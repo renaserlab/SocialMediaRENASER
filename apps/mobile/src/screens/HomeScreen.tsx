@@ -1,11 +1,15 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
 import { PostCard } from '@/components/PostCard';
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { StateView } from '@/components/StateView';
+import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -21,53 +25,143 @@ const stories = [
 
 export function HomeScreen() {
   const { colors } = useAppTheme();
+  const router = useRouter();
   const posts = useAppStore((state) => state.posts);
   const user = useAppStore((state) => state.user);
 
+  const [feedTab, setFeedTab] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Simular carga de feed por 1.5s
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
-    <AppScreen contentStyle={{ paddingBottom: 100 }}>
-      <AppHeader title="RENASER" rightIcon="notifications-outline" onRightPress={() => router.push('/events')} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stories}>
-        {stories.map((story) => <Avatar key={story.label} label={story.label} image={story.image} size={58} />)}
-      </ScrollView>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppHeader
+        title="RENASER"
+        rightIcon="bell"
+        onRightPress={() => router.push('/notifications')}
+      />
 
-      <View style={styles.container}>
-        <Pressable
-          onPress={() => router.push('/(tabs)/create')}
-          style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
-        >
-          <Image source={assets.avatar} style={styles.composerAvatar} />
-          <Text style={[styles.composerText, { color: colors.textMuted }]}>¿Qué estás aprendiendo hoy, {user?.fullName.split(' ')[0] ?? 'Katherine'}?</Text>
-          <Ionicons name="add-circle-outline" size={24} color={colors.text} />
-        </Pressable>
+      <AppScreen contentStyle={{ paddingBottom: 100 }}>
+        {/* Historias / Avatares */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stories}>
+          {stories.map((story) => (
+            <Avatar key={story.label} label={story.label} image={story.image} size={54} />
+          ))}
+        </ScrollView>
 
-        <View style={styles.quickRow}>
-          <Pressable onPress={() => router.push('/audio/private')} style={[styles.quickCard, { backgroundColor: colors.primary }]}>
-            <Ionicons name="headset-outline" size={24} color={colors.onPrimary} />
-            <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>Audio privado</Text>
-            <Text style={[styles.quickBody, { color: colors.onPrimary }]}>Recomendación basada en tu quiz</Text>
+        <View style={styles.container}>
+          {/* Segmented Control para Para ti / Siguiendo */}
+          <SegmentedControl
+            options={['Para ti', 'Siguiendo']}
+            selectedIndex={feedTab}
+            onChange={setFeedTab}
+            style={styles.tabs}
+          />
+
+          {/* Creador de posts rápido */}
+          <Pressable
+            onPress={() => router.push('/(tabs)/create')}
+            style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            accessibilityLabel="Crear nueva publicación"
+            accessibilityRole="button"
+          >
+            <Image source={assets.avatar} style={styles.composerAvatar} />
+            <Text style={[styles.composerText, { color: colors.textMuted }]}>
+              ¿Qué estás aprendiendo hoy, {user?.fullName.split(' ')[0] ?? 'Katherine'}?
+            </Text>
+            <Feather name="plus-circle" size={24} color={colors.text} />
           </Pressable>
-          <Pressable onPress={() => router.push('/circle/lideres-renaser')} style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
-            <Ionicons name="people-outline" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Tu círculo</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>423 personas avanzando</Text>
-          </Pressable>
+
+          {/* Accesos directos rápidos */}
+          <View style={styles.quickRow}>
+            <Pressable
+              onPress={() => router.push('/audio/private')}
+              style={[styles.quickCard, { backgroundColor: colors.primary }]}
+            >
+              <Feather name="headphones" size={24} color={colors.onPrimary} />
+              <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>Audio privado</Text>
+              <Text style={[styles.quickBody, { color: colors.onPrimary }]}>
+                Recomendación de tu quiz
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/circle/lideres-renaser')}
+              style={[
+                styles.quickCard,
+                { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+              ]}
+            >
+              <Feather name="users" size={24} color={colors.text} />
+              <Text style={[styles.quickTitle, { color: colors.text }]}>Tu círculo</Text>
+              <Text style={[styles.quickBody, { color: colors.textMuted }]}>
+                423 personas avanzando
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Feed de posts real con simulación de Skeleton */}
+          <StateView
+            state={loading ? 'loading' : 'content'}
+            loadingComponent={
+              <View style={styles.skeletonContainer}>
+                {[1, 2].map((i) => (
+                  <View key={i} style={[styles.skeletonCard, { borderColor: colors.border }]}>
+                    <View style={styles.skeletonHeader}>
+                      <Skeleton width={40} height={40} circle />
+                      <View style={{ gap: 6, flex: 1 }}>
+                        <Skeleton width="40%" height={12} />
+                        <Skeleton width="20%" height={10} />
+                      </View>
+                    </View>
+                    <Skeleton width="90%" height={14} />
+                    <Skeleton width="70%" height={14} />
+                  </View>
+                ))}
+              </View>
+            }
+          >
+            {posts.map((post) => (
+              <PostCard key={post.id} post={post} />
+            ))}
+          </StateView>
         </View>
-
-        {posts.map((post) => <PostCard key={post.id} post={post} />)}
-      </View>
-    </AppScreen>
+      </AppScreen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   stories: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.md },
   container: { paddingHorizontal: spacing.lg },
+  tabs: {
+    marginBottom: spacing.lg,
+  },
   composer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.md, marginBottom: spacing.lg },
   composerAvatar: { width: 40, height: 40, borderRadius: 20 },
   composerText: { flex: 1, fontSize: 13 },
   quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
-  quickCard: { flex: 1, minHeight: 148, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between' },
-  quickTitle: { fontSize: 16, fontWeight: '900', marginTop: spacing.lg },
+  quickCard: { flex: 1, minHeight: 136, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between' },
+  quickTitle: { fontSize: 15, fontWeight: '900', marginTop: spacing.md },
   quickBody: { fontSize: 11, lineHeight: 16, opacity: 0.82 },
+  skeletonContainer: {
+    gap: spacing.md,
+  },
+  skeletonCard: {
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    gap: spacing.md,
+  },
+  skeletonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
 });

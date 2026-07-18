@@ -20,6 +20,9 @@ type AppState = {
   conversations: Conversation[];
   liveMessages: Array<{ id: string; author: string; text: string }>;
 
+  languageSelected: boolean;
+  setLanguageSelected: (value: boolean) => void;
+
   setHydrated: (hydrated: boolean) => void;
   toggleTheme: () => void;
   registerLocalUser: (input: { fullName: string; email: string }) => void;
@@ -81,6 +84,9 @@ export const useAppStore = create<AppState>()(
         { id: 'l1', author: 'María G.', text: 'Gracias Darren, este era el punto que necesitaba.' },
         { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },
       ],
+
+      languageSelected: false,
+      setLanguageSelected: (value) => set({ languageSelected: value }),
 
       setHydrated: (hydrated) => set({ hydrated }),
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
@@ -210,6 +216,7 @@ export const useAppStore = create<AppState>()(
           reservedEventIds: [],
           purchasedCourseIds: [],
           conversations,
+          languageSelected: false,
         }),
     }),
     {

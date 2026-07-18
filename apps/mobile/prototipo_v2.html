@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RENASER Universo · Prototipo navegable v2.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{--stage:#0d0d0f;--ink:#e9e9ec;--dim:#8b8b93;--line:#26262b;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:'Inter',-apple-system,system-ui,sans-serif;background:radial-gradient(1200px 700px at 50% -10%,#1c1c20 0%,var(--stage) 55%);color:var(--ink);display:flex;min-height:100vh}
+.rail{width:280px;flex:none;padding:22px 16px;border-right:1px solid var(--line);position:sticky;top:0;height:100vh;overflow-y:auto;background:rgba(10,10,12,.6);backdrop-filter:blur(8px)}
+.rail::-webkit-scrollbar{width:6px}.rail::-webkit-scrollbar-thumb{background:#2c2c33;border-radius:3px}
+.brand{font-weight:800;letter-spacing:.14em;font-size:15px}.brand span{color:var(--dim);font-weight:600}
+.tag{font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:.06em}
+.modes{display:flex;gap:8px;margin:14px 0 6px}
+.modes button{flex:1;padding:8px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--dim);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.modes button.on{background:var(--ink);color:#0d0d0f;border-color:var(--ink)}
+.grp{font-size:9px;letter-spacing:.16em;color:var(--dim);margin:18px 0 6px;text-transform:uppercase;font-weight:700}
+.nav-item{display:flex;gap:9px;align-items:center;padding:7px 9px;border-radius:9px;cursor:pointer;font-size:12.5px;color:var(--dim);transition:.12s;border:1px solid transparent}
+.nav-item:hover{color:var(--ink);background:#ffffff08}
+.nav-item.active{color:#0d0d0f;background:var(--ink);font-weight:600}
+.nav-item b{font-size:10px;width:20px;height:20px;display:grid;place-items:center;border-radius:5px;background:#ffffff12;flex:none}
+.nav-item.active b{background:#0d0d0f22;color:#0d0d0f}
+.hint{font-size:10.5px;color:var(--dim);line-height:1.6;margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+.hint b{color:var(--ink)}
+.stage{flex:1;display:flex;flex-direction:column;align-items:center;padding:34px 20px 80px;gap:16px}
+.stage-top{text-align:center;max-width:620px}
+.stage-top h1{font-size:20px;font-weight:800}
+.stage-top p{color:var(--dim);font-size:12.5px;margin-top:6px;line-height:1.6}
+.crumbs{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:8px}
+.crumbs button{background:none;border:0;color:var(--dim);font-family:inherit;font-size:12px;cursor:pointer;font-weight:600}
+.crumbs button:hover{color:var(--ink)}
+.phone{width:390px;height:806px;border-radius:52px;padding:12px;flex:none;background:linear-gradient(160deg,#3a3a40,#111114);box-shadow:0 40px 90px -30px #000,0 0 0 2px #000,inset 0 0 3px #ffffff30;position:relative}
+.notch{position:absolute;top:20px;left:50%;transform:translateX(-50%);width:118px;height:30px;background:#000;border-radius:20px;z-index:60}
+.viewport{width:100%;height:100%;border-radius:42px;overflow:hidden;position:relative;background:var(--bg);transition:background .3s;--bg:#fff;--fg:#0a0a0b;--sub:#6b6b73;--hair:#ececed;--soft:#f7f7f7;--card:#fff;--btn:#0a0a0b;--btnfg:#fff;--chip:#f1f1f2;--media:#e4e4e8;--dis:#bdbdbd}
+.viewport.dark{--bg:#000;--fg:#f4f4f6;--sub:#a1a1a1;--hair:#242424;--soft:#0a0a0a;--card:#111;--btn:#fff;--btnfg:#000;--chip:#1a1a1e;--media:#1b1b20;--dis:#5a5a5a}
+.screen{position:absolute;inset:0;background:var(--bg);color:var(--fg);display:none;flex-direction:column;overflow:hidden}
+.screen.show{display:flex;animation:fade .26s ease}
+@keyframes fade{from{opacity:0;transform:translateX(7px)}to{opacity:1;transform:none}}
+.scroll{flex:1;overflow-y:auto}.scroll::-webkit-scrollbar{display:none}
+.statusbar{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:8px 26px 0;font-size:13px;font-weight:600}
+.sb-r{font-size:11px}
+.topbar{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-weight:700;font-size:16px}
+.ic{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;cursor:pointer;font-size:19px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--btn);color:var(--btnfg);border:0;font-family:inherit;font-weight:600;font-size:15px;padding:15px;border-radius:14px;cursor:pointer;width:100%}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--hair)}
+.btn:active{transform:scale(.985)}
+.btn.dis{background:var(--dis);color:var(--bg)}
+.link{color:var(--fg);font-weight:600;cursor:pointer}.muted{color:var(--sub)}
+.pad{padding:0 20px}
+.tabbar{height:62px;flex:none;display:flex;justify-content:space-around;align-items:center;border-top:1px solid var(--hair);background:var(--bg)}
+.tab{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;color:var(--sub);cursor:pointer;flex:1}
+.tab svg{width:23px;height:23px;stroke:var(--sub);fill:none;stroke-width:1.7}
+.tab.act{color:var(--fg)}.tab.act svg{stroke:var(--fg)}
+.tab .plus{width:34px;height:34px;border-radius:11px;background:var(--btn);display:grid;place-items:center}
+.tab .plus svg{stroke:var(--btnfg);width:20px;height:20px}
+.media{background:linear-gradient(150deg,#2a2a30,#0c0c0e);position:relative;overflow:hidden}
+.silh{position:absolute;inset:0;display:grid;place-items:end center}
+.silh svg{width:76%;opacity:.9}
+.avatar{border-radius:50%;background:linear-gradient(145deg,#3a3a42,#101014);display:grid;place-items:center;color:#fff;font-weight:700;flex:none;overflow:hidden;font-size:13px}
+.ring{padding:2px;border-radius:50%;background:conic-gradient(from 210deg,#fff,#888,#fff)}
+.chip{padding:7px 14px;border-radius:20px;background:var(--chip);font-size:13px;font-weight:500;color:var(--fg);white-space:nowrap;cursor:pointer}
+.field{width:100%;padding:13px;border-radius:12px;border:1px solid var(--hair);background:var(--soft);color:var(--fg);font-family:inherit;font-size:14px;margin-top:10px}
+.row{display:flex;align-items:center;gap:12px}
+.hr{height:1px;background:var(--hair);margin:14px 0}
+.badge{width:15px;height:15px;border-radius:50%;background:var(--fg);color:var(--bg);display:inline-grid;place-items:center;font-size:9px;font-weight:800;vertical-align:middle}
+.seg{display:flex;background:var(--chip);border-radius:11px;padding:3px;margin:0 20px}
+.seg div{flex:1;text-align:center;padding:8px;border-radius:9px;font-size:13px;font-weight:600;color:var(--sub);cursor:pointer}
+.seg div.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 3px #0002}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:0 20px}.tabs::-webkit-scrollbar{display:none}
+.tpill{padding:9px 3px;font-size:13px;color:var(--sub);cursor:pointer;font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+.tpill.on{color:var(--fg);border-color:var(--fg);font-weight:600}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
+.g-cell{aspect-ratio:1;background:linear-gradient(150deg,#2a2a30,#0c0c0e);position:relative;cursor:pointer}
+.play{position:absolute;inset:0;margin:auto;width:54px;height:54px;border-radius:50%;background:#fff;display:grid;place-items:center}
+.play svg{width:22px;height:22px;fill:#000;margin-left:3px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--hair)}.dot.on{background:var(--fg);width:20px;border-radius:4px}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#ff3b30;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.4}}
+.toast{position:absolute;bottom:80px;left:20px;right:20px;background:var(--fg);color:var(--bg);padding:13px 16px;border-radius:12px;font-size:13px;font-weight:600;text-align:center;opacity:0;transform:translateY(10px);transition:.3s;pointer-events:none;z-index:40}
+.toast.show{opacity:1;transform:none}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bg);border-radius:22px 22px 0 0;padding:10px 18px 26px;z-index:30;box-shadow:0 -12px 40px #0004}
+.sheet .grab{width:38px;height:4px;background:var(--hair);border-radius:2px;margin:6px auto 14px}
+.crList{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.crItem{background:var(--soft);border-radius:14px;padding:14px 8px;text-align:center;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--hair)}
+.crItem .e{font-size:22px;display:block;margin-bottom:6px}
+.list-row{display:flex;gap:13px;padding:13px 20px;border-bottom:1px solid var(--hair);align-items:center;cursor:pointer}
+.sk{background:linear-gradient(90deg,var(--soft) 25%,var(--chip) 37%,var(--soft) 63%);background-size:400% 100%;animation:sh 1.3s infinite;border-radius:8px}
+@keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.state-box{text-align:center;padding:40px 24px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.state-ic{width:64px;height:64px;border-radius:18px;background:var(--soft);display:grid;place-items:center;font-size:28px;border:1px solid var(--hair);margin-bottom:6px}
+@media(max-width:1040px){.rail{display:none}}
+</style>
+</head>
+<body>
+<aside class="rail">
+  <div class="brand">RENASER <span>UNIVERSO</span></div>
+  <div class="tag">PROTOTIPO NAVEGABLE · v2.0 · P0</div>
+  <div class="modes"><button id="mLight" class="on" onclick="setMode('light')">☀︎ Light</button><button id="mDark" onclick="setMode('dark')">☾ Dark</button></div>
+  <div id="navList"></div>
+  <div class="hint"><b>Cómo usarlo:</b> haz clic en los botones dentro del teléfono para recorrer el flujo, o salta a cualquier pantalla desde la lista. Todo en blanco y negro, con light/dark.</div>
+</aside>
+
+<main class="stage">
+  <div class="stage-top">
+    <h1 id="scrTitle">—</h1>
+    <p id="scrDesc">—</p>
+    <div class="crumbs"><button onclick="prev()">‹ Anterior</button><span class="muted" id="scrPos"></span><button onclick="next()">Siguiente ›</button></div>
+  </div>
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="viewport" id="vp">
+
+    <!-- 1 SPLASH -->
+    <section class="screen" data-s="1">
+      <div class="scroll" style="display:flex;align-items:center;justify-content:center;background:#000">
+        <div style="text-align:center">
+          <div class="ring" style="margin:0 auto"><div class="avatar" style="width:96px;height:96px;font-size:36px">R</div></div>
+          <div style="color:#fff;font-weight:800;letter-spacing:.18em;margin-top:20px">RENASER</div>
+          <div style="color:#8b8b93;font-size:11px;letter-spacing:.16em;margin-top:4px">UNIVERSO</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2 IDIOMA -->
+    <section class="screen" data-s="2">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(1)">‹</div><div style="font-size:15px;font-weight:700">Idioma</div><div style="width:34px"></div></div>
+      <div class="scroll pad">
+        <p class="muted" style="font-size:13px;margin:4px 0 12px">Elige el idioma de la aplicación</p>
+        <div class="list-row" style="border-radius:12px;border:1px solid var(--fg);border-bottom:1px solid var(--fg)" onclick="go(3)"><span style="flex:1;font-weight:600">Español</span><span class="badge">✓</span></div>
+        <div class="list-row" onclick="go(3)"><span style="flex:1">English</span></div>
+        <div class="list-row" onclick="go(3)"><span style="flex:1">Português</span></div>
+      </div>
+      <div class="pad" style="padding-bottom:22px"><button class="btn" onclick="go(3)">Continuar</button></div>
+    </section>
+
+    <!-- 3 LANDING -->
+    <section class="screen" data-s="3">
+      <div class="scroll" style="background:#000;color:#fff">
+        <div class="statusbar" style="color:#fff"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+        <div class="media" style="height:400px">
+          <div class="silh"><svg viewBox="0 0 200 240"><path fill="#4a4a52" d="M100 40a44 44 0 110 88 44 44 0 010-88zM20 240c0-52 36-86 80-86s80 34 80 86z"/></svg></div>
+          <div style="position:absolute;inset:0;background:linear-gradient(180deg,#0000 30%,#000 92%)"></div>
+          <div style="position:absolute;top:18px;left:22px;font-weight:800;letter-spacing:.12em">RENASER</div>
+        </div>
+        <div style="padding:0 26px;margin-top:-46px;position:relative">
+          <div style="font-size:29px;font-weight:800;line-height:1.12">¿Qué está bloqueando realmente tu crecimiento?</div>
+          <p style="color:#a8a8ae;margin-top:14px;font-size:14px;line-height:1.6">Responde 7 preguntas y descubre tu verdadero límite.</p>
+          <button class="btn" style="background:#fff;color:#000;margin-top:24px" onclick="go(4)">Descubrir ahora</button>
+          <p style="text-align:center;color:#6b6b73;font-size:12px;margin:16px 0 30px">2 min · Gratis · Resultado inmediato</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 QUIZ -->
+    <section class="screen" data-s="4">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(3)">✕</div><div style="font-size:13px;font-weight:700">2 / 7</div><div class="ic muted">•</div></div>
+      <div style="height:3px;background:var(--hair);margin:0 20px;border-radius:2px"><div style="width:28%;height:100%;background:var(--fg);border-radius:2px"></div></div>
+      <div class="scroll pad" style="margin-top:20px">
+        <h2 style="font-size:23px;font-weight:800;text-align:center;line-height:1.25">¿En qué área sientes que más te cuesta avanzar hoy?</h2>
+        <div style="margin-top:24px;display:flex;flex-direction:column;gap:12px">
+          <div class="qz">Mentalidad</div><div class="qz">Relaciones</div><div class="qz sel">Negocios / Finanzas</div><div class="qz">Salud</div><div class="qz">Propósito</div>
+        </div>
+      </div>
+      <div class="pad" style="padding-bottom:22px"><button class="btn" onclick="go(5)">Siguiente →</button></div>
+    </section>
+
+    <!-- 5 RESULTADO -->
+    <section class="screen" data-s="5">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(4)">‹</div><div class="muted" style="font-size:13px;font-weight:600">Tu resultado</div><div style="width:34px"></div></div>
+      <div class="scroll pad">
+        <h2 style="font-size:24px;font-weight:800;text-align:center;line-height:1.22;margin-top:6px">Tu principal límite no es la estrategia. Eres tú.</h2>
+        <p class="muted" style="text-align:center;font-size:14px;line-height:1.6;margin-top:12px">Tu empresa sigue dependiendo de tu estado emocional y de tu capacidad de sostenerlo todo.</p>
+        <div class="media" style="height:180px;width:180px;border-radius:50%;margin:24px auto 0"><div class="silh"><svg viewBox="0 0 200 240"><path fill="#4a4a52" d="M100 60a40 40 0 110 80 40 40 0 010-80zM30 240c0-46 32-74 70-74s70 28 70 74z"/></svg></div></div>
+        <p style="text-align:center;font-size:13px;margin-top:20px;line-height:1.6">Darren preparó un <b>audio privado</b> para ti.</p>
+      </div>
+      <div class="pad" style="padding-bottom:22px"><button class="btn" onclick="go(6)">🎧 &nbsp;Escuchar ahora</button></div>
+    </section>
+
+    <!-- 6 REGISTRO -->
+    <section class="screen" data-s="6">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(5)">‹</div><div></div><div style="width:34px"></div></div>
+      <div class="scroll pad">
+        <h2 style="font-size:25px;font-weight:800;line-height:1.15">Crea tu cuenta RENASER</h2>
+        <p class="muted" style="font-size:13px;margin-top:8px">Guarda tu resultado y desbloquea el audio.</p>
+        <button class="btn ghost" style="margin-top:20px">G&nbsp;&nbsp;Continuar con Google</button>
+        <button class="btn ghost" style="margin-top:12px"> &nbsp;Continuar con Apple</button>
+        <div class="row" style="margin:18px 0"><div class="hr" style="flex:1;margin:0"></div><span class="muted" style="font-size:12px">o con tu email</span><div class="hr" style="flex:1;margin:0"></div></div>
+        <input class="field" placeholder="Nombre completo" style="margin-top:0"><input class="field" placeholder="Email"><input class="field" placeholder="Contraseña" type="password">
+        <button class="btn" style="margin-top:16px" onclick="go(7)">Crear cuenta</button>
+        <p class="muted" style="font-size:11px;text-align:center;margin-top:12px;line-height:1.5">Al crear tu cuenta aceptas los Términos y la Política de Privacidad.</p>
+      </div>
+    </section>
+
+    <!-- 7 ONBOARDING INTERESES -->
+    <section class="screen" data-s="7">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div style="width:34px"></div><div style="font-weight:800;letter-spacing:.1em;font-size:13px">RENASER</div><div class="link" style="font-size:13px" onclick="go(8)">Saltar</div></div>
+      <div class="scroll pad">
+        <h2 style="font-size:22px;font-weight:800;margin-top:6px">Elige tus intereses</h2>
+        <p class="muted" style="font-size:13px;margin-top:6px">Personalizaremos tu feed con esto.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:20px">
+          <div class="chip sel-c">Mentalidad</div><div class="chip">Negocios</div><div class="chip sel-c">Liderazgo</div><div class="chip">Finanzas</div><div class="chip sel-c">Propósito</div><div class="chip">Salud</div><div class="chip">Relaciones</div><div class="chip">Productividad</div><div class="chip">Energía</div><div class="chip">Espiritualidad</div>
+        </div>
+      </div>
+      <div class="pad" style="padding-bottom:22px"><button class="btn" onclick="go(8)">Comenzar</button></div>
+    </section>
+
+    <!-- 8 HOME -->
+    <section class="screen" data-s="8">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div style="font-weight:800;letter-spacing:.1em">RENASER</div><div class="ic" onclick="go(24)">🔔</div></div>
+      <div class="seg"><div id="hf1" class="on" onclick="hfeed(1)">Para ti</div><div id="hf2" onclick="hfeed(2)">Siguiendo</div></div>
+      <div class="scroll">
+        <div style="display:flex;gap:15px;overflow-x:auto;padding:12px 18px">
+          <div style="text-align:center;flex:none"><div class="ring"><div class="avatar" style="width:54px;height:54px">Tú</div></div><div style="font-size:10px;margin-top:5px" class="muted">Tu historia</div></div>
+          <div style="text-align:center;flex:none" onclick="go(23)"><div style="padding:2px;border-radius:50%;background:linear-gradient(45deg,#ff3b30,#ff9500)"><div class="avatar" style="width:54px;height:54px;border:2px solid var(--bg)">DS</div></div><div style="font-size:10px;margin-top:5px;color:#ff3b30;font-weight:600">Live</div></div>
+          <div style="text-align:center;flex:none"><div class="ring"><div class="avatar" style="width:54px;height:54px">AL</div></div><div style="font-size:10px;margin-top:5px" class="muted">Alquimia</div></div>
+          <div style="text-align:center;flex:none"><div class="ring"><div class="avatar" style="width:54px;height:54px">CO</div></div><div style="font-size:10px;margin-top:5px" class="muted">Comunidad</div></div>
+        </div>
+        <div class="hr" style="margin:0"></div>
+        <div class="pad" style="padding-top:12px">
+          <div class="row" style="justify-content:space-between"><div class="row" onclick="go(12)" style="cursor:pointer"><div class="avatar" style="width:40px;height:40px">DS</div><div><div style="font-weight:700;font-size:14px">Darren Supa <span class="badge">✓</span></div><div class="muted" style="font-size:12px">Hace 2 horas</div></div></div><div class="ic">···</div></div>
+          <p style="font-size:14px;line-height:1.55;margin:10px 0">La claridad no llega cuando tienes todas las respuestas, llega cuando estás dispuesto a hacerte las preguntas correctas.</p>
+        </div>
+        <div class="media" style="height:340px" onclick="go(10)"><div class="silh"><svg viewBox="0 0 200 240"><path fill="#4a4a52" d="M100 44a42 42 0 110 84 42 42 0 010-84zM24 240c0-50 34-82 76-82s76 32 76 82z"/></svg></div><div class="play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
+        <div class="pad row" style="justify-content:space-between;padding:12px 20px;font-size:13px"><div class="row" style="gap:18px"><span>♥ 1.2K</span><span onclick="go(11)">💬 128</span><span>↪ 89</span></div><span>🔖</span></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 9 EXPLORAR / BÚSQUEDA -->
+    <section class="screen" data-s="9">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="pad" style="padding-top:8px"><input class="field" placeholder="🔍  Buscar personas, temas, cursos" style="margin-top:6px"></div>
+      <div class="tabs" style="margin-top:10px;border-bottom:1px solid var(--hair)"><div class="tpill on">Para ti</div><div class="tpill">Creadores</div><div class="tpill">Cursos</div><div class="tpill">Eventos</div><div class="tpill">Audios</div></div>
+      <div class="scroll">
+        <div class="grid3" style="margin-top:3px">
+          <div class="g-cell" onclick="go(10)"></div><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell" onclick="go(12)"></div><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell"></div>
+        </div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 10 VIDEO VERTICAL -->
+    <section class="screen" data-s="10">
+      <div class="scroll" style="background:#000;position:relative">
+        <div class="media" style="position:absolute;inset:0"><div class="silh"><svg viewBox="0 0 200 240"><path fill="#4a4a52" d="M100 44a42 42 0 110 84 42 42 0 010-84zM24 240c0-50 34-82 76-82s76 32 76 82z"/></svg></div></div>
+        <div style="position:relative;z-index:2;display:flex;flex-direction:column;height:806px;color:#fff">
+          <div class="statusbar" style="color:#fff"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+          <div class="row" style="padding:6px 18px"><div class="ic" onclick="go(8)" style="color:#fff">‹</div><div style="flex:1"></div></div>
+          <div style="flex:1"></div>
+          <div style="position:absolute;right:14px;bottom:120px;display:flex;flex-direction:column;gap:20px;align-items:center;font-size:12px;text-align:center">
+            <div><div style="font-size:26px">♥</div>12.4K</div><div onclick="go(11)"><div style="font-size:26px">💬</div>842</div><div><div style="font-size:26px">↪</div>1.2K</div><div><div style="font-size:26px">🔖</div></div>
+          </div>
+          <div style="padding:0 18px 26px;max-width:78%">
+            <div class="row" onclick="go(12)"><div class="avatar" style="width:38px;height:38px;border:2px solid #fff">DS</div><b style="font-size:14px">Darren Supa <span class="badge" style="background:#fff;color:#000">✓</span></b></div>
+            <p style="font-size:13px;margin-top:10px;line-height:1.5">Tu empresa no crece más rápido que tú. #liderazgo #mentalidad</p>
+            <div class="row" style="margin-top:10px;background:#ffffff22;padding:8px 12px;border-radius:10px;width:fit-content" onclick="go(16)"><span style="font-size:13px">🛒 Líder de tu vida — $1,497</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 DETALLE / COMENTARIOS -->
+    <section class="screen" data-s="11">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(8)">‹</div><div style="font-size:15px;font-weight:700">Comentarios</div><div style="width:34px"></div></div>
+      <div class="scroll pad" style="padding-top:6px">
+        <div class="row" style="align-items:flex-start;margin-bottom:16px"><div class="avatar" style="width:36px;height:36px">MG</div><div><div style="font-size:13px"><b>María G.</b> <span class="muted">· 1h</span></div><p style="font-size:14px;margin-top:3px">Esto me pegó fuerte. Gracias Darren 🙏</p><div class="muted" style="font-size:12px;margin-top:4px">♥ 24 · Responder</div></div></div>
+        <div class="row" style="align-items:flex-start;margin-bottom:16px"><div class="avatar" style="width:36px;height:36px">CR</div><div><div style="font-size:13px"><b>Carlos R.</b> <span class="muted">· 3h</span></div><p style="font-size:14px;margin-top:3px">El punto exacto que necesitaba escuchar hoy.</p><div class="muted" style="font-size:12px;margin-top:4px">♥ 12 · Responder</div></div></div>
+        <div class="row" style="align-items:flex-start"><div class="avatar" style="width:36px;height:36px">AS</div><div><div style="font-size:13px"><b>Ana S.</b> <span class="muted">· 5h</span></div><p style="font-size:14px;margin-top:3px">¿Cuándo el próximo live? 🔥</p><div class="muted" style="font-size:12px;margin-top:4px">♥ 8 · Responder</div></div></div>
+      </div>
+      <div class="pad row" style="padding:12px 20px;border-top:1px solid var(--hair)"><input class="field" placeholder="Añade un comentario…" style="margin-top:0"><div class="avatar" style="width:42px;height:42px;background:var(--btn);color:var(--btnfg)">➤</div></div>
+    </section>
+
+    <!-- 12 PERFIL DARREN -->
+    <section class="screen" data-s="12">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="scroll">
+        <div class="media" style="height:140px"><div class="ic" onclick="go(8)" style="position:absolute;top:14px;left:14px;color:#fff">‹</div><div class="ic" style="position:absolute;top:14px;right:14px;color:#fff">···</div></div>
+        <div class="pad" style="margin-top:-42px">
+          <div class="row" style="justify-content:space-between;align-items:flex-end"><div class="ring" style="background:#fff"><div class="avatar" style="width:86px;height:86px;font-size:24px;border:3px solid var(--bg)">DS</div></div><button class="btn" style="width:auto;padding:10px 24px;margin-bottom:6px" onclick="toast('Ahora sigues a Darren Supa')">Seguir</button></div>
+          <div style="margin-top:10px;font-size:20px;font-weight:800">Darren Supa <span class="badge">✓</span></div>
+          <div class="muted" style="font-size:13px">@darrensupa · El Alquimista · Liderazgo</div>
+          <p style="font-size:13px;margin-top:8px;line-height:1.5">Te ayudo a dar tu siguiente nivel. Cuenta oficial fundadora.</p>
+          <div class="row" style="gap:22px;margin-top:12px;font-size:13px"><div><b style="font-size:16px">1.2M</b> <span class="muted">Seg.</span></div><div><b style="font-size:16px">128</b> <span class="muted">Sig.</span></div><div><b style="font-size:16px">1.8K</b> <span class="muted">Posts</span></div></div>
+          <button class="btn" style="margin-top:14px" onclick="go(14)">🎧 &nbsp;Escuchar tu audio privado</button>
+          <div style="display:flex;gap:10px;overflow-x:auto;margin-top:14px;padding-bottom:4px"><div class="chip" onclick="go(14)">Audios</div><div class="chip" onclick="go(15)">Eventos</div><div class="chip" onclick="go(16)">Cursos</div><div class="chip" onclick="go(23)">En Vivo</div><div class="chip" onclick="go(21)">Círculos</div></div>
+        </div>
+        <div class="tabs" style="margin-top:14px;border-bottom:1px solid var(--hair)"><div class="tpill on">Inicio</div><div class="tpill">Videos</div><div class="tpill">Audios</div><div class="tpill">Programas</div></div>
+        <div class="grid3" style="margin-top:3px"><div class="g-cell" onclick="go(10)"></div><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell" onclick="go(16)"></div><div class="g-cell"></div></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 13 PERFIL PROPIO -->
+    <section class="screen" data-s="13">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div style="font-weight:800;font-size:16px">Mi perfil</div><div class="ic" onclick="go(25)">⚙</div></div>
+      <div class="scroll pad">
+        <div class="row" style="margin-top:6px"><div class="ring"><div class="avatar" style="width:76px;height:76px;font-size:22px">Tú</div></div><div style="flex:1"><div class="row" style="gap:22px;font-size:13px;justify-content:space-around"><div style="text-align:center"><b style="font-size:16px;display:block">1</b><span class="muted">Posts</span></div><div style="text-align:center"><b style="font-size:16px;display:block">128</b><span class="muted">Seg.</span></div><div style="text-align:center"><b style="font-size:16px;display:block">96</b><span class="muted">Sig.</span></div></div></div></div>
+        <div style="margin-top:12px;font-weight:700;font-size:15px">Katherine Béjar</div>
+        <div class="muted" style="font-size:13px">@katherine</div>
+        <p style="font-size:13px;margin-top:6px;line-height:1.5">Creando una vida con claridad, propósito y crecimiento consciente.</p>
+        <div class="row" style="gap:10px;margin-top:14px"><button class="btn ghost" style="padding:11px" onclick="toast('Editar perfil')">Editar perfil</button><button class="btn ghost" style="padding:11px" onclick="go(20)">Mi biblioteca</button></div>
+        <div class="grid3" style="margin-top:16px"><div class="g-cell"></div><div class="g-cell"></div><div class="g-cell"></div></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 14 AUDIO -->
+    <section class="screen" data-s="14">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(12)">‹</div><div style="font-size:13px;font-weight:600">Audio privado</div><div class="ic">···</div></div>
+      <div class="scroll pad" style="text-align:center">
+        <p class="muted" style="font-size:13px;margin-top:2px">Basado en tu resultado del quiz</p>
+        <div class="media" style="height:290px;border-radius:24px;margin-top:16px;display:flex;align-items:flex-end;justify-content:center;padding:26px"><div style="position:relative;z-index:2;color:#fff"><div style="font-size:23px;font-weight:800;line-height:1.2">Tu próximo nivel<br>empieza aquí.</div><div style="opacity:.8;margin-top:8px;font-style:italic">— Darren Supa</div></div></div>
+        <div class="row" style="justify-content:space-between;font-size:12px;margin-top:18px"><span>00:02</span><span class="muted">16:45</span></div>
+        <div style="height:4px;background:var(--hair);border-radius:2px;margin-top:6px"><div style="width:8%;height:100%;background:var(--fg);border-radius:2px"></div></div>
+        <div class="row" style="justify-content:center;gap:30px;margin-top:22px;font-size:22px"><span>↺15</span><div class="avatar" style="width:64px;height:64px;background:var(--btn);color:var(--btnfg);font-size:22px" onclick="toast('Reproduciendo…')">▶</div><span>15↻</span></div>
+        <div class="row" style="justify-content:space-around;margin-top:28px;font-size:11px"><div>↓<br>Descargar</div><div>↪<br>Compartir</div><div>🔖<br>Guardar</div><div onclick="go(15)">›<br>Siguiente</div></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 15 EVENTOS -->
+    <section class="screen" data-s="15">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(12)">‹</div><div style="font-size:16px;font-weight:800">Próximos eventos</div><div style="width:34px"></div></div>
+      <div class="scroll pad">
+        <div class="media" style="height:160px;border-radius:20px;padding:20px;display:flex;flex-direction:column;justify-content:flex-end" onclick="go(16)"><div style="position:relative;z-index:2;color:#fff"><div style="font-size:21px;font-weight:800;letter-spacing:.05em">ALQUIMIA</div><div style="font-size:12px;opacity:.8;margin-top:4px">La experiencia de transformación más poderosa.</div><div style="font-size:12px;opacity:.7;margin-top:8px">24–26 May · Ciudad de México</div></div></div>
+        <div style="margin-top:8px"><button class="btn ghost" style="padding:10px" onclick="go(16)">Ver detalles</button></div>
+        <div class="hr"></div>
+        <div class="row" style="justify-content:space-between"><div class="row"><div class="avatar" style="width:46px;height:46px">W</div><div><div style="font-weight:700;font-size:14px">Webinar gratuito</div><div class="muted" style="font-size:12px">Los 3 pilares · Mar 30, 6PM</div></div></div><button class="btn" style="width:auto;padding:9px 16px;font-size:13px" onclick="toast('Reservado ✓')">Reservar</button></div>
+        <div class="hr"></div>
+        <div class="row" style="justify-content:space-between"><div class="row"><div class="avatar" style="width:46px;height:46px">Q</div><div><div style="font-weight:700;font-size:14px">Sesión en vivo</div><div class="muted" style="font-size:12px">Q&A · Dom 5, 7PM</div></div></div><button class="btn" style="width:auto;padding:9px 16px;font-size:13px" onclick="go(23)">Entrar</button></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 16 PRODUCTO -->
+    <section class="screen" data-s="16">
+      <div class="scroll">
+        <div class="media" style="height:300px;display:flex;align-items:center;justify-content:center"><div class="ic" onclick="go(12)" style="position:absolute;top:14px;left:14px;color:#fff">‹</div><div class="ic" style="position:absolute;top:14px;right:14px;color:#fff">🛒</div><div style="position:relative;z-index:2;color:#fff;text-align:center"><div style="font-size:29px;font-weight:900;line-height:1.05">LÍDER<br>DE TU VIDA</div><div style="font-size:12px;opacity:.75;margin-top:10px">Programa Online</div></div></div>
+        <div class="pad" style="margin-top:18px">
+          <div style="font-size:21px;font-weight:800">Líder de tu vida y de tu empresa</div>
+          <div style="font-size:18px;font-weight:700;margin-top:6px">$1,497 MXN</div>
+          <p class="muted" style="font-size:13px;margin-top:10px;line-height:1.6">Un programa para desarrollar liderazgo, mentalidad y estrategia.</p>
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:14px"><div class="row"><span class="badge">✓</span> 8 módulos · 45 lecciones</div><div class="row"><span class="badge">✓</span> Audios exclusivos</div><div class="row"><span class="badge">✓</span> Plantillas y ejercicios</div><div class="row"><span class="badge">✓</span> Comunidad privada</div></div>
+          <button class="btn ghost" style="margin-top:14px;padding:11px" onclick="go(17)">▶ &nbsp;Ver lección de muestra</button>
+        </div>
+      </div>
+      <div class="pad" style="padding-bottom:18px;padding-top:10px;border-top:1px solid var(--hair)"><button class="btn" onclick="go(18)">🛒 &nbsp;Comprar ahora · $1,497</button></div>
+    </section>
+
+    <!-- 17 REPRODUCTOR LECCIÓN -->
+    <section class="screen" data-s="17">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="media" style="height:210px;flex:none"><div class="ic" onclick="go(16)" style="position:absolute;top:12px;left:12px;color:#fff">‹</div><div class="play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div><div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:#ffffff33"><div style="width:35%;height:100%;background:#fff"></div></div></div>
+      <div class="scroll pad" style="padding-top:14px">
+        <div class="muted" style="font-size:12px">Módulo 1 · Lección 3</div>
+        <div style="font-size:18px;font-weight:800;margin-top:4px">El costo oculto de sostenerlo todo</div>
+        <div class="row" style="gap:16px;margin-top:14px;font-size:12px" ><span class="muted">▶ 12:40</span><span class="muted">📄 Recursos</span><span class="muted">✓ Completar</span></div>
+        <div class="hr"></div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px">Contenido del módulo</div>
+        <div class="list-row" style="padding:11px 0"><span class="badge">✓</span><span style="flex:1;font-size:14px">1. Introducción</span><span class="muted" style="font-size:12px">08:12</span></div>
+        <div class="list-row" style="padding:11px 0"><span class="badge">✓</span><span style="flex:1;font-size:14px">2. El diagnóstico</span><span class="muted" style="font-size:12px">10:05</span></div>
+        <div class="list-row" style="padding:11px 0;font-weight:600"><span style="width:15px;height:15px;border-radius:50%;border:2px solid var(--fg);display:inline-block"></span><span style="flex:1;font-size:14px">3. El costo oculto</span><span class="muted" style="font-size:12px">12:40</span></div>
+      </div>
+    </section>
+
+    <!-- 18 CHECKOUT -->
+    <section class="screen" data-s="18">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(16)">‹</div><div style="font-size:16px;font-weight:800">Resumen de compra</div><div style="width:34px"></div></div>
+      <div class="scroll pad">
+        <div class="row" style="gap:14px;margin-top:6px"><div class="media" style="width:62px;height:78px;border-radius:10px"></div><div><div style="font-weight:700;font-size:14px">Líder de tu vida y de tu empresa</div><div class="muted" style="font-size:13px;margin-top:4px">$1,497 MXN</div></div></div>
+        <div class="hr"></div>
+        <div class="row" style="justify-content:space-between;font-size:15px"><span class="muted">Total</span><b>$1,497 MXN</b></div>
+        <div class="hr"></div>
+        <div class="row" style="justify-content:space-between;margin-top:4px;padding:14px;border:1px solid var(--hair);border-radius:12px"><span style="font-size:14px">💳 ···· 4242</span><span class="link" style="font-size:13px">Cambiar</span></div>
+        <div class="row" style="justify-content:space-between;margin-top:12px;padding:14px;border:1px dashed var(--hair);border-radius:12px" class="muted"><span style="font-size:14px" class="muted">+ Agregar cupón</span></div>
+      </div>
+      <div class="pad" style="padding-bottom:20px"><button class="btn" onclick="go(19)">Pagar $1,497 MXN</button><p class="muted" style="text-align:center;font-size:11px;margin-top:12px">🔒 Pago seguro protegido con SSL</p></div>
+    </section>
+
+    <!-- 19 CONFIRMACIÓN -->
+    <section class="screen" data-s="19">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="scroll pad" style="text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center"><div class="avatar" style="width:92px;height:92px;background:var(--btn);color:var(--btnfg);font-size:40px">✓</div><h2 style="font-size:23px;font-weight:800;margin-top:24px">¡Pago exitoso!</h2><p class="muted" style="font-size:14px;margin-top:10px;line-height:1.6;max-width:250px">Ya tienes acceso a <b>Líder de tu vida y de tu empresa</b>.</p></div>
+      <div class="pad" style="padding-bottom:22px"><button class="btn" onclick="go(17)">Ir al curso</button><button class="btn ghost" style="margin-top:12px" onclick="go(20)">Ver mi biblioteca</button></div>
+    </section>
+
+    <!-- 20 BIBLIOTECA -->
+    <section class="screen" data-s="20">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(13)">‹</div><div style="font-size:16px;font-weight:800">Mi biblioteca</div><div style="width:34px"></div></div>
+      <div class="tabs" style="border-bottom:1px solid var(--hair)"><div class="tpill on">Cursos</div><div class="tpill">Audios</div><div class="tpill">Eventos</div><div class="tpill">Guardados</div></div>
+      <div class="scroll pad" style="padding-top:12px">
+        <div class="row" style="gap:13px;margin-bottom:14px" onclick="go(17)"><div class="media" style="width:70px;height:70px;border-radius:12px"></div><div style="flex:1"><div style="font-weight:700;font-size:14px">Líder de tu vida</div><div class="muted" style="font-size:12px;margin-top:3px">35% completado</div><div style="height:4px;background:var(--hair);border-radius:2px;margin-top:6px"><div style="width:35%;height:100%;background:var(--fg);border-radius:2px"></div></div></div></div>
+        <div class="row" style="gap:13px;margin-bottom:14px"><div class="media" style="width:70px;height:70px;border-radius:12px"></div><div style="flex:1"><div style="font-weight:700;font-size:14px">Audio: Tu próximo nivel</div><div class="muted" style="font-size:12px;margin-top:3px">Escuchado</div></div></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 21 CÍRCULO -->
+    <section class="screen" data-s="21">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(12)">‹</div><div style="text-align:center"><div style="font-size:15px;font-weight:800">Círculo Privado</div><div class="muted" style="font-size:11px">423 miembros</div></div><div class="ic">···</div></div>
+      <div class="tabs" style="border-bottom:1px solid var(--hair)"><div class="tpill on">Feed</div><div class="tpill" onclick="go(22)">Chat</div><div class="tpill">Recursos</div><div class="tpill">Podio</div><div class="tpill" onclick="go(15)">Eventos</div></div>
+      <div class="scroll pad" style="padding-top:12px">
+        <div class="row" style="gap:10px"><div class="avatar" style="width:36px;height:36px">Tú</div><input class="field" placeholder="Comparte algo…" style="margin-top:0"></div>
+        <div class="hr"></div>
+        <div class="row"><div class="avatar" style="width:40px;height:40px">DS</div><div><div style="font-weight:700;font-size:14px">Darren Supa <span class="badge">✓</span></div><div class="muted" style="font-size:12px">Administrador · 3h</div></div></div>
+        <p style="font-size:14px;line-height:1.55;margin:10px 0">Bienvenidos a este espacio. Aquí nos impulsamos a nuestro siguiente nivel.</p>
+        <div class="row" style="gap:18px;font-size:13px" class="muted"><span>♥ 128</span><span>💬 24</span></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 22 MENSAJES -->
+    <section class="screen" data-s="22">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div style="font-size:18px;font-weight:800">Mensajes</div><div class="ic">✎</div></div>
+      <div class="pad"><input class="field" placeholder="🔍  Buscar" style="margin-top:0"></div>
+      <div class="scroll" style="margin-top:6px">
+        <div class="list-row" onclick="go(12)"><div class="avatar" style="width:48px;height:48px">DS</div><div style="flex:1"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Darren Supa <span class="badge">✓</span></b><span class="muted" style="font-size:11px">9:41</span></div><div class="muted" style="font-size:13px;margin-top:2px">Gracias por ser parte de RENASER.</div></div></div>
+        <div class="list-row"><div class="avatar" style="width:48px;height:48px">RE</div><div style="flex:1"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Equipo RENASER</b><span class="muted" style="font-size:11px">Ayer</span></div><div class="muted" style="font-size:13px;margin-top:2px">Tu próximo evento comienza en 2 días.</div></div></div>
+        <div class="list-row" onclick="go(21)"><div class="avatar" style="width:48px;height:48px">LR</div><div style="flex:1"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Líderes RENASER</b><span class="muted" style="font-size:11px">Ayer</span></div><div class="muted" style="font-size:13px;margin-top:2px">Ana: Nos vemos en el live 👋</div></div></div>
+        <div class="list-row"><div class="avatar" style="width:48px;height:48px">SO</div><div style="flex:1"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Soporte RENASER</b><span class="muted" style="font-size:11px">2d</span></div><div class="muted" style="font-size:13px;margin-top:2px">Tu consulta ha sido resuelta.</div></div></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 23 LIVE -->
+    <section class="screen" data-s="23">
+      <div class="scroll" style="background:#000;position:relative">
+        <div class="media" style="position:absolute;inset:0"><div class="silh"><svg viewBox="0 0 200 240"><path fill="#4a4a52" d="M100 44a42 42 0 110 84 42 42 0 010-84zM24 240c0-50 34-82 76-82s76 32 76 82z"/></svg></div></div>
+        <div style="position:relative;z-index:2;display:flex;flex-direction:column;height:806px;color:#fff">
+          <div class="statusbar" style="color:#fff"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+          <div class="row" style="justify-content:space-between;padding:8px 18px"><div class="row" style="gap:8px;background:#0006;padding:6px 12px;border-radius:20px"><span class="live-dot"></span><b style="font-size:12px">EN VIVO</b></div><div class="row" style="gap:6px;background:#0006;padding:6px 12px;border-radius:20px;font-size:12px">👁 1,245</div><div class="ic" onclick="go(8)" style="background:#0006;color:#fff">✕</div></div>
+          <div style="flex:1"></div>
+          <div style="padding:0 18px 12px;display:flex;flex-direction:column;gap:8px"><div style="background:#0006;padding:8px 12px;border-radius:14px;font-size:13px;width:fit-content"><b>María G.</b> esto es oro 🔥</div><div style="background:#0006;padding:8px 12px;border-radius:14px;font-size:13px;width:fit-content"><b>Carlos R.</b> siguiente nivel</div></div>
+          <div class="row" style="padding:0 18px 26px;gap:10px"><input class="field" placeholder="Escribe un mensaje…" style="margin-top:0;background:#0006;border-color:#fff3;color:#fff"><div class="avatar" style="width:44px;height:44px;background:#fff;color:#000">➤</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 24 NOTIFICACIONES -->
+    <section class="screen" data-s="24">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(8)">‹</div><div style="font-size:16px;font-weight:800">Notificaciones</div><div style="width:34px"></div></div>
+      <div class="scroll">
+        <div class="list-row"><div class="avatar" style="width:42px;height:42px">DS</div><div style="flex:1;font-size:13px"><b>Darren Supa</b> empezó un live. <span class="muted">Ahora</span></div></div>
+        <div class="list-row"><div class="avatar" style="width:42px;height:42px">MG</div><div style="flex:1;font-size:13px"><b>María G.</b> comentó tu publicación. <span class="muted">2h</span></div></div>
+        <div class="list-row"><div class="avatar" style="width:42px;height:42px">RE</div><div style="flex:1;font-size:13px"><b>RENASER</b> tu evento Alquimia es en 2 días. <span class="muted">1d</span></div></div>
+        <div class="list-row"><div class="avatar" style="width:42px;height:42px">+9</div><div style="flex:1;font-size:13px">Tienes 9 nuevos seguidores. <span class="muted">1d</span></div></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 25 AJUSTES -->
+    <section class="screen" data-s="25">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(13)">‹</div><div style="font-size:16px;font-weight:800">Ajustes</div><div style="width:34px"></div></div>
+      <div class="scroll">
+        <div class="grp" style="padding:0 20px;margin:14px 0 4px">CUENTA</div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Editar perfil</span><span class="muted">›</span></div>
+        <div class="list-row" onclick="go(26)"><span style="flex:1;font-size:14px">Verificación e identidad</span><span class="muted">›</span></div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Privacidad</span><span class="muted">›</span></div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Seguridad</span><span class="muted">›</span></div>
+        <div class="grp" style="padding:0 20px;margin:14px 0 4px">PREFERENCIAS</div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Modo oscuro</span><span class="muted" style="font-size:13px">Automático</span></div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Notificaciones</span><span class="muted">›</span></div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Idioma</span><span class="muted" style="font-size:13px">Español</span></div>
+        <div class="grp" style="padding:0 20px;margin:14px 0 4px">SOPORTE</div>
+        <div class="list-row"><span style="flex:1;font-size:14px">Centro de ayuda</span><span class="muted">›</span></div>
+        <div class="list-row"><span style="flex:1;font-size:14px;color:#ff3b30">Cerrar sesión</span></div>
+      </div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- 26 VERIFICACIÓN / CERTIFICACIONES -->
+    <section class="screen" data-s="26">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div class="ic" onclick="go(25)">‹</div><div style="font-size:15px;font-weight:800">Verificación e identidad</div><div style="width:34px"></div></div>
+      <div class="scroll pad" style="padding-top:8px">
+        <p class="muted" style="font-size:13px;line-height:1.6;margin-bottom:14px">Tener una cuenta no significa que RENASER te avale. Cada nivel es un estado distinto.</p>
+        <div style="border:1px solid var(--hair);border-radius:14px;padding:14px;margin-bottom:12px"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Cuenta registrada</b><span class="badge">✓</span></div><p class="muted" style="font-size:12px;margin-top:4px">Correo confirmado</p></div>
+        <div style="border:1px solid var(--hair);border-radius:14px;padding:14px;margin-bottom:12px"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Identidad verificada</b><span class="chip" style="padding:4px 10px;font-size:11px" onclick="toast('Verificación iniciada')">Verificar</span></div><p class="muted" style="font-size:12px;margin-top:4px">Requerida para vender o cobrar</p></div>
+        <div style="border:1px solid var(--hair);border-radius:14px;padding:14px;margin-bottom:12px"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Profesional verificado</b><span class="muted" style="font-size:12px">Bloqueado</span></div><p class="muted" style="font-size:12px;margin-top:4px">Documentación profesional</p></div>
+        <div style="border:1px solid var(--hair);border-radius:14px;padding:14px"><div class="row" style="justify-content:space-between"><b style="font-size:14px">Certificado RENASER</b><span class="muted" style="font-size:12px">Bloqueado</span></div><p class="muted" style="font-size:12px;margin-top:4px">Emitido tras formación y evaluación</p></div>
+      </div>
+    </section>
+
+    <!-- 27 ESTADOS -->
+    <section class="screen" data-s="27">
+      <div class="statusbar"><span>9:41</span><span class="sb-r">◧ ▮ ▰</span></div>
+      <div class="topbar"><div style="font-size:15px;font-weight:800">Estados del sistema</div><div id="stSel" class="chip" style="font-size:11px;padding:5px 10px" onclick="cycleState()">Carga</div></div>
+      <div class="scroll" id="stBody"></div>
+      <div class="tabbar tb"></div>
+    </section>
+
+    <!-- CREAR SHEET (overlay) -->
+    <div id="sheet" class="sheet" style="display:none">
+      <div class="grab"></div>
+      <div class="row" style="justify-content:space-between;margin-bottom:12px"><b style="font-size:15px">Crear</b><div class="ic" onclick="closeSheet()">✕</div></div>
+      <div class="crList">
+        <div class="crItem"><span class="e">🖼️</span>Publicación</div><div class="crItem"><span class="e">🎬</span>Video corto</div><div class="crItem"><span class="e">⭕</span>Historia</div>
+        <div class="crItem"><span class="e">🎧</span>Audio</div><div class="crItem"><span class="e">🔴</span>Live</div><div class="crItem"><span class="e">📅</span>Evento</div>
+        <div class="crItem"><span class="e">❓</span>Quiz</div><div class="crItem"><span class="e">🎓</span>Curso</div><div class="crItem"><span class="e">🛍️</span>Producto</div>
+        <div class="crItem"><span class="e">👥</span>Comunidad</div><div class="crItem"><span class="e">🎙️</span>Sala</div><div class="crItem"><span class="e">📊</span>Encuesta</div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    </div>
+  </div>
+</main>
+
+<style>
+.qz{padding:16px;border-radius:14px;border:1px solid var(--hair);font-size:15px;cursor:pointer;background:var(--soft)}
+.qz.sel{background:var(--btn);color:var(--btnfg);border-color:var(--btn);font-weight:600}
+.sel-c{background:var(--btn)!important;color:var(--btnfg)!important}
+</style>
+<script>
+const SCREENS=[
+ [1,'Entrada','Splash','Pantalla de arranque con identidad de marca.'],
+ [2,'Entrada','Idioma','Selección de idioma antes de entrar.'],
+ [3,'Entrada','Landing (anuncio)','Llegada desde un anuncio de Meta. Inicia el quiz.'],
+ [4,'Entrada','Quiz','Pregunta de opciones cerradas. Valor antes del registro.'],
+ [5,'Entrada','Resultado','Resultado específico y revelador + gancho al audio.'],
+ [6,'Entrada','Registro','Creación del RENASER ID (Google, Apple o email).'],
+ [7,'Entrada','Onboarding','Selección de intereses para personalizar el feed.'],
+ [8,'Social','Home','Feed social con tabs Para ti / Siguiendo e historias.'],
+ [9,'Social','Explorar / Búsqueda','Descubrimiento por rejilla y búsqueda.'],
+ [10,'Social','Video vertical','Reproductor inmersivo con comercio social.'],
+ [11,'Social','Comentarios','Detalle de publicación e hilo de comentarios.'],
+ [12,'Social','Perfil de Darren','Identidad + mini landing + contenido + comercio.'],
+ [13,'Social','Perfil propio','Tu perfil, con acceso a biblioteca y ajustes.'],
+ [14,'Contenido & Comercio','Audio privado','Reproductor premium con guardar y compartir.'],
+ [15,'Contenido & Comercio','Eventos / Calendario','Próximos eventos, webinars y sesiones.'],
+ [16,'Contenido & Comercio','Producto / Curso','Detalle del programa y CTA de compra.'],
+ [17,'Contenido & Comercio','Reproductor de lección','Video de lección + contenido del módulo.'],
+ [18,'Contenido & Comercio','Checkout','Pago con máxima claridad.'],
+ [19,'Contenido & Comercio','Confirmación','Pago exitoso + acceso inmediato.'],
+ [20,'Contenido & Comercio','Biblioteca','Cursos, audios y guardados del usuario.'],
+ [21,'Comunidad','Círculo','Feed y navegación del círculo privado.'],
+ [22,'Comunidad','Mensajes','Bandeja de conversaciones.'],
+ [23,'Comunidad','Live / Sala','Transmisión en vivo con chat en tiempo real.'],
+ [24,'Cuenta & Confianza','Notificaciones','Actividad social e institucional.'],
+ [25,'Cuenta & Confianza','Ajustes','Cuenta, preferencias y soporte.'],
+ [26,'Cuenta & Confianza','Verificación','Niveles de identidad y certificación RENASER.'],
+ [27,'Estados','Estados del sistema','Carga, vacío, error y sin conexión.'],
+];
+const META=Object.fromEntries(SCREENS.map(s=>[s[0],s]));
+const TAB=`<div class="tab" data-t="8" onclick="go(8)"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Inicio</div>
+ <div class="tab" data-t="9" onclick="go(9)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>Explorar</div>
+ <div class="tab" onclick="openSheet()"><div class="plus"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div></div>
+ <div class="tab" data-t="22" onclick="go(22)"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Mensajes</div>
+ <div class="tab" data-t="13" onclick="go(13)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Perfil</div>`;
+document.querySelectorAll('.tb').forEach(t=>t.innerHTML=TAB);
+
+let cur=1;
+function go(n){
+  closeSheet();
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('show'));
+  const el=document.querySelector('.screen[data-s="'+n+'"]');el.classList.add('show');
+  el.querySelectorAll('.scroll').forEach(sc=>sc.scrollTop=0);
+  cur=n;const m=META[n];
+  document.getElementById('scrTitle').textContent=n+' · '+m[2];
+  document.getElementById('scrDesc').textContent=m[3];
+  document.getElementById('scrPos').textContent=n+' / '+SCREENS.length;
+  document.querySelectorAll('.nav-item').forEach(i=>i.classList.toggle('active',i.dataset.n==n));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('act',t.dataset.t==n));
+  if(n===27)renderState();
+}
+function next(){go(cur>=SCREENS.length?1:cur+1)}
+function prev(){go(cur<=1?SCREENS.length:cur-1)}
+function setMode(m){document.getElementById('vp').classList.toggle('dark',m==='dark');document.getElementById('mLight').classList.toggle('on',m==='light');document.getElementById('mDark').classList.toggle('on',m==='dark')}
+let tt;function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),1500)}
+function openSheet(){document.getElementById('sheet').style.display='block'}
+function closeSheet(){const s=document.getElementById('sheet');if(s)s.style.display='none'}
+function hfeed(n){document.getElementById('hf1').classList.toggle('on',n===1);document.getElementById('hf2').classList.toggle('on',n===2);toast(n===1?'Feed: Para ti':'Feed: Siguiendo')}
+// build rail grouped
+const nl=document.getElementById('navList');let lastG='';
+SCREENS.forEach(s=>{if(s[1]!==lastG){lastG=s[1];const h=document.createElement('div');h.className='grp';h.textContent=s[1];nl.appendChild(h)}const d=document.createElement('div');d.className='nav-item';d.dataset.n=s[0];d.innerHTML='<b>'+s[0]+'</b>'+s[2];d.onclick=()=>go(s[0]);nl.appendChild(d)});
+// states
+const STATES=['Carga','Vacío','Error','Sin conexión'];let stIdx=0;
+function cycleState(){stIdx=(stIdx+1)%STATES.length;document.getElementById('stSel').textContent=STATES[stIdx];renderState()}
+function renderState(){
+  const b=document.getElementById('stBody');const s=STATES[stIdx];
+  if(s==='Carga'){b.innerHTML=`<div style="padding:16px 20px">
+    <div class="row" style="margin-bottom:16px"><div class="sk" style="width:40px;height:40px;border-radius:50%"></div><div style="flex:1"><div class="sk" style="height:12px;width:50%"></div><div class="sk" style="height:10px;width:30%;margin-top:6px"></div></div></div>
+    <div class="sk" style="height:220px;width:100%;border-radius:14px"></div>
+    <div class="sk" style="height:12px;width:80%;margin-top:14px"></div><div class="sk" style="height:12px;width:60%;margin-top:8px"></div></div>`;}
+  else if(s==='Vacío'){b.innerHTML=`<div class="state-box"><div class="state-ic">🗂️</div><div style="font-weight:700;font-size:16px">Aún no hay nada aquí</div><p class="muted" style="font-size:13px;max-width:230px;line-height:1.5">Cuando sigas creadores o guardes contenido, aparecerá en este espacio.</p><button class="btn" style="width:auto;padding:11px 22px;margin-top:8px" onclick="go(9)">Explorar contenido</button></div>`;}
+  else if(s==='Error'){b.innerHTML=`<div class="state-box"><div class="state-ic">⚠️</div><div style="font-weight:700;font-size:16px">Algo salió mal</div><p class="muted" style="font-size:13px;max-width:230px;line-height:1.5">No pudimos cargar este contenido. Inténtalo de nuevo.</p><button class="btn" style="width:auto;padding:11px 22px;margin-top:8px" onclick="toast('Reintentando…')">Reintentar</button></div>`;}
+  else{b.innerHTML=`<div class="state-box"><div class="state-ic">📡</div><div style="font-weight:700;font-size:16px">Sin conexión</div><p class="muted" style="font-size:13px;max-width:230px;line-height:1.5">Revisa tu conexión a internet. Mostramos tu contenido guardado offline.</p><button class="btn ghost" style="width:auto;padding:11px 22px;margin-top:8px" onclick="toast('Reconectando…')">Reintentar</button></div>`;}
+}
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')next();if(e.key==='ArrowLeft')prev()});
+go(1);
+</script>
+</body>
+</html>

@@ -1,24 +1,101 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
+import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type Props = {
   size?: number;
   label?: string;
-  image?: 'avatar' | 'speaker' | 'hero';
+  image?: keyof typeof assets | ImageSourcePropType | null;
+  name?: string;
 };
 
-export function Avatar({ size = 44, label, image = 'avatar' }: Props) {
+export function Avatar({ size = 44, label, image, name }: Props) {
   const { colors } = useAppTheme();
+
+  // Obtener la fuente de la imagen
+  let source: ImageSourcePropType | null = null;
+  if (image) {
+    if (typeof image === 'string' && assets[image]) {
+      source = assets[image]!;
+    } else if (typeof image === 'object') {
+      source = image as ImageSourcePropType;
+    }
+  }
+
+  // Generar iniciales para el fallback
+  const getInitials = () => {
+    if (!name) return '';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 0) return '';
+    if (parts.length === 1) return parts[0]?.slice(0, 2).toUpperCase() || '';
+    return `${parts[0]?.charAt(0)}${parts[1]?.charAt(0)}`.toUpperCase();
+  };
+
+  const initials = getInitials();
+
   return (
-    <View style={{ alignItems: 'center', gap: 5 }}>
-      <Image source={assets[image]} style={{ width: size, height: size, borderRadius: size / 2 }} />
-      {label ? <Text numberOfLines={1} style={[styles.label, { color: colors.text }]}>{label}</Text> : null}
+    <View style={{ alignItems: 'center', gap: 6 }}>
+      {source ? (
+        <Image
+          source={source}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: colors.surfaceAlt,
+            borderWidth: 1,
+            borderColor: colors.border,
+          }}
+        />
+      ) : (
+        <View
+          style={[
+            styles.placeholder,
+            {
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              backgroundColor: colors.surfaceAlt,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          {initials ? (
+            <Text style={[styles.initials, { fontSize: size * 0.38, color: colors.text }]}>
+              {initials}
+            </Text>
+          ) : (
+            <Feather name="user" size={size * 0.48} color={colors.textMuted} />
+          )}
+        </View>
+      )}
+      {label ? (
+        <Text numberOfLines={1} style={[styles.label, { color: colors.text }]}>
+          {label}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: 10, maxWidth: 70, textAlign: 'center', fontWeight: '600' },
+  placeholder: {
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  initials: {
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  label: {
+    fontSize: 10,
+    maxWidth: 70,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
 });
