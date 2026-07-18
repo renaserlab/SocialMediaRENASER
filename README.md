@@ -1,4 +1,4 @@
-# RENASER Universo — MVP móvil
+# RENASER Social Media — MVP móvil
 
 MVP funcional inspirado en el diseño entregado. La aplicación es **móvil híbrida real** con React Native + Expo y funciona en Android e iOS desde una sola base de código.
 
