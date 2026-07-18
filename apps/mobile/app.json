@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "RENASER Universo",
+    "slug": "renaser-universo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "renaser",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.renaser.universo",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "RENASER utiliza el micrófono para salas en vivo y mensajes de audio.",
+        "NSCameraUsageDescription": "RENASER utiliza la cámara para crear publicaciones y participar en salas en vivo.",
+        "NSPhotoLibraryUsageDescription": "RENASER accede a tus fotos cuando eliges contenido para publicar."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "package": "com.renaser.universo",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "image": "./assets/splash.png",
+            "backgroundColor": "#000000"
+          }
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Permite que RENASER use el micrófono.",
+          "enableBackgroundPlayback": true,
+          "enableBackgroundRecording": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REEMPLAZAR_CON_PROJECT_ID_EAS"
+      }
+    }
+  }
+}

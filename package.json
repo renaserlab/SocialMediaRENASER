@@ -1,0 +1,17 @@
+{
+  "name": "renaser-universo-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/mobile"
+  ],
+  "scripts": {
+    "mobile": "npm --workspace apps/mobile run start",
+    "mobile:android": "npm --workspace apps/mobile run android",
+    "mobile:ios": "npm --workspace apps/mobile run ios",
+    "mobile:check": "npm --workspace apps/mobile run check"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
