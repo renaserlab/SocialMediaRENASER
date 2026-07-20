@@ -43,6 +43,25 @@ class Event(Base):
     )
 
 
+class EventRegistration(Base):
+    __tablename__ = "event_registrations"
+
+    event_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), server_default="confirmed")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Course(Base):
     __tablename__ = "courses"
 

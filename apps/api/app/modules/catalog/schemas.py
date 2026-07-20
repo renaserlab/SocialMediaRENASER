@@ -17,6 +17,8 @@ class EventRead(BaseModel):
     event_type: str
     status: str
     capacity: int | None = None
+    registrations_count: int = 0
+    reserved_by_me: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
