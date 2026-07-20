@@ -77,7 +77,7 @@ export function LoginScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="" onBack={() => router.back()} />
+      <AppHeader title="" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}RENASER</Text>

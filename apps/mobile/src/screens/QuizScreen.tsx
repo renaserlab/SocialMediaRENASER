@@ -41,7 +41,7 @@ export function QuizScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={styles.topBar}>
         <Pressable
-          onPress={() => index === 0 ? router.back() : setIndex((value) => value - 1)}
+          onPress={() => index === 0 ? (router.canGoBack() ? router.back() : router.replace('/')) : setIndex((value) => value - 1)}
           hitSlop={12}
           accessibilityLabel={index === 0 ? 'Cerrar' : 'Pregunta anterior'}
           accessibilityRole="button"

@@ -93,7 +93,7 @@ export function CommentsScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: colors.background }}
     >
-      <AppHeader title="Comentarios" onBack={() => router.back()} />
+      <AppHeader title="Comentarios" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <View style={styles.container}>
         <StateView
           state={uiState}

@@ -59,7 +59,7 @@ export function NotificationsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Notificaciones" onBack={() => router.back()} />
+      <AppHeader title="Notificaciones" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <StateView
         state={uiState}
         onRetry={load}

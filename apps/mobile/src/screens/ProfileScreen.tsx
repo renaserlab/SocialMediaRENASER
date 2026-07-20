@@ -113,7 +113,7 @@ export function ProfileScreen() {
   if (isRealPublic && publicState !== 'idle') {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="PERFIL" onBack={() => router.back()} />
+        <AppHeader title="PERFIL" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state={publicState === 'error' ? 'error' : 'loading'} onRetry={loadPublic} />
       </View>
     );
@@ -155,7 +155,7 @@ export function ProfileScreen() {
         title={isPublic ? 'PERFIL' : 'MI PERFIL'}
         rightIcon={isPublic ? undefined : 'settings'}
         onRightPress={isPublic ? undefined : () => router.push('/settings')}
-        onBack={isPublic ? () => router.back() : undefined}
+        onBack={isPublic ? () => (router.canGoBack() ? router.back() : router.replace('/')) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
         <Image source={assets.hero} style={[styles.cover, { tintColor: 'gray' }]} />

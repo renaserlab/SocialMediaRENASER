@@ -77,7 +77,7 @@ export function EventsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Próximos eventos" onBack={() => router.back()} />
+      <AppHeader title="Próximos eventos" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <StateView

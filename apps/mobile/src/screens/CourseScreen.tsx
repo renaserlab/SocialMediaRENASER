@@ -19,7 +19,7 @@ export function CourseScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Programa" onBack={() => router.back()} />
+      <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <Image source={assets.course} style={[styles.hero, { tintColor: 'gray' }]} />
         <View style={styles.container}>

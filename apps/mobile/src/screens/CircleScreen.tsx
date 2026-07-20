@@ -29,7 +29,7 @@ export function CircleScreen() {
       <AppHeader
         title="CÍRCULO"
         rightIcon="more-horizontal"
-        onBack={() => router.back()}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.header}>

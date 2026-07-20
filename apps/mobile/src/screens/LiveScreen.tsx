@@ -28,7 +28,7 @@ export function LiveScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.top}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
             accessibilityLabel="Salir de sala"
             accessibilityRole="button"
             style={styles.backButton}

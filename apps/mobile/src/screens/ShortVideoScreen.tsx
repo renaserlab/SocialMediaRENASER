@@ -33,7 +33,7 @@ export function ShortVideoScreen() {
 
       {/* Header back button */}
       <Pressable
-        onPress={() => router.back()}
+        onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
         accessibilityLabel="Volver"
         accessibilityRole="button"
         style={styles.backButton}

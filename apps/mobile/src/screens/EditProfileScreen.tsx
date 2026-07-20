@@ -44,7 +44,7 @@ export function EditProfileScreen() {
         username: username.trim(),
         bio: bio.trim(),
       });
-      router.back();
+      (router.canGoBack() ? router.back() : router.replace('/'));
     } catch (error) {
       const message =
         error instanceof ApiError || error instanceof Error
@@ -62,7 +62,7 @@ export function EditProfileScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Editar perfil" onBack={() => router.back()} />
+      <AppHeader title="Editar perfil" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Input

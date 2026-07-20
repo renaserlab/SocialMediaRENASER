@@ -28,7 +28,7 @@ export function ResultScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Tu resultado" onBack={() => router.back()} />
+      <AppHeader title="Tu resultado" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.content}>
           <Text style={[styles.title, { color: colors.text }]}>{copy.headline}</Text>

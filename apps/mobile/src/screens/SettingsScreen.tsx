@@ -25,7 +25,7 @@ export function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Ajustes" onBack={() => router.back()} />
+      <AppHeader title="Ajustes" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <ScrollView contentContainerStyle={styles.list}>
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Visualización</Text>
         <ListRow

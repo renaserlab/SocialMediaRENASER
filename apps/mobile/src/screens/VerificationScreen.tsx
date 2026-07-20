@@ -23,7 +23,7 @@ export function VerificationScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Verificación de Cuenta" onBack={() => router.back()} />
+      <AppHeader title="Verificación de Cuenta" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen scroll={false}>
         <View style={styles.container}>
           <View style={styles.iconContainer}>
@@ -65,7 +65,7 @@ export function VerificationScreen() {
               />
             )}
             {status === 'verified' && (
-              <Button label="Volver a Ajustes" variant="ghost" onPress={() => router.back()} />
+              <Button label="Volver a Ajustes" variant="ghost" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
             )}
           </View>
         </View>

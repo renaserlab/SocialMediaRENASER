@@ -63,7 +63,7 @@ export function CheckoutScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Resumen de compra" onBack={() => router.back()} />
+      <AppHeader title="Resumen de compra" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <View style={[styles.summary, { backgroundColor: colors.surface, borderColor: colors.border }]}>
