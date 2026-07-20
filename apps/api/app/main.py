@@ -20,6 +20,8 @@ from app.modules.content.router import router as content_router
 from app.modules.identity.router import router as identity_router
 from app.modules.learning.router import router as learning_router
 from app.modules.messaging.router import router as messaging_router
+from app.modules.moderation.router import router as moderation_router
+from app.modules.notifications.router import router as notifications_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.social_graph.router import router as social_graph_router
 
@@ -82,6 +84,8 @@ def create_app() -> FastAPI:
     app.include_router(catalog_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)
+    app.include_router(notifications_router, prefix=prefix)
+    app.include_router(moderation_router, prefix=prefix)
 
     return app
 

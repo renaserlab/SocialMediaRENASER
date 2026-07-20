@@ -22,6 +22,7 @@ from app.modules.content.schemas import (
     PostMediaRead,
     PostRead,
 )
+from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.shared.database import get_db
 from app.shared.pagination import Page, pagination_params
@@ -241,10 +242,18 @@ async def like_post(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    await _get_active_post(db, post_id)
+    post = await _get_active_post(db, post_id)
     existing = await db.get(PostLike, {"post_id": post_id, "user_id": current_user.id})
     if existing is None:
         db.add(PostLike(post_id=post_id, user_id=current_user.id))
+        add_notification(
+            db,
+            user_id=post.author_id,
+            actor_id=current_user.id,
+            type="like",
+            entity_type="post",
+            entity_id=post_id,
+        )
         await db.commit()
     return {"liked": True, "likes_count": await _likes_count(db, post_id)}
 
@@ -339,7 +348,7 @@ async def create_comment(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CommentRead:
-    await _get_active_post(db, post_id)
+    post = await _get_active_post(db, post_id)
     comment = Comment(
         post_id=post_id,
         author_id=current_user.id,
@@ -347,6 +356,14 @@ async def create_comment(
         body=payload.body,
     )
     db.add(comment)
+    add_notification(
+        db,
+        user_id=post.author_id,
+        actor_id=current_user.id,
+        type="comment",
+        entity_type="post",
+        entity_id=post_id,
+    )
     await db.commit()
     await db.refresh(comment)
 

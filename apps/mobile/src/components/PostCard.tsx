@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
+import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -41,6 +42,29 @@ export function PostCard({ post }: { post: Post }) {
     setShowComments(true);
   };
 
+  const reportPost = () => {
+    Alert.alert('Reportar publicación', '¿Deseas reportar esta publicación?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Reportar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await ReportRepository.create({
+              entityType: 'post',
+              entityId: post.id,
+              reportedUserId: post.authorId,
+              reason: 'Contenido inapropiado',
+            });
+            Alert.alert('Gracias', 'Hemos recibido tu reporte.');
+          } catch {
+            Alert.alert('No se pudo enviar', 'Inténtalo de nuevo.');
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.header}>
@@ -57,7 +81,14 @@ export function PostCard({ post }: { post: Post }) {
             <Text variant="secondary" color={colors.textMuted}>{post.username} · {post.createdAt}</Text>
           </View>
         </Pressable>
-        <Feather name="more-horizontal" size={20} color={colors.textMuted} />
+        <Pressable
+          onPress={reportPost}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Más opciones"
+        >
+          <Feather name="more-horizontal" size={20} color={colors.textMuted} />
+        </Pressable>
       </View>
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
