@@ -1,15 +1,16 @@
 import React from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
-import { Button } from '@/components/Button';
 import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
+import { VideoPlayer } from '@/components/VideoPlayer';
 import { useLesson } from '@/hooks/useLesson';
-import { spacing, radius } from '@/theme/tokens';
-import { useAppTheme } from '@/theme/useAppTheme';
 import { assets } from '@/data/assets';
+import { SAMPLE_VIDEO_URL } from '@/data/media';
+import { spacing } from '@/theme/tokens';
+import { useAppTheme } from '@/theme/useAppTheme';
 
 export function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -41,13 +42,14 @@ export function LessonScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Lección del Curso" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Visual representation of video player */}
-        <View style={[styles.playerContainer, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
-          <Image source={assets.course} style={[styles.coverImage, { tintColor: 'gray' }]} />
-          <View style={styles.playOverlay}>
-            <Button label="Iniciar Lección" icon="play" onPress={() => {}} />
-          </View>
-        </View>
+        {/* Reproductor de video real de la lección */}
+        <VideoPlayer
+          uri={SAMPLE_VIDEO_URL}
+          poster={assets.course}
+          style={[styles.playerContainer, { borderBottomWidth: 1, borderColor: colors.border }]}
+          contentFit="cover"
+          nativeControls
+        />
 
         <View style={styles.details}>
           <Text style={[styles.title, { color: colors.text }]}>
@@ -87,20 +89,6 @@ const styles = StyleSheet.create({
   },
   playerContainer: {
     height: 220,
-    borderBottomWidth: 1,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  coverImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  playOverlay: {
-    position: 'absolute',
-    alignSelf: 'center',
   },
   details: {
     padding: spacing.lg,

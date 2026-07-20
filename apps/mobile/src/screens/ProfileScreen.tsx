@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -53,7 +53,7 @@ export function ProfileScreen() {
         onBack={isDarren ? () => router.back() : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
-        <Image source={assets.hero} style={[styles.cover, { tintColor: 'gray' }]} />
+        <Image source={assets.hero} style={styles.cover} />
         <View style={[styles.profileBlock, { backgroundColor: colors.background }]}>
           <View style={styles.avatarRow}>
             <Avatar size={90} image={profileData.avatar} />
@@ -77,7 +77,7 @@ export function ProfileScreen() {
                 <Button
                   label="Editar perfil"
                   variant="secondary"
-                  onPress={() => {}}
+                  onPress={() => Alert.alert('Editar perfil', 'La edición de perfil estará disponible próximamente.')}
                   style={styles.actionBtn}
                 />
               )}
@@ -89,7 +89,7 @@ export function ProfileScreen() {
             <Text style={[styles.username, { color: colors.textMuted }]}>{profileData.username}</Text>
           </View>
 
-          <View style={styles.stats}>
+          <View style={[styles.stats, { borderColor: colors.border }]}>
             <Stat label="Seguidores" value={profileData.followers} />
             <Stat label="Siguiendo" value={profileData.following} />
             <Stat label="Publicaciones" value={profileData.posts} />
@@ -113,10 +113,10 @@ export function ProfileScreen() {
             <Shortcut icon="users" label="Círculos" onPress={() => router.push('/circle/lideres-renaser')} />
           </View>
 
-          {/* Grid de imágenes de publicaciones en B&W */}
+          {/* Grid de publicaciones */}
           <View style={styles.grid}>
             {[assets.audio, assets.event, assets.course, assets.circle, assets.speaker, assets.hero].map((source, index) => (
-              <Image key={index} source={source} style={[styles.gridImage, { tintColor: 'gray' }]} />
+              <Image key={index} source={source} style={[styles.gridImage, { borderColor: colors.background }]} />
             ))}
           </View>
         </View>
@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
   infoBlock: { marginTop: spacing.md },
   name: { fontSize: 20, fontWeight: '900' },
   username: { fontSize: 13, marginTop: 2 },
-  stats: { flexDirection: 'row', marginVertical: spacing.lg, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: spacing.md, borderColor: '#EAEAEA' },
+  stats: { flexDirection: 'row', marginVertical: spacing.lg, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: spacing.md },
   statBox: { alignItems: 'center', flex: 1 },
   bio: { fontSize: 13, lineHeight: 18, marginBottom: spacing.lg },
   audioBtn: { width: '100%', marginBottom: spacing.lg },
@@ -170,5 +170,5 @@ const styles = StyleSheet.create({
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },
   shortcutIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginTop: spacing.lg },
-  gridImage: { width: '32.6%', aspectRatio: 1, borderWidth: 1, borderColor: 'white' },
+  gridImage: { width: '32.6%', aspectRatio: 1, borderWidth: 1 },
 });

@@ -19,6 +19,15 @@ const resultCopy: Record<QuizArea, { headline: string; description: string }> = 
   proposito: { headline: 'No estás perdido. Estás listo para una dirección más auténtica.', description: 'Tus metas necesitan alinearse con la vida que realmente deseas construir.' },
 };
 
+// Imagen acorde a cada área de resultado.
+const resultImage: Record<QuizArea, keyof typeof assets> = {
+  mentalidad: 'hero',
+  relaciones: 'avatar',
+  negocios: 'course',
+  salud: 'speaker',
+  proposito: 'circle',
+};
+
 export function ResultScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
@@ -34,7 +43,7 @@ export function ResultScreen() {
           <Text style={[styles.title, { color: colors.text }]}>{copy.headline}</Text>
           <Text style={[styles.description, { color: colors.textMuted }]}>{copy.description}</Text>
           <Image
-            source={assets.event}
+            source={assets[resultImage[result]]}
             style={[styles.resultImage, { borderColor: colors.border }]}
           />
           <Text style={[styles.note, { color: colors.textMuted }]}>

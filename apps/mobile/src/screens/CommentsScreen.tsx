@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Avatar } from '@/components/Avatar';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
+import { StateView } from '@/components/StateView';
+import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -29,6 +30,8 @@ export function CommentsScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
 
+  const user = useAppStore((state) => state.user);
+
   const [comments, setComments] = useState<CommentItem[]>(initialComments);
   const [inputText, setInputText] = useState('');
 
@@ -37,8 +40,8 @@ export function CommentsScreen() {
     if (!trimmed) return;
     const newComment: CommentItem = {
       id: `comment-${Date.now()}`,
-      author: 'Katherine Béjar',
-      username: '@katherine',
+      author: user?.fullName ?? 'Tú',
+      username: user?.username ?? '@tu',
       text: trimmed,
       time: 'Ahora',
     };
@@ -57,6 +60,14 @@ export function CommentsScreen() {
           data={comments}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <StateView
+              state="empty"
+              icon="message-square"
+              title="Sé el primero en comentar"
+              description="Comparte lo que piensas sobre esta publicación."
+            />
+          }
           renderItem={({ item }) => (
             <View style={[styles.commentRow, { borderBottomColor: colors.border }]}>
               <Avatar size={36} image="avatar" />

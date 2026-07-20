@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -63,9 +63,21 @@ export function CreatePostScreen() {
             />
             <View style={styles.editorFooter}>
               <View style={styles.mediaRow}>
-                <Feather name="image" size={20} color={colors.textMuted} />
-                <Feather name="video" size={20} color={colors.textMuted} />
-                <Feather name="mic" size={20} color={colors.textMuted} />
+                {([
+                  { icon: 'image', label: 'foto' },
+                  { icon: 'video', label: 'video' },
+                  { icon: 'mic', label: 'audio' },
+                ] as const).map((m) => (
+                  <Pressable
+                    key={m.icon}
+                    onPress={() => Alert.alert('Adjuntar', `Adjuntar ${m.label} estará disponible próximamente.`)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Adjuntar ${m.label}`}
+                    style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, minWidth: 32, minHeight: 32, justifyContent: 'center' })}
+                  >
+                    <Feather name={m.icon} size={20} color={colors.textMuted} />
+                  </Pressable>
+                ))}
               </View>
               <Text style={[styles.counter, { color: colors.textMuted }]}>{text.length}/700</Text>
             </View>

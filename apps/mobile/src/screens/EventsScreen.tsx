@@ -10,8 +10,11 @@ import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { useEvents } from '@/hooks/useEvents';
 import { useAppStore } from '@/store/useAppStore';
-import { radius, spacing } from '@/theme/tokens';
+import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+
+// Texto sobre la tarjeta de evento (imagen + overlay) → contexto de media.
+const media = palette('dark');
 
 export function EventsScreen() {
   const { colors } = useAppTheme();
@@ -59,7 +62,7 @@ export function EventsScreen() {
             const main = index === 0;
             return main ? (
               <View key={event.id} style={styles.mainCard}>
-                <Image source={assets.event} style={[StyleSheet.absoluteFill, { tintColor: 'gray' }]} resizeMode="cover" />
+                <Image source={assets.event} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 <View style={[styles.overlay, { backgroundColor: colors.overlay }]} />
                 <View style={styles.mainContent}>
                   <Text style={styles.tag}>{event.type.toUpperCase()}</Text>
@@ -79,7 +82,7 @@ export function EventsScreen() {
                 key={event.id}
                 style={[styles.rowCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
               >
-                <Image source={index === 1 ? assets.speaker : assets.hero} style={[styles.thumb, { tintColor: 'gray' }]} />
+                <Image source={index === 1 ? assets.speaker : assets.hero} style={[styles.thumb, { borderColor: colors.border }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.title, { color: colors.text }]}>{event.title}</Text>
                   <Text style={[styles.description, { color: colors.textMuted }]}>{event.description}</Text>
@@ -108,15 +111,15 @@ export function EventsScreen() {
 
 const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.lg },
-  mainCard: { height: 460, borderRadius: radius.xl, overflow: 'hidden', justifyContent: 'flex-end', marginBottom: spacing.lg, borderWidth: 1, borderColor: '#333' },
+  mainCard: { height: 460, borderRadius: radius.xl, overflow: 'hidden', justifyContent: 'flex-end', marginBottom: spacing.lg, borderWidth: 1, borderColor: media.border },
   overlay: { ...StyleSheet.absoluteFillObject },
   mainContent: { padding: spacing.xl },
-  tag: { color: '#DADADA', fontSize: 10, letterSpacing: 1.5, fontWeight: '800' },
-  mainTitle: { color: '#FFFFFF', fontSize: 32, fontWeight: '900', marginTop: spacing.sm },
-  mainDescription: { color: '#E7E7E7', fontSize: 13, lineHeight: 18, marginTop: spacing.sm },
-  mainMeta: { color: '#FFFFFF', fontSize: 12, lineHeight: 18, fontWeight: '800', marginTop: spacing.lg },
+  tag: { color: media.textMuted, fontSize: 10, letterSpacing: 1.5, fontWeight: '800' },
+  mainTitle: { color: media.text, fontSize: 32, fontWeight: '900', marginTop: spacing.sm },
+  mainDescription: { color: media.textMuted, fontSize: 13, lineHeight: 18, marginTop: spacing.sm },
+  mainMeta: { color: media.text, fontSize: 12, lineHeight: 18, fontWeight: '800', marginTop: spacing.lg },
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md, marginBottom: spacing.md },
-  thumb: { width: 70, height: 86, borderRadius: radius.md, borderWidth: 1, borderColor: '#888' },
+  thumb: { width: 70, height: 86, borderRadius: radius.md, borderWidth: 1 },
   title: { fontSize: 14, fontWeight: '800' },
   description: { fontSize: 11, lineHeight: 16, marginTop: 4 },
   meta: { fontSize: 10, marginTop: spacing.sm },

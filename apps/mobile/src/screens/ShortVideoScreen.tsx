@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { Image, StyleSheet, Text, View, Pressable } from 'react-native';
+import { Share, StyleSheet, Text, View, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
-import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
-import { spacing, radius } from '@/theme/tokens';
-import { useAppTheme } from '@/theme/useAppTheme';
+import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
+import { SAMPLE_VIDEO_URL } from '@/data/media';
+import { palette, spacing } from '@/theme/tokens';
+
+// Superficie full-bleed sobre video → contexto de media (siempre oscuro).
+const media = palette('dark');
 
 export function ShortVideoScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { colors } = useAppTheme();
   const router = useRouter();
 
   const [liked, setLiked] = useState(false);
@@ -19,26 +22,40 @@ export function ShortVideoScreen() {
 
   const toggleLike = () => {
     setLiked(!liked);
-    setLikesCount(prev => prev + (liked ? -1 : 1));
+    setLikesCount((prev) => prev + (liked ? -1 : 1));
+  };
+
+  const onShare = () => {
+    Share.share({ message: 'Mira este short de Darren Hardy en RENASER Universo.' }).catch(() => {});
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Video cover representation in B&W */}
-      <Image
-        source={assets.hero}
-        style={[styles.videoPlaceholder, { tintColor: 'gray' }]} // visual simulation
+    <View style={[styles.container, { backgroundColor: media.background }]}>
+      {/* Video vertical real (autoplay + loop, silenciado) */}
+      <VideoPlayer
+        uri={SAMPLE_VIDEO_URL}
+        poster={assets.hero}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        loop
+        autoPlay
+        muted
+        nativeControls={false}
       />
-      <View style={[styles.overlayShadow, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
+      <LinearGradient
+        colors={['transparent', media.overlay]}
+        style={styles.bottomScrim}
+        pointerEvents="none"
+      />
 
       {/* Header back button */}
       <Pressable
         onPress={() => router.back()}
         accessibilityLabel="Volver"
         accessibilityRole="button"
-        style={styles.backButton}
+        style={[styles.backButton, { backgroundColor: media.overlay }]}
       >
-        <Feather name="arrow-left" size={24} color="#FFFFFF" />
+        <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
       {/* Floating Action Bar */}
@@ -58,8 +75,8 @@ export function ShortVideoScreen() {
           accessibilityRole="checkbox"
           accessibilityState={{ checked: liked }}
         >
-          <Feather name="heart" size={28} color={liked ? '#FF8A80' : '#FFFFFF'} />
-          <Text style={styles.sidebarLabel}>{likesCount}</Text>
+          <Feather name="heart" size={28} color={liked ? media.danger : media.text} />
+          <Text style={[styles.sidebarLabel, { color: media.text }]}>{likesCount}</Text>
         </Pressable>
 
         <Pressable
@@ -67,24 +84,24 @@ export function ShortVideoScreen() {
           style={styles.sidebarItem}
           accessibilityLabel="Comentarios"
         >
-          <Feather name="message-square" size={28} color="#FFFFFF" />
-          <Text style={styles.sidebarLabel}>28</Text>
+          <Feather name="message-square" size={28} color={media.text} />
+          <Text style={[styles.sidebarLabel, { color: media.text }]}>28</Text>
         </Pressable>
 
         <Pressable
-          onPress={() => {}}
+          onPress={onShare}
           style={styles.sidebarItem}
           accessibilityLabel="Compartir"
         >
-          <Feather name="share-2" size={28} color="#FFFFFF" />
-          <Text style={styles.sidebarLabel}>Compartir</Text>
+          <Feather name="share-2" size={28} color={media.text} />
+          <Text style={[styles.sidebarLabel, { color: media.text }]}>Compartir</Text>
         </Pressable>
       </View>
 
       {/* Bottom Info Overlay */}
       <View style={styles.bottomInfo}>
-        <Text style={styles.author}>Darren Hardy</Text>
-        <Text style={styles.caption} numberOfLines={2}>
+        <Text style={[styles.author, { color: media.text }]}>Darren Hardy</Text>
+        <Text style={[styles.caption, { color: media.text }]} numberOfLines={2}>
           El secreto de tu éxito se encuentra en tu rutina diaria. Haz que cada día cuente. #crecimiento #mindset #rutina
         </Text>
       </View>
@@ -96,13 +113,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  videoPlaceholder: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  overlayShadow: {
-    ...StyleSheet.absoluteFillObject,
+  bottomScrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '40%',
   },
   backButton: {
     position: 'absolute',
@@ -111,7 +127,6 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
@@ -131,11 +146,10 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   sidebarLabel: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
     marginTop: spacing.xs,
-    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowColor: media.overlay,
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
@@ -148,18 +162,16 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   author: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowColor: media.overlay,
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
   caption: {
-    color: '#FFFFFF',
     fontSize: 13,
     lineHeight: 18,
-    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowColor: media.overlay,
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },

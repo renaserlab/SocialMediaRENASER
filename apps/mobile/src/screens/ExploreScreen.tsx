@@ -10,9 +10,12 @@ import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { ListRow } from '@/components/ListRow';
 import { assets } from '@/data/assets';
-import { course, events } from '@/data/mockData';
-import { radius, spacing } from '@/theme/tokens';
+import { circle, course, events } from '@/data/mockData';
+import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+
+// Texto sobre el hero oscuro (overlay) → contexto de media.
+const media = palette('dark');
 
 export function ExploreScreen() {
   const { colors } = useAppTheme();
@@ -42,7 +45,7 @@ export function ExploreScreen() {
             accessibilityLabel={`Programa recomendado: ${course.title}`}
             accessibilityRole="button"
           >
-            <Image source={assets.course} style={[StyleSheet.absoluteFill, { tintColor: 'gray' }]} resizeMode="cover" />
+            <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
             <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
             <View style={styles.heroContent}>
               <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>
@@ -77,7 +80,7 @@ export function ExploreScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.eyebrow, { color: colors.onPrimary }]}>CÍRCULO PRIVADO</Text>
               <Text style={[styles.circleTitle, { color: colors.onPrimary }]}>Líderes RENASER</Text>
-              <Text style={[styles.circleBody, { color: colors.onPrimary }]}>Conecta, comparte y crece con 423 miembros.</Text>
+              <Text style={[styles.circleBody, { color: colors.onPrimary }]}>Conecta, comparte y crece con {circle.members} miembros.</Text>
             </View>
             <Feather name="users" size={48} color={colors.onPrimary} style={styles.circleIcon} />
           </Pressable>
@@ -104,9 +107,9 @@ const styles = StyleSheet.create({
   heroCard: { height: 280, borderRadius: radius.xl, overflow: 'hidden', marginBottom: spacing.xl, justifyContent: 'flex-end' },
   heroOverlay: { ...StyleSheet.absoluteFillObject },
   heroContent: { padding: spacing.xl },
-  eyebrow: { color: '#D0D0D0', fontSize: 10, fontWeight: '800', letterSpacing: 1.3 },
-  heroTitle: { color: '#FFFFFF', fontSize: 24, lineHeight: 30, fontWeight: '900', marginVertical: spacing.sm },
-  heroBody: { color: '#E2E2E2', fontSize: 13 },
+  eyebrow: { color: media.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1.3 },
+  heroTitle: { color: media.text, fontSize: 24, lineHeight: 30, fontWeight: '900', marginVertical: spacing.sm },
+  heroBody: { color: media.textMuted, fontSize: 13 },
   list: {
     marginBottom: spacing.xl,
   },

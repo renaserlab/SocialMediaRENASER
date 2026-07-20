@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -21,10 +21,13 @@ export function MessagesScreen() {
 
   const [searchText, setSearchText] = useState('');
 
+  const onNewMessage = () =>
+    Alert.alert('Nueva conversación', 'La creación de conversaciones estará disponible próximamente.');
+
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="MENSAJES" rightIcon="edit" onRightPress={() => {}} />
+        <AppHeader title="MENSAJES" rightIcon="edit" onRightPress={onNewMessage} />
         <StateView state="loading" />
       </View>
     );
@@ -33,7 +36,7 @@ export function MessagesScreen() {
   if (error) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="MENSAJES" rightIcon="edit" onRightPress={() => {}} />
+        <AppHeader title="MENSAJES" rightIcon="edit" onRightPress={onNewMessage} />
         <StateView state="error" description={error} onRetry={reload} />
       </View>
     );
@@ -51,7 +54,7 @@ export function MessagesScreen() {
       <AppHeader
         title="MENSAJES"
         rightIcon="edit"
-        onRightPress={() => {}}
+        onRightPress={onNewMessage}
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
         <View style={styles.container}>
@@ -87,7 +90,7 @@ export function MessagesScreen() {
               >
                 <Image
                   source={index === 0 ? assets.avatar : index === 1 ? assets.circle : assets.speaker}
-                  style={styles.avatar}
+                  style={[styles.avatar, { borderColor: colors.border }]}
                 />
                 <View style={{ flex: 1 }}>
                   <View style={styles.nameRow}>
@@ -128,7 +131,7 @@ const styles = StyleSheet.create({
     top: 15,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.lg, borderBottomWidth: 1 },
-  avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#DDD' },
+  avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   name: { fontSize: 14, fontWeight: '800' },
   time: { fontSize: 10 },

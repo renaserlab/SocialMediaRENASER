@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+
+import { assets } from '@/data/assets';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -90,11 +92,7 @@ export function CheckoutScreen() {
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <View style={[styles.summary, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={[styles.thumbnail, { backgroundColor: colors.primary }]}>
-              <Text style={{ color: colors.onPrimary, fontWeight: '900', textAlign: 'center', fontSize: 12 }}>
-                LÍDER{`\n`}DE TU VIDA
-              </Text>
-            </View>
+            <Image source={assets.course} style={styles.thumbnail} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.product, { color: colors.text }]}>{course.title}</Text>
               <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
@@ -171,7 +169,7 @@ export function CheckoutScreen() {
 const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.lg },
   summary: { flexDirection: 'row', gap: spacing.md, borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, alignItems: 'center' },
-  thumbnail: { width: 82, height: 100, borderRadius: radius.md, justifyContent: 'center', padding: spacing.sm },
+  thumbnail: { width: 82, height: 100, borderRadius: radius.md, resizeMode: 'cover' },
   product: { fontSize: 14, fontWeight: '800', lineHeight: 18 },
   price: { fontSize: 16, fontWeight: '900', marginTop: spacing.sm },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.xl, borderBottomWidth: 1 },

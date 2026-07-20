@@ -1,47 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Image, LayoutChangeEvent, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { assets } from '@/data/assets';
+import { SAMPLE_AUDIO } from '@/data/media';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-
-// ─── Web fallback: HTML Audio API ────────────────────────────────────────────
-// En web no está disponible expo-audio (módulo nativo), se usa HTMLAudioElement.
-// En iOS/Android se usa expo-audio directamente mediante lazy import.
-
-function useAudioWeb() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(18);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const audio = new Audio();
-    audioRef.current = audio;
-    audio.addEventListener('timeupdate', () => setCurrentTime(audio.currentTime));
-    audio.addEventListener('loadedmetadata', () => setDuration(audio.duration));
-    audio.addEventListener('ended', () => setPlaying(false));
-    return () => { audio.pause(); };
-  }, []);
-
-  const toggle = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (playing) { audio.pause(); setPlaying(false); }
-    else { audio.play().then(() => setPlaying(true)).catch(() => {}); }
-  };
-
-  const seekTo = (t: number) => {
-    if (audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }
-  };
-
-  return { playing, currentTime, duration, toggle, seekTo };
-}
 
 function formatTime(value: number) {
   const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -50,44 +19,50 @@ function formatTime(value: number) {
   return `${minutes}:${seconds}`;
 }
 
-// ─── Pantalla de Audio ────────────────────────────────────────────────────────
-
 export function AudioScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
 
-  // En web usamos el hook nativo de HTMLAudio; en móvil cargamos expo-audio
-  const webAudio = useAudioWeb();
+  // Reproducción real (expo-audio funciona en iOS/Android/web).
+  const player = useAudioPlayer(SAMPLE_AUDIO);
+  const status = useAudioPlayerStatus(player);
 
-  // Estado unificado para móvil (se inicializa solo en plataformas nativas)
-  const [nativeState, setNativeState] = useState<{
-    player: any;
-    playing: boolean;
-    currentTime: number;
-    duration: number;
-  } | null>(null);
+  const playing = status.playing;
+  const currentTime = status.currentTime ?? 0;
+  const duration = status.duration && status.duration > 0 ? status.duration : 0;
+  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
-  // Lazy-load expo-audio solo en nativo para evitar el crash en web
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    let player: any;
-    let sub: any;
-    (async () => {
-      const { useAudioPlayer, AudioPlayer } = await import('expo-audio');
-      // No podemos usar hooks aquí, así que usamos la API imperativa directamente
-      // La pantalla mostrará un placeholder en móvil si expo-audio no está listo
-      // (En producción real, esta lógica iría en un componente nativo separado)
-    })();
-  }, []);
+  const [trackWidth, setTrackWidth] = useState(0);
+  const [saved, setSaved] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
 
-  const isWeb = Platform.OS === 'web';
-  const playing = isWeb ? webAudio.playing : false;
-  const currentTime = isWeb ? webAudio.currentTime : 0;
-  const duration = isWeb ? webAudio.duration : 18;
-  const toggle = isWeb ? webAudio.toggle : () => {};
-  const seekTo = isWeb ? webAudio.seekTo : () => {};
+  const toggle = () => {
+    if (playing) {
+      player.pause();
+    } else {
+      if (status.didJustFinish || currentTime >= duration) {
+        player.seekTo(0);
+      }
+      player.play();
+    }
+  };
 
-  const progress = Math.min(1, currentTime / (duration || 18));
+  const seekTo = (seconds: number) => {
+    const clamped = Math.max(0, duration > 0 ? Math.min(seconds, duration) : seconds);
+    player.seekTo(clamped);
+  };
+
+  const onTrackPress = (evt: { nativeEvent: { locationX: number } }) => {
+    if (duration <= 0 || trackWidth <= 0) return;
+    const ratio = Math.max(0, Math.min(1, evt.nativeEvent.locationX / trackWidth));
+    seekTo(ratio * duration);
+  };
+
+  const onShare = () => {
+    Share.share({
+      message: 'Escucha "Tu enfoque de esta semana" en RENASER Universo.',
+    }).catch(() => {});
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -95,11 +70,28 @@ export function AudioScreen() {
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>Basado en el resultado de tu quiz</Text>
-          <Image source={assets.audio} style={[styles.cover, { tintColor: 'gray' }]} />
 
-          <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
-            <View style={[styles.progress, { width: `${progress * 100}%` as any, backgroundColor: colors.primary }]} />
+          <View style={[styles.cover, { borderColor: colors.border }]}>
+            <Image source={assets.audio} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <LinearGradient
+              colors={['transparent', colors.overlay]}
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.coverBadge}>
+              <Feather name="headphones" size={16} color={colors.onPrimary} />
+              <Text style={[styles.coverBadgeText, { color: colors.onPrimary }]}>Audio guiado</Text>
+            </View>
           </View>
+
+          <Pressable
+            style={[styles.progressTrack, { backgroundColor: colors.border }]}
+            onLayout={(e: LayoutChangeEvent) => setTrackWidth(e.nativeEvent.layout.width)}
+            onPress={onTrackPress}
+            accessibilityRole="adjustable"
+            accessibilityLabel="Barra de progreso del audio"
+          >
+            <View style={[styles.progress, { width: `${progress * 100}%` as any, backgroundColor: colors.primary }]} />
+          </Pressable>
           <View style={styles.timeRow}>
             <Text style={[styles.time, { color: colors.textMuted }]}>{formatTime(currentTime)}</Text>
             <Text style={[styles.time, { color: colors.textMuted }]}>{formatTime(duration)}</Text>
@@ -107,7 +99,7 @@ export function AudioScreen() {
 
           <View style={styles.controls}>
             <Pressable
-              onPress={() => seekTo(Math.max(0, currentTime - 15))}
+              onPress={() => seekTo(currentTime - 15)}
               style={styles.smallControl}
               accessibilityLabel="Retroceder 15 segundos"
               accessibilityRole="button"
@@ -126,7 +118,7 @@ export function AudioScreen() {
             </Pressable>
 
             <Pressable
-              onPress={() => seekTo(Math.min(duration, currentTime + 15))}
+              onPress={() => seekTo(currentTime + 15)}
               style={styles.smallControl}
               accessibilityLabel="Adelantar 15 segundos"
               accessibilityRole="button"
@@ -137,9 +129,19 @@ export function AudioScreen() {
           </View>
 
           <View style={styles.actions}>
-            <AudioAction icon="download" label="Descargar" />
-            <AudioAction icon="share-2" label="Compartir" />
-            <AudioAction icon="bookmark" label="Guardar" />
+            <AudioAction
+              icon={downloaded ? 'check-circle' : 'download'}
+              label={downloaded ? 'Descargado' : 'Descargar'}
+              active={downloaded}
+              onPress={() => setDownloaded((v) => !v)}
+            />
+            <AudioAction icon="share-2" label="Compartir" onPress={onShare} />
+            <AudioAction
+              icon="bookmark"
+              label={saved ? 'Guardado' : 'Guardar'}
+              active={saved}
+              onPress={() => setSaved((v) => !v)}
+            />
           </View>
 
           <View style={[styles.note, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -154,16 +156,28 @@ export function AudioScreen() {
   );
 }
 
-function AudioAction({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: string }) {
+function AudioAction({
+  icon,
+  label,
+  active = false,
+  onPress,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) {
   const { colors } = useAppTheme();
   return (
     <Pressable
+      onPress={onPress}
       style={({ pressed }) => [styles.actionButton, { opacity: pressed ? 0.8 : 1 }]}
       accessibilityLabel={label}
       accessibilityRole="button"
+      accessibilityState={{ selected: active }}
     >
-      <Feather name={icon} size={22} color={colors.text} />
-      <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '500' }}>{label}</Text>
+      <Feather name={icon} size={22} color={active ? colors.primary : colors.text} />
+      <Text style={{ color: active ? colors.text : colors.textMuted, fontSize: 11, fontWeight: '500' }}>{label}</Text>
     </Pressable>
   );
 }
@@ -171,8 +185,10 @@ function AudioAction({ icon, label }: { icon: keyof typeof Feather.glyphMap; lab
 const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.xl, alignItems: 'center' },
   subtitle: { fontSize: 12, marginTop: spacing.sm, marginBottom: spacing.xl },
-  cover: { width: '100%', aspectRatio: 1, borderRadius: radius.lg, borderWidth: 1 },
-  progressTrack: { height: 4, width: '100%', borderRadius: radius.pill, overflow: 'hidden', marginTop: spacing.xl },
+  cover: { width: '100%', aspectRatio: 1, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', justifyContent: 'flex-end' },
+  coverBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, margin: spacing.lg, alignSelf: 'flex-start' },
+  coverBadgeText: { fontSize: 12, fontWeight: '700' },
+  progressTrack: { height: 6, width: '100%', borderRadius: radius.pill, overflow: 'hidden', marginTop: spacing.xl },
   progress: { height: '100%' },
   timeRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
   time: { fontSize: 10 },

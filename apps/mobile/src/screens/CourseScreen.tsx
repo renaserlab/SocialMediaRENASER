@@ -46,7 +46,7 @@ export function CourseScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Programa" onBack={() => router.back()} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        <Image source={assets.course} style={[styles.hero, { tintColor: 'gray' }]} />
+        <Image source={assets.course} style={[styles.hero, { borderColor: colors.border }]} />
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
           <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
@@ -89,7 +89,7 @@ function Info({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: str
 }
 
 const styles = StyleSheet.create({
-  hero: { width: '100%', aspectRatio: 1.1, resizeMode: 'cover', borderWidth: 1, borderColor: '#444' },
+  hero: { width: '100%', aspectRatio: 1.1, resizeMode: 'cover', borderWidth: 1 },
   container: { padding: spacing.xl },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   price: { fontSize: 20, fontWeight: '900', marginTop: spacing.md },
