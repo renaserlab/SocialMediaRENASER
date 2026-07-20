@@ -19,15 +19,26 @@ export function CreatePostScreen() {
   const createPost = useAppStore((state) => state.createPost);
   const [text, setText] = useState('');
   const [prompt, setPrompt] = useState(prompts[0]!);
+  const [publishing, setPublishing] = useState(false);
 
-  const publish = () => {
+  const publish = async () => {
     if (!text.trim()) {
       Alert.alert('Escribe algo', 'Comparte una reflexión antes de publicar.');
       return;
     }
-    createPost(text);
-    setText('');
-    router.replace('/(tabs)/home');
+    setPublishing(true);
+    try {
+      await createPost(text);
+      setText('');
+      router.replace('/(tabs)/home');
+    } catch (error) {
+      Alert.alert(
+        'No se pudo publicar',
+        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      );
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -70,7 +81,7 @@ export function CreatePostScreen() {
               <Text style={[styles.counter, { color: colors.textMuted }]}>{text.length}/700</Text>
             </View>
           </View>
-          <Button label="Publicar" onPress={publish} disabled={!text.trim()} />
+          <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
         </View>
       </AppScreen>
     </View>

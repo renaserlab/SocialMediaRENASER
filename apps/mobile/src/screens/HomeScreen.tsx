@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
+import { Button } from '@/components/Button';
 import { PostCard } from '@/components/PostCard';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
@@ -28,17 +29,26 @@ export function HomeScreen() {
   const router = useRouter();
   const posts = useAppStore((state) => state.posts);
   const user = useAppStore((state) => state.user);
+  const feedStatus = useAppStore((state) => state.feedStatus);
+  const feedHasMore = useAppStore((state) => state.feedHasMore);
+  const feedLoadingMore = useAppStore((state) => state.feedLoadingMore);
+  const loadFeed = useAppStore((state) => state.loadFeed);
+  const loadMoreFeed = useAppStore((state) => state.loadMoreFeed);
 
   const [feedTab, setFeedTab] = useState(0);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simular carga de feed por 1.5s
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
+    void loadFeed();
+  }, [loadFeed]);
+
+  const uiState =
+    feedStatus === 'loading'
+      ? 'loading'
+      : feedStatus === 'error'
+      ? 'error'
+      : posts.length === 0
+      ? 'empty'
+      : 'content';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -106,9 +116,10 @@ export function HomeScreen() {
             </Pressable>
           </View>
 
-          {/* Feed de posts real con simulación de Skeleton */}
+          {/* Feed real con estados de carga / vacío / error */}
           <StateView
-            state={loading ? 'loading' : 'content'}
+            state={uiState}
+            onRetry={() => void loadFeed()}
             loadingComponent={
               <View style={styles.skeletonContainer}>
                 {[1, 2].map((i) => (
@@ -130,6 +141,14 @@ export function HomeScreen() {
             {posts.map((post) => (
               <PostCard key={post.id} post={post} />
             ))}
+            {feedHasMore && (
+              <Button
+                label="Ver más"
+                variant="secondary"
+                loading={feedLoadingMore}
+                onPress={() => void loadMoreFeed()}
+              />
+            )}
           </StateView>
         </View>
       </AppScreen>

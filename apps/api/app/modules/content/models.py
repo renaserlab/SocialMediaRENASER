@@ -63,6 +63,42 @@ class PostMedia(Base):
     post: Mapped[Post] = relationship(back_populates="media")
 
 
+class PostLike(Base):
+    __tablename__ = "post_likes"
+
+    post_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("posts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SavedPost(Base):
+    __tablename__ = "saved_posts"
+
+    post_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("posts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Comment(Base):
     __tablename__ = "comments"
 

@@ -35,6 +35,8 @@ export type Post = {
   imageKey?: 'hero' | 'speaker' | 'event' | 'circle';
   likes: number;
   comments: Comment[];
+  /** Contador de comentarios del backend (los comments se cargan bajo demanda). */
+  commentsCount?: number;
   isOwn?: boolean;
 };
 

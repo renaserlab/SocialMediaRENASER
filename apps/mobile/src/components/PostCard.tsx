@@ -18,9 +18,23 @@ export function PostCard({ post }: { post: Post }) {
   const toggleLike = useAppStore((state) => state.toggleLikePost);
   const toggleSave = useAppStore((state) => state.toggleSavePost);
   const addComment = useAppStore((state) => state.addComment);
+  const loadCommentsFor = useAppStore((state) => state.loadCommentsFor);
+
+  const commentCount = post.commentsCount ?? post.comments.length;
+
+  const openComments = () => {
+    setShowComments((value) => {
+      const next = !value;
+      // Al abrir, carga los comentarios del backend si aún no están.
+      if (next && post.comments.length === 0 && commentCount > 0) {
+        void loadCommentsFor(post.id);
+      }
+      return next;
+    });
+  };
 
   const submitComment = () => {
-    addComment(post.id, comment);
+    void addComment(post.id, comment);
     setComment('');
     setShowComments(true);
   };
@@ -53,12 +67,12 @@ export function PostCard({ post }: { post: Post }) {
         </Pressable>
         <Pressable
           style={styles.action}
-          onPress={() => setShowComments((value) => !value)}
+          onPress={openComments}
           accessibilityLabel="Comentarios"
           accessibilityRole="button"
         >
           <Feather name="message-square" size={18} color={colors.text} />
-          <Text variant="secondary" weight="600" style={styles.count}>{post.comments.length}</Text>
+          <Text variant="secondary" weight="600" style={styles.count}>{commentCount}</Text>
         </Pressable>
         <Pressable
           style={styles.action}

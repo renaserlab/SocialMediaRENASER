@@ -5,6 +5,13 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class AuthorSummary(BaseModel):
+    id: str
+    full_name: str
+    username: str | None = None
+    avatar_path: str | None = None
+
+
 class PostCreate(BaseModel):
     # OJO: sin author_id. El autor se toma del JWT (current_user.id).
     body: str = Field(min_length=1, max_length=3000)
@@ -13,11 +20,15 @@ class PostCreate(BaseModel):
 
 class PostRead(BaseModel):
     id: str
-    author_id: str
+    author: AuthorSummary
     body: str
     status: str
     visibility: str
     created_at: datetime
+    likes_count: int = 0
+    comments_count: int = 0
+    liked_by_me: bool = False
+    saved_by_me: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,7 +41,7 @@ class CommentCreate(BaseModel):
 class CommentRead(BaseModel):
     id: str
     post_id: str
-    author_id: str
+    author: AuthorSummary
     parent_id: str | None
     body: str
     created_at: datetime

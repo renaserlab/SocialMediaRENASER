@@ -3,7 +3,13 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { conversations, initialPosts } from '@/data/mockData';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { PostRepository } from '@/repositories/PostRepository';
 import { Conversation, Post, QuizArea, ThemeMode, UserProfile } from '@/types';
+
+/** Con Supabase configurado usamos el backend real; si no, modo demo local. */
+const backendEnabled = AuthRepository.enabled;
+const FEED_PAGE = 20;
 
 type AppState = {
   hydrated: boolean;
@@ -20,6 +26,16 @@ type AppState = {
   conversations: Conversation[];
   liveMessages: Array<{ id: string; author: string; text: string }>;
 
+  // Estado del feed remoto (no se persiste)
+  feedStatus: 'idle' | 'loading' | 'error';
+  feedError: string | null;
+  feedHasMore: boolean;
+  feedLoadingMore: boolean;
+  feedOffset: number;
+  loadFeed: () => Promise<void>;
+  loadMoreFeed: () => Promise<void>;
+  loadCommentsFor: (postId: string) => Promise<void>;
+
   languageSelected: boolean;
   setLanguageSelected: (value: boolean) => void;
 
@@ -30,10 +46,10 @@ type AppState = {
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
   finishQuiz: () => QuizArea;
-  createPost: (body: string) => void;
+  createPost: (body: string) => Promise<void>;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
-  addComment: (postId: string, text: string) => void;
+  addComment: (postId: string, text: string) => Promise<void>;
   toggleReservation: (eventId: string) => void;
   purchaseCourse: (courseId: string) => void;
   sendMessage: (conversationId: string, text: string) => void;
@@ -86,6 +102,12 @@ export const useAppStore = create<AppState>()(
         { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },
       ],
 
+      feedStatus: 'idle',
+      feedError: null,
+      feedHasMore: false,
+      feedLoadingMore: false,
+      feedOffset: 0,
+
       languageSelected: false,
       setLanguageSelected: (value) => set({ languageSelected: value }),
 
@@ -109,9 +131,20 @@ export const useAppStore = create<AppState>()(
         set({ quizResult: result });
         return result;
       },
-      createPost: (body) => {
+      createPost: async (body) => {
         const trimmed = body.trim();
         if (!trimmed) return;
+
+        if (backendEnabled) {
+          const uid = get().user?.id ?? null;
+          const post = await PostRepository.createPost(trimmed, uid);
+          set((state) => ({
+            posts: [post, ...state.posts],
+            user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
+          }));
+          return;
+        }
+
         const user = get().user ?? defaultUser;
         const post: Post = {
           id: `post-${Date.now()}`,
@@ -128,29 +161,82 @@ export const useAppStore = create<AppState>()(
           user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
         }));
       },
-      toggleLikePost: (postId) =>
-        set((state) => {
-          const isLiked = state.likedPostIds.includes(postId);
-          return {
-            likedPostIds: isLiked
-              ? state.likedPostIds.filter((id) => id !== postId)
-              : [...state.likedPostIds, postId],
-            posts: state.posts.map((post) =>
-              post.id === postId
-                ? { ...post, likes: Math.max(0, post.likes + (isLiked ? -1 : 1)) }
-                : post,
-            ),
-          };
-        }),
-      toggleSavePost: (postId) =>
+      toggleLikePost: (postId) => {
+        const wasLiked = get().likedPostIds.includes(postId);
+        // Actualización optimista.
         set((state) => ({
-          savedPostIds: state.savedPostIds.includes(postId)
+          likedPostIds: wasLiked
+            ? state.likedPostIds.filter((id) => id !== postId)
+            : [...state.likedPostIds, postId],
+          posts: state.posts.map((post) =>
+            post.id === postId
+              ? { ...post, likes: Math.max(0, post.likes + (wasLiked ? -1 : 1)) }
+              : post,
+          ),
+        }));
+
+        if (!backendEnabled) return;
+        const op = wasLiked ? PostRepository.unlike(postId) : PostRepository.like(postId);
+        op
+          .then((likesCount) =>
+            set((state) => ({
+              posts: state.posts.map((post) =>
+                post.id === postId ? { ...post, likes: likesCount } : post,
+              ),
+            })),
+          )
+          .catch(() =>
+            // Revertir ante fallo de red.
+            set((state) => ({
+              likedPostIds: wasLiked
+                ? [...state.likedPostIds, postId]
+                : state.likedPostIds.filter((id) => id !== postId),
+              posts: state.posts.map((post) =>
+                post.id === postId
+                  ? { ...post, likes: Math.max(0, post.likes + (wasLiked ? 1 : -1)) }
+                  : post,
+              ),
+            })),
+          );
+      },
+      toggleSavePost: (postId) => {
+        const wasSaved = get().savedPostIds.includes(postId);
+        set((state) => ({
+          savedPostIds: wasSaved
             ? state.savedPostIds.filter((id) => id !== postId)
             : [...state.savedPostIds, postId],
-        })),
-      addComment: (postId, text) => {
+        }));
+
+        if (!backendEnabled) return;
+        const op = wasSaved ? PostRepository.unsave(postId) : PostRepository.save(postId);
+        op.catch(() =>
+          set((state) => ({
+            savedPostIds: wasSaved
+              ? [...state.savedPostIds, postId]
+              : state.savedPostIds.filter((id) => id !== postId),
+          })),
+        );
+      },
+      addComment: async (postId, text) => {
         const trimmed = text.trim();
         if (!trimmed) return;
+
+        if (backendEnabled) {
+          const comment = await PostRepository.addComment(postId, trimmed);
+          set((state) => ({
+            posts: state.posts.map((post) =>
+              post.id === postId
+                ? {
+                    ...post,
+                    comments: [...post.comments, comment],
+                    commentsCount: (post.commentsCount ?? post.comments.length) + 1,
+                  }
+                : post,
+            ),
+          }));
+          return;
+        }
+
         const author = get().user?.fullName ?? 'Tú';
         set((state) => ({
           posts: state.posts.map((post) =>
@@ -165,6 +251,66 @@ export const useAppStore = create<AppState>()(
               : post,
           ),
         }));
+      },
+      loadFeed: async () => {
+        if (!backendEnabled) {
+          set({ feedStatus: 'idle' });
+          return;
+        }
+        set({ feedStatus: 'loading', feedError: null });
+        try {
+          const uid = get().user?.id ?? null;
+          const page = await PostRepository.listFeed({ limit: FEED_PAGE, offset: 0 }, uid);
+          set({
+            posts: page.items,
+            likedPostIds: page.likedIds,
+            savedPostIds: page.savedIds,
+            feedStatus: 'idle',
+            feedOffset: page.items.length,
+            feedHasMore: page.items.length === FEED_PAGE,
+          });
+        } catch (error) {
+          set({
+            feedStatus: 'error',
+            feedError: error instanceof Error ? error.message : 'No se pudo cargar el feed.',
+          });
+        }
+      },
+      loadMoreFeed: async () => {
+        if (!backendEnabled) return;
+        const { feedHasMore, feedLoadingMore, feedOffset } = get();
+        if (!feedHasMore || feedLoadingMore) return;
+        set({ feedLoadingMore: true });
+        try {
+          const uid = get().user?.id ?? null;
+          const page = await PostRepository.listFeed(
+            { limit: FEED_PAGE, offset: feedOffset },
+            uid,
+          );
+          set((state) => ({
+            posts: [...state.posts, ...page.items],
+            likedPostIds: Array.from(new Set([...state.likedPostIds, ...page.likedIds])),
+            savedPostIds: Array.from(new Set([...state.savedPostIds, ...page.savedIds])),
+            feedOffset: state.feedOffset + page.items.length,
+            feedHasMore: page.items.length === FEED_PAGE,
+            feedLoadingMore: false,
+          }));
+        } catch {
+          set({ feedLoadingMore: false });
+        }
+      },
+      loadCommentsFor: async (postId) => {
+        if (!backendEnabled) return;
+        try {
+          const comments = await PostRepository.listComments(postId);
+          set((state) => ({
+            posts: state.posts.map((post) =>
+              post.id === postId ? { ...post, comments } : post,
+            ),
+          }));
+        } catch {
+          // Silencioso: la tarjeta conserva el contador del feed.
+        }
       },
       toggleReservation: (eventId) =>
         set((state) => ({
