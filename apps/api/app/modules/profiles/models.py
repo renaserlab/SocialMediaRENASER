@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, DateTime, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
+from app.shared.enums import app_role
 
 
 class Profile(Base):
@@ -18,7 +19,7 @@ class Profile(Base):
     username: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     bio: Mapped[str] = mapped_column(Text, default="", server_default="")
     avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    role: Mapped[str] = mapped_column(String(20), default="user", server_default="user")
+    role: Mapped[str] = mapped_column(app_role, default="user", server_default="user")
     is_private: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )

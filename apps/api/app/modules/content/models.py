@@ -11,6 +11,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.shared.database import Base
+from app.shared.enums import content_status
 
 
 def _uuid() -> str:
@@ -27,7 +28,7 @@ class Post(Base):
         index=True,
     )
     body: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), server_default="published")
+    status: Mapped[str] = mapped_column(content_status, server_default="published")
     visibility: Mapped[str] = mapped_column(String(20), server_default="public")
     circle_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -115,7 +116,7 @@ class Comment(Base):
     )
     parent_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
     body: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), server_default="published")
+    status: Mapped[str] = mapped_column(content_status, server_default="published")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
