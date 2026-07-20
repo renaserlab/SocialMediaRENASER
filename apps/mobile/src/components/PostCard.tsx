@@ -1,7 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useState } from 'react';
+import { Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
+import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -29,32 +30,50 @@ export function PostCard({ post }: { post: Post }) {
       <View style={styles.header}>
         <Image source={assets.avatar} style={styles.avatar} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.author, { color: colors.text }]}>{post.author}</Text>
-          <Text style={[styles.meta, { color: colors.textMuted }]}>{post.username} · {post.createdAt}</Text>
+          <Text variant="body" weight="700">{post.author}</Text>
+          <Text variant="secondary" color={colors.textMuted}>{post.username} · {post.createdAt}</Text>
         </View>
-        <Ionicons name="ellipsis-horizontal" size={20} color={colors.textMuted} />
+        <Feather name="more-horizontal" size={20} color={colors.textMuted} />
       </View>
 
-      <Text style={[styles.body, { color: colors.text }]}>{post.body}</Text>
+      <Text variant="body" style={styles.body}>{post.body}</Text>
       {post.imageKey ? (
         <Image source={assets[post.imageKey]} resizeMode="cover" style={styles.image} />
       ) : null}
 
       <View style={styles.actions}>
-        <Pressable style={styles.action} onPress={() => toggleLike(post.id)}>
-          <Ionicons name={liked ? 'heart' : 'heart-outline'} size={22} color={liked ? colors.danger : colors.text} />
-          <Text style={[styles.count, { color: colors.text }]}>{post.likes}</Text>
+        <Pressable
+          style={styles.action}
+          onPress={() => toggleLike(post.id)}
+          accessibilityLabel="Me gusta"
+          accessibilityRole="button"
+        >
+          <Feather name="heart" size={20} color={liked ? colors.danger : colors.text} />
+          <Text variant="secondary" weight="600" style={styles.count}>{post.likes}</Text>
         </Pressable>
-        <Pressable style={styles.action} onPress={() => setShowComments((value) => !value)}>
-          <Ionicons name="chatbubble-outline" size={20} color={colors.text} />
-          <Text style={[styles.count, { color: colors.text }]}>{post.comments.length}</Text>
+        <Pressable
+          style={styles.action}
+          onPress={() => setShowComments((value) => !value)}
+          accessibilityLabel="Comentarios"
+          accessibilityRole="button"
+        >
+          <Feather name="message-square" size={18} color={colors.text} />
+          <Text variant="secondary" weight="600" style={styles.count}>{post.comments.length}</Text>
         </Pressable>
-        <Pressable style={styles.action}>
-          <Ionicons name="paper-plane-outline" size={21} color={colors.text} />
+        <Pressable
+          style={styles.action}
+          accessibilityLabel="Compartir"
+          accessibilityRole="button"
+        >
+          <Feather name="share-2" size={19} color={colors.text} />
         </Pressable>
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => toggleSave(post.id)}>
-          <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={21} color={colors.text} />
+        <Pressable
+          onPress={() => toggleSave(post.id)}
+          accessibilityLabel="Guardar"
+          accessibilityRole="button"
+        >
+          <Feather name="bookmark" size={19} color={saved ? colors.text : colors.textMuted} />
         </Pressable>
       </View>
 
@@ -62,22 +81,27 @@ export function PostCard({ post }: { post: Post }) {
         <View style={[styles.comments, { borderTopColor: colors.border }]}>
           {post.comments.map((item) => (
             <View key={item.id} style={{ marginBottom: spacing.sm }}>
-              <Text style={[styles.commentAuthor, { color: colors.text }]}>{item.author}</Text>
-              <Text style={[styles.commentText, { color: colors.textMuted }]}>{item.text}</Text>
+              <Text variant="secondary" weight="700">{item.author}</Text>
+              <Text variant="body" color={colors.textMuted}>{item.text}</Text>
             </View>
           ))}
           <View style={styles.commentInputRow}>
             <TextInput
               value={comment}
               onChangeText={setComment}
-              placeholder="Escribe un comentario..."
+              placeholder="Añade un comentario…"
               placeholderTextColor={colors.textMuted}
-              style={[styles.commentInput, { color: colors.text, backgroundColor: colors.surfaceAlt }]}
+              style={[styles.commentInput, { color: colors.text, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
               returnKeyType="send"
               onSubmitEditing={submitComment}
             />
-            <Pressable onPress={submitComment} disabled={!comment.trim()}>
-              <Ionicons name="arrow-up-circle" size={30} color={comment.trim() ? colors.text : colors.border} />
+            <Pressable
+              onPress={submitComment}
+              disabled={!comment.trim()}
+              accessibilityLabel="Enviar comentario"
+              accessibilityRole="button"
+            >
+              <Feather name="arrow-up-circle" size={30} color={comment.trim() ? colors.text : colors.border} />
             </Pressable>
           </View>
         </View>
@@ -89,17 +113,13 @@ export function PostCard({ post }: { post: Post }) {
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.lg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.lg },
-  avatar: { width: 42, height: 42, borderRadius: 21 },
-  author: { fontWeight: '800', fontSize: 14 },
-  meta: { fontSize: 11, marginTop: 2 },
-  body: { fontSize: 15, lineHeight: 22, paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
+  avatar: { width: 40, height: 40, borderRadius: 20 },
+  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
   image: { width: '100%', height: 340 },
   actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.lg },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  count: { fontSize: 12, fontWeight: '600' },
+  count: { marginLeft: 2 },
   comments: { borderTopWidth: 1, padding: spacing.lg },
-  commentAuthor: { fontSize: 12, fontWeight: '800' },
-  commentText: { fontSize: 13, marginTop: 2 },
   commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
-  commentInput: { flex: 1, height: 40, borderRadius: radius.pill, paddingHorizontal: spacing.lg, fontSize: 13 },
+  commentInput: { flex: 1, height: 40, borderRadius: radius.pill, borderWidth: 1, paddingHorizontal: spacing.lg, fontSize: 13 },
 });

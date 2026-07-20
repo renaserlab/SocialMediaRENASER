@@ -1,20 +1,47 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/Text';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-export function SectionTitle({ title, action }: { title: string; action?: string }) {
+type SectionTitleProps = {
+  title: string;
+  action?: string;
+  onActionPress?: () => void;
+};
+
+export function SectionTitle({ title, action, onActionPress }: SectionTitleProps) {
   const { colors } = useAppTheme();
+
   return (
     <View style={styles.row}>
-      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-      {action ? <Text style={[styles.action, { color: colors.textMuted }]}>{action}</Text> : null}
+      <Text variant="titleMedium">{title}</Text>
+      {action && onActionPress ? (
+        <Pressable
+          onPress={onActionPress}
+          accessibilityLabel={action}
+          accessibilityRole="button"
+          style={styles.actionPressable}
+        >
+          <Text variant="secondary" color={colors.textMuted}>{action}</Text>
+        </Pressable>
+      ) : action ? (
+        <Text variant="secondary" color={colors.textMuted}>{action}</Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
-  title: { fontSize: 20, fontWeight: '800' },
-  action: { fontSize: 13, fontWeight: '600' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+    marginTop: spacing.lg,
+  },
+  actionPressable: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
 });
