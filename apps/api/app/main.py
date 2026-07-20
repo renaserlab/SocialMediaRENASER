@@ -17,6 +17,7 @@ from app.core.logging import configure_logging, get_logger
 from app.modules.catalog.router import router as catalog_router
 from app.modules.content.router import router as content_router
 from app.modules.identity.router import router as identity_router
+from app.modules.messaging.router import router as messaging_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.social_graph.router import router as social_graph_router
 
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(profiles_router, prefix=prefix)
     app.include_router(social_graph_router, prefix=prefix)
     app.include_router(content_router, prefix=prefix)
+    app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)
 
     return app

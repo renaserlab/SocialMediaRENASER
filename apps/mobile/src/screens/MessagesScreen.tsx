@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -8,16 +8,44 @@ import { AppScreen } from '@/components/AppScreen';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
+import { MessageRepository } from '@/repositories/MessageRepository';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { Conversation } from '@/types';
 
 export function MessagesScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const conversations = useAppStore((state) => state.conversations);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const demoConversations = useAppStore((state) => state.conversations);
 
   const [searchText, setSearchText] = useState('');
+  const [remote, setRemote] = useState<Conversation[]>([]);
+  const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+
+  const load = useCallback(() => {
+    if (!supabaseEnabled) {
+      setStatus('idle');
+      return;
+    }
+    setStatus('loading');
+    MessageRepository.listConversations()
+      .then((data) => {
+        setRemote(data);
+        setStatus('idle');
+      })
+      .catch(() => setStatus('error'));
+  }, [supabaseEnabled]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  const conversations = supabaseEnabled ? remote : demoConversations;
 
   const filteredConversations = conversations.filter((conv) =>
     conv.name.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -25,6 +53,13 @@ export function MessagesScreen() {
   );
 
   const hasMessages = filteredConversations.length > 0;
+  const uiState = supabaseEnabled && status === 'loading'
+    ? 'loading'
+    : supabaseEnabled && status === 'error'
+    ? 'error'
+    : hasMessages
+    ? 'content'
+    : 'empty';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -49,15 +84,25 @@ export function MessagesScreen() {
           </View>
 
           <StateView
-            state={hasMessages ? 'content' : 'empty'}
-            title="No se encontraron mensajes"
-            description="Intenta buscar con otros términos o inicia una nueva conversación."
+            state={uiState}
+            onRetry={load}
+            title={uiState === 'empty' ? 'No hay conversaciones' : undefined}
+            description={
+              uiState === 'empty'
+                ? 'Inicia un chat desde el perfil de alguien.'
+                : undefined
+            }
             icon="message-square"
           >
             {filteredConversations.map((conversation, index) => (
               <Pressable
                 key={conversation.id}
-                onPress={() => router.push(`/chat/${conversation.id}`)}
+                onPress={() =>
+                  router.push({
+                    pathname: '/chat/[id]',
+                    params: { id: conversation.id, name: conversation.name },
+                  })
+                }
                 accessibilityRole="button"
                 accessibilityLabel={`Chat con ${conversation.name}. ${conversation.subtitle}`}
                 style={({ pressed }) => [
@@ -73,7 +118,7 @@ export function MessagesScreen() {
                   <View style={styles.nameRow}>
                     <Text style={[styles.name, { color: colors.text }]}>{conversation.name}</Text>
                     <Text style={[styles.time, { color: colors.textMuted }]}>
-                      {conversation.messages.at(-1)?.createdAt}
+                      {conversation.time ?? conversation.messages.at(-1)?.createdAt}
                     </Text>
                   </View>
                   <Text numberOfLines={1} style={[styles.subtitle, { color: colors.textMuted }]}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
+import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -75,6 +76,20 @@ export function ProfileScreen() {
       setFollowersCount((c) => Math.max(0, c + (wasFollowing ? 1 : -1)));
     } finally {
       setFollowBusy(false);
+    }
+  };
+
+  const openChat = async () => {
+    if (isDarren) {
+      router.push('/chat/darren' as never);
+      return;
+    }
+    if (!id) return;
+    try {
+      const conv = await MessageRepository.getOrCreateDirect(id);
+      router.push({ pathname: '/chat/[id]', params: { id: conv.id, name: profileData.fullName } } as never);
+    } catch {
+      Alert.alert('No se pudo abrir el chat', 'Inténtalo de nuevo.');
     }
   };
 
@@ -160,7 +175,7 @@ export function ProfileScreen() {
                   <Button
                     label="Mensaje"
                     variant="secondary"
-                    onPress={() => router.push((isDarren ? '/chat/darren' : `/chat/${id}`) as never)}
+                    onPress={openChat}
                     style={styles.actionBtn}
                   />
                 </React.Fragment>

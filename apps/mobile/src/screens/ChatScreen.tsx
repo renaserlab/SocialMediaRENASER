@@ -1,25 +1,31 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
-import { AppScreen } from '@/components/AppScreen';
 import { Input } from '@/components/Input';
+import { toMessageFromRow } from '@/mappers/messageMapper';
+import { MessageRepository } from '@/repositories/MessageRepository';
+import { subscribeToConversation } from '@/services/realtime';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { Message } from '@/types';
 
 export function ChatScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ id: string }>();
-  const conversations = useAppStore((state) => state.conversations);
-  const sendMessage = useAppStore((state) => state.sendMessage);
+  const params = useLocalSearchParams<{ id: string; name?: string }>();
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const currentUserId = useAppStore((state) => state.user?.id);
 
-  // Buscar la conversación basada en id.
-  // También manejamos el caso especial de Darren Hardy ('darren').
-  const conversation = useMemo(() => {
+  // Modo demo (sin Supabase): usa el store local.
+  const conversations = useAppStore((state) => state.conversations);
+  const sendMessageDemo = useAppStore((state) => state.sendMessage);
+
+  const demoConversation = useMemo(() => {
     let found = conversations.find((item) => item.id === params.id);
     if (!found && params.id === 'darren') {
       found = {
@@ -28,35 +34,83 @@ export function ChatScreen() {
         subtitle: 'Mentor de líderes',
         unread: 0,
         messages: [
-          { id: 'd1', sender: 'them', text: '¡Hola! Qué gusto saludarte. ¿En qué puedo apoyarte hoy en tu camino de crecimiento?', createdAt: '10:00 AM' }
-        ]
+          { id: 'd1', sender: 'them', text: '¡Hola! Qué gusto saludarte. ¿En qué puedo apoyarte hoy en tu camino de crecimiento?', createdAt: '10:00 AM' },
+        ],
       };
     }
     return found;
   }, [conversations, params.id]);
 
+  const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
 
-  const submit = () => {
-    if (!conversation) return;
-    sendMessage(conversation.id, text);
+  // Carga inicial + suscripción Realtime a los mensajes de la conversación.
+  useEffect(() => {
+    if (!supabaseEnabled || !params.id) return;
+    let mounted = true;
+
+    MessageRepository.listMessages(params.id, currentUserId)
+      .then((msgs) => {
+        if (mounted) setRemoteMessages(msgs);
+      })
+      .catch(() => {});
+    MessageRepository.markRead(params.id).catch(() => {});
+
+    const unsubscribe = subscribeToConversation(params.id, (row) => {
+      setRemoteMessages((prev) =>
+        prev.some((m) => m.id === row.id)
+          ? prev
+          : [...prev, toMessageFromRow(row, currentUserId)],
+      );
+      MessageRepository.markRead(params.id).catch(() => {});
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [supabaseEnabled, params.id, currentUserId]);
+
+  const headerName = params.name ?? demoConversation?.name ?? 'Conversación';
+  const messages = supabaseEnabled ? remoteMessages : demoConversation?.messages ?? [];
+
+  const submit = async () => {
+    const body = text.trim();
+    if (!body) return;
+
+    if (!supabaseEnabled) {
+      if (demoConversation) sendMessageDemo(demoConversation.id, body);
+      setText('');
+      return;
+    }
+
     setText('');
+    const tempId = `tmp-${Date.now()}`;
+    setRemoteMessages((prev) => [
+      ...prev,
+      { id: tempId, text: body, sender: 'me', createdAt: '' },
+    ]);
+    try {
+      const saved = await MessageRepository.sendMessage(params.id, body, currentUserId);
+      setRemoteMessages((prev) => [
+        ...prev.filter((m) => m.id !== tempId && m.id !== saved.id),
+        saved,
+      ]);
+    } catch {
+      setRemoteMessages((prev) => prev.filter((m) => m.id !== tempId));
+    }
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader
-        title={conversation?.name ?? 'Conversación'}
-        rightIcon="video"
-        onBack={() => router.back()}
-      />
+      <AppHeader title={headerName} rightIcon="video" onBack={() => router.back()} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <ScrollView contentContainerStyle={styles.messages} showsVerticalScrollIndicator={false}>
-          {conversation?.messages.map((message) => {
+          {messages.map((message) => {
             const mine = message.sender === 'me';
             return (
               <View
@@ -112,11 +166,7 @@ export function ChatScreen() {
             accessibilityLabel="Enviar mensaje"
             accessibilityRole="button"
           >
-            <Feather
-              name="send"
-              size={20}
-              color={text.trim() ? colors.text : colors.border}
-            />
+            <Feather name="send" size={20} color={text.trim() ? colors.text : colors.border} />
           </Pressable>
         </View>
       </KeyboardAvoidingView>

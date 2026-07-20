@@ -59,6 +59,8 @@ export type Conversation = {
   subtitle: string;
   unread: number;
   messages: Message[];
+  /** Hora del último mensaje (para la lista de conversaciones). */
+  time?: string;
 };
 
 export type EventItem = {
