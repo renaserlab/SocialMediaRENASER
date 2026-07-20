@@ -40,6 +40,7 @@ create table public.posts (
   updated_at timestamptz not null default now()
 );
 
+
 create table public.post_media (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,

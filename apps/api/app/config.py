@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "RENASER Universo API"
+    app_name: str = "RENASER Social Media"
     environment: str = "development"
     database_url: str = "sqlite+aiosqlite:///./renaser.db"
     cors_origins: str = "*"
