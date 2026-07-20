@@ -7,7 +7,9 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
+import { ApiError } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -15,15 +17,18 @@ export function RegisterScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const register = useAppStore((state) => state.registerLocalUser);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const signUpEmail = useAuthStore((state) => state.signUpEmail);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [hidden, setHidden] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   const [errors, setErrors] = useState<{ fullName?: string; email?: string; password?: string }>({});
 
-  const submit = () => {
+  const submit = async () => {
     const newErrors: { fullName?: string; email?: string; password?: string } = {};
 
     if (fullName.trim().length < 3) {
@@ -41,8 +46,41 @@ export function RegisterScreen() {
       return;
     }
 
-    register({ fullName: fullName.trim(), email: email.trim().toLowerCase() });
-    router.replace('/onboarding');
+    const cleanName = fullName.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Sin Supabase configurado: se mantiene el flujo demo local.
+    if (!supabaseEnabled) {
+      register({ fullName: cleanName, email: cleanEmail });
+      router.replace('/onboarding');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await signUpEmail({ fullName: cleanName, email: cleanEmail, password });
+      if (result.needsEmailConfirmation) {
+        Alert.alert(
+          'Confirma tu correo',
+          'Te enviamos un enlace de verificación a tu email para activar la cuenta.',
+        );
+        router.replace('/verification');
+      } else {
+        router.replace('/onboarding');
+      }
+    } catch (error) {
+      const message =
+        error instanceof ApiError || error instanceof Error
+          ? error.message
+          : 'No se pudo crear la cuenta. Inténtalo de nuevo.';
+      if (/already|registrad|exist/i.test(message)) {
+        setErrors({ email: 'Este correo ya está registrado' });
+      } else {
+        Alert.alert('No se pudo crear la cuenta', message);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const socialDemo = (provider: string) => {
@@ -122,7 +160,7 @@ export function RegisterScreen() {
             </Pressable>
           </View>
 
-          <Button label="Crear cuenta" onPress={submit} style={{ marginTop: spacing.sm }} />
+          <Button label="Crear cuenta" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
 
           <Text style={[styles.legal, { color: colors.textMuted }]}>
             Al crear tu cuenta aceptas nuestros Términos y la Política de Privacidad.

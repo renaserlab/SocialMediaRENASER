@@ -25,6 +25,7 @@ type AppState = {
 
   setHydrated: (hydrated: boolean) => void;
   toggleTheme: () => void;
+  setUser: (user: UserProfile | null) => void;
   registerLocalUser: (input: { fullName: string; email: string }) => void;
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
@@ -90,6 +91,7 @@ export const useAppStore = create<AppState>()(
 
       setHydrated: (hydrated) => set({ hydrated }),
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
+      setUser: (user) => set({ user }),
       registerLocalUser: ({ fullName, email }) =>
         set({
           user: {

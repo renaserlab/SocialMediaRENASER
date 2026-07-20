@@ -6,6 +6,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -14,8 +15,10 @@ export function SettingsScreen() {
   const router = useRouter();
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const resetDemo = useAppStore((state) => state.resetDemo);
+  const signOut = useAuthStore((state) => state.signOut);
 
-  const handleReset = () => {
+  const handleReset = async () => {
+    await signOut();
     resetDemo();
     router.replace('/');
   };

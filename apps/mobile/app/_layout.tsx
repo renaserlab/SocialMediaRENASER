@@ -15,6 +15,7 @@ import {
 } from '@expo-google-fonts/inter';
 
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 450, fade: true });
@@ -22,6 +23,11 @@ SplashScreen.setOptions({ duration: 450, fade: true });
 export default function RootLayout() {
   const hydrated = useAppStore((state) => state.hydrated);
   const mode = useAppStore((state) => state.themeMode);
+
+  // Inicializa la sesion de Supabase (restaura usuario autenticado si lo hay).
+  useEffect(() => {
+    void useAuthStore.getState().bootstrap();
+  }, []);
 
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
