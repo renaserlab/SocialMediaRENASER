@@ -78,6 +78,7 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
   return {
     id: dto.id,
     author: authorName(dto.author),
+    authorId: dto.author.id,
     username: authorHandle(dto.author),
     body: dto.body,
     createdAt: formatRelativeTime(dto.created_at),

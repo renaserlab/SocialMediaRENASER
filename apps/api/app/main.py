@@ -18,6 +18,7 @@ from app.modules.catalog.router import router as catalog_router
 from app.modules.content.router import router as content_router
 from app.modules.identity.router import router as identity_router
 from app.modules.profiles.router import router as profiles_router
+from app.modules.social_graph.router import router as social_graph_router
 
 settings = get_settings()
 logger = get_logger("renaser.api")
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     prefix = settings.api_v1_prefix
     app.include_router(identity_router, prefix=prefix)
     app.include_router(profiles_router, prefix=prefix)
+    app.include_router(social_graph_router, prefix=prefix)
     app.include_router(content_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)
 

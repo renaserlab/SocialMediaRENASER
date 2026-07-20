@@ -15,6 +15,24 @@ class ProfileRead(BaseModel):
     role: str = "user"
     is_private: bool = False
     created_at: datetime
+    followers_count: int = 0
+    following_count: int = 0
+    posts_count: int = 0
+    # Si el usuario autenticado sigue a este perfil (false para el perfil propio).
+    is_following: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileSummary(BaseModel):
+    """Perfil compacto para listas (búsqueda, seguidores)."""
+
+    id: str
+    full_name: str = ""
+    username: str | None = None
+    avatar_path: str | None = None
+    bio: str = ""
+    is_following: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

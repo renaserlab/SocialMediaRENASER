@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
@@ -11,6 +12,7 @@ import { Post } from '@/types';
 
 export function PostCard({ post }: { post: Post }) {
   const { colors } = useAppTheme();
+  const router = useRouter();
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState('');
   const liked = useAppStore((state) => state.likedPostIds.includes(post.id));
@@ -42,11 +44,19 @@ export function PostCard({ post }: { post: Post }) {
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.header}>
-        <Image source={assets.avatar} style={styles.avatar} />
-        <View style={{ flex: 1 }}>
-          <Text variant="body" weight="700">{post.author}</Text>
-          <Text variant="secondary" color={colors.textMuted}>{post.username} · {post.createdAt}</Text>
-        </View>
+        <Pressable
+          style={styles.headerInfo}
+          onPress={() => post.authorId && router.push(`/profile/${post.authorId}` as never)}
+          disabled={!post.authorId}
+          accessibilityRole="button"
+          accessibilityLabel={`Ver perfil de ${post.author}`}
+        >
+          <Image source={assets.avatar} style={styles.avatar} />
+          <View style={{ flex: 1 }}>
+            <Text variant="body" weight="700">{post.author}</Text>
+            <Text variant="secondary" color={colors.textMuted}>{post.username} · {post.createdAt}</Text>
+          </View>
+        </Pressable>
         <Feather name="more-horizontal" size={20} color={colors.textMuted} />
       </View>
 
@@ -129,6 +139,7 @@ export function PostCard({ post }: { post: Post }) {
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.lg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.lg },
+  headerInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
   avatar: { width: 40, height: 40, borderRadius: 20 },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
   image: { width: '100%', height: 340 },

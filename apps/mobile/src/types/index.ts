@@ -9,6 +9,8 @@ export type UserProfile = {
   followers: number;
   following: number;
   posts: number;
+  /** Si el usuario actual sigue a este perfil (solo en perfiles ajenos). */
+  isFollowing?: boolean;
 };
 
 export type QuizArea = 'mentalidad' | 'relaciones' | 'negocios' | 'salud' | 'proposito';
@@ -29,6 +31,8 @@ export type Comment = {
 export type Post = {
   id: string;
   author: string;
+  /** id del autor en el backend (para navegar a su perfil). */
+  authorId?: string;
   username: string;
   body: string;
   createdAt: string;

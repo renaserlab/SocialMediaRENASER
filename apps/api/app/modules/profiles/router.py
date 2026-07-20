@@ -1,47 +1,100 @@
-"""Endpoints de perfiles.
+"""Endpoints de perfiles: perfil propio, público, edición y búsqueda.
 
-- La lectura publica del perfil no requiere sesion.
-- La edicion solo puede hacerla el dueno (identidad tomada del JWT, nunca
-  de un id enviado por el cliente).
+Los perfiles vienen enriquecidos con contadores (seguidores/seguidos/posts) y,
+si hay sesión, con is_following (si el usuario actual sigue a ese perfil).
 """
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
-from app.core.security import AuthUser, get_current_user
+from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.modules.content.models import Post
 from app.modules.profiles.models import Profile
-from app.modules.profiles.schemas import ProfileRead, ProfileUpdate
+from app.modules.profiles.schemas import ProfileRead, ProfileSummary, ProfileUpdate
+from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 
-@router.get("", response_model=list[ProfileRead])
-async def list_profiles(
-    page: Page = Depends(pagination_params),
-    db: AsyncSession = Depends(get_db),
-) -> list[Profile]:
-    result = await db.scalars(
-        select(Profile)
-        .order_by(Profile.created_at.desc())
-        .limit(page.limit)
-        .offset(page.offset)
+# --------------------------------------------------------------------------- #
+# Helpers de contadores
+# --------------------------------------------------------------------------- #
+def _count_columns(viewer_id: str | None):
+    followers = (
+        select(func.count())
+        .select_from(Follow)
+        .where(Follow.following_id == Profile.id)
+        .scalar_subquery()
     )
-    return list(result)
+    following = (
+        select(func.count())
+        .select_from(Follow)
+        .where(Follow.follower_id == Profile.id)
+        .scalar_subquery()
+    )
+    posts = (
+        select(func.count())
+        .select_from(Post)
+        .where(Post.author_id == Profile.id, Post.status == "published")
+        .scalar_subquery()
+    )
+    if viewer_id:
+        is_following = (
+            select(func.count())
+            .select_from(Follow)
+            .where(Follow.follower_id == viewer_id, Follow.following_id == Profile.id)
+            .scalar_subquery()
+        )
+    else:
+        is_following = literal(0)
+    return followers, following, posts, is_following
 
 
+def _to_profile_read(profile: Profile, fc: int, gc: int, pc: int, isf: int) -> ProfileRead:
+    return ProfileRead(
+        id=profile.id,
+        email=profile.email,
+        full_name=profile.full_name,
+        username=profile.username,
+        bio=profile.bio,
+        avatar_path=profile.avatar_path,
+        role=profile.role,
+        is_private=profile.is_private,
+        created_at=profile.created_at,
+        followers_count=fc or 0,
+        following_count=gc or 0,
+        posts_count=pc or 0,
+        is_following=(isf or 0) > 0,
+    )
+
+
+async def _load_profile(
+    db: AsyncSession, profile_id: str, viewer_id: str | None
+) -> ProfileRead:
+    fc, gc, pc, isf = _count_columns(viewer_id)
+    row = (
+        await db.execute(
+            select(Profile, fc, gc, pc, isf).where(Profile.id == profile_id)
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError("Perfil no encontrado.")
+    return _to_profile_read(*row)
+
+
+# --------------------------------------------------------------------------- #
+# Endpoints
+# --------------------------------------------------------------------------- #
 @router.get("/me", response_model=ProfileRead)
 async def get_my_profile(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Profile:
-    profile = await db.get(Profile, current_user.id)
-    if profile is None:
-        raise NotFoundError("Perfil no encontrado para el usuario actual.")
-    return profile
+) -> ProfileRead:
+    return await _load_profile(db, current_user.id, viewer_id=None)
 
 
 @router.patch("/me", response_model=ProfileRead)
@@ -49,23 +102,81 @@ async def update_my_profile(
     payload: ProfileUpdate,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Profile:
+) -> ProfileRead:
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil no encontrado para el usuario actual.")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
     await db.commit()
-    await db.refresh(profile)
-    return profile
+    return await _load_profile(db, current_user.id, viewer_id=None)
+
+
+@router.get("/search", response_model=list[ProfileSummary])
+async def search_profiles(
+    q: str = Query(min_length=1, max_length=80),
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProfileSummary]:
+    term = q.strip()
+    if len(term) < 2:
+        return []
+    viewer_id = current_user.id if current_user else None
+    _, _, _, is_following_sq = _count_columns(viewer_id)
+    pattern = f"%{term}%"
+    stmt = (
+        select(Profile, is_following_sq)
+        .where(or_(Profile.username.ilike(pattern), Profile.full_name.ilike(pattern)))
+        .order_by(Profile.full_name)
+        .limit(20)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        ProfileSummary(
+            id=p.id,
+            full_name=p.full_name,
+            username=p.username,
+            avatar_path=p.avatar_path,
+            bio=p.bio,
+            is_following=(isf or 0) > 0,
+        )
+        for p, isf in rows
+    ]
+
+
+@router.get("", response_model=list[ProfileSummary])
+async def list_profiles(
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProfileSummary]:
+    viewer_id = current_user.id if current_user else None
+    _, _, _, is_following_sq = _count_columns(viewer_id)
+    stmt = (
+        select(Profile, is_following_sq)
+        .order_by(Profile.created_at.desc())
+        .limit(page.limit)
+        .offset(page.offset)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        ProfileSummary(
+            id=p.id,
+            full_name=p.full_name,
+            username=p.username,
+            avatar_path=p.avatar_path,
+            bio=p.bio,
+            is_following=(isf or 0) > 0,
+        )
+        for p, isf in rows
+    ]
 
 
 @router.get("/{profile_id}", response_model=ProfileRead)
 async def get_profile(
     profile_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
-) -> Profile:
-    profile = await db.get(Profile, profile_id)
-    if profile is None:
-        raise NotFoundError("Perfil no encontrado.")
-    return profile
+) -> ProfileRead:
+    viewer_id = current_user.id if current_user else None
+    return await _load_profile(db, profile_id, viewer_id=viewer_id)

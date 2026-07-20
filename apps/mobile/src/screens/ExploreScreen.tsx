@@ -1,22 +1,59 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { Avatar } from '@/components/Avatar';
 import { SectionTitle } from '@/components/SectionTitle';
 import { Input } from '@/components/Input';
-import { Card } from '@/components/Card';
 import { ListRow } from '@/components/ListRow';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { course, events } from '@/data/mockData';
+import type { ProfileSummary } from '@/mappers/profileMapper';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function ExploreScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<ProfileSummary[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const term = query.trim();
+  const isSearching = term.length >= 2;
+
+  useEffect(() => {
+    if (!isSearching || !supabaseEnabled) {
+      setResults([]);
+      return;
+    }
+    let active = true;
+    setSearching(true);
+    const handle = setTimeout(() => {
+      ProfileRepository.search(term)
+        .then((data) => {
+          if (active) setResults(data);
+        })
+        .catch(() => {
+          if (active) setResults([]);
+        })
+        .finally(() => {
+          if (active) setSearching(false);
+        });
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(handle);
+    };
+  }, [term, isSearching, supabaseEnabled]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -26,15 +63,52 @@ export function ExploreScreen() {
           {/* Campo de búsqueda */}
           <View style={styles.searchWrapper}>
             <Input
-              placeholder="Buscar personas, cursos o eventos..."
+              placeholder="Buscar personas..."
               placeholderTextColor={colors.textMuted}
               containerStyle={styles.searchContainer}
+              value={query}
+              onChangeText={setQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
             />
             <View style={styles.searchIcon}>
               <Feather name="search" size={18} color={colors.textMuted} />
             </View>
           </View>
 
+          {isSearching && (
+            <View style={styles.results}>
+              <StateView
+                state={
+                  searching
+                    ? 'loading'
+                    : results.length === 0
+                    ? 'empty'
+                    : 'content'
+                }
+                title={!searching && results.length === 0 ? 'Sin resultados' : undefined}
+                description={
+                  !searching && results.length === 0
+                    ? 'No encontramos personas con ese nombre.'
+                    : undefined
+                }
+              >
+                {results.map((person) => (
+                  <ListRow
+                    key={person.id}
+                    title={person.fullName}
+                    subtitle={person.username}
+                    leftComponent={<Avatar size={40} image="avatar" />}
+                    rightIcon="chevron-right"
+                    onPress={() => router.push(`/profile/${person.id}` as never)}
+                  />
+                ))}
+              </StateView>
+            </View>
+          )}
+
+          {!isSearching && (
+          <React.Fragment>
           <SectionTitle title="Tu siguiente paso" />
           <Pressable
             onPress={() => router.push('/course/lider-vida-empresa')}
@@ -81,6 +155,8 @@ export function ExploreScreen() {
             </View>
             <Feather name="users" size={48} color={colors.onPrimary} style={styles.circleIcon} />
           </Pressable>
+          </React.Fragment>
+          )}
         </View>
       </AppScreen>
     </View>
@@ -100,6 +176,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: spacing.md,
     top: 15,
+  },
+  results: {
+    marginBottom: spacing.xl,
+    minHeight: 120,
   },
   heroCard: { height: 280, borderRadius: radius.xl, overflow: 'hidden', marginBottom: spacing.xl, justifyContent: 'flex-end' },
   heroOverlay: { ...StyleSheet.absoluteFillObject },

@@ -11,6 +11,29 @@ export type ProfileDto = {
   role: string;
   is_private: boolean;
   created_at: string;
+  followers_count?: number;
+  following_count?: number;
+  posts_count?: number;
+  is_following?: boolean;
+};
+
+/** Perfil compacto para listas (búsqueda). */
+export type ProfileSummaryDto = {
+  id: string;
+  full_name: string;
+  username: string | null;
+  avatar_path: string | null;
+  bio: string;
+  is_following: boolean;
+};
+
+export type ProfileSummary = {
+  id: string;
+  fullName: string;
+  username: string;
+  avatarPath: string | null;
+  bio: string;
+  isFollowing: boolean;
 };
 
 function deriveUsername(dto: ProfileDto): string {
@@ -34,9 +57,24 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     username: deriveUsername(dto),
     email: dto.email ?? '',
     bio: dto.bio ?? '',
-    followers: 0,
-    following: 0,
-    posts: 0,
+    followers: dto.followers_count ?? 0,
+    following: dto.following_count ?? 0,
+    posts: dto.posts_count ?? 0,
+    isFollowing: dto.is_following ?? false,
+  };
+}
+
+export function toProfileSummary(dto: ProfileSummaryDto): ProfileSummary {
+  const handle = dto.username
+    ? `@${dto.username}`
+    : `@${(dto.full_name || 'usuario').toLowerCase().replace(/[^a-z0-9_.]+/g, '').slice(0, 18) || 'usuario'}`;
+  return {
+    id: dto.id,
+    fullName: dto.full_name || 'Usuario',
+    username: handle,
+    avatarPath: dto.avatar_path,
+    bio: dto.bio ?? '',
+    isFollowing: dto.is_following,
   };
 }
 

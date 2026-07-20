@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -9,10 +9,12 @@ import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { UserProfile } from '@/types';
 
 export function ProfileScreen() {
   const { colors } = useAppTheme();
@@ -25,13 +27,59 @@ export function ProfileScreen() {
   const profileError = useAuthStore((state) => state.profileError);
   const refreshProfile = useAuthStore((state) => state.refreshProfile);
 
-  // Determinar si es perfil de Darren o el propio
+  // Tipos de perfil: propio (sin id), Darren (demo), o público real (uuid).
   const isDarren = id === 'darren';
+  const isRealPublic = !!id && !isDarren && id !== currentUser?.id;
+  const isPublic = isDarren || isRealPublic;
 
   const [following, setFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
+  const [publicState, setPublicState] = useState<'loading' | 'error' | 'idle'>('loading');
 
-  // Perfil propio con backend real: mostrar carga/error mientras llega el perfil.
-  if (!isDarren && supabaseEnabled && !currentUser) {
+  const loadPublic = React.useCallback(() => {
+    if (!isRealPublic || !id) return;
+    setPublicState('loading');
+    ProfileRepository.getById(id)
+      .then((p) => {
+        setPublicProfile(p);
+        setFollowing(p.isFollowing ?? false);
+        setFollowersCount(p.followers);
+        setPublicState('idle');
+      })
+      .catch(() => setPublicState('error'));
+  }, [id, isRealPublic]);
+
+  useEffect(() => {
+    loadPublic();
+  }, [loadPublic]);
+
+  const toggleFollow = async () => {
+    if (isDarren) {
+      setFollowing((v) => !v);
+      return;
+    }
+    if (!isRealPublic || !id) return;
+    const wasFollowing = following;
+    setFollowBusy(true);
+    setFollowing(!wasFollowing);
+    setFollowersCount((c) => Math.max(0, c + (wasFollowing ? -1 : 1)));
+    try {
+      const count = wasFollowing
+        ? await ProfileRepository.unfollow(id)
+        : await ProfileRepository.follow(id);
+      setFollowersCount(count);
+    } catch {
+      setFollowing(wasFollowing);
+      setFollowersCount((c) => Math.max(0, c + (wasFollowing ? 1 : -1)));
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  // Perfil propio con backend real: carga/error mientras llega el perfil.
+  if (!id && supabaseEnabled && !currentUser) {
     const state = profileError ? 'error' : authStatus === 'loading' ? 'loading' : 'empty';
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -46,6 +94,16 @@ export function ProfileScreen() {
     );
   }
 
+  // Perfil público real: carga/error.
+  if (isRealPublic && publicState !== 'idle') {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="PERFIL" onBack={() => router.back()} />
+        <StateView state={publicState === 'error' ? 'error' : 'loading'} onRetry={loadPublic} />
+      </View>
+    );
+  }
+
   const profileData = isDarren
     ? {
         fullName: 'Darren Hardy',
@@ -55,6 +113,16 @@ export function ProfileScreen() {
         following: 42,
         posts: 180,
         avatar: 'speaker' as const,
+      }
+    : isRealPublic
+    ? {
+        fullName: publicProfile?.fullName ?? '',
+        username: publicProfile?.username ?? '',
+        bio: publicProfile?.bio ?? '',
+        followers: followersCount,
+        following: publicProfile?.following ?? 0,
+        posts: publicProfile?.posts ?? 0,
+        avatar: 'avatar' as const,
       }
     : {
         fullName: currentUser?.fullName ?? 'Katherine Béjar',
@@ -69,10 +137,10 @@ export function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title={isDarren ? 'PERFIL' : 'MI PERFIL'}
-        rightIcon={isDarren ? undefined : 'settings'}
-        onRightPress={isDarren ? undefined : () => router.push('/settings')}
-        onBack={isDarren ? () => router.back() : undefined}
+        title={isPublic ? 'PERFIL' : 'MI PERFIL'}
+        rightIcon={isPublic ? undefined : 'settings'}
+        onRightPress={isPublic ? undefined : () => router.push('/settings')}
+        onBack={isPublic ? () => router.back() : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
         <Image source={assets.hero} style={[styles.cover, { tintColor: 'gray' }]} />
@@ -80,18 +148,19 @@ export function ProfileScreen() {
           <View style={styles.avatarRow}>
             <Avatar size={90} image={profileData.avatar} />
             <View style={styles.actionRow}>
-              {isDarren ? (
+              {isPublic ? (
                 <React.Fragment>
                   <Button
                     label={following ? 'Siguiendo' : 'Seguir'}
                     variant={following ? 'secondary' : 'primary'}
-                    onPress={() => setFollowing(!following)}
+                    loading={followBusy}
+                    onPress={toggleFollow}
                     style={styles.actionBtn}
                   />
                   <Button
                     label="Mensaje"
                     variant="secondary"
-                    onPress={() => router.push('/chat/darren')}
+                    onPress={() => router.push((isDarren ? '/chat/darren' : `/chat/${id}`) as never)}
                     style={styles.actionBtn}
                   />
                 </React.Fragment>
