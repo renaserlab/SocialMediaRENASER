@@ -73,7 +73,11 @@
     "extra": {
       "router": {
         "root": "./app"
+      },
+      "eas": {
+        "projectId": "a41f6cdf-fbf3-423c-8761-1331773ddeb1"
       }
-    }
+    },
+    "owner": "ggderbor"
   }
 }
