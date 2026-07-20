@@ -12,6 +12,12 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "preview",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
+        "EXPO_PUBLIC_API_URL": "http://192.168.0.79:8001"
       }
     },
     "production": {
