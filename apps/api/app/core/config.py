@@ -62,8 +62,8 @@ class Settings(BaseSettings):
 
     @property
     def auth_configured(self) -> bool:
-        """True cuando hay como validar tokens de Supabase."""
-        return bool(self.supabase_jwt_secret)
+        """True cuando hay como validar tokens de Supabase (JWKS o HS256)."""
+        return bool(self.supabase_url or self.supabase_jwt_secret)
 
 
 @lru_cache
