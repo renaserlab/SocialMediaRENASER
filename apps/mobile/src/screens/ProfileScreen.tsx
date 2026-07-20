@@ -7,8 +7,10 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -18,11 +20,31 @@ export function ProfileScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
 
   const currentUser = useAppStore((state) => state.user);
+  const authStatus = useAuthStore((state) => state.status);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const profileError = useAuthStore((state) => state.profileError);
+  const refreshProfile = useAuthStore((state) => state.refreshProfile);
 
   // Determinar si es perfil de Darren o el propio
   const isDarren = id === 'darren';
 
   const [following, setFollowing] = useState(false);
+
+  // Perfil propio con backend real: mostrar carga/error mientras llega el perfil.
+  if (!isDarren && supabaseEnabled && !currentUser) {
+    const state = profileError ? 'error' : authStatus === 'loading' ? 'loading' : 'empty';
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="MI PERFIL" rightIcon="settings" onRightPress={() => router.push('/settings')} />
+        <StateView
+          state={state}
+          onRetry={() => void refreshProfile()}
+          title={state === 'empty' ? 'Perfil no disponible' : undefined}
+          description={state === 'empty' ? 'Inicia sesión para ver tu perfil.' : undefined}
+        />
+      </View>
+    );
+  }
 
   const profileData = isDarren
     ? {
@@ -77,7 +99,7 @@ export function ProfileScreen() {
                 <Button
                   label="Editar perfil"
                   variant="secondary"
-                  onPress={() => {}}
+                  onPress={() => router.push('/edit-profile' as never)}
                   style={styles.actionBtn}
                 />
               )}

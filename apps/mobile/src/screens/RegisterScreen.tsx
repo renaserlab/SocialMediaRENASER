@@ -166,7 +166,7 @@ export function RegisterScreen() {
             Al crear tu cuenta aceptas nuestros Términos y la Política de Privacidad.
           </Text>
 
-          <Pressable onPress={() => socialDemo('Inicio de sesión')}>
+          <Pressable onPress={() => router.replace('/login' as never)}>
             <Text style={[styles.login, { color: colors.text }]}>
               ¿Ya tienes cuenta? <Text style={{ fontWeight: '900' }}>Iniciar sesión</Text>
             </Text>

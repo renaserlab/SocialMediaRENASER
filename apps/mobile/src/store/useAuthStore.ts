@@ -4,6 +4,9 @@ import { AuthRepository, SignInInput, SignUpInput, SignUpResult } from '@/reposi
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { setAuthTokenProvider, ApiError } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
+import type { UserProfile } from '@/types';
+
+export type ProfilePatch = Partial<Pick<UserProfile, 'fullName' | 'username' | 'bio'>>;
 
 type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
 
@@ -12,12 +15,15 @@ type AuthState = {
   /** true cuando Supabase esta configurado; false = modo demo local. */
   supabaseEnabled: boolean;
   initialized: boolean;
+  /** Mensaje si fallo la carga del perfil (para mostrar reintento en la UI). */
+  profileError: string | null;
 
   bootstrap: () => Promise<void>;
   signUpEmail: (input: SignUpInput) => Promise<SignUpResult>;
   signInEmail: (input: SignInInput) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateProfile: (patch: ProfilePatch) => Promise<void>;
 };
 
 let unsubscribeAuth: (() => void) | null = null;
@@ -26,6 +32,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'loading',
   supabaseEnabled: AuthRepository.enabled,
   initialized: false,
+  profileError: null,
 
   async bootstrap() {
     if (get().initialized) return;
@@ -71,10 +78,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const profile = await ProfileRepository.getMyProfile();
       useAppStore.getState().setUser(profile);
+      set({ profileError: null });
     } catch (error) {
       // Si el perfil aun no existe (trigger en curso) no bloqueamos la sesion.
-      if (error instanceof ApiError && error.status === 404) return;
-      throw error;
+      if (error instanceof ApiError && error.status === 404) {
+        set({ profileError: null });
+        return;
+      }
+      set({
+        profileError:
+          error instanceof Error ? error.message : 'No se pudo cargar el perfil.',
+      });
     }
   },
 
@@ -97,5 +111,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.signOut();
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });
+  },
+
+  async updateProfile(patch) {
+    const appStore = useAppStore.getState();
+
+    // Modo demo: se actualiza el usuario local sin backend.
+    if (!AuthRepository.enabled) {
+      const current = appStore.user;
+      if (current) appStore.setUser({ ...current, ...patch });
+      return;
+    }
+
+    const updated = await ProfileRepository.updateMyProfile(patch);
+    appStore.setUser(updated);
   },
 }));
