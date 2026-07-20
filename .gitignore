@@ -17,6 +17,7 @@ apps/mobile/ios/
 
 # IDE / tooling
 .gemini/
+.idea/
 
 # npm workspaces: only the root lockfile is tracked
 apps/*/package-lock.json

@@ -35,16 +35,29 @@ const ctxNativeShim = path.resolve(projectRoot, 'web-shims', '_ctx.native.js');
 // ─── 4. Aliases y Deduplicación de React / React Native / React DOM ───────────
 //
 // Para evitar múltiples copias de React (Invalid hook call), forzamos a Metro
-// a resolver los imports de raíz del módulo a la carpeta local de apps/mobile/node_modules/.
-// Al usar extraNodeModules, Metro maneja la resolución nativa de los puntos de
-// entrada (index.js, package.json) de forma limpia y robusta.
+// a resolver estos módulos a UNA sola ubicación física. En un monorepo con
+// hoisting de npm, react/react-native viven en la raíz (../../node_modules),
+// no en apps/mobile/node_modules. Resolvemos la ruta real con require.resolve
+// (buscando desde projectRoot y luego workspaceRoot) para que el mapeo apunte
+// siempre a la copia existente, sin importar dónde quedó hoisted.
 //
-const forcedModules = {
-  'react': path.resolve(projectRoot, 'node_modules/react'),
-  'react-dom': path.resolve(projectRoot, 'node_modules/react-dom'),
-  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
-  'react-native-web': path.resolve(projectRoot, 'node_modules/react-native-web'),
+const resolvePkgDir = (name) => {
+  try {
+    return path.dirname(
+      require.resolve(`${name}/package.json`, { paths: [projectRoot, workspaceRoot] })
+    );
+  } catch {
+    return null;
+  }
 };
+
+const forcedModules = {};
+for (const name of ['react', 'react-dom', 'react-native', 'react-native-web']) {
+  const dir = resolvePkgDir(name);
+  if (dir) {
+    forcedModules[name] = dir;
+  }
+}
 
 config.resolver.extraNodeModules = forcedModules;
 

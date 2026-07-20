@@ -6,39 +6,40 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
-import { spacing } from '@/theme/tokens';
-import { useAppTheme } from '@/theme/useAppTheme';
+import { palette, spacing } from '@/theme/tokens';
+
+// La landing es una portada intencionalmente oscura en ambos temas.
+const media = palette('dark');
 
 export function LandingScreen() {
-  const { colors } = useAppTheme();
   const router = useRouter();
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000000' }}>
+    <View style={{ flex: 1, backgroundColor: media.background }}>
       <AppScreen scroll edges={['left', 'right', 'bottom']}>
         <View style={styles.mediaContainer}>
           <Image source={assets.hero} style={styles.image} resizeMode="cover" />
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: media.overlay }]} />
           <View style={styles.brandContainer}>
-            <Text variant="body" weight="800" color="#FFFFFF" style={styles.brandText}>
+            <Text variant="body" weight="800" color={media.text} style={styles.brandText}>
               RENASER
             </Text>
           </View>
         </View>
 
         <View style={styles.infoContainer}>
-          <Text variant="display" color="#FFFFFF" style={styles.title}>
+          <Text variant="display" color={media.text} style={styles.title}>
             ¿Qué está bloqueando realmente tu crecimiento?
           </Text>
-          <Text variant="body" color="#A8A8AE" style={styles.subtitle}>
+          <Text variant="body" color={media.textMuted} style={styles.subtitle}>
             Responde 7 preguntas y descubre tu verdadero límite.
           </Text>
           <Button
             label="Descubrir ahora"
+            variant="secondary"
             onPress={() => router.push('/quiz' as any)}
-            style={styles.btnInverse}
           />
-          <Text variant="secondary" color="#6B6B73" style={styles.hint}>
+          <Text variant="secondary" color={media.textMuted} style={styles.hint}>
             2 min · Gratis · Resultado inmediato
           </Text>
         </View>
@@ -70,7 +71,7 @@ const styles = StyleSheet.create({
     marginTop: -46,
     position: 'relative',
     zIndex: 10,
-    backgroundColor: '#000000',
+    backgroundColor: media.background,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: spacing.lg,
@@ -82,9 +83,6 @@ const styles = StyleSheet.create({
   subtitle: {
     lineHeight: 22,
     marginBottom: spacing.xl,
-  },
-  btnInverse: {
-    backgroundColor: '#FFFFFF',
   },
   hint: {
     textAlign: 'center',

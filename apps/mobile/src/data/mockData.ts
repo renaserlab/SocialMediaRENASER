@@ -1,4 +1,4 @@
-import { Circle, Conversation, Course, EventItem, Post, QuizQuestion } from '@/types';
+import { Circle, Conversation, Course, EventItem, Lesson, Post, QuizQuestion } from '@/types';
 
 export const quizQuestions: QuizQuestion[] = [
   {
@@ -181,3 +181,47 @@ export const circle: Circle = {
   description: 'Un espacio para compartir, aprender y avanzar junto a personas comprometidas con su crecimiento.',
   members: 423,
 };
+
+export const lessons: Lesson[] = [
+  {
+    id: '1',
+    courseId: course.id,
+    order: 1,
+    title: 'El Poder de la Disciplina Diaria',
+    durationMin: 18,
+    mentor: 'Darren Hardy',
+    summary:
+      'La disciplina es el puente entre tus metas y tus logros. El éxito no se consigue con saltos gigantescos, sino con la acumulación constante de pequeñas acciones diarias. En esta lección analizamos las rutinas matutinas que definen el día y cómo crear barreras contra la distracción en un mundo hiperconectado.',
+    resources: [
+      { id: 'r1', title: 'Guía de Trabajo PDF', subtitle: 'Planificador Diario.pdf (4.2 MB)', icon: 'file-text' },
+      { id: 'r2', title: 'Audio Resumen MP3', subtitle: 'Resumen de lección.mp3 (12.8 MB)', icon: 'music' },
+    ],
+  },
+  {
+    id: '2',
+    courseId: course.id,
+    order: 2,
+    title: 'Mentalidad de Crecimiento y Estrategia',
+    durationMin: 22,
+    mentor: 'Darren Hardy',
+    summary:
+      'Tu forma de interpretar los obstáculos define tu techo. Aquí trabajamos cómo convertir la visión en un plan accionable y cómo tomar decisiones con claridad bajo presión.',
+    resources: [
+      { id: 'r1', title: 'Plantilla de Estrategia', subtitle: 'Estrategia 90 días.pdf (2.1 MB)', icon: 'file-text' },
+    ],
+  },
+  {
+    id: '3',
+    courseId: course.id,
+    order: 3,
+    title: 'Liderazgo sin Agotamiento',
+    durationMin: 20,
+    mentor: 'Darren Hardy',
+    summary:
+      'Liderar equipos y tu propia vida sin quemarte requiere sistemas, no fuerza de voluntad. Revisamos hábitos sostenibles y cómo proteger tu energía a largo plazo.',
+    resources: [
+      { id: 'r1', title: 'Checklist de Hábitos', subtitle: 'Habitos sostenibles.pdf (1.4 MB)', icon: 'file-text' },
+      { id: 'r2', title: 'Audio de Cierre', subtitle: 'Integración final.mp3 (9.6 MB)', icon: 'music' },
+    ],
+  },
+];

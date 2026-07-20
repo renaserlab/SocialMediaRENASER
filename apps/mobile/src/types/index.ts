@@ -89,3 +89,21 @@ export type Circle = {
   description: string;
   members: number;
 };
+
+export type LessonResource = {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: 'file-text' | 'music' | 'video' | 'download';
+};
+
+export type Lesson = {
+  id: string;
+  courseId: string;
+  order: number;
+  title: string;
+  durationMin: number;
+  mentor: string;
+  summary: string;
+  resources: LessonResource[];
+};

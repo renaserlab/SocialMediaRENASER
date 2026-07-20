@@ -42,6 +42,8 @@ type AppState = {
   setHydrated: (hydrated: boolean) => void;
   toggleTheme: () => void;
   setUser: (user: UserProfile | null) => void;
+  setPosts: (posts: Post[]) => void;
+  setConversations: (conversations: Conversation[]) => void;
   registerLocalUser: (input: { fullName: string; email: string }) => void;
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
@@ -114,6 +116,8 @@ export const useAppStore = create<AppState>()(
       setHydrated: (hydrated) => set({ hydrated }),
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
       setUser: (user) => set({ user }),
+      setPosts: (posts) => set({ posts }),
+      setConversations: (conversations) => set({ conversations }),
       registerLocalUser: ({ fullName, email }) =>
         set({
           user: {

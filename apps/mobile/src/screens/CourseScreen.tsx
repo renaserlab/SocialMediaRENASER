@@ -1,13 +1,14 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { course } from '@/data/mockData';
+import { useCourse } from '@/hooks/useCourse';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -15,13 +16,37 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function CourseScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const purchased = useAppStore((state) => state.purchasedCourseIds.includes(course.id));
+  const { id } = useLocalSearchParams<{ id: string }>();
+
+  // Curso a través de la capa de repositorio (mock hoy, backend mañana).
+  const { course, loading, error, reload } = useCourse(id);
+  const purchasedIds = useAppStore((state) => state.purchasedCourseIds);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Programa" onBack={() => router.back()} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (error || !course) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Programa" onBack={() => router.back()} />
+        <StateView state="error" description={error ?? undefined} onRetry={reload} />
+      </View>
+    );
+  }
+
+  const purchased = purchasedIds.includes(course.id);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        <Image source={assets.course} style={[styles.hero, { tintColor: 'gray' }]} />
+        <Image source={assets.course} style={[styles.hero, { borderColor: colors.border }]} />
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
           <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
@@ -64,7 +89,7 @@ function Info({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: str
 }
 
 const styles = StyleSheet.create({
-  hero: { width: '100%', aspectRatio: 1.1, resizeMode: 'cover', borderWidth: 1, borderColor: '#444' },
+  hero: { width: '100%', aspectRatio: 1.1, resizeMode: 'cover', borderWidth: 1 },
   container: { padding: spacing.xl },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   price: { fontSize: 20, fontWeight: '900', marginTop: spacing.md },
