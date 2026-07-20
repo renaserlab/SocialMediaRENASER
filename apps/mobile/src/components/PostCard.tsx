@@ -51,7 +51,9 @@ export function PostCard({ post }: { post: Post }) {
       </View>
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
-      {post.imageKey ? (
+      {post.imageUrl ? (
+        <Image source={{ uri: post.imageUrl }} resizeMode="cover" style={styles.image} />
+      ) : post.imageKey ? (
         <Image source={assets[post.imageKey]} resizeMode="cover" style={styles.image} />
       ) : null}
 

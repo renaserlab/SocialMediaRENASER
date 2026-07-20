@@ -33,6 +33,8 @@ export type Post = {
   body: string;
   createdAt: string;
   imageKey?: 'hero' | 'speaker' | 'event' | 'circle';
+  /** URL firmada de la imagen remota (Supabase Storage). */
+  imageUrl?: string;
   likes: number;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */

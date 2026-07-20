@@ -13,12 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.content.models import Comment, Post, PostLike, SavedPost
+from app.modules.content.models import Comment, Post, PostLike, PostMedia, SavedPost
 from app.modules.content.schemas import (
     AuthorSummary,
     CommentCreate,
     CommentRead,
     PostCreate,
+    PostMediaRead,
     PostRead,
 )
 from app.modules.profiles.models import Profile
@@ -75,7 +76,13 @@ def _author(profile: Profile) -> AuthorSummary:
 
 
 def _to_post_read(
-    post: Post, profile: Profile, lc: int, cc: int, lk: int, sv: int
+    post: Post,
+    profile: Profile,
+    lc: int,
+    cc: int,
+    lk: int,
+    sv: int,
+    media: list[PostMediaRead] | None = None,
 ) -> PostRead:
     return PostRead(
         id=post.id,
@@ -84,11 +91,36 @@ def _to_post_read(
         status=post.status,
         visibility=post.visibility,
         created_at=post.created_at,
+        media=media or [],
         likes_count=lc or 0,
         comments_count=cc or 0,
         liked_by_me=(lk or 0) > 0,
         saved_by_me=(sv or 0) > 0,
     )
+
+
+async def _load_media_map(
+    db: AsyncSession, post_ids: list[str]
+) -> dict[str, list[PostMediaRead]]:
+    if not post_ids:
+        return {}
+    rows = (
+        await db.scalars(
+            select(PostMedia)
+            .where(PostMedia.post_id.in_(post_ids))
+            .order_by(PostMedia.sort_order)
+        )
+    ).all()
+    result: dict[str, list[PostMediaRead]] = {}
+    for media in rows:
+        result.setdefault(media.post_id, []).append(
+            PostMediaRead(
+                storage_path=media.storage_path,
+                media_type=media.media_type,
+                sort_order=media.sort_order,
+            )
+        )
+    return result
 
 
 async def _get_active_post(db: AsyncSession, post_id: str) -> Post:
@@ -125,7 +157,8 @@ async def list_posts(
         .offset(page.offset)
     )
     rows = (await db.execute(stmt)).all()
-    return [_to_post_read(*row) for row in rows]
+    media_map = await _load_media_map(db, [row[0].id for row in rows])
+    return [_to_post_read(*row, media=media_map.get(row[0].id, [])) for row in rows]
 
 
 @router.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
@@ -143,10 +176,26 @@ async def create_post(
     await db.commit()
     await db.refresh(post)
 
+    media: list[PostMediaRead] = []
+    for index, path in enumerate(payload.image_paths):
+        db.add(
+            PostMedia(
+                post_id=post.id,
+                storage_path=path,
+                media_type="image",
+                sort_order=index,
+            )
+        )
+        media.append(
+            PostMediaRead(storage_path=path, media_type="image", sort_order=index)
+        )
+    if media:
+        await db.commit()
+
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil del autor no encontrado.")
-    return _to_post_read(post, profile, 0, 0, 0, 0)
+    return _to_post_read(post, profile, 0, 0, 0, 0, media=media)
 
 
 @router.get("/posts/{post_id}", response_model=PostRead)
@@ -165,7 +214,8 @@ async def get_post(
     row = (await db.execute(stmt)).first()
     if row is None:
         raise NotFoundError("Publicacion no encontrada.")
-    return _to_post_read(*row)
+    media_map = await _load_media_map(db, [row[0].id])
+    return _to_post_read(*row, media=media_map.get(row[0].id, []))
 
 
 @router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)

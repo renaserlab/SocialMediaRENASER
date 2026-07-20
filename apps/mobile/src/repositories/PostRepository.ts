@@ -1,5 +1,6 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
+import { signImageUrls } from '@/services/storage';
 import type { Comment, Post } from '@/types';
 
 export type FeedPage = {
@@ -7,6 +8,20 @@ export type FeedPage = {
   likedIds: string[];
   savedIds: string[];
 };
+
+/** Firma la primera imagen de cada post y la asigna a item.imageUrl. */
+async function attachImageUrls(items: Post[], dtos: PostDto[]): Promise<void> {
+  const paths = dtos
+    .map((d) => d.media[0]?.storage_path)
+    .filter((p): p is string => Boolean(p));
+  if (paths.length === 0) return;
+  const urls = await signImageUrls(paths);
+  dtos.forEach((dto, i) => {
+    const path = dto.media[0]?.storage_path;
+    const item = items[i];
+    if (path && item && urls[path]) item.imageUrl = urls[path];
+  });
+}
 
 /**
  * Acceso al feed y a las interacciones a traves del backend FastAPI.
@@ -20,19 +35,27 @@ export const PostRepository = {
     const dtos = await apiRequest<PostDto[]>(
       `${API_V1}/posts?limit=${limit}&offset=${offset}`,
     );
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachImageUrls(items, dtos);
     return {
-      items: dtos.map((dto) => toPost(dto, currentUserId)),
+      items,
       likedIds: dtos.filter((d) => d.liked_by_me).map((d) => d.id),
       savedIds: dtos.filter((d) => d.saved_by_me).map((d) => d.id),
     };
   },
 
-  async createPost(body: string, currentUserId?: string | null): Promise<Post> {
+  async createPost(
+    body: string,
+    imagePaths: string[] = [],
+    currentUserId?: string | null,
+  ): Promise<Post> {
     const dto = await apiRequest<PostDto>(`${API_V1}/posts`, {
       method: 'POST',
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body, image_paths: imagePaths }),
     });
-    return toPost(dto, currentUserId);
+    const post = toPost(dto, currentUserId);
+    await attachImageUrls([post], [dto]);
+    return post;
   },
 
   async deletePost(postId: string): Promise<void> {

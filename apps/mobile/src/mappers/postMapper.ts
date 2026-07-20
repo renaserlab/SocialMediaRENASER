@@ -7,6 +7,12 @@ export type PostAuthorDto = {
   avatar_path: string | null;
 };
 
+export type PostMediaDto = {
+  storage_path: string;
+  media_type: string;
+  sort_order: number;
+};
+
 export type PostDto = {
   id: string;
   author: PostAuthorDto;
@@ -14,6 +20,7 @@ export type PostDto = {
   status: string;
   visibility: string;
   created_at: string;
+  media: PostMediaDto[];
   likes_count: number;
   comments_count: number;
   liked_by_me: boolean;

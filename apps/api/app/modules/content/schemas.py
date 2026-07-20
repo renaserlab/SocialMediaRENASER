@@ -12,10 +12,18 @@ class AuthorSummary(BaseModel):
     avatar_path: str | None = None
 
 
+class PostMediaRead(BaseModel):
+    storage_path: str
+    media_type: str
+    sort_order: int = 0
+
+
 class PostCreate(BaseModel):
     # OJO: sin author_id. El autor se toma del JWT (current_user.id).
     body: str = Field(min_length=1, max_length=3000)
     visibility: str = Field(default="public", pattern=r"^(public|followers|circle)$")
+    # Rutas de Storage (bucket post-media) ya subidas por el cliente.
+    image_paths: list[str] = Field(default_factory=list, max_length=4)
 
 
 class PostRead(BaseModel):
@@ -25,6 +33,7 @@ class PostRead(BaseModel):
     status: str
     visibility: str
     created_at: datetime
+    media: list[PostMediaRead] = Field(default_factory=list)
     likes_count: int = 0
     comments_count: int = 0
     liked_by_me: bool = False

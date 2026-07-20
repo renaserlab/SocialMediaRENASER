@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import type { ImagePickerAsset } from 'expo-image-picker';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
+import { pickImage, uploadPostImage } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -17,9 +20,24 @@ export function CreatePostScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const createPost = useAppStore((state) => state.createPost);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const [text, setText] = useState('');
   const [prompt, setPrompt] = useState(prompts[0]!);
+  const [image, setImage] = useState<ImagePickerAsset | null>(null);
   const [publishing, setPublishing] = useState(false);
+
+  const chooseImage = async () => {
+    if (!supabaseEnabled) {
+      Alert.alert('Imágenes', 'Conecta Supabase para adjuntar imágenes a tus publicaciones.');
+      return;
+    }
+    try {
+      const asset = await pickImage();
+      if (asset) setImage(asset);
+    } catch {
+      Alert.alert('No se pudo abrir la galería', 'Revisa los permisos e inténtalo de nuevo.');
+    }
+  };
 
   const publish = async () => {
     if (!text.trim()) {
@@ -28,8 +46,13 @@ export function CreatePostScreen() {
     }
     setPublishing(true);
     try {
-      await createPost(text);
+      let imagePaths: string[] = [];
+      if (image && supabaseEnabled) {
+        imagePaths = [await uploadPostImage(image)];
+      }
+      await createPost(text, imagePaths);
       setText('');
+      setImage(null);
       router.replace('/(tabs)/home');
     } catch (error) {
       Alert.alert(
@@ -74,13 +97,36 @@ export function CreatePostScreen() {
             />
             <View style={styles.editorFooter}>
               <View style={styles.mediaRow}>
-                <Feather name="image" size={20} color={colors.textMuted} />
+                <Pressable
+                  onPress={chooseImage}
+                  accessibilityRole="button"
+                  accessibilityLabel="Adjuntar imagen"
+                  hitSlop={8}
+                >
+                  <Feather name="image" size={20} color={image ? colors.primary : colors.textMuted} />
+                </Pressable>
                 <Feather name="video" size={20} color={colors.textMuted} />
                 <Feather name="mic" size={20} color={colors.textMuted} />
               </View>
               <Text style={[styles.counter, { color: colors.textMuted }]}>{text.length}/700</Text>
             </View>
           </View>
+
+          {image && (
+            <View style={styles.previewWrap}>
+              <Image source={{ uri: image.uri }} style={styles.preview} resizeMode="cover" />
+              <Pressable
+                onPress={() => setImage(null)}
+                style={styles.removeBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Quitar imagen"
+                hitSlop={8}
+              >
+                <Feather name="x" size={16} color="#FFFFFF" />
+              </Pressable>
+            </View>
+          )}
+
           <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
         </View>
       </AppScreen>
@@ -98,4 +144,17 @@ const styles = StyleSheet.create({
   editorFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md },
   mediaRow: { flexDirection: 'row', gap: spacing.lg },
   counter: { fontSize: 11 },
+  previewWrap: { position: 'relative', marginBottom: spacing.lg },
+  preview: { width: '100%', height: 200, borderRadius: radius.lg },
+  removeBtn: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

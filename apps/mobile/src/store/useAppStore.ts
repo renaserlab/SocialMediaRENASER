@@ -46,7 +46,7 @@ type AppState = {
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
   finishQuiz: () => QuizArea;
-  createPost: (body: string) => Promise<void>;
+  createPost: (body: string, imagePaths?: string[]) => Promise<void>;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
@@ -131,13 +131,13 @@ export const useAppStore = create<AppState>()(
         set({ quizResult: result });
         return result;
       },
-      createPost: async (body) => {
+      createPost: async (body, imagePaths = []) => {
         const trimmed = body.trim();
         if (!trimmed) return;
 
         if (backendEnabled) {
           const uid = get().user?.id ?? null;
-          const post = await PostRepository.createPost(trimmed, uid);
+          const post = await PostRepository.createPost(trimmed, imagePaths, uid);
           set((state) => ({
             posts: [post, ...state.posts],
             user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
