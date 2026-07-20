@@ -1,18 +1,26 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
+const fs = require('fs');
 
-// ─── Rutas del monorepo ───────────────────────────────────────────────────────
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, '../..');
-const appRoot = path.resolve(projectRoot, 'app');
+// ─── Rutas del monorepo con capitalización real (Windows fix) ────────────────
+const currentDir = fs.realpathSync(__dirname);
+const workspaceRoot = fs.realpathSync(path.resolve(currentDir, '../..'));
+const appRoot = fs.realpathSync(path.resolve(currentDir, 'app'));
 
-// Inyectar para cualquier uso de process.env en código Node (e.g. scripts)
+// Establecemos el projectRoot al subproyecto local de la app
+const projectRoot = currentDir;
+
+// Inyectar para que expo-router encuentre el directorio app correcto de mobile
 process.env.EXPO_ROUTER_APP_ROOT = appRoot;
 
 const config = getDefaultConfig(projectRoot);
 
-// ─── 1. Watch folders del monorepo ───────────────────────────────────────────
-config.watchFolders = [...(config.watchFolders || []), workspaceRoot];
+// ─── 1. Watch folders del monorepo con rutas reales (extendiendo los defaults)
+config.watchFolders = [
+  ...(config.watchFolders || []),
+  projectRoot,
+  workspaceRoot,
+];
 
 // ─── 2. Resolución de node_modules en monorepo ───────────────────────────────
 config.resolver.nodeModulesPaths = [
@@ -21,30 +29,25 @@ config.resolver.nodeModulesPaths = [
 ];
 
 // ─── 3. Shim de require.context para TODAS las plataformas ───────────────────
-//
-// El problema: expo-router/_ctx*.js usa require.context(process.env.EXPO_ROUTER_APP_ROOT, ...)
-// Metro necesita que el primer argumento sea un STRING LITERAL estático en tiempo de parseo.
-// En un monorepo, la variable llega como undefined a los workers de Babel → crash:
-//   "First argument of require.context should be a string"
-//
-// Solución: interceptar el import 'expo-router/_ctx' y redirigir a un shim local
-// que tiene '../app' hardcodeado. Un shim por grupo de plataforma (web / nativo).
-//
 const ctxWebShim = path.resolve(projectRoot, 'web-shims', '_ctx.web.js');
 const ctxNativeShim = path.resolve(projectRoot, 'web-shims', '_ctx.native.js');
 
-// ─── 4. Fix de import.meta para web (zustand devtools) ───────────────────────
+// ─── 4. Aliases y Deduplicación de React / React Native / React DOM ───────────
 //
-// Zustand y otros paquetes tienen exports condicionales:
-//   "import" → esm/*.mjs   (contiene import.meta.env.MODE → crash en web no-module)
-//   "react-native" → *.js  (CJS limpio, sin import.meta)
+// Para evitar múltiples copias de React (Invalid hook call), forzamos a Metro
+// a resolver los imports de raíz del módulo a la carpeta local de apps/mobile/node_modules/.
+// Al usar extraNodeModules, Metro maneja la resolución nativa de los puntos de
+// entrada (index.js, package.json) de forma limpia y robusta.
 //
-// Cuando Metro sirve en web, resuelve la condición "import" y carga el .mjs,
-// lo cual genera "Uncaught SyntaxError: Cannot use 'import.meta' outside a module".
-//
-// Solución: en resolveRequest, cuando la plataforma es "web" y el módulo pertenece
-// a paquetes con este problema, forzar la resolución CJS directamente.
-//
+const forcedModules = {
+  'react': path.resolve(projectRoot, 'node_modules/react'),
+  'react-dom': path.resolve(projectRoot, 'node_modules/react-dom'),
+  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
+  'react-native-web': path.resolve(projectRoot, 'node_modules/react-native-web'),
+};
+
+config.resolver.extraNodeModules = forcedModules;
+
 const ESM_PACKAGES_TO_CJS = ['zustand'];
 
 const originalResolveRequest = config.resolver.resolveRequest;

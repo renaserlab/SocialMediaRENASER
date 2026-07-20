@@ -15,7 +15,7 @@ export function LandingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000000' }}>
-      <AppScreen scroll edges={['left', 'right', 'bottom']} style={{ backgroundColor: '#000000' }}>
+      <AppScreen scroll edges={['left', 'right', 'bottom']}>
         <View style={styles.mediaContainer}>
           <Image source={assets.hero} style={styles.image} resizeMode="cover" />
           <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
