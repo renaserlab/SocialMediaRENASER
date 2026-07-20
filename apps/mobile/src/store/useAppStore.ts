@@ -29,12 +29,14 @@ type AppState = {
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
   finishQuiz: () => QuizArea;
+  setPosts: (posts: Post[]) => void;
   createPost: (body: string) => void;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => void;
   toggleReservation: (eventId: string) => void;
   purchaseCourse: (courseId: string) => void;
+  setConversations: (conversations: Conversation[]) => void;
   sendMessage: (conversationId: string, text: string) => void;
   sendLiveMessage: (text: string) => void;
   resetDemo: () => void;
@@ -107,6 +109,8 @@ export const useAppStore = create<AppState>()(
         set({ quizResult: result });
         return result;
       },
+      // Reemplaza el feed con datos de la fuente remota (repositorio → backend).
+      setPosts: (posts) => set({ posts }),
       createPost: (body) => {
         const trimmed = body.trim();
         if (!trimmed) return;
@@ -176,6 +180,8 @@ export const useAppStore = create<AppState>()(
             ? state.purchasedCourseIds
             : [...state.purchasedCourseIds, courseId],
         })),
+      // Reemplaza las conversaciones con datos de la fuente remota (repositorio → backend).
+      setConversations: (conversations) => set({ conversations }),
       sendMessage: (conversationId, text) => {
         const trimmed = text.trim();
         if (!trimmed) return;

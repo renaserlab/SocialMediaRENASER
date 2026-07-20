@@ -2,10 +2,11 @@ import React from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Button } from '@/components/Button';
 import { ListRow } from '@/components/ListRow';
+import { StateView } from '@/components/StateView';
+import { useLesson } from '@/hooks/useLesson';
 import { spacing, radius } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { assets } from '@/data/assets';
@@ -14,6 +15,27 @@ export function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
+
+  // Lección a través de la capa de repositorio (mock hoy, backend mañana).
+  const { lesson, loading, error, reload } = useLesson(id);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Lección del Curso" onBack={() => router.back()} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (error || !lesson) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Lección del Curso" onBack={() => router.back()} />
+        <StateView state="error" description={error ?? undefined} onRetry={reload} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -29,36 +51,30 @@ export function LessonScreen() {
 
         <View style={styles.details}>
           <Text style={[styles.title, { color: colors.text }]}>
-            Lección {id === '1' ? '1' : id}: El Poder de la Disciplina Diaria
+            Lección {lesson.order}: {lesson.title}
           </Text>
-          <Text style={[styles.duration, { color: colors.textMuted }]}>Duración: 18 min • Mentor: Darren Hardy</Text>
+          <Text style={[styles.duration, { color: colors.textMuted }]}>
+            Duración: {lesson.durationMin} min • Mentor: {lesson.mentor}
+          </Text>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Transcripción / Resumen</Text>
-          <Text style={[styles.bodyText, { color: colors.text, lineHeight: 22 }]}>
-            La disciplina es el puente entre tus metas y tus logros. El éxito no se consigue con saltos gigantescos,
-            sino con la acumulación constante de pequeñas acciones diarias. En esta lección analizamos las rutinas matutinas
-            que definen el día y cómo crear barreras contra la distracción en un mundo hiperconectado.
-          </Text>
+          <Text style={[styles.bodyText, { color: colors.text, lineHeight: 22 }]}>{lesson.summary}</Text>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Recursos del Curso</Text>
-          <ListRow
-            title="Guía de Trabajo PDF"
-            subtitle="Planificador Diario.pdf (4.2 MB)"
-            leftIcon="file-text"
-            rightIcon="download"
-            onPress={() => {}}
-          />
-          <ListRow
-            title="Audio Resumen MP3"
-            subtitle="Resumen de lección.mp3 (12.8 MB)"
-            leftIcon="music"
-            rightIcon="download"
-            onPress={() => {}}
-          />
+          {lesson.resources.map((resource) => (
+            <ListRow
+              key={resource.id}
+              title={resource.title}
+              subtitle={resource.subtitle}
+              leftIcon={resource.icon}
+              rightIcon="download"
+              onPress={() => {}}
+            />
+          ))}
         </View>
       </ScrollView>
     </View>

@@ -8,16 +8,36 @@ import { AppScreen } from '@/components/AppScreen';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { useAppStore } from '@/store/useAppStore';
+import { useConversations } from '@/hooks/useConversations';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function MessagesScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const conversations = useAppStore((state) => state.conversations);
+
+  // Conversaciones vía la capa de repositorio (mock hoy, backend mañana).
+  const { conversations, loading, error, reload } = useConversations();
 
   const [searchText, setSearchText] = useState('');
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="MENSAJES" rightIcon="edit" onRightPress={() => {}} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="MENSAJES" rightIcon="edit" onRightPress={() => {}} />
+        <StateView state="error" description={error} onRetry={reload} />
+      </View>
+    );
+  }
 
   const filteredConversations = conversations.filter((conv) =>
     conv.name.toLowerCase().includes(searchText.toLowerCase()) ||

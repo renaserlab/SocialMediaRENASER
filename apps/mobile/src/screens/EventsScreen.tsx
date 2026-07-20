@@ -6,8 +6,9 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { events } from '@/data/mockData';
+import { useEvents } from '@/hooks/useEvents';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -17,6 +18,36 @@ export function EventsScreen() {
   const router = useRouter();
   const reserved = useAppStore((state) => state.reservedEventIds);
   const toggle = useAppStore((state) => state.toggleReservation);
+
+  // Lista de eventos vía la capa de repositorio (mock hoy, backend mañana).
+  const { events, loading, error, reload } = useEvents();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Próximos eventos" onBack={() => router.back()} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Próximos eventos" onBack={() => router.back()} />
+        <StateView state="error" description={error} onRetry={reload} />
+      </View>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Próximos eventos" onBack={() => router.back()} />
+        <StateView state="empty" title="No hay eventos próximos" description="Vuelve a revisar más tarde." />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

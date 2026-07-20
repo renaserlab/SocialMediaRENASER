@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
+import { usePostsFeed } from '@/hooks/usePostsFeed';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -26,19 +27,12 @@ const stories = [
 export function HomeScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const posts = useAppStore((state) => state.posts);
   const user = useAppStore((state) => state.user);
 
-  const [feedTab, setFeedTab] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Datos del feed a través de la capa de repositorio (mock hoy, backend mañana).
+  const { posts, loading, error, reload } = usePostsFeed();
 
-  useEffect(() => {
-    // Simular carga de feed por 1.5s
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
+  const [feedTab, setFeedTab] = useState(0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -106,9 +100,10 @@ export function HomeScreen() {
             </Pressable>
           </View>
 
-          {/* Feed de posts real con simulación de Skeleton */}
+          {/* Feed de posts vía repositorio (loading / error / empty / content) */}
           <StateView
-            state={loading ? 'loading' : 'content'}
+            state={loading ? 'loading' : error ? 'error' : posts.length === 0 ? 'empty' : 'content'}
+            onRetry={reload}
             loadingComponent={
               <View style={styles.skeletonContainer}>
                 {[1, 2].map((i) => (

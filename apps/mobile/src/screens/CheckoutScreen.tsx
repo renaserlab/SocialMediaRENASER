@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -8,7 +8,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
-import { course } from '@/data/mockData';
+import { useCourse } from '@/hooks/useCourse';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -16,7 +16,11 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function CheckoutScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const purchase = useAppStore((state) => state.purchaseCourse);
+
+  // Curso a comprar vía la capa de repositorio (mock hoy, backend mañana).
+  const { course, loading, error: courseError, reload } = useCourse(id);
 
   const [coupon, setCoupon] = useState('');
   const [method, setMethod] = useState<'card' | 'store'>('card');
@@ -34,10 +38,29 @@ export function CheckoutScreen() {
   };
 
   const forceSuccess = () => {
+    if (!course) return;
     // Simulamos reintento exitoso
     purchase(course.id);
     router.replace('/confirmation');
   };
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Resumen de compra" onBack={() => router.back()} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (courseError || !course) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Resumen de compra" onBack={() => router.back()} />
+        <StateView state="error" description={courseError ?? undefined} onRetry={reload} />
+      </View>
+    );
+  }
 
   if (paymentState === 'processing') {
     return (

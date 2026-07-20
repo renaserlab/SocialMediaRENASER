@@ -1,11 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
-import { AppScreen } from '@/components/AppScreen';
 import { Input } from '@/components/Input';
+import { StateView } from '@/components/StateView';
+import { useConversation } from '@/hooks/useConversations';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -14,26 +15,11 @@ export function ChatScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
-  const conversations = useAppStore((state) => state.conversations);
   const sendMessage = useAppStore((state) => state.sendMessage);
 
-  // Buscar la conversación basada en id.
-  // También manejamos el caso especial de Darren Hardy ('darren').
-  const conversation = useMemo(() => {
-    let found = conversations.find((item) => item.id === params.id);
-    if (!found && params.id === 'darren') {
-      found = {
-        id: 'darren',
-        name: 'Darren Hardy',
-        subtitle: 'Mentor de líderes',
-        unread: 0,
-        messages: [
-          { id: 'd1', sender: 'them', text: '¡Hola! Qué gusto saludarte. ¿En qué puedo apoyarte hoy en tu camino de crecimiento?', createdAt: '10:00 AM' }
-        ]
-      };
-    }
-    return found;
-  }, [conversations, params.id]);
+  // Conversación vía la capa de repositorio; se lee del store (reactivo: los
+  // mensajes enviados aparecen al instante).
+  const { conversation, loading } = useConversation(params.id);
 
   const [text, setText] = useState('');
 
@@ -42,6 +28,15 @@ export function ChatScreen() {
     sendMessage(conversation.id, text);
     setText('');
   };
+
+  if (loading && !conversation) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Conversación" onBack={() => router.back()} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

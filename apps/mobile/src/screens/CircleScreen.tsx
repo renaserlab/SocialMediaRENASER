@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Card } from '@/components/Card';
 import { Input } from '@/components/Input';
+import { StateView } from '@/components/StateView';
 import { Tabs } from '@/components/Tabs';
 import { assets } from '@/data/assets';
-import { circle } from '@/data/mockData';
+import { useCircle } from '@/hooks/useCircle';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -21,8 +22,30 @@ const circlePosts = [
 export function CircleScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id: string }>();
+
+  // Círculo vía la capa de repositorio (mock hoy, backend mañana).
+  const { circle, loading, error, reload } = useCircle(id);
 
   const [activeTab, setActiveTab] = useState('Feed');
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => router.back()} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (error || !circle) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => router.back()} />
+        <StateView state="error" description={error ?? undefined} onRetry={reload} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
