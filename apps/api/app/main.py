@@ -24,6 +24,7 @@ from app.modules.moderation.router import router as moderation_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.social_graph.router import router as social_graph_router
+from app.modules.stories.router import router as stories_router
 
 settings = get_settings()
 logger = get_logger("renaser.api")
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(profiles_router, prefix=prefix)
     app.include_router(social_graph_router, prefix=prefix)
     app.include_router(content_router, prefix=prefix)
+    app.include_router(stories_router, prefix=prefix)
     app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
