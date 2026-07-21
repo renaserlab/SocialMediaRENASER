@@ -56,25 +56,36 @@ export function LessonScreen() {
             Lección {lesson.order}: {lesson.title}
           </Text>
           <Text style={[styles.duration, { color: colors.textMuted }]}>
-            Duración: {lesson.durationMin} min • Mentor: {lesson.mentor}
+            Duración: {lesson.durationMin} min
+            {lesson.mentor ? ` • Mentor: ${lesson.mentor}` : ''}
           </Text>
 
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          {/*
+            El backend aun no guarda transcripcion ni recursos por leccion. Se
+            ocultan las secciones vacias en vez de dejar la cabecera sola.
+          */}
+          {lesson.summary ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Transcripción / Resumen</Text>
+              <Text style={[styles.bodyText, { color: colors.text, lineHeight: 22 }]}>{lesson.summary}</Text>
+            </>
+          ) : null}
 
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Transcripción / Resumen</Text>
-          <Text style={[styles.bodyText, { color: colors.text, lineHeight: 22 }]}>{lesson.summary}</Text>
-
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recursos del Curso</Text>
-          {lesson.resources.map((resource) => (
-            <ListRow
-              key={resource.id}
-              title={resource.title}
-              subtitle={resource.subtitle}
-              leftIcon={resource.icon}
-            />
-          ))}
+          {lesson.resources.length > 0 ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Recursos del Curso</Text>
+              {lesson.resources.map((resource) => (
+                <ListRow
+                  key={resource.id}
+                  title={resource.title}
+                  subtitle={resource.subtitle}
+                  leftIcon={resource.icon}
+                />
+              ))}
+            </>
+          ) : null}
         </View>
       </ScrollView>
     </View>

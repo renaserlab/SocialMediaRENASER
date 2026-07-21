@@ -85,7 +85,7 @@ export function PostCard({ post, onDeleted }: Props) {
 
   const sharePost = () => {
     Share.share({
-      message: `"${post.body}" — ${post.author} en RENASER Universo.`,
+      message: `"${post.body}" — ${post.author} en Renaser Social Media.`,
     }).catch(() => {
       // El usuario cancelo, o el navegador no expone navigator.share.
     });

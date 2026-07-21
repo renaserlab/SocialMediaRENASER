@@ -59,7 +59,7 @@ export function AudioScreen() {
 
   const onShare = () => {
     Share.share({
-      message: 'Escucha "Tu enfoque de esta semana" en RENASER Universo.',
+      message: 'Escucha "Tu enfoque de esta semana" en Renaser Social Media.',
     }).catch(() => {});
   };
 

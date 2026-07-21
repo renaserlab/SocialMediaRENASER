@@ -11,6 +11,14 @@ class LessonRead(BaseModel):
     completed: bool = False
 
 
+class LessonDetailRead(LessonRead):
+    """Una leccion con su contexto, para abrirla por su propio id."""
+
+    course_id: str
+    course_title: str
+    module_title: str
+
+
 class ModuleRead(BaseModel):
     id: str
     title: str

@@ -15,6 +15,7 @@ from app.modules.learning.models import (
 )
 from app.modules.learning.schemas import (
     CourseDetailRead,
+    LessonDetailRead,
     LessonRead,
     ModuleRead,
 )
@@ -145,6 +146,48 @@ async def enroll_course(
         )
         await db.commit()
     return {"enrolled": True}
+
+
+@router.get("/lessons/{lesson_id}", response_model=LessonDetailRead)
+async def get_lesson_detail(
+    lesson_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> LessonDetailRead:
+    """Una leccion por su id.
+
+    La app abre `/lesson/<id>` sin conocer el curso, asi que aqui se resuelve
+    el contexto (modulo y curso) con un solo join.
+    """
+    row = (
+        await db.execute(
+            select(CourseLesson, CourseModule, Course)
+            .join(CourseModule, CourseModule.id == CourseLesson.module_id)
+            .join(Course, Course.id == CourseModule.course_id)
+            .where(CourseLesson.id == lesson_id)
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError("Lección no encontrada.")
+    lesson, module, course = row
+
+    completed = False
+    if current_user:
+        progress = await db.get(
+            LessonProgress, {"user_id": current_user.id, "lesson_id": lesson_id}
+        )
+        completed = bool(progress and progress.completed)
+
+    return LessonDetailRead(
+        id=lesson.id,
+        title=lesson.title,
+        duration_seconds=lesson.duration_seconds,
+        sort_order=lesson.sort_order,
+        completed=completed,
+        course_id=course.id,
+        course_title=course.title,
+        module_title=module.title,
+    )
 
 
 @router.post("/lessons/{lesson_id}/complete")

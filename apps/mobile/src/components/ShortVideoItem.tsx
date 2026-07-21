@@ -35,7 +35,7 @@ export function ShortVideoItem({ short, active, height }: Props) {
   };
 
   const onShare = () => {
-    Share.share({ message: `Mira este short de ${short.author} en RENASER Universo.` }).catch(() => {});
+    Share.share({ message: `Mira este short de ${short.author} en Renaser Social Media.` }).catch(() => {});
   };
 
   return (

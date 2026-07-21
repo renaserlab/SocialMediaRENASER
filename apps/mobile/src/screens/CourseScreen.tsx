@@ -19,8 +19,10 @@ export function CourseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // Curso a través de la capa de repositorio (mock hoy, backend mañana).
-  const { course, loading, error, reload } = useCourse(id);
+  const { course, lessons, loading, error, reload } = useCourse(id);
   const purchasedIds = useAppStore((state) => state.purchasedCourseIds);
+  // Primera leccion sin completar; si estan todas, la primera del curso.
+  const firstLessonId = (lessons.find((l) => !l.completed) ?? lessons[0])?.id;
 
   if (loading) {
     return (
@@ -69,7 +71,14 @@ export function CourseScreen() {
 
           <Button
             label={purchased ? 'Ir al curso' : 'Comprar ahora'}
-            onPress={() => purchased ? router.push('/lesson/1' as any) : router.push(`/checkout/${course.id}` as any)}
+            // Antes abria siempre '/lesson/1', un id de demo: con datos reales
+            // llevaba a una leccion inexistente. Ahora va a la primera del curso.
+            disabled={purchased && !firstLessonId}
+            onPress={() =>
+              purchased
+                ? firstLessonId && router.push(`/lesson/${firstLessonId}` as never)
+                : router.push(`/checkout/${course.id}` as never)
+            }
             style={{ marginTop: spacing.xl }}
           />
         </View>
