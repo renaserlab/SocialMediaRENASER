@@ -21,6 +21,8 @@ export type PickedMedia = {
   kind: MediaKind;
   mimeType?: string | null;
   name?: string | null;
+  /** Duracion en ms cuando el medio es un video (la informa el selector). */
+  durationMs?: number | null;
 };
 
 /** Medio ya subido a Storage, listo para enviar al backend. */
@@ -81,7 +83,7 @@ export async function takePhoto(aspect?: [number, number]): Promise<PickedMedia 
 }
 
 /** Abre la galería y devuelve el video elegido (o null si se cancela). */
-export async function pickVideo(): Promise<PickedMedia | null> {
+export async function pickVideo(maxDurationSec = 180): Promise<PickedMedia | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -89,12 +91,20 @@ export async function pickVideo(): Promise<PickedMedia | null> {
     // Reduce el peso en origen: los videos de galeria pasan de 100 MB con
     // facilidad y en iOS se reexportan a 720p antes de subirlos.
     videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
-    videoMaxDuration: 180,
+    // OJO: solo limita la grabacion con camara. Al elegir de la galeria hay que
+    // comprobar `durationMs` en quien llama.
+    videoMaxDuration: maxDurationSec,
   });
   if (result.canceled) return null;
   const asset = result.assets[0];
   if (!asset) return null;
-  return { uri: asset.uri, kind: 'video', mimeType: asset.mimeType, name: asset.fileName };
+  return {
+    uri: asset.uri,
+    kind: 'video',
+    mimeType: asset.mimeType,
+    name: asset.fileName,
+    durationMs: asset.duration ?? null,
+  };
 }
 
 /** Abre el selector de archivos para elegir un audio. */
