@@ -16,6 +16,7 @@ Validacion hibrida segun el algoritmo del token:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 import jwt
@@ -92,7 +93,15 @@ def _decode_token(token: str, settings: Settings) -> dict[str, Any]:
     alg = header.get("alg", "")
     key = _resolve_key(token, alg, settings)
 
-    decode_kwargs: dict[str, Any] = {"algorithms": [alg] if alg else ["ES256", "RS256", "HS256"]}
+    # Tolerancia de reloj. Sin ella (PyJWT usa 0 por defecto) un token recien
+    # emitido por Supabase puede tener `iat`/`nbf` unos milisegundos por delante
+    # del reloj de este servidor y se rechaza con 401: justo despues de iniciar
+    # sesion la primera peticion fallaba y el perfil no se cargaba hasta
+    # recargar la app.
+    decode_kwargs: dict[str, Any] = {
+        "algorithms": [alg] if alg else ["ES256", "RS256", "HS256"],
+        "leeway": timedelta(seconds=60),
+    }
     if settings.supabase_jwt_audience:
         decode_kwargs["audience"] = settings.supabase_jwt_audience
     else:
