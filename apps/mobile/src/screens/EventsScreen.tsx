@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { notify } from '@/lib/notify';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';

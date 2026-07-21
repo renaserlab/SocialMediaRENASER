@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { notify } from '@/lib/notify';
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';

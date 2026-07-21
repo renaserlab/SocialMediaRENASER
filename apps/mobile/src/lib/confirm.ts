@@ -39,3 +39,17 @@ export function confirm({
     ]);
   });
 }
+
+/**
+ * Aviso simple multiplataforma. Mismo motivo que `confirm`: en web
+ * `Alert.alert` no hace nada, por lo que los errores se perdian en silencio.
+ */
+export function notify(title: string, message?: string): void {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') {
+      window.alert(message ? `${title}\n\n${message}` : title);
+    }
+    return;
+  }
+  Alert.alert(title, message);
+}

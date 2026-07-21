@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { notify } from '@/lib/notify';
 import { haptics } from '@/lib/haptics';
 import { Feather } from '@expo/vector-icons';
 
