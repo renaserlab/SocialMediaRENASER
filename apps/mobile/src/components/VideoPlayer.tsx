@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -19,6 +19,7 @@ export function VideoPlayer({
   muted = false,
   contentFit = 'cover',
   nativeControls = true,
+  active,
 }: VideoPlayerProps) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = loop;
@@ -29,6 +30,17 @@ export function VideoPlayer({
   });
 
   const [started, setStarted] = useState(autoPlay);
+
+  // Reproducción por viewport: play/pausa según `active` (feeds tipo reels).
+  useEffect(() => {
+    if (active === undefined) return;
+    if (active) {
+      setStarted(true);
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [active, player]);
 
   const start = () => {
     setStarted(true);

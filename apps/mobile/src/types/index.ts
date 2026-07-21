@@ -107,3 +107,45 @@ export type Lesson = {
   summary: string;
   resources: LessonResource[];
 };
+
+/** Un tramo de una historia (imagen a pantalla completa con texto opcional). */
+export type StorySegment = {
+  id: string;
+  /** Clave de `data/assets` con la imagen del tramo. */
+  image: string;
+  caption?: string;
+};
+
+/** Historia de un autor: se ve como una secuencia de tramos. */
+export type Story = {
+  id: string;
+  author: string;
+  /** Clave de `data/assets` con el avatar del autor. */
+  avatar: string;
+  segments: StorySegment[];
+};
+
+/** Persona en listas sociales (seguidores / siguiendo / resultados). */
+export type Person = {
+  id: string;
+  fullName: string;
+  username: string;
+  /** Clave de `data/assets` con el avatar. */
+  avatar: string;
+  bio?: string;
+};
+
+/** Item del feed vertical de shorts (reels). */
+export type Short = {
+  id: string;
+  author: string;
+  /** Clave de `data/assets` con el avatar del autor. */
+  avatar: string;
+  caption: string;
+  /** URL del video. */
+  uri: string;
+  /** Clave de `data/assets` usada como póster. */
+  poster: string;
+  likes: number;
+  comments: number;
+};

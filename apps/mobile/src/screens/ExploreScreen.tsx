@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -26,6 +26,13 @@ export function ExploreScreen() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ProfileSummary[]>([]);
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await new Promise((r) => setTimeout(r, 700));
+    setRefreshing(false);
+  }, []);
 
   const term = query.trim();
   const isSearching = term.length >= 2;
@@ -57,8 +64,15 @@ export function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="EXPLORAR" />
-      <AppScreen contentStyle={{ paddingBottom: 100 }}>
+      <AppHeader title="EXPLORAR" rightIcon="search" onRightPress={() => router.push('/search' as never)} />
+      <AppScreen
+        contentStyle={{ paddingBottom: 100 }}
+        scrollProps={{
+          refreshControl: (
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
+          ),
+        }}
+      >
         <View style={styles.container}>
           {/* Campo de búsqueda */}
           <View style={styles.searchWrapper}>
@@ -124,6 +138,17 @@ export function ExploreScreen() {
               <Text style={styles.heroBody}>{course.modules} módulos · {course.lessons} lecciones</Text>
             </View>
           </Pressable>
+
+          <SectionTitle title="Shorts" action="Ver todos" onActionPress={() => router.push('/reels' as never)} />
+          <View style={styles.list}>
+            <ListRow
+              title="Shorts de la comunidad"
+              subtitle="Videos cortos para avanzar en minutos"
+              leftIcon="play-circle"
+              rightIcon="chevron-right"
+              onPress={() => router.push('/reels' as never)}
+            />
+          </View>
 
           <SectionTitle title="Próximos eventos" action="Ver calendario" onActionPress={() => router.push('/events')} />
           <View style={styles.list}>

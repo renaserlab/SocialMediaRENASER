@@ -52,12 +52,26 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: 'Social (nuevas)',
+    items: [
+      { label: 'Historias (visor)', href: '/stories/0' },
+      { label: 'Reels (feed vertical)', href: '/reels' },
+      { label: 'Detalle de publicación', href: '/post/post-1' },
+      { label: 'Seguidores', href: '/followers/me' },
+      { label: 'Siguiendo', href: '/following/me' },
+      { label: 'Búsqueda', href: '/search' },
+      { label: 'Guardados', href: '/saved' },
+    ],
+  },
+  {
     title: 'Otras',
     items: [
       { label: 'Eventos', href: '/events' },
       { label: 'Biblioteca', href: '/library' },
       { label: 'Notificaciones', href: '/notifications' },
       { label: 'Ajustes', href: '/settings' },
+      { label: 'Editar perfil', href: '/edit-profile' },
+      { label: 'Login', href: '/login' },
     ],
   },
 ];
