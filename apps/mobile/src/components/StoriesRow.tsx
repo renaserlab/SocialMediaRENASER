@@ -112,7 +112,15 @@ export function StoriesRow() {
           <View>
             <Ring seen={own?.seen ?? true} hasStory={!!own}>
               <ExpoImage
-                source={user?.avatarUrl ? { uri: user.avatarUrl } : assets.avatar}
+                // Tu foto local (edicion de perfil) tiene prioridad; si no, la
+                // del backend; y en ultimo caso el placeholder.
+                source={
+                  user?.avatarUrl
+                    ? { uri: user.avatarUrl }
+                    : own?.avatarUrl
+                    ? { uri: own.avatarUrl }
+                    : assets.avatar
+                }
                 style={styles.avatar}
                 contentFit="cover"
               />
@@ -208,7 +216,11 @@ function Bubble({ group, onPress }: { group: StoryGroup; onPress: () => void }) 
       style={({ pressed }) => [styles.item, { opacity: pressed ? 0.8 : 1 }]}
     >
       <Ring seen={group.seen} hasStory>
-        <ExpoImage source={assets.avatar} style={styles.avatar} contentFit="cover" />
+        <ExpoImage
+          source={group.avatarUrl ? { uri: group.avatarUrl } : assets.avatar}
+          style={styles.avatar}
+          contentFit="cover"
+        />
       </Ring>
       <Text numberOfLines={1} style={styles.label} color={colors.text}>
         {group.author}

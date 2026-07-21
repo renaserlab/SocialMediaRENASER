@@ -136,6 +136,8 @@ export type StoryGroup = {
   author: string;
   username: string;
   avatarPath?: string;
+  /** URL publica del avatar del autor; sin valor se usa el placeholder. */
+  avatarUrl?: string;
   items: StoryItem[];
   /** false si queda algun tramo sin ver: es lo que decide el anillo. */
   seen: boolean;

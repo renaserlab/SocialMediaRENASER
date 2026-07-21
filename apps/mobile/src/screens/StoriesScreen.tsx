@@ -272,7 +272,11 @@ export function StoriesScreen() {
         </View>
 
         <View style={styles.header}>
-          <ExpoImage source={assets.avatar} style={styles.avatar} contentFit="cover" />
+          <ExpoImage
+            source={group.avatarUrl ? { uri: group.avatarUrl } : assets.avatar}
+            style={styles.avatar}
+            contentFit="cover"
+          />
           <Text style={[styles.author, { color: media.text }]} numberOfLines={1}>
             {group.author}
           </Text>

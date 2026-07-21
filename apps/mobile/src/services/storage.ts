@@ -11,9 +11,22 @@ import { uploadResumable } from '@/services/resumableUpload';
 import { supabase, supabaseUrl } from '@/services/supabase';
 
 const BUCKET = 'post-media';
+const AVATAR_BUCKET = 'avatars';
 const SIGNED_URL_TTL = 60 * 60; // 1 hora
 
 export type MediaKind = 'image' | 'video' | 'audio';
+
+/**
+ * URL publica del avatar de un perfil (o null si no tiene).
+ *
+ * El bucket `avatars` es publico (ver 0001_initial.sql), asi que no hace falta
+ * firmar: se construye la URL directa, sin round-trip. Devuelve null cuando el
+ * perfil aun no ha subido foto, para que quien llama use el placeholder.
+ */
+export function avatarPublicUrl(path: string | null | undefined): string | null {
+  if (!path || !supabase) return null;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+}
 
 /** Medio elegido por el usuario, antes de subirlo. */
 export type PickedMedia = {
