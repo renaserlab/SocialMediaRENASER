@@ -2,14 +2,19 @@ import React, { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import type { ImagePickerAsset } from 'expo-image-picker';
-
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
-import { pickImage, uploadPostImage } from '@/services/storage';
+import { VideoPlayer } from '@/components/VideoPlayer';
+import {
+  pickAudio,
+  pickImage,
+  pickVideo,
+  uploadPostMedia,
+  type PickedMedia,
+} from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -25,19 +30,28 @@ export function CreatePostScreen() {
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const [text, setText] = useState('');
   const [prompt, setPrompt] = useState(prompts[0]!);
-  const [image, setImage] = useState<ImagePickerAsset | null>(null);
+  const [media, setMedia] = useState<PickedMedia | null>(null);
   const [publishing, setPublishing] = useState(false);
 
-  const chooseImage = async () => {
+  /** Elige un medio (imagen, video o audio) y lo deja listo para publicar. */
+  const choose = async (kind: 'image' | 'video' | 'audio') => {
     if (!supabaseEnabled) {
-      Alert.alert('Imágenes', 'Conecta Supabase para adjuntar imágenes a tus publicaciones.');
+      Alert.alert(
+        'Adjuntos',
+        'Conecta Supabase para adjuntar imágenes, videos o audios a tus publicaciones.',
+      );
       return;
     }
     try {
-      const asset = await pickImage();
-      if (asset) setImage(asset);
+      const picked =
+        kind === 'image'
+          ? await pickImage()
+          : kind === 'video'
+          ? await pickVideo()
+          : await pickAudio();
+      if (picked) setMedia(picked);
     } catch {
-      Alert.alert('No se pudo abrir la galería', 'Revisa los permisos e inténtalo de nuevo.');
+      Alert.alert('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
@@ -48,13 +62,10 @@ export function CreatePostScreen() {
     }
     setPublishing(true);
     try {
-      let imagePaths: string[] = [];
-      if (image && supabaseEnabled) {
-        imagePaths = [await uploadPostImage(image)];
-      }
-      await createPost(text, imagePaths);
+      const uploaded = media && supabaseEnabled ? [await uploadPostMedia(media)] : [];
+      await createPost(text, uploaded);
       setText('');
-      setImage(null);
+      setMedia(null);
       // `navigate` conmuta de pestaña conservando el historial; `replace` lo
       // sustituía y el gesto atrás de Android podía cerrar la app.
       router.navigate('/(tabs)/home');
@@ -107,28 +118,70 @@ export function CreatePostScreen() {
             <View style={styles.editorFooter}>
               <View style={styles.mediaRow}>
                 <Pressable
-                  onPress={chooseImage}
+                  onPress={() => choose('image')}
                   accessibilityRole="button"
                   accessibilityLabel="Adjuntar imagen"
                   hitSlop={8}
                 >
-                  <Feather name="image" size={20} color={image ? colors.primary : colors.textMuted} />
+                  <Feather
+                    name="image"
+                    size={20}
+                    color={media?.kind === 'image' ? colors.primary : colors.textMuted}
+                  />
                 </Pressable>
-                <Feather name="video" size={20} color={colors.textMuted} />
-                <Feather name="mic" size={20} color={colors.textMuted} />
+                <Pressable
+                  onPress={() => choose('video')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Adjuntar video"
+                  hitSlop={8}
+                >
+                  <Feather
+                    name="video"
+                    size={20}
+                    color={media?.kind === 'video' ? colors.primary : colors.textMuted}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => choose('audio')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Adjuntar audio"
+                  hitSlop={8}
+                >
+                  <Feather
+                    name="mic"
+                    size={20}
+                    color={media?.kind === 'audio' ? colors.primary : colors.textMuted}
+                  />
+                </Pressable>
               </View>
               <Text style={[styles.counter, { color: colors.textMuted }]}>{text.length}/700</Text>
             </View>
           </View>
 
-          {image && (
+          {media && (
             <View style={styles.previewWrap}>
-              <Image source={{ uri: image.uri }} style={styles.preview} resizeMode="cover" />
+              {media.kind === 'image' ? (
+                <Image source={{ uri: media.uri }} style={styles.preview} resizeMode="cover" />
+              ) : media.kind === 'video' ? (
+                <VideoPlayer uri={media.uri} style={styles.preview} nativeControls muted />
+              ) : (
+                <View
+                  style={[
+                    styles.audioPreview,
+                    { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+                  ]}
+                >
+                  <Feather name="music" size={22} color={colors.text} />
+                  <Text numberOfLines={1} style={[styles.audioName, { color: colors.text }]}>
+                    {media.name ?? 'Audio seleccionado'}
+                  </Text>
+                </View>
+              )}
               <Pressable
-                onPress={() => setImage(null)}
+                onPress={() => setMedia(null)}
                 style={styles.removeBtn}
                 accessibilityRole="button"
-                accessibilityLabel="Quitar imagen"
+                accessibilityLabel="Quitar adjunto"
                 hitSlop={8}
               >
                 <Feather name="x" size={16} color="#FFFFFF" />
@@ -155,7 +208,17 @@ const styles = StyleSheet.create({
   mediaRow: { flexDirection: 'row', gap: spacing.lg },
   counter: { fontSize: 11 },
   previewWrap: { position: 'relative', marginBottom: spacing.lg },
-  preview: { width: '100%', height: 200, borderRadius: radius.lg },
+  preview: { width: '100%', height: 200, borderRadius: radius.lg, overflow: 'hidden' },
+  audioPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    minHeight: 72,
+  },
+  audioName: { flex: 1, fontSize: 13, fontWeight: '600' },
   removeBtn: {
     position: 'absolute',
     top: spacing.sm,

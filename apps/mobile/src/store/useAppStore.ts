@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { conversations, initialPosts } from '@/data/mockData';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
+import type { UploadedMedia } from '@/services/storage';
 import { Conversation, Post, QuizArea, ThemeMode, UserProfile } from '@/types';
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
@@ -48,7 +49,7 @@ type AppState = {
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
   finishQuiz: () => QuizArea;
-  createPost: (body: string, imagePaths?: string[]) => Promise<void>;
+  createPost: (body: string, media?: UploadedMedia[]) => Promise<void>;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
@@ -135,13 +136,13 @@ export const useAppStore = create<AppState>()(
         set({ quizResult: result });
         return result;
       },
-      createPost: async (body, imagePaths = []) => {
+      createPost: async (body, media = []) => {
         const trimmed = body.trim();
         if (!trimmed) return;
 
         if (backendEnabled) {
           const uid = get().user?.id ?? null;
-          const post = await PostRepository.createPost(trimmed, imagePaths, uid);
+          const post = await PostRepository.createPost(trimmed, media, uid);
           set((state) => ({
             posts: [post, ...state.posts],
             user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,

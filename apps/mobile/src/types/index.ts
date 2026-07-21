@@ -37,8 +37,10 @@ export type Post = {
   body: string;
   createdAt: string;
   imageKey?: 'hero' | 'speaker' | 'event' | 'circle';
-  /** URL firmada de la imagen remota (Supabase Storage). */
-  imageUrl?: string;
+  /** URL firmada del medio remoto (Supabase Storage). */
+  mediaUrl?: string;
+  /** Tipo del medio remoto: imagen, video o audio. */
+  mediaType?: 'image' | 'video' | 'audio';
   likes: number;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */

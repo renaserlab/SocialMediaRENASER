@@ -177,18 +177,24 @@ async def create_post(
     await db.commit()
     await db.refresh(post)
 
+    # Medios con tipo explícito + compatibilidad con image_paths (sin tipo).
+    entries: list[tuple[str, str]] = [
+        (item.storage_path, item.media_type) for item in payload.media
+    ]
+    entries += [(path, "image") for path in payload.image_paths]
+
     media: list[PostMediaRead] = []
-    for index, path in enumerate(payload.image_paths):
+    for index, (path, media_type) in enumerate(entries):
         db.add(
             PostMedia(
                 post_id=post.id,
                 storage_path=path,
-                media_type="image",
+                media_type=media_type,
                 sort_order=index,
             )
         )
         media.append(
-            PostMediaRead(storage_path=path, media_type="image", sort_order=index)
+            PostMediaRead(storage_path=path, media_type=media_type, sort_order=index)
         )
     if media:
         await db.commit()

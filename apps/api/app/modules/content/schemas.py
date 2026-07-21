@@ -18,11 +18,20 @@ class PostMediaRead(BaseModel):
     sort_order: int = 0
 
 
+class PostMediaInput(BaseModel):
+    """Medio ya subido a Storage por el cliente (bucket post-media)."""
+
+    storage_path: str = Field(min_length=1, max_length=500)
+    media_type: str = Field(pattern=r"^(image|video|audio|document)$")
+
+
 class PostCreate(BaseModel):
     # OJO: sin author_id. El autor se toma del JWT (current_user.id).
     body: str = Field(min_length=1, max_length=3000)
     visibility: str = Field(default="public", pattern=r"^(public|followers|circle)$")
-    # Rutas de Storage (bucket post-media) ya subidas por el cliente.
+    # Medios (imagen/video/audio) ya subidos a Storage.
+    media: list[PostMediaInput] = Field(default_factory=list, max_length=4)
+    # Compatibilidad: rutas de imagen sin tipo explícito.
     image_paths: list[str] = Field(default_factory=list, max_length=4)
 
 

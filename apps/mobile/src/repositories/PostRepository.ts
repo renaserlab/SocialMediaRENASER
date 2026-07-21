@@ -1,6 +1,6 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
-import { signImageUrls } from '@/services/storage';
+import { signMediaUrls, type UploadedMedia } from '@/services/storage';
 import type { Comment, Post } from '@/types';
 
 export type FeedPage = {
@@ -9,17 +9,23 @@ export type FeedPage = {
   savedIds: string[];
 };
 
-/** Firma la primera imagen de cada post y la asigna a item.imageUrl. */
-async function attachImageUrls(items: Post[], dtos: PostDto[]): Promise<void> {
+/**
+ * Firma el primer medio de cada post y lo asigna a item.mediaUrl/mediaType
+ * (sirve para imagen, video y audio).
+ */
+async function attachMediaUrls(items: Post[], dtos: PostDto[]): Promise<void> {
   const paths = dtos
     .map((d) => d.media[0]?.storage_path)
     .filter((p): p is string => Boolean(p));
   if (paths.length === 0) return;
-  const urls = await signImageUrls(paths);
+  const urls = await signMediaUrls(paths);
   dtos.forEach((dto, i) => {
-    const path = dto.media[0]?.storage_path;
+    const first = dto.media[0];
     const item = items[i];
-    if (path && item && urls[path]) item.imageUrl = urls[path];
+    if (first && item && urls[first.storage_path]) {
+      item.mediaUrl = urls[first.storage_path];
+      item.mediaType = first.media_type as Post['mediaType'];
+    }
   });
 }
 
@@ -36,7 +42,7 @@ export const PostRepository = {
       `${API_V1}/posts?limit=${limit}&offset=${offset}`,
     );
     const items = dtos.map((dto) => toPost(dto, currentUserId));
-    await attachImageUrls(items, dtos);
+    await attachMediaUrls(items, dtos);
     return {
       items,
       likedIds: dtos.filter((d) => d.liked_by_me).map((d) => d.id),
@@ -46,15 +52,21 @@ export const PostRepository = {
 
   async createPost(
     body: string,
-    imagePaths: string[] = [],
+    media: UploadedMedia[] = [],
     currentUserId?: string | null,
   ): Promise<Post> {
     const dto = await apiRequest<PostDto>(`${API_V1}/posts`, {
       method: 'POST',
-      body: JSON.stringify({ body, image_paths: imagePaths }),
+      body: JSON.stringify({
+        body,
+        media: media.map((m) => ({
+          storage_path: m.storagePath,
+          media_type: m.mediaType,
+        })),
+      }),
     });
     const post = toPost(dto, currentUserId);
-    await attachImageUrls([post], [dto]);
+    await attachMediaUrls([post], [dto]);
     return post;
   },
 

@@ -4,8 +4,10 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AudioPlayer } from '@/components/AudioPlayer';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { Text } from '@/components/Text';
+import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
 import { ReportRepository } from '@/repositories/ReportRepository';
@@ -101,13 +103,17 @@ export function PostCard({ post }: { post: Post }) {
       </View>
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
-      {post.imageUrl || post.imageKey ? (
+      {post.mediaType === 'video' && post.mediaUrl ? (
+        <VideoPlayer uri={post.mediaUrl} style={styles.image} nativeControls />
+      ) : post.mediaType === 'audio' && post.mediaUrl ? (
+        <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
+      ) : post.mediaUrl || post.imageKey ? (
         <DoubleTapLike
           onDoubleTap={() => { if (!liked) toggleLike(post.id); }}
           onSingleTap={() => router.push(`/post/${post.id}` as never)}
         >
           <ExpoImage
-            source={post.imageUrl ? { uri: post.imageUrl } : assets[post.imageKey!]}
+            source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
             contentFit="cover"
             transition={150}
             style={styles.image}
