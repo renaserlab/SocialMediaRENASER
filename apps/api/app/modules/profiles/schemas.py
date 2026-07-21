@@ -12,6 +12,7 @@ class ProfileRead(BaseModel):
     username: str | None = None
     bio: str = ""
     avatar_path: str | None = None
+    cover_path: str | None = None
     role: str = "user"
     is_private: bool = False
     created_at: datetime
@@ -45,5 +46,8 @@ class ProfileUpdate(BaseModel):
         default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$"
     )
     bio: str | None = Field(default=None, max_length=600)
+    # Cadena vacia = quitar la foto (a null). Es lo que distingue "no tocar este
+    # campo" (ausente/None) de "borrar la imagen".
     avatar_path: str | None = Field(default=None, max_length=500)
+    cover_path: str | None = Field(default=None, max_length=500)
     is_private: bool | None = None

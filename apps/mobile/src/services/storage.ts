@@ -291,6 +291,63 @@ export async function uploadPostMedia(
   return { storagePath: path, mediaType: media.kind };
 }
 
+// --------------------------------------------------------------------------
+// Fotos de perfil y portada
+// --------------------------------------------------------------------------
+
+const AVATARS_BUCKET = 'avatars';
+
+/**
+ * Sube la foto de perfil o portada al bucket `avatars` y devuelve su RUTA.
+ *
+ * Se guarda la ruta (no la URL) porque es lo que persiste el backend: asi el
+ * bucket puede pasar a privado sin reescribir la base de datos. La carpeta debe
+ * empezar por el uid, que es lo que exige la politica RLS.
+ */
+export async function uploadProfileImage(
+  kind: 'avatar' | 'cover',
+  media: PickedMedia,
+): Promise<string> {
+  if (!supabase) throw new Error('Almacenamiento no disponible.');
+  const { data } = await supabase.auth.getSession();
+  const uid = data.session?.user?.id;
+  if (!uid) throw new Error('Inicia sesión para cambiar tus fotos.');
+
+  // Una foto de perfil no necesita la resolucion original de la camara.
+  let uri = media.uri;
+  if (compressionAvailable) {
+    try {
+      uri = await compressImage(media.uri);
+    } catch {
+      uri = media.uri;
+    }
+  }
+
+  const ext = resolveExtension({ ...media, uri, name: null });
+  const path = `${uid}/${kind}-${randomName(ext)}`;
+
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error('No se pudo leer la imagen seleccionada.');
+  const blob = await response.blob();
+  if (blob.size === 0) throw new Error('La imagen seleccionada está vacía.');
+
+  const { error } = await supabase.storage
+    .from(AVATARS_BUCKET)
+    .upload(path, blob, { contentType: resolveContentType(media, ext), upsert: false });
+  if (error) throw new Error(describeStorageError(error));
+  return path;
+}
+
+/**
+ * URL publica de una ruta del bucket `avatars`. Es un bucket publico, asi que
+ * no hace falta firmar y la URL no caduca (importante: la foto de perfil se
+ * muestra en cada tarjeta del feed).
+ */
+export function profileImageUrl(path: string | null | undefined): string | undefined {
+  if (!supabase || !path) return undefined;
+  return supabase.storage.from(AVATARS_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
 /** Firma en lote rutas de post-media para poder mostrarlas (bucket privado). */
 export async function signMediaUrls(
   paths: string[],

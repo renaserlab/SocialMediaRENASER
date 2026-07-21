@@ -3,6 +3,7 @@ import {
   ProfileDto,
   ProfileSummary,
   ProfileSummaryDto,
+  ProfileUpdatePatch,
   toProfileSummary,
   toProfileUpdatePayload,
   toUserProfile,
@@ -19,9 +20,7 @@ export const ProfileRepository = {
     return toUserProfile(dto);
   },
 
-  async updateMyProfile(
-    patch: Partial<Pick<UserProfile, 'fullName' | 'username' | 'bio'>>,
-  ): Promise<UserProfile> {
+  async updateMyProfile(patch: ProfileUpdatePatch): Promise<UserProfile> {
     const dto = await apiRequest<ProfileDto>(`${API_V1}/profiles/me`, {
       method: 'PATCH',
       body: JSON.stringify(toProfileUpdatePayload(patch)),

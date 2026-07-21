@@ -5,7 +5,8 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { conversations, initialPosts } from '@/data/mockData';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
-import type { UploadedMedia } from '@/services/storage';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
 import { Conversation, Post, QuizArea, ThemeMode, UserProfile } from '@/types';
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
@@ -51,8 +52,8 @@ type AppState = {
   finishQuiz: () => QuizArea;
   createPost: (body: string, media?: UploadedMedia[]) => Promise<void>;
   deletePost: (postId: string) => Promise<void>;
-  /** `uri` a null quita la foto y devuelve la imagen por defecto. */
-  setProfileImage: (kind: 'avatar' | 'cover', uri: string | null) => void;
+  /** `media` a null quita la foto y devuelve la imagen por defecto. */
+  setProfileImage: (kind: 'avatar' | 'cover', media: PickedMedia | null) => Promise<void>;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
@@ -199,13 +200,32 @@ export const useAppStore = create<AppState>()(
           throw error;
         }
       },
-      setProfileImage: (kind, uri) =>
-        set((state) => {
-          const base = state.user ?? defaultUser;
-          return {
-            user: { ...base, [kind === 'avatar' ? 'avatarUrl' : 'coverUrl']: uri ?? undefined },
-          };
-        }),
+      setProfileImage: async (kind, media) => {
+        const field = kind === 'avatar' ? 'avatarUrl' : 'coverUrl';
+        const previous = get().user;
+        // Sin perfil cargado no se inventa uno: antes caia a `defaultUser` y el
+        // usuario terminaba con la identidad del demo.
+        if (!previous) return;
+
+        // Optimista: la foto aparece al instante mientras sube de fondo.
+        set({ user: { ...previous, [field]: media?.uri } });
+
+        // Modo demo sin backend: se queda en local, que es lo unico que hay.
+        if (!backendEnabled) return;
+
+        try {
+          const path = media ? await uploadProfileImage(kind, media) : null;
+          const updated = await ProfileRepository.updateMyProfile(
+            kind === 'avatar' ? { avatarPath: path } : { coverPath: path },
+          );
+          // La respuesta trae ya la URL publica y persistente del bucket, que
+          // sustituye al uri local (temporal, y en web invalido tras recargar).
+          set({ user: updated });
+        } catch (error) {
+          set({ user: previous });
+          throw error;
+        }
+      },
       toggleLikePost: (postId) => {
         const wasLiked = get().likedPostIds.includes(postId);
         // Actualización optimista.

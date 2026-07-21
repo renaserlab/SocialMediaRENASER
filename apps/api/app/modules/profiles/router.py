@@ -62,6 +62,7 @@ def _to_profile_read(profile: Profile, fc: int, gc: int, pc: int, isf: int) -> P
         username=profile.username,
         bio=profile.bio,
         avatar_path=profile.avatar_path,
+        cover_path=profile.cover_path,
         role=profile.role,
         is_private=profile.is_private,
         created_at=profile.created_at,
@@ -107,6 +108,11 @@ async def update_my_profile(
     if profile is None:
         raise NotFoundError("Perfil no encontrado para el usuario actual.")
     for field, value in payload.model_dump(exclude_unset=True).items():
+        # `exclude_unset` ya distingue "no enviado" de "enviado". Para las
+        # imagenes hace falta un valor que signifique "quitar": la cadena vacia
+        # se guarda como NULL para volver a la imagen por defecto.
+        if field in {"avatar_path", "cover_path"} and value == "":
+            value = None
         setattr(profile, field, value)
     await db.commit()
     return await _load_profile(db, current_user.id, viewer_id=None)

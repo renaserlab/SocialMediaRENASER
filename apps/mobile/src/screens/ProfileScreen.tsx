@@ -107,19 +107,29 @@ export function ProfileScreen() {
     try {
       const picked = source === 'gallery' ? await pickImage(aspect) : await takePhoto(aspect);
       if (!picked) return;
-      setProfileImage(kind, picked.uri);
-    } catch {
+      await setProfileImage(kind, picked);
+    } catch (error) {
       notify(
-        source === 'gallery' ? 'No se pudo abrir la galería' : 'No se pudo abrir la cámara',
-        'Revisa los permisos e inténtalo de nuevo.',
+        'No se pudo cambiar la foto',
+        error instanceof Error
+          ? error.message
+          : 'Revisa los permisos e inténtalo de nuevo.',
       );
     }
   };
 
-  const removePhoto = () => {
+  const removePhoto = async () => {
     if (!editingPhoto) return;
-    setProfileImage(editingPhoto, null);
+    const kind = editingPhoto;
     setEditingPhoto(null);
+    try {
+      await setProfileImage(kind, null);
+    } catch (error) {
+      notify(
+        'No se pudo quitar la foto',
+        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      );
+    }
   };
 
   const openChat = async () => {
