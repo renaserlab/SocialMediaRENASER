@@ -333,7 +333,18 @@ export function StoriesScreen() {
           <Text style={styles.sheetEmpty}>Todavía no la ha visto nadie.</Text>
         ) : (
           viewers.map((viewer) => (
-            <ListRow key={viewer.id} title={viewer.fullName} subtitle={viewer.username} leftIcon="user" />
+            <ListRow
+              key={viewer.id}
+              title={viewer.fullName}
+              subtitle={viewer.username}
+              leftComponent={
+                <ExpoImage
+                  source={viewer.avatarUrl ? { uri: viewer.avatarUrl } : assets.avatar}
+                  style={styles.viewerAvatar}
+                  contentFit="cover"
+                />
+              }
+            />
           ))
         )}
       </BottomSheet>
@@ -366,4 +377,5 @@ const styles = StyleSheet.create({
     color: media.text,
   },
   sheetEmpty: { fontSize: 13, paddingVertical: spacing.md, color: media.textMuted },
+  viewerAvatar: { width: 36, height: 36, borderRadius: 18 },
 });

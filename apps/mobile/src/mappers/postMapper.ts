@@ -1,3 +1,4 @@
+import { avatarPublicUrl } from '@/services/storage';
 import type { Comment, Post } from '@/types';
 
 export type PostAuthorDto = {
@@ -79,6 +80,7 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     id: dto.id,
     author: authorName(dto.author),
     authorId: dto.author.id,
+    authorAvatarUrl: avatarPublicUrl(dto.author.avatar_path) ?? undefined,
     username: authorHandle(dto.author),
     body: dto.body,
     createdAt: formatRelativeTime(dto.created_at),

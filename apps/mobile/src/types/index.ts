@@ -37,6 +37,8 @@ export type Post = {
   author: string;
   /** id del autor en el backend (para navegar a su perfil). */
   authorId?: string;
+  /** URL publica del avatar del autor; sin valor se usa el placeholder. */
+  authorAvatarUrl?: string;
   username: string;
   body: string;
   createdAt: string;
@@ -149,6 +151,8 @@ export type StoryViewer = {
   id: string;
   fullName: string;
   username: string;
+  /** URL publica del avatar; sin valor se usa el placeholder. */
+  avatarUrl?: string;
   viewedAt: string;
 };
 
