@@ -14,7 +14,7 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "RENASER utiliza el micrófono para salas en vivo y mensajes de audio.",
         "NSCameraUsageDescription": "RENASER utiliza la cámara para crear publicaciones y participar en salas en vivo.",
-        "NSPhotoLibraryUsageDescription": "RENASER accede a tus fotos cuando eliges contenido para publicar.",
+        "NSPhotoLibraryUsageDescription": "RENASER accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil o portada.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -62,6 +62,13 @@
           "microphonePermission": "Permite que RENASER use el micrófono.",
           "enableBackgroundPlayback": true,
           "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "RENASER accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil o portada.",
+          "cameraPermission": "RENASER utiliza la cámara para crear publicaciones y participar en salas en vivo."
         }
       ],
       "expo-font",

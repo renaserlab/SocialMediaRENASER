@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { BottomSheet } from '@/components/BottomSheet';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
+import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
+import { confirm } from '@/lib/confirm';
 import { haptics } from '@/lib/haptics';
+import { notify } from '@/lib/notify';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -22,17 +26,34 @@ import { Post } from '@/types';
  */
 const ACTION_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
 
-export function PostCard({ post }: { post: Post }) {
+type Props = {
+  post: Post;
+  /** Aviso para que la pantalla anfitriona reaccione (p. ej. volver atrás). */
+  onDeleted?: () => void;
+};
+
+export function PostCard({ post, onDeleted }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
   const liked = useAppStore((state) => state.likedPostIds.includes(post.id));
   const saved = useAppStore((state) => state.savedPostIds.includes(post.id));
   const toggleLike = useAppStore((state) => state.toggleLikePost);
   const toggleSave = useAppStore((state) => state.toggleSavePost);
   const addComment = useAppStore((state) => state.addComment);
   const loadCommentsFor = useAppStore((state) => state.loadCommentsFor);
+  const deletePost = useAppStore((state) => state.deletePost);
+  const currentUserId = useAppStore((state) => state.user?.id);
+
+  /**
+   * La propiedad se deriva en cada render y NO se confia solo en `post.isOwn`:
+   * ese campo lo fija el mapper con el id que hubiera al descargar el feed, y
+   * si el feed carga antes que el perfil llega vacio y ya no se recalcula.
+   */
+  const isOwn =
+    post.isOwn === true || (!!currentUserId && !!post.authorId && post.authorId === currentUserId);
 
   const commentCount = post.commentsCount ?? post.comments.length;
 
@@ -53,27 +74,61 @@ export function PostCard({ post }: { post: Post }) {
     setShowComments(true);
   };
 
-  const reportPost = () => {
-    Alert.alert('Reportar publicación', '¿Deseas reportar esta publicación?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Reportar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await ReportRepository.create({
-              entityType: 'post',
-              entityId: post.id,
-              reportedUserId: post.authorId,
-              reason: 'Contenido inapropiado',
-            });
-            Alert.alert('Gracias', 'Hemos recibido tu reporte.');
-          } catch {
-            Alert.alert('No se pudo enviar', 'Inténtalo de nuevo.');
-          }
-        },
-      },
-    ]);
+  /**
+   * Cierra la hoja y despues ejecuta la accion. El retardo deja que el Modal
+   * termine su animacion de salida: en iOS un dialogo lanzado durante ese cierre
+   * no llega a mostrarse.
+   */
+  const closeMenuThen = (action: () => void) => {
+    setMenuOpen(false);
+    setTimeout(action, 250);
+  };
+
+  const sharePost = () => {
+    Share.share({
+      message: `"${post.body}" — ${post.author} en RENASER Universo.`,
+    }).catch(() => {
+      // El usuario cancelo, o el navegador no expone navigator.share.
+    });
+  };
+
+  /** Solo para publicaciones propias: confirmar y eliminar. */
+  const deleteOwnPost = async () => {
+    const accepted = await confirm({
+      title: 'Eliminar publicación',
+      message: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      destructive: true,
+    });
+    if (!accepted) return;
+    try {
+      await deletePost(post.id);
+      haptics.light();
+      onDeleted?.();
+    } catch {
+      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+    }
+  };
+
+  const reportPost = async () => {
+    const accepted = await confirm({
+      title: 'Reportar publicación',
+      message: '¿Deseas reportar esta publicación?',
+      confirmLabel: 'Reportar',
+      destructive: true,
+    });
+    if (!accepted) return;
+    try {
+      await ReportRepository.create({
+        entityType: 'post',
+        entityId: post.id,
+        reportedUserId: post.authorId,
+        reason: 'Contenido inapropiado',
+      });
+      notify('Gracias', 'Hemos recibido tu reporte.');
+    } catch {
+      notify('No se pudo enviar', 'Inténtalo de nuevo.');
+    }
   };
 
   return (
@@ -93,7 +148,7 @@ export function PostCard({ post }: { post: Post }) {
           </View>
         </Pressable>
         <Pressable
-          onPress={reportPost}
+          onPress={() => setMenuOpen(true)}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Más opciones"
@@ -145,6 +200,7 @@ export function PostCard({ post }: { post: Post }) {
         <Pressable
           style={styles.action}
           hitSlop={ACTION_HIT_SLOP}
+          onPress={sharePost}
           accessibilityLabel="Compartir"
           accessibilityRole="button"
         >
@@ -191,6 +247,47 @@ export function PostCard({ post }: { post: Post }) {
           </View>
         </View>
       ) : null}
+
+      <BottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
+        {!isOwn && post.authorId ? (
+          <ListRow
+            title={`Ver perfil de ${post.author}`}
+            leftIcon="user"
+            onPress={() => {
+              setMenuOpen(false);
+              router.push(`/profile/${post.authorId}` as never);
+            }}
+          />
+        ) : null}
+        <ListRow
+          title={saved ? 'Quitar de guardados' : 'Guardar'}
+          leftIcon="bookmark"
+          onPress={() => {
+            setMenuOpen(false);
+            toggleSave(post.id);
+          }}
+        />
+        <ListRow
+          title="Compartir"
+          leftIcon="share-2"
+          onPress={() => closeMenuThen(sharePost)}
+        />
+        {isOwn ? (
+          <ListRow
+            title="Eliminar publicación"
+            leftIcon="trash-2"
+            destructive
+            onPress={() => closeMenuThen(() => void deleteOwnPost())}
+          />
+        ) : (
+          <ListRow
+            title="Reportar publicación"
+            leftIcon="flag"
+            destructive
+            onPress={() => closeMenuThen(() => void reportPost())}
+          />
+        )}
+      </BottomSheet>
     </View>
   );
 }

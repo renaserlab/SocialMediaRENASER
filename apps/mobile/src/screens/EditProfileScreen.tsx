@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { notify } from '@/lib/notify';
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
@@ -55,7 +56,7 @@ export function EditProfileScreen() {
       if (error instanceof ApiError && error.status === 409) {
         setErrors({ username: 'Ese nombre de usuario ya está en uso' });
       } else {
-        Alert.alert('No se pudo guardar', message);
+        notify('No se pudo guardar', message);
       }
     } finally {
       setSaving(false);

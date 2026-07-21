@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { notify } from '@/lib/notify';
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
@@ -62,7 +63,7 @@ export function RegisterScreen() {
     try {
       const result = await signUpEmail({ fullName: cleanName, email: cleanEmail, password });
       if (result.needsEmailConfirmation) {
-        Alert.alert(
+        notify(
           'Confirma tu correo',
           'Te enviamos un enlace de verificación a tu email para activar la cuenta.',
         );
@@ -78,7 +79,7 @@ export function RegisterScreen() {
       if (/already|registrad|exist/i.test(message)) {
         setErrors({ email: 'Este correo ya está registrado' });
       } else {
-        Alert.alert('No se pudo crear la cuenta', message);
+        notify('No se pudo crear la cuenta', message);
       }
     } finally {
       setSubmitting(false);
@@ -86,7 +87,7 @@ export function RegisterScreen() {
   };
 
   const socialDemo = (provider: string) => {
-    Alert.alert(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
+    notify(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
   };
 
   return (

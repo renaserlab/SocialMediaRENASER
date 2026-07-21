@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { notify } from '@/lib/notify';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
@@ -63,7 +64,7 @@ export function EventsScreen() {
       else await CatalogRepository.reserve(id);
     } catch {
       setRemoteReserved((prev) => (was ? [...prev, id] : prev.filter((x) => x !== id)));
-      Alert.alert('No se pudo actualizar la reserva', 'Inténtalo de nuevo.');
+      notify('No se pudo actualizar la reserva', 'Inténtalo de nuevo.');
     }
   };
 

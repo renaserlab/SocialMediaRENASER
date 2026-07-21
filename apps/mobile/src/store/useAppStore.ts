@@ -50,6 +50,9 @@ type AppState = {
   answerQuiz: (questionId: string, value: QuizArea) => void;
   finishQuiz: () => QuizArea;
   createPost: (body: string, media?: UploadedMedia[]) => Promise<void>;
+  deletePost: (postId: string) => Promise<void>;
+  /** `uri` a null quita la foto y devuelve la imagen por defecto. */
+  setProfileImage: (kind: 'avatar' | 'cover', uri: string | null) => void;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
@@ -166,6 +169,43 @@ export const useAppStore = create<AppState>()(
           user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
         }));
       },
+      deletePost: async (postId) => {
+        const index = get().posts.findIndex((post) => post.id === postId);
+        if (index < 0) return;
+        const removed = get().posts[index]!;
+
+        // Quitamos de inmediato para que la UI responda sin esperar a la red.
+        set((state) => ({
+          posts: state.posts.filter((post) => post.id !== postId),
+          user: state.user
+            ? { ...state.user, posts: Math.max(0, state.user.posts - 1) }
+            : state.user,
+        }));
+
+        if (!backendEnabled) return;
+
+        try {
+          await PostRepository.deletePost(postId);
+        } catch (error) {
+          // Devolvemos la publicación a su posición original.
+          set((state) => {
+            const posts = [...state.posts];
+            posts.splice(Math.min(index, posts.length), 0, removed);
+            return {
+              posts,
+              user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
+            };
+          });
+          throw error;
+        }
+      },
+      setProfileImage: (kind, uri) =>
+        set((state) => {
+          const base = state.user ?? defaultUser;
+          return {
+            user: { ...base, [kind === 'avatar' ? 'avatarUrl' : 'coverUrl']: uri ?? undefined },
+          };
+        }),
       toggleLikePost: (postId) => {
         const wasLiked = get().likedPostIds.includes(postId);
         // Actualización optimista.

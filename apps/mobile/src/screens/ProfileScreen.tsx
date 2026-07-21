@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
+import { notify } from '@/lib/notify';
 import { haptics } from '@/lib/haptics';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
+import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { pickImage, takePhoto } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -25,6 +29,7 @@ export function ProfileScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
 
   const currentUser = useAppStore((state) => state.user);
+  const setProfileImage = useAppStore((state) => state.setProfileImage);
   const authStatus = useAuthStore((state) => state.status);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const profileError = useAuthStore((state) => state.profileError);
@@ -82,6 +87,41 @@ export function ProfileScreen() {
     }
   };
 
+  /**
+   * Foto en edición: al tocar el avatar o la portada se abre la hoja de
+   * opciones (galería / cámara / quitar), en vez de saltar directo al selector.
+   */
+  const [editingPhoto, setEditingPhoto] = useState<'avatar' | 'cover' | null>(null);
+
+  const openPhotoSheet = (kind: 'avatar' | 'cover') => {
+    haptics.light();
+    setEditingPhoto(kind);
+  };
+
+  /** Recorte cuadrado para el avatar y panorámico para la portada. */
+  const applyPhoto = async (source: 'gallery' | 'camera') => {
+    const kind = editingPhoto;
+    if (!kind) return;
+    setEditingPhoto(null);
+    const aspect: [number, number] = kind === 'avatar' ? [1, 1] : [16, 9];
+    try {
+      const picked = source === 'gallery' ? await pickImage(aspect) : await takePhoto(aspect);
+      if (!picked) return;
+      setProfileImage(kind, picked.uri);
+    } catch {
+      notify(
+        source === 'gallery' ? 'No se pudo abrir la galería' : 'No se pudo abrir la cámara',
+        'Revisa los permisos e inténtalo de nuevo.',
+      );
+    }
+  };
+
+  const removePhoto = () => {
+    if (!editingPhoto) return;
+    setProfileImage(editingPhoto, null);
+    setEditingPhoto(null);
+  };
+
   const openChat = async () => {
     if (isDarren) {
       router.push('/chat/darren' as never);
@@ -92,7 +132,7 @@ export function ProfileScreen() {
       const conv = await MessageRepository.getOrCreateDirect(id);
       router.push({ pathname: '/chat/[id]', params: { id: conv.id, name: profileData.fullName } } as never);
     } catch {
-      Alert.alert('No se pudo abrir el chat', 'Inténtalo de nuevo.');
+      notify('No se pudo abrir el chat', 'Inténtalo de nuevo.');
     }
   };
 
@@ -152,6 +192,14 @@ export function ProfileScreen() {
         avatar: 'avatar' as const,
       };
 
+  // Las fotos elegidas por el usuario solo aplican a su propia cuenta.
+  const coverSource = !isPublic && currentUser?.coverUrl ? { uri: currentUser.coverUrl } : assets.hero;
+  const avatarSource =
+    !isPublic && currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : profileData.avatar;
+  // "Quitar foto" solo tiene sentido si hay una elegida por el usuario.
+  const hasCustomPhoto =
+    editingPhoto === 'cover' ? !!currentUser?.coverUrl : !!currentUser?.avatarUrl;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
@@ -161,10 +209,43 @@ export function ProfileScreen() {
         onBack={isPublic ? () => (router.canGoBack() ? router.back() : router.replace('/')) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
-        <Image source={assets.hero} style={styles.cover} />
+        {/* La portada completa es tocable; el chip solo señala que se puede editar. */}
+        <Pressable
+          onPress={isPublic ? undefined : () => openPhotoSheet('cover')}
+          disabled={isPublic}
+          accessibilityRole={isPublic ? undefined : 'button'}
+          accessibilityLabel={isPublic ? undefined : 'Cambiar foto de portada'}
+          style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
+        >
+          <Image source={coverSource} style={styles.cover} />
+          {!isPublic && (
+            <View style={[styles.coverEditBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Feather name="camera" size={14} color={colors.text} />
+              <Text style={[styles.coverEditLabel, { color: colors.text }]}>Editar portada</Text>
+            </View>
+          )}
+        </Pressable>
         <View style={[styles.profileBlock, { backgroundColor: colors.background }]}>
           <View style={styles.avatarRow}>
-            <Avatar size={90} image={profileData.avatar} />
+            <Pressable
+              onPress={isPublic ? undefined : () => openPhotoSheet('avatar')}
+              disabled={isPublic}
+              accessibilityRole={isPublic ? undefined : 'button'}
+              accessibilityLabel={isPublic ? undefined : 'Cambiar foto de perfil'}
+              style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
+            >
+              <Avatar size={90} image={avatarSource} />
+              {!isPublic && (
+                <View
+                  style={[
+                    styles.avatarEditBtn,
+                    { backgroundColor: colors.text, borderColor: colors.background },
+                  ]}
+                >
+                  <Feather name="camera" size={13} color={colors.background} />
+                </View>
+              )}
+            </Pressable>
             <View style={styles.actionRow}>
               {isPublic ? (
                 <React.Fragment>
@@ -239,6 +320,21 @@ export function ProfileScreen() {
           </View>
         </View>
       </AppScreen>
+
+      <BottomSheet visible={editingPhoto !== null} onClose={() => setEditingPhoto(null)}>
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>
+          {editingPhoto === 'cover' ? 'Foto de portada' : 'Foto de perfil'}
+        </Text>
+        <ListRow
+          title="Elegir de la galería"
+          leftIcon="image"
+          onPress={() => void applyPhoto('gallery')}
+        />
+        <ListRow title="Tomar foto" leftIcon="camera" onPress={() => void applyPhoto('camera')} />
+        {hasCustomPhoto && (
+          <ListRow title="Quitar foto actual" leftIcon="trash-2" destructive onPress={removePhoto} />
+        )}
+      </BottomSheet>
     </View>
   );
 }
@@ -288,6 +384,39 @@ function Shortcut({ icon, label, onPress }: { icon: keyof typeof Feather.glyphMa
 
 const styles = StyleSheet.create({
   cover: { width: '100%', height: 180, resizeMode: 'cover' },
+  // Se separa del borde inferior para no quedar bajo el bloque de perfil (marginTop: -20).
+  coverEditBtn: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg + 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 32,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  coverEditLabel: { fontSize: 11, fontWeight: '700' },
+  // Badge sólido con borde del color del fondo: se lee sobre cualquier foto.
+  avatarEditBtn: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: spacing.sm,
+  },
   profileBlock: { marginTop: -20, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg },
   avatarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: -50 },
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },

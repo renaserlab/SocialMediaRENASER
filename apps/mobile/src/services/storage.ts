@@ -33,14 +33,39 @@ const DEFAULT_EXT: Record<MediaKind, string> = {
 // Selección
 // --------------------------------------------------------------------------
 
-/** Abre la galería y devuelve la imagen elegida (o null si se cancela). */
-export async function pickImage(): Promise<PickedMedia | null> {
+/**
+ * Abre la galería y devuelve la imagen elegida (o null si se cancela).
+ *
+ * `aspect` solo lo respeta Android; en iOS el recorte siempre es cuadrado.
+ */
+export async function pickImage(aspect?: [number, number]): Promise<PickedMedia | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
     quality: 0.8,
     allowsEditing: true,
+    aspect,
+  });
+  if (result.canceled) return null;
+  const asset = result.assets[0];
+  if (!asset) return null;
+  return { uri: asset.uri, kind: 'image', mimeType: asset.mimeType, name: asset.fileName };
+}
+
+/**
+ * Abre la cámara y devuelve la foto tomada (o null si se cancela).
+ *
+ * `aspect` solo lo respeta Android; en iOS el recorte siempre es cuadrado.
+ */
+export async function takePhoto(aspect?: [number, number]): Promise<PickedMedia | null> {
+  const permission = await ImagePicker.requestCameraPermissionsAsync();
+  if (!permission.granted) return null;
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    quality: 0.8,
+    allowsEditing: true,
+    aspect,
   });
   if (result.canceled) return null;
   const asset = result.assets[0];

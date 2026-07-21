@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { notify } from '@/lib/notify';
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
@@ -36,7 +37,7 @@ export function CreatePostScreen() {
   /** Elige un medio (imagen, video o audio) y lo deja listo para publicar. */
   const choose = async (kind: 'image' | 'video' | 'audio') => {
     if (!supabaseEnabled) {
-      Alert.alert(
+      notify(
         'Adjuntos',
         'Conecta Supabase para adjuntar imágenes, videos o audios a tus publicaciones.',
       );
@@ -51,13 +52,13 @@ export function CreatePostScreen() {
           : await pickAudio();
       if (picked) setMedia(picked);
     } catch {
-      Alert.alert('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
+      notify('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
   const publish = async () => {
     if (!text.trim()) {
-      Alert.alert('Escribe algo', 'Comparte una reflexión antes de publicar.');
+      notify('Escribe algo', 'Comparte una reflexión antes de publicar.');
       return;
     }
     setPublishing(true);
@@ -70,7 +71,7 @@ export function CreatePostScreen() {
       // sustituía y el gesto atrás de Android podía cerrar la app.
       router.navigate('/(tabs)/home');
     } catch (error) {
-      Alert.alert(
+      notify(
         'No se pudo publicar',
         error instanceof Error ? error.message : 'Inténtalo de nuevo.',
       );
