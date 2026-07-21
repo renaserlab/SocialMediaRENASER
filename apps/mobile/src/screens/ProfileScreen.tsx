@@ -194,10 +194,12 @@ export function ProfileScreen() {
         avatar: 'avatar' as const,
       };
 
-  // Las fotos elegidas por el usuario solo aplican a su propia cuenta.
-  const coverSource = !isPublic && currentUser?.coverUrl ? { uri: currentUser.coverUrl } : assets.hero;
-  const avatarSource =
-    !isPublic && currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : profileData.avatar;
+  // Foto a mostrar: en tu perfil, la tuya (local o backend); en uno ajeno, la
+  // del perfil cargado. Sin foto, el placeholder de siempre.
+  const coverUri = isPublic ? publicProfile?.coverUrl : currentUser?.coverUrl;
+  const avatarUri = isPublic ? publicProfile?.avatarUrl : currentUser?.avatarUrl;
+  const coverSource = coverUri ? { uri: coverUri } : assets.hero;
+  const avatarSource = avatarUri ? { uri: avatarUri } : profileData.avatar;
   // "Quitar foto" solo tiene sentido si hay una elegida por el usuario.
   const hasCustomPhoto =
     editingPhoto === 'cover' ? !!currentUser?.coverUrl : !!currentUser?.avatarUrl;
