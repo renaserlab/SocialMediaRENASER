@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
+import { haptics } from '@/lib/haptics';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -75,7 +78,7 @@ export function PostCard({ post }: { post: Post }) {
           accessibilityRole="button"
           accessibilityLabel={`Ver perfil de ${post.author}`}
         >
-          <Image source={assets.avatar} style={styles.avatar} />
+          <ExpoImage source={assets.avatar} style={styles.avatar} contentFit="cover" />
           <View style={{ flex: 1 }}>
             <Text variant="body" weight="700">{post.author}</Text>
             <Text variant="secondary" color={colors.textMuted}>{post.username} · {post.createdAt}</Text>
@@ -92,16 +95,21 @@ export function PostCard({ post }: { post: Post }) {
       </View>
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
-      {post.imageUrl ? (
-        <Image source={{ uri: post.imageUrl }} resizeMode="cover" style={styles.image} />
-      ) : post.imageKey ? (
-        <Image source={assets[post.imageKey]} resizeMode="cover" style={styles.image} />
+      {post.imageUrl || post.imageKey ? (
+        <DoubleTapLike onDoubleTap={() => { if (!liked) toggleLike(post.id); }}>
+          <ExpoImage
+            source={post.imageUrl ? { uri: post.imageUrl } : assets[post.imageKey!]}
+            contentFit="cover"
+            transition={150}
+            style={styles.image}
+          />
+        </DoubleTapLike>
       ) : null}
 
       <View style={styles.actions}>
         <Pressable
           style={styles.action}
-          onPress={() => toggleLike(post.id)}
+          onPress={() => { toggleLike(post.id); haptics.light(); }}
           accessibilityLabel="Me gusta"
           accessibilityRole="button"
         >

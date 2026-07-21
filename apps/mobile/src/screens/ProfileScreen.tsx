@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+
+import { haptics } from '@/lib/haptics';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -57,6 +59,7 @@ export function ProfileScreen() {
   }, [loadPublic]);
 
   const toggleFollow = async () => {
+    haptics.light();
     if (isDarren) {
       setFollowing((v) => !v);
       return;

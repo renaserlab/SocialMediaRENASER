@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -24,6 +24,7 @@ export function MessagesScreen() {
   const [searchText, setSearchText] = useState('');
   const [remote, setRemote] = useState<Conversation[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
     if (!supabaseEnabled) {
@@ -44,6 +45,13 @@ export function MessagesScreen() {
       load();
     }, [load]),
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    load();
+    await new Promise((r) => setTimeout(r, 600));
+    setRefreshing(false);
+  }, [load]);
 
   const conversations = supabaseEnabled ? remote : demoConversations;
 
@@ -68,7 +76,14 @@ export function MessagesScreen() {
         rightIcon="edit"
         onRightPress={() => {}}
       />
-      <AppScreen contentStyle={{ paddingBottom: 100 }}>
+      <AppScreen
+        contentStyle={{ paddingBottom: 100 }}
+        scrollProps={{
+          refreshControl: (
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
+          ),
+        }}
+      >
         <View style={styles.container}>
           {/* Búsqueda interactiva */}
           <View style={styles.searchWrapper}>

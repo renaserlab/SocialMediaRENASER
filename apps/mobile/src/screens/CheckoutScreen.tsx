@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { assets } from '@/data/assets';
+import { haptics } from '@/lib/haptics';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -31,6 +32,7 @@ export function CheckoutScreen() {
   const [paymentState, setPaymentState] = useState<'checkout' | 'processing' | 'error'>('checkout');
 
   const startPayment = () => {
+    haptics.medium();
     setPaymentState('processing');
 
     // Simulamos un retraso de 1s y luego forzamos un error de pago (para cumplir con el requisito de StateView real)
@@ -42,6 +44,7 @@ export function CheckoutScreen() {
   const forceSuccess = () => {
     if (!course) return;
     // Simulamos reintento exitoso
+    haptics.success();
     purchase(course.id);
     router.replace('/confirmation');
   };

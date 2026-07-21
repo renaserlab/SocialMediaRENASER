@@ -12,4 +12,9 @@ export type VideoPlayerProps = {
   contentFit?: 'cover' | 'contain' | 'fill';
   /** Muestra los controles nativos una vez iniciada la reproducción. */
   nativeControls?: boolean;
+  /**
+   * Reproducción por viewport (feeds tipo reels): `true` reproduce, `false`
+   * pausa. Si es `undefined`, el control queda a cargo de autoPlay/usuario.
+   */
+  active?: boolean;
 };
