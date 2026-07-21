@@ -56,6 +56,13 @@ export function VideoPlayer({
         muted={muted}
         playsInline
         preload="metadata"
+        // Sin esto el menu "..." del navegador ofrece Descargar / Imagen en
+        // imagen: no queremos que el contenido se difunda fuera de la app.
+        controlsList="nodownload noplaybackrate noremoteplayback"
+        disablePictureInPicture
+        disableRemotePlayback
+        // El menu contextual del navegador tiene su propio "Guardar video como".
+        onContextMenu={(event) => event.preventDefault()}
         style={{
           position: 'absolute',
           inset: 0,

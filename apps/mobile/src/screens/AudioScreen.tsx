@@ -34,7 +34,6 @@ export function AudioScreen() {
 
   const [trackWidth, setTrackWidth] = useState(0);
   const [saved, setSaved] = useState(false);
-  const [downloaded, setDownloaded] = useState(false);
 
   const toggle = () => {
     if (playing) {
@@ -129,12 +128,6 @@ export function AudioScreen() {
           </View>
 
           <View style={styles.actions}>
-            <AudioAction
-              icon={downloaded ? 'check-circle' : 'download'}
-              label={downloaded ? 'Descargado' : 'Descargar'}
-              active={downloaded}
-              onPress={() => setDownloaded((v) => !v)}
-            />
             <AudioAction icon="share-2" label="Compartir" onPress={onShare} />
             <AudioAction
               icon="bookmark"

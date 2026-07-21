@@ -73,8 +73,6 @@ export function LessonScreen() {
               title={resource.title}
               subtitle={resource.subtitle}
               leftIcon={resource.icon}
-              rightIcon="download"
-              onPress={() => {}}
             />
           ))}
         </View>

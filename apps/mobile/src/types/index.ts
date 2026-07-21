@@ -96,7 +96,7 @@ export type LessonResource = {
   id: string;
   title: string;
   subtitle: string;
-  icon: 'file-text' | 'music' | 'video' | 'download';
+  icon: 'file-text' | 'music' | 'video';
 };
 
 export type Lesson = {
