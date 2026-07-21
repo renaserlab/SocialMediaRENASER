@@ -1,5 +1,5 @@
-import React from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -12,6 +12,18 @@ type BottomSheetProps = {
 
 export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
   const { colors } = useAppTheme();
+
+  /**
+   * En web el Modal marca el resto de la pagina como `aria-hidden`. Si el boton
+   * que abrio la hoja conserva el foco, queda dentro de esa zona oculta y el
+   * navegador avisa de que se esta escondiendo un elemento enfocado de los
+   * lectores de pantalla. Se le quita el foco al abrir.
+   */
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'web') return;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (active instanceof HTMLElement) active.blur();
+  }, [visible]);
 
   return (
     <Modal
