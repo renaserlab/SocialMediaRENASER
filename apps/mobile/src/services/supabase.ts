@@ -17,3 +17,6 @@ export const supabase = url && anonKey
   : null;
 
 export const isSupabaseConfigured = Boolean(supabase);
+
+/** URL base del proyecto; la necesita la subida reanumable (TUS). */
+export const supabaseUrl = url ?? null;

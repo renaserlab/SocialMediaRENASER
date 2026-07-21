@@ -2,7 +2,13 @@ import 'react-native-url-polyfill/auto';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 
-import { supabase } from '@/services/supabase';
+import {
+  compressImage,
+  compressVideo,
+  compressionAvailable,
+} from '@/services/mediaCompressor';
+import { uploadResumable } from '@/services/resumableUpload';
+import { supabase, supabaseUrl } from '@/services/supabase';
 
 const BUCKET = 'post-media';
 const SIGNED_URL_TTL = 60 * 60; // 1 hora
@@ -124,9 +130,18 @@ function formatMb(bytes: number): string {
  * (`statusCode`), asi que sin esto en consola solo se ve "400 (Bad Request)".
  */
 function describeStorageError(error: unknown): string {
-  const err = error as { message?: string; statusCode?: string | number };
-  const code = String(err?.statusCode ?? '');
+  const err = error as {
+    message?: string;
+    statusCode?: string | number;
+    // tus-js-client adjunta la respuesta HTTP que provoco el fallo.
+    originalResponse?: { getStatus?: () => number };
+  };
+  const code = String(err?.statusCode ?? err?.originalResponse?.getStatus?.() ?? '');
   const message = err?.message ?? 'Error desconocido';
+
+  if (/network|failed to fetch|timeout/i.test(message)) {
+    return 'Se perdió la conexión durante la subida. Vuelve a intentarlo: se reanudará donde se quedó.';
+  }
 
   if (code === '413' || /exceeded the maximum allowed size|too large/i.test(message)) {
     // El servidor lo rechaza aunque pase el chequeo local: el limite del
@@ -146,22 +161,69 @@ function describeStorageError(error: unknown): string {
 }
 
 /**
+ * A partir de este tamaño se usa subida reanudable (TUS) en vez de un POST
+ * unico. Es el umbral que recomienda Supabase.
+ */
+const RESUMABLE_THRESHOLD = 6 * 1024 * 1024;
+
+export type UploadPhase = 'compressing' | 'uploading';
+
+export type UploadProgress = {
+  phase: UploadPhase;
+  /** Avance de 0 a 1. */
+  ratio: number;
+};
+
+/**
  * Sube un medio (imagen/video/audio) al bucket post-media dentro de la carpeta
  * del usuario (uid/...), como exige la política RLS. Devuelve la ruta y su tipo.
+ *
+ * Antes comprime en el dispositivo y, si el archivo sigue siendo grande, lo
+ * sube por trozos reanudables para sobrevivir a cortes de red.
  */
-export async function uploadPostMedia(media: PickedMedia): Promise<UploadedMedia> {
+export async function uploadPostMedia(
+  media: PickedMedia,
+  onProgress?: (progress: UploadProgress) => void,
+): Promise<UploadedMedia> {
   if (!supabase) throw new Error('Almacenamiento no disponible.');
   const { data } = await supabase.auth.getSession();
-  const uid = data.session?.user?.id;
-  if (!uid) throw new Error('Inicia sesión para subir archivos.');
+  const session = data.session;
+  const uid = session?.user?.id;
+  if (!session || !uid) throw new Error('Inicia sesión para subir archivos.');
 
-  const ext = resolveExtension(media);
+  // 1. Compresión en el dispositivo (no-op en web). Un video de galeria de
+  //    100 MB suele bajar a 10-20 MB, que es lo que hace que subir por datos
+  //    moviles sea viable.
+  let uri = media.uri;
+  let compressed = false;
+  if (compressionAvailable && (media.kind === 'video' || media.kind === 'image')) {
+    try {
+      onProgress?.({ phase: 'compressing', ratio: 0 });
+      uri =
+        media.kind === 'video'
+          ? await compressVideo(media.uri, (ratio) =>
+              onProgress?.({ phase: 'compressing', ratio }),
+            )
+          : await compressImage(media.uri);
+      compressed = uri !== media.uri;
+    } catch {
+      // Si la compresión falla no bloqueamos la publicación: sube el original.
+      uri = media.uri;
+    }
+  }
+
+  // Tras comprimir el contenedor es otro (mp4/jpg), asi que el nombre original
+  // ya no describe la extension real: se deduce de la ruta resultante.
+  const ext = resolveExtension(compressed ? { ...media, uri, name: null } : media);
   const path = `${uid}/${randomName(ext)}`;
-  const contentType = resolveContentType(media, ext);
+  const contentType = resolveContentType(
+    compressed ? { ...media, mimeType: null } : media,
+    ext,
+  );
 
   // Usamos Blob (no ArrayBuffer) para poder validar el tamaño antes de gastar
   // la subida y para que supabase-js conserve el content-type.
-  const response = await fetch(media.uri);
+  const response = await fetch(uri);
   if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');
   const blob = await response.blob();
 
@@ -174,10 +236,33 @@ export async function uploadPostMedia(media: PickedMedia): Promise<UploadedMedia
     );
   }
 
+  onProgress?.({ phase: 'uploading', ratio: 0 });
+
+  // 2a. Archivo grande: subida reanudable por trozos, con progreso real.
+  if (blob.size > RESUMABLE_THRESHOLD && supabaseUrl) {
+    const { done } = uploadResumable({
+      supabaseUrl,
+      accessToken: session.access_token,
+      bucket: BUCKET,
+      path,
+      file: blob,
+      contentType,
+      onProgress: (ratio) => onProgress?.({ phase: 'uploading', ratio }),
+    });
+    try {
+      await done;
+    } catch (error) {
+      throw new Error(describeStorageError(error));
+    }
+    return { storagePath: path, mediaType: media.kind };
+  }
+
+  // 2b. Archivo pequeño: un POST directo es mas simple y rapido.
   const { error } = await supabase.storage
     .from(BUCKET)
     .upload(path, blob, { contentType, upsert: false });
   if (error) throw new Error(describeStorageError(error));
+  onProgress?.({ phase: 'uploading', ratio: 1 });
   return { storagePath: path, mediaType: media.kind };
 }
 

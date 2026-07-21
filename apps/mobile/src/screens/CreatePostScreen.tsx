@@ -15,6 +15,7 @@ import {
   pickVideo,
   uploadPostMedia,
   type PickedMedia,
+  type UploadProgress,
 } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -35,7 +36,8 @@ export function CreatePostScreen() {
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Un video puede tardar minutos: sin esto el boton solo gira y parece colgado.
-  const [phase, setPhase] = useState<'idle' | 'uploading' | 'posting'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'compressing' | 'uploading' | 'posting'>('idle');
+  const [progress, setProgress] = useState(0);
 
   /** Elige un medio (imagen, video o audio) y lo deja listo para publicar. */
   const choose = async (kind: 'image' | 'video' | 'audio') => {
@@ -72,10 +74,14 @@ export function CreatePostScreen() {
     try {
       let uploaded: Awaited<ReturnType<typeof uploadPostMedia>>[] = [];
       if (media && supabaseEnabled) {
-        setPhase('uploading');
-        uploaded = [await uploadPostMedia(media)];
+        const onProgress = ({ phase: p, ratio }: UploadProgress) => {
+          setPhase(p);
+          setProgress(ratio);
+        };
+        uploaded = [await uploadPostMedia(media, onProgress)];
       }
       setPhase('posting');
+      setProgress(1);
       await createPost(text, uploaded);
       setText('');
       setMedia(null);
@@ -89,6 +95,7 @@ export function CreatePostScreen() {
     } finally {
       setPublishing(false);
       setPhase('idle');
+      setProgress(0);
     }
   };
 
@@ -209,18 +216,34 @@ export function CreatePostScreen() {
             </View>
           )}
 
-          <Button
-            label={
-              phase === 'uploading'
-                ? `Subiendo ${media?.kind === 'video' ? 'video' : media?.kind === 'audio' ? 'audio' : 'imagen'}…`
-                : phase === 'posting'
-                ? 'Publicando…'
-                : 'Publicar'
-            }
-            onPress={publish}
-            loading={publishing}
-            disabled={!text.trim()}
-          />
+          {publishing && phase !== 'idle' && (
+            <View style={styles.progressWrap}>
+              <View style={styles.progressHeader}>
+                <Text style={[styles.progressLabel, { color: colors.textMuted }]}>
+                  {phase === 'compressing'
+                    ? 'Optimizando video…'
+                    : phase === 'uploading'
+                    ? 'Subiendo…'
+                    : 'Publicando…'}
+                </Text>
+                {phase !== 'posting' && (
+                  <Text style={[styles.progressLabel, { color: colors.textMuted }]}>
+                    {Math.round(progress * 100)}%
+                  </Text>
+                )}
+              </View>
+              <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${Math.max(2, progress * 100)}%`, backgroundColor: colors.primary },
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
+          <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
         </View>
       </AppScreen>
       </KeyboardAvoidingView>
@@ -260,6 +283,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   errorText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  progressWrap: { marginBottom: spacing.lg, gap: spacing.sm },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between' },
+  progressLabel: { fontSize: 12, fontWeight: '600' },
+  progressTrack: { height: 6, borderRadius: radius.pill, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: radius.pill },
   removeBtn: {
     position: 'absolute',
     top: spacing.sm,
