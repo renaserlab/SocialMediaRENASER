@@ -130,7 +130,7 @@ export function ExploreScreen() {
             accessibilityLabel={`Programa recomendado: ${course.title}`}
             accessibilityRole="button"
           >
-            <Image source={assets.course} style={[StyleSheet.absoluteFill, { tintColor: 'gray' }]} resizeMode="cover" />
+            <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
             <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
             <View style={styles.heroContent}>
               <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>

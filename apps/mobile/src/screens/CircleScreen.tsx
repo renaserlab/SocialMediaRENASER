@@ -35,7 +35,7 @@ export function CircleScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => router.back()} />
+        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="loading" />
       </View>
     );
@@ -44,7 +44,7 @@ export function CircleScreen() {
   if (error || !circle) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => router.back()} />
+        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
       </View>
     );

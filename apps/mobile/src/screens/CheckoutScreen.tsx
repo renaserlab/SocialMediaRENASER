@@ -52,7 +52,7 @@ export function CheckoutScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Resumen de compra" onBack={() => router.back()} />
+        <AppHeader title="Resumen de compra" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="loading" />
       </View>
     );
@@ -61,7 +61,7 @@ export function CheckoutScreen() {
   if (courseError || !course) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Resumen de compra" onBack={() => router.back()} />
+        <AppHeader title="Resumen de compra" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={courseError ?? undefined} onRetry={reload} />
       </View>
     );

@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
@@ -30,7 +30,9 @@ export default function RootLayout() {
     void useAuthStore.getState().bootstrap();
   }, []);
 
-  const [fontsLoaded] = useFonts({
+  // El segundo valor es el error de carga: si la fuente falla (sin red, cache
+  // vacia) hay que continuar igualmente con la tipografia del sistema.
+  const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
@@ -39,13 +41,24 @@ export default function RootLayout() {
     Inter_900Black,
   });
 
+  // Red de seguridad: pase lo que pase, la app se muestra a los 3 s. Evita que
+  // un fallo de hidratacion o de fuentes deje al usuario en el splash para siempre.
+  const [bootTimedOut, setBootTimedOut] = useState(false);
   useEffect(() => {
-    if (hydrated && fontsLoaded) {
+    const timer = setTimeout(() => setBootTimedOut(true), 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const fontsReady = fontsLoaded || !!fontError;
+  const ready = (hydrated && fontsReady) || bootTimedOut;
+
+  useEffect(() => {
+    if (ready) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [hydrated, fontsLoaded]);
+  }, [ready]);
 
-  if (!hydrated || !fontsLoaded) {
+  if (!ready) {
     return null;
   }
 

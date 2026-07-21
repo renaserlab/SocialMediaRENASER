@@ -23,7 +23,7 @@ export function LessonScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Lección del Curso" onBack={() => router.back()} />
+        <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="loading" />
       </View>
     );
@@ -32,7 +32,7 @@ export function LessonScreen() {
   if (error || !lesson) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Lección del Curso" onBack={() => router.back()} />
+        <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
       </View>
     );

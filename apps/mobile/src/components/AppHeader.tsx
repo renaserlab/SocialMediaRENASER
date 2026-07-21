@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -18,14 +19,23 @@ type Props = {
 export function AppHeader({ title = 'RENASER', back = false, onBack, rightIcon, onRightPress }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
+  // El header es el primer elemento de la pantalla: debe respetar el notch /
+  // Dynamic Island. `AppScreen` ya no inyecta el inset superior (evita el hueco).
+  const insets = useSafeAreaInsets();
 
   const handleBack = () => {
-    if (onBack) onBack();
-    else router.back();
+    if (onBack) {
+      onBack();
+      return;
+    }
+    // Sin historial (p. ej. tras un deep link) `back()` es un no-op y dejaria al
+    // usuario atrapado: caemos al inicio.
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
   };
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, { height: 48 + insets.top, paddingTop: insets.top }]}>
       <View style={styles.side}>
         {back || onBack ? (
           <Pressable
@@ -59,7 +69,7 @@ export function AppHeader({ title = 'RENASER', back = false, onBack, rightIcon, 
 
 const styles = StyleSheet.create({
   row: {
-    height: 48,
+    // La altura final se calcula en el componente: 48 + inset superior.
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
