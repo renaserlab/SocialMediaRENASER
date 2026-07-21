@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
+import { confirm } from '@/lib/confirm';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
@@ -15,9 +16,33 @@ export function SettingsScreen() {
   const router = useRouter();
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const resetDemo = useAppStore((state) => state.resetDemo);
+  const user = useAppStore((state) => state.user);
   const signOut = useAuthStore((state) => state.signOut);
+  const authStatus = useAuthStore((state) => state.status);
+
+  const isLoggedIn = authStatus === 'authenticated';
+
+  const handleSignOut = async () => {
+    const ok = await confirm({
+      title: 'Cerrar sesión',
+      message: '¿Seguro que quieres salir de tu cuenta?',
+      confirmLabel: 'Cerrar sesión',
+      destructive: true,
+    });
+    if (!ok) return;
+    await signOut();
+    router.replace('/');
+  };
 
   const handleReset = async () => {
+    const ok = await confirm({
+      title: 'Reiniciar aplicación',
+      message:
+        'Se restaurarán los datos de demo y se cerrará tu sesión. Esta acción no se puede deshacer.',
+      confirmLabel: 'Reiniciar',
+      destructive: true,
+    });
+    if (!ok) return;
     await signOut();
     resetDemo();
     router.replace('/');
@@ -44,6 +69,13 @@ export function SettingsScreen() {
         />
 
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Cuenta & Membresía</Text>
+        {isLoggedIn && user && (
+          <ListRow
+            title={user.fullName || user.username}
+            subtitle={user.email || user.username}
+            leftIcon="user"
+          />
+        )}
         <ListRow
           title="Verificación de Cuenta"
           subtitle="Ver estado de tu membresía"
@@ -51,6 +83,23 @@ export function SettingsScreen() {
           rightIcon="chevron-right"
           onPress={() => router.push('/verification')}
         />
+        {isLoggedIn ? (
+          <ListRow
+            title="Cerrar Sesión"
+            subtitle="Salir de tu cuenta en este dispositivo"
+            leftIcon="log-out"
+            destructive
+            onPress={handleSignOut}
+          />
+        ) : (
+          <ListRow
+            title="Iniciar Sesión"
+            subtitle="Accede para publicar y comentar"
+            leftIcon="log-in"
+            rightIcon="chevron-right"
+            onPress={() => router.push('/login')}
+          />
+        )}
 
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Sistema</Text>
         <ListRow

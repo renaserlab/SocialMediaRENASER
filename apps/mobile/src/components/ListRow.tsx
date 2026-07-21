@@ -15,6 +15,8 @@ type ListRowProps = {
   rightComponent?: React.ReactNode;
   onPress?: () => void;
   style?: ViewStyle;
+  /** Tinta el titulo y el icono en rojo (acciones de riesgo: salir, borrar). */
+  destructive?: boolean;
 };
 
 export function ListRow({
@@ -26,8 +28,10 @@ export function ListRow({
   rightComponent,
   onPress,
   style,
+  destructive = false,
 }: ListRowProps) {
   const { colors } = useAppTheme();
+  const accent = destructive ? colors.danger : colors.text;
 
   const RowContainer = onPress ? Pressable : View;
 
@@ -49,10 +53,10 @@ export function ListRow({
       <View style={styles.leftSection}>
         {leftComponent}
         {!leftComponent && leftIcon && (
-          <Feather name={leftIcon} size={20} color={colors.text} style={styles.leftIcon} />
+          <Feather name={leftIcon} size={20} color={accent} style={styles.leftIcon} />
         )}
         <View style={styles.textContainer}>
-          <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.title, { color: accent }]}>{title}</Text>
           {subtitle && <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitle}</Text>}
         </View>
       </View>
