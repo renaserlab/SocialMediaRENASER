@@ -1,71 +1,72 @@
-import type { StoryGroup, StoryItem, StoryViewer } from '@/types';
+import type { StoryItem, StoryViewer } from '@/types';
 
-import type { PostAuthorDto } from '@/mappers/postMapper';
-
-export type StoryDto = {
+/**
+ * Filas tal y como las devuelve PostgREST (Supabase). Los nombres son los de
+ * las columnas: el mapeo a camelCase vive aqui, como en el resto de mappers.
+ */
+export type ProfileRow = {
   id: string;
+  full_name: string | null;
+  username: string | null;
+  avatar_path: string | null;
+};
+
+export type StoryRow = {
+  id: string;
+  author_id: string;
   storage_path: string;
   media_type: 'image' | 'video';
   duration_ms: number;
-  caption: string;
+  caption: string | null;
   created_at: string;
   expires_at: string;
-  viewed_by_me: boolean;
-  views_count: number;
+  /** Perfil incrustado. PostgREST puede devolverlo como objeto o como array. */
+  author: ProfileRow | ProfileRow[] | null;
 };
 
-export type StoryGroupDto = {
-  author: PostAuthorDto;
-  items: StoryDto[];
-  seen: boolean;
-  is_own: boolean;
-};
-
-export type StoryViewerDto = {
-  viewer: PostAuthorDto;
+export type StoryViewRow = {
   viewed_at: string;
+  viewer: ProfileRow | ProfileRow[] | null;
 };
 
-function authorName(author: PostAuthorDto): string {
-  return author.full_name || author.username || 'Usuario';
+/** Normaliza el perfil incrustado, que llega como objeto o array segun el caso. */
+export function embeddedProfile(value: ProfileRow | ProfileRow[] | null): ProfileRow | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-function authorHandle(author: PostAuthorDto): string {
-  if (author.username) return `@${author.username}`;
-  const base = authorName(author).toLowerCase().replace(/[^a-z0-9_.]+/g, '').slice(0, 18);
+export function profileName(profile: ProfileRow | null): string {
+  return profile?.full_name || profile?.username || 'Usuario';
+}
+
+export function profileHandle(profile: ProfileRow | null): string {
+  if (profile?.username) return `@${profile.username}`;
+  const base = profileName(profile).toLowerCase().replace(/[^a-z0-9_.]+/g, '').slice(0, 18);
   return `@${base || 'usuario'}`;
 }
 
-export function toStoryItem(dto: StoryDto): StoryItem {
+export function toStoryItem(
+  row: StoryRow,
+  { viewed, viewsCount }: { viewed: boolean; viewsCount: number },
+): StoryItem {
   return {
-    id: dto.id,
-    storagePath: dto.storage_path,
-    mediaType: dto.media_type,
-    durationMs: dto.duration_ms,
-    caption: dto.caption,
-    createdAt: dto.created_at,
-    viewedByMe: dto.viewed_by_me,
-    viewsCount: dto.views_count,
+    id: row.id,
+    storagePath: row.storage_path,
+    mediaType: row.media_type,
+    durationMs: row.duration_ms,
+    caption: row.caption ?? '',
+    createdAt: row.created_at,
+    viewedByMe: viewed,
+    viewsCount,
   };
 }
 
-export function toStoryGroup(dto: StoryGroupDto): StoryGroup {
+export function toStoryViewer(row: StoryViewRow): StoryViewer {
+  const profile = embeddedProfile(row.viewer);
   return {
-    authorId: dto.author.id,
-    author: authorName(dto.author),
-    username: authorHandle(dto.author),
-    avatarPath: dto.author.avatar_path ?? undefined,
-    items: dto.items.map(toStoryItem),
-    seen: dto.seen,
-    isOwn: dto.is_own,
-  };
-}
-
-export function toStoryViewer(dto: StoryViewerDto): StoryViewer {
-  return {
-    id: dto.viewer.id,
-    fullName: authorName(dto.viewer),
-    username: authorHandle(dto.viewer),
-    viewedAt: dto.viewed_at,
+    id: profile?.id ?? '',
+    fullName: profileName(profile),
+    username: profileHandle(profile),
+    viewedAt: row.viewed_at,
   };
 }

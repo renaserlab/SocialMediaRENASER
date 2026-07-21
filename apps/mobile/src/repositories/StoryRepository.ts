@@ -1,62 +1,173 @@
 import {
-  StoryGroupDto,
-  StoryViewerDto,
-  toStoryGroup,
+  embeddedProfile,
+  profileHandle,
+  profileName,
+  toStoryItem,
   toStoryViewer,
+  type StoryRow,
+  type StoryViewRow,
 } from '@/mappers/storyMapper';
-import { apiRequest, API_V1 } from '@/services/api';
+import { supabase } from '@/services/supabase';
 import { signMediaUrls, type UploadedMedia } from '@/services/storage';
 import type { StoryGroup, StoryViewer } from '@/types';
 
 /**
- * Historias a traves del backend FastAPI. Igual que en el resto de
- * repositorios, la identidad la resuelve el backend desde el JWT.
+ * Historias contra Supabase (PostgREST), sin pasar por la API FastAPI.
+ *
+ * La API desplegada se construye desde otra rama, asi que las historias hablan
+ * directamente con la base. Es seguro porque las politicas RLS de
+ * 0003_stories.sql son las que mandan: solo puedes insertar historias con tu
+ * propio author_id, solo borrar las tuyas, y las vistas solo las lee el autor
+ * de la historia o el propio espectador.
+ *
+ * El modulo `apps/api/app/modules/stories` queda escrito para cuando se
+ * quiera centralizar la logica en el backend.
  */
+
+const SELECT_STORY =
+  'id, author_id, storage_path, media_type, duration_ms, caption, created_at, expires_at, author:profiles(id, full_name, username, avatar_path)';
+
+function client() {
+  if (!supabase) throw new Error('Supabase no esta configurado.');
+  return supabase;
+}
+
+async function currentUserId(): Promise<string | null> {
+  const { data } = await client().auth.getSession();
+  return data.session?.user.id ?? null;
+}
+
 export const StoryRepository = {
   /** Historias vigentes agrupadas por autor, ya con las URLs firmadas. */
   async list(): Promise<StoryGroup[]> {
-    const dtos = await apiRequest<StoryGroupDto[]>(`${API_V1}/stories`);
-    const groups = dtos.map(toStoryGroup);
+    const db = client();
+    const uid = await currentUserId();
+
+    const { data, error } = await db
+      .from('stories')
+      .select(SELECT_STORY)
+      .gt('expires_at', new Date().toISOString())
+      // Cronologico dentro de cada autor: el visor avanza de vieja a nueva.
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []) as unknown as StoryRow[];
+    if (rows.length === 0) return [];
+
+    // Que tramos he visto ya (RLS: solo devuelve mis propias filas).
+    const seen = new Set<string>();
+    if (uid) {
+      const { data: views } = await db
+        .from('story_views')
+        .select('story_id')
+        .eq('viewer_id', uid)
+        .in('story_id', rows.map((row) => row.id));
+      (views ?? []).forEach((view: { story_id: string }) => seen.add(view.story_id));
+    }
+
+    // Contador de vistas, solo de las historias propias: es lo unico que la
+    // RLS deja leer, y evita traer las visitas de todo el mundo.
+    const viewsByStory = new Map<string, number>();
+    if (uid) {
+      const ownIds = rows.filter((row) => row.author_id === uid).map((row) => row.id);
+      if (ownIds.length > 0) {
+        const { data: ownViews } = await db
+          .from('story_views')
+          .select('story_id')
+          .in('story_id', ownIds);
+        (ownViews ?? []).forEach((view: { story_id: string }) => {
+          viewsByStory.set(view.story_id, (viewsByStory.get(view.story_id) ?? 0) + 1);
+        });
+      }
+    }
+
+    const groups = new Map<string, StoryGroup>();
+    rows.forEach((row) => {
+      const profile = embeddedProfile(row.author);
+      let group = groups.get(row.author_id);
+      if (!group) {
+        group = {
+          authorId: row.author_id,
+          author: profileName(profile),
+          username: profileHandle(profile),
+          avatarPath: profile?.avatar_path ?? undefined,
+          items: [],
+          seen: true,
+          isOwn: row.author_id === uid,
+        };
+        groups.set(row.author_id, group);
+      }
+      const viewed = seen.has(row.id);
+      group.items.push(toStoryItem(row, { viewed, viewsCount: viewsByStory.get(row.id) ?? 0 }));
+      // Basta con que quede un tramo sin ver para que el anillo siga activo.
+      if (!viewed) group.seen = false;
+    });
+
+    const ordered = [...groups.values()].sort((a, b) => {
+      if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
+      if (a.seen !== b.seen) return a.seen ? 1 : -1;
+      const lastA = a.items[a.items.length - 1]?.createdAt ?? '';
+      const lastB = b.items[b.items.length - 1]?.createdAt ?? '';
+      return lastB.localeCompare(lastA);
+    });
 
     // El bucket es privado: una sola firma en lote para todos los tramos.
-    const paths = groups.flatMap((group) => group.items.map((item) => item.storagePath));
+    const paths = ordered.flatMap((group) => group.items.map((item) => item.storagePath));
     if (paths.length > 0) {
       const urls = await signMediaUrls(paths);
-      groups.forEach((group) => {
+      ordered.forEach((group) => {
         group.items.forEach((item) => {
           item.mediaUrl = urls[item.storagePath];
         });
       });
     }
-    return groups;
+    return ordered;
   },
 
   async create(
     media: UploadedMedia,
     { durationMs = 5000, caption = '' }: { durationMs?: number; caption?: string } = {},
   ): Promise<void> {
-    await apiRequest<unknown>(`${API_V1}/stories`, {
-      method: 'POST',
-      body: JSON.stringify({
-        storage_path: media.storagePath,
-        media_type: media.mediaType,
-        duration_ms: durationMs,
-        caption,
-      }),
+    const uid = await currentUserId();
+    if (!uid) throw new Error('Inicia sesión para publicar una historia.');
+
+    // `expires_at` lo pone la base (now() + 24 h): no se envia desde el cliente.
+    const { error } = await client().from('stories').insert({
+      author_id: uid,
+      storage_path: media.storagePath,
+      media_type: media.mediaType,
+      duration_ms: durationMs,
+      caption,
     });
+    if (error) throw new Error(error.message);
   },
 
   async remove(storyId: string): Promise<void> {
-    await apiRequest<void>(`${API_V1}/stories/${storyId}`, { method: 'DELETE' });
+    // La RLS impide borrar historias ajenas aunque llegue el id.
+    const { error } = await client().from('stories').delete().eq('id', storyId);
+    if (error) throw new Error(error.message);
   },
 
   /** Idempotente: el visor lo llama cada vez que muestra un tramo. */
   async markViewed(storyId: string): Promise<void> {
-    await apiRequest<void>(`${API_V1}/stories/${storyId}/view`, { method: 'POST' });
+    const uid = await currentUserId();
+    if (!uid) return;
+    const { error } = await client()
+      .from('story_views')
+      .upsert(
+        { story_id: storyId, viewer_id: uid },
+        { onConflict: 'story_id,viewer_id', ignoreDuplicates: true },
+      );
+    if (error) throw new Error(error.message);
   },
 
   async listViewers(storyId: string): Promise<StoryViewer[]> {
-    const dtos = await apiRequest<StoryViewerDto[]>(`${API_V1}/stories/${storyId}/viewers`);
-    return dtos.map(toStoryViewer);
+    const { data, error } = await client()
+      .from('story_views')
+      .select('viewed_at, viewer:profiles(id, full_name, username, avatar_path)')
+      .eq('story_id', storyId)
+      .order('viewed_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return ((data ?? []) as unknown as StoryViewRow[]).map(toStoryViewer);
   },
 };

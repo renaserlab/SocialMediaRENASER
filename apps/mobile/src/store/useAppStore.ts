@@ -220,6 +220,13 @@ export const useAppStore = create<AppState>()(
         );
         if (alreadySeen) return;
 
+        // Mirar tu propia historia no cuenta como visita. Antes lo filtraba la
+        // API; ahora que se inserta desde el cliente hay que hacerlo aqui, o el
+        // contador se inflaria solo con abrirla.
+        const isOwn = groups.some(
+          (group) => group.isOwn && group.items.some((item) => item.id === storyId),
+        );
+
         // Optimista: el anillo se apaga sin esperar a la red.
         set({
           storyGroups: groups.map((group) => {
@@ -229,7 +236,7 @@ export const useAppStore = create<AppState>()(
             return { ...group, items, seen: items.every((item) => item.viewedByMe) };
           }),
         });
-        if (backendEnabled) {
+        if (backendEnabled && !isOwn) {
           StoryRepository.markViewed(storyId).catch(() => {
             // Marcar una vista no es critico: si falla, se reintenta al reabrir.
           });
