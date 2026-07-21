@@ -31,19 +31,30 @@ export function MembersScreen() {
   const [state, setState] = useState<'loading' | 'error' | 'idle'>('loading');
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const goHome = useCallback(() => router.replace('/(tabs)/home'), [router]);
+
   const load = useCallback(() => {
+    // Sin backend (modo demo) no hay perfiles que sugerir.
     if (!supabaseEnabled) {
-      setState('idle');
+      goHome();
       return;
     }
     setState('loading');
     ProfileRepository.listFeatured()
       .then((list) => {
-        setMembers(list);
+        // Solo se sugiere a quien el usuario aun NO sigue. Si ya sigue a todos
+        // los destacados (o es Darren, que no se sugiere a si mismo) esta
+        // pantalla no aporta nada: se salta directa al feed.
+        const suggestions = list.filter((m) => !m.isFollowing);
+        if (suggestions.length === 0) {
+          goHome();
+          return;
+        }
+        setMembers(suggestions);
         setState('idle');
       })
       .catch(() => setState('error'));
-  }, [supabaseEnabled]);
+  }, [supabaseEnabled, goHome]);
 
   useEffect(load, [load]);
 

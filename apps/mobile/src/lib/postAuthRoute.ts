@@ -1,14 +1,13 @@
-import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 
 /**
  * Destino tras autenticarse.
  *
- * Quien no sigue a nadie pasa por "Miembros RENASER" para que su feed no
- * empiece vacio; quien ya sigue a alguien va directo al home. Al ser una
- * condicion sobre el estado real (y no una bandera guardada), la pantalla deja
- * de aparecer sola en cuanto el usuario sigue a alguien.
+ * Todos pasan por "Miembros RENASER" salvo el modo demo (sin backend, no hay a
+ * quien seguir). La propia pantalla decide si hay algo que sugerir: si el
+ * usuario ya sigue a los destacados (o es Darren), se salta sola al home. Asi
+ * la condicion es "¿sigues a Darren?", no "¿sigues a alguien?".
  */
 export function postAuthRoute(): string {
-  const user = useAppStore.getState().user;
-  return (user?.following ?? 0) === 0 ? '/members' : '/(tabs)/home';
+  return useAuthStore.getState().supabaseEnabled ? '/members' : '/(tabs)/home';
 }
