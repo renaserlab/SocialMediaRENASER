@@ -7,13 +7,12 @@ import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
-import { Avatar } from '@/components/Avatar';
+import { StoriesRow } from '@/components/StoriesRow';
 import { PostCard } from '@/components/PostCard';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
-import { stories } from '@/data/mockData';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -64,19 +63,8 @@ export function HomeScreen() {
 
   const header = (
     <View>
-      {/* Historias / Avatares */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stories}>
-        {stories.map((story, index) => (
-          <Pressable
-            key={story.id}
-            onPress={() => router.push(`/stories/${index}` as never)}
-            accessibilityRole="button"
-            accessibilityLabel={`Ver historia de ${story.author}`}
-          >
-            <Avatar label={story.author} image={story.avatar} size={54} />
-          </Pressable>
-        ))}
-      </ScrollView>
+      {/* Historias reales del backend (subida + anillo visto/sin ver) */}
+      <StoriesRow />
 
       <View style={styles.container}>
         <SegmentedControl
@@ -193,7 +181,6 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  stories: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.md },
   container: { paddingHorizontal: spacing.lg },
   tabs: { marginBottom: spacing.lg },
   composer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.md, marginBottom: spacing.lg },

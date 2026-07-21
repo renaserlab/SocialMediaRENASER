@@ -1,4 +1,4 @@
-import { profileImageUrl } from '@/services/storage';
+import { avatarPublicUrl } from '@/services/storage';
 import type { UserProfile } from '@/types';
 
 /** Forma en que el backend (FastAPI /profiles) devuelve un perfil. */
@@ -9,7 +9,8 @@ export type ProfileDto = {
   username: string | null;
   bio: string;
   avatar_path: string | null;
-  cover_path: string | null;
+  /** Foto de portada; el backend la guarda en el bucket publico avatars. */
+  cover_path?: string | null;
   role: string;
   is_featured?: boolean;
   is_private: boolean;
@@ -64,9 +65,10 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     following: dto.following_count ?? 0,
     posts: dto.posts_count ?? 0,
     isFollowing: dto.is_following ?? false,
-    // El backend guarda la ruta dentro del bucket; la vista necesita una URL.
-    avatarUrl: profileImageUrl(dto.avatar_path),
-    coverUrl: profileImageUrl(dto.cover_path),
+    // Fotos del backend resueltas a URL publica (bucket avatars). El backend
+    // envia avatar_path/cover_path; sin ellos, la vista usa el placeholder.
+    avatarUrl: avatarPublicUrl(dto.avatar_path) ?? undefined,
+    coverUrl: avatarPublicUrl(dto.cover_path) ?? undefined,
     isAdmin: dto.role === 'admin',
   };
 }
@@ -89,7 +91,7 @@ export type FeaturedMember = ProfileSummary & {
 export function toFeaturedMember(dto: FeaturedProfileDto): FeaturedMember {
   return {
     ...toProfileSummary(dto),
-    avatarUrl: profileImageUrl(dto.avatar_path),
+    avatarUrl: avatarPublicUrl(dto.avatar_path) ?? undefined,
     isAdmin: dto.role === 'admin',
     followers: dto.followers_count ?? 0,
     posts: dto.posts_count ?? 0,

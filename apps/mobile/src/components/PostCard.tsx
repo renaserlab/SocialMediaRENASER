@@ -140,7 +140,11 @@ export function PostCard({ post, onDeleted }: Props) {
           accessibilityRole="button"
           accessibilityLabel={`Ver perfil de ${post.author}`}
         >
-          <ExpoImage source={assets.avatar} style={styles.avatar} contentFit="cover" />
+          <ExpoImage
+            source={post.authorAvatarUrl ? { uri: post.authorAvatarUrl } : assets.avatar}
+            style={styles.avatar}
+            contentFit="cover"
+          />
           <View style={{ flex: 1 }}>
             <Text variant="body" weight="700">{post.author}</Text>
             <Text variant="secondary" color={colors.textMuted}>{post.username} · {post.createdAt}</Text>

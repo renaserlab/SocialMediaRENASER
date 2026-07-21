@@ -6,8 +6,9 @@ import { conversations, initialPosts } from '@/data/mockData';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository, type FeedKind } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { StoryRepository } from '@/repositories/StoryRepository';
 import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
-import { Conversation, Post, QuizArea, ThemeMode, UserProfile } from '@/types';
+import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
 const backendEnabled = AuthRepository.enabled;
@@ -39,6 +40,14 @@ type AppState = {
   loadFeed: (feed?: FeedKind) => Promise<void>;
   loadMoreFeed: () => Promise<void>;
   loadCommentsFor: (postId: string) => Promise<void>;
+
+  // Historias (efimeras, 24 h). No se persisten: caducan solas.
+  storyGroups: StoryGroup[];
+  storiesStatus: 'idle' | 'loading' | 'error';
+  loadStories: () => Promise<void>;
+  createStory: (media: UploadedMedia, durationMs?: number) => Promise<void>;
+  deleteStory: (storyId: string) => Promise<void>;
+  markStoryViewed: (storyId: string) => void;
 
   languageSelected: boolean;
   setLanguageSelected: (value: boolean) => void;
@@ -118,6 +127,9 @@ export const useAppStore = create<AppState>()(
       feedLoadingMore: false,
       feedOffset: 0,
 
+      storyGroups: [],
+      storiesStatus: 'idle',
+
       languageSelected: false,
       setLanguageSelected: (value) => set({ languageSelected: value }),
 
@@ -172,6 +184,70 @@ export const useAppStore = create<AppState>()(
           posts: [post, ...state.posts],
           user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
         }));
+      },
+      loadStories: async () => {
+        // Sin backend no hay historias: la fila se queda vacia en vez de
+        // mostrar burbujas de mentira.
+        if (!backendEnabled) {
+          set({ storyGroups: [], storiesStatus: 'idle' });
+          return;
+        }
+        set({ storiesStatus: 'loading' });
+        try {
+          set({ storyGroups: await StoryRepository.list(), storiesStatus: 'idle' });
+        } catch (error) {
+          // Un fallo aqui no debe tumbar el inicio: el feed sigue funcionando.
+          // Pero se registra: un error silencioso aqui dejaba la fila vacia sin
+          // ninguna pista de por que (p. ej. un embed ambiguo de PostgREST).
+          console.warn('[historias] no se pudieron cargar:', error);
+          set({ storiesStatus: 'error' });
+        }
+      },
+      createStory: async (media, durationMs = 5000) => {
+        await StoryRepository.create(media, { durationMs });
+        await get().loadStories();
+      },
+      deleteStory: async (storyId) => {
+        // Se quita al instante y se recarga para recalcular anillos y orden.
+        set((state) => ({
+          storyGroups: state.storyGroups
+            .map((group) => ({ ...group, items: group.items.filter((i) => i.id !== storyId) }))
+            .filter((group) => group.items.length > 0),
+        }));
+        try {
+          await StoryRepository.remove(storyId);
+        } finally {
+          await get().loadStories();
+        }
+      },
+      markStoryViewed: (storyId) => {
+        const groups = get().storyGroups;
+        const alreadySeen = groups.every((group) =>
+          group.items.every((item) => item.id !== storyId || item.viewedByMe),
+        );
+        if (alreadySeen) return;
+
+        // Mirar tu propia historia no cuenta como visita. Antes lo filtraba la
+        // API; ahora que se inserta desde el cliente hay que hacerlo aqui, o el
+        // contador se inflaria solo con abrirla.
+        const isOwn = groups.some(
+          (group) => group.isOwn && group.items.some((item) => item.id === storyId),
+        );
+
+        // Optimista: el anillo se apaga sin esperar a la red.
+        set({
+          storyGroups: groups.map((group) => {
+            const items = group.items.map((item) =>
+              item.id === storyId ? { ...item, viewedByMe: true } : item,
+            );
+            return { ...group, items, seen: items.every((item) => item.viewedByMe) };
+          }),
+        });
+        if (backendEnabled && !isOwn) {
+          StoryRepository.markViewed(storyId).catch(() => {
+            // Marcar una vista no es critico: si falla, se reintenta al reabrir.
+          });
+        }
       },
       deletePost: async (postId) => {
         const index = get().posts.findIndex((post) => post.id === postId);

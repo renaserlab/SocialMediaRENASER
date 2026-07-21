@@ -11,9 +11,22 @@ import { uploadResumable } from '@/services/resumableUpload';
 import { supabase, supabaseUrl } from '@/services/supabase';
 
 const BUCKET = 'post-media';
+const AVATAR_BUCKET = 'avatars';
 const SIGNED_URL_TTL = 60 * 60; // 1 hora
 
 export type MediaKind = 'image' | 'video' | 'audio';
+
+/**
+ * URL publica del avatar de un perfil (o null si no tiene).
+ *
+ * El bucket `avatars` es publico (ver 0001_initial.sql), asi que no hace falta
+ * firmar: se construye la URL directa, sin round-trip. Devuelve null cuando el
+ * perfil aun no ha subido foto, para que quien llama use el placeholder.
+ */
+export function avatarPublicUrl(path: string | null | undefined): string | null {
+  if (!path || !supabase) return null;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+}
 
 /** Medio elegido por el usuario, antes de subirlo. */
 export type PickedMedia = {
@@ -21,6 +34,8 @@ export type PickedMedia = {
   kind: MediaKind;
   mimeType?: string | null;
   name?: string | null;
+  /** Duracion en ms cuando el medio es un video (la informa el selector). */
+  durationMs?: number | null;
 };
 
 /** Medio ya subido a Storage, listo para enviar al backend. */
@@ -81,7 +96,7 @@ export async function takePhoto(aspect?: [number, number]): Promise<PickedMedia 
 }
 
 /** Abre la galería y devuelve el video elegido (o null si se cancela). */
-export async function pickVideo(): Promise<PickedMedia | null> {
+export async function pickVideo(maxDurationSec = 180): Promise<PickedMedia | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -89,12 +104,20 @@ export async function pickVideo(): Promise<PickedMedia | null> {
     // Reduce el peso en origen: los videos de galeria pasan de 100 MB con
     // facilidad y en iOS se reexportan a 720p antes de subirlos.
     videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
-    videoMaxDuration: 180,
+    // OJO: solo limita la grabacion con camara. Al elegir de la galeria hay que
+    // comprobar `durationMs` en quien llama.
+    videoMaxDuration: maxDurationSec,
   });
   if (result.canceled) return null;
   const asset = result.assets[0];
   if (!asset) return null;
-  return { uri: asset.uri, kind: 'video', mimeType: asset.mimeType, name: asset.fileName };
+  return {
+    uri: asset.uri,
+    kind: 'video',
+    mimeType: asset.mimeType,
+    name: asset.fileName,
+    durationMs: asset.duration ?? null,
+  };
 }
 
 /** Abre el selector de archivos para elegir un audio. */
@@ -295,8 +318,6 @@ export async function uploadPostMedia(
 // Fotos de perfil y portada
 // --------------------------------------------------------------------------
 
-const AVATARS_BUCKET = 'avatars';
-
 /**
  * Sube la foto de perfil o portada al bucket `avatars` y devuelve su RUTA.
  *
@@ -332,20 +353,10 @@ export async function uploadProfileImage(
   if (blob.size === 0) throw new Error('La imagen seleccionada está vacía.');
 
   const { error } = await supabase.storage
-    .from(AVATARS_BUCKET)
+    .from(AVATAR_BUCKET)
     .upload(path, blob, { contentType: resolveContentType(media, ext), upsert: false });
   if (error) throw new Error(describeStorageError(error));
   return path;
-}
-
-/**
- * URL publica de una ruta del bucket `avatars`. Es un bucket publico, asi que
- * no hace falta firmar y la URL no caduca (importante: la foto de perfil se
- * muestra en cada tarjeta del feed).
- */
-export function profileImageUrl(path: string | null | undefined): string | undefined {
-  if (!supabase || !path) return undefined;
-  return supabase.storage.from(AVATARS_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
 /** Firma en lote rutas de post-media para poder mostrarlas (bucket privado). */

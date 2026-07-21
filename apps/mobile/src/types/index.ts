@@ -39,6 +39,8 @@ export type Post = {
   author: string;
   /** id del autor en el backend (para navegar a su perfil). */
   authorId?: string;
+  /** URL publica del avatar del autor; sin valor se usa el placeholder. */
+  authorAvatarUrl?: string;
   username: string;
   body: string;
   createdAt: string;
@@ -114,6 +116,46 @@ export type Lesson = {
   mentor: string;
   summary: string;
   resources: LessonResource[];
+};
+
+/** Un tramo real de historia, tal y como lo devuelve el backend. */
+export type StoryItem = {
+  id: string;
+  storagePath: string;
+  /** URL firmada del medio; se resuelve al cargar el listado. */
+  mediaUrl?: string;
+  mediaType: 'image' | 'video';
+  /** Cuanto dura el tramo en el visor (en video, su duracion real). */
+  durationMs: number;
+  caption: string;
+  createdAt: string;
+  viewedByMe: boolean;
+  /** Solo llega con valor en las historias propias. */
+  viewsCount: number;
+};
+
+/** Las historias vigentes de un autor: una burbuja en la fila de inicio. */
+export type StoryGroup = {
+  authorId: string;
+  author: string;
+  username: string;
+  avatarPath?: string;
+  /** URL publica del avatar del autor; sin valor se usa el placeholder. */
+  avatarUrl?: string;
+  items: StoryItem[];
+  /** false si queda algun tramo sin ver: es lo que decide el anillo. */
+  seen: boolean;
+  isOwn: boolean;
+};
+
+/** Quien vio una historia (solo lo consulta su autor). */
+export type StoryViewer = {
+  id: string;
+  fullName: string;
+  username: string;
+  /** URL publica del avatar; sin valor se usa el placeholder. */
+  avatarUrl?: string;
+  viewedAt: string;
 };
 
 /** Un tramo de una historia (imagen a pantalla completa con texto opcional). */
