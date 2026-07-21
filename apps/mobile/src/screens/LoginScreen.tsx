@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -66,7 +67,7 @@ export function LoginScreen() {
       if (/invalid|credential|incorrect|contraseñ/i.test(message)) {
         setErrors({ password: 'Correo o contraseña incorrectos' });
       } else {
-        Alert.alert('No se pudo iniciar sesión', message);
+        notify('No se pudo iniciar sesión', message);
       }
     } finally {
       setSubmitting(false);
@@ -74,7 +75,7 @@ export function LoginScreen() {
   };
 
   const socialDemo = (provider: string) => {
-    Alert.alert(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
+    notify(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
   };
 
   return (

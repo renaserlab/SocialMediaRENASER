@@ -100,6 +100,39 @@ function resolveContentType(media: PickedMedia, ext: string): string {
   return `audio/${ext === 'm4a' ? 'mp4' : ext}`;
 }
 
+/** Límite por archivo del plan free de Supabase Storage. */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+function formatMb(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Traduce un error de Storage a algo accionable.
+ *
+ * Storage responde SIEMPRE con HTTP 400 y mete el codigo real en el cuerpo
+ * (`statusCode`), asi que sin esto en consola solo se ve "400 (Bad Request)".
+ */
+function describeStorageError(error: unknown): string {
+  const err = error as { message?: string; statusCode?: string | number };
+  const code = String(err?.statusCode ?? '');
+  const message = err?.message ?? 'Error desconocido';
+
+  if (code === '413' || /exceeded the maximum allowed size|too large/i.test(message)) {
+    return `El archivo supera el límite de ${formatMb(MAX_UPLOAD_BYTES)} permitido por Supabase. Prueba con uno más corto o de menor calidad.`;
+  }
+  if (code === '403' || /unauthorized|row-level security|violates/i.test(message)) {
+    return 'No tienes permiso para subir este archivo. Cierra sesión y vuelve a entrar.';
+  }
+  if (code === '409' || /already exists/i.test(message)) {
+    return 'Ya existe un archivo con ese nombre. Inténtalo de nuevo.';
+  }
+  if (/mime|content-type/i.test(message)) {
+    return `El bucket no acepta este tipo de archivo (${message}).`;
+  }
+  return `Storage rechazó el archivo: ${message}${code ? ` (código ${code})` : ''}`;
+}
+
 /**
  * Sube un medio (imagen/video/audio) al bucket post-media dentro de la carpeta
  * del usuario (uid/...), como exige la política RLS. Devuelve la ruta y su tipo.
@@ -114,13 +147,25 @@ export async function uploadPostMedia(media: PickedMedia): Promise<UploadedMedia
   const path = `${uid}/${randomName(ext)}`;
   const contentType = resolveContentType(media, ext);
 
+  // Usamos Blob (no ArrayBuffer) para poder validar el tamaño antes de gastar
+  // la subida y para que supabase-js conserve el content-type.
   const response = await fetch(media.uri);
-  const arrayBuffer = await response.arrayBuffer();
+  if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');
+  const blob = await response.blob();
+
+  if (blob.size === 0) {
+    throw new Error('El archivo seleccionado está vacío.');
+  }
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `El archivo pesa ${formatMb(blob.size)} y el máximo son ${formatMb(MAX_UPLOAD_BYTES)}. Elige un video más corto o comprímelo antes de subirlo.`,
+    );
+  }
 
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(path, arrayBuffer, { contentType, upsert: false });
-  if (error) throw error;
+    .upload(path, blob, { contentType, upsert: false });
+  if (error) throw new Error(describeStorageError(error));
   return { storagePath: path, mediaType: media.kind };
 }
 

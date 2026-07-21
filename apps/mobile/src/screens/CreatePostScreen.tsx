@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
@@ -8,6 +8,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { notify } from '@/lib/confirm';
 import {
   pickAudio,
   pickImage,
@@ -32,11 +33,12 @@ export function CreatePostScreen() {
   const [prompt, setPrompt] = useState(prompts[0]!);
   const [media, setMedia] = useState<PickedMedia | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   /** Elige un medio (imagen, video o audio) y lo deja listo para publicar. */
   const choose = async (kind: 'image' | 'video' | 'audio') => {
     if (!supabaseEnabled) {
-      Alert.alert(
+      notify(
         'Adjuntos',
         'Conecta Supabase para adjuntar imágenes, videos o audios a tus publicaciones.',
       );
@@ -49,18 +51,22 @@ export function CreatePostScreen() {
           : kind === 'video'
           ? await pickVideo()
           : await pickAudio();
-      if (picked) setMedia(picked);
+      if (picked) {
+        setMedia(picked);
+        setError(null);
+      }
     } catch {
-      Alert.alert('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
+      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
   const publish = async () => {
     if (!text.trim()) {
-      Alert.alert('Escribe algo', 'Comparte una reflexión antes de publicar.');
+      setError('Comparte una reflexión antes de publicar.');
       return;
     }
     setPublishing(true);
+    setError(null);
     try {
       const uploaded = media && supabaseEnabled ? [await uploadPostMedia(media)] : [];
       await createPost(text, uploaded);
@@ -69,11 +75,10 @@ export function CreatePostScreen() {
       // `navigate` conmuta de pestaña conservando el historial; `replace` lo
       // sustituía y el gesto atrás de Android podía cerrar la app.
       router.navigate('/(tabs)/home');
-    } catch (error) {
-      Alert.alert(
-        'No se pudo publicar',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
-      );
+    } catch (err) {
+      // Se muestra en la propia pantalla: Alert.alert es un no-op en web y el
+      // motivo real del fallo (tamaño, permisos, tipo) se perdía en silencio.
+      setError(err instanceof Error ? err.message : 'No se pudo publicar. Inténtalo de nuevo.');
     } finally {
       setPublishing(false);
     }
@@ -189,6 +194,13 @@ export function CreatePostScreen() {
             </View>
           )}
 
+          {error && (
+            <View style={[styles.errorBox, { backgroundColor: colors.surfaceAlt, borderColor: colors.danger }]}>
+              <Feather name="alert-triangle" size={18} color={colors.danger} />
+              <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+            </View>
+          )}
+
           <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
         </View>
       </AppScreen>
@@ -219,6 +231,16 @@ const styles = StyleSheet.create({
     minHeight: 72,
   },
   audioName: { flex: 1, fontSize: 13, fontWeight: '600' },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  errorText: { flex: 1, fontSize: 13, lineHeight: 18 },
   removeBtn: {
     position: 'absolute',
     top: spacing.sm,

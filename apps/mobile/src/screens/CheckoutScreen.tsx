@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -146,7 +147,7 @@ export function CheckoutScreen() {
             <Button
               label="Aplicar"
               variant="secondary"
-              onPress={() => Alert.alert('Cupón', coupon ? 'Cupón validado en modo demostración.' : 'Ingresa un cupón.')}
+              onPress={() => notify('Cupón', coupon ? 'Cupón validado en modo demostración.' : 'Ingresa un cupón.')}
               style={styles.couponButton}
             />
           </View>

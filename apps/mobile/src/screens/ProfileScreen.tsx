@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { haptics } from '@/lib/haptics';
@@ -92,7 +93,7 @@ export function ProfileScreen() {
       const conv = await MessageRepository.getOrCreateDirect(id);
       router.push({ pathname: '/chat/[id]', params: { id: conv.id, name: profileData.fullName } } as never);
     } catch {
-      Alert.alert('No se pudo abrir el chat', 'Inténtalo de nuevo.');
+      notify('No se pudo abrir el chat', 'Inténtalo de nuevo.');
     }
   };
 

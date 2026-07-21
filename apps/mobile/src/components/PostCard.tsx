@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
+import { confirm, notify } from '@/lib/confirm';
 import { haptics } from '@/lib/haptics';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -53,27 +54,25 @@ export function PostCard({ post }: { post: Post }) {
     setShowComments(true);
   };
 
-  const reportPost = () => {
-    Alert.alert('Reportar publicación', '¿Deseas reportar esta publicación?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Reportar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await ReportRepository.create({
-              entityType: 'post',
-              entityId: post.id,
-              reportedUserId: post.authorId,
-              reason: 'Contenido inapropiado',
-            });
-            Alert.alert('Gracias', 'Hemos recibido tu reporte.');
-          } catch {
-            Alert.alert('No se pudo enviar', 'Inténtalo de nuevo.');
-          }
-        },
-      },
-    ]);
+  const reportPost = async () => {
+    const ok = await confirm({
+      title: 'Reportar publicación',
+      message: '¿Deseas reportar esta publicación?',
+      confirmLabel: 'Reportar',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await ReportRepository.create({
+        entityType: 'post',
+        entityId: post.id,
+        reportedUserId: post.authorId,
+        reason: 'Contenido inapropiado',
+      });
+      notify('Gracias', 'Hemos recibido tu reporte.');
+    } catch {
+      notify('No se pudo enviar', 'Inténtalo de nuevo.');
+    }
   };
 
   return (
