@@ -55,7 +55,20 @@ export function StoriesRow() {
     router.push(`/stories/${authorId}` as never);
   };
 
+  /**
+   * Como en Instagram, la burbuja propia son dos acciones: tocar la foto ve tu
+   * historia (si la tienes) y el boton `+` siempre anade una nueva.
+   */
   const onOwnPress = () => {
+    haptics.light();
+    if (own) {
+      router.push(`/stories/${own.authorId}` as never);
+      return;
+    }
+    setSheetOpen(true);
+  };
+
+  const onAddPress = () => {
     haptics.light();
     setSheetOpen(true);
   };
@@ -102,11 +115,11 @@ export function StoriesRow() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
       >
-        {/* Tu historia: publicar si no tienes, o abrir la tuya si ya existe. */}
+        {/* Tu historia: la foto abre la tuya y el `+` anade otra. */}
         <Pressable
           onPress={onOwnPress}
           accessibilityRole="button"
-          accessibilityLabel={own ? 'Tu historia' : 'Añadir a tu historia'}
+          accessibilityLabel={own ? 'Ver tu historia' : 'Añadir a tu historia'}
           style={({ pressed }) => [styles.item, { opacity: pressed ? 0.8 : 1 }]}
         >
           <View>
@@ -125,15 +138,35 @@ export function StoriesRow() {
                 contentFit="cover"
               />
             </Ring>
+            {/*
+              El `+` se muestra SIEMPRE, tengas o no historia: es el acceso a
+              publicar otra. Antes solo aparecia sin historias, asi que al subir
+              la primera desaparecia la forma de anadir mas.
+            */}
             {uploading ? (
-              <View style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}>
+              <View
+                style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}
+              >
                 <ActivityIndicator size="small" color={colors.background} />
               </View>
-            ) : !own ? (
-              <View style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}>
+            ) : (
+              <Pressable
+                onPress={onAddPress}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Añadir a tu historia"
+                style={({ pressed }) => [
+                  styles.badge,
+                  {
+                    backgroundColor: colors.text,
+                    borderColor: colors.background,
+                    opacity: pressed ? 0.75 : 1,
+                  },
+                ]}
+              >
                 <Feather name="plus" size={13} color={colors.background} />
-              </View>
-            ) : null}
+              </Pressable>
+            )}
           </View>
           <Text numberOfLines={1} style={styles.label} color={colors.text}>
             Tu historia
@@ -153,19 +186,8 @@ export function StoriesRow() {
 
       <BottomSheet visible={sheetOpen} onClose={() => setSheetOpen(false)}>
         <Text style={styles.sheetTitle} color={colors.text}>
-          Tu historia
+          Añadir a tu historia
         </Text>
-        {own ? (
-          <ListRow
-            title="Ver tu historia"
-            subtitle={`${own.items.length} ${own.items.length === 1 ? 'elemento' : 'elementos'}`}
-            leftIcon="play-circle"
-            onPress={() => {
-              setSheetOpen(false);
-              router.push(`/stories/${own.authorId}` as never);
-            }}
-          />
-        ) : null}
         <ListRow title="Foto de la galería" leftIcon="image" onPress={() => void publish('gallery-photo')} />
         <ListRow
           title="Video de la galería"
