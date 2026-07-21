@@ -24,8 +24,11 @@ import type { StoryGroup, StoryViewer } from '@/types';
  * quiera centralizar la logica en el backend.
  */
 
+// Se nombra la FK explicitamente (`!stories_author_id_fkey`) porque hay dos
+// caminos de stories a profiles —el autor y, via story_views, los espectadores—
+// y sin desambiguar PostgREST responde PGRST201 (relacion ambigua).
 const SELECT_STORY =
-  'id, author_id, storage_path, media_type, duration_ms, caption, created_at, expires_at, author:profiles(id, full_name, username, avatar_path)';
+  'id, author_id, storage_path, media_type, duration_ms, caption, created_at, expires_at, author:profiles!stories_author_id_fkey(id, full_name, username, avatar_path)';
 
 function client() {
   if (!supabase) throw new Error('Supabase no esta configurado.');

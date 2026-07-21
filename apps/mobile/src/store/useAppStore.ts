@@ -191,8 +191,11 @@ export const useAppStore = create<AppState>()(
         set({ storiesStatus: 'loading' });
         try {
           set({ storyGroups: await StoryRepository.list(), storiesStatus: 'idle' });
-        } catch {
+        } catch (error) {
           // Un fallo aqui no debe tumbar el inicio: el feed sigue funcionando.
+          // Pero se registra: un error silencioso aqui dejaba la fila vacia sin
+          // ninguna pista de por que (p. ej. un embed ambiguo de PostgREST).
+          console.warn('[historias] no se pudieron cargar:', error);
           set({ storiesStatus: 'error' });
         }
       },
