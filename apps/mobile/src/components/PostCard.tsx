@@ -96,7 +96,10 @@ export function PostCard({ post }: { post: Post }) {
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
       {post.imageUrl || post.imageKey ? (
-        <DoubleTapLike onDoubleTap={() => { if (!liked) toggleLike(post.id); }}>
+        <DoubleTapLike
+          onDoubleTap={() => { if (!liked) toggleLike(post.id); }}
+          onSingleTap={() => router.push(`/post/${post.id}` as never)}
+        >
           <ExpoImage
             source={post.imageUrl ? { uri: post.imageUrl } : assets[post.imageKey!]}
             contentFit="cover"

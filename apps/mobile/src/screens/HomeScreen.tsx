@@ -12,18 +12,11 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
+import { stories } from '@/data/mockData';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
-
-const stories = [
-  { label: 'Tu historia', image: 'avatar' as const },
-  { label: 'Reto diario', image: 'speaker' as const },
-  { label: 'Alquimia', image: 'hero' as const },
-  { label: 'Comunidad', image: 'avatar' as const },
-  { label: 'En vivo', image: 'speaker' as const },
-];
 
 export function HomeScreen() {
   const { colors } = useAppTheme();
@@ -62,8 +55,15 @@ export function HomeScreen() {
     <View>
       {/* Historias / Avatares */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stories}>
-        {stories.map((story) => (
-          <Avatar key={story.label} label={story.label} image={story.image} size={54} />
+        {stories.map((story, index) => (
+          <Pressable
+            key={story.id}
+            onPress={() => router.push(`/stories/${index}` as never)}
+            accessibilityRole="button"
+            accessibilityLabel={`Ver historia de ${story.author}`}
+          >
+            <Avatar label={story.author} image={story.avatar} size={54} />
+          </Pressable>
         ))}
       </ScrollView>
 

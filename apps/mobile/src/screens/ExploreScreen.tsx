@@ -64,7 +64,7 @@ export function ExploreScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="EXPLORAR" />
+      <AppHeader title="EXPLORAR" rightIcon="search" onRightPress={() => router.push('/search' as never)} />
       <AppScreen
         contentStyle={{ paddingBottom: 100 }}
         scrollProps={{
@@ -138,6 +138,17 @@ export function ExploreScreen() {
               <Text style={styles.heroBody}>{course.modules} módulos · {course.lessons} lecciones</Text>
             </View>
           </Pressable>
+
+          <SectionTitle title="Shorts" action="Ver todos" onActionPress={() => router.push('/reels' as never)} />
+          <View style={styles.list}>
+            <ListRow
+              title="Shorts de la comunidad"
+              subtitle="Videos cortos para avanzar en minutos"
+              leftIcon="play-circle"
+              rightIcon="chevron-right"
+              onPress={() => router.push('/reels' as never)}
+            />
+          </View>
 
           <SectionTitle title="Próximos eventos" action="Ver calendario" onActionPress={() => router.push('/events')} />
           <View style={styles.list}>

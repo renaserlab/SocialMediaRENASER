@@ -199,8 +199,16 @@ export function ProfileScreen() {
           </View>
 
           <View style={styles.stats}>
-            <Stat label="Seguidores" value={profileData.followers} />
-            <Stat label="Siguiendo" value={profileData.following} />
+            <Stat
+              label="Seguidores"
+              value={profileData.followers}
+              onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
+            />
+            <Stat
+              label="Siguiendo"
+              value={profileData.following}
+              onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
+            />
             <Stat label="Publicaciones" value={profileData.posts} />
           </View>
 
@@ -216,6 +224,7 @@ export function ProfileScreen() {
           )}
 
           <View style={styles.shortcuts}>
+            <Shortcut icon="bookmark" label="Guardados" onPress={() => router.push('/saved' as never)} />
             <Shortcut icon="headphones" label="Audios" onPress={() => router.push('/audio/private')} />
             <Shortcut icon="calendar" label="Eventos" onPress={() => router.push('/events')} />
             <Shortcut icon="book" label="Cursos" onPress={() => router.push('/course/lider-vida-empresa')} />
@@ -234,14 +243,29 @@ export function ProfileScreen() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, onPress }: { label: string; value: number; onPress?: () => void }) {
   const { colors } = useAppTheme();
   const display = value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}K` : String(value);
-  return (
-    <View style={styles.statBox}>
+  const content = (
+    <React.Fragment>
       <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{display}</Text>
       <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{label}</Text>
-    </View>
+    </React.Fragment>
+  );
+
+  if (!onPress) {
+    return <View style={styles.statBox}>{content}</View>;
+  }
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.statBox, { opacity: pressed ? 0.7 : 1 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`Ver ${label}`}
+    >
+      {content}
+    </Pressable>
   );
 }
 
