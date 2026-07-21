@@ -14,6 +14,7 @@ class ProfileRead(BaseModel):
     avatar_path: str | None = None
     cover_path: str | None = None
     role: str = "user"
+    is_featured: bool = False
     is_private: bool = False
     created_at: datetime
     followers_count: int = 0
@@ -36,6 +37,14 @@ class ProfileSummary(BaseModel):
     is_following: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FeaturedProfile(ProfileSummary):
+    """Perfil sugerido al registrarse. Lleva contadores para dar contexto."""
+
+    role: str = "user"
+    followers_count: int = 0
+    posts_count: int = 0
 
 
 class ProfileUpdate(BaseModel):

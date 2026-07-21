@@ -15,6 +15,8 @@ export type UserProfile = {
   avatarUrl?: string;
   /** Foto de portada elegida por el usuario. Sin valor se usa la imagen por defecto. */
   coverUrl?: string;
+  /** Gestiona la aplicación (crear cursos, moderar). Lo resuelve el backend. */
+  isAdmin?: boolean;
 };
 
 export type QuizArea = 'mentalidad' | 'relaciones' | 'negocios' | 'salud' | 'proposito';

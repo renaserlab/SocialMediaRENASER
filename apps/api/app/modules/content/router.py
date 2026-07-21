@@ -7,7 +7,7 @@ El feed devuelve el autor (join a profiles) y los contadores (likes/comentarios)
 mas el estado propio (liked_by_me / saved_by_me) cuando hay sesion.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import delete, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ from app.modules.content.schemas import (
 )
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
+from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
 from app.shared.pagination import Page, pagination_params
 
@@ -144,9 +145,16 @@ async def _likes_count(db: AsyncSession, post_id: str) -> int:
 @router.get("/posts", response_model=list[PostRead])
 async def list_posts(
     page: Page = Depends(pagination_params),
+    feed: str = Query(default="all", pattern="^(all|following)$"),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
+    """Feed publico.
+
+    `feed=all` ("Para ti") devuelve todo lo publicado; `feed=following`
+    ("Siguiendo") solo lo de los perfiles que sigue el usuario. Sin sesion,
+    `following` no tiene a quien consultar y devuelve una lista vacia.
+    """
     uid = current_user.id if current_user else None
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
     stmt = (
@@ -157,6 +165,11 @@ async def list_posts(
         .limit(page.limit)
         .offset(page.offset)
     )
+    if feed == "following":
+        if not uid:
+            return []
+        followed = select(Follow.following_id).where(Follow.follower_id == uid)
+        stmt = stmt.where(Post.author_id.in_(followed))
     rows = (await db.execute(stmt)).all()
     media_map = await _load_media_map(db, [row[0].id for row in rows])
     return [_to_post_read(*row, media=media_map.get(row[0].id, [])) for row in rows]

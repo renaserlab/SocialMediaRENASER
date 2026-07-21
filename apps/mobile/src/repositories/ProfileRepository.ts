@@ -1,9 +1,12 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import {
+  FeaturedMember,
+  FeaturedProfileDto,
   ProfileDto,
   ProfileSummary,
   ProfileSummaryDto,
   ProfileUpdatePatch,
+  toFeaturedMember,
   toProfileSummary,
   toProfileUpdatePayload,
   toUserProfile,
@@ -26,6 +29,12 @@ export const ProfileRepository = {
       body: JSON.stringify(toProfileUpdatePayload(patch)),
     });
     return toUserProfile(dto);
+  },
+
+  /** Perfiles sugeridos al registrarse, para que el feed no empiece vacío. */
+  async listFeatured(): Promise<FeaturedMember[]> {
+    const dtos = await apiRequest<FeaturedProfileDto[]>(`${API_V1}/profiles/featured`);
+    return dtos.map(toFeaturedMember);
   },
 
   async getById(profileId: string): Promise<UserProfile> {

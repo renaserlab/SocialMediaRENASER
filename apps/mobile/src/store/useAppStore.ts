@@ -4,7 +4,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { conversations, initialPosts } from '@/data/mockData';
 import { AuthRepository } from '@/repositories/AuthRepository';
-import { PostRepository } from '@/repositories/PostRepository';
+import { PostRepository, type FeedKind } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
 import { Conversation, Post, QuizArea, ThemeMode, UserProfile } from '@/types';
@@ -34,7 +34,9 @@ type AppState = {
   feedHasMore: boolean;
   feedLoadingMore: boolean;
   feedOffset: number;
-  loadFeed: () => Promise<void>;
+  /** Pestaña activa del feed; la conserva `loadMoreFeed` al paginar. */
+  feedKind: FeedKind;
+  loadFeed: (feed?: FeedKind) => Promise<void>;
   loadMoreFeed: () => Promise<void>;
   loadCommentsFor: (postId: string) => Promise<void>;
 
@@ -109,6 +111,7 @@ export const useAppStore = create<AppState>()(
         { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },
       ],
 
+      feedKind: 'all',
       feedStatus: 'idle',
       feedError: null,
       feedHasMore: false,
@@ -317,15 +320,19 @@ export const useAppStore = create<AppState>()(
           ),
         }));
       },
-      loadFeed: async () => {
+      loadFeed: async (feed) => {
+        const kind = feed ?? get().feedKind;
         if (!backendEnabled) {
-          set({ feedStatus: 'idle' });
+          set({ feedStatus: 'idle', feedKind: kind });
           return;
         }
-        set({ feedStatus: 'loading', feedError: null });
+        set({ feedStatus: 'loading', feedError: null, feedKind: kind });
         try {
           const uid = get().user?.id ?? null;
-          const page = await PostRepository.listFeed({ limit: FEED_PAGE, offset: 0 }, uid);
+          const page = await PostRepository.listFeed(
+            { limit: FEED_PAGE, offset: 0, feed: kind },
+            uid,
+          );
           set({
             posts: page.items,
             likedPostIds: page.likedIds,
@@ -349,7 +356,7 @@ export const useAppStore = create<AppState>()(
         try {
           const uid = get().user?.id ?? null;
           const page = await PostRepository.listFeed(
-            { limit: FEED_PAGE, offset: feedOffset },
+            { limit: FEED_PAGE, offset: feedOffset, feed: get().feedKind },
             uid,
           );
           set((state) => ({

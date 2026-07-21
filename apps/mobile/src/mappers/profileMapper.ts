@@ -11,6 +11,7 @@ export type ProfileDto = {
   avatar_path: string | null;
   cover_path: string | null;
   role: string;
+  is_featured?: boolean;
   is_private: boolean;
   created_at: string;
   followers_count?: number;
@@ -66,6 +67,32 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     // El backend guarda la ruta dentro del bucket; la vista necesita una URL.
     avatarUrl: profileImageUrl(dto.avatar_path),
     coverUrl: profileImageUrl(dto.cover_path),
+    isAdmin: dto.role === 'admin',
+  };
+}
+
+/** Perfil sugerido tras registrarse (endpoint /profiles/featured). */
+export type FeaturedProfileDto = ProfileSummaryDto & {
+  role: string;
+  followers_count: number;
+  posts_count: number;
+};
+
+export type FeaturedMember = ProfileSummary & {
+  /** URL lista para pintar; sin foto queda undefined y se usa el avatar local. */
+  avatarUrl?: string;
+  isAdmin: boolean;
+  followers: number;
+  posts: number;
+};
+
+export function toFeaturedMember(dto: FeaturedProfileDto): FeaturedMember {
+  return {
+    ...toProfileSummary(dto),
+    avatarUrl: profileImageUrl(dto.avatar_path),
+    isAdmin: dto.role === 'admin',
+    followers: dto.followers_count ?? 0,
+    posts: dto.posts_count ?? 0,
   };
 }
 

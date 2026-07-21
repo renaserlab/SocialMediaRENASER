@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
+import { postAuthRoute } from '@/lib/postAuthRoute';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -58,7 +59,7 @@ export function LoginScreen() {
     setSubmitting(true);
     try {
       await signInEmail({ email: cleanEmail, password });
-      router.replace('/(tabs)/home');
+      router.replace(postAuthRoute() as never);
     } catch (error) {
       const message =
         error instanceof ApiError || error instanceof Error

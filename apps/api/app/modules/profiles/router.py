@@ -12,7 +12,12 @@ from app.core.exceptions import NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.content.models import Post
 from app.modules.profiles.models import Profile
-from app.modules.profiles.schemas import ProfileRead, ProfileSummary, ProfileUpdate
+from app.modules.profiles.schemas import (
+    FeaturedProfile,
+    ProfileRead,
+    ProfileSummary,
+    ProfileUpdate,
+)
 from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
 from app.shared.pagination import Page, pagination_params
@@ -64,6 +69,7 @@ def _to_profile_read(profile: Profile, fc: int, gc: int, pc: int, isf: int) -> P
         avatar_path=profile.avatar_path,
         cover_path=profile.cover_path,
         role=profile.role,
+        is_featured=profile.is_featured,
         is_private=profile.is_private,
         created_at=profile.created_at,
         followers_count=fc or 0,
@@ -116,6 +122,43 @@ async def update_my_profile(
         setattr(profile, field, value)
     await db.commit()
     return await _load_profile(db, current_user.id, viewer_id=None)
+
+
+@router.get("/featured", response_model=list[FeaturedProfile])
+async def list_featured_profiles(
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[FeaturedProfile]:
+    """Perfiles sugeridos al registrarse, para que el feed no empiece vacio.
+
+    Se declara antes que `/{profile_id}` porque si no esa ruta capturaria la
+    palabra "featured" y responderia 404.
+    """
+    viewer_id = current_user.id if current_user else None
+    followers_sq, _, posts_sq, is_following_sq = _count_columns(viewer_id)
+    stmt = (
+        select(Profile, followers_sq, posts_sq, is_following_sq)
+        .where(Profile.is_featured.is_(True))
+        # El propio usuario no se sugiere a si mismo.
+        .where(Profile.id != viewer_id if viewer_id else literal(True))
+        .order_by(Profile.created_at)
+        .limit(20)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        FeaturedProfile(
+            id=p.id,
+            full_name=p.full_name,
+            username=p.username,
+            avatar_path=p.avatar_path,
+            bio=p.bio,
+            role=p.role,
+            followers_count=fc or 0,
+            posts_count=pc or 0,
+            is_following=(isf or 0) > 0,
+        )
+        for p, fc, pc, isf in rows
+    ]
 
 
 @router.get("/search", response_model=list[ProfileSummary])

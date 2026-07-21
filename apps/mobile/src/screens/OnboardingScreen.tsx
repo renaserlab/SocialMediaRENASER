@@ -6,6 +6,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
+import { postAuthRoute } from '@/lib/postAuthRoute';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -65,12 +66,12 @@ export function OnboardingScreen() {
     }
     // Finalizar onboarding completo
     complete(true);
-    router.replace('/(tabs)/home');
+    router.replace(postAuthRoute() as never);
   };
 
   const skip = () => {
     complete(true);
-    router.replace('/(tabs)/home');
+    router.replace(postAuthRoute() as never);
   };
 
   if (showInterests) {
