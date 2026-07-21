@@ -25,6 +25,7 @@ export function HomeScreen() {
   const keyboardOffset = useKeyboardOffset();
   const posts = useAppStore((state) => state.posts);
   const user = useAppStore((state) => state.user);
+  const firstName = user?.fullName?.trim().split(' ')[0];
   const feedStatus = useAppStore((state) => state.feedStatus);
   const feedHasMore = useAppStore((state) => state.feedHasMore);
   const feedLoadingMore = useAppStore((state) => state.feedLoadingMore);
@@ -85,7 +86,9 @@ export function HomeScreen() {
         >
           <ExpoImage source={assets.avatar} style={styles.composerAvatar} contentFit="cover" />
           <Text style={[styles.composerText, { color: colors.textMuted }]}>
-            ¿Qué estás aprendiendo hoy, {user?.fullName.split(' ')[0] ?? 'Katherine'}?
+            {/* Sin nombre se saluda en generico: antes caia a un "Katherine"
+                fijo del demo y se le mostraba a cualquier usuario. */}
+            {firstName ? `¿Qué estás aprendiendo hoy, ${firstName}?` : '¿Qué estás aprendiendo hoy?'}
           </Text>
           <Feather name="plus-circle" size={24} color={colors.text} />
         </Pressable>

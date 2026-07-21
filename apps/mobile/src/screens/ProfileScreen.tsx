@@ -183,12 +183,14 @@ export function ProfileScreen() {
         avatar: 'avatar' as const,
       }
     : {
-        fullName: currentUser?.fullName ?? 'Katherine Béjar',
-        username: currentUser?.username ?? '@katherine',
-        bio: currentUser?.bio ?? 'Creando una vida con claridad, propósito y crecimiento consciente.',
-        followers: currentUser?.followers ?? 128,
-        following: currentUser?.following ?? 96,
-        posts: currentUser?.posts ?? 1,
+        // Sin datos reales no se inventa una identidad: antes caia a la
+        // "Katherine Bejar" del demo y el usuario veia un perfil ajeno.
+        fullName: currentUser?.fullName ?? '',
+        username: currentUser?.username ?? '',
+        bio: currentUser?.bio ?? '',
+        followers: currentUser?.followers ?? 0,
+        following: currentUser?.following ?? 0,
+        posts: currentUser?.posts ?? 0,
         avatar: 'avatar' as const,
       };
 

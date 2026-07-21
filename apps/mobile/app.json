@@ -72,7 +72,8 @@
         }
       ],
       "expo-font",
-      "expo-video"
+      "expo-video",
+      "react-native-compressor"
     ],
     "experiments": {
       "typedRoutes": true

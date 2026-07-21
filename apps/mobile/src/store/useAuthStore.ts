@@ -84,20 +84,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async refreshProfile() {
-    try {
-      const profile = await ProfileRepository.getMyProfile();
-      useAppStore.getState().setUser(profile);
-      set({ profileError: null });
-    } catch (error) {
-      // Si el perfil aun no existe (trigger en curso) no bloqueamos la sesion.
-      if (error instanceof ApiError && error.status === 404) {
+    // Se reintenta porque justo despues de iniciar sesion la primera peticion
+    // puede fallar de forma transitoria (token recien emitido, perfil aun
+    // creandose por el trigger). Sin reintento el usuario quedaba a null y la
+    // sesion se veia sin perfil hasta recargar la app entera.
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const profile = await ProfileRepository.getMyProfile();
+        useAppStore.getState().setUser(profile);
         set({ profileError: null });
         return;
+      } catch (error) {
+        const isLast = attempt === MAX_ATTEMPTS;
+
+        // Si el perfil aun no existe (trigger en curso) no bloqueamos la sesion.
+        if (error instanceof ApiError && error.status === 404 && isLast) {
+          set({ profileError: null });
+          return;
+        }
+
+        if (isLast) {
+          set({
+            profileError:
+              error instanceof Error ? error.message : 'No se pudo cargar el perfil.',
+          });
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
       }
-      set({
-        profileError:
-          error instanceof Error ? error.message : 'No se pudo cargar el perfil.',
-      });
     }
   },
 

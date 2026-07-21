@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
@@ -15,6 +14,7 @@ import {
   pickVideo,
   uploadPostMedia,
   type PickedMedia,
+  type UploadProgress,
 } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -33,14 +33,15 @@ export function CreatePostScreen() {
   const [prompt, setPrompt] = useState(prompts[0]!);
   const [media, setMedia] = useState<PickedMedia | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Un video puede tardar minutos: sin esto el boton solo gira y parece colgado.
+  const [phase, setPhase] = useState<'idle' | 'compressing' | 'uploading' | 'posting'>('idle');
+  const [progress, setProgress] = useState(0);
 
   /** Elige un medio (imagen, video o audio) y lo deja listo para publicar. */
   const choose = async (kind: 'image' | 'video' | 'audio') => {
     if (!supabaseEnabled) {
-      notify(
-        'Adjuntos',
-        'Conecta Supabase para adjuntar imágenes, videos o audios a tus publicaciones.',
-      );
+      setError('Conecta Supabase para adjuntar imágenes, videos o audios a tus publicaciones.');
       return;
     }
     try {
@@ -50,33 +51,47 @@ export function CreatePostScreen() {
           : kind === 'video'
           ? await pickVideo()
           : await pickAudio();
-      if (picked) setMedia(picked);
+      if (picked) {
+        setMedia(picked);
+        setError(null);
+      }
     } catch {
-      notify('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
+      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
   const publish = async () => {
     if (!text.trim()) {
-      notify('Escribe algo', 'Comparte una reflexión antes de publicar.');
+      setError('Comparte una reflexión antes de publicar.');
       return;
     }
     setPublishing(true);
+    setError(null);
     try {
-      const uploaded = media && supabaseEnabled ? [await uploadPostMedia(media)] : [];
+      let uploaded: Awaited<ReturnType<typeof uploadPostMedia>>[] = [];
+      if (media && supabaseEnabled) {
+        const onProgress = ({ phase: p, ratio }: UploadProgress) => {
+          setPhase(p);
+          setProgress(ratio);
+        };
+        uploaded = [await uploadPostMedia(media, onProgress)];
+      }
+      setPhase('posting');
+      setProgress(1);
       await createPost(text, uploaded);
       setText('');
       setMedia(null);
       // `navigate` conmuta de pestaña conservando el historial; `replace` lo
       // sustituía y el gesto atrás de Android podía cerrar la app.
       router.navigate('/(tabs)/home');
-    } catch (error) {
-      notify(
-        'No se pudo publicar',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
-      );
+    } catch (err) {
+      // Se muestra en la propia pantalla: Alert.alert es un no-op en web y el
+      // motivo real del fallo (tamaño, permisos, tipo) se perdía en silencio.
+      setError(err instanceof Error ? err.message : 'No se pudo publicar. Inténtalo de nuevo.');
     } finally {
       setPublishing(false);
+      setPhase('idle');
+      setProgress(0);
     }
   };
 
@@ -190,6 +205,40 @@ export function CreatePostScreen() {
             </View>
           )}
 
+          {error && (
+            <View style={[styles.errorBox, { backgroundColor: colors.surfaceAlt, borderColor: colors.danger }]}>
+              <Feather name="alert-triangle" size={18} color={colors.danger} />
+              <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+            </View>
+          )}
+
+          {publishing && phase !== 'idle' && (
+            <View style={styles.progressWrap}>
+              <View style={styles.progressHeader}>
+                <Text style={[styles.progressLabel, { color: colors.textMuted }]}>
+                  {phase === 'compressing'
+                    ? 'Optimizando video…'
+                    : phase === 'uploading'
+                    ? 'Subiendo…'
+                    : 'Publicando…'}
+                </Text>
+                {phase !== 'posting' && (
+                  <Text style={[styles.progressLabel, { color: colors.textMuted }]}>
+                    {Math.round(progress * 100)}%
+                  </Text>
+                )}
+              </View>
+              <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${Math.max(2, progress * 100)}%`, backgroundColor: colors.primary },
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
           <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
         </View>
       </AppScreen>
@@ -220,6 +269,21 @@ const styles = StyleSheet.create({
     minHeight: 72,
   },
   audioName: { flex: 1, fontSize: 13, fontWeight: '600' },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  errorText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  progressWrap: { marginBottom: spacing.lg, gap: spacing.sm },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between' },
+  progressLabel: { fontSize: 12, fontWeight: '600' },
+  progressTrack: { height: 6, borderRadius: radius.pill, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: radius.pill },
   removeBtn: {
     position: 'absolute',
     top: spacing.sm,
