@@ -4,9 +4,10 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { conversations, initialPosts } from '@/data/mockData';
 import { AuthRepository } from '@/repositories/AuthRepository';
-import { PostRepository } from '@/repositories/PostRepository';
+import { PostRepository, type FeedKind } from '@/repositories/PostRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { StoryRepository } from '@/repositories/StoryRepository';
-import type { UploadedMedia } from '@/services/storage';
+import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
@@ -34,7 +35,9 @@ type AppState = {
   feedHasMore: boolean;
   feedLoadingMore: boolean;
   feedOffset: number;
-  loadFeed: () => Promise<void>;
+  /** Pestaña activa del feed; la conserva `loadMoreFeed` al paginar. */
+  feedKind: FeedKind;
+  loadFeed: (feed?: FeedKind) => Promise<void>;
   loadMoreFeed: () => Promise<void>;
   loadCommentsFor: (postId: string) => Promise<void>;
 
@@ -60,8 +63,8 @@ type AppState = {
   finishQuiz: () => QuizArea;
   createPost: (body: string, media?: UploadedMedia[]) => Promise<void>;
   deletePost: (postId: string) => Promise<void>;
-  /** `uri` a null quita la foto y devuelve la imagen por defecto. */
-  setProfileImage: (kind: 'avatar' | 'cover', uri: string | null) => void;
+  /** `media` a null quita la foto y devuelve la imagen por defecto. */
+  setProfileImage: (kind: 'avatar' | 'cover', media: PickedMedia | null) => Promise<void>;
   toggleLikePost: (postId: string) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
@@ -117,6 +120,7 @@ export const useAppStore = create<AppState>()(
         { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },
       ],
 
+      feedKind: 'all',
       feedStatus: 'idle',
       feedError: null,
       feedHasMore: false,
@@ -275,13 +279,32 @@ export const useAppStore = create<AppState>()(
           throw error;
         }
       },
-      setProfileImage: (kind, uri) =>
-        set((state) => {
-          const base = state.user ?? defaultUser;
-          return {
-            user: { ...base, [kind === 'avatar' ? 'avatarUrl' : 'coverUrl']: uri ?? undefined },
-          };
-        }),
+      setProfileImage: async (kind, media) => {
+        const field = kind === 'avatar' ? 'avatarUrl' : 'coverUrl';
+        const previous = get().user;
+        // Sin perfil cargado no se inventa uno: antes caia a `defaultUser` y el
+        // usuario terminaba con la identidad del demo.
+        if (!previous) return;
+
+        // Optimista: la foto aparece al instante mientras sube de fondo.
+        set({ user: { ...previous, [field]: media?.uri } });
+
+        // Modo demo sin backend: se queda en local, que es lo unico que hay.
+        if (!backendEnabled) return;
+
+        try {
+          const path = media ? await uploadProfileImage(kind, media) : null;
+          const updated = await ProfileRepository.updateMyProfile(
+            kind === 'avatar' ? { avatarPath: path } : { coverPath: path },
+          );
+          // La respuesta trae ya la URL publica y persistente del bucket, que
+          // sustituye al uri local (temporal, y en web invalido tras recargar).
+          set({ user: updated });
+        } catch (error) {
+          set({ user: previous });
+          throw error;
+        }
+      },
       toggleLikePost: (postId) => {
         const wasLiked = get().likedPostIds.includes(postId);
         // Actualización optimista.
@@ -373,15 +396,19 @@ export const useAppStore = create<AppState>()(
           ),
         }));
       },
-      loadFeed: async () => {
+      loadFeed: async (feed) => {
+        const kind = feed ?? get().feedKind;
         if (!backendEnabled) {
-          set({ feedStatus: 'idle' });
+          set({ feedStatus: 'idle', feedKind: kind });
           return;
         }
-        set({ feedStatus: 'loading', feedError: null });
+        set({ feedStatus: 'loading', feedError: null, feedKind: kind });
         try {
           const uid = get().user?.id ?? null;
-          const page = await PostRepository.listFeed({ limit: FEED_PAGE, offset: 0 }, uid);
+          const page = await PostRepository.listFeed(
+            { limit: FEED_PAGE, offset: 0, feed: kind },
+            uid,
+          );
           set({
             posts: page.items,
             likedPostIds: page.likedIds,
@@ -405,7 +432,7 @@ export const useAppStore = create<AppState>()(
         try {
           const uid = get().user?.id ?? null;
           const page = await PostRepository.listFeed(
-            { limit: FEED_PAGE, offset: feedOffset },
+            { limit: FEED_PAGE, offset: feedOffset, feed: get().feedKind },
             uid,
           );
           set((state) => ({

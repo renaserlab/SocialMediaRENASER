@@ -1,4 +1,4 @@
-import { avatarPublicUrl } from '@/services/storage';
+import { profileImageUrl } from '@/services/storage';
 import type { StoryItem, StoryViewer } from '@/types';
 
 /**
@@ -68,7 +68,7 @@ export function toStoryViewer(row: StoryViewRow): StoryViewer {
     id: profile?.id ?? '',
     fullName: profileName(profile),
     username: profileHandle(profile),
-    avatarUrl: avatarPublicUrl(profile?.avatar_path) ?? undefined,
+    avatarUrl: profileImageUrl(profile?.avatar_path),
     viewedAt: row.viewed_at,
   };
 }

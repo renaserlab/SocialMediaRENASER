@@ -19,7 +19,14 @@ class Profile(Base):
     username: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     bio: Mapped[str] = mapped_column(Text, default="", server_default="")
     avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ruta dentro del bucket `avatars` (no una URL), igual que avatar_path.
+    cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped[str] = mapped_column(app_role, default="user", server_default="user")
+    # Aparece en la pantalla de sugerencias tras registrarse. Independiente del
+    # rol: se puede destacar a un mentor sin darle permisos de administracion.
+    is_featured: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     is_private: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )

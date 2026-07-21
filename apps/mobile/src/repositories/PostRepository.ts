@@ -9,6 +9,9 @@ export type FeedPage = {
   savedIds: string[];
 };
 
+/** 'all' = pestaña "Para ti"; 'following' = pestaña "Siguiendo". */
+export type FeedKind = 'all' | 'following';
+
 /**
  * Firma el primer medio de cada post y lo asigna a item.mediaUrl/mediaType
  * (sirve para imagen, video y audio).
@@ -35,11 +38,15 @@ async function attachMediaUrls(items: Post[], dtos: PostDto[]): Promise<void> {
  */
 export const PostRepository = {
   async listFeed(
-    { limit = 20, offset = 0 }: { limit?: number; offset?: number } = {},
+    {
+      limit = 20,
+      offset = 0,
+      feed = 'all',
+    }: { limit?: number; offset?: number; feed?: FeedKind } = {},
     currentUserId?: string | null,
   ): Promise<FeedPage> {
     const dtos = await apiRequest<PostDto[]>(
-      `${API_V1}/posts?limit=${limit}&offset=${offset}`,
+      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}`,
     );
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items, dtos);

@@ -8,7 +8,7 @@ import {
   type StoryViewRow,
 } from '@/mappers/storyMapper';
 import { supabase } from '@/services/supabase';
-import { avatarPublicUrl, signMediaUrls, type UploadedMedia } from '@/services/storage';
+import { profileImageUrl, signMediaUrls, type UploadedMedia } from '@/services/storage';
 import type { StoryGroup, StoryViewer } from '@/types';
 
 /**
@@ -94,7 +94,7 @@ export const StoryRepository = {
           author: profileName(profile),
           username: profileHandle(profile),
           avatarPath: profile?.avatar_path ?? undefined,
-          avatarUrl: avatarPublicUrl(profile?.avatar_path) ?? undefined,
+          avatarUrl: profileImageUrl(profile?.avatar_path),
           items: [],
           seen: true,
           isOwn: row.author_id === uid,

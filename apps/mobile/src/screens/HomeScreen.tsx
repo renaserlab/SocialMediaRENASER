@@ -32,6 +32,14 @@ export function HomeScreen() {
   const loadMoreFeed = useAppStore((state) => state.loadMoreFeed);
 
   const [feedTab, setFeedTab] = useState(0);
+
+  // Antes el indice se guardaba pero no se usaba: ambas pestañas mostraban el
+  // mismo feed global. Ahora "Siguiendo" pide al backend solo lo de los
+  // perfiles que sigue el usuario.
+  const changeTab = (index: number) => {
+    setFeedTab(index);
+    void loadFeed(index === 1 ? 'following' : 'all');
+  };
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -62,7 +70,7 @@ export function HomeScreen() {
         <SegmentedControl
           options={['Para ti', 'Siguiendo']}
           selectedIndex={feedTab}
-          onChange={setFeedTab}
+          onChange={changeTab}
           style={styles.tabs}
         />
 

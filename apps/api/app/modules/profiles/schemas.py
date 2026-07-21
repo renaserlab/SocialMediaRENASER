@@ -12,7 +12,9 @@ class ProfileRead(BaseModel):
     username: str | None = None
     bio: str = ""
     avatar_path: str | None = None
+    cover_path: str | None = None
     role: str = "user"
+    is_featured: bool = False
     is_private: bool = False
     created_at: datetime
     followers_count: int = 0
@@ -37,6 +39,14 @@ class ProfileSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class FeaturedProfile(ProfileSummary):
+    """Perfil sugerido al registrarse. Lleva contadores para dar contexto."""
+
+    role: str = "user"
+    followers_count: int = 0
+    posts_count: int = 0
+
+
 class ProfileUpdate(BaseModel):
     """Actualizacion parcial del perfil propio. Todos los campos opcionales."""
 
@@ -45,5 +55,8 @@ class ProfileUpdate(BaseModel):
         default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$"
     )
     bio: str | None = Field(default=None, max_length=600)
+    # Cadena vacia = quitar la foto (a null). Es lo que distingue "no tocar este
+    # campo" (ausente/None) de "borrar la imagen".
     avatar_path: str | None = Field(default=None, max_length=500)
+    cover_path: str | None = Field(default=None, max_length=500)
     is_private: bool | None = None
