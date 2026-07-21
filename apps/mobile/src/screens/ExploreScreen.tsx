@@ -28,9 +28,11 @@ export function ExploreScreen() {
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(async () => {
+  // El catálogo (curso/eventos) es estático en mock; si hay búsqueda activa se
+  // relanza. Sin esperas artificiales: el spinner dura lo que dure el trabajo.
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    await new Promise((r) => setTimeout(r, 700));
+    setQuery((q) => q);
     setRefreshing(false);
   }, []);
 
@@ -130,7 +132,7 @@ export function ExploreScreen() {
             accessibilityLabel={`Programa recomendado: ${course.title}`}
             accessibilityRole="button"
           >
-            <Image source={assets.course} style={[StyleSheet.absoluteFill, { tintColor: 'gray' }]} resizeMode="cover" />
+            <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
             <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
             <View style={styles.heroContent}>
               <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>

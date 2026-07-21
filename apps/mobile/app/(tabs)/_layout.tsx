@@ -1,5 +1,6 @@
 import React from 'react';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Tabs } from 'expo-router';
 
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -10,6 +11,9 @@ const icon = (name: keyof typeof Feather.glyphMap) => ({ color, size }: { color:
 
 export default function TabsLayout() {
   const { colors } = useAppTheme();
+  // Sin esto, fijar `height` anula el calculo height + inset de React Navigation
+  // y los iconos quedan bajo la barra de gestos / home indicator.
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -20,9 +24,9 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: 64,
+          height: 64 + insets.bottom,
           paddingTop: 8,
-          paddingBottom: 8,
+          paddingBottom: 8 + insets.bottom,
         },
         tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },
       }}

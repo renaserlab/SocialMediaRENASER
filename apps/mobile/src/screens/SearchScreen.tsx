@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -16,9 +17,20 @@ import { course, events, people } from '@/data/mockData';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { Person, Post } from '@/types';
 
 const RECENTS_KEY = 'renaser-recent-searches';
 const MAX_RECENTS = 6;
+
+type CatalogHit = { id: string; title: string; subtitle: string; href: string };
+
+/** Fila de la lista aplanada (secciones + resultados en una sola FlashList). */
+type SearchRow =
+  | { kind: 'section'; key: string; title: string; onAction?: () => void }
+  | { kind: 'recent'; key: string; value: string }
+  | { kind: 'person'; key: string; person: Person }
+  | { kind: 'post'; key: string; post: Post }
+  | { kind: 'catalog'; key: string; item: CatalogHit };
 
 export function SearchScreen() {
   const { colors } = useAppTheme();
@@ -69,6 +81,34 @@ export function SearchScreen() {
 
   const total = results.people.length + results.posts.length + results.catalog.length;
 
+  // Las 3 secciones se aplanan en una sola lista virtualizada: con datos reales
+  // del backend, mapear todo dentro de un ScrollView no escala.
+  const rows = useMemo<SearchRow[]>(() => {
+    if (!isSearching) {
+      if (recents.length === 0) return [];
+      return [
+        { kind: 'section', key: 'sec-recents', title: 'Búsquedas recientes', onAction: clearRecents },
+        ...recents.map((value) => ({ kind: 'recent' as const, key: `r-${value}`, value })),
+      ];
+    }
+    const out: SearchRow[] = [];
+    if (results.people.length > 0) {
+      out.push({ kind: 'section', key: 'sec-people', title: 'Personas' });
+      results.people.forEach((person) => out.push({ kind: 'person', key: `p-${person.id}`, person }));
+    }
+    if (results.posts.length > 0) {
+      out.push({ kind: 'section', key: 'sec-posts', title: 'Publicaciones' });
+      results.posts.forEach((post) => out.push({ kind: 'post', key: `o-${post.id}`, post }));
+    }
+    if (results.catalog.length > 0) {
+      out.push({ kind: 'section', key: 'sec-catalog', title: 'Cursos y eventos' });
+      results.catalog.forEach((item) => out.push({ kind: 'catalog', key: `c-${item.id}`, item }));
+    }
+    return out;
+    // `recents`/`clearRecents` solo afectan al modo sin búsqueda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSearching, results, recents]);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
@@ -93,21 +133,19 @@ export function SearchScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {!isSearching ? (
-          recents.length > 0 ? (
-            <React.Fragment>
-              <SectionTitle title="Búsquedas recientes" action="Borrar" onActionPress={clearRecents} />
-              {recents.map((item) => (
-                <ListRow
-                  key={item}
-                  title={item}
-                  leftIcon="clock"
-                  rightIcon="chevron-right"
-                  onPress={() => setQuery(item)}
-                />
-              ))}
-            </React.Fragment>
+      <FlashList
+        data={rows}
+        keyExtractor={(row: SearchRow) => row.key}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          isSearching && total === 0 ? (
+            <StateView
+              state="empty"
+              icon="search"
+              title="Sin resultados"
+              description={`No encontramos nada para "${query.trim()}".`}
+            />
           ) : (
             <StateView
               state="empty"
@@ -116,76 +154,59 @@ export function SearchScreen() {
               description="Encuentra personas, publicaciones, cursos y eventos."
             />
           )
-        ) : total === 0 ? (
-          <StateView
-            state="empty"
-            icon="search"
-            title="Sin resultados"
-            description={`No encontramos nada para "${query.trim()}".`}
-          />
-        ) : (
-          <React.Fragment>
-            {results.people.length > 0 && (
-              <React.Fragment>
-                <SectionTitle title="Personas" />
-                {results.people.map((person) => (
-                  <ListRow
-                    key={person.id}
-                    title={person.fullName}
-                    subtitle={person.username}
-                    leftComponent={<ExpoImage source={assets[person.avatar]} style={styles.avatar} contentFit="cover" />}
-                    rightIcon="chevron-right"
-                    onPress={() => {
-                      persistRecent(query);
-                      router.push(`/profile/${person.id}` as never);
-                    }}
-                  />
-                ))}
-              </React.Fragment>
-            )}
-
-            {results.posts.length > 0 && (
-              <React.Fragment>
-                <SectionTitle title="Publicaciones" />
-                {results.posts.map((post) => (
-                  <Pressable
-                    key={post.id}
-                    onPress={() => {
-                      persistRecent(query);
-                      router.push(`/post/${post.id}` as never);
-                    }}
-                    style={({ pressed }) => [styles.postRow, { borderBottomColor: colors.border, opacity: pressed ? 0.75 : 1 }]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Ver publicación de ${post.author}`}
-                  >
-                    <Text variant="secondary" weight="700">{post.author}</Text>
-                    <Text variant="body" color={colors.textMuted} numberOfLines={2}>{post.body}</Text>
-                  </Pressable>
-                ))}
-              </React.Fragment>
-            )}
-
-            {results.catalog.length > 0 && (
-              <React.Fragment>
-                <SectionTitle title="Cursos y eventos" />
-                {results.catalog.map((item) => (
-                  <ListRow
-                    key={item.id}
-                    title={item.title}
-                    subtitle={item.subtitle}
-                    leftIcon="book"
-                    rightIcon="chevron-right"
-                    onPress={() => {
-                      persistRecent(query);
-                      router.push(item.href as never);
-                    }}
-                  />
-                ))}
-              </React.Fragment>
-            )}
-          </React.Fragment>
-        )}
-      </ScrollView>
+        }
+        renderItem={({ item: row }: { item: SearchRow }) => {
+          switch (row.kind) {
+            case 'section':
+              return <SectionTitle title={row.title} action={row.onAction ? 'Borrar' : undefined} onActionPress={row.onAction} />;
+            case 'recent':
+              return (
+                <ListRow title={row.value} leftIcon="clock" rightIcon="chevron-right" onPress={() => setQuery(row.value)} />
+              );
+            case 'person':
+              return (
+                <ListRow
+                  title={row.person.fullName}
+                  subtitle={row.person.username}
+                  leftComponent={<ExpoImage source={assets[row.person.avatar]} style={styles.avatar} contentFit="cover" />}
+                  rightIcon="chevron-right"
+                  onPress={() => {
+                    persistRecent(query);
+                    router.push(`/profile/${row.person.id}` as never);
+                  }}
+                />
+              );
+            case 'post':
+              return (
+                <Pressable
+                  onPress={() => {
+                    persistRecent(query);
+                    router.push(`/post/${row.post.id}` as never);
+                  }}
+                  style={({ pressed }) => [styles.postRow, { borderBottomColor: colors.border, opacity: pressed ? 0.75 : 1 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ver publicación de ${row.post.author}`}
+                >
+                  <Text variant="secondary" weight="700">{row.post.author}</Text>
+                  <Text variant="body" color={colors.textMuted} numberOfLines={2}>{row.post.body}</Text>
+                </Pressable>
+              );
+            case 'catalog':
+              return (
+                <ListRow
+                  title={row.item.title}
+                  subtitle={row.item.subtitle}
+                  leftIcon="book"
+                  rightIcon="chevron-right"
+                  onPress={() => {
+                    persistRecent(query);
+                    router.push(row.item.href as never);
+                  }}
+                />
+              );
+          }
+        }}
+      />
     </View>
   );
 }

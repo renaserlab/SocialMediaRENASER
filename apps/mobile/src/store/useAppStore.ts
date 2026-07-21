@@ -374,21 +374,33 @@ export const useAppStore = create<AppState>()(
     {
       name: 'renaser-universo-v1',
       storage: createJSONStorage(() => AsyncStorage),
+      // Solo se persisten preferencias y estado ligero del usuario.
+      // `posts`, `conversations` y `liveMessages` quedan FUERA a proposito: son
+      // colecciones sin techo que se repueblan con loadFeed()/los repositorios, y
+      // persistirlas obligaba a reserializar todo el feed a AsyncStorage en cada
+      // like (jank de disco y riesgo de superar la cuota de SQLite).
       partialize: (state: AppState) => ({
         themeMode: state.themeMode,
         user: state.user,
         onboardingComplete: state.onboardingComplete,
+        languageSelected: state.languageSelected,
         quizAnswers: state.quizAnswers,
         quizResult: state.quizResult,
-        posts: state.posts,
         likedPostIds: state.likedPostIds,
         savedPostIds: state.savedPostIds,
         reservedEventIds: state.reservedEventIds,
         purchasedCourseIds: state.purchasedCourseIds,
-        conversations: state.conversations,
-        liveMessages: state.liveMessages,
       }),
-      onRehydrateStorage: () => (state?: AppState) => state?.setHydrated(true),
+      // La firma real es (state, error). Si la rehidratacion falla, `state` llega
+      // undefined y el arranque se quedaba bloqueado para siempre en el splash.
+      // Marcamos hidratado SIEMPRE para que la app pueda continuar.
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.warn('[store] fallo la rehidratacion; se continua con estado en memoria', error);
+        }
+        if (state) state.setHydrated(true);
+        else useAppStore.setState({ hydrated: true });
+      },
     },
   ),
 );

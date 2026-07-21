@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { Input } from '@/components/Input';
 import { toMessageFromRow } from '@/mappers/messageMapper';
 import { MessageRepository } from '@/repositories/MessageRepository';
@@ -17,6 +20,8 @@ import type { Message } from '@/types';
 export function ChatScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const keyboardOffset = useKeyboardOffset();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -106,15 +111,18 @@ export function ChatScreen() {
       <AppHeader title={headerName} rightIcon="video" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
       >
-        <ScrollView contentContainerStyle={styles.messages} showsVerticalScrollIndicator={false}>
-          {messages.map((message) => {
-            const mine = message.sender === 'me';
+        <FlashList
+          data={messages}
+          keyExtractor={(item: Message) => item.id}
+          contentContainerStyle={styles.messages}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }: { item: Message }) => {
+            const mine = item.sender === 'me';
             return (
               <View
-                key={message.id}
                 style={[
                   styles.bubble,
                   mine ? styles.mine : styles.theirs,
@@ -125,7 +133,7 @@ export function ChatScreen() {
                 ]}
               >
                 <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
-                  {message.text}
+                  {item.text}
                 </Text>
                 <Text
                   style={{
@@ -135,13 +143,23 @@ export function ChatScreen() {
                     opacity: 0.75,
                   }}
                 >
-                  {message.createdAt}
+                  {item.createdAt}
                 </Text>
               </View>
             );
-          })}
-        </ScrollView>
-        <View style={[styles.inputBar, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
+          }}
+        />
+        <View
+          style={[
+            styles.inputBar,
+            {
+              borderTopColor: colors.border,
+              backgroundColor: colors.background,
+              // Evita que el campo quede bajo la barra de gestos / home indicator.
+              paddingBottom: spacing.lg + insets.bottom,
+            },
+          ]}
+        >
           <Pressable
             accessibilityLabel="Adjuntar archivo"
             accessibilityRole="button"
@@ -175,8 +193,9 @@ export function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  messages: { padding: spacing.lg, gap: spacing.md, flexGrow: 1, justifyContent: 'flex-end' },
-  bubble: { maxWidth: '82%', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1 },
+  // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
+  messages: { padding: spacing.lg },
+  bubble: { maxWidth: '82%', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, marginBottom: spacing.md },
   mine: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
   theirs: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
   inputBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: 1, padding: spacing.md, paddingBottom: spacing.lg },

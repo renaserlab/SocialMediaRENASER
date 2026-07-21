@@ -14,7 +14,7 @@ export function ConfirmationScreen() {
   const router = useRouter();
 
   return (
-    <AppScreen contentStyle={styles.screen}>
+    <AppScreen contentStyle={styles.screen} edges={['top', 'left', 'right']}>
       <View style={styles.content}>
         <View style={[styles.check, { borderColor: colors.text }]}>
           <Feather name="check" size={54} color={colors.text} />

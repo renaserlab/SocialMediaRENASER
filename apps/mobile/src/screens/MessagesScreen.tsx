@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from 'react';
 import { Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
-import { AppScreen } from '@/components/AppScreen';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
@@ -46,10 +46,10 @@ export function MessagesScreen() {
     }, [load]),
   );
 
-  const onRefresh = useCallback(async () => {
+  // Sin espera artificial: `load()` ya gestiona su propio estado de carga.
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     load();
-    await new Promise((r) => setTimeout(r, 600));
     setRefreshing(false);
   }, [load]);
 
@@ -76,16 +76,14 @@ export function MessagesScreen() {
         rightIcon="edit"
         onRightPress={() => {}}
       />
-      <AppScreen
-        contentStyle={{ paddingBottom: 100 }}
-        scrollProps={{
-          refreshControl: (
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
-          ),
-        }}
-      >
-        <View style={styles.container}>
-          {/* Búsqueda interactiva */}
+      <FlashList
+        data={uiState === 'content' ? filteredConversations : []}
+        keyExtractor={(item: Conversation) => item.id}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
+        }
+        ListHeaderComponent={
           <View style={styles.searchWrapper}>
             <Input
               placeholder="Buscar mensajes..."
@@ -97,7 +95,8 @@ export function MessagesScreen() {
               <Feather name="search" size={18} color={colors.textMuted} />
             </View>
           </View>
-
+        }
+        ListEmptyComponent={
           <StateView
             state={uiState}
             onRetry={load}
@@ -108,10 +107,10 @@ export function MessagesScreen() {
                 : undefined
             }
             icon="message-square"
-          >
-            {filteredConversations.map((conversation, index) => (
+          />
+        }
+        renderItem={({ item: conversation, index }: { item: Conversation; index: number }) => (
               <Pressable
-                key={conversation.id}
                 onPress={() =>
                   router.push({
                     pathname: '/chat/[id]',
@@ -148,16 +147,14 @@ export function MessagesScreen() {
                   </View>
                 ) : null}
               </Pressable>
-            ))}
-          </StateView>
-        </View>
-      </AppScreen>
+        )}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: spacing.lg },
+  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 100 },
   searchWrapper: {
     position: 'relative',
     marginBottom: spacing.md,

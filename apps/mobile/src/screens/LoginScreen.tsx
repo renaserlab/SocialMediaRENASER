@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -16,6 +17,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function LoginScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const keyboardOffset = useKeyboardOffset();
   const registerLocal = useAppStore((state) => state.registerLocalUser);
   const completeOnboarding = useAppStore((state) => state.setOnboardingComplete);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -78,6 +80,11 @@ export function LoginScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
+      >
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}RENASER</Text>
@@ -146,6 +153,7 @@ export function LoginScreen() {
           </Pressable>
         </View>
       </AppScreen>
+      </KeyboardAvoidingView>
     </View>
   );
 }

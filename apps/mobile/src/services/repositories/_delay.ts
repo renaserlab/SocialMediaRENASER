@@ -3,7 +3,8 @@
  * datos mock. Al integrar el backend, las llamadas reales aportan su propia
  * latencia y este helper deja de usarse en las ramas remotas.
  */
-export const MOCK_LATENCY_MS = 800;
+// Suficiente para que el skeleton sea visible, sin penalizar cada navegación.
+export const MOCK_LATENCY_MS = 250;
 
 export const mockDelay = (ms: number = MOCK_LATENCY_MS) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));

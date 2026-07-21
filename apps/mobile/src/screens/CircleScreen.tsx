@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Card } from '@/components/Card';
 import { Input } from '@/components/Input';
@@ -22,6 +23,7 @@ const circlePosts = [
 export function CircleScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const keyboardOffset = useKeyboardOffset();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // Círculo vía la capa de repositorio (mock hoy, backend mañana).
@@ -35,7 +37,7 @@ export function CircleScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => router.back()} />
+        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="loading" />
       </View>
     );
@@ -44,7 +46,7 @@ export function CircleScreen() {
   if (error || !circle) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => router.back()} />
+        <AppHeader title="CÍRCULO" rightIcon="more-horizontal" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
       </View>
     );
@@ -57,6 +59,11 @@ export function CircleScreen() {
         rightIcon="more-horizontal"
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
+      >
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.header}>
           <Image source={assets.circle} style={[styles.circleImage, { borderColor: colors.border }]} />
@@ -140,6 +147,7 @@ export function CircleScreen() {
           )}
         </View>
       </AppScreen>
+      </KeyboardAvoidingView>
     </View>
   );
 }

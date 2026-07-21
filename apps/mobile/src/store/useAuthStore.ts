@@ -47,12 +47,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Cada request al backend llevara el JWT actual de Supabase.
     setAuthTokenProvider(() => AuthRepository.getAccessToken());
 
-    const session = await AuthRepository.getSession();
-    if (session) {
-      await get().refreshProfile();
-      set({ status: 'authenticated' });
-    } else {
-      set({ status: 'anonymous' });
+    try {
+      const session = await AuthRepository.getSession();
+      if (session) {
+        await get().refreshProfile();
+        set({ status: 'authenticated' });
+      } else {
+        set({ status: 'anonymous' });
+      }
+    } catch (error) {
+      // Si la sesion no se puede resolver (red caida, backend abajo) NO dejamos
+      // `status` en 'loading': eso congelaba el spinner de app/index.tsx para
+      // siempre. Degradamos a anonimo y liberamos el guard para poder reintentar.
+      console.warn('[auth] no se pudo restaurar la sesion; se continua como anonimo', error);
+      set({ status: 'anonymous', initialized: false });
+      return;
     }
 
     // Mantiene la sesion sincronizada ante login/logout/refresh de token.

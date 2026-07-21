@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
@@ -26,6 +27,7 @@ export function CommentsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUser = useAppStore((state) => state.user);
 
@@ -119,7 +121,17 @@ export function CommentsScreen() {
             )}
           />
         </StateView>
-        <View style={[styles.inputBar, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
+        <View
+          style={[
+            styles.inputBar,
+            {
+              borderTopColor: colors.border,
+              backgroundColor: colors.background,
+              // Evita que el campo quede bajo la barra de gestos / home indicator.
+              paddingBottom: spacing.md + insets.bottom,
+            },
+          ]}
+        >
           <Input
             placeholder="Escribe un comentario..."
             value={inputText}

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -15,6 +16,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function EditProfileScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const keyboardOffset = useKeyboardOffset();
   const user = useAppStore((state) => state.user);
   const updateProfile = useAuthStore((state) => state.updateProfile);
 
@@ -63,6 +65,11 @@ export function EditProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Editar perfil" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
+      >
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Input
@@ -101,6 +108,7 @@ export function EditProfileScreen() {
           <Button label="Guardar cambios" onPress={save} loading={saving} style={{ marginTop: spacing.sm }} />
         </View>
       </AppScreen>
+      </KeyboardAvoidingView>
     </View>
   );
 }

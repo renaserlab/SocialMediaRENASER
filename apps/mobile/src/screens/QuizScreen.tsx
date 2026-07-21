@@ -57,7 +57,7 @@ export function QuizScreen() {
         <View style={[styles.progressFill, { backgroundColor: colors.text, width: `${((index + 1) / quizQuestions.length) * 100}%` }]} />
       </View>
 
-      <AppScreen scroll>
+      <AppScreen scroll edges={['top', 'left', 'right']}>
         <View style={styles.content}>
           <Text variant="title" style={styles.question}>
             {question.question}

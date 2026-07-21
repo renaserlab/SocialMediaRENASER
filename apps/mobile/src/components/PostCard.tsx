@@ -14,6 +14,12 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { Post } from '@/types';
 
+/**
+ * Los iconos de acción miden 18-20 px. Ampliamos el area tactil con hitSlop
+ * (no con minHeight) para llegar a ~44 px sin alterar el layout de la fila.
+ */
+const ACTION_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
+
 export function PostCard({ post }: { post: Post }) {
   const { colors } = useAppTheme();
   const router = useRouter();
@@ -112,6 +118,7 @@ export function PostCard({ post }: { post: Post }) {
       <View style={styles.actions}>
         <Pressable
           style={styles.action}
+          hitSlop={ACTION_HIT_SLOP}
           onPress={() => { toggleLike(post.id); haptics.light(); }}
           accessibilityLabel="Me gusta"
           accessibilityRole="button"
@@ -121,6 +128,7 @@ export function PostCard({ post }: { post: Post }) {
         </Pressable>
         <Pressable
           style={styles.action}
+          hitSlop={ACTION_HIT_SLOP}
           onPress={openComments}
           accessibilityLabel="Comentarios"
           accessibilityRole="button"
@@ -130,6 +138,7 @@ export function PostCard({ post }: { post: Post }) {
         </Pressable>
         <Pressable
           style={styles.action}
+          hitSlop={ACTION_HIT_SLOP}
           accessibilityLabel="Compartir"
           accessibilityRole="button"
         >
@@ -138,6 +147,7 @@ export function PostCard({ post }: { post: Post }) {
         <View style={{ flex: 1 }} />
         <Pressable
           onPress={() => toggleSave(post.id)}
+          hitSlop={ACTION_HIT_SLOP}
           accessibilityLabel="Guardar"
           accessibilityRole="button"
         >
@@ -166,6 +176,7 @@ export function PostCard({ post }: { post: Post }) {
             <Pressable
               onPress={submitComment}
               disabled={!comment.trim()}
+              hitSlop={ACTION_HIT_SLOP}
               accessibilityLabel="Enviar comentario"
               accessibilityRole="button"
             >
