@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { Avatar } from '@/components/Avatar';
 import { PostCard } from '@/components/PostCard';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -21,6 +22,7 @@ import type { Post } from '@/types';
 export function HomeScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const keyboardOffset = useKeyboardOffset();
   const posts = useAppStore((state) => state.posts);
   const user = useAppStore((state) => state.user);
   const feedStatus = useAppStore((state) => state.feedStatus);
@@ -140,6 +142,13 @@ export function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="RENASER" rightIcon="bell" onRightPress={() => router.push('/notifications')} />
 
+      {/* El comentario inline de PostCard vive dentro de esta lista: el KAV debe
+          estar a nivel de pantalla, nunca dentro del item. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
+      >
       <FlashList
         data={posts}
         keyExtractor={(item: Post) => item.id}
@@ -165,7 +174,9 @@ export function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
         }
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       />
+      </KeyboardAvoidingView>
     </View>
   );
 }

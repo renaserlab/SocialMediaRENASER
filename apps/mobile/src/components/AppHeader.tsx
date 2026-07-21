@@ -8,6 +8,9 @@ import { Text } from '@/components/Text';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
+/** Alto del header sin contar el inset superior. Lo consume useKeyboardOffset. */
+export const APP_HEADER_HEIGHT = 48;
+
 type Props = {
   title?: string;
   back?: boolean;
@@ -35,7 +38,7 @@ export function AppHeader({ title = 'RENASER', back = false, onBack, rightIcon, 
   };
 
   return (
-    <View style={[styles.row, { height: 48 + insets.top, paddingTop: insets.top }]}>
+    <View style={[styles.row, { height: APP_HEADER_HEIGHT + insets.top, paddingTop: insets.top }]}>
       <View style={styles.side}>
         {back || onBack ? (
           <Pressable

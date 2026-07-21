@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { Input } from '@/components/Input';
 import { toMessageFromRow } from '@/mappers/messageMapper';
 import { MessageRepository } from '@/repositories/MessageRepository';
@@ -18,6 +20,8 @@ import type { Message } from '@/types';
 export function ChatScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const keyboardOffset = useKeyboardOffset();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -107,8 +111,8 @@ export function ChatScreen() {
       <AppHeader title={headerName} rightIcon="video" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
       >
         <FlashList
           data={messages}
@@ -145,7 +149,17 @@ export function ChatScreen() {
             );
           }}
         />
-        <View style={[styles.inputBar, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
+        <View
+          style={[
+            styles.inputBar,
+            {
+              borderTopColor: colors.border,
+              backgroundColor: colors.background,
+              // Evita que el campo quede bajo la barra de gestos / home indicator.
+              paddingBottom: spacing.lg + insets.bottom,
+            },
+          ]}
+        >
           <Pressable
             accessibilityLabel="Adjuntar archivo"
             accessibilityRole="button"

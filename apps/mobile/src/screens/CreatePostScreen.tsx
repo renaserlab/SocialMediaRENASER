@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import type { ImagePickerAsset } from 'expo-image-picker';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
@@ -19,6 +20,7 @@ const prompts = ['Un aprendizaje', 'Una pregunta', 'Una victoria', 'Una reflexiÃ
 export function CreatePostScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const keyboardOffset = useKeyboardOffset();
   const createPost = useAppStore((state) => state.createPost);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const [text, setText] = useState('');
@@ -69,6 +71,11 @@ export function CreatePostScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="CREAR" />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
+      >
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Comparte algo que pueda transformar a alguien.</Text>
@@ -132,6 +139,7 @@ export function CreatePostScreen() {
           <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
         </View>
       </AppScreen>
+      </KeyboardAvoidingView>
     </View>
   );
 }

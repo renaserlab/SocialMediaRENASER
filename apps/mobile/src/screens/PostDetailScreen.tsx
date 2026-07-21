@@ -1,8 +1,9 @@
 import React from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { ListRow } from '@/components/ListRow';
 import { PostCard } from '@/components/PostCard';
 import { StateView } from '@/components/StateView';
@@ -14,6 +15,7 @@ export function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
+  const keyboardOffset = useKeyboardOffset();
 
   const post = useAppStore((state) => state.posts.find((p) => p.id === id));
 
@@ -36,16 +38,26 @@ export function PostDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Publicación" onBack={goBack} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <PostCard post={post} />
-        <ListRow
-          title="Ver todos los comentarios"
-          subtitle={`${post.commentsCount ?? post.comments.length} comentarios`}
-          leftIcon="message-square"
-          rightIcon="chevron-right"
-          onPress={() => router.push(`/comments/${post.id}` as never)}
-        />
-      </ScrollView>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={keyboardOffset}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <PostCard post={post} />
+          <ListRow
+            title="Ver todos los comentarios"
+            subtitle={`${post.commentsCount ?? post.comments.length} comentarios`}
+            leftIcon="message-square"
+            rightIcon="chevron-right"
+            onPress={() => router.push(`/comments/${post.id}` as never)}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
