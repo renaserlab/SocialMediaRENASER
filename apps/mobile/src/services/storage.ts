@@ -37,8 +37,9 @@ const DEFAULT_EXT: Record<MediaKind, string> = {
 export async function pickImage(): Promise<PickedMedia | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
+  // `MediaTypeOptions` esta deprecado en expo-image-picker 17: se usa el array.
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     quality: 0.8,
     allowsEditing: true,
   });
@@ -53,8 +54,10 @@ export async function pickVideo(): Promise<PickedMedia | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-    quality: 0.8,
+    mediaTypes: ['videos'],
+    // Reduce el peso en origen: los videos de galeria pasan de 100 MB con
+    // facilidad y en iOS se reexportan a 720p antes de subirlos.
+    videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
     videoMaxDuration: 180,
   });
   if (result.canceled) return null;
@@ -100,11 +103,18 @@ function resolveContentType(media: PickedMedia, ext: string): string {
   return `audio/${ext === 'm4a' ? 'mp4' : ext}`;
 }
 
-/** Límite por archivo del plan free de Supabase Storage. */
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/**
+ * Límite por archivo, en MB. Debe coincidir con el limite real del proyecto
+ * Supabase (Storage → Settings → Upload file size limit) y con el del bucket:
+ * el plan free tope a 50 MB, el Pro admite hasta 50 GB. Esta comprobacion es
+ * solo para fallar rapido y con un mensaje claro; quien manda es el servidor.
+ */
+const MAX_UPLOAD_MB = Number(process.env.EXPO_PUBLIC_MAX_UPLOAD_MB ?? 500);
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 function formatMb(bytes: number): string {
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
 }
 
 /**
@@ -119,7 +129,9 @@ function describeStorageError(error: unknown): string {
   const message = err?.message ?? 'Error desconocido';
 
   if (code === '413' || /exceeded the maximum allowed size|too large/i.test(message)) {
-    return `El archivo supera el límite de ${formatMb(MAX_UPLOAD_BYTES)} permitido por Supabase. Prueba con uno más corto o de menor calidad.`;
+    // El servidor lo rechaza aunque pase el chequeo local: el limite del
+    // proyecto/bucket en Supabase es menor que EXPO_PUBLIC_MAX_UPLOAD_MB.
+    return `Supabase rechazó el archivo por tamaño. Sube el límite en Storage → Settings → Upload file size limit (y en el bucket post-media).`;
   }
   if (code === '403' || /unauthorized|row-level security|violates/i.test(message)) {
     return 'No tienes permiso para subir este archivo. Cierra sesión y vuelve a entrar.';

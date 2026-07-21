@@ -34,6 +34,8 @@ export function CreatePostScreen() {
   const [media, setMedia] = useState<PickedMedia | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Un video puede tardar minutos: sin esto el boton solo gira y parece colgado.
+  const [phase, setPhase] = useState<'idle' | 'uploading' | 'posting'>('idle');
 
   /** Elige un medio (imagen, video o audio) y lo deja listo para publicar. */
   const choose = async (kind: 'image' | 'video' | 'audio') => {
@@ -68,7 +70,12 @@ export function CreatePostScreen() {
     setPublishing(true);
     setError(null);
     try {
-      const uploaded = media && supabaseEnabled ? [await uploadPostMedia(media)] : [];
+      let uploaded: Awaited<ReturnType<typeof uploadPostMedia>>[] = [];
+      if (media && supabaseEnabled) {
+        setPhase('uploading');
+        uploaded = [await uploadPostMedia(media)];
+      }
+      setPhase('posting');
       await createPost(text, uploaded);
       setText('');
       setMedia(null);
@@ -81,6 +88,7 @@ export function CreatePostScreen() {
       setError(err instanceof Error ? err.message : 'No se pudo publicar. Inténtalo de nuevo.');
     } finally {
       setPublishing(false);
+      setPhase('idle');
     }
   };
 
@@ -201,7 +209,18 @@ export function CreatePostScreen() {
             </View>
           )}
 
-          <Button label="Publicar" onPress={publish} loading={publishing} disabled={!text.trim()} />
+          <Button
+            label={
+              phase === 'uploading'
+                ? `Subiendo ${media?.kind === 'video' ? 'video' : media?.kind === 'audio' ? 'audio' : 'imagen'}…`
+                : phase === 'posting'
+                ? 'Publicando…'
+                : 'Publicar'
+            }
+            onPress={publish}
+            loading={publishing}
+            disabled={!text.trim()}
+          />
         </View>
       </AppScreen>
       </KeyboardAvoidingView>
