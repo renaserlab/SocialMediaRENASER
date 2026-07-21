@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { palette } from '@/theme/tokens';
@@ -42,6 +43,20 @@ export function VideoPlayer({
     }
   }, [active, player]);
 
+  // Con el Stack, las pantallas anteriores siguen montadas: sin esto un video
+  // seguiría decodificando en segundo plano (batería y hasta 4-7 players a la
+  // vez). Pausamos al perder el foco y reanudamos solo si debía reproducir.
+  useFocusEffect(
+    useCallback(() => {
+      if (autoPlay || active) {
+        player.play();
+      }
+      return () => {
+        player.pause();
+      };
+    }, [player, autoPlay, active]),
+  );
+
   const start = () => {
     setStarted(true);
     player.play();
@@ -54,7 +69,9 @@ export function VideoPlayer({
         player={player}
         contentFit={contentFit}
         nativeControls={nativeControls && started}
-        allowsFullscreen
+        // `allowsFullscreen` está deprecada en expo-video. Además, en un feed
+        // vertical (reels) no tiene sentido ofrecer pantalla completa.
+        fullscreenOptions={{ enable: nativeControls }}
         allowsPictureInPicture={false}
       />
       {!started && (

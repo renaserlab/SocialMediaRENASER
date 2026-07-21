@@ -28,9 +28,11 @@ export function ExploreScreen() {
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(async () => {
+  // El catálogo (curso/eventos) es estático en mock; si hay búsqueda activa se
+  // relanza. Sin esperas artificiales: el spinner dura lo que dure el trabajo.
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    await new Promise((r) => setTimeout(r, 700));
+    setQuery((q) => q);
     setRefreshing(false);
   }, []);
 

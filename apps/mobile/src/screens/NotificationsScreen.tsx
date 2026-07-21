@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
@@ -67,10 +68,12 @@ export function NotificationsScreen() {
         title={uiState === 'empty' ? 'Sin notificaciones' : undefined}
         description={uiState === 'empty' ? 'Aquí verás la actividad sobre ti.' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.list}>
-          {items.map((item) => (
+        <FlashList
+          data={items}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          renderItem={({ item }) => (
             <ListRow
-              key={item.id}
               title={item.title}
               subtitle={`${item.subtitle} • ${item.time}`}
               leftIcon={item.icon}
@@ -80,8 +83,8 @@ export function NotificationsScreen() {
                   : undefined
               }
             />
-          ))}
-        </ScrollView>
+          )}
+        />
       </StateView>
     </View>
   );

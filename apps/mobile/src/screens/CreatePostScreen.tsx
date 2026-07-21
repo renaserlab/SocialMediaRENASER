@@ -53,7 +53,9 @@ export function CreatePostScreen() {
       await createPost(text, imagePaths);
       setText('');
       setImage(null);
-      router.replace('/(tabs)/home');
+      // `navigate` conmuta de pestaña conservando el historial; `replace` lo
+      // sustituía y el gesto atrás de Android podía cerrar la app.
+      router.navigate('/(tabs)/home');
     } catch (error) {
       Alert.alert(
         'No se pudo publicar',

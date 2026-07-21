@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -109,12 +110,15 @@ export function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <ScrollView contentContainerStyle={styles.messages} showsVerticalScrollIndicator={false}>
-          {messages.map((message) => {
-            const mine = message.sender === 'me';
+        <FlashList
+          data={messages}
+          keyExtractor={(item: Message) => item.id}
+          contentContainerStyle={styles.messages}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }: { item: Message }) => {
+            const mine = item.sender === 'me';
             return (
               <View
-                key={message.id}
                 style={[
                   styles.bubble,
                   mine ? styles.mine : styles.theirs,
@@ -125,7 +129,7 @@ export function ChatScreen() {
                 ]}
               >
                 <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
-                  {message.text}
+                  {item.text}
                 </Text>
                 <Text
                   style={{
@@ -135,12 +139,12 @@ export function ChatScreen() {
                     opacity: 0.75,
                   }}
                 >
-                  {message.createdAt}
+                  {item.createdAt}
                 </Text>
               </View>
             );
-          })}
-        </ScrollView>
+          }}
+        />
         <View style={[styles.inputBar, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
           <Pressable
             accessibilityLabel="Adjuntar archivo"
@@ -175,8 +179,9 @@ export function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  messages: { padding: spacing.lg, gap: spacing.md, flexGrow: 1, justifyContent: 'flex-end' },
-  bubble: { maxWidth: '82%', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1 },
+  // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
+  messages: { padding: spacing.lg },
+  bubble: { maxWidth: '82%', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, marginBottom: spacing.md },
   mine: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
   theirs: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
   inputBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: 1, padding: spacing.md, paddingBottom: spacing.lg },

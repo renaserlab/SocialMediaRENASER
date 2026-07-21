@@ -76,7 +76,7 @@ export function HomeScreen() {
         />
 
         <Pressable
-          onPress={() => router.push('/(tabs)/create')}
+          onPress={() => router.navigate('/(tabs)/create')}
           style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
           accessibilityLabel="Crear nueva publicación"
           accessibilityRole="button"
