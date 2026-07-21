@@ -35,20 +35,27 @@ export function ListRow({
 
   const RowContainer = onPress ? Pressable : View;
 
+  /**
+   * Solo `Pressable` acepta `style` como funcion; `View` la descarta entera.
+   * Las filas sin `onPress` (p. ej. la de la cuenta en Ajustes) se quedaban sin
+   * padding ni borde y su icono aparecia desalineado respecto al resto.
+   */
+  const baseStyle = [
+    styles.container,
+    { borderColor: colors.border, backgroundColor: colors.surface },
+    style,
+  ];
+
   return (
     <RowContainer
       onPress={onPress}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={`${title}${subtitle ? `, ${subtitle}` : ''}`}
-      style={({ pressed }: { pressed?: boolean }) => [
-        styles.container,
-        {
-          borderColor: colors.border,
-          backgroundColor: colors.surface,
-          opacity: pressed ? 0.78 : 1,
-        },
-        style,
-      ]}
+      style={
+        onPress
+          ? ({ pressed }: { pressed?: boolean }) => [...baseStyle, { opacity: pressed ? 0.78 : 1 }]
+          : baseStyle
+      }
     >
       <View style={styles.leftSection}>
         {leftComponent}
