@@ -7,11 +7,108 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.catalog.models import Course, Event, EventRegistration
-from app.modules.catalog.schemas import CourseRead, EventRead
+from app.modules.catalog.schemas import (
+    CourseCreate,
+    CourseRead,
+    CourseUpdate,
+    EventCreate,
+    EventRead,
+    EventUpdate,
+)
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
+from app.shared.permissions import require_admin
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
+
+
+@router.post("/events", response_model=EventRead, status_code=status.HTTP_201_CREATED)
+async def create_event(
+    payload: EventCreate,
+    current_user: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EventRead:
+    """Publica un evento. `require_admin` es lo que protege esto de verdad:
+    que la app oculte el boton no impide llamar al endpoint a mano."""
+    event = Event(
+        organizer_id=current_user.id,
+        title=payload.title,
+        description=payload.description,
+        starts_at=payload.starts_at,
+        location=payload.location,
+        cover_path=payload.cover_path,
+        event_type=payload.event_type,
+        status="published",
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return _to_event_read(event, 0, 0)
+
+
+@router.patch("/events/{event_id}", response_model=EventRead)
+async def update_event(
+    event_id: str,
+    payload: EventUpdate,
+    _: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EventRead:
+    ensure_uuid(event_id, "Evento no encontrado.")
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise NotFoundError("Evento no encontrado.")
+    # `exclude_unset` distingue "no enviado" de "enviado vacio", igual que en
+    # el perfil: sin ello, editar el titulo borraria el resto de campos.
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(event, field, value)
+    await db.commit()
+    await db.refresh(event)
+    return _to_event_read(event, 0, 0)
+
+
+@router.patch("/courses/{course_id}", response_model=CourseRead)
+async def update_course(
+    course_id: str,
+    payload: CourseUpdate,
+    _: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CourseRead:
+    ensure_uuid(course_id, "Curso no encontrado.")
+    course = await db.get(Course, course_id)
+    if course is None:
+        raise NotFoundError("Curso no encontrado.")
+    data = payload.model_dump(exclude_unset=True)
+    # El cliente habla en la unidad mayor; la columna guarda centavos.
+    if "price" in data:
+        course.price_minor = (data.pop("price") or 0) * 100
+    for field, value in data.items():
+        setattr(course, field, value)
+    await db.commit()
+    await db.refresh(course)
+    return CourseRead.model_validate(course)
+
+
+@router.post("/courses", response_model=CourseRead, status_code=status.HTTP_201_CREATED)
+async def create_course(
+    payload: CourseCreate,
+    current_user: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CourseRead:
+    course = Course(
+        author_id=current_user.id,
+        title=payload.title,
+        description=payload.description,
+        cover_path=payload.cover_path,
+        # El cliente envia la unidad mayor; la columna guarda centavos.
+        price_minor=payload.price * 100,
+        currency=payload.currency,
+        status="published",
+    )
+    db.add(course)
+    await db.commit()
+    await db.refresh(course)
+    return CourseRead.model_validate(course)
 
 
 def _to_event_read(event: Event, count: int, reserved: int) -> EventRead:

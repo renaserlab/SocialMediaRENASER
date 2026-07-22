@@ -16,6 +16,9 @@ import { assets } from '@/data/assets';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
+import type { ProfileSectionKind } from '@/components/ProfileSection';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -23,6 +26,7 @@ import type { Post } from '@/types';
 
 export function HomeScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const keyboardOffset = useKeyboardOffset();
   const posts = useAppStore((state) => state.posts);
@@ -52,9 +56,24 @@ export function HomeScreen() {
       .catch(() => setAdminId(null));
   }, []);
 
-  const openAdminSection = (section: 'eventos' | 'cursos') => {
-    if (!adminId) return;
-    router.push({ pathname: '/profile/[id]', params: { id: adminId, section } } as never);
+  /**
+   * Solo el administrador ve el acceso para publicar. El permiso de verdad lo
+   * aplica el backend (`require_admin`); esto es comodidad, no seguridad.
+   */
+  const isAdmin = user?.isAdmin === true;
+  const [creating, setCreating] = useState<CatalogKind | null>(null);
+
+  /**
+   * Perfil donde viven eventos y cursos. Si el propio usuario es el
+   * administrador, es SU perfil: el endpoint de destacados excluye a quien
+   * mira, asi que Darren no aparece en su propia lista y las tarjetas se
+   * quedaban desactivadas para el.
+   */
+  const catalogProfileId = isAdmin ? (user?.id ?? null) : adminId;
+
+  const openAdminSection = (section: ProfileSectionKind) => {
+    if (!catalogProfileId) return;
+    router.push({ pathname: '/profile/[id]', params: { id: catalogProfileId, section } } as never);
   };
 
   const [feedTab, setFeedTab] = useState(0);
@@ -94,7 +113,7 @@ export function HomeScreen() {
 
       <View style={styles.container}>
         <SegmentedControl
-          options={['Para ti', 'Siguiendo']}
+          options={[t('home.forYou'), t('home.following')]}
           selectedIndex={feedTab}
           onChange={changeTab}
           style={styles.tabs}
@@ -117,57 +136,185 @@ export function HomeScreen() {
           <Text style={[styles.composerText, { color: colors.textMuted }]}>
             {/* Sin nombre se saluda en generico: antes caia a un "Katherine"
                 fijo del demo y se le mostraba a cualquier usuario. */}
-            {firstName ? `¿Qué estás aprendiendo hoy, ${firstName}?` : '¿Qué estás aprendiendo hoy?'}
+            {firstName ? t('home.composerNamed', { name: firstName }) : t('home.composer')}
           </Text>
           <Feather name="plus-circle" size={24} color={colors.text} />
         </Pressable>
 
+        {/* Audio privado ocupa toda la fila; el circulo baja junto al podcast. */}
+        <Pressable
+          onPress={() => router.push('/audio/private')}
+          style={[styles.wideCard, { backgroundColor: colors.primary }]}
+        >
+          <Feather name="headphones" size={24} color={colors.onPrimary} />
+          <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>{t('home.privateAudio')}</Text>
+          <Text style={[styles.quickBody, { color: colors.onPrimary }]}>{t('home.privateAudioBody')}</Text>
+        </Pressable>
+
         <View style={styles.quickRow}>
-          <Pressable
-            onPress={() => router.push('/audio/private')}
-            style={[styles.quickCard, { backgroundColor: colors.primary }]}
+          <View
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
           >
-            <Feather name="headphones" size={24} color={colors.onPrimary} />
-            <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>Audio privado</Text>
-            <Text style={[styles.quickBody, { color: colors.onPrimary }]}>Recomendación de tu quiz</Text>
-          </Pressable>
+            {/*
+              La zona pulsable va DETRAS del contenido, no envolviendolo: en web
+              cada Pressable es un <button> y el "+" anidado dentro producia
+              <button> dentro de <button> (HTML invalido, error de hidratacion).
+            */}
+            <Pressable
+              onPress={() => openAdminSection('eventos')}
+              disabled={!catalogProfileId}
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel="Ver eventos"
+            />
+            <View style={styles.quickHeader} pointerEvents="box-none">
+              <View pointerEvents="none">
+                <Feather name="calendar" size={24} color={colors.text} />
+              </View>
+              {isAdmin ? (
+                <Pressable
+                  onPress={() => setCreating('evento')}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Agregar evento"
+                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="plus" size={14} color={colors.background} />
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+              {t('home.events')}
+            </Text>
+            {isAdmin ? (
+              <Pressable
+                onPress={() => setCreating('evento')}
+                style={[styles.addChip, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="Agregar evento"
+              >
+                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addEvent')}</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+                {t('home.eventsBody')}
+              </Text>
+            )}
+          </View>
+          <View
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+          >
+            {/*
+              La zona pulsable va DETRAS del contenido, no envolviendolo: en web
+              cada Pressable es un <button> y el "+" anidado dentro producia
+              <button> dentro de <button> (HTML invalido, error de hidratacion).
+            */}
+            <Pressable
+              onPress={() => openAdminSection('cursos')}
+              disabled={!catalogProfileId}
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel="Ver cursos"
+            />
+            <View style={styles.quickHeader} pointerEvents="box-none">
+              <View pointerEvents="none">
+                <Feather name="book" size={24} color={colors.text} />
+              </View>
+              {isAdmin ? (
+                <Pressable
+                  onPress={() => setCreating('curso')}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Agregar curso"
+                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="plus" size={14} color={colors.background} />
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+              {t('home.courses')}
+            </Text>
+            {isAdmin ? (
+              <Pressable
+                onPress={() => setCreating('curso')}
+                style={[styles.addChip, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="Agregar curso"
+              >
+                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addCourse')}</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+                {t('home.coursesBody')}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Tu circulo baja aqui, junto al nuevo acceso al podcast. */}
+        <View style={styles.quickRow}>
           <Pressable
             onPress={() => circle && router.push(`/circle/${circle.id}` as never)}
             disabled={!circle}
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.yourCircle')}
           >
             <Feather name="users" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Tu círculo</Text>
+            <Text style={[styles.quickTitle, { color: colors.text }]}>{t('home.yourCircle')}</Text>
             {/* Contador real; antes era "423 personas" escrito a mano. */}
             <Text style={[styles.quickBody, { color: colors.textMuted }]}>
-              {circle ? `${circle.members} personas avanzando` : 'Únete a la comunidad'}
+              {circle ? t('home.circleMembers', { count: circle.members }) : t('home.joinCommunity')}
             </Text>
           </Pressable>
-        </View>
 
-        <View style={styles.quickRow}>
-          <Pressable
-            onPress={() => openAdminSection('eventos')}
-            disabled={!adminId}
+          <View
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Ver eventos"
           >
-            <Feather name="calendar" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Eventos</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Encuentros y experiencias</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => openAdminSection('cursos')}
-            disabled={!adminId}
-            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Ver cursos"
-          >
-            <Feather name="book" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Cursos</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Programas para avanzar</Text>
-          </Pressable>
+            {/* Igual que en Eventos: la zona pulsable va detras para no anidar
+                un <button> dentro de otro en web. */}
+            <Pressable
+              onPress={() => openAdminSection('podcast')}
+              disabled={!catalogProfileId}
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel={t('home.podcast')}
+            />
+            <View style={styles.quickHeader} pointerEvents="box-none">
+              <View pointerEvents="none">
+                <Feather name="headphones" size={24} color={colors.text} />
+              </View>
+              {isAdmin ? (
+                <Pressable
+                  onPress={() => setCreating('podcast')}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('home.addAudio')}
+                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="plus" size={14} color={colors.background} />
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+              {t('home.podcast')}
+            </Text>
+            {isAdmin ? (
+              <Pressable
+                onPress={() => setCreating('podcast')}
+                style={[styles.addChip, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel={t('home.addAudio')}
+              >
+                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addAudio')}</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+                {t('home.podcastBody')}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -196,7 +343,7 @@ export function HomeScreen() {
   ) : feedStatus === 'error' ? (
     <StateView state="error" onRetry={() => void loadFeed()} />
   ) : (
-    <StateView state="empty" title="Aún no hay publicaciones" description="Vuelve más tarde o crea la primera." />
+    <StateView state="empty" title={t('home.emptyTitle')} description={t('home.emptyBody')} />
   );
 
   return (
@@ -238,6 +385,15 @@ export function HomeScreen() {
         keyboardShouldPersistTaps="handled"
       />
       </KeyboardAvoidingView>
+
+      {creating ? (
+        <CreateCatalogSheet
+          kind={creating}
+          visible
+          onClose={() => setCreating(null)}
+          onCreated={() => void loadFeed()}
+        />
+      ) : null}
     </View>
   );
 }
@@ -248,8 +404,13 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.md, marginBottom: spacing.lg },
   composerAvatar: { width: 40, height: 40, borderRadius: 20 },
   composerText: { flex: 1, fontSize: 13 },
+  wideCard: { minHeight: 120, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between', marginBottom: spacing.md },
   quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
   quickCard: { flex: 1, minHeight: 136, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between' },
+  quickHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  addBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  addChip: { borderWidth: 1, borderRadius: radius.pill, paddingVertical: 5, paddingHorizontal: 10, alignSelf: 'flex-start' },
+  addChipText: { fontSize: 10, fontWeight: '700' },
   quickTitle: { fontSize: 15, fontWeight: '900', marginTop: spacing.md },
   quickBody: { fontSize: 11, lineHeight: 16, opacity: 0.82 },
   footer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, paddingBottom: 100 },

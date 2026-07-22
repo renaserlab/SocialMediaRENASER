@@ -3,6 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { LANGUAGE_NAMES, type Language } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -16,38 +18,45 @@ export function LanguageScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const setLanguageSelected = useAppStore((state) => state.setLanguageSelected);
-  const [selectedLang, setSelectedLang] = useState<'es' | 'en' | 'pt'>('es');
+  const setLanguage = useAppStore((state) => state.setLanguage);
+  const current = useAppStore((state) => state.language);
+  const { t } = useTranslation();
+  // Arranca en el idioma guardado, no siempre en español.
+  const [selectedLang, setSelectedLang] = useState<Language>(current);
 
   const proceed = () => {
+    // Antes el idioma elegido solo vivia en este useState y se perdia al salir,
+    // por eso la app seguia en español.
+    setLanguage(selectedLang);
     setLanguageSelected(true);
     router.replace('/');
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Idioma" back />
+      <AppHeader title={t('language.title')} back />
       <AppScreen scroll={false} edges={['left', 'right', 'bottom']}>
         <View style={styles.container}>
           <View style={styles.content}>
             <Text variant="secondary" color={colors.textMuted} style={styles.description}>
-              Elige el idioma de la aplicación
+              {t('language.description')}
             </Text>
 
             <View style={styles.list}>
               <ListRow
-                title="Español"
+                title={LANGUAGE_NAMES.es}
                 rightComponent={selectedLang === 'es' ? <Feather name="check" size={18} color={colors.text} /> : null}
                 onPress={() => setSelectedLang('es')}
                 style={selectedLang === 'es' ? { borderColor: colors.text } : undefined}
               />
               <ListRow
-                title="English"
+                title={LANGUAGE_NAMES.en}
                 rightComponent={selectedLang === 'en' ? <Feather name="check" size={18} color={colors.text} /> : null}
                 onPress={() => setSelectedLang('en')}
                 style={selectedLang === 'en' ? { borderColor: colors.text } : undefined}
               />
               <ListRow
-                title="Português"
+                title={LANGUAGE_NAMES.pt}
                 rightComponent={selectedLang === 'pt' ? <Feather name="check" size={18} color={colors.text} /> : null}
                 onPress={() => setSelectedLang('pt')}
                 style={selectedLang === 'pt' ? { borderColor: colors.text } : undefined}
@@ -56,7 +65,7 @@ export function LanguageScreen() {
           </View>
 
           <View style={styles.footer}>
-            <Button label="Continuar" onPress={proceed} />
+            <Button label={t('language.continue')} onPress={proceed} />
           </View>
         </View>
       </AppScreen>

@@ -49,8 +49,10 @@ export const PostRepository = {
     }: { limit?: number; offset?: number; feed?: FeedKind } = {},
     currentUserId?: string | null,
   ): Promise<FeedPage> {
+    // Los audios se dejan fuera del muro: son episodios del podcast y tienen
+    // su propia sección en el perfil del administrador.
     const dtos = await apiRequest<PostDto[]>(
-      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}`,
+      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}&exclude_media=audio`,
     );
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items, dtos);
@@ -116,6 +118,32 @@ export const PostRepository = {
           media_type: m.mediaType,
         })),
       }),
+    });
+    const post = toPost(dto, currentUserId);
+    await attachMediaUrls([post], [dto]);
+    return post;
+  },
+
+  /**
+   * Edita una publicación propia. `media` sin definir deja el adjunto como
+   * está; pasarlo (aunque sea vacío) lo reemplaza, lo que permite quitarlo.
+   */
+  async updatePost(
+    postId: string,
+    changes: { body?: string; media?: UploadedMedia[] },
+    currentUserId?: string | null,
+  ): Promise<Post> {
+    const payload: Record<string, unknown> = {};
+    if (changes.body !== undefined) payload.body = changes.body;
+    if (changes.media !== undefined) {
+      payload.media = changes.media.map((m) => ({
+        storage_path: m.storagePath,
+        media_type: m.mediaType,
+      }));
+    }
+    const dto = await apiRequest<PostDto>(`${API_V1}/posts/${postId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
     });
     const post = toPost(dto, currentUserId);
     await attachMediaUrls([post], [dto]);

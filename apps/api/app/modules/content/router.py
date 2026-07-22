@@ -20,6 +20,7 @@ from app.modules.content.schemas import (
     CommentRead,
     PostCreate,
     PostMediaRead,
+    PostUpdate,
     PostRead,
 )
 from app.modules.notifications.service import add_notification
@@ -27,11 +28,11 @@ from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
+from app.shared.permissions import is_admin as is_admin_user
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(tags=["content"])
 
-_ADMIN_ROLES = {"admin", "moderator"}
 
 
 # --------------------------------------------------------------------------- #
@@ -150,6 +151,7 @@ async def list_posts(
     author_id: str | None = Query(default=None),
     circle_id: str | None = Query(default=None),
     media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
+    exclude_media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -161,7 +163,12 @@ async def list_posts(
 
     `author_id` restringe a las publicaciones de un perfil (su galeria) y
     `media` al tipo de adjunto, para separar la cuadricula de los audios sin
-    traerse todo y filtrar en el cliente.
+    traerse todo y filtrar en el cliente. `exclude_media` hace lo contrario:
+    lo usa el muro para dejar fuera los audios, que viven en el podcast.
+
+    Filtrar aqui y no en el cliente evita que la paginacion se descuadre: si el
+    muro descartara los audios despues de recibirlos, una pagina de 20 podria
+    quedarse en 12 y el scroll infinito pediria de mas.
     """
     uid = current_user.id if current_user else None
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
@@ -191,6 +198,12 @@ async def list_posts(
     if media:
         with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
         stmt = stmt.where(Post.id.in_(with_media))
+
+    if exclude_media:
+        # El feed de Inicio excluye los audios: son episodios del podcast y
+        # tienen su propia seccion, no deben repetirse en el muro.
+        of_type = select(PostMedia.post_id).where(PostMedia.media_type == exclude_media)
+        stmt = stmt.where(Post.id.not_in(of_type))
     rows = (await db.execute(stmt)).all()
     media_map = await _load_media_map(db, [row[0].id for row in rows])
     return [_to_post_read(*row, media=media_map.get(row[0].id, [])) for row in rows]
@@ -239,24 +252,74 @@ async def create_post(
     return _to_post_read(post, profile, 0, 0, 0, 0, media=media)
 
 
+async def _load_single_post(
+    db: AsyncSession, post_id: str, uid: str | None
+) -> PostRead:
+    """Una publicacion con autor, contadores y estado propio."""
+    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
+    row = (
+        await db.execute(
+            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+            .join(Profile, Profile.id == Post.author_id)
+            .where(Post.id == post_id, Post.status != "deleted")
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError("Publicacion no encontrada.")
+    media_map = await _load_media_map(db, [row[0].id])
+    return _to_post_read(*row, media=media_map.get(row[0].id, []))
+
+
 @router.get("/posts/{post_id}", response_model=PostRead)
 async def get_post(
     post_id: str,
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostRead:
-    uid = current_user.id if current_user else None
-    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
-    stmt = (
-        select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
-        .join(Profile, Profile.id == Post.author_id)
-        .where(Post.id == post_id, Post.status != "deleted")
+    ensure_uuid(post_id, "Publicacion no encontrada.")
+    return await _load_single_post(
+        db, post_id, current_user.id if current_user else None
     )
-    row = (await db.execute(stmt)).first()
-    if row is None:
-        raise NotFoundError("Publicacion no encontrada.")
-    media_map = await _load_media_map(db, [row[0].id])
-    return _to_post_read(*row, media=media_map.get(row[0].id, []))
+
+
+@router.patch("/posts/{post_id}", response_model=PostRead)
+async def update_post(
+    post_id: str,
+    payload: PostUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PostRead:
+    """Edita una publicacion propia (texto y/o adjunto).
+
+    Solo el autor: un moderador puede retirar contenido, pero no reescribir lo
+    que otra persona dijo.
+    """
+    ensure_uuid(post_id, "Publicacion no encontrada.")
+    post = await _get_active_post(db, post_id)
+    if post.author_id != current_user.id:
+        raise ForbiddenError("No puedes editar esta publicacion.")
+
+    if payload.body is not None:
+        post.body = payload.body
+    if payload.visibility is not None:
+        post.visibility = payload.visibility
+
+    # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
+    # lista vacia equivale a quitarlo).
+    if payload.media is not None:
+        await db.execute(delete(PostMedia).where(PostMedia.post_id == post_id))
+        for index, item in enumerate(payload.media):
+            db.add(
+                PostMedia(
+                    post_id=post_id,
+                    storage_path=item.storage_path,
+                    media_type=item.media_type,
+                    sort_order=index,
+                )
+            )
+
+    await db.commit()
+    return await _load_single_post(db, post_id, current_user.id)
 
 
 @router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -266,8 +329,10 @@ async def delete_post(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     post = await _get_active_post(db, post_id)
-    is_admin = (current_user.role or "") in _ADMIN_ROLES
-    if post.author_id != current_user.id and not is_admin:
+    # El rol de la app esta en profiles.role, no en el JWT: alli `role` vale
+    # siempre "authenticated", asi que esta comprobacion nunca se cumplia y un
+    # moderador no podia retirar la publicacion de otra persona.
+    if post.author_id != current_user.id and not await is_admin_user(db, current_user.id):
         raise ForbiddenError("No puedes eliminar esta publicacion.")
     post.status = "deleted"  # soft delete
     await db.commit()

@@ -37,6 +37,7 @@ export function toEventItem(dto: EventDto): EventItem {
   return {
     id: dto.id,
     organizerId: dto.organizer_id,
+    startsAtDate: new Date(dto.starts_at),
     title: dto.title,
     description: dto.description,
     date: formatEventDate(dto.starts_at),

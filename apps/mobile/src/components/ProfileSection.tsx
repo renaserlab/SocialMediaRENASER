@@ -1,18 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
+import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
+import { Button } from '@/components/Button';
 import { ListRow } from '@/components/ListRow';
+import { PodcastList } from '@/components/PodcastList';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import { PostRepository } from '@/repositories/PostRepository';
+import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import type { Course, EventItem } from '@/types';
+import type { Course, EventItem, Post } from '@/types';
 
 /** Secciones del perfil que se abren desde los accesos circulares. */
-export type ProfileSectionKind = 'eventos' | 'cursos';
+export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast';
 
 type Props = {
   kind: ProfileSectionKind;
@@ -32,7 +37,23 @@ export function ProfileSection({ kind, profileId }: Props) {
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [episodes, setEpisodes] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Elemento en edicion; solo el administrador puede abrirlo. */
+  const [editing, setEditing] = useState<CatalogEditable | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  /**
+   * Se recarga al volver a la pantalla. Sin esto, publicar un episodio (o un
+   * evento) desde otra vista no se reflejaba aqui: la lista se habia pedido al
+   * montar y no se volvia a pedir, asi que lo recien subido no aparecia.
+   */
+  useFocusEffect(reload);
+
+  /** Alta desde la propia seccion; solo el administrador la ve. */
+  const [creating, setCreating] = useState(false);
+  const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
     if (!AuthRepository.enabled) {
@@ -42,7 +63,16 @@ export function ProfileSection({ kind, profileId }: Props) {
     let alive = true;
     setLoading(true);
     const request =
-      kind === 'eventos'
+      kind === 'podcast'
+        ? PostRepository.listByAuthor(
+            profileId ?? '',
+            { media: 'audio', limit: 60 },
+            profileId,
+          ).then((list) => {
+            // El episodio 1 es el mas antiguo; el backend devuelve al reves.
+            if (alive) setEpisodes([...list].reverse());
+          })
+        : kind === 'eventos'
         ? CatalogRepository.listEvents().then((page) => {
             if (alive) {
               // Solo los que organiza este perfil.
@@ -62,6 +92,7 @@ export function ProfileSection({ kind, profileId }: Props) {
         if (alive) {
           setEvents([]);
           setCourses([]);
+          setEpisodes([]);
         }
       })
       .finally(() => {
@@ -71,12 +102,38 @@ export function ProfileSection({ kind, profileId }: Props) {
     return () => {
       alive = false;
     };
-  }, [kind, profileId]);
+  }, [kind, profileId, reloadKey]);
 
   if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={colors.textMuted} />
+      </View>
+    );
+  }
+
+  // El podcast siempre pinta sus 30 filas, aunque aun no haya episodios: la
+  // lista bloqueada es parte de lo que se quiere mostrar.
+  if (kind === 'podcast') {
+    return (
+      <View>
+        {isAdmin ? (
+          <Button
+            label="Agregar audio"
+            variant="secondary"
+            icon="plus"
+            onPress={() => setCreating(true)}
+          />
+        ) : null}
+        <PodcastList episodes={episodes} />
+        {creating ? (
+          <CreateCatalogSheet
+            kind="podcast"
+            visible
+            onClose={() => setCreating(false)}
+            onCreated={reload}
+          />
+        ) : null}
       </View>
     );
   }
@@ -103,8 +160,18 @@ export function ProfileSection({ kind, profileId }: Props) {
               title={event.title}
               subtitle={`${event.date} • ${event.location}`}
               leftIcon="calendar"
-              rightIcon="chevron-right"
-              onPress={() => router.push('/events')}
+              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
+              onPress={() =>
+                isAdmin
+                  ? setEditing({
+                      id: event.id,
+                      title: event.title,
+                      description: event.description,
+                      startsAt: event.startsAtDate ?? null,
+                      location: event.location,
+                    })
+                  : router.push('/events')
+              }
             />
           ))
         : courses.map((course) => (
@@ -113,10 +180,28 @@ export function ProfileSection({ kind, profileId }: Props) {
               title={course.title}
               subtitle={course.subtitle || 'Ver programa'}
               leftIcon="book"
-              rightIcon="chevron-right"
-              onPress={() => router.push(`/course/${course.id}` as never)}
+              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
+              onPress={() =>
+                isAdmin
+                  ? setEditing({
+                      id: course.id,
+                      title: course.title,
+                      description: course.description,
+                      price: course.price,
+                    })
+                  : router.push(`/course/${course.id}` as never)
+              }
             />
           ))}
+      {editing ? (
+        <CreateCatalogSheet
+          kind={kind === 'eventos' ? 'evento' : 'curso'}
+          visible
+          editing={editing}
+          onClose={() => setEditing(null)}
+          onCreated={reload}
+        />
+      ) : null}
     </View>
   );
 }

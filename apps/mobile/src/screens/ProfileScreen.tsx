@@ -20,6 +20,7 @@ import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { pickImage, takePhoto } from '@/services/storage';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -28,6 +29,7 @@ import type { UserProfile } from '@/types';
 
 export function ProfileScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const { id, section } = useLocalSearchParams<{ id?: string; section?: string }>();
 
@@ -52,7 +54,7 @@ export function ProfileScreen() {
    * circulos. `null` = la galeria de publicaciones.
    */
   const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(
-    section === 'eventos' || section === 'cursos' ? section : null,
+    section === 'eventos' || section === 'cursos' || section === 'podcast' ? section : null,
   );
 
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
@@ -238,10 +240,18 @@ export function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title={isPublic ? 'PERFIL' : 'MI PERFIL'}
+        title={isPublic ? t('profile.titlePublic') : t('profile.title')}
         rightIcon={isPublic ? undefined : 'settings'}
         onRightPress={isPublic ? undefined : () => router.push('/settings')}
-        onBack={isPublic ? () => (router.canGoBack() ? router.back() : router.replace('/')) : undefined}
+        /*
+          Atras SIEMPRE que se llegue por /profile/[id], aunque sea el perfil
+          propio: esa ruta vive fuera de las pestañas, asi que sin este boton no
+          hay barra inferior ni forma de salir. Solo la pestaña Perfil (sin id)
+          se queda sin flecha, porque alli si esta la barra.
+        */
+        onBack={
+          id ? () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/home')) : undefined
+        }
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
         {/* La portada completa es tocable; el chip solo señala que se puede editar. */}
@@ -340,19 +350,23 @@ export function ProfileScreen() {
           )}
 
           <View style={styles.shortcuts}>
-            <Shortcut icon="bookmark" label="Guardados" onPress={() => router.push('/saved' as never)} />
-            <Shortcut icon="headphones" label="Podcast" onPress={() => router.push('/audio/private')} />
+            <Shortcut icon="bookmark" label={t('profile.saved')} onPress={() => router.push('/saved' as never)} />
+            <Shortcut
+              icon="headphones"
+              label={t('profile.podcast')}
+              onPress={() => setActiveSection((v) => (v === 'podcast' ? null : 'podcast'))}
+            />
             <Shortcut
               icon="calendar"
-              label="Eventos"
+              label={t('profile.events')}
               onPress={() => setActiveSection((v) => (v === 'eventos' ? null : 'eventos'))}
             />
             <Shortcut
               icon="book"
-              label="Cursos"
+              label={t('profile.courses')}
               onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
             />
-            <Shortcut icon="users" label="Círculos" onPress={() => router.push('/circle/lideres-renaser')} />
+            <Shortcut icon="users" label={t('profile.circles')} onPress={() => router.push('/circle/lideres-renaser')} />
           </View>
 
           {activeSection ? (

@@ -33,6 +33,49 @@ export const LearningRepository = {
     return dtos.map(toCourseFromSummary);
   },
 
+  /** Publica un curso. Solo administradores (lo comprueba el backend). */
+  async createCourse(input: {
+    title: string;
+    description: string;
+    price: number;
+    currency: string;
+    coverPath?: string | null;
+  }): Promise<Course> {
+    const dto = await apiRequest<CourseDto>(`${API_V1}/catalog/courses`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description,
+        price: input.price,
+        currency: input.currency,
+        cover_path: input.coverPath ?? null,
+      }),
+    });
+    return toCourseFromSummary(dto);
+  },
+
+  /** Edita un curso. Solo administradores (lo verifica el backend). */
+  async updateCourse(
+    courseId: string,
+    changes: {
+      title?: string;
+      description?: string;
+      price?: number;
+      coverPath?: string | null;
+    },
+  ): Promise<Course> {
+    const payload: Record<string, unknown> = {};
+    if (changes.title !== undefined) payload.title = changes.title;
+    if (changes.description !== undefined) payload.description = changes.description;
+    if (changes.price !== undefined) payload.price = changes.price;
+    if (changes.coverPath !== undefined) payload.cover_path = changes.coverPath;
+    const dto = await apiRequest<CourseDto>(`${API_V1}/catalog/courses/${courseId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    return toCourseFromSummary(dto);
+  },
+
   async getCourseDetail(courseId: string): Promise<CourseDetail> {
     const dto = await apiRequest<CourseDetailDto>(
       `${API_V1}/learning/courses/${courseId}`,

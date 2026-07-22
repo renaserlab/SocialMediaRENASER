@@ -287,12 +287,21 @@ export function PostCard({ post, onDeleted }: Props) {
           onPress={() => closeMenuThen(sharePost)}
         />
         {isOwn ? (
-          <ListRow
-            title="Eliminar publicación"
-            leftIcon="trash-2"
-            destructive
-            onPress={() => closeMenuThen(() => void deleteOwnPost())}
-          />
+          <>
+            <ListRow
+              title="Editar publicación"
+              leftIcon="edit-2"
+              onPress={() =>
+                closeMenuThen(() => router.push(`/edit-post/${post.id}` as never))
+              }
+            />
+            <ListRow
+              title="Eliminar publicación"
+              leftIcon="trash-2"
+              destructive
+              onPress={() => closeMenuThen(() => void deleteOwnPost())}
+            />
+          </>
         ) : (
           <ListRow
             title="Reportar publicación"
