@@ -4,8 +4,9 @@ La identidad (quién sigue o bloquea) se toma siempre del JWT.
 """
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, func, literal, literal_column, or_, select
+from sqlalchemy import delete, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
@@ -56,12 +57,16 @@ async def _people(
         where = Follow.follower_id == profile_id
 
     if viewer_id:
+        # Alias TIPADO del modelo (no literal_column): asi `follower_id` conserva
+        # su tipo UUID y no se compara como texto contra el viewer, que reventaba
+        # con "operator does not exist: uuid = character varying".
+        f2 = aliased(Follow)
         is_following_sq = (
             select(func.count())
-            .select_from(Follow.__table__.alias("f2"))
+            .select_from(f2)
             .where(
-                literal_column("f2.follower_id") == viewer_id,
-                literal_column("f2.following_id") == Profile.id,
+                f2.follower_id == viewer_id,
+                f2.following_id == Profile.id,
             )
             .scalar_subquery()
         )
