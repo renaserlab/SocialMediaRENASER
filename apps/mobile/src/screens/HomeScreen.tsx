@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -35,12 +36,26 @@ export function HomeScreen() {
 
   // Circulo destacado real, para el contador y el enlace de la tarjeta.
   const [circle, setCircle] = useState<CircleDetail | null>(null);
+  /**
+   * Perfil del administrador. Darren gestiona la aplicacion, asi que los
+   * eventos y los cursos viven en su perfil: las tarjetas de abajo llevan alli
+   * a cualquier usuario, a la seccion que haya elegido.
+   */
+  const [adminId, setAdminId] = useState<string | null>(null);
   useEffect(() => {
     if (!AuthRepository.enabled) return;
     CommunityRepository.list()
       .then((list) => setCircle(list[0] ?? null))
       .catch(() => setCircle(null));
+    ProfileRepository.listFeatured()
+      .then((list) => setAdminId((list.find((m) => m.isAdmin) ?? list[0])?.id ?? null))
+      .catch(() => setAdminId(null));
   }, []);
+
+  const openAdminSection = (section: 'eventos' | 'cursos') => {
+    if (!adminId) return;
+    router.push({ pathname: '/profile/[id]', params: { id: adminId, section } } as never);
+  };
 
   const [feedTab, setFeedTab] = useState(0);
 
@@ -127,6 +142,31 @@ export function HomeScreen() {
             <Text style={[styles.quickBody, { color: colors.textMuted }]}>
               {circle ? `${circle.members} personas avanzando` : 'Únete a la comunidad'}
             </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.quickRow}>
+          <Pressable
+            onPress={() => openAdminSection('eventos')}
+            disabled={!adminId}
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Ver eventos"
+          >
+            <Feather name="calendar" size={24} color={colors.text} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Eventos</Text>
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Encuentros y experiencias</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => openAdminSection('cursos')}
+            disabled={!adminId}
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Ver cursos"
+          >
+            <Feather name="book" size={24} color={colors.text} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Cursos</Text>
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Programas para avanzar</Text>
           </Pressable>
         </View>
       </View>

@@ -75,6 +75,8 @@ export type Conversation = {
 
 export type EventItem = {
   id: string;
+  /** Quien organiza el evento; permite listar los de un perfil. */
+  organizerId?: string;
   title: string;
   description: string;
   date: string;

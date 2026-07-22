@@ -1,21 +1,22 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { AudioPlayer } from '@/components/AudioPlayer';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
-import { radius, spacing } from '@/theme/tokens';
+import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
 
 type Props = {
   gallery: Post[];
-  audios: Post[];
+  /** Audios publicados. Ya no se muestran como pestaña, pero se conservan
+   *  para el podcast del perfil (siguiente iteración). */
+  audios?: Post[];
   loading: boolean;
   error: string | null;
   /** Texto del estado vacío; cambia entre perfil propio y ajeno. */
@@ -29,10 +30,9 @@ type Props = {
  * mostraba contenido que no era suyo (y en tema oscuro parecian recuadros
  * vacios). Ahora sale lo que ha publicado esa persona.
  */
-export function ProfileGallery({ gallery, audios, loading, error, emptyHint }: Props) {
+export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const [tab, setTab] = useState(0);
 
   if (loading) {
     return (
@@ -52,50 +52,27 @@ export function ProfileGallery({ gallery, audios, loading, error, emptyHint }: P
     );
   }
 
-  const showingAudios = tab === 1;
-  const items = showingAudios ? audios : gallery;
+  const items = gallery;
 
   return (
     <View style={styles.wrap}>
+      {/*
+        Solo "Publicaciones". Los audios publicados siguen llegando en `audios`
+        y se muestran en el podcast del perfil, no como una pestaña aparte.
+      */}
       <SegmentedControl
-        options={[`Publicaciones ${gallery.length}`, `Audios ${audios.length}`]}
-        selectedIndex={tab}
-        onChange={setTab}
+        options={[`Publicaciones ${gallery.length}`]}
+        selectedIndex={0}
+        onChange={() => {}}
         style={styles.tabs}
       />
 
       {items.length === 0 ? (
         <View style={styles.center}>
-          <Feather
-            name={showingAudios ? 'headphones' : 'camera'}
-            size={30}
-            color={colors.textMuted}
-          />
+          <Feather name="camera" size={30} color={colors.textMuted} />
           <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-            {showingAudios
-              ? 'Aún no hay audios publicados.'
-              : (emptyHint ?? 'Aún no hay publicaciones.')}
+            {emptyHint ?? 'Aún no hay publicaciones.'}
           </Text>
-        </View>
-      ) : showingAudios ? (
-        <View style={styles.audioList}>
-          {audios.map((post) => (
-            <Pressable
-              key={post.id}
-              onPress={() => router.push(`/post/${post.id}` as never)}
-              accessibilityRole="button"
-              accessibilityLabel={`Abrir audio: ${post.body}`}
-            >
-              <Text variant="secondary" numberOfLines={1} style={styles.audioTitle}>
-                {post.body}
-              </Text>
-              {post.mediaUrl ? (
-                <View pointerEvents="none">
-                  <AudioPlayer uri={post.mediaUrl} title={post.createdAt} />
-                </View>
-              ) : null}
-            </Pressable>
-          ))}
         </View>
       ) : (
         <View style={styles.grid}>
@@ -170,7 +147,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   placeholder: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  audioList: { gap: spacing.md },
-  audioTitle: { fontWeight: '600', marginBottom: spacing.xs },
-  audioRow: { borderRadius: radius.lg },
 });

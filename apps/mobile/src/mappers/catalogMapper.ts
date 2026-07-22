@@ -36,6 +36,7 @@ function mapType(eventType: string): EventItem['type'] {
 export function toEventItem(dto: EventDto): EventItem {
   return {
     id: dto.id,
+    organizerId: dto.organizer_id,
     title: dto.title,
     description: dto.description,
     date: formatEventDate(dto.starts_at),

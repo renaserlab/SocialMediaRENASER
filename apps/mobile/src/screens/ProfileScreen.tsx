@@ -13,6 +13,7 @@ import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { ListRow } from '@/components/ListRow';
 import { ProfileGallery } from '@/components/ProfileGallery';
+import { ProfileSection, type ProfileSectionKind } from '@/components/ProfileSection';
 import { StateView } from '@/components/StateView';
 import { useProfilePosts } from '@/hooks/useProfilePosts';
 import { assets } from '@/data/assets';
@@ -28,7 +29,7 @@ import type { UserProfile } from '@/types';
 export function ProfileScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, section } = useLocalSearchParams<{ id?: string; section?: string }>();
 
   const currentUser = useAppStore((state) => state.user);
   const setProfileImage = useAppStore((state) => state.setProfileImage);
@@ -45,6 +46,15 @@ export function ProfileScreen() {
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
+  /**
+   * Seccion activa bajo los accesos circulares. Llega por parametro desde las
+   * tarjetas de Inicio (Eventos / Cursos) y tambien se cambia tocando los
+   * circulos. `null` = la galeria de publicaciones.
+   */
+  const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(
+    section === 'eventos' || section === 'cursos' ? section : null,
+  );
+
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
   const [publicState, setPublicState] = useState<'loading' | 'error' | 'idle'>('loading');
 
@@ -331,13 +341,24 @@ export function ProfileScreen() {
 
           <View style={styles.shortcuts}>
             <Shortcut icon="bookmark" label="Guardados" onPress={() => router.push('/saved' as never)} />
-            <Shortcut icon="headphones" label="Audios" onPress={() => router.push('/audio/private')} />
-            <Shortcut icon="calendar" label="Eventos" onPress={() => router.push('/events')} />
-            <Shortcut icon="book" label="Cursos" onPress={() => router.push('/course/lider-vida-empresa')} />
+            <Shortcut icon="headphones" label="Podcast" onPress={() => router.push('/audio/private')} />
+            <Shortcut
+              icon="calendar"
+              label="Eventos"
+              onPress={() => setActiveSection((v) => (v === 'eventos' ? null : 'eventos'))}
+            />
+            <Shortcut
+              icon="book"
+              label="Cursos"
+              onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
+            />
             <Shortcut icon="users" label="Círculos" onPress={() => router.push('/circle/lideres-renaser')} />
           </View>
 
-          {/* Publicaciones reales del perfil: fotos/videos y audios. */}
+          {activeSection ? (
+            <ProfileSection kind={activeSection} profileId={galleryOwnerId} />
+          ) : (
+          /* Publicaciones reales del perfil: fotos/videos. */
           <ProfileGallery
             gallery={gallery}
             audios={audios}
@@ -349,6 +370,7 @@ export function ProfileScreen() {
                 : 'Cuando publiques una foto o un video, aparecerá aquí.'
             }
           />
+          )}
         </View>
       </AppScreen>
 
