@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
+import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
@@ -15,6 +16,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function CourseScreen() {
+  const [editing, setEditing] = React.useState(false);
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -49,7 +51,14 @@ export function CourseScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title="Programa"
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        // Editar los datos del curso vive aqui, junto al temario: asi el
+        // administrador gestiona todo el curso desde un solo sitio.
+        rightIcon={isAdmin ? 'edit-2' : undefined}
+        onRightPress={isAdmin ? () => setEditing(true) : undefined}
+      />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <Image source={assets.course} style={[styles.hero, { borderColor: colors.border }]} />
         <View style={styles.container}>
@@ -98,6 +107,21 @@ export function CourseScreen() {
           />
         </View>
       </AppScreen>
+
+      {editing ? (
+        <CreateCatalogSheet
+          kind="curso"
+          visible
+          editing={{
+            id: course.id,
+            title: course.title,
+            description: course.description,
+            price: course.price,
+          }}
+          onClose={() => setEditing(false)}
+          onCreated={reload}
+        />
+      ) : null}
     </View>
   );
 }

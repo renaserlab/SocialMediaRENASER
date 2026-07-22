@@ -373,17 +373,12 @@ export function ProfileSection({ kind, profileId }: Props) {
               title={course.title}
               subtitle={course.subtitle || 'Ver programa'}
               leftIcon="book"
-              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
-              onPress={() =>
-                isAdmin
-                  ? setEditing({
-                      id: course.id,
-                      title: course.title,
-                      description: course.description,
-                      price: course.price,
-                    })
-                  : router.push(`/course/${course.id}` as never)
-              }
+              rightIcon="chevron-right"
+              // Antes, para el administrador, tocar abria la hoja de edicion y
+              // nunca navegaba: no habia forma de llegar al temario. Ahora la
+              // fila siempre abre el curso, y editar sus datos vive dentro (el
+              // lapiz de la cabecera), junto a la gestion de modulos.
+              onPress={() => router.push(`/course/${course.id}` as never)}
             />
           ))}
       <EventDetailSheet event={detail} onClose={() => setDetail(null)} />
