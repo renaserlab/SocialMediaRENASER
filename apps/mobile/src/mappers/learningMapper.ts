@@ -89,6 +89,7 @@ export function toCourseFromDetail(dto: CourseDetailDto): Course {
 export function toCourseFromSummary(dto: CourseDto): Course {
   return {
     id: dto.id,
+    authorId: dto.author_id,
     title: dto.title,
     subtitle: deriveSubtitle(dto.description),
     price: toMajorUnits(dto.price_minor),

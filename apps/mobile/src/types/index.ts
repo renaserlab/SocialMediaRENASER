@@ -98,6 +98,8 @@ export type EventItem = {
 
 export type Course = {
   id: string;
+  /** Quién publica el curso; permite listar los de un perfil. */
+  authorId?: string;
   title: string;
   subtitle: string;
   price: number;

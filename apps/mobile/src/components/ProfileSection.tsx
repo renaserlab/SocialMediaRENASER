@@ -32,6 +32,42 @@ import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/
 /** Secciones del perfil que se abren desde los accesos circulares. */
 export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast' | 'testimonios';
 
+/**
+ * Que se dice en cada seccion cuando el perfil no administra la aplicacion.
+ * Reunido aqui para que anadir una seccion sea anadir una entrada.
+ */
+const ADMIN_SECTIONS: Partial<
+  Record<
+    ProfileSectionKind,
+    { icon: 'headphones' | 'calendar' | 'book' | 'camera'; title: string; body: string; action: string }
+  >
+> = {
+  podcast: {
+    icon: 'headphones',
+    title: 'Aún no tienes podcast',
+    body: 'Los episodios de RENASER están en el perfil de Darren.',
+    action: 'Ir al podcast de RENASER',
+  },
+  eventos: {
+    icon: 'calendar',
+    title: 'Aún no tienes eventos',
+    body: 'Los próximos encuentros de RENASER están en el perfil de Darren.',
+    action: 'Ver eventos de RENASER',
+  },
+  cursos: {
+    icon: 'book',
+    title: 'Aún no tienes cursos',
+    body: 'Los programas de RENASER están en el perfil de Darren.',
+    action: 'Ver cursos de RENASER',
+  },
+  testimonios: {
+    icon: 'camera',
+    title: 'Aún no tienes testimonios',
+    body: 'Los testimonios de la comunidad están en el perfil de Darren.',
+    action: 'Ver testimonios de RENASER',
+  },
+};
+
 /** Orden de las pestañas de la galeria: Todos / Fotos / Videos. */
 const TESTIMONIAL_FILTERS: TestimonialFilter[] = ['all', 'image', 'video'];
 
@@ -82,21 +118,27 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  /** Lleva al podcast del administrador, resolviendo quien es. */
-  const openAdminPodcast = useCallback(async () => {
-    try {
-      const featured = await ProfileRepository.listFeatured();
-      const admin = featured.find((m) => m.isAdmin) ?? featured[0];
-      if (admin) {
-        router.push({
-          pathname: '/profile/[id]',
-          params: { id: admin.id, section: 'podcast' },
-        } as never);
+  /**
+   * Lleva a la seccion equivalente en el perfil del administrador, que es
+   * donde vive el contenido de RENASER. El id se resuelve, no va escrito.
+   */
+  const openAdminSection = useCallback(
+    async (target: ProfileSectionKind) => {
+      try {
+        const featured = await ProfileRepository.listFeatured();
+        const admin = featured.find((m) => m.isAdmin) ?? featured[0];
+        if (admin) {
+          router.push({
+            pathname: '/profile/[id]',
+            params: { id: admin.id, section: target },
+          } as never);
+        }
+      } catch {
+        // Sin red no se puede resolver; se puede llegar desde el inicio.
       }
-    } catch {
-      // Sin red no se puede resolver; el usuario puede ir desde el inicio.
-    }
-  }, [router]);
+    },
+    [router],
+  );
 
   /**
    * Se recarga al volver a la pantalla. Sin esto, publicar un episodio (o un
@@ -140,6 +182,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
         : kind === 'testimonios'
         ? TestimonialRepository.list(
             TESTIMONIAL_FILTERS[testimonialFilter] ?? 'all',
+            profileId,
           ).then((list) => {
             if (alive) setTestimonials(list);
           })
@@ -155,7 +198,12 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
             }
           })
         : LearningRepository.listCourses().then((list) => {
-            if (alive) setCourses(list);
+            // Solo los que publica este perfil, igual que con los eventos.
+            if (alive) {
+              setCourses(
+                profileId ? list.filter((c) => !c.authorId || c.authorId === profileId) : list,
+              );
+            }
           });
 
     request
@@ -205,24 +253,28 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
 
   // El podcast siempre pinta sus 30 filas, aunque aun no haya episodios: la
   // lista bloqueada es parte de lo que se quiere mostrar.
-  if (kind === 'podcast' && !ownerIsAdmin) {
-    // Sin catalogo propio no tiene sentido enseñar 30 huecos bloqueados ni los
-    // filtros: solo confunde. Se explica donde estan los episodios.
+  /**
+   * Podcast, eventos, cursos y testimonios son contenido de RENASER: los
+   * publica quien administra. En un perfil normal no hay nada que enseñar, asi
+   * que en vez de listas vacias (o peor, listas bloqueadas y filtros sin nada
+   * que filtrar) se explica donde esta y se lleva alli.
+   */
+  if (!ownerIsAdmin && ADMIN_SECTIONS[kind]) {
+    const copy = ADMIN_SECTIONS[kind]!;
     return (
       <View style={styles.center}>
-        <Feather name="headphones" size={30} color={colors.textMuted} />
+        <Feather name={copy.icon} size={30} color={colors.textMuted} />
         <Text variant="body" weight="700" style={styles.centerText}>
-          Aún no tienes podcast
+          {copy.title}
         </Text>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          Los episodios de RENASER están en el perfil de Darren. Entra desde la
-          tarjeta «Podcast» del inicio o visita su perfil.
+          {copy.body}
         </Text>
         <Button
-          label="Ir al podcast de RENASER"
+          label={copy.action}
           variant="secondary"
-          icon="headphones"
-          onPress={() => void openAdminPodcast()}
+          icon={copy.icon}
+          onPress={() => void openAdminSection(kind)}
           style={styles.centerAction}
         />
       </View>
