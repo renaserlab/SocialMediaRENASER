@@ -12,6 +12,7 @@ import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -112,6 +113,7 @@ export function PostCard({ post, onDeleted }: Props) {
     try {
       await deletePost(post.id);
       haptics.light();
+      toast('Publicación eliminada');
       onDeleted?.();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');
@@ -133,7 +135,7 @@ export function PostCard({ post, onDeleted }: Props) {
         reportedUserId: post.authorId,
         reason: 'Contenido inapropiado',
       });
-      notify('Gracias', 'Hemos recibido tu reporte.');
+      toast('Reporte enviado. Gracias por avisar.', 'flag');
     } catch {
       notify('No se pudo enviar', 'Inténtalo de nuevo.');
     }

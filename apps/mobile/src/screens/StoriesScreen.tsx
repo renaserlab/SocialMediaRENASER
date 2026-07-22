@@ -13,6 +13,7 @@ import { ListRow } from '@/components/ListRow';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { StoryRepository } from '@/repositories/StoryRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
@@ -170,6 +171,7 @@ export function StoriesScreen() {
     }
     try {
       await deleteStory(item.id);
+      toast('Historia eliminada');
       close();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');

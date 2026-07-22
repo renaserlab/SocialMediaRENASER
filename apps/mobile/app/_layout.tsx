@@ -16,6 +16,7 @@ import {
 } from '@expo-google-fonts/inter';
 
 import { DialogHost } from '@/components/DialogHost';
+import { ToastHost } from '@/components/ToastHost';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -72,6 +73,8 @@ export default function RootLayout() {
         />
         {/* Dialogo de confirmaciones y avisos: uno solo para toda la app. */}
         <DialogHost />
+        {/* Toast de exito. Va despues para quedar por encima del dialogo. */}
+        <ToastHost />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

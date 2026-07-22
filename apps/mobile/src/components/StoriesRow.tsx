@@ -9,6 +9,7 @@ import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
 import { pickImage, pickVideo, takePhoto, uploadPostMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
@@ -98,6 +99,7 @@ export function StoriesRow() {
       setUploading(true);
       const uploaded = await uploadPostMedia(picked);
       await createStory(uploaded, picked.kind === 'video' ? Math.max(1000, duration) : PHOTO_MS);
+      toast('Historia publicada');
     } catch (error) {
       notify(
         'No se pudo publicar la historia',

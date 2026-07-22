@@ -9,6 +9,7 @@ import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { TestimonialRepository } from '@/repositories/TestimonialRepository';
 import { pickImage, pickVideo, uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
@@ -85,6 +86,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
       } else {
         await TestimonialRepository.create(uploaded!, title.trim());
       }
+      toast(isEditing ? 'Cambios guardados' : 'Testimonio publicado');
       reset();
       onCreated?.();
       onClose();

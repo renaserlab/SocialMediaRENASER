@@ -21,6 +21,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/types';
 
 /** Secciones del perfil que se abren desde los accesos circulares. */
@@ -150,6 +151,7 @@ export function ProfileSection({ kind, profileId }: Props) {
     if (!accepted) return;
     try {
       await TestimonialRepository.remove(id);
+      toast('Testimonio eliminado');
       reload();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');
