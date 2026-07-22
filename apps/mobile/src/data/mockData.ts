@@ -1,4 +1,5 @@
-import { Circle, Conversation, Course, EventItem, Post, QuizQuestion } from '@/types';
+import { Circle, Conversation, Course, EventItem, Lesson, Person, Post, QuizQuestion, Short, Story } from '@/types';
+import { SAMPLE_VIDEO_URL } from '@/data/media';
 
 export const quizQuestions: QuizQuestion[] = [
   {
@@ -110,10 +111,10 @@ export const conversations: Conversation[] = [
   {
     id: 'darren',
     name: 'Darren Supa',
-    subtitle: 'Gracias por ser parte de RENASER Universo.',
+    subtitle: 'Gracias por ser parte de Renaser Social Media.',
     unread: 1,
     messages: [
-      { id: 'm1', text: 'Bienvenida a RENASER Universo.', sender: 'them', createdAt: '9:35' },
+      { id: 'm1', text: 'Bienvenida a Renaser Social Media.', sender: 'them', createdAt: '9:35' },
       { id: 'm2', text: 'Tu próximo nivel comienza con una decisión consciente.', sender: 'them', createdAt: '9:36' },
     ],
   },
@@ -181,3 +182,137 @@ export const circle: Circle = {
   description: 'Un espacio para compartir, aprender y avanzar junto a personas comprometidas con su crecimiento.',
   members: 423,
 };
+
+export const lessons: Lesson[] = [
+  {
+    id: '1',
+    courseId: course.id,
+    order: 1,
+    title: 'El Poder de la Disciplina Diaria',
+    durationMin: 18,
+    mentor: 'Darren Hardy',
+    summary:
+      'La disciplina es el puente entre tus metas y tus logros. El éxito no se consigue con saltos gigantescos, sino con la acumulación constante de pequeñas acciones diarias. En esta lección analizamos las rutinas matutinas que definen el día y cómo crear barreras contra la distracción en un mundo hiperconectado.',
+    resources: [
+      { id: 'r1', title: 'Guía de Trabajo PDF', subtitle: 'Planificador Diario.pdf (4.2 MB)', icon: 'file-text' },
+      { id: 'r2', title: 'Audio Resumen MP3', subtitle: 'Resumen de lección.mp3 (12.8 MB)', icon: 'music' },
+    ],
+  },
+  {
+    id: '2',
+    courseId: course.id,
+    order: 2,
+    title: 'Mentalidad de Crecimiento y Estrategia',
+    durationMin: 22,
+    mentor: 'Darren Hardy',
+    summary:
+      'Tu forma de interpretar los obstáculos define tu techo. Aquí trabajamos cómo convertir la visión en un plan accionable y cómo tomar decisiones con claridad bajo presión.',
+    resources: [
+      { id: 'r1', title: 'Plantilla de Estrategia', subtitle: 'Estrategia 90 días.pdf (2.1 MB)', icon: 'file-text' },
+    ],
+  },
+  {
+    id: '3',
+    courseId: course.id,
+    order: 3,
+    title: 'Liderazgo sin Agotamiento',
+    durationMin: 20,
+    mentor: 'Darren Hardy',
+    summary:
+      'Liderar equipos y tu propia vida sin quemarte requiere sistemas, no fuerza de voluntad. Revisamos hábitos sostenibles y cómo proteger tu energía a largo plazo.',
+    resources: [
+      { id: 'r1', title: 'Checklist de Hábitos', subtitle: 'Habitos sostenibles.pdf (1.4 MB)', icon: 'file-text' },
+      { id: 'r2', title: 'Audio de Cierre', subtitle: 'Integración final.mp3 (9.6 MB)', icon: 'music' },
+    ],
+  },
+];
+
+// ─── Historias (visor a pantalla completa) ───────────────────────────────────
+export const stories: Story[] = [
+  {
+    id: 'tu-historia',
+    author: 'Tu historia',
+    avatar: 'avatar',
+    segments: [
+      { id: 'th-1', image: 'avatar', caption: 'Comparte tu primer momento del día.' },
+    ],
+  },
+  {
+    id: 'reto-diario',
+    author: 'Reto diario',
+    avatar: 'speaker',
+    segments: [
+      { id: 'rd-1', image: 'speaker', caption: 'Reto 1: 20 minutos sin distracciones.' },
+      { id: 'rd-2', image: 'hero', caption: 'Reto 2: escribe la decisión que postergas.' },
+    ],
+  },
+  {
+    id: 'alquimia',
+    author: 'Alquimia',
+    avatar: 'hero',
+    segments: [
+      { id: 'al-1', image: 'hero', caption: 'Transformar hábitos empieza por el entorno.' },
+      { id: 'al-2', image: 'course', caption: 'Diseña tu semana antes de que te diseñe a ti.' },
+    ],
+  },
+  {
+    id: 'comunidad',
+    author: 'Comunidad',
+    avatar: 'circle',
+    segments: [
+      { id: 'co-1', image: 'circle', caption: '423 personas avanzando contigo.' },
+    ],
+  },
+  {
+    id: 'en-vivo',
+    author: 'En vivo',
+    avatar: 'speaker',
+    segments: [
+      { id: 'ev-1', image: 'event', caption: 'Hoy 7:00 PM · Sala RENASER.' },
+    ],
+  },
+];
+
+// ─── Shorts (feed vertical tipo reels) ───────────────────────────────────────
+export const shorts: Short[] = [
+  {
+    id: 'short-1',
+    author: 'Darren Hardy',
+    avatar: 'speaker',
+    caption: 'El secreto de tu éxito está en tu rutina diaria. #crecimiento #mindset',
+    uri: SAMPLE_VIDEO_URL,
+    poster: 'hero',
+    likes: 142,
+    comments: 28,
+  },
+  {
+    id: 'short-2',
+    author: 'Ana Sofía',
+    avatar: 'avatar',
+    caption: 'Poner un límite también es un acto de amor propio. #relaciones',
+    uri: SAMPLE_VIDEO_URL,
+    poster: 'circle',
+    likes: 86,
+    comments: 12,
+  },
+  {
+    id: 'short-3',
+    author: 'RENASER',
+    avatar: 'circle',
+    caption: 'Tu energía es la base de todo lo que quieres construir. #salud',
+    uri: SAMPLE_VIDEO_URL,
+    poster: 'course',
+    likes: 231,
+    comments: 41,
+  },
+];
+
+// ─── Personas (seguidores / siguiendo / resultados de búsqueda) ──────────────
+export const people: Person[] = [
+  { id: 'darren', fullName: 'Darren Hardy', username: '@darrenhardy', avatar: 'speaker', bio: 'Mentor de líderes.' },
+  { id: 'ana', fullName: 'Ana Sofía', username: '@anasofia', avatar: 'avatar', bio: 'Construyendo hábitos sostenibles.' },
+  { id: 'carlos', fullName: 'Carlos R.', username: '@carlosr', avatar: 'circle', bio: 'Estrategia y foco.' },
+  { id: 'maria', fullName: 'María G.', username: '@mariag', avatar: 'hero', bio: 'Aprendiendo cada día.' },
+  { id: 'esteban', fullName: 'Esteban R.', username: '@estebanr', avatar: 'course', bio: 'Liderazgo consciente.' },
+  { id: 'sophia', fullName: 'Sophia V.', username: '@sophiav', avatar: 'event', bio: 'Claridad y propósito.' },
+];

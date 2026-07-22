@@ -1,57 +1,174 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
-import { AppScreen } from '@/components/AppScreen';
+import { Input } from '@/components/Input';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
+import { MessageRepository } from '@/repositories/MessageRepository';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { Conversation } from '@/types';
 
 export function MessagesScreen() {
   const { colors } = useAppTheme();
-  const conversations = useAppStore((state) => state.conversations);
+  const router = useRouter();
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const demoConversations = useAppStore((state) => state.conversations);
+
+  const [searchText, setSearchText] = useState('');
+  const [remote, setRemote] = useState<Conversation[]>([]);
+  const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(() => {
+    if (!supabaseEnabled) {
+      setStatus('idle');
+      return;
+    }
+    setStatus('loading');
+    MessageRepository.listConversations()
+      .then((data) => {
+        setRemote(data);
+        setStatus('idle');
+      })
+      .catch(() => setStatus('error'));
+  }, [supabaseEnabled]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  // Sin espera artificial: `load()` ya gestiona su propio estado de carga.
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load();
+    setRefreshing(false);
+  }, [load]);
+
+  const conversations = supabaseEnabled ? remote : demoConversations;
+
+  const filteredConversations = conversations.filter((conv) =>
+    conv.name.toLowerCase().includes(searchText.toLowerCase()) ||
+    conv.subtitle.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  const hasMessages = filteredConversations.length > 0;
+  const uiState = supabaseEnabled && status === 'loading'
+    ? 'loading'
+    : supabaseEnabled && status === 'error'
+    ? 'error'
+    : hasMessages
+    ? 'content'
+    : 'empty';
 
   return (
-    <AppScreen contentStyle={{ paddingBottom: 100 }}>
-      <AppHeader title="MENSAJES" rightIcon="create-outline" />
-      <View style={styles.container}>
-        <View style={[styles.search, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Ionicons name="search" size={19} color={colors.textMuted} />
-          <TextInput placeholder="Buscar" placeholderTextColor={colors.textMuted} style={{ flex: 1, color: colors.text }} />
-        </View>
-
-        {conversations.map((conversation, index) => (
-          <Pressable
-            key={conversation.id}
-            onPress={() => router.push(`/chat/${conversation.id}`)}
-            style={[styles.row, { borderBottomColor: colors.border }]}
-          >
-            <Image source={index === 0 ? assets.avatar : index === 1 ? assets.circle : assets.speaker} style={styles.avatar} />
-            <View style={{ flex: 1 }}>
-              <View style={styles.nameRow}>
-                <Text style={[styles.name, { color: colors.text }]}>{conversation.name}</Text>
-                <Text style={[styles.time, { color: colors.textMuted }]}>{conversation.messages.at(-1)?.createdAt}</Text>
-              </View>
-              <Text numberOfLines={1} style={[styles.subtitle, { color: colors.textMuted }]}>{conversation.subtitle}</Text>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppHeader
+        title="MENSAJES"
+        rightIcon="edit"
+        onRightPress={() => {}}
+      />
+      <FlashList
+        data={uiState === 'content' ? filteredConversations : []}
+        keyExtractor={(item: Conversation) => item.id}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
+        }
+        ListHeaderComponent={
+          <View style={styles.searchWrapper}>
+            <Input
+              placeholder="Buscar mensajes..."
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholderTextColor={colors.textMuted}
+            />
+            <View style={styles.searchIcon}>
+              <Feather name="search" size={18} color={colors.textMuted} />
             </View>
-            {conversation.unread > 0 ? <View style={[styles.badge, { backgroundColor: colors.primary }]}><Text style={{ color: colors.onPrimary, fontSize: 10 }}>{conversation.unread}</Text></View> : null}
-          </Pressable>
-        ))}
-      </View>
-    </AppScreen>
+          </View>
+        }
+        ListEmptyComponent={
+          <StateView
+            state={uiState}
+            onRetry={load}
+            title={uiState === 'empty' ? 'No hay conversaciones' : undefined}
+            description={
+              uiState === 'empty'
+                ? 'Inicia un chat desde el perfil de alguien.'
+                : undefined
+            }
+            icon="message-square"
+          />
+        }
+        renderItem={({ item: conversation, index }: { item: Conversation; index: number }) => (
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/chat/[id]',
+                    params: { id: conversation.id, name: conversation.name },
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Chat con ${conversation.name}. ${conversation.subtitle}`}
+                style={({ pressed }) => [
+                  styles.row,
+                  { borderBottomColor: colors.border, opacity: pressed ? 0.78 : 1 },
+                ]}
+              >
+                <Image
+                  source={index === 0 ? assets.avatar : index === 1 ? assets.circle : assets.speaker}
+                  style={styles.avatar}
+                />
+                <View style={{ flex: 1 }}>
+                  <View style={styles.nameRow}>
+                    <Text style={[styles.name, { color: colors.text }]}>{conversation.name}</Text>
+                    <Text style={[styles.time, { color: colors.textMuted }]}>
+                      {conversation.time ?? conversation.messages.at(-1)?.createdAt}
+                    </Text>
+                  </View>
+                  <Text numberOfLines={1} style={[styles.subtitle, { color: colors.textMuted }]}>
+                    {conversation.subtitle}
+                  </Text>
+                </View>
+                {conversation.unread > 0 ? (
+                  <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+                    <Text style={{ color: colors.onPrimary, fontSize: 10, fontWeight: '700' }}>
+                      {conversation.unread}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+        )}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: spacing.lg },
-  search: { flexDirection: 'row', height: 46, borderRadius: radius.pill, borderWidth: 1, alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 100 },
+  searchWrapper: {
+    position: 'relative',
+    marginBottom: spacing.md,
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: spacing.md,
+    top: 15,
+  },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.lg, borderBottomWidth: 1 },
-  avatar: { width: 54, height: 54, borderRadius: 27 },
+  avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#DDD' },
   nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   name: { fontSize: 14, fontWeight: '800' },
   time: { fontSize: 10 },
-  subtitle: { fontSize: 12, marginTop: 5 },
+  subtitle: { fontSize: 12, marginTop: 4 },
   badge: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 });

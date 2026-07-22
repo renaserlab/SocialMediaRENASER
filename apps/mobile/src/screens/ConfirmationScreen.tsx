@@ -1,36 +1,59 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppScreen } from '@/components/AppScreen';
-import { PrimaryButton } from '@/components/PrimaryButton';
-import { course } from '@/data/mockData';
+import { Button } from '@/components/Button';
+import { useCourse } from '@/hooks/useCourse';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function ConfirmationScreen() {
   const { colors } = useAppTheme();
+  const router = useRouter();
+  // El curso recien comprado. Antes se mostraba SIEMPRE el curso de demo,
+  // asi que la confirmacion anunciaba un producto distinto al comprado.
+  const { courseId } = useLocalSearchParams<{ courseId?: string }>();
+  const { course, lessons } = useCourse(courseId);
+  const firstLessonId = (lessons.find((l) => !l.completed) ?? lessons[0])?.id;
+
   return (
-    <AppScreen contentStyle={styles.screen}>
+    <AppScreen contentStyle={styles.screen} edges={['top', 'left', 'right']}>
       <View style={styles.content}>
         <View style={[styles.check, { borderColor: colors.text }]}>
-          <Ionicons name="checkmark" size={58} color={colors.text} />
+          <Feather name="check" size={54} color={colors.text} />
         </View>
         <Text style={[styles.title, { color: colors.text }]}>¡Pago exitoso!</Text>
-        <Text style={[styles.body, { color: colors.textMuted }]}>Ya tienes acceso a{`\n`}{course.title}</Text>
+        <Text style={[styles.body, { color: colors.textMuted }]}>
+          Ya tienes acceso a{`\n`}{course?.title ?? 'tu nuevo curso'}
+        </Text>
       </View>
-      <PrimaryButton label="Ir al curso" onPress={() => router.replace('/course/lider-vida-empresa')} />
-      <PrimaryButton label="Volver al inicio" variant="secondary" onPress={() => router.replace('/(tabs)/home')} />
+      <Button
+        label="Ir al curso"
+        // Antes iba a '/lesson/1', un id del prototipo: con datos reales el
+        // usuario acababa en un error justo despues de pagar.
+        onPress={() =>
+          router.replace(
+            (firstLessonId
+              ? `/lesson/${firstLessonId}`
+              : courseId
+              ? `/course/${courseId}`
+              : '/(tabs)/home') as never,
+          )
+        }
+      />
+      <Button label="Volver al inicio" variant="secondary" onPress={() => router.replace('/(tabs)/home')} />
       <Text style={[styles.email, { color: colors.textMuted }]}>Te enviamos los detalles a tu email.</Text>
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: spacing.xl, gap: spacing.md },
+  screen: { padding: spacing.xl, gap: spacing.md, minHeight: '100%' },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  check: { width: 130, height: 130, borderRadius: 65, borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 31, fontWeight: '900', marginTop: spacing.xxl },
-  body: { fontSize: 15, lineHeight: 22, textAlign: 'center', marginTop: spacing.md },
+  check: { width: 110, height: 110, borderRadius: 55, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 24, fontWeight: '900', marginTop: spacing.xl },
+  body: { fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: spacing.md },
   email: { fontSize: 11, textAlign: 'center', marginTop: spacing.md },
 });

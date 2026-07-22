@@ -15,7 +15,10 @@ export function AppScreen({
   children,
   scroll = true,
   contentStyle,
-  edges = ['top', 'left', 'right'],
+  // Por defecto NO se aplica el inset superior: la mayoria de pantallas llevan
+  // <AppHeader/> encima, que ya lo respeta. Las pantallas sin header deben pasar
+  // edges={['top','left','right']} explicitamente.
+  edges = ['left', 'right'],
   scrollProps,
 }: AppScreenProps) {
   const { colors } = useAppTheme();

@@ -9,9 +9,17 @@
     "mobile": "npm --workspace apps/mobile run start",
     "mobile:android": "npm --workspace apps/mobile run android",
     "mobile:ios": "npm --workspace apps/mobile run ios",
+    "mobile:web": "npm --workspace apps/mobile run web",
     "mobile:check": "npm --workspace apps/mobile run check"
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "@types/react": "~19.1.10",
+    "react-native": "0.81.5",
+    "react-native-worklets": "0.5.1"
   }
 }

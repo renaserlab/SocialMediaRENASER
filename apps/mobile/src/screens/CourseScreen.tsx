@@ -1,68 +1,111 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
-import { PrimaryButton } from '@/components/PrimaryButton';
+import { Button } from '@/components/Button';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { course } from '@/data/mockData';
+import { useCourse } from '@/hooks/useCourse';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function CourseScreen() {
   const { colors } = useAppTheme();
-  const purchased = useAppStore((state) => state.purchasedCourseIds.includes(course.id));
+  const router = useRouter();
+  const { id } = useLocalSearchParams<{ id: string }>();
+
+  // Curso a través de la capa de repositorio (mock hoy, backend mañana).
+  const { course, lessons, loading, error, reload } = useCourse(id);
+  const purchasedIds = useAppStore((state) => state.purchasedCourseIds);
+  // Primera leccion sin completar; si estan todas, la primera del curso.
+  const firstLessonId = (lessons.find((l) => !l.completed) ?? lessons[0])?.id;
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <StateView state="loading" />
+      </View>
+    );
+  }
+
+  if (error || !course) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <StateView state="error" description={error ?? undefined} onRetry={reload} />
+      </View>
+    );
+  }
+
+  const purchased = purchasedIds.includes(course.id);
 
   return (
-    <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-      <AppHeader back title="Programa" />
-      <Image source={assets.course} style={styles.hero} />
-      <View style={styles.container}>
-        <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
-        <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
-        <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+        <Image source={assets.course} style={[styles.hero, { borderColor: colors.border }]} />
+        <View style={styles.container}>
+          <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
+          <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
+          <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
 
-        <View style={[styles.info, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Info icon="library-outline" label={`${course.modules} módulos`} />
-          <Info icon="play-circle-outline" label={`${course.lessons} lecciones`} />
-          <Info icon="document-text-outline" label="Plantillas y ejercicios" />
-          <Info icon="people-outline" label="Comunidad privada" />
-        </View>
-
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Lo que vas a desarrollar</Text>
-        {['Claridad para tomar decisiones difíciles', 'Liderazgo personal y de equipos', 'Estrategia para convertir visión en resultados', 'Hábitos sostenibles sin agotamiento'].map((item) => (
-          <View key={item} style={styles.bulletRow}>
-            <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-            <Text style={[styles.bullet, { color: colors.text }]}>{item}</Text>
+          <View style={[styles.info, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Info icon="book" label={`${course.modules} módulos`} />
+            <Info icon="play-circle" label={`${course.lessons} lecciones`} />
+            <Info icon="file-text" label="Plantillas y ejercicios" />
+            <Info icon="users" label="Comunidad privada" />
           </View>
-        ))}
 
-        <PrimaryButton
-          label={purchased ? 'Ir al curso' : 'Comprar ahora'}
-          onPress={() => purchased ? router.push('/confirmation') : router.push(`/checkout/${course.id}`)}
-          style={{ marginTop: spacing.xl }}
-        />
-      </View>
-    </AppScreen>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Lo que vas a desarrollar</Text>
+          {['Claridad para tomar decisiones difíciles', 'Liderazgo personal y de equipos', 'Estrategia para convertir visión en resultados', 'Hábitos sostenibles sin agotamiento'].map((item) => (
+            <View key={item} style={styles.bulletRow}>
+              <Feather name="check" size={20} color={colors.success} style={{ marginTop: 2 }} />
+              <Text style={[styles.bullet, { color: colors.text }]}>{item}</Text>
+            </View>
+          ))}
+
+          <Button
+            label={purchased ? 'Ir al curso' : 'Comprar ahora'}
+            // Antes abria siempre '/lesson/1', un id de demo: con datos reales
+            // llevaba a una leccion inexistente. Ahora va a la primera del curso.
+            disabled={purchased && !firstLessonId}
+            onPress={() =>
+              purchased
+                ? firstLessonId && router.push(`/lesson/${firstLessonId}` as never)
+                : router.push(`/checkout/${course.id}` as never)
+            }
+            style={{ marginTop: spacing.xl }}
+          />
+        </View>
+      </AppScreen>
+    </View>
   );
 }
 
-function Info({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+function Info({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: string }) {
   const { colors } = useAppTheme();
-  return <View style={styles.infoRow}><Ionicons name={icon} size={20} color={colors.text} /><Text style={{ color: colors.textMuted, fontSize: 13 }}>{label}</Text></View>;
+  return (
+    <View style={styles.infoRow}>
+      <Feather name={icon} size={20} color={colors.text} />
+      <Text style={{ color: colors.textMuted, fontSize: 13 }}>{label}</Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  hero: { width: '100%', aspectRatio: 0.95 },
+  hero: { width: '100%', aspectRatio: 1.1, resizeMode: 'cover', borderWidth: 1 },
   container: { padding: spacing.xl },
-  title: { fontSize: 30, lineHeight: 36, fontWeight: '900' },
-  price: { fontSize: 22, fontWeight: '900', marginTop: spacing.md },
+  title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
+  price: { fontSize: 20, fontWeight: '900', marginTop: spacing.md },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  sectionTitle: { fontSize: 20, fontWeight: '900', marginBottom: spacing.lg },
+  sectionTitle: { fontSize: 18, fontWeight: '900', marginBottom: spacing.lg },
   bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, marginBottom: spacing.md },
   bullet: { flex: 1, fontSize: 14, lineHeight: 20 },
 });

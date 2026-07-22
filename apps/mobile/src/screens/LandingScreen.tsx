@@ -1,40 +1,92 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import { ImageBackground, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React from 'react';
+import { Image, StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
-import { PrimaryButton } from '@/components/PrimaryButton';
+import { AppScreen } from '@/components/AppScreen';
+import { Button } from '@/components/Button';
+import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
-import { spacing } from '@/theme/tokens';
+import { palette, spacing } from '@/theme/tokens';
+
+// La landing es una portada intencionalmente oscura en ambos temas.
+const media = palette('dark');
 
 export function LandingScreen() {
+  const router = useRouter();
+
   return (
-    <ImageBackground source={assets.hero} resizeMode="cover" style={styles.background}>
-      <LinearGradient colors={['rgba(0,0,0,0.10)', 'rgba(0,0,0,0.55)', '#000000']} style={StyleSheet.absoluteFill} />
-      <SafeAreaView style={styles.safe}>
-        <Text style={styles.brand}>RENASER</Text>
-        <View style={styles.content}>
-          <Text style={styles.title}>¿Qué está bloqueando realmente tu crecimiento?</Text>
-          <Text style={styles.subtitle}>Responde 7 preguntas y descubre tu verdadero límite.</Text>
-          <PrimaryButton
-            label="Descubrir ahora"
-            onPress={() => router.push('/quiz')}
-            style={styles.button}
-          />
-          <Text style={styles.hint}>Desliza tu vida hacia el siguiente nivel</Text>
+    <View style={{ flex: 1, backgroundColor: media.background }}>
+      <AppScreen scroll edges={['left', 'right', 'bottom']}>
+        <View style={styles.mediaContainer}>
+          <Image source={assets.hero} style={styles.image} resizeMode="cover" />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: media.overlay }]} />
+          <View style={styles.brandContainer}>
+            <Text variant="body" weight="800" color={media.text} style={styles.brandText}>
+              RENASER
+            </Text>
+          </View>
         </View>
-      </SafeAreaView>
-    </ImageBackground>
+
+        <View style={styles.infoContainer}>
+          <Text variant="display" color={media.text} style={styles.title}>
+            ¿Qué está bloqueando realmente tu crecimiento?
+          </Text>
+          <Text variant="body" color={media.textMuted} style={styles.subtitle}>
+            Responde 7 preguntas y descubre tu verdadero límite.
+          </Text>
+          <Button
+            label="Descubrir ahora"
+            variant="secondary"
+            onPress={() => router.push('/quiz' as any)}
+          />
+          <Text variant="secondary" color={media.textMuted} style={styles.hint}>
+            2 min · Gratis · Resultado inmediato
+          </Text>
+        </View>
+      </AppScreen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  background: { flex: 1, backgroundColor: '#000' },
-  safe: { flex: 1, paddingHorizontal: spacing.xl },
-  brand: { color: '#FFFFFF', textAlign: 'center', fontWeight: '800', letterSpacing: 1.8, marginTop: spacing.sm },
-  content: { flex: 1, justifyContent: 'flex-end', paddingBottom: spacing.xxl },
-  title: { color: '#FFFFFF', fontSize: 34, lineHeight: 40, fontWeight: '800', textAlign: 'center' },
-  subtitle: { color: '#DADADA', fontSize: 15, lineHeight: 22, textAlign: 'center', marginTop: spacing.lg, marginBottom: spacing.xl },
-  button: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
-  hint: { color: '#888888', fontSize: 11, textAlign: 'center', marginTop: spacing.lg },
+  mediaContainer: {
+    height: 400,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+  brandContainer: {
+    position: 'absolute',
+    top: 24,
+    left: 22,
+  },
+  brandText: {
+    letterSpacing: 1.8,
+  },
+  infoContainer: {
+    paddingHorizontal: 26,
+    marginTop: -46,
+    position: 'relative',
+    zIndex: 10,
+    backgroundColor: media.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: spacing.lg,
+  },
+  title: {
+    lineHeight: 33,
+    marginBottom: spacing.md,
+  },
+  subtitle: {
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+  },
+  hint: {
+    textAlign: 'center',
+    marginTop: spacing.md,
+    marginBottom: spacing.xxl,
+  },
 });

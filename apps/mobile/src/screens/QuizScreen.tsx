@@ -1,10 +1,11 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppScreen } from '@/components/AppScreen';
-import { PrimaryButton } from '@/components/PrimaryButton';
+import { Button } from '@/components/Button';
+import { Text } from '@/components/Text';
 import { quizQuestions } from '@/data/mockData';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -13,6 +14,7 @@ import { QuizArea } from '@/types';
 
 export function QuizScreen() {
   const { colors } = useAppTheme();
+  const router = useRouter();
   const answers = useAppStore((state) => state.quizAnswers);
   const answerQuiz = useAppStore((state) => state.answerQuiz);
   const finishQuiz = useAppStore((state) => state.finishQuiz);
@@ -27,7 +29,7 @@ export function QuizScreen() {
     if (!selected) return;
     if (isLast) {
       finishQuiz();
-      router.replace('/result');
+      router.replace('/result' as any);
       return;
     }
     setIndex((value) => value + 1);
@@ -36,56 +38,127 @@ export function QuizScreen() {
   const choose = (value: QuizArea) => answerQuiz(question.id, value);
 
   return (
-    <AppScreen contentStyle={styles.container}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={styles.topBar}>
-        <Pressable onPress={() => index === 0 ? router.back() : setIndex((value) => value - 1)} hitSlop={12}>
-          <Ionicons name={index === 0 ? 'close' : 'chevron-back'} size={23} color={colors.text} />
+        <Pressable
+          onPress={() => index === 0 ? (router.canGoBack() ? router.back() : router.replace('/')) : setIndex((value) => value - 1)}
+          hitSlop={12}
+          accessibilityLabel={index === 0 ? 'Cerrar' : 'Pregunta anterior'}
+          accessibilityRole="button"
+          style={styles.navButton}
+        >
+          <Feather name={index === 0 ? 'x' : 'chevron-left'} size={24} color={colors.text} />
         </Pressable>
-        <Text style={[styles.progressText, { color: colors.text }]}>{index + 1}/{quizQuestions.length}</Text>
-        <View style={{ width: 23 }} />
+        <Text variant="secondary" weight="700" style={styles.progressText}>{index + 1} / {quizQuestions.length}</Text>
+        <View style={styles.navButtonPlaceholder} />
       </View>
+
       <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
         <View style={[styles.progressFill, { backgroundColor: colors.text, width: `${((index + 1) / quizQuestions.length) * 100}%` }]} />
       </View>
 
-      <Text style={[styles.question, { color: colors.text }]}>{question.question}</Text>
-      <View style={styles.options}>
-        {question.options.map((option) => {
-          const active = selected === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => choose(option.value)}
-              style={({ pressed }: { pressed: boolean }) => [
-                styles.option,
-                {
-                  backgroundColor: active ? colors.primary : colors.surface,
-                  borderColor: active ? colors.primary : colors.border,
-                  opacity: pressed ? 0.8 : 1,
-                },
-              ]}
-            >
-              <Text style={[styles.optionText, { color: active ? colors.onPrimary : colors.text }]}>{option.label}</Text>
-              {active ? <Ionicons name="checkmark-circle" size={20} color={colors.onPrimary} /> : null}
-            </Pressable>
-          );
-        })}
-      </View>
+      <AppScreen scroll edges={['top', 'left', 'right']}>
+        <View style={styles.content}>
+          <Text variant="title" style={styles.question}>
+            {question.question}
+          </Text>
 
-      <View style={{ flex: 1 }} />
-      <PrimaryButton label={isLast ? 'Ver mi resultado' : 'Siguiente'} onPress={next} disabled={!selected} icon="→" />
-    </AppScreen>
+          <View style={styles.options}>
+            {question.options.map((option) => {
+              const active = selected === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => choose(option.value)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: active }}
+                  accessibilityLabel={option.label}
+                  style={({ pressed }: { pressed: boolean }) => [
+                    styles.option,
+                    {
+                      backgroundColor: active ? colors.primary : colors.backgroundAlt,
+                      borderColor: active ? colors.primary : colors.border,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    variant="body"
+                    weight={active ? '700' : '400'}
+                    color={active ? colors.onPrimary : colors.text}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </AppScreen>
+
+      <View style={styles.footer}>
+        <Button
+          label={isLast ? 'Ver mi resultado' : 'Siguiente'}
+          onPress={next}
+          disabled={!selected}
+        />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: spacing.xl, minHeight: '100%' },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  progressText: { fontSize: 13, fontWeight: '700' },
-  progressTrack: { height: 3, borderRadius: radius.pill, marginTop: spacing.md, overflow: 'hidden' },
-  progressFill: { height: '100%' },
-  question: { fontSize: 28, lineHeight: 34, fontWeight: '800', textAlign: 'center', marginVertical: spacing.xxxl },
-  options: { gap: spacing.md },
-  option: { minHeight: 56, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  optionText: { fontSize: 15, fontWeight: '600' },
+  topBar: {
+    height: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+  },
+  navButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  navButtonPlaceholder: {
+    width: 44,
+  },
+  progressText: {
+    textAlign: 'center',
+  },
+  progressTrack: {
+    height: 3,
+    marginHorizontal: 20,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  content: {
+    padding: 20,
+  },
+  question: {
+    textAlign: 'center',
+    lineHeight: 28,
+    marginVertical: spacing.xl,
+  },
+  options: {
+    gap: spacing.md,
+  },
+  option: {
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 52,
+  },
+  footer: {
+    padding: 20,
+    paddingBottom: 22,
+  },
 });

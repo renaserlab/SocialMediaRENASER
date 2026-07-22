@@ -1,36 +1,41 @@
-import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
+import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Tabs } from 'expo-router';
 
 import { useAppTheme } from '@/theme/useAppTheme';
 
-const icon = (name: keyof typeof Ionicons.glyphMap) => ({ color, size }: { color: string; size: number }) => (
-  <Ionicons name={name} color={color} size={size} />
+const icon = (name: keyof typeof Feather.glyphMap) => ({ color, size }: { color: string; size: number }) => (
+  <Feather name={name} color={color} size={size} />
 );
 
 export default function TabsLayout() {
   const { colors } = useAppTheme();
+  // Sin esto, fijar `height` anula el calculo height + inset de React Navigation
+  // y los iconos quedan bajo la barra de gestos / home indicator.
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.text,
+        tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: 78,
-          paddingTop: 7,
-          paddingBottom: 10,
+          height: 64 + insets.bottom,
+          paddingTop: 8,
+          paddingBottom: 8 + insets.bottom,
         },
         tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },
       }}
     >
       <Tabs.Screen name="home" options={{ title: 'Inicio', tabBarIcon: icon('home') }} />
       <Tabs.Screen name="explore" options={{ title: 'Explorar', tabBarIcon: icon('search') }} />
-      <Tabs.Screen name="create" options={{ title: 'Crear', tabBarIcon: icon('add-circle') }} />
-      <Tabs.Screen name="messages" options={{ title: 'Mensajes', tabBarIcon: icon('chatbubble-outline') }} />
-      <Tabs.Screen name="profile" options={{ title: 'Perfil', tabBarIcon: icon('person-circle-outline') }} />
+      <Tabs.Screen name="create" options={{ title: 'Crear', tabBarIcon: icon('plus-square') }} />
+      <Tabs.Screen name="messages" options={{ title: 'Mensajes', tabBarIcon: icon('message-square') }} />
+      <Tabs.Screen name="profile" options={{ title: 'Perfil', tabBarIcon: icon('user') }} />
     </Tabs>
   );
 }

@@ -1,0 +1,42 @@
+# Blueprint de Render para el backend FastAPI (RENASER).
+# En Render: New > Blueprint > conecta este repo > usa la rama Edson.
+# Los valores marcados como sync:false se configuran en el dashboard (secretos).
+
+services:
+  - type: web
+    name: renaser-api
+    runtime: docker
+    repo: https://github.com/renaserlab/SocialMediaRENASER
+    branch: Edson
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: APP_NAME
+        value: RENASER Social Media API
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SUPABASE_JWT_ALGORITHM
+        value: HS256
+      - key: SUPABASE_JWT_AUDIENCE
+        value: authenticated
+      # --- Secretos: configúralos en el dashboard de Render ---
+      # DATABASE_URL: postgresql+asyncpg://postgres.<ref>:<PWD_%23>@aws-0-us-east-1.pooler.supabase.com:5432/postgres
+      - key: DATABASE_URL
+        sync: false
+      # SUPABASE_URL: https://<ref>.supabase.co
+      - key: SUPABASE_URL
+        sync: false
+      # SUPABASE_ANON_KEY: publishable key
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # SUPABASE_JWT_SECRET: (opcional si tu proyecto usa ES256/JWKS; con SUPABASE_URL basta)
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      # SUPABASE_SERVICE_ROLE_KEY: sb_secret_... (solo backend)
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

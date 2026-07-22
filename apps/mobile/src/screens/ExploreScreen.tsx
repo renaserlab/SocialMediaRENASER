@@ -1,80 +1,259 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { Avatar } from '@/components/Avatar';
 import { SectionTitle } from '@/components/SectionTitle';
+import { Input } from '@/components/Input';
+import { ListRow } from '@/components/ListRow';
+import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { course, events } from '@/data/mockData';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { CatalogRepository } from '@/repositories/CatalogRepository';
+import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
+import type { Course, EventItem } from '@/types';
+import type { ProfileSummary } from '@/mappers/profileMapper';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function ExploreScreen() {
   const { colors } = useAppTheme();
+  const router = useRouter();
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+
+  // Destacados reales del catalogo. Antes el curso, los eventos y el circulo
+  // eran los del paquete de demo, con "423 miembros" escrito a mano.
+  const [featuredCourse, setFeaturedCourse] = useState<Course | null>(null);
+  const [nextEvents, setNextEvents] = useState<EventItem[]>([]);
+  const [featuredCircle, setFeaturedCircle] = useState<CircleDetail | null>(null);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    LearningRepository.listCourses()
+      .then((list) => setFeaturedCourse(list[0] ?? null))
+      .catch(() => setFeaturedCourse(null));
+    CatalogRepository.listEvents()
+      .then((page) => setNextEvents(page.items))
+      .catch(() => setNextEvents([]));
+    CommunityRepository.list()
+      .then((list) => setFeaturedCircle(list[0] ?? null))
+      .catch(() => setFeaturedCircle(null));
+  }, []);
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<ProfileSummary[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // El catálogo (curso/eventos) es estático en mock; si hay búsqueda activa se
+  // relanza. Sin esperas artificiales: el spinner dura lo que dure el trabajo.
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setQuery((q) => q);
+    setRefreshing(false);
+  }, []);
+
+  const term = query.trim();
+  const isSearching = term.length >= 2;
+
+  useEffect(() => {
+    if (!isSearching || !supabaseEnabled) {
+      setResults([]);
+      return;
+    }
+    let active = true;
+    setSearching(true);
+    const handle = setTimeout(() => {
+      ProfileRepository.search(term)
+        .then((data) => {
+          if (active) setResults(data);
+        })
+        .catch(() => {
+          if (active) setResults([]);
+        })
+        .finally(() => {
+          if (active) setSearching(false);
+        });
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(handle);
+    };
+  }, [term, isSearching, supabaseEnabled]);
 
   return (
-    <AppScreen contentStyle={{ paddingBottom: 100 }}>
-      <AppHeader title="EXPLORAR" />
-      <View style={styles.container}>
-        <View style={[styles.search, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Ionicons name="search" size={20} color={colors.textMuted} />
-          <TextInput placeholder="Buscar personas, cursos o eventos" placeholderTextColor={colors.textMuted} style={[styles.searchInput, { color: colors.text }]} />
-        </View>
-
-        <SectionTitle title="Tu siguiente paso" />
-        <Pressable onPress={() => router.push('/course/lider-vida-empresa')} style={styles.heroCard}>
-          <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          <View style={styles.heroOverlay} />
-          <View style={styles.heroContent}>
-            <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>
-            <Text style={styles.heroTitle}>{course.title}</Text>
-            <Text style={styles.heroBody}>{course.modules} módulos · {course.lessons} lecciones</Text>
-          </View>
-        </Pressable>
-
-        <SectionTitle title="Próximos eventos" action="Ver calendario" />
-        {events.slice(0, 2).map((event, index) => (
-          <Pressable key={event.id} onPress={() => router.push('/events')} style={[styles.eventRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Image source={index === 0 ? assets.event : assets.speaker} style={styles.eventImage} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.eventTitle, { color: colors.text }]}>{event.title}</Text>
-              <Text style={[styles.eventMeta, { color: colors.textMuted }]}>{event.date}</Text>
-              <Text numberOfLines={1} style={[styles.eventMeta, { color: colors.textMuted }]}>{event.location}</Text>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppHeader title="EXPLORAR" rightIcon="search" onRightPress={() => router.push('/search' as never)} />
+      <AppScreen
+        contentStyle={{ paddingBottom: 100 }}
+        scrollProps={{
+          refreshControl: (
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
+          ),
+        }}
+      >
+        <View style={styles.container}>
+          {/* Campo de búsqueda */}
+          <View style={styles.searchWrapper}>
+            <Input
+              placeholder="Buscar personas..."
+              placeholderTextColor={colors.textMuted}
+              containerStyle={styles.searchContainer}
+              value={query}
+              onChangeText={setQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.searchIcon}>
+              <Feather name="search" size={18} color={colors.textMuted} />
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </Pressable>
-        ))}
-
-        <SectionTitle title="Comunidades" />
-        <Pressable onPress={() => router.push('/circle/lideres-renaser')} style={[styles.circle, { backgroundColor: colors.primary }]}>
-          <View>
-            <Text style={[styles.eyebrow, { color: colors.onPrimary }]}>CÍRCULO PRIVADO</Text>
-            <Text style={[styles.circleTitle, { color: colors.onPrimary }]}>Líderes RENASER</Text>
-            <Text style={[styles.circleBody, { color: colors.onPrimary }]}>Conecta, comparte y crece con 423 miembros.</Text>
           </View>
-          <Ionicons name="people-circle-outline" size={68} color={colors.onPrimary} />
-        </Pressable>
-      </View>
-    </AppScreen>
+
+          {isSearching && (
+            <View style={styles.results}>
+              <StateView
+                state={
+                  searching
+                    ? 'loading'
+                    : results.length === 0
+                    ? 'empty'
+                    : 'content'
+                }
+                title={!searching && results.length === 0 ? 'Sin resultados' : undefined}
+                description={
+                  !searching && results.length === 0
+                    ? 'No encontramos personas con ese nombre.'
+                    : undefined
+                }
+              >
+                {results.map((person) => (
+                  <ListRow
+                    key={person.id}
+                    title={person.fullName}
+                    subtitle={person.username}
+                    leftComponent={<Avatar size={40} image="avatar" />}
+                    rightIcon="chevron-right"
+                    onPress={() => router.push(`/profile/${person.id}` as never)}
+                  />
+                ))}
+              </StateView>
+            </View>
+          )}
+
+          {!isSearching && (
+          <React.Fragment>
+          <SectionTitle title="Tu siguiente paso" />
+          <Pressable
+            onPress={() => featuredCourse && router.push(`/course/${featuredCourse.id}` as never)}
+            disabled={!featuredCourse}
+            style={styles.heroCard}
+            accessibilityLabel={`Programa recomendado: ${featuredCourse?.title ?? ''}`}
+            accessibilityRole="button"
+          >
+            <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
+            <View style={styles.heroContent}>
+              <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>
+              <Text style={styles.heroTitle}>{featuredCourse?.title ?? 'Programas en camino'}</Text>
+              <Text style={styles.heroBody}>
+                {featuredCourse ? featuredCourse.subtitle : 'Muy pronto habrá contenido disponible.'}
+              </Text>
+            </View>
+          </Pressable>
+
+          <SectionTitle title="Shorts" action="Ver todos" onActionPress={() => router.push('/reels' as never)} />
+          <View style={styles.list}>
+            <ListRow
+              title="Shorts de la comunidad"
+              subtitle="Videos cortos para avanzar en minutos"
+              leftIcon="play-circle"
+              rightIcon="chevron-right"
+              onPress={() => router.push('/reels' as never)}
+            />
+          </View>
+
+          <SectionTitle title="Próximos eventos" action="Ver calendario" onActionPress={() => router.push('/events')} />
+          <View style={styles.list}>
+            {nextEvents.slice(0, 2).map((event, index) => (
+              <ListRow
+                key={event.id}
+                title={event.title}
+                subtitle={`${event.date} • ${event.location}`}
+                leftComponent={
+                  <Image source={index === 0 ? assets.event : assets.speaker} style={styles.eventImage} />
+                }
+                rightIcon="chevron-right"
+                onPress={() => router.push('/events')}
+              />
+            ))}
+          </View>
+
+          <SectionTitle title="Comunidades" />
+          <Pressable
+            onPress={() => featuredCircle && router.push(`/circle/${featuredCircle.id}` as never)}
+            disabled={!featuredCircle}
+            style={[styles.circle, { backgroundColor: colors.primary }]}
+            accessibilityLabel={`Círculo: ${featuredCircle?.name ?? ""}`}
+            accessibilityRole="button"
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.eyebrow, { color: colors.onPrimary }]}>CÍRCULO PRIVADO</Text>
+              <Text style={[styles.circleTitle, { color: colors.onPrimary }]}>
+                {featuredCircle?.name ?? 'Círculos'}
+              </Text>
+              <Text style={[styles.circleBody, { color: colors.onPrimary }]}>
+                {featuredCircle
+                  ? `Conecta, comparte y crece con ${featuredCircle.members} miembros.`
+                  : 'Muy pronto podrás unirte a un círculo.'}
+              </Text>
+            </View>
+            <Feather name="users" size={48} color={colors.onPrimary} style={styles.circleIcon} />
+          </Pressable>
+          </React.Fragment>
+          )}
+        </View>
+      </AppScreen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.lg },
-  search: { flexDirection: 'row', alignItems: 'center', height: 50, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: spacing.lg, gap: spacing.sm, marginBottom: spacing.xl },
-  searchInput: { flex: 1, fontSize: 14 },
-  heroCard: { height: 300, borderRadius: radius.xl, overflow: 'hidden', marginBottom: spacing.xl, justifyContent: 'flex-end' },
-  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)' },
+  searchWrapper: {
+    position: 'relative',
+    marginBottom: spacing.xl,
+  },
+  searchContainer: {
+    paddingLeft: 30,
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: spacing.md,
+    top: 15,
+  },
+  results: {
+    marginBottom: spacing.xl,
+    minHeight: 120,
+  },
+  heroCard: { height: 280, borderRadius: radius.xl, overflow: 'hidden', marginBottom: spacing.xl, justifyContent: 'flex-end' },
+  heroOverlay: { ...StyleSheet.absoluteFillObject },
   heroContent: { padding: spacing.xl },
   eyebrow: { color: '#D0D0D0', fontSize: 10, fontWeight: '800', letterSpacing: 1.3 },
-  heroTitle: { color: '#FFFFFF', fontSize: 29, lineHeight: 34, fontWeight: '900', marginVertical: spacing.sm },
+  heroTitle: { color: '#FFFFFF', fontSize: 24, lineHeight: 30, fontWeight: '900', marginVertical: spacing.sm },
   heroBody: { color: '#E2E2E2', fontSize: 13 },
-  eventRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.md, marginBottom: spacing.md },
-  eventImage: { width: 76, height: 76, borderRadius: radius.md },
-  eventTitle: { fontSize: 15, fontWeight: '800' },
-  eventMeta: { fontSize: 11, marginTop: 3 },
+  list: {
+    marginBottom: spacing.xl,
+  },
+  eventImage: { width: 50, height: 50, borderRadius: radius.md },
   circle: { borderRadius: radius.xl, padding: spacing.xl, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xl },
-  circleTitle: { fontSize: 24, fontWeight: '900', marginTop: spacing.sm },
-  circleBody: { maxWidth: 240, fontSize: 12, lineHeight: 17, opacity: 0.82, marginTop: spacing.sm },
+  circleTitle: { fontSize: 20, fontWeight: '900', marginTop: spacing.sm },
+  circleBody: { fontSize: 12, lineHeight: 17, opacity: 0.82, marginTop: spacing.sm },
+  circleIcon: {
+    marginLeft: spacing.md,
+  },
 });
