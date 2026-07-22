@@ -102,6 +102,30 @@ export const CourseContentRepository = {
     return modules;
   },
 
+  /**
+   * Puntos de "Lo que vas a desarrollar".
+   *
+   * Se leen de Supabase y no de la API porque el endpoint desplegado no
+   * devuelve la columna (se anadio en 0013, despues de su ultimo despliegue).
+   */
+  async getHighlights(courseId: string): Promise<string[]> {
+    const { data, error } = await client()
+      .from('courses')
+      .select('highlights')
+      .eq('id', courseId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data?.highlights as string[] | null) ?? [];
+  },
+
+  async setHighlights(courseId: string, highlights: string[]): Promise<void> {
+    const { error } = await client()
+      .from('courses')
+      .update({ highlights })
+      .eq('id', courseId);
+    if (error) throw new Error(error.message);
+  },
+
   async createModule(courseId: string, title: string, sortOrder: number): Promise<void> {
     const { error } = await client()
       .from('course_modules')

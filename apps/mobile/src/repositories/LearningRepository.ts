@@ -1,4 +1,5 @@
 import { apiRequest, API_V1 } from '@/services/api';
+import { signMediaUrls } from '@/services/storage';
 import {
   CourseDetailDto,
   CourseDto,
@@ -93,8 +94,16 @@ export const LearningRepository = {
             completed: lesson.completed,
           })),
       );
+    const course = toCourseFromDetail(dto);
+    // La portada se guarda como RUTA en el bucket privado post-media (es donde
+    // la sube CreateCatalogSheet), asi que hay que firmarla para poder verla.
+    if (course.coverPath) {
+      const urls = await signMediaUrls([course.coverPath]);
+      course.coverUrl = urls[course.coverPath];
+    }
+
     return {
-      course: toCourseFromDetail(dto),
+      course,
       enrolled: dto.enrolled ?? false,
       progressPercent: dto.progress_percent ?? 0,
       lessons,

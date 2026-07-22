@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
+import { CourseHighlights } from '@/components/CourseHighlights';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
@@ -60,7 +61,11 @@ export function CourseScreen() {
         onRightPress={isAdmin ? () => setEditing(true) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        <Image source={assets.course} style={[styles.hero, { borderColor: colors.border }]} />
+        {/* Portada real del curso; el asset local solo mientras no tenga. */}
+        <Image
+          source={course.coverUrl ? { uri: course.coverUrl } : assets.course}
+          style={[styles.hero, { borderColor: colors.border }]}
+        />
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
           <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
@@ -73,13 +78,7 @@ export function CourseScreen() {
             <Info icon="users" label="Comunidad privada" />
           </View>
 
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Lo que vas a desarrollar</Text>
-          {['Claridad para tomar decisiones difíciles', 'Liderazgo personal y de equipos', 'Estrategia para convertir visión en resultados', 'Hábitos sostenibles sin agotamiento'].map((item) => (
-            <View key={item} style={styles.bulletRow}>
-              <Feather name="check" size={20} color={colors.success} style={{ marginTop: 2 }} />
-              <Text style={[styles.bullet, { color: colors.text }]}>{item}</Text>
-            </View>
-          ))}
+          <CourseHighlights courseId={course.id} canEdit={isAdmin} />
 
           {/*
             Temario real del curso. Para el alumno es la lista de contenidos;
@@ -90,6 +89,10 @@ export function CourseScreen() {
               courseId={course.id}
               canEdit={isAdmin}
               onOpenLesson={(lessonId) => router.push(`/lesson/${lessonId}` as never)}
+              // Los contadores de arriba ("X modulos, Y lecciones") vienen del
+              // detalle del curso, que se pide una sola vez al montar. Sin esto
+              // seguian en 0 despues de anadir contenido.
+              onChanged={reload}
             />
           </View>
 

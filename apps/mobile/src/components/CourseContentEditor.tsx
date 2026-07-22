@@ -23,6 +23,8 @@ type Props = {
   canEdit: boolean;
   /** Al tocar una leccion (para abrirla en el reproductor). */
   onOpenLesson?: (lessonId: string) => void;
+  /** Avisa a la pantalla de que el temario cambio, para refrescar contadores. */
+  onChanged?: () => void;
 };
 
 /** mm:ss a partir de segundos. */
@@ -40,7 +42,7 @@ function formatDuration(seconds: number): string {
  * el editor. Quien puede escribir lo impone la RLS (0012_course_content.sql);
  * `canEdit` solo evita mostrar botones que no llevarian a ninguna parte.
  */
-export function CourseContentEditor({ courseId, canEdit, onOpenLesson }: Props) {
+export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged }: Props) {
   const { colors } = useAppTheme();
   const [modules, setModules] = useState<CourseModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +63,19 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson }: Props) 
     }
   }, [courseId]);
 
+  /**
+   * Recarga el temario y avisa a la pantalla para que refresque sus contadores.
+   *
+   * `onChanged` va SOLO aqui, tras una modificacion real, y no dentro de
+   * `load`: ponerlo alli creaba un bucle infinito, porque recargar el curso
+   * activa su estado de carga, la pantalla desmonta este componente y al volver
+   * a montarse pedia el temario otra vez.
+   */
+  const reloadAndNotify = useCallback(async () => {
+    await load();
+    onChanged?.();
+  }, [load, onChanged]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -73,7 +88,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson }: Props) 
       setModuleTitle('');
       setAddingModule(false);
       toast('Módulo añadido');
-      await load();
+      await reloadAndNotify();
     } catch (error) {
       notify('No se pudo añadir', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
     }
@@ -93,7 +108,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson }: Props) 
     try {
       await CourseContentRepository.removeModule(module.id);
       toast('Módulo eliminado');
-      await load();
+      await reloadAndNotify();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');
     }
@@ -110,7 +125,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson }: Props) 
     try {
       await CourseContentRepository.removeLesson(lessonId);
       toast('Lección eliminada');
-      await load();
+      await reloadAndNotify();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');
     }
@@ -230,7 +245,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson }: Props) 
         <AddLessonSheet
           module={lessonFor}
           onClose={() => setLessonFor(null)}
-          onCreated={() => void load()}
+          onCreated={() => void reloadAndNotify()}
         />
       ) : null}
     </View>
