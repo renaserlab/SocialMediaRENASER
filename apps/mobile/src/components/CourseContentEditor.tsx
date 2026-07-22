@@ -51,10 +51,17 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
   const [addingModule, setAddingModule] = useState(false);
   /** Modulo al que se le esta anadiendo una leccion. */
   const [lessonFor, setLessonFor] = useState<CourseModule | null>(null);
+  /** Curso anunciado pero sin contenido disponible. */
+  const [comingSoon, setComingSoon] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setModules(await CourseContentRepository.listContent(courseId));
+      const [content, soon] = await Promise.all([
+        CourseContentRepository.listContent(courseId),
+        CourseContentRepository.getComingSoon(courseId).catch(() => false),
+      ]);
+      setModules(content);
+      setComingSoon(soon);
     } catch (error) {
       console.warn('[curso] no se pudo cargar el temario:', error);
       setModules([]);
@@ -79,6 +86,17 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
   useEffect(() => {
     void load();
   }, [load]);
+
+  const toggleComingSoon = async () => {
+    const next = !comingSoon;
+    try {
+      await CourseContentRepository.setComingSoon(courseId, next);
+      setComingSoon(next);
+      toast(next ? 'Marcado como próximamente' : 'Contenido publicado');
+    } catch (error) {
+      notify('No se pudo cambiar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+    }
+  };
 
   const addModule = async () => {
     const title = moduleTitle.trim();
@@ -139,8 +157,48 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
     );
   }
 
+  /**
+   * Curso anunciado pero sin contenido disponible.
+   *
+   * Al alumno se le muestra solo el aviso; la administracion sigue viendo y
+   * editando el temario, porque es justo lo que esta preparando.
+   */
+  if (comingSoon && !canEdit) {
+    return (
+      <View style={[styles.soon, { borderColor: colors.border }]}>
+        <Feather name="clock" size={22} color={colors.textMuted} />
+        <Text variant="body" weight="700">
+          Próximamente
+        </Text>
+        <Text variant="secondary" color={colors.textMuted} style={styles.soonBody}>
+          Estamos preparando el contenido de este programa. Te avisaremos cuando esté disponible.
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View>
+      {canEdit ? (
+        <Pressable
+          onPress={() => void toggleComingSoon()}
+          style={({ pressed }) => [
+            styles.stateRow,
+            { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={comingSoon ? 'Publicar el contenido' : 'Marcar como próximamente'}
+        >
+          <Feather name={comingSoon ? 'clock' : 'check-circle'} size={16} color={colors.text} />
+          <Text variant="secondary" weight="700" style={{ flex: 1 }}>
+            {comingSoon ? 'Próximamente — el alumno no ve el contenido' : 'Publicado — el contenido es visible'}
+          </Text>
+          <Text variant="secondary" color={colors.textMuted}>
+            {comingSoon ? 'Publicar' : 'Ocultar'}
+          </Text>
+        </Pressable>
+      ) : null}
+
       <Text variant="body" weight="900" style={styles.heading}>
         Temario
       </Text>
@@ -349,6 +407,23 @@ function AddLessonSheet({
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl },
   heading: { marginBottom: spacing.md },
+  stateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  soon: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+  },
+  soonBody: { textAlign: 'center' },
   empty: { marginBottom: spacing.md },
   module: {
     borderWidth: 1,

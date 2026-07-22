@@ -34,6 +34,29 @@ export type CourseModule = {
   lessons: CourseLesson[];
 };
 
+/** Documento descargable de una leccion (PDF, plantilla...). */
+export type LessonResourceFile = {
+  id: string;
+  lessonId: string;
+  title: string;
+  storagePath: string;
+  /** URL firmada, ya resuelta al listar. */
+  url?: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  sortOrder: number;
+};
+
+type ResourceRow = {
+  id: string;
+  lesson_id: string;
+  title: string;
+  storage_path: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  sort_order: number;
+};
+
 type ModuleRow = { id: string; course_id: string; title: string; sort_order: number };
 type LessonRow = {
   id: string;
@@ -123,6 +146,76 @@ export const CourseContentRepository = {
       .from('courses')
       .update({ highlights })
       .eq('id', courseId);
+    if (error) throw new Error(error.message);
+  },
+
+  /** ¿El curso esta anunciado pero sin contenido disponible? */
+  async getComingSoon(courseId: string): Promise<boolean> {
+    const { data, error } = await client()
+      .from('courses')
+      .select('coming_soon')
+      .eq('id', courseId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data?.coming_soon as boolean | null) ?? false;
+  },
+
+  async setComingSoon(courseId: string, comingSoon: boolean): Promise<void> {
+    const { error } = await client()
+      .from('courses')
+      .update({ coming_soon: comingSoon })
+      .eq('id', courseId);
+    if (error) throw new Error(error.message);
+  },
+
+  /** Material descargable de una leccion, con las URLs ya firmadas. */
+  async listResources(lessonId: string): Promise<LessonResourceFile[]> {
+    const { data, error } = await client()
+      .from('course_lesson_resources')
+      .select('id, lesson_id, title, storage_path, mime_type, size_bytes, sort_order')
+      .eq('lesson_id', lessonId)
+      .order('sort_order', { ascending: true });
+    if (error) throw new Error(error.message);
+
+    const items: LessonResourceFile[] = ((data ?? []) as ResourceRow[]).map((row) => ({
+      id: row.id,
+      lessonId: row.lesson_id,
+      title: row.title,
+      storagePath: row.storage_path,
+      mimeType: row.mime_type,
+      sizeBytes: row.size_bytes,
+      sortOrder: row.sort_order,
+    }));
+    if (items.length === 0) return items;
+
+    const urls = await signCourseUrls(items.map((i) => i.storagePath));
+    items.forEach((item) => {
+      item.url = urls[item.storagePath];
+    });
+    return items;
+  },
+
+  async addResource(input: {
+    lessonId: string;
+    title: string;
+    storagePath: string;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+    sortOrder: number;
+  }): Promise<void> {
+    const { error } = await client().from('course_lesson_resources').insert({
+      lesson_id: input.lessonId,
+      title: input.title,
+      storage_path: input.storagePath,
+      mime_type: input.mimeType ?? null,
+      size_bytes: input.sizeBytes ?? null,
+      sort_order: input.sortOrder,
+    });
+    if (error) throw new Error(error.message);
+  },
+
+  async removeResource(id: string): Promise<void> {
+    const { error } = await client().from('course_lesson_resources').delete().eq('id', id);
     if (error) throw new Error(error.message);
   },
 
