@@ -33,6 +33,27 @@ export const LearningRepository = {
     return dtos.map(toCourseFromSummary);
   },
 
+  /** Publica un curso. Solo administradores (lo comprueba el backend). */
+  async createCourse(input: {
+    title: string;
+    description: string;
+    price: number;
+    currency: string;
+    coverPath?: string | null;
+  }): Promise<Course> {
+    const dto = await apiRequest<CourseDto>(`${API_V1}/catalog/courses`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description,
+        price: input.price,
+        currency: input.currency,
+        cover_path: input.coverPath ?? null,
+      }),
+    });
+    return toCourseFromSummary(dto);
+  },
+
   async getCourseDetail(courseId: string): Promise<CourseDetail> {
     const dto = await apiRequest<CourseDetailDto>(
       `${API_V1}/learning/courses/${courseId}`,

@@ -2,7 +2,33 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class EventCreate(BaseModel):
+    """Alta de evento. Solo para administradores."""
+
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    #: Fecha y hora de inicio, ya combinadas por el cliente.
+    starts_at: datetime
+    location: str | None = Field(default=None, max_length=200)
+    #: Ruta de la portada en Storage (no una URL): igual que avatar_path.
+    cover_path: str | None = Field(default=None, max_length=500)
+    #: Valores admitidos por el CHECK de la tabla (0001_initial.sql). No usar
+    #: otros: la fila se rechaza con `events_event_type_check`.
+    event_type: str = Field(default="presential", pattern="^(online|presential|live)$")
+
+
+class CourseCreate(BaseModel):
+    """Alta de curso. Solo para administradores."""
+
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    cover_path: str | None = Field(default=None, max_length=500)
+    #: Precio en la unidad mayor (soles, pesos...); el modelo guarda centavos.
+    price: int = Field(default=0, ge=0)
+    currency: str = Field(default="PEN", pattern="^[A-Z]{3}$")
 
 
 class EventRead(BaseModel):

@@ -16,6 +16,7 @@ import { assets } from '@/data/assets';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -51,6 +52,13 @@ export function HomeScreen() {
       .then((list) => setAdminId((list.find((m) => m.isAdmin) ?? list[0])?.id ?? null))
       .catch(() => setAdminId(null));
   }, []);
+
+  /**
+   * Solo el administrador ve el acceso para publicar. El permiso de verdad lo
+   * aplica el backend (`require_admin`); esto es comodidad, no seguridad.
+   */
+  const isAdmin = user?.isAdmin === true;
+  const [creating, setCreating] = useState<CatalogKind | null>(null);
 
   const openAdminSection = (section: 'eventos' | 'cursos') => {
     if (!adminId) return;
@@ -153,9 +161,33 @@ export function HomeScreen() {
             accessibilityRole="button"
             accessibilityLabel="Ver eventos"
           >
-            <Feather name="calendar" size={24} color={colors.text} />
+            <View style={styles.quickHeader}>
+              <Feather name="calendar" size={24} color={colors.text} />
+              {isAdmin ? (
+                <Pressable
+                  onPress={() => setCreating('evento')}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Agregar evento"
+                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="plus" size={14} color={colors.background} />
+                </Pressable>
+              ) : null}
+            </View>
             <Text style={[styles.quickTitle, { color: colors.text }]}>Eventos</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Encuentros y experiencias</Text>
+            {isAdmin ? (
+              <Pressable
+                onPress={() => setCreating('evento')}
+                style={[styles.addChip, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="Agregar evento"
+              >
+                <Text style={[styles.addChipText, { color: colors.text }]}>Agregar evento</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.quickBody, { color: colors.textMuted }]}>Encuentros y experiencias</Text>
+            )}
           </Pressable>
           <Pressable
             onPress={() => openAdminSection('cursos')}
@@ -164,9 +196,33 @@ export function HomeScreen() {
             accessibilityRole="button"
             accessibilityLabel="Ver cursos"
           >
-            <Feather name="book" size={24} color={colors.text} />
+            <View style={styles.quickHeader}>
+              <Feather name="book" size={24} color={colors.text} />
+              {isAdmin ? (
+                <Pressable
+                  onPress={() => setCreating('curso')}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Agregar curso"
+                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="plus" size={14} color={colors.background} />
+                </Pressable>
+              ) : null}
+            </View>
             <Text style={[styles.quickTitle, { color: colors.text }]}>Cursos</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Programas para avanzar</Text>
+            {isAdmin ? (
+              <Pressable
+                onPress={() => setCreating('curso')}
+                style={[styles.addChip, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="Agregar curso"
+              >
+                <Text style={[styles.addChipText, { color: colors.text }]}>Agregar curso</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.quickBody, { color: colors.textMuted }]}>Programas para avanzar</Text>
+            )}
           </Pressable>
         </View>
       </View>
@@ -238,6 +294,15 @@ export function HomeScreen() {
         keyboardShouldPersistTaps="handled"
       />
       </KeyboardAvoidingView>
+
+      {creating ? (
+        <CreateCatalogSheet
+          kind={creating}
+          visible
+          onClose={() => setCreating(null)}
+          onCreated={() => void loadFeed()}
+        />
+      ) : null}
     </View>
   );
 }
@@ -250,6 +315,10 @@ const styles = StyleSheet.create({
   composerText: { flex: 1, fontSize: 13 },
   quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
   quickCard: { flex: 1, minHeight: 136, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between' },
+  quickHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  addBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  addChip: { borderWidth: 1, borderRadius: radius.pill, paddingVertical: 5, paddingHorizontal: 10, alignSelf: 'flex-start' },
+  addChipText: { fontSize: 10, fontWeight: '700' },
   quickTitle: { fontSize: 15, fontWeight: '900', marginTop: spacing.md },
   quickBody: { fontSize: 11, lineHeight: 16, opacity: 0.82 },
   footer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, paddingBottom: 100 },

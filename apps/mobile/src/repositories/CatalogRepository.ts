@@ -16,6 +16,32 @@ export const CatalogRepository = {
     };
   },
 
+  /**
+   * Publica un evento. Reservado a administradores: el backend lo verifica
+   * contra `profiles.role`, ocultar el boton en la app no es la proteccion.
+   */
+  async createEvent(input: {
+    title: string;
+    description: string;
+    startsAt: Date;
+    location: string;
+    coverPath?: string | null;
+  }): Promise<EventItem> {
+    const dto = await apiRequest<EventDto>(`${API_V1}/catalog/events`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description,
+        starts_at: input.startsAt.toISOString(),
+        location: input.location || null,
+        cover_path: input.coverPath ?? null,
+        // Valor tal y como lo admite la base ('presential', no 'presencial').
+        event_type: 'presential',
+      }),
+    });
+    return toEventItem(dto);
+  },
+
   async reserve(eventId: string): Promise<void> {
     await apiRequest<EventDto>(`${API_V1}/catalog/events/${eventId}/reserve`, {
       method: 'POST',

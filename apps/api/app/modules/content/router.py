@@ -27,11 +27,11 @@ from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
+from app.shared.permissions import is_admin as is_admin_user
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(tags=["content"])
 
-_ADMIN_ROLES = {"admin", "moderator"}
 
 
 # --------------------------------------------------------------------------- #
@@ -266,8 +266,10 @@ async def delete_post(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     post = await _get_active_post(db, post_id)
-    is_admin = (current_user.role or "") in _ADMIN_ROLES
-    if post.author_id != current_user.id and not is_admin:
+    # El rol de la app esta en profiles.role, no en el JWT: alli `role` vale
+    # siempre "authenticated", asi que esta comprobacion nunca se cumplia y un
+    # moderador no podia retirar la publicacion de otra persona.
+    if post.author_id != current_user.id and not await is_admin_user(db, current_user.id):
         raise ForbiddenError("No puedes eliminar esta publicacion.")
     post.status = "deleted"  # soft delete
     await db.commit()
