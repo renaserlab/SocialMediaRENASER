@@ -4,6 +4,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
+import { CourseCard } from '@/components/CourseCard';
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
 import { CreateTestimonialSheet, type TestimonialEditable } from '@/components/CreateTestimonialSheet';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -331,7 +332,9 @@ export function ProfileSection({ kind, profileId }: Props) {
   }
 
   const items = kind === 'eventos' ? events : courses;
-  if (items.length === 0) {
+  // Vacio: los eventos no ofrecen alta desde aqui (se crean en Inicio); los
+  // cursos si, para que Darren pueda empezar uno desde su propio perfil.
+  if (items.length === 0 && !(kind === 'cursos' && isAdmin)) {
     return (
       <View style={styles.center}>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
@@ -368,19 +371,36 @@ export function ProfileSection({ kind, profileId }: Props) {
             />
           ))
         : courses.map((course) => (
-            <ListRow
+            // La fila abre el curso (temario y contenido); el lapiz edita sus
+            // datos sin salir del perfil. Van como hermanos, no anidados.
+            <CourseCard
               key={course.id}
-              title={course.title}
-              subtitle={course.subtitle || 'Ver programa'}
-              leftIcon="book"
-              rightIcon="chevron-right"
-              // Antes, para el administrador, tocar abria la hoja de edicion y
-              // nunca navegaba: no habia forma de llegar al temario. Ahora la
-              // fila siempre abre el curso, y editar sus datos vive dentro (el
-              // lapiz de la cabecera), junto a la gestion de modulos.
+              course={course}
               onPress={() => router.push(`/course/${course.id}` as never)}
+              onEdit={
+                isAdmin
+                  ? () =>
+                      setEditing({
+                        id: course.id,
+                        title: course.title,
+                        description: course.description,
+                        price: course.price,
+                      })
+                  : undefined
+              }
             />
           ))}
+
+      {/* Alta de un curso nuevo, debajo de los ya publicados. */}
+      {kind === 'cursos' && isAdmin ? (
+        <Button
+          label="Agregar curso"
+          variant="secondary"
+          icon="plus"
+          onPress={() => setCreating(true)}
+        />
+      ) : null}
+
       <EventDetailSheet event={detail} onClose={() => setDetail(null)} />
 
       {editing ? (
@@ -389,6 +409,16 @@ export function ProfileSection({ kind, profileId }: Props) {
           visible
           editing={editing}
           onClose={() => setEditing(null)}
+          onCreated={reload}
+        />
+      ) : null}
+
+      {/* Crear (sin `editing`) es distinto de editar: la misma hoja, vacia. */}
+      {creating && kind === 'cursos' ? (
+        <CreateCatalogSheet
+          kind="curso"
+          visible
+          onClose={() => setCreating(false)}
           onCreated={reload}
         />
       ) : null}
