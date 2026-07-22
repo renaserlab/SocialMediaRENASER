@@ -9,6 +9,7 @@ import {
 } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { setAuthTokenProvider, ApiError } from '@/services/api';
+import { clearSignedUrlCache } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import type { UserProfile } from '@/types';
 
@@ -151,6 +152,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async signOut() {
     await AuthRepository.signOut();
+    // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
+    clearSignedUrlCache();
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });
   },

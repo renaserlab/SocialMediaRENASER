@@ -143,6 +143,7 @@ export function StoriesRow() {
                   }
                   style={styles.avatar}
                   contentFit="cover"
+                  cachePolicy="memory-disk"
                 />
               </Ring>
             </Pressable>
@@ -250,6 +251,7 @@ function Bubble({ group, onPress }: { group: StoryGroup; onPress: () => void }) 
           source={group.avatarUrl ? { uri: group.avatarUrl } : assets.avatar}
           style={styles.avatar}
           contentFit="cover"
+          cachePolicy="memory-disk"
         />
       </Ring>
       <Text numberOfLines={1} style={styles.label} color={colors.text}>

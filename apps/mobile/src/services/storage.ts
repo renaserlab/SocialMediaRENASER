@@ -14,6 +14,19 @@ const BUCKET = 'post-media';
 const AVATAR_BUCKET = 'avatars';
 const SIGNED_URL_TTL = 60 * 60; // 1 hora
 
+/**
+ * Cache de URLs firmadas.
+ *
+ * Cada llamada a `createSignedUrls` devuelve una firma DISTINTA para el mismo
+ * archivo, asi que la URL cambiaba en cada carga del feed y la imagen nunca se
+ * reutilizaba de la cache del sistema: se descargaba entera otra vez.
+ * Reutilizando la firma mientras siga vigente, volver a una pantalla ya vista
+ * es inmediato. Se renueva 10 min antes de caducar para no servir un enlace
+ * muerto.
+ */
+const CACHE_TTL_MS = (SIGNED_URL_TTL - 600) * 1000;
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
 export type MediaKind = 'image' | 'video' | 'audio';
 
 /**
@@ -364,13 +377,33 @@ export async function signMediaUrls(
   paths: string[],
 ): Promise<Record<string, string>> {
   if (!supabase || paths.length === 0) return {};
+
+  // Solo se piden las que no estan en cache o estan a punto de caducar.
+  const now = Date.now();
+  const map: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const path of paths) {
+    const hit = signedUrlCache.get(path);
+    if (hit && hit.expiresAt > now) map[path] = hit.url;
+    else missing.push(path);
+  }
+  if (missing.length === 0) return map;
+
   const { data, error } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrls(paths, SIGNED_URL_TTL);
-  if (error || !data) return {};
-  const map: Record<string, string> = {};
+    .createSignedUrls(missing, SIGNED_URL_TTL);
+  if (error || !data) return map;
+  const expiresAt = now + CACHE_TTL_MS;
   for (const item of data) {
-    if (item.path && item.signedUrl) map[item.path] = item.signedUrl;
+    if (item.path && item.signedUrl) {
+      map[item.path] = item.signedUrl;
+      signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
+    }
   }
   return map;
+}
+
+/** Se vacia al cerrar sesion: las firmas van atadas al usuario. */
+export function clearSignedUrlCache(): void {
+  signedUrlCache.clear();
 }

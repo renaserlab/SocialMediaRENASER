@@ -125,6 +125,7 @@ export function ProfileGallery({ gallery, audios, loading, error, emptyHint }: P
                     source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
                     style={StyleSheet.absoluteFill}
                     contentFit="cover"
+                    cachePolicy="memory-disk"
                     transition={120}
                   />
                 ) : (

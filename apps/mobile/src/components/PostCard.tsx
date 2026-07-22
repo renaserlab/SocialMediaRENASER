@@ -144,6 +144,7 @@ export function PostCard({ post, onDeleted }: Props) {
             source={post.authorAvatarUrl ? { uri: post.authorAvatarUrl } : assets.avatar}
             style={styles.avatar}
             contentFit="cover"
+            cachePolicy="memory-disk"
           />
           <View style={{ flex: 1 }}>
             <Text variant="body" weight="700">{post.author}</Text>
@@ -173,6 +174,7 @@ export function PostCard({ post, onDeleted }: Props) {
           <ExpoImage
             source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
             contentFit="cover"
+            cachePolicy="memory-disk"
             transition={150}
             style={styles.image}
           />

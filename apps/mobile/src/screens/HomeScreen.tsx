@@ -80,7 +80,14 @@ export function HomeScreen() {
           accessibilityLabel="Crear nueva publicación"
           accessibilityRole="button"
         >
-          <ExpoImage source={assets.avatar} style={styles.composerAvatar} contentFit="cover" />
+          {/* Tu foto real; el marcador solo mientras no haya perfil cargado. */}
+          <ExpoImage
+            source={user?.avatarUrl ? { uri: user.avatarUrl } : assets.avatar}
+            style={styles.composerAvatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={120}
+          />
           <Text style={[styles.composerText, { color: colors.textMuted }]}>
             {/* Sin nombre se saluda en generico: antes caia a un "Katherine"
                 fijo del demo y se le mostraba a cualquier usuario. */}
