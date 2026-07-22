@@ -20,6 +20,7 @@ import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { TestimonialRepository } from '@/repositories/TestimonialRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -31,6 +32,42 @@ import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/
 
 /** Secciones del perfil que se abren desde los accesos circulares. */
 export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast' | 'testimonios';
+
+/**
+ * Que se dice en cada seccion cuando el perfil no administra la aplicacion.
+ * Reunido aqui para que anadir una seccion sea anadir una entrada.
+ */
+const ADMIN_SECTIONS: Partial<
+  Record<
+    ProfileSectionKind,
+    { icon: 'headphones' | 'calendar' | 'book' | 'camera'; title: string; body: string; action: string }
+  >
+> = {
+  podcast: {
+    icon: 'headphones',
+    title: 'Aún no tienes podcast',
+    body: 'Los episodios de RENASER están en el perfil de Darren.',
+    action: 'Ir al podcast de RENASER',
+  },
+  eventos: {
+    icon: 'calendar',
+    title: 'Aún no tienes eventos',
+    body: 'Los próximos encuentros de RENASER están en el perfil de Darren.',
+    action: 'Ver eventos de RENASER',
+  },
+  cursos: {
+    icon: 'book',
+    title: 'Aún no tienes cursos',
+    body: 'Los programas de RENASER están en el perfil de Darren.',
+    action: 'Ver cursos de RENASER',
+  },
+  testimonios: {
+    icon: 'camera',
+    title: 'Aún no tienes testimonios',
+    body: 'Los testimonios de la comunidad están en el perfil de Darren.',
+    action: 'Ver testimonios de RENASER',
+  },
+};
 
 /** Orden de las pestañas de la galeria: Todos / Fotos / Videos. */
 const TESTIMONIAL_FILTERS: TestimonialFilter[] = ['all', 'image', 'video'];
@@ -53,6 +90,11 @@ type Props = {
   kind: ProfileSectionKind;
   /** Perfil dueño de la sección: solo se muestra lo que ha creado. */
   profileId?: string;
+  /**
+   * Si el dueño del perfil administra la aplicación. El podcast, los eventos
+   * y los cursos son suyos: en un perfil normal no hay nada que enseñar.
+   */
+  ownerIsAdmin?: boolean;
 };
 
 /**
@@ -61,7 +103,7 @@ type Props = {
  * Darren administra la aplicacion, asi que su perfil es donde viven los
  * eventos y los cursos: las tarjetas del inicio traen aqui a cualquier usuario.
  */
-export function ProfileSection({ kind, profileId }: Props) {
+export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -76,6 +118,28 @@ export function ProfileSection({ kind, profileId }: Props) {
   const [editing, setEditing] = useState<CatalogEditable | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  /**
+   * Lleva a la seccion equivalente en el perfil del administrador, que es
+   * donde vive el contenido de RENASER. El id se resuelve, no va escrito.
+   */
+  const openAdminSection = useCallback(
+    async (target: ProfileSectionKind) => {
+      try {
+        const featured = await ProfileRepository.listFeatured();
+        const admin = featured.find((m) => m.isAdmin) ?? featured[0];
+        if (admin) {
+          router.push({
+            pathname: '/profile/[id]',
+            params: { id: admin.id, section: target },
+          } as never);
+        }
+      } catch {
+        // Sin red no se puede resolver; se puede llegar desde el inicio.
+      }
+    },
+    [router],
+  );
 
   /**
    * Se recarga al volver a la pantalla. Sin esto, publicar un episodio (o un
@@ -119,6 +183,7 @@ export function ProfileSection({ kind, profileId }: Props) {
         : kind === 'testimonios'
         ? TestimonialRepository.list(
             TESTIMONIAL_FILTERS[testimonialFilter] ?? 'all',
+            profileId,
           ).then((list) => {
             if (alive) setTestimonials(list);
           })
@@ -134,7 +199,12 @@ export function ProfileSection({ kind, profileId }: Props) {
             }
           })
         : LearningRepository.listCourses().then((list) => {
-            if (alive) setCourses(list);
+            // Solo los que publica este perfil, igual que con los eventos.
+            if (alive) {
+              setCourses(
+                profileId ? list.filter((c) => !c.authorId || c.authorId === profileId) : list,
+              );
+            }
           });
 
     request
@@ -184,6 +254,34 @@ export function ProfileSection({ kind, profileId }: Props) {
 
   // El podcast siempre pinta sus 30 filas, aunque aun no haya episodios: la
   // lista bloqueada es parte de lo que se quiere mostrar.
+  /**
+   * Podcast, eventos, cursos y testimonios son contenido de RENASER: los
+   * publica quien administra. En un perfil normal no hay nada que enseñar, asi
+   * que en vez de listas vacias (o peor, listas bloqueadas y filtros sin nada
+   * que filtrar) se explica donde esta y se lleva alli.
+   */
+  if (!ownerIsAdmin && ADMIN_SECTIONS[kind]) {
+    const copy = ADMIN_SECTIONS[kind]!;
+    return (
+      <View style={styles.center}>
+        <Feather name={copy.icon} size={30} color={colors.textMuted} />
+        <Text variant="body" weight="700" style={styles.centerText}>
+          {copy.title}
+        </Text>
+        <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
+          {copy.body}
+        </Text>
+        <Button
+          label={copy.action}
+          variant="secondary"
+          icon={copy.icon}
+          onPress={() => void openAdminSection(kind)}
+          style={styles.centerAction}
+        />
+      </View>
+    );
+  }
+
   if (kind === 'podcast') {
     return (
       <View>
@@ -427,8 +525,9 @@ export function ProfileSection({ kind, profileId }: Props) {
 }
 
 const styles = StyleSheet.create({
-  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl },
+  center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
+  centerAction: { marginTop: spacing.md },
   list: { marginTop: spacing.md },
   // `filters` es de los chips de categoria del podcast. El de la galeria se
   // llama `testimonialFilters` para no pisarlo: ambos se anadieron a la vez.

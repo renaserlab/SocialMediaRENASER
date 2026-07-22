@@ -14,10 +14,16 @@ export function FollowersScreen() {
   // La ruta es /followers/[id]; sin id se entienden los del propio usuario.
   const { id } = useLocalSearchParams<{ id?: string }>();
   const currentUserId = useAppStore((state) => state.user?.id);
-  const profileId = id ?? currentUserId;
+  /**
+   * La ruta usa "me" para el perfil propio, que es legible en la URL pero NO
+   * es un id: enviarlo al backend daba 404 ("perfil no encontrado"), porque
+   * `/profiles/{id}` espera un UUID. Se resuelve aqui.
+   */
+  const isSelf = !id || id === 'me' || id === currentUserId;
+  const profileId = isSelf ? currentUserId : id;
 
   const { people, loading, error, reload, toggleFollow } = useFollowList(profileId, 'followers');
-  const isOwn = !id || id === currentUserId;
+  const isOwn = isSelf;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

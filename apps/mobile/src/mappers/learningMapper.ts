@@ -90,6 +90,7 @@ export function toCourseFromDetail(dto: CourseDetailDto): Course {
 export function toCourseFromSummary(dto: CourseDto): Course {
   return {
     id: dto.id,
+    authorId: dto.author_id,
     title: dto.title,
     coverPath: dto.cover_path ?? null,
     subtitle: deriveSubtitle(dto.description),

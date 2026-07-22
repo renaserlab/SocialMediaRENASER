@@ -53,14 +53,22 @@ export function ProfileScreen() {
    * tarjetas de Inicio (Eventos / Cursos) y tambien se cambia tocando los
    * circulos. `null` = la galeria de publicaciones.
    */
-  const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(
-    section === 'eventos' ||
-      section === 'cursos' ||
-      section === 'podcast' ||
-      section === 'testimonios'
-      ? section
-      : null,
-  );
+  const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(null);
+
+  /**
+   * Sincroniza la seccion con el parametro de la ruta.
+   *
+   * Antes se leia solo en el valor inicial de `useState`, que se calcula una
+   * vez: si la pantalla ya estaba montada (por ejemplo tras visitar el
+   * podcast), pulsar "Eventos" en el inicio cambiaba la URL pero seguia
+   * enseñando la seccion anterior.
+   */
+  useEffect(() => {
+    const valid: ProfileSectionKind[] = ['eventos', 'cursos', 'podcast', 'testimonios'];
+    setActiveSection(
+      valid.includes(section as ProfileSectionKind) ? (section as ProfileSectionKind) : null,
+    );
+  }, [section, id]);
 
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
   const [publicState, setPublicState] = useState<'loading' | 'error' | 'idle'>('loading');
@@ -401,7 +409,13 @@ export function ProfileScreen() {
           </View>
 
           {activeSection ? (
-            <ProfileSection kind={activeSection} profileId={galleryOwnerId} />
+            <ProfileSection
+              kind={activeSection}
+              profileId={galleryOwnerId}
+              ownerIsAdmin={
+                isRealPublic ? publicProfile?.isAdmin === true : currentUser?.isAdmin === true
+              }
+            />
           ) : (
           /* Publicaciones reales del perfil: fotos/videos. */
           <ProfileGallery

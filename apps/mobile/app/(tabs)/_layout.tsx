@@ -73,7 +73,22 @@ export default function TabsLayout() {
       <Tabs.Screen name="explore" options={{ title: t('tabs.explore'), tabBarIcon: icon('search') }} />
       <Tabs.Screen name="create" options={{ title: t('tabs.create'), tabBarIcon: icon('plus-square') }} />
       <Tabs.Screen name="messages" options={{ title: t('tabs.messages'), tabBarIcon: icon('message-square') }} />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: icon('user') }} />
+      <Tabs.Screen name="profile/index" options={{ title: t('tabs.profile'), tabBarIcon: icon('user') }} />
+
+      {/*
+        Pantallas que viven DENTRO del navegador de pestañas para que la barra
+        inferior no desaparezca al abrirlas (antes colgaban de la raiz y se
+        entraba en una vista sin salida visible). `href: null` las mantiene
+        fuera de la barra: son destinos, no pestañas.
+
+        El grupo `(tabs)` no aparece en la URL, asi que las rutas siguen siendo
+        /profile/<id>, /circle/<id> y /audio/<id>.
+      */}
+      <Tabs.Screen name="profile/[id]" options={{ href: null }} />
+      <Tabs.Screen name="circle/[id]" options={{ href: null }} />
+      <Tabs.Screen name="audio/[id]" options={{ href: null }} />
+      <Tabs.Screen name="followers/[id]" options={{ href: null }} />
+      <Tabs.Screen name="following/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

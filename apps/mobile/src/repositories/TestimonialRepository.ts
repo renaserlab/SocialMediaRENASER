@@ -26,12 +26,22 @@ function client() {
 }
 
 export const TestimonialRepository = {
-  /** Galeria completa o filtrada por tipo, con las URLs ya firmadas. */
-  async list(filter: TestimonialFilter = 'all'): Promise<Testimonial[]> {
+  /**
+   * Galeria de un perfil, con las URLs ya firmadas.
+   *
+   * `authorId` es obligatorio en la practica: sin el, la consulta devolvia
+   * TODOS los testimonios, asi que los de la cuenta administradora aparecian
+   * dentro del perfil de cualquier otra persona.
+   */
+  async list(
+    filter: TestimonialFilter = 'all',
+    authorId?: string,
+  ): Promise<Testimonial[]> {
     let query = client()
       .from('testimonials')
       .select('id, storage_path, media_type, caption, created_at')
       .order('created_at', { ascending: false });
+    if (authorId) query = query.eq('author_id', authorId);
     if (filter !== 'all') query = query.eq('media_type', filter);
 
     const { data, error } = await query;
