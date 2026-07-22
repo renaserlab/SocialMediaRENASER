@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
+import { DateField } from '@/components/DateField';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { CATEGORIES, type CategoryId } from '@/data/categories';
@@ -323,15 +324,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
 
         {isEvent ? (
           <>
-            <Input label="Día" value={day} onChangeText={setDay} placeholder="dd/mm/aaaa" />
+            <DateField label="Día" value={day} onChange={setDay} />
             <Input label="Hora" value={time} onChangeText={setTime} placeholder="hh:mm" />
             <Input label="Lugar" value={place} onChangeText={setPlace} placeholder="Dirección o enlace" />
-            <Input
-              label="Día de fin (opcional)"
-              value={endDay}
-              onChangeText={setEndDay}
-              placeholder="dd/mm/aaaa"
-            />
+            <DateField label="Día de fin (opcional)" value={endDay} onChange={setEndDay} />
             <Input
               label="Hora de fin (opcional)"
               value={endTime}
