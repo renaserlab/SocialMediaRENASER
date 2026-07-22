@@ -13,6 +13,15 @@ export const CATEGORIES: Array<{ id: CategoryId; label: string }> = [
   { id: 'dinero', label: 'Dinero' },
 ];
 
+/**
+ * Categoría reservada del audio privado.
+ *
+ * No aparece entre los filtros ni se puede elegir al publicar un episodio: es
+ * la marca que distingue "el audio privado" del resto de audios, y se excluye
+ * de la lista del podcast para que no salga dos veces.
+ */
+export const PRIVATE_AUDIO_CATEGORY = 'privado';
+
 /** Etiqueta legible de una categoría; vacío si no tiene o no se reconoce. */
 export function categoryLabel(id?: string | null): string {
   return CATEGORIES.find((c) => c.id === id)?.label ?? '';

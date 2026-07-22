@@ -9,7 +9,7 @@ import { EventCard } from '@/components/EventCard';
 import { EventDetailSheet } from '@/components/EventDetailSheet';
 import { ListRow } from '@/components/ListRow';
 import { PodcastList } from '@/components/PodcastList';
-import { CATEGORIES, type CategoryId } from '@/data/categories';
+import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
@@ -74,7 +74,12 @@ export function ProfileSection({ kind, profileId }: Props) {
       kind === 'podcast'
         ? PostRepository.listByAuthor(
             profileId ?? '',
-            { media: 'audio', limit: 60, ...(category ? { category } : {}) },
+            {
+              media: 'audio',
+              limit: 60,
+              excludeCategory: PRIVATE_AUDIO_CATEGORY,
+              ...(category ? { category } : {}),
+            },
             profileId,
           ).then((list) => {
             // El episodio 1 es el mas antiguo; el backend devuelve al reves.

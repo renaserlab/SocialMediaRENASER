@@ -9,7 +9,7 @@ import { Chip } from '@/components/Chip';
 import { DateField } from '@/components/DateField';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
-import { CATEGORIES, type CategoryId } from '@/data/categories';
+import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
 import { notify } from '@/lib/confirm';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -18,7 +18,7 @@ import { PostRepository } from '@/repositories/PostRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-export type CatalogKind = 'evento' | 'curso' | 'podcast';
+export type CatalogKind = 'evento' | 'curso' | 'podcast' | 'privado';
 
 /** Elemento existente cuando la hoja se usa para editar. */
 export type CatalogEditable = {
@@ -80,7 +80,9 @@ function parseDateTime(day: string, time: string): Date | null {
 export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing }: Props) {
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
-  const isPodcast = kind === 'podcast';
+  /** El audio privado usa el mismo formulario que un episodio. */
+  const isPrivate = kind === 'privado';
+  const isPodcast = kind === 'podcast' || isPrivate;
 
   const [cover, setCover] = useState<PickedMedia | null>(null);
   /** Solo para podcast: el archivo de audio del episodio. */
@@ -207,7 +209,12 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         // Un episodio es una publicacion de audio: reutiliza la subida, el
         // firmado y los permisos que ya existen, sin una tabla nueva.
         const uploaded = await uploadPostMedia(audio!);
-        await PostRepository.createPost(title.trim(), [uploaded], undefined, category);
+        await PostRepository.createPost(
+          title.trim(),
+          [uploaded],
+          undefined,
+          isPrivate ? PRIVATE_AUDIO_CATEGORY : category,
+        );
       } else if (isEvent) {
         const data = {
           title: title.trim(),
@@ -253,6 +260,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       <Text style={styles.sheetTitle} color={colors.text}>
         {editing
           ? isEvent ? 'Editar evento' : 'Editar curso'
+          : isPrivate ? 'Audio privado'
           : isPodcast ? 'Nuevo episodio'
           : isEvent ? 'Nuevo evento' : 'Nuevo curso'}
       </Text>
@@ -306,7 +314,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         />
         ) : null}
 
-        {isPodcast ? (
+        {isPodcast && !isPrivate ? (
           <View style={styles.categories}>
             <Text variant="secondary" color={colors.textMuted}>Categoría</Text>
             <View style={styles.chips}>
@@ -362,6 +370,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           label={
             editing
               ? 'Guardar cambios'
+              : isPrivate ? 'Publicar audio privado'
               : isPodcast ? 'Publicar episodio'
               : isEvent ? 'Publicar evento' : 'Publicar curso'
           }

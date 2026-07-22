@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Image, LayoutChangeEvent, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -7,8 +7,15 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { Button } from '@/components/Button';
+import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { assets } from '@/data/assets';
 import { SAMPLE_AUDIO } from '@/data/media';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { PostRepository } from '@/repositories/PostRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { useAppStore } from '@/store/useAppStore';
+import type { Post } from '@/types';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -23,8 +30,40 @@ export function AudioScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
 
+  const currentUser = useAppStore((state) => state.user);
+  const isAdmin = currentUser?.isAdmin === true;
+
+  /**
+   * Audio privado vigente: el ultimo que publico el administrador. Mientras no
+   * haya ninguno se mantiene el audio de ejemplo, para que la pantalla no
+   * quede muda.
+   */
+  const [audio, setAudio] = useState<Post | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!AuthRepository.enabled) return;
+    try {
+      // El audio lo publica el administrador, asi que primero hay que saber
+      // quien es: si el propio usuario lo es, es su perfil.
+      let adminId = currentUser?.isAdmin ? currentUser.id : null;
+      if (!adminId) {
+        const featured = await ProfileRepository.listFeatured();
+        adminId = (featured.find((m) => m.isAdmin) ?? featured[0])?.id ?? null;
+      }
+      if (!adminId) return;
+      setAudio(await PostRepository.getPrivateAudio(adminId, currentUser?.id));
+    } catch {
+      setAudio(null);
+    }
+  }, [currentUser?.id, currentUser?.isAdmin]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   // Reproducción real (expo-audio funciona en iOS/Android/web).
-  const player = useAudioPlayer(SAMPLE_AUDIO);
+  const player = useAudioPlayer(audio?.mediaUrl ?? SAMPLE_AUDIO);
   const status = useAudioPlayerStatus(player);
 
   const playing = status.playing;
@@ -59,7 +98,7 @@ export function AudioScreen() {
 
   const onShare = () => {
     Share.share({
-      message: 'Escucha "Tu enfoque de esta semana" en Renaser Social Media.',
+      message: `Escucha "${audio?.body ?? 'Tu enfoque de esta semana'}" en Renaser Social Media.`,
     }).catch(() => {});
   };
 
@@ -68,7 +107,19 @@ export function AudioScreen() {
       <AppHeader title="Esta es una invitación para ti" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
-          <Text style={[styles.subtitle, { color: colors.textMuted }]}>Basado en el resultado de tu quiz</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            {audio ? audio.body : 'Basado en el resultado de tu quiz'}
+          </Text>
+
+          {isAdmin ? (
+            <Button
+              label={audio ? 'Cambiar audio privado' : 'Agregar audio privado'}
+              variant="secondary"
+              icon="plus"
+              onPress={() => setCreating(true)}
+              style={styles.adminBtn}
+            />
+          ) : null}
 
           <View style={[styles.cover, { borderColor: colors.border }]}>
             <Image source={assets.audio} style={StyleSheet.absoluteFill} resizeMode="cover" />
@@ -145,6 +196,15 @@ export function AudioScreen() {
           </View>
         </View>
       </AppScreen>
+
+      {creating ? (
+        <CreateCatalogSheet
+          kind="privado"
+          visible
+          onClose={() => setCreating(false)}
+          onCreated={() => void load()}
+        />
+      ) : null}
     </View>
   );
 }
@@ -177,7 +237,8 @@ function AudioAction({
 
 const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.xl, alignItems: 'center' },
-  subtitle: { fontSize: 12, marginTop: spacing.sm, marginBottom: spacing.xl },
+  subtitle: { fontSize: 12, marginTop: spacing.sm, marginBottom: spacing.lg, textAlign: 'center' },
+  adminBtn: { width: '100%', marginBottom: spacing.lg },
   cover: { width: '100%', aspectRatio: 1, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', justifyContent: 'flex-end' },
   coverBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, margin: spacing.lg, alignSelf: 'flex-start' },
   coverBadgeText: { fontSize: 12, fontWeight: '700' },

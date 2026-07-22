@@ -1,6 +1,7 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
 import { signMediaUrls, type UploadedMedia } from '@/services/storage';
+import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import type { Comment, Post } from '@/types';
 
 export type FeedPage = {
@@ -73,7 +74,13 @@ export const PostRepository = {
       media,
       limit = 30,
       category,
-    }: { media?: 'image' | 'video' | 'audio'; limit?: number; category?: string } = {},
+      excludeCategory,
+    }: {
+      media?: 'image' | 'video' | 'audio';
+      limit?: number;
+      category?: string;
+      excludeCategory?: string;
+    } = {},
     currentUserId?: string | null,
   ): Promise<Post[]> {
     const params = new URLSearchParams({
@@ -83,10 +90,24 @@ export const PostRepository = {
     });
     if (media) params.set('media', media);
     if (category) params.set('category', category);
+    if (excludeCategory) params.set('exclude_category', excludeCategory);
     const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items, dtos);
     return items;
+  },
+
+  /**
+   * El audio privado vigente: el más reciente que el administrador haya
+   * marcado con la categoría reservada. `null` si aún no hay ninguno.
+   */
+  async getPrivateAudio(adminId: string, currentUserId?: string | null): Promise<Post | null> {
+    const list = await this.listByAuthor(
+      adminId,
+      { media: 'audio', limit: 1, category: PRIVATE_AUDIO_CATEGORY },
+      currentUserId,
+    );
+    return list[0] ?? null;
   },
 
   /** Publicaciones con video, en orden reciente: alimentan los reels. */

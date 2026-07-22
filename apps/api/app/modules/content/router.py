@@ -154,6 +154,7 @@ async def list_posts(
     media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     exclude_media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     category: str | None = Query(default=None, max_length=40),
+    exclude_category: str | None = Query(default=None, max_length=40),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -203,6 +204,13 @@ async def list_posts(
 
     if category:
         stmt = stmt.where(Post.category == category)
+
+    if exclude_category:
+        # El audio privado es un audio con categoria reservada: se pide aparte
+        # y no debe colarse en la lista de episodios del podcast.
+        stmt = stmt.where(
+            (Post.category.is_(None)) | (Post.category != exclude_category)
+        )
 
     if exclude_media:
         # El feed de Inicio excluye los audios: son episodios del podcast y
