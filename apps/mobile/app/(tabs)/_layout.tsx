@@ -87,6 +87,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="profile/[id]" options={{ href: null }} />
       <Tabs.Screen name="circle/[id]" options={{ href: null }} />
       <Tabs.Screen name="audio/[id]" options={{ href: null }} />
+      <Tabs.Screen name="followers/[id]" options={{ href: null }} />
+      <Tabs.Screen name="following/[id]" options={{ href: null }} />
     </Tabs>
   );
 }
