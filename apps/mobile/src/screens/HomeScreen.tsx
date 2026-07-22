@@ -319,7 +319,7 @@ export function HomeScreen() {
 
         {/* Acceso a la galeria de testimonios, debajo de las tarjetas. */}
         <Pressable
-          onPress={() => router.push('/testimonials' as never)}
+          onPress={() => openAdminSection('testimonios')}
           accessibilityRole="button"
           accessibilityLabel={t('home.seeMore')}
           hitSlop={6}

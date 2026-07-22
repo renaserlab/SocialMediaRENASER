@@ -54,7 +54,12 @@ export function ProfileScreen() {
    * circulos. `null` = la galeria de publicaciones.
    */
   const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(
-    section === 'eventos' || section === 'cursos' || section === 'podcast' ? section : null,
+    section === 'eventos' ||
+      section === 'cursos' ||
+      section === 'podcast' ||
+      section === 'testimonios'
+      ? section
+      : null,
   );
 
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
@@ -391,7 +396,7 @@ export function ProfileScreen() {
             <Shortcut
               icon="camera"
               label={t('profile.testimonials')}
-              onPress={() => router.push('/testimonials' as never)}
+              onPress={() => setActiveSection((v) => (v === 'testimonios' ? null : 'testimonios'))}
             />
           </View>
 
