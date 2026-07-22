@@ -22,12 +22,14 @@ export function RegisterScreen() {
   const register = useAppStore((state) => state.registerLocalUser);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signUpEmail = useAuthStore((state) => state.signUpEmail);
+  const signInWithProvider = useAuthStore((state) => state.signInWithProvider);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [hidden, setHidden] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [socialBusy, setSocialBusy] = useState(false);
 
   const [errors, setErrors] = useState<{ fullName?: string; email?: string; password?: string }>({});
 
@@ -86,8 +88,26 @@ export function RegisterScreen() {
     }
   };
 
-  const socialDemo = (provider: string) => {
-    notify(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
+  /** Con Google no hay "registro" aparte: el primer acceso crea la cuenta. */
+  const continueWithGoogle = async () => {
+    if (!supabaseEnabled) {
+      notify('Google no disponible', 'Conecta Supabase para crear tu cuenta con Google.');
+      return;
+    }
+    setSocialBusy(true);
+    try {
+      await signInWithProvider('google');
+      if (useAuthStore.getState().status === 'authenticated') {
+        router.replace('/onboarding');
+      }
+    } catch (error) {
+      notify(
+        'No se pudo continuar con Google',
+        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      );
+    } finally {
+      setSocialBusy(false);
+    }
   };
 
   return (
@@ -102,17 +122,13 @@ export function RegisterScreen() {
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Crea tu cuenta{`\n`}RENASER</Text>
 
+          {/* Apple queda fuera hasta tener el Apple Developer Program. */}
           <Button
             label="Continuar con Google"
             variant="secondary"
             icon="chrome"
-            onPress={() => socialDemo('Google')}
-          />
-          <Button
-            label="Continuar con Apple"
-            variant="secondary"
-            icon="aperture"
-            onPress={() => socialDemo('Apple')}
+            loading={socialBusy}
+            onPress={() => void continueWithGoogle()}
           />
 
           <View style={styles.dividerRow}>

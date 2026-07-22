@@ -24,11 +24,13 @@ export function LoginScreen() {
   const completeOnboarding = useAppStore((state) => state.setOnboardingComplete);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signInEmail = useAuthStore((state) => state.signInEmail);
+  const signInWithProvider = useAuthStore((state) => state.signInWithProvider);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [hidden, setHidden] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [socialBusy, setSocialBusy] = useState(false);
 
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
@@ -75,8 +77,26 @@ export function LoginScreen() {
     }
   };
 
-  const socialDemo = (provider: string) => {
-    notify(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
+  const continueWithGoogle = async () => {
+    if (!supabaseEnabled) {
+      notify('Google no disponible', 'Conecta Supabase para acceder con Google.');
+      return;
+    }
+    setSocialBusy(true);
+    try {
+      await signInWithProvider('google');
+      // En web la pagina se redirige sola; en nativo ya hay sesion al volver.
+      if (useAuthStore.getState().status === 'authenticated') {
+        router.replace(postAuthRoute() as never);
+      }
+    } catch (error) {
+      notify(
+        'No se pudo acceder con Google',
+        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      );
+    } finally {
+      setSocialBusy(false);
+    }
   };
 
   return (
@@ -91,17 +111,17 @@ export function LoginScreen() {
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}RENASER</Text>
 
+          {/*
+            Apple no se muestra: exige el Apple Developer Program para
+            registrar el Service ID, asi que hoy no puede funcionar en ninguna
+            plataforma. Mejor no ofrecer un boton que no lleva a nada.
+          */}
           <Button
             label="Continuar con Google"
             variant="secondary"
             icon="chrome"
-            onPress={() => socialDemo('Google')}
-          />
-          <Button
-            label="Continuar con Apple"
-            variant="secondary"
-            icon="aperture"
-            onPress={() => socialDemo('Apple')}
+            loading={socialBusy}
+            onPress={() => void continueWithGoogle()}
           />
 
           <View style={styles.dividerRow}>

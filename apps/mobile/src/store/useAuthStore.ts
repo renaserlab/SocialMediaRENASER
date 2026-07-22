@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 
-import { AuthRepository, SignInInput, SignUpInput, SignUpResult } from '@/repositories/AuthRepository';
+import {
+  AuthRepository,
+  OAuthProvider,
+  SignInInput,
+  SignUpInput,
+  SignUpResult,
+} from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { setAuthTokenProvider, ApiError } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
@@ -21,6 +27,7 @@ type AuthState = {
   bootstrap: () => Promise<void>;
   signUpEmail: (input: SignUpInput) => Promise<SignUpResult>;
   signInEmail: (input: SignInInput) => Promise<void>;
+  signInWithProvider: (provider: OAuthProvider) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateProfile: (patch: ProfilePatch) => Promise<void>;
@@ -130,6 +137,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.signIn(input);
     await get().refreshProfile();
     set({ status: 'authenticated' });
+  },
+
+  async signInWithProvider(provider) {
+    await AuthRepository.signInWithProvider(provider);
+    // En web la pagina se redirige y la sesion se resuelve al volver; en nativo
+    // ya tenemos sesion y solo falta cargar el perfil.
+    if (await AuthRepository.getSession()) {
+      await get().refreshProfile();
+      set({ status: 'authenticated' });
+    }
   },
 
   async signOut() {
