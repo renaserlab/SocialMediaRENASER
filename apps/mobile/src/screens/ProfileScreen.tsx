@@ -12,7 +12,9 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { ListRow } from '@/components/ListRow';
+import { ProfileGallery } from '@/components/ProfileGallery';
 import { StateView } from '@/components/StateView';
+import { useProfilePosts } from '@/hooks/useProfilePosts';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
@@ -45,6 +47,15 @@ export function ProfileScreen() {
   const [followersCount, setFollowersCount] = useState(0);
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
   const [publicState, setPublicState] = useState<'loading' | 'error' | 'idle'>('loading');
+
+  // Publicaciones del perfil que se esta viendo (el propio o el de otro).
+  const galleryOwnerId = isRealPublic ? id : currentUser?.id;
+  const {
+    gallery,
+    audios,
+    loading: postsLoading,
+    error: postsError,
+  } = useProfilePosts(isDarren ? null : galleryOwnerId);
 
   const loadPublic = React.useCallback(() => {
     if (!isRealPublic || !id) return;
@@ -326,12 +337,18 @@ export function ProfileScreen() {
             <Shortcut icon="users" label="Círculos" onPress={() => router.push('/circle/lideres-renaser')} />
           </View>
 
-          {/* Grid de imágenes de publicaciones en B&W */}
-          <View style={styles.grid}>
-            {[assets.audio, assets.event, assets.course, assets.circle, assets.speaker, assets.hero].map((source, index) => (
-              <Image key={index} source={source} style={[styles.gridImage, { borderColor: colors.background }]} />
-            ))}
-          </View>
+          {/* Publicaciones reales del perfil: fotos/videos y audios. */}
+          <ProfileGallery
+            gallery={gallery}
+            audios={audios}
+            loading={postsLoading}
+            error={postsError}
+            emptyHint={
+              isPublic
+                ? 'Este perfil aún no ha publicado nada.'
+                : 'Cuando publiques una foto o un video, aparecerá aquí.'
+            }
+          />
         </View>
       </AppScreen>
 

@@ -122,7 +122,10 @@ export function RegisterScreen() {
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Crea tu cuenta{`\n`}RENASER</Text>
 
-          {/* Apple queda fuera hasta tener el Apple Developer Program. */}
+          {/*
+            Oculto igual que en LoginScreen: el flujo de Google esta listo,
+            falta activarlo en Supabase. Descomentar para reactivarlo.
+
           <Button
             label="Continuar con Google"
             variant="secondary"
@@ -136,6 +139,7 @@ export function RegisterScreen() {
             <Text style={[styles.or, { color: colors.textMuted }]}>o continúa con tu email</Text>
             <View style={[styles.line, { backgroundColor: colors.border }]} />
           </View>
+          */}
 
           <Input
             label="Nombre completo"

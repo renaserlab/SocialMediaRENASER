@@ -112,10 +112,16 @@ export function LoginScreen() {
           <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}RENASER</Text>
 
           {/*
-            Apple no se muestra: exige el Apple Developer Program para
-            registrar el Service ID, asi que hoy no puede funcionar en ninguna
-            plataforma. Mejor no ofrecer un boton que no lleva a nada.
-          */}
+            ACCESO CON PROVEEDORES EXTERNOS — oculto a proposito.
+
+            Google: el flujo esta implementado y probado (ver
+            AuthRepository.signInWithProvider). Solo falta activar el proveedor
+            en Supabase y pegar las credenciales de Google Cloud. Para
+            reactivarlo basta con descomentar este bloque.
+
+            Apple: ademas de lo anterior, exige el Apple Developer Program para
+            registrar el Service ID.
+
           <Button
             label="Continuar con Google"
             variant="secondary"
@@ -129,6 +135,7 @@ export function LoginScreen() {
             <Text style={[styles.or, { color: colors.textMuted }]}>o continúa con tu email</Text>
             <View style={[styles.line, { backgroundColor: colors.border }]} />
           </View>
+          */}
 
           <Input
             label="Correo electrónico"
