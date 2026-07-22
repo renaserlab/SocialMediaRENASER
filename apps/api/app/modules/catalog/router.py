@@ -10,10 +10,13 @@ from app.modules.catalog.models import Course, Event, EventRegistration
 from app.modules.catalog.schemas import (
     CourseCreate,
     CourseRead,
+    CourseUpdate,
     EventCreate,
     EventRead,
+    EventUpdate,
 )
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 from app.shared.permissions import require_admin
 
@@ -42,6 +45,48 @@ async def create_event(
     await db.commit()
     await db.refresh(event)
     return _to_event_read(event, 0, 0)
+
+
+@router.patch("/events/{event_id}", response_model=EventRead)
+async def update_event(
+    event_id: str,
+    payload: EventUpdate,
+    _: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EventRead:
+    ensure_uuid(event_id, "Evento no encontrado.")
+    event = await db.get(Event, event_id)
+    if event is None:
+        raise NotFoundError("Evento no encontrado.")
+    # `exclude_unset` distingue "no enviado" de "enviado vacio", igual que en
+    # el perfil: sin ello, editar el titulo borraria el resto de campos.
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(event, field, value)
+    await db.commit()
+    await db.refresh(event)
+    return _to_event_read(event, 0, 0)
+
+
+@router.patch("/courses/{course_id}", response_model=CourseRead)
+async def update_course(
+    course_id: str,
+    payload: CourseUpdate,
+    _: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CourseRead:
+    ensure_uuid(course_id, "Curso no encontrado.")
+    course = await db.get(Course, course_id)
+    if course is None:
+        raise NotFoundError("Curso no encontrado.")
+    data = payload.model_dump(exclude_unset=True)
+    # El cliente habla en la unidad mayor; la columna guarda centavos.
+    if "price" in data:
+        course.price_minor = (data.pop("price") or 0) * 100
+    for field, value in data.items():
+        setattr(course, field, value)
+    await db.commit()
+    await db.refresh(course)
+    return CourseRead.model_validate(course)
 
 
 @router.post("/courses", response_model=CourseRead, status_code=status.HTTP_201_CREATED)

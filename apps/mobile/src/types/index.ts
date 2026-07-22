@@ -77,6 +77,8 @@ export type EventItem = {
   id: string;
   /** Quien organiza el evento; permite listar los de un perfil. */
   organizerId?: string;
+  /** Fecha real de inicio; `date` es solo el texto ya formateado. */
+  startsAtDate?: Date;
   title: string;
   description: string;
   date: string;

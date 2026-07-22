@@ -122,6 +122,32 @@ export const PostRepository = {
     return post;
   },
 
+  /**
+   * Edita una publicación propia. `media` sin definir deja el adjunto como
+   * está; pasarlo (aunque sea vacío) lo reemplaza, lo que permite quitarlo.
+   */
+  async updatePost(
+    postId: string,
+    changes: { body?: string; media?: UploadedMedia[] },
+    currentUserId?: string | null,
+  ): Promise<Post> {
+    const payload: Record<string, unknown> = {};
+    if (changes.body !== undefined) payload.body = changes.body;
+    if (changes.media !== undefined) {
+      payload.media = changes.media.map((m) => ({
+        storage_path: m.storagePath,
+        media_type: m.mediaType,
+      }));
+    }
+    const dto = await apiRequest<PostDto>(`${API_V1}/posts/${postId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    const post = toPost(dto, currentUserId);
+    await attachMediaUrls([post], [dto]);
+    return post;
+  },
+
   async deletePost(postId: string): Promise<void> {
     await apiRequest<void>(`${API_V1}/posts/${postId}`, { method: 'DELETE' });
   },

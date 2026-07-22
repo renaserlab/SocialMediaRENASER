@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Course, EventItem } from '@/types';
@@ -33,6 +35,10 @@ export function ProfileSection({ kind, profileId }: Props) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Elemento en edicion; solo el administrador puede abrirlo. */
+  const [editing, setEditing] = useState<CatalogEditable | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
     if (!AuthRepository.enabled) {
@@ -71,7 +77,7 @@ export function ProfileSection({ kind, profileId }: Props) {
     return () => {
       alive = false;
     };
-  }, [kind, profileId]);
+  }, [kind, profileId, reloadKey]);
 
   if (loading) {
     return (
@@ -103,8 +109,18 @@ export function ProfileSection({ kind, profileId }: Props) {
               title={event.title}
               subtitle={`${event.date} • ${event.location}`}
               leftIcon="calendar"
-              rightIcon="chevron-right"
-              onPress={() => router.push('/events')}
+              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
+              onPress={() =>
+                isAdmin
+                  ? setEditing({
+                      id: event.id,
+                      title: event.title,
+                      description: event.description,
+                      startsAt: event.startsAtDate ?? null,
+                      location: event.location,
+                    })
+                  : router.push('/events')
+              }
             />
           ))
         : courses.map((course) => (
@@ -113,10 +129,28 @@ export function ProfileSection({ kind, profileId }: Props) {
               title={course.title}
               subtitle={course.subtitle || 'Ver programa'}
               leftIcon="book"
-              rightIcon="chevron-right"
-              onPress={() => router.push(`/course/${course.id}` as never)}
+              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
+              onPress={() =>
+                isAdmin
+                  ? setEditing({
+                      id: course.id,
+                      title: course.title,
+                      description: course.description,
+                      price: course.price,
+                    })
+                  : router.push(`/course/${course.id}` as never)
+              }
             />
           ))}
+      {editing ? (
+        <CreateCatalogSheet
+          kind={kind === 'eventos' ? 'evento' : 'curso'}
+          visible
+          editing={editing}
+          onClose={() => setEditing(null)}
+          onCreated={() => setReloadKey((k) => k + 1)}
+        />
+      ) : null}
     </View>
   );
 }

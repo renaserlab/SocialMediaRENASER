@@ -20,6 +20,7 @@ from app.modules.content.schemas import (
     CommentRead,
     PostCreate,
     PostMediaRead,
+    PostUpdate,
     PostRead,
 )
 from app.modules.notifications.service import add_notification
@@ -239,24 +240,74 @@ async def create_post(
     return _to_post_read(post, profile, 0, 0, 0, 0, media=media)
 
 
+async def _load_single_post(
+    db: AsyncSession, post_id: str, uid: str | None
+) -> PostRead:
+    """Una publicacion con autor, contadores y estado propio."""
+    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
+    row = (
+        await db.execute(
+            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+            .join(Profile, Profile.id == Post.author_id)
+            .where(Post.id == post_id, Post.status != "deleted")
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError("Publicacion no encontrada.")
+    media_map = await _load_media_map(db, [row[0].id])
+    return _to_post_read(*row, media=media_map.get(row[0].id, []))
+
+
 @router.get("/posts/{post_id}", response_model=PostRead)
 async def get_post(
     post_id: str,
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostRead:
-    uid = current_user.id if current_user else None
-    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
-    stmt = (
-        select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
-        .join(Profile, Profile.id == Post.author_id)
-        .where(Post.id == post_id, Post.status != "deleted")
+    ensure_uuid(post_id, "Publicacion no encontrada.")
+    return await _load_single_post(
+        db, post_id, current_user.id if current_user else None
     )
-    row = (await db.execute(stmt)).first()
-    if row is None:
-        raise NotFoundError("Publicacion no encontrada.")
-    media_map = await _load_media_map(db, [row[0].id])
-    return _to_post_read(*row, media=media_map.get(row[0].id, []))
+
+
+@router.patch("/posts/{post_id}", response_model=PostRead)
+async def update_post(
+    post_id: str,
+    payload: PostUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PostRead:
+    """Edita una publicacion propia (texto y/o adjunto).
+
+    Solo el autor: un moderador puede retirar contenido, pero no reescribir lo
+    que otra persona dijo.
+    """
+    ensure_uuid(post_id, "Publicacion no encontrada.")
+    post = await _get_active_post(db, post_id)
+    if post.author_id != current_user.id:
+        raise ForbiddenError("No puedes editar esta publicacion.")
+
+    if payload.body is not None:
+        post.body = payload.body
+    if payload.visibility is not None:
+        post.visibility = payload.visibility
+
+    # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
+    # lista vacia equivale a quitarlo).
+    if payload.media is not None:
+        await db.execute(delete(PostMedia).where(PostMedia.post_id == post_id))
+        for index, item in enumerate(payload.media):
+            db.add(
+                PostMedia(
+                    post_id=post_id,
+                    storage_path=item.storage_path,
+                    media_type=item.media_type,
+                    sort_order=index,
+                )
+            )
+
+    await db.commit()
+    return await _load_single_post(db, post_id, current_user.id)
 
 
 @router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -17,6 +17,7 @@ import { AuthRepository } from '@/repositories/AuthRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -24,6 +25,7 @@ import type { Post } from '@/types';
 
 export function HomeScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const keyboardOffset = useKeyboardOffset();
   const posts = useAppStore((state) => state.posts);
@@ -110,7 +112,7 @@ export function HomeScreen() {
 
       <View style={styles.container}>
         <SegmentedControl
-          options={['Para ti', 'Siguiendo']}
+          options={[t('home.forYou'), t('home.following')]}
           selectedIndex={feedTab}
           onChange={changeTab}
           style={styles.tabs}
@@ -133,7 +135,7 @@ export function HomeScreen() {
           <Text style={[styles.composerText, { color: colors.textMuted }]}>
             {/* Sin nombre se saluda en generico: antes caia a un "Katherine"
                 fijo del demo y se le mostraba a cualquier usuario. */}
-            {firstName ? `¿Qué estás aprendiendo hoy, ${firstName}?` : '¿Qué estás aprendiendo hoy?'}
+            {firstName ? t('home.composerNamed', { name: firstName }) : t('home.composer')}
           </Text>
           <Feather name="plus-circle" size={24} color={colors.text} />
         </Pressable>
@@ -144,8 +146,8 @@ export function HomeScreen() {
             style={[styles.quickCard, { backgroundColor: colors.primary }]}
           >
             <Feather name="headphones" size={24} color={colors.onPrimary} />
-            <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>Audio privado</Text>
-            <Text style={[styles.quickBody, { color: colors.onPrimary }]}>Recomendación de tu quiz</Text>
+            <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>{t('home.privateAudio')}</Text>
+            <Text style={[styles.quickBody, { color: colors.onPrimary }]}>{t('home.privateAudioBody')}</Text>
           </Pressable>
           <Pressable
             onPress={() => circle && router.push(`/circle/${circle.id}` as never)}
@@ -153,10 +155,10 @@ export function HomeScreen() {
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
           >
             <Feather name="users" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Tu círculo</Text>
+            <Text style={[styles.quickTitle, { color: colors.text }]}>{t('home.yourCircle')}</Text>
             {/* Contador real; antes era "423 personas" escrito a mano. */}
             <Text style={[styles.quickBody, { color: colors.textMuted }]}>
-              {circle ? `${circle.members} personas avanzando` : 'Únete a la comunidad'}
+              {circle ? t('home.circleMembers', { count: circle.members }) : t('home.joinCommunity')}
             </Text>
           </Pressable>
         </View>
@@ -194,7 +196,7 @@ export function HomeScreen() {
               ) : null}
             </View>
             <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
-              Eventos
+              {t('home.events')}
             </Text>
             {isAdmin ? (
               <Pressable
@@ -203,11 +205,11 @@ export function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Agregar evento"
               >
-                <Text style={[styles.addChipText, { color: colors.text }]}>Agregar evento</Text>
+                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addEvent')}</Text>
               </Pressable>
             ) : (
               <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
-                Encuentros y experiencias
+                {t('home.eventsBody')}
               </Text>
             )}
           </View>
@@ -243,7 +245,7 @@ export function HomeScreen() {
               ) : null}
             </View>
             <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
-              Cursos
+              {t('home.courses')}
             </Text>
             {isAdmin ? (
               <Pressable
@@ -252,11 +254,11 @@ export function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Agregar curso"
               >
-                <Text style={[styles.addChipText, { color: colors.text }]}>Agregar curso</Text>
+                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addCourse')}</Text>
               </Pressable>
             ) : (
               <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
-                Programas para avanzar
+                {t('home.coursesBody')}
               </Text>
             )}
           </View>
@@ -288,7 +290,7 @@ export function HomeScreen() {
   ) : feedStatus === 'error' ? (
     <StateView state="error" onRetry={() => void loadFeed()} />
   ) : (
-    <StateView state="empty" title="Aún no hay publicaciones" description="Vuelve más tarde o crea la primera." />
+    <StateView state="empty" title={t('home.emptyTitle')} description={t('home.emptyBody')} />
   );
 
   return (

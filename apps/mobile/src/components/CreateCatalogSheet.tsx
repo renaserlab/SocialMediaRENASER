@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -16,12 +16,26 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 export type CatalogKind = 'evento' | 'curso';
 
+/** Elemento existente cuando la hoja se usa para editar. */
+export type CatalogEditable = {
+  id: string;
+  title: string;
+  description: string;
+  /** Solo eventos. */
+  startsAt?: Date | null;
+  location?: string;
+  /** Solo cursos, en la unidad mayor. */
+  price?: number;
+};
+
 type Props = {
   kind: CatalogKind;
   visible: boolean;
   onClose: () => void;
-  /** Se llama tras crear, para que la pantalla recargue su listado. */
+  /** Se llama tras crear o editar, para recargar el listado. */
   onCreated?: () => void;
+  /** Si llega, la hoja edita ese elemento en vez de crear uno nuevo. */
+  editing?: CatalogEditable | null;
 };
 
 /** dd/mm/aaaa + hh:mm -> Date. Devuelve null si la combinacion no es valida. */
@@ -57,7 +71,7 @@ function parseDateTime(day: string, time: string): Date | null {
  * El permiso real lo aplica el backend (`require_admin` contra
  * `profiles.role`). Esta hoja solo se muestra a quien puede usarla.
  */
-export function CreateCatalogSheet({ kind, visible, onClose, onCreated }: Props) {
+export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing }: Props) {
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
 
@@ -70,6 +84,25 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated }: Props)
   const [price, setPrice] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Al abrir en modo edicion se precargan los valores actuales.
+  useEffect(() => {
+    if (!visible) return;
+    if (!editing) {
+      reset();
+      return;
+    }
+    setTitle(editing.title);
+    setDescription(editing.description);
+    setPrice(editing.price != null ? String(editing.price) : '');
+    setPlace(editing.location ?? '');
+    if (editing.startsAt) {
+      const d = editing.startsAt;
+      const two = (n: number) => String(n).padStart(2, '0');
+      setDay(`${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`);
+      setTime(`${two(d.getHours())}:${two(d.getMinutes())}`);
+    }
+  }, [visible, editing]);
 
   const reset = () => {
     setCover(null);
@@ -118,24 +151,31 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated }: Props)
       const coverPath = cover ? (await uploadPostMedia(cover)).storagePath : null;
 
       if (isEvent) {
-        await CatalogRepository.createEvent({
+        const data = {
           title: title.trim(),
           description: description.trim(),
           startsAt: startsAt!,
           location: place.trim(),
-          coverPath,
-        });
+          // `undefined` deja la portada intacta al editar; solo se envia si se
+          // eligio una nueva.
+          ...(coverPath ? { coverPath } : {}),
+        };
+        if (editing) await CatalogRepository.updateEvent(editing.id, data);
+        else await CatalogRepository.createEvent({ ...data, coverPath });
       } else {
-        await LearningRepository.createCourse({
+        const data = {
           title: title.trim(),
           description: description.trim(),
           price: Number(price) || 0,
-          currency: 'PEN',
-          coverPath,
-        });
+          ...(coverPath ? { coverPath } : {}),
+        };
+        if (editing) await LearningRepository.updateCourse(editing.id, data);
+        else await LearningRepository.createCourse({ ...data, currency: 'PEN', coverPath });
       }
       notify(
-        isEvent ? 'Evento publicado' : 'Curso publicado',
+        editing
+          ? isEvent ? 'Evento actualizado' : 'Curso actualizado'
+          : isEvent ? 'Evento publicado' : 'Curso publicado',
         'Ya está disponible para la comunidad.',
       );
       onCreated?.();
@@ -150,7 +190,9 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated }: Props)
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.sheetTitle} color={colors.text}>
-        {isEvent ? 'Nuevo evento' : 'Nuevo curso'}
+        {editing
+          ? isEvent ? 'Editar evento' : 'Editar curso'
+          : isEvent ? 'Nuevo evento' : 'Nuevo curso'}
       </Text>
 
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
@@ -166,7 +208,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated }: Props)
             <View style={styles.coverEmpty}>
               <Feather name="image" size={22} color={colors.textMuted} />
               <Text variant="secondary" color={colors.textMuted}>
-                Portada ({isEvent ? 'foto o banner' : 'imagen del curso'})
+                {editing ? 'Cambiar portada (opcional)' : `Portada (${isEvent ? 'foto o banner' : 'imagen del curso'})`}
               </Text>
             </View>
           )}
@@ -209,7 +251,11 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated }: Props)
         ) : null}
 
         <Button
-          label={isEvent ? 'Publicar evento' : 'Publicar curso'}
+          label={
+            editing
+              ? 'Guardar cambios'
+              : isEvent ? 'Publicar evento' : 'Publicar curso'
+          }
           onPress={() => void submit()}
           loading={saving}
           style={styles.submit}

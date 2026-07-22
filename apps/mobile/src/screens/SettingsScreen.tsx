@@ -5,6 +5,8 @@ import { useRouter } from 'expo-router';
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
+import { LANGUAGE_NAMES } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 import { confirm } from '@/lib/confirm';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -13,6 +15,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 export function SettingsScreen() {
   const { colors, mode } = useAppTheme();
+  const { t, language } = useTranslation();
   const router = useRouter();
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const resetDemo = useAppStore((state) => state.resetDemo);
@@ -50,25 +53,25 @@ export function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Ajustes" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader title={t('settings.title')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <ScrollView contentContainerStyle={styles.list}>
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Visualización</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.display')}</Text>
         <ListRow
-          title="Modo Oscuro"
-          subtitle={`Actualmente: ${mode === 'dark' ? 'Oscuro' : 'Claro'}`}
+          title={t('settings.darkMode')}
+          subtitle={t('settings.currently', { value: mode === 'dark' ? t('settings.dark') : t('settings.light') })}
           leftIcon="moon"
           rightIcon="refresh-cw"
           onPress={toggleTheme}
         />
         <ListRow
-          title="Idioma de la App"
-          subtitle="Español (ES)"
+          title={t('settings.language')}
+          subtitle={LANGUAGE_NAMES[language]}
           leftIcon="globe"
           rightIcon="chevron-right"
           onPress={() => router.push('/language')}
         />
 
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Cuenta & Membresía</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.account')}</Text>
         {isLoggedIn && user && (
           <ListRow
             title={user.fullName || user.username}
@@ -77,23 +80,23 @@ export function SettingsScreen() {
           />
         )}
         <ListRow
-          title="Verificación de Cuenta"
-          subtitle="Ver estado de tu membresía"
+          title={t('settings.verification')}
+          subtitle={t('settings.verificationBody')}
           leftIcon="check-circle"
           rightIcon="chevron-right"
           onPress={() => router.push('/verification')}
         />
         {isLoggedIn ? (
           <ListRow
-            title="Cerrar Sesión"
-            subtitle="Salir de tu cuenta en este dispositivo"
+            title={t('settings.signOut')}
+            subtitle={t('settings.signOutBody')}
             leftIcon="log-out"
             destructive
             onPress={handleSignOut}
           />
         ) : (
           <ListRow
-            title="Iniciar Sesión"
+            title={t('settings.signIn')}
             subtitle="Accede para publicar y comentar"
             leftIcon="log-in"
             rightIcon="chevron-right"
@@ -101,10 +104,10 @@ export function SettingsScreen() {
           />
         )}
 
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Sistema</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
         <ListRow
-          title="Reiniciar Aplicación"
-          subtitle="Restaurar base de datos y reiniciar demo"
+          title={t('settings.reset')}
+          subtitle={t('settings.resetBody')}
           leftIcon="trash-2"
           onPress={handleReset}
         />

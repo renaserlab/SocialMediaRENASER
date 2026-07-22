@@ -31,6 +31,27 @@ class CourseCreate(BaseModel):
     currency: str = Field(default="PEN", pattern="^[A-Z]{3}$")
 
 
+class EventUpdate(BaseModel):
+    """Edicion de evento. Solo administradores; todos los campos opcionales."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+    starts_at: datetime | None = None
+    location: str | None = Field(default=None, max_length=200)
+    cover_path: str | None = Field(default=None, max_length=500)
+    event_type: str | None = Field(default=None, pattern="^(online|presential|live)$")
+
+
+class CourseUpdate(BaseModel):
+    """Edicion de curso. Solo administradores."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+    cover_path: str | None = Field(default=None, max_length=500)
+    price: int | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, pattern="^[A-Z]{3}$")
+
+
 class EventRead(BaseModel):
     id: str
     organizer_id: str

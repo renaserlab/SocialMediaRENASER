@@ -8,6 +8,7 @@ import { PostRepository, type FeedKind } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { StoryRepository } from '@/repositories/StoryRepository';
 import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
+import type { Language } from '@/i18n';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
@@ -50,6 +51,9 @@ type AppState = {
   markStoryViewed: (storyId: string) => void;
 
   languageSelected: boolean;
+  /** Idioma de la interfaz. Se persiste con el resto de preferencias. */
+  language: Language;
+  setLanguage: (language: Language) => void;
   setLanguageSelected: (value: boolean) => void;
 
   setHydrated: (hydrated: boolean) => void;
@@ -135,6 +139,8 @@ export const useAppStore = create<AppState>()(
       storiesStatus: 'idle',
 
       languageSelected: false,
+      language: 'es',
+      setLanguage: (language) => set({ language }),
       setLanguageSelected: (value) => set({ languageSelected: value }),
 
       setHydrated: (hydrated) => set({ hydrated }),
@@ -517,6 +523,7 @@ export const useAppStore = create<AppState>()(
           purchasedCourseIds: [],
           conversations,
           languageSelected: false,
+          language: 'es',
         }),
     }),
     {
@@ -532,6 +539,7 @@ export const useAppStore = create<AppState>()(
         user: state.user,
         onboardingComplete: state.onboardingComplete,
         languageSelected: state.languageSelected,
+        language: state.language,
         quizAnswers: state.quizAnswers,
         quizResult: state.quizResult,
         likedPostIds: state.likedPostIds,
