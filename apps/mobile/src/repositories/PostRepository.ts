@@ -69,7 +69,11 @@ export const PostRepository = {
    */
   async listByAuthor(
     authorId: string,
-    { media, limit = 30 }: { media?: 'image' | 'video' | 'audio'; limit?: number } = {},
+    {
+      media,
+      limit = 30,
+      category,
+    }: { media?: 'image' | 'video' | 'audio'; limit?: number; category?: string } = {},
     currentUserId?: string | null,
   ): Promise<Post[]> {
     const params = new URLSearchParams({
@@ -78,6 +82,7 @@ export const PostRepository = {
       author_id: authorId,
     });
     if (media) params.set('media', media);
+    if (category) params.set('category', category);
     const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items, dtos);
@@ -108,11 +113,13 @@ export const PostRepository = {
     body: string,
     media: UploadedMedia[] = [],
     currentUserId?: string | null,
+    category?: string | null,
   ): Promise<Post> {
     const dto = await apiRequest<PostDto>(`${API_V1}/posts`, {
       method: 'POST',
       body: JSON.stringify({
         body,
+        category: category ?? null,
         media: media.map((m) => ({
           storage_path: m.storagePath,
           media_type: m.mediaType,
@@ -130,11 +137,12 @@ export const PostRepository = {
    */
   async updatePost(
     postId: string,
-    changes: { body?: string; media?: UploadedMedia[] },
+    changes: { body?: string; media?: UploadedMedia[]; category?: string | null },
     currentUserId?: string | null,
   ): Promise<Post> {
     const payload: Record<string, unknown> = {};
     if (changes.body !== undefined) payload.body = changes.body;
+    if (changes.category !== undefined) payload.category = changes.category;
     if (changes.media !== undefined) {
       payload.media = changes.media.map((m) => ({
         storage_path: m.storagePath,

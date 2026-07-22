@@ -5,8 +5,10 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
+import { CATEGORIES, type CategoryId } from '@/data/categories';
 import { notify } from '@/lib/confirm';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -86,6 +88,8 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
   const [time, setTime] = useState('');
   const [place, setPlace] = useState('');
   const [price, setPrice] = useState('');
+  /** Solo podcast: categoria del episodio, para los filtros. */
+  const [category, setCategory] = useState<CategoryId | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -117,6 +121,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
     setTime('');
     setPlace('');
     setPrice('');
+    setCategory(null);
     setError(null);
   };
 
@@ -172,7 +177,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         // Un episodio es una publicacion de audio: reutiliza la subida, el
         // firmado y los permisos que ya existen, sin una tabla nueva.
         const uploaded = await uploadPostMedia(audio!);
-        await PostRepository.createPost(title.trim(), [uploaded]);
+        await PostRepository.createPost(title.trim(), [uploaded], undefined, category);
       } else if (isEvent) {
         const data = {
           title: title.trim(),
@@ -269,6 +274,22 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         />
         ) : null}
 
+        {isPodcast ? (
+          <View style={styles.categories}>
+            <Text variant="secondary" color={colors.textMuted}>Categoría</Text>
+            <View style={styles.chips}>
+              {CATEGORIES.map((c) => (
+                <Chip
+                  key={c.id}
+                  label={c.label}
+                  selected={category === c.id}
+                  onPress={() => setCategory(category === c.id ? null : c.id)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         {isEvent ? (
           <>
             <Input label="Día" value={day} onChangeText={setDay} placeholder="dd/mm/aaaa" />
@@ -323,6 +344,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: spacing.md,
   },
+  categories: { gap: spacing.sm, marginBottom: spacing.md },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   audioPicker: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md,

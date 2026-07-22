@@ -6,8 +6,10 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { CATEGORIES, type CategoryId } from '@/data/categories';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { PostRepository } from '@/repositories/PostRepository';
 import {
@@ -45,6 +47,8 @@ export function EditPostScreen() {
   const [post, setPost] = useState<Post | null>(null);
   const [text, setText] = useState('');
   const [media, setMedia] = useState<MediaChange>(null);
+  /** Categoría, solo relevante en los audios (episodios del podcast). */
+  const [category, setCategory] = useState<CategoryId | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState<UploadProgress['phase'] | null>(null);
@@ -57,6 +61,7 @@ export function EditPostScreen() {
     if (cached) {
       setPost(cached);
       setText(cached.body);
+      setCategory((cached.category as CategoryId | null) ?? null);
       setLoading(false);
       return;
     }
@@ -67,6 +72,7 @@ export function EditPostScreen() {
         if (!alive) return;
         setPost(found);
         setText(found?.body ?? '');
+        setCategory((found?.category as CategoryId | null) ?? null);
       })
       .catch(() => {})
       .finally(() => {
@@ -96,8 +102,13 @@ export function EditPostScreen() {
     setSaving(true);
     setError(null);
     try {
-      const changes: { body?: string; media?: Awaited<ReturnType<typeof uploadPostMedia>>[] } = {};
+      const changes: {
+        body?: string;
+        media?: Awaited<ReturnType<typeof uploadPostMedia>>[];
+        category?: string | null;
+      } = {};
       if (text.trim() !== post.body) changes.body = text.trim();
+      if ((category ?? null) !== (post.category ?? null)) changes.category = category;
       if (media === 'remove') {
         changes.media = [];
       } else if (media) {
@@ -212,6 +223,24 @@ export function EditPostScreen() {
             </Text>
           ) : null}
 
+          {/* Los audios son episodios del podcast: su categoría alimenta los
+              filtros de esa sección. */}
+          {post.mediaType === 'audio' ? (
+            <View style={styles.categories}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Categoría</Text>
+              <View style={styles.chips}>
+                {CATEGORIES.map((c) => (
+                  <Chip
+                    key={c.id}
+                    label={c.label}
+                    selected={category === c.id}
+                    onPress={() => setCategory(category === c.id ? null : c.id)}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : null}
+
           {error ? (
             <View style={[styles.errorBox, { borderColor: colors.danger, backgroundColor: colors.surfaceAlt }]}>
               <Feather name="alert-triangle" size={18} color={colors.danger} />
@@ -246,6 +275,8 @@ const styles = StyleSheet.create({
     width: 30, height: 30, borderRadius: 15,
     backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
   },
+  categories: { gap: spacing.sm, marginBottom: spacing.lg },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   removedNote: { fontSize: 13, marginBottom: spacing.lg },
   errorBox: {
     flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,

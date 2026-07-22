@@ -65,7 +65,7 @@ export function AudioScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Audio privado para ti" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader title="Esta es una invitación para ti" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>Basado en el resultado de tu quiz</Text>

@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
 import { ListRow } from '@/components/ListRow';
 import { PodcastList } from '@/components/PodcastList';
+import { CATEGORIES, type CategoryId } from '@/data/categories';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
@@ -53,6 +55,8 @@ export function ProfileSection({ kind, profileId }: Props) {
 
   /** Alta desde la propia seccion; solo el administrador la ve. */
   const [creating, setCreating] = useState(false);
+  /** Filtro del podcast; `null` = Todos. */
+  const [category, setCategory] = useState<CategoryId | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
@@ -66,7 +70,7 @@ export function ProfileSection({ kind, profileId }: Props) {
       kind === 'podcast'
         ? PostRepository.listByAuthor(
             profileId ?? '',
-            { media: 'audio', limit: 60 },
+            { media: 'audio', limit: 60, ...(category ? { category } : {}) },
             profileId,
           ).then((list) => {
             // El episodio 1 es el mas antiguo; el backend devuelve al reves.
@@ -102,7 +106,7 @@ export function ProfileSection({ kind, profileId }: Props) {
     return () => {
       alive = false;
     };
-  }, [kind, profileId, reloadKey]);
+  }, [kind, profileId, reloadKey, category]);
 
   if (loading) {
     return (
@@ -117,6 +121,23 @@ export function ProfileSection({ kind, profileId }: Props) {
   if (kind === 'podcast') {
     return (
       <View>
+        {/* Filtros por categoria; "Todos" es simplemente sin filtro. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filters}
+        >
+          <Chip label="Todos" selected={category === null} onPress={() => setCategory(null)} />
+          {CATEGORIES.map((c) => (
+            <Chip
+              key={c.id}
+              label={c.label}
+              selected={category === c.id}
+              onPress={() => setCategory(c.id)}
+            />
+          ))}
+        </ScrollView>
+
         {isAdmin ? (
           <Button
             label="Agregar audio"
@@ -125,7 +146,7 @@ export function ProfileSection({ kind, profileId }: Props) {
             onPress={() => setCreating(true)}
           />
         ) : null}
-        <PodcastList episodes={episodes} />
+        <PodcastList episodes={episodes} showLockedSlots={category === null} />
         {creating ? (
           <CreateCatalogSheet
             kind="podcast"
@@ -210,4 +231,5 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
   list: { marginTop: spacing.md },
+  filters: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm },
 });

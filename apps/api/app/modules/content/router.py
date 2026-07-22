@@ -94,6 +94,7 @@ def _to_post_read(
         body=post.body,
         status=post.status,
         visibility=post.visibility,
+        category=post.category,
         created_at=post.created_at,
         media=media or [],
         likes_count=lc or 0,
@@ -152,6 +153,7 @@ async def list_posts(
     circle_id: str | None = Query(default=None),
     media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     exclude_media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
+    category: str | None = Query(default=None, max_length=40),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -199,6 +201,9 @@ async def list_posts(
         with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
         stmt = stmt.where(Post.id.in_(with_media))
 
+    if category:
+        stmt = stmt.where(Post.category == category)
+
     if exclude_media:
         # El feed de Inicio excluye los audios: son episodios del podcast y
         # tienen su propia seccion, no deben repetirse en el muro.
@@ -219,6 +224,7 @@ async def create_post(
         author_id=current_user.id,
         body=payload.body,
         visibility=payload.visibility,
+        category=payload.category,
     )
     db.add(post)
     await db.commit()
@@ -303,6 +309,8 @@ async def update_post(
         post.body = payload.body
     if payload.visibility is not None:
         post.visibility = payload.visibility
+    if payload.category is not None:
+        post.category = payload.category
 
     # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
     # lista vacia equivale a quitarlo).

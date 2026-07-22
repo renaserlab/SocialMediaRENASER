@@ -49,6 +49,8 @@ export type Post = {
   mediaUrl?: string;
   /** Tipo del medio remoto: imagen, video o audio. */
   mediaType?: 'image' | 'video' | 'audio';
+  /** Categoría temática; alimenta los filtros del podcast. */
+  category?: string | null;
   likes: number;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */

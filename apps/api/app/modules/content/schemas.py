@@ -33,6 +33,8 @@ class PostCreate(BaseModel):
     media: list[PostMediaInput] = Field(default_factory=list, max_length=4)
     # Compatibilidad: rutas de imagen sin tipo explícito.
     image_paths: list[str] = Field(default_factory=list, max_length=4)
+    # Etiqueta tematica (los filtros del podcast). Libre pero acotada.
+    category: str | None = Field(default=None, max_length=40)
 
 
 class PostUpdate(BaseModel):
@@ -45,11 +47,13 @@ class PostUpdate(BaseModel):
     body: str | None = Field(default=None, min_length=1, max_length=3000)
     visibility: str | None = Field(default=None, pattern=r"^(public|followers|circle)$")
     media: list[PostMediaInput] | None = Field(default=None, max_length=4)
+    category: str | None = Field(default=None, max_length=40)
 
 
 class PostRead(BaseModel):
     id: str
     author: AuthorSummary
+    category: str | None = None
     body: str
     status: str
     visibility: str
