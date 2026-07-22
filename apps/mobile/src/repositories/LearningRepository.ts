@@ -31,7 +31,18 @@ export const LearningRepository = {
     const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses`, {
       auth: false,
     });
-    return dtos.map(toCourseFromSummary);
+    const courses = dtos.map(toCourseFromSummary);
+
+    // Las portadas viven en el bucket privado post-media: hay que firmarlas en
+    // lote para poder mostrarlas en las tarjetas.
+    const paths = courses.map((c) => c.coverPath).filter((p): p is string => !!p);
+    if (paths.length > 0) {
+      const urls = await signMediaUrls(paths);
+      courses.forEach((course) => {
+        if (course.coverPath) course.coverUrl = urls[course.coverPath];
+      });
+    }
+    return courses;
   },
 
   /** Publica un curso. Solo administradores (lo comprueba el backend). */

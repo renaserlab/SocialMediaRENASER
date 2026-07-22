@@ -168,6 +168,20 @@ export const CourseContentRepository = {
     if (error) throw new Error(error.message);
   },
 
+  /**
+   * Elimina el curso entero. Modulos, lecciones y recursos caen en cascada
+   * (`on delete cascade`). La RLS (courses_write) solo lo permite al autor o a
+   * la administracion.
+   *
+   * OJO: un curso con compras tiene `on delete restrict` en purchases, asi que
+   * la base lo rechazara si alguien ya lo compro. Es intencionado: no se borra
+   * algo por lo que alguien pago.
+   */
+  async removeCourse(courseId: string): Promise<void> {
+    const { error } = await client().from('courses').delete().eq('id', courseId);
+    if (error) throw new Error(error.message);
+  },
+
   /** Material descargable de una leccion, con las URLs ya firmadas. */
   async listResources(lessonId: string): Promise<LessonResourceFile[]> {
     const { data, error } = await client()

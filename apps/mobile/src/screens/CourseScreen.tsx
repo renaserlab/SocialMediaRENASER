@@ -123,6 +123,7 @@ export function CourseScreen() {
           }}
           onClose={() => setEditing(false)}
           onCreated={reload}
+          onDeleted={() => (router.canGoBack() ? router.back() : router.replace('/'))}
         />
       ) : null}
     </View>
@@ -140,7 +141,9 @@ function Info({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: str
 }
 
 const styles = StyleSheet.create({
-  hero: { width: '100%', aspectRatio: 1.1, resizeMode: 'cover', borderWidth: 1 },
+  // 16:9 en vez de 1.1: una portada panoramica se recortaba de forma agresiva
+  // en un lienzo casi cuadrado. Este ratio respeta mejor la imagen que se sube.
+  hero: { width: '100%', aspectRatio: 16 / 9, resizeMode: 'cover' },
   container: { padding: spacing.xl },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   price: { fontSize: 20, fontWeight: '900', marginTop: spacing.md },
