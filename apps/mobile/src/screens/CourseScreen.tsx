@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
@@ -21,6 +22,8 @@ export function CourseScreen() {
   // Curso a través de la capa de repositorio (mock hoy, backend mañana).
   const { course, lessons, loading, error, reload } = useCourse(id);
   const purchasedIds = useAppStore((state) => state.purchasedCourseIds);
+  // Solo la administracion edita el temario; la RLS lo impone de verdad.
+  const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
   // Primera leccion sin completar; si estan todas, la primera del curso.
   const firstLessonId = (lessons.find((l) => !l.completed) ?? lessons[0])?.id;
 
@@ -69,6 +72,18 @@ export function CourseScreen() {
             </View>
           ))}
 
+          {/*
+            Temario real del curso. Para el alumno es la lista de contenidos;
+            para la administracion es ademas el editor de modulos y lecciones.
+          */}
+          <View style={styles.contentBlock}>
+            <CourseContentEditor
+              courseId={course.id}
+              canEdit={isAdmin}
+              onOpenLesson={(lessonId) => router.push(`/lesson/${lessonId}` as never)}
+            />
+          </View>
+
           <Button
             label={purchased ? 'Ir al curso' : 'Comprar ahora'}
             // Antes abria siempre '/lesson/1', un id de demo: con datos reales
@@ -105,6 +120,7 @@ const styles = StyleSheet.create({
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  contentBlock: { marginTop: spacing.xl },
   sectionTitle: { fontSize: 18, fontWeight: '900', marginBottom: spacing.lg },
   bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, marginBottom: spacing.md },
   bullet: { flex: 1, fontSize: 14, lineHeight: 20 },
