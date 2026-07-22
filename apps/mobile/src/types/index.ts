@@ -101,6 +101,10 @@ export type Course = {
   /** Quién publica el curso; permite listar los de un perfil. */
   authorId?: string;
   title: string;
+  /** Ruta de la portada en Storage (bucket post-media). */
+  coverPath?: string | null;
+  /** URL firmada de la portada, ya resuelta por el repositorio. */
+  coverUrl?: string;
   subtitle: string;
   price: number;
   currency: 'PEN' | 'MXN' | 'USD';

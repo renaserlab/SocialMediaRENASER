@@ -386,6 +386,90 @@ export async function uploadProfileImage(
 }
 
 /** Firma en lote rutas de post-media para poder mostrarlas (bucket privado). */
+const COURSE_BUCKET = 'course-media';
+
+/**
+ * Sube el video (o material) de una leccion y devuelve su RUTA.
+ *
+ * Va al bucket `course-media`, no a `post-media`: admite 2 GB por archivo
+ * (0004_storage_limits) y sus politicas solo dejan escribir a la
+ * administracion. Se guarda la ruta, no la URL, porque el bucket es privado y
+ * las firmas caducan.
+ */
+export async function uploadCourseMedia(
+  media: PickedMedia,
+  onProgress?: (progress: UploadProgress) => void,
+): Promise<string> {
+  if (!supabase) throw new Error('Almacenamiento no disponible.');
+  const { data } = await supabase.auth.getSession();
+  const session = data.session;
+  const uid = session?.user?.id;
+  if (!session || !uid) throw new Error('Inicia sesión para subir el contenido.');
+
+  let uri = media.uri;
+  if (compressionAvailable && media.kind === 'video') {
+    try {
+      onProgress?.({ phase: 'compressing', ratio: 0 });
+      uri = await compressVideo(media.uri, (ratio) =>
+        onProgress?.({ phase: 'compressing', ratio }),
+      );
+    } catch {
+      uri = media.uri;
+    }
+  }
+
+  const ext = resolveExtension({ ...media, uri, name: null });
+  const path = `${uid}/${randomName(ext)}`;
+  const contentType = resolveContentType({ ...media, mimeType: null }, ext);
+
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');
+  const blob = await response.blob();
+  if (blob.size === 0) throw new Error('El archivo seleccionado está vacío.');
+
+  onProgress?.({ phase: 'uploading', ratio: 0 });
+
+  // Igual que en las publicaciones: por encima del umbral, subida reanudable.
+  if (blob.size > RESUMABLE_THRESHOLD && supabaseUrl) {
+    const { done } = uploadResumable({
+      supabaseUrl,
+      accessToken: session.access_token,
+      bucket: COURSE_BUCKET,
+      path,
+      file: blob,
+      contentType,
+      onProgress: (ratio) => onProgress?.({ phase: 'uploading', ratio }),
+    });
+    try {
+      await done;
+    } catch (error) {
+      throw new Error(describeStorageError(error));
+    }
+    return path;
+  }
+
+  const { error } = await supabase.storage
+    .from(COURSE_BUCKET)
+    .upload(path, blob, { contentType, upsert: false });
+  if (error) throw new Error(describeStorageError(error));
+  onProgress?.({ phase: 'uploading', ratio: 1 });
+  return path;
+}
+
+/** Firma rutas del bucket `course-media` (privado, como post-media). */
+export async function signCourseUrls(paths: string[]): Promise<Record<string, string>> {
+  if (!supabase || paths.length === 0) return {};
+  const { data, error } = await supabase.storage
+    .from(COURSE_BUCKET)
+    .createSignedUrls(paths, SIGNED_URL_TTL);
+  if (error || !data) return {};
+  const map: Record<string, string> = {};
+  for (const item of data) {
+    if (item.path && item.signedUrl) map[item.path] = item.signedUrl;
+  }
+  return map;
+}
+
 export async function signMediaUrls(
   paths: string[],
 ): Promise<Record<string, string>> {

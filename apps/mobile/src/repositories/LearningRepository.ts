@@ -1,4 +1,5 @@
 import { apiRequest, API_V1 } from '@/services/api';
+import { signMediaUrls } from '@/services/storage';
 import {
   CourseDetailDto,
   CourseDto,
@@ -30,7 +31,18 @@ export const LearningRepository = {
     const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses`, {
       auth: false,
     });
-    return dtos.map(toCourseFromSummary);
+    const courses = dtos.map(toCourseFromSummary);
+
+    // Las portadas viven en el bucket privado post-media: hay que firmarlas en
+    // lote para poder mostrarlas en las tarjetas.
+    const paths = courses.map((c) => c.coverPath).filter((p): p is string => !!p);
+    if (paths.length > 0) {
+      const urls = await signMediaUrls(paths);
+      courses.forEach((course) => {
+        if (course.coverPath) course.coverUrl = urls[course.coverPath];
+      });
+    }
+    return courses;
   },
 
   /** Publica un curso. Solo administradores (lo comprueba el backend). */
@@ -93,8 +105,16 @@ export const LearningRepository = {
             completed: lesson.completed,
           })),
       );
+    const course = toCourseFromDetail(dto);
+    // La portada se guarda como RUTA en el bucket privado post-media (es donde
+    // la sube CreateCatalogSheet), asi que hay que firmarla para poder verla.
+    if (course.coverPath) {
+      const urls = await signMediaUrls([course.coverPath]);
+      course.coverUrl = urls[course.coverPath];
+    }
+
     return {
-      course: toCourseFromDetail(dto),
+      course,
       enrolled: dto.enrolled ?? false,
       progressPercent: dto.progress_percent ?? 0,
       lessons,

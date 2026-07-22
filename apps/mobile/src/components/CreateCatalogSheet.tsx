@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
@@ -10,7 +10,9 @@ import { DateField } from '@/components/DateField';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
-import { notify } from '@/lib/confirm';
+import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
+import { CourseContentRepository } from '@/repositories/CourseContentRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { pickAudio, pickImage, uploadPostMedia, type PickedMedia } from '@/services/storage';
@@ -42,6 +44,8 @@ type Props = {
   onCreated?: () => void;
   /** Si llega, la hoja edita ese elemento en vez de crear uno nuevo. */
   editing?: CatalogEditable | null;
+  /** Al eliminar (solo cursos): la pantalla decide si volver atras. */
+  onDeleted?: () => void;
 };
 
 /** dd/mm/aaaa + hh:mm -> Date. Devuelve null si la combinacion no es valida. */
@@ -77,7 +81,7 @@ function parseDateTime(day: string, time: string): Date | null {
  * El permiso real lo aplica el backend (`require_admin` contra
  * `profiles.role`). Esta hoja solo se muestra a quien puede usarla.
  */
-export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing }: Props) {
+export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing, onDeleted }: Props) {
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
   /** El audio privado usa el mismo formulario que un episodio. */
@@ -143,9 +147,39 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
     setError(null);
   };
 
+  const [deleting, setDeleting] = useState(false);
+
   const close = () => {
     reset();
     onClose();
+  };
+
+  /** Elimina el curso. Modulos, lecciones y recursos caen en cascada. */
+  const deleteCourse = async () => {
+    if (!editing) return;
+    const accepted = await confirm({
+      title: 'Eliminar curso',
+      message:
+        'Se eliminarán sus módulos, lecciones y recursos. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      destructive: true,
+    });
+    if (!accepted) return;
+    setDeleting(true);
+    try {
+      await CourseContentRepository.removeCourse(editing.id);
+      toast('Curso eliminado');
+      onDeleted?.();
+      onCreated?.();
+      onClose();
+    } catch (error) {
+      notify(
+        'No se pudo eliminar',
+        error instanceof Error ? error.message : 'Puede que tenga compras asociadas.',
+      );
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const chooseAudio = async () => {
@@ -395,6 +429,31 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           loading={saving}
           style={styles.submit}
         />
+
+        {/* Eliminar el curso, solo al editar uno existente. */}
+        {editing && kind === 'curso' ? (
+          <Pressable
+            onPress={() => void deleteCourse()}
+            disabled={deleting}
+            accessibilityRole="button"
+            accessibilityLabel="Eliminar curso"
+            style={({ pressed }) => [
+              styles.delete,
+              { borderColor: colors.danger, opacity: pressed || deleting ? 0.6 : 1 },
+            ]}
+          >
+            {deleting ? (
+              <ActivityIndicator color={colors.danger} size="small" />
+            ) : (
+              <>
+                <Feather name="trash-2" size={16} color={colors.danger} />
+                <Text variant="body" weight="700" color={colors.danger}>
+                  Eliminar curso
+                </Text>
+              </>
+            )}
+          </Pressable>
+        ) : null}
       </ScrollView>
     </BottomSheet>
   );
@@ -424,5 +483,15 @@ const styles = StyleSheet.create({
   },
   coverEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
   error: { marginTop: spacing.sm },
+  delete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    marginTop: spacing.md,
+  },
   submit: { marginTop: spacing.lg, marginBottom: spacing.lg },
 });

@@ -1,16 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
+import { BottomSheet } from '@/components/BottomSheet';
+import { Button } from '@/components/Button';
+import { Input } from '@/components/Input';
+import { LessonResources } from '@/components/LessonResources';
 import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useLesson } from '@/hooks/useLesson';
+import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
+import { CourseContentRepository } from '@/repositories/CourseContentRepository';
+import { useAppStore } from '@/store/useAppStore';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { assets } from '@/data/assets';
 import { SAMPLE_VIDEO_URL } from '@/data/media';
-import { signMediaUrls } from '@/services/storage';
+import { signCourseUrls } from '@/services/storage';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -20,6 +29,10 @@ export function LessonScreen() {
   const router = useRouter();
 
   const { lesson, loading, error, reload } = useLesson(id);
+  const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [savingDescription, setSavingDescription] = useState(false);
 
   // El video vive en un bucket privado: hay que firmar su ruta para verlo.
   // En modo demo (sin backend) se sigue usando el clip de ejemplo.
@@ -35,7 +48,10 @@ export function LessonScreen() {
       setVideoUrl(null);
       return;
     }
-    signMediaUrls([mediaPath])
+    // El video de una leccion se sube al bucket course-media (2 GB), no a
+    // post-media: firmarlo contra el bucket equivocado devolvia nada y la
+    // pantalla decia "esta leccion aun no tiene video".
+    signCourseUrls([mediaPath])
       .then((urls) => {
         if (alive) setVideoUrl(urls[mediaPath] ?? null);
       })
@@ -65,9 +81,50 @@ export function LessonScreen() {
     );
   }
 
+  /** La descripcion se guarda en course_lessons.body, que ya existia. */
+  const saveDescription = async () => {
+    setSavingDescription(true);
+    try {
+      await CourseContentRepository.updateLesson(lesson.id, { body: descriptionDraft.trim() });
+      toast('Descripción guardada');
+      setEditingDescription(false);
+      reload();
+    } catch (error) {
+      notify('No se pudo guardar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+    } finally {
+      setSavingDescription(false);
+    }
+  };
+
+  /** Solo la administracion borra; la RLS lo impone de verdad. */
+  const removeLesson = async () => {
+    const accepted = await confirm({
+      title: 'Eliminar lección',
+      message: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      destructive: true,
+    });
+    if (!accepted) return;
+    try {
+      await CourseContentRepository.removeLesson(lesson.id);
+      toast('Lección eliminada');
+      if (router.canGoBack()) router.back();
+      else router.replace('/');
+    } catch {
+      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title="Lección del Curso"
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        // Eliminar vive aqui y no en el temario: alli tocar la fila borraba la
+        // leccion, de modo que no habia forma de abrirla para revisarla.
+        rightIcon={isAdmin ? 'trash-2' : undefined}
+        onRightPress={isAdmin ? () => void removeLesson() : undefined}
+      />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/*
           Video de ESTA lección. Antes era `SAMPLE_VIDEO_URL`, un clip de
@@ -97,41 +154,63 @@ export function LessonScreen() {
 
         <View style={styles.details}>
           <Text style={[styles.title, { color: colors.text }]}>
-            Lección {lesson.order}: {lesson.title}
+            Lección {lesson.order + 1}: {lesson.title}
           </Text>
           <Text style={[styles.duration, { color: colors.textMuted }]}>
             Duración: {lesson.durationMin} min
             {lesson.mentor ? ` • Mentor: ${lesson.mentor}` : ''}
           </Text>
 
-          {/*
-            El backend aun no guarda transcripcion ni recursos por leccion. Se
-            ocultan las secciones vacias en vez de dejar la cabecera sola.
-          */}
-          {lesson.summary ? (
+          {/* Descripcion de la leccion; solo la edita la administracion. */}
+          {lesson.summary || isAdmin ? (
             <>
               <View style={[styles.divider, { backgroundColor: colors.border }]} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Transcripción / Resumen</Text>
-              <Text style={[styles.bodyText, { color: colors.text, lineHeight: 22 }]}>{lesson.summary}</Text>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>Descripción</Text>
+                {isAdmin ? (
+                  <Pressable
+                    onPress={() => {
+                      setDescriptionDraft(lesson.summary ?? '');
+                      setEditingDescription(true);
+                    }}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel="Editar descripción"
+                  >
+                    <Feather name="edit-2" size={16} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <Text style={[styles.bodyText, { color: lesson.summary ? colors.text : colors.textMuted, lineHeight: 22 }]}>
+                {lesson.summary || 'Sin descripción todavía.'}
+              </Text>
             </>
           ) : null}
 
-          {lesson.resources.length > 0 ? (
-            <>
-              <View style={[styles.divider, { backgroundColor: colors.border }]} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Recursos del Curso</Text>
-              {lesson.resources.map((resource) => (
-                <ListRow
-                  key={resource.id}
-                  title={resource.title}
-                  subtitle={resource.subtitle}
-                  leftIcon={resource.icon}
-                />
-              ))}
-            </>
-          ) : null}
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <LessonResources lessonId={lesson.id} canEdit={isAdmin} />
         </View>
       </ScrollView>
+
+      <BottomSheet visible={editingDescription} onClose={() => setEditingDescription(false)}>
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>Descripción de la lección</Text>
+        <Input
+          value={descriptionDraft}
+          onChangeText={setDescriptionDraft}
+          placeholder="De qué trata esta lección…"
+          placeholderTextColor={colors.textMuted}
+          multiline
+          numberOfLines={5}
+          textAlignVertical="top"
+          style={{ color: colors.text, minHeight: 120 }}
+        />
+        <Button
+          label="Guardar"
+          onPress={() => void saveDescription()}
+          loading={savingDescription}
+          style={{ marginTop: spacing.lg }}
+        />
+      </BottomSheet>
     </View>
   );
 }
@@ -158,6 +237,14 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     marginVertical: spacing.sm,
+  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  sheetTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: spacing.md,
   },
   sectionTitle: {
     fontSize: 14,
