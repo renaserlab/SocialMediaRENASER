@@ -20,6 +20,7 @@ from app.modules.learning.schemas import (
     ModuleRead,
 )
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
@@ -43,6 +44,7 @@ async def get_course_detail(
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseDetailRead:
+    ensure_uuid(course_id, "Curso no encontrado.")
     course = await db.get(Course, course_id)
     if course is None:
         raise NotFoundError("Curso no encontrado.")
@@ -159,6 +161,7 @@ async def get_lesson_detail(
     La app abre `/lesson/<id>` sin conocer el curso, asi que aqui se resuelve
     el contexto (modulo y curso) con un solo join.
     """
+    ensure_uuid(lesson_id, "Lección no encontrada.")
     row = (
         await db.execute(
             select(CourseLesson, CourseModule, Course)

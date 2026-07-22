@@ -34,6 +34,20 @@ export async function fetchCourseById(id: string): Promise<Course | null> {
     return all.find((c) => c.id === id) ?? all[0] ?? null;
   }
 
-  const detail = await LearningRepository.getCourseDetail(id);
+  const detail = await LearningRepository.getCourseDetail(await resolveCourseId(id));
   return detail.course;
+}
+
+/** Los ids reales son UUID; el prototipo enlazaba por slug. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Varias pantallas siguen enlazando al slug del prototipo
+ * ('lider-vida-empresa'). En vez de pedir un id inexistente, se resuelve al
+ * primer curso real del catálogo.
+ */
+export async function resolveCourseId(id: string): Promise<string> {
+  if (UUID_RE.test(id)) return id;
+  const all = await LearningRepository.listCourses();
+  return all[0]?.id ?? id;
 }

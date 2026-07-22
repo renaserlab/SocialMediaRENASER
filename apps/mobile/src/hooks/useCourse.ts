@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
-import { fetchCourseById } from '@/services/repositories/courses';
+import { fetchCourseById, resolveCourseId } from '@/services/repositories/courses';
 import type { Course } from '@/types';
 
 /**
@@ -30,7 +30,7 @@ export function useCourse(id?: string) {
     try {
       if (AuthRepository.enabled) {
         // Una sola llamada trae el curso y su desglose de lecciones.
-        const detail = await LearningRepository.getCourseDetail(id);
+        const detail = await LearningRepository.getCourseDetail(await resolveCourseId(id));
         setCourse(detail.course);
         setLessons(detail.lessons);
       } else {
