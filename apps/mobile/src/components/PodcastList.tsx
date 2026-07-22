@@ -12,7 +12,7 @@ import type { Post } from '@/types';
 /** Episodios visibles en la lista, aunque todavia no existan. */
 export const TOTAL_EPISODES = 30;
 /** Cuantos se pueden escuchar; del siguiente en adelante van con candado. */
-export const FREE_EPISODES = 4;
+export const FREE_EPISODES = 5;
 
 type Props = {
   /** Audios publicados, del mas antiguo al mas reciente (episodio 1 primero). */

@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
+import { Button } from '@/components/Button';
 import { ListRow } from '@/components/ListRow';
 import { PodcastList } from '@/components/PodcastList';
 import { Text } from '@/components/Text';
@@ -41,6 +42,17 @@ export function ProfileSection({ kind, profileId }: Props) {
   /** Elemento en edicion; solo el administrador puede abrirlo. */
   const [editing, setEditing] = useState<CatalogEditable | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  /**
+   * Se recarga al volver a la pantalla. Sin esto, publicar un episodio (o un
+   * evento) desde otra vista no se reflejaba aqui: la lista se habia pedido al
+   * montar y no se volvia a pedir, asi que lo recien subido no aparecia.
+   */
+  useFocusEffect(reload);
+
+  /** Alta desde la propia seccion; solo el administrador la ve. */
+  const [creating, setCreating] = useState(false);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
@@ -105,7 +117,23 @@ export function ProfileSection({ kind, profileId }: Props) {
   if (kind === 'podcast') {
     return (
       <View>
+        {isAdmin ? (
+          <Button
+            label="Agregar audio"
+            variant="secondary"
+            icon="plus"
+            onPress={() => setCreating(true)}
+          />
+        ) : null}
         <PodcastList episodes={episodes} />
+        {creating ? (
+          <CreateCatalogSheet
+            kind="podcast"
+            visible
+            onClose={() => setCreating(false)}
+            onCreated={reload}
+          />
+        ) : null}
       </View>
     );
   }
@@ -171,7 +199,7 @@ export function ProfileSection({ kind, profileId }: Props) {
           visible
           editing={editing}
           onClose={() => setEditing(null)}
-          onCreated={() => setReloadKey((k) => k + 1)}
+          onCreated={reload}
         />
       ) : null}
     </View>
