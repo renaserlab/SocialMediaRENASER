@@ -13,11 +13,16 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
-import { course, events, people } from '@/data/mockData';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { CatalogRepository } from '@/repositories/CatalogRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
+import type { ProfileSummary } from '@/mappers/profileMapper';
+import { avatarPublicUrl } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import type { Person, Post } from '@/types';
+import type { Course, EventItem, Post } from '@/types';
 
 const RECENTS_KEY = 'renaser-recent-searches';
 const MAX_RECENTS = 6;
@@ -28,7 +33,7 @@ type CatalogHit = { id: string; title: string; subtitle: string; href: string };
 type SearchRow =
   | { kind: 'section'; key: string; title: string; onAction?: () => void }
   | { kind: 'recent'; key: string; value: string }
-  | { kind: 'person'; key: string; person: Person }
+  | { kind: 'person'; key: string; person: ProfileSummary }
   | { kind: 'post'; key: string; post: Post }
   | { kind: 'catalog'; key: string; item: CatalogHit };
 
@@ -64,20 +69,59 @@ export function SearchScreen() {
   const term = query.trim().toLowerCase();
   const isSearching = term.length >= 2;
 
+  // Personas: busqueda en el backend, no sobre una lista fija de demo.
+  const [remotePeople, setRemotePeople] = useState<ProfileSummary[]>([]);
+  useEffect(() => {
+    if (!isSearching || !AuthRepository.enabled) {
+      setRemotePeople([]);
+      return;
+    }
+    let alive = true;
+    // Pequeña espera para no lanzar una peticion por cada tecla.
+    const timer = setTimeout(() => {
+      ProfileRepository.search(term)
+        .then((list) => {
+          if (alive) setRemotePeople(list);
+        })
+        .catch(() => {
+          if (alive) setRemotePeople([]);
+        });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [term, isSearching]);
+
+  // Catalogo real, cargado una vez.
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [allEvents, setAllEvents] = useState<EventItem[]>([]);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    LearningRepository.listCourses().then(setCourses).catch(() => setCourses([]));
+    CatalogRepository.listEvents()
+      .then((page) => setAllEvents(page.items))
+      .catch(() => setAllEvents([]));
+  }, []);
+
   const results = useMemo(() => {
     if (!isSearching) return { people: [], posts: [], catalog: [] };
     const match = (text: string) => text.toLowerCase().includes(term);
     return {
-      people: people.filter((p) => match(p.fullName) || match(p.username)),
+      // Las personas las resuelve el backend (ver el efecto de arriba); el
+      // catalogo se filtra en cliente porque son pocos elementos.
+      people: remotePeople,
       posts: posts.filter((p) => match(p.body) || match(p.author)),
       catalog: [
-        ...(match(course.title) ? [{ id: course.id, title: course.title, subtitle: 'Programa', href: `/course/${course.id}` }] : []),
-        ...events
+        ...courses
+          .filter((c) => match(c.title) || match(c.description))
+          .map((c) => ({ id: c.id, title: c.title, subtitle: 'Programa', href: `/course/${c.id}` })),
+        ...allEvents
           .filter((e) => match(e.title) || match(e.description))
           .map((e) => ({ id: e.id, title: e.title, subtitle: `${e.date} · ${e.location}`, href: '/events' })),
       ],
     };
-  }, [term, isSearching, posts]);
+  }, [term, isSearching, posts, remotePeople, courses, allEvents]);
 
   const total = results.people.length + results.posts.length + results.catalog.length;
 
@@ -168,7 +212,14 @@ export function SearchScreen() {
                 <ListRow
                   title={row.person.fullName}
                   subtitle={row.person.username}
-                  leftComponent={<ExpoImage source={assets[row.person.avatar]} style={styles.avatar} contentFit="cover" />}
+                  leftComponent={
+                    <ExpoImage
+                      source={avatarPublicUrl(row.person.avatarPath) ? { uri: avatarPublicUrl(row.person.avatarPath)! } : assets.avatar}
+                      style={styles.avatar}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                  }
                   rightIcon="chevron-right"
                   onPress={() => {
                     persistRecent(query);

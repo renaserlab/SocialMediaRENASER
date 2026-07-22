@@ -116,6 +116,8 @@ export type Lesson = {
   mentor: string;
   summary: string;
   resources: LessonResource[];
+  /** Ruta del video en Storage; la pantalla la firma para reproducirlo. */
+  mediaPath?: string | null;
 };
 
 /** Un tramo real de historia, tal y como lo devuelve el backend. */

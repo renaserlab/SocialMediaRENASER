@@ -49,6 +49,22 @@ export const ProfileRepository = {
     return dtos.map(toProfileSummary);
   },
 
+  /** Quienes siguen a este perfil. */
+  async listFollowers(profileId: string): Promise<ProfileSummary[]> {
+    const dtos = await apiRequest<ProfileSummaryDto[]>(
+      `${API_V1}/profiles/${profileId}/followers?limit=50`,
+    );
+    return dtos.map(toProfileSummary);
+  },
+
+  /** A quienes sigue este perfil. */
+  async listFollowing(profileId: string): Promise<ProfileSummary[]> {
+    const dtos = await apiRequest<ProfileSummaryDto[]>(
+      `${API_V1}/profiles/${profileId}/following?limit=50`,
+    );
+    return dtos.map(toProfileSummary);
+  },
+
   async follow(profileId: string): Promise<number> {
     const res = await apiRequest<{ following: boolean; followers_count: number }>(
       `${API_V1}/profiles/${profileId}/follow`,

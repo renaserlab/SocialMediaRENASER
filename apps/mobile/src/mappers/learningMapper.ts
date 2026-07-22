@@ -7,6 +7,8 @@ export type LessonDto = {
   duration_seconds: number;
   sort_order: number;
   completed: boolean;
+  /** Ruta del video en Storage; hay que firmarla para reproducirlo. */
+  media_path?: string | null;
 };
 
 export type LessonDetailDto = LessonDto & {
@@ -113,5 +115,6 @@ export function toLesson(dto: LessonDetailDto): Lesson {
     mentor: '',
     summary: '',
     resources: [],
+    mediaPath: dto.media_path ?? null,
   };
 }

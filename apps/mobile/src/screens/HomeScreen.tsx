@@ -13,6 +13,8 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -30,6 +32,15 @@ export function HomeScreen() {
   const feedLoadingMore = useAppStore((state) => state.feedLoadingMore);
   const loadFeed = useAppStore((state) => state.loadFeed);
   const loadMoreFeed = useAppStore((state) => state.loadMoreFeed);
+
+  // Circulo destacado real, para el contador y el enlace de la tarjeta.
+  const [circle, setCircle] = useState<CircleDetail | null>(null);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    CommunityRepository.list()
+      .then((list) => setCircle(list[0] ?? null))
+      .catch(() => setCircle(null));
+  }, []);
 
   const [feedTab, setFeedTab] = useState(0);
 
@@ -106,12 +117,16 @@ export function HomeScreen() {
             <Text style={[styles.quickBody, { color: colors.onPrimary }]}>Recomendación de tu quiz</Text>
           </Pressable>
           <Pressable
-            onPress={() => router.push('/circle/lideres-renaser')}
+            onPress={() => circle && router.push(`/circle/${circle.id}` as never)}
+            disabled={!circle}
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
           >
             <Feather name="users" size={24} color={colors.text} />
             <Text style={[styles.quickTitle, { color: colors.text }]}>Tu círculo</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>423 personas avanzando</Text>
+            {/* Contador real; antes era "423 personas" escrito a mano. */}
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>
+              {circle ? `${circle.members} personas avanzando` : 'Únete a la comunidad'}
+            </Text>
           </Pressable>
         </View>
       </View>

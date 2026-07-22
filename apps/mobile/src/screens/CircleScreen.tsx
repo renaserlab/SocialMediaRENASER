@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -7,18 +7,22 @@ import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Card } from '@/components/Card';
+import { PostCard } from '@/components/PostCard';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Tabs } from '@/components/Tabs';
 import { assets } from '@/data/assets';
 import { useCircle } from '@/hooks/useCircle';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { PostRepository } from '@/repositories/PostRepository';
+import { useAppStore } from '@/store/useAppStore';
+import type { Post } from '@/types';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-const circlePosts = [
-  { author: 'Darren Hardy', text: 'Bienvenidos a este espacio. Aquí compartimos, aprendemos y nos impulsamos a nuestro siguiente nivel.', likes: 128, comments: 24 },
-  { author: 'Ana Sofía', text: 'Hoy puse un límite que llevaba meses postergando. Se sintió incómodo, pero también liberador.', likes: 84, comments: 17 },
-];
+// Las publicaciones del circulo ya NO son un array fijo firmado por gente del
+// demo: se piden al backend filtrando por `circle_id` y se pintan con la misma
+// tarjeta que el feed, para no mantener dos versiones de lo mismo.
 
 export function CircleScreen() {
   const { colors } = useAppTheme();
@@ -30,9 +34,26 @@ export function CircleScreen() {
   const { circle, loading, error, reload } = useCircle(id);
 
   const [activeTab, setActiveTab] = useState('Feed');
-  const [likedPosts, setLikedPosts] = useState<Record<number, boolean>>({});
+  const [circlePosts, setCirclePosts] = useState<Post[]>([]);
 
-  const toggleLike = (index: number) => setLikedPosts((prev) => ({ ...prev, [index]: !prev[index] }));
+  const currentUserId = useAppStore((state) => state.user?.id);
+
+  // Publicaciones reales del circulo. `circle.id` es el UUID ya resuelto por
+  // useCircle, incluso si se entro por el slug antiguo.
+  useEffect(() => {
+    if (!circle?.id || !AuthRepository.enabled) return;
+    let alive = true;
+    PostRepository.listByCircle(circle.id, currentUserId)
+      .then((posts) => {
+        if (alive) setCirclePosts(posts);
+      })
+      .catch(() => {
+        if (alive) setCirclePosts([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [circle?.id, currentUserId]);
 
   if (loading) {
     return (
@@ -89,45 +110,13 @@ export function CircleScreen() {
                 />
               </View>
 
-              {circlePosts.map((post, index) => {
-                const liked = !!likedPosts[index];
-                return (
-                  <Card key={post.author} style={styles.postCard}>
-                    <View style={styles.authorRow}>
-                      <Image source={post.author === 'Darren Hardy' ? assets.speaker : assets.avatar} style={styles.avatar} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.author, { color: colors.text }]}>{post.author}</Text>
-                        <Text style={[styles.date, { color: colors.textMuted }]}>Hace 3 horas</Text>
-                      </View>
-                      <Feather name="more-horizontal" size={20} color={colors.textMuted} />
-                    </View>
-
-                    <Text style={[styles.postText, { color: colors.text }]}>{post.text}</Text>
-
-                    <View style={[styles.actions, { borderTopColor: colors.border }]}>
-                      <Pressable
-                        onPress={() => toggleLike(index)}
-                        style={styles.action}
-                        accessibilityLabel="Me gusta"
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: liked }}
-                      >
-                        <Feather name="heart" size={18} color={liked ? colors.danger : colors.text} />
-                        <Text style={{ color: colors.text, fontSize: 13 }}>{post.likes + (liked ? 1 : 0)}</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => router.push(`/comments/circle-${index}` as any)}
-                        style={styles.action}
-                        accessibilityLabel="Comentarios"
-                        accessibilityRole="button"
-                      >
-                        <Feather name="message-square" size={18} color={colors.text} />
-                        <Text style={{ color: colors.text, fontSize: 13 }}>{post.comments}</Text>
-                      </Pressable>
-                    </View>
-                  </Card>
-                );
-              })}
+              {circlePosts.length === 0 ? (
+                <Text style={[styles.emptyPosts, { color: colors.textMuted }]}>
+                  Aún no hay publicaciones en este círculo.
+                </Text>
+              ) : (
+                circlePosts.map((post) => <PostCard key={post.id} post={post} />)
+              )}
             </React.Fragment>
           )}
 
@@ -153,6 +142,7 @@ export function CircleScreen() {
 }
 
 const styles = StyleSheet.create({
+  emptyPosts: { textAlign: 'center', paddingVertical: spacing.xl, fontSize: 13 },
   header: { alignItems: 'center', paddingHorizontal: spacing.xl, marginTop: spacing.md },
   circleImage: { width: 90, height: 90, borderRadius: 45, borderWidth: 1 },
   title: { fontSize: 20, fontWeight: '900', textAlign: 'center', marginTop: spacing.md },

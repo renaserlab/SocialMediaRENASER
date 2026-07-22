@@ -82,6 +82,26 @@ export const PostRepository = {
     return items;
   },
 
+  /** Publicaciones con video, en orden reciente: alimentan los reels. */
+  async listVideos(currentUserId?: string | null): Promise<Post[]> {
+    const dtos = await apiRequest<PostDto[]>(
+      `${API_V1}/posts?limit=30&offset=0&media=video`,
+    );
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
+  },
+
+  /** Publicaciones de un círculo. */
+  async listByCircle(circleId: string, currentUserId?: string | null): Promise<Post[]> {
+    const dtos = await apiRequest<PostDto[]>(
+      `${API_V1}/posts?limit=30&offset=0&circle_id=${encodeURIComponent(circleId)}`,
+    );
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
+  },
+
   async createPost(
     body: string,
     media: UploadedMedia[] = [],

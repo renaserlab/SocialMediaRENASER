@@ -95,6 +95,7 @@ async def get_course_detail(
                     duration_seconds=lesson.duration_seconds,
                     sort_order=lesson.sort_order,
                     completed=done,
+                    media_path=lesson.media_path,
                 )
             )
         module_reads.append(
@@ -187,6 +188,7 @@ async def get_lesson_detail(
         duration_seconds=lesson.duration_seconds,
         sort_order=lesson.sort_order,
         completed=completed,
+        media_path=lesson.media_path,
         course_id=course.id,
         course_title=course.title,
         module_title=module.title,

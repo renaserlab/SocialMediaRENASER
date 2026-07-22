@@ -9,6 +9,9 @@ class LessonRead(BaseModel):
     duration_seconds: int
     sort_order: int
     completed: bool = False
+    # Ruta del video dentro de Storage. La columna existia desde 0001 pero no
+    # se exponia, asi que la app no podia reproducir el video real de nadie.
+    media_path: str | None = None
 
 
 class LessonDetailRead(LessonRead):

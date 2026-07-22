@@ -148,6 +148,7 @@ async def list_posts(
     page: Page = Depends(pagination_params),
     feed: str = Query(default="all", pattern="^(all|following)$"),
     author_id: str | None = Query(default=None),
+    circle_id: str | None = Query(default=None),
     media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
@@ -182,6 +183,10 @@ async def list_posts(
         # Un id con otro formato llegaria a Postgres y reventaria la consulta.
         ensure_uuid(author_id, "Perfil no encontrado.")
         stmt = stmt.where(Post.author_id == author_id)
+
+    if circle_id:
+        ensure_uuid(circle_id, "Círculo no encontrado.")
+        stmt = stmt.where(Post.circle_id == circle_id)
 
     if media:
         with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
