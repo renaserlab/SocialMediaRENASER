@@ -401,7 +401,13 @@ export function ProfileScreen() {
           </View>
 
           {activeSection ? (
-            <ProfileSection kind={activeSection} profileId={galleryOwnerId} />
+            <ProfileSection
+              kind={activeSection}
+              profileId={galleryOwnerId}
+              ownerIsAdmin={
+                isRealPublic ? publicProfile?.isAdmin === true : currentUser?.isAdmin === true
+              }
+            />
           ) : (
           /* Publicaciones reales del perfil: fotos/videos. */
           <ProfileGallery

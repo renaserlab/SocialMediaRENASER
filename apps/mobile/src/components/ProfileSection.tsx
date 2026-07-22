@@ -19,6 +19,7 @@ import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { TestimonialRepository } from '@/repositories/TestimonialRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -52,6 +53,11 @@ type Props = {
   kind: ProfileSectionKind;
   /** Perfil dueño de la sección: solo se muestra lo que ha creado. */
   profileId?: string;
+  /**
+   * Si el dueño del perfil administra la aplicación. El podcast, los eventos
+   * y los cursos son suyos: en un perfil normal no hay nada que enseñar.
+   */
+  ownerIsAdmin?: boolean;
 };
 
 /**
@@ -60,7 +66,7 @@ type Props = {
  * Darren administra la aplicacion, asi que su perfil es donde viven los
  * eventos y los cursos: las tarjetas del inicio traen aqui a cualquier usuario.
  */
-export function ProfileSection({ kind, profileId }: Props) {
+export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -75,6 +81,22 @@ export function ProfileSection({ kind, profileId }: Props) {
   const [editing, setEditing] = useState<CatalogEditable | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  /** Lleva al podcast del administrador, resolviendo quien es. */
+  const openAdminPodcast = useCallback(async () => {
+    try {
+      const featured = await ProfileRepository.listFeatured();
+      const admin = featured.find((m) => m.isAdmin) ?? featured[0];
+      if (admin) {
+        router.push({
+          pathname: '/profile/[id]',
+          params: { id: admin.id, section: 'podcast' },
+        } as never);
+      }
+    } catch {
+      // Sin red no se puede resolver; el usuario puede ir desde el inicio.
+    }
+  }, [router]);
 
   /**
    * Se recarga al volver a la pantalla. Sin esto, publicar un episodio (o un
@@ -183,6 +205,30 @@ export function ProfileSection({ kind, profileId }: Props) {
 
   // El podcast siempre pinta sus 30 filas, aunque aun no haya episodios: la
   // lista bloqueada es parte de lo que se quiere mostrar.
+  if (kind === 'podcast' && !ownerIsAdmin) {
+    // Sin catalogo propio no tiene sentido enseñar 30 huecos bloqueados ni los
+    // filtros: solo confunde. Se explica donde estan los episodios.
+    return (
+      <View style={styles.center}>
+        <Feather name="headphones" size={30} color={colors.textMuted} />
+        <Text variant="body" weight="700" style={styles.centerText}>
+          Aún no tienes podcast
+        </Text>
+        <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
+          Los episodios de RENASER están en el perfil de Darren. Entra desde la
+          tarjeta «Podcast» del inicio o visita su perfil.
+        </Text>
+        <Button
+          label="Ir al podcast de RENASER"
+          variant="secondary"
+          icon="headphones"
+          onPress={() => void openAdminPodcast()}
+          style={styles.centerAction}
+        />
+      </View>
+    );
+  }
+
   if (kind === 'podcast') {
     return (
       <View>
@@ -402,8 +448,9 @@ export function ProfileSection({ kind, profileId }: Props) {
 }
 
 const styles = StyleSheet.create({
-  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl },
+  center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
+  centerAction: { marginTop: spacing.md },
   list: { marginTop: spacing.md },
   // `filters` es de los chips de categoria del podcast. El de la galeria se
   // llama `testimonialFilters` para no pisarlo: ambos se anadieron a la vez.
