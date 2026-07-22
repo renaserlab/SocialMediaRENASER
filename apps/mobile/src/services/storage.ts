@@ -54,19 +54,28 @@ const DEFAULT_EXT: Record<MediaKind, string> = {
 // Selección
 // --------------------------------------------------------------------------
 
-/**
- * Abre la galería y devuelve la imagen elegida (o null si se cancela).
- *
- * `aspect` solo lo respeta Android; en iOS el recorte siempre es cuadrado.
- */
-export async function pickImage(aspect?: [number, number]): Promise<PickedMedia | null> {
+export type PickImageOptions = {
+  /** Proporción del recorte. Solo la respeta Android. */
+  aspect?: [number, number];
+  /**
+   * Recorte antes de subir. Debe ir a `false` para banners: con `true`, iOS
+   * fuerza un recorte CUADRADO y una portada apaisada pierde los bordes.
+   */
+  allowsEditing?: boolean;
+};
+
+/** Abre la galería y devuelve la imagen elegida (o null si se cancela). */
+export async function pickImage(
+  options: PickImageOptions = {},
+): Promise<PickedMedia | null> {
+  const { aspect, allowsEditing = true } = options;
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
   // `MediaTypeOptions` esta deprecado en expo-image-picker 17: se usa el array.
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     quality: 0.8,
-    allowsEditing: true,
+    allowsEditing,
     aspect,
   });
   if (result.canceled) return null;
@@ -80,13 +89,16 @@ export async function pickImage(aspect?: [number, number]): Promise<PickedMedia 
  *
  * `aspect` solo lo respeta Android; en iOS el recorte siempre es cuadrado.
  */
-export async function takePhoto(aspect?: [number, number]): Promise<PickedMedia | null> {
+export async function takePhoto(
+  options: PickImageOptions = {},
+): Promise<PickedMedia | null> {
+  const { aspect, allowsEditing = true } = options;
   const permission = await ImagePicker.requestCameraPermissionsAsync();
   if (!permission.granted) return null;
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
     quality: 0.8,
-    allowsEditing: true,
+    allowsEditing,
     aspect,
   });
   if (result.canceled) return null;

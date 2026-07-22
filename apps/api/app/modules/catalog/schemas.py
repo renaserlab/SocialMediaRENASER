@@ -10,11 +10,16 @@ class EventCreate(BaseModel):
 
     title: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=2000)
-    #: Fecha y hora de inicio, ya combinadas por el cliente.
-    starts_at: datetime
+    #: Fecha y hora de inicio, ya combinadas por el cliente. Opcional: hay
+    #: eventos anunciados "por confirmar".
+    starts_at: datetime | None = None
+    #: Fin del evento; permite mostrar rangos ("25-26 de agosto").
+    ends_at: datetime | None = None
     location: str | None = Field(default=None, max_length=200)
     #: Ruta de la portada en Storage (no una URL): igual que avatar_path.
     cover_path: str | None = Field(default=None, max_length=500)
+    #: Invitacion al grupo de WhatsApp del evento.
+    whatsapp_url: str | None = Field(default=None, max_length=500)
     #: Valores admitidos por el CHECK de la tabla (0001_initial.sql). No usar
     #: otros: la fila se rechaza con `events_event_type_check`.
     event_type: str = Field(default="presential", pattern="^(online|presential|live)$")
@@ -37,8 +42,10 @@ class EventUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
     starts_at: datetime | None = None
+    ends_at: datetime | None = None
     location: str | None = Field(default=None, max_length=200)
     cover_path: str | None = Field(default=None, max_length=500)
+    whatsapp_url: str | None = Field(default=None, max_length=500)
     event_type: str | None = Field(default=None, pattern="^(online|presential|live)$")
 
 
@@ -57,10 +64,11 @@ class EventRead(BaseModel):
     organizer_id: str
     title: str
     description: str
-    starts_at: datetime
+    starts_at: datetime | None = None
     ends_at: datetime | None = None
     location: str | None = None
     cover_path: str | None = None
+    whatsapp_url: str | None = None
     event_type: str
     status: str
     capacity: int | None = None

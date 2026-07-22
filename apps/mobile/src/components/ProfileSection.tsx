@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -9,8 +9,12 @@ import { CreateTestimonialSheet, type TestimonialEditable } from '@/components/C
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
+import { EventCard } from '@/components/EventCard';
+import { EventDetailSheet } from '@/components/EventDetailSheet';
 import { ListRow } from '@/components/ListRow';
 import { PodcastList } from '@/components/PodcastList';
+import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
@@ -83,6 +87,10 @@ export function ProfileSection({ kind, profileId }: Props) {
   const [creating, setCreating] = useState(false);
   /** Testimonio en edicion; solo lo abre el administrador. */
   const [editingTestimonial, setEditingTestimonial] = useState<TestimonialEditable | null>(null);
+  /** Filtro del podcast; `null` = Todos. */
+  const [category, setCategory] = useState<CategoryId | null>(null);
+  /** Evento cuya ficha se esta viendo. */
+  const [detail, setDetail] = useState<EventItem | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
@@ -96,7 +104,12 @@ export function ProfileSection({ kind, profileId }: Props) {
       kind === 'podcast'
         ? PostRepository.listByAuthor(
             profileId ?? '',
-            { media: 'audio', limit: 60 },
+            {
+              media: 'audio',
+              limit: 60,
+              excludeCategory: PRIVATE_AUDIO_CATEGORY,
+              ...(category ? { category } : {}),
+            },
             profileId,
           ).then((list) => {
             // El episodio 1 es el mas antiguo; el backend devuelve al reves.
@@ -139,7 +152,9 @@ export function ProfileSection({ kind, profileId }: Props) {
     return () => {
       alive = false;
     };
-  }, [kind, profileId, reloadKey, testimonialFilter]);
+    // `testimonialFilter` es de la galeria y `category` del podcast: cada
+    // seccion recarga cuando cambia el suyo.
+  }, [kind, profileId, reloadKey, testimonialFilter, category]);
 
   const removeTestimonial = async (id: string) => {
     const accepted = await confirm({
@@ -171,6 +186,23 @@ export function ProfileSection({ kind, profileId }: Props) {
   if (kind === 'podcast') {
     return (
       <View>
+        {/* Filtros por categoria; "Todos" es simplemente sin filtro. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filters}
+        >
+          <Chip label="Todos" selected={category === null} onPress={() => setCategory(null)} />
+          {CATEGORIES.map((c) => (
+            <Chip
+              key={c.id}
+              label={c.label}
+              selected={category === c.id}
+              onPress={() => setCategory(c.id)}
+            />
+          ))}
+        </ScrollView>
+
         {isAdmin ? (
           <Button
             label="Agregar audio"
@@ -179,7 +211,11 @@ export function ProfileSection({ kind, profileId }: Props) {
             onPress={() => setCreating(true)}
           />
         ) : null}
-        <PodcastList episodes={episodes} />
+        <PodcastList
+          episodes={episodes}
+          showLockedSlots={category === null}
+          onEdit={isAdmin ? (id) => router.push(`/edit-post/${id}` as never) : undefined}
+        />
         {creating ? (
           <CreateCatalogSheet
             kind="podcast"
@@ -209,7 +245,7 @@ export function ProfileSection({ kind, profileId }: Props) {
           options={['Todos', 'Fotos', 'Videos']}
           selectedIndex={testimonialFilter}
           onChange={setTestimonialFilter}
-          style={styles.filters}
+          style={styles.testimonialFilters}
         />
 
         {testimonials.length === 0 ? (
@@ -311,22 +347,23 @@ export function ProfileSection({ kind, profileId }: Props) {
     <View style={styles.list}>
       {kind === 'eventos'
         ? events.map((event) => (
-            <ListRow
+            <EventCard
               key={event.id}
-              title={event.title}
-              subtitle={`${event.date} • ${event.location}`}
-              leftIcon="calendar"
-              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
-              onPress={() =>
+              event={event}
+              onPress={() => setDetail(event)}
+              onEdit={
                 isAdmin
-                  ? setEditing({
-                      id: event.id,
-                      title: event.title,
-                      description: event.description,
-                      startsAt: event.startsAtDate ?? null,
-                      location: event.location,
-                    })
-                  : router.push('/events')
+                  ? () =>
+                      setEditing({
+                        id: event.id,
+                        title: event.title,
+                        description: event.description,
+                        startsAt: event.startsAtDate ?? null,
+                        endsAt: event.endsAtDate ?? null,
+                        location: event.location,
+                        whatsappUrl: event.whatsappUrl ?? '',
+                      })
+                  : undefined
               }
             />
           ))
@@ -349,6 +386,8 @@ export function ProfileSection({ kind, profileId }: Props) {
               }
             />
           ))}
+      <EventDetailSheet event={detail} onClose={() => setDetail(null)} />
+
       {editing ? (
         <CreateCatalogSheet
           kind={kind === 'eventos' ? 'evento' : 'curso'}
@@ -366,7 +405,10 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
   list: { marginTop: spacing.md },
-  filters: { marginTop: spacing.md },
+  // `filters` es de los chips de categoria del podcast. El de la galeria se
+  // llama `testimonialFilters` para no pisarlo: ambos se anadieron a la vez.
+  filters: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm },
+  testimonialFilters: { marginTop: spacing.md },
   gallery: { marginTop: spacing.md, gap: spacing.md },
   testimonialCard: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden' },
   testimonialMedia: { width: '100%', height: 220 },

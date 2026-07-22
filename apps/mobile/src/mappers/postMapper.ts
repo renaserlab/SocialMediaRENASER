@@ -20,6 +20,8 @@ export type PostDto = {
   body: string;
   status: string;
   visibility: string;
+  /** Categoría temática; alimenta los filtros del podcast. */
+  category?: string | null;
   created_at: string;
   media: PostMediaDto[];
   likes_count: number;
@@ -77,6 +79,7 @@ export function toComment(dto: CommentDto): Comment {
  */
 export function toPost(dto: PostDto, currentUserId?: string | null): Post {
   return {
+    category: dto.category ?? null,
     id: dto.id,
     author: authorName(dto.author),
     authorId: dto.author.id,

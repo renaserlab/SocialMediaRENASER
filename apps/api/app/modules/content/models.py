@@ -31,6 +31,8 @@ class Post(Base):
     status: Mapped[str] = mapped_column(content_status, server_default="published")
     visibility: Mapped[str] = mapped_column(String(20), server_default="public")
     circle_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    # Etiqueta tematica; alimenta los filtros del podcast.
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

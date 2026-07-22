@@ -17,6 +17,14 @@ export const FREE_EPISODES = 5;
 type Props = {
   /** Audios publicados, del mas antiguo al mas reciente (episodio 1 primero). */
   episodes: Post[];
+  /**
+   * Pinta los huecos bloqueados hasta {@link TOTAL_EPISODES}. Se usa en la
+   * vista "Todos"; al filtrar por categoria se muestran solo sus episodios,
+   * porque los treinta huecos describen el catalogo completo, no el filtrado.
+   */
+  showLockedSlots?: boolean;
+  /** Solo lo recibe el administrador; abre la edicion del episodio. */
+  onEdit?: (postId: string) => void;
 };
 
 /**
@@ -29,14 +37,16 @@ type Props = {
  * Solo se monta el reproductor del episodio elegido: montar treinta a la vez
  * dejaria otros tantos decodificadores de audio abiertos.
  */
-export function PodcastList({ episodes }: Props) {
+export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const [playingId, setPlayingId] = useState<string | null>(null);
 
   return (
     <View style={styles.list}>
-      {Array.from({ length: TOTAL_EPISODES }, (_, index) => {
+      {Array.from(
+        { length: showLockedSlots ? TOTAL_EPISODES : episodes.length },
+        (_, index) => {
         const number = index + 1;
         const episode = episodes[index];
         const locked = index >= FREE_EPISODES;
@@ -73,6 +83,18 @@ export function PodcastList({ episodes }: Props) {
                 ) : null}
               </View>
 
+              {onEdit && episode ? (
+                <Pressable
+                  onPress={() => onEdit(episode.id)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Editar ${episode.body}`}
+                  style={styles.action}
+                >
+                  <Feather name="edit-2" size={15} color={colors.textMuted} />
+                </Pressable>
+              ) : null}
+
               {locked ? (
                 <View style={styles.action}>
                   <Feather name="lock" size={17} color={colors.textMuted} />
@@ -103,7 +125,13 @@ export function PodcastList({ episodes }: Props) {
             ) : null}
           </View>
         );
-      })}
+        },
+      )}
+      {!showLockedSlots && episodes.length === 0 ? (
+        <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
+          No hay episodios en esta categoría.
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -116,4 +144,5 @@ const styles = StyleSheet.create({
   info: { flex: 1 },
   action: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   play: { borderRadius: radius.pill },
+  empty: { textAlign: 'center', paddingVertical: spacing.xl },
 });

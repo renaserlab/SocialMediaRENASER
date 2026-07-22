@@ -49,6 +49,8 @@ export type Post = {
   mediaUrl?: string;
   /** Tipo del medio remoto: imagen, video o audio. */
   mediaType?: 'image' | 'video' | 'audio';
+  /** Categoría temática; alimenta los filtros del podcast. */
+  category?: string | null;
   likes: number;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */
@@ -79,6 +81,14 @@ export type EventItem = {
   organizerId?: string;
   /** Fecha real de inicio; `date` es solo el texto ya formateado. */
   startsAtDate?: Date;
+  /** Fin del evento; con el se muestran rangos ("25-26 de agosto"). */
+  endsAtDate?: Date | null;
+  /** Invitación al grupo de WhatsApp donde se dan los detalles. */
+  whatsappUrl?: string | null;
+  /** Ruta de la portada en Storage; hay que firmarla para mostrarla. */
+  coverPath?: string | null;
+  /** URL firmada de la portada, ya resuelta. */
+  coverUrl?: string;
   title: string;
   description: string;
   date: string;

@@ -133,7 +133,7 @@ export function ProfileScreen() {
     setEditingPhoto(null);
     const aspect: [number, number] = kind === 'avatar' ? [1, 1] : [16, 9];
     try {
-      const picked = source === 'gallery' ? await pickImage(aspect) : await takePhoto(aspect);
+      const picked = source === 'gallery' ? await pickImage({ aspect }) : await takePhoto({ aspect });
       if (!picked) return;
       await setProfileImage(kind, picked);
     } catch (error) {

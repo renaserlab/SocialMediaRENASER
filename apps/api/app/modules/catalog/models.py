@@ -26,12 +26,17 @@ class Event(Base):
     )
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Opcional: un evento puede anunciarse antes de cerrar la fecha.
+    starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=True
+    )
     ends_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Invitacion al grupo donde se dan los detalles del evento.
+    whatsapp_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_type: Mapped[str] = mapped_column(String(20), server_default="online")
     status: Mapped[str] = mapped_column(content_status, server_default="published")
     capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)

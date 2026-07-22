@@ -1,6 +1,7 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
 import { signMediaUrls, type UploadedMedia } from '@/services/storage';
+import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import type { Comment, Post } from '@/types';
 
 export type FeedPage = {
@@ -69,7 +70,17 @@ export const PostRepository = {
    */
   async listByAuthor(
     authorId: string,
-    { media, limit = 30 }: { media?: 'image' | 'video' | 'audio'; limit?: number } = {},
+    {
+      media,
+      limit = 30,
+      category,
+      excludeCategory,
+    }: {
+      media?: 'image' | 'video' | 'audio';
+      limit?: number;
+      category?: string;
+      excludeCategory?: string;
+    } = {},
     currentUserId?: string | null,
   ): Promise<Post[]> {
     const params = new URLSearchParams({
@@ -78,10 +89,25 @@ export const PostRepository = {
       author_id: authorId,
     });
     if (media) params.set('media', media);
+    if (category) params.set('category', category);
+    if (excludeCategory) params.set('exclude_category', excludeCategory);
     const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items, dtos);
     return items;
+  },
+
+  /**
+   * El audio privado vigente: el más reciente que el administrador haya
+   * marcado con la categoría reservada. `null` si aún no hay ninguno.
+   */
+  async getPrivateAudio(adminId: string, currentUserId?: string | null): Promise<Post | null> {
+    const list = await this.listByAuthor(
+      adminId,
+      { media: 'audio', limit: 1, category: PRIVATE_AUDIO_CATEGORY },
+      currentUserId,
+    );
+    return list[0] ?? null;
   },
 
   /** Publicaciones con video, en orden reciente: alimentan los reels. */
@@ -108,11 +134,13 @@ export const PostRepository = {
     body: string,
     media: UploadedMedia[] = [],
     currentUserId?: string | null,
+    category?: string | null,
   ): Promise<Post> {
     const dto = await apiRequest<PostDto>(`${API_V1}/posts`, {
       method: 'POST',
       body: JSON.stringify({
         body,
+        category: category ?? null,
         media: media.map((m) => ({
           storage_path: m.storagePath,
           media_type: m.mediaType,
@@ -130,11 +158,12 @@ export const PostRepository = {
    */
   async updatePost(
     postId: string,
-    changes: { body?: string; media?: UploadedMedia[] },
+    changes: { body?: string; media?: UploadedMedia[]; category?: string | null },
     currentUserId?: string | null,
   ): Promise<Post> {
     const payload: Record<string, unknown> = {};
     if (changes.body !== undefined) payload.body = changes.body;
+    if (changes.category !== undefined) payload.category = changes.category;
     if (changes.media !== undefined) {
       payload.media = changes.media.map((m) => ({
         storage_path: m.storagePath,

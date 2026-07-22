@@ -5,8 +5,11 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
+import { DateField } from '@/components/DateField';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
+import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
 import { notify } from '@/lib/confirm';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -15,7 +18,7 @@ import { PostRepository } from '@/repositories/PostRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-export type CatalogKind = 'evento' | 'curso' | 'podcast';
+export type CatalogKind = 'evento' | 'curso' | 'podcast' | 'privado';
 
 /** Elemento existente cuando la hoja se usa para editar. */
 export type CatalogEditable = {
@@ -24,7 +27,9 @@ export type CatalogEditable = {
   description: string;
   /** Solo eventos. */
   startsAt?: Date | null;
+  endsAt?: Date | null;
   location?: string;
+  whatsappUrl?: string;
   /** Solo cursos, en la unidad mayor. */
   price?: number;
 };
@@ -75,7 +80,9 @@ function parseDateTime(day: string, time: string): Date | null {
 export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing }: Props) {
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
-  const isPodcast = kind === 'podcast';
+  /** El audio privado usa el mismo formulario que un episodio. */
+  const isPrivate = kind === 'privado';
+  const isPodcast = kind === 'podcast' || isPrivate;
 
   const [cover, setCover] = useState<PickedMedia | null>(null);
   /** Solo para podcast: el archivo de audio del episodio. */
@@ -85,7 +92,13 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
   const [day, setDay] = useState('');
   const [time, setTime] = useState('');
   const [place, setPlace] = useState('');
+  /** Fin opcional del evento, para rangos de varios dias. */
+  const [endDay, setEndDay] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
   const [price, setPrice] = useState('');
+  /** Solo podcast: categoria del episodio, para los filtros. */
+  const [category, setCategory] = useState<CategoryId | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,11 +113,17 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
     setDescription(editing.description);
     setPrice(editing.price != null ? String(editing.price) : '');
     setPlace(editing.location ?? '');
+    setWhatsapp(editing.whatsappUrl ?? '');
+    const two = (n: number) => String(n).padStart(2, '0');
+    const asDay = (d: Date) => `${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`;
+    const asTime = (d: Date) => `${two(d.getHours())}:${two(d.getMinutes())}`;
     if (editing.startsAt) {
-      const d = editing.startsAt;
-      const two = (n: number) => String(n).padStart(2, '0');
-      setDay(`${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`);
-      setTime(`${two(d.getHours())}:${two(d.getMinutes())}`);
+      setDay(asDay(editing.startsAt));
+      setTime(asTime(editing.startsAt));
+    }
+    if (editing.endsAt) {
+      setEndDay(asDay(editing.endsAt));
+      setEndTime(asTime(editing.endsAt));
     }
   }, [visible, editing]);
 
@@ -116,7 +135,11 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
     setDay('');
     setTime('');
     setPlace('');
+    setEndDay('');
+    setEndTime('');
+    setWhatsapp('');
     setPrice('');
+    setCategory(null);
     setError(null);
   };
 
@@ -137,7 +160,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
   const chooseCover = async () => {
     try {
       // 16:9 es la proporcion de un banner de portada.
-      const picked = await pickImage([16, 9]);
+      const picked = await pickImage({ allowsEditing: false });
       if (picked) setCover(picked);
     } catch {
       setError('No se pudo abrir la galería.');
@@ -153,11 +176,28 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       setError('Elige el archivo de audio del episodio.');
       return;
     }
+    // La fecha es OPCIONAL: hay eventos que se anuncian antes de cerrarla.
+    // Solo se valida si se ha escrito algo, y entonces hacen falta las dos
+    // partes (una fecha sin hora no se puede guardar como instante).
     let startsAt: Date | null = null;
-    if (isEvent) {
+    if (isEvent && (day.trim() || time.trim())) {
       startsAt = parseDateTime(day, time);
       if (!startsAt) {
-        setError('Revisa el día (dd/mm/aaaa) y la hora (hh:mm).');
+        setError('Para fijar la fecha necesito el día y la hora. Déjalos vacíos si aún no se sabe.');
+        return;
+      }
+    }
+
+    // El fin es opcional, pero si se rellena a medias hay que avisar.
+    let endsAt: Date | null = null;
+    if (isEvent && startsAt && (endDay.trim() || endTime.trim())) {
+      endsAt = parseDateTime(endDay, endTime);
+      if (!endsAt) {
+        setError('Revisa el día y la hora de fin (dd/mm/aaaa y hh:mm).');
+        return;
+      }
+      if (startsAt && endsAt < startsAt) {
+        setError('El fin del evento no puede ser anterior a su inicio.');
         return;
       }
     }
@@ -172,13 +212,20 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         // Un episodio es una publicacion de audio: reutiliza la subida, el
         // firmado y los permisos que ya existen, sin una tabla nueva.
         const uploaded = await uploadPostMedia(audio!);
-        await PostRepository.createPost(title.trim(), [uploaded]);
+        await PostRepository.createPost(
+          title.trim(),
+          [uploaded],
+          undefined,
+          isPrivate ? PRIVATE_AUDIO_CATEGORY : category,
+        );
       } else if (isEvent) {
         const data = {
           title: title.trim(),
           description: description.trim(),
-          startsAt: startsAt!,
+          startsAt,
+          endsAt,
           location: place.trim(),
+          whatsappUrl: whatsapp.trim(),
           // `undefined` deja la portada intacta al editar; solo se envia si se
           // eligio una nueva.
           ...(coverPath ? { coverPath } : {}),
@@ -216,6 +263,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       <Text style={styles.sheetTitle} color={colors.text}>
         {editing
           ? isEvent ? 'Editar evento' : 'Editar curso'
+          : isPrivate ? 'Audio privado'
           : isPodcast ? 'Nuevo episodio'
           : isEvent ? 'Nuevo evento' : 'Nuevo curso'}
       </Text>
@@ -241,12 +289,16 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           accessibilityLabel="Elegir portada"
         >
           {cover ? (
-            <ExpoImage source={{ uri: cover.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            // `contain` para que la vista previa muestre la portada entera, sin
+            // recortar: es lo que se va a ver despues en la ficha.
+            <ExpoImage source={{ uri: cover.uri }} style={StyleSheet.absoluteFill} contentFit="contain" />
           ) : (
             <View style={styles.coverEmpty}>
               <Feather name="image" size={22} color={colors.textMuted} />
               <Text variant="secondary" color={colors.textMuted}>
-                {editing ? 'Cambiar portada (opcional)' : `Portada (${isEvent ? 'foto o banner' : 'imagen del curso'})`}
+                {editing
+                  ? 'Cambiar portada (opcional)'
+                  : `Portada — se sube sin recortar (${isEvent ? 'banner 820x312' : 'imagen del curso'})`}
               </Text>
             </View>
           )}
@@ -269,11 +321,51 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         />
         ) : null}
 
+        {isPodcast && !isPrivate ? (
+          <View style={styles.categories}>
+            <Text variant="secondary" color={colors.textMuted}>Categoría</Text>
+            <View style={styles.chips}>
+              {CATEGORIES.map((c) => (
+                <Chip
+                  key={c.id}
+                  label={c.label}
+                  selected={category === c.id}
+                  onPress={() => setCategory(category === c.id ? null : c.id)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         {isEvent ? (
           <>
-            <Input label="Día" value={day} onChangeText={setDay} placeholder="dd/mm/aaaa" />
-            <Input label="Hora" value={time} onChangeText={setTime} placeholder="hh:mm" />
-            <Input label="Lugar" value={place} onChangeText={setPlace} placeholder="Dirección o enlace" />
+            <DateField label="Día (opcional)" value={day} onChange={setDay} />
+            <Input
+              label="Hora (opcional)"
+              value={time}
+              onChangeText={setTime}
+              placeholder="hh:mm"
+            />
+            <Input
+              label="Lugar (opcional)"
+              value={place}
+              onChangeText={setPlace}
+              placeholder="Dirección, enlace o «por confirmar»"
+            />
+            <DateField label="Día de fin (opcional)" value={endDay} onChange={setEndDay} />
+            <Input
+              label="Hora de fin (opcional)"
+              value={endTime}
+              onChangeText={setEndTime}
+              placeholder="hh:mm"
+            />
+            <Input
+              label="Grupo de WhatsApp (opcional)"
+              value={whatsapp}
+              onChangeText={setWhatsapp}
+              placeholder="https://chat.whatsapp.com/..."
+              autoCapitalize="none"
+            />
           </>
         ) : isPodcast ? null : (
           <Input
@@ -295,6 +387,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           label={
             editing
               ? 'Guardar cambios'
+              : isPrivate ? 'Publicar audio privado'
               : isPodcast ? 'Publicar episodio'
               : isEvent ? 'Publicar evento' : 'Publicar curso'
           }
@@ -323,6 +416,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: spacing.md,
   },
+  categories: { gap: spacing.sm, marginBottom: spacing.md },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   audioPicker: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md,
