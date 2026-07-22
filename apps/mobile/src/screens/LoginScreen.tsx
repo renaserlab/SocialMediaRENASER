@@ -24,11 +24,13 @@ export function LoginScreen() {
   const completeOnboarding = useAppStore((state) => state.setOnboardingComplete);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signInEmail = useAuthStore((state) => state.signInEmail);
+  const signInWithProvider = useAuthStore((state) => state.signInWithProvider);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [hidden, setHidden] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [socialBusy, setSocialBusy] = useState(false);
 
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
@@ -75,8 +77,26 @@ export function LoginScreen() {
     }
   };
 
-  const socialDemo = (provider: string) => {
-    notify(`${provider} en modo demostración`, 'La autenticación real queda preparada para conectarse con Supabase Auth.');
+  const continueWithGoogle = async () => {
+    if (!supabaseEnabled) {
+      notify('Google no disponible', 'Conecta Supabase para acceder con Google.');
+      return;
+    }
+    setSocialBusy(true);
+    try {
+      await signInWithProvider('google');
+      // En web la pagina se redirige sola; en nativo ya hay sesion al volver.
+      if (useAuthStore.getState().status === 'authenticated') {
+        router.replace(postAuthRoute() as never);
+      }
+    } catch (error) {
+      notify(
+        'No se pudo acceder con Google',
+        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      );
+    } finally {
+      setSocialBusy(false);
+    }
   };
 
   return (
@@ -91,17 +111,23 @@ export function LoginScreen() {
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}RENASER</Text>
 
+          {/*
+            ACCESO CON PROVEEDORES EXTERNOS — oculto a proposito.
+
+            Google: el flujo esta implementado y probado (ver
+            AuthRepository.signInWithProvider). Solo falta activar el proveedor
+            en Supabase y pegar las credenciales de Google Cloud. Para
+            reactivarlo basta con descomentar este bloque.
+
+            Apple: ademas de lo anterior, exige el Apple Developer Program para
+            registrar el Service ID.
+
           <Button
             label="Continuar con Google"
             variant="secondary"
             icon="chrome"
-            onPress={() => socialDemo('Google')}
-          />
-          <Button
-            label="Continuar con Apple"
-            variant="secondary"
-            icon="aperture"
-            onPress={() => socialDemo('Apple')}
+            loading={socialBusy}
+            onPress={() => void continueWithGoogle()}
           />
 
           <View style={styles.dividerRow}>
@@ -109,6 +135,7 @@ export function LoginScreen() {
             <Text style={[styles.or, { color: colors.textMuted }]}>o continúa con tu email</Text>
             <View style={[styles.line, { backgroundColor: colors.border }]} />
           </View>
+          */}
 
           <Input
             label="Correo electrónico"

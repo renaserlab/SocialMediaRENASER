@@ -1,13 +1,14 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { ShortVideoItem } from '@/components/ShortVideoItem';
-import { shorts } from '@/data/mockData';
+import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { PostRepository } from '@/repositories/PostRepository';
+import { useAppStore } from '@/store/useAppStore';
 import { palette, spacing } from '@/theme/tokens';
-import type { Short } from '@/types';
 
 const media = palette('dark');
 
@@ -15,6 +16,39 @@ export function ReelsScreen() {
   const router = useRouter();
   const { height } = useWindowDimensions();
   const [activeIndex, setActiveIndex] = useState(0);
+  const currentUserId = useAppStore((state) => state.user?.id);
+
+  // Reels = las publicaciones de video del feed. Antes era una lista fija de
+  // shorts inventados con videos de ejemplo.
+  const [reels, setReels] = useState<ReelItem[]>([]);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    let alive = true;
+    PostRepository.listVideos(currentUserId)
+      .then((posts) => {
+        if (!alive) return;
+        setReels(
+          posts
+            .filter((p) => !!p.mediaUrl)
+            .map((p) => ({
+              id: p.id,
+              author: p.author,
+              authorId: p.authorId,
+              avatarUrl: p.authorAvatarUrl,
+              caption: p.body,
+              uri: p.mediaUrl!,
+              likes: p.likes,
+              comments: p.commentsCount ?? 0,
+            })),
+        );
+      })
+      .catch(() => {
+        if (alive) setReels([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [currentUserId]);
 
   // Solo el item visible reproduce; el resto se pausa (memoria y batería).
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
@@ -35,9 +69,9 @@ export function ReelsScreen() {
   return (
     <View style={styles.root}>
       <FlashList
-        data={shorts}
-        keyExtractor={(item: Short) => item.id}
-        renderItem={({ item, index }: { item: Short; index: number }) => (
+        data={reels}
+        keyExtractor={(item: ReelItem) => item.id}
+        renderItem={({ item, index }: { item: ReelItem; index: number }) => (
           <ShortVideoItem short={item} active={index === activeIndex} height={height} />
         )}
         pagingEnabled

@@ -111,10 +111,10 @@ export const conversations: Conversation[] = [
   {
     id: 'darren',
     name: 'Darren Supa',
-    subtitle: 'Gracias por ser parte de RENASER Universo.',
+    subtitle: 'Gracias por ser parte de Renaser Social Media.',
     unread: 1,
     messages: [
-      { id: 'm1', text: 'Bienvenida a RENASER Universo.', sender: 'them', createdAt: '9:35' },
+      { id: 'm1', text: 'Bienvenida a Renaser Social Media.', sender: 'them', createdAt: '9:35' },
       { id: 'm2', text: 'Tu próximo nivel comienza con una decisión consciente.', sender: 'them', createdAt: '9:36' },
     ],
   },

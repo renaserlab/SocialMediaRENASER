@@ -1,5 +1,5 @@
 /**
- * RENASER Universo — Design Tokens
+ * Renaser Social Media — Design Tokens
  * Fuente de verdad del sistema visual (blanco y negro estricto).
  * Valores alineados al prompt maestro (§4 Dirección visual inalterable).
  *

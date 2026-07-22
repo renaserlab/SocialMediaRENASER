@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "RENASER Universo",
+    "name": "Renaser Social Media",
     "slug": "renaser-universo",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -73,7 +73,8 @@
       ],
       "expo-font",
       "expo-video",
-      "react-native-compressor"
+      "react-native-compressor",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

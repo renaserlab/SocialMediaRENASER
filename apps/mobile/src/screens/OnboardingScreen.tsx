@@ -13,7 +13,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 const slides = [
   {
-    title: 'Bienvenido a RENASER Universo',
+    title: 'Bienvenido a Renaser Social Media',
     body: 'El lugar donde el crecimiento personal se convierte en transformación real.',
     symbol: 'R',
   },

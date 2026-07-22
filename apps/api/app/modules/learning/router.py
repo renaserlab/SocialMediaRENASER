@@ -15,10 +15,12 @@ from app.modules.learning.models import (
 )
 from app.modules.learning.schemas import (
     CourseDetailRead,
+    LessonDetailRead,
     LessonRead,
     ModuleRead,
 )
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
@@ -42,6 +44,7 @@ async def get_course_detail(
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseDetailRead:
+    ensure_uuid(course_id, "Curso no encontrado.")
     course = await db.get(Course, course_id)
     if course is None:
         raise NotFoundError("Curso no encontrado.")
@@ -92,6 +95,7 @@ async def get_course_detail(
                     duration_seconds=lesson.duration_seconds,
                     sort_order=lesson.sort_order,
                     completed=done,
+                    media_path=lesson.media_path,
                 )
             )
         module_reads.append(
@@ -145,6 +149,50 @@ async def enroll_course(
         )
         await db.commit()
     return {"enrolled": True}
+
+
+@router.get("/lessons/{lesson_id}", response_model=LessonDetailRead)
+async def get_lesson_detail(
+    lesson_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> LessonDetailRead:
+    """Una leccion por su id.
+
+    La app abre `/lesson/<id>` sin conocer el curso, asi que aqui se resuelve
+    el contexto (modulo y curso) con un solo join.
+    """
+    ensure_uuid(lesson_id, "Lección no encontrada.")
+    row = (
+        await db.execute(
+            select(CourseLesson, CourseModule, Course)
+            .join(CourseModule, CourseModule.id == CourseLesson.module_id)
+            .join(Course, Course.id == CourseModule.course_id)
+            .where(CourseLesson.id == lesson_id)
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError("Lección no encontrada.")
+    lesson, module, course = row
+
+    completed = False
+    if current_user:
+        progress = await db.get(
+            LessonProgress, {"user_id": current_user.id, "lesson_id": lesson_id}
+        )
+        completed = bool(progress and progress.completed)
+
+    return LessonDetailRead(
+        id=lesson.id,
+        title=lesson.title,
+        duration_seconds=lesson.duration_seconds,
+        sort_order=lesson.sort_order,
+        completed=completed,
+        media_path=lesson.media_path,
+        course_id=course.id,
+        course_title=course.title,
+        module_title=module.title,
+    )
 
 
 @router.post("/lessons/{lesson_id}/complete")

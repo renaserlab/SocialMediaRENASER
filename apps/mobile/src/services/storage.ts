@@ -13,6 +13,19 @@ import { supabase, supabaseUrl } from '@/services/supabase';
 const BUCKET = 'post-media';
 const SIGNED_URL_TTL = 60 * 60; // 1 hora
 
+/**
+ * Cache de URLs firmadas.
+ *
+ * Cada llamada a `createSignedUrls` devuelve una firma DISTINTA para el mismo
+ * archivo, asi que la URL cambiaba en cada carga del feed y la imagen nunca se
+ * reutilizaba de la cache del sistema: se descargaba entera otra vez.
+ * Reutilizando la firma mientras siga vigente, volver a una pantalla ya vista
+ * es inmediato. Se renueva 10 min antes de caducar para no servir un enlace
+ * muerto.
+ */
+const CACHE_TTL_MS = (SIGNED_URL_TTL - 600) * 1000;
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
 export type MediaKind = 'image' | 'video' | 'audio';
 
 /** Medio elegido por el usuario, antes de subirlo. */
@@ -305,7 +318,19 @@ export async function uploadPostMedia(
 // Fotos de perfil y portada
 // --------------------------------------------------------------------------
 
-const AVATARS_BUCKET = 'avatars';
+const AVATAR_BUCKET = 'avatars';
+
+/**
+ * URL publica de una ruta del bucket `avatars` (avatar o portada).
+ *
+ * El bucket es publico, asi que no hace falta firmar y la URL no caduca, algo
+ * importante porque la foto de perfil se pinta en cada tarjeta del feed.
+ * Devuelve undefined cuando no hay foto, para que la vista use el placeholder.
+ */
+export function profileImageUrl(path: string | null | undefined): string | undefined {
+  if (!supabase || !path) return undefined;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+}
 
 /**
  * Sube la foto de perfil o portada al bucket `avatars` y devuelve su RUTA.
@@ -342,20 +367,10 @@ export async function uploadProfileImage(
   if (blob.size === 0) throw new Error('La imagen seleccionada está vacía.');
 
   const { error } = await supabase.storage
-    .from(AVATARS_BUCKET)
+    .from(AVATAR_BUCKET)
     .upload(path, blob, { contentType: resolveContentType(media, ext), upsert: false });
   if (error) throw new Error(describeStorageError(error));
   return path;
-}
-
-/**
- * URL publica de una ruta del bucket `avatars`. Es un bucket publico, asi que
- * no hace falta firmar y la URL no caduca (importante: la foto de perfil se
- * muestra en cada tarjeta del feed).
- */
-export function profileImageUrl(path: string | null | undefined): string | undefined {
-  if (!supabase || !path) return undefined;
-  return supabase.storage.from(AVATARS_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
 /** Firma en lote rutas de post-media para poder mostrarlas (bucket privado). */
@@ -363,13 +378,33 @@ export async function signMediaUrls(
   paths: string[],
 ): Promise<Record<string, string>> {
   if (!supabase || paths.length === 0) return {};
+
+  // Solo se piden las que no estan en cache o estan a punto de caducar.
+  const now = Date.now();
+  const map: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const path of paths) {
+    const hit = signedUrlCache.get(path);
+    if (hit && hit.expiresAt > now) map[path] = hit.url;
+    else missing.push(path);
+  }
+  if (missing.length === 0) return map;
+
   const { data, error } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrls(paths, SIGNED_URL_TTL);
-  if (error || !data) return {};
-  const map: Record<string, string> = {};
+    .createSignedUrls(missing, SIGNED_URL_TTL);
+  if (error || !data) return map;
+  const expiresAt = now + CACHE_TTL_MS;
   for (const item of data) {
-    if (item.path && item.signedUrl) map[item.path] = item.signedUrl;
+    if (item.path && item.signedUrl) {
+      map[item.path] = item.signedUrl;
+      signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
+    }
   }
   return map;
+}
+
+/** Se vacia al cerrar sesion: las firmas van atadas al usuario. */
+export function clearSignedUrlCache(): void {
+  signedUrlCache.clear();
 }

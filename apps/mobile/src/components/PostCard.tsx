@@ -67,10 +67,19 @@ export function PostCard({ post, onDeleted }: Props) {
     });
   };
 
-  const submitComment = () => {
-    void addComment(post.id, comment);
+  const submitComment = async () => {
+    const body = comment;
     setComment('');
     setShowComments(true);
+    try {
+      await addComment(post.id, body);
+    } catch {
+      // `addComment` lanza si el POST falla. Antes se llamaba con `void`, asi
+      // que el fallo quedaba como rechazo sin capturar: el campo se vaciaba y
+      // el comentario no aparecia nunca, sin explicacion.
+      notify('No se pudo comentar', 'Revisa tu conexión e inténtalo de nuevo.');
+      setComment(body);
+    }
   };
 
   /**
@@ -85,7 +94,7 @@ export function PostCard({ post, onDeleted }: Props) {
 
   const sharePost = () => {
     Share.share({
-      message: `"${post.body}" — ${post.author} en RENASER Universo.`,
+      message: `"${post.body}" — ${post.author} en Renaser Social Media.`,
     }).catch(() => {
       // El usuario cancelo, o el navegador no expone navigator.share.
     });
@@ -144,6 +153,7 @@ export function PostCard({ post, onDeleted }: Props) {
             source={post.authorAvatarUrl ? { uri: post.authorAvatarUrl } : assets.avatar}
             style={styles.avatar}
             contentFit="cover"
+            cachePolicy="memory-disk"
           />
           <View style={{ flex: 1 }}>
             <Text variant="body" weight="700">{post.author}</Text>
@@ -173,6 +183,7 @@ export function PostCard({ post, onDeleted }: Props) {
           <ExpoImage
             source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
             contentFit="cover"
+            cachePolicy="memory-disk"
             transition={150}
             style={styles.image}
           />
@@ -236,10 +247,10 @@ export function PostCard({ post, onDeleted }: Props) {
               placeholderTextColor={colors.textMuted}
               style={[styles.commentInput, { color: colors.text, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
               returnKeyType="send"
-              onSubmitEditing={submitComment}
+              onSubmitEditing={() => void submitComment()}
             />
             <Pressable
-              onPress={submitComment}
+              onPress={() => void submitComment()}
               disabled={!comment.trim()}
               hitSlop={ACTION_HIT_SLOP}
               accessibilityLabel="Enviar comentario"

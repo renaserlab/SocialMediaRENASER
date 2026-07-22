@@ -109,12 +109,16 @@ export const useAppStore = create<AppState>()(
       onboardingComplete: false,
       quizAnswers: {},
       quizResult: null,
-      posts: initialPosts,
+      // Con backend real se arranca VACIO a proposito. Al precargar los datos
+      // de demo, `posts.length > 0` hacia que el esqueleto de carga no se
+      // mostrara nunca: se pintaban publicaciones falsas y un instante despues
+      // saltaban a las reales. Vacio -> se ve el esqueleto y luego el contenido.
+      posts: backendEnabled ? [] : initialPosts,
       likedPostIds: [],
       savedPostIds: [],
       reservedEventIds: [],
       purchasedCourseIds: [],
-      conversations,
+      conversations: backendEnabled ? [] : conversations,
       liveMessages: [
         { id: 'l1', author: 'María G.', text: 'Gracias Darren, este era el punto que necesitaba.' },
         { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },

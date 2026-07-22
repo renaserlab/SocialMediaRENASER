@@ -116,28 +116,37 @@ export function StoriesRow() {
         contentContainerStyle={styles.row}
       >
         {/* Tu historia: la foto abre la tuya y el `+` anade otra. */}
-        <Pressable
-          onPress={onOwnPress}
-          accessibilityRole="button"
-          accessibilityLabel={own ? 'Ver tu historia' : 'Añadir a tu historia'}
-          style={({ pressed }) => [styles.item, { opacity: pressed ? 0.8 : 1 }]}
-        >
+        {/*
+          El `+` NO puede ir dentro del Pressable de la burbuja: en web cada
+          Pressable es un <button> y anidarlos es HTML invalido (rompe la
+          hidratacion). Van como hermanos dentro del mismo contenedor, que es
+          lo que posiciona el badge absoluto.
+        */}
+        <View style={styles.item}>
           <View>
-            <Ring seen={own?.seen ?? true} hasStory={!!own}>
-              <ExpoImage
-                // Tu foto local (edicion de perfil) tiene prioridad; si no, la
-                // del backend; y en ultimo caso el placeholder.
-                source={
-                  user?.avatarUrl
-                    ? { uri: user.avatarUrl }
-                    : own?.avatarUrl
-                    ? { uri: own.avatarUrl }
-                    : assets.avatar
-                }
-                style={styles.avatar}
-                contentFit="cover"
-              />
-            </Ring>
+            <Pressable
+              onPress={onOwnPress}
+              accessibilityRole="button"
+              accessibilityLabel={own ? 'Ver tu historia' : 'Añadir a tu historia'}
+              style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}
+            >
+              <Ring seen={own?.seen ?? true} hasStory={!!own}>
+                <ExpoImage
+                  // Tu foto local (edicion de perfil) tiene prioridad; si no, la
+                  // del backend; y en ultimo caso el placeholder.
+                  source={
+                    user?.avatarUrl
+                      ? { uri: user.avatarUrl }
+                      : own?.avatarUrl
+                      ? { uri: own.avatarUrl }
+                      : assets.avatar
+                  }
+                  style={styles.avatar}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
+              </Ring>
+            </Pressable>
             {/*
               El `+` se muestra SIEMPRE, tengas o no historia: es el acceso a
               publicar otra. Antes solo aparecia sin historias, asi que al subir
@@ -171,7 +180,7 @@ export function StoriesRow() {
           <Text numberOfLines={1} style={styles.label} color={colors.text}>
             Tu historia
           </Text>
-        </Pressable>
+        </View>
 
         {others.map((group) => (
           <Bubble key={group.authorId} group={group} onPress={() => openStory(group.authorId)} />
@@ -242,6 +251,7 @@ function Bubble({ group, onPress }: { group: StoryGroup; onPress: () => void }) 
           source={group.avatarUrl ? { uri: group.avatarUrl } : assets.avatar}
           style={styles.avatar}
           contentFit="cover"
+          cachePolicy="memory-disk"
         />
       </Ring>
       <Text numberOfLines={1} style={styles.label} color={colors.text}>

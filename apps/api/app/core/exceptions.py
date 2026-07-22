@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.exc import DBAPIError
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -88,6 +89,27 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             content=_error_body("http_error", str(exc.detail)),
         )
+
+    @app.exception_handler(DBAPIError)
+    async def _dbapi_error_handler(_: Request, exc: DBAPIError) -> JSONResponse:
+        """Red de seguridad para ids con formato invalido.
+
+        Las columnas de id son UUID. Si llega otra cosa por la URL (un slug de
+        una pantalla antigua, o basura), el string viaja hasta el driver y
+        asyncpg falla con `invalid input for query argument`. Eso salia como un
+        500, cuando en realidad es un error del cliente: el recurso no existe.
+
+        `ensure_uuid` sigue siendo la via preferente porque valida ANTES de
+        tocar la base de datos; esto solo evita que un endpoint sin esa
+        comprobacion acabe en un 500.
+        """
+        text = str(getattr(exc, "orig", exc))
+        if "invalid input for query argument" in text or "invalid UUID" in text:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=_error_body("not_found", "Recurso no encontrado."),
+            )
+        raise exc
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(

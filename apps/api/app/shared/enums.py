@@ -28,3 +28,20 @@ app_role = ENUM(
     name="app_role",
     create_type=False,
 )
+
+purchase_status = ENUM(
+    "pending",
+    "paid",
+    "refunded",
+    "cancelled",
+    name="purchase_status",
+    create_type=False,
+)
+
+member_role = ENUM(
+    "member",
+    "moderator",
+    "owner",
+    name="member_role",
+    create_type=False,
+)

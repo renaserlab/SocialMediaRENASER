@@ -13,6 +13,9 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Skeleton } from '@/components/Skeleton';
 import { assets } from '@/data/assets';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -30,6 +33,29 @@ export function HomeScreen() {
   const feedLoadingMore = useAppStore((state) => state.feedLoadingMore);
   const loadFeed = useAppStore((state) => state.loadFeed);
   const loadMoreFeed = useAppStore((state) => state.loadMoreFeed);
+
+  // Circulo destacado real, para el contador y el enlace de la tarjeta.
+  const [circle, setCircle] = useState<CircleDetail | null>(null);
+  /**
+   * Perfil del administrador. Darren gestiona la aplicacion, asi que los
+   * eventos y los cursos viven en su perfil: las tarjetas de abajo llevan alli
+   * a cualquier usuario, a la seccion que haya elegido.
+   */
+  const [adminId, setAdminId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    CommunityRepository.list()
+      .then((list) => setCircle(list[0] ?? null))
+      .catch(() => setCircle(null));
+    ProfileRepository.listFeatured()
+      .then((list) => setAdminId((list.find((m) => m.isAdmin) ?? list[0])?.id ?? null))
+      .catch(() => setAdminId(null));
+  }, []);
+
+  const openAdminSection = (section: 'eventos' | 'cursos') => {
+    if (!adminId) return;
+    router.push({ pathname: '/profile/[id]', params: { id: adminId, section } } as never);
+  };
 
   const [feedTab, setFeedTab] = useState(0);
 
@@ -80,7 +106,14 @@ export function HomeScreen() {
           accessibilityLabel="Crear nueva publicación"
           accessibilityRole="button"
         >
-          <ExpoImage source={assets.avatar} style={styles.composerAvatar} contentFit="cover" />
+          {/* Tu foto real; el marcador solo mientras no haya perfil cargado. */}
+          <ExpoImage
+            source={user?.avatarUrl ? { uri: user.avatarUrl } : assets.avatar}
+            style={styles.composerAvatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={120}
+          />
           <Text style={[styles.composerText, { color: colors.textMuted }]}>
             {/* Sin nombre se saluda en generico: antes caia a un "Katherine"
                 fijo del demo y se le mostraba a cualquier usuario. */}
@@ -99,12 +132,41 @@ export function HomeScreen() {
             <Text style={[styles.quickBody, { color: colors.onPrimary }]}>Recomendación de tu quiz</Text>
           </Pressable>
           <Pressable
-            onPress={() => router.push('/circle/lideres-renaser')}
+            onPress={() => circle && router.push(`/circle/${circle.id}` as never)}
+            disabled={!circle}
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
           >
             <Feather name="users" size={24} color={colors.text} />
             <Text style={[styles.quickTitle, { color: colors.text }]}>Tu círculo</Text>
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>423 personas avanzando</Text>
+            {/* Contador real; antes era "423 personas" escrito a mano. */}
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>
+              {circle ? `${circle.members} personas avanzando` : 'Únete a la comunidad'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.quickRow}>
+          <Pressable
+            onPress={() => openAdminSection('eventos')}
+            disabled={!adminId}
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Ver eventos"
+          >
+            <Feather name="calendar" size={24} color={colors.text} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Eventos</Text>
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Encuentros y experiencias</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => openAdminSection('cursos')}
+            disabled={!adminId}
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Ver cursos"
+          >
+            <Feather name="book" size={24} color={colors.text} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>Cursos</Text>
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>Programas para avanzar</Text>
           </Pressable>
         </View>
       </View>

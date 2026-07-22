@@ -11,7 +11,11 @@ import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { course, events } from '@/data/mockData';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { CatalogRepository } from '@/repositories/CatalogRepository';
+import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
+import type { Course, EventItem } from '@/types';
 import type { ProfileSummary } from '@/mappers/profileMapper';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -22,6 +26,24 @@ export function ExploreScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+
+  // Destacados reales del catalogo. Antes el curso, los eventos y el circulo
+  // eran los del paquete de demo, con "423 miembros" escrito a mano.
+  const [featuredCourse, setFeaturedCourse] = useState<Course | null>(null);
+  const [nextEvents, setNextEvents] = useState<EventItem[]>([]);
+  const [featuredCircle, setFeaturedCircle] = useState<CircleDetail | null>(null);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    LearningRepository.listCourses()
+      .then((list) => setFeaturedCourse(list[0] ?? null))
+      .catch(() => setFeaturedCourse(null));
+    CatalogRepository.listEvents()
+      .then((page) => setNextEvents(page.items))
+      .catch(() => setNextEvents([]));
+    CommunityRepository.list()
+      .then((list) => setFeaturedCircle(list[0] ?? null))
+      .catch(() => setFeaturedCircle(null));
+  }, []);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ProfileSummary[]>([]);
@@ -127,17 +149,20 @@ export function ExploreScreen() {
           <React.Fragment>
           <SectionTitle title="Tu siguiente paso" />
           <Pressable
-            onPress={() => router.push('/course/lider-vida-empresa')}
+            onPress={() => featuredCourse && router.push(`/course/${featuredCourse.id}` as never)}
+            disabled={!featuredCourse}
             style={styles.heroCard}
-            accessibilityLabel={`Programa recomendado: ${course.title}`}
+            accessibilityLabel={`Programa recomendado: ${featuredCourse?.title ?? ''}`}
             accessibilityRole="button"
           >
             <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
             <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
             <View style={styles.heroContent}>
               <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>
-              <Text style={styles.heroTitle}>{course.title}</Text>
-              <Text style={styles.heroBody}>{course.modules} módulos · {course.lessons} lecciones</Text>
+              <Text style={styles.heroTitle}>{featuredCourse?.title ?? 'Programas en camino'}</Text>
+              <Text style={styles.heroBody}>
+                {featuredCourse ? featuredCourse.subtitle : 'Muy pronto habrá contenido disponible.'}
+              </Text>
             </View>
           </Pressable>
 
@@ -154,7 +179,7 @@ export function ExploreScreen() {
 
           <SectionTitle title="Próximos eventos" action="Ver calendario" onActionPress={() => router.push('/events')} />
           <View style={styles.list}>
-            {events.slice(0, 2).map((event, index) => (
+            {nextEvents.slice(0, 2).map((event, index) => (
               <ListRow
                 key={event.id}
                 title={event.title}
@@ -170,15 +195,22 @@ export function ExploreScreen() {
 
           <SectionTitle title="Comunidades" />
           <Pressable
-            onPress={() => router.push('/circle/lideres-renaser')}
+            onPress={() => featuredCircle && router.push(`/circle/${featuredCircle.id}` as never)}
+            disabled={!featuredCircle}
             style={[styles.circle, { backgroundColor: colors.primary }]}
-            accessibilityLabel="Círculo privado: Líderes RENASER"
+            accessibilityLabel={`Círculo: ${featuredCircle?.name ?? ""}`}
             accessibilityRole="button"
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.eyebrow, { color: colors.onPrimary }]}>CÍRCULO PRIVADO</Text>
-              <Text style={[styles.circleTitle, { color: colors.onPrimary }]}>Líderes RENASER</Text>
-              <Text style={[styles.circleBody, { color: colors.onPrimary }]}>Conecta, comparte y crece con 423 miembros.</Text>
+              <Text style={[styles.circleTitle, { color: colors.onPrimary }]}>
+                {featuredCircle?.name ?? 'Círculos'}
+              </Text>
+              <Text style={[styles.circleBody, { color: colors.onPrimary }]}>
+                {featuredCircle
+                  ? `Conecta, comparte y crece con ${featuredCircle.members} miembros.`
+                  : 'Muy pronto podrás unirte a un círculo.'}
+              </Text>
             </View>
             <Feather name="users" size={48} color={colors.onPrimary} style={styles.circleIcon} />
           </Pressable>

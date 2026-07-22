@@ -1,33 +1,32 @@
 import { mockDelay } from '@/services/repositories/_delay';
 import { course } from '@/data/mockData';
-import { isSupabaseConfigured, supabase } from '@/services/supabase';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
 import type { Course } from '@/types';
 
 /**
  * Fuente única de la verdad para los cursos.
  *
- * HOY (sin backend): datos mock tras una latencia simulada.
- * MAÑANA (backend): al configurar Supabase se consulta la tabla `courses`.
+ * Antes se consultaba Supabase directamente y la fila se devolvía con un
+ * `as unknown as Course[]`: ese cast desactivaba el chequeo de tipos, así que
+ * llegaba snake_case (price_minor, ...) donde la vista esperaba camelCase.
+ * Ahora se pasa por el backend, que ya entrega el modelo mapeado.
  *
- * Ni las pantallas ni el store deben saber de dónde salen los cursos.
+ * Sin backend configurado se mantiene el curso de demo para no romper la
+ * navegación.
  */
+const backendEnabled = AuthRepository.enabled;
+
 export async function fetchCourses(): Promise<Course[]> {
-  if (!isSupabaseConfigured || !supabase) {
+  if (!backendEnabled) {
     await mockDelay();
     return [course];
   }
-
-  const { data, error } = await supabase.from('courses').select('*');
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  // TODO(backend): mapear la fila de Supabase al tipo `Course` (acordar shape en src/types).
-  return (data ?? []) as unknown as Course[];
+  return LearningRepository.listCourses();
 }
 
 export async function fetchCourseById(id: string): Promise<Course | null> {
-  if (!isSupabaseConfigured || !supabase) {
+  if (!backendEnabled) {
     await mockDelay();
     const all = [course];
     // Demo: si el id no coincide (p. ej. desde la galería /dev), caemos al único
@@ -35,14 +34,20 @@ export async function fetchCourseById(id: string): Promise<Course | null> {
     return all.find((c) => c.id === id) ?? all[0] ?? null;
   }
 
-  const { data, error } = await supabase
-    .from('courses')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle();
-  if (error) {
-    throw new Error(error.message);
-  }
+  const detail = await LearningRepository.getCourseDetail(await resolveCourseId(id));
+  return detail.course;
+}
 
-  return data ? (data as unknown as Course) : null;
+/** Los ids reales son UUID; el prototipo enlazaba por slug. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Varias pantallas siguen enlazando al slug del prototipo
+ * ('lider-vida-empresa'). En vez de pedir un id inexistente, se resuelve al
+ * primer curso real del catálogo.
+ */
+export async function resolveCourseId(id: string): Promise<string> {
+  if (UUID_RE.test(id)) return id;
+  const all = await LearningRepository.listCourses();
+  return all[0]?.id ?? id;
 }

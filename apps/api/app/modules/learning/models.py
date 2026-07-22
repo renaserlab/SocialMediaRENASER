@@ -20,6 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
+from app.shared.enums import purchase_status
 
 
 def _uuid() -> str:
@@ -69,7 +70,9 @@ class Purchase(Base):
     provider_transaction_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     amount_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     currency: Mapped[str] = mapped_column(String(3), server_default="PEN")
-    status: Mapped[str] = mapped_column(String(16), server_default="pending")
+    # Es un ENUM de Postgres, no VARCHAR: comparar con una cadena sin tipar
+    # rompia con 'operator does not exist: purchase_status = character varying'.
+    status: Mapped[str] = mapped_column(purchase_status, server_default="pending")
     purchased_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

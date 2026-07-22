@@ -25,10 +25,14 @@ async function attachMediaUrls(items: Post[], dtos: PostDto[]): Promise<void> {
   dtos.forEach((dto, i) => {
     const first = dto.media[0];
     const item = items[i];
-    if (first && item && urls[first.storage_path]) {
-      item.mediaUrl = urls[first.storage_path];
-      item.mediaType = first.media_type as Post['mediaType'];
-    }
+    if (!first || !item) return;
+    // El TIPO se asigna siempre: viene del backend y no depende de Storage.
+    // Antes solo se ponia si la firma habia funcionado, y como firmar exige
+    // sesion (el bucket es privado), un visitante anonimo recibia los posts
+    // sin tipo y la galeria del perfil salia vacia.
+    item.mediaType = first.media_type as Post['mediaType'];
+    const signed = urls[first.storage_path];
+    if (signed) item.mediaUrl = signed;
   });
 }
 
@@ -55,6 +59,47 @@ export const PostRepository = {
       likedIds: dtos.filter((d) => d.liked_by_me).map((d) => d.id),
       savedIds: dtos.filter((d) => d.saved_by_me).map((d) => d.id),
     };
+  },
+
+  /**
+   * Publicaciones de un perfil, para su galeria.
+   * `media` separa la cuadricula (image/video) de la lista de audios.
+   */
+  async listByAuthor(
+    authorId: string,
+    { media, limit = 30 }: { media?: 'image' | 'video' | 'audio'; limit?: number } = {},
+    currentUserId?: string | null,
+  ): Promise<Post[]> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: '0',
+      author_id: authorId,
+    });
+    if (media) params.set('media', media);
+    const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
+  },
+
+  /** Publicaciones con video, en orden reciente: alimentan los reels. */
+  async listVideos(currentUserId?: string | null): Promise<Post[]> {
+    const dtos = await apiRequest<PostDto[]>(
+      `${API_V1}/posts?limit=30&offset=0&media=video`,
+    );
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
+  },
+
+  /** Publicaciones de un círculo. */
+  async listByCircle(circleId: string, currentUserId?: string | null): Promise<Post[]> {
+    const dtos = await apiRequest<PostDto[]>(
+      `${API_V1}/posts?limit=30&offset=0&circle_id=${encodeURIComponent(circleId)}`,
+    );
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
   },
 
   async createPost(

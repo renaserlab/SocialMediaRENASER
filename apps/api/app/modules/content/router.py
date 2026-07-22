@@ -26,6 +26,7 @@ from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(tags=["content"])
@@ -146,6 +147,9 @@ async def _likes_count(db: AsyncSession, post_id: str) -> int:
 async def list_posts(
     page: Page = Depends(pagination_params),
     feed: str = Query(default="all", pattern="^(all|following)$"),
+    author_id: str | None = Query(default=None),
+    circle_id: str | None = Query(default=None),
+    media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -154,6 +158,10 @@ async def list_posts(
     `feed=all` ("Para ti") devuelve todo lo publicado; `feed=following`
     ("Siguiendo") solo lo de los perfiles que sigue el usuario. Sin sesion,
     `following` no tiene a quien consultar y devuelve una lista vacia.
+
+    `author_id` restringe a las publicaciones de un perfil (su galeria) y
+    `media` al tipo de adjunto, para separar la cuadricula de los audios sin
+    traerse todo y filtrar en el cliente.
     """
     uid = current_user.id if current_user else None
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
@@ -170,6 +178,19 @@ async def list_posts(
             return []
         followed = select(Follow.following_id).where(Follow.follower_id == uid)
         stmt = stmt.where(Post.author_id.in_(followed))
+
+    if author_id:
+        # Un id con otro formato llegaria a Postgres y reventaria la consulta.
+        ensure_uuid(author_id, "Perfil no encontrado.")
+        stmt = stmt.where(Post.author_id == author_id)
+
+    if circle_id:
+        ensure_uuid(circle_id, "Círculo no encontrado.")
+        stmt = stmt.where(Post.circle_id == circle_id)
+
+    if media:
+        with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
+        stmt = stmt.where(Post.id.in_(with_media))
     rows = (await db.execute(stmt)).all()
     media_map = await _load_media_map(db, [row[0].id for row in rows])
     return [_to_post_read(*row, media=media_map.get(row[0].id, [])) for row in rows]
@@ -344,6 +365,7 @@ async def list_comments(
     page: Page = Depends(pagination_params),
     db: AsyncSession = Depends(get_db),
 ) -> list[CommentRead]:
+    ensure_uuid(post_id, "Publicacion no encontrada.")
     stmt = (
         select(Comment, Profile)
         .join(Profile, Profile.id == Comment.author_id)
@@ -367,6 +389,7 @@ async def create_comment(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CommentRead:
+    ensure_uuid(post_id, "Publicacion no encontrada.")
     post = await _get_active_post(db, post_id)
     comment = Comment(
         post_id=post_id,

@@ -9,13 +9,27 @@ import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
 import { palette, spacing } from '@/theme/tokens';
-import type { Short } from '@/types';
+
+/**
+ * Reel normalizado. Antes el componente consumia el tipo `Short` del demo, con
+ * claves de `data/assets` para avatar y poster; ahora recibe URLs reales.
+ */
+export type ReelItem = {
+  id: string;
+  author: string;
+  authorId?: string;
+  avatarUrl?: string;
+  caption: string;
+  uri: string;
+  likes: number;
+  comments: number;
+};
 
 // Superficie full-bleed sobre video → contexto de media (siempre oscuro).
 const media = palette('dark');
 
 type Props = {
-  short: Short;
+  short: ReelItem;
   /** Solo el item visible reproduce (autoplay por viewport). */
   active: boolean;
   height: number;
@@ -35,14 +49,13 @@ export function ShortVideoItem({ short, active, height }: Props) {
   };
 
   const onShare = () => {
-    Share.share({ message: `Mira este short de ${short.author} en RENASER Universo.` }).catch(() => {});
+    Share.share({ message: `Mira este short de ${short.author} en Renaser Social Media.` }).catch(() => {});
   };
 
   return (
     <View style={[styles.container, { height }]}>
       <VideoPlayer
         uri={short.uri}
-        poster={assets[short.poster]}
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         loop
@@ -54,12 +67,12 @@ export function ShortVideoItem({ short, active, height }: Props) {
 
       <View style={styles.sidebar}>
         <Pressable
-          onPress={() => router.push('/profile/darren' as never)}
+          onPress={() => short.authorId && router.push(`/profile/${short.authorId}` as never)}
           style={styles.sidebarItem}
           accessibilityRole="button"
           accessibilityLabel={`Perfil de ${short.author}`}
         >
-          <ExpoImage source={assets[short.avatar]} style={styles.avatar} contentFit="cover" />
+          <ExpoImage source={short.avatarUrl ? { uri: short.avatarUrl } : assets.avatar} style={styles.avatar} contentFit="cover" />
         </Pressable>
 
         <Pressable

@@ -9,6 +9,7 @@ from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.communities.models import Circle, CircleMember
 from app.modules.communities.schemas import CircleRead
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(prefix="/circles", tags=["communities"])
@@ -80,6 +81,7 @@ async def get_circle(
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> CircleRead:
+    ensure_uuid(circle_id, "Círculo no encontrado.")
     uid = current_user.id if current_user else None
     members_sq, mine_sq = _member_columns(uid)
     row = (

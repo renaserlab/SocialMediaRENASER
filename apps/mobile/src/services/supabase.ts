@@ -1,4 +1,5 @@
 import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -11,7 +12,10 @@ export const supabase = url && anonKey
         storage: AsyncStorage,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: false,
+        // Al volver de Google, la sesion llega en el fragmento de la URL y
+        // solo el navegador puede leerla. En nativo no hay URL que inspeccionar
+        // (el retorno lo gestiona WebBrowser), y dejarlo activo daba avisos.
+        detectSessionInUrl: Platform.OS === 'web',
       },
     })
   : null;
