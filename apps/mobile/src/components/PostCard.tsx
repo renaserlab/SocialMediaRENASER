@@ -67,10 +67,19 @@ export function PostCard({ post, onDeleted }: Props) {
     });
   };
 
-  const submitComment = () => {
-    void addComment(post.id, comment);
+  const submitComment = async () => {
+    const body = comment;
     setComment('');
     setShowComments(true);
+    try {
+      await addComment(post.id, body);
+    } catch {
+      // `addComment` lanza si el POST falla. Antes se llamaba con `void`, asi
+      // que el fallo quedaba como rechazo sin capturar: el campo se vaciaba y
+      // el comentario no aparecia nunca, sin explicacion.
+      notify('No se pudo comentar', 'Revisa tu conexión e inténtalo de nuevo.');
+      setComment(body);
+    }
   };
 
   /**
@@ -238,10 +247,10 @@ export function PostCard({ post, onDeleted }: Props) {
               placeholderTextColor={colors.textMuted}
               style={[styles.commentInput, { color: colors.text, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
               returnKeyType="send"
-              onSubmitEditing={submitComment}
+              onSubmitEditing={() => void submitComment()}
             />
             <Pressable
-              onPress={submitComment}
+              onPress={() => void submitComment()}
               disabled={!comment.trim()}
               hitSlop={ACTION_HIT_SLOP}
               accessibilityLabel="Enviar comentario"

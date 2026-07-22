@@ -22,6 +22,7 @@ from app.modules.messaging.schemas import (
 )
 from app.modules.profiles.models import Profile
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(prefix="/conversations", tags=["messaging"])
@@ -170,6 +171,7 @@ async def list_messages(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MessageRead]:
+    ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
     rows = (
         await db.execute(
@@ -208,6 +210,7 @@ async def send_message(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRead:
+    ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
     message = Message(
         conversation_id=conversation_id,

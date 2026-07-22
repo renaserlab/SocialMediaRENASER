@@ -8,6 +8,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { Input } from '@/components/Input';
+import { notify } from '@/lib/confirm';
 import { toMessageFromRow } from '@/mappers/messageMapper';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { subscribeToConversation } from '@/services/realtime';
@@ -48,6 +49,7 @@ export function ChatScreen() {
 
   const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Carga inicial + suscripción Realtime a los mensajes de la conversación.
   useEffect(() => {
@@ -58,7 +60,11 @@ export function ChatScreen() {
       .then((msgs) => {
         if (mounted) setRemoteMessages(msgs);
       })
-      .catch(() => {});
+      // Sin esto un fallo de carga dejaba el chat vacio, como si no hubiera
+      // mensajes, en vez de avisar de que no se pudieron cargar.
+      .catch(() => {
+        if (mounted) setLoadError('No se pudieron cargar los mensajes.');
+      });
     MessageRepository.markRead(params.id).catch(() => {});
 
     const unsubscribe = subscribeToConversation(params.id, (row) => {
@@ -101,14 +107,26 @@ export function ChatScreen() {
         ...prev.filter((m) => m.id !== tempId && m.id !== saved.id),
         saved,
       ]);
-    } catch {
+    } catch (error) {
       setRemoteMessages((prev) => prev.filter((m) => m.id !== tempId));
+      // Antes la burbuja desaparecia sin decir nada y el usuario creia que su
+      // mensaje se habia enviado.
+      notify(
+        'No se pudo enviar',
+        error instanceof Error ? error.message : 'Revisa tu conexión e inténtalo de nuevo.',
+      );
+      setText(body);
     }
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title={headerName} rightIcon="video" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      {loadError ? (
+        <Text style={{ color: colors.danger, textAlign: 'center', padding: spacing.sm, fontSize: 12 }}>
+          {loadError}
+        </Text>
+      ) : null}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.select({ ios: 'padding', android: 'height' })}

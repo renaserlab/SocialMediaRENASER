@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -7,9 +7,12 @@ import { AppHeader } from '@/components/AppHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { ListRow } from '@/components/ListRow';
+import { AuthRepository } from '@/repositories/AuthRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { Course } from '@/types';
 
 export function LibraryScreen() {
   const { colors } = useAppTheme();
@@ -17,6 +20,14 @@ export function LibraryScreen() {
   const purchasedCourseIds = useAppStore((state) => state.purchasedCourseIds);
 
   const [activeTab, setActiveTab] = useState(0);
+  // Catalogo real, para resolver el titulo de cada curso comprado.
+  const [courses, setCourses] = useState<Course[]>([]);
+  useEffect(() => {
+    if (!AuthRepository.enabled) return;
+    LearningRepository.listCourses()
+      .then(setCourses)
+      .catch(() => setCourses([]));
+  }, []);
 
   const hasCourses = purchasedCourseIds.length > 0;
   const hasAudios = audios.length > 0;
@@ -46,16 +57,21 @@ export function LibraryScreen() {
       >
         <ScrollView contentContainerStyle={styles.list}>
           {activeTab === 0
-            ? purchasedCourseIds.map((courseId) => (
-                <ListRow
-                  key={courseId}
-                  title={courseId === 'lider-vida-empresa' ? 'Líder de tu Vida y Empresa' : courseId}
-                  subtitle="Darren Hardy • 12 Lecciones"
-                  leftIcon="play-circle"
-                  rightIcon="chevron-right"
-                  onPress={() => router.push(`/lesson/1` as any)}
-                />
-              ))
+            ? purchasedCourseIds.map((courseId) => {
+                // Con backend real el id es un UUID: sin buscar el curso, la
+                // biblioteca mostraba ese UUID como titulo.
+                const real = courses.find((c) => c.id === courseId);
+                return (
+                  <ListRow
+                    key={courseId}
+                    title={real?.title ?? 'Curso'}
+                    subtitle={real?.subtitle || 'Ver contenido'}
+                    leftIcon="play-circle"
+                    rightIcon="chevron-right"
+                    onPress={() => router.push(`/course/${courseId}` as never)}
+                  />
+                );
+              })
             : audios.map((audio) => (
                 <ListRow
                   key={audio.id}

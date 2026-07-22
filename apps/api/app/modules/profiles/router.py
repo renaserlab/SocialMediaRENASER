@@ -20,6 +20,7 @@ from app.modules.profiles.schemas import (
 )
 from app.modules.social_graph.models import Follow
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
@@ -227,5 +228,6 @@ async def get_profile(
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProfileRead:
+    ensure_uuid(profile_id, "Perfil no encontrado.")
     viewer_id = current_user.id if current_user else None
     return await _load_profile(db, profile_id, viewer_id=viewer_id)

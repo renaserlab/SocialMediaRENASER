@@ -13,6 +13,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { useCourse } from '@/hooks/useCourse';
+import { LearningRepository } from '@/repositories/LearningRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -42,12 +43,19 @@ export function CheckoutScreen() {
     }, 1000);
   };
 
-  const forceSuccess = () => {
+  const forceSuccess = async () => {
     if (!course) return;
-    // Simulamos reintento exitoso
     haptics.success();
     purchase(course.id);
-    router.replace('/confirmation');
+    // Sin esto la compra solo existia en el estado local: el backend seguia
+    // considerando al usuario NO inscrito, asi que el progreso del curso no se
+    // guardaba y al reinstalar se perdia el acceso.
+    try {
+      await LearningRepository.enroll(course.id);
+    } catch {
+      // La inscripcion se reintenta al entrar al curso; no bloquea el flujo.
+    }
+    router.replace({ pathname: '/confirmation', params: { courseId: course.id } } as never);
   };
 
   if (loading) {
@@ -84,7 +92,7 @@ export function CheckoutScreen() {
           state="error"
           title="Tu transacción ha sido rechazada"
           description="Hubo un error al procesar tu tarjeta bancaria. Verifica tus fondos o utiliza otro método."
-          onRetry={forceSuccess}
+          onRetry={() => void forceSuccess()}
         />
       </View>
     );

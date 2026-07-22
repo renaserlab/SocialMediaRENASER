@@ -360,6 +360,7 @@ async def list_comments(
     page: Page = Depends(pagination_params),
     db: AsyncSession = Depends(get_db),
 ) -> list[CommentRead]:
+    ensure_uuid(post_id, "Publicacion no encontrada.")
     stmt = (
         select(Comment, Profile)
         .join(Profile, Profile.id == Comment.author_id)
@@ -383,6 +384,7 @@ async def create_comment(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CommentRead:
+    ensure_uuid(post_id, "Publicacion no encontrada.")
     post = await _get_active_post(db, post_id)
     comment = Comment(
         post_id=post_id,
