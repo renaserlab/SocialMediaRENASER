@@ -49,8 +49,10 @@ export const PostRepository = {
     }: { limit?: number; offset?: number; feed?: FeedKind } = {},
     currentUserId?: string | null,
   ): Promise<FeedPage> {
+    // Los audios se dejan fuera del muro: son episodios del podcast y tienen
+    // su propia sección en el perfil del administrador.
     const dtos = await apiRequest<PostDto[]>(
-      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}`,
+      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}&exclude_media=audio`,
     );
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items, dtos);

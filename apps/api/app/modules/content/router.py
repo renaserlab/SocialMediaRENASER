@@ -151,6 +151,7 @@ async def list_posts(
     author_id: str | None = Query(default=None),
     circle_id: str | None = Query(default=None),
     media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
+    exclude_media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -162,7 +163,12 @@ async def list_posts(
 
     `author_id` restringe a las publicaciones de un perfil (su galeria) y
     `media` al tipo de adjunto, para separar la cuadricula de los audios sin
-    traerse todo y filtrar en el cliente.
+    traerse todo y filtrar en el cliente. `exclude_media` hace lo contrario:
+    lo usa el muro para dejar fuera los audios, que viven en el podcast.
+
+    Filtrar aqui y no en el cliente evita que la paginacion se descuadre: si el
+    muro descartara los audios despues de recibirlos, una pagina de 20 podria
+    quedarse en 12 y el scroll infinito pediria de mas.
     """
     uid = current_user.id if current_user else None
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
@@ -192,6 +198,12 @@ async def list_posts(
     if media:
         with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
         stmt = stmt.where(Post.id.in_(with_media))
+
+    if exclude_media:
+        # El feed de Inicio excluye los audios: son episodios del podcast y
+        # tienen su propia seccion, no deben repetirse en el muro.
+        of_type = select(PostMedia.post_id).where(PostMedia.media_type == exclude_media)
+        stmt = stmt.where(Post.id.not_in(of_type))
     rows = (await db.execute(stmt)).all()
     media_map = await _load_media_map(db, [row[0].id for row in rows])
     return [_to_post_read(*row, media=media_map.get(row[0].id, [])) for row in rows]
