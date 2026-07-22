@@ -15,6 +15,7 @@ import {
   Inter_900Black,
 } from '@expo-google-fonts/inter';
 
+import { DialogHost } from '@/components/DialogHost';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -69,6 +70,8 @@ export default function RootLayout() {
         <Stack
           screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }}
         />
+        {/* Dialogo de confirmaciones y avisos: uno solo para toda la app. */}
+        <DialogHost />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
