@@ -171,7 +171,7 @@ async def list_events(
         await db.execute(
             select(Event, count_sq, reserved_sq)
             .where(Event.status == "published")
-            .order_by(Event.starts_at.asc())
+            .order_by(Event.starts_at.asc().nulls_last())
             .limit(page.limit)
             .offset(page.offset)
         )

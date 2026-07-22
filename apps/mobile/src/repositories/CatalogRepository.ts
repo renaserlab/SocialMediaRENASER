@@ -43,7 +43,7 @@ export const CatalogRepository = {
   async createEvent(input: {
     title: string;
     description: string;
-    startsAt: Date;
+    startsAt?: Date | null;
     endsAt?: Date | null;
     location: string;
     coverPath?: string | null;
@@ -54,7 +54,7 @@ export const CatalogRepository = {
       body: JSON.stringify({
         title: input.title,
         description: input.description,
-        starts_at: input.startsAt.toISOString(),
+        starts_at: input.startsAt ? input.startsAt.toISOString() : null,
         ends_at: input.endsAt ? input.endsAt.toISOString() : null,
         location: input.location || null,
         cover_path: input.coverPath ?? null,
@@ -72,7 +72,7 @@ export const CatalogRepository = {
     changes: {
       title?: string;
       description?: string;
-      startsAt?: Date;
+      startsAt?: Date | null;
       endsAt?: Date | null;
       location?: string;
       coverPath?: string | null;
@@ -82,7 +82,8 @@ export const CatalogRepository = {
     const payload: Record<string, unknown> = {};
     if (changes.title !== undefined) payload.title = changes.title;
     if (changes.description !== undefined) payload.description = changes.description;
-    if (changes.startsAt !== undefined) payload.starts_at = changes.startsAt.toISOString();
+    if (changes.startsAt !== undefined)
+      payload.starts_at = changes.startsAt ? changes.startsAt.toISOString() : null;
     if (changes.endsAt !== undefined) payload.ends_at = changes.endsAt ? changes.endsAt.toISOString() : null;
     if (changes.whatsappUrl !== undefined) payload.whatsapp_url = changes.whatsappUrl || null;
     if (changes.location !== undefined) payload.location = changes.location || null;

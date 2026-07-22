@@ -15,7 +15,8 @@ const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', '
  * Un evento de varios dias sale como "25-26"; uno de un dia, como "17".
  */
 function badgeDay(start?: Date, end?: Date | null): string {
-  if (!start) return '--';
+  // Sin fecha aun: el distintivo lo dice en vez de mostrar un hueco.
+  if (!start) return '?';
   if (end && end.getDate() !== start.getDate()) {
     return `${start.getDate()}-${end.getDate()}`;
   }
@@ -75,7 +76,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
             {badgeDay(event.startsAtDate, event.endsAtDate)}
           </Text>
           <Text variant="secondary" color={colors.textMuted}>
-            {event.startsAtDate ? MONTHS[event.startsAtDate.getMonth()] : ''}
+            {event.startsAtDate ? MONTHS[event.startsAtDate.getMonth()] : 'Fecha'}
           </Text>
         </View>
 
@@ -84,7 +85,9 @@ export function EventCard({ event, onPress, onEdit }: Props) {
             {event.title}
           </Text>
           <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>
-            {formatRange(event.startsAtDate, event.endsAtDate)}
+            {event.startsAtDate
+              ? formatRange(event.startsAtDate, event.endsAtDate)
+              : 'Fecha y hora por confirmar'}
           </Text>
           {event.location ? (
             <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>

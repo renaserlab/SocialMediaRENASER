@@ -10,8 +10,9 @@ class EventCreate(BaseModel):
 
     title: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=2000)
-    #: Fecha y hora de inicio, ya combinadas por el cliente.
-    starts_at: datetime
+    #: Fecha y hora de inicio, ya combinadas por el cliente. Opcional: hay
+    #: eventos anunciados "por confirmar".
+    starts_at: datetime | None = None
     #: Fin del evento; permite mostrar rangos ("25-26 de agosto").
     ends_at: datetime | None = None
     location: str | None = Field(default=None, max_length=200)
@@ -63,7 +64,7 @@ class EventRead(BaseModel):
     organizer_id: str
     title: str
     description: str
-    starts_at: datetime
+    starts_at: datetime | None = None
     ends_at: datetime | None = None
     location: str | None = None
     cover_path: str | None = None

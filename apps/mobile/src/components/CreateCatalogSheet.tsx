@@ -176,18 +176,21 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       setError('Elige el archivo de audio del episodio.');
       return;
     }
+    // La fecha es OPCIONAL: hay eventos que se anuncian antes de cerrarla.
+    // Solo se valida si se ha escrito algo, y entonces hacen falta las dos
+    // partes (una fecha sin hora no se puede guardar como instante).
     let startsAt: Date | null = null;
-    if (isEvent) {
+    if (isEvent && (day.trim() || time.trim())) {
       startsAt = parseDateTime(day, time);
       if (!startsAt) {
-        setError('Revisa el día (dd/mm/aaaa) y la hora (hh:mm).');
+        setError('Para fijar la fecha necesito el día y la hora. Déjalos vacíos si aún no se sabe.');
         return;
       }
     }
 
     // El fin es opcional, pero si se rellena a medias hay que avisar.
     let endsAt: Date | null = null;
-    if (isEvent && (endDay.trim() || endTime.trim())) {
+    if (isEvent && startsAt && (endDay.trim() || endTime.trim())) {
       endsAt = parseDateTime(endDay, endTime);
       if (!endsAt) {
         setError('Revisa el día y la hora de fin (dd/mm/aaaa y hh:mm).');
@@ -219,7 +222,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
         const data = {
           title: title.trim(),
           description: description.trim(),
-          startsAt: startsAt!,
+          startsAt,
           endsAt,
           location: place.trim(),
           whatsappUrl: whatsapp.trim(),
@@ -336,9 +339,19 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
 
         {isEvent ? (
           <>
-            <DateField label="Día" value={day} onChange={setDay} />
-            <Input label="Hora" value={time} onChangeText={setTime} placeholder="hh:mm" />
-            <Input label="Lugar" value={place} onChangeText={setPlace} placeholder="Dirección o enlace" />
+            <DateField label="Día (opcional)" value={day} onChange={setDay} />
+            <Input
+              label="Hora (opcional)"
+              value={time}
+              onChangeText={setTime}
+              placeholder="hh:mm"
+            />
+            <Input
+              label="Lugar (opcional)"
+              value={place}
+              onChangeText={setPlace}
+              placeholder="Dirección, enlace o «por confirmar»"
+            />
             <DateField label="Día de fin (opcional)" value={endDay} onChange={setEndDay} />
             <Input
               label="Hora de fin (opcional)"

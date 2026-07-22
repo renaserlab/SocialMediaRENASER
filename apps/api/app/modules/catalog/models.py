@@ -26,7 +26,10 @@ class Event(Base):
     )
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Opcional: un evento puede anunciarse antes de cerrar la fecha.
+    starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=True
+    )
     ends_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
