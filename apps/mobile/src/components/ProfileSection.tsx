@@ -5,7 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
-import { CreateTestimonialSheet } from '@/components/CreateTestimonialSheet';
+import { CreateTestimonialSheet, type TestimonialEditable } from '@/components/CreateTestimonialSheet';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { Button } from '@/components/Button';
@@ -80,6 +80,8 @@ export function ProfileSection({ kind, profileId }: Props) {
 
   /** Alta desde la propia seccion; solo el administrador la ve. */
   const [creating, setCreating] = useState(false);
+  /** Testimonio en edicion; solo lo abre el administrador. */
+  const [editingTestimonial, setEditingTestimonial] = useState<TestimonialEditable | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
@@ -243,14 +245,31 @@ export function ProfileSection({ kind, profileId }: Props) {
                     {item.caption || (item.mediaType === 'video' ? 'Video' : 'Foto')}
                   </Text>
                   {isAdmin ? (
-                    <Pressable
-                      onPress={() => void removeTestimonial(item.id)}
-                      hitSlop={10}
-                      accessibilityRole="button"
-                      accessibilityLabel="Eliminar testimonio"
-                    >
-                      <Feather name="trash-2" size={16} color={colors.textMuted} />
-                    </Pressable>
+                    <React.Fragment>
+                      <Pressable
+                        onPress={() =>
+                          setEditingTestimonial({
+                            id: item.id,
+                            caption: item.caption,
+                            mediaType: item.mediaType,
+                            mediaUrl: item.mediaUrl,
+                          })
+                        }
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="Editar testimonio"
+                      >
+                        <Feather name="edit-2" size={16} color={colors.textMuted} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => void removeTestimonial(item.id)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="Eliminar testimonio"
+                      >
+                        <Feather name="trash-2" size={16} color={colors.textMuted} />
+                      </Pressable>
+                    </React.Fragment>
                   ) : null}
                 </View>
               </View>
@@ -260,6 +279,14 @@ export function ProfileSection({ kind, profileId }: Props) {
 
         {creating ? (
           <CreateTestimonialSheet visible onClose={() => setCreating(false)} onCreated={reload} />
+        ) : null}
+        {editingTestimonial ? (
+          <CreateTestimonialSheet
+            visible
+            editing={editingTestimonial}
+            onClose={() => setEditingTestimonial(null)}
+            onCreated={reload}
+          />
         ) : null}
       </View>
     );

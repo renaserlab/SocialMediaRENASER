@@ -14,11 +14,22 @@ import { pickImage, pickVideo, uploadPostMedia, type PickedMedia } from '@/servi
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
+/** Testimonio existente cuando la hoja se usa para editar. */
+export type TestimonialEditable = {
+  id: string;
+  caption: string;
+  mediaType: 'image' | 'video';
+  /** URL firmada del medio actual, para la vista previa. */
+  mediaUrl?: string;
+};
+
 type Props = {
   visible: boolean;
   onClose: () => void;
-  /** Se llama tras publicar, para recargar la galeria. */
+  /** Se llama tras publicar o editar, para recargar la galeria. */
   onCreated?: () => void;
+  /** Si llega, la hoja edita ese testimonio en vez de crear uno nuevo. */
+  editing?: TestimonialEditable | null;
 };
 
 /**
@@ -27,14 +38,15 @@ type Props = {
  * Solo la abre el administrador, pero quien decide de verdad es la RLS de
  * `testimonials`, que exige `public.is_admin()` para insertar.
  */
-export function CreateTestimonialSheet({ visible, onClose, onCreated }: Props) {
+export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }: Props) {
   const { colors } = useAppTheme();
-  const [title, setTitle] = useState('');
+  const isEditing = !!editing;
+  const [title, setTitle] = useState(editing?.caption ?? '');
   const [media, setMedia] = useState<PickedMedia | null>(null);
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
-    setTitle('');
+    setTitle(editing?.caption ?? '');
     setMedia(null);
   };
 
@@ -57,20 +69,28 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated }: Props) {
       notify('Falta el título', 'Escribe un título para el testimonio.');
       return;
     }
-    if (!media) {
+    // Al editar, el archivo es opcional: sin uno nuevo se conserva el actual.
+    if (!isEditing && !media) {
       notify('Falta el archivo', 'Elige una foto o un video.');
       return;
     }
     setSaving(true);
     try {
-      const uploaded = await uploadPostMedia(media);
-      await TestimonialRepository.create(uploaded, title.trim());
+      const uploaded = media ? await uploadPostMedia(media) : null;
+      if (editing) {
+        await TestimonialRepository.update(editing.id, {
+          caption: title.trim(),
+          media: uploaded,
+        });
+      } else {
+        await TestimonialRepository.create(uploaded!, title.trim());
+      }
       reset();
       onCreated?.();
       onClose();
     } catch (error) {
       notify(
-        'No se pudo publicar',
+        isEditing ? 'No se pudo guardar' : 'No se pudo publicar',
         error instanceof Error ? error.message : 'Inténtalo de nuevo.',
       );
     } finally {
@@ -81,7 +101,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated }: Props) {
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
-        Nuevo testimonio
+        {isEditing ? 'Editar testimonio' : 'Nuevo testimonio'}
       </Text>
 
       <Input
@@ -111,29 +131,46 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated }: Props) {
           </Pressable>
         </View>
       ) : (
-        <View style={styles.pickRow}>
-          <Button
-            label="Foto"
-            icon="image"
-            variant="secondary"
-            onPress={() => void choose('image')}
-            style={styles.pickBtn}
-          />
-          <Button
-            label="Video"
-            icon="video"
-            variant="secondary"
-            onPress={() => void choose('video')}
-            style={styles.pickBtn}
-          />
+        <View>
+          {/* Al editar se muestra el archivo actual; cambiarlo es opcional. */}
+          {isEditing && editing?.mediaUrl ? (
+            <View style={styles.previewWrap}>
+              {editing.mediaType === 'video' ? (
+                <VideoPlayer uri={editing.mediaUrl} style={styles.preview} nativeControls muted />
+              ) : (
+                <ExpoImage
+                  source={{ uri: editing.mediaUrl }}
+                  style={styles.preview}
+                  contentFit="cover"
+                />
+              )}
+            </View>
+          ) : null}
+
+          <View style={styles.pickRow}>
+            <Button
+              label={isEditing ? 'Cambiar por foto' : 'Foto'}
+              icon="image"
+              variant="secondary"
+              onPress={() => void choose('image')}
+              style={styles.pickBtn}
+            />
+            <Button
+              label={isEditing ? 'Cambiar por video' : 'Video'}
+              icon="video"
+              variant="secondary"
+              onPress={() => void choose('video')}
+              style={styles.pickBtn}
+            />
+          </View>
         </View>
       )}
 
       <Button
-        label="Publicar"
+        label={isEditing ? 'Guardar cambios' : 'Publicar'}
         onPress={() => void publish()}
         loading={saving}
-        disabled={!title.trim() || !media}
+        disabled={!title.trim() || (!isEditing && !media)}
         style={styles.submit}
       />
     </BottomSheet>

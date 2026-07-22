@@ -68,6 +68,24 @@ export const TestimonialRepository = {
     if (error) throw new Error(error.message);
   },
 
+  /**
+   * Edita un testimonio. El archivo es opcional: si no llega, solo cambia el
+   * titulo y se conserva el medio original.
+   */
+  async update(
+    id: string,
+    { caption, media }: { caption: string; media?: UploadedMedia | null },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = { caption };
+    if (media) {
+      patch.storage_path = media.storagePath;
+      patch.media_type = media.mediaType;
+    }
+    // La RLS rechaza el update si quien lo pide no es administracion.
+    const { error } = await client().from('testimonials').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+  },
+
   async remove(id: string): Promise<void> {
     // La RLS rechaza el borrado si quien lo pide no es administracion.
     const { error } = await client().from('testimonials').delete().eq('id', id);
