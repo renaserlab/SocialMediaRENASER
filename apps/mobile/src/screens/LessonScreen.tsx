@@ -7,10 +7,14 @@ import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useLesson } from '@/hooks/useLesson';
+import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
+import { CourseContentRepository } from '@/repositories/CourseContentRepository';
+import { useAppStore } from '@/store/useAppStore';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { assets } from '@/data/assets';
 import { SAMPLE_VIDEO_URL } from '@/data/media';
-import { signMediaUrls } from '@/services/storage';
+import { signCourseUrls } from '@/services/storage';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -20,6 +24,7 @@ export function LessonScreen() {
   const router = useRouter();
 
   const { lesson, loading, error, reload } = useLesson(id);
+  const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   // El video vive en un bucket privado: hay que firmar su ruta para verlo.
   // En modo demo (sin backend) se sigue usando el clip de ejemplo.
@@ -35,7 +40,10 @@ export function LessonScreen() {
       setVideoUrl(null);
       return;
     }
-    signMediaUrls([mediaPath])
+    // El video de una leccion se sube al bucket course-media (2 GB), no a
+    // post-media: firmarlo contra el bucket equivocado devolvia nada y la
+    // pantalla decia "esta leccion aun no tiene video".
+    signCourseUrls([mediaPath])
       .then((urls) => {
         if (alive) setVideoUrl(urls[mediaPath] ?? null);
       })
@@ -65,9 +73,35 @@ export function LessonScreen() {
     );
   }
 
+  /** Solo la administracion borra; la RLS lo impone de verdad. */
+  const removeLesson = async () => {
+    const accepted = await confirm({
+      title: 'Eliminar lección',
+      message: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      destructive: true,
+    });
+    if (!accepted) return;
+    try {
+      await CourseContentRepository.removeLesson(lesson.id);
+      toast('Lección eliminada');
+      if (router.canGoBack()) router.back();
+      else router.replace('/');
+    } catch {
+      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title="Lección del Curso"
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        // Eliminar vive aqui y no en el temario: alli tocar la fila borraba la
+        // leccion, de modo que no habia forma de abrirla para revisarla.
+        rightIcon={isAdmin ? 'trash-2' : undefined}
+        onRightPress={isAdmin ? () => void removeLesson() : undefined}
+      />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/*
           Video de ESTA lección. Antes era `SAMPLE_VIDEO_URL`, un clip de
@@ -97,7 +131,7 @@ export function LessonScreen() {
 
         <View style={styles.details}>
           <Text style={[styles.title, { color: colors.text }]}>
-            Lección {lesson.order}: {lesson.title}
+            Lección {lesson.order + 1}: {lesson.title}
           </Text>
           <Text style={[styles.duration, { color: colors.textMuted }]}>
             Duración: {lesson.durationMin} min

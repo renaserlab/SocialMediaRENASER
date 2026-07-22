@@ -186,10 +186,11 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
                     .join(' · ')
                 }
                 leftIcon={lesson.mediaPath ? 'play-circle' : 'file-text'}
-                rightIcon={canEdit ? 'trash-2' : 'chevron-right'}
-                onPress={() =>
-                  canEdit ? void removeLesson(lesson.id) : onOpenLesson?.(lesson.id)
-                }
+                rightIcon="chevron-right"
+                // Tocar SIEMPRE abre la leccion, tambien siendo administrador:
+                // antes la borraba, asi que Darren no podia ni previsualizar su
+                // propio contenido. Eliminarla vive dentro, en su cabecera.
+                onPress={() => onOpenLesson?.(lesson.id)}
               />
             ))
           )}
