@@ -60,9 +60,17 @@ export function HomeScreen() {
   const isAdmin = user?.isAdmin === true;
   const [creating, setCreating] = useState<CatalogKind | null>(null);
 
+  /**
+   * Perfil donde viven eventos y cursos. Si el propio usuario es el
+   * administrador, es SU perfil: el endpoint de destacados excluye a quien
+   * mira, asi que Darren no aparece en su propia lista y las tarjetas se
+   * quedaban desactivadas para el.
+   */
+  const catalogProfileId = isAdmin ? (user?.id ?? null) : adminId;
+
   const openAdminSection = (section: 'eventos' | 'cursos') => {
-    if (!adminId) return;
-    router.push({ pathname: '/profile/[id]', params: { id: adminId, section } } as never);
+    if (!catalogProfileId) return;
+    router.push({ pathname: '/profile/[id]', params: { id: catalogProfileId, section } } as never);
   };
 
   const [feedTab, setFeedTab] = useState(0);
@@ -154,15 +162,25 @@ export function HomeScreen() {
         </View>
 
         <View style={styles.quickRow}>
-          <Pressable
-            onPress={() => openAdminSection('eventos')}
-            disabled={!adminId}
+          <View
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Ver eventos"
           >
-            <View style={styles.quickHeader}>
-              <Feather name="calendar" size={24} color={colors.text} />
+            {/*
+              La zona pulsable va DETRAS del contenido, no envolviendolo: en web
+              cada Pressable es un <button> y el "+" anidado dentro producia
+              <button> dentro de <button> (HTML invalido, error de hidratacion).
+            */}
+            <Pressable
+              onPress={() => openAdminSection('eventos')}
+              disabled={!catalogProfileId}
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel="Ver eventos"
+            />
+            <View style={styles.quickHeader} pointerEvents="box-none">
+              <View pointerEvents="none">
+                <Feather name="calendar" size={24} color={colors.text} />
+              </View>
               {isAdmin ? (
                 <Pressable
                   onPress={() => setCreating('evento')}
@@ -175,7 +193,9 @@ export function HomeScreen() {
                 </Pressable>
               ) : null}
             </View>
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Eventos</Text>
+            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+              Eventos
+            </Text>
             {isAdmin ? (
               <Pressable
                 onPress={() => setCreating('evento')}
@@ -186,18 +206,30 @@ export function HomeScreen() {
                 <Text style={[styles.addChipText, { color: colors.text }]}>Agregar evento</Text>
               </Pressable>
             ) : (
-              <Text style={[styles.quickBody, { color: colors.textMuted }]}>Encuentros y experiencias</Text>
+              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+                Encuentros y experiencias
+              </Text>
             )}
-          </Pressable>
-          <Pressable
-            onPress={() => openAdminSection('cursos')}
-            disabled={!adminId}
+          </View>
+          <View
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Ver cursos"
           >
-            <View style={styles.quickHeader}>
-              <Feather name="book" size={24} color={colors.text} />
+            {/*
+              La zona pulsable va DETRAS del contenido, no envolviendolo: en web
+              cada Pressable es un <button> y el "+" anidado dentro producia
+              <button> dentro de <button> (HTML invalido, error de hidratacion).
+            */}
+            <Pressable
+              onPress={() => openAdminSection('cursos')}
+              disabled={!catalogProfileId}
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel="Ver cursos"
+            />
+            <View style={styles.quickHeader} pointerEvents="box-none">
+              <View pointerEvents="none">
+                <Feather name="book" size={24} color={colors.text} />
+              </View>
               {isAdmin ? (
                 <Pressable
                   onPress={() => setCreating('curso')}
@@ -210,7 +242,9 @@ export function HomeScreen() {
                 </Pressable>
               ) : null}
             </View>
-            <Text style={[styles.quickTitle, { color: colors.text }]}>Cursos</Text>
+            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+              Cursos
+            </Text>
             {isAdmin ? (
               <Pressable
                 onPress={() => setCreating('curso')}
@@ -221,9 +255,11 @@ export function HomeScreen() {
                 <Text style={[styles.addChipText, { color: colors.text }]}>Agregar curso</Text>
               </Pressable>
             ) : (
-              <Text style={[styles.quickBody, { color: colors.textMuted }]}>Programas para avanzar</Text>
+              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+                Programas para avanzar
+              </Text>
             )}
-          </Pressable>
+          </View>
         </View>
       </View>
     </View>
