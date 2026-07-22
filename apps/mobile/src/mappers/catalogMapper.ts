@@ -9,6 +9,7 @@ export type EventDto = {
   ends_at: string | null;
   location: string | null;
   cover_path: string | null;
+  whatsapp_url?: string | null;
   event_type: string;
   status: string;
   capacity: number | null;
@@ -38,6 +39,9 @@ export function toEventItem(dto: EventDto): EventItem {
     id: dto.id,
     organizerId: dto.organizer_id,
     startsAtDate: new Date(dto.starts_at),
+    endsAtDate: dto.ends_at ? new Date(dto.ends_at) : null,
+    whatsappUrl: dto.whatsapp_url ?? null,
+    coverPath: dto.cover_path,
     title: dto.title,
     description: dto.description,
     date: formatEventDate(dto.starts_at),

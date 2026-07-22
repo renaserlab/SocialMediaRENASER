@@ -23,6 +23,8 @@ type Props = {
    * porque los treinta huecos describen el catalogo completo, no el filtrado.
    */
   showLockedSlots?: boolean;
+  /** Solo lo recibe el administrador; abre la edicion del episodio. */
+  onEdit?: (postId: string) => void;
 };
 
 /**
@@ -35,7 +37,7 @@ type Props = {
  * Solo se monta el reproductor del episodio elegido: montar treinta a la vez
  * dejaria otros tantos decodificadores de audio abiertos.
  */
-export function PodcastList({ episodes, showLockedSlots = true }: Props) {
+export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -80,6 +82,18 @@ export function PodcastList({ episodes, showLockedSlots = true }: Props) {
                   </Text>
                 ) : null}
               </View>
+
+              {onEdit && episode ? (
+                <Pressable
+                  onPress={() => onEdit(episode.id)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Editar ${episode.body}`}
+                  style={styles.action}
+                >
+                  <Feather name="edit-2" size={15} color={colors.textMuted} />
+                </Pressable>
+              ) : null}
 
               {locked ? (
                 <View style={styles.action}>

@@ -5,6 +5,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
+import { EventCard } from '@/components/EventCard';
+import { EventDetailSheet } from '@/components/EventDetailSheet';
 import { ListRow } from '@/components/ListRow';
 import { PodcastList } from '@/components/PodcastList';
 import { CATEGORIES, type CategoryId } from '@/data/categories';
@@ -57,6 +59,8 @@ export function ProfileSection({ kind, profileId }: Props) {
   const [creating, setCreating] = useState(false);
   /** Filtro del podcast; `null` = Todos. */
   const [category, setCategory] = useState<CategoryId | null>(null);
+  /** Evento cuya ficha se esta viendo. */
+  const [detail, setDetail] = useState<EventItem | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
 
   useEffect(() => {
@@ -146,7 +150,11 @@ export function ProfileSection({ kind, profileId }: Props) {
             onPress={() => setCreating(true)}
           />
         ) : null}
-        <PodcastList episodes={episodes} showLockedSlots={category === null} />
+        <PodcastList
+          episodes={episodes}
+          showLockedSlots={category === null}
+          onEdit={isAdmin ? (id) => router.push(`/edit-post/${id}` as never) : undefined}
+        />
         {creating ? (
           <CreateCatalogSheet
             kind="podcast"
@@ -176,22 +184,23 @@ export function ProfileSection({ kind, profileId }: Props) {
     <View style={styles.list}>
       {kind === 'eventos'
         ? events.map((event) => (
-            <ListRow
+            <EventCard
               key={event.id}
-              title={event.title}
-              subtitle={`${event.date} • ${event.location}`}
-              leftIcon="calendar"
-              rightIcon={isAdmin ? 'edit-2' : 'chevron-right'}
-              onPress={() =>
+              event={event}
+              onPress={() => setDetail(event)}
+              onEdit={
                 isAdmin
-                  ? setEditing({
-                      id: event.id,
-                      title: event.title,
-                      description: event.description,
-                      startsAt: event.startsAtDate ?? null,
-                      location: event.location,
-                    })
-                  : router.push('/events')
+                  ? () =>
+                      setEditing({
+                        id: event.id,
+                        title: event.title,
+                        description: event.description,
+                        startsAt: event.startsAtDate ?? null,
+                        endsAt: event.endsAtDate ?? null,
+                        location: event.location,
+                        whatsappUrl: event.whatsappUrl ?? '',
+                      })
+                  : undefined
               }
             />
           ))
@@ -214,6 +223,8 @@ export function ProfileSection({ kind, profileId }: Props) {
               }
             />
           ))}
+      <EventDetailSheet event={detail} onClose={() => setDetail(null)} />
+
       {editing ? (
         <CreateCatalogSheet
           kind={kind === 'eventos' ? 'evento' : 'curso'}

@@ -36,8 +36,10 @@ async def create_event(
         title=payload.title,
         description=payload.description,
         starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
         location=payload.location,
         cover_path=payload.cover_path,
+        whatsapp_url=payload.whatsapp_url,
         event_type=payload.event_type,
         status="published",
     )
@@ -121,6 +123,7 @@ def _to_event_read(event: Event, count: int, reserved: int) -> EventRead:
         ends_at=event.ends_at,
         location=event.location,
         cover_path=event.cover_path,
+        whatsapp_url=event.whatsapp_url,
         event_type=event.event_type,
         status=event.status,
         capacity=event.capacity,

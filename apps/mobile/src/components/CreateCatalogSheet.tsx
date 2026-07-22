@@ -26,7 +26,9 @@ export type CatalogEditable = {
   description: string;
   /** Solo eventos. */
   startsAt?: Date | null;
+  endsAt?: Date | null;
   location?: string;
+  whatsappUrl?: string;
   /** Solo cursos, en la unidad mayor. */
   price?: number;
 };
@@ -87,6 +89,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
   const [day, setDay] = useState('');
   const [time, setTime] = useState('');
   const [place, setPlace] = useState('');
+  /** Fin opcional del evento, para rangos de varios dias. */
+  const [endDay, setEndDay] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
   const [price, setPrice] = useState('');
   /** Solo podcast: categoria del episodio, para los filtros. */
   const [category, setCategory] = useState<CategoryId | null>(null);
@@ -104,11 +110,17 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
     setDescription(editing.description);
     setPrice(editing.price != null ? String(editing.price) : '');
     setPlace(editing.location ?? '');
+    setWhatsapp(editing.whatsappUrl ?? '');
+    const two = (n: number) => String(n).padStart(2, '0');
+    const asDay = (d: Date) => `${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`;
+    const asTime = (d: Date) => `${two(d.getHours())}:${two(d.getMinutes())}`;
     if (editing.startsAt) {
-      const d = editing.startsAt;
-      const two = (n: number) => String(n).padStart(2, '0');
-      setDay(`${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`);
-      setTime(`${two(d.getHours())}:${two(d.getMinutes())}`);
+      setDay(asDay(editing.startsAt));
+      setTime(asTime(editing.startsAt));
+    }
+    if (editing.endsAt) {
+      setEndDay(asDay(editing.endsAt));
+      setEndTime(asTime(editing.endsAt));
     }
   }, [visible, editing]);
 
@@ -120,6 +132,9 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
     setDay('');
     setTime('');
     setPlace('');
+    setEndDay('');
+    setEndTime('');
+    setWhatsapp('');
     setPrice('');
     setCategory(null);
     setError(null);
@@ -167,6 +182,20 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       }
     }
 
+    // El fin es opcional, pero si se rellena a medias hay que avisar.
+    let endsAt: Date | null = null;
+    if (isEvent && (endDay.trim() || endTime.trim())) {
+      endsAt = parseDateTime(endDay, endTime);
+      if (!endsAt) {
+        setError('Revisa el día y la hora de fin (dd/mm/aaaa y hh:mm).');
+        return;
+      }
+      if (startsAt && endsAt < startsAt) {
+        setError('El fin del evento no puede ser anterior a su inicio.');
+        return;
+      }
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -183,7 +212,9 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           title: title.trim(),
           description: description.trim(),
           startsAt: startsAt!,
+          endsAt,
           location: place.trim(),
+          whatsappUrl: whatsapp.trim(),
           // `undefined` deja la portada intacta al editar; solo se envia si se
           // eligio una nueva.
           ...(coverPath ? { coverPath } : {}),
@@ -295,6 +326,25 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
             <Input label="Día" value={day} onChangeText={setDay} placeholder="dd/mm/aaaa" />
             <Input label="Hora" value={time} onChangeText={setTime} placeholder="hh:mm" />
             <Input label="Lugar" value={place} onChangeText={setPlace} placeholder="Dirección o enlace" />
+            <Input
+              label="Día de fin (opcional)"
+              value={endDay}
+              onChangeText={setEndDay}
+              placeholder="dd/mm/aaaa"
+            />
+            <Input
+              label="Hora de fin (opcional)"
+              value={endTime}
+              onChangeText={setEndTime}
+              placeholder="hh:mm"
+            />
+            <Input
+              label="Grupo de WhatsApp (opcional)"
+              value={whatsapp}
+              onChangeText={setWhatsapp}
+              placeholder="https://chat.whatsapp.com/..."
+              autoCapitalize="none"
+            />
           </>
         ) : isPodcast ? null : (
           <Input

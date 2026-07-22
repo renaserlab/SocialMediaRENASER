@@ -32,6 +32,8 @@ class Event(Base):
     )
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Invitacion al grupo donde se dan los detalles del evento.
+    whatsapp_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_type: Mapped[str] = mapped_column(String(20), server_default="online")
     status: Mapped[str] = mapped_column(content_status, server_default="published")
     capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)

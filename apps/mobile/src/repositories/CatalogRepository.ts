@@ -1,5 +1,6 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { EventDto, toEventItem } from '@/mappers/catalogMapper';
+import { signMediaUrls } from '@/services/storage';
 import type { EventItem } from '@/types';
 
 export type EventsPage = {
@@ -7,11 +8,30 @@ export type EventsPage = {
   reservedIds: string[];
 };
 
+/**
+ * Firma en lote las portadas del listado.
+ *
+ * Se suben al mismo bucket privado que el resto de medios, asi que hay que
+ * firmarlas para poder mostrarlas; una sola llamada para todas.
+ */
+async function attachCovers(items: EventItem[]): Promise<void> {
+  const paths = items
+    .map((e) => e.coverPath)
+    .filter((p): p is string => Boolean(p));
+  if (paths.length === 0) return;
+  const urls = await signMediaUrls(paths);
+  items.forEach((item) => {
+    if (item.coverPath && urls[item.coverPath]) item.coverUrl = urls[item.coverPath];
+  });
+}
+
 export const CatalogRepository = {
   async listEvents(): Promise<EventsPage> {
     const dtos = await apiRequest<EventDto[]>(`${API_V1}/catalog/events?limit=50`);
+    const items = dtos.map(toEventItem);
+    await attachCovers(items);
     return {
-      items: dtos.map(toEventItem),
+      items,
       reservedIds: dtos.filter((d) => d.reserved_by_me).map((d) => d.id),
     };
   },
@@ -24,8 +44,10 @@ export const CatalogRepository = {
     title: string;
     description: string;
     startsAt: Date;
+    endsAt?: Date | null;
     location: string;
     coverPath?: string | null;
+    whatsappUrl?: string | null;
   }): Promise<EventItem> {
     const dto = await apiRequest<EventDto>(`${API_V1}/catalog/events`, {
       method: 'POST',
@@ -33,8 +55,10 @@ export const CatalogRepository = {
         title: input.title,
         description: input.description,
         starts_at: input.startsAt.toISOString(),
+        ends_at: input.endsAt ? input.endsAt.toISOString() : null,
         location: input.location || null,
         cover_path: input.coverPath ?? null,
+        whatsapp_url: input.whatsappUrl || null,
         // Valor tal y como lo admite la base ('presential', no 'presencial').
         event_type: 'presential',
       }),
@@ -49,14 +73,18 @@ export const CatalogRepository = {
       title?: string;
       description?: string;
       startsAt?: Date;
+      endsAt?: Date | null;
       location?: string;
       coverPath?: string | null;
+      whatsappUrl?: string | null;
     },
   ): Promise<EventItem> {
     const payload: Record<string, unknown> = {};
     if (changes.title !== undefined) payload.title = changes.title;
     if (changes.description !== undefined) payload.description = changes.description;
     if (changes.startsAt !== undefined) payload.starts_at = changes.startsAt.toISOString();
+    if (changes.endsAt !== undefined) payload.ends_at = changes.endsAt ? changes.endsAt.toISOString() : null;
+    if (changes.whatsappUrl !== undefined) payload.whatsapp_url = changes.whatsappUrl || null;
     if (changes.location !== undefined) payload.location = changes.location || null;
     if (changes.coverPath !== undefined) payload.cover_path = changes.coverPath;
     const dto = await apiRequest<EventDto>(`${API_V1}/catalog/events/${eventId}`, {

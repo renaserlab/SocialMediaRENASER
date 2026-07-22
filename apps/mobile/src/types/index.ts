@@ -81,6 +81,14 @@ export type EventItem = {
   organizerId?: string;
   /** Fecha real de inicio; `date` es solo el texto ya formateado. */
   startsAtDate?: Date;
+  /** Fin del evento; con el se muestran rangos ("25-26 de agosto"). */
+  endsAtDate?: Date | null;
+  /** Invitación al grupo de WhatsApp donde se dan los detalles. */
+  whatsappUrl?: string | null;
+  /** Ruta de la portada en Storage; hay que firmarla para mostrarla. */
+  coverPath?: string | null;
+  /** URL firmada de la portada, ya resuelta. */
+  coverUrl?: string;
   title: string;
   description: string;
   date: string;
