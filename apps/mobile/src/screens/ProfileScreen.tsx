@@ -172,14 +172,35 @@ export function ProfileScreen() {
   // Perfil propio con backend real: carga/error mientras llega el perfil.
   if (!id && supabaseEnabled && !currentUser) {
     const state = profileError ? 'error' : authStatus === 'loading' ? 'loading' : 'empty';
+    // Sin sesion no falta el perfil: falta entrar. Antes ambos casos mostraban
+    // el mismo aviso y sin ninguna accion, asi que quien llegaba aqui sin
+    // cuenta se quedaba atascado: se le pedia iniciar sesion sin ofrecer donde.
+    const anonymous = authStatus === 'anonymous';
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title="MI PERFIL" rightIcon="settings" onRightPress={() => router.push('/settings')} />
         <StateView
           state={state}
           onRetry={() => void refreshProfile()}
-          title={state === 'empty' ? 'Perfil no disponible' : undefined}
-          description={state === 'empty' ? 'Inicia sesión para ver tu perfil.' : undefined}
+          icon={state === 'empty' && anonymous ? 'user' : undefined}
+          title={
+            state === 'empty' ? (anonymous ? 'Entra a tu cuenta' : 'Perfil no disponible') : undefined
+          }
+          description={
+            state === 'empty'
+              ? anonymous
+                ? 'Inicia sesión para ver tu perfil, publicar y seguir a otras personas.'
+                : 'Estamos preparando tu perfil. Inténtalo de nuevo en un momento.'
+              : undefined
+          }
+          actionLabel={state === 'empty' ? (anonymous ? 'Iniciar sesión' : 'Reintentar') : undefined}
+          onAction={
+            state === 'empty'
+              ? anonymous
+                ? () => router.push('/login' as never)
+                : () => void refreshProfile()
+              : undefined
+          }
         />
       </View>
     );

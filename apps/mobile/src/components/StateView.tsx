@@ -15,6 +15,15 @@ type StateViewProps = {
   title?: string;
   description?: string;
   onRetry?: () => void;
+  /**
+   * Accion principal, disponible en cualquier estado salvo carga.
+   *
+   * `onRetry` solo pintaba boton en 'error', asi que un estado vacio quedaba
+   * sin salida (p. ej. el perfil de un usuario sin sesion: pedia iniciar
+   * sesion pero no ofrecia como).
+   */
+  actionLabel?: string;
+  onAction?: () => void;
   loadingComponent?: React.ReactNode;
   icon?: keyof typeof Feather.glyphMap;
   style?: ViewStyle;
@@ -26,6 +35,8 @@ export function StateView({
   title,
   description,
   onRetry,
+  actionLabel,
+  onAction,
   loadingComponent,
   icon,
   style,
@@ -79,14 +90,21 @@ export function StateView({
           {finalDescription}
         </Text>
       )}
-      {state === 'error' && onRetry && (
+      {onAction && actionLabel ? (
+        <Button
+          label={actionLabel}
+          onPress={onAction}
+          variant="secondary"
+          style={styles.retryButton}
+        />
+      ) : state === 'error' && onRetry ? (
         <Button
           label="Reintentar"
           onPress={onRetry}
           variant="secondary"
           style={styles.retryButton}
         />
-      )}
+      ) : null}
     </View>
   );
 }
