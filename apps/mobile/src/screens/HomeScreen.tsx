@@ -316,6 +316,21 @@ export function HomeScreen() {
             )}
           </View>
         </View>
+
+        {/* Acceso a la galeria de testimonios, debajo de las tarjetas. */}
+        <Pressable
+          onPress={() => router.push('/testimonials' as never)}
+          accessibilityRole="button"
+          accessibilityLabel={t('home.seeMore')}
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.seeMore,
+            { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+          ]}
+        >
+          <Text style={[styles.seeMoreText, { color: colors.text }]}>{t('home.seeMore')}</Text>
+          <Feather name="chevron-right" size={15} color={colors.text} />
+        </Pressable>
       </View>
     </View>
   );
@@ -399,6 +414,19 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  seeMoreText: { fontSize: 13, fontWeight: '700' },
+  seeMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    alignSelf: 'center',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    minHeight: 36,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+  },
   container: { paddingHorizontal: spacing.lg },
   tabs: { marginBottom: spacing.lg },
   composer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.md, marginBottom: spacing.lg },

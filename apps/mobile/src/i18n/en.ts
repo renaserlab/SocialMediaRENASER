@@ -42,6 +42,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'profile.events': 'Events',
   'profile.courses': 'Courses',
   'profile.circles': 'Circles',
+  'profile.testimonials': 'Testimonials',
   'profile.noPosts': 'No posts yet.',
   'profile.noEvents': 'No events published yet.',
   'profile.noCourses': 'No courses published yet.',
@@ -69,6 +70,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
 
   'home.podcast': 'Podcast',
   'home.podcastBody': 'Listen to the episodes',
+  'home.seeMore': 'See more',
   'home.addAudio': 'Add audio',
   'podcast.locked': 'Available with your membership',
   'podcast.soon': 'Coming soon',

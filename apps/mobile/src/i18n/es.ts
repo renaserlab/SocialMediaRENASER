@@ -48,6 +48,7 @@ export const es = {
   'profile.events': 'Eventos',
   'profile.courses': 'Cursos',
   'profile.circles': 'Círculos',
+  'profile.testimonials': 'Testimonios',
   'profile.noPosts': 'Aún no hay publicaciones.',
   'profile.noEvents': 'Aún no hay eventos publicados.',
   'profile.noCourses': 'Aún no hay cursos publicados.',
@@ -78,6 +79,7 @@ export const es = {
   // Acciones comunes
   'home.podcast': 'Podcast',
   'home.podcastBody': 'Escucha los episodios',
+  'home.seeMore': 'Ver más',
   'home.addAudio': 'Agregar audio',
   'podcast.locked': 'Disponible con tu membresía',
   'podcast.soon': 'Próximamente',

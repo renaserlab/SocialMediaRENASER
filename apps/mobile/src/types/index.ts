@@ -164,6 +164,20 @@ export type StoryViewer = {
   viewedAt: string;
 };
 
+/** Filtro de la galeria de testimonios. */
+export type TestimonialFilter = 'all' | 'image' | 'video';
+
+/** Foto o video de la galeria de testimonios (solo los publica la admin). */
+export type Testimonial = {
+  id: string;
+  storagePath: string;
+  /** URL firmada; el bucket es privado, asi que caduca. */
+  mediaUrl?: string;
+  mediaType: 'image' | 'video';
+  caption: string;
+  createdAt: string;
+};
+
 /** Un tramo de una historia (imagen a pantalla completa con texto opcional). */
 export type StorySegment = {
   id: string;

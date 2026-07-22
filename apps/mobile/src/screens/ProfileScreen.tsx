@@ -388,6 +388,11 @@ export function ProfileScreen() {
               onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
             />
             <Shortcut icon="users" label={t('profile.circles')} onPress={() => router.push('/circle/lideres-renaser')} />
+            <Shortcut
+              icon="camera"
+              label={t('profile.testimonials')}
+              onPress={() => router.push('/testimonials' as never)}
+            />
           </View>
 
           {activeSection ? (
