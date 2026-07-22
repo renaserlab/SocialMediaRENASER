@@ -160,7 +160,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
   const chooseCover = async () => {
     try {
       // 16:9 es la proporcion de un banner de portada.
-      const picked = await pickImage([16, 9]);
+      const picked = await pickImage({ allowsEditing: false });
       if (picked) setCover(picked);
     } catch {
       setError('No se pudo abrir la galería.');
@@ -286,12 +286,16 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           accessibilityLabel="Elegir portada"
         >
           {cover ? (
-            <ExpoImage source={{ uri: cover.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            // `contain` para que la vista previa muestre la portada entera, sin
+            // recortar: es lo que se va a ver despues en la ficha.
+            <ExpoImage source={{ uri: cover.uri }} style={StyleSheet.absoluteFill} contentFit="contain" />
           ) : (
             <View style={styles.coverEmpty}>
               <Feather name="image" size={22} color={colors.textMuted} />
               <Text variant="secondary" color={colors.textMuted}>
-                {editing ? 'Cambiar portada (opcional)' : `Portada (${isEvent ? 'foto o banner' : 'imagen del curso'})`}
+                {editing
+                  ? 'Cambiar portada (opcional)'
+                  : `Portada — se sube sin recortar (${isEvent ? 'banner 820x312' : 'imagen del curso'})`}
               </Text>
             </View>
           )}

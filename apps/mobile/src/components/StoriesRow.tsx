@@ -78,9 +78,9 @@ export function StoriesRow() {
     try {
       const picked =
         source === 'gallery-photo'
-          ? await pickImage([9, 16])
+          ? await pickImage({ aspect: [9, 16] })
           : source === 'camera'
-          ? await takePhoto([9, 16])
+          ? await takePhoto({ aspect: [9, 16] })
           : await pickVideo(MAX_STORY_MS / 1000);
       if (!picked) return;
 

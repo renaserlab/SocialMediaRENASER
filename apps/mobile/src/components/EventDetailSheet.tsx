@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
+import { CoverImage } from '@/components/CoverImage';
 import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
@@ -53,15 +53,7 @@ export function EventDetailSheet({ event, onClose }: Props) {
   return (
     <BottomSheet visible onClose={close}>
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
-        {event.coverUrl ? (
-          <ExpoImage
-            source={{ uri: event.coverUrl }}
-            style={styles.cover}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-          />
-        ) : null}
+        {event.coverUrl ? <CoverImage uri={event.coverUrl} style={styles.cover} /> : null}
 
         <Text variant="title" weight="900" style={styles.title}>
           {event.title}
@@ -125,7 +117,7 @@ function Row({ icon, text }: { icon: keyof typeof Feather.glyphMap; text: string
 
 const styles = StyleSheet.create({
   scroll: { maxHeight: 520 },
-  cover: { width: '100%', height: 170, borderRadius: radius.lg, marginBottom: spacing.md },
+  cover: { marginBottom: spacing.md },
   title: { marginBottom: spacing.sm },
   meta: { gap: spacing.xs, marginBottom: spacing.md },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
