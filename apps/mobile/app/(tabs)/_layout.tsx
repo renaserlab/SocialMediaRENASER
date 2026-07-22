@@ -1,9 +1,12 @@
 import React from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 
 import { useTranslation } from '@/i18n/useTranslation';
+import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 const icon = (name: keyof typeof Feather.glyphMap) => ({ color, size }: { color: string; size: number }) => (
@@ -16,6 +19,39 @@ export default function TabsLayout() {
   // Sin esto, fijar `height` anula el calculo height + inset de React Navigation
   // y los iconos quedan bajo la barra de gestos / home indicator.
   const insets = useSafeAreaInsets();
+
+  const hydrated = useAppStore((state) => state.hydrated);
+  const authStatus = useAuthStore((state) => state.status);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+
+  // Mismo criterio que app/index.tsx: no se decide nada hasta saber si hay
+  // sesion, o cada arranque rebotaria a la bienvenida antes de resolverla.
+  if (!hydrated || (supabaseEnabled && authStatus === 'loading')) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.background,
+        }}
+      >
+        <ActivityIndicator color={colors.text} />
+      </View>
+    );
+  }
+
+  /**
+   * La red social es solo para quien tiene cuenta.
+   *
+   * La guarda vive aqui, en el layout, y no en cada pantalla: asi cubre TODAS
+   * las pestañas y tambien los enlaces directos (en web bastaba con escribir
+   * /home o /messages para entrar sin sesion). Se redirige a la raiz, que
+   * reanuda el recorrido de bienvenida: idioma -> quiz -> resultado -> registro.
+   */
+  if (supabaseEnabled && authStatus !== 'authenticated') {
+    return <Redirect href="/" />;
+  }
 
   return (
     <Tabs
