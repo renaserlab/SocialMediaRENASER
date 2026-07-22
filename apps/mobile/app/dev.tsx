@@ -1,5 +1,5 @@
 import { StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
@@ -78,6 +78,11 @@ const GROUPS: Group[] = [
 
 export default function DevGalleryScreen() {
   const router = useRouter();
+
+  // Esta galeria es una herramienta de desarrollo: no esta enlazada en ningun
+  // sitio, pero la ruta /dev respondia igual en una build de produccion y
+  // dejaba entrar a pantallas internas con un enlace profundo.
+  if (!__DEV__) return <Redirect href="/" />;
 
   return (
     <AppScreen contentStyle={styles.content}>

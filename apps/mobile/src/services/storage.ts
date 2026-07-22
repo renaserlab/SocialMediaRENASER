@@ -11,7 +11,6 @@ import { uploadResumable } from '@/services/resumableUpload';
 import { supabase, supabaseUrl } from '@/services/supabase';
 
 const BUCKET = 'post-media';
-const AVATAR_BUCKET = 'avatars';
 const SIGNED_URL_TTL = 60 * 60; // 1 hora
 
 /**
@@ -28,18 +27,6 @@ const CACHE_TTL_MS = (SIGNED_URL_TTL - 600) * 1000;
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
 export type MediaKind = 'image' | 'video' | 'audio';
-
-/**
- * URL publica del avatar de un perfil (o null si no tiene).
- *
- * El bucket `avatars` es publico (ver 0001_initial.sql), asi que no hace falta
- * firmar: se construye la URL directa, sin round-trip. Devuelve null cuando el
- * perfil aun no ha subido foto, para que quien llama use el placeholder.
- */
-export function avatarPublicUrl(path: string | null | undefined): string | null {
-  if (!path || !supabase) return null;
-  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
-}
 
 /** Medio elegido por el usuario, antes de subirlo. */
 export type PickedMedia = {
@@ -330,6 +317,20 @@ export async function uploadPostMedia(
 // --------------------------------------------------------------------------
 // Fotos de perfil y portada
 // --------------------------------------------------------------------------
+
+const AVATAR_BUCKET = 'avatars';
+
+/**
+ * URL publica de una ruta del bucket `avatars` (avatar o portada).
+ *
+ * El bucket es publico, asi que no hace falta firmar y la URL no caduca, algo
+ * importante porque la foto de perfil se pinta en cada tarjeta del feed.
+ * Devuelve undefined cuando no hay foto, para que la vista use el placeholder.
+ */
+export function profileImageUrl(path: string | null | undefined): string | undefined {
+  if (!supabase || !path) return undefined;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+}
 
 /**
  * Sube la foto de perfil o portada al bucket `avatars` y devuelve su RUTA.

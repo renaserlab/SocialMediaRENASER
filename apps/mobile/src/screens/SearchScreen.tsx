@@ -18,7 +18,7 @@ import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import type { ProfileSummary } from '@/mappers/profileMapper';
-import { avatarPublicUrl } from '@/services/storage';
+import { profileImageUrl } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -214,7 +214,7 @@ export function SearchScreen() {
                   subtitle={row.person.username}
                   leftComponent={
                     <ExpoImage
-                      source={avatarPublicUrl(row.person.avatarPath) ? { uri: avatarPublicUrl(row.person.avatarPath)! } : assets.avatar}
+                      source={profileImageUrl(row.person.avatarPath) ? { uri: profileImageUrl(row.person.avatarPath)! } : assets.avatar}
                       style={styles.avatar}
                       contentFit="cover"
                       cachePolicy="memory-disk"

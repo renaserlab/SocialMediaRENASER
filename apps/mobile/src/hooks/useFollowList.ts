@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { PersonRow } from '@/components/PeopleList';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
-import { avatarPublicUrl } from '@/services/storage';
+import { profileImageUrl } from '@/services/storage';
 
 export type FollowListKind = 'followers' | 'following';
 
@@ -37,7 +37,7 @@ export function useFollowList(profileId: string | undefined, kind: FollowListKin
           id: p.id,
           fullName: p.fullName,
           username: p.username,
-          avatarUrl: avatarPublicUrl(p.avatarPath) ?? undefined,
+          avatarUrl: profileImageUrl(p.avatarPath) ?? undefined,
           isFollowing: p.isFollowing,
         })),
       );
