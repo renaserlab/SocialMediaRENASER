@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
@@ -42,6 +42,26 @@ export function LandingScreen() {
           <Text variant="secondary" color={media.textMuted} style={styles.hint}>
             2 min · Gratis · Resultado inmediato
           </Text>
+
+          {/*
+            Salida para quien YA tiene cuenta: sin esto, alguien que solo cerro
+            sesion tenia que responder las 7 preguntas y llegar al registro para
+            encontrar el enlace de iniciar sesion.
+          */}
+          <Pressable
+            onPress={() => router.push('/login' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Iniciar sesión"
+            hitSlop={8}
+            style={({ pressed }) => [styles.loginRow, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Text variant="secondary" color={media.textMuted}>
+              ¿Ya tienes cuenta?{' '}
+            </Text>
+            <Text variant="secondary" weight="700" color={media.text}>
+              Iniciar sesión
+            </Text>
+          </Pressable>
         </View>
       </AppScreen>
     </View>
@@ -87,6 +107,13 @@ const styles = StyleSheet.create({
   hint: {
     textAlign: 'center',
     marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  loginRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: spacing.xxl,
+    minHeight: 44,
   },
 });

@@ -26,9 +26,22 @@ export default function IndexRoute() {
     );
   }
 
-  // Con sesión activa se va directo al home; el quiz/registro es solo para
-  // usuarios nuevos o anónimos (evita quedar atrapado en el flujo de onboarding).
+  // Con sesión activa se va directo al home.
   if (authStatus === 'authenticated') return <Redirect href="/(tabs)/home" />;
+
+  // Sin sesión y con backend real, manda la sesión y NO `onboardingComplete`:
+  // esa marca vive en el dispositivo, no en la cuenta, asi que quien completó
+  // el flujo alguna vez y luego cerró sesión (o se le caducó el token) volvía a
+  // entrar como anónimo, saltándose el quiz y quedando atrapado en un perfil
+  // sin datos. Se le devuelve a la bienvenida para que repita el recorrido:
+  // idioma → quiz → resultado → registro.
+  if (supabaseEnabled) {
+    if (!languageSelected) return <Redirect href="/language" />;
+    return <LandingScreen />;
+  }
+
+  // Modo demo (sin backend): no hay sesión que comprobar, así que la marca
+  // local sigue siendo el único criterio.
   if (onboardingComplete) return <Redirect href="/(tabs)/home" />;
   if (!languageSelected) return <Redirect href="/language" />;
   return <LandingScreen />;
