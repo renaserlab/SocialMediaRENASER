@@ -4,17 +4,19 @@ import { useRouter } from 'expo-router';
 
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
 import { ListRow } from '@/components/ListRow';
+import { PodcastList } from '@/components/PodcastList';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import type { Course, EventItem } from '@/types';
+import type { Course, EventItem, Post } from '@/types';
 
 /** Secciones del perfil que se abren desde los accesos circulares. */
-export type ProfileSectionKind = 'eventos' | 'cursos';
+export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast';
 
 type Props = {
   kind: ProfileSectionKind;
@@ -34,6 +36,7 @@ export function ProfileSection({ kind, profileId }: Props) {
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [episodes, setEpisodes] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   /** Elemento en edicion; solo el administrador puede abrirlo. */
   const [editing, setEditing] = useState<CatalogEditable | null>(null);
@@ -48,7 +51,16 @@ export function ProfileSection({ kind, profileId }: Props) {
     let alive = true;
     setLoading(true);
     const request =
-      kind === 'eventos'
+      kind === 'podcast'
+        ? PostRepository.listByAuthor(
+            profileId ?? '',
+            { media: 'audio', limit: 60 },
+            profileId,
+          ).then((list) => {
+            // El episodio 1 es el mas antiguo; el backend devuelve al reves.
+            if (alive) setEpisodes([...list].reverse());
+          })
+        : kind === 'eventos'
         ? CatalogRepository.listEvents().then((page) => {
             if (alive) {
               // Solo los que organiza este perfil.
@@ -68,6 +80,7 @@ export function ProfileSection({ kind, profileId }: Props) {
         if (alive) {
           setEvents([]);
           setCourses([]);
+          setEpisodes([]);
         }
       })
       .finally(() => {
@@ -83,6 +96,16 @@ export function ProfileSection({ kind, profileId }: Props) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={colors.textMuted} />
+      </View>
+    );
+  }
+
+  // El podcast siempre pinta sus 30 filas, aunque aun no haya episodios: la
+  // lista bloqueada es parte de lo que se quiere mostrar.
+  if (kind === 'podcast') {
+    return (
+      <View>
+        <PodcastList episodes={episodes} />
       </View>
     );
   }

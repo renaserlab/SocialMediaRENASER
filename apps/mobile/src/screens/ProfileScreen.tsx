@@ -54,7 +54,7 @@ export function ProfileScreen() {
    * circulos. `null` = la galeria de publicaciones.
    */
   const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(
-    section === 'eventos' || section === 'cursos' ? section : null,
+    section === 'eventos' || section === 'cursos' || section === 'podcast' ? section : null,
   );
 
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
@@ -351,7 +351,11 @@ export function ProfileScreen() {
 
           <View style={styles.shortcuts}>
             <Shortcut icon="bookmark" label={t('profile.saved')} onPress={() => router.push('/saved' as never)} />
-            <Shortcut icon="headphones" label={t('profile.podcast')} onPress={() => router.push('/audio/private')} />
+            <Shortcut
+              icon="headphones"
+              label={t('profile.podcast')}
+              onPress={() => setActiveSection((v) => (v === 'podcast' ? null : 'podcast'))}
+            />
             <Shortcut
               icon="calendar"
               label={t('profile.events')}

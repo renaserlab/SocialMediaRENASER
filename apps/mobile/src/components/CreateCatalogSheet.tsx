@@ -10,11 +10,12 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
-import { pickImage, uploadPostMedia, type PickedMedia } from '@/services/storage';
+import { pickAudio, pickImage, uploadPostMedia, type PickedMedia } from '@/services/storage';
+import { PostRepository } from '@/repositories/PostRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-export type CatalogKind = 'evento' | 'curso';
+export type CatalogKind = 'evento' | 'curso' | 'podcast';
 
 /** Elemento existente cuando la hoja se usa para editar. */
 export type CatalogEditable = {
@@ -74,8 +75,11 @@ function parseDateTime(day: string, time: string): Date | null {
 export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing }: Props) {
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
+  const isPodcast = kind === 'podcast';
 
   const [cover, setCover] = useState<PickedMedia | null>(null);
+  /** Solo para podcast: el archivo de audio del episodio. */
+  const [audio, setAudio] = useState<PickedMedia | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [day, setDay] = useState('');
@@ -106,6 +110,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
 
   const reset = () => {
     setCover(null);
+    setAudio(null);
     setTitle('');
     setDescription('');
     setDay('');
@@ -118,6 +123,15 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
   const close = () => {
     reset();
     onClose();
+  };
+
+  const chooseAudio = async () => {
+    try {
+      const picked = await pickAudio();
+      if (picked) setAudio(picked);
+    } catch {
+      setError('No se pudo abrir el selector de archivos.');
+    }
   };
 
   const chooseCover = async () => {
@@ -135,6 +149,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       setError(`Escribe el nombre del ${kind}.`);
       return;
     }
+    if (isPodcast && !audio) {
+      setError('Elige el archivo de audio del episodio.');
+      return;
+    }
     let startsAt: Date | null = null;
     if (isEvent) {
       startsAt = parseDateTime(day, time);
@@ -150,7 +168,12 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       // La portada se sube primero: se guarda su RUTA, no una URL.
       const coverPath = cover ? (await uploadPostMedia(cover)).storagePath : null;
 
-      if (isEvent) {
+      if (isPodcast) {
+        // Un episodio es una publicacion de audio: reutiliza la subida, el
+        // firmado y los permisos que ya existen, sin una tabla nueva.
+        const uploaded = await uploadPostMedia(audio!);
+        await PostRepository.createPost(title.trim(), [uploaded]);
+      } else if (isEvent) {
         const data = {
           title: title.trim(),
           description: description.trim(),
@@ -175,6 +198,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       notify(
         editing
           ? isEvent ? 'Evento actualizado' : 'Curso actualizado'
+          : isPodcast ? 'Episodio publicado'
           : isEvent ? 'Evento publicado' : 'Curso publicado',
         'Ya está disponible para la comunidad.',
       );
@@ -192,10 +216,24 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
       <Text style={styles.sheetTitle} color={colors.text}>
         {editing
           ? isEvent ? 'Editar evento' : 'Editar curso'
+          : isPodcast ? 'Nuevo episodio'
           : isEvent ? 'Nuevo evento' : 'Nuevo curso'}
       </Text>
 
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
+        {isPodcast ? (
+          <Pressable
+            onPress={chooseAudio}
+            style={[styles.audioPicker, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
+            accessibilityRole="button"
+            accessibilityLabel="Elegir archivo de audio"
+          >
+            <Feather name={audio ? 'music' : 'upload'} size={20} color={colors.text} />
+            <Text variant="secondary" numberOfLines={1} color={audio ? colors.text : colors.textMuted}>
+              {audio?.name ?? 'Elegir archivo de audio'}
+            </Text>
+          </Pressable>
+        ) : (
         <Pressable
           onPress={chooseCover}
           style={[styles.cover, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
@@ -213,13 +251,15 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
             </View>
           )}
         </Pressable>
+        )}
 
         <Input
-          label={isEvent ? 'Nombre del evento' : 'Nombre del curso'}
+          label={isPodcast ? 'Nombre del audio' : isEvent ? 'Nombre del evento' : 'Nombre del curso'}
           value={title}
           onChangeText={setTitle}
-          placeholder={isEvent ? 'Encuentro RENASER' : 'Liderazgo consciente'}
+          placeholder={isPodcast ? 'Episodio 1: Claridad' : isEvent ? 'Encuentro RENASER' : 'Liderazgo consciente'}
         />
+        {!isPodcast ? (
         <Input
           label="Descripción"
           value={description}
@@ -227,6 +267,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           placeholder="De qué trata"
           multiline
         />
+        ) : null}
 
         {isEvent ? (
           <>
@@ -234,7 +275,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
             <Input label="Hora" value={time} onChangeText={setTime} placeholder="hh:mm" />
             <Input label="Lugar" value={place} onChangeText={setPlace} placeholder="Dirección o enlace" />
           </>
-        ) : (
+        ) : isPodcast ? null : (
           <Input
             label="Precio (PEN)"
             value={price}
@@ -254,6 +295,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing 
           label={
             editing
               ? 'Guardar cambios'
+              : isPodcast ? 'Publicar episodio'
               : isEvent ? 'Publicar evento' : 'Publicar curso'
           }
           onPress={() => void submit()}
@@ -280,6 +322,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     overflow: 'hidden',
     marginBottom: spacing.md,
+  },
+  audioPicker: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md,
   },
   coverEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
   error: { marginTop: spacing.sm },

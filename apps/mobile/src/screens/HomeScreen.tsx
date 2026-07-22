@@ -17,6 +17,7 @@ import { AuthRepository } from '@/repositories/AuthRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
+import type { ProfileSectionKind } from '@/components/ProfileSection';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -70,7 +71,7 @@ export function HomeScreen() {
    */
   const catalogProfileId = isAdmin ? (user?.id ?? null) : adminId;
 
-  const openAdminSection = (section: 'eventos' | 'cursos') => {
+  const openAdminSection = (section: ProfileSectionKind) => {
     if (!catalogProfileId) return;
     router.push({ pathname: '/profile/[id]', params: { id: catalogProfileId, section } } as never);
   };
@@ -140,28 +141,15 @@ export function HomeScreen() {
           <Feather name="plus-circle" size={24} color={colors.text} />
         </Pressable>
 
-        <View style={styles.quickRow}>
-          <Pressable
-            onPress={() => router.push('/audio/private')}
-            style={[styles.quickCard, { backgroundColor: colors.primary }]}
-          >
-            <Feather name="headphones" size={24} color={colors.onPrimary} />
-            <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>{t('home.privateAudio')}</Text>
-            <Text style={[styles.quickBody, { color: colors.onPrimary }]}>{t('home.privateAudioBody')}</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => circle && router.push(`/circle/${circle.id}` as never)}
-            disabled={!circle}
-            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-          >
-            <Feather name="users" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>{t('home.yourCircle')}</Text>
-            {/* Contador real; antes era "423 personas" escrito a mano. */}
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>
-              {circle ? t('home.circleMembers', { count: circle.members }) : t('home.joinCommunity')}
-            </Text>
-          </Pressable>
-        </View>
+        {/* Audio privado ocupa toda la fila; el circulo baja junto al podcast. */}
+        <Pressable
+          onPress={() => router.push('/audio/private')}
+          style={[styles.wideCard, { backgroundColor: colors.primary }]}
+        >
+          <Feather name="headphones" size={24} color={colors.onPrimary} />
+          <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>{t('home.privateAudio')}</Text>
+          <Text style={[styles.quickBody, { color: colors.onPrimary }]}>{t('home.privateAudioBody')}</Text>
+        </Pressable>
 
         <View style={styles.quickRow}>
           <View
@@ -263,6 +251,71 @@ export function HomeScreen() {
             )}
           </View>
         </View>
+
+        {/* Tu circulo baja aqui, junto al nuevo acceso al podcast. */}
+        <View style={styles.quickRow}>
+          <Pressable
+            onPress={() => circle && router.push(`/circle/${circle.id}` as never)}
+            disabled={!circle}
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.yourCircle')}
+          >
+            <Feather name="users" size={24} color={colors.text} />
+            <Text style={[styles.quickTitle, { color: colors.text }]}>{t('home.yourCircle')}</Text>
+            {/* Contador real; antes era "423 personas" escrito a mano. */}
+            <Text style={[styles.quickBody, { color: colors.textMuted }]}>
+              {circle ? t('home.circleMembers', { count: circle.members }) : t('home.joinCommunity')}
+            </Text>
+          </Pressable>
+
+          <View
+            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+          >
+            {/* Igual que en Eventos: la zona pulsable va detras para no anidar
+                un <button> dentro de otro en web. */}
+            <Pressable
+              onPress={() => openAdminSection('podcast')}
+              disabled={!catalogProfileId}
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel={t('home.podcast')}
+            />
+            <View style={styles.quickHeader} pointerEvents="box-none">
+              <View pointerEvents="none">
+                <Feather name="headphones" size={24} color={colors.text} />
+              </View>
+              {isAdmin ? (
+                <Pressable
+                  onPress={() => setCreating('podcast')}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('home.addAudio')}
+                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                >
+                  <Feather name="plus" size={14} color={colors.background} />
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+              {t('home.podcast')}
+            </Text>
+            {isAdmin ? (
+              <Pressable
+                onPress={() => setCreating('podcast')}
+                style={[styles.addChip, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel={t('home.addAudio')}
+              >
+                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addAudio')}</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+                {t('home.podcastBody')}
+              </Text>
+            )}
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -351,6 +404,7 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.md, marginBottom: spacing.lg },
   composerAvatar: { width: 40, height: 40, borderRadius: 20 },
   composerText: { flex: 1, fontSize: 13 },
+  wideCard: { minHeight: 120, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between', marginBottom: spacing.md },
   quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
   quickCard: { flex: 1, minHeight: 136, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between' },
   quickHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

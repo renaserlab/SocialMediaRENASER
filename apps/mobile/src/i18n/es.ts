@@ -76,6 +76,13 @@ export const es = {
   'language.continue': 'Continuar',
 
   // Acciones comunes
+  'home.podcast': 'Podcast',
+  'home.podcastBody': 'Escucha los episodios',
+  'home.addAudio': 'Agregar audio',
+  'podcast.locked': 'Disponible con tu membresía',
+  'podcast.soon': 'Próximamente',
+  'podcast.empty': 'Aún no hay episodios publicados.',
+
   'common.save': 'Guardar',
   'common.cancel': 'Cancelar',
   'common.edit': 'Editar',

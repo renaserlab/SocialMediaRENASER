@@ -67,6 +67,13 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'language.description': 'Escolha o idioma do aplicativo',
   'language.continue': 'Continuar',
 
+  'home.podcast': 'Podcast',
+  'home.podcastBody': 'Ouça os episódios',
+  'home.addAudio': 'Adicionar áudio',
+  'podcast.locked': 'Disponível com sua assinatura',
+  'podcast.soon': 'Em breve',
+  'podcast.empty': 'Ainda não há episódios publicados.',
+
   'common.save': 'Salvar',
   'common.cancel': 'Cancelar',
   'common.edit': 'Editar',
