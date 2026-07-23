@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import AuthUser, get_current_user
 from app.modules.profiles.models import Profile
 from app.shared.database import get_db
+from app.shared.storage import delete_user_files
 
 router = APIRouter(prefix="/auth", tags=["identity"])
 
@@ -56,9 +57,14 @@ async def delete_my_account(
     La identidad sale del token ya validado, nunca de un id recibido: solo se
     puede borrar la cuenta propia.
 
-    Nota: los archivos subidos a Storage (avatares, media) no cuelgan de la base
-    de datos y quedan huerfanos; su limpieza es un proceso aparte.
+    Los archivos de Storage se borran ANTES que las filas: van bajo el prefijo
+    del id de usuario, y aunque ese id se conoce por el token, hacerlo primero
+    deja el sistema en un estado comprensible si algo falla a mitad (quedaria la
+    cuenta viva sin sus archivos, en vez de archivos sin dueno que nadie sabria
+    localizar). Si Storage falla no se aborta el borrado: la cuenta se elimina
+    igual y el incidente queda registrado.
     """
+    await delete_user_files(current_user.id)
     await db.execute(delete(Profile).where(Profile.id == current_user.id))
     # Cross-schema y sin modelo ORM: se hace con SQL parametrizado. El backend
     # conecta como `postgres`, que si tiene permiso para tocar el esquema auth.

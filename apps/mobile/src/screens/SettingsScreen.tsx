@@ -131,6 +131,15 @@ export function SettingsScreen() {
           onPress={() => router.push('/verification')}
         />
         {isLoggedIn ? (
+          <ListRow
+            title="Cuentas bloqueadas"
+            subtitle="Revisa y desbloquea a quien quieras"
+            leftIcon="slash"
+            rightIcon="chevron-right"
+            onPress={() => router.push('/blocked' as never)}
+          />
+        ) : null}
+        {isLoggedIn ? (
           <>
             <ListRow
               title={t('settings.signOut')}

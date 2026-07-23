@@ -24,6 +24,8 @@ class ProfileRead(BaseModel):
     posts_count: int = 0
     # Si el usuario autenticado sigue a este perfil (false para el perfil propio).
     is_following: bool = False
+    #: Si el usuario autenticado ha bloqueado a este perfil.
+    is_blocked: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
