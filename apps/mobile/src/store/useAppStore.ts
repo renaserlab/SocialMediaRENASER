@@ -50,6 +50,14 @@ type AppState = {
   deleteStory: (storyId: string) => Promise<void>;
   markStoryViewed: (storyId: string) => void;
 
+  /**
+   * Guias "toca aqui" que el usuario ya cerro a mano. Se persisten para que no
+   * reaparezcan en cada arranque; las que dependen de una accion (publicar por
+   * primera vez) se apagan solas al completarla y no necesitan estar aqui.
+   */
+  dismissedGuides: string[];
+  dismissGuide: (id: string) => void;
+
   languageSelected: boolean;
   /** Idioma de la interfaz. Se persiste con el resto de preferencias. */
   language: Language;
@@ -137,6 +145,14 @@ export const useAppStore = create<AppState>()(
 
       storyGroups: [],
       storiesStatus: 'idle',
+
+      dismissedGuides: [],
+      dismissGuide: (id) =>
+        set((state) =>
+          state.dismissedGuides.includes(id)
+            ? state
+            : { dismissedGuides: [...state.dismissedGuides, id] },
+        ),
 
       languageSelected: false,
       language: 'es',
@@ -522,6 +538,7 @@ export const useAppStore = create<AppState>()(
           reservedEventIds: [],
           purchasedCourseIds: [],
           conversations,
+          dismissedGuides: [],
           languageSelected: false,
           language: 'es',
         }),
@@ -538,6 +555,7 @@ export const useAppStore = create<AppState>()(
         themeMode: state.themeMode,
         user: state.user,
         onboardingComplete: state.onboardingComplete,
+        dismissedGuides: state.dismissedGuides,
         languageSelected: state.languageSelected,
         language: state.language,
         quizAnswers: state.quizAnswers,
