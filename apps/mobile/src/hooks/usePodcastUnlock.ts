@@ -6,6 +6,19 @@ import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
 
 /**
+ * Origen provisional mientras el servidor no ha dado el suyo.
+ *
+ * Tiene que quedar CONGELADO. Si en su lugar se usara "ahora" en cada repintado,
+ * la resta daría siempre el mismo resultado y la cuenta atrás se vería parada en
+ * cifras redondas (08:00:00, 16:00:00...) por mucho que el reloj avanzara.
+ *
+ * Vive fuera del componente para que salir de la sección y volver a entrar no lo
+ * reinicie. Es solo un apaño para el rato que tarda la respuesta: en cuanto
+ * llega el instante del servidor, manda ese.
+ */
+let provisionalOrigin: number | null = null;
+
+/**
  * Estado de desbloqueo de los episodios para QUIEN mira, no para el dueño del
  * perfil: el podcast vive en el perfil de RENASER pero la cuenta atrás es de
  * cada persona, y arranca la primera vez que abre la sección.
@@ -28,8 +41,7 @@ export function usePodcastUnlock(enabled = true): (index: number) => EpisodeGate
   const startedAt = startedAtIso ? Date.parse(startedAtIso) : null;
 
   // Primera visita: se pide al backend que fije el origen. Es idempotente, así
-  // que volver a entrar no reinicia nada. Si falla (sin red) no se bloquea la
-  // vista: se sigue con el origen provisional "ahora" y se reintenta al volver.
+  // que volver a entrar no reinicia nada.
   useEffect(() => {
     if (!enabled || startedAtIso) return;
     let cancelled = false;
@@ -37,15 +49,38 @@ export function usePodcastUnlock(enabled = true): (index: number) => EpisodeGate
       .then((profile) => {
         if (!cancelled) setUser(profile);
       })
-      .catch(() => {
-        /* Sin conexión se reintenta en la siguiente entrada al podcast. */
+      .catch((error) => {
+        // Sin conexión se reintenta al volver a entrar, y mientras tanto se usa
+        // el origen provisional. Se avisa en desarrollo porque el síntoma (una
+        // cuenta atrás que nunca persiste entre recargas) no apunta solo a su
+        // causa: lo habitual es un backend sin el endpoint desplegado.
+        if (__DEV__) {
+          console.warn(
+            '[podcast] no se pudo fijar el inicio en el servidor; la cuenta ' +
+              'atrás no sobrevivirá a una recarga.',
+            error,
+          );
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [enabled, startedAtIso, setUser]);
 
-  const ticking = enabled && !isAdmin && hasPendingUnlocks(startedAt, now);
+  // Quien administra sube los episodios: tiene que poder escucharlos al subirlos.
+  // Se le exime de la ESPERA (origen en el pasado), no de la lista: los huecos
+  // de membresía se siguen viendo igual que los ve cualquier otra persona.
+  let origin: number;
+  if (isAdmin) {
+    origin = 0;
+  } else if (startedAt != null) {
+    origin = startedAt;
+  } else {
+    provisionalOrigin ??= Date.now();
+    origin = provisionalOrigin;
+  }
+
+  const ticking = enabled && !isAdmin && hasPendingUnlocks(origin, now);
 
   useEffect(() => {
     if (!ticking) return;
@@ -61,9 +96,5 @@ export function usePodcastUnlock(enabled = true): (index: number) => EpisodeGate
     };
   }, [ticking]);
 
-  // Quien administra sube los episodios: tiene que poder escucharlos al subirlos.
-  // Se le exime de la ESPERA (origen en el pasado), no de la lista: los huecos
-  // de membresía se siguen viendo igual que los ve cualquier otra persona.
-  const origin = isAdmin ? 0 : startedAt;
   return (index: number) => gateFor(index, origin, now);
 }

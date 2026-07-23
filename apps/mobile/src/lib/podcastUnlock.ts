@@ -44,26 +44,26 @@ export function unlockDelayMs(index: number): number {
 /**
  * Calcula el estado de un episodio.
  *
+ * `startedAt` es obligatorio a propósito. Admitir aquí un "todavía no lo sé" y
+ * resolverlo con `now` parecía cómodo, pero deja la cuenta atrás congelada: si
+ * el origen se recalcula en cada repintado, la resta da siempre lo mismo y el
+ * contador se queda clavado en cifras redondas aunque el reloj avance. Quien
+ * llama decide el origen UNA vez y lo mantiene.
+ *
  * @param index      Posición en la lista, empezando en 0.
- * @param startedAt  Milisegundos del inicio de la liberación; `null` si todavía
- *                   no ha arrancado (se trata como "acaba de empezar", de modo
- *                   que el primero se ve libre y el resto en cuenta atrás).
+ * @param startedAt  Milisegundos del inicio de la liberación.
  * @param now        Reloj actual, inyectado para que la función sea pura.
  */
-export function gateFor(index: number, startedAt: number | null, now: number): EpisodeGate {
+export function gateFor(index: number, startedAt: number, now: number): EpisodeGate {
   if (index >= DRIP_EPISODES) return { state: 'membership' };
-  // Sin instante de inicio el primero ya es gratuito; asumir "ahora" para el
-  // resto muestra la cuenta atrás completa en lugar de un hueco sin explicar.
-  const origin = startedAt ?? now;
-  const unlocksAt = origin + unlockDelayMs(index);
+  const unlocksAt = startedAt + unlockDelayMs(index);
   if (now >= unlocksAt) return { state: 'open' };
   return { state: 'waiting', unlocksAt, remainingMs: unlocksAt - now };
 }
 
 /** `true` si todavía queda algún episodio por abrirse (hay algo que contar). */
-export function hasPendingUnlocks(startedAt: number | null, now: number): boolean {
-  const origin = startedAt ?? now;
-  return now < origin + unlockDelayMs(DRIP_EPISODES - 1);
+export function hasPendingUnlocks(startedAt: number, now: number): boolean {
+  return now < startedAt + unlockDelayMs(DRIP_EPISODES - 1);
 }
 
 /**

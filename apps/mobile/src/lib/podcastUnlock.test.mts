@@ -80,12 +80,21 @@ describe('detalles de presentación', () => {
   });
 });
 
-describe('sin instante de inicio guardado', () => {
-  // Ocurre en la primerísima visita, mientras el backend responde.
-  it('deja el primero libre y pone el resto en cuenta atrás', () => {
-    assert.equal(gateFor(0, null, START).state, 'open');
-    const gate = gateFor(1, null, START);
-    assert.equal(gate.state, 'waiting');
-    if (gate.state === 'waiting') assert.equal(formatCountdown(gate.remainingMs), '08:00:00');
+describe('la cuenta atrás avanza de verdad', () => {
+  // Regresión: con el origen recalculado en cada repintado la resta daba
+  // siempre lo mismo y el contador se veía clavado en 08:00:00. El origen se
+  // fija una vez y solo se mueve el reloj.
+  it('descuenta un segundo por cada segundo que pasa', () => {
+    const marcas = [0, 1, 2, 59, 60].map((s) =>
+      formatCountdown(remaining(1, START + s * 1000)),
+    );
+    assert.deepEqual(marcas, ['08:00:00', '07:59:59', '07:59:58', '07:59:01', '07:59:00']);
+  });
+
+  it('no repite valor entre dos instantes distintos', () => {
+    const a = remaining(2, START + 1000);
+    const b = remaining(2, START + 2000);
+    assert.notEqual(a, b, 'el tiempo restante no puede quedarse quieto');
+    assert.equal(a - b, 1000);
   });
 });
