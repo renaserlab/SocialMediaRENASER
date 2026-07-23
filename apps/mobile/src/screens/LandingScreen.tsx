@@ -37,7 +37,9 @@ export function LandingScreen() {
           <Button
             label="Descubrir ahora"
             variant="secondary"
-            onPress={() => router.push('/quiz' as any)}
+            // Pasa por la bienvenida: explica que RENASER es privado antes de
+            // soltar al visitante en las 7 preguntas.
+            onPress={() => router.push('/welcome' as any)}
           />
           <Text variant="secondary" color={media.textMuted} style={styles.hint}>
             2 min · Gratis · Resultado inmediato
