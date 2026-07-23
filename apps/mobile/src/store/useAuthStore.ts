@@ -29,6 +29,15 @@ type AuthState = {
   signUpEmail: (input: SignUpInput) => Promise<SignUpResult>;
   signInEmail: (input: SignInInput) => Promise<void>;
   signInWithProvider: (provider: OAuthProvider) => Promise<void>;
+  /**
+   * El usuario llego desde el enlace del correo y todavia no ha fijado su nueva
+   * contrasena. Mientras sea true, la app lo lleva a /reset-password en vez de
+   * al feed: Supabase abre sesion al pulsar el enlace, asi que sin esta marca
+   * entraria directo y no cambiaria nada.
+   */
+  passwordRecovery: boolean;
+  requestPasswordReset: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateProfile: (patch: ProfilePatch) => Promise<void>;
@@ -41,6 +50,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   supabaseEnabled: AuthRepository.enabled,
   initialized: false,
   profileError: null,
+  passwordRecovery: false,
 
   async bootstrap() {
     if (get().initialized) return;
@@ -76,7 +86,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // El trabajo async se difiere para no llamar a Supabase dentro de su
     // propio callback (evita un posible deadlock documentado en supabase-js).
     unsubscribeAuth?.();
-    unsubscribeAuth = AuthRepository.onAuthStateChange((nextSession) => {
+    unsubscribeAuth = AuthRepository.onAuthStateChange((nextSession, event) => {
+      if (event === 'PASSWORD_RECOVERY') set({ passwordRecovery: true });
       setTimeout(() => {
         if (nextSession) {
           void get()
@@ -150,10 +161,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  async requestPasswordReset(email) {
+    await AuthRepository.requestPasswordReset(email);
+  },
+
+  async updatePassword(password) {
+    await AuthRepository.updatePassword(password);
+    // Cambiada: se levanta la marca y la sesion pasa a ser normal.
+    set({ passwordRecovery: false });
+    await get().refreshProfile();
+    set({ status: 'authenticated' });
+  },
+
   async signOut() {
     await AuthRepository.signOut();
     // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
     clearSignedUrlCache();
+    set({ passwordRecovery: false });
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });
   },

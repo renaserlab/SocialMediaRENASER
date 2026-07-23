@@ -153,11 +153,62 @@ export const AuthRepository = {
     return session?.access_token ?? null;
   },
 
-  /** Suscripcion a cambios de sesion (login/logout/refresh). Devuelve unsubscribe. */
-  onAuthStateChange(callback: (session: Session | null) => void): () => void {
+  /**
+   * Envia el correo con el enlace para restablecer la contrasena.
+   *
+   * `redirectTo` debe estar dado de alta en Supabase (Authentication -> URL
+   * Configuration -> Redirect URLs) o el enlace lleva al sitio por defecto.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const client = requireClient();
+    const redirectTo =
+      Platform.OS === 'web'
+        ? `${window.location.origin}/reset-password`
+        : Linking.createURL('reset-password');
+    const { error } = await client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo,
+    });
+    if (error) throw AuthRepository._describeResetError(error);
+  },
+
+  /**
+   * Cambia la contrasena del usuario con sesion abierta.
+   *
+   * Tras pulsar el enlace del correo, Supabase abre una sesion de recuperacion:
+   * es esa sesion la que autoriza el cambio, no hace falta la contrasena vieja.
+   */
+  async updatePassword(password: string): Promise<void> {
+    const client = requireClient();
+    const { error } = await client.auth.updateUser({ password });
+    if (error) throw error;
+  },
+
+  /** Traduce los errores mas habituales del envio a algo accionable. */
+  _describeResetError(error: { message?: string; status?: number }): Error {
+    const message = error?.message ?? '';
+    if (error?.status === 429 || /rate limit|too many/i.test(message)) {
+      return new Error(
+        'Se alcanzó el límite de correos por hora. Espera un momento e inténtalo de nuevo.',
+      );
+    }
+    if (/smtp|email provider/i.test(message)) {
+      return new Error('El servidor de correo no está configurado. Avisa al administrador.');
+    }
+    return error instanceof Error ? error : new Error(message || 'No se pudo enviar el correo.');
+  },
+
+  /**
+   * Suscripcion a cambios de sesion. Ademas de la sesion informa del EVENTO,
+   * porque `PASSWORD_RECOVERY` hay que distinguirlo: al volver del correo
+   * Supabase abre sesion, y sin diferenciarlo el usuario entraria directo al
+   * feed sin llegar a cambiar la contrasena.
+   */
+  onAuthStateChange(
+    callback: (session: Session | null, event?: string) => void,
+  ): () => void {
     if (!supabase) return () => {};
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      callback(session);
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      callback(session, event);
     });
     return () => data.subscription.unsubscribe();
   },

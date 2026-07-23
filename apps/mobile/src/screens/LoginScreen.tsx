@@ -174,6 +174,16 @@ export function LoginScreen() {
           </View>
 
           <Button label="Iniciar sesión" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
+          <Pressable
+            onPress={() => router.push('/forgot-password' as never)}
+            style={styles.forgot}
+            accessibilityRole="button"
+            accessibilityLabel="Olvidé mi contraseña"
+          >
+            <Text style={[styles.forgotText, { color: colors.textMuted }]}>
+              ¿Olvidaste tu contraseña?
+            </Text>
+          </Pressable>
 
           <Pressable onPress={() => router.replace('/register')}>
             <Text style={[styles.login, { color: colors.text }]}>
@@ -188,6 +198,8 @@ export function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
+  forgot: { alignSelf: 'center', paddingVertical: spacing.md },
+  forgotText: { fontSize: 13, fontWeight: '600' },
   container: { paddingHorizontal: spacing.xl, gap: spacing.md },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900', marginVertical: spacing.lg },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginVertical: spacing.sm },

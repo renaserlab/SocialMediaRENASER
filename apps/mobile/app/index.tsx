@@ -11,6 +11,7 @@ export default function IndexRoute() {
   const onboardingComplete = useAppStore((state) => state.onboardingComplete);
   const languageSelected = useAppStore((state) => state.languageSelected);
   const authStatus = useAuthStore((state) => state.status);
+  const passwordRecovery = useAuthStore((state) => state.passwordRecovery);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const { colors } = useAppTheme();
 
