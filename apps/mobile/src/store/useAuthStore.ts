@@ -39,6 +39,8 @@ type AuthState = {
   requestPasswordReset: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Borra la cuenta y todo su contenido, luego cierra sesion. */
+  deleteAccount: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateProfile: (patch: ProfilePatch) => Promise<void>;
 };
@@ -176,6 +178,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async signOut() {
     await AuthRepository.signOut();
     // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
+    clearSignedUrlCache();
+    set({ passwordRecovery: false });
+    useAppStore.getState().setUser(null);
+    set({ status: 'anonymous' });
+  },
+
+  async deleteAccount() {
+    // Si el borrado falla se propaga el error y NO se limpia el estado: la
+    // sesion sigue viva y la pantalla puede avisar de que no se pudo.
+    await AuthRepository.deleteAccount();
+    // A partir de aqui es el mismo cierre que signOut: la cuenta ya no existe.
     clearSignedUrlCache();
     set({ passwordRecovery: false });
     useAppStore.getState().setUser(null);
