@@ -1,10 +1,16 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
+import {
+  DELETE_ACCOUNT_URL,
+  PRIVACY_URL,
+  TERMS_URL,
+  hasLegalLinks,
+} from '@/config/legal';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
@@ -12,6 +18,13 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+
+/** Abre un documento legal en el navegador del sistema. */
+function openLegal(url: string): void {
+  Linking.openURL(url).catch(() => {
+    notify('No se pudo abrir', 'Inténtalo de nuevo o revisa tu conexión.');
+  });
+}
 
 export function SettingsScreen() {
   const { colors, mode } = useAppTheme();
@@ -143,6 +156,41 @@ export function SettingsScreen() {
             onPress={() => router.push('/login')}
           />
         )}
+
+        {/* Solo aparece cuando los documentos estan publicados: enlazar a una
+            pagina inexistente seria peor que no ofrecer el enlace. */}
+        {hasLegalLinks() ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
+            {PRIVACY_URL ? (
+              <ListRow
+                title="Política de Privacidad"
+                subtitle="Qué datos tratamos y para qué"
+                leftIcon="shield"
+                rightIcon="external-link"
+                onPress={() => openLegal(PRIVACY_URL)}
+              />
+            ) : null}
+            {TERMS_URL ? (
+              <ListRow
+                title="Condiciones de Uso"
+                subtitle="Normas de la comunidad"
+                leftIcon="file-text"
+                rightIcon="external-link"
+                onPress={() => openLegal(TERMS_URL)}
+              />
+            ) : null}
+            {DELETE_ACCOUNT_URL ? (
+              <ListRow
+                title="Cómo eliminar tu cuenta"
+                subtitle="Procedimiento y qué se borra"
+                leftIcon="help-circle"
+                rightIcon="external-link"
+                onPress={() => openLegal(DELETE_ACCOUNT_URL)}
+              />
+            ) : null}
+          </>
+        ) : null}
 
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
         <ListRow

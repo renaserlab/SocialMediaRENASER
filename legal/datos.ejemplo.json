@@ -1,0 +1,18 @@
+{
+  "_comentario": "Copia este fichero a 'datos.json' y sustituye los valores. datos.json esta en .gitignore porque lleva datos de la empresa. Los marcadores que son NOTAS (texto en mayusculas explicando una decision editorial) no van aqui: hay que resolverlos editando el HTML.",
+
+  "RAZÓN SOCIAL": "Renaser S.A.C.",
+  "NIF/RUC/CIF": "20XXXXXXXXX",
+  "DIRECCIÓN COMPLETA": "Av. Ejemplo 123, Oficina 45, Lima, Perú",
+  "PAÍS": "Perú",
+  "CIUDAD/PROVINCIA": "Lima",
+
+  "EMAIL_SOPORTE": "soporte@renaser.com",
+  "EMAIL_PRIVACIDAD": "privacidad@renaser.com",
+
+  "FECHA": "23 de julio de 2026",
+  "EDAD MÍNIMA": "16",
+  "DIAS_BACKUP": "30",
+  "PLAZO DE RETENCIÓN DE LOGS": "90 días",
+  "CONCRETAR SEGÚN PAÍS": "5 años, conforme a la normativa tributaria peruana"
+}
