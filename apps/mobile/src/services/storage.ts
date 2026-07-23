@@ -1,5 +1,7 @@
 import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 
 import {
@@ -226,6 +228,51 @@ function describeStorageError(error: unknown): string {
  */
 const RESUMABLE_THRESHOLD = 6 * 1024 * 1024;
 
+/** Archivo local ya leido, listo para subir por cualquiera de las dos vias. */
+type LocalFile = {
+  /** Tamaño real en bytes. */
+  size: number;
+  /** Cuerpo para el POST directo de supabase-js. */
+  directBody: () => Promise<Blob | ArrayBuffer>;
+  /** Cuerpo (Blob) para la subida reanudable por trozos (TUS). */
+  resumableBody: () => Promise<Blob>;
+};
+
+/**
+ * Prepara un archivo local para subirlo, leyendo su tamaño y sus bytes.
+ *
+ * El motivo de que exista: en React Native, `fetch(uri).blob()` devuelve un
+ * Blob que informa bien su `size`, pero cuyo cuerpo viaja VACIO cuando
+ * supabase-js lo envia en el POST. Una foto tomada desde el iPhone se subia
+ * como 0 bytes y, claro, no se veia. Solo afectaba a los archivos por debajo
+ * del umbral reanudable: los grandes van por TUS, que recorre el Blob por
+ * trozos y si transmite el contenido.
+ *
+ * En nativo se leen los bytes reales con expo-file-system (`File.arrayBuffer`),
+ * que supabase-js sube correctamente. En web el Blob funciona y se conserva tal
+ * cual, sin cargar nada extra en memoria.
+ */
+async function readLocalFile(uri: string): Promise<LocalFile> {
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri);
+    if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');
+    const blob = await response.blob();
+    return {
+      size: blob.size,
+      directBody: async () => blob,
+      resumableBody: async () => blob,
+    };
+  }
+  // El tamaño se obtiene sin cargar el archivo entero en memoria.
+  const file = new File(uri);
+  return {
+    size: file.size ?? 0,
+    directBody: () => file.arrayBuffer(),
+    // TUS lee el Blob por trozos; ahi el contenido si viaja bien en RN.
+    resumableBody: async () => (await fetch(uri)).blob(),
+  };
+}
+
 export type UploadPhase = 'compressing' | 'uploading';
 
 export type UploadProgress = {
@@ -281,31 +328,27 @@ export async function uploadPostMedia(
     ext,
   );
 
-  // Usamos Blob (no ArrayBuffer) para poder validar el tamaño antes de gastar
-  // la subida y para que supabase-js conserve el content-type.
-  const response = await fetch(uri);
-  if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');
-  const blob = await response.blob();
+  const local = await readLocalFile(uri);
 
-  if (blob.size === 0) {
+  if (local.size === 0) {
     throw new Error('El archivo seleccionado está vacío.');
   }
-  if (blob.size > MAX_UPLOAD_BYTES) {
+  if (local.size > MAX_UPLOAD_BYTES) {
     throw new Error(
-      `El archivo pesa ${formatMb(blob.size)} y el máximo son ${formatMb(MAX_UPLOAD_BYTES)}. Elige un video más corto o comprímelo antes de subirlo.`,
+      `El archivo pesa ${formatMb(local.size)} y el máximo son ${formatMb(MAX_UPLOAD_BYTES)}. Elige un video más corto o comprímelo antes de subirlo.`,
     );
   }
 
   onProgress?.({ phase: 'uploading', ratio: 0 });
 
   // 2a. Archivo grande: subida reanudable por trozos, con progreso real.
-  if (blob.size > RESUMABLE_THRESHOLD && supabaseUrl) {
+  if (local.size > RESUMABLE_THRESHOLD && supabaseUrl) {
     const { done } = uploadResumable({
       supabaseUrl,
       accessToken: session.access_token,
       bucket: BUCKET,
       path,
-      file: blob,
+      file: await local.resumableBody(),
       contentType,
       onProgress: (ratio) => onProgress?.({ phase: 'uploading', ratio }),
     });
@@ -320,7 +363,7 @@ export async function uploadPostMedia(
   // 2b. Archivo pequeño: un POST directo es mas simple y rapido.
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(path, blob, { contentType, upsert: false });
+    .upload(path, await local.directBody(), { contentType, upsert: false });
   if (error) throw new Error(describeStorageError(error));
   onProgress?.({ phase: 'uploading', ratio: 1 });
   return { storagePath: path, mediaType: media.kind };
@@ -373,14 +416,15 @@ export async function uploadProfileImage(
   const ext = resolveExtension({ ...media, uri, name: null });
   const path = `${uid}/${kind}-${randomName(ext)}`;
 
-  const response = await fetch(uri);
-  if (!response.ok) throw new Error('No se pudo leer la imagen seleccionada.');
-  const blob = await response.blob();
-  if (blob.size === 0) throw new Error('La imagen seleccionada está vacía.');
+  const local = await readLocalFile(uri);
+  if (local.size === 0) throw new Error('La imagen seleccionada está vacía.');
 
   const { error } = await supabase.storage
     .from(AVATAR_BUCKET)
-    .upload(path, blob, { contentType: resolveContentType(media, ext), upsert: false });
+    .upload(path, await local.directBody(), {
+      contentType: resolveContentType(media, ext),
+      upsert: false,
+    });
   if (error) throw new Error(describeStorageError(error));
   return path;
 }
@@ -422,21 +466,19 @@ export async function uploadCourseMedia(
   const path = `${uid}/${randomName(ext)}`;
   const contentType = resolveContentType({ ...media, mimeType: null }, ext);
 
-  const response = await fetch(uri);
-  if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');
-  const blob = await response.blob();
-  if (blob.size === 0) throw new Error('El archivo seleccionado está vacío.');
+  const local = await readLocalFile(uri);
+  if (local.size === 0) throw new Error('El archivo seleccionado está vacío.');
 
   onProgress?.({ phase: 'uploading', ratio: 0 });
 
   // Igual que en las publicaciones: por encima del umbral, subida reanudable.
-  if (blob.size > RESUMABLE_THRESHOLD && supabaseUrl) {
+  if (local.size > RESUMABLE_THRESHOLD && supabaseUrl) {
     const { done } = uploadResumable({
       supabaseUrl,
       accessToken: session.access_token,
       bucket: COURSE_BUCKET,
       path,
-      file: blob,
+      file: await local.resumableBody(),
       contentType,
       onProgress: (ratio) => onProgress?.({ phase: 'uploading', ratio }),
     });
@@ -450,7 +492,7 @@ export async function uploadCourseMedia(
 
   const { error } = await supabase.storage
     .from(COURSE_BUCKET)
-    .upload(path, blob, { contentType, upsert: false });
+    .upload(path, await local.directBody(), { contentType, upsert: false });
   if (error) throw new Error(describeStorageError(error));
   onProgress?.({ phase: 'uploading', ratio: 1 });
   return path;
