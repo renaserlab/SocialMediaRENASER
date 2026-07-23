@@ -187,8 +187,21 @@ export const AuthRepository = {
   _describeResetError(error: { message?: string; status?: number }): Error {
     const message = error?.message ?? '';
     if (error?.status === 429 || /rate limit|too many/i.test(message)) {
+      /*
+        Supabase impone DOS limites distintos y conviene no confundirlos:
+        - una espera entre envios al MISMO correo (dice los segundos exactos),
+        - y un tope por hora del proyecto.
+        Si nos dice los segundos, se los damos al usuario en vez de un vago
+        "espera un momento".
+      */
+      const seconds = message.match(/after (\d+) seconds?/i)?.[1];
+      if (seconds) {
+        return new Error(
+          `Acabamos de enviarte un correo. Espera ${seconds} segundos antes de pedir otro.`,
+        );
+      }
       return new Error(
-        'Se alcanzó el límite de correos por hora. Espera un momento e inténtalo de nuevo.',
+        'Se alcanzó el límite de envíos. Espera unos minutos e inténtalo de nuevo.',
       );
     }
     if (/smtp|email provider/i.test(message)) {
