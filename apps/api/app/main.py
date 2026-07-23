@@ -56,10 +56,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    if settings.is_production and settings.cors_origin_list == ["*"]:
+    if settings.is_production and not settings.cors_origin_list:
         logger.warning(
-            "CORS abierto a '*' en produccion. Define CORS_ORIGINS con los "
-            "origenes permitidos."
+            "CORS cerrado a todos los origenes: en produccion no se acepta el "
+            "comodin. La app movil funciona igual (CORS solo afecta a "
+            "navegadores); para habilitar la web, define CORS_ORIGINS con los "
+            "dominios permitidos, separados por comas."
         )
 
     app.add_middleware(
