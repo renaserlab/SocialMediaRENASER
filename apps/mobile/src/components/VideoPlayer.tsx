@@ -11,6 +11,27 @@ import type { VideoPlayerProps } from './VideoPlayer.types';
 // contexto de "media" para que los overlays sean legibles en ambos temas.
 const media = palette('dark');
 
+/**
+ * Ejecuta una accion sobre el reproductor tolerando que ya no exista.
+ *
+ * `useVideoPlayer` libera el reproductor NATIVO al desmontar el componente,
+ * pero las limpiezas de los efectos de React corren despues. Al salir de una
+ * pantalla con video, `player.pause()` se ejecutaba sobre un objeto ya
+ * liberado y lanzaba NativeSharedObjectNotFoundException, que tumbaba la app
+ * con una pantalla roja.
+ *
+ * expo-video no expone forma de saber si el reproductor sigue vivo, asi que se
+ * captura el fallo. Es seguro porque estas llamadas son de control de
+ * reproduccion: si el reproductor ya no esta, no hay nada que pausar.
+ */
+function safely(action: () => void): void {
+  try {
+    action();
+  } catch {
+    // Reproductor ya liberado; no queda nada que hacer.
+  }
+}
+
 export function VideoPlayer({
   uri,
   poster,
@@ -37,9 +58,9 @@ export function VideoPlayer({
     if (active === undefined) return;
     if (active) {
       setStarted(true);
-      player.play();
+      safely(() => player.play());
     } else {
-      player.pause();
+      safely(() => player.pause());
     }
   }, [active, player]);
 
@@ -49,10 +70,12 @@ export function VideoPlayer({
   useFocusEffect(
     useCallback(() => {
       if (autoPlay || active) {
-        player.play();
+        safely(() => player.play());
       }
       return () => {
-        player.pause();
+        // Esta limpieza corre tambien al desmontar, cuando el reproductor
+        // nativo ya puede estar liberado: de ahi la guarda.
+        safely(() => player.pause());
       };
     }, [player, autoPlay, active]),
   );
