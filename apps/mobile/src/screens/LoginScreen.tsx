@@ -114,13 +114,26 @@ export function LoginScreen() {
           {/*
             ACCESO CON PROVEEDORES EXTERNOS — oculto a proposito.
 
+            NO DESCOMENTAR sin antes tener las credenciales. Que este oculto es
+            lo que hoy protege el envio a la App Store, no una carencia:
+
+            - Un boton que falla al pulsarlo es rechazo por «app incompleta»
+              (directriz 2.1). Google no tiene credenciales en Supabase.
+            - Ofrecer un login social de terceros ACTIVA la directriz 4.8, que
+              obliga a ofrecer tambien Sign in with Apple. Mientras aqui no se
+              muestre ninguno, esa exigencia no aplica y la app puede subirse
+              solo con correo y contrasena.
+
             Google: el flujo esta implementado y probado (ver
             AuthRepository.signInWithProvider). Solo falta activar el proveedor
-            en Supabase y pegar las credenciales de Google Cloud. Para
-            reactivarlo basta con descomentar este bloque.
+            en Supabase y pegar las credenciales de Google Cloud.
 
             Apple: ademas de lo anterior, exige el Apple Developer Program para
-            registrar el Service ID.
+            registrar el Service ID, y la dependencia nativa
+            expo-apple-authentication (hoy no instalada) para usar su boton.
+
+            Orden correcto para encenderlo: credenciales primero, los dos
+            proveedores despues y a la vez. Nunca uno solo.
 
           <Button
             label="Continuar con Google"
