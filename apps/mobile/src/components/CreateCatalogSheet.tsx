@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
@@ -147,7 +147,6 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     setError(null);
   };
 
-  const [deleting, setDeleting] = useState(false);
 
   const close = () => {
     reset();
@@ -157,6 +156,21 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
   /** Elimina el curso. Modulos, lecciones y recursos caen en cascada. */
   const deleteCourse = async () => {
     if (!editing) return;
+    // Se captura antes de cerrar: al cerrar, el padre deja de pasar `editing`.
+    const target = editing;
+
+    /*
+      En iOS un Modal NO puede abrirse encima de otro. Esta hoja ya es un
+      Modal, asi que el dialogo de confirmacion no llegaba a mostrarse y
+      `confirm()` no resolvia nunca: la pantalla se quedaba congelada, con la
+      hoja bloqueando y sin nada que pulsar.
+
+      Se cierra la hoja y se espera a su animacion de salida antes de
+      preguntar. Es el mismo patron que usa el menu de PostCard.
+    */
+    onClose();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
     const accepted = await confirm({
       title: 'Eliminar curso',
       message:
@@ -165,20 +179,17 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
       destructive: true,
     });
     if (!accepted) return;
-    setDeleting(true);
+
     try {
-      await CourseContentRepository.removeCourse(editing.id);
+      await CourseContentRepository.removeCourse(target.id);
       toast('Curso eliminado');
       onDeleted?.();
       onCreated?.();
-      onClose();
     } catch (error) {
       notify(
         'No se pudo eliminar',
         error instanceof Error ? error.message : 'Puede que tenga compras asociadas.',
       );
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -434,24 +445,17 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         {editing && kind === 'curso' ? (
           <Pressable
             onPress={() => void deleteCourse()}
-            disabled={deleting}
             accessibilityRole="button"
             accessibilityLabel="Eliminar curso"
             style={({ pressed }) => [
               styles.delete,
-              { borderColor: colors.danger, opacity: pressed || deleting ? 0.6 : 1 },
+              { borderColor: colors.danger, opacity: pressed ? 0.6 : 1 },
             ]}
           >
-            {deleting ? (
-              <ActivityIndicator color={colors.danger} size="small" />
-            ) : (
-              <>
-                <Feather name="trash-2" size={16} color={colors.danger} />
-                <Text variant="body" weight="700" color={colors.danger}>
-                  Eliminar curso
-                </Text>
-              </>
-            )}
+            <Feather name="trash-2" size={16} color={colors.danger} />
+            <Text variant="body" weight="700" color={colors.danger}>
+              Eliminar curso
+            </Text>
           </Pressable>
         ) : null}
       </ScrollView>
