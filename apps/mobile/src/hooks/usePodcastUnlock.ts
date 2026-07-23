@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { gateFor, hasPendingUnlocks, type EpisodeGate } from '@/lib/podcastUnlock';
+import { DRIP_EPISODES, gateFor, hasPendingUnlocks, type EpisodeGate } from '@/lib/podcastUnlock';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
 
 /**
  * Origen provisional mientras el servidor no ha dado el suyo.
@@ -18,10 +19,29 @@ import { useAppStore } from '@/store/useAppStore';
  */
 let provisionalOrigin: number | null = null;
 
+export type PodcastAccess = {
+  /** Estado de la fila `index` (base 0). */
+  gateFor: (index: number) => EpisodeGate;
+  /**
+   * Si procede pintar los huecos del catálogo que aún no existen. Son el
+   * escaparate de la membresía, así que no se le enseñan a quien administra:
+   * para quien sube los audios serían treinta candados sin sentido.
+   */
+  showsCatalogSlots: boolean;
+};
+
 /**
- * Estado de desbloqueo de los episodios para QUIEN mira, no para el dueño del
- * perfil: el podcast vive en el perfil de RENASER pero la cuenta atrás es de
- * cada persona, y arranca la primera vez que abre la sección.
+ * Acceso a los episodios para QUIEN mira, no para el dueño del perfil: el
+ * podcast vive en el perfil de RENASER pero la cuenta atrás es de cada persona.
+ *
+ * Hay tres casos y conviene tenerlos separados:
+ *
+ *  - **Administración**: sin ningún bloqueo. Es quien sube los audios; verlos
+ *    con candado le impediría comprobar lo que acaba de publicar.
+ *  - **Con sesión iniciada**: los cinco primeros salen uno cada 8 horas desde el
+ *    instante que guarda su cuenta, y del sexto en adelante es membresía.
+ *  - **Sin sesión**: no se aplica la espera. La cuenta atrás cuelga de una
+ *    cuenta —ahí se guarda su origen—, así que sin ella no hay nada que contar.
  *
  * Sobre el paso del tiempo: el intervalo de un segundo solo mueve el número en
  * pantalla. Lo que decide si un episodio está abierto es la comparación contra
@@ -32,18 +52,28 @@ let provisionalOrigin: number | null = null;
  * @param enabled `false` en las vistas donde no hace falta (evita el reloj y la
  *                llamada de arranque).
  */
-export function usePodcastUnlock(enabled = true): (index: number) => EpisodeGate {
+export function usePodcastUnlock(enabled = true): PodcastAccess {
   const startedAtIso = useAppStore((state) => state.user?.podcastStartedAt ?? null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
   const setUser = useAppStore((state) => state.setUser);
+  // Se distinguen dos cosas: si YA hay sesion (para pedir el origen al backend)
+  // y si SE SABE que no la hay (para no aplicar la espera). Mientras se esta
+  // comprobando no es ninguna de las dos, y ahi conviene mantener el bloqueo:
+  // darlo por abierto dejaria los cinco episodios sueltos ese instante.
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  const anonymous = useAuthStore((state) => state.status === 'anonymous');
 
   const [now, setNow] = useState(() => Date.now());
   const startedAt = startedAtIso ? Date.parse(startedAtIso) : null;
 
+  // Solo se cuenta el tiempo de quien tiene cuenta y no administra.
+  const drips = enabled && !anonymous && !isAdmin;
+
   // Primera visita: se pide al backend que fije el origen. Es idempotente, así
   // que volver a entrar no reinicia nada.
   useEffect(() => {
-    if (!enabled || startedAtIso) return;
+    // El origen se pide con la sesion ya confirmada: sin token seria un 401.
+    if (!drips || !signedIn || startedAtIso) return;
     let cancelled = false;
     void ProfileRepository.startPodcastDrip()
       .then((profile) => {
@@ -65,22 +95,17 @@ export function usePodcastUnlock(enabled = true): (index: number) => EpisodeGate
     return () => {
       cancelled = true;
     };
-  }, [enabled, startedAtIso, setUser]);
+  }, [drips, signedIn, startedAtIso, setUser]);
 
-  // Quien administra sube los episodios: tiene que poder escucharlos al subirlos.
-  // Se le exime de la ESPERA (origen en el pasado), no de la lista: los huecos
-  // de membresía se siguen viendo igual que los ve cualquier otra persona.
   let origin: number;
-  if (isAdmin) {
-    origin = 0;
-  } else if (startedAt != null) {
+  if (startedAt != null) {
     origin = startedAt;
   } else {
     provisionalOrigin ??= Date.now();
     origin = provisionalOrigin;
   }
 
-  const ticking = enabled && !isAdmin && hasPendingUnlocks(origin, now);
+  const ticking = drips && hasPendingUnlocks(origin, now);
 
   useEffect(() => {
     if (!ticking) return;
@@ -96,5 +121,15 @@ export function usePodcastUnlock(enabled = true): (index: number) => EpisodeGate
     };
   }, [ticking]);
 
-  return (index: number) => gateFor(index, origin, now);
+  if (isAdmin) {
+    return { gateFor: () => ({ state: 'open' }), showsCatalogSlots: false };
+  }
+  if (!drips) {
+    // Sin sesión: no hay espera, pero el catálogo se sigue anunciando igual.
+    return {
+      gateFor: (index) => (index < DRIP_EPISODES ? { state: 'open' } : { state: 'membership' }),
+      showsCatalogSlots: true,
+    };
+  }
+  return { gateFor: (index) => gateFor(index, origin, now), showsCatalogSlots: true };
 }

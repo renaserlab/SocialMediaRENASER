@@ -49,12 +49,14 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const gateFor = usePodcastUnlock();
+  const { gateFor, showsCatalogSlots } = usePodcastUnlock();
 
   return (
     <View style={styles.list}>
       {Array.from(
-        { length: showLockedSlots ? TOTAL_EPISODES : episodes.length },
+        // Los huecos del catalogo solo se pintan si quien mira los ve con
+        // sentido: quien administra ve unicamente los audios que ha subido.
+        { length: showLockedSlots && showsCatalogSlots ? TOTAL_EPISODES : episodes.length },
         (_, index) => {
         const number = index + 1;
         const episode = episodes[index];
@@ -163,9 +165,11 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
         );
         },
       )}
-      {!showLockedSlots && episodes.length === 0 ? (
+      {(!showLockedSlots || !showsCatalogSlots) && episodes.length === 0 ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
-          No hay episodios en esta categoría.
+          {/* El motivo de que no haya nada depende de por que esta vacia: por
+              el filtro elegido, o porque todavia no se ha subido ningun audio. */}
+          {showLockedSlots ? 'Aún no has subido audios.' : 'No hay episodios en esta categoría.'}
         </Text>
       ) : null}
     </View>

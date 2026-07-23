@@ -98,3 +98,15 @@ describe('la cuenta atrás avanza de verdad', () => {
     assert.equal(a - b, 1000);
   });
 });
+
+describe('quien administra no tiene ningun bloqueo', () => {
+  // Sube los audios: verlos con candado le impediria comprobar lo que acaba de
+  // publicar. El hook le devuelve 'open' sin consultar el calendario, asi que
+  // aqui se comprueba la pieza que si depende del tiempo: con el origen en el
+  // pasado no queda ninguna espera pendiente.
+  it('con el origen en el pasado no espera por nada', () => {
+    const states = [0, 1, 2, 3, 4].map((i) => gateFor(i, 0, START).state);
+    assert.deepEqual(states, ['open', 'open', 'open', 'open', 'open']);
+    assert.equal(hasPendingUnlocks(0, START), false);
+  });
+});
