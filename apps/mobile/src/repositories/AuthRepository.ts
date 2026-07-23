@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
+import { apiRequest, API_V1 } from '@/services/api';
 import { supabase, isSupabaseConfigured } from '@/services/supabase';
 
 /** Proveedores externos ofrecidos en las pantallas de acceso. */
@@ -139,6 +140,19 @@ export const AuthRepository = {
   async signOut(): Promise<void> {
     if (!supabase) return;
     await supabase.auth.signOut();
+  },
+
+  /**
+   * Borra la cuenta de forma permanente y cierra la sesion.
+   *
+   * Primero el backend, que elimina el usuario y todo su contenido; solo si eso
+   * responde bien se cierra la sesion local. Al reves —cerrar sesion antes— se
+   * perderia el token y la peticion de borrado iria sin autenticar: la cuenta
+   * quedaria a medio eliminar.
+   */
+  async deleteAccount(): Promise<void> {
+    await apiRequest<void>(`${API_V1}/auth/me`, { method: 'DELETE' });
+    if (supabase) await supabase.auth.signOut();
   },
 
   async getSession(): Promise<Session | null> {

@@ -7,7 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
-import { confirm } from '@/lib/confirm';
+import { confirm, notify } from '@/lib/confirm';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
@@ -21,6 +21,7 @@ export function SettingsScreen() {
   const resetDemo = useAppStore((state) => state.resetDemo);
   const user = useAppStore((state) => state.user);
   const signOut = useAuthStore((state) => state.signOut);
+  const deleteAccount = useAuthStore((state) => state.deleteAccount);
   const authStatus = useAuthStore((state) => state.status);
 
   const isLoggedIn = authStatus === 'authenticated';
@@ -35,6 +36,36 @@ export function SettingsScreen() {
     if (!ok) return;
     await signOut();
     router.replace('/');
+  };
+
+  const handleDeleteAccount = async () => {
+    // Doble confirmacion: es irreversible y se lleva todo el contenido. La
+    // primera explica lo que pasa; la segunda es la ultima red antes de borrar.
+    const ok = await confirm({
+      title: 'Eliminar cuenta',
+      message:
+        'Se borrarán tu cuenta y todo tu contenido (publicaciones, comentarios, ' +
+        'mensajes y audios) de forma permanente. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar cuenta',
+      destructive: true,
+    });
+    if (!ok) return;
+    const reallySure = await confirm({
+      title: '¿Seguro del todo?',
+      message: 'No hay vuelta atrás. Tu cuenta se eliminará ahora mismo.',
+      confirmLabel: 'Sí, eliminar',
+      destructive: true,
+    });
+    if (!reallySure) return;
+    try {
+      await deleteAccount();
+      router.replace('/');
+    } catch {
+      notify(
+        'No se pudo eliminar la cuenta',
+        'Inténtalo de nuevo en unos momentos. Tu cuenta sigue activa.',
+      );
+    }
   };
 
   const handleReset = async () => {
@@ -87,13 +118,22 @@ export function SettingsScreen() {
           onPress={() => router.push('/verification')}
         />
         {isLoggedIn ? (
-          <ListRow
-            title={t('settings.signOut')}
-            subtitle={t('settings.signOutBody')}
-            leftIcon="log-out"
-            destructive
-            onPress={handleSignOut}
-          />
+          <>
+            <ListRow
+              title={t('settings.signOut')}
+              subtitle={t('settings.signOutBody')}
+              leftIcon="log-out"
+              destructive
+              onPress={handleSignOut}
+            />
+            <ListRow
+              title="Eliminar cuenta"
+              subtitle="Borra tu cuenta y todo tu contenido de forma permanente"
+              leftIcon="trash-2"
+              destructive
+              onPress={handleDeleteAccount}
+            />
+          </>
         ) : (
           <ListRow
             title={t('settings.signIn')}

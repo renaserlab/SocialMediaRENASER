@@ -90,8 +90,10 @@ export function MessagesScreen() {
               value={searchText}
               onChangeText={setSearchText}
               placeholderTextColor={colors.textMuted}
+              // Deja hueco para la lupa: sin esto el texto arranca debajo de ella.
+              style={styles.searchInput}
             />
-            <View style={styles.searchIcon}>
+            <View style={styles.searchIcon} pointerEvents="none">
               <Feather name="search" size={18} color={colors.textMuted} />
             </View>
           </View>
@@ -159,10 +161,19 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: spacing.md,
   },
+  // El texto ya empieza en el margen del campo, donde tambien esta la lupa; se
+  // desplaza el ancho del icono (18) mas un respiro (8) para que no se pisen.
+  searchInput: {
+    paddingLeft: 18 + spacing.sm,
+  },
+  // top/bottom a 0 centra la lupa verticalmente sea cual sea el alto del campo,
+  // sin depender de un desplazamiento fijo que se descuadra si cambia la fuente.
   searchIcon: {
     position: 'absolute',
     left: spacing.md,
-    top: 15,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.lg, borderBottomWidth: 1 },
   avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#DDD' },
