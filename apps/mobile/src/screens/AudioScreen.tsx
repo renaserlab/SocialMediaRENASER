@@ -11,7 +11,6 @@ import { AudioScrubber } from '@/components/AudioScrubber';
 import { Button } from '@/components/Button';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { assets } from '@/data/assets';
-import { SAMPLE_AUDIO } from '@/data/media';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
@@ -64,11 +63,14 @@ export function AudioScreen() {
     void load();
   }, [load]);
 
-  // Reproducción real (expo-audio funciona en iOS/Android/web).
-  const player = useAudioPlayer(audio?.mediaUrl ?? SAMPLE_AUDIO);
+  // Reproducción real (expo-audio funciona en iOS/Android/web). Sin audio
+  // subido la fuente es null: el reproductor queda en silencio en vez de sonar
+  // un ejemplo, que se solapaba con el audio de bienvenida.
+  const player = useAudioPlayer(audio?.mediaUrl ?? null);
   const status = useAudioPlayerStatus(player);
   useBackgroundAudio();
 
+  const hasAudio = !!audio?.mediaUrl;
   const playing = status.playing;
   const currentTime = status.currentTime ?? 0;
   const duration = status.duration && status.duration > 0 ? status.duration : 0;
@@ -77,6 +79,8 @@ export function AudioScreen() {
   const [saved, setSaved] = useState(false);
 
   const toggle = () => {
+    // Sin audio subido no hay nada que reproducir.
+    if (!hasAudio) return;
     if (playing) {
       player.pause();
     } else {
@@ -159,9 +163,11 @@ export function AudioScreen() {
 
             <Pressable
               onPress={toggle}
-              style={[styles.play, { backgroundColor: colors.primary }]}
+              disabled={!hasAudio}
+              style={[styles.play, { backgroundColor: colors.primary, opacity: hasAudio ? 1 : 0.4 }]}
               accessibilityLabel={playing ? 'Pausar audio' : 'Reproducir audio'}
               accessibilityRole="button"
+              accessibilityState={{ disabled: !hasAudio }}
             >
               <Feather name={playing ? 'pause' : 'play'} size={32} color={colors.onPrimary} />
             </Pressable>
