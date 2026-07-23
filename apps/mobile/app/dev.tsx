@@ -48,7 +48,6 @@ const GROUPS: Group[] = [
       { label: 'En vivo', href: '/live/1' },
       { label: 'Short', href: '/short/1' },
       { label: 'Audio', href: '/audio/1' },
-      { label: 'Checkout', href: '/checkout/1' },
     ],
   },
   {
