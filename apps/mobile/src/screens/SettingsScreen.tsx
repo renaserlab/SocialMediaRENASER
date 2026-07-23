@@ -144,6 +144,28 @@ export function SettingsScreen() {
           />
         )}
 
+        {/*
+          Legal. Apple exige que la politica de privacidad y el acuerdo de
+          licencia sean accesibles DENTRO de la app, no solo en la ficha de la
+          tienda. Son rutas propias, asi que en la web quedan publicadas en
+          /privacy y /terms.
+        */}
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
+        <ListRow
+          title="Política de Privacidad"
+          subtitle="Qué datos recogemos y cómo los usamos"
+          leftIcon="shield"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/privacy' as never)}
+        />
+        <ListRow
+          title="Términos y Condiciones"
+          subtitle="Normas de la comunidad y acuerdo de licencia"
+          leftIcon="file-text"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/terms' as never)}
+        />
+
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
         <ListRow
           title={t('settings.reset')}

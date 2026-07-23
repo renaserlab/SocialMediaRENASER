@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -12,6 +12,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
+import { FEATURE_PURCHASES } from '@/config/features';
 import { useCourse } from '@/hooks/useCourse';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -23,6 +24,19 @@ export function CheckoutScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const purchase = useAppStore((state) => state.purchaseCourse);
+
+  /**
+   * Con las compras apagadas nadie deberia llegar aqui: ningun boton lleva a
+   * esta ruta. La guarda existe porque en web la direccion se puede escribir a
+   * mano, y una pantalla de pago simulada visible es motivo de rechazo.
+   *
+   * Se redirige al curso, que es lo que el miembro venia a ver.
+   */
+  useEffect(() => {
+    if (FEATURE_PURCHASES) return;
+    if (id) router.replace(`/course/${id}` as never);
+    else router.replace('/');
+  }, [id, router]);
 
   // Curso a comprar vía la capa de repositorio (mock hoy, backend mañana).
   const { course, loading, error: courseError, reload } = useCourse(id);
@@ -57,6 +71,13 @@ export function CheckoutScreen() {
     }
     router.replace({ pathname: '/confirmation', params: { courseId: course.id } } as never);
   };
+
+  // Va DESPUES de todos los hooks (su orden debe ser estable entre renders) y
+  // antes de pintar nada: evita que asome la pantalla de pago mientras el
+  // efecto de arriba redirige.
+  if (!FEATURE_PURCHASES) {
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+  }
 
   if (loading) {
     return (

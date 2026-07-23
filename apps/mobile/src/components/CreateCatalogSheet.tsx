@@ -10,6 +10,7 @@ import { DateField } from '@/components/DateField';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
+import { FEATURE_PURCHASES } from '@/config/features';
 import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
@@ -415,7 +416,9 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
               autoCapitalize="none"
             />
           </>
-        ) : isPodcast ? null : (
+        ) : isPodcast || !FEATURE_PURCHASES ? null : (
+          // Sin venta, pedir un precio no tiene sentido: el curso se guarda con
+          // 0 y se muestra como incluido en la membresia.
           <Input
             label="Precio (PEN)"
             value={price}

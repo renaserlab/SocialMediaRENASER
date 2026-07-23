@@ -11,6 +11,7 @@ import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { CourseHighlights } from '@/components/CourseHighlights';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { StateView } from '@/components/StateView';
+import { FEATURE_PURCHASES } from '@/config/features';
 import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
 import { useAppStore } from '@/store/useAppStore';
@@ -49,7 +50,11 @@ export function CourseScreen() {
     );
   }
 
-  const purchased = purchasedIds.includes(course.id);
+  /**
+   * Sin compras, el curso forma parte del acceso de miembro: se entra
+   * directamente al contenido, sin pasar por ninguna pantalla de pago.
+   */
+  const purchased = !FEATURE_PURCHASES || purchasedIds.includes(course.id);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -69,7 +74,17 @@ export function CourseScreen() {
         />
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
-          <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
+          {/* Como app de miembros no se muestra precio: el curso va incluido. */}
+          {FEATURE_PURCHASES ? (
+            <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
+          ) : (
+            <View style={[styles.included, { borderColor: colors.border }]}>
+              <Feather name="check" size={14} color={colors.text} />
+              <Text style={[styles.includedText, { color: colors.text }]}>
+                Incluido en tu membresía
+              </Text>
+            </View>
+          )}
           <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
 
           <View style={[styles.info, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -121,6 +136,10 @@ export function CourseScreen() {
             }
             style={{ marginTop: spacing.xl }}
           />
+          {/*
+            Con las compras apagadas `purchased` es siempre true, asi que este
+            boton nunca lleva al checkout: la unica salida es el contenido.
+          */}
         </View>
       </AppScreen>
 
@@ -160,6 +179,18 @@ const styles = StyleSheet.create({
   container: { padding: spacing.xl },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   price: { fontSize: 20, fontWeight: '900', marginTop: spacing.md },
+  included: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    marginTop: spacing.md,
+  },
+  includedText: { fontSize: 12, fontWeight: '700' },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
