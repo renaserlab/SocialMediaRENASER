@@ -4,15 +4,20 @@ import { Feather } from '@expo/vector-icons';
 
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { Text } from '@/components/Text';
+import { usePodcastUnlock } from '@/hooks/usePodcastUnlock';
 import { useTranslation } from '@/i18n/useTranslation';
+import { DRIP_EPISODES, formatCountdown, waitingLabel } from '@/lib/podcastUnlock';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
 
 /** Episodios visibles en la lista, aunque todavia no existan. */
 export const TOTAL_EPISODES = 30;
-/** Cuantos se pueden escuchar; del siguiente en adelante van con candado. */
-export const FREE_EPISODES = 5;
+/**
+ * Episodios incluidos en la liberacion progresiva (uno cada 8 h). Del siguiente
+ * en adelante el candado ya no es de tiempo, sino de membresia.
+ */
+export const FREE_EPISODES = DRIP_EPISODES;
 
 type Props = {
   /** Audios publicados, del mas antiguo al mas reciente (episodio 1 primero). */
@@ -34,6 +39,9 @@ type Props = {
  * audio real y el resto bloqueadas, para que se vea de un vistazo todo lo que
  * incluye la membresia.
  *
+ * Los cinco primeros no se abren de golpe: van saliendo uno cada 8 horas y
+ * mientras tanto muestran el tiempo que falta (ver `lib/podcastUnlock`).
+ *
  * Solo se monta el reproductor del episodio elegido: montar treinta a la vez
  * dejaria otros tantos decodificadores de audio abiertos.
  */
@@ -41,6 +49,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const gateFor = usePodcastUnlock();
 
   return (
     <View style={styles.list}>
@@ -49,9 +58,14 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
         (_, index) => {
         const number = index + 1;
         const episode = episodes[index];
-        const locked = index >= FREE_EPISODES;
-        const playable = !locked && !!episode?.mediaUrl;
+        const gate = gateFor(index);
+        // "Esperando" es distinto de "bloqueado": el primero se abre solo con
+        // el tiempo y por eso lleva cuenta atras; el segundo es de membresia.
+        const waiting = gate.state === 'waiting';
+        const locked = gate.state === 'membership';
+        const playable = gate.state === 'open' && !!episode?.mediaUrl;
         const isPlaying = playable && playingId === episode!.id;
+        const dimmed = locked || waiting || !episode;
 
         return (
           <View
@@ -62,7 +76,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
               <Text
                 variant="secondary"
                 weight="700"
-                color={locked ? colors.textMuted : colors.text}
+                color={dimmed ? colors.textMuted : colors.text}
                 style={styles.number}
               >
                 {number}
@@ -72,11 +86,33 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                 <Text
                   variant="body"
                   numberOfLines={1}
-                  color={locked || !episode ? colors.textMuted : colors.text}
+                  color={dimmed ? colors.textMuted : colors.text}
                 >
                   {episode ? episode.body : `Episodio ${number}`}
                 </Text>
-                {locked || !episode ? (
+                {waiting ? (
+                  <View style={styles.waiting}>
+                    <Text variant="secondary" color={colors.textMuted}>
+                      {waitingLabel(gate.remainingMs)}
+                    </Text>
+                    <View
+                      style={[
+                        styles.countdown,
+                        { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+                      ]}
+                    >
+                      <Feather name="clock" size={11} color={colors.primary} />
+                      <Text
+                        variant="secondary"
+                        weight="700"
+                        color={colors.primary}
+                        style={styles.digits}
+                      >
+                        {formatCountdown(gate.remainingMs)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : locked || !episode ? (
                   <Text variant="secondary" color={colors.textMuted}>
                     {locked ? t('podcast.locked') : t('podcast.soon')}
                   </Text>
@@ -142,6 +178,26 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   number: { width: 26, textAlign: 'center' },
   info: { flex: 1 },
+  // Se envuelve porque en pantallas estrechas el texto y la cuenta atras no
+  // caben en una linea junto al numero y los botones.
+  waiting: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: 3,
+  },
+  // Cifras de ancho fijo: si no, la pastilla se encoge y se estira cada segundo.
+  digits: { fontVariant: ['tabular-nums'] },
+  countdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
   action: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   play: { borderRadius: radius.pill },
   empty: { textAlign: 'center', paddingVertical: spacing.xl },

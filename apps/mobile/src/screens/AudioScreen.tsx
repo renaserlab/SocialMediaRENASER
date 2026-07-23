@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, LayoutChangeEvent, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,10 +7,12 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { AudioScrubber } from '@/components/AudioScrubber';
 import { Button } from '@/components/Button';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { assets } from '@/data/assets';
 import { SAMPLE_AUDIO } from '@/data/media';
+import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
@@ -65,13 +67,13 @@ export function AudioScreen() {
   // Reproducción real (expo-audio funciona en iOS/Android/web).
   const player = useAudioPlayer(audio?.mediaUrl ?? SAMPLE_AUDIO);
   const status = useAudioPlayerStatus(player);
+  useBackgroundAudio();
 
   const playing = status.playing;
   const currentTime = status.currentTime ?? 0;
   const duration = status.duration && status.duration > 0 ? status.duration : 0;
-  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
-
-  const [trackWidth, setTrackWidth] = useState(0);
+  // Segundo que marca el dedo mientras se arrastra la barra; `null` si no.
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
 
   const toggle = () => {
@@ -88,12 +90,6 @@ export function AudioScreen() {
   const seekTo = (seconds: number) => {
     const clamped = Math.max(0, duration > 0 ? Math.min(seconds, duration) : seconds);
     player.seekTo(clamped);
-  };
-
-  const onTrackPress = (evt: { nativeEvent: { locationX: number } }) => {
-    if (duration <= 0 || trackWidth <= 0) return;
-    const ratio = Math.max(0, Math.min(1, evt.nativeEvent.locationX / trackWidth));
-    seekTo(ratio * duration);
   };
 
   const onShare = () => {
@@ -133,17 +129,20 @@ export function AudioScreen() {
             </View>
           </View>
 
-          <Pressable
-            style={[styles.progressTrack, { backgroundColor: colors.border }]}
-            onLayout={(e: LayoutChangeEvent) => setTrackWidth(e.nativeEvent.layout.width)}
-            onPress={onTrackPress}
-            accessibilityRole="adjustable"
-            accessibilityLabel="Barra de progreso del audio"
-          >
-            <View style={[styles.progress, { width: `${progress * 100}%` as any, backgroundColor: colors.primary }]} />
-          </Pressable>
+          <View style={styles.progressTrack}>
+            <AudioScrubber
+              currentTime={currentTime}
+              duration={duration}
+              onSeek={seekTo}
+              onScrubChange={setScrubTime}
+              height={6}
+            />
+          </View>
           <View style={styles.timeRow}>
-            <Text style={[styles.time, { color: colors.textMuted }]}>{formatTime(currentTime)}</Text>
+            {/* Al arrastrar se muestra el destino, para verlo antes de soltar. */}
+            <Text style={[styles.time, { color: colors.textMuted }]}>
+              {formatTime(scrubTime ?? currentTime)}
+            </Text>
             <Text style={[styles.time, { color: colors.textMuted }]}>{formatTime(duration)}</Text>
           </View>
 
@@ -242,8 +241,7 @@ const styles = StyleSheet.create({
   cover: { width: '100%', aspectRatio: 1, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', justifyContent: 'flex-end' },
   coverBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, margin: spacing.lg, alignSelf: 'flex-start' },
   coverBadgeText: { fontSize: 12, fontWeight: '700' },
-  progressTrack: { height: 6, width: '100%', borderRadius: radius.pill, overflow: 'hidden', marginTop: spacing.xl },
-  progress: { height: '100%' },
+  progressTrack: { width: '100%', marginTop: spacing.lg },
   timeRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
   time: { fontSize: 10 },
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxl, marginVertical: spacing.xl },

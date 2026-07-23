@@ -13,6 +13,8 @@ class ProfileRead(BaseModel):
     bio: str = ""
     avatar_path: str | None = None
     cover_path: str | None = None
+    #: Nulo hasta que la persona abre el podcast por primera vez.
+    podcast_started_at: datetime | None = None
     role: str = "user"
     is_featured: bool = False
     is_private: bool = False

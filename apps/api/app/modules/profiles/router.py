@@ -4,8 +4,10 @@ Los perfiles vienen enriquecidos con contadores (seguidores/seguidos/posts) y,
 si hay sesión, con is_following (si el usuario actual sigue a ese perfil).
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, literal, or_, select
+from sqlalchemy import func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -69,6 +71,7 @@ def _to_profile_read(profile: Profile, fc: int, gc: int, pc: int, isf: int) -> P
         bio=profile.bio,
         avatar_path=profile.avatar_path,
         cover_path=profile.cover_path,
+        podcast_started_at=profile.podcast_started_at,
         role=profile.role,
         is_featured=profile.is_featured,
         is_private=profile.is_private,
@@ -122,6 +125,31 @@ async def update_my_profile(
             value = None
         setattr(profile, field, value)
     await db.commit()
+    return await _load_profile(db, current_user.id, viewer_id=None)
+
+
+@router.post("/me/podcast-start", response_model=ProfileRead)
+async def start_podcast_drip(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileRead:
+    """Arranca la cuenta atras del podcast la primera vez que se abre.
+
+    Es IDEMPOTENTE: si ya estaba marcada no se toca, para que volver a entrar en
+    la seccion no reinicie el progreso. El `WHERE ... IS NULL` deja esa decision
+    a la base de datos en una sola sentencia; leerla antes y escribirla despues
+    permitiria que dos peticiones a la vez la fijaran dos veces.
+
+    El instante lo pone el servidor, nunca el cliente: si lo enviara el telefono
+    bastaria con cambiar su hora para desbloquearlo todo.
+    """
+    await db.execute(
+        update(Profile)
+        .where(Profile.id == current_user.id, Profile.podcast_started_at.is_(None))
+        .values(podcast_started_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    # Si no existiera el perfil, la carga siguiente responde 404.
     return await _load_profile(db, current_user.id, viewer_id=None)
 
 

@@ -31,6 +31,19 @@ export const ProfileRepository = {
     return toUserProfile(dto);
   },
 
+  /**
+   * Marca el inicio de la liberación progresiva del podcast.
+   *
+   * Idempotente: si ya estaba marcada el backend la respeta, así que se puede
+   * llamar cada vez que se abre el podcast sin reiniciar el progreso.
+   */
+  async startPodcastDrip(): Promise<UserProfile> {
+    const dto = await apiRequest<ProfileDto>(`${API_V1}/profiles/me/podcast-start`, {
+      method: 'POST',
+    });
+    return toUserProfile(dto);
+  },
+
   /** Perfiles sugeridos al registrarse, para que el feed no empiece vacío. */
   async listFeatured(): Promise<FeaturedMember[]> {
     const dtos = await apiRequest<FeaturedProfileDto[]>(`${API_V1}/profiles/featured`);

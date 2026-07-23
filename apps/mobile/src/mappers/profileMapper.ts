@@ -10,6 +10,7 @@ export type ProfileDto = {
   bio: string;
   avatar_path: string | null;
   cover_path: string | null;
+  podcast_started_at?: string | null;
   role: string;
   is_featured?: boolean;
   is_private: boolean;
@@ -68,6 +69,7 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     avatarUrl: profileImageUrl(dto.avatar_path),
     coverUrl: profileImageUrl(dto.cover_path),
     isAdmin: dto.role === 'admin',
+    podcastStartedAt: dto.podcast_started_at ?? null,
   };
 }
 

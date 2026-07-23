@@ -17,6 +17,11 @@ export type UserProfile = {
   coverUrl?: string;
   /** Gestiona la aplicación (crear cursos, moderar). Lo resuelve el backend. */
   isAdmin?: boolean;
+  /**
+   * Instante (ISO, del servidor) en que arrancó la liberación progresiva del
+   * podcast. Nulo mientras no se haya abierto el podcast por primera vez.
+   */
+  podcastStartedAt?: string | null;
 };
 
 export type QuizArea = 'mentalidad' | 'relaciones' | 'negocios' | 'salud' | 'proposito';

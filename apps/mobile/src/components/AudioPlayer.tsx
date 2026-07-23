@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
+import { AudioScrubber } from '@/components/AudioScrubber';
 import { Text } from '@/components/Text';
+import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -19,11 +21,34 @@ export function AudioPlayer({ uri, title }: { uri: string; title?: string }) {
   const { colors } = useAppTheme();
   const player = useAudioPlayer({ uri });
   const status = useAudioPlayerStatus(player);
+  useBackgroundAudio();
 
   const playing = status?.playing ?? false;
   const duration = status?.duration ?? 0;
   const current = status?.currentTime ?? 0;
-  const progress = duration > 0 ? Math.min(1, current / duration) : 0;
+
+  // Segundo que marca el dedo mientras se arrastra; `null` el resto del tiempo.
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+
+  // Controles en la pantalla de bloqueo (y en el aviso de Android). Sin esto el
+  // audio sigue sonando de fondo pero no hay forma de pararlo sin volver a
+  // abrir la app. Solo existe en nativo; en web la comprobación lo salta.
+  useEffect(() => {
+    if (typeof player.setActiveForLockScreen !== 'function') return;
+    player.setActiveForLockScreen(
+      true,
+      { title: title ?? 'Audio', artist: 'RENASER' },
+      { showSeekForward: true, showSeekBackward: true },
+    );
+    return () => {
+      // Ceder el sitio: solo un reproductor puede ocupar la pantalla de bloqueo.
+      try {
+        player.setActiveForLockScreen(false);
+      } catch {
+        /* El reproductor ya se liberó al desmontarse. */
+      }
+    };
+  }, [player, title]);
 
   const toggle = () => {
     if (playing) player.pause();
@@ -46,13 +71,18 @@ export function AudioPlayer({ uri, title }: { uri: string; title?: string }) {
         <Text variant="secondary" weight="600" numberOfLines={1}>
           {title ?? 'Audio'}
         </Text>
-        <View style={[styles.track, { backgroundColor: colors.border }]}>
-          <View
-            style={[styles.progress, { width: `${progress * 100}%`, backgroundColor: colors.primary }]}
-          />
-        </View>
+
+        <AudioScrubber
+          currentTime={current}
+          duration={duration}
+          onSeek={(seconds) => void player.seekTo(seconds)}
+          onScrubChange={setScrubTime}
+          knobBorderColor={colors.surfaceAlt}
+        />
+
         <Text variant="secondary" color={colors.textMuted}>
-          {formatTime(current)} / {formatTime(duration)}
+          {/* Al arrastrar se muestra el destino, para verlo antes de soltar. */}
+          {formatTime(scrubTime ?? current)} / {formatTime(duration)}
         </Text>
       </View>
     </View>
@@ -71,7 +101,5 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   button: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  info: { flex: 1, gap: 6 },
-  track: { height: 4, borderRadius: radius.pill, overflow: 'hidden' },
-  progress: { height: '100%' },
+  info: { flex: 1, gap: 2 },
 });

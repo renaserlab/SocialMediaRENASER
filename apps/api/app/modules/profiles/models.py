@@ -21,6 +21,10 @@ class Profile(Base):
     avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Ruta dentro del bucket `avatars` (no una URL), igual que avatar_path.
     cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Inicio de la liberacion progresiva del podcast (un episodio cada 8 h).
+    podcast_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     role: Mapped[str] = mapped_column(app_role, default="user", server_default="user")
     # Aparece en la pantalla de sugerencias tras registrarse. Independiente del
     # rol: se puede destacar a un mentor sin darle permisos de administracion.

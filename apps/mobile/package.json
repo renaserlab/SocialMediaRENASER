@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "build:web": "expo export --platform web",
     "check": "tsc --noEmit",
-    "doctor": "npx expo-doctor@latest"
+    "doctor": "npx expo-doctor@latest",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.mts\""
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
