@@ -17,9 +17,18 @@ type Props = {
   onBack?: () => void;
   rightIcon?: keyof typeof Feather.glyphMap;
   onRightPress?: () => void;
+  /** Punto sobre el icono derecho: hay algo sin ver detras de el. */
+  rightBadge?: boolean;
 };
 
-export function AppHeader({ title = 'RENASER', back = false, onBack, rightIcon, onRightPress }: Props) {
+export function AppHeader({
+  title = 'RENASER',
+  back = false,
+  onBack,
+  rightIcon,
+  onRightPress,
+  rightBadge = false,
+}: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
   // El header es el primer elemento de la pantalla: debe respetar el notch /
@@ -63,6 +72,13 @@ export function AppHeader({ title = 'RENASER', back = false, onBack, rightIcon, 
             style={styles.backButton}
           >
             <Feather name={rightIcon} size={22} color={colors.text} />
+            {/* El punto no lleva texto: se acompana del propio icono, nunca es
+                el color el unico portador de la informacion. */}
+            {rightBadge ? (
+              <View
+                style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}
+              />
+            ) : null}
           </Pressable>
         ) : null}
       </View>
@@ -90,5 +106,14 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 1.5,
   },
 });

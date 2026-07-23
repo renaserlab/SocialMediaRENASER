@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { CoachMark } from '@/components/CoachMark';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { StoriesRow } from '@/components/StoriesRow';
 import { PostCard } from '@/components/PostCard';
@@ -19,6 +20,7 @@ import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
 import type { ProfileSectionKind } from '@/components/ProfileSection';
 import { useTranslation } from '@/i18n/useTranslation';
+import { DARREN_NOTICE_ID } from '@/lib/guides';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -62,6 +64,15 @@ export function HomeScreen() {
    */
   const isAdmin = user?.isAdmin === true;
   const [creating, setCreating] = useState<CatalogKind | null>(null);
+
+  /**
+   * El aviso de contenido gratuito de Darren vive en Notificaciones. Aqui solo
+   * se consulta si sigue pendiente para pintar el punto en la campana; no tiene
+   * sentido para el propio Darren.
+   */
+  const darrenNoticePending = useAppStore(
+    (state) => !state.dismissedGuides.includes(DARREN_NOTICE_ID) && state.user?.isAdmin !== true,
+  );
 
   /**
    * Perfil donde viven eventos y cursos. Si el propio usuario es el
@@ -140,6 +151,19 @@ export function HomeScreen() {
           </Text>
           <Feather name="plus-circle" size={24} color={colors.text} />
         </Pressable>
+
+        {/*
+          Guia de la primera publicacion. Solo para quien todavia no ha
+          publicado: `createPost` sube el contador, asi que se apaga sola en
+          cuanto el usuario hace lo que se le pide.
+        */}
+        <CoachMark
+          id="primera-publicacion"
+          arrow="up"
+          visible={!!user && user.posts === 0}
+          text="Comparte tu primera publicación con la comunidad."
+          onPress={() => router.navigate('/(tabs)/create')}
+        />
 
         {/* Audio privado ocupa toda la fila; el circulo baja junto al podcast. */}
         <Pressable
@@ -363,7 +387,14 @@ export function HomeScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="RENASER" rightIcon="bell" onRightPress={() => router.push('/notifications')} />
+      <AppHeader
+        title="RENASER"
+        rightIcon="bell"
+        // Un aviso que nadie abre no sirve de nada: el punto marca que el de
+        // "contenido de Darren gratis" sigue esperando dentro.
+        rightBadge={darrenNoticePending}
+        onRightPress={() => router.push('/notifications')}
+      />
 
       {/* El comentario inline de PostCard vive dentro de esta lista: el KAV debe
           estar a nivel de pantalla, nunca dentro del item. */}

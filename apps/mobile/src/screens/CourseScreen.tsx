@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { CoachMark } from '@/components/CoachMark';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { CourseHighlights } from '@/components/CourseHighlights';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
@@ -84,6 +85,18 @@ export function CourseScreen() {
             Temario real del curso. Para el alumno es la lista de contenidos;
             para la administracion es ademas el editor de modulos y lecciones.
           */}
+          {/*
+            Guia hacia el temario. Para el administrador sobra: ese bloque es su
+            editor y ya lo conoce.
+          */}
+          <CoachMark
+            id="curso-temario"
+            arrow="down"
+            visible={!isAdmin && !!firstLessonId}
+            text="Abre la primera lección del temario."
+            onPress={() => firstLessonId && router.push(`/lesson/${firstLessonId}` as never)}
+          />
+
           <View style={styles.contentBlock}>
             <CourseContentEditor
               courseId={course.id}

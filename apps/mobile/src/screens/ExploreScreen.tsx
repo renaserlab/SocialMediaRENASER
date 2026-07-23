@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
+import { CoachMark } from '@/components/CoachMark';
 import { SectionTitle } from '@/components/SectionTitle';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
@@ -148,6 +149,18 @@ export function ExploreScreen() {
           {!isSearching && (
           <React.Fragment>
           <SectionTitle title="Tu siguiente paso" />
+          {/*
+            Guia hacia el contenido: sin ella la portada se lee como una imagen
+            decorativa y no como algo en lo que se puede entrar. Solo aparece si
+            hay un curso real que abrir.
+          */}
+          <CoachMark
+            id="explorar-programa"
+            arrow="down"
+            visible={!!featuredCourse}
+            text="Entra al programa recomendado y empieza por el primer módulo."
+            onPress={() => featuredCourse && router.push(`/course/${featuredCourse.id}` as never)}
+          />
           <Pressable
             onPress={() => featuredCourse && router.push(`/course/${featuredCourse.id}` as never)}
             disabled={!featuredCourse}
