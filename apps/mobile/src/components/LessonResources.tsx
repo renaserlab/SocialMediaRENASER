@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
@@ -43,6 +44,9 @@ export function LessonResources({ lessonId, canEdit }: Props) {
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [saving, setSaving] = useState(false);
+  // Lo que falla con la hoja abierta se cuenta DENTRO de la hoja: en iOS un
+  // dialogo no puede presentarse encima de un Modal y no se veria.
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -67,16 +71,18 @@ export function LessonResources({ lessonId, canEdit }: Props) {
       const asset = result.assets?.[0];
       if (!asset) return;
       setFile(asset);
+      setError(null);
       // El nombre del archivo es un titulo razonable por defecto.
       if (!title.trim()) setTitle(asset.name.replace(/\.[^.]+$/, ''));
     } catch {
-      notify('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
+      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
   const save = async () => {
     if (!title.trim() || !file) return;
     setSaving(true);
+    setError(null);
     try {
       const storagePath = await uploadCourseMedia({
         uri: file.uri,
@@ -94,13 +100,15 @@ export function LessonResources({ lessonId, canEdit }: Props) {
         sizeBytes: file.size ?? null,
         sortOrder: items.length,
       });
-      toast('Documento añadido');
       setTitle('');
       setFile(null);
+      // Cerrar antes del aviso: mientras la hoja siga montada, en iOS tapa el
+      // toast igual que taparia un dialogo.
       setAdding(false);
+      toast('Documento añadido');
       await load();
-    } catch (error) {
-      notify('No se pudo subir', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo subir. Inténtalo de nuevo.');
     } finally {
       setSaving(false);
     }
@@ -184,6 +192,7 @@ export function LessonResources({ lessonId, canEdit }: Props) {
           setAdding(false);
           setTitle('');
           setFile(null);
+          setError(null);
         }}
       >
         <Text style={styles.sheetTitle} color={colors.text}>
@@ -202,6 +211,7 @@ export function LessonResources({ lessonId, canEdit }: Props) {
           leftIcon="paperclip"
           onPress={() => void choose()}
         />
+        <InlineError message={error} />
         <Button
           label="Subir documento"
           onPress={() => void save()}

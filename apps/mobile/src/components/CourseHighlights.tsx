@@ -4,9 +4,9 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
-import { notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { CourseContentRepository } from '@/repositories/CourseContentRepository';
 import { spacing } from '@/theme/tokens';
@@ -30,6 +30,7 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -47,6 +48,7 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
   const open = () => {
     // Siempre una linea vacia al final para poder seguir escribiendo.
     setDraft(items.length > 0 ? [...items, ''] : ['']);
+    setError(null);
     setEditing(true);
   };
 
@@ -63,13 +65,16 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
   const save = async () => {
     const clean = draft.map((v) => v.trim()).filter(Boolean);
     setSaving(true);
+    setError(null);
     try {
       await CourseContentRepository.setHighlights(courseId, clean);
       setItems(clean);
+      // Cerrar antes del aviso: la hoja es un Modal y en iOS taparia el toast.
       setEditing(false);
       toast('Puntos actualizados');
-    } catch (error) {
-      notify('No se pudo guardar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+    } catch (failure) {
+      // La hoja sigue abierta: el error se cuenta dentro de ella.
+      setError(failure instanceof Error ? failure.message : 'No se pudo guardar. Inténtalo de nuevo.');
     } finally {
       setSaving(false);
     }
@@ -129,6 +134,7 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
         <Text variant="secondary" color={colors.textMuted} style={styles.hint}>
           Deja un punto en blanco para eliminarlo.
         </Text>
+        <InlineError message={error} />
         <Button label="Guardar" onPress={() => void save()} loading={saving} style={styles.submit} />
       </BottomSheet>
     </View>

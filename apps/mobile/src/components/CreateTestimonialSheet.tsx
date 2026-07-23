@@ -5,10 +5,10 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
-import { notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { TestimonialRepository } from '@/repositories/TestimonialRepository';
 import { pickImage, pickVideo, uploadPostMedia, type PickedMedia } from '@/services/storage';
@@ -45,10 +45,14 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
   const [title, setTitle] = useState(editing?.caption ?? '');
   const [media, setMedia] = useState<PickedMedia | null>(null);
   const [saving, setSaving] = useState(false);
+  // El error se muestra dentro de la hoja: un dialogo encima de un Modal no se
+  // ve en iOS. Ver `InlineError`.
+  const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
     setTitle(editing?.caption ?? '');
     setMedia(null);
+    setError(null);
   };
 
   const close = () => {
@@ -59,23 +63,27 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
   const choose = async (kind: 'image' | 'video') => {
     try {
       const picked = kind === 'image' ? await pickImage() : await pickVideo();
-      if (picked) setMedia(picked);
+      if (picked) {
+        setMedia(picked);
+        setError(null);
+      }
     } catch {
-      notify('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
+      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
   const publish = async () => {
     if (!title.trim()) {
-      notify('Falta el título', 'Escribe un título para el testimonio.');
+      setError('Escribe un título para el testimonio.');
       return;
     }
     // Al editar, el archivo es opcional: sin uno nuevo se conserva el actual.
     if (!isEditing && !media) {
-      notify('Falta el archivo', 'Elige una foto o un video.');
+      setError('Elige una foto o un video.');
       return;
     }
     setSaving(true);
+    setError(null);
     try {
       const uploaded = media ? await uploadPostMedia(media) : null;
       if (editing) {
@@ -90,10 +98,13 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
       reset();
       onCreated?.();
       onClose();
-    } catch (error) {
-      notify(
-        isEditing ? 'No se pudo guardar' : 'No se pudo publicar',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : isEditing
+          ? 'No se pudo guardar. Inténtalo de nuevo.'
+          : 'No se pudo publicar. Inténtalo de nuevo.',
       );
     } finally {
       setSaving(false);
@@ -167,6 +178,8 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
           </View>
         </View>
       )}
+
+      <InlineError message={error} />
 
       <Button
         label={isEditing ? 'Guardar cambios' : 'Publicar'}

@@ -5,8 +5,8 @@ import { Feather } from '@expo/vector-icons';
 import { BottomSheet } from '@/components/BottomSheet';
 import { CoverImage } from '@/components/CoverImage';
 import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { Text } from '@/components/Text';
-import { notify } from '@/lib/confirm';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { EventItem } from '@/types';
@@ -29,6 +29,7 @@ type Props = {
 export function EventDetailSheet({ event, onClose }: Props) {
   const { colors } = useAppTheme();
   const [expanded, setExpanded] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   if (!event) return null;
 
@@ -38,6 +39,7 @@ export function EventDetailSheet({ event, onClose }: Props) {
 
   const close = () => {
     setExpanded(false);
+    setLinkError(null);
     onClose();
   };
 
@@ -46,7 +48,9 @@ export function EventDetailSheet({ event, onClose }: Props) {
     try {
       await Linking.openURL(event.whatsappUrl);
     } catch {
-      notify('No se pudo abrir WhatsApp', 'Copia el enlace del evento e inténtalo de nuevo.');
+      // Dentro de la hoja: en iOS un dialogo no se abre encima de un Modal y
+      // el aviso se quedaba invisible.
+      setLinkError('No se pudo abrir WhatsApp. Copia el enlace del evento e inténtalo de nuevo.');
     }
   };
 
@@ -91,12 +95,15 @@ export function EventDetailSheet({ event, onClose }: Props) {
         ) : null}
 
         {event.whatsappUrl ? (
-          <Button
-            label="Unirme al grupo de WhatsApp"
-            icon="message-circle"
-            onPress={() => void openWhatsApp()}
-            style={styles.cta}
-          />
+          <React.Fragment>
+            <Button
+              label="Unirme al grupo de WhatsApp"
+              icon="message-circle"
+              onPress={() => void openWhatsApp()}
+              style={styles.cta}
+            />
+            <InlineError message={linkError} />
+          </React.Fragment>
         ) : null}
       </ScrollView>
     </BottomSheet>

@@ -7,6 +7,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
 import { DateField } from '@/components/DateField';
+import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
@@ -287,15 +288,17 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         if (editing) await LearningRepository.updateCourse(editing.id, data);
         else await LearningRepository.createCourse({ ...data, currency: 'PEN', coverPath });
       }
-      notify(
+      onCreated?.();
+      // El aviso va DESPUES de cerrar. Mientras la hoja (un Modal) siga
+      // montada, en iOS tapa cualquier cosa que se pinte por encima: el
+      // mensaje de exito no llegaba a verse nunca.
+      close();
+      toast(
         editing
           ? isEvent ? 'Evento actualizado' : 'Curso actualizado'
           : isPodcast ? 'Episodio publicado'
           : isEvent ? 'Evento publicado' : 'Curso publicado',
-        'Ya está disponible para la comunidad.',
       );
-      onCreated?.();
-      close();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo publicar.');
     } finally {
@@ -422,11 +425,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           />
         )}
 
-        {error ? (
-          <Text variant="secondary" color={colors.danger} style={styles.error}>
-            {error}
-          </Text>
-        ) : null}
+        <InlineError message={error} />
 
         <Button
           label={

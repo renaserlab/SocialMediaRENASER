@@ -4,6 +4,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
@@ -49,6 +50,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
 
   const [moduleTitle, setModuleTitle] = useState('');
   const [addingModule, setAddingModule] = useState(false);
+  const [moduleError, setModuleError] = useState<string | null>(null);
   /** Modulo al que se le esta anadiendo una leccion. */
   const [lessonFor, setLessonFor] = useState<CourseModule | null>(null);
   /** Curso anunciado pero sin contenido disponible. */
@@ -101,6 +103,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
   const addModule = async () => {
     const title = moduleTitle.trim();
     if (!title) return;
+    setModuleError(null);
     try {
       await CourseContentRepository.createModule(courseId, title, modules.length);
       setModuleTitle('');
@@ -108,7 +111,9 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
       toast('Módulo añadido');
       await reloadAndNotify();
     } catch (error) {
-      notify('No se pudo añadir', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+      // La hoja sigue abierta al fallar: el aviso tiene que vivir dentro de
+      // ella, porque en iOS un dialogo no se abre encima de un Modal.
+      setModuleError(error instanceof Error ? error.message : 'No se pudo añadir. Inténtalo de nuevo.');
     }
   };
 
@@ -280,6 +285,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
         onClose={() => {
           setAddingModule(false);
           setModuleTitle('');
+          setModuleError(null);
         }}
       >
         <Text style={styles.sheetTitle} color={colors.text}>
@@ -292,6 +298,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
           placeholderTextColor={colors.textMuted}
           style={{ color: colors.text }}
         />
+        <InlineError message={moduleError} />
         <Button
           label="Crear módulo"
           onPress={() => void addModule()}
@@ -326,19 +333,26 @@ function AddLessonSheet({
   const [video, setVideo] = useState<Awaited<ReturnType<typeof pickVideo>>>(null);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
+  // Dentro de una hoja el error se pinta en la propia hoja: en iOS un dialogo
+  // no puede abrirse sobre un Modal y el aviso no llegaba a verse.
+  const [error, setError] = useState<string | null>(null);
 
   const choose = async () => {
     try {
       const picked = await pickVideo();
-      if (picked) setVideo(picked);
+      if (picked) {
+        setVideo(picked);
+        setError(null);
+      }
     } catch {
-      notify('No se pudo abrir el selector', 'Revisa los permisos e inténtalo de nuevo.');
+      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
     }
   };
 
   const save = async () => {
     if (!title.trim()) return;
     setSaving(true);
+    setError(null);
     try {
       const mediaPath = video ? await uploadCourseMedia(video, setProgress) : null;
       await CourseContentRepository.createLesson({
@@ -349,11 +363,12 @@ function AddLessonSheet({
         durationSeconds: video?.durationMs ? Math.round(video.durationMs / 1000) : 0,
         sortOrder: module.lessons.length,
       });
-      toast('Lección añadida');
       onCreated();
+      // Cerrar antes del aviso: la hoja es un Modal y en iOS tapa el toast.
       onClose();
-    } catch (error) {
-      notify('No se pudo guardar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+      toast('Lección añadida');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo guardar. Inténtalo de nuevo.');
     } finally {
       setSaving(false);
       setProgress(null);
@@ -392,6 +407,8 @@ function AddLessonSheet({
           {progressLabel}
         </Text>
       ) : null}
+
+      <InlineError message={error} />
 
       <Button
         label="Guardar lección"
