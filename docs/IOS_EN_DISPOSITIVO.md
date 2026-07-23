@@ -49,29 +49,90 @@ por adelantado desde Windows; la configuracion ya esta validada y lista.
 
 Para prototipar basta el Apple ID gratuito.
 
-### Pasos en el Mac
+### Pasos en el Mac — primera vez, en orden
+
+Todo esto se hace una sola vez. Los comandos van en la app **Terminal**
+(Launchpad → Otros → Terminal, o Cmd+Espacio y escribir "Terminal").
+
+**1. Xcode.** Instalar **Xcode** desde la App Store (~10 GB, tarda). Abrirlo una
+vez para que acepte la licencia, y luego instalar las herramientas de linea de
+comandos:
 
 ```bash
-# 1. Xcode desde la App Store (~10 GB) y sus herramientas de linea de comandos
 xcode-select --install
+```
 
-# 2. El repositorio
-git clone <repo> && cd SocialMediaRENASER
+**2. Homebrew + Node** (si el Mac no los trae). Homebrew es el gestor de
+paquetes de macOS:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install node git watchman
+```
+
+`watchman` no es obligatorio pero hace que Metro vaya mas fino.
+
+**3. Clonar el repositorio e instalar dependencias:**
+
+```bash
+git clone https://github.com/renaserlab/SocialMediaRENASER.git
+cd SocialMediaRENASER
 npm install
+```
 
-# 3. Variables de entorno (ver aviso mas abajo)
-cp apps/mobile/.env.example apps/mobile/.env   # y rellenarlo
+**4. Variables de entorno** (ver Aviso 1 mas abajo — es el error mas facil de
+cometer):
 
-# 4. Generar el proyecto nativo, compilar e instalar en el iPhone conectado
+```bash
+cp apps/mobile/.env.example apps/mobile/.env
+```
+
+Luego abrir ese `.env` (`open -e apps/mobile/.env`) y pegar los valores reales.
+Sin ellos la app arranca con datos inventados.
+
+**5. Preparar el iPhone** (una vez):
+
+- Conectarlo al Mac por cable y, en el iPhone, tocar **Confiar** cuando pregunte.
+- Activar el **Modo desarrollador**: Ajustes → Privacidad y seguridad → Modo
+  de desarrollador → activar → el iPhone se reinicia. (Solo aparece a partir de
+  iOS 16; en versiones anteriores no hace falta.)
+
+**6. Compilar e instalar en el iPhone conectado:**
+
+```bash
 cd apps/mobile
 npx expo run:ios --device
 ```
 
-`run:ios` hace por si solo el `prebuild`, el `pod install` y la instalacion.
+Preguntara en cual dispositivo instalar; elegir el iPhone. `run:ios` hace por si
+solo el `prebuild` (genera la carpeta `ios/`), el `pod install` y la
+instalacion. La primera vez tarda bastante; las siguientes van rapidas.
 
-La primera vez Xcode pedira un equipo de firma: **Xcode → Settings → Accounts**,
-anadir el Apple ID, y en el destino `RenaserSocialMedia` elegir ese equipo
-personal en *Signing & Capabilities*.
+**7. Firma (solo la primera compilacion).** Si falla pidiendo un equipo de firma:
+
+1. Se abre el proyecto en Xcode: `open ios/*.xcworkspace`
+2. **Xcode → Settings → Accounts → +** → añadir tu Apple ID (el gratuito vale).
+3. En el panel izquierdo, seleccionar el proyecto → destino
+   **RenaserSocialMedia** → pestaña **Signing & Capabilities** → marcar
+   *Automatically manage signing* y en *Team* elegir tu cuenta personal.
+4. Volver a la Terminal y repetir `npx expo run:ios --device`.
+
+**8. Confiar en el certificado en el iPhone** (solo con Apple ID gratuito). La
+primera vez la app no abre y dice que el desarrollador no es de confianza:
+Ajustes → General → VPN y gestion de dispositivos → tocar tu Apple ID →
+**Confiar**. Ya abre.
+
+Con Apple ID gratuito la firma **caduca a los 7 dias**: pasado ese plazo la app
+deja de abrir y hay que volver a hacer el paso 6 para reinstalarla. Es lo normal
+para prototipar; solo el Developer Program (99 USD/año) evita esa caducidad.
+
+### Cuando ya funciona: recompilar tras cambios
+
+- Cambios solo de **JavaScript/React** (lo habitual): no hace falta recompilar.
+  `cd apps/mobile && npx expo start`, y la app instalada recarga sola. Incluso
+  desde Windows con `--tunnel`, como venimos haciendo.
+- Cambios en **dependencias nativas o configuracion** (`app.json`, un plugin,
+  un modulo nuevo): repetir `npx expo run:ios --device`.
 
 ### ⚠️ Aviso 1: el `.env` NO esta en el repositorio
 
