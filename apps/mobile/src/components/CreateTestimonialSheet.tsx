@@ -74,7 +74,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
 
   const publish = async () => {
     if (!title.trim()) {
-      setError('Escribe un título para el testimonio.');
+      setError('Escribe un título para la reseña.');
       return;
     }
     // Al editar, el archivo es opcional: sin uno nuevo se conserva el actual.
@@ -94,7 +94,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
       } else {
         await TestimonialRepository.create(uploaded!, title.trim());
       }
-      toast(isEditing ? 'Cambios guardados' : 'Testimonio publicado');
+      toast(isEditing ? 'Cambios guardados' : 'Reseña publicada');
       reset();
       onCreated?.();
       onClose();
@@ -114,13 +114,13 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
-        {isEditing ? 'Editar testimonio' : 'Nuevo testimonio'}
+        {isEditing ? 'Editar reseña' : 'Nueva reseña'}
       </Text>
 
       <Input
         value={title}
         onChangeText={setTitle}
-        placeholder="Título del testimonio"
+        placeholder="Título de la reseña"
         placeholderTextColor={colors.textMuted}
         maxLength={300}
         style={{ color: colors.text }}
