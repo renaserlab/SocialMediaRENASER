@@ -73,6 +73,25 @@ el navegador (`localhost:8081`) o el iPhone con Expo Go.
   Go.** `services/mediaCompressor.ts` lo carga de forma protegida y degrada a
   subir sin comprimir. No importarlo a nivel de modulo sin esa proteccion.
 
+## App Store — decisiones tomadas
+
+- **v1 se envia como app de MIEMBROS.** `FEATURE_PURCHASES` en
+  `src/config/features.ts` esta en `false`: sin precios ni compras. El cobro de
+  `CheckoutScreen` es simulado y Apple rechaza los flujos de compra que no
+  completan una transaccion. Encenderlo obliga a usar las compras integradas de
+  Apple, con su comision: es una decision de negocio, no un detalle tecnico.
+- **El login con Google/Apple sigue oculto a proposito** en `LoginScreen`.
+  No descomentarlo sin las credenciales: un boton que falla es rechazo por
+  «app incompleta» (2.1), y ofrecer un login social activa la directriz 4.8,
+  que obliga a ofrecer tambien Sign in with Apple. Mientras no se muestre
+  ninguno, la app se sube solo con correo y contrasena. Encenderlos, cuando
+  toque, va junto: nunca uno solo.
+- `supportsTablet` esta en `false` para no tener que mantener ni justificar la
+  version de iPad.
+- `/privacy` y `/terms` son rutas propias: se publican en la web de Vercel (la
+  URL publica que Apple exige) y se enlazan desde Ajustes. El texto esta
+  marcado como borrador pendiente de revision legal.
+
 ## Estado y pendientes
 
 - **Muro de pagos: pendiente a proposito.** Hoy cualquier usuario autenticado

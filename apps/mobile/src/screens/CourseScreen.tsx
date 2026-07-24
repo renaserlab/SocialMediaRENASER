@@ -11,6 +11,7 @@ import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { CourseHighlights } from '@/components/CourseHighlights';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { StateView } from '@/components/StateView';
+import { FEATURE_PURCHASES } from '@/config/features';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
@@ -88,11 +89,24 @@ export function CourseScreen() {
         />
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
-          {course.price > 0 ? (
+          {/*
+            App de miembros: el curso va incluido, asi que no se muestra precio
+            sino de que forma se accede. El importe solo reaparece si algun dia
+            se encienden las compras (`FEATURE_PURCHASES`) con una pasarela de
+            verdad detras.
+          */}
+          {FEATURE_PURCHASES && course.price > 0 ? (
             <Text style={[styles.price, { color: colors.text }]}>
               ${course.price.toLocaleString()} {course.currency}
             </Text>
-          ) : null}
+          ) : (
+            <View style={[styles.included, { borderColor: colors.border }]}>
+              <Feather name="check" size={14} color={colors.text} />
+              <Text style={[styles.includedText, { color: colors.text }]}>
+                Incluido en tu membresía
+              </Text>
+            </View>
+          )}
           <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
 
           <View style={[styles.info, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -188,6 +202,18 @@ const styles = StyleSheet.create({
   container: { padding: spacing.xl },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   price: { fontSize: 20, fontWeight: '900', marginTop: spacing.md },
+  included: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    marginTop: spacing.md,
+  },
+  includedText: { fontSize: 12, fontWeight: '700' },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

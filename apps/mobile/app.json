@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.renaser.universo",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "RENASER utiliza el micrófono para salas en vivo y mensajes de audio.",

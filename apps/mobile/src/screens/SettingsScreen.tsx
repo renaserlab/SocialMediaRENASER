@@ -5,12 +5,7 @@ import { useRouter } from 'expo-router';
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
-import {
-  DELETE_ACCOUNT_URL,
-  PRIVACY_URL,
-  TERMS_URL,
-  hasLegalLinks,
-} from '@/config/legal';
+import { DELETE_ACCOUNT_URL } from '@/config/legal';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
@@ -166,39 +161,43 @@ export function SettingsScreen() {
           />
         )}
 
-        {/* Solo aparece cuando los documentos estan publicados: enlazar a una
-            pagina inexistente seria peor que no ofrecer el enlace. */}
-        {hasLegalLinks() ? (
-          <>
-            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
-            {PRIVACY_URL ? (
-              <ListRow
-                title="Política de Privacidad"
-                subtitle="Qué datos tratamos y para qué"
-                leftIcon="shield"
-                rightIcon="external-link"
-                onPress={() => openLegal(PRIVACY_URL)}
-              />
-            ) : null}
-            {TERMS_URL ? (
-              <ListRow
-                title="Condiciones de Uso"
-                subtitle="Normas de la comunidad"
-                leftIcon="file-text"
-                rightIcon="external-link"
-                onPress={() => openLegal(TERMS_URL)}
-              />
-            ) : null}
-            {DELETE_ACCOUNT_URL ? (
-              <ListRow
-                title="Cómo eliminar tu cuenta"
-                subtitle="Procedimiento y qué se borra"
-                leftIcon="help-circle"
-                rightIcon="external-link"
-                onPress={() => openLegal(DELETE_ACCOUNT_URL)}
-              />
-            ) : null}
-          </>
+        {/*
+          Legal. Apple exige que la politica de privacidad y el acuerdo de
+          licencia sean accesibles DENTRO de la app, no solo en la ficha de la
+          tienda. Son rutas propias, asi que no dependen de configurar ninguna
+          URL —siempre funcionan, incluso sin conexion— y ademas quedan
+          publicadas en la web de Vercel como /privacy y /terms, que es la
+          direccion publica que pide la ficha de la tienda.
+        */}
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
+        <ListRow
+          title="Política de Privacidad"
+          subtitle="Qué datos recogemos y cómo los usamos"
+          leftIcon="shield"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/privacy' as never)}
+        />
+        <ListRow
+          title="Términos y Condiciones"
+          subtitle="Normas de la comunidad y acuerdo de licencia"
+          leftIcon="file-text"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/terms' as never)}
+        />
+        {/*
+          Pagina externa de borrado de cuenta: Google Play la quiere accesible
+          SIN instalar la app, asi que no puede ser una ruta interna. Solo
+          aparece cuando este publicada (ver `config/legal.ts`); enlazar a algo
+          inexistente seria peor que no ofrecerlo.
+        */}
+        {DELETE_ACCOUNT_URL ? (
+          <ListRow
+            title="Cómo eliminar tu cuenta"
+            subtitle="Procedimiento y qué se borra"
+            leftIcon="help-circle"
+            rightIcon="external-link"
+            onPress={() => openLegal(DELETE_ACCOUNT_URL)}
+          />
         ) : null}
 
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
