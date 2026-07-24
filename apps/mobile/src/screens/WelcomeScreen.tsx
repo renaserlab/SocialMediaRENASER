@@ -9,13 +9,14 @@ import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { palette, radius, spacing } from '@/theme/tokens';
 
+
 // Portada intencionalmente oscura en ambos temas, como la landing.
 const media = palette('dark');
 
 /** Lo que el usuario se lleva al entrar; se explica antes de pedirle nada. */
 const PUNTOS: Array<{ icon: keyof typeof Feather.glyphMap; text: string }> = [
   { icon: 'lock', text: 'Espacio privado: solo miembros' },
-  { icon: 'compass', text: 'Contenido guiado por Darren Supa' },
+  { icon: 'compass', text: 'Contenido guiado por Z' },
   { icon: 'users', text: 'Una comunidad que avanza contigo' },
 ];
 
@@ -37,14 +38,14 @@ export function WelcomeScreen() {
           <View style={[StyleSheet.absoluteFill, { backgroundColor: media.overlay }]} />
           <View style={styles.brand}>
             <Text variant="body" weight="800" color={media.text} style={styles.brandText}>
-              RENASER
+              Z
             </Text>
           </View>
         </View>
 
         <View style={styles.body}>
           <Text variant="display" color={media.text} style={styles.title}>
-            Bienvenido a RENASER
+            Bienvenido a Z
           </Text>
           <Text variant="body" color={media.textMuted} style={styles.subtitle}>
             Esta es una plataforma privada. Un espacio para crecer con
@@ -67,11 +68,11 @@ export function WelcomeScreen() {
           <Button
             label="Comenzar"
             variant="secondary"
-            onPress={() => router.push('/quiz' as never)}
+            onPress={() => router.push('/register' as never)}
             style={styles.cta}
           />
           <Text variant="secondary" color={media.textMuted} style={styles.hint}>
-            Antes de entrar, 7 preguntas para saber por dónde empezar.
+            Antes de entrar, explora este mundo.
           </Text>
         </View>
       </AppScreen>

@@ -165,16 +165,6 @@ export function HomeScreen() {
           onPress={() => router.navigate('/(tabs)/create')}
         />
 
-        {/* Audio privado ocupa toda la fila; el circulo baja junto al podcast. */}
-        <Pressable
-          onPress={() => router.push('/audio/private')}
-          style={[styles.wideCard, { backgroundColor: colors.primary }]}
-        >
-          <Feather name="headphones" size={24} color={colors.onPrimary} />
-          <Text style={[styles.quickTitle, { color: colors.onPrimary }]}>{t('home.privateAudio')}</Text>
-          <Text style={[styles.quickBody, { color: colors.onPrimary }]}>{t('home.privateAudioBody')}</Text>
-        </Pressable>
-
         <View style={styles.quickRow}>
           <View
             style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
@@ -388,7 +378,7 @@ export function HomeScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="RENASER"
+        title="Z"
         rightIcon="bell"
         // Un aviso que nadie abre no sirve de nada: el punto marca que el de
         // "contenido de Darren gratis" sigue esperando dentro.

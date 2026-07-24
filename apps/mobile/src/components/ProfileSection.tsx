@@ -63,9 +63,9 @@ const ADMIN_SECTIONS: Partial<
   },
   testimonios: {
     icon: 'camera',
-    title: 'Aún no tienes testimonios',
-    body: 'Los testimonios de la comunidad están en el perfil de Darren.',
-    action: 'Ver testimonios de RENASER',
+    title: 'Aún no tienes reseñas',
+    body: 'Las reseñas de la comunidad están en el perfil de Darren.',
+    action: 'Ver reseñas de RENASER',
   },
 };
 
@@ -95,6 +95,8 @@ type Props = {
    * y los cursos son suyos: en un perfil normal no hay nada que enseñar.
    */
   ownerIsAdmin?: boolean;
+  /** Si la persona conectada es el dueño de este perfil. */
+  isOwner?: boolean;
 };
 
 /**
@@ -103,7 +105,7 @@ type Props = {
  * Darren administra la aplicacion, asi que su perfil es donde viven los
  * eventos y los cursos: las tarjetas del inicio traen aqui a cualquier usuario.
  */
-export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props) {
+export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner = false }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -229,7 +231,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
 
   const removeTestimonial = async (id: string) => {
     const accepted = await confirm({
-      title: 'Eliminar testimonio',
+      title: 'Eliminar reseña',
       message: 'Esta acción no se puede deshacer.',
       confirmLabel: 'Eliminar',
       destructive: true,
@@ -237,7 +239,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
     if (!accepted) return;
     try {
       await TestimonialRepository.remove(id);
-      toast('Testimonio eliminado');
+      toast('Reseña eliminada');
       reload();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');
@@ -252,15 +254,8 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
     );
   }
 
-  // El podcast siempre pinta sus 30 filas, aunque aun no haya episodios: la
-  // lista bloqueada es parte de lo que se quiere mostrar.
-  /**
-   * Podcast, eventos, cursos y testimonios son contenido de RENASER: los
-   * publica quien administra. En un perfil normal no hay nada que enseñar, asi
-   * que en vez de listas vacias (o peor, listas bloqueadas y filtros sin nada
-   * que filtrar) se explica donde esta y se lleva alli.
-   */
-  if (!ownerIsAdmin && ADMIN_SECTIONS[kind]) {
+  // El podcast esta disponible en cualquier perfil si es dueño o si no se requiere ser admin.
+  if (kind !== 'podcast' && !ownerIsAdmin && ADMIN_SECTIONS[kind]) {
     const copy = ADMIN_SECTIONS[kind]!;
     return (
       <View style={styles.center}>
@@ -283,6 +278,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
   }
 
   if (kind === 'podcast') {
+    const canAddAudio = isOwner || isAdmin;
     return (
       <View>
         {/* Filtros por categoria; "Todos" es simplemente sin filtro. */}
@@ -302,7 +298,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
           ))}
         </ScrollView>
 
-        {isAdmin ? (
+        {canAddAudio ? (
           <Button
             label="Agregar audio"
             variant="secondary"
@@ -312,8 +308,8 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
         ) : null}
         <PodcastList
           episodes={episodes}
-          showLockedSlots={category === null}
-          onEdit={isAdmin ? (id) => router.push(`/edit-post/${id}` as never) : undefined}
+          showLockedSlots={category === null && ownerIsAdmin}
+          onEdit={canAddAudio ? (id) => router.push(`/edit-post/${id}` as never) : undefined}
         />
         {creating ? (
           <CreateCatalogSheet
@@ -327,13 +323,13 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
     );
   }
 
-  // Galeria de testimonios: se ve dentro del perfil, como el podcast.
+  // Galeria de testimonios / reseñas: se ve dentro del perfil, como el podcast.
   if (kind === 'testimonios') {
     return (
       <View>
         {isAdmin ? (
           <Button
-            label="Agregar testimonio"
+            label="Agregar reseña"
             variant="secondary"
             icon="plus"
             onPress={() => setCreating(true)}
@@ -350,7 +346,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
         {testimonials.length === 0 ? (
           <View style={styles.center}>
             <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-              Aún no hay testimonios publicados.
+              Aún no hay reseñas publicadas.
             </Text>
           </View>
         ) : (
@@ -360,11 +356,6 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
                 key={item.id}
                 style={[styles.testimonialCard, { borderColor: colors.border }]}
               >
-                {/*
-                  Sin menu contextual ni arrastre en web: no impide guardar el
-                  archivo (el navegador ya lo descargo para pintarlo), pero
-                  evita la copia casual. Los videos lo traen del propio player.
-                */}
                 <View {...noSaveProps}>
                   {item.mediaType === 'video' && item.mediaUrl ? (
                     <VideoPlayer uri={item.mediaUrl} style={styles.testimonialMedia} nativeControls />
@@ -394,7 +385,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
                         }
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Editar testimonio"
+                        accessibilityLabel="Editar reseña"
                       >
                         <Feather name="edit-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -402,7 +393,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false }: Props)
                         onPress={() => void removeTestimonial(item.id)}
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Eliminar testimonio"
+                        accessibilityLabel="Eliminar reseña"
                       >
                         <Feather name="trash-2" size={16} color={colors.textMuted} />
                       </Pressable>

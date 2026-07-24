@@ -37,6 +37,15 @@ export function LessonScreen() {
   // El video vive en un bucket privado: hay que firmar su ruta para verlo.
   // En modo demo (sin backend) se sigue usando el clip de ejemplo.
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  /**
+   * La leccion tiene video pero no se pudo obtener.
+   *
+   * Con el muro de pago (migracion 0016) la politica de `course-media` solo
+   * deja firmar a quien tenga el curso. Asi que "hay `mediaPath` pero no hay
+   * URL" significa que falta el acceso, no que falte el video: son dos estados
+   * distintos y conviene no confundirlos delante del usuario.
+   */
+  const [locked, setLocked] = useState(false);
   const mediaPath = lesson?.mediaPath ?? null;
   useEffect(() => {
     let alive = true;
@@ -46,6 +55,7 @@ export function LessonScreen() {
     }
     if (!mediaPath) {
       setVideoUrl(null);
+      setLocked(false);
       return;
     }
     // El video de una leccion se sube al bucket course-media (2 GB), no a
@@ -53,10 +63,15 @@ export function LessonScreen() {
     // pantalla decia "esta leccion aun no tiene video".
     signCourseUrls([mediaPath])
       .then((urls) => {
-        if (alive) setVideoUrl(urls[mediaPath] ?? null);
+        if (!alive) return;
+        const url = urls[mediaPath] ?? null;
+        setVideoUrl(url);
+        setLocked(url === null);
       })
       .catch(() => {
-        if (alive) setVideoUrl(null);
+        if (!alive) return;
+        setVideoUrl(null);
+        setLocked(true);
       });
     return () => {
       alive = false;
@@ -146,9 +161,35 @@ export function LessonScreen() {
               { borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
             ]}
           >
-            <Text style={{ color: colors.textMuted, fontSize: 13 }}>
-              Esta lección aún no tiene video.
-            </Text>
+            {/*
+              Contenido bloqueado. Se dice lo que pasa y NADA MAS: sin precio,
+              sin boton de compra y sin enlace a ninguna web de pago. Una
+              llamada a la accion hacia un cobro externo es motivo de rechazo
+              (directriz 3.1.1), asi que la puerta se comunica, no se vende.
+            */}
+            {locked ? (
+              <>
+                <Feather name="lock" size={22} color={colors.textMuted} />
+                <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: spacing.md }}>
+                  Contenido no disponible
+                </Text>
+                <Text
+                  style={{
+                    color: colors.textMuted,
+                    fontSize: 13,
+                    marginTop: spacing.xs,
+                    textAlign: 'center',
+                    paddingHorizontal: spacing.xl,
+                  }}
+                >
+                  Esta lección no está incluida en tu cuenta.
+                </Text>
+              </>
+            ) : (
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+                Esta lección aún no tiene video.
+              </Text>
+            )}
           </View>
         )}
 

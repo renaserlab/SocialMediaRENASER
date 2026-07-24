@@ -9,6 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { BottomSheet } from '@/components/BottomSheet';
+import { BookSessionSheet } from '@/components/BookSessionSheet';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { ListRow } from '@/components/ListRow';
@@ -50,6 +51,8 @@ export function ProfileScreen() {
   const [followersCount, setFollowersCount] = useState(0);
   const [blocked, setBlocked] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
+  const [bookingVisible, setBookingVisible] = useState(false);
+  const [optionsVisible, setOptionsVisible] = useState(false);
   /**
    * Seccion activa bajo los accesos circulares. Llega por parametro desde las
    * tarjetas de Inicio (Eventos / Cursos) y tambien se cambia tocando los
@@ -317,8 +320,8 @@ export function ProfileScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
         title={isPublic ? t('profile.titlePublic') : t('profile.title')}
-        rightIcon={isPublic ? undefined : 'settings'}
-        onRightPress={isPublic ? undefined : () => router.push('/settings')}
+        rightIcon="more-vertical"
+        onRightPress={() => setOptionsVisible(true)}
         /*
           Atras SIEMPRE que se llegue por /profile/[id], aunque sea el perfil
           propio: esa ruta vive fuera de las pestañas, asi que sin este boton no
@@ -446,28 +449,27 @@ export function ProfileScreen() {
             />
           )}
 
+          {/* TODO: Reactivar el shortcut "Círculos" (icon="users") cuando el perfil alcance un umbral de seguidores */}
           <View style={styles.shortcuts}>
-            <Shortcut icon="bookmark" label={t('profile.saved')} onPress={() => router.push('/saved' as never)} />
             <Shortcut
               icon="headphones"
               label={t('profile.podcast')}
               onPress={() => setActiveSection((v) => (v === 'podcast' ? null : 'podcast'))}
             />
             <Shortcut
-              icon="calendar"
-              label={t('profile.events')}
-              onPress={() => setActiveSection((v) => (v === 'eventos' ? null : 'eventos'))}
-            />
-            <Shortcut
               icon="book"
               label={t('profile.courses')}
               onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
             />
-            <Shortcut icon="users" label={t('profile.circles')} onPress={() => router.push('/circle/lideres-renaser')} />
             <Shortcut
               icon="camera"
               label={t('profile.testimonials')}
               onPress={() => setActiveSection((v) => (v === 'testimonios' ? null : 'testimonios'))}
+            />
+            <Shortcut
+              icon="calendar"
+              label={t('profile.bookSession')}
+              onPress={() => setBookingVisible(true)}
             />
           </View>
 
@@ -475,6 +477,7 @@ export function ProfileScreen() {
             <ProfileSection
               kind={activeSection}
               profileId={galleryOwnerId}
+              isOwner={!isPublic}
               ownerIsAdmin={
                 isRealPublic ? publicProfile?.isAdmin === true : currentUser?.isAdmin === true
               }
@@ -495,6 +498,59 @@ export function ProfileScreen() {
           )}
         </View>
       </AppScreen>
+
+      <BookSessionSheet
+        visible={bookingVisible}
+        onClose={() => setBookingVisible(false)}
+        targetUser={{
+          id: galleryOwnerId ?? id ?? '',
+          fullName: profileData.fullName,
+        }}
+      />
+
+      <BottomSheet visible={optionsVisible} onClose={() => setOptionsVisible(false)}>
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>Opciones</Text>
+        <ListRow
+          title={t('profile.saved')}
+          leftIcon="bookmark"
+          onPress={() => {
+            setOptionsVisible(false);
+            router.push('/saved' as never);
+          }}
+        />
+        {!isPublic ? (
+          <React.Fragment>
+            <ListRow
+              title={t('profile.editProfile')}
+              leftIcon="edit-3"
+              onPress={() => {
+                setOptionsVisible(false);
+                router.push('/edit-profile' as never);
+              }}
+            />
+            <ListRow
+              title={t('settings.title')}
+              leftIcon="settings"
+              onPress={() => {
+                setOptionsVisible(false);
+                router.push('/settings');
+              }}
+            />
+          </React.Fragment>
+        ) : (
+          !blocked && (
+            <ListRow
+              title="Bloquear a esta persona"
+              leftIcon="slash"
+              destructive
+              onPress={() => {
+                setOptionsVisible(false);
+                void toggleBlock();
+              }}
+            />
+          )
+        )}
+      </BottomSheet>
 
       <BottomSheet visible={editingPhoto !== null} onClose={() => setEditingPhoto(null)}>
         <Text style={[styles.sheetTitle, { color: colors.text }]}>

@@ -13,9 +13,9 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 const slides = [
   {
-    title: 'Bienvenido a Renaser Social Media',
+    title: 'Bienvenido a Z',
     body: 'El lugar donde el crecimiento personal se convierte en transformación real.',
-    symbol: 'R',
+    symbol: 'Z',
   },
   {
     title: 'Conecta con personas que también avanzan',
