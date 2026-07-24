@@ -1,20 +1,20 @@
 {
   "expo": {
-    "name": "Renaser Social Media",
-    "slug": "renaser-universo",
+    "name": "Z",
+    "slug": "z-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "renaser",
+    "scheme": "z",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.renaser.universo",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "RENASER utiliza el micrófono para salas en vivo y mensajes de audio.",
-        "NSCameraUsageDescription": "RENASER utiliza la cámara para crear publicaciones y participar en salas en vivo.",
-        "NSPhotoLibraryUsageDescription": "RENASER accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil o portada.",
+        "NSMicrophoneUsageDescription": "Z utiliza el micrófono para salas en vivo y mensajes de audio.",
+        "NSCameraUsageDescription": "Z utiliza la cámara para crear publicaciones y participar en salas en vivo.",
+        "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil o portada.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
