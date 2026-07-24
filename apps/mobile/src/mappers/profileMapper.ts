@@ -19,6 +19,7 @@ export type ProfileDto = {
   following_count?: number;
   posts_count?: number;
   is_following?: boolean;
+  is_blocked?: boolean;
 };
 
 /** Perfil compacto para listas (búsqueda). */
@@ -65,6 +66,7 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     following: dto.following_count ?? 0,
     posts: dto.posts_count ?? 0,
     isFollowing: dto.is_following ?? false,
+    isBlocked: dto.is_blocked ?? false,
     // El backend guarda la ruta dentro del bucket; la vista necesita una URL.
     avatarUrl: profileImageUrl(dto.avatar_path),
     coverUrl: profileImageUrl(dto.cover_path),

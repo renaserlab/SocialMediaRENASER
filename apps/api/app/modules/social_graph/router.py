@@ -96,6 +96,46 @@ async def _people(
     ]
 
 
+@router.get("/me/blocked", response_model=list[ProfileSummary])
+async def list_blocked(
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProfileSummary]:
+    """Perfiles que ha bloqueado quien hace la peticion.
+
+    Sin este listado, bloquear seria una via de sentido unico: la persona
+    bloqueada desaparece de la vista y ya no habria forma de encontrarla para
+    revertirlo.
+
+    Se declara antes que `/{profile_id}/...` porque si no esa ruta capturaria
+    la palabra "me" y responderia 404.
+    """
+    rows = (
+        await db.execute(
+            select(Profile)
+            .join(UserBlock, UserBlock.blocked_id == Profile.id)
+            .where(UserBlock.blocker_id == current_user.id)
+            .order_by(UserBlock.created_at.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+    ).scalars().all()
+    return [
+        ProfileSummary(
+            id=p.id,
+            full_name=p.full_name,
+            username=p.username,
+            avatar_path=p.avatar_path,
+            bio=p.bio,
+            # Al bloquear se deshace el seguimiento en ambos sentidos, asi que
+            # aqui siempre es falso.
+            is_following=False,
+        )
+        for p in rows
+    ]
+
+
 @router.get("/{profile_id}/followers", response_model=list[ProfileSummary])
 async def list_followers(
     profile_id: str,

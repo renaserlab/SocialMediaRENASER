@@ -24,3 +24,7 @@ apps/*/package-lock.json
 
 # Bases de datos locales de desarrollo (SQLite)
 *.db
+
+# Datos reales de la empresa para las paginas legales (no versionar)
+legal/datos.json
+legal/publicar/

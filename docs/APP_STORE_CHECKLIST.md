@@ -10,19 +10,18 @@ supuesto.
 
 | # | Requisito | Estado | Donde |
 |---|---|---|---|
-| A1 | **Bloquear usuarios abusivos** (directriz 1.2) | ❌ **FALTA** | tabla `user_blocks` existe en `0001_initial.sql`, pero ningun codigo la usa y no hay opcion en la interfaz |
+| A1 | **Bloquear usuarios abusivos** (directriz 1.2) | ✅ | pantalla `/blocked`, bloqueo desde perfil y publicacion, via API (`ProfileRepository.block`) |
 | A2 | Reportar contenido ofensivo | ✅ | `ReportRepository` + menu de `PostCard` |
-| A3 | Eliminar la cuenta desde la app | ✅ | `AuthRepository.deleteAccount` + Ajustes |
+| A3 | Eliminar la cuenta desde la app | ✅ | `AuthRepository.deleteAccount` + Ajustes, con doble confirmacion |
 | A4 | Politica de privacidad en URL publica | ⚠️ escrita, sin publicar | `/privacy`; se publica al mergear a `main` |
 | A5 | Terminos / EULA con tolerancia cero y respuesta en 24 h | ⚠️ escrita, sin publicar | `/terms` |
 | A6 | Cuenta de demostracion para los revisores | ❌ **FALTA** | la app exige inicio de sesion |
-| A7 | Sin flujos de compra no funcionales | ✅ | `FEATURE_PURCHASES = false` |
+| A7 | Sin flujos de compra no funcionales | ✅ | la pasarela simulada se elimino; `FEATURE_PURCHASES = false` oculta precios |
 | A8 | Sign in with Apple si hay login social | ✅ no aplica | el login social esta oculto a proposito |
 | A9 | Apple Developer Program activo | ❌ **FALTA** | 99 USD/ano |
 
-> **A1 arrastra un problema anadido:** el texto actual de `/terms` afirma que
-> se puede bloquear. O se implementa el bloqueo, o hay que corregir el texto.
-> Dejar la promesa sin la funcion es peor que no mencionarla.
+**Ya no queda nada de codigo pendiente.** A1 se resolvio en `e133847`, lo que
+tambien deja correcto el texto de `/terms`, que promete poder bloquear.
 
 ---
 
@@ -68,12 +67,10 @@ Nada de esto es codigo; se prepara aparte y suele ser lo que mas tarda.
 
 ## E. Orden sugerido
 
-1. Implementar el bloqueo de usuarios (A1) — es lo unico de codigo que falta.
-2. Mergear a `main` para publicar `/privacy` y `/terms` (A4, A5).
-3. Contratar el Developer Program (A9) y decidir la cuenta (D).
-4. Crear la cuenta de demostracion (A6).
-5. Separar el proyecto Supabase de produccion (D).
-6. Preparar el material de la ficha (C).
+1. Mergear a `main` para publicar `/privacy` y `/terms` (A4, A5).
+2. Contratar el Developer Program (A9) y decidir la cuenta (D).
+3. Crear la cuenta de demostracion (A6).
+4. Separar el proyecto Supabase de produccion (D).
+5. Preparar el material de la ficha (C).
 
-Lo unico que depende de programar es el punto 1. El resto son tramites y
-contenido.
+**Nada de esto depende de programar**: son tramites, decisiones y contenido.

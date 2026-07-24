@@ -14,6 +14,7 @@ import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
+import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -28,11 +29,15 @@ const ACTION_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
 
 type Props = {
   post: Post;
-  /** Aviso para que la pantalla anfitriona reaccione (p. ej. volver atrás). */
-  onDeleted?: () => void;
+  /**
+   * La publicación deja de estar visible para quien mira: se ha borrado, o se
+   * ha bloqueado a su autor. La pantalla anfitriona reacciona (p. ej. volver
+   * atrás si la estaba mostrando en solitario).
+   */
+  onRemoved?: () => void;
 };
 
-export function PostCard({ post, onDeleted }: Props) {
+export function PostCard({ post, onRemoved }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [showComments, setShowComments] = useState(false);
@@ -114,7 +119,7 @@ export function PostCard({ post, onDeleted }: Props) {
       await deletePost(post.id);
       haptics.light();
       toast('Publicación eliminada');
-      onDeleted?.();
+      onRemoved?.();
     } catch {
       notify('No se pudo eliminar', 'Inténtalo de nuevo.');
     }
@@ -138,6 +143,34 @@ export function PostCard({ post, onDeleted }: Props) {
       toast('Reporte enviado. Gracias por avisar.', 'flag');
     } catch {
       notify('No se pudo enviar', 'Inténtalo de nuevo.');
+    }
+  };
+
+  /**
+   * Bloquear al autor desde la propia publicacion.
+   *
+   * Google exige que se pueda bloquear a alguien, y el sitio natural es donde
+   * aparece lo que molesta: obligar a entrar en su perfil anade friccion justo
+   * cuando la persona quiere cortar por lo sano.
+   */
+  const blockAuthor = async () => {
+    // Los posts de demostracion no traen autor real: no hay a quien bloquear.
+    if (!post.authorId) return;
+    const accepted = await confirm({
+      title: `Bloquear a ${post.author}`,
+      message:
+        'Dejaréis de seguiros y no volverás a ver sus publicaciones. ' +
+        'Puedes deshacerlo desde Ajustes › Cuentas bloqueadas.',
+      confirmLabel: 'Bloquear',
+      destructive: true,
+    });
+    if (!accepted) return;
+    try {
+      await ProfileRepository.block(post.authorId);
+      toast('Cuenta bloqueada.', 'slash');
+      onRemoved?.();
+    } catch {
+      notify('No se pudo bloquear', 'Inténtalo de nuevo.');
     }
   };
 
@@ -305,12 +338,20 @@ export function PostCard({ post, onDeleted }: Props) {
             />
           </>
         ) : (
-          <ListRow
-            title="Reportar publicación"
-            leftIcon="flag"
-            destructive
-            onPress={() => closeMenuThen(() => void reportPost())}
-          />
+          <>
+            <ListRow
+              title="Reportar publicación"
+              leftIcon="flag"
+              destructive
+              onPress={() => closeMenuThen(() => void reportPost())}
+            />
+            <ListRow
+              title={`Bloquear a ${post.author}`}
+              leftIcon="slash"
+              destructive
+              onPress={() => closeMenuThen(() => void blockAuthor())}
+            />
+          </>
         )}
       </BottomSheet>
     </View>

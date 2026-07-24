@@ -20,7 +20,8 @@ from app.modules.profiles.schemas import (
     ProfileSummary,
     ProfileUpdate,
 )
-from app.modules.social_graph.models import Follow
+from app.modules.social_graph.models import Follow, UserBlock
+from app.modules.social_graph.service import is_blocked_column
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
@@ -31,6 +32,12 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 # --------------------------------------------------------------------------- #
 # Helpers de contadores
 # --------------------------------------------------------------------------- #
+def _blocked_column(viewer_id: str | None):
+    """Si el visitante ha bloqueado el perfil de cada fila."""
+    column = is_blocked_column(viewer_id, Profile.id)
+    return column if column is not None else literal(False)
+
+
 def _count_columns(viewer_id: str | None):
     followers = (
         select(func.count())
@@ -62,7 +69,9 @@ def _count_columns(viewer_id: str | None):
     return followers, following, posts, is_following
 
 
-def _to_profile_read(profile: Profile, fc: int, gc: int, pc: int, isf: int) -> ProfileRead:
+def _to_profile_read(
+    profile: Profile, fc: int, gc: int, pc: int, isf: int, blocked: bool = False
+) -> ProfileRead:
     return ProfileRead(
         id=profile.id,
         email=profile.email,
@@ -80,6 +89,7 @@ def _to_profile_read(profile: Profile, fc: int, gc: int, pc: int, isf: int) -> P
         following_count=gc or 0,
         posts_count=pc or 0,
         is_following=(isf or 0) > 0,
+        is_blocked=bool(blocked),
     )
 
 
@@ -87,9 +97,10 @@ async def _load_profile(
     db: AsyncSession, profile_id: str, viewer_id: str | None
 ) -> ProfileRead:
     fc, gc, pc, isf = _count_columns(viewer_id)
+    blocked = _blocked_column(viewer_id)
     row = (
         await db.execute(
-            select(Profile, fc, gc, pc, isf).where(Profile.id == profile_id)
+            select(Profile, fc, gc, pc, isf, blocked).where(Profile.id == profile_id)
         )
     ).first()
     if row is None:

@@ -86,6 +86,30 @@ export const ProfileRepository = {
     return res.followers_count;
   },
 
+  /**
+   * Bloquea a un perfil. El backend deshace ademas el seguimiento en ambos
+   * sentidos y deja de mostrar su contenido en el muro.
+   */
+  async block(profileId: string): Promise<void> {
+    await apiRequest<{ blocked: boolean }>(`${API_V1}/profiles/${profileId}/block`, {
+      method: 'POST',
+    });
+  },
+
+  async unblock(profileId: string): Promise<void> {
+    await apiRequest<{ blocked: boolean }>(`${API_V1}/profiles/${profileId}/block`, {
+      method: 'DELETE',
+    });
+  },
+
+  /** Perfiles que ha bloqueado el usuario actual, para poder revertirlo. */
+  async listBlocked(): Promise<ProfileSummary[]> {
+    const dtos = await apiRequest<ProfileSummaryDto[]>(
+      `${API_V1}/profiles/me/blocked?limit=50`,
+    );
+    return dtos.map(toProfileSummary);
+  },
+
   async unfollow(profileId: string): Promise<number> {
     const res = await apiRequest<{ following: boolean; followers_count: number }>(
       `${API_V1}/profiles/${profileId}/follow`,

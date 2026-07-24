@@ -11,6 +11,8 @@ export type UserProfile = {
   posts: number;
   /** Si el usuario actual sigue a este perfil (solo en perfiles ajenos). */
   isFollowing?: boolean;
+  /** Si el usuario actual ha bloqueado a este perfil. */
+  isBlocked?: boolean;
   /** Foto de perfil elegida por el usuario. Sin valor se usa el avatar por defecto. */
   avatarUrl?: string;
   /** Foto de portada elegida por el usuario. Sin valor se usa la imagen por defecto. */

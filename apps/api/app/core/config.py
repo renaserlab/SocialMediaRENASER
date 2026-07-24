@@ -56,9 +56,26 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        if self.cors_origins.strip() == "*":
-            return ["*"]
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        """Origenes de navegador autorizados a llamar a esta API.
+
+        En produccion el comodin NO se acepta: dejaria que cualquier web
+        llamara a la API desde el navegador de alguien con la sesion abierta.
+        Si no se han configurado origenes se deniegan todos, que es la opcion
+        segura por defecto; para habilitar la version web hay que declarar el
+        dominio en CORS_ORIGINS.
+
+        Esto no afecta a la aplicacion movil: CORS es una restriccion que
+        aplican los navegadores, no los clientes nativos.
+        """
+        raw = self.cors_origins.strip()
+        if raw == "*":
+            return [] if self.is_production else ["*"]
+        origins = [o.strip() for o in raw.split(",") if o.strip()]
+        # El comodin tambien puede venir mezclado con dominios reales
+        # ("*, https://..."), y ahi seguiria abriendo la API entera.
+        if self.is_production:
+            origins = [o for o in origins if o != "*"]
+        return origins
 
     @property
     def auth_configured(self) -> bool:

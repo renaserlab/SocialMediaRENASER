@@ -26,6 +26,7 @@ from app.modules.content.schemas import (
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import Follow
+from app.modules.social_graph.service import blocked_either_way
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import is_admin as is_admin_user
@@ -183,6 +184,15 @@ async def list_posts(
         .limit(page.limit)
         .offset(page.offset)
     )
+    # Bloquear tiene que servir de algo: sin esto la persona bloqueada seguiria
+    # apareciendo en el muro. Se filtra en la consulta, igual que el resto de
+    # criterios, para no descuadrar la paginacion.
+    #
+    # El corte va en los dos sentidos: no se ve a quien has bloqueado, y tampoco
+    # a quien te ha bloqueado a ti. Si solo se cortara en un sentido, bastaria
+    # con que la otra persona no te bloqueara para seguir leyendote.
+    if uid:
+        stmt = stmt.where(Post.author_id.not_in(blocked_either_way(uid)))
     if feed == "following":
         if not uid:
             return []

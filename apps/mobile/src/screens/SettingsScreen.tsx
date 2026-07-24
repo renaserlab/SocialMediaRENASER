@@ -1,10 +1,11 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
+import { DELETE_ACCOUNT_URL } from '@/config/legal';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
@@ -12,6 +13,13 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+
+/** Abre un documento legal en el navegador del sistema. */
+function openLegal(url: string): void {
+  Linking.openURL(url).catch(() => {
+    notify('No se pudo abrir', 'Inténtalo de nuevo o revisa tu conexión.');
+  });
+}
 
 export function SettingsScreen() {
   const { colors, mode } = useAppTheme();
@@ -118,6 +126,15 @@ export function SettingsScreen() {
           onPress={() => router.push('/verification')}
         />
         {isLoggedIn ? (
+          <ListRow
+            title="Cuentas bloqueadas"
+            subtitle="Revisa y desbloquea a quien quieras"
+            leftIcon="slash"
+            rightIcon="chevron-right"
+            onPress={() => router.push('/blocked' as never)}
+          />
+        ) : null}
+        {isLoggedIn ? (
           <>
             <ListRow
               title={t('settings.signOut')}
@@ -147,8 +164,10 @@ export function SettingsScreen() {
         {/*
           Legal. Apple exige que la politica de privacidad y el acuerdo de
           licencia sean accesibles DENTRO de la app, no solo en la ficha de la
-          tienda. Son rutas propias, asi que en la web quedan publicadas en
-          /privacy y /terms.
+          tienda. Son rutas propias, asi que no dependen de configurar ninguna
+          URL —siempre funcionan, incluso sin conexion— y ademas quedan
+          publicadas en la web de Vercel como /privacy y /terms, que es la
+          direccion publica que pide la ficha de la tienda.
         */}
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
         <ListRow
@@ -165,6 +184,21 @@ export function SettingsScreen() {
           rightIcon="chevron-right"
           onPress={() => router.push('/terms' as never)}
         />
+        {/*
+          Pagina externa de borrado de cuenta: Google Play la quiere accesible
+          SIN instalar la app, asi que no puede ser una ruta interna. Solo
+          aparece cuando este publicada (ver `config/legal.ts`); enlazar a algo
+          inexistente seria peor que no ofrecerlo.
+        */}
+        {DELETE_ACCOUNT_URL ? (
+          <ListRow
+            title="Cómo eliminar tu cuenta"
+            subtitle="Procedimiento y qué se borra"
+            leftIcon="help-circle"
+            rightIcon="external-link"
+            onPress={() => openLegal(DELETE_ACCOUNT_URL)}
+          />
+        ) : null}
 
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
         <ListRow

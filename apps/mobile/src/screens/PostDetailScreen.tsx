@@ -48,7 +48,7 @@ export function PostDetailScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <PostCard post={post} onDeleted={goBack} />
+          <PostCard post={post} onRemoved={goBack} />
           <ListRow
             title="Ver todos los comentarios"
             subtitle={`${post.commentsCount ?? post.comments.length} comentarios`}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -12,6 +12,7 @@ import { CourseHighlights } from '@/components/CourseHighlights';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { StateView } from '@/components/StateView';
 import { FEATURE_PURCHASES } from '@/config/features';
+import { LearningRepository } from '@/repositories/LearningRepository';
 import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
 import { useAppStore } from '@/store/useAppStore';
@@ -26,11 +27,31 @@ export function CourseScreen() {
 
   // Curso a través de la capa de repositorio (mock hoy, backend mañana).
   const { course, lessons, loading, error, reload } = useCourse(id);
-  const purchasedIds = useAppStore((state) => state.purchasedCourseIds);
   // Solo la administracion edita el temario; la RLS lo impone de verdad.
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
   // Primera leccion sin completar; si estan todas, la primera del curso.
   const firstLessonId = (lessons.find((l) => !l.completed) ?? lessons[0])?.id;
+  const [enrolling, setEnrolling] = useState(false);
+
+  /**
+   * Inscribe y abre la primera leccion.
+   *
+   * La inscripcion se registra en el servidor: sin ella el progreso no se
+   * guarda y se pierde al reinstalar. Si falla no se bloquea la entrada, porque
+   * el propio curso vuelve a intentarlo.
+   */
+  const startCourse = async () => {
+    if (!firstLessonId || !course) return;
+    setEnrolling(true);
+    try {
+      await LearningRepository.enroll(course.id);
+    } catch {
+      // Se reintenta al avanzar por las lecciones.
+    } finally {
+      setEnrolling(false);
+    }
+    router.push(`/lesson/${firstLessonId}` as never);
+  };
 
   if (loading) {
     return (
@@ -50,12 +71,6 @@ export function CourseScreen() {
     );
   }
 
-  /**
-   * Sin compras, el curso forma parte del acceso de miembro: se entra
-   * directamente al contenido, sin pasar por ninguna pantalla de pago.
-   */
-  const purchased = !FEATURE_PURCHASES || purchasedIds.includes(course.id);
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
@@ -74,9 +89,16 @@ export function CourseScreen() {
         />
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>{course.title}</Text>
-          {/* Como app de miembros no se muestra precio: el curso va incluido. */}
-          {FEATURE_PURCHASES ? (
-            <Text style={[styles.price, { color: colors.text }]}>${course.price.toLocaleString()} {course.currency}</Text>
+          {/*
+            App de miembros: el curso va incluido, asi que no se muestra precio
+            sino de que forma se accede. El importe solo reaparece si algun dia
+            se encienden las compras (`FEATURE_PURCHASES`) con una pasarela de
+            verdad detras.
+          */}
+          {FEATURE_PURCHASES && course.price > 0 ? (
+            <Text style={[styles.price, { color: colors.text }]}>
+              ${course.price.toLocaleString()} {course.currency}
+            </Text>
           ) : (
             <View style={[styles.included, { borderColor: colors.border }]}>
               <Feather name="check" size={14} color={colors.text} />
@@ -124,22 +146,23 @@ export function CourseScreen() {
             />
           </View>
 
+          {/*
+            No hay pasarela de pago: los cursos son gratuitos y se accede
+            directamente. Antes esto abria un checkout simulado que SIEMPRE
+            terminaba en "transaccion rechazada", y cuyo boton de reintentar
+            regalaba el curso; ademas, cobrar contenido digital dentro de la
+            aplicacion obliga a usar la facturacion de Google Play. Si algun dia
+            se cobra, hay que integrarla en condiciones.
+          */}
           <Button
-            label={purchased ? 'Ir al curso' : 'Comprar ahora'}
+            label={enrolling ? 'Abriendo…' : 'Empezar curso'}
             // Antes abria siempre '/lesson/1', un id de demo: con datos reales
             // llevaba a una leccion inexistente. Ahora va a la primera del curso.
-            disabled={purchased && !firstLessonId}
-            onPress={() =>
-              purchased
-                ? firstLessonId && router.push(`/lesson/${firstLessonId}` as never)
-                : router.push(`/checkout/${course.id}` as never)
-            }
+            disabled={!firstLessonId || enrolling}
+            loading={enrolling}
+            onPress={() => void startCourse()}
             style={{ marginTop: spacing.xl }}
           />
-          {/*
-            Con las compras apagadas `purchased` es siempre true, asi que este
-            boton nunca lleva al checkout: la unica salida es el contenido.
-          */}
         </View>
       </AppScreen>
 

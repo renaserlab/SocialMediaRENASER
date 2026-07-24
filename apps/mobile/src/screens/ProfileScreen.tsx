@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { notify } from '@/lib/confirm';
+import { confirm, notify } from '@/lib/confirm';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { haptics } from '@/lib/haptics';
@@ -48,6 +48,8 @@ export function ProfileScreen() {
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
+  const [blocked, setBlocked] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
   /**
    * Seccion activa bajo los accesos circulares. Llega por parametro desde las
    * tarjetas de Inicio (Eventos / Cursos) y tambien se cambia tocando los
@@ -89,6 +91,7 @@ export function ProfileScreen() {
       .then((p) => {
         setPublicProfile(p);
         setFollowing(p.isFollowing ?? false);
+        setBlocked(p.isBlocked ?? false);
         setFollowersCount(p.followers);
         setPublicState('idle');
       })
@@ -120,6 +123,45 @@ export function ProfileScreen() {
       setFollowersCount((c) => Math.max(0, c + (wasFollowing ? 1 : -1)));
     } finally {
       setFollowBusy(false);
+    }
+  };
+
+  /**
+   * Bloquear y desbloquear.
+   *
+   * Bloquear pide confirmación porque el backend deshace además el seguimiento
+   * en ambos sentidos: no es un cambio que convenga disparar por un roce con el
+   * dedo. Al terminar se recarga el perfil, cuyos contadores han cambiado.
+   */
+  const toggleBlock = async () => {
+    if (!isRealPublic || !id) return;
+    haptics.light();
+    if (!blocked) {
+      const ok = await confirm({
+        title: `Bloquear a ${publicProfile?.fullName ?? 'esta persona'}`,
+        message:
+          'Dejaréis de seguiros y no volverás a ver sus publicaciones. ' +
+          'Puedes deshacerlo cuando quieras desde Ajustes.',
+        confirmLabel: 'Bloquear',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    const estaba = blocked;
+    setBlockBusy(true);
+    setBlocked(!estaba);
+    try {
+      if (estaba) await ProfileRepository.unblock(id);
+      else await ProfileRepository.block(id);
+      await loadPublic();
+    } catch {
+      setBlocked(estaba);
+      notify(
+        estaba ? 'No se pudo desbloquear' : 'No se pudo bloquear',
+        'Inténtalo de nuevo en unos momentos.',
+      );
+    } finally {
+      setBlockBusy(false);
     }
   };
 
@@ -327,21 +369,42 @@ export function ProfileScreen() {
             </Pressable>
             <View style={styles.actionRow}>
               {isPublic ? (
-                <React.Fragment>
+                blocked ? (
+                  // Bloqueado: no tiene sentido ofrecer seguir ni escribir.
                   <Button
-                    label={following ? 'Siguiendo' : 'Seguir'}
-                    variant={following ? 'secondary' : 'primary'}
-                    loading={followBusy}
-                    onPress={toggleFollow}
-                    style={styles.actionBtn}
-                  />
-                  <Button
-                    label="Mensaje"
+                    label="Desbloquear"
                     variant="secondary"
-                    onPress={openChat}
+                    loading={blockBusy}
+                    onPress={toggleBlock}
                     style={styles.actionBtn}
                   />
-                </React.Fragment>
+                ) : (
+                  <React.Fragment>
+                    <Button
+                      label={following ? 'Siguiendo' : 'Seguir'}
+                      variant={following ? 'secondary' : 'primary'}
+                      loading={followBusy}
+                      onPress={toggleFollow}
+                      style={styles.actionBtn}
+                    />
+                    <Button
+                      label="Mensaje"
+                      variant="secondary"
+                      onPress={openChat}
+                      style={styles.actionBtn}
+                    />
+                    <Pressable
+                      onPress={toggleBlock}
+                      disabled={blockBusy}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Bloquear a esta persona"
+                      style={[styles.blockBtn, { borderColor: colors.border }]}
+                    >
+                      <Feather name="slash" size={17} color={colors.textMuted} />
+                    </Pressable>
+                  </React.Fragment>
+                )
               ) : (
                 <Button
                   label="Editar perfil"
@@ -532,6 +595,14 @@ const styles = StyleSheet.create({
   profileBlock: { marginTop: -20, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg },
   avatarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: -50 },
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  blockBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   actionBtn: { minWidth: 100, minHeight: 40, height: 40 },
   infoBlock: { marginTop: spacing.md },
   name: { fontSize: 20, fontWeight: '900' },
