@@ -1,6 +1,6 @@
 """Esquemas de aprendizaje."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class LessonRead(BaseModel):
@@ -42,3 +42,36 @@ class CourseDetailRead(BaseModel):
     lessons_total: int = 0
     lessons_completed: int = 0
     modules: list[ModuleRead] = []
+
+
+class LessonCreate(BaseModel):
+    title: str
+    duration_seconds: int
+    sort_order: int = 0
+    media_path: str | None = None
+
+    @field_validator("duration_seconds")
+    @classmethod
+    def validate_duration(cls, v: int) -> int:
+        if v < 900 or v > 1200:
+            raise ValueError(
+                "La duración de la lección debe estar entre 15 y 20 minutos (900 a 1200 segundos)."
+            )
+        return v
+
+
+class LessonUpdate(BaseModel):
+    title: str | None = None
+    duration_seconds: int | None = None
+    sort_order: int | None = None
+    media_path: str | None = None
+
+    @field_validator("duration_seconds")
+    @classmethod
+    def validate_duration(cls, v: int | None) -> int | None:
+        if v is not None and (v < 900 or v > 1200):
+            raise ValueError(
+                "La duración de la lección debe estar entre 15 y 20 minutos (900 a 1200 segundos)."
+            )
+        return v
+

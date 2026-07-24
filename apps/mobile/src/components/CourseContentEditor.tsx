@@ -342,7 +342,12 @@ function AddLessonSheet({
       const picked = await pickVideo();
       if (picked) {
         setVideo(picked);
-        setError(null);
+        const dur = picked.durationMs ? Math.round(picked.durationMs / 1000) : 0;
+        if (dur > 0 && (dur < 900 || dur > 1200)) {
+          setError('La duración de la lección debe estar entre 15 y 20 minutos (15:00 a 20:00).');
+        } else {
+          setError(null);
+        }
       }
     } catch {
       setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
@@ -351,6 +356,11 @@ function AddLessonSheet({
 
   const save = async () => {
     if (!title.trim()) return;
+    const durationSeconds = video?.durationMs ? Math.round(video.durationMs / 1000) : 0;
+    if (video && (durationSeconds < 900 || durationSeconds > 1200)) {
+      setError('La duración de la lección debe estar entre 15 y 20 minutos (15:00 a 20:00).');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -360,7 +370,7 @@ function AddLessonSheet({
         title: title.trim(),
         mediaPath,
         // El selector informa la duracion en ms; la base la guarda en segundos.
-        durationSeconds: video?.durationMs ? Math.round(video.durationMs / 1000) : 0,
+        durationSeconds,
         sortOrder: module.lessons.length,
       });
       onCreated();

@@ -23,4 +23,21 @@ export const NotificationRepository = {
   async markAllRead(): Promise<void> {
     await apiRequest<void>(`${API_V1}/notifications/read-all`, { method: 'POST' });
   },
+
+  async notifySessionBooked(input: { targetUserId: string; dateText: string; note?: string }): Promise<void> {
+    const { supabase } = await import('@/services/supabase');
+    if (!supabase) return;
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) return;
+    await supabase.from('notifications').insert({
+      user_id: input.targetUserId,
+      actor_id: data.user.id,
+      type: 'session_booked',
+      entity_type: 'booking',
+      payload: {
+        dateText: input.dateText,
+        note: input.note ?? '',
+      },
+    });
+  },
 };
