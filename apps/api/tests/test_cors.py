@@ -17,10 +17,21 @@ def test_desarrollo_permite_comodin() -> None:
     assert settings.cors_origin_list == ["*"]
 
 
-def test_produccion_sin_configurar_deniega_todo() -> None:
-    """Sin dominios declarados se cierra, en vez de abrirse a cualquiera."""
+def test_produccion_sin_configurar_usa_los_dominios_propios() -> None:
+    """Sin configurar no se abre a cualquiera, pero tampoco se cierra a todos.
+
+    Cerrarlo del todo dejo la web sin servicio porque nadie habia puesto la
+    variable en el servidor. Se sirven los dominios del producto, que es una
+    lista concreta y por tanto igual de segura que declararlos a mano.
+    """
     settings = Settings(environment="production", cors_origins="*")
-    assert settings.cors_origin_list == []
+    assert settings.cors_origin_list == list(Settings.DEFAULT_PRODUCTION_ORIGINS)
+    assert "*" not in settings.cors_origin_list
+
+
+def test_la_web_publicada_esta_entre_los_dominios_propios() -> None:
+    """Si cambia el dominio de la web hay que actualizarlo aqui."""
+    assert "https://social-media-renaser.vercel.app" in Settings.DEFAULT_PRODUCTION_ORIGINS
 
 
 def test_produccion_respeta_los_dominios_declarados() -> None:

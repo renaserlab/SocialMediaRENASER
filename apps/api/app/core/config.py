@@ -6,7 +6,7 @@ en el backend. Nunca en la app movil ni en git.
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -42,6 +42,21 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: str = "*"
 
+    #: Origenes propios del producto, permitidos en produccion aunque nadie haya
+    #: configurado CORS_ORIGINS.
+    #:
+    #: Cerrar el comodin dejo la API denegando TODAS las peticiones de navegador
+    #: y tumbo la web, porque la variable no estaba puesta en el servidor. Que la
+    #: seguridad dependa de recordar una variable de entorno es fragil: si se
+    #: olvida, el sistema no falla al desplegar sino mas tarde y en otro sitio.
+    #: Declarar aqui los dominios conocidos hace que funcione de fabrica, y sigue
+    #: siendo seguro porque es una lista concreta, no un comodin.
+    #:
+    #: CORS_ORIGINS los sustituye cuando se define (dominio propio, previews...).
+    DEFAULT_PRODUCTION_ORIGINS: ClassVar[tuple[str, ...]] = (
+        "https://social-media-renaser.vercel.app",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
@@ -60,16 +75,20 @@ class Settings(BaseSettings):
 
         En produccion el comodin NO se acepta: dejaria que cualquier web
         llamara a la API desde el navegador de alguien con la sesion abierta.
-        Si no se han configurado origenes se deniegan todos, que es la opcion
-        segura por defecto; para habilitar la version web hay que declarar el
-        dominio en CORS_ORIGINS.
+        Si no se declara nada se usan los dominios propios del producto
+        (DEFAULT_PRODUCTION_ORIGINS), de modo que la web funciona sin depender
+        de que alguien se acuerde de configurar la variable. Para anadir otros
+        —un dominio propio, las vistas previa de Vercel— se declaran en
+        CORS_ORIGINS separados por comas, y esa lista sustituye a la de por
+        defecto.
 
         Esto no afecta a la aplicacion movil: CORS es una restriccion que
         aplican los navegadores, no los clientes nativos.
         """
         raw = self.cors_origins.strip()
         if raw == "*":
-            return [] if self.is_production else ["*"]
+            # Sin configurar: comodin en local, dominios propios en produccion.
+            return list(self.DEFAULT_PRODUCTION_ORIGINS) if self.is_production else ["*"]
         origins = [o.strip() for o in raw.split(",") if o.strip()]
         # El comodin tambien puede venir mezclado con dominios reales
         # ("*, https://..."), y ahi seguiria abriendo la API entera.
