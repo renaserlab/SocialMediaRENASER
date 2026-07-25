@@ -18,7 +18,7 @@ from app.modules.catalog.schemas import (
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import require_admin
+from app.shared.permissions import require_admin, require_owner_or_admin
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -26,11 +26,15 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 @router.post("/events", response_model=EventRead, status_code=status.HTTP_201_CREATED)
 async def create_event(
     payload: EventCreate,
-    current_user: AuthUser = Depends(require_admin),
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    """Publica un evento. `require_admin` es lo que protege esto de verdad:
-    que la app oculte el boton no impide llamar al endpoint a mano."""
+    """Publica un evento o una cita. Queda a nombre de quien lo organiza.
+
+    Lo que protege esto de verdad es el servidor, no la interfaz: que la app
+    oculte un boton no impide llamar al endpoint a mano. Por eso editar sigue
+    comprobandose aqui contra el organizador.
+    """
     event = Event(
         organizer_id=current_user.id,
         title=payload.title,
@@ -53,13 +57,16 @@ async def create_event(
 async def update_event(
     event_id: str,
     payload: EventUpdate,
-    _: AuthUser = Depends(require_admin),
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
     ensure_uuid(event_id, "Evento no encontrado.")
     event = await db.get(Event, event_id)
     if event is None:
         raise NotFoundError("Evento no encontrado.")
+    await require_owner_or_admin(
+        db, event.organizer_id, current_user, "No puedes editar este evento."
+    )
     # `exclude_unset` distingue "no enviado" de "enviado vacio", igual que en
     # el perfil: sin ello, editar el titulo borraria el resto de campos.
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -73,13 +80,16 @@ async def update_event(
 async def update_course(
     course_id: str,
     payload: CourseUpdate,
-    _: AuthUser = Depends(require_admin),
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseRead:
     ensure_uuid(course_id, "Curso no encontrado.")
     course = await db.get(Course, course_id)
     if course is None:
         raise NotFoundError("Curso no encontrado.")
+    await require_owner_or_admin(
+        db, course.author_id, current_user, "No puedes editar este curso."
+    )
     data = payload.model_dump(exclude_unset=True)
     # El cliente habla en la unidad mayor; la columna guarda centavos.
     if "price" in data:
@@ -94,9 +104,15 @@ async def update_course(
 @router.post("/courses", response_model=CourseRead, status_code=status.HTTP_201_CREATED)
 async def create_course(
     payload: CourseCreate,
-    current_user: AuthUser = Depends(require_admin),
+    current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseRead:
+    """Publica un curso. Queda a nombre de quien lo crea.
+
+    Antes solo podia hacerlo la administracion, de modo que la comunidad no
+    tenia forma de compartir lo suyo. Editarlo y borrarlo siguen reservados a su
+    autor (o a la administracion, para poder moderar).
+    """
     course = Course(
         author_id=current_user.id,
         title=payload.title,

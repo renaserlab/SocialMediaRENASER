@@ -13,6 +13,7 @@ import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { AuthRepository } from '@/repositories/AuthRepository';
+import { profileImageUrl } from '@/services/storage';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -137,7 +138,16 @@ export function ExploreScreen() {
                     key={person.id}
                     title={person.fullName}
                     subtitle={person.username}
-                    leftComponent={<Avatar size={40} image="avatar" />}
+                    leftComponent={
+                      // Antes se pasaba siempre el avatar generico, asi que
+                      // quien tenia foto salia igualmente con la silueta por
+                      // defecto y no habia forma de reconocer a nadie.
+                      <Avatar
+                        size={40}
+                        image={profileImageUrl(person.avatarPath) ?? null}
+                        name={person.fullName}
+                      />
+                    }
                     rightIcon="chevron-right"
                     onPress={() => router.push(`/profile/${person.id}` as never)}
                   />

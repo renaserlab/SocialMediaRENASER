@@ -1,7 +1,6 @@
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
-import { LandingScreen } from '@/screens/LandingScreen';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -30,20 +29,17 @@ export default function IndexRoute() {
   // Con sesión activa se va directo al home.
   if (authStatus === 'authenticated') return <Redirect href="/(tabs)/home" />;
 
-  // Sin sesión y con backend real, manda la sesión y NO `onboardingComplete`:
-  // esa marca vive en el dispositivo, no en la cuenta, asi que quien completó
-  // el flujo alguna vez y luego cerró sesión (o se le caducó el token) volvía a
-  // entrar como anónimo, saltándose el quiz y quedando atrapado en un perfil
-  // sin datos. Se le devuelve a la bienvenida para que repita el recorrido:
-  // idioma → quiz → resultado → registro.
-  if (supabaseEnabled) {
-    if (!languageSelected) return <Redirect href="/language" />;
-    return <LandingScreen />;
-  }
-
-  // Modo demo (sin backend): no hay sesión que comprobar, así que la marca
-  // local sigue siendo el único criterio.
-  if (onboardingComplete) return <Redirect href="/(tabs)/home" />;
+  // Sin sesión TAMBIEN se entra al muro. Antes habia por delante una portada y
+  // un cuestionario de siete preguntas, de modo que no se veia ni una sola
+  // publicacion sin registrarse primero: quien llegaba por un enlace tenia que
+  // rellenar un formulario para descubrir de que iba la aplicacion.
+  //
+  // Ahora se navega libremente, como en TikTok, y la cuenta se pide en el
+  // momento en que hace falta de verdad —publicar, comentar, reaccionar o
+  // guardar—, que es cuando ya se entiende para que sirve (ver `useRequireAuth`).
+  //
+  // El idioma se sigue preguntando primero: condiciona todo lo que se lee
+  // despues y no cuesta nada responderlo.
   if (!languageSelected) return <Redirect href="/language" />;
-  return <LandingScreen />;
+  return <Redirect href="/(tabs)/home" />;
 }

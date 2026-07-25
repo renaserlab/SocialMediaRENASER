@@ -12,6 +12,13 @@ import type { VideoPlayerProps } from './VideoPlayer.types';
 const media = palette('dark');
 
 /**
+ * Oscurecido minimo sobre el video en reposo: lo justo para que el boton de
+ * reproduccion se distinga sobre un fotograma claro, sin llegar a ocultar de que
+ * va el video.
+ */
+const SOFT_VEIL = 'rgba(0,0,0,0.18)';
+
+/**
  * Ejecuta una accion sobre el reproductor tolerando que ya no exista.
  *
  * `useVideoPlayer` libera el reproductor NATIVO al desmontar el componente,
@@ -105,8 +112,17 @@ export function VideoPlayer({
           accessibilityLabel="Reproducir video"
         >
           {poster ? <Image source={poster} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: media.overlay }]} />
-          <View style={[styles.playCircle, { backgroundColor: media.overlay, borderColor: media.textMuted }]}>
+          {/*
+            Velo MUY tenue. Antes cubria el video con un negro al 72 %, asi que
+            en el muro un video sin portada se veia como un rectangulo negro:
+            el primer fotograma que ya pinta el reproductor quedaba tapado y
+            parecia que no hubiera nada hasta pulsar play.
+
+            El circulo de reproduccion lleva su propio fondo, de modo que se lee
+            igual sobre una imagen clara sin necesidad de oscurecerla entera.
+          */}
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: SOFT_VEIL }]} />
+          <View style={[styles.playCircle, { backgroundColor: media.overlay, borderColor: media.text }]}>
             <Feather name="play" size={30} color={media.text} />
           </View>
         </Pressable>

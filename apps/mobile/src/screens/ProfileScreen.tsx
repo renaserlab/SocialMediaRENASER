@@ -333,22 +333,11 @@ export function ProfileScreen() {
         }
       />
       <AppScreen contentStyle={{ paddingBottom: 100 }}>
-        {/* La portada completa es tocable; el chip solo señala que se puede editar. */}
-        <Pressable
-          onPress={isPublic ? undefined : () => openPhotoSheet('cover')}
-          disabled={isPublic}
-          accessibilityRole={isPublic ? undefined : 'button'}
-          accessibilityLabel={isPublic ? undefined : 'Cambiar foto de portada'}
-          style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
-        >
-          <Image source={coverSource} style={styles.cover} />
-          {!isPublic && (
-            <View style={[styles.coverEditBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Feather name="camera" size={14} color={colors.text} />
-              <Text style={[styles.coverEditLabel, { color: colors.text }]}>Editar portada</Text>
-            </View>
-          )}
-        </Pressable>
+        {/*
+          Sin foto de portada. Ocupaba el primer tercio de la pantalla con una
+          imagen que casi nadie cambiaba, y empujaba hacia abajo lo que de
+          verdad identifica a la persona: su foto, sus cifras y su descripcion.
+        */}
         <View style={[styles.profileBlock, { backgroundColor: colors.background }]}>
           <View style={styles.avatarRow}>
             <Pressable
@@ -370,7 +359,30 @@ export function ProfileScreen() {
                 </View>
               )}
             </Pressable>
-            <View style={styles.actionRow}>
+            {/*
+              Las cifras van al costado de la foto, no en una banda aparte mas
+              abajo: asi la primera linea del perfil ya dice quien es y cuanta
+              gente le sigue, sin desplazar la pantalla.
+            */}
+            <View style={styles.headStats}>
+              <Stat
+                label="Publicaciones"
+                value={profileData.posts}
+              />
+              <Stat
+                label="Seguidores"
+                value={profileData.followers}
+                onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
+              />
+              <Stat
+                label="Siguiendo"
+                value={profileData.following}
+                onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
+              />
+            </View>
+          </View>
+
+          <View style={styles.actionRow}>
               {isPublic ? (
                 blocked ? (
                   // Bloqueado: no tiene sentido ofrecer seguir ni escribir.
@@ -416,29 +428,17 @@ export function ProfileScreen() {
                   style={styles.actionBtn}
                 />
               )}
-            </View>
           </View>
 
+          {/* Nombre y descripcion, debajo de la foto y las cifras. */}
           <View style={styles.infoBlock}>
             <Text style={[styles.name, { color: colors.text }]}>{profileData.fullName}</Text>
             <Text style={[styles.username, { color: colors.textMuted }]}>{profileData.username}</Text>
           </View>
 
-          <View style={[styles.stats, { borderColor: colors.border }]}>
-            <Stat
-              label="Seguidores"
-              value={profileData.followers}
-              onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
-            />
-            <Stat
-              label="Siguiendo"
-              value={profileData.following}
-              onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
-            />
-            <Stat label="Publicaciones" value={profileData.posts} />
-          </View>
-
-          <Text style={[styles.bio, { color: colors.text }]}>{profileData.bio}</Text>
+          {profileData.bio ? (
+            <Text style={[styles.bio, { color: colors.text }]}>{profileData.bio}</Text>
+          ) : null}
 
           {isDarren && (
             <Button
@@ -648,9 +648,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: spacing.sm,
   },
-  profileBlock: { marginTop: -20, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg },
-  avatarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: -50 },
-  actionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  profileBlock: { padding: spacing.lg },
+  avatarRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  // Las tres cifras reparten el ancho que queda junto a la foto.
+  headStats: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   blockBtn: {
     width: 44,
     height: 44,
@@ -661,11 +663,12 @@ const styles = StyleSheet.create({
   },
   actionBtn: { minWidth: 100, minHeight: 40, height: 40 },
   infoBlock: { marginTop: spacing.md },
+  // `stats` se conserva: lo usa la ficha de otros perfiles.
   name: { fontSize: 20, fontWeight: '900' },
   username: { fontSize: 13, marginTop: 2 },
   stats: { flexDirection: 'row', marginVertical: spacing.lg, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: spacing.md },
   statBox: { alignItems: 'center', flex: 1 },
-  bio: { fontSize: 13, lineHeight: 18, marginBottom: spacing.lg },
+  bio: { fontSize: 13, lineHeight: 18, marginTop: spacing.sm, marginBottom: spacing.lg },
   audioBtn: { width: '100%', marginBottom: spacing.lg },
   shortcuts: { flexDirection: 'row', marginVertical: spacing.md, gap: spacing.sm },
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },

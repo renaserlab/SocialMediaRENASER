@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
+import { StateView } from '@/components/StateView';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
 import { VideoPlayer } from '@/components/VideoPlayer';
@@ -29,6 +30,7 @@ export function CreatePostScreen() {
   const keyboardOffset = useKeyboardOffset();
   const createPost = useAppStore((state) => state.createPost);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
   const [text, setText] = useState('');
   const [prompt, setPrompt] = useState(prompts[0]!);
   const [media, setMedia] = useState<PickedMedia | null>(null);
@@ -94,6 +96,25 @@ export function CreatePostScreen() {
       setProgress(0);
     }
   };
+
+  // Publicar es la accion que mas claramente necesita una cuenta: lo que se
+  // escribe queda firmado. Se explica en la propia pantalla en vez de saltar un
+  // dialogo encima, que interrumpe sin decir donde se ha entrado.
+  if (supabaseEnabled && !signedIn) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader title="CREAR" />
+        <StateView
+          state="empty"
+          icon="edit-3"
+          title="Crea tu cuenta para publicar"
+          description="Puedes seguir explorando sin cuenta. Para compartir algo, necesitamos saber quién eres."
+          actionLabel="Crear cuenta"
+          onAction={() => router.push('/register' as never)}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

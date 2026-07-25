@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
+import { ZLogo } from '@/components/ZLogo';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -61,7 +62,16 @@ export function AppHeader({
           </Pressable>
         ) : null}
       </View>
-      <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>{title}</Text>
+      {/* La marca se pinta con su logo; el resto de pantallas llevan su
+          nombre escrito. Asi Inicio muestra la Z con textura en vez de una
+          letra suelta, sin tener que cambiar cada llamada al header. */}
+      {title === 'Z' ? (
+        <View style={styles.brand}>
+          <ZLogo size={30} />
+        </View>
+      ) : (
+        <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>{title}</Text>
+      )}
       <View style={[styles.side, { alignItems: 'flex-end' }]}>
         {rightIcon ? (
           <Pressable
@@ -94,6 +104,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   side: { width: 44 },
+  brand: { flex: 1, alignItems: 'center' },
   title: {
     flex: 1,
     textAlign: 'center',

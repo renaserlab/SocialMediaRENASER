@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { PostImage } from '@/components/PostImage';
 import { BottomSheet } from '@/components/BottomSheet';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { ListRow } from '@/components/ListRow';
@@ -14,6 +15,7 @@ import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -50,6 +52,9 @@ export function PostCard({ post, onRemoved }: Props) {
   const addComment = useAppStore((state) => state.addComment);
   const loadCommentsFor = useAppStore((state) => state.loadCommentsFor);
   const deletePost = useAppStore((state) => state.deletePost);
+  // Reaccionar, comentar y guardar quedan asociados a una cuenta: se pide al
+  // usarlos, no al entrar en la aplicacion.
+  const requireAuth = useRequireAuth();
   const currentUserId = useAppStore((state) => state.user?.id);
 
   /**
@@ -75,6 +80,15 @@ export function PostCard({ post, onRemoved }: Props) {
 
   const submitComment = async () => {
     const body = comment;
+    // Leer los comentarios es libre; escribirlos queda a nombre de alguien.
+    // Se comprueba antes de vaciar el campo, para no perder lo escrito si la
+    // persona decide no registrarse ahora.
+    let autorizado = false;
+    await requireAuth('para comentar', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
+
     setComment('');
     setShowComments(true);
     try {
@@ -212,15 +226,17 @@ export function PostCard({ post, onRemoved }: Props) {
         <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
       ) : post.mediaUrl || post.imageKey ? (
         <DoubleTapLike
-          onDoubleTap={() => { if (!liked) toggleLike(post.id); }}
+          onDoubleTap={() =>
+            void requireAuth('para dar me gusta', () => {
+              if (!liked) toggleLike(post.id);
+            })
+          }
           onSingleTap={() => router.push(`/post/${post.id}` as never)}
         >
-          <ExpoImage
-            source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-            style={styles.image}
+          {/* El alto lo marca la foto (ver PostImage), no una caja fija. */}
+          <PostImage
+            uri={post.mediaUrl ?? undefined}
+            source={post.mediaUrl ? undefined : assets[post.imageKey!]}
           />
         </DoubleTapLike>
       ) : null}
@@ -229,7 +245,12 @@ export function PostCard({ post, onRemoved }: Props) {
         <Pressable
           style={styles.action}
           hitSlop={ACTION_HIT_SLOP}
-          onPress={() => { toggleLike(post.id); haptics.light(); }}
+          onPress={() =>
+            void requireAuth('para dar me gusta', () => {
+              toggleLike(post.id);
+              haptics.light();
+            })
+          }
           accessibilityLabel="Me gusta"
           accessibilityRole="button"
         >
@@ -257,7 +278,7 @@ export function PostCard({ post, onRemoved }: Props) {
         </Pressable>
         <View style={{ flex: 1 }} />
         <Pressable
-          onPress={() => toggleSave(post.id)}
+          onPress={() => void requireAuth('para guardar contenido', () => toggleSave(post.id))}
           hitSlop={ACTION_HIT_SLOP}
           accessibilityLabel="Guardar"
           accessibilityRole="button"

@@ -11,6 +11,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
+import { ZLogo } from '@/components/ZLogo';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -38,6 +39,11 @@ export function LanguageScreen() {
       <AppScreen scroll={false} edges={['left', 'right', 'bottom']}>
         <View style={styles.container}>
           <View style={styles.content}>
+            {/* La marca preside la primera pantalla que se ve al entrar. */}
+            <View style={styles.brand}>
+              <ZLogo size={72} />
+            </View>
+
             <Text variant="secondary" color={colors.textMuted} style={styles.description}>
               {t('language.description')}
             </Text>
@@ -74,6 +80,7 @@ export function LanguageScreen() {
 }
 
 const styles = StyleSheet.create({
+  brand: { alignItems: 'center', marginBottom: spacing.xl },
   container: {
     flex: 1,
     paddingHorizontal: spacing.lg,

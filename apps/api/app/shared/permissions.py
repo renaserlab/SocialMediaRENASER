@@ -38,3 +38,24 @@ async def require_admin(
     if not await is_admin(db, current_user.id):
         raise ForbiddenError("Solo un administrador puede realizar esta acción.")
     return current_user
+
+
+async def require_owner_or_admin(
+    db: AsyncSession,
+    owner_id: str | None,
+    current_user: AuthUser,
+    message: str = "No puedes modificar este contenido.",
+) -> None:
+    """Exige ser quien lo creo, o administrar la aplicacion.
+
+    Cualquiera puede publicar sus propios cursos, resenas y citas, pero solo
+    sobre lo suyo: sin esta comprobacion, abrir la creacion a todo el mundo
+    dejaria tambien que se editara o borrara lo de los demas.
+
+    La administracion mantiene el paso franco para poder moderar.
+    """
+    if owner_id == current_user.id:
+        return
+    if await is_admin(db, current_user.id):
+        return
+    raise ForbiddenError(message)

@@ -1,0 +1,50 @@
+import { useCallback } from 'react';
+import { useRouter } from 'expo-router';
+
+import { confirm } from '@/lib/confirm';
+import { useAuthStore } from '@/store/useAuthStore';
+
+/**
+ * Exige tener cuenta para ejecutar una acción, y solo entonces.
+ *
+ * La aplicación se puede recorrer entera sin registrarse: se ve el muro, los
+ * perfiles, los cursos. La cuenta se pide en el momento en que la acción la
+ * necesita de verdad —publicar, comentar, reaccionar, guardar—, porque son
+ * cosas que quedan asociadas a alguien.
+ *
+ * Pedirla antes, como se hacía, obligaba a rellenar un formulario para poder
+ * ver de qué iba la aplicación.
+ *
+ * Uso:
+ *
+ *   const requireAuth = useRequireAuth();
+ *   onPress={() => requireAuth('para dar me gusta', () => toggleLike(id))}
+ *
+ * Si hay sesión, la acción se ejecuta sin más. Si no, se ofrece entrar y, al
+ * aceptar, se lleva a la pantalla de acceso.
+ */
+export function useRequireAuth() {
+  const router = useRouter();
+  const status = useAuthStore((state) => state.status);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+
+  return useCallback(
+    async (motivo: string, accion: () => void | Promise<void>): Promise<void> => {
+      // En modo demo (sin backend) no hay sesión que exigir: la aplicación
+      // funciona con datos locales y bloquear aquí la dejaría inservible.
+      if (!supabaseEnabled || status === 'authenticated') {
+        await accion();
+        return;
+      }
+
+      const entrar = await confirm({
+        title: 'Crea tu cuenta',
+        message: `Necesitas una cuenta ${motivo}. Es rápido y podrás seguir donde lo dejaste.`,
+        confirmLabel: 'Continuar',
+        cancelLabel: 'Ahora no',
+      });
+      if (entrar) router.push('/register' as never);
+    },
+    [router, status, supabaseEnabled],
+  );
+}

@@ -16,11 +16,21 @@ type Props = {
 export function Avatar({ size = 44, label, image, name }: Props) {
   const { colors } = useAppTheme();
 
-  // Obtener la fuente de la imagen
+  // Fuente de la imagen. Se aceptan tres formas y conviene distinguirlas:
+  //
+  //   - una clave del catalogo local ('avatar', 'circle'...),
+  //   - una URL, que es lo que devuelve `profileImageUrl` para las fotos
+  //     subidas por cada persona,
+  //   - o una fuente ya construida.
+  //
+  // La URL hay que envolverla en `{ uri }`. Sin este caso, un enlace perfecto
+  // no coincidia con ninguna clave del catalogo, se descartaba en silencio y
+  // salia la silueta por defecto: quien tenia foto se veia como quien no.
   let source: ImageSourcePropType | null = null;
   if (image) {
-    if (typeof image === 'string' && assets[image]) {
-      source = assets[image]!;
+    if (typeof image === 'string') {
+      if (assets[image]) source = assets[image]!;
+      else if (/^(https?:|file:|data:|blob:)/.test(image)) source = { uri: image };
     } else if (typeof image === 'object') {
       source = image as ImageSourcePropType;
     }

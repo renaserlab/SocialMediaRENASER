@@ -70,8 +70,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const session = await AuthRepository.getSession();
       if (session) {
-        await get().refreshProfile();
+        // La sesion basta para entrar. El perfil se pide en paralelo y no se
+        // espera: es informacion para pintar la pantalla, no permiso de acceso.
+        //
+        // Esperarlo dejaba la aplicacion en el indicador de carga mientras el
+        // servidor respondia y, si estaba dormido, eso son hasta sesenta
+        // segundos mirando una rueda girar.
         set({ status: 'authenticated' });
+        void get().refreshProfile();
       } else {
         set({ status: 'anonymous' });
       }
@@ -92,10 +98,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (event === 'PASSWORD_RECOVERY') set({ passwordRecovery: true });
       setTimeout(() => {
         if (nextSession) {
-          void get()
-            .refreshProfile()
-            .then(() => set({ status: 'authenticated' }))
-            .catch(() => {});
+          // Mismo criterio que arriba: la sesion decide, el perfil acompana.
+          set({ status: 'authenticated' });
+          void get().refreshProfile();
         } else {
           useAppStore.getState().setUser(null);
           set({ status: 'anonymous' });
@@ -141,16 +146,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async signUpEmail(input) {
     const result = await AuthRepository.signUp(input);
     if (result.session) {
-      await get().refreshProfile();
       set({ status: 'authenticated' });
+      // Recien creada la cuenta, el perfil lo escribe un disparador en la base
+      // de datos y puede tardar un instante en existir; `refreshProfile` ya
+      // reintenta por su cuenta, asi que tampoco aqui hay que esperarlo.
+      void get().refreshProfile();
     }
     return result;
   },
 
   async signInEmail(input) {
     await AuthRepository.signIn(input);
-    await get().refreshProfile();
+    // Se entra en cuanto la sesion es valida; el perfil llega despues (ver
+    // `bootstrap`). Antes se aguardaba a cargarlo y el formulario se quedaba
+    // pensando aunque la contrasena ya se hubiera aceptado.
     set({ status: 'authenticated' });
+    void get().refreshProfile();
   },
 
   async signInWithProvider(provider) {
@@ -158,8 +169,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // En web la pagina se redirige y la sesion se resuelve al volver; en nativo
     // ya tenemos sesion y solo falta cargar el perfil.
     if (await AuthRepository.getSession()) {
-      await get().refreshProfile();
       set({ status: 'authenticated' });
+      void get().refreshProfile();
     }
   },
 

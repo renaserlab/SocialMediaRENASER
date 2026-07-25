@@ -159,6 +159,15 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   /** Evento cuya ficha se esta viendo. */
   const [detail, setDetail] = useState<EventItem | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
+  /**
+   * Puede publicar y editar en ESTA seccion: en su propio perfil cualquiera,
+   * y quien administra en cualquiera (para moderar).
+   *
+   * Antes solo mandaba `isAdmin`, de modo que la comunidad no podia compartir
+   * sus cursos ni sus resenas. Quien decide de verdad es el servidor: la
+   * comprobacion de aqui solo evita ensenar botones que iban a fallar.
+   */
+  const canManage = isOwner || isAdmin;
 
   useEffect(() => {
     if (!AuthRepository.enabled) {
@@ -278,7 +287,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   }
 
   if (kind === 'podcast') {
-    const canAddAudio = isOwner || isAdmin;
+    const canAddAudio = canManage;
     return (
       <View>
         {/* Filtros por categoria; "Todos" es simplemente sin filtro. */}
@@ -327,7 +336,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   if (kind === 'testimonios') {
     return (
       <View>
-        {isAdmin ? (
+        {canManage ? (
           <Button
             label="Agregar reseña"
             variant="secondary"
@@ -372,7 +381,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                   <Text variant="body" weight="600" style={{ flex: 1 }}>
                     {item.caption || (item.mediaType === 'video' ? 'Video' : 'Foto')}
                   </Text>
-                  {isAdmin ? (
+                  {canManage ? (
                     <React.Fragment>
                       <Pressable
                         onPress={() =>
@@ -423,7 +432,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const items = kind === 'eventos' ? events : courses;
   // Vacio: los eventos no ofrecen alta desde aqui (se crean en Inicio); los
   // cursos si, para que Darren pueda empezar uno desde su propio perfil.
-  if (items.length === 0 && !(kind === 'cursos' && isAdmin)) {
+  if (items.length === 0 && !(kind === 'cursos' && canManage)) {
     return (
       <View style={styles.center}>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
@@ -444,7 +453,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
               event={event}
               onPress={() => setDetail(event)}
               onEdit={
-                isAdmin
+                canManage
                   ? () =>
                       setEditing({
                         id: event.id,
@@ -467,7 +476,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
               course={course}
               onPress={() => router.push(`/course/${course.id}` as never)}
               onEdit={
-                isAdmin
+                canManage
                   ? () =>
                       setEditing({
                         id: course.id,
@@ -481,7 +490,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
           ))}
 
       {/* Alta de un curso nuevo, debajo de los ya publicados. */}
-      {kind === 'cursos' && isAdmin ? (
+      {kind === 'cursos' && canManage ? (
         <Button
           label="Agregar curso"
           variant="secondary"

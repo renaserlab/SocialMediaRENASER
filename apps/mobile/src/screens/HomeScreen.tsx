@@ -165,106 +165,12 @@ export function HomeScreen() {
           onPress={() => router.navigate('/(tabs)/create')}
         />
 
-        <View style={styles.quickRow}>
-          <View
-            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-          >
-            {/*
-              La zona pulsable va DETRAS del contenido, no envolviendolo: en web
-              cada Pressable es un <button> y el "+" anidado dentro producia
-              <button> dentro de <button> (HTML invalido, error de hidratacion).
-            */}
-            <Pressable
-              onPress={() => openAdminSection('eventos')}
-              disabled={!catalogProfileId}
-              style={StyleSheet.absoluteFill}
-              accessibilityRole="button"
-              accessibilityLabel="Ver eventos"
-            />
-            <View style={styles.quickHeader} pointerEvents="box-none">
-              <View pointerEvents="none">
-                <Feather name="calendar" size={24} color={colors.text} />
-              </View>
-              {isAdmin ? (
-                <Pressable
-                  onPress={() => setCreating('evento')}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Agregar evento"
-                  style={[styles.addBadge, { backgroundColor: colors.text }]}
-                >
-                  <Feather name="plus" size={14} color={colors.background} />
-                </Pressable>
-              ) : null}
-            </View>
-            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
-              {t('home.events')}
-            </Text>
-            {isAdmin ? (
-              <Pressable
-                onPress={() => setCreating('evento')}
-                style={[styles.addChip, { borderColor: colors.border }]}
-                accessibilityRole="button"
-                accessibilityLabel="Agregar evento"
-              >
-                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addEvent')}</Text>
-              </Pressable>
-            ) : (
-              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
-                {t('home.eventsBody')}
-              </Text>
-            )}
-          </View>
-          <View
-            style={[styles.quickCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-          >
-            {/*
-              La zona pulsable va DETRAS del contenido, no envolviendolo: en web
-              cada Pressable es un <button> y el "+" anidado dentro producia
-              <button> dentro de <button> (HTML invalido, error de hidratacion).
-            */}
-            <Pressable
-              onPress={() => openAdminSection('cursos')}
-              disabled={!catalogProfileId}
-              style={StyleSheet.absoluteFill}
-              accessibilityRole="button"
-              accessibilityLabel="Ver cursos"
-            />
-            <View style={styles.quickHeader} pointerEvents="box-none">
-              <View pointerEvents="none">
-                <Feather name="book" size={24} color={colors.text} />
-              </View>
-              {isAdmin ? (
-                <Pressable
-                  onPress={() => setCreating('curso')}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Agregar curso"
-                  style={[styles.addBadge, { backgroundColor: colors.text }]}
-                >
-                  <Feather name="plus" size={14} color={colors.background} />
-                </Pressable>
-              ) : null}
-            </View>
-            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
-              {t('home.courses')}
-            </Text>
-            {isAdmin ? (
-              <Pressable
-                onPress={() => setCreating('curso')}
-                style={[styles.addChip, { borderColor: colors.border }]}
-                accessibilityRole="button"
-                accessibilityLabel="Agregar curso"
-              >
-                <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addCourse')}</Text>
-              </Pressable>
-            ) : (
-              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
-                {t('home.coursesBody')}
-              </Text>
-            )}
-          </View>
-        </View>
+        {/*
+          Eventos y Cursos ya no viven en Inicio. El muro es para descubrir
+          contenido y ver el de quien se sigue; el catalogo se consulta desde el
+          perfil que lo publica, que es donde tiene contexto. Tenerlo aqui
+          empujaba las publicaciones fuera de la primera pantalla.
+        */}
 
         {/* Tu circulo baja aqui, junto al nuevo acceso al podcast. */}
         <View style={styles.quickRow}>

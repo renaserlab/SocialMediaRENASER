@@ -2,7 +2,7 @@ import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Redirect, Tabs } from 'expo-router';
+import { Tabs } from 'expo-router';
 
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
@@ -41,17 +41,21 @@ export default function TabsLayout() {
     );
   }
 
-  /**
-   * La red social es solo para quien tiene cuenta.
-   *
-   * La guarda vive aqui, en el layout, y no en cada pantalla: asi cubre TODAS
-   * las pestañas y tambien los enlaces directos (en web bastaba con escribir
-   * /home o /messages para entrar sin sesion). Se redirige a la raiz, que
-   * reanuda el recorrido de bienvenida: idioma -> quiz -> resultado -> registro.
-   */
-  if (supabaseEnabled && authStatus !== 'authenticated') {
-    return <Redirect href="/" />;
-  }
+  /*
+    Ya no hay guarda de sesion aqui.
+
+    Estas pestañas se pueden recorrer sin cuenta: se ve el muro, se explora y se
+    entra en los perfiles, como en TikTok. Lo que pide cuenta es actuar
+    —publicar, comentar, reaccionar, guardar—, y eso se comprueba en cada
+    accion (`useRequireAuth`), no al entrar.
+
+    Ademas, mientras estuvo aqui la comprobacion, la aplicacion se quedaba en
+    blanco: la raiz mandaba al muro y el muro devolvia a la raiz, en un ida y
+    vuelta sin fin del que no salia ninguna pantalla.
+
+    Lo que de verdad protege los datos es el servidor: sin token, la API no
+    devuelve nada privado.
+  */
 
   return (
     <Tabs

@@ -214,18 +214,25 @@ export function StoriesScreen() {
 
   return (
     <View style={styles.root}>
+      {/*
+        `contain` y no `cover`: una historia se ve ENTERA. Con `cover` se
+        rellenaba la pantalla recortando lo que sobraba, asi que una foto que no
+        fuera justo vertical perdia los bordes —y con ellos, a menudo, la cara
+        de quien la subio—. Lo que queda libre alrededor es negro, como en
+        Instagram o TikTok.
+      */}
       {item.mediaType === 'video' && item.mediaUrl ? (
         <VideoPlayer
           uri={item.mediaUrl}
           style={StyleSheet.absoluteFill}
-          contentFit="cover"
+          contentFit="contain"
           active={!paused}
         />
       ) : (
         <ExpoImage
           source={item.mediaUrl ? { uri: item.mediaUrl } : assets.hero}
           style={StyleSheet.absoluteFill}
-          contentFit="cover"
+          contentFit="contain"
           transition={150}
         />
       )}
