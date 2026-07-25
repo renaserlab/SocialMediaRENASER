@@ -38,6 +38,10 @@ export function ProfileScreen() {
   const setProfileImage = useAppStore((state) => state.setProfileImage);
   const authStatus = useAuthStore((state) => state.status);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  // 'anonymous' es distinto de 'todavia no lo se': al arrancar el estado pasa
+  // por 'loading', y ahi no se debe dar por hecho que no hay cuenta.
+  const anonimo = useAuthStore((state) => state.status === 'anonymous');
   const profileError = useAuthStore((state) => state.profileError);
   const refreshProfile = useAuthStore((state) => state.refreshProfile);
 
@@ -104,6 +108,52 @@ export function ProfileScreen() {
   useEffect(() => {
     loadPublic();
   }, [loadPublic]);
+
+  /**
+   * Invitacion a crear cuenta al asomarse al perfil de otra persona.
+   *
+   * Sin sesion se puede mirar, pero conviene decir que hay mas detras: quien
+   * llega aqui ya ha mostrado interes por alguien concreto, y ese es el momento
+   * de explicar para que sirve registrarse. Antes no se decia nada y la
+   * pantalla se quedaba a medias sin motivo aparente.
+   *
+   * Se enseña UNA vez por perfil visitado (`avisadoRef`), no en cada
+   * repintado ni al volver atras: repetir el mismo aviso cansa y acaba
+   * cerrandose sin leer.
+   */
+  const avisadoRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    // Se espera a saber con certeza que no hay sesion (`anonimo`), no basta
+    // con que aun no la haya: durante el arranque el estado es 'loading' y
+    // avisar ahi saldria tambien a quien si tiene cuenta.
+    if (!isPublic || !supabaseEnabled || !anonimo) return;
+    const clave = id ?? 'perfil';
+    if (avisadoRef.current === clave) return;
+    avisadoRef.current = clave;
+
+    const nombre = isDarren
+      ? 'Darren'
+      : publicProfile?.fullName?.split(' ')[0] ?? 'esta persona';
+
+    // Un respiro antes de preguntar. Da tiempo a que el dialogo propio de la
+    // aplicacion este montado —si no, se cae al del navegador, que anuncia
+    // "localhost dice" y no se puede dar estilo— y evita que la invitacion
+    // aparezca encima de una pantalla a medio pintar.
+    const temporizador = setTimeout(() => {
+      void (async () => {
+        const entrar = await confirm({
+          title: `Descubre el contenido de ${nombre}`,
+          message:
+            'Inicia sesión o crea tu cuenta para ver sus publicaciones, cursos y ' +
+            'episodios completos, y para escribirle.',
+          confirmLabel: 'Crear cuenta',
+          cancelLabel: 'Seguir mirando',
+        });
+        if (entrar) router.push('/register' as never);
+      })();
+    }, 700);
+    return () => clearTimeout(temporizador);
+  }, [isPublic, supabaseEnabled, anonimo, id, isDarren, publicProfile?.fullName, router]);
 
   const toggleFollow = async () => {
     haptics.light();

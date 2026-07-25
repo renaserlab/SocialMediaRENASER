@@ -10,6 +10,7 @@ import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
+import { ZLogo } from '@/components/ZLogo';
 import { ApiError } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -109,7 +110,16 @@ export function LoginScreen() {
       >
         <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
           <View style={styles.container}>
-            <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}Z</Text>
+            {/*
+              La marca se pinta con su logo y en la MISMA linea. Antes llevaba
+              un salto y la «Z» iba escrita con la tipografia del texto: se
+              leia como una letra suelta colgando debajo, no como el nombre
+              del producto.
+            */}
+            <View style={styles.titleRow}>
+              <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en</Text>
+              <ZLogo size={34} />
+            </View>
 
             {/*
             ACCESO CON PROVEEDORES EXTERNOS — oculto a proposito.
@@ -214,7 +224,15 @@ const styles = StyleSheet.create({
   forgot: { alignSelf: 'center', paddingVertical: spacing.md },
   forgotText: { fontSize: 13, fontWeight: '600' },
   container: { paddingHorizontal: spacing.xl, gap: spacing.md },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: '900', marginVertical: spacing.lg },
+  title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    // Si el idioma alarga el texto, el logo baja en vez de salirse.
+    flexWrap: 'wrap',
+    marginVertical: spacing.lg,
+  },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginVertical: spacing.sm },
   line: { height: 1, flex: 1 },
   or: { fontSize: 11 },
