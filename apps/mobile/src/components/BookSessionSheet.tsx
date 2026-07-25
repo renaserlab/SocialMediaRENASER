@@ -10,6 +10,7 @@ import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { TimeField } from '@/components/TimeField';
 import { toHumanTime } from '@/components/TimeField.types';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { toast } from '@/lib/toast';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
@@ -28,6 +29,7 @@ type Props = {
 export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const requireAuth = useRequireAuth();
 
   // Fecha (dd/mm/aaaa) y hora (HH:MM) por separado: cada una con su selector.
   // Antes era un solo campo de texto libre —«Mañana a las 4:00 PM»— que había
@@ -72,6 +74,12 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    * elegida se perdía por el camino.
    */
   const handleOpenChat = async () => {
+    let autorizado = false;
+    await requireAuth('para escribir a esta persona', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
+
     setSending(true);
     setError(null);
     try {
@@ -104,6 +112,12 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       setError('Elige la fecha y la hora de la sesión.');
       return;
     }
+
+    let autorizado = false;
+    await requireAuth('para agendar una sesión', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
 
     setSaving(true);
     setError(null);

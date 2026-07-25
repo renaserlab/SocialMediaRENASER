@@ -140,6 +140,11 @@ export function PostCard({ post, onRemoved }: Props) {
   };
 
   const reportPost = async () => {
+    let autorizado = false;
+    await requireAuth('para reportar una publicación', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
     const accepted = await confirm({
       title: 'Reportar publicación',
       message: '¿Deseas reportar esta publicación?',
@@ -170,6 +175,11 @@ export function PostCard({ post, onRemoved }: Props) {
   const blockAuthor = async () => {
     // Los posts de demostracion no traen autor real: no hay a quien bloquear.
     if (!post.authorId) return;
+    let autorizado = false;
+    await requireAuth('para bloquear a alguien', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
     const accepted = await confirm({
       title: `Bloquear a ${post.author}`,
       message:

@@ -17,6 +17,7 @@ import { ProfileGallery } from '@/components/ProfileGallery';
 import { ProfileSection, type ProfileSectionKind } from '@/components/ProfileSection';
 import { StateView } from '@/components/StateView';
 import { useProfilePosts } from '@/hooks/useProfilePosts';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
@@ -39,6 +40,8 @@ export function ProfileScreen() {
   const authStatus = useAuthStore((state) => state.status);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  // Seguir, escribir y bloquear necesitan cuenta: se pide al usarlos.
+  const requireAuth = useRequireAuth();
   // 'anonymous' es distinto de 'todavia no lo se': al arrancar el estado pasa
   // por 'loading', y ahi no se debe dar por hecho que no hay cuenta.
   const anonimo = useAuthStore((state) => state.status === 'anonymous');
@@ -127,6 +130,10 @@ export function ProfileScreen() {
     // con que aun no la haya: durante el arranque el estado es 'loading' y
     // avisar ahi saldria tambien a quien si tiene cuenta.
     if (!isPublic || !supabaseEnabled || !anonimo) return;
+    // En un perfil real se espera a tener su nombre: la invitacion dice a quien
+    // se esta visitando, y lanzarla antes la dejaba en un generico «esta
+    // persona» que no convence a nadie.
+    if (isRealPublic && !publicProfile) return;
     const clave = id ?? 'perfil';
     if (avisadoRef.current === clave) return;
     avisadoRef.current = clave;
@@ -153,10 +160,17 @@ export function ProfileScreen() {
       })();
     }, 700);
     return () => clearTimeout(temporizador);
-  }, [isPublic, supabaseEnabled, anonimo, id, isDarren, publicProfile?.fullName, router]);
+  }, [isPublic, supabaseEnabled, anonimo, id, isDarren, isRealPublic, publicProfile, router]);
 
   const toggleFollow = async () => {
     haptics.light();
+    // Seguir queda registrado a nombre de alguien: primero la cuenta.
+    let autorizado = false;
+    await requireAuth('para seguir a esta persona', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
+
     if (isDarren) {
       setFollowing((v) => !v);
       return;
@@ -188,6 +202,11 @@ export function ProfileScreen() {
    */
   const toggleBlock = async () => {
     if (!isRealPublic || !id) return;
+    let autorizado = false;
+    await requireAuth('para bloquear a alguien', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
     haptics.light();
     if (!blocked) {
       const ok = await confirm({
@@ -264,6 +283,13 @@ export function ProfileScreen() {
   };
 
   const openChat = async () => {
+    // Escribir abre una conversacion, y una conversacion tiene dos partes.
+    let autorizado = false;
+    await requireAuth('para enviar un mensaje', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
+
     if (isDarren) {
       router.push('/chat/darren' as never);
       return;

@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import type { FeaturedMember } from '@/mappers/profileMapper';
 import { useAppStore } from '@/store/useAppStore';
@@ -30,6 +31,7 @@ export function MembersScreen() {
   const [members, setMembers] = useState<FeaturedMember[]>([]);
   const [state, setState] = useState<'loading' | 'error' | 'idle'>('loading');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const requireAuth = useRequireAuth();
 
   const goHome = useCallback(() => router.replace('/(tabs)/home'), [router]);
 
@@ -59,6 +61,12 @@ export function MembersScreen() {
   useEffect(load, [load]);
 
   const toggleFollow = async (member: FeaturedMember) => {
+    let autorizado = false;
+    await requireAuth('para seguir a esta persona', () => {
+      autorizado = true;
+    });
+    if (!autorizado) return;
+
     setBusyId(member.id);
     const wasFollowing = member.isFollowing;
     // Optimista: el boton responde sin esperar a la red.
