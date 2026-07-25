@@ -80,6 +80,10 @@ export type Conversation = {
   messages: Message[];
   /** Hora del último mensaje (para la lista de conversaciones). */
   time?: string;
+  /** Foto del otro participante; sin valor se usa el avatar por defecto. */
+  avatarUrl?: string;
+  /** Su id, para poder abrir su perfil desde la conversación. */
+  otherId?: string;
 };
 
 export type EventItem = {

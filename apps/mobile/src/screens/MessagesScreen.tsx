@@ -111,7 +111,7 @@ export function MessagesScreen() {
             icon="message-square"
           />
         }
-        renderItem={({ item: conversation, index }: { item: Conversation; index: number }) => (
+        renderItem={({ item: conversation }: { item: Conversation }) => (
               <Pressable
                 onPress={() =>
                   router.push({
@@ -126,8 +126,14 @@ export function MessagesScreen() {
                   { borderBottomColor: colors.border, opacity: pressed ? 0.78 : 1 },
                 ]}
               >
+                {/*
+                  La foto real de la otra persona. Antes se elegia una imagen
+                  de muestra segun la POSICION de la fila (la primera una, la
+                  segunda otra...), asi que no correspondia con nadie: quien
+                  tenia foto salia con la de otro.
+                */}
                 <Image
-                  source={index === 0 ? assets.avatar : index === 1 ? assets.circle : assets.speaker}
+                  source={conversation.avatarUrl ? { uri: conversation.avatarUrl } : assets.avatar}
                   style={styles.avatar}
                 />
                 <View style={{ flex: 1 }}>

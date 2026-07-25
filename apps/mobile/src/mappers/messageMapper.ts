@@ -1,3 +1,4 @@
+import { profileImageUrl } from '@/services/storage';
 import type { Conversation, Message } from '@/types';
 
 export type MsgAuthorDto = {
@@ -50,6 +51,11 @@ export function toConversation(dto: ConversationDto): Conversation {
     unread: dto.unread_count,
     messages: [],
     time: formatTime(dto.last_message_at),
+    // El backend ya manda al otro participante con su foto; antes se descartaba
+    // y la lista pintaba imagenes de muestra segun la posicion de la fila, de
+    // modo que quien tenia foto salia con la de otra persona.
+    avatarUrl: profileImageUrl(dto.other?.avatar_path) ?? undefined,
+    otherId: dto.other?.id,
   };
 }
 
