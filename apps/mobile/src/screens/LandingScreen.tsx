@@ -22,7 +22,7 @@ export function LandingScreen() {
           <View style={[StyleSheet.absoluteFill, { backgroundColor: media.overlay }]} />
           <View style={styles.brandContainer}>
             <Text variant="body" weight="800" color={media.text} style={styles.brandText}>
-              RENASER
+              Z
             </Text>
           </View>
         </View>
@@ -31,9 +31,11 @@ export function LandingScreen() {
           <Text variant="display" color={media.text} style={styles.title}>
             ¿Qué está bloqueando realmente tu crecimiento?
           </Text>
-          <Text variant="body" color={media.textMuted} style={styles.subtitle}>
+
+          {/*<Text variant="body" color={media.textMuted} style={styles.subtitle}>
             Responde 7 preguntas y descubre tu verdadero límite.
-          </Text>
+          </Text>*/}
+
           <Button
             label="Descubrir ahora"
             variant="secondary"
@@ -42,7 +44,7 @@ export function LandingScreen() {
             onPress={() => router.push('/welcome' as any)}
           />
           <Text variant="secondary" color={media.textMuted} style={styles.hint}>
-            2 min · Gratis · Resultado inmediato
+
           </Text>
 
           {/*

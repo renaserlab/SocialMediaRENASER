@@ -118,11 +118,11 @@ export function RegisterScreen() {
         behavior={Platform.select({ ios: 'padding', android: 'height' })}
         keyboardVerticalOffset={keyboardOffset}
       >
-      <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        <View style={styles.container}>
-          <Text style={[styles.title, { color: colors.text }]}>Crea tu cuenta{`\n`}RENASER</Text>
+        <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+          <View style={styles.container}>
+            <Text style={[styles.title, { color: colors.text }]}>Crea tu cuenta{`\n`}Z</Text>
 
-          {/*
+            {/*
             Oculto igual que en LoginScreen: el flujo de Google esta listo,
             falta activarlo en Supabase. Descomentar para reactivarlo.
 
@@ -141,66 +141,66 @@ export function RegisterScreen() {
           </View>
           */}
 
-          <Input
-            label="Nombre completo"
-            value={fullName}
-            onChangeText={(t) => {
-              setFullName(t);
-              setErrors((e) => ({ ...e, fullName: undefined }));
-            }}
-            placeholder="Juan Pérez"
-            error={errors.fullName}
-          />
-
-          <Input
-            label="Correo electrónico"
-            value={email}
-            onChangeText={(t) => {
-              setEmail(t);
-              setErrors((e) => ({ ...e, email: undefined }));
-            }}
-            placeholder="ejemplo@correo.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            error={errors.email}
-          />
-
-          <View style={styles.passwordContainer}>
             <Input
-              label="Contraseña"
-              value={password}
+              label="Nombre completo"
+              value={fullName}
               onChangeText={(t) => {
-                setPassword(t);
-                setErrors((e) => ({ ...e, password: undefined }));
+                setFullName(t);
+                setErrors((e) => ({ ...e, fullName: undefined }));
               }}
-              placeholder="Mínimo 6 caracteres"
-              secureTextEntry={hidden}
-              error={errors.password}
+              placeholder="Juan Pérez"
+              error={errors.fullName}
             />
-            <Pressable
-              onPress={() => setHidden((v) => !v)}
-              style={styles.eyeButton}
-              accessibilityLabel={hidden ? 'Mostrar contraseña' : 'Ocultar contraseña'}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: !hidden }}
-            >
-              <Feather name={hidden ? 'eye' : 'eye-off'} size={18} color={colors.textMuted} />
+
+            <Input
+              label="Correo electrónico"
+              value={email}
+              onChangeText={(t) => {
+                setEmail(t);
+                setErrors((e) => ({ ...e, email: undefined }));
+              }}
+              placeholder="ejemplo@correo.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              error={errors.email}
+            />
+
+            <View style={styles.passwordContainer}>
+              <Input
+                label="Contraseña"
+                value={password}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  setErrors((e) => ({ ...e, password: undefined }));
+                }}
+                placeholder="Mínimo 6 caracteres"
+                secureTextEntry={hidden}
+                error={errors.password}
+              />
+              <Pressable
+                onPress={() => setHidden((v) => !v)}
+                style={styles.eyeButton}
+                accessibilityLabel={hidden ? 'Mostrar contraseña' : 'Ocultar contraseña'}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: !hidden }}
+              >
+                <Feather name={hidden ? 'eye' : 'eye-off'} size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <Button label="Crear cuenta" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
+
+            <Text style={[styles.legal, { color: colors.textMuted }]}>
+              Al crear tu cuenta aceptas nuestros Términos y la Política de Privacidad.
+            </Text>
+
+            <Pressable onPress={() => router.replace('/login' as never)}>
+              <Text style={[styles.login, { color: colors.text }]}>
+                ¿Ya tienes cuenta? <Text style={{ fontWeight: '900' }}>Iniciar sesión</Text>
+              </Text>
             </Pressable>
           </View>
-
-          <Button label="Crear cuenta" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
-
-          <Text style={[styles.legal, { color: colors.textMuted }]}>
-            Al crear tu cuenta aceptas nuestros Términos y la Política de Privacidad.
-          </Text>
-
-          <Pressable onPress={() => router.replace('/login' as never)}>
-            <Text style={[styles.login, { color: colors.text }]}>
-              ¿Ya tienes cuenta? <Text style={{ fontWeight: '900' }}>Iniciar sesión</Text>
-            </Text>
-          </Pressable>
-        </View>
-      </AppScreen>
+        </AppScreen>
       </KeyboardAvoidingView>
     </View>
   );

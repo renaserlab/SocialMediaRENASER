@@ -107,11 +107,11 @@ export function LoginScreen() {
         behavior={Platform.select({ ios: 'padding', android: 'height' })}
         keyboardVerticalOffset={keyboardOffset}
       >
-      <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        <View style={styles.container}>
-          <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}RENASER</Text>
+        <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+          <View style={styles.container}>
+            <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en{`\n`}Z</Text>
 
-          {/*
+            {/*
             ACCESO CON PROVEEDORES EXTERNOS — oculto a proposito.
 
             NO DESCOMENTAR sin antes tener las credenciales. Que este oculto es
@@ -150,61 +150,61 @@ export function LoginScreen() {
           </View>
           */}
 
-          <Input
-            label="Correo electrónico"
-            value={email}
-            onChangeText={(t) => {
-              setEmail(t);
-              setErrors((e) => ({ ...e, email: undefined }));
-            }}
-            placeholder="ejemplo@correo.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            error={errors.email}
-          />
-
-          <View style={styles.passwordContainer}>
             <Input
-              label="Contraseña"
-              value={password}
+              label="Correo electrónico"
+              value={email}
               onChangeText={(t) => {
-                setPassword(t);
-                setErrors((e) => ({ ...e, password: undefined }));
+                setEmail(t);
+                setErrors((e) => ({ ...e, email: undefined }));
               }}
-              placeholder="Tu contraseña"
-              secureTextEntry={hidden}
-              error={errors.password}
+              placeholder="ejemplo@correo.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              error={errors.email}
             />
+
+            <View style={styles.passwordContainer}>
+              <Input
+                label="Contraseña"
+                value={password}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  setErrors((e) => ({ ...e, password: undefined }));
+                }}
+                placeholder="Tu contraseña"
+                secureTextEntry={hidden}
+                error={errors.password}
+              />
+              <Pressable
+                onPress={() => setHidden((v) => !v)}
+                style={styles.eyeButton}
+                accessibilityLabel={hidden ? 'Mostrar contraseña' : 'Ocultar contraseña'}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: !hidden }}
+              >
+                <Feather name={hidden ? 'eye' : 'eye-off'} size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <Button label="Iniciar sesión" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
             <Pressable
-              onPress={() => setHidden((v) => !v)}
-              style={styles.eyeButton}
-              accessibilityLabel={hidden ? 'Mostrar contraseña' : 'Ocultar contraseña'}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: !hidden }}
+              onPress={() => router.push('/forgot-password' as never)}
+              style={styles.forgot}
+              accessibilityRole="button"
+              accessibilityLabel="Olvidé mi contraseña"
             >
-              <Feather name={hidden ? 'eye' : 'eye-off'} size={18} color={colors.textMuted} />
+              <Text style={[styles.forgotText, { color: colors.textMuted }]}>
+                ¿Olvidaste tu contraseña?
+              </Text>
+            </Pressable>
+
+            <Pressable onPress={() => router.replace('/register')}>
+              <Text style={[styles.login, { color: colors.text }]}>
+                ¿No tienes cuenta? <Text style={{ fontWeight: '900' }}>Crear cuenta</Text>
+              </Text>
             </Pressable>
           </View>
-
-          <Button label="Iniciar sesión" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
-          <Pressable
-            onPress={() => router.push('/forgot-password' as never)}
-            style={styles.forgot}
-            accessibilityRole="button"
-            accessibilityLabel="Olvidé mi contraseña"
-          >
-            <Text style={[styles.forgotText, { color: colors.textMuted }]}>
-              ¿Olvidaste tu contraseña?
-            </Text>
-          </Pressable>
-
-          <Pressable onPress={() => router.replace('/register')}>
-            <Text style={[styles.login, { color: colors.text }]}>
-              ¿No tienes cuenta? <Text style={{ fontWeight: '900' }}>Crear cuenta</Text>
-            </Text>
-          </Pressable>
-        </View>
-      </AppScreen>
+        </AppScreen>
       </KeyboardAvoidingView>
     </View>
   );

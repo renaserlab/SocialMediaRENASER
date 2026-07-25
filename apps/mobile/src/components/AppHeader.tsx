@@ -22,7 +22,7 @@ type Props = {
 };
 
 export function AppHeader({
-  title = 'RENASER',
+  title = 'Z',
   back = false,
   onBack,
   rightIcon,
