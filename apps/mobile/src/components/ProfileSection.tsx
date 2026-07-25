@@ -46,26 +46,26 @@ const ADMIN_SECTIONS: Partial<
   podcast: {
     icon: 'headphones',
     title: 'Aún no tienes podcast',
-    body: 'Los episodios de RENASER están en el perfil de Darren.',
-    action: 'Ir al podcast de RENASER',
+    body: 'Los episodios de Z están en el perfil de Darren.',
+    action: 'Ir al podcast de Z',
   },
   eventos: {
     icon: 'calendar',
     title: 'Aún no tienes eventos',
-    body: 'Los próximos encuentros de RENASER están en el perfil de Darren.',
-    action: 'Ver eventos de RENASER',
+    body: 'Los próximos encuentros de Z están en el perfil de Darren.',
+    action: 'Ver eventos de Z',
   },
   cursos: {
     icon: 'book',
     title: 'Aún no tienes cursos',
-    body: 'Los programas de RENASER están en el perfil de Darren.',
-    action: 'Ver cursos de RENASER',
+    body: 'Los programas de Z están en el perfil de Darren.',
+    action: 'Ver cursos de Z',
   },
   testimonios: {
     icon: 'camera',
     title: 'Aún no tienes reseñas',
     body: 'Las reseñas de la comunidad están en el perfil de Darren.',
-    action: 'Ver reseñas de RENASER',
+    action: 'Ver reseñas de Z',
   },
 };
 
@@ -263,8 +263,17 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     );
   }
 
-  // El podcast esta disponible en cualquier perfil si es dueño o si no se requiere ser admin.
-  if (kind !== 'podcast' && !ownerIsAdmin && ADMIN_SECTIONS[kind]) {
+  /*
+    Remite al perfil de la administracion cuando aqui no hay nada que enseñar
+    NI nada que se pueda crear.
+
+    Antes bastaba con que el perfil no fuera el de la administracion para
+    quedarse en este aviso, de modo que en el propio perfil no habia por donde
+    publicar un curso: solo el enlace a los de otro. Ahora, si es tu perfil,
+    sigue adelante y pinta la seccion con su boton de alta; este acceso baja al
+    final, debajo de lo tuyo.
+  */
+  if (kind !== 'podcast' && !ownerIsAdmin && !canManage && ADMIN_SECTIONS[kind]) {
     const copy = ADMIN_SECTIONS[kind]!;
     return (
       <View style={styles.center}>
@@ -430,9 +439,9 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   }
 
   const items = kind === 'eventos' ? events : courses;
-  // Vacio: los eventos no ofrecen alta desde aqui (se crean en Inicio); los
-  // cursos si, para que Darren pueda empezar uno desde su propio perfil.
-  if (items.length === 0 && !(kind === 'cursos' && canManage)) {
+  // Vacio y sin nada que ofrecer: solo entonces se corta aqui. Si se puede
+  // crear, se continua para pintar el boton de alta y el acceso al catalogo.
+  if (items.length === 0 && !canManage) {
     return (
       <View style={styles.center}>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
@@ -499,6 +508,27 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
         />
       ) : null}
 
+      {/*
+        Y al final, el catalogo de Z. Va DEBAJO de lo propio a proposito: en tu
+        perfil lo primero es lo tuyo, y esto es una salida hacia el resto, no el
+        contenido principal de la pantalla.
+      */}
+      {canManage && ADMIN_SECTIONS[kind] ? (
+        <View style={styles.catalogLink}>
+          <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
+            {items.length === 0
+              ? `Todavía no has publicado ${kind === 'cursos' ? 'ningún curso' : 'ningún evento'}.`
+              : ''}
+          </Text>
+          <Button
+            label={ADMIN_SECTIONS[kind]!.action}
+            variant="secondary"
+            icon={ADMIN_SECTIONS[kind]!.icon}
+            onPress={() => void openAdminSection(kind)}
+          />
+        </View>
+      ) : null}
+
       <EventDetailSheet event={detail} onClose={() => setDetail(null)} />
 
       {editing ? (
@@ -528,6 +558,7 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
   centerAction: { marginTop: spacing.md },
+  catalogLink: { marginTop: spacing.xl, gap: spacing.sm },
   list: { marginTop: spacing.md },
   // `filters` es de los chips de categoria del podcast. El de la galeria se
   // llama `testimonialFilters` para no pisarlo: ambos se anadieron a la vez.

@@ -24,12 +24,24 @@ export const NotificationRepository = {
     await apiRequest<void>(`${API_V1}/notifications/read-all`, { method: 'POST' });
   },
 
+  /**
+   * Avisa a alguien de que le han propuesto una sesión.
+   *
+   * Los fallos se propagan a proposito. Antes se salía sin decir nada cuando no
+   * había sesión iniciada o cuando la inserción era rechazada, de modo que la
+   * pantalla anunciaba «sesión agendada» y en realidad no se había guardado
+   * nada: la otra persona no llegaba a enterarse nunca.
+   */
   async notifySessionBooked(input: { targetUserId: string; dateText: string; note?: string }): Promise<void> {
     const { supabase } = await import('@/services/supabase');
-    if (!supabase) return;
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) return;
-    await supabase.from('notifications').insert({
+    if (!supabase) throw new Error('No hay conexión con el servidor.');
+
+    const { data, error: authError } = await supabase.auth.getUser();
+    if (authError || !data.user) {
+      throw new Error('Inicia sesión para agendar una sesión.');
+    }
+
+    const { error } = await supabase.from('notifications').insert({
       user_id: input.targetUserId,
       actor_id: data.user.id,
       type: 'session_booked',
@@ -39,5 +51,6 @@ export const NotificationRepository = {
         note: input.note ?? '',
       },
     });
+    if (error) throw new Error(error.message);
   },
 };

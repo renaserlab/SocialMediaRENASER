@@ -4,9 +4,12 @@ import { useRouter } from 'expo-router';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
+import { DateField } from '@/components/DateField';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
+import { TimeField } from '@/components/TimeField';
+import { toHumanTime } from '@/components/TimeField.types';
 import { toast } from '@/lib/toast';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
@@ -26,13 +29,22 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
 
-  const [dateText, setDateText] = useState('');
+  // Fecha (dd/mm/aaaa) y hora (HH:MM) por separado: cada una con su selector.
+  // Antes era un solo campo de texto libre —«Mañana a las 4:00 PM»— que había
+  // que interpretar a ojo y no se podía ordenar ni recordar.
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** Lo que se enseña y se envía: «12/08/2026 a las 4:00 PM». */
+  const propuesta = date && time ? `${date} a las ${toHumanTime(time)}` : '';
+
   const reset = () => {
-    setDateText('');
+    setDate('');
+    setTime('');
     setNote('');
     setError(null);
   };
@@ -42,22 +54,54 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     onClose();
   };
 
+  /** Texto de la propuesta, tal y como llega al chat de la otra persona. */
+  const redactarMensaje = () =>
+    [
+      `Hola ${targetUser.fullName}, me gustaría agendar una sesión 1:1.`,
+      propuesta ? `Fecha propuesta: ${propuesta}.` : null,
+      note.trim() ? `Tema: ${note.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+  /**
+   * Abre el chat con la propuesta ya enviada.
+   *
+   * Antes solo abría la conversación vacía: la persona tenía que volver a
+   * escribir a mano lo que acababa de rellenar en el formulario, y la fecha
+   * elegida se perdía por el camino.
+   */
   const handleOpenChat = async () => {
+    setSending(true);
+    setError(null);
     try {
       const conv = await MessageRepository.getOrCreateDirect(targetUser.id);
+      await MessageRepository.sendMessage(conv.id, redactarMensaje());
       close();
       router.push({
         pathname: '/chat/[id]',
         params: { id: conv.id, name: targetUser.fullName },
       } as never);
-    } catch {
-      setError('No se pudo abrir el chat directo.');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'No se pudo abrir el chat. Inténtalo de nuevo.',
+      );
+    } finally {
+      setSending(false);
     }
   };
 
+  /**
+   * Confirma la reserva: avisa a la otra persona y le deja la propuesta por
+   * escrito en el chat.
+   *
+   * Las dos cosas, porque la notificación se lee una vez y se pierde entre las
+   * demás; el mensaje queda en la conversación y ahí se puede responder y
+   * acordar el detalle.
+   */
   const handleBook = async () => {
-    if (!dateText.trim()) {
-      setError('Indica la fecha y hora sugerida para la sesión.');
+    if (!date || !time) {
+      setError('Elige la fecha y la hora de la sesión.');
       return;
     }
 
@@ -66,10 +110,20 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     try {
       await NotificationRepository.notifySessionBooked({
         targetUserId: targetUser.id,
-        dateText: dateText.trim(),
+        dateText: propuesta,
         note: note.trim(),
       });
-      toast(`Sesión agendada con ${targetUser.fullName}`);
+
+      // Si el aviso llega pero el mensaje falla, la reserva sigue siendo válida:
+      // no se deshace nada ni se avisa de un error que no impide nada.
+      try {
+        const conv = await MessageRepository.getOrCreateDirect(targetUser.id);
+        await MessageRepository.sendMessage(conv.id, redactarMensaje());
+      } catch {
+        // El aviso ya salió; el chat se puede abrir después.
+      }
+
+      toast(`Sesión propuesta a ${targetUser.fullName}`);
       close();
     } catch (err) {
       setError(
@@ -80,6 +134,8 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     }
   };
 
+  const listo = !!date && !!time;
+
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
@@ -89,13 +145,14 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         Reserva un espacio personalizado con {targetUser.fullName}.
       </Text>
 
-      <Input
-        value={dateText}
-        onChangeText={setDateText}
-        placeholder="Fecha y hora sugerida (ej. Mañana a las 4:00 PM)"
-        placeholderTextColor={colors.textMuted}
-        style={{ color: colors.text }}
-      />
+      <View style={styles.when}>
+        <View style={styles.half}>
+          <DateField label="Fecha" value={date} onChange={setDate} />
+        </View>
+        <View style={styles.half}>
+          <TimeField label="Hora" value={time} onChange={setTime} />
+        </View>
+      </View>
 
       <Input
         value={note}
@@ -104,7 +161,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         placeholderTextColor={colors.textMuted}
         multiline
         numberOfLines={3}
-        style={{ color: colors.text, marginTop: spacing.sm }}
+        style={{ color: colors.text, marginTop: spacing.md }}
       />
 
       <InlineError message={error} />
@@ -114,16 +171,17 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
           label="Enviar mensaje directo"
           icon="message-circle"
           variant="secondary"
+          loading={sending}
           onPress={() => void handleOpenChat()}
-          style={styles.chatBtn}
+          style={styles.fullWidth}
         />
         <Button
           label="Confirmar reserva"
           icon="calendar"
           onPress={() => void handleBook()}
           loading={saving}
-          disabled={!dateText.trim()}
-          style={styles.bookBtn}
+          disabled={!listo}
+          style={styles.fullWidth}
         />
       </View>
     </BottomSheet>
@@ -141,14 +199,14 @@ const styles = StyleSheet.create({
   subtitle: {
     marginBottom: spacing.md,
   },
+  // Fecha y hora comparten fila: se leen como una sola respuesta.
+  when: { flexDirection: 'row', gap: spacing.sm },
+  half: { flex: 1 },
   actions: {
     marginTop: spacing.lg,
     gap: spacing.sm,
   },
-  chatBtn: {
-    width: '100%',
-  },
-  bookBtn: {
+  fullWidth: {
     width: '100%',
   },
 });
