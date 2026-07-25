@@ -94,7 +94,11 @@
     "extra": {
       "router": {
         "root": "./app"
+      },
+      "eas": {
+        "projectId": "66fb7bea-7810-43c5-bf1d-58f6f50cb0ba"
       }
-    }
+    },
+    "owner": "renaser"
   }
 }

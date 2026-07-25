@@ -168,7 +168,7 @@ eas build --platform ios --profile preview     # compila en la nube (macOS)
 `eas.json` ya trae los perfiles `preview` (dispositivo),
 `preview-ios-simulator` y `production`.
 
-**Pendiente antes de usarlo:** `app.json` declara `owner: ggderbor` (la cuenta
+**Nota:** `app.json` declara `owner: renaser` (la cuenta de empresa
 de Edson). Quien compile debe pertenecer a esa cuenta, o cambiar `owner` y
 `extra.eas.projectId` por los suyos — teniendo en cuenta que ese archivo es
 compartido y el cambio choca en el proximo merge.

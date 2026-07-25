@@ -59,7 +59,7 @@ Nada de esto es codigo; se prepara aparte y suele ser lo que mas tarda.
 | Decision | Situacion |
 |---|---|
 | Cuenta de Apple: individual u organizacion | La organizacion muestra "RENASER" como vendedor pero exige numero D-U-N-S, que tarda dias. Empezarlo pronto si se quiere esa via. |
-| `owner` de Expo | `app.json` declara `ggderbor`, la cuenta de Edson. O te agregan como miembro, o se cambia `owner` y `extra.eas.projectId`. |
+| `owner` de Expo | ✅ Resuelto: el proyecto es `@renaser/z-app`, de la cuenta de empresa. |
 | Proyecto Supabase de produccion | `eas.json` usa **el mismo proyecto en `preview` y en `production`**: los usuarios reales compartirian base de datos con las pruebas. |
 | Moderacion operativa | El compromiso de 24 h esta por escrito; hace falta que alguien revise de verdad los reportes en ese plazo. |
 

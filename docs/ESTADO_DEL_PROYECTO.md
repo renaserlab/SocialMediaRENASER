@@ -177,10 +177,10 @@ Base: `/api/v1`. Todo lo protegido requiere `Authorization: Bearer <jwt>`.
 - **Backend → Render** (listo): `apps/api/Dockerfile` (usa `$PORT`) + `render.yaml`
   (Blueprint). Secretos como `sync:false` (se ponen en el dashboard).
 - **APK → EAS Build**: `apps/mobile/eas.json` perfil `preview` (`buildType: apk`) con
-  `env` (Supabase + `EXPO_PUBLIC_API_URL`). Proyecto vinculado a la cuenta **ggderbor**.
+  `env` (Supabase + `EXPO_PUBLIC_API_URL`). Proyecto vinculado a la cuenta de empresa **renaser** (`@renaser/z-app`).
   - Comando: `cd apps/mobile && eas build -p android --profile preview`.
   - Un APK standalone **no depende de Expo Go** → el desfase SDK 54 vs Expo Go 57 no aplica.
-  - ✅ **Primer APK compilado con éxito** (build en expo.dev/accounts/ggderbor).
+  - ✅ **Primer APK compilado con éxito** (build en expo.dev/accounts/renaser).
   - Al instalar, **Google Play Protect** bloquea apps sideload de un desarrollador
     desconocido: tocar **"Más detalles" → "Instalar de todos modos"**. Es normal.
   - ⚠️ Tras cada merge con dependencias nativas nuevas (FlashList, expo-image, haptics)
@@ -213,7 +213,7 @@ Apple no permite sideload de apps sin cuenta de pago (a diferencia de Android).
 11. **Arreglos de pruebas web:** back seguro (no quedar atrapado), sesión→home,
     canal Realtime único (crash de chat), etc.
 12. **Despliegue:** Dockerfile `$PORT` + `render.yaml`; APK vinculado a cuenta propia
-    (`ggderbor`) y **primer APK compilado**.
+    (`renaser`) y **primer APK compilado**.
 13. **Segundo merge `andy`** (limpio, sin conflictos): 7 pantallas sociales nuevas,
     microinteracciones estilo IG (doble toque, haptics), FlashList + pull-to-refresh,
     combinado con la integración real existente.

@@ -544,6 +544,10 @@ export const useAppStore = create<AppState>()(
         }),
     }),
     {
+      // NO CAMBIAR este nombre aunque el producto se llame ahora Z: es la clave
+      // con la que se guardan las preferencias en el dispositivo. Renombrarla
+      // haria que la aplicacion no encontrara lo guardado y todo el mundo
+      // perderia sus ajustes al actualizar.
       name: 'renaser-universo-v1',
       storage: createJSONStorage(() => AsyncStorage),
       // Solo se persisten preferencias y estado ligero del usuario.
