@@ -231,7 +231,9 @@ export function PostCard({ post, onRemoved }: Props) {
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
       {post.mediaType === 'video' && post.mediaUrl ? (
-        <VideoPlayer uri={post.mediaUrl} style={styles.image} nativeControls />
+        // 16:9 en vez de una caja fija: la mayoria de videos son apaisados y
+        // con alto fijo quedaban con franjas negras arriba y abajo.
+        <VideoPlayer uri={post.mediaUrl} style={styles.video} nativeControls contentFit="contain" />
       ) : post.mediaType === 'audio' && post.mediaUrl ? (
         <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
       ) : post.mediaUrl || post.imageKey ? (
@@ -396,6 +398,7 @@ const styles = StyleSheet.create({
   avatar: { width: 40, height: 40, borderRadius: 20 },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
   image: { width: '100%', height: 340 },
+  video: { width: '100%', aspectRatio: 16 / 9 },
   actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.lg },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   count: { marginLeft: 2 },

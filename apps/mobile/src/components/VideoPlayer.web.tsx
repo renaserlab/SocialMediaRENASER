@@ -41,6 +41,23 @@ export function VideoPlayer({
   // el atributo poster del DOM no. Lo pintamos debajo del video.
   const posterUri = typeof poster === 'number' ? undefined : (poster as { uri?: string })?.uri;
 
+  /**
+   * Primer fotograma como portada.
+   *
+   * Con `preload="metadata"` el navegador descarga la duracion y las medidas,
+   * pero NO pinta ningun fotograma: el hueco queda negro hasta que alguien
+   * pulsa play, y en el muro parece que el video esta roto o vacio.
+   *
+   * El fragmento `#t=0.001` le pide que se situe en ese instante, y al hacerlo
+   * dibuja ese fotograma. Es la forma habitual de conseguir una portada sin
+   * generar imagenes aparte ni guardarlas en el servidor.
+   *
+   * Se anade solo si la URL no traia ya un fragmento, para no pisarlo. Las
+   * firmadas de Supabase llevan sus parametros en la query (`?token=`), asi que
+   * no estorba.
+   */
+  const src = uri && !uri.includes('#') ? `${uri}#t=0.001` : uri;
+
   return (
     <View style={[styles.wrap, style]}>
       {poster ? (
@@ -48,7 +65,7 @@ export function VideoPlayer({
       ) : null}
       <video
         ref={ref}
-        src={uri}
+        src={src}
         poster={posterUri}
         controls={nativeControls}
         autoPlay={autoPlay}
@@ -77,5 +94,7 @@ export function VideoPlayer({
 }
 
 const styles = StyleSheet.create({
-  wrap: { overflow: 'hidden', backgroundColor: media.background },
+  // Gris muy oscuro en vez de negro puro: mientras el fotograma llega, un
+  // rectangulo negro se lee como un hueco roto; este se lee como algo cargando.
+  wrap: { overflow: 'hidden', backgroundColor: '#1c1c1c' },
 });
