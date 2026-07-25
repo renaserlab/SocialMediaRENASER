@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.renaser.universo",
+      "bundleIdentifier": "com.renaser.app",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Z utiliza el micrófono para salas en vivo y mensajes de audio.",
         "NSCameraUsageDescription": "Z utiliza la cámara para crear publicaciones y participar en salas en vivo.",
@@ -26,7 +26,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.renaser.universo",
+      "package": "com.renaser.app",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": true,
       "permissions": [

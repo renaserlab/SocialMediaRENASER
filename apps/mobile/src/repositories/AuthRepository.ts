@@ -92,7 +92,8 @@ export const AuthRepository = {
    * Web: Supabase redirige la pagina entera y la sesion se recoge al volver
    * (por eso `detectSessionInUrl` esta activo en web).
    * Nativo: se abre un navegador seguro del sistema y, al volver al esquema
-   * `renaser://`, se leen los tokens de la URL y se establece la sesion.
+   * `z://` (el `scheme` de app.json), se leen los tokens de la URL y se
+   * establece la sesion.
    */
   async signInWithProvider(provider: OAuthProvider): Promise<void> {
     const client = requireClient();
@@ -172,6 +173,10 @@ export const AuthRepository = {
    *
    * `redirectTo` debe estar dado de alta en Supabase (Authentication -> URL
    * Configuration -> Redirect URLs) o el enlace lleva al sitio por defecto.
+   *
+   * En movil sale del `scheme` de app.json, hoy `z`, de modo que hay que tener
+   * registrado `z://reset-password`. Si se cambia el scheme, hay que anadir el
+   * nuevo alli o los correos de recuperacion dejan de abrir la aplicacion.
    */
   async requestPasswordReset(email: string): Promise<void> {
     const client = requireClient();
