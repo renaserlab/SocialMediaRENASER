@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import type { NotificationItem } from '@/mappers/notificationMapper';
@@ -27,6 +28,7 @@ export function NotificationsScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
 
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
@@ -58,7 +60,8 @@ export function NotificationsScreen() {
   };
 
   const load = useCallback(() => {
-    if (!supabaseEnabled) {
+    // Igual que en Mensajes: sin sesion no hay actividad que consultar.
+    if (!supabaseEnabled || !signedIn) {
       setItems(demoNotifications);
       setStatus('idle');
       return;
@@ -72,7 +75,7 @@ export function NotificationsScreen() {
         NotificationRepository.markAllRead().catch(() => {});
       })
       .catch(() => setStatus('error'));
-  }, [supabaseEnabled]);
+  }, [supabaseEnabled, signedIn]);
 
   useFocusEffect(
     useCallback(() => {
@@ -94,6 +97,13 @@ export function NotificationsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Notificaciones" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      {supabaseEnabled && !signedIn ? (
+        <SignedOutNotice
+          icon="bell"
+          title="Aquí verás tu actividad"
+          description="Crea tu cuenta para saber quién te sigue, comenta o reacciona a lo tuyo."
+        />
+      ) : (
       <StateView
         state={uiState}
         onRetry={load}
@@ -156,6 +166,7 @@ export function NotificationsScreen() {
           )}
         />
       </StateView>
+      )}
     </View>
   );
 }

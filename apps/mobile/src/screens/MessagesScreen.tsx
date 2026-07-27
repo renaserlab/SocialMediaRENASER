@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { Input } from '@/components/Input';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
@@ -19,6 +20,7 @@ export function MessagesScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
   const demoConversations = useAppStore((state) => state.conversations);
 
   const [searchText, setSearchText] = useState('');
@@ -27,7 +29,9 @@ export function MessagesScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(() => {
-    if (!supabaseEnabled) {
+    // Sin sesion no se pide nada: las conversaciones son de alguien y el
+    // servidor responderia que no esta autorizado.
+    if (!supabaseEnabled || !signedIn) {
       setStatus('idle');
       return;
     }
@@ -38,7 +42,7 @@ export function MessagesScreen() {
         setStatus('idle');
       })
       .catch(() => setStatus('error'));
-  }, [supabaseEnabled]);
+  }, [supabaseEnabled, signedIn]);
 
   useFocusEffect(
     useCallback(() => {
@@ -73,9 +77,16 @@ export function MessagesScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
         title="MENSAJES"
-        rightIcon="edit"
+        rightIcon={signedIn ? 'edit' : undefined}
         onRightPress={() => {}}
       />
+      {supabaseEnabled && !signedIn ? (
+        <SignedOutNotice
+          icon="message-square"
+          title="Tus mensajes te esperan"
+          description="Crea tu cuenta para escribir a otras personas y recibir sus respuestas."
+        />
+      ) : (
       <FlashList
         data={uiState === 'content' ? filteredConversations : []}
         keyExtractor={(item: Conversation) => item.id}
@@ -157,6 +168,7 @@ export function MessagesScreen() {
               </Pressable>
         )}
       />
+      )}
     </View>
   );
 }
