@@ -8,6 +8,7 @@ import { Feather } from '@expo/vector-icons';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
+import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
 
 /**
@@ -61,7 +62,7 @@ export function ShortVideoItem({ short, active, height, muted, onToggleMuted, on
   };
 
   return (
-    <View style={[styles.container, { height }]}>
+    <View style={[styles.container, snapToPage, { height }]}>
       <VideoPlayer
         uri={short.uri}
         style={StyleSheet.absoluteFill}

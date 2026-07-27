@@ -87,7 +87,17 @@ export function DoubleTapLike({ children, onDoubleTap, onSingleTap, style }: Dou
   const gesture = Gesture.Exclusive(doubleTap, singleTap);
 
   return (
-    <GestureDetector gesture={gesture}>
+    /*
+      `touchAction` es solo para navegador. Sin ella, la libreria de gestos
+      marca la foto con «yo me encargo de todo lo que pase aqui» y el navegador
+      deja de desplazar la pagina: en el movil la lista solo se movia si el
+      dedo caia en un hueco entre fotos, nunca sobre una.
+
+      `pan-y` reparte el trabajo: el desplazamiento vertical sigue siendo del
+      navegador y aqui solo se escuchan los toques. Un toque no desplaza, asi
+      que ninguno de los dos gestos le quita nada al otro.
+    */
+    <GestureDetector gesture={gesture} touchAction="pan-y">
       <View style={style}>
         {children}
         {burst > 0 ? <HeartBurst key={burst} reduceMotion={reduceMotion} /> : null}
