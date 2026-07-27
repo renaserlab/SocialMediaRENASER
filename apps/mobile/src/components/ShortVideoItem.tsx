@@ -57,6 +57,15 @@ function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onFor
     });
   };
 
+  /*
+    Ir al perfil de quien publica. Lo comparten la foto y el nombre: son la
+    misma intencion y separarlas en dos sitios acaba con uno de los dos sin
+    hacer nada, que es justo lo que pasaba con el nombre.
+  */
+  const openProfile = () => {
+    if (short.authorId) router.push(`/profile/${short.authorId}` as never);
+  };
+
   const onShare = () => {
     Share.share({ message: `Mira este short de ${short.author} en Renaser Social Media.` }).catch(() => {});
   };
@@ -80,10 +89,11 @@ function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onFor
 
       <View style={styles.sidebar}>
         <Pressable
-          onPress={() => short.authorId && router.push(`/profile/${short.authorId}` as never)}
+          onPress={openProfile}
+          disabled={!short.authorId}
           style={styles.sidebarItem}
           accessibilityRole="button"
-          accessibilityLabel={`Perfil de ${short.author}`}
+          accessibilityLabel={`Ver perfil de ${short.author}`}
         >
           <ExpoImage source={short.avatarUrl ? { uri: short.avatarUrl } : assets.avatar} style={styles.avatar} contentFit="cover" />
         </Pressable>
@@ -134,7 +144,24 @@ function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onFor
       </View>
 
       <View style={styles.bottomInfo}>
-        <Text style={[styles.author, { color: media.text }]}>{short.author}</Text>
+        {/*
+          El nombre lleva al perfil, igual que la foto: es lo que se espera al
+          leerlo y era el gesto natural que no respondia.
+
+          `alignSelf` lo cine al ancho del texto para que el hueco vacio de al
+          lado no navegue tambien, y el `hitSlop` compensa que una linea de
+          texto es mas fina que el dedo de nadie.
+        */}
+        <Pressable
+          onPress={openProfile}
+          disabled={!short.authorId}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.authorButton}
+          accessibilityRole="button"
+          accessibilityLabel={`Ver perfil de ${short.author}`}
+        >
+          <Text style={[styles.author, { color: media.text }]}>{short.author}</Text>
+        </Pressable>
         <Text style={[styles.caption, { color: media.text }]} numberOfLines={2}>
           {short.caption}
         </Text>
@@ -153,6 +180,7 @@ const styles = StyleSheet.create({
   soundButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, marginTop: spacing.sm },
   sidebarLabel: { fontSize: 12, fontWeight: '600', marginTop: spacing.xs },
   bottomInfo: { position: 'absolute', left: spacing.lg, right: 80, bottom: 60, zIndex: 10, gap: spacing.xs },
+  authorButton: { alignSelf: 'flex-start' },
   author: { fontSize: 16, fontWeight: '700' },
   caption: { fontSize: 13, lineHeight: 18 },
 });
