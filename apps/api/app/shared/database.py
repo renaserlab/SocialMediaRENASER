@@ -51,6 +51,7 @@ async def create_all_dev() -> None:
     from app.modules.learning import models as _learning  # noqa: F401
     from app.modules.messaging import models as _messaging  # noqa: F401
     from app.modules.moderation import models as _moderation  # noqa: F401
+    from app.modules.notifications import device_tokens as _device_tokens  # noqa: F401
     from app.modules.notifications import models as _notifications  # noqa: F401
     from app.modules.profiles import models as _profiles  # noqa: F401
     from app.modules.social_graph import models as _social  # noqa: F401

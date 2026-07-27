@@ -9,6 +9,7 @@ import {
 } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { setAuthTokenProvider, ApiError } from '@/services/api';
+import { registerForPush, unregisterPush } from '@/services/notifications';
 import { clearSignedUrlCache } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import type { UserProfile } from '@/types';
@@ -101,6 +102,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           // Mismo criterio que arriba: la sesion decide, el perfil acompana.
           set({ status: 'authenticated' });
           void get().refreshProfile();
+          // El dispositivo se registra al iniciar sesion, no al arrancar la
+          // app: el permiso se pide cuando ya tiene sentido para quien la usa.
+          // Si falla (Expo Go, emulador, permiso denegado) devuelve null y no
+          // pasa nada mas: la app funciona igual, sin avisos en el telefono.
+          void registerForPush();
         } else {
           useAppStore.getState().setUser(null);
           set({ status: 'anonymous' });
@@ -187,6 +193,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async signOut() {
+    // ANTES de cerrar: dar de baja el dispositivo necesita la sesion viva.
+    // Sin esto, quien cierra sesion en un telefono compartido seguiria
+    // recibiendo los avisos de su cuenta en un aparato que ya no usa.
+    await unregisterPush().catch(() => {});
     await AuthRepository.signOut();
     // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
     clearSignedUrlCache();

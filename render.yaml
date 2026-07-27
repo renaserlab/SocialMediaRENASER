@@ -1,5 +1,5 @@
-# Blueprint de Render para el backend FastAPI (RENASER).
-# En Render: New > Blueprint > conecta este repo > usa la rama Edson.
+# Blueprint de Render para el backend FastAPI (Z).
+# En Render: New > Blueprint > conecta este repo > usa la rama main.
 # Los valores marcados como sync:false se configuran en el dashboard (secretos).
 
 services:
@@ -7,7 +7,15 @@ services:
     name: renaser-api
     runtime: docker
     repo: https://github.com/renaserlab/SocialMediaRENASER
-    branch: Edson
+    # Despliega desde `main`, la misma rama de la que Vercel publica la web.
+    #
+    # Antes escuchaba `Edson`. Eso ataba el backend de produccion a la rama de
+    # trabajo de una persona: cualquier cosa a medias en esa rama salia al
+    # servidor, y a la vez lo que ya estaba aprobado en `main` no llegaba nunca.
+    # Con las dos partes del producto saliendo de `main`, la web y la API van
+    # siempre a la par y hay un solo sitio que mirar para saber que esta
+    # publicado.
+    branch: main
     rootDir: apps/api
     dockerfilePath: ./Dockerfile
     plan: free
@@ -18,6 +26,11 @@ services:
         value: RENASER Social Media API
       - key: ENVIRONMENT
         value: production
+      # El comodin NO abre la API: en produccion `cors_origin_list` lo descarta
+      # y usa los dominios propios (DEFAULT_PRODUCTION_ORIGINS). Se deja asi
+      # para que en local siga siendo permisivo. Al tener dominio propio, hay
+      # que ponerlo aqui separado por comas: esa lista sustituye a la de
+      # por defecto.
       - key: CORS_ORIGINS
         value: "*"
       - key: SUPABASE_JWT_ALGORITHM

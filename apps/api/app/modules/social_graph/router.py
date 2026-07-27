@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.modules.notifications.push import send_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.profiles.schemas import ProfileSummary
@@ -186,6 +187,15 @@ async def follow_profile(
             db, user_id=profile_id, actor_id=current_user.id, type="follow"
         )
         await db.commit()
+        # Despues del commit: un aviso de algo que no se guardo seria peor que
+        # no avisar.
+        await send_push(
+            db,
+            user_id=profile_id,
+            notification_type="follow",
+            actor_name=current_user.full_name,
+            data={"type": "follow", "profileId": current_user.id},
+        )
     return {"following": True, "followers_count": await _followers_count(db, profile_id)}
 
 

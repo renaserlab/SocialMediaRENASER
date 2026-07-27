@@ -82,6 +82,12 @@
           "cameraPermission": "RENASER utiliza la cámara para crear publicaciones y participar en salas en vivo."
         }
       ],
+      [
+        "expo-notifications",
+        {
+          "color": "#000000"
+        }
+      ],
       "expo-font",
       "expo-video",
       "react-native-compressor",
