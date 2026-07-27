@@ -9,6 +9,7 @@ import { DELETE_ACCOUNT_URL } from '@/config/legal';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
+import { notifyLocally, requestNotificationPermission } from '@/services/notifications';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
@@ -74,6 +75,28 @@ export function SettingsScreen() {
         'Inténtalo de nuevo en unos momentos. Tu cuenta sigue activa.',
       );
     }
+  };
+
+  /**
+   * Lanza un aviso de prueba en este mismo telefono.
+   *
+   * Es una notificacion LOCAL, asi que suena y se ve igual que la de verdad
+   * pero no necesita servidor. Sirve para dos cosas: comprobar que el permiso
+   * esta concedido, y oir el sonido en Expo Go, donde el push remoto no llega.
+   */
+  const testNotification = async () => {
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      notify(
+        'Permiso desactivado',
+        'Activa las notificaciones de Z en los ajustes del teléfono para recibir avisos.',
+      );
+      return;
+    }
+    await notifyLocally(
+      'Así se verá',
+      'Cuando alguien reaccione, comente o te siga, recibirás un aviso como este.',
+    );
   };
 
   const handleReset = async () => {
@@ -199,6 +222,15 @@ export function SettingsScreen() {
             onPress={() => openLegal(DELETE_ACCOUNT_URL)}
           />
         ) : null}
+
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Notificaciones</Text>
+        <ListRow
+          title="Probar una notificación"
+          subtitle="Comprueba el sonido y el aviso en este teléfono"
+          leftIcon="bell"
+          rightIcon="chevron-right"
+          onPress={() => void testNotification()}
+        />
 
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
         <ListRow

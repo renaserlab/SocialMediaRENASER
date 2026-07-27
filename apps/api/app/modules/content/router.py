@@ -23,6 +23,7 @@ from app.modules.content.schemas import (
     PostUpdate,
     PostRead,
 )
+from app.modules.notifications.push import send_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import Follow
@@ -386,6 +387,15 @@ async def like_post(
             entity_id=post_id,
         )
         await db.commit()
+        # El push va DESPUES del commit: si la transaccion fallara, no puede
+        # haberse avisado ya de algo que no llego a ocurrir.
+        await send_push(
+            db,
+            user_id=post.author_id,
+            notification_type="like",
+            actor_name=current_user.full_name,
+            data={"type": "like", "postId": post_id},
+        )
     return {"liked": True, "likes_count": await _likes_count(db, post_id)}
 
 
@@ -498,6 +508,14 @@ async def create_comment(
         entity_id=post_id,
     )
     await db.commit()
+    # Despues del commit, por el mismo motivo que en el "me gusta".
+    await send_push(
+        db,
+        user_id=post.author_id,
+        notification_type="comment",
+        actor_name=current_user.full_name,
+        data={"type": "comment", "postId": post_id},
+    )
     await db.refresh(comment)
 
     profile = await db.get(Profile, current_user.id)
