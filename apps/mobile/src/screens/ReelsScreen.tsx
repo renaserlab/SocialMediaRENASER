@@ -75,6 +75,15 @@ export function ReelsScreen() {
     },
   ).current;
 
+  /*
+    Los manejadores se crean una sola vez. Si se escribieran dentro del render
+    de cada fila serian funciones nuevas en cada pasada y `ShortVideoItem`
+    volveria a dibujarse aunque no hubiera cambiado nada suyo, que es
+    justamente lo que se quiere evitar mientras el dedo desplaza la lista.
+  */
+  const toggleMuted = useCallback(() => setMuted((previous) => !previous), []);
+  const forceMuted = useCallback(() => setMuted(true), []);
+
   const close = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/home');
@@ -91,11 +100,15 @@ export function ReelsScreen() {
             active={index === activeIndex}
             height={height}
             muted={muted}
-            onToggleMuted={() => setMuted((previous) => !previous)}
-            onForcedMute={() => setMuted(true)}
+            onToggleMuted={toggleMuted}
+            onForcedMute={forceMuted}
           />
         )}
         pagingEnabled
+        // El siguiente video se prepara con una pantalla de antelacion: si se
+        // montara justo al llegar, el salto se veria en blanco un instante y
+        // se percibe como un tiron.
+        drawDistance={height}
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}

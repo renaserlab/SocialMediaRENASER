@@ -16,8 +16,18 @@ import type { ViewStyle } from 'react-native';
  * falta para que el gesto siempre acabe en uno entero. De paso, un simple
  * toque no mueve nada: sin desplazamiento no hay nada que anclar.
  *
- * `scrollSnapAlign` es propiedad del navegador y no existe en los tipos de
- * React Native, de ahi la conversion; en movil se usa el archivo hermano, que
- * no aplica nada.
+ * `scrollSnapStop: 'always'` es lo que impide saltarse videos. Sin ella, un
+ * arrastre fuerte conserva su impulso, recorre varias pantallas y se detiene
+ * en la que le pille al frenar: quien queria pasar al siguiente se encontraba
+ * dos o tres mas alla, sin saber que se habia perdido. Con ella el navegador
+ * esta obligado a parar en cada video, asi que un gesto siempre avanza uno,
+ * fuerte o suave.
+ *
+ * Son propiedades del navegador y no existen en los tipos de React Native, de
+ * ahi la conversion; en movil se usa el archivo hermano, que no aplica nada
+ * porque alli la lista ya pagina por su cuenta.
  */
-export const snapToPage = { scrollSnapAlign: 'start' } as unknown as ViewStyle;
+export const snapToPage = {
+  scrollSnapAlign: 'start',
+  scrollSnapStop: 'always',
+} as unknown as ViewStyle;

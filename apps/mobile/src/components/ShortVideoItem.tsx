@@ -44,7 +44,7 @@ type Props = {
   onForcedMute: () => void;
 };
 
-export function ShortVideoItem({ short, active, height, muted, onToggleMuted, onForcedMute }: Props) {
+function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onForcedMute }: Props) {
   const router = useRouter();
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(short.likes);
@@ -156,3 +156,13 @@ const styles = StyleSheet.create({
   author: { fontSize: 16, fontWeight: '700' },
   caption: { fontSize: 13, lineHeight: 18 },
 });
+
+/**
+ * Solo se vuelve a dibujar el video cuyo estado ha cambiado.
+ *
+ * Al pasar de uno a otro cambia el indice activo, y sin esto se redibujaban
+ * TODOS los videos montados —cada uno con su reproductor— justo mientras el
+ * dedo esta desplazando la lista. Ese trabajo de mas en mitad del gesto es lo
+ * que se nota como un desplazamiento acartonado.
+ */
+export const ShortVideoItem = React.memo(ShortVideoItemBase);
