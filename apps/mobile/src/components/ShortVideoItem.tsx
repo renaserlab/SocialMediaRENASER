@@ -33,9 +33,17 @@ type Props = {
   /** Solo el item visible reproduce (autoplay por viewport). */
   active: boolean;
   height: number;
+  /**
+   * El sonido se decide una vez para todo el feed, no video a video: si cada
+   * uno recordase el suyo, bajar la lista seria un sobresalto continuo.
+   */
+  muted: boolean;
+  onToggleMuted: () => void;
+  /** El navegador obligo a silenciar para poder arrancar. */
+  onForcedMute: () => void;
 };
 
-export function ShortVideoItem({ short, active, height }: Props) {
+export function ShortVideoItem({ short, active, height, muted, onToggleMuted, onForcedMute }: Props) {
   const router = useRouter();
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(short.likes);
@@ -59,9 +67,13 @@ export function ShortVideoItem({ short, active, height }: Props) {
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         loop
-        muted
+        muted={muted}
         nativeControls={false}
         active={active}
+        // Controles propios: un toque pausa o reanuda y abajo hay una barra
+        // arrastrable. Los del sistema taparian el video con su botonera.
+        shortsControls
+        onMutedChange={onForcedMute}
       />
       <LinearGradient colors={['transparent', media.overlay]} style={styles.bottomScrim} pointerEvents="none" />
 
@@ -99,6 +111,25 @@ export function ShortVideoItem({ short, active, height }: Props) {
         <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel="Compartir">
           <Feather name="share-2" size={28} color={media.text} />
         </Pressable>
+
+        {/*
+          El sonido va al final y aparte del resto. Arriba tapaba la foto de
+          quien publica, y ademas no es una accion sobre el video como el resto
+          de la columna, sino un ajuste de como se reproduce: el circulo y la
+          separacion lo distinguen de un vistazo.
+
+          El estado lo lleva el icono, no un color: tachado es silencio, ondas
+          es audio.
+        */}
+        <Pressable
+          onPress={onToggleMuted}
+          style={[styles.sidebarItem, styles.soundButton, { backgroundColor: media.overlay, borderColor: media.border }]}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: !muted }}
+          accessibilityLabel={muted ? 'Activar el sonido' : 'Silenciar'}
+        >
+          <Feather name={muted ? 'volume-x' : 'volume-2'} size={22} color={media.text} />
+        </Pressable>
       </View>
 
       <View style={styles.bottomInfo}>
@@ -114,9 +145,11 @@ export function ShortVideoItem({ short, active, height }: Props) {
 const styles = StyleSheet.create({
   container: { width: '100%', backgroundColor: media.background },
   bottomScrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '40%' },
-  sidebar: { position: 'absolute', right: spacing.md, bottom: 140, alignItems: 'center', gap: spacing.lg, zIndex: 10 },
+  sidebar: { position: 'absolute', right: spacing.md, bottom: 140, alignItems: 'center', gap: spacing.xl, zIndex: 10 },
   sidebarItem: { alignItems: 'center', justifyContent: 'center', minWidth: 44, minHeight: 44 },
-  avatar: { width: 40, height: 40, borderRadius: 20 },
+  avatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: media.text },
+  // Circulo de 40 con borde: se lee como un ajuste, no como una accion mas.
+  soundButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, marginTop: spacing.sm },
   sidebarLabel: { fontSize: 12, fontWeight: '600', marginTop: spacing.xs },
   bottomInfo: { position: 'absolute', left: spacing.lg, right: 80, bottom: 60, zIndex: 10, gap: spacing.xs },
   author: { fontSize: 16, fontWeight: '700' },
