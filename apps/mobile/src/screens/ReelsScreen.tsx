@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
+import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -17,6 +18,19 @@ export function ReelsScreen() {
   const { height } = useWindowDimensions();
   const [activeIndex, setActiveIndex] = useState(0);
   const currentUserId = useAppStore((state) => state.user?.id);
+
+  /*
+    Los shorts suenan. El silencio se decide para todo el feed y arranca
+    apagado, como en el resto de aplicaciones de video vertical.
+  */
+  const [muted, setMuted] = useState(false);
+
+  /*
+    Prepara la sesion de audio del sistema. Sin esto, en un iPhone con el
+    interruptor de silencio puesto el video se ve pero no se oye, y parece que
+    el sonido siga sin funcionar.
+  */
+  useBackgroundAudio();
 
   // Reels = las publicaciones de video del feed. Antes era una lista fija de
   // shorts inventados con videos de ejemplo.
@@ -72,7 +86,14 @@ export function ReelsScreen() {
         data={reels}
         keyExtractor={(item: ReelItem) => item.id}
         renderItem={({ item, index }: { item: ReelItem; index: number }) => (
-          <ShortVideoItem short={item} active={index === activeIndex} height={height} />
+          <ShortVideoItem
+            short={item}
+            active={index === activeIndex}
+            height={height}
+            muted={muted}
+            onToggleMuted={() => setMuted((previous) => !previous)}
+            onForcedMute={() => setMuted(true)}
+          />
         )}
         pagingEnabled
         showsVerticalScrollIndicator={false}
