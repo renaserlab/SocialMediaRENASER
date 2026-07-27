@@ -38,6 +38,7 @@ export function HomeScreen() {
   const feedHasMore = useAppStore((state) => state.feedHasMore);
   const feedLoadingMore = useAppStore((state) => state.feedLoadingMore);
   const loadFeed = useAppStore((state) => state.loadFeed);
+  const feedError = useAppStore((state) => state.feedError);
   const loadMoreFeed = useAppStore((state) => state.loadMoreFeed);
 
   // Circulo destacado real, para el contador y el enlace de la tarjeta.
@@ -276,7 +277,10 @@ export function HomeScreen() {
       </View>
     </View>
   ) : feedStatus === 'error' ? (
-    <StateView state="error" onRetry={() => void loadFeed()} />
+    // Se pasa el motivo real: si el telefono esta sin cobertura, decirlo evita
+    // que se lea como un fallo de la aplicacion y reintentos que no van a
+    // funcionar hasta recuperar la conexion.
+    <StateView state="error" description={feedError ?? undefined} onRetry={() => void loadFeed()} />
   ) : (
     <StateView state="empty" title={t('home.emptyTitle')} description={t('home.emptyBody')} />
   );

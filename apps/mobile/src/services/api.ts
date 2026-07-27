@@ -64,7 +64,23 @@ export async function apiRequest<T>(
     }
   }
 
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers: finalHeaders });
+  /*
+    Un fallo de red no es lo mismo que un error del servidor, y conviene no
+    confundirlos: si el telefono no tiene cobertura, `fetch` lanza sin llegar a
+    responder nada. Sin este envoltorio salia un fallo tecnico sin capturar, y
+    la pantalla mostraba «No pudimos cargar la informacion», que no dice que el
+    problema esta en la conexion y no en la aplicacion.
+  */
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...init, headers: finalHeaders });
+  } catch {
+    throw new ApiError(
+      0,
+      'network_error',
+      'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
+    );
+  }
 
   if (!response.ok) {
     throw await parseError(response);
