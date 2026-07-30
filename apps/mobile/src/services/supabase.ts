@@ -1,5 +1,5 @@
 import 'react-native-url-polyfill/auto';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -24,3 +24,27 @@ export const isSupabaseConfigured = Boolean(supabase);
 
 /** URL base del proyecto; la necesita la subida reanumable (TUS). */
 export const supabaseUrl = url ?? null;
+
+/*
+  Renovacion del token ligada al ciclo de vida de la aplicacion.
+
+  `autoRefreshToken` renueva la sesion con un temporizador, y en un movil los
+  temporizadores se detienen cuando la aplicacion pasa a segundo plano. Al
+  volver despues de un rato, el token podia estar caducado y el temporizador
+  parado: todas las peticiones respondian «no autorizado» y no habia forma de
+  recuperarse sin cerrar la aplicacion y abrirla de nuevo. Es el fallo tipico
+  de «la dejo abierta, vuelvo por la tarde y ya no me carga nada».
+
+  Al volver al primer plano se reanuda la renovacion —lo que fuerza una
+  comprobacion inmediata— y al salir se detiene, para no gastar bateria
+  renovando una sesion que nadie esta usando.
+
+  En navegador no hace falta: no hay segundo plano que congele los
+  temporizadores.
+*/
+if (supabase && Platform.OS !== 'web') {
+  AppState.addEventListener('change', (estado) => {
+    if (estado === 'active') void supabase.auth.startAutoRefresh();
+    else void supabase.auth.stopAutoRefresh();
+  });
+}

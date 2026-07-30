@@ -43,14 +43,29 @@ async function parseError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, code, message, details);
 }
 
+/**
+ * Cuanto se espera como maximo por una respuesta, en milisegundos.
+ *
+ * Sin limite, una conexion mala no falla: se queda esperando. La pantalla se
+ * queda «cargando» indefinidamente, sin error y sin nada que reintentar, y da
+ * la impresion de que la aplicacion se ha colgado.
+ *
+ * Veinte segundos son holgados para una respuesta normal —incluso con el
+ * servidor recien despertado— y lo bastante cortos para no dejar a nadie
+ * mirando una pantalla vacia.
+ */
+const ESPERA_MAXIMA_MS = 20_000;
+
 export type ApiRequestOptions = RequestInit & {
   /** Si true, incluye el header Authorization con el token actual. Default true. */
   auth?: boolean;
+  /** Espera maxima propia, para operaciones que legitimamente tardan mas. */
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(
   path: string,
-  { auth = true, headers, ...init }: ApiRequestOptions = {},
+  { auth = true, headers, timeoutMs = ESPERA_MAXIMA_MS, ...init }: ApiRequestOptions = {},
 ): Promise<T> {
   const finalHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -71,15 +86,50 @@ export async function apiRequest<T>(
     la pantalla mostraba «No pudimos cargar la informacion», que no dice que el
     problema esta en la conexion y no en la aplicacion.
   */
+  const control = new AbortController();
+  const corte = setTimeout(() => control.abort(), timeoutMs);
+
+  /*
+    Si quien llama trae su propia cancelacion, se encadena a la nuestra en vez
+    de sustituirla: pasando la suya directamente al fetch, el corte por tiempo
+    se quedaria sin efecto y volveriamos a tener esperas sin fin.
+  */
+  const externa = init.signal;
+  const propagar = () => control.abort();
+  if (externa) {
+    if (externa.aborted) control.abort();
+    else externa.addEventListener('abort', propagar, { once: true });
+  }
+
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers: finalHeaders });
-  } catch {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: finalHeaders,
+      signal: control.signal,
+    });
+  } catch (fallo) {
+    // Agotar la espera y quedarse sin cobertura son cosas distintas y conviene
+    // decirlas distinto: en un caso el servidor no contesta, en el otro no hay
+    // por donde preguntar.
+    // Cancelacion pedida por quien llama (cambio de pantalla, nueva busqueda):
+    // no es un fallo que haya que contar a nadie, se deja pasar tal cual.
+    if (externa?.aborted) throw fallo;
+    if (control.signal.aborted) {
+      throw new ApiError(
+        0,
+        'timeout',
+        'El servidor está tardando demasiado en responder. Inténtalo de nuevo.',
+      );
+    }
     throw new ApiError(
       0,
       'network_error',
       'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
     );
+  } finally {
+    clearTimeout(corte);
+    externa?.removeEventListener('abort', propagar);
   }
 
   if (!response.ok) {

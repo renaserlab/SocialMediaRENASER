@@ -2,7 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
-import { Stack } from 'expo-router';
+import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -15,10 +15,23 @@ import {
   Inter_900Black,
 } from '@expo-google-fonts/inter';
 
+import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { DialogHost } from '@/components/DialogHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
+
+/**
+ * Red de seguridad para toda la aplicacion.
+ *
+ * expo-router llama a este componente cuando una pantalla falla al dibujarse.
+ * Sin el, ese fallo dejaba la aplicacion en blanco, sin explicacion y sin
+ * salida: habia que cerrarla y volver a abrirla. Al declararlo en la raiz
+ * cubre todas las rutas.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return <AppErrorFallback error={error} retry={retry} />;
+}
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 450, fade: true });

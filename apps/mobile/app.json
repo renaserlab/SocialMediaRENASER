@@ -12,9 +12,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.renaser.z",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Z utiliza el micrófono para salas en vivo y mensajes de audio.",
-        "NSCameraUsageDescription": "Z utiliza la cámara para crear publicaciones y participar en salas en vivo.",
-        "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil o portada.",
+        "NSCameraUsageDescription": "Z utiliza la cámara para hacer una foto o un vídeo y publicarlo.",
+        "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
@@ -30,7 +29,6 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": true,
       "permissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.CAMERA",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
@@ -40,7 +38,8 @@
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -70,7 +69,6 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Permite que RENASER use el micrófono.",
           "enableBackgroundPlayback": true,
           "enableBackgroundRecording": false
         }
@@ -78,8 +76,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "RENASER accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil o portada.",
-          "cameraPermission": "RENASER utiliza la cámara para crear publicaciones y participar en salas en vivo."
+          "photosPermission": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
+          "cameraPermission": "Z utiliza la cámara para hacer una foto o un vídeo y publicarlo."
         }
       ],
       [
