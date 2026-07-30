@@ -103,6 +103,10 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
                     style={StyleSheet.absoluteFill}
                     contentFit="cover"
                     cachePolicy="memory-disk"
+                    // La cuadricula reaprovecha las mismas casillas al
+                    // desplazarse; sin esta marca la miniatura anterior sigue
+                    // ocupando memoria hasta que le toca soltarse.
+                    recyclingKey={post.mediaUrl ?? post.imageKey}
                     transition={120}
                   />
                 ) : (

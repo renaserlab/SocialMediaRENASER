@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Image as RNImage, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 
@@ -43,30 +43,18 @@ export function PostImage({
   style?: object;
 }) {
   const { colors } = useAppTheme();
-  const [proporcion, setProporcion] = useState(PROPORCION_INICIAL);
-
-  useEffect(() => {
-    let vigente = true;
-    if (uri) {
-      RNImage.getSize(
-        uri,
-        (ancho, alto) => {
-          if (vigente && alto > 0) setProporcion(limitar(ancho / alto));
-        },
-        // Si no se pueden leer las medidas (sin red, enlace caducado) se queda
-        // el cuadrado: es mejor que no reservar espacio y que la lista salte.
-        () => {},
-      );
-    } else if (source) {
-      const resuelta = RNImage.resolveAssetSource(source as never);
-      if (resuelta?.width && resuelta?.height) {
-        setProporcion(limitar(resuelta.width / resuelta.height));
-      }
-    }
-    return () => {
-      vigente = false;
-    };
-  }, [uri, source]);
+  /*
+    Las medidas de una imagen que viene con la aplicacion se conocen sin
+    descargar nada, asi que se resuelven ya. Las de una foto remota llegan
+    cuando termina de cargarse.
+  */
+  const [proporcion, setProporcion] = useState(() => {
+    if (uri || !source) return PROPORCION_INICIAL;
+    const resuelta = RNImage.resolveAssetSource(source as never);
+    return resuelta?.width && resuelta?.height
+      ? limitar(resuelta.width / resuelta.height)
+      : PROPORCION_INICIAL;
+  });
 
   return (
     <View style={[styles.wrap, { aspectRatio: proporcion, backgroundColor: colors.surfaceAlt }, style]}>
@@ -74,7 +62,38 @@ export function PostImage({
         source={uri ? { uri } : source}
         contentFit="cover"
         contentPosition="center"
-        cachePolicy="memory-disk"
+        /*
+          Las medidas se leen de la imagen que YA se esta mostrando.
+
+          Antes se pedian aparte con `Image.getSize`, que en Android descarga y
+          descomprime la foto ENTERA solo para mirar cuanto mide, y despues se
+          volvia a descargar para pintarla: dos descargas y dos copias en
+          memoria por cada foto del muro.
+
+          Con fotos hechas con el movil eso no es poca cosa. Una de seis megas
+          ocupa unos cuarenta y ocho al descomprimirse, y con varias recorridas
+          la aplicacion agotaba la memoria que Android le concede y la cerraba
+          de golpe. El aviso solia aparecer al empezar a descargar un video,
+          que era lo siguiente en pedir memoria, aunque la culpa no fuera suya.
+        */
+        onLoad={({ source: cargada }) => {
+          if (cargada?.width && cargada?.height) {
+            setProporcion(limitar(cargada.width / cargada.height));
+          }
+        }}
+        /*
+          En disco, no en memoria. La foto del muro es grande y en memoria se
+          guarda descomprimida: conservar ahi todas las que se han ido
+          recorriendo es lo que agotaba el limite. Desde disco se vuelve a
+          mostrar al instante y sin volver a la red.
+        */
+        cachePolicy="disk"
+        /*
+          La lista reaprovecha las mismas filas segun se desplaza. Sin esta
+          marca la imagen anterior sigue ocupando memoria hasta que le toca
+          soltarse; con ella se libera en cuanto la fila pasa a otra foto.
+        */
+        recyclingKey={uri ?? undefined}
         transition={150}
         style={StyleSheet.absoluteFill}
       />
