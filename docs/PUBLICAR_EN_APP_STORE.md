@@ -68,16 +68,33 @@ Ver arriba. Mientras se espera, se puede avanzar con todo lo demas.
 ### Paso 2 — Apple Developer Program (1-2 dias tras tener el D-U-N-S)
 
 1. https://developer.apple.com/programs/enroll/
-2. Entrar con un **Apple ID de la empresa** (crear uno nuevo con un correo
-   corporativo; no usar el personal de nadie).
+2. Entrar con un **Apple ID de la empresa**, creado para esto y no reutilizando
+   el personal de nadie.
 3. Elegir **Company / Organization** e introducir el D-U-N-S.
 4. Pagar 99 USD/ano.
 5. Apple verifica por telefono o correo que quien solicita puede firmar en
    nombre de la empresa. **Plazo: 24-48 h**, a veces mas si llaman.
 
-> El Apple ID de la empresa conviene crearlo con un correo de tipo
-> `desarrollo@laempresa.com` y no con el de una persona concreta: si esa persona
-> se va, la cuenta se va con ella.
+### El Apple ID de la empresa
+
+Un correo de Gmail vale: Apple no exige un dominio corporativo. Lo que importa
+no es el dominio, sino **quien controla el acceso**.
+
+- Crear una cuenta NUEVA y dedicada (`zapp.desarrollo@gmail.com`), nunca la
+  personal de alguien del equipo.
+- La verificacion en dos pasos es obligatoria en Apple ID. **Si el telefono de
+  recuperacion es el movil personal de una persona, esa persona controla la
+  cuenta de hecho**, por mucho que el correo se llame "de la empresa". Es el
+  mismo problema de propiedad que se queria evitar, solo que desplazado.
+- Contrasena y codigos de recuperacion en un gestor al que acceda mas de una
+  persona de confianza.
+
+**Efecto secundario del correo generico:** en el alta como Organizacion, Apple
+comprueba que quien solicita representa a la empresa mirando el D-U-N-S, la
+documentacion legal y **el sitio web**. Con un Gmail esa verificacion suele ser
+mas lenta o pedir documentacion extra. Tener la web en un dominio propio de la
+empresa (en vez de una URL `.vercel.app`) refuerza bastante ese paso, asi que
+si se va a configurar el dominio, conviene hacerlo ANTES del alta.
 
 ### Paso 3 — Cuenta de Expo de la empresa (30 minutos, se puede hacer YA)
 
@@ -167,7 +184,9 @@ D-U-N-S** y usar la espera para el material.
 ## Lo que se puede hacer HOY, sin esperar a nadie
 
 1. Solicitar el D-U-N-S.
-2. Crear el Apple ID de la empresa con un correo corporativo.
+2. Crear el Apple ID de la empresa (Gmail dedicado sirve) y dejar la
+   verificacion en dos pasos apuntando a algo que controle la empresa, no al
+   movil personal de una persona.
 3. Conseguir acceso a la cuenta de Expo `renaser`.
 4. Preparar descripcion, subtitulo y palabras clave.
 5. Crear la cuenta de demostracion en Supabase y anotar sus credenciales.
