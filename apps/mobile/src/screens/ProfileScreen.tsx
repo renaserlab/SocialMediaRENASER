@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { afterSheetClose } from '@/lib/afterSheetClose';
 import { confirm, notify } from '@/lib/confirm';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -21,7 +22,7 @@ import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
-import { pickImage, takePhoto } from '@/services/storage';
+import { PermisoDenegadoError, pickImage, takePhoto } from '@/services/storage';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -252,15 +253,31 @@ export function ProfileScreen() {
   const applyPhoto = async (source: 'gallery' | 'camera') => {
     const kind = editingPhoto;
     if (!kind) return;
-    setEditingPhoto(null);
     const aspect: [number, number] = kind === 'avatar' ? [1, 1] : [16, 9];
     try {
+      /*
+        La hoja se queda ABIERTA mientras se elige la foto, y se cierra despues.
+
+        Cerrarla antes parecia lo natural, pero rompia el selector: iOS no deja
+        presentar una pantalla nativa mientras otra se esta cerrando, y tras el
+        primer intento el sistema quedaba en un estado del que no se recuperaba
+        —funcionaba una vez y despues ya no abria nada, sin ningun error—.
+
+        Abrir el selector ENCIMA de la hoja abierta es lo que ya hacian
+        `CreateCatalogSheet` y `CreateTestimonialSheet`, que nunca dieron
+        problemas.
+      */
       const picked = source === 'gallery' ? await pickImage({ aspect }) : await takePhoto({ aspect });
+      setEditingPhoto(null);
       if (!picked) return;
       await setProfileImage(kind, picked);
     } catch (error) {
+      // Si fallo antes de cerrar, la hoja sigue en pantalla: hay que cerrarla y
+      // esperar, o el aviso quedaria invisible bajo ella (Modal sobre Modal).
+      setEditingPhoto(null);
+      await afterSheetClose();
       notify(
-        'No se pudo cambiar la foto',
+        error instanceof PermisoDenegadoError ? 'Falta un permiso' : 'No se pudo cambiar la foto',
         error instanceof Error
           ? error.message
           : 'Revisa los permisos e inténtalo de nuevo.',

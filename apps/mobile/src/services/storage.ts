@@ -66,19 +66,58 @@ export type PickImageOptions = {
   allowsEditing?: boolean;
 };
 
+/**
+ * El permiso de fotos o de camara esta denegado.
+ *
+ * Se lanza en vez de devolver `null` porque `null` significa "la persona
+ * cancelo", y confundir ambos casos dejaba el boton sin hacer NADA: ni foto ni
+ * explicacion. En iOS el sistema solo pregunta UNA vez, asi que si se rechazo
+ * en su dia, todas las llamadas siguientes fallan calladas para siempre y la
+ * unica salida es activarlo a mano en los ajustes del telefono.
+ */
+export class PermisoDenegadoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PermisoDenegadoError';
+  }
+}
+
+const AVISO_FOTOS =
+  'Z no tiene permiso para acceder a tus fotos. Actívalo en Ajustes del ' +
+  'teléfono → Z → Fotos.';
+const AVISO_CAMARA =
+  'Z no tiene permiso para usar la cámara. Actívalo en Ajustes del ' +
+  'teléfono → Z → Cámara.';
+
+/**
+ * `aspect` solo se envia en Android.
+ *
+ * iOS lo ignora —su recorte siempre es cuadrado— pero ademas pasarlo impedia
+ * que el selector llegara a abrirse: los sitios que lo enviaban (historias,
+ * foto de perfil) no hacian nada al tocarlos, mientras que crear una
+ * publicacion, que no lo envia, funcionaba. Como en iOS no aportaba nada, se
+ * omite en vez de arrastrar el problema.
+ */
+function aspectoPorPlataforma(
+  aspect: [number, number] | undefined,
+): { aspect?: [number, number] } {
+  if (Platform.OS !== 'android' || !aspect) return {};
+  return { aspect };
+}
+
 /** Abre la galería y devuelve la imagen elegida (o null si se cancela). */
 export async function pickImage(
   options: PickImageOptions = {},
 ): Promise<PickedMedia | null> {
   const { aspect, allowsEditing = true } = options;
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) return null;
+  if (!permission.granted) throw new PermisoDenegadoError(AVISO_FOTOS);
   // `MediaTypeOptions` esta deprecado en expo-image-picker 17: se usa el array.
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     quality: 0.8,
     allowsEditing,
-    aspect,
+    ...aspectoPorPlataforma(aspect),
   });
   if (result.canceled) return null;
   const asset = result.assets[0];
@@ -96,12 +135,12 @@ export async function takePhoto(
 ): Promise<PickedMedia | null> {
   const { aspect, allowsEditing = true } = options;
   const permission = await ImagePicker.requestCameraPermissionsAsync();
-  if (!permission.granted) return null;
+  if (!permission.granted) throw new PermisoDenegadoError(AVISO_CAMARA);
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
     quality: 0.8,
     allowsEditing,
-    aspect,
+    ...aspectoPorPlataforma(aspect),
   });
   if (result.canceled) return null;
   const asset = result.assets[0];
@@ -112,7 +151,7 @@ export async function takePhoto(
 /** Abre la galería y devuelve el video elegido (o null si se cancela). */
 export async function pickVideo(maxDurationSec = 180): Promise<PickedMedia | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) return null;
+  if (!permission.granted) throw new PermisoDenegadoError(AVISO_FOTOS);
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['videos'],
     // Reduce el peso en origen: los videos de galeria pasan de 100 MB con

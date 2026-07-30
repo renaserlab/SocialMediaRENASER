@@ -8,10 +8,17 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
+import { afterSheetClose } from '@/lib/afterSheetClose';
 import { notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
-import { pickImage, pickVideo, takePhoto, uploadPostMedia } from '@/services/storage';
+import {
+  PermisoDenegadoError,
+  pickImage,
+  pickVideo,
+  takePhoto,
+  uploadPostMedia,
+} from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -75,20 +82,31 @@ export function StoriesRow() {
   };
 
   const publish = async (source: Source) => {
-    setSheetOpen(false);
     try {
+      /*
+        La hoja se queda ABIERTA mientras se elige, y se cierra despues.
+
+        Cerrarla antes rompia el selector: iOS no deja presentar una pantalla
+        nativa mientras otra se esta cerrando, y tras el primer intento quedaba
+        en un estado del que no se recuperaba —funcionaba una vez y despues ya
+        no abria nada, sin ningun error—. Abrirlo ENCIMA de la hoja es lo que
+        hacen los sitios que nunca dieron problemas.
+      */
       const picked =
         source === 'gallery-photo'
           ? await pickImage({ aspect: [9, 16] })
           : source === 'camera'
           ? await takePhoto({ aspect: [9, 16] })
           : await pickVideo(MAX_STORY_MS / 1000);
+      setSheetOpen(false);
       if (!picked) return;
 
       // `videoMaxDuration` solo limita la camara, asi que el recorte real de la
       // galeria hay que comprobarlo aqui.
       const duration = picked.durationMs ?? 0;
       if (picked.kind === 'video' && duration > MAX_STORY_MS) {
+        // La hoja acaba de cerrarse: sin esperar, el aviso saldria debajo.
+        await afterSheetClose();
         notify(
           'El video es muy largo',
           `Las historias admiten hasta ${MAX_STORY_MS / 1000} segundos. Recorta el video e inténtalo de nuevo.`,
@@ -101,8 +119,16 @@ export function StoriesRow() {
       await createStory(uploaded, picked.kind === 'video' ? Math.max(1000, duration) : PHOTO_MS);
       toast('Historia publicada');
     } catch (error) {
+      // Si fallo antes de cerrar, la hoja sigue en pantalla y taparia el aviso.
+      setSheetOpen(false);
+      await afterSheetClose();
+      // Un permiso denegado no es un fallo al publicar: no se llego ni a elegir
+      // la foto. Decirlo como "no se pudo publicar" mandaba a buscar el problema
+      // donde no estaba.
       notify(
-        'No se pudo publicar la historia',
+        error instanceof PermisoDenegadoError
+          ? 'Falta un permiso'
+          : 'No se pudo publicar la historia',
         error instanceof Error ? error.message : 'Inténtalo de nuevo.',
       );
     } finally {

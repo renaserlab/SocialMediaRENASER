@@ -49,6 +49,14 @@ el navegador (`localhost:8081`) o el iPhone con Expo Go.
   correcto: cerrar la hoja, esperar ~300 ms y despues preguntar. Para errores
   con la hoja abierta, usar `<InlineError />`. Los mensajes de exito van
   DESPUES de cerrar.
+- **Lo mismo aplica al SELECTOR DE FOTOS y a la camara**, que tambien son
+  pantallas nativas. `setSheetOpen(false)` seguido de `await pickImage()` no
+  abre nada: el Modal sigue en su animacion de salida. Y falla en silencio, sin
+  error ni pista. Fue la causa de que los botones de subir historia y de
+  cambiar la foto de perfil no hicieran nada. Usar `afterSheetClose()` de
+  `src/lib/afterSheetClose.ts` entre cerrar y abrir. Ojo: solo hace falta si se
+  CIERRA la hoja antes; dejarla abierta y abrir el selector encima funciona
+  (es lo que hacen `CreateCatalogSheet` y `CreateTestimonialSheet`).
 - **Web: cada `Pressable` es un `<button>`.** Anidar uno dentro de otro genera
   HTML invalido y rompe la hidratacion. La zona pulsable grande va DETRAS del
   contenido (`StyleSheet.absoluteFill`) con `pointerEvents="none"` en lo de
