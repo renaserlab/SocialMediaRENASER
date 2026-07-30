@@ -29,6 +29,21 @@ const SOFT_VEIL = 'rgba(0,0,0,0.18)';
 const PROGRESS_INTERVAL_SECONDS = 0.25;
 
 /**
+ * Cuanta memoria puede reservar el reproductor para adelantar la descarga.
+ *
+ * Sin limite, el reproductor decide por su cuenta y con un video largo se
+ * adelanta cuanto puede. En el muro hay varios reproductores montados a la vez,
+ * cada uno con su reserva, y ahi es donde Android corta: cuando ya no queda
+ * memoria, la aplicacion se cierra sola en mitad de una descarga.
+
+ * Treinta y dos megas dan holgura de sobra para que no se entrecorte, y unos
+ * veinte segundos por delante son mas que suficientes en un feed donde se
+ * cambia de video constantemente.
+ */
+const MAX_BUFFER_BYTES = 32 * 1024 * 1024;
+const BUFFER_SECONDS = 20;
+
+/**
  * Ejecuta una accion sobre el reproductor tolerando que ya no exista.
  *
  * `useVideoPlayer` libera el reproductor NATIVO al desmontar el componente,
@@ -76,6 +91,10 @@ export function VideoPlayer({
   const player = useVideoPlayer(uri, (p) => {
     p.loop = loop;
     p.muted = muted;
+    p.bufferOptions = {
+      maxBufferBytes: MAX_BUFFER_BYTES,
+      preferredForwardBufferDuration: BUFFER_SECONDS,
+    };
     if (shortsControls) {
       // Sin esto el reproductor no informa de su avance y la barra se quedaria
       // clavada en el minuto cero.
