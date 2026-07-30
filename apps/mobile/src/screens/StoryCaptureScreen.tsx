@@ -3,20 +3,23 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  PanResponder,
   Pressable,
   StyleSheet,
   View,
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import type { CameraType, FlashMode } from 'expo-camera';
+import type { CameraMode, CameraType, FlashMode } from 'expo-camera';
 import { Image as ExpoImage } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 
 import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
+import { describeError } from '@/lib/describeError';
 import { haptics } from '@/lib/haptics';
 import { palette, radius, spacing } from '@/theme/tokens';
 import type { PickedMedia } from '@/services/storage';
@@ -26,6 +29,43 @@ const media = palette('dark');
 
 /** Tope de una historia; coincide con el CHECK de la migracion 0003. */
 const MAX_STORY_MS = 15_000;
+
+/** A partir de aqui la pulsacion se considera larga y empieza a grabar. */
+const MANTENER_MS = 350;
+
+/**
+ * Lo que tarda el cambio de modo en llegar a la camara nativa.
+ *
+ * `mode` es una prop de React: cambiarla no es inmediato. Ademas la vista se
+ * recrea (ver `key` en CameraView), y arrancar la camara lleva su tiempo.
+ * Pedirle grabar antes de que este lista falla, que es lo que hacia que el
+ * video no funcionara nunca.
+ */
+const CAMBIO_DE_MODO_MS = 600;
+
+/* --- Medidas del anillo de grabacion --- */
+const ANILLO = 76;
+const GROSOR = 4;
+/** El radio se mide al CENTRO del trazo, o el circulo se sale del lienzo. */
+const RADIO = (ANILLO - GROSOR) / 2;
+const PERIMETRO = 2 * Math.PI * RADIO;
+
+/**
+ * Pixeles que hay que deslizar para recorrer el zoom entero.
+ *
+ * Un valor corto hace el zoom nervioso e imposible de ajustar; uno muy largo
+ * obliga a un recorrido que no cabe en la pantalla. 220 px permite llegar al
+ * maximo sin levantar el dedo y deja controlar los pasos intermedios.
+ */
+const RECORRIDO_ZOOM_PX = 220;
+
+/**
+ * `Circle` animable.
+ *
+ * `strokeDashoffset` no es una propiedad de estilo, asi que Animated no la
+ * toca a menos que el componente este envuelto asi.
+ */
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 type Props = {
   /** Se llama con lo capturado o elegido. */
@@ -62,13 +102,40 @@ export function StoryCaptureScreen({
   const [busy, setBusy] = useState(false);
 
   /**
+   * Modo de la camara. Se lleva aparte de `recording` a proposito.
+   *
+   * `recordAsync` SOLO funciona si la vista nativa ya esta en modo video, y el
+   * modo se cambia con una prop de React: hay que cambiarlo y esperar a que
+   * llegue abajo. Derivarlo de `recording` fallaba siempre, porque se pedia
+   * grabar en el mismo instante en que se pedia el cambio, cuando la camara
+   * seguia en modo foto.
+   */
+  const [mode, setMode] = useState<CameraMode>('picture');
+
+  /**
    * Distingue el toque de la pulsacion larga.
    *
    * `onLongPress` de Pressable no sirve aqui: necesitamos empezar a grabar al
    * mantener Y parar al soltar, y eso son dos eventos distintos.
    */
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** El dedo sigue sobre el disparador. */
+  const pressing = useRef(false);
+  /** La pulsacion ya se considero larga: al soltar NO se hace foto. */
+  const holdFired = useRef(false);
+  /** La grabacion llego a empezar: al soltar hay que cortarla. */
   const didRecord = useRef(false);
+
+  /**
+   * Zoom de 0 a 1, como lo espera la camara.
+   *
+   * Se guarda ademas en una `ref` porque el PanResponder se crea UNA vez y sus
+   * funciones capturarian el primer valor del estado para siempre.
+   */
+  const [zoom, setZoom] = useState(0);
+  const zoomRef = useRef(0);
+  /** Zoom al empezar el gesto; el deslizamiento suma sobre el. */
+  const zoomInicial = useRef(0);
 
   // Anillo de progreso mientras se graba.
   const progress = useRef(new Animated.Value(0)).current;
@@ -93,8 +160,8 @@ export function StoryCaptureScreen({
       if (photo?.uri) {
         onCaptured({ uri: photo.uri, kind: 'image', mimeType: 'image/jpeg', name: null });
       }
-    } catch {
-      notify('No se pudo tomar la foto', 'Inténtalo de nuevo.');
+    } catch (error) {
+      notify('No se pudo tomar la foto', describeError(error, 'Inténtalo de nuevo.'));
     } finally {
       setBusy(false);
     }
@@ -114,6 +181,19 @@ export function StoryCaptureScreen({
         return;
       }
     }
+    // La camara pasa a modo video ANTES de grabar, y se espera a que el cambio
+    // llegue a la vista nativa: `recordAsync` sobre una camara en modo foto
+    // falla siempre. Sin esta espera, grabar no funcionaba nunca.
+    setMode('video');
+    await new Promise((resolve) => setTimeout(resolve, CAMBIO_DE_MODO_MS));
+
+    // Se solto mientras cambiaba el modo: fue una pulsacion corta de mas, no
+    // una peticion de grabar.
+    if (!pressing.current) {
+      setMode('picture');
+      return;
+    }
+
     didRecord.current = true;
     setRecording(true);
     haptics.medium();
@@ -123,29 +203,67 @@ export function StoryCaptureScreen({
       easing: Easing.linear,
       useNativeDriver: false,
     }).start();
+
+    /*
+      Corte propio a los 15 s.
+
+      `maxDuration` deberia bastar, pero no siempre se respeta y grabando de
+      mas se acababa subiendo un video que el backend rechaza (la migracion
+      0003 tiene un CHECK). Este temporizador garantiza el limite pase lo que
+      pase; si la camara corta antes, se cancela en el `finally`.
+    */
+    const inicio = Date.now();
+    const corte = setTimeout(() => {
+      cameraRef.current?.stopRecording();
+    }, MAX_STORY_MS);
+
     try {
       const video = await cameraRef.current.recordAsync({
         maxDuration: MAX_STORY_MS / 1000,
       });
       if (video?.uri) {
-        onCaptured({ uri: video.uri, kind: 'video', mimeType: 'video/mp4', name: null });
+        /*
+          La duracion se mide aqui y se pasa adelante.
+
+          Sin ella el visor recibia 0 y mostraba el video UN SEGUNDO: pasaba
+          volando y parecia que la reproduccion iba acelerada. `recordAsync` no
+          devuelve la duracion, asi que se cronometra.
+        */
+        const duracion = Math.min(Date.now() - inicio, MAX_STORY_MS);
+        onCaptured({
+          uri: video.uri,
+          kind: 'video',
+          mimeType: 'video/mp4',
+          name: null,
+          durationMs: Math.max(1000, duracion),
+        });
       }
-    } catch {
-      notify('No se pudo grabar', 'Inténtalo de nuevo.');
+    } catch (error) {
+      notify('No se pudo grabar', describeError(error, 'Inténtalo de nuevo.'));
     } finally {
+      clearTimeout(corte);
+      didRecord.current = false;
       setRecording(false);
+      // El zoom no se hereda de una grabacion a la siguiente.
+      zoomRef.current = 0;
+      setZoom(0);
+      // Se vuelve a modo foto: es lo que se usa la mayor parte del tiempo.
+      setMode('picture');
       stopProgress();
     }
   }, [busy, micPermission, requestMicPermission, onCaptured, progress, stopProgress]);
 
   const onPressIn = () => {
-    didRecord.current = false;
+    pressing.current = true;
+    holdFired.current = false;
     holdTimer.current = setTimeout(() => {
+      holdFired.current = true;
       void startRecording();
-    }, 350);
+    }, MANTENER_MS);
   };
 
   const onPressOut = () => {
+    pressing.current = false;
     if (holdTimer.current) {
       clearTimeout(holdTimer.current);
       holdTimer.current = null;
@@ -155,8 +273,62 @@ export function StoryCaptureScreen({
       cameraRef.current?.stopRecording();
       return;
     }
+    /*
+      Si la pulsacion ya se considero larga no se hace foto, aunque todavia no
+      hubiera empezado a grabar: en ese hueco la camara esta cambiando a modo
+      video, y pedirle una foto ahi falla. `startRecording` ve que se solto y
+      cancela solo.
+    */
+    if (holdFired.current) return;
     void takePhoto();
   };
+
+  /**
+   * Disparador con zoom por deslizamiento, como en Instagram.
+   *
+   * Se usa `PanResponder` y no `Pressable` porque hace falta seguir el dedo
+   * MIENTRAS sigue apoyado: `Pressable` avisa de que se pulsa y de que se
+   * suelta, pero no de por donde se mueve entre medias.
+   *
+   * Subir el dedo acerca; bajarlo aleja. La grabacion no se corta al salirse
+   * del boton —eso es justo lo que hay que hacer para acercar— y solo termina
+   * al levantar el dedo o al llegar al limite de tiempo.
+   */
+  /*
+    El PanResponder se crea UNA vez, asi que capturaria las funciones del primer
+    render para siempre: se quedaria con un `micPermission` viejo y volveria a
+    pedir el permiso ya concedido. Esta ref se actualiza en cada render y el
+    gesto llama siempre a la version buena.
+  */
+  const acciones = useRef({ onPressIn, onPressOut });
+  acciones.current = { onPressIn, onPressOut };
+
+  const disparador = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      // Reclama el gesto tambien al moverse, o el dedo saliendo del boton
+      // cancelaria la pulsacion y cortaria la grabacion.
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        zoomInicial.current = zoomRef.current;
+        acciones.current.onPressIn();
+      },
+      onPanResponderMove: (_event, gesto) => {
+        // Solo mientras se graba: en una foto el deslizamiento no significa nada.
+        if (!didRecord.current) return;
+        // `dy` es negativo hacia arriba; se invierte para que subir = acercar.
+        const delta = -gesto.dy / RECORRIDO_ZOOM_PX;
+        const nuevo = Math.min(1, Math.max(0, zoomInicial.current + delta));
+        zoomRef.current = nuevo;
+        setZoom(nuevo);
+      },
+      onPanResponderRelease: () => acciones.current.onPressOut(),
+      // Si el sistema se lleva el gesto (una llamada, un aviso), se trata como
+      // soltar: mejor cerrar la grabacion que dejarla colgada.
+      onPanResponderTerminate: () => acciones.current.onPressOut(),
+    }),
+  ).current;
 
   // Sin permiso no se puede ni mostrar la vista previa: se explica y se ofrece
   // la galeria, que no necesita camara.
@@ -192,11 +364,22 @@ export function StoryCaptureScreen({
   return (
     <View style={styles.root}>
       <CameraView
+        /*
+          `key` fuerza a recrear la vista nativa al cambiar de modo.
+
+          Cambiar `mode` sobre una camara ya montada no siempre surte efecto en
+          iOS: la prop cambia en React pero la sesion de captura sigue
+          configurada para fotos, y `recordAsync` falla. Recrearla garantiza que
+          arranca en el modo correcto. Cuesta un parpadeo, que es preferible a
+          que grabar no funcione.
+        */
+        key={mode}
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing={facing}
         flash={flash}
-        mode={recording ? 'video' : 'picture'}
+        mode={mode}
+        zoom={zoom}
       />
 
       {/* Barra superior: cerrar y flash. */}
@@ -225,6 +408,20 @@ export function StoryCaptureScreen({
         </View>
       ) : null}
 
+      {/*
+        Nivel de zoom. Solo aparece cuando se esta usando: un indicador fijo en
+        1.0x seria ruido permanente. Sin el no hay forma de saber cuanto se ha
+        acercado ni si el gesto esta haciendo algo.
+      */}
+      {recording && zoom > 0.01 ? (
+        <View style={styles.zoomPill}>
+          <Feather name="search" size={13} color={media.text} />
+          <Text variant="secondary" weight="700" color={media.text}>
+            {(1 + zoom * 4).toFixed(1)}x
+          </Text>
+        </View>
+      ) : null}
+
       {/* Barra inferior: galeria, disparador y girar camara. */}
       <View style={styles.bottomBar} pointerEvents="box-none">
         <Pressable
@@ -240,37 +437,68 @@ export function StoryCaptureScreen({
           )}
         </Pressable>
 
-        <Pressable
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-          disabled={busy}
+        <View
+          {...disparador.panHandlers}
           accessibilityRole="button"
-          accessibilityLabel="Tocar para foto, mantener para vídeo"
+          accessibilityLabel="Tocar para foto, mantener para vídeo, deslizar arriba para acercar"
           style={styles.shutterHit}
         >
-          <Animated.View
-            style={[
-              styles.shutterRing,
-              {
-                borderColor: media.text,
-                transform: [{ scale: recording ? 1.15 : 1 }],
-              },
-            ]}
-          >
+          <View style={styles.shutterRing}>
+            {/*
+              Anillo de progreso.
+
+              Antes se animaba un valor que no estaba enlazado a ningun estilo,
+              asi que la grabacion avanzaba pero no se veia nada. Se dibuja con
+              un circulo SVG y `strokeDashoffset`: el trazo se va descubriendo
+              conforme baja, que es como se hace un arco de progreso.
+            */}
+            <Svg width={ANILLO} height={ANILLO} style={StyleSheet.absoluteFill}>
+              {/* Pista de fondo, siempre visible. */}
+              <Circle
+                cx={ANILLO / 2}
+                cy={ANILLO / 2}
+                r={RADIO}
+                stroke={media.textMuted}
+                strokeWidth={GROSOR}
+                fill="none"
+              />
+              {recording ? (
+                <AnimatedCircle
+                  cx={ANILLO / 2}
+                  cy={ANILLO / 2}
+                  r={RADIO}
+                  stroke={media.text}
+                  strokeWidth={GROSOR}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={PERIMETRO}
+                  strokeDashoffset={progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [PERIMETRO, 0],
+                  })}
+                  // Empieza arriba en vez de a la derecha, que es donde
+                  // arranca un circulo SVG por defecto.
+                  rotation={-90}
+                  originX={ANILLO / 2}
+                  originY={ANILLO / 2}
+                />
+              ) : null}
+            </Svg>
+
             {busy ? (
-              <ActivityIndicator color={media.background} />
+              <ActivityIndicator color={media.text} />
             ) : (
               <View
                 style={[
                   styles.shutterCore,
-                  recording
-                    ? { backgroundColor: media.text, borderRadius: radius.sm, width: 30, height: 30 }
-                    : { backgroundColor: media.text },
+                  { backgroundColor: media.text },
+                  // Cuadrado al grabar: el icono universal de "parar".
+                  recording ? { borderRadius: radius.sm, width: 28, height: 28 } : null,
                 ]}
               />
             )}
-          </Animated.View>
-        </Pressable>
+          </View>
+        </View>
 
         <Pressable
           onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))}
@@ -284,7 +512,7 @@ export function StoryCaptureScreen({
       </View>
 
       <Text variant="secondary" color={media.textMuted} style={styles.hint}>
-        Toca para una foto · Mantén para grabar
+        Toca para una foto · Mantén para grabar · Desliza para acercar
       </Text>
     </View>
   );
@@ -338,6 +566,18 @@ const styles = StyleSheet.create({
     backgroundColor: media.overlay,
   },
   recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: media.danger },
+  zoomPill: {
+    position: 'absolute',
+    bottom: 148,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: media.overlay,
+  },
   bottomBar: {
     position: 'absolute',
     bottom: 58,
@@ -361,10 +601,9 @@ const styles = StyleSheet.create({
   thumbImage: { width: '100%', height: '100%' },
   shutterHit: { alignItems: 'center', justifyContent: 'center' },
   shutterRing: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 4,
+    // El circulo lo pinta el SVG de dentro; este View solo centra el nucleo.
+    width: ANILLO,
+    height: ANILLO,
     alignItems: 'center',
     justifyContent: 'center',
   },
