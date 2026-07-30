@@ -26,7 +26,7 @@ export function ShortVideoScreen() {
   };
 
   const onShare = () => {
-    Share.share({ message: 'Mira este short de Darren Hardy en Renaser Social Media.' }).catch(() => {});
+    Share.share({ message: 'Mira este short de Darren Hardy en Z.' }).catch(() => {});
   };
 
   return (

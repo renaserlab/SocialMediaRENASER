@@ -194,7 +194,7 @@ export function SearchScreen() {
             <StateView
               state="empty"
               icon="search"
-              title="Busca en RENASER"
+              title="Busca en Z"
               description="Encuentra personas, publicaciones, cursos y eventos."
             />
           )

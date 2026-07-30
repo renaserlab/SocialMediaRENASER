@@ -67,7 +67,7 @@ function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onFor
   };
 
   const onShare = () => {
-    Share.share({ message: `Mira este short de ${short.author} en Renaser Social Media.` }).catch(() => {});
+    Share.share({ message: `Mira este short de ${short.author} en Z.` }).catch(() => {});
   };
 
   return (

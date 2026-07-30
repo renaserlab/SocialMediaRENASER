@@ -98,7 +98,7 @@ export function AudioScreen() {
 
   const onShare = () => {
     Share.share({
-      message: `Escucha "${audio?.body ?? 'Tu enfoque de esta semana'}" en Renaser Social Media.`,
+      message: `Escucha "${audio?.body ?? 'Tu enfoque de esta semana'}" en Z.`,
     }).catch(() => {});
   };
 
