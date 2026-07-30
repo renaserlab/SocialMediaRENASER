@@ -131,10 +131,19 @@ def _fotogramas(datos):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description='Coloca el indice al principio en los videos que arrancan lento.')
+    # Revisar es lo que hace por defecto. Se admite igualmente como opcion
+    # explicita: al ir a corregir algo que es de otras personas, poder escribir
+    # «revisar» y ver que pasaria antes de tocar nada da mas tranquilidad que
+    # confiar en recordar cual era el comportamiento por defecto.
+    ap.add_argument('--revisar', action='store_true',
+                    help='solo informa de cuales arrancan lento (es lo que hace por defecto)')
     ap.add_argument('--aplicar', action='store_true',
-                    help='reemplaza los videos; sin esto solo informa')
+                    help='reemplaza los videos; guarda antes una copia de cada original')
     args = ap.parse_args()
+    if args.revisar and args.aplicar:
+        sys.exit('Elige una: --revisar mira, --aplicar modifica.')
 
     url = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
     clave = os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or ''
