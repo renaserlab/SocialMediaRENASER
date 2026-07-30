@@ -37,9 +37,20 @@ type Props = {
    * atrás si la estaba mostrando en solitario).
    */
   onRemoved?: () => void;
+  /**
+   * La tarjeta esta a la vista dentro de la lista.
+   *
+   * Solo lo usa el video: al dejar de verse se pausa, para que no siga sonando
+   * ni gastando bateria despues de haberlo dejado atras. NO lo arranca al
+   * aparecer: en un muro eso seria intrusivo.
+   *
+   * Sin valor (por ejemplo en el detalle de una publicacion, donde solo hay
+   * una) el video no se pausa nunca por este motivo.
+   */
+  visible?: boolean;
 };
 
-export function PostCard({ post, onRemoved }: Props) {
+export function PostCard({ post, onRemoved, visible }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [showComments, setShowComments] = useState(false);
@@ -233,7 +244,13 @@ export function PostCard({ post, onRemoved }: Props) {
       {post.mediaType === 'video' && post.mediaUrl ? (
         // 16:9 en vez de una caja fija: la mayoria de videos son apaisados y
         // con alto fijo quedaban con franjas negras arriba y abajo.
-        <VideoPlayer uri={post.mediaUrl} style={styles.video} nativeControls contentFit="contain" />
+        <VideoPlayer
+          uri={post.mediaUrl}
+          style={styles.video}
+          nativeControls
+          contentFit="contain"
+          visible={visible}
+        />
       ) : post.mediaType === 'audio' && post.mediaUrl ? (
         <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
       ) : post.mediaUrl || post.imageKey ? (

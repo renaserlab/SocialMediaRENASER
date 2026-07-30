@@ -61,6 +61,22 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        /*
+          Congela las pestanas que no se ven.
+
+          React Navigation mantiene montada cada pestana ya visitada, asi que
+          sin esto un solo cambio del estado global re-renderiza TODAS: das un
+          "me gusta" y se recalculan las veinte tarjetas del muro aunque estes
+          en Explorar. Ese trabajo ocurre en el hilo de JavaScript, el mismo que
+          anima la transicion, y de ahi el tiron al cambiar de pestana.
+
+          Congelada, una pantalla deja de renderizar hasta que vuelve a verse.
+          Es seguro para lo que hay hoy: la cuenta atras del podcast se calcula
+          desde `Date.now()` en cada tick, no acumula, asi que al descongelarse
+          muestra el valor correcto. Ojo si algun dia se anade algo que dependa
+          de seguir contando en segundo plano.
+        */
+        freezeOnBlur: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {

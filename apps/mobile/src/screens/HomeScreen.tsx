@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
@@ -117,6 +117,31 @@ export function HomeScreen() {
       void loadMoreFeed();
     }
   }, [feedHasMore, feedLoadingMore, loadMoreFeed]);
+
+  /*
+    Publicaciones a la vista, para que un video que se queda atras deje de
+    sonar y de consumir bateria. Solo PAUSA: en un muro, arrancar un video
+    porque pasas por delante seria intrusivo y gastaria datos de quien mira.
+
+    Se guardan ids y no indices porque la lista se reordena al recargar; con
+    indices, el video que se pausa despues de un refresco no seria el mismo.
+
+    El umbral es bajo (50 %) a proposito: lo que se busca es detectar cuando
+    algo YA NO se ve, no elegir un unico protagonista como en Shorts.
+  */
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ key?: string; item?: Post }> }) => {
+      setVisibleIds(
+        new Set(
+          viewableItems
+            .map((entry) => entry.item?.id ?? entry.key)
+            .filter((id): id is string => typeof id === 'string'),
+        ),
+      );
+    },
+  ).current;
 
   const header = (
     <View>
@@ -308,9 +333,11 @@ export function HomeScreen() {
         keyExtractor={(item: Post) => item.id}
         renderItem={({ item }: { item: Post }) => (
           <View style={styles.container}>
-            <PostCard post={item} />
+            <PostCard post={item} visible={visibleIds.has(item.id)} />
           </View>
         )}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
         ListFooterComponent={

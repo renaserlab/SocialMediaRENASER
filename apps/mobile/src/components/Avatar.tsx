@@ -1,5 +1,6 @@
 import React from 'react';
-import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
+import { ImageSourcePropType, StyleSheet, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
@@ -50,7 +51,14 @@ export function Avatar({ size = 44, label, image, name }: Props) {
   return (
     <View style={{ alignItems: 'center', gap: 6 }}>
       {source ? (
-        <Image
+        /*
+          `expo-image` y no el `Image` de React Native: este componente es el
+          mas repetido de la app —sale en cada publicacion, cada comentario,
+          cada conversacion y cada lista de miembros—, y el de React Native no
+          guarda las imagenes en cache. Cada vez que una fila volvia a
+          renderizarse, la foto se descargaba otra vez.
+        */
+        <ExpoImage
           source={source}
           style={{
             width: size,
@@ -60,6 +68,10 @@ export function Avatar({ size = 44, label, image, name }: Props) {
             borderWidth: 1,
             borderColor: colors.border,
           }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          // Sin transicion el cambio es brusco; con una larga se nota lento.
+          transition={120}
         />
       ) : (
         <View

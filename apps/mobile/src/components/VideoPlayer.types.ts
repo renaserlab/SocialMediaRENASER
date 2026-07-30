@@ -18,6 +18,17 @@ export type VideoPlayerProps = {
    */
   active?: boolean;
   /**
+   * Solo PAUSA cuando el vídeo deja de verse; nunca lo arranca al aparecer.
+   *
+   * Es lo que necesita un muro, donde el vídeo lo pone la persona y empezar
+   * solo al desplazarse seria intrusivo y gastaria datos. Sin esto, un vídeo
+   * seguía sonando y decodificando después de haberlo dejado atrás.
+   *
+   * Se distingue de `active` a propósito: ese sí reproduce al entrar, que es lo
+   * que quiere Shorts.
+   */
+  visible?: boolean;
+  /**
    * Controles propios para video vertical a pantalla completa: un toque en
    * cualquier parte pausa o reanuda, y abajo aparece una barra de progreso que
    * se puede arrastrar.

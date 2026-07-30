@@ -69,6 +69,7 @@ export function VideoPlayer({
   contentFit = 'cover',
   nativeControls = true,
   active,
+  visible,
   shortsControls = false,
   controlsBottomInset = 0,
 }: VideoPlayerProps) {
@@ -101,6 +102,18 @@ export function VideoPlayer({
   useEventListener(player, 'timeUpdate', ({ currentTime }) => {
     setProgress({ currentTime, duration: readNumber(() => player.duration) });
   });
+
+  /*
+    Muro: pausar al perder de vista, sin arrancar al aparecer.
+
+    Un video que se queda atras seguia sonando y decodificando. Aqui solo se
+    pausa: empezar solo al desplazarse seria intrusivo y gastaria datos, asi que
+    quien decide reproducir sigue siendo la persona.
+  */
+  useEffect(() => {
+    if (visible === undefined || visible) return;
+    safely(() => player.pause());
+  }, [visible, player]);
 
   // Reproducción por viewport: play/pausa según `active` (feeds tipo reels).
   useEffect(() => {
