@@ -219,6 +219,22 @@ function resolveContentType(media: PickedMedia, ext: string): string {
 const MAX_UPLOAD_MB = Number(process.env.EXPO_PUBLIC_MAX_UPLOAD_MB ?? 500);
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
+/**
+ * Tope para un video que NO ha pasado por el compresor.
+ *
+ * El compresor deja un video de movil en 10-20 MB y, de paso, coloca el indice
+ * del archivo al principio, que es lo que permite empezar a verlo enseguida en
+ * vez de esperar. Cuando no esta disponible —en Expo Go o en la web— el video
+ * viaja tal cual, y ahi es donde se colaron los que hay hoy: hasta 161 MB para
+ * menos de dos minutos, a una velocidad que ninguna conexion movil sostiene y
+ * gastando 89 MB de datos por cada minuto visto a quien lo mira.
+ *
+ * Sesenta megas es holgado para un video corto ya comprimido y corta en seco
+ * los originales de camara sin tocar. Solo se aplica cuando no se ha podido
+ * comprimir: si el compresor hizo su trabajo, manda el limite general.
+ */
+const MAX_VIDEO_SIN_COMPRIMIR_BYTES = 60 * 1024 * 1024;
+
 function formatMb(bytes: number): string {
   const mb = bytes / 1024 / 1024;
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
@@ -353,10 +369,19 @@ export async function uploadPostMedia(
           : await compressImage(media.uri);
       compressed = uri !== media.uri;
     } catch {
-      // Si la compresión falla no bloqueamos la publicación: sube el original.
+      // Si la compresión falla no bloqueamos la publicación: sube el original,
+      // pero mas abajo se comprueba que no sea desmesurado.
       uri = media.uri;
     }
   }
+
+  /*
+    Un video que no ha pasado por el compresor viaja con el tamaño original y
+    con el indice al final del archivo. Se marca aqui para poder exigirle un
+    tope mas estricto: hasta ahora subia en silencio y el problema no aparecia
+    hasta que alguien intentaba verlo.
+  */
+  const videoSinComprimir = media.kind === 'video' && !compressed;
 
   // Tras comprimir el contenedor es otro (mp4/jpg), asi que el nombre original
   // ya no describe la extension real: se deduce de la ruta resultante.
@@ -375,6 +400,13 @@ export async function uploadPostMedia(
   if (local.size > MAX_UPLOAD_BYTES) {
     throw new Error(
       `El archivo pesa ${formatMb(local.size)} y el máximo son ${formatMb(MAX_UPLOAD_BYTES)}. Elige un video más corto o comprímelo antes de subirlo.`,
+    );
+  }
+  if (videoSinComprimir && local.size > MAX_VIDEO_SIN_COMPRIMIR_BYTES) {
+    throw new Error(
+      `Este vídeo pesa ${formatMb(local.size)} y no se ha podido comprimir en este dispositivo. ` +
+        `Súbelo desde la aplicación instalada, o elige uno de menos de ${formatMb(MAX_VIDEO_SIN_COMPRIMIR_BYTES)}: ` +
+        'a ese tamaño tardaría demasiado en cargar y consumiría muchos datos a quien lo vea.',
     );
   }
 
