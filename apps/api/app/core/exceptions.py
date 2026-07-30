@@ -69,6 +69,18 @@ class ValidationAppError(AppError):
     message = "Datos invalidos."
 
 
+class ServiceUnavailableError(AppError):
+    """La funcion existe pero todavia no esta configurada o disponible.
+
+    Se distingue de un 404 a proposito: 404 hace pensar que la ruta esta mal
+    escrita, cuando lo que falta es la configuracion del servicio.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+    message = "Servicio no disponible temporalmente."
+
+
 def _error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details}}
 

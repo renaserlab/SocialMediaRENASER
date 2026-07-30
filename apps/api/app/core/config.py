@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     # Opcional para verificar el emisor: https://<ref>.supabase.co/auth/v1
     supabase_jwt_issuer: str = ""
 
+    # --- Pagos ---
+    #: Portal de pagos de los cursos. APAGADO por defecto: el modulo esta
+    #: construido pero no hay pasarela elegida, y un cobro que no se completa es
+    #: motivo de rechazo en las tiendas. Encenderlo exige haber implementado un
+    #: PaymentProvider real (ver modules/payments/providers.py).
+    payments_enabled: bool = False
+
+    #: A donde vuelve el usuario despues de pagar. Es una pagina de la WEB, no
+    #: de la app: cobrar dentro de la aplicacion obliga a usar las compras
+    #: integradas de Apple y Google, con su comision.
+    payments_return_url: str = "https://social-media-renaser.vercel.app/pago"
+
     # --- CORS ---
     cors_origins: str = "*"
 
