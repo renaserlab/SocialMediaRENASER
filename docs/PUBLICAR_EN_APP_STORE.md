@@ -28,6 +28,10 @@ Nada de esto hay que volver a tocarlo:
 
 ## El camino critico: el numero D-U-N-S
 
+> **Solo aplica si la cuenta es de Organizacion.** Con cuenta Individual este
+> apartado entero se salta y se pasa directo al paso 2. Ver la comparativa al
+> final de esta seccion antes de decidir.
+
 Esto es lo primero y lo mas lento. **Empezar hoy.**
 
 Apple exige que una cuenta de **Organizacion** este respaldada por un numero
@@ -44,18 +48,36 @@ es el unico paso cuyo plazo no controlas.
 coincidan al caracter con lo registrado. Merece la pena tener a mano la
 escritura o el RUC antes de rellenarlo.
 
-### Individual vs Organizacion
+### Individual vs Organizacion — la decision que marca el plazo
 
 | | Individual | Organizacion |
 |---|---|---|
-| Vendedor visible en la tienda | Tu nombre personal | **El nombre de la empresa** |
-| D-U-N-S | No hace falta | **Obligatorio** |
-| Alta | 24-48 h | 1-3 semanas en total |
-| Propiedad de la app | De la persona | **De la sociedad** |
+| D-U-N-S | **No hace falta** | Obligatorio (5-14 dias habiles) |
+| Alta | **24-48 h** | +1-2 dias tras el D-U-N-S |
+| **Hasta poder subir** | **2-3 dias** | **2-4 semanas** |
+| Vendedor visible en la tienda | Nombre personal | Nombre de la empresa |
+| Propiedad legal de la app | De la persona | De la sociedad |
 
-Para el caso de Z, con la app a nombre de la empresa, **Organizacion es la
-correcta** aunque tarde mas. Migrar una app de una cuenta personal a una de
-empresa despues es un tramite aparte y lento.
+**El D-U-N-S es lo unico que convierte esto en un proceso de semanas.** Si la
+cuenta va a ser Individual, todo el camino critico desaparece.
+
+### Publicar como Individual y transferir despues
+
+Es una estrategia valida y la mas rapida: se publica ya a nombre personal y,
+cuando la empresa tenga su cuenta de Organizacion, se usa **App Transfer** para
+mover la app.
+
+Condiciones a tener en cuenta antes de contar con ello:
+
+- La app debe estar **ya publicada**; no se transfiere algo que sigue en
+  revision.
+- La cuenta que **recibe** debe estar dada de alta y al corriente.
+- No todo viaja: los probadores de TestFlight, por ejemplo, se pierden.
+- Las reglas de Apple sobre transferencias cambian. **Verificar en su
+  documentacion vigente** antes de apoyar una decision de negocio en esto.
+
+El riesgo es bajo y el ahorro es de semanas, pero conviene decidirlo a
+conciencia y no por defecto.
 
 ---
 
@@ -167,17 +189,18 @@ y reenviar no vuelve a la cola desde cero: suele revisarse mas rapido.
 
 ## Cuanto se tarda en total
 
-| Fase | Plazo |
-|---|---|
-| D-U-N-S | 5-14 dias habiles |
-| Alta en el Developer Program | 1-2 dias |
-| Material y capturas | 1 dia de trabajo |
-| Compilar y enviar | medio dia |
-| Revision de Apple | 1-3 dias |
-| **Total realista** | **2 a 4 semanas** |
+| Fase | Individual | Organizacion |
+|---|---|---|
+| D-U-N-S | — | 5-14 dias habiles |
+| Alta en el Developer Program | 1-2 dias | 1-2 dias |
+| Material y capturas | 1 dia de trabajo | 1 dia de trabajo |
+| Compilar y enviar | medio dia | medio dia |
+| Revision de Apple | 1-3 dias | 1-3 dias |
+| **Total realista** | **menos de 1 semana** | **2 a 4 semanas** |
 
-La mayor parte es espera, no trabajo. Por eso conviene **empezar hoy por el
-D-U-N-S** y usar la espera para el material.
+La mayor parte es espera, no trabajo. Con cuenta de Organizacion conviene
+**empezar el primer dia por el D-U-N-S** y usar la espera para el material; con
+cuenta Individual se puede ir de corrido.
 
 ---
 
