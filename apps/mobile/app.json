@@ -17,7 +17,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
-        ]
+        ],
+        "NSMicrophoneUsageDescription": "Z usa el micrófono para grabar el sonido de los vídeos de tus historias."
       }
     },
     "android": {
@@ -33,13 +34,13 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECORD_AUDIO"
       ],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -81,6 +82,14 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Z usa la cámara para que puedas tomar fotos y grabar vídeos para tus historias.",
+          "microphonePermission": "Z usa el micrófono para grabar el sonido de los vídeos de tus historias.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
         "expo-notifications",
         {
           "color": "#000000"
@@ -90,7 +99,15 @@
       "expo-video",
       "react-native-compressor",
       "expo-web-browser",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Z accede a tus fotos para que elijas cuál compartir en tu historia.",
+          "savePhotosPermission": "Z guarda en tu carrete las fotos y vídeos que capturas.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

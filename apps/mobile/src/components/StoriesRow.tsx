@@ -4,33 +4,15 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { BottomSheet } from '@/components/BottomSheet';
-import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
-import { afterSheetClose } from '@/lib/afterSheetClose';
-import { notify } from '@/lib/confirm';
-import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
-import {
-  PermisoDenegadoError,
-  pickImage,
-  pickVideo,
-  takePhoto,
-  uploadPostMedia,
-} from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { StoryGroup } from '@/types';
 
 const BUBBLE = 54;
-/** Tope de duracion de una historia; coincide con el CHECK de la migracion. */
-const MAX_STORY_MS = 15_000;
-/** Lo que dura una foto en el visor. */
-const PHOTO_MS = 5_000;
-
-type Source = 'gallery-photo' | 'gallery-video' | 'camera';
 
 /**
  * Fila de historias del inicio.
@@ -45,11 +27,8 @@ export function StoriesRow() {
   const groups = useAppStore((state) => state.storyGroups);
   const status = useAppStore((state) => state.storiesStatus);
   const loadStories = useAppStore((state) => state.loadStories);
-  const createStory = useAppStore((state) => state.createStory);
   const user = useAppStore((state) => state.user);
 
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     void loadStories();
@@ -64,77 +43,28 @@ export function StoriesRow() {
   };
 
   /**
-   * Como en Instagram, la burbuja propia son dos acciones: tocar la foto ve tu
-   * historia (si la tienes) y el boton `+` siempre anade una nueva.
+   * Abre la pantalla de crear historia.
+   *
+   * Sustituye a la hoja con tres opciones: ahora se entra directo a la camara,
+   * como en Instagram, y desde alli se pasa a la galeria. La hoja obligaba a
+   * decidir "foto o video" antes de ver nada.
    */
+  const nuevaHistoria = () => {
+    haptics.light();
+    router.push('/stories/nueva' as never);
+  };
+
   const onOwnPress = () => {
     haptics.light();
     if (own) {
       router.push(`/stories/${own.authorId}` as never);
       return;
     }
-    setSheetOpen(true);
+    nuevaHistoria();
   };
 
-  const onAddPress = () => {
-    haptics.light();
-    setSheetOpen(true);
-  };
+  const onAddPress = nuevaHistoria;
 
-  const publish = async (source: Source) => {
-    try {
-      /*
-        La hoja se queda ABIERTA mientras se elige, y se cierra despues.
-
-        Cerrarla antes rompia el selector: iOS no deja presentar una pantalla
-        nativa mientras otra se esta cerrando, y tras el primer intento quedaba
-        en un estado del que no se recuperaba —funcionaba una vez y despues ya
-        no abria nada, sin ningun error—. Abrirlo ENCIMA de la hoja es lo que
-        hacen los sitios que nunca dieron problemas.
-      */
-      const picked =
-        source === 'gallery-photo'
-          ? await pickImage({ aspect: [9, 16] })
-          : source === 'camera'
-          ? await takePhoto({ aspect: [9, 16] })
-          : await pickVideo(MAX_STORY_MS / 1000);
-      setSheetOpen(false);
-      if (!picked) return;
-
-      // `videoMaxDuration` solo limita la camara, asi que el recorte real de la
-      // galeria hay que comprobarlo aqui.
-      const duration = picked.durationMs ?? 0;
-      if (picked.kind === 'video' && duration > MAX_STORY_MS) {
-        // La hoja acaba de cerrarse: sin esperar, el aviso saldria debajo.
-        await afterSheetClose();
-        notify(
-          'El video es muy largo',
-          `Las historias admiten hasta ${MAX_STORY_MS / 1000} segundos. Recorta el video e inténtalo de nuevo.`,
-        );
-        return;
-      }
-
-      setUploading(true);
-      const uploaded = await uploadPostMedia(picked);
-      await createStory(uploaded, picked.kind === 'video' ? Math.max(1000, duration) : PHOTO_MS);
-      toast('Historia publicada');
-    } catch (error) {
-      // Si fallo antes de cerrar, la hoja sigue en pantalla y taparia el aviso.
-      setSheetOpen(false);
-      await afterSheetClose();
-      // Un permiso denegado no es un fallo al publicar: no se llego ni a elegir
-      // la foto. Decirlo como "no se pudo publicar" mandaba a buscar el problema
-      // donde no estaba.
-      notify(
-        error instanceof PermisoDenegadoError
-          ? 'Falta un permiso'
-          : 'No se pudo publicar la historia',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
 
   return (
     <View>
@@ -180,30 +110,22 @@ export function StoriesRow() {
               publicar otra. Antes solo aparecia sin historias, asi que al subir
               la primera desaparecia la forma de anadir mas.
             */}
-            {uploading ? (
-              <View
-                style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}
-              >
-                <ActivityIndicator size="small" color={colors.background} />
-              </View>
-            ) : (
-              <Pressable
-                onPress={onAddPress}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="Añadir a tu historia"
-                style={({ pressed }) => [
-                  styles.badge,
-                  {
-                    backgroundColor: colors.text,
-                    borderColor: colors.background,
-                    opacity: pressed ? 0.75 : 1,
-                  },
-                ]}
-              >
-                <Feather name="plus" size={13} color={colors.background} />
-              </Pressable>
-            )}
+            <Pressable
+              onPress={onAddPress}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Añadir a tu historia"
+              style={({ pressed }) => [
+                styles.badge,
+                {
+                  backgroundColor: colors.text,
+                  borderColor: colors.background,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <Feather name="plus" size={13} color={colors.background} />
+            </Pressable>
           </View>
           <Text numberOfLines={1} style={styles.label} color={colors.text}>
             Tu historia
@@ -221,19 +143,6 @@ export function StoriesRow() {
         ) : null}
       </ScrollView>
 
-      <BottomSheet visible={sheetOpen} onClose={() => setSheetOpen(false)}>
-        <Text style={styles.sheetTitle} color={colors.text}>
-          Añadir a tu historia
-        </Text>
-        <ListRow title="Foto de la galería" leftIcon="image" onPress={() => void publish('gallery-photo')} />
-        <ListRow
-          title="Video de la galería"
-          subtitle={`Hasta ${MAX_STORY_MS / 1000} segundos`}
-          leftIcon="video"
-          onPress={() => void publish('gallery-video')}
-        />
-        <ListRow title="Tomar foto" leftIcon="camera" onPress={() => void publish('camera')} />
-      </BottomSheet>
     </View>
   );
 }
@@ -312,11 +221,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   label: { fontSize: 10, maxWidth: BUBBLE + 16, textAlign: 'center', fontWeight: '600' },
-  sheetTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: spacing.sm,
-  },
 });
