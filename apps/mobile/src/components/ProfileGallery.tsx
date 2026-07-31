@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -8,6 +8,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { Text } from '@/components/Text';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
+import { GRID_GAP, gridItemSize } from '@/lib/gridLayout';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
@@ -33,6 +34,18 @@ type Props = {
 export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
+
+  /*
+    El lado de cada celda se calcula midiendo el contenedor, en pixeles.
+
+    Antes se definia con un ancho en porcentaje y la altura deducida de la
+    proporcion, y eso no se resuelve igual en el navegador que en el movil: en
+    el navegador salia bien, y en la aplicacion instalada las celdas se
+    quedaban sin altura. El perfil anunciaba «3 publicaciones» y debajo no
+    habia nada, ni las fotos ni el aviso de que no hubiera ninguna.
+  */
+  const [anchoCuadricula, setAnchoCuadricula] = useState(0);
+  const lado = gridItemSize(anchoCuadricula);
 
   if (loading) {
     return (
@@ -75,11 +88,15 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
           </Text>
         </View>
       ) : (
-        <View style={styles.grid}>
-          {gallery.map((post) => (
+        <View
+          style={styles.grid}
+          onLayout={(event) => setAnchoCuadricula(event.nativeEvent.layout.width)}
+        >
+          {/* Hasta medir no se dibuja: pintar con un tamano inventado daria un salto. */}
+          {lado === 0 ? null : gallery.map((post) => (
             <Pressable
               key={post.id}
-              style={styles.tile}
+              style={[styles.tile, { width: lado, height: lado }]}
               onPress={() => router.push(`/post/${post.id}` as never)}
               accessibilityRole="button"
               accessibilityLabel={`Abrir publicación: ${post.body}`}
@@ -133,8 +150,9 @@ const styles = StyleSheet.create({
   tabs: { marginBottom: spacing.md },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
-  tile: { width: '32.6%', aspectRatio: 1, overflow: 'hidden', backgroundColor: '#000' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP },
+  // El tamano llega medido en pixeles; aqui solo lo que no depende de el.
+  tile: { overflow: 'hidden', backgroundColor: '#000' },
   badge: {
     position: 'absolute',
     top: 6,
