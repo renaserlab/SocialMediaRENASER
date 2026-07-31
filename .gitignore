@@ -29,7 +29,7 @@ apps/*/package-lock.json
 legal/datos.json
 legal/publicar/
 
-# Copias de los videos originales que deja `scripts/arreglar_arranque_videos.py`
-# antes de tocarlos. Son cientos de megas y no son codigo: se conservan en
-# local por si hay que volver atras, pero no tienen sitio en el repositorio.
+# Red de seguridad: el script de videos ya guarda sus copias FUERA del
+# proyecto, pero si alguien apunta `RESPALDO_VIDEOS_DIR` aqui dentro, que no
+# acaben en el repositorio. Son cientos de megas de contenido, no codigo.
 respaldo_videos/

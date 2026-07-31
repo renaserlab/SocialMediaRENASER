@@ -11,6 +11,7 @@ import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
@@ -242,15 +243,34 @@ export function PostCard({ post, onRemoved, visible }: Props) {
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
       {post.mediaType === 'video' && post.mediaUrl ? (
-        // 16:9 en vez de una caja fija: la mayoria de videos son apaisados y
-        // con alto fijo quedaban con franjas negras arriba y abajo.
-        <VideoPlayer
-          uri={post.mediaUrl}
-          style={styles.video}
-          nativeControls
-          contentFit="contain"
-          visible={visible}
-        />
+        /*
+          16:9 en vez de una caja fija: la mayoria de videos son apaisados y
+          con alto fijo quedaban con franjas negras arriba y abajo.
+
+          El reproductor SOLO existe mientras la publicacion esta en pantalla.
+          Antes se montaba uno por cada publicacion con video del muro y todos
+          seguian ahi al seguir bajando: cada uno reserva memoria para ir por
+          delante de la reproduccion, y sumando unos pocos se agota la que
+          Android concede a la aplicacion, que la cierra sin mas. Bajar esa
+          reserva no bastaba, porque el problema era cuantos habia, no cuanto
+          ocupaba cada uno.
+
+          Al salir de pantalla se sustituye por su celda, de modo que la
+          publicacion se sigue viendo igual y se recupera la memoria.
+        */
+        visible === false ? (
+          <View style={styles.video}>
+            <VideoTile uri={post.mediaUrl} />
+          </View>
+        ) : (
+          <VideoPlayer
+            uri={post.mediaUrl}
+            style={styles.video}
+            nativeControls
+            contentFit="contain"
+            visible={visible}
+          />
+        )
       ) : post.mediaType === 'audio' && post.mediaUrl ? (
         <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
       ) : post.mediaUrl || post.imageKey ? (

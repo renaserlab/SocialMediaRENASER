@@ -6,7 +6,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Text } from '@/components/Text';
-import { VideoPlayer } from '@/components/VideoPlayer';
+import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -91,12 +91,8 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
               */}
               <View style={StyleSheet.absoluteFill} pointerEvents="none">
                 {post.mediaType === 'video' && post.mediaUrl ? (
-                  <VideoPlayer
-                    uri={post.mediaUrl}
-                    style={StyleSheet.absoluteFill}
-                    nativeControls={false}
-                    contentFit="cover"
-                  />
+                  // Sin reproductor: en una cuadricula no se reproduce nada.
+                  <VideoTile uri={post.mediaUrl} />
                 ) : post.mediaUrl || post.imageKey ? (
                   <ExpoImage
                     source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
