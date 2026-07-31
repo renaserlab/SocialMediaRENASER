@@ -44,10 +44,13 @@ tambien deja correcto el texto de `/terms`, que promete poder bloquear.
 
 Nada de esto es codigo; se prepara aparte y suele ser lo que mas tarda.
 
-- [ ] Capturas de pantalla de iPhone 6.7" (minimo un tamano)
+- [x] Capturas de pantalla de iPhone 6.7" — hechas en el iPhone (31/07/2026).
+      Antes de subirlas, comprobar que miden **1290 × 2796** exactos: App Store
+      Connect rechaza cualquier otro tamano, y una captura de iPhone recortada
+      o de un modelo distinto no cumple.
 - [ ] Nombre, subtitulo y descripcion
 - [ ] Categoria y palabras clave
-- [ ] **URL de soporte** (obligatoria; hoy no existe ninguna)
+- [x] **URL de soporte** → `https://social-media-renaser.vercel.app/support`
 - [ ] URL de la politica de privacidad → sale de A4
 - [ ] Cuestionario de privacidad: declarar correo, contenido de usuario, fotos y uso
 - [ ] Clasificacion por edad (la app declara 18+ en sus terminos)

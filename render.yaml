@@ -15,9 +15,19 @@ services:
     # Con las dos partes del producto saliendo de `main`, la web y la API van
     # siempre a la par y hay un solo sitio que mirar para saber que esta
     # publicado.
+    #
+    # OJO: este fichero NO cambia por si solo un servicio que ya existe. Render
+    # solo lo aplica al sincronizar el Blueprint; mientras no se haga, manda lo
+    # que ponga el panel. Si el servicio sigue escuchando otra rama, hay que
+    # cambiarlo alli a mano (Settings > Build & Deploy > Branch).
     branch: main
     rootDir: apps/api
     dockerfilePath: ./Dockerfile
+    # El plan gratuito DUERME tras un rato sin trafico y tarda en despertar. Para
+    # el dia a dia vale; antes de mandar la app a revision hay que subirlo, o
+    # quien revise se encontrara la app sin datos y la leera como rota. Se deja
+    # en `free` a proposito: cambiarlo aqui empieza a cobrar en cuanto se
+    # sincronice el Blueprint, y esa es una decision de negocio.
     plan: free
     healthCheckPath: /health
     autoDeploy: true
@@ -37,6 +47,17 @@ services:
         value: HS256
       - key: SUPABASE_JWT_AUDIENCE
         value: authenticated
+      # Portal de pagos: APAGADO. Ya es el valor por defecto en config.py, pero
+      # se declara aqui para que el estado quede a la vista de quien mire el
+      # servidor. Encenderlo sin una pasarela real implementada deja un cobro
+      # que no se completa, y eso es rechazo directo en las dos tiendas.
+      - key: PAYMENTS_ENABLED
+        value: "false"
+      # A donde vuelve la persona al terminar el pago. Es una pagina de la WEB,
+      # no de la app: cobrar dentro de la aplicacion obliga a usar las compras
+      # integradas de Apple y Google, con su comision.
+      - key: PAYMENTS_RETURN_URL
+        value: https://social-media-renaser.vercel.app/pago
       # --- Secretos: configúralos en el dashboard de Render ---
       # DATABASE_URL: postgresql+asyncpg://postgres.<ref>:<PWD_%23>@aws-0-us-east-1.pooler.supabase.com:5432/postgres
       - key: DATABASE_URL
