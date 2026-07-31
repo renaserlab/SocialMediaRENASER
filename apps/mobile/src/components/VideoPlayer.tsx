@@ -31,17 +31,17 @@ const PROGRESS_INTERVAL_SECONDS = 0.25;
 /**
  * Cuanta memoria puede reservar el reproductor para adelantar la descarga.
  *
- * Sin limite, el reproductor decide por su cuenta y con un video largo se
- * adelanta cuanto puede. En el muro hay varios reproductores montados a la vez,
- * cada uno con su reserva, y ahi es donde Android corta: cuando ya no queda
- * memoria, la aplicacion se cierra sola en mitad de una descarga.
-
- * Treinta y dos megas dan holgura de sobra para que no se entrecorte, y unos
- * veinte segundos por delante son mas que suficientes en un feed donde se
- * cambia de video constantemente.
+ * Sin limite, decide por su cuenta y con un video largo se adelanta cuanto
+ * puede. Este tope acompana a la regla de fondo —que solo exista reproductor
+ * mientras el video se ve— y le pone suelo: aunque coincidan dos en pantalla,
+ * entre ambos no llegan a comprometer la memoria de la aplicacion.
+ *
+ * Dieciseis megas son unos diez segundos por delante incluso en los videos mas
+ * pesados que hay subidos, de sobra para que no se entrecorte en un muro donde
+ * se cambia de video constantemente.
  */
-const MAX_BUFFER_BYTES = 32 * 1024 * 1024;
-const BUFFER_SECONDS = 20;
+const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+const BUFFER_SECONDS = 15;
 
 /**
  * Ejecuta una accion sobre el reproductor tolerando que ya no exista.

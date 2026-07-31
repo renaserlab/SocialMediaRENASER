@@ -32,7 +32,8 @@ ningun sitio:
 PRECAUCIONES
 ------------
 - `--revisar` no toca nada: dice cuales estan mal y termina.
-- Antes de reemplazar, cada original se guarda en `respaldo_videos/`.
+- Antes de reemplazar, cada original se guarda FUERA del repositorio (carpeta
+  temporal del sistema, o `RESPALDO_VIDEOS_DIR` si se indica otra).
 - El archivo se reemplaza en su MISMA ruta, para que las publicaciones que ya
   lo enlazan sigan funcionando.
 - Se comprueba el resultado ANTES de subirlo: si el indice no quedo delante, si
@@ -46,13 +47,20 @@ import os
 import pathlib
 import struct
 import sys
+import tempfile
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import faststart  # noqa: E402
 
 BUCKET = 'post-media'
-RESPALDO = pathlib.Path('respaldo_videos')
+
+# Las copias NO van dentro del repositorio: son cientos de megas de contenido y
+# no forman parte del proyecto. Se dejan en la carpeta temporal del sistema, o
+# donde diga RESPALDO_VIDEOS_DIR si se prefiere otro sitio.
+RESPALDO = pathlib.Path(
+    os.environ.get('RESPALDO_VIDEOS_DIR') or (pathlib.Path(tempfile.gettempdir()) / 'z-respaldo-videos')
+)
 
 
 def _peticion(url, metodo='GET', cuerpo=None, cabeceras=None, tiempo=900):
@@ -169,7 +177,7 @@ def main():
         print('Revision solamente. Vuelve a lanzarlo con --aplicar para corregirlos.')
         return
 
-    RESPALDO.mkdir(exist_ok=True)
+    RESPALDO.mkdir(parents=True, exist_ok=True)
     arreglados = 0
     for v in pendientes:
         ruta = v['ruta']
