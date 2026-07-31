@@ -7,6 +7,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { CourseCard } from '@/components/CourseCard';
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
 import { CreateTestimonialSheet, type TestimonialEditable } from '@/components/CreateTestimonialSheet';
+import { ImageViewer } from '@/components/ImageViewer';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { Button } from '@/components/Button';
@@ -113,6 +114,10 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const [courses, setCourses] = useState<Course[]>([]);
   const [episodes, setEpisodes] = useState<Post[]>([]);
   const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  /** Imagen abierta a pantalla completa, o null si el visor esta cerrado. */
+  const [viewerImage, setViewerImage] = useState<{ uri: string; caption: string | null } | null>(
+    null,
+  );
   /** Filtro de la galeria: 0 todos, 1 fotos, 2 videos. */
   const [testimonialFilter, setTestimonialFilter] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -378,12 +383,35 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                   {item.mediaType === 'video' && item.mediaUrl ? (
                     <VideoPlayer uri={item.mediaUrl} style={styles.testimonialMedia} nativeControls />
                   ) : (
-                    <ExpoImage
-                      source={item.mediaUrl ? { uri: item.mediaUrl } : undefined}
-                      style={styles.testimonialMedia}
-                      contentFit="cover"
-                      transition={150}
-                    />
+                    /*
+                      En la tarjeta la imagen va recortada para que todas midan
+                      igual, y cuando lo compartido es la captura de un texto eso
+                      la vuelve ilegible. Al tocarla se abre entera.
+                    */
+                    <Pressable
+                      onPress={() => item.mediaUrl && setViewerImage({
+                        uri: item.mediaUrl,
+                        caption: item.caption ?? null,
+                      })}
+                      disabled={!item.mediaUrl}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        item.caption ? `Ver la imagen: ${item.caption}` : 'Ver la imagen completa'
+                      }
+                    >
+                      <ExpoImage
+                        source={item.mediaUrl ? { uri: item.mediaUrl } : undefined}
+                        style={styles.testimonialMedia}
+                        contentFit="cover"
+                        transition={150}
+                      />
+                      {/* Pista de que se puede abrir; sin ella nadie lo prueba. */}
+                      {item.mediaUrl ? (
+                        <View style={[styles.expandBadge, { backgroundColor: colors.overlay }]}>
+                          <Feather name="maximize-2" size={13} color="#FFFFFF" />
+                        </View>
+                      ) : null}
+                    </Pressable>
                   )}
                 </View>
                 <View style={styles.testimonialFooter}>
@@ -434,6 +462,17 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
             onCreated={reload}
           />
         ) : null}
+
+        {/*
+          Imagen a pantalla completa. Va DENTRO de esta rama porque las resenas
+          tienen su propio `return`: montado mas abajo nunca se llegaba a
+          renderizar, y tocar la imagen no abria nada.
+        */}
+        <ImageViewer
+          uri={viewerImage?.uri ?? null}
+          caption={viewerImage?.caption ?? null}
+          onClose={() => setViewerImage(null)}
+        />
       </View>
     );
   }
@@ -567,5 +606,15 @@ const styles = StyleSheet.create({
   gallery: { marginTop: spacing.md, gap: spacing.md },
   testimonialCard: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden' },
   testimonialMedia: { width: '100%', height: 220 },
+  expandBadge: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   testimonialFooter: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md },
 });
