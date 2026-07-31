@@ -15,10 +15,11 @@ supuesto.
 | A3 | Eliminar la cuenta desde la app | ✅ | `AuthRepository.deleteAccount` + Ajustes, con doble confirmacion |
 | A4 | Politica de privacidad en URL publica | ⚠️ escrita, sin publicar | `/privacy`; se publica al mergear a `main` |
 | A5 | Terminos / EULA con tolerancia cero y respuesta en 24 h | ⚠️ escrita, sin publicar | `/terms` |
-| A6 | Cuenta de demostracion para los revisores | ❌ **FALTA** | la app exige inicio de sesion |
+| A6 | Cuenta de demostracion para los revisores | ⚠️ preparada, sin crear | script y ficha en [`CUENTA_DE_REVISION.md`](CUENTA_DE_REVISION.md); falta el paso manual en el panel de Supabase |
 | A7 | Sin flujos de compra no funcionales | ✅ | la pasarela simulada se elimino; `FEATURE_PURCHASES = false` oculta precios |
 | A8 | Sign in with Apple si hay login social | ✅ no aplica | el login social esta oculto a proposito |
-| A9 | Apple Developer Program activo | ❌ **FALTA** | 99 USD/ano |
+| A9 | Apple Developer Program activo | ⚠️ pagado, en tramite | 99 USD abonados; Apple avisa que tarda 2 dias habiles |
+| A10 | URL de soporte publica | ✅ | `/support`, con contacto y preguntas frecuentes |
 
 **Ya no queda nada de codigo pendiente.** A1 se resolvio en `e133847`, lo que
 tambien deja correcto el texto de `/terms`, que promete poder bloquear.
@@ -69,7 +70,8 @@ Nada de esto es codigo; se prepara aparte y suele ser lo que mas tarda.
 
 1. Mergear a `main` para publicar `/privacy` y `/terms` (A4, A5).
 2. Contratar el Developer Program (A9) y decidir la cuenta (D).
-3. Crear la cuenta de demostracion (A6).
+3. Crear la cuenta de demostracion (A6): son dos pasos manuales de un minuto,
+   detallados en [`CUENTA_DE_REVISION.md`](CUENTA_DE_REVISION.md).
 4. Separar el proyecto Supabase de produccion (D).
 5. Preparar el material de la ficha (C).
 
