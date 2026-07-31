@@ -25,7 +25,7 @@
 do $$
 declare
   -- Único sitio que hay que tocar si se cambia la dirección.
-  v_email    text := 'renaserlab+applereview@gmail.com';
+  v_email    text := 'testgoogle@gmail.com';
   v_user_id  uuid;
   v_cursos   integer;
 begin
@@ -49,7 +49,7 @@ begin
   -- que el público no tiene, y aprobaría una app distinta de la publicada.
   update public.profiles
      set full_name  = 'Revisión App Store',
-         username   = 'apple_review',
+         username   = 'revision_tiendas',
          bio        = 'Cuenta de demostración para la revisión de las tiendas.',
          role       = 'user',
          -- -------------------------------------------------------------------
@@ -132,5 +132,5 @@ select
   ) as sin_acceso
 from public.profiles p
 where p.id = (
-  select id from auth.users where email = 'renaserlab+applereview@gmail.com'
+  select id from auth.users where email = 'testgoogle@gmail.com'
 );

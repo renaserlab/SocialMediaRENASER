@@ -8,22 +8,25 @@ Este documento explica cómo dejarla lista y qué escribir en la ficha.
 
 ---
 
-## 1. Crear la persona usuaria (panel de Supabase)
+## 1. La persona usuaria — ya existe
 
-**Authentication → Users → Add user**
+`testgoogle@gmail.com`, creada el 31 de julio de 2026. Se dio de alta para la
+prueba cerrada de Google Play y sirve igual para Apple: **una sola cuenta para
+las dos tiendas**, así solo hay una contraseña que mantener viva.
 
-| Campo | Valor |
-|---|---|
-| Email | `renaserlab+applereview@gmail.com` |
-| Password | *(la eliges tú, ver más abajo)* |
-| Auto Confirm User | **marcado** |
+Estado comprobado contra la base de datos:
 
-«Auto Confirm User» no es opcional. Sin marcarlo, la cuenta queda pendiente de
+| Campo | Valor | |
+|---|---|---|
+| `role` | `user` | ✅ ve lo mismo que cualquier miembro |
+| `full_name` | `testgoogle` | ⚠️ lo arregla el script |
+| `username` | `null` | ⚠️ lo arregla el script |
+| `bio` | vacía | ⚠️ lo arregla el script |
+| `podcast_started_at` | `null` | ⚠️ **importante**, ver abajo |
+
+Si alguna vez hay que crear otra: **Authentication → Users → Add user**,
+marcando **«Auto Confirm User»**. Sin esa casilla la cuenta queda pendiente de
 confirmar por correo y no puede iniciar sesión.
-
-La dirección usa el `+` de Gmail: llega a la bandeja de `renaserlab@gmail.com`,
-se distingue del resto del correo y se puede filtrar. La pantalla de acceso solo
-comprueba que haya una `@`, así que el `+` no da problemas.
 
 ### Sobre la contraseña
 
@@ -53,15 +56,24 @@ Hace tres cosas:
    lo que ve cualquier miembro. Con permisos de administración vería pantallas
    que el público no tiene y aprobaría una app distinta de la publicada.
 3. **Concede acceso a los cursos de pago** mediante una compra `manual` en
-   estado `paid`, que es para lo que existe ese proveedor. Sin esto, la
-   migración `0016_course_paywall.sql` bloquearía los vídeos y quien revisa
-   leería la app como rota.
-4. **Adelanta el podcast diez días.** Los episodios 2 a 5 se abren a las 8, 16,
-   24 y 32 horas del alta. Una revisión dura minutos, así que con la fecha real
-   solo podría escuchar el primero y encontraría el resto con una cuenta atrás.
+   estado `paid`, que es para lo que existe ese proveedor.
 
-Al terminar, la comprobación del final debe dar **`sin_acceso = 0`**. Si diera
-más, hay un curso cuyo vídeo no cargaría.
+   Hoy **no concede ninguna**: los cuatro cursos publicados (Formación, Retiro,
+   Consultoría y Certificación) tienen `price_minor = 0`, y la migración
+   `0016_course_paywall.sql` deja los gratuitos abiertos a cualquier persona
+   autenticada. Queda por si mañana se le pone precio a alguno: ese día, sin
+   esta concesión, quien revisa vería la ficha del curso y ningún vídeo se
+   reproduciría.
+4. **Adelanta el podcast diez días.** Es el punto que de verdad importa hoy.
+
+   Los episodios 2 a 5 se abren a las 8, 16, 24 y 32 horas, contadas desde
+   `podcast_started_at`. En esta cuenta ese campo está a `null`, y la API lo
+   rellena con la hora actual la primera vez que se abre la sección: quien
+   revisa entraría, vería el episodio 1 y los cuatro siguientes con una cuenta
+   atrás de hasta 32 horas. Adelantando el origen, los cinco están abiertos
+   desde el primer momento.
+
+Al terminar, la comprobación del final debe dar **`sin_acceso = 0`**.
 
 ---
 
