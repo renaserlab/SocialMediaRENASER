@@ -86,9 +86,10 @@ Al terminar, la comprobación del final debe dar **`sin_acceso = 0`**.
 Marca **Sign-in required** y rellena usuario y contraseña. En **Notes**:
 
 ```
-La aplicación es una red social privada para la comunidad RENASER. Todo el
-contenido está detrás del inicio de sesión, por lo que es imprescindible usar
-la cuenta facilitada.
+La aplicación es una comunidad de crecimiento personal. El muro, los perfiles
+y los cursos se pueden recorrer SIN cuenta; el inicio de sesión hace falta para
+publicar, comentar, reaccionar, guardar contenido, escribir mensajes y escuchar
+los episodios del pódcast. La cuenta facilitada permite probar todo eso.
 
 Esta versión NO incluye compras ni ofrece ningún producto de pago: no hay
 precios, ni carrito, ni pasarela. El acceso a la comunidad se gestiona

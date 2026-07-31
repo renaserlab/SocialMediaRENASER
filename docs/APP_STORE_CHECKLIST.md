@@ -48,12 +48,13 @@ Nada de esto es codigo; se prepara aparte y suele ser lo que mas tarda.
       Antes de subirlas, comprobar que miden **1290 × 2796** exactos: App Store
       Connect rechaza cualquier otro tamano, y una captura de iPhone recortada
       o de un modelo distinto no cumple.
-- [ ] Nombre, subtitulo y descripcion
-- [ ] Categoria y palabras clave
+- [x] Nombre, subtitulo, descripcion y texto promocional → [`FICHA_APP_STORE.md`](FICHA_APP_STORE.md)
+- [x] Categoria y palabras clave → mismo documento
 - [x] **URL de soporte** → `https://social-media-renaser.vercel.app/support`
 - [ ] URL de la politica de privacidad → sale de A4
 - [ ] Cuestionario de privacidad: declarar correo, contenido de usuario, fotos y uso
-- [ ] Clasificacion por edad (la app declara 18+ en sus terminos)
+- [ ] Clasificacion por edad: **17+**. La determina admitir que hay contenido
+      de usuarios sin moderacion previa; ver [`FICHA_APP_STORE.md`](FICHA_APP_STORE.md)
 - [ ] Cumplimiento de exportacion → ya cubierto por `ITSAppUsesNonExemptEncryption`
 
 ---
