@@ -14,15 +14,17 @@ Este documento explica cómo dejarla lista y qué escribir en la ficha.
 prueba cerrada de Google Play y sirve igual para Apple: **una sola cuenta para
 las dos tiendas**, así solo hay una contraseña que mantener viva.
 
-Estado comprobado contra la base de datos:
+**Script aplicado el 31 de julio de 2026.** Estado verificado contra la base de
+datos después de ejecutarlo:
 
 | Campo | Valor | |
 |---|---|---|
 | `role` | `user` | ✅ ve lo mismo que cualquier miembro |
-| `full_name` | `testgoogle` | ⚠️ lo arregla el script |
-| `username` | `null` | ⚠️ lo arregla el script |
-| `bio` | vacía | ⚠️ lo arregla el script |
-| `podcast_started_at` | `null` | ⚠️ **importante**, ver abajo |
+| `full_name` | `Revisión App Store` | ✅ |
+| `username` | `revision_tiendas` | ✅ |
+| `bio` | rellena | ✅ |
+| `podcast_started_at` | `2026-07-21 22:14 UTC` | ✅ los 5 episodios abiertos |
+| cursos sin acceso | `0` | ✅ los cuatro son gratuitos |
 
 Si alguna vez hay que crear otra: **Authentication → Users → Add user**,
 marcando **«Auto Confirm User»**. Sin esa casilla la cuenta queda pendiente de

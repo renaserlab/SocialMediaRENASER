@@ -15,7 +15,7 @@ supuesto.
 | A3 | Eliminar la cuenta desde la app | ✅ | `AuthRepository.deleteAccount` + Ajustes, con doble confirmacion |
 | A4 | Politica de privacidad en URL publica | ⚠️ escrita, sin publicar | `/privacy`; se publica al mergear a `main` |
 | A5 | Terminos / EULA con tolerancia cero y respuesta en 24 h | ⚠️ escrita, sin publicar | `/terms` |
-| A6 | Cuenta de demostracion para los revisores | ⚠️ preparada, sin crear | script y ficha en [`CUENTA_DE_REVISION.md`](CUENTA_DE_REVISION.md); falta el paso manual en el panel de Supabase |
+| A6 | Cuenta de demostracion para los revisores | ✅ | `testgoogle@gmail.com`, script aplicado el 31/07/2026 y verificado; ficha en [`CUENTA_DE_REVISION.md`](CUENTA_DE_REVISION.md) |
 | A7 | Sin flujos de compra no funcionales | ✅ | la pasarela simulada se elimino; `FEATURE_PURCHASES = false` oculta precios |
 | A8 | Sign in with Apple si hay login social | ✅ no aplica | el login social esta oculto a proposito |
 | A9 | Apple Developer Program activo | ⚠️ pagado, en tramite | 99 USD abonados; Apple avisa que tarda 2 dias habiles |
