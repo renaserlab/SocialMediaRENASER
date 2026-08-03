@@ -51,7 +51,7 @@ import tempfile
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-import faststart  # noqa: E402
+import faststart  # noqa: 
 
 BUCKET = 'post-media'
 
