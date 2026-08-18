@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
+import { Text } from '@/components/Text';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
@@ -35,9 +36,24 @@ export function ReelsScreen() {
   // Reels = las publicaciones de video del feed. Antes era una lista fija de
   // shorts inventados con videos de ejemplo.
   const [reels, setReels] = useState<ReelItem[]>([]);
+  /*
+    Esta pantalla no tenia ningun estado que contar.
+
+    Con la lista vacia —da igual si porque no hay videos o porque la peticion
+    fallo— quedaba una pantalla NEGRA con una flecha de volver y nada mas: ni
+    «cargando», ni «todavia no hay shorts», ni aviso de fallo. Parecia que la
+    aplicacion se hubiera colgado, y no habia forma de reintentar.
+  */
+  const [estado, setEstado] = useState<'cargando' | 'listo' | 'error'>('cargando');
+  const [intento, setIntento] = useState(0);
+
   useEffect(() => {
-    if (!AuthRepository.enabled) return;
+    if (!AuthRepository.enabled) {
+      setEstado('listo');
+      return;
+    }
     let alive = true;
+    setEstado('cargando');
     PostRepository.listVideos(currentUserId)
       .then((posts) => {
         if (!alive) return;
@@ -55,14 +71,18 @@ export function ReelsScreen() {
               comments: p.commentsCount ?? 0,
             })),
         );
+        setEstado('listo');
       })
-      .catch(() => {
-        if (alive) setReels([]);
+      .catch((error) => {
+        console.warn('[shorts] no se pudieron cargar los videos', error);
+        if (!alive) return;
+        setReels([]);
+        setEstado('error');
       });
     return () => {
       alive = false;
     };
-  }, [currentUserId]);
+  }, [currentUserId, intento]);
 
   // Solo el item visible reproduce; el resto se pausa (memoria y batería).
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
@@ -89,8 +109,50 @@ export function ReelsScreen() {
     else router.replace('/(tabs)/home');
   }, [router]);
 
+  /*
+    El aviso se pinta con la paleta oscura de la propia pantalla, no con la del
+    tema de la aplicacion: los shorts son siempre fondo negro y un texto en
+    color de tema claro seria ilegible aqui.
+  */
+  const aviso =
+    estado === 'cargando' ? (
+      <View style={styles.aviso}>
+        <ActivityIndicator color={media.text} />
+      </View>
+    ) : estado === 'error' ? (
+      <View style={styles.aviso}>
+        <Feather name="wifi-off" size={32} color={media.text} />
+        <Text variant="title" weight="800" color={media.text} style={styles.avisoTexto}>
+          No pudimos cargar los shorts
+        </Text>
+        <Text variant="body" color={media.textMuted} style={styles.avisoTexto}>
+          Revisa tu conexión e inténtalo de nuevo.
+        </Text>
+        <Pressable
+          onPress={() => setIntento((n) => n + 1)}
+          style={[styles.avisoBoton, { borderColor: media.border }]}
+          accessibilityRole="button"
+        >
+          <Text variant="body" weight="700" color={media.text}>
+            Reintentar
+          </Text>
+        </Pressable>
+      </View>
+    ) : reels.length === 0 ? (
+      <View style={styles.aviso}>
+        <Feather name="video-off" size={32} color={media.text} />
+        <Text variant="title" weight="800" color={media.text} style={styles.avisoTexto}>
+          Todavía no hay shorts
+        </Text>
+        <Text variant="body" color={media.textMuted} style={styles.avisoTexto}>
+          Cuando alguien publique un vídeo aparecerá aquí.
+        </Text>
+      </View>
+    ) : null;
+
   return (
     <View style={styles.root}>
+      {aviso}
       <FlashList
         data={reels}
         keyExtractor={(item: ReelItem) => item.id}
@@ -128,6 +190,24 @@ export function ReelsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: media.background },
+  aviso: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    zIndex: 10,
+  },
+  avisoTexto: { textAlign: 'center' },
+  avisoBoton: {
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
   backButton: {
     position: 'absolute',
     top: 50,

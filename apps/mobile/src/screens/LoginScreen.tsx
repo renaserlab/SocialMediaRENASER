@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { postAuthRoute } from '@/lib/postAuthRoute';
@@ -11,7 +11,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { ZLogo } from '@/components/ZLogo';
-import { ApiError } from '@/services/api';
+import { mensajeDeAuth } from '@/lib/authErrors';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
@@ -34,8 +34,12 @@ export function LoginScreen() {
   const [socialBusy, setSocialBusy] = useState(false);
 
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  // Evita dos intentos de acceso simultaneos: el segundo llegaba con la sesion
+  // del primero ya en curso y podia dejar avisos contradictorios en pantalla.
+  const accediendo = useRef(false);
 
   const submit = async () => {
+    if (accediendo.current) return;
     const newErrors: { email?: string; password?: string } = {};
     if (!email.includes('@')) {
       newErrors.email = 'Introduce un correo electrónico válido';
@@ -59,21 +63,28 @@ export function LoginScreen() {
       return;
     }
 
+    accediendo.current = true;
     setSubmitting(true);
     try {
       await signInEmail({ email: cleanEmail, password });
       router.replace(postAuthRoute() as never);
     } catch (error) {
-      const message =
-        error instanceof ApiError || error instanceof Error
-          ? error.message
-          : 'No se pudo iniciar sesión. Inténtalo de nuevo.';
-      if (/invalid|credential|incorrect|contraseñ/i.test(message)) {
-        setErrors({ password: 'Correo o contraseña incorrectos' });
+      /*
+        Antes se pintaba `error.message` tal cual, y Supabase responde en ingles
+        y en jerga («Invalid login credentials», «Email not confirmed»,
+        «Failed to fetch»). Ahora se traduce siempre y el original queda en la
+        consola.
+      */
+      const message = mensajeDeAuth(error, 'acceso');
+      // Las credenciales se corrigen en el propio formulario; el resto son
+      // cosas que no dependen de lo escrito y merecen un aviso aparte.
+      if (/incorrect/i.test(message)) {
+        setErrors({ password: message });
       } else {
         notify('No se pudo iniciar sesión', message);
       }
     } finally {
+      accediendo.current = false;
       setSubmitting(false);
     }
   };
@@ -91,10 +102,7 @@ export function LoginScreen() {
         router.replace(postAuthRoute() as never);
       }
     } catch (error) {
-      notify(
-        'No se pudo acceder con Google',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
-      );
+      notify('No se pudo acceder con Google', mensajeDeAuth(error, 'acceso'));
     } finally {
       setSocialBusy(false);
     }

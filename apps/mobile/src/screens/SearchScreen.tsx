@@ -98,10 +98,20 @@ export function SearchScreen() {
   const [allEvents, setAllEvents] = useState<EventItem[]>([]);
   useEffect(() => {
     if (!AuthRepository.enabled) return;
-    LearningRepository.listCourses().then(setCourses).catch(() => setCourses([]));
+    // Si el catalogo no carga, buscar un curso devuelve «sin resultados» y
+    // parece que ese curso no existe. Queda constancia en el log.
+    LearningRepository.listCourses()
+      .then(setCourses)
+      .catch((error) => {
+        console.warn('[buscar] no se pudo cargar el catalogo de cursos', error);
+        setCourses([]);
+      });
     CatalogRepository.listEvents()
       .then((page) => setAllEvents(page.items))
-      .catch(() => setAllEvents([]));
+      .catch((error) => {
+        console.warn('[buscar] no se pudieron cargar los eventos', error);
+        setAllEvents([]);
+      });
   }, []);
 
   const results = useMemo(() => {

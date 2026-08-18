@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -9,6 +9,8 @@ import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
+import { mensajeDeAuth } from '@/lib/authErrors';
+import { postAuthRoute } from '@/lib/postAuthRoute';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
@@ -32,13 +34,20 @@ export function ResetPasswordScreen() {
   const updatePassword = useAuthStore((state) => state.updatePassword);
   const status = useAuthStore((state) => state.status);
   const passwordRecovery = useAuthStore((state) => state.passwordRecovery);
+  const recoveryError = useAuthStore((state) => state.recoveryError);
+  const setRecoveryError = useAuthStore((state) => state.setRecoveryError);
 
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Mismo cerrojo que en el envio del correo: `saving` es estado de React y no
+  // frena dos pulsaciones simultaneas. Guardar dos veces la contrasena hacia
+  // que la segunda llamada fallara y tapara el exito de la primera.
+  const guardando = useRef(false);
 
   const submit = async () => {
+    if (guardando.current) return;
     if (password.length < MIN_LENGTH) {
       setError(`La contraseña debe tener al menos ${MIN_LENGTH} caracteres.`);
       return;
@@ -47,22 +56,28 @@ export function ResetPasswordScreen() {
       setError('Las dos contraseñas no coinciden.');
       return;
     }
+    guardando.current = true;
     setSaving(true);
     setError(null);
     try {
       await updatePassword(password);
       toast('Contraseña actualizada');
-      router.replace('/(tabs)/home');
+      router.replace(postAuthRoute() as never);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cambiar la contraseña.');
+      // Mismo criterio que en el envio del correo: el motivo tecnico va a la
+      // consola y a la pantalla solo sale algo que se pueda entender y usar.
+      setError(mensajeDeAuth(err, 'nueva-contrasena'));
     } finally {
+      guardando.current = false;
       setSaving(false);
     }
   };
 
   // Sin sesión de recuperación no hay nada que cambiar: el enlace caducó, ya se
-  // usó, o se entró a la ruta a mano.
-  if (status !== 'authenticated' && !passwordRecovery) {
+  // usó, o se entró a la ruta a mano. `recoveryError` manda sobre la sesión:
+  // un enlace rechazado no debe dejar cambiar la contraseña aunque quedara una
+  // sesión anterior abierta en el mismo teléfono.
+  if (recoveryError || (status !== 'authenticated' && !passwordRecovery)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title="" onBack={() => router.replace('/login')} />
@@ -70,10 +85,26 @@ export function ResetPasswordScreen() {
           state="empty"
           icon="alert-triangle"
           title="Enlace no válido o caducado"
-          description="Vuelve a pedir el correo de recuperación para crear tu contraseña."
+          /*
+            Se prefiere el motivo concreto cuando se conoce (caducado, ya
+            usado): decirle a alguien «no es válido» sin mas le deja sin saber
+            si el problema es suyo, del correo o de la aplicación.
+          */
+          description={
+            recoveryError ??
+            'Vuelve a pedir el correo de recuperación para crear tu contraseña.'
+          }
         />
         <View style={styles.footer}>
-          <Button label="Pedir un enlace nuevo" onPress={() => router.replace('/forgot-password')} />
+          <Button
+            label="Pedir un enlace nuevo"
+            onPress={() => {
+              // Se limpia el motivo al salir: si no, el aviso del enlace viejo
+              // seguiría puesto al volver de pedir uno nuevo.
+              setRecoveryError(null);
+              router.replace('/forgot-password');
+            }}
+          />
         </View>
       </View>
     );

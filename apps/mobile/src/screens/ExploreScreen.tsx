@@ -34,31 +34,69 @@ export function ExploreScreen() {
   const [featuredCourse, setFeaturedCourse] = useState<Course | null>(null);
   const [nextEvents, setNextEvents] = useState<EventItem[]>([]);
   const [featuredCircle, setFeaturedCircle] = useState<CircleDetail | null>(null);
-  useEffect(() => {
+  /*
+    Que el servidor falle y que todavia no haya contenido NO son lo mismo.
+
+    Antes los tres `.catch` se limitaban a dejar el estado a vacio, asi que una
+    API caida se leia en pantalla como «Muy pronto habra contenido disponible»:
+    una aplicacion rota parecia una aplicacion a medio llenar. Nadie reintentaba
+    porque nada indicaba que hubiera fallado algo.
+  */
+  const [catalogoFallido, setCatalogoFallido] = useState(false);
+
+  const cargarDestacados = useCallback(async () => {
     if (!AuthRepository.enabled) return;
-    LearningRepository.listCourses()
-      .then((list) => setFeaturedCourse(list[0] ?? null))
-      .catch(() => setFeaturedCourse(null));
-    CatalogRepository.listEvents()
-      .then((page) => setNextEvents(page.items))
-      .catch(() => setNextEvents([]));
-    CommunityRepository.list()
-      .then((list) => setFeaturedCircle(list[0] ?? null))
-      .catch(() => setFeaturedCircle(null));
+    const [cursos, eventos, circulos] = await Promise.allSettled([
+      LearningRepository.listCourses(),
+      CatalogRepository.listEvents(),
+      CommunityRepository.list(),
+    ]);
+
+    if (cursos.status === 'fulfilled') setFeaturedCourse(cursos.value[0] ?? null);
+    if (eventos.status === 'fulfilled') setNextEvents(eventos.value.items);
+    if (circulos.status === 'fulfilled') setFeaturedCircle(circulos.value[0] ?? null);
+
+    const fallos = [cursos, eventos, circulos].filter((r) => r.status === 'rejected');
+    // Se avisa solo si fallo TODO. Que una de las tres secciones no cargue no
+    // justifica tapar la pantalla entera con un error.
+    setCatalogoFallido(fallos.length === 3);
+    for (const fallo of fallos) {
+      console.warn('[explorar] no se pudo cargar una seccion', (fallo as PromiseRejectedResult).reason);
+    }
   }, []);
+
+  useEffect(() => {
+    void cargarDestacados();
+  }, [cargarDestacados]);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ProfileSummary[]>([]);
   const [searching, setSearching] = useState(false);
+  const [busquedaFallida, setBusquedaFallida] = useState(false);
+  /*
+    Contador que fuerza a repetir la busqueda al pulsar «reintentar».
+    Hace falta uno explicito: el termino no ha cambiado, asi que sin esto el
+    efecto no se volveria a ejecutar y el boton no haria nada —el mismo fallo
+    que tenia el gesto de refrescar.
+  */
+  const [reintentoBusqueda, setReintentoBusqueda] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  // El catálogo (curso/eventos) es estático en mock; si hay búsqueda activa se
-  // relanza. Sin esperas artificiales: el spinner dura lo que dure el trabajo.
-  const onRefresh = useCallback(() => {
+  /*
+    Deslizar hacia abajo vuelve a pedir el catalogo.
+
+    Antes hacia `setQuery((q) => q)`, que en React no cambia nada: el indicador
+    aparecia y desaparecia sin lanzar ni una peticion. Justo el gesto al que se
+    recurre cuando algo no ha cargado era el unico que no servia para nada.
+  */
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setQuery((q) => q);
-    setRefreshing(false);
-  }, []);
+    try {
+      await cargarDestacados();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [cargarDestacados]);
 
   const term = query.trim();
   const isSearching = term.length >= 2;
@@ -70,13 +108,20 @@ export function ExploreScreen() {
     }
     let active = true;
     setSearching(true);
+    setBusquedaFallida(false);
     const handle = setTimeout(() => {
       ProfileRepository.search(term)
         .then((data) => {
           if (active) setResults(data);
         })
-        .catch(() => {
-          if (active) setResults([]);
+        .catch((error) => {
+          // «No encontramos a nadie» cuando en realidad no se pudo preguntar
+          // hace pensar que la persona buscada no esta en la aplicacion.
+          console.warn('[explorar] la busqueda de personas fallo', error);
+          if (active) {
+            setResults([]);
+            setBusquedaFallida(true);
+          }
         })
         .finally(() => {
           if (active) setSearching(false);
@@ -86,7 +131,7 @@ export function ExploreScreen() {
       active = false;
       clearTimeout(handle);
     };
-  }, [term, isSearching, supabaseEnabled]);
+  }, [term, isSearching, supabaseEnabled, reintentoBusqueda]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -122,16 +167,27 @@ export function ExploreScreen() {
                 state={
                   searching
                     ? 'loading'
+                    : busquedaFallida
+                    ? 'error'
                     : results.length === 0
                     ? 'empty'
                     : 'content'
                 }
-                title={!searching && results.length === 0 ? 'Sin resultados' : undefined}
+                title={
+                  !searching && busquedaFallida
+                    ? 'No pudimos buscar'
+                    : !searching && results.length === 0
+                    ? 'Sin resultados'
+                    : undefined
+                }
                 description={
-                  !searching && results.length === 0
+                  !searching && busquedaFallida
+                    ? 'Revisa tu conexión e inténtalo de nuevo.'
+                    : !searching && results.length === 0
                     ? 'No encontramos personas con ese nombre.'
                     : undefined
                 }
+                onRetry={busquedaFallida ? () => setReintentoBusqueda((n) => n + 1) : undefined}
               >
                 {results.map((person) => (
                   <ListRow
@@ -158,6 +214,22 @@ export function ExploreScreen() {
 
           {!isSearching && (
           <React.Fragment>
+          {/*
+            Un fallo del servidor se dice, no se disfraza de «todavia no hay
+            nada». Lleva icono y texto ademas del color, y ofrece la salida
+            (reintentar) en el mismo sitio donde se ve el problema.
+          */}
+          {catalogoFallido && (
+            <View style={styles.avisoCarga}>
+              <StateView
+                state="error"
+                icon="wifi-off"
+                title="No pudimos cargar el contenido"
+                description="Revisa tu conexión e inténtalo de nuevo."
+                onRetry={() => void cargarDestacados()}
+              />
+            </View>
+          )}
           <SectionTitle title="Tu siguiente paso" />
           {/*
             Guia hacia el contenido: sin ella la portada se lee como una imagen
@@ -184,7 +256,11 @@ export function ExploreScreen() {
               <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>
               <Text style={styles.heroTitle}>{featuredCourse?.title ?? 'Programas en camino'}</Text>
               <Text style={styles.heroBody}>
-                {featuredCourse ? featuredCourse.subtitle : 'Muy pronto habrá contenido disponible.'}
+                {featuredCourse
+                  ? featuredCourse.subtitle
+                  : catalogoFallido
+                  ? 'No pudimos cargar el programa.'
+                  : 'Muy pronto habrá contenido disponible.'}
               </Text>
             </View>
           </Pressable>
@@ -232,6 +308,8 @@ export function ExploreScreen() {
               <Text style={[styles.circleBody, { color: colors.onPrimary }]}>
                 {featuredCircle
                   ? `Conecta, comparte y crece con ${featuredCircle.members} miembros.`
+                  : catalogoFallido
+                  ? 'No pudimos cargar los círculos.'
                   : 'Muy pronto podrás unirte a un círculo.'}
               </Text>
             </View>
@@ -247,6 +325,7 @@ export function ExploreScreen() {
 
 const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.lg },
+  avisoCarga: { paddingVertical: spacing.md },
   searchWrapper: {
     position: 'relative',
     marginBottom: spacing.xl,

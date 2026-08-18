@@ -110,6 +110,22 @@ export const PostRepository = {
     return list[0] ?? null;
   },
 
+  /**
+   * Una publicacion concreta, pedida al servidor por su identificador.
+   *
+   * Hace falta porque la pantalla de detalle solo miraba el feed que hubiera
+   * en memoria. Al abrir un enlace compartido, al recargar la pagina en el
+   * navegador o al llegar desde un aviso, ese feed aun no existe y la
+   * publicacion —que esta perfectamente publicada— se anunciaba como
+   * «no disponible, es posible que se haya eliminado».
+   */
+  async getById(postId: string, currentUserId?: string | null): Promise<Post> {
+    const dto = await apiRequest<PostDto>(`${API_V1}/posts/${encodeURIComponent(postId)}`);
+    const item = toPost(dto, currentUserId);
+    await attachMediaUrls([item], [dto]);
+    return item;
+  },
+
   /** Publicaciones con video, en orden reciente: alimentan los reels. */
   async listVideos(currentUserId?: string | null): Promise<Post[]> {
     const dtos = await apiRequest<PostDto[]>(

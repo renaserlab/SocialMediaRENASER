@@ -26,7 +26,12 @@ export function LibraryScreen() {
     if (!AuthRepository.enabled) return;
     LearningRepository.listCourses()
       .then(setCourses)
-      .catch(() => setCourses([]));
+      .catch((error) => {
+        // Sin el catalogo los cursos comprados salen con un titulo generico.
+        // No rompe la pantalla, pero tampoco puede desaparecer sin dejar rastro.
+        console.warn('[biblioteca] no se pudo cargar el catalogo de cursos', error);
+        setCourses([]);
+      });
   }, []);
 
   const hasCourses = purchasedCourseIds.length > 0;

@@ -46,7 +46,10 @@ export function NotificationsScreen() {
     if (!supabaseEnabled || noticeDismissed) return;
     ProfileRepository.listFeatured()
       .then((list) => setAdminId(list.find((member) => member.isAdmin)?.id ?? null))
-      .catch(() => setAdminId(null));
+      .catch((error) => {
+        console.warn('[avisos] no se pudo resolver el administrador', error);
+        setAdminId(null);
+      });
   }, [supabaseEnabled, noticeDismissed]);
 
   // `listFeatured` excluye a quien mira: si el propio Darren abre la pantalla no

@@ -26,6 +26,17 @@ export default function IndexRoute() {
     );
   }
 
+  /*
+    La recuperacion de contrasena va PRIMERO, antes que la sesion.
+
+    Al pulsar el enlace del correo Supabase abre sesion, asi que sin esta
+    comprobacion el usuario aterrizaba en el feed con la contrasena vieja
+    intacta y sin llegar a cambiarla: pedia recuperarla y la aplicacion se
+    comportaba como si no hubiera pasado nada. `passwordRecovery` ya se leia
+    aqui, pero no se usaba para nada.
+  */
+  if (passwordRecovery) return <Redirect href="/reset-password" />;
+
   // Con sesión activa se va directo al home.
   if (authStatus === 'authenticated') return <Redirect href="/(tabs)/home" />;
 

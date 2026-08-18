@@ -53,10 +53,16 @@ export function HomeScreen() {
     if (!AuthRepository.enabled) return;
     CommunityRepository.list()
       .then((list) => setCircle(list[0] ?? null))
-      .catch(() => setCircle(null));
+      .catch((error) => {
+        console.warn('[inicio] no se pudo cargar el circulo destacado', error);
+        setCircle(null);
+      });
     ProfileRepository.listFeatured()
       .then((list) => setAdminId((list.find((m) => m.isAdmin) ?? list[0])?.id ?? null))
-      .catch(() => setAdminId(null));
+      .catch((error) => {
+        console.warn('[inicio] no se pudo resolver el administrador', error);
+        setAdminId(null);
+      });
   }, []);
 
   /**

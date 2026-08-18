@@ -90,3 +90,25 @@ test('una respuesta sin contenido no revienta al intentar leerla', async () => {
   const resultado = await apiRequest('/algo', { auth: false });
   assert.equal(resultado, undefined);
 });
+
+test('un servidor que falla sin explicarse no imprime el codigo en pantalla', async () => {
+  // Produccion devuelve «Internal Server Error» en texto plano, sin JSON. Antes
+  // el respaldo era `Error 500` y ese literal se pintaba en el feed.
+  globalThis.fetch = (() =>
+    Promise.resolve(new Response('Internal Server Error', { status: 500 }))) as typeof fetch;
+
+  const fallo = await apiRequest('/algo', { auth: false }).catch((e) => e);
+
+  assert.equal(fallo.status, 500, 'el estado sigue disponible para depurar');
+  assert.doesNotMatch(fallo.message, /500|Error \d/);
+  assert.match(fallo.message, /no está disponible/i);
+});
+
+test('la sesion caducada se explica, no se numera', async () => {
+  globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 401 }))) as typeof fetch;
+
+  const fallo = await apiRequest('/algo', { auth: false }).catch((e) => e);
+
+  assert.equal(fallo.status, 401);
+  assert.match(fallo.message, /sesión ha caducado/i);
+});

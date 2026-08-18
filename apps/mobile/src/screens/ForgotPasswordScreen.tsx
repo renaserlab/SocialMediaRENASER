@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
+import { mensajeDeAuth } from '@/lib/authErrors';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -26,7 +27,23 @@ export function ForgotPasswordScreen() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+    Cerrojo contra el doble envio.
+
+    `sending` no basta: es estado de React y no cambia hasta el siguiente
+    dibujado, asi que dos pulsaciones en el mismo instante entran las dos. Pasa
+    de verdad —un doble toque, o un clic que dispara puntero y raton— y la
+    consecuencia era mala de un modo poco evidente: el primer correo se enviaba
+    bien, el segundo chocaba con el limite de envios de Supabase y su error
+    BORRABA la pantalla de «revisa tu correo». El usuario leia que habia
+    fallado, con el mensaje ya en su bandeja, y volvia a intentarlo.
+
+    Un `ref` se actualiza en el acto, asi que la segunda llamada se descarta.
+  */
+  const enviando = useRef(false);
+
   const submit = async () => {
+    if (enviando.current) return;
     const clean = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(clean)) {
       setError('Escribe un correo válido.');
@@ -36,14 +53,23 @@ export function ForgotPasswordScreen() {
       setError('La recuperación necesita conexión con el servidor.');
       return;
     }
+    enviando.current = true;
     setSending(true);
     setError(null);
     try {
       await requestPasswordReset(clean);
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo enviar el correo.');
+      /*
+        El fallo de Supabase llega en ingles y describe la averia del servidor
+        («Unable to validate email address: invalid format», «Failed to fetch»,
+        «AuthApiError»). Escrito en rojo debajo del campo parecia que la
+        aplicacion se hubiera roto. El detalle tecnico entero queda en la
+        consola; aqui solo se dice que ha pasado y que se puede hacer.
+      */
+      setError(mensajeDeAuth(err, 'recuperacion'));
     } finally {
+      enviando.current = false;
       setSending(false);
     }
   };

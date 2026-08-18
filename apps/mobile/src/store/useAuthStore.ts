@@ -8,7 +8,9 @@ import {
   SignUpResult,
 } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { esEnlaceDeRecuperacion, mensajeDeEnlace } from '@/lib/authLink';
 import { setAuthTokenProvider, ApiError } from '@/services/api';
+import { enlaceAuthInicial } from '@/services/supabase';
 import { registerForPush, unregisterPush } from '@/services/notifications';
 import { clearSignedUrlCache } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
@@ -37,6 +39,16 @@ type AuthState = {
    * entraria directo y no cambiaria nada.
    */
   passwordRecovery: boolean;
+  /**
+   * Por que no se pudo abrir el enlace del correo, ya en lenguaje de persona.
+   * Lo pinta ResetPasswordScreen: sin esto la pantalla decia siempre «enlace no
+   * valido o caducado» aunque el motivo real fuera otro.
+   */
+  recoveryError: string | null;
+  /** Marca que hay sesion de recuperacion en curso (la abre el enlace). */
+  startPasswordRecovery: () => void;
+  /** Guarda el motivo por el que el enlace no sirvio. */
+  setRecoveryError: (message: string | null) => void;
   requestPasswordReset: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -54,6 +66,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialized: false,
   profileError: null,
   passwordRecovery: false,
+  recoveryError: null,
+
+  startPasswordRecovery() {
+    set({ passwordRecovery: true, recoveryError: null });
+  },
+
+  setRecoveryError(message) {
+    // Un motivo nuevo cancela la recuperacion en curso: si el enlace no sirve,
+    // no hay sesion que aprovechar y dejar la marca puesta atraparia al usuario
+    // en la pantalla de contrasena nueva sin poder guardarla.
+    set({ recoveryError: message, passwordRecovery: message ? false : get().passwordRecovery });
+  },
 
   async bootstrap() {
     if (get().initialized) return;
@@ -67,6 +91,52 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // Cada request al backend llevara el JWT actual de Supabase.
     setAuthTokenProvider(() => AuthRepository.getAccessToken());
+
+    /*
+      El enlace del correo abierto EN EL NAVEGADOR se resuelve solo: supabase-js
+      lee el fragmento de la direccion al arrancar. Pero si el enlace venia
+      caducado no hay sesion y tampoco evento, asi que sin mirar la URL de
+      entrada la aplicacion no tenia forma de explicar por que. `enlaceAuthInicial`
+      guarda ese motivo antes de que la libreria limpie la direccion.
+    */
+    if (enlaceAuthInicial?.errorCode) {
+      console.warn('[auth] el enlace de entrada traia un error', enlaceAuthInicial);
+      set({ recoveryError: mensajeDeEnlace(enlaceAuthInicial) });
+    } else if (enlaceAuthInicial && esEnlaceDeRecuperacion(enlaceAuthInicial)) {
+      // La sesion la abre supabase-js; aqui solo se deja constancia de que este
+      // arranque viene de una recuperacion, para no colar al usuario en el feed
+      // si el evento PASSWORD_RECOVERY llega antes de que nadie escuche.
+      set({ passwordRecovery: true });
+    }
+
+    /*
+      La suscripcion va ANTES de resolver la sesion, no despues.
+
+      `getSession()` espera a que supabase-js termine de arrancar, y es durante
+      ese arranque cuando emite `PASSWORD_RECOVERY` al detectar el enlace en la
+      direccion. Suscribiendose despues, ese aviso ya habia pasado y se perdia:
+      la marca de recuperacion nunca se levantaba y el usuario entraba al feed
+      con la contrasena vieja intacta.
+    */
+    unsubscribeAuth?.();
+    unsubscribeAuth = AuthRepository.onAuthStateChange((nextSession, event) => {
+      if (event === 'PASSWORD_RECOVERY') set({ passwordRecovery: true, recoveryError: null });
+      setTimeout(() => {
+        if (nextSession) {
+          // Mismo criterio que abajo: la sesion decide, el perfil acompana.
+          set({ status: 'authenticated' });
+          void get().refreshProfile();
+          // El dispositivo se registra al iniciar sesion, no al arrancar la
+          // app: el permiso se pide cuando ya tiene sentido para quien la usa.
+          // Si falla (Expo Go, emulador, permiso denegado) devuelve null y no
+          // pasa nada mas: la app funciona igual, sin avisos en el telefono.
+          void registerForPush();
+        } else {
+          useAppStore.getState().setUser(null);
+          set({ status: 'anonymous' });
+        }
+      }, 0);
+    });
 
     try {
       const session = await AuthRepository.getSession();
@@ -91,28 +161,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    // Mantiene la sesion sincronizada ante login/logout/refresh de token.
-    // El trabajo async se difiere para no llamar a Supabase dentro de su
-    // propio callback (evita un posible deadlock documentado en supabase-js).
-    unsubscribeAuth?.();
-    unsubscribeAuth = AuthRepository.onAuthStateChange((nextSession, event) => {
-      if (event === 'PASSWORD_RECOVERY') set({ passwordRecovery: true });
-      setTimeout(() => {
-        if (nextSession) {
-          // Mismo criterio que arriba: la sesion decide, el perfil acompana.
-          set({ status: 'authenticated' });
-          void get().refreshProfile();
-          // El dispositivo se registra al iniciar sesion, no al arrancar la
-          // app: el permiso se pide cuando ya tiene sentido para quien la usa.
-          // Si falla (Expo Go, emulador, permiso denegado) devuelve null y no
-          // pasa nada mas: la app funciona igual, sin avisos en el telefono.
-          void registerForPush();
-        } else {
-          useAppStore.getState().setUser(null);
-          set({ status: 'anonymous' });
-        }
-      }, 0);
-    });
   },
 
   async refreshProfile() {
@@ -187,7 +235,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async updatePassword(password) {
     await AuthRepository.updatePassword(password);
     // Cambiada: se levanta la marca y la sesion pasa a ser normal.
-    set({ passwordRecovery: false });
+    set({ passwordRecovery: false, recoveryError: null });
     await get().refreshProfile();
     set({ status: 'authenticated' });
   },
@@ -200,7 +248,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.signOut();
     // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
     clearSignedUrlCache();
-    set({ passwordRecovery: false });
+    set({ passwordRecovery: false, recoveryError: null });
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });
   },
@@ -211,7 +259,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.deleteAccount();
     // A partir de aqui es el mismo cierre que signOut: la cuenta ya no existe.
     clearSignedUrlCache();
-    set({ passwordRecovery: false });
+    set({ passwordRecovery: false, recoveryError: null });
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });
   },

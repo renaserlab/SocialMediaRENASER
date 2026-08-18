@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
@@ -10,7 +10,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { ZLogo } from '@/components/ZLogo';
-import { ApiError } from '@/services/api';
+import { mensajeDeAuth } from '@/lib/authErrors';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
@@ -33,8 +33,13 @@ export function RegisterScreen() {
   const [socialBusy, setSocialBusy] = useState(false);
 
   const [errors, setErrors] = useState<{ fullName?: string; email?: string; password?: string }>({});
+  // Sin este cerrojo, un doble toque lanzaba dos altas: la segunda respondia
+  // «ese correo ya tiene una cuenta» —la que acababa de crear la primera— y
+  // parecia que el registro habia fallado cuando en realidad habia funcionado.
+  const creando = useRef(false);
 
   const submit = async () => {
+    if (creando.current) return;
     const newErrors: { fullName?: string; email?: string; password?: string } = {};
 
     if (fullName.trim().length < 3) {
@@ -62,6 +67,7 @@ export function RegisterScreen() {
       return;
     }
 
+    creando.current = true;
     setSubmitting(true);
     try {
       const result = await signUpEmail({ fullName: cleanName, email: cleanEmail, password });
@@ -75,16 +81,16 @@ export function RegisterScreen() {
         router.replace('/onboarding');
       }
     } catch (error) {
-      const message =
-        error instanceof ApiError || error instanceof Error
-          ? error.message
-          : 'No se pudo crear la cuenta. Inténtalo de nuevo.';
-      if (/already|registrad|exist/i.test(message)) {
-        setErrors({ email: 'Este correo ya está registrado' });
+      // Igual que en el acceso: el texto tecnico de Supabase no llega a la
+      // pantalla, solo a la consola.
+      const message = mensajeDeAuth(error, 'registro');
+      if (/ya tiene una cuenta/i.test(message)) {
+        setErrors({ email: 'Ese correo ya tiene una cuenta' });
       } else {
         notify('No se pudo crear la cuenta', message);
       }
     } finally {
+      creando.current = false;
       setSubmitting(false);
     }
   };
@@ -102,10 +108,7 @@ export function RegisterScreen() {
         router.replace('/onboarding');
       }
     } catch (error) {
-      notify(
-        'No se pudo continuar con Google',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
-      );
+      notify('No se pudo continuar con Google', mensajeDeAuth(error, 'registro'));
     } finally {
       setSocialBusy(false);
     }

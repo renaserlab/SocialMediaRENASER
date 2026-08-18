@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
+import { leerEnlaceAuth, type EnlaceAuth } from '@/lib/authLink';
 import { apiRequest, API_V1 } from '@/services/api';
 import { supabase, isSupabaseConfigured } from '@/services/supabase';
 
@@ -24,10 +25,9 @@ export class ProviderNotEnabledError extends Error {
 
 /** Lee tokens tanto del fragmento (#) como de la query (?) de la URL. */
 function extractTokens(url: string): { access: string; refresh: string } | null {
-  const raw = url.split('#')[1] ?? url.split('?')[1] ?? '';
-  const params = new URLSearchParams(raw);
-  const access = params.get('access_token');
-  const refresh = params.get('refresh_token');
+  const enlace = leerEnlaceAuth(url);
+  const access = enlace?.accessToken;
+  const refresh = enlace?.refreshToken;
   return access && refresh ? { access, refresh } : null;
 }
 
@@ -184,10 +184,21 @@ export const AuthRepository = {
       Platform.OS === 'web'
         ? `${window.location.origin}/reset-password`
         : Linking.createURL('reset-password');
+    /*
+      Se deja constancia del destino exacto que se pide.
+
+      Esta URL tiene que estar dada de alta en Supabase (Authentication -> URL
+      Configuration -> Redirect URLs) o el correo lleva al sitio por defecto en
+      vez de a la aplicacion. Y cambia segun donde corra: `z://reset-password`
+      en la app instalada, `exp://...` en Expo Go, el origen del navegador en
+      web. Cuando un enlace no abre donde debe, esto es lo primero que hay que
+      mirar, y sin imprimirlo habia que adivinarlo.
+    */
+    console.log('[auth] enlace de recuperacion pedido con redirectTo =', redirectTo);
     const { error } = await client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
       redirectTo,
     });
-    if (error) throw AuthRepository._describeResetError(error);
+    if (error) throw error;
   },
 
   /**
@@ -202,31 +213,39 @@ export const AuthRepository = {
     if (error) throw error;
   },
 
-  /** Traduce los errores mas habituales del envio a algo accionable. */
-  _describeResetError(error: { message?: string; status?: number }): Error {
-    const message = error?.message ?? '';
-    if (error?.status === 429 || /rate limit|too many/i.test(message)) {
-      /*
-        Supabase impone DOS limites distintos y conviene no confundirlos:
-        - una espera entre envios al MISMO correo (dice los segundos exactos),
-        - y un tope por hora del proyecto.
-        Si nos dice los segundos, se los damos al usuario en vez de un vago
-        "espera un momento".
-      */
-      const seconds = message.match(/after (\d+) seconds?/i)?.[1];
-      if (seconds) {
-        return new Error(
-          `Acabamos de enviarte un correo. Espera ${seconds} segundos antes de pedir otro.`,
-        );
-      }
-      return new Error(
-        'Se alcanzó el límite de envíos. Espera unos minutos e inténtalo de nuevo.',
-      );
+  /**
+   * Abre la sesion de recuperacion a partir del enlace del correo.
+   *
+   * Hace falta EN NATIVO. En el navegador supabase-js ya lo hace solo
+   * (`detectSessionInUrl`), pero en el telefono ese ajuste esta apagado —no hay
+   * barra de direcciones que inspeccionar— y nadie leia los tokens que el
+   * sistema entrega al abrir `z://reset-password#access_token=...`. Sin esto la
+   * pantalla de contrasena nueva no encontraba sesion y respondia siempre
+   * «Enlace no valido o caducado», aunque el enlace acabara de llegar.
+   *
+   * Se admiten los dos flujos porque el proyecto puede cambiar de uno a otro
+   * sin tocar la aplicacion: tokens sueltos (implicito) y codigo de un solo uso
+   * (PKCE).
+   */
+  async abrirSesionDesdeEnlace(enlace: EnlaceAuth): Promise<boolean> {
+    const client = requireClient();
+
+    if (enlace.accessToken && enlace.refreshToken) {
+      const { error } = await client.auth.setSession({
+        access_token: enlace.accessToken,
+        refresh_token: enlace.refreshToken,
+      });
+      if (error) throw error;
+      return true;
     }
-    if (/smtp|email provider/i.test(message)) {
-      return new Error('El servidor de correo no está configurado. Avisa al administrador.');
+
+    if (enlace.code) {
+      const { error } = await client.auth.exchangeCodeForSession(enlace.code);
+      if (error) throw error;
+      return true;
     }
-    return error instanceof Error ? error : new Error(message || 'No se pudo enviar el correo.');
+
+    return false;
   },
 
   /**

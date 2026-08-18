@@ -3,8 +3,25 @@ import { AppState, Platform } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { leerEnlaceAuth, type EnlaceAuth } from '@/lib/authLink';
+
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+/*
+  Lo que traia la direccion al abrir la aplicacion en el navegador.
+
+  Se lee AQUI, antes de crear el cliente, y no mas tarde desde una pantalla:
+  con `detectSessionInUrl` activo, supabase-js consume el fragmento de la URL y
+  lo borra de la barra de direcciones nada mas arrancar. Despues de eso ya no
+  hay forma de saber si el enlace del correo venia con un error —caducado, ya
+  usado— y el usuario acababa viendo una pantalla generica que no explicaba
+  nada. Leyendolo antes, ese motivo se conserva.
+*/
+export const enlaceAuthInicial: EnlaceAuth | null =
+  Platform.OS === 'web' && typeof window !== 'undefined'
+    ? leerEnlaceAuth(window.location.href)
+    : null;
 
 export const supabase = url && anonKey
   ? createClient(url, anonKey, {

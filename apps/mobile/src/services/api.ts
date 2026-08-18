@@ -26,9 +26,30 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Que decir cuando el servidor falla sin explicarse.
+ *
+ * El texto de respaldo era `Error ${status}`, y ese literal acababa impreso en
+ * la pantalla: quien abria la aplicacion leia «Error 500» donde deberia haber
+ * un feed. Un numero de estado no le dice nada a quien lo lee ni sugiere que
+ * hacer. El estado sigue viajando en `ApiError.status` para quien depura.
+ */
+function mensajePorEstado(status: number): string {
+  if (status === 401 || status === 403) {
+    return 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+  }
+  if (status === 404) return 'No encontramos lo que buscabas.';
+  if (status === 429) return 'Demasiadas peticiones. Espera un momento e inténtalo de nuevo.';
+  if (status >= 500) {
+    return 'El servidor no está disponible ahora mismo. Inténtalo de nuevo en unos minutos.';
+  }
+  return 'No pudimos completar la operación. Inténtalo de nuevo.';
+}
+
 async function parseError(response: Response): Promise<ApiError> {
   let code = 'http_error';
-  let message = `Error ${response.status}`;
+  // Solo es el respaldo: si el backend manda su propio mensaje, manda el suyo.
+  let message = mensajePorEstado(response.status);
   let details: unknown;
   try {
     const body = await response.json();

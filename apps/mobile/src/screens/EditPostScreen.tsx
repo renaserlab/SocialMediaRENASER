@@ -66,15 +66,23 @@ export function EditPostScreen() {
       return;
     }
     let alive = true;
-    PostRepository.listByAuthor(currentUserId ?? '', { limit: 60 }, currentUserId)
-      .then((list) => {
-        const found = list.find((p) => p.id === id) ?? null;
+    /*
+      Se pide la publicacion por su identificador.
+
+      Antes se descargaban las 60 ultimas del autor para buscar una: pesaba de
+      mas y, sobre todo, quien tuviera mas de sesenta publicaciones no podia
+      editar las antiguas —la pantalla se quedaba vacia sin decir por que—.
+    */
+    PostRepository.getById(id, currentUserId)
+      .then((found) => {
         if (!alive) return;
         setPost(found);
-        setText(found?.body ?? '');
-        setCategory((found?.category as CategoryId | null) ?? null);
+        setText(found.body);
+        setCategory((found.category as CategoryId | null) ?? null);
       })
-      .catch(() => {})
+      .catch((error) => {
+        console.warn('[editar publicacion] no se pudo cargar', error);
+      })
       .finally(() => {
         if (alive) setLoading(false);
       });

@@ -18,6 +18,7 @@ import {
 import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { DialogHost } from '@/components/DialogHost';
 import { ToastHost } from '@/components/ToastHost';
+import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -44,6 +45,11 @@ export default function RootLayout() {
   useEffect(() => {
     void useAuthStore.getState().bootstrap();
   }, []);
+
+  // Atiende los enlaces del correo (recuperar contrasena) en movil. Va en la
+  // raiz porque el enlace puede llegar con cualquier pantalla delante, o con la
+  // aplicacion cerrada.
+  useAuthDeepLink();
 
   // El segundo valor es el error de carga: si la fuente falla (sin red, cache
   // vacia) hay que continuar igualmente con la tipografia del sistema.
