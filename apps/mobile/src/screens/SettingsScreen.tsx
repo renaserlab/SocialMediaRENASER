@@ -192,6 +192,20 @@ export function SettingsScreen() {
           publicadas en la web de Vercel como /privacy y /terms, que es la
           direccion publica que pide la ficha de la tienda.
         */}
+        {/*
+          Ayuda. Va ANTES de lo legal porque es lo que se busca cuando algo no
+          funciona, y porque la misma ruta es la URL de soporte publica que
+          exigen tanto la ficha de App Store como la de Google Play.
+        */}
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Ayuda</Text>
+        <ListRow
+          title="Soporte y preguntas frecuentes"
+          subtitle="Resuelve dudas o escríbenos"
+          leftIcon="life-buoy"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/support' as never)}
+        />
+
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
         <ListRow
           title="Política de Privacidad"

@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.renaser.z",
+      "bundleIdentifier": "com.renaser.zeta",
       "infoPlist": {
         "NSCameraUsageDescription": "Z utiliza la cámara para hacer una foto o un vídeo y publicarlo.",
         "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
@@ -26,7 +26,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.renaser.z",
+      "package": "com.renaser.zeta",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": true,
       "permissions": [

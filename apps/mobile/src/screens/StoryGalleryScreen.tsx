@@ -8,7 +8,9 @@ import { Feather } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { palette, radius, spacing } from '@/theme/tokens';
-import type { PickedMedia } from '@/services/storage';
+import { pickImage, type PickedMedia } from '@/services/storage';
+import { notify } from '@/lib/confirm';
+import { describeError } from '@/lib/describeError';
 
 /** Superficie oscura, como el resto del flujo de captura. */
 const media = palette('dark');
@@ -84,6 +86,22 @@ export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera }: Props) {
     })();
   }, [ask, load]);
 
+  /**
+   * Elige usando el selector del propio telefono.
+   *
+   * Alternativa para cuando la cuadricula no puede cargar: sin permiso, o en
+   * Android 12 y anteriores, donde leer el carrete exigiria un permiso de
+   * almacenamiento que la aplicacion no pide.
+   */
+  const elegirConElSistema = async () => {
+    try {
+      const foto = await pickImage({ aspect: [9, 16] });
+      if (foto) onSelect(foto);
+    } catch (error) {
+      notify('No se pudo abrir el selector', describeError(error, 'Inténtalo de nuevo.'));
+    }
+  };
+
   const choose = (asset: MediaLibrary.Asset) => {
     const esVideo = asset.mediaType === 'video';
     onSelect({
@@ -126,6 +144,28 @@ export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera }: Props) {
             style={styles.deniedCta}
           />
         ) : null}
+
+        {/*
+          Salida por el selector del sistema.
+
+          No es solo un consuelo para quien rechaza el permiso: en Android 12 y
+          anteriores leer el carrete exige READ_EXTERNAL_STORAGE, que la
+          aplicacion bloquea a proposito —Google Play mira con lupa el acceso
+          amplio al almacenamiento—. En esos telefonos la cuadricula NUNCA va a
+          poder cargar, y sin esta alternativa se quedarian sin forma de elegir
+          una foto salvo hacerla con la camara.
+
+          El selector del sistema no necesita ese permiso porque la eleccion
+          ocurre fuera de la aplicacion: solo se recibe lo que la persona elige.
+        */}
+        <Button
+          label="Elegir con el selector del teléfono"
+          variant="secondary"
+          icon="folder"
+          onPress={() => void elegirConElSistema()}
+          style={styles.deniedCta}
+        />
+
         <Pressable onPress={onClose} hitSlop={10} style={styles.deniedLink}>
           <Text variant="secondary" color={media.textMuted}>
             Cancelar
