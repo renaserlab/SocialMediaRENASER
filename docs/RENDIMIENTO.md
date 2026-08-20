@@ -130,9 +130,26 @@ API con el código nuevo desplegado.
 con HLS explícito (hoy hereda de PostCard), prefetch de la siguiente imagen
 del muro con `Image.prefetch`.
 
-**Por infraestructura** — ejecutar la migración 0021 y el script de
-reproceso (necesitan la service role key, que este entorno no tiene);
-verificar el endpoint HLS con un video real transcodificado.
+**Por infraestructura** — ejecutar el script de reproceso (necesita la service
+role key); verificar el endpoint HLS con un video real transcodificado.
+
+### Hallazgo colateral (2026-08-20): `SUPABASE_SERVICE_ROLE_KEY` faltaba en Render
+
+Al configurarla para el procesado de media se descubrió que **nunca había
+estado puesta**. Consecuencia anterior a este trabajo: `delete_user_files`
+(borrado de cuenta) salía por su rama de "no configurado", registraba un aviso
+en el log y **no borraba nada de Storage**. La política de privacidad promete
+que esos archivos se eliminan.
+
+Comprobación hecha comparando las carpetas de los buckets contra la tabla
+`profiles`: **un único archivo huérfano**, `post-media/7d00ee95-f3a6-4a45-9564-0ca782cef755/1784580768207-e6y8ogml.jpg`
+(0.16 MB, 2026-07-20). Verificado que es real y no un falso positivo por RLS:
+no existe el perfil, no hay publicaciones de ese autor y ninguna fila de
+`post_media` lo referencia. Los buckets `avatars` y `course-media` están
+limpios.
+
+Queda **borrarlo a mano** desde Storage en el panel de Supabase. Con la
+variable ya configurada, los borrados de cuenta futuros sí limpian solos.
 
 **Por costo (decisiones de negocio, NO tomadas aquí)** —
 - Render de pago o keep-alive externo: el warm-up mitiga, pero el plan free
