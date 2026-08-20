@@ -112,11 +112,11 @@ API con el código nuevo desplegado.
    SQL Editor de Supabase (repetible; termina con su comprobación).
 2. **Desplegar el API** (merge a `main` cuando Edson apruebe → Render). Las
    publicaciones nuevas generan derivados solas a partir de aquí.
-3. **Reprocesar lo existente** (cualquier máquina con ffmpeg y la service
-   role key; NUNCA commitear la clave):
+3. **Reprocesar lo existente** (cualquier máquina con ffmpeg). El script lee
+   la dirección del proyecto de `apps/mobile/.env` y pide la **service role
+   key por teclado, oculta**: no va en ningún archivo del repositorio ni en la
+   línea de comandos, donde quedaría en el historial de la consola.
    ```bash
-   set SUPABASE_URL=https://<ref>.supabase.co
-   set SUPABASE_SERVICE_ROLE_KEY=sb_secret_...
    python scripts/procesar_media.py --dry-run
    python scripts/procesar_media.py --images
    python scripts/procesar_media.py --videos --hls

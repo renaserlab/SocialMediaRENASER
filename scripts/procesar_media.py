@@ -21,13 +21,17 @@ Garantias:
   - --dry-run enseña que haria, sin subir ni escribir nada.
   - Repetible: lo ya procesado (feed_path/stream_path presentes) se salta.
 
-Uso (necesita la service role key, que NUNCA viaja en la app):
-  set SUPABASE_URL=https://<ref>.supabase.co
-  set SUPABASE_SERVICE_ROLE_KEY=sb_secret_...
-  python scripts/procesar_media.py --dry-run
-  python scripts/procesar_media.py --videos --hls
+Uso: la direccion del proyecto se lee de apps/mobile/.env y la SERVICE ROLE KEY
+se pide por teclado, oculta y sin guardarse en ningun sitio. NO hace falta
+ponerla en ningun archivo ni en la linea de comandos:
+
+  python scripts/procesar_media.py --dry-run          # ensayo, no toca nada
   python scripts/procesar_media.py --images
-  python scripts/procesar_media.py --media-id <uuid>     # uno concreto
+  python scripts/procesar_media.py --videos --hls
+  python scripts/procesar_media.py --media-id <uuid>  # uno concreto
+
+Para automatizarlo (CI), admite tambien SUPABASE_URL y
+SUPABASE_SERVICE_ROLE_KEY por entorno.
 
 Requisitos: ffmpeg y ffprobe en el PATH (videos); `pip install pillow`
 (imagenes).
@@ -36,6 +40,7 @@ Requisitos: ffmpeg y ffprobe en el PATH (videos); `pip install pillow`
 from __future__ import annotations
 
 import argparse
+import getpass
 import io
 import json
 import os
@@ -62,6 +67,41 @@ HLS_LADDER = [("360p", 360, 800), ("540p", 540, 1400), ("720p", 720, 2400)]
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+def _direccion_del_proyecto() -> str:
+    """La URL de Supabase, que NO es secreta (viaja en la app).
+
+    Se lee de `apps/mobile/.env` para no tener que escribirla a mano. Si no
+    esta, se pregunta.
+    """
+    entorno = Path(__file__).resolve().parent.parent / "apps" / "mobile" / ".env"
+    if entorno.exists():
+        for linea in entorno.read_text(encoding="utf-8").splitlines():
+            if linea.startswith("EXPO_PUBLIC_SUPABASE_URL="):
+                return linea.split("=", 1)[1].strip().rstrip("/")
+    return input("Direccion del proyecto Supabase (https://<ref>.supabase.co): ").strip().rstrip("/")
+
+
+def _clave_de_servicio() -> str:
+    """Pide la service role key SIN que aparezca en pantalla ni en el historial.
+
+    Pegarla en la linea de comandos la deja escrita en el historial de la
+    consola (en Windows, `ConsoleHost_history.txt`), donde sobrevive a la
+    sesion y a cualquiera que abra ese fichero. Escrita aqui no se guarda en
+    ningun sitio: vive solo mientras el script corre.
+
+    La variable de entorno se sigue admitiendo para poder automatizarlo.
+    """
+    print(
+        "\nNecesito la SERVICE ROLE KEY de Supabase.\n"
+        "  Panel > Project Settings > API Keys > service_role (la secreta).\n"
+        "  No se vera al escribirla y no se guarda en ningun archivo.\n"
+    )
+    clave = getpass.getpass("service_role key: ").strip()
+    if not clave:
+        raise SystemExit("Sin clave no se puede continuar.")
+    return clave
 
 
 def _pedir(url: str, *, method: str = "GET", data: bytes | None = None,
@@ -378,10 +418,13 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
 
-    if not SUPABASE_URL or not SERVICE_KEY:
-        raise SystemExit(
-            "Faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY en el entorno."
-        )
+    # Lo que no venga por entorno se resuelve aqui: la direccion se lee del
+    # proyecto y la clave se pide por teclado, oculta.
+    global SUPABASE_URL, SERVICE_KEY
+    if not SUPABASE_URL:
+        SUPABASE_URL = _direccion_del_proyecto()
+    if not SERVICE_KEY:
+        SERVICE_KEY = _clave_de_servicio()
 
     ambos = not args.images and not args.videos
     seleccion = "id,storage_path,media_type,width,height,duration_s,bytes,poster_path,feed_path,stream_path"
