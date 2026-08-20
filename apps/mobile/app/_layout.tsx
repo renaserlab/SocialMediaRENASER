@@ -19,6 +19,7 @@ import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { DialogHost } from '@/components/DialogHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
+import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -74,7 +75,12 @@ export default function RootLayout() {
   const ready = (hydrated && fontsReady) || bootTimedOut;
 
   useEffect(() => {
+    if (hydrated) perfMark('STORE_HYDRATED');
+  }, [hydrated]);
+
+  useEffect(() => {
     if (ready) {
+      perfMark('SHELL_VISIBLE');
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [ready]);

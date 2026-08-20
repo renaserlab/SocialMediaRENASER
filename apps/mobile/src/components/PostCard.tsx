@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -20,7 +20,7 @@ import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
-import { radius, spacing } from '@/theme/tokens';
+import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { Post } from '@/types';
 
@@ -29,6 +29,9 @@ import { Post } from '@/types';
  * (no con minHeight) para llegar a ~44 px sin alterar el layout de la fila.
  */
 const ACTION_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
+
+// Overlays sobre el video: contexto de media, siempre oscuro, en ambos temas.
+const mediaPalette = palette('dark');
 
 type Props = {
   post: Post;
@@ -57,6 +60,19 @@ export function PostCard({ post, onRemoved, visible }: Props) {
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  /*
+    El reproductor de video solo existe DESPUES de que la persona pulse play.
+
+    Crear el reproductor con la fuente ya dispara la descarga del buffer
+    inicial, aunque nadie vaya a reproducir: con varios videos en el muro eso
+    eran megas de datos y memoria nativa gastados en pasar de largo. Hasta el
+    toque se muestra el poster (una imagen ligera); al perderse de vista, el
+    reproductor se suelta y vuelve el poster.
+  */
+  const [videoStarted, setVideoStarted] = useState(false);
+  useEffect(() => {
+    if (visible === false) setVideoStarted(false);
+  }, [visible]);
   const liked = useAppStore((state) => state.likedPostIds.includes(post.id));
   const saved = useAppStore((state) => state.savedPostIds.includes(post.id));
   const toggleLike = useAppStore((state) => state.toggleLikePost);
@@ -242,34 +258,50 @@ export function PostCard({ post, onRemoved, visible }: Props) {
       </View>
 
       <Text variant="body" style={styles.body}>{post.body}</Text>
-      {post.mediaType === 'video' && post.mediaUrl ? (
+      {post.mediaType === 'video' ? (
         /*
           16:9 en vez de una caja fija: la mayoria de videos son apaisados y
           con alto fijo quedaban con franjas negras arriba y abajo.
 
-          El reproductor SOLO existe mientras la publicacion esta en pantalla.
-          Antes se montaba uno por cada publicacion con video del muro y todos
-          seguian ahi al seguir bajando: cada uno reserva memoria para ir por
-          delante de la reproduccion, y sumando unos pocos se agota la que
-          Android concede a la aplicacion, que la cierra sin mas. Bajar esa
-          reserva no bastaba, porque el problema era cuantos habia, no cuanto
-          ocupaba cada uno.
-
-          Al salir de pantalla se sustituye por su celda, de modo que la
-          publicacion se sigue viendo igual y se recupera la memoria.
+          El reproductor SOLO existe despues de pulsar play y mientras la
+          publicacion esta en pantalla. Antes se montaba uno por cada video
+          visible del muro: cada reproductor reserva memoria y ADEMAS empieza a
+          descargar su buffer aunque nadie le haya dado a play. Con el poster
+          delante, pasar por el muro no cuesta ni un byte de video, y la
+          memoria de reproductores queda en cero hasta que alguien mira uno.
         */
-        visible === false ? (
-          <View style={styles.video}>
-            <VideoTile uri={post.mediaUrl} />
-          </View>
-        ) : (
+        videoStarted && visible !== false && post.mediaUrl ? (
           <VideoPlayer
             uri={post.mediaUrl}
+            poster={post.posterUrl ? { uri: post.posterUrl } : undefined}
+            posterCacheKey={post.posterPath}
+            cacheToDisk
             style={styles.video}
             nativeControls
             contentFit="contain"
             visible={visible}
+            autoPlay
           />
+        ) : (
+          <Pressable
+            style={styles.video}
+            onPress={() => setVideoStarted(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Reproducir video"
+          >
+            <VideoTile posterUrl={post.posterUrl} posterCacheKey={post.posterPath} />
+            {/* Mismo circulo de play que usa el reproductor, en paleta media. */}
+            <View style={styles.playOverlay} pointerEvents="none">
+              <View
+                style={[
+                  styles.playCircle,
+                  { backgroundColor: mediaPalette.overlay, borderColor: mediaPalette.text },
+                ]}
+              >
+                <Feather name="play" size={30} color={mediaPalette.text} />
+              </View>
+            </View>
+          </Pressable>
         )
       ) : post.mediaType === 'audio' && post.mediaUrl ? (
         <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
@@ -286,6 +318,9 @@ export function PostCard({ post, onRemoved, visible }: Props) {
           <PostImage
             uri={post.mediaUrl ?? undefined}
             source={post.mediaUrl ? undefined : assets[post.imageKey!]}
+            cacheKey={post.mediaPath}
+            width={post.mediaWidth}
+            height={post.mediaHeight}
           />
         </DoubleTapLike>
       ) : null}
@@ -439,6 +474,15 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.lg },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   count: { marginLeft: 2 },
+  playOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  playCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
   comments: { borderTopWidth: 1, padding: spacing.lg },
   commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   commentInput: { flex: 1, height: 40, borderRadius: radius.pill, borderWidth: 1, paddingHorizontal: spacing.lg, fontSize: 13 },

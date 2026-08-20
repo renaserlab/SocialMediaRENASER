@@ -12,6 +12,22 @@ export type PostMediaDto = {
   storage_path: string;
   media_type: string;
   sort_order: number;
+  /*
+    Metadata opcional del medio. La informa el backend cuando existe; un
+    backend anterior a la migracion 0021 simplemente no manda estos campos y
+    todo sigue funcionando con el original.
+  */
+  width?: number | null;
+  height?: number | null;
+  duration_s?: number | null;
+  bytes?: number | null;
+  /** Miniatura/poster generado (imagen), si existe. */
+  poster_path?: string | null;
+  /** Version optimizada para el feed (imagen recomprimida o MP4 ligero). */
+  feed_path?: string | null;
+  /** Raiz del empaquetado HLS, si el video fue transcodificado. */
+  stream_path?: string | null;
+  processing_status?: string | null;
 };
 
 export type PostDto = {
@@ -78,6 +94,7 @@ export function toComment(dto: CommentDto): Comment {
  * bajo demanda; el contador viene en commentsCount.
  */
 export function toPost(dto: PostDto, currentUserId?: string | null): Post {
+  const first = dto.media[0];
   return {
     category: dto.category ?? null,
     id: dto.id,
@@ -87,9 +104,21 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     username: authorHandle(dto.author),
     body: dto.body,
     createdAt: formatRelativeTime(dto.created_at),
+    createdAtIso: dto.created_at,
     likes: dto.likes_count,
     comments: [],
     commentsCount: dto.comments_count,
     isOwn: currentUserId ? dto.author.id === currentUserId : undefined,
+    // El tipo y la ruta van SIEMPRE, aunque la firma llegue despues (o falle):
+    // con ellos la tarjeta ya sabe que hueco reservar y que cache consultar.
+    mediaType: first ? (first.media_type as Post['mediaType']) : undefined,
+    // Se prefiere la version optimizada para el feed; el original queda como
+    // respaldo para el contenido anterior al pipeline de derivados.
+    mediaPath: first ? (first.feed_path ?? first.storage_path) : undefined,
+    posterPath: first?.poster_path ?? undefined,
+    mediaWidth: first?.width ?? undefined,
+    mediaHeight: first?.height ?? undefined,
+    mediaDurationS: first?.duration_s ?? undefined,
+    processingStatus: (first?.processing_status as Post['processingStatus']) ?? undefined,
   };
 }

@@ -31,7 +31,15 @@ const media = palette('dark');
  * Es lo mismo que hacen las aplicaciones de referencia: en una cuadricula,
  * imagenes; el reproductor aparece al abrir la publicacion.
  */
-export function VideoTile({ posterUrl }: { uri?: string | null; posterUrl?: string | null }) {
+export function VideoTile({
+  posterUrl,
+  posterCacheKey,
+}: {
+  uri?: string | null;
+  posterUrl?: string | null;
+  /** Ruta del poster en Storage: clave de cache estable frente a refirmas. */
+  posterCacheKey?: string | null;
+}) {
   return (
     <View style={[styles.wrap, { backgroundColor: media.surfaceAlt }]}>
       {/*
@@ -41,11 +49,11 @@ export function VideoTile({ posterUrl }: { uri?: string | null; posterUrl?: stri
       */}
       {posterUrl ? (
         <ExpoImage
-          source={{ uri: posterUrl }}
+          source={{ uri: posterUrl, cacheKey: posterCacheKey ?? undefined }}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           cachePolicy="disk"
-          recyclingKey={posterUrl}
+          recyclingKey={posterCacheKey ?? posterUrl}
           transition={120}
         />
       ) : (

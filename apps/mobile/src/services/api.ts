@@ -163,5 +163,24 @@ export async function apiRequest<T>(
   return response.json() as Promise<T>;
 }
 
+/**
+ * Despierta el servidor sin esperar respuesta.
+ *
+ * El backend vive en el plan gratuito de Render, que SUSPENDE la instancia
+ * tras un rato sin trafico y tarda ~20-25 segundos en levantarla (medido
+ * contra produccion). Si la primera peticion que la despierta es la del feed,
+ * el usuario mira una pantalla vacia todo ese tiempo.
+ *
+ * Llamando a /health en cuanto arranca la aplicacion, el servidor se levanta
+ * EN PARALELO mientras la persona ya esta viendo el contenido cacheado. Para
+ * cuando el feed de red se pide (o se reintenta), la instancia suele estar
+ * lista. Si ya estaba despierta, esta llamada cuesta ~250 ms y nada mas.
+ */
+export function warmUpApi(): void {
+  fetch(`${API_URL}/health`).catch(() => {
+    // Sin conexion o servidor caido: el feed ya ensena su propio error.
+  });
+}
+
 export const API_BASE_URL = API_URL;
 export const API_V1 = '/api/v1';

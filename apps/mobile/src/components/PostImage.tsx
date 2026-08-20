@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Image as RNImage, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 
+import { perfMark } from '@/lib/perf';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
@@ -36,19 +37,33 @@ function limitar(proporcion: number): number {
 export function PostImage({
   source,
   uri,
+  cacheKey,
+  width,
+  height,
   style,
 }: {
   source?: ImageSourcePropType;
   uri?: string;
+  /**
+   * Identidad ESTABLE de la imagen para la cache de disco (la ruta en
+   * Storage). La URL firmada cambia con cada firma; sin esta clave, cada
+   * refirma invalidaba la cache y la foto se descargaba entera otra vez.
+   */
+  cacheKey?: string;
+  /** Medidas reales del backend: reservan el hueco exacto desde el primer render. */
+  width?: number;
+  height?: number;
   style?: object;
 }) {
   const { colors } = useAppTheme();
   /*
-    Las medidas de una imagen que viene con la aplicacion se conocen sin
-    descargar nada, asi que se resuelven ya. Las de una foto remota llegan
-    cuando termina de cargarse.
+    La proporcion se resuelve ANTES de descargar nada siempre que se pueda:
+    de la metadata del backend (fotos remotas con medidas guardadas) o del
+    propio bundle (imagenes locales). Solo las fotos antiguas sin medidas
+    esperan al onLoad, y son las unicas que pueden reajustar el alto.
   */
   const [proporcion, setProporcion] = useState(() => {
+    if (width && height) return limitar(width / height);
     if (uri || !source) return PROPORCION_INICIAL;
     const resuelta = RNImage.resolveAssetSource(source as never);
     return resuelta?.width && resuelta?.height
@@ -59,7 +74,7 @@ export function PostImage({
   return (
     <View style={[styles.wrap, { aspectRatio: proporcion, backgroundColor: colors.surfaceAlt }, style]}>
       <ExpoImage
-        source={uri ? { uri } : source}
+        source={uri ? { uri, cacheKey: cacheKey ?? undefined } : source}
         contentFit="cover"
         contentPosition="center"
         /*
@@ -77,8 +92,11 @@ export function PostImage({
           que era lo siguiente en pedir memoria, aunque la culpa no fuera suya.
         */
         onLoad={({ source: cargada }) => {
+          perfMark('FIRST_IMAGE_VISIBLE');
           if (cargada?.width && cargada?.height) {
-            setProporcion(limitar(cargada.width / cargada.height));
+            const real = limitar(cargada.width / cargada.height);
+            // Evita un re-render cuando la metadata ya acerto.
+            setProporcion((previa) => (Math.abs(previa - real) < 0.01 ? previa : real));
           }
         }}
         /*
@@ -93,7 +111,7 @@ export function PostImage({
           marca la imagen anterior sigue ocupando memoria hasta que le toca
           soltarse; con ella se libera en cuanto la fila pasa a otra foto.
         */
-        recyclingKey={uri ?? undefined}
+        recyclingKey={cacheKey ?? uri ?? undefined}
         transition={150}
         style={StyleSheet.absoluteFill}
       />

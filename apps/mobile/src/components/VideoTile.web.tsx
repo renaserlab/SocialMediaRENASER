@@ -20,7 +20,15 @@ const media = palette('dark');
  * `preload="metadata"` mas el fragmento `#t=0.001` traen solo el principio del
  * archivo y pintan ese instante: no se descarga el video entero.
  */
-export function VideoTile({ uri, posterUrl }: { uri?: string | null; posterUrl?: string | null }) {
+export function VideoTile({
+  uri,
+  posterUrl,
+}: {
+  uri?: string | null;
+  posterUrl?: string | null;
+  /** Solo lo usa la variante nativa; aqui la cache la lleva el navegador. */
+  posterCacheKey?: string | null;
+}) {
   const src = uri && !uri.includes('#') ? `${uri}#t=0.001` : uri;
 
   return (
@@ -29,7 +37,8 @@ export function VideoTile({ uri, posterUrl }: { uri?: string | null; posterUrl?:
         <video
           src={src}
           poster={posterUrl ?? undefined}
-          preload="metadata"
+          // Con poster guardado no hace falta tocar el video para la miniatura.
+          preload={posterUrl ? 'none' : 'metadata'}
           muted
           playsInline
           // Es una miniatura, no un reproductor: sin controles y sin opciones

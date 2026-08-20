@@ -14,26 +14,43 @@ export type FeedPage = {
 export type FeedKind = 'all' | 'following';
 
 /**
- * Firma el primer medio de cada post y lo asigna a item.mediaUrl/mediaType
- * (sirve para imagen, video y audio).
+ * Firma las URLs del medio y del poster de cada post y devuelve copias con
+ * `mediaUrl`/`posterUrl` puestos. El tipo y las rutas ya vienen del mapper,
+ * que no depende de Storage: un visitante anonimo (que no puede firmar audio)
+ * conserva el tipo y la galeria no sale vacia.
+ *
+ * Es la SEGUNDA fase de la carga: la primera pinta el texto y reserva los
+ * huecos con la metadata; esta rellena las imagenes. Con la cache de firmas
+ * persistente suele resolverse sin tocar la red.
  */
-async function attachMediaUrls(items: Post[], dtos: PostDto[]): Promise<void> {
-  const paths = dtos
-    .map((d) => d.media[0]?.storage_path)
-    .filter((p): p is string => Boolean(p));
-  if (paths.length === 0) return;
-  const urls = await signMediaUrls(paths);
-  dtos.forEach((dto, i) => {
-    const first = dto.media[0];
+export async function resolveMediaUrls(items: Post[]): Promise<Post[]> {
+  const paths = new Set<string>();
+  for (const item of items) {
+    if (item.mediaPath) paths.add(item.mediaPath);
+    if (item.posterPath) paths.add(item.posterPath);
+  }
+  if (paths.size === 0) return items;
+  const urls = await signMediaUrls([...paths]);
+  return items.map((item) => {
+    const mediaUrl = item.mediaPath ? urls[item.mediaPath] : undefined;
+    const posterUrl = item.posterPath ? urls[item.posterPath] : undefined;
+    if (!mediaUrl && !posterUrl) return item;
+    return {
+      ...item,
+      mediaUrl: mediaUrl ?? item.mediaUrl,
+      posterUrl: posterUrl ?? item.posterUrl,
+    };
+  });
+}
+
+/** Variante mutante para los flujos de una sola fase (detalle, galerias). */
+async function attachMediaUrls(items: Post[], _dtos?: PostDto[]): Promise<void> {
+  const resolved = await resolveMediaUrls(items);
+  resolved.forEach((post, i) => {
     const item = items[i];
-    if (!first || !item) return;
-    // El TIPO se asigna siempre: viene del backend y no depende de Storage.
-    // Antes solo se ponia si la firma habia funcionado, y como firmar exige
-    // sesion (el bucket es privado), un visitante anonimo recibia los posts
-    // sin tipo y la galeria del perfil salia vacia.
-    item.mediaType = first.media_type as Post['mediaType'];
-    const signed = urls[first.storage_path];
-    if (signed) item.mediaUrl = signed;
+    if (!item) return;
+    item.mediaUrl = post.mediaUrl;
+    item.posterUrl = post.posterUrl;
   });
 }
 
@@ -47,16 +64,31 @@ export const PostRepository = {
       limit = 20,
       offset = 0,
       feed = 'all',
-    }: { limit?: number; offset?: number; feed?: FeedKind } = {},
+      withMediaUrls = true,
+      timeoutMs,
+    }: {
+      limit?: number;
+      offset?: number;
+      feed?: FeedKind;
+      /**
+       * false = devolver los posts en cuanto llega el JSON, sin esperar a las
+       * firmas de Storage. Quien llama pinta la metadata al momento y despues
+       * completa las URLs con `resolveMediaUrls` (carga en dos fases).
+       */
+      withMediaUrls?: boolean;
+      /** Espera mayor que la estandar, para sobrevivir al arranque de Render. */
+      timeoutMs?: number;
+    } = {},
     currentUserId?: string | null,
   ): Promise<FeedPage> {
     // Los audios se dejan fuera del muro: son episodios del podcast y tienen
     // su propia sección en el perfil del administrador.
     const dtos = await apiRequest<PostDto[]>(
       `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}&exclude_media=audio`,
+      timeoutMs ? { timeoutMs } : undefined,
     );
     const items = dtos.map((dto) => toPost(dto, currentUserId));
-    await attachMediaUrls(items, dtos);
+    if (withMediaUrls) await attachMediaUrls(items);
     return {
       items,
       likedIds: dtos.filter((d) => d.liked_by_me).map((d) => d.id),
@@ -126,13 +158,39 @@ export const PostRepository = {
     return item;
   },
 
-  /** Publicaciones con video, en orden reciente: alimentan los reels. */
-  async listVideos(currentUserId?: string | null): Promise<Post[]> {
-    const dtos = await apiRequest<PostDto[]>(
-      `${API_V1}/posts?limit=30&offset=0&media=video`,
-    );
+  /**
+   * Publicaciones con video, en orden reciente: alimentan los reels.
+   *
+   * Paginado de verdad: antes pedia 30 videos con sus firmas para ensenar el
+   * primero. Ahora se piden pocos y el siguiente lote se trae al acercarse al
+   * final. Se mandan `offset` Y cursor a la vez: un backend anterior a la
+   * paginacion por cursor ignora los parametros que no conoce y usa el offset,
+   * asi que la misma app funciona contra ambas versiones.
+   */
+  async listVideos(
+    currentUserId?: string | null,
+    {
+      limit = 6,
+      offset = 0,
+      beforeCreatedAt,
+      beforeId,
+    }: {
+      limit?: number;
+      offset?: number;
+      beforeCreatedAt?: string;
+      beforeId?: string;
+    } = {},
+  ): Promise<Post[]> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      media: 'video',
+    });
+    if (beforeCreatedAt) params.set('before_created_at', beforeCreatedAt);
+    if (beforeId) params.set('before_id', beforeId);
+    const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
     const items = dtos.map((dto) => toPost(dto, currentUserId));
-    await attachMediaUrls(items, dtos);
+    await attachMediaUrls(items);
     return items;
   },
 
@@ -160,6 +218,14 @@ export const PostRepository = {
         media: media.map((m) => ({
           storage_path: m.storagePath,
           media_type: m.mediaType,
+          // Metadata calculada en el dispositivo. Un backend anterior a la
+          // migracion 0021 ignora estos campos sin quejarse (Pydantic descarta
+          // lo que no conoce), asi que la app funciona contra ambas versiones.
+          width: m.width ?? null,
+          height: m.height ?? null,
+          duration_s: m.durationS ?? null,
+          bytes: m.bytes ?? null,
+          poster_path: m.posterPath ?? null,
         })),
       }),
     });
@@ -184,6 +250,11 @@ export const PostRepository = {
       payload.media = changes.media.map((m) => ({
         storage_path: m.storagePath,
         media_type: m.mediaType,
+        width: m.width ?? null,
+        height: m.height ?? null,
+        duration_s: m.durationS ?? null,
+        bytes: m.bytes ?? null,
+        poster_path: m.posterPath ?? null,
       }));
     }
     const dto = await apiRequest<PostDto>(`${API_V1}/posts/${postId}`, {

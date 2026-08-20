@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Image, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
+import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoSource } from 'expo-video';
 
 import { VideoScrubber } from '@/components/VideoScrubber';
+import { perfMark } from '@/lib/perf';
 import { palette } from '@/theme/tokens';
 import type { VideoPlayerProps } from './VideoPlayer.types';
 
@@ -77,6 +79,8 @@ function readNumber(read: () => number): number {
 export function VideoPlayer({
   uri,
   poster,
+  posterCacheKey,
+  cacheToDisk = false,
   style,
   loop = false,
   autoPlay = false,
@@ -88,7 +92,13 @@ export function VideoPlayer({
   shortsControls = false,
   controlsBottomInset = 0,
 }: VideoPlayerProps) {
-  const player = useVideoPlayer(uri, (p) => {
+  /*
+    `useCaching` guarda el video en la cache de disco de expo-video: volver a
+    un short ya visto no toca la red. Se activa por prop porque la cache no
+    soporta HLS en iOS; quien reproduce streams lo deja apagado.
+  */
+  const source: VideoSource = cacheToDisk ? { uri, useCaching: true } : uri;
+  const player = useVideoPlayer(source, (p) => {
     p.loop = loop;
     p.muted = muted;
     p.bufferOptions = {
@@ -108,6 +118,13 @@ export function VideoPlayer({
   const [started, setStarted] = useState(autoPlay);
   const [playing, setPlaying] = useState(autoPlay);
   const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
+  /*
+    El reproductor ya pinto su primer fotograma. Hasta ese momento, si hay
+    poster, se mantiene por encima: sin esto, en los shorts el poster
+    desaparecia al arrancar y quedaba un rectangulo negro mientras el video
+    descargaba lo suficiente para empezar.
+  */
+  const [firstFrame, setFirstFrame] = useState(false);
 
   // El silencio puede cambiarlo la persona en cualquier momento (boton de
   // sonido); el ajuste inicial del reproductor solo vale para el primer render.
@@ -201,6 +218,16 @@ export function VideoPlayer({
   // Antes de arrancar manda la portada, que ya ofrece su propio boton de play.
   const showShortsControls = shortsControls && started;
 
+  /*
+    La cache de disco de expo-image se indexa por URL, y la URL firmada del
+    poster cambia con cada firma. Con `cacheKey` (la ruta en Storage) la misma
+    miniatura se reutiliza aunque la firma sea nueva.
+  */
+  const posterSource =
+    poster && typeof poster === 'object' && !Array.isArray(poster) && posterCacheKey
+      ? { ...(poster as { uri?: string }), cacheKey: posterCacheKey }
+      : poster;
+
   return (
     <View style={[styles.wrap, style]}>
       <VideoView
@@ -208,11 +235,32 @@ export function VideoPlayer({
         player={player}
         contentFit={contentFit}
         nativeControls={nativeControls && !shortsControls && started}
+        onFirstFrameRender={() => {
+          perfMark('VIDEO_FIRST_FRAME');
+          setFirstFrame(true);
+        }}
         // `allowsFullscreen` está deprecada en expo-video. Además, en un feed
         // vertical (reels) no tiene sentido ofrecer pantalla completa.
         fullscreenOptions={{ enable: nativeControls && !shortsControls }}
         allowsPictureInPicture={false}
       />
+      {/*
+        Poster sobre el video mientras el primer fotograma llega. No captura
+        toques: los controles de debajo siguen funcionando. La transicion corta
+        hace que el paso poster→video se sienta continuo y no como un salto.
+      */}
+      {started && !firstFrame && posterSource ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <ExpoImage
+            source={posterSource}
+            style={StyleSheet.absoluteFill}
+            contentFit={contentFit === 'fill' ? 'cover' : contentFit}
+            cachePolicy="disk"
+            recyclingKey={posterCacheKey}
+            transition={80}
+          />
+        </View>
+      ) : null}
       {showShortsControls ? (
         <>
           {/*
@@ -249,7 +297,16 @@ export function VideoPlayer({
           accessibilityRole="button"
           accessibilityLabel="Reproducir video"
         >
-          {poster ? <Image source={poster} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
+          {posterSource ? (
+            <ExpoImage
+              source={posterSource}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              cachePolicy="disk"
+              recyclingKey={posterCacheKey}
+              transition={120}
+            />
+          ) : null}
           {/*
             Velo MUY tenue. Antes cubria el video con un negro al 72 %, asi que
             en el muro un video sin portada se veia como un rectangulo negro:

@@ -5,6 +5,18 @@ export type VideoPlayerProps = {
   uri: string;
   /** Póster mostrado antes de reproducir (tratamiento B&N vía scrim). */
   poster?: ImageSourcePropType;
+  /**
+   * Clave estable para la cache de disco del poster (su ruta en Storage).
+   * La URL firmada cambia con cada firma; sin esto, cada refirma volvia a
+   * descargar la misma miniatura.
+   */
+  posterCacheKey?: string;
+  /**
+   * Guarda el video en la cache de disco de expo-video: el segundo visionado
+   * no vuelve a la red. Solo para fuentes MP4 (la cache no soporta HLS en
+   * iOS); el que llama decide segun el tipo de fuente.
+   */
+  cacheToDisk?: boolean;
   style?: StyleProp<ViewStyle>;
   loop?: boolean;
   autoPlay?: boolean;

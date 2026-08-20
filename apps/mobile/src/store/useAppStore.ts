@@ -3,17 +3,87 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { conversations, initialPosts } from '@/data/mockData';
+import { formatRelativeTime } from '@/mappers/postMapper';
 import { AuthRepository } from '@/repositories/AuthRepository';
-import { PostRepository, type FeedKind } from '@/repositories/PostRepository';
+import {
+  PostRepository,
+  resolveMediaUrls,
+  type FeedKind,
+  type FeedPage,
+} from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { StoryRepository } from '@/repositories/StoryRepository';
+import { ApiError } from '@/services/api';
 import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
+import { perfMark } from '@/lib/perf';
 import type { Language } from '@/i18n';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
 const backendEnabled = AuthRepository.enabled;
 const FEED_PAGE = 20;
+
+/*
+  Instantanea local del feed (stale-while-revalidate).
+
+  Al abrir la aplicacion se pinta la ULTIMA tanda de publicaciones guardada y,
+  en paralelo, se consulta el servidor y se reconcilia en silencio. Sin esto,
+  cada arranque era una pantalla de esqueletos hasta que el backend —que en el
+  plan gratuito de Render puede tardar ~25 s en despertar— respondiera.
+
+  Se guarda SOLO metadata ligera (texto, autor, contadores, rutas de Storage y
+  medidas): unos pocos KB. Nunca URLs firmadas (caducan) ni blobs (para eso
+  estan las caches de disco de expo-image/expo-video).
+
+  Por que AsyncStorage y no expo-sqlite: es UN objeto pequeño que se lee una
+  vez al arrancar y se escribe una vez por carga de feed. SQLite anadiria un
+  modulo nativo, un esquema y migraciones para un caso que no consulta, no
+  filtra y no crece. Si algun dia se cachean cientos de posts o se busca
+  offline, ese sera el momento de migrar.
+*/
+const FEED_SNAPSHOT_KEY = 'z-feed-snapshot-v1';
+const FEED_SNAPSHOT_SIZE = 12;
+
+type FeedSnapshot = { savedAt: number; posts: Post[] };
+
+function saveFeedSnapshot(posts: Post[]): void {
+  const slim = posts.slice(0, FEED_SNAPSHOT_SIZE).map((post) => ({
+    ...post,
+    // Volatil o pesado: fuera. Se reconstruye al cargar.
+    mediaUrl: undefined,
+    posterUrl: undefined,
+    comments: [],
+  }));
+  const snapshot: FeedSnapshot = { savedAt: Date.now(), posts: slim };
+  AsyncStorage.setItem(FEED_SNAPSHOT_KEY, JSON.stringify(snapshot)).catch(() => {});
+}
+
+/** Completa mediaUrl/posterUrl de los posts del estado, casando por id. */
+function mergeMediaUrls(current: Post[], withUrls: Post[]): Post[] {
+  const byId = new Map(withUrls.map((post) => [post.id, post]));
+  return current.map((post) => {
+    const resolved = byId.get(post.id);
+    if (!resolved) return post;
+    if (resolved.mediaUrl === post.mediaUrl && resolved.posterUrl === post.posterUrl) {
+      return post;
+    }
+    return {
+      ...post,
+      mediaUrl: resolved.mediaUrl ?? post.mediaUrl,
+      posterUrl: resolved.posterUrl ?? post.posterUrl,
+    };
+  });
+}
+
+/*
+  Deduplicacion de cargas del feed: el montaje doble de un efecto, volver a la
+  pestana o un focus rapido disparaban `loadFeed` varias veces seguidas y cada
+  una era UNA peticion completa al backend. La que llega mientras otra igual
+  esta en vuelo simplemente espera a esa.
+*/
+let feedInFlight: { kind: FeedKind; promise: Promise<void> } | null = null;
+/** true en cuanto una carga de red termina: la instantanea ya no debe pisar. */
+let feedLoadedFromNetwork = false;
 
 type AppState = {
   hydrated: boolean;
@@ -41,6 +111,8 @@ type AppState = {
   loadFeed: (feed?: FeedKind) => Promise<void>;
   loadMoreFeed: () => Promise<void>;
   loadCommentsFor: (postId: string) => Promise<void>;
+  /** Pinta la ultima instantanea guardada del feed mientras llega la red. */
+  hydrateFeedFromCache: () => Promise<void>;
 
   // Historias (efimeras, 24 h). No se persisten: caducan solas.
   storyGroups: StoryGroup[];
@@ -422,33 +494,103 @@ export const useAppStore = create<AppState>()(
           ),
         }));
       },
+      hydrateFeedFromCache: async () => {
+        if (!backendEnabled) return;
+        try {
+          const raw = await AsyncStorage.getItem(FEED_SNAPSHOT_KEY);
+          if (!raw) return;
+          // La red pudo ganar a la lectura de disco: entonces no hay nada que
+          // aportar, lo que se ve ya es mas fresco que la instantanea.
+          if (feedLoadedFromNetwork || get().posts.length > 0) return;
+          const snapshot = JSON.parse(raw) as FeedSnapshot;
+          if (!Array.isArray(snapshot?.posts) || snapshot.posts.length === 0) return;
+          const posts = snapshot.posts.map((post) => ({
+            ...post,
+            // El "hace 2 h" guardado envejecio: se recalcula desde la fecha ISO.
+            createdAt: post.createdAtIso
+              ? formatRelativeTime(post.createdAtIso)
+              : post.createdAt,
+          }));
+          perfMark('FEED_CACHE_SHOWN');
+          set((state) => ({
+            posts,
+            // Si una carga de red esta en vuelo se respeta su estado visual.
+            feedStatus: state.feedStatus === 'loading' ? 'loading' : state.feedStatus,
+          }));
+          // Segunda fase: firmar las rutas. Con la cache de firmas persistente
+          // esto se resuelve de disco, sin red, y la imagen sale al instante.
+          const withUrls = await resolveMediaUrls(posts);
+          if (feedLoadedFromNetwork) return;
+          set((state) => ({ posts: mergeMediaUrls(state.posts, withUrls) }));
+        } catch {
+          // Instantanea corrupta o ilegible: la carga de red sigue su curso.
+        }
+      },
       loadFeed: async (feed) => {
         const kind = feed ?? get().feedKind;
         if (!backendEnabled) {
           set({ feedStatus: 'idle', feedKind: kind });
           return;
         }
-        set({ feedStatus: 'loading', feedError: null, feedKind: kind });
-        try {
-          const uid = get().user?.id ?? null;
-          const page = await PostRepository.listFeed(
-            { limit: FEED_PAGE, offset: 0, feed: kind },
-            uid,
-          );
-          set({
-            posts: page.items,
-            likedPostIds: page.likedIds,
-            savedPostIds: page.savedIds,
-            feedStatus: 'idle',
-            feedOffset: page.items.length,
-            feedHasMore: page.items.length === FEED_PAGE,
-          });
-        } catch (error) {
-          set({
-            feedStatus: 'error',
-            feedError: error instanceof Error ? error.message : 'No se pudo cargar el feed.',
-          });
-        }
+        if (feedInFlight?.kind === kind) return feedInFlight.promise;
+        const promise = (async () => {
+          set({ feedStatus: 'loading', feedError: null, feedKind: kind });
+          try {
+            const uid = get().user?.id ?? null;
+            const options = {
+              limit: FEED_PAGE,
+              offset: 0,
+              feed: kind,
+              // Dos fases: primero el JSON (texto + metadata), despues las
+              // firmas. El primer post no espera a Storage.
+              withMediaUrls: false,
+              // Mas holgura que los 20 s estandar: la primera peticion del dia
+              // puede coincidir con el arranque de Render (~25 s medidos).
+              timeoutMs: 30_000,
+            };
+            let page: FeedPage;
+            try {
+              page = await PostRepository.listFeed(options, uid);
+            } catch (error) {
+              // Un unico reintento tras agotar la espera: para entonces el
+              // aviso de arranque (warmUpApi) ya desperto la instancia y el
+              // segundo intento responde en menos de un segundo.
+              if (error instanceof ApiError && error.code === 'timeout') {
+                page = await PostRepository.listFeed(options, uid);
+              } else {
+                throw error;
+              }
+            }
+            feedLoadedFromNetwork = true;
+            perfMark('FEED_RESPONSE');
+            set({
+              posts: page.items,
+              likedPostIds: page.likedIds,
+              savedPostIds: page.savedIds,
+              feedStatus: 'idle',
+              feedOffset: page.items.length,
+              feedHasMore: page.items.length === FEED_PAGE,
+            });
+            const withUrls = await resolveMediaUrls(page.items);
+            perfMark('FEED_URLS_READY');
+            set((state) => ({ posts: mergeMediaUrls(state.posts, withUrls) }));
+            // Solo la pestana "Para ti" alimenta la instantanea: es la que se
+            // ve al abrir la aplicacion.
+            if (kind === 'all') saveFeedSnapshot(withUrls);
+          } catch (error) {
+            set({
+              // Con contenido ya en pantalla (instantanea o carga anterior) el
+              // fallo no debe taparlo: se queda lo que hay y el estado vuelve a
+              // reposo. El aviso de error queda para cuando no hay nada que ver.
+              feedStatus: get().posts.length > 0 ? 'idle' : 'error',
+              feedError: error instanceof Error ? error.message : 'No se pudo cargar el feed.',
+            });
+          } finally {
+            feedInFlight = null;
+          }
+        })();
+        feedInFlight = { kind, promise };
+        return promise;
       },
       loadMoreFeed: async () => {
         if (!backendEnabled) return;

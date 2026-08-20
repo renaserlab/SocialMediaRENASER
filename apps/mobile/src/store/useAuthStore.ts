@@ -9,7 +9,8 @@ import {
 } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { esEnlaceDeRecuperacion, mensajeDeEnlace } from '@/lib/authLink';
-import { setAuthTokenProvider, ApiError } from '@/services/api';
+import { perfMark } from '@/lib/perf';
+import { setAuthTokenProvider, warmUpApi, ApiError } from '@/services/api';
 import { enlaceAuthInicial } from '@/services/supabase';
 import { registerForPush, unregisterPush } from '@/services/notifications';
 import { clearSignedUrlCache } from '@/services/storage';
@@ -89,6 +90,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
+    // Lo PRIMERO de todo: despertar la instancia de Render (el plan gratuito
+    // duerme y tarda ~25 s en volver). Corre en paralelo con el resto del
+    // arranque, mientras la persona ya ve la instantanea local del feed.
+    warmUpApi();
+
+    // La ultima tanda de publicaciones guardada se pinta sin esperar a nada.
+    void useAppStore.getState().hydrateFeedFromCache();
+
     // Cada request al backend llevara el JWT actual de Supabase.
     setAuthTokenProvider(() => AuthRepository.getAccessToken());
 
@@ -140,6 +149,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const session = await AuthRepository.getSession();
+      perfMark('AUTH_RESTORED');
       if (session) {
         // La sesion basta para entrar. El perfil se pide en paralelo y no se
         // espera: es informacion para pintar la pantalla, no permiso de acceso.

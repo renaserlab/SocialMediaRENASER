@@ -56,6 +56,28 @@ export type Post = {
   mediaUrl?: string;
   /** Tipo del medio remoto: imagen, video o audio. */
   mediaType?: 'image' | 'video' | 'audio';
+  /**
+   * Ruta del medio en Storage. Es la identidad ESTABLE del archivo: la URL
+   * firmada cambia con cada firma, asi que las caches (disco de expo-image,
+   * snapshot del feed) se indexan por esta ruta y no por la URL.
+   */
+  mediaPath?: string;
+  /** URL firmada del poster del video (se pinta mientras el video prepara). */
+  posterUrl?: string;
+  /** Ruta del poster en Storage, para refirmarlo. */
+  posterPath?: string;
+  /** Medidas reales del medio: reservan el hueco exacto y evitan saltos. */
+  mediaWidth?: number;
+  mediaHeight?: number;
+  /** Duracion del video/audio en segundos. */
+  mediaDurationS?: number;
+  /** Fecha ISO original; `createdAt` es su forma corta y hay que recalcularla. */
+  createdAtIso?: string;
+  /**
+   * Estado del procesado del medio (posters/derivados). `processing` significa
+   * que el original ya se ve pero las versiones optimizadas aun no existen.
+   */
+  processingStatus?: 'uploaded' | 'processing' | 'ready' | 'failed';
   /** Categoría temática; alimenta los filtros del podcast. */
   category?: string | null;
   likes: number;

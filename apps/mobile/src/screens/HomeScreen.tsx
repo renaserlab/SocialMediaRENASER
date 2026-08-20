@@ -21,6 +21,7 @@ import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalog
 import type { ProfileSectionKind } from '@/components/ProfileSection';
 import { useTranslation } from '@/i18n/useTranslation';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
+import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -106,6 +107,9 @@ export function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    perfMark('HOME_MOUNTED');
+    // `loadFeed` deduplica por dentro: si otra carga igual esta en vuelo (por
+    // ejemplo, el doble montaje de StrictMode), esta llamada espera a esa.
     void loadFeed();
   }, [loadFeed]);
 

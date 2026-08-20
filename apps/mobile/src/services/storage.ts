@@ -1,5 +1,6 @@
 import 'react-native-url-polyfill/auto';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -8,6 +9,8 @@ import {
   compressImage,
   compressVideo,
   compressionAvailable,
+  createVideoPoster,
+  readVideoMetadata,
 } from '@/services/mediaCompressor';
 import { uploadResumable } from '@/services/resumableUpload';
 import { supabase, supabaseUrl } from '@/services/supabase';
@@ -28,6 +31,59 @@ const SIGNED_URL_TTL = 60 * 60; // 1 hora
 const CACHE_TTL_MS = (SIGNED_URL_TTL - 600) * 1000;
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
+/*
+  La cache de firmas SOBREVIVE al cierre de la aplicacion.
+
+  Solo en memoria, cada arranque partia de cero: se volvia a firmar todo y,
+  como cada firma produce una URL DISTINTA, la cache de disco de expo-image no
+  reconocia ninguna imagen y el muro entero se descargaba otra vez en cada
+  apertura (medido: el feed actual son varios MB de fotos). Guardando las
+  firmas vigentes, al reabrir dentro de la hora la URL es la misma, no hay
+  peticion de firma y las imagenes salen del disco al instante.
+
+  Se guarda solo el mapa ruta→{url, caducidad}: unos pocos KB.
+*/
+const SIGNED_CACHE_STORAGE_KEY = 'z-signed-urls-v1';
+
+let signedCacheReady: Promise<void> | null = null;
+
+function ensureSignedCacheLoaded(): Promise<void> {
+  if (!signedCacheReady) {
+    signedCacheReady = AsyncStorage.getItem(SIGNED_CACHE_STORAGE_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        const now = Date.now();
+        const saved = JSON.parse(raw) as Record<string, { url: string; expiresAt: number }>;
+        for (const [path, entry] of Object.entries(saved)) {
+          // Las caducadas no se restauran; se refirmaran al pedirse.
+          if (entry?.url && entry.expiresAt > now && !signedUrlCache.has(path)) {
+            signedUrlCache.set(path, entry);
+          }
+        }
+      })
+      .catch(() => {
+        // Una cache ilegible no es un error: se firma de nuevo y listo.
+      });
+  }
+  return signedCacheReady;
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Persiste la cache con un pequeño retraso para agrupar rafagas de firmas. */
+function scheduleSignedCacheSave(): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    const out: Record<string, { url: string; expiresAt: number }> = {};
+    const now = Date.now();
+    for (const [path, entry] of signedUrlCache) {
+      if (entry.expiresAt > now) out[path] = entry;
+    }
+    AsyncStorage.setItem(SIGNED_CACHE_STORAGE_KEY, JSON.stringify(out)).catch(() => {});
+  }, 500);
+}
+
 export type MediaKind = 'image' | 'video' | 'audio';
 
 /** Medio elegido por el usuario, antes de subirlo. */
@@ -38,12 +94,27 @@ export type PickedMedia = {
   name?: string | null;
   /** Duracion en ms cuando el medio es un video (la informa el selector). */
   durationMs?: number | null;
+  /** Medidas que informa el selector; sirven para la proporcion del hueco. */
+  width?: number | null;
+  height?: number | null;
 };
 
 /** Medio ya subido a Storage, listo para enviar al backend. */
 export type UploadedMedia = {
   storagePath: string;
   mediaType: MediaKind;
+  /*
+    Metadata que viaja al backend junto a la ruta. Con ella la tarjeta reserva
+    el hueco exacto (sin saltos de layout) y el poster se pinta al instante
+    mientras el video prepara. Todo opcional: donde no se pueda calcular
+    (Expo Go sin modulo nativo), el post funciona igual que antes.
+  */
+  width?: number;
+  height?: number;
+  durationS?: number;
+  bytes?: number;
+  /** Ruta del poster ya subido a Storage (solo videos, cuando se pudo). */
+  posterPath?: string;
 };
 
 const DEFAULT_EXT: Record<MediaKind, string> = {
@@ -122,7 +193,14 @@ export async function pickImage(
   if (result.canceled) return null;
   const asset = result.assets[0];
   if (!asset) return null;
-  return { uri: asset.uri, kind: 'image', mimeType: asset.mimeType, name: asset.fileName };
+  return {
+    uri: asset.uri,
+    kind: 'image',
+    mimeType: asset.mimeType,
+    name: asset.fileName,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
+  };
 }
 
 /**
@@ -145,7 +223,14 @@ export async function takePhoto(
   if (result.canceled) return null;
   const asset = result.assets[0];
   if (!asset) return null;
-  return { uri: asset.uri, kind: 'image', mimeType: asset.mimeType, name: asset.fileName };
+  return {
+    uri: asset.uri,
+    kind: 'image',
+    mimeType: asset.mimeType,
+    name: asset.fileName,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
+  };
 }
 
 /** Abre la galería y devuelve el video elegido (o null si se cancela). */
@@ -170,6 +255,8 @@ export async function pickVideo(maxDurationSec = 180): Promise<PickedMedia | nul
     mimeType: asset.mimeType,
     name: asset.fileName,
     durationMs: asset.duration ?? null,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
   };
 }
 
@@ -410,6 +497,53 @@ export async function uploadPostMedia(
     );
   }
 
+  /*
+    Metadata y poster ANTES de subir, con el archivo definitivo (el comprimido
+    si lo hubo). Ninguno es imprescindible: si algo falla, el post sale igual
+    que salia antes y el pipeline del backend puede completarlo despues.
+  */
+  const meta: Pick<UploadedMedia, 'width' | 'height' | 'durationS' | 'bytes'> = {
+    bytes: local.size,
+  };
+  let posterPath: string | undefined;
+  if (media.kind === 'video') {
+    const fromFile = await readVideoMetadata(uri).catch(() => null);
+    meta.width = fromFile?.width ?? media.width ?? undefined;
+    meta.height = fromFile?.height ?? media.height ?? undefined;
+    meta.durationS =
+      fromFile?.durationS ?? (media.durationMs ? media.durationMs / 1000 : undefined);
+
+    // El poster es la diferencia entre un rectangulo negro y ver de que va el
+    // video sin descargar ni un byte de el.
+    try {
+      const poster = await createVideoPoster(uri);
+      if (poster) {
+        const posterLocal = await readLocalFile(poster.uri);
+        if (posterLocal.size > 0) {
+          const candidate = `${uid}/poster-${randomName('jpg')}`;
+          const { error: posterError } = await supabase.storage
+            .from(BUCKET)
+            .upload(candidate, await posterLocal.directBody(), {
+              contentType: 'image/jpeg',
+              upsert: false,
+            });
+          if (!posterError) {
+            posterPath = candidate;
+            meta.width = meta.width ?? poster.width;
+            meta.height = meta.height ?? poster.height;
+          }
+        }
+      }
+    } catch {
+      // Sin poster: el muro pinta su celda generica, como hasta ahora.
+    }
+  } else if (media.kind === 'image') {
+    // El compresor reescala en proporcion, asi que las medidas del selector
+    // valen para reservar el hueco aunque el archivo subido sea mas pequeno.
+    meta.width = media.width ?? undefined;
+    meta.height = media.height ?? undefined;
+  }
+
   onProgress?.({ phase: 'uploading', ratio: 0 });
 
   // 2a. Archivo grande: subida reanudable por trozos, con progreso real.
@@ -428,7 +562,7 @@ export async function uploadPostMedia(
     } catch (error) {
       throw new Error(describeStorageError(error));
     }
-    return { storagePath: path, mediaType: media.kind };
+    return { storagePath: path, mediaType: media.kind, ...meta, posterPath };
   }
 
   // 2b. Archivo pequeño: un POST directo es mas simple y rapido.
@@ -437,7 +571,7 @@ export async function uploadPostMedia(
     .upload(path, await local.directBody(), { contentType, upsert: false });
   if (error) throw new Error(describeStorageError(error));
   onProgress?.({ phase: 'uploading', ratio: 1 });
-  return { storagePath: path, mediaType: media.kind };
+  return { storagePath: path, mediaType: media.kind, ...meta, posterPath };
 }
 
 // --------------------------------------------------------------------------
@@ -588,6 +722,9 @@ export async function signMediaUrls(
 ): Promise<Record<string, string>> {
   if (!supabase || paths.length === 0) return {};
 
+  // Las firmas guardadas del arranque anterior cuentan como cache valida.
+  await ensureSignedCacheLoaded();
+
   // Solo se piden las que no estan en cache o estan a punto de caducar.
   const now = Date.now();
   const map: Record<string, string> = {};
@@ -610,10 +747,12 @@ export async function signMediaUrls(
       signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
     }
   }
+  scheduleSignedCacheSave();
   return map;
 }
 
 /** Se vacia al cerrar sesion: las firmas van atadas al usuario. */
 export function clearSignedUrlCache(): void {
   signedUrlCache.clear();
+  AsyncStorage.removeItem(SIGNED_CACHE_STORAGE_KEY).catch(() => {});
 }
