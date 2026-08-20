@@ -7,12 +7,42 @@ import { Feather } from '@expo/vector-icons';
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
 import { Text } from '@/components/Text';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
+import { perfMark } from '@/lib/perf';
+import { bestVideoSource } from '@/lib/videoSource';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, spacing } from '@/theme/tokens';
+import type { Post } from '@/types';
 
 const media = palette('dark');
+
+/**
+ * Cuantos videos por pagina. Antes se pedian 30 con todas sus firmas para
+ * ensenar UNO; con paginas cortas el primero llega antes y el resto se trae
+ * segun el usuario se acerca al final.
+ */
+const REELS_PAGE = 6;
+
+/** Post con video → item del feed vertical. */
+function toReel(post: Post): ReelItem | null {
+  const source = bestVideoSource(post);
+  if (!source) return null;
+  return {
+    id: post.id,
+    author: post.author,
+    authorId: post.authorId,
+    avatarUrl: post.authorAvatarUrl,
+    caption: post.body,
+    uri: source.uri,
+    isStream: source.isStream,
+    posterUrl: post.posterUrl,
+    posterPath: post.posterPath,
+    createdAtIso: post.createdAtIso,
+    likes: post.likes,
+    comments: post.commentsCount ?? 0,
+  };
+}
 
 export function ReelsScreen() {
   const router = useRouter();
@@ -46,6 +76,14 @@ export function ReelsScreen() {
   */
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'error'>('cargando');
   const [intento, setIntento] = useState(0);
+  /*
+    Paginacion incremental. `hasMore` se apaga cuando una pagina llega corta o
+    no aporta ids nuevos: esto ultimo protege contra un backend anterior al
+    cursor, que ignoraria los parametros y devolveria siempre la primera
+    pagina.
+  */
+  const [hasMore, setHasMore] = useState(true);
+  const loadingMore = useRef(false);
 
   useEffect(() => {
     if (!AuthRepository.enabled) {
@@ -54,23 +92,12 @@ export function ReelsScreen() {
     }
     let alive = true;
     setEstado('cargando');
-    PostRepository.listVideos(currentUserId)
+    PostRepository.listVideos(currentUserId, { limit: REELS_PAGE })
       .then((posts) => {
         if (!alive) return;
-        setReels(
-          posts
-            .filter((p) => !!p.mediaUrl)
-            .map((p) => ({
-              id: p.id,
-              author: p.author,
-              authorId: p.authorId,
-              avatarUrl: p.authorAvatarUrl,
-              caption: p.body,
-              uri: p.mediaUrl!,
-              likes: p.likes,
-              comments: p.commentsCount ?? 0,
-            })),
-        );
+        perfMark('REELS_FIRST_PAGE');
+        setReels(posts.map(toReel).filter((r): r is ReelItem => r !== null));
+        setHasMore(posts.length === REELS_PAGE);
         setEstado('listo');
       })
       .catch((error) => {
@@ -83,6 +110,36 @@ export function ReelsScreen() {
       alive = false;
     };
   }, [currentUserId, intento]);
+
+  const loadMore = useCallback(() => {
+    if (!AuthRepository.enabled || !hasMore || loadingMore.current) return;
+    const last = reels[reels.length - 1];
+    if (!last) return;
+    loadingMore.current = true;
+    PostRepository.listVideos(currentUserId, {
+      limit: REELS_PAGE,
+      // Cursor y offset a la vez: el backend nuevo usa el cursor (no repite
+      // aunque entren videos nuevos); uno viejo lo ignora y usa el offset.
+      offset: reels.length,
+      beforeCreatedAt: last.createdAtIso,
+      beforeId: last.id,
+    })
+      .then((posts) => {
+        const conocidos = new Set(reels.map((r) => r.id));
+        const nuevos = posts
+          .map(toReel)
+          .filter((r): r is ReelItem => r !== null && !conocidos.has(r.id));
+        if (nuevos.length > 0) setReels((prev) => [...prev, ...nuevos]);
+        // Pagina corta o sin novedades: no hay mas que pedir.
+        setHasMore(posts.length === REELS_PAGE && nuevos.length > 0);
+      })
+      .catch(() => {
+        // Se reintentara la proxima vez que el usuario se acerque al final.
+      })
+      .finally(() => {
+        loadingMore.current = false;
+      });
+  }, [currentUserId, hasMore, reels]);
 
   // Solo el item visible reproduce; el resto se pausa (memoria y batería).
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
@@ -160,6 +217,9 @@ export function ReelsScreen() {
           <ShortVideoItem
             short={item}
             active={index === activeIndex}
+            // Ventana de reproductores: el visible y sus vecinos inmediatos.
+            // Nunca hay mas de 3 vivos; el resto son posters.
+            preload={Math.abs(index - activeIndex) <= 1}
             height={height}
             muted={muted}
             onToggleMuted={toggleMuted}
@@ -174,6 +234,10 @@ export function ReelsScreen() {
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
+        // La siguiente pagina se pide con dos pantallas de antelacion: al
+        // ritmo de un swipe por video, llega antes de alcanzar el final.
+        onEndReached={loadMore}
+        onEndReachedThreshold={2}
       />
 
       <Pressable

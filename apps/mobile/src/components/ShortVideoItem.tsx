@@ -22,6 +22,14 @@ export type ReelItem = {
   avatarUrl?: string;
   caption: string;
   uri: string;
+  /** true si `uri` es una playlist HLS (sin cache de disco del reproductor). */
+  isStream?: boolean;
+  /** Poster del video: se pinta al instante mientras el reproductor prepara. */
+  posterUrl?: string;
+  /** Ruta del poster en Storage: clave de cache estable frente a refirmas. */
+  posterPath?: string;
+  /** Fecha ISO del post: alimenta el cursor de paginacion. */
+  createdAtIso?: string;
   likes: number;
   comments: number;
 };
@@ -33,6 +41,14 @@ type Props = {
   short: ReelItem;
   /** Solo el item visible reproduce (autoplay por viewport). */
   active: boolean;
+  /**
+   * El reproductor existe solo para el video visible y sus vecinos inmediatos
+   * (N-1, N, N+1): asi el siguiente arranca al instante sin que haya nunca mas
+   * de tres reproductores vivos. Los demas muestran su poster, que es una
+   * imagen ligera. Es la misma estrategia de ventana que usan las apps de
+   * video vertical.
+   */
+  preload: boolean;
   height: number;
   /**
    * El sonido se decide una vez para todo el feed, no video a video: si cada
@@ -44,7 +60,7 @@ type Props = {
   onForcedMute: () => void;
 };
 
-function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onForcedMute }: Props) {
+function ShortVideoItemBase({ short, active, preload, height, muted, onToggleMuted, onForcedMute }: Props) {
   const router = useRouter();
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(short.likes);
@@ -72,19 +88,42 @@ function ShortVideoItemBase({ short, active, height, muted, onToggleMuted, onFor
 
   return (
     <View style={[styles.container, snapToPage, { height }]}>
-      <VideoPlayer
-        uri={short.uri}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-        loop
-        muted={muted}
-        nativeControls={false}
-        active={active}
-        // Controles propios: un toque pausa o reanuda y abajo hay una barra
-        // arrastrable. Los del sistema taparian el video con su botonera.
-        shortsControls
-        onMutedChange={onForcedMute}
-      />
+      {active || preload ? (
+        <VideoPlayer
+          uri={short.uri}
+          poster={short.posterUrl ? { uri: short.posterUrl } : undefined}
+          posterCacheKey={short.posterPath}
+          cacheToDisk={!short.isStream}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          loop
+          muted={muted}
+          nativeControls={false}
+          active={active}
+          // Controles propios: un toque pausa o reanuda y abajo hay una barra
+          // arrastrable. Los del sistema taparian el video con su botonera.
+          shortsControls
+          onMutedChange={onForcedMute}
+        />
+      ) : (
+        /*
+          Fuera de la ventana de precarga no hay reproductor: solo el poster.
+          Cero memoria nativa y cero red por los videos que quedan lejos; al
+          acercarse, esta celda se convierte en reproductor con el poster ya
+          en cache, asi que el cambio no se nota.
+        */
+        <View style={StyleSheet.absoluteFill}>
+          {short.posterUrl ? (
+            <ExpoImage
+              source={{ uri: short.posterUrl, cacheKey: short.posterPath }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              cachePolicy="disk"
+              recyclingKey={short.posterPath ?? short.posterUrl}
+            />
+          ) : null}
+        </View>
+      )}
       <LinearGradient colors={['transparent', media.overlay]} style={styles.bottomScrim} pointerEvents="none" />
 
       <View style={styles.sidebar}>

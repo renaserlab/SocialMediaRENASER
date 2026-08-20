@@ -16,6 +16,7 @@ import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
+import { bestVideoSource } from '@/lib/videoSource';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { ReportRepository } from '@/repositories/ReportRepository';
@@ -73,6 +74,8 @@ export function PostCard({ post, onRemoved, visible }: Props) {
   useEffect(() => {
     if (visible === false) setVideoStarted(false);
   }, [visible]);
+  // HLS si el video esta transcodificado; MP4 optimizado/original si no.
+  const videoSource = post.mediaType === 'video' ? bestVideoSource(post) : null;
   const liked = useAppStore((state) => state.likedPostIds.includes(post.id));
   const saved = useAppStore((state) => state.savedPostIds.includes(post.id));
   const toggleLike = useAppStore((state) => state.toggleLikePost);
@@ -270,12 +273,12 @@ export function PostCard({ post, onRemoved, visible }: Props) {
           delante, pasar por el muro no cuesta ni un byte de video, y la
           memoria de reproductores queda en cero hasta que alguien mira uno.
         */
-        videoStarted && visible !== false && post.mediaUrl ? (
+        videoStarted && visible !== false && videoSource ? (
           <VideoPlayer
-            uri={post.mediaUrl}
+            uri={videoSource.uri}
             poster={post.posterUrl ? { uri: post.posterUrl } : undefined}
             posterCacheKey={post.posterPath}
-            cacheToDisk
+            cacheToDisk={!videoSource.isStream}
             style={styles.video}
             nativeControls
             contentFit="contain"

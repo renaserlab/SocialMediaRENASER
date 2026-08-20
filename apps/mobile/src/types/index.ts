@@ -74,6 +74,13 @@ export type Post = {
   /** Fecha ISO original; `createdAt` es su forma corta y hay que recalcularla. */
   createdAtIso?: string;
   /**
+   * URL de la playlist HLS del video (streaming adaptativo por segmentos).
+   * Solo existe si el video fue transcodificado; el reproductor nativo la
+   * prefiere sobre el MP4. En web se ignora (el <video> del navegador no
+   * reproduce HLS salvo Safari) y se usa el MP4 de siempre.
+   */
+  streamUrl?: string;
+  /**
    * Estado del procesado del medio (posters/derivados). `processing` significa
    * que el original ya se ve pero las versiones optimizadas aun no existen.
    */

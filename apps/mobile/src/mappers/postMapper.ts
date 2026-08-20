@@ -1,3 +1,4 @@
+import { API_BASE_URL, API_V1 } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
 import type { Comment, Post } from '@/types';
 
@@ -9,6 +10,8 @@ export type PostAuthorDto = {
 };
 
 export type PostMediaDto = {
+  /** Identificador del medio; con el se pide la playlist HLS al backend. */
+  id?: string | null;
   storage_path: string;
   media_type: string;
   sort_order: number;
@@ -120,5 +123,12 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     mediaHeight: first?.height ?? undefined,
     mediaDurationS: first?.duration_s ?? undefined,
     processingStatus: (first?.processing_status as Post['processingStatus']) ?? undefined,
+    // La playlist HLS la sirve el backend, que firma cada segmento. Solo se
+    // construye si el video fue transcodificado (stream_path) y conocemos el
+    // id del medio.
+    streamUrl:
+      first?.stream_path && first?.id
+        ? `${API_BASE_URL}${API_V1}/media/${first.id}/hls/master.m3u8`
+        : undefined,
   };
 }
