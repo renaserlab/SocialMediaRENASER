@@ -140,18 +140,41 @@ export function HomeScreen() {
   }, [feedHasMore, feedLoadingMore, loadMoreFeed]);
 
   /*
-    Publicaciones a la vista, para que un video que se queda atras deje de
-    sonar y de consumir bateria. Solo PAUSA: en un muro, arrancar un video
-    porque pasas por delante seria intrusivo y gastaria datos de quien mira.
+    Publicaciones a la vista y video protagonista.
+
+    Los videos del muro se reproducen SOLOS al aparecer, como en Instagram, y
+    en silencio (quien quiera sonido lo activa en el propio video). Para que
+    eso no se convierta en cinco reproductores a la vez —que es justo lo que
+    agotaba la memoria en Android— manda uno solo: el primer video visible.
+
+    Ademas se prepara el SIGUIENTE video del muro aunque todavia no se vea. Es
+    lo que hace que al llegar a el ya este listo en vez de empezar en negro.
+    Como mucho, por tanto, hay dos reproductores vivos: el que suena y el que
+    espera.
 
     Se guardan ids y no indices porque la lista se reordena al recargar; con
     indices, el video que se pausa despues de un refresco no seria el mismo.
 
-    El umbral es bajo (50 %) a proposito: lo que se busca es detectar cuando
-    algo YA NO se ve, no elegir un unico protagonista como en Shorts.
+    El umbral es del 60 %: lo bastante alto para que no arranque un video que
+    apenas asoma por el borde, y lo bastante bajo para que empiece antes de
+    que termines de colocarlo en el centro.
   */
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const [videoEnCurso, setVideoEnCurso] = useState<{
+    activo: string | null;
+    siguiente: string | null;
+  }>({ activo: null, siguiente: null });
+
+  /*
+    La lista actual, accesible desde el manejador de visibilidad sin volver a
+    crearlo. El manejador vive en un `useRef` porque FlashList no admite que
+    cambie entre renders, asi que no puede cerrar sobre `posts` directamente:
+    se quedaria mirando siempre la primera lista.
+  */
+  const postsRef = useRef(posts);
+  postsRef.current = posts;
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ key?: string; item?: Post }> }) => {
       setVisibleIds(
@@ -160,6 +183,26 @@ export function HomeScreen() {
             .map((entry) => entry.item?.id ?? entry.key)
             .filter((id): id is string => typeof id === 'string'),
         ),
+      );
+
+      // Protagonista: el primer video visible (el de mas arriba manda, que es
+      // el orden en que se leen las publicaciones).
+      const activo =
+        viewableItems.find((entry) => entry.item?.mediaType === 'video')?.item?.id ?? null;
+
+      // Y el siguiente video que vendra, para tenerlo preparado al llegar.
+      let siguiente: string | null = null;
+      if (activo) {
+        const lista = postsRef.current;
+        const desde = lista.findIndex((post) => post.id === activo);
+        siguiente =
+          lista.slice(desde + 1).find((post) => post.mediaType === 'video')?.id ?? null;
+      }
+
+      setVideoEnCurso((previo) =>
+        previo.activo === activo && previo.siguiente === siguiente
+          ? previo
+          : { activo, siguiente },
       );
     },
   ).current;
@@ -354,7 +397,12 @@ export function HomeScreen() {
         keyExtractor={(item: Post) => item.id}
         renderItem={({ item }: { item: Post }) => (
           <View style={styles.container}>
-            <PostCard post={item} visible={visibleIds.has(item.id)} />
+            <PostCard
+              post={item}
+              visible={visibleIds.has(item.id)}
+              videoActive={videoEnCurso.activo === item.id}
+              videoPreload={videoEnCurso.siguiente === item.id}
+            />
           </View>
         )}
         onViewableItemsChanged={onViewableItemsChanged}

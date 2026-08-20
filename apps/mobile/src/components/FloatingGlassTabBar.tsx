@@ -184,8 +184,21 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
+    /*
+      Margen a los lados: la capsula NO llega a los bordes de la pantalla. Ese
+      aire es lo que la hace parecer flotante en vez de una barra pegada.
+    */
+    paddingHorizontal: spacing.lg,
   },
   shadowWrap: {
+    /*
+      La barra se estira a lo ancho disponible y reparte los botones a lo
+      largo, en lugar de apretarlos en el centro. El tope evita que en tablet
+      o en el navegador se convierta en una regla de lado a lado: pasado ese
+      ancho deja de crecer y se queda centrada.
+    */
+    width: '100%',
+    maxWidth: 460,
     borderRadius: radius.pill,
     shadowOpacity: 0.18,
     shadowRadius: 16,
@@ -194,6 +207,8 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
+    // Reparte el espacio sobrante entre los botones, no alrededor del grupo.
+    justifyContent: 'space-between',
     height: BAR_HEIGHT,
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
@@ -201,16 +216,24 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   item: {
-    minWidth: 60,
+    // Cada boton toma la misma porcion del ancho: quedan repartidos de forma
+    // pareja sea cual sea el tamano de la pantalla.
+    flex: 1,
     height: BAR_HEIGHT - spacing.sm * 2,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
-    paddingHorizontal: spacing.sm,
     borderRadius: radius.pill,
   },
   pill: {
-    ...StyleSheet.absoluteFillObject,
+    // Con los botones ya repartidos a lo ancho, la capsula se cine al
+    // contenido en vez de ocupar toda la celda: marca el activo sin
+    // convertirse en una franja.
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: spacing.sm,
+    right: spacing.sm,
     borderRadius: radius.pill,
   },
   label: {

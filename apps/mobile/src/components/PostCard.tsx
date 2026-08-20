@@ -53,9 +53,23 @@ type Props = {
    * una) el video no se pausa nunca por este motivo.
    */
   visible?: boolean;
+  /**
+   * Esta tarjeta es la que manda: su video se reproduce SOLO, como en
+   * Instagram. Lo decide la pantalla anfitriona, que es la unica que sabe
+   * cual esta mas a la vista, y asi se garantiza que nunca suene mas de uno.
+   *
+   * Sin definir (detalle de una publicacion, galerias) la tarjeta vuelve al
+   * comportamiento de siempre: portada quieta y el video arranca al tocarlo.
+   */
+  videoActive?: boolean;
+  /**
+   * El video que viene despues: se prepara sin reproducirse, para que al
+   * llegar a el ya tenga contenido y no empiece en negro.
+   */
+  videoPreload?: boolean;
 };
 
-export function PostCard({ post, onRemoved, visible }: Props) {
+export function PostCard({ post, onRemoved, visible, videoActive, videoPreload }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [showComments, setShowComments] = useState(false);
@@ -76,6 +90,22 @@ export function PostCard({ post, onRemoved, visible }: Props) {
   }, [visible]);
   // HLS si el video esta transcodificado; MP4 optimizado/original si no.
   const videoSource = post.mediaType === 'video' ? bestVideoSource(post) : null;
+
+  /*
+    Muro con reproduccion automatica: la pantalla anfitriona dice quien manda
+    (`videoActive`) y quien se prepara (`videoPreload`). Donde no lo diga
+    —detalle de una publicacion, galeria— se conserva el comportamiento
+    anterior: portada quieta hasta que la persona toca.
+  */
+  const autoFeed = videoActive !== undefined;
+  const feedMuted = useAppStore((state) => state.feedMuted);
+  const toggleFeedMuted = useAppStore((state) => state.toggleFeedMuted);
+
+  // Solo existe reproductor para el video que suena y para el siguiente: dos
+  // como mucho en todo el muro, aunque haya veinte publicaciones con video.
+  const montarReproductor = autoFeed
+    ? Boolean(videoActive || videoPreload)
+    : videoStarted && visible !== false;
   const liked = useAppStore((state) => state.likedPostIds.includes(post.id));
   const saved = useAppStore((state) => state.savedPostIds.includes(post.id));
   const toggleLike = useAppStore((state) => state.toggleLikePost);
@@ -273,37 +303,109 @@ export function PostCard({ post, onRemoved, visible }: Props) {
           delante, pasar por el muro no cuesta ni un byte de video, y la
           memoria de reproductores queda en cero hasta que alguien mira uno.
         */
-        videoStarted && visible !== false && videoSource ? (
-          <VideoPlayer
-            uri={videoSource.uri}
-            poster={post.posterUrl ? { uri: post.posterUrl } : undefined}
-            posterCacheKey={post.posterPath}
-            cacheToDisk={!videoSource.isStream}
-            style={styles.video}
-            nativeControls
-            contentFit="contain"
-            visible={visible}
-            autoPlay
-          />
+        montarReproductor && videoSource ? (
+          <View style={styles.video}>
+            <VideoPlayer
+              uri={videoSource.uri}
+              poster={post.posterUrl ? { uri: post.posterUrl } : undefined}
+              posterCacheKey={post.posterPath}
+              cacheToDisk={!videoSource.isStream}
+              style={StyleSheet.absoluteFill}
+              contentFit="contain"
+              visible={visible}
+              /*
+                En el muro manda `active`: reproduce el protagonista y deja
+                preparado —pero parado— al siguiente. Fuera del muro sigue
+                mandando el toque de la persona (autoPlay tras pulsar).
+              */
+              active={autoFeed ? videoActive : undefined}
+              autoPlay={!autoFeed}
+              muted={autoFeed ? feedMuted : false}
+              /*
+                Sin botonera del sistema en el muro: tapa el video y desentona
+                con una reproduccion que empieza sola. En su lugar, los mismos
+                controles del formato corto: un toque pausa o reanuda y abajo
+                queda una barra fina de avance.
+              */
+              nativeControls={!autoFeed}
+              shortsControls={autoFeed}
+              /*
+                Los navegadores no dejan arrancar con sonido si la persona aun
+                no ha tocado la pagina: el reproductor se silencia solo para
+                poder empezar y lo avisa por aqui. Sin recoger ese aviso, el
+                boton diria que hay audio mientras no se oye nada.
+              */
+              onMutedChange={
+                autoFeed
+                  ? () => {
+                      if (!feedMuted) toggleFeedMuted();
+                    }
+                  : undefined
+              }
+            />
+            {autoFeed ? (
+              /*
+                Sonido. Arranca en silencio —igual que Instagram— y este boton
+                es la forma de activarlo. El estado lo lleva el ICONO (tachado
+                o con ondas), no un color, para que se entienda sin depender de
+                distinguir tonos.
+              */
+              <Pressable
+                onPress={toggleFeedMuted}
+                hitSlop={10}
+                style={[
+                  styles.soundButton,
+                  { backgroundColor: mediaPalette.overlay, borderColor: mediaPalette.border },
+                ]}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: !feedMuted }}
+                accessibilityLabel={feedMuted ? 'Activar el sonido' : 'Silenciar'}
+              >
+                <Feather
+                  name={feedMuted ? 'volume-x' : 'volume-2'}
+                  size={16}
+                  color={mediaPalette.text}
+                />
+              </Pressable>
+            ) : null}
+          </View>
         ) : (
           <Pressable
             style={styles.video}
             onPress={() => setVideoStarted(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Reproducir video"
+            disabled={autoFeed}
+            accessibilityRole={autoFeed ? 'image' : 'button'}
+            accessibilityLabel={autoFeed ? 'Video' : 'Reproducir video'}
           >
-            <VideoTile posterUrl={post.posterUrl} posterCacheKey={post.posterPath} />
-            {/* Mismo circulo de play que usa el reproductor, en paleta media. */}
-            <View style={styles.playOverlay} pointerEvents="none">
-              <View
-                style={[
-                  styles.playCircle,
-                  { backgroundColor: mediaPalette.overlay, borderColor: mediaPalette.text },
-                ]}
-              >
-                <Feather name="play" size={30} color={mediaPalette.text} />
+            {/*
+              `uri` importa aunque no haya reproductor: en el navegador la
+              celda pinta con el el PRIMER FOTOGRAMA del video (pidiendo solo
+              la cabecera del archivo, no el video entero). Sin el quedaba un
+              rectangulo negro, que es justo lo que se veia en el muro
+              mientras los videos no tengan miniatura guardada.
+            */}
+            <VideoTile
+              uri={post.mediaUrl}
+              posterUrl={post.posterUrl}
+              posterCacheKey={post.posterPath}
+            />
+            {/*
+              El circulo de play solo donde hay que pulsar para arrancar. En el
+              muro el video se reproduce solo, asi que un boton de play seria
+              una instruccion falsa.
+            */}
+            {!autoFeed ? (
+              <View style={styles.playOverlay} pointerEvents="none">
+                <View
+                  style={[
+                    styles.playCircle,
+                    { backgroundColor: mediaPalette.overlay, borderColor: mediaPalette.text },
+                  ]}
+                >
+                  <Feather name="play" size={30} color={mediaPalette.text} />
+                </View>
               </View>
-            </View>
+            ) : null}
           </Pressable>
         )
       ) : post.mediaType === 'audio' && post.mediaUrl ? (
@@ -478,6 +580,18 @@ const styles = StyleSheet.create({
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   count: { marginLeft: 2 },
   playOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  // Arriba a la derecha: no estorba al contenido ni a la barra de avance.
+  soundButton: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   playCircle: {
     width: 64,
     height: 64,

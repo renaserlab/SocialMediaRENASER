@@ -100,6 +100,19 @@ type AppState = {
   conversations: Conversation[];
   liveMessages: Array<{ id: string; author: string; text: string }>;
 
+  /**
+   * Silencio de los videos del muro, compartido por todas las tarjetas.
+   *
+   * Arranca SILENCIADO, como Instagram: los videos se reproducen solos al
+   * aparecer, y que ademas sonaran sin permiso seria intrusivo (y los
+   * navegadores directamente lo bloquean). Se decide una vez para todo el
+   * muro: si cada video recordara el suyo, bajar la lista seria un sobresalto
+   * continuo. No se persiste a proposito: cada sesion vuelve a empezar en
+   * silencio.
+   */
+  feedMuted: boolean;
+  toggleFeedMuted: () => void;
+
   // Estado del feed remoto (no se persiste)
   feedStatus: 'idle' | 'loading' | 'error';
   feedError: string | null;
@@ -207,6 +220,9 @@ export const useAppStore = create<AppState>()(
         { id: 'l1', author: 'María G.', text: 'Gracias Darren, este era el punto que necesitaba.' },
         { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },
       ],
+
+      feedMuted: true,
+      toggleFeedMuted: () => set((state) => ({ feedMuted: !state.feedMuted })),
 
       feedKind: 'all',
       feedStatus: 'idle',

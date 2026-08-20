@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
 import { Image as ExpoImage } from 'expo-image';
@@ -249,16 +249,32 @@ export function VideoPlayer({
         toques: los controles de debajo siguen funcionando. La transicion corta
         hace que el paso poster→video se sienta continuo y no como un salto.
       */}
-      {started && !firstFrame && posterSource ? (
+      {started && !firstFrame ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <ExpoImage
-            source={posterSource}
-            style={StyleSheet.absoluteFill}
-            contentFit={contentFit === 'fill' ? 'cover' : contentFit}
-            cachePolicy="disk"
-            recyclingKey={posterCacheKey}
-            transition={80}
-          />
+          {posterSource ? (
+            <ExpoImage
+              source={posterSource}
+              style={StyleSheet.absoluteFill}
+              contentFit={contentFit === 'fill' ? 'cover' : contentFit}
+              cachePolicy="disk"
+              recyclingKey={posterCacheKey}
+              transition={80}
+            />
+          ) : (
+            /*
+              Sin miniatura guardada no hay nada que ensenar todavia, y un
+              rectangulo negro y quieto se lee como algo roto. Un indicador
+              dice lo que de verdad pasa: esta cargando. Desaparece en cuanto
+              llega el primer fotograma.
+
+              Los videos subidos antes del pipeline de miniaturas son los
+              unicos que pasan por aqui; en cuanto se reprocesan, entran por
+              la rama de arriba y el salto a negro desaparece del todo.
+            */
+            <View style={styles.centered}>
+              <ActivityIndicator color={media.textMuted} />
+            </View>
+          )}
         </View>
       ) : null}
       {showShortsControls ? (
@@ -327,7 +343,10 @@ export function VideoPlayer({
 }
 
 const styles = StyleSheet.create({
-  wrap: { overflow: 'hidden', backgroundColor: media.background },
+  // Gris muy oscuro en vez de negro puro: mientras el fotograma llega, un
+  // rectangulo negro se lee como un hueco roto; este se lee como algo cargando
+  // (mismo criterio que la variante web).
+  wrap: { overflow: 'hidden', backgroundColor: media.surface },
   posterLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   centered: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   playCircle: {

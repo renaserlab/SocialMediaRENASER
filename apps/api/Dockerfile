@@ -5,13 +5,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# ffmpeg: extrae el poster (un fotograma) de los videos que suben sin el.
-# Lee el archivo remoto por rangos, asi que no descarga el video entero.
-# La transcodificacion completa NO corre en este servicio (ver
-# content/media_processing.py); ffmpeg aqui solo hace trabajos de un segundo.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# AQUI NO SE INSTALA ffmpeg, y es a proposito.
+#
+# Se intento: `media_processing.py` sabe usarlo para sacar el poster de un
+# video que llegue sin el. Pero ffmpeg arrastra ~400 MB de paquetes y el build
+# del plan gratuito de Render no lo aguanta: el despliegue quedo en
+# `no-deploy`, es decir, sin ninguna version viva.
+#
+# No se pierde nada, porque el poster ya viene cubierto dos veces:
+#   1. lo genera el TELEFONO al subir (services/mediaCompressor.ts), que es
+#      donde el video ya esta en local y sacar un fotograma es instantaneo;
+#   2. para el contenido antiguo lo genera scripts/procesar_media.py, que
+#      corre en una maquina de verdad.
+# Y el codigo ya degrada solo: sin ffmpeg en el sistema simplemente se salta
+# ese paso (ver `_ffmpeg()`), sin romper nada.
+#
+# Si algun dia el servicio deja de ser gratuito, basta con reponer aqui el
+# apt-get install de ffmpeg para que el respaldo del servidor vuelva a estar.
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
