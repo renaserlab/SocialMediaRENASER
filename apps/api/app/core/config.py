@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     #: integradas de Apple y Google, con su comision.
     payments_return_url: str = "https://social-media-renaser.vercel.app/pago"
 
+    # --- Procesado de media (derivados) ---
+    #: Genera en segundo plano la version ligera de las imagenes nuevas y el
+    #: poster de los videos que suban sin el. Necesita la service_role key.
+    #: Es barato (Pillow sobre una foto, un fotograma con ffmpeg) y corre tras
+    #: responder la peticion, asi que no anade latencia a publicar.
+    media_processing_enabled: bool = True
+
+    #: Transcodificar VIDEO en el servidor (720p H.264). Apagado por defecto:
+    #: en el plan gratuito de Render (0.1 CPU, 512 MB) un video de un minuto
+    #: tardaria decenas de minutos y podria morir al dormirse la instancia.
+    #: Para el contenido existente esta scripts/procesar_media.py, que corre
+    #: donde si hay CPU. Encenderlo aqui es decision de infraestructura.
+    video_transcode_enabled: bool = False
+
     # --- CORS ---
     cors_origins: str = "*"
 

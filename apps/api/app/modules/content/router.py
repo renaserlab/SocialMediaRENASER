@@ -7,18 +7,26 @@ El feed devuelve el autor (join a profiles) y los contadores (likes/comentarios)
 mas el estado propio (liked_by_me / saved_by_me) cuando hay sesion.
 """
 
-from fastapi import APIRouter, Depends, Query, status
+import re
+from datetime import datetime
+
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy import delete, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.config import get_settings
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.modules.content import media_processing as _mp
+from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import Comment, Post, PostLike, PostMedia, SavedPost
 from app.modules.content.schemas import (
     AuthorSummary,
     CommentCreate,
     CommentRead,
     PostCreate,
+    PostMediaInput,
     PostMediaRead,
     PostUpdate,
     PostRead,
@@ -54,21 +62,25 @@ def _feed_columns(uid: str | None):
         .scalar_subquery()
     )
     if uid:
+        # EXISTS y no COUNT: solo interesa si hay fila, no cuantas. Postgres
+        # corta en la primera coincidencia en vez de recorrer y contar, y el
+        # plan usa directamente el indice de la clave primaria (post_id,
+        # user_id).
         liked_sq = (
-            select(func.count())
+            select(literal(1))
             .select_from(PostLike)
             .where(PostLike.post_id == Post.id, PostLike.user_id == uid)
-            .scalar_subquery()
+            .exists()
         )
         saved_sq = (
-            select(func.count())
+            select(literal(1))
             .select_from(SavedPost)
             .where(SavedPost.post_id == Post.id, SavedPost.user_id == uid)
-            .scalar_subquery()
+            .exists()
         )
     else:
-        liked_sq = literal(0)
-        saved_sq = literal(0)
+        liked_sq = literal(False)
+        saved_sq = literal(False)
     return likes_sq, comments_sq, liked_sq, saved_sq
 
 
@@ -86,8 +98,8 @@ def _to_post_read(
     profile: Profile,
     lc: int,
     cc: int,
-    lk: int,
-    sv: int,
+    lk: int | bool,
+    sv: int | bool,
     media: list[PostMediaRead] | None = None,
 ) -> PostRead:
     return PostRead(
@@ -120,14 +132,25 @@ async def _load_media_map(
     ).all()
     result: dict[str, list[PostMediaRead]] = {}
     for media in rows:
-        result.setdefault(media.post_id, []).append(
-            PostMediaRead(
-                storage_path=media.storage_path,
-                media_type=media.media_type,
-                sort_order=media.sort_order,
-            )
-        )
+        result.setdefault(media.post_id, []).append(_media_read(media))
     return result
+
+
+def _media_read(media: PostMedia) -> PostMediaRead:
+    return PostMediaRead(
+        id=media.id,
+        storage_path=media.storage_path,
+        media_type=media.media_type,
+        sort_order=media.sort_order,
+        width=media.width,
+        height=media.height,
+        duration_s=media.duration_s,
+        bytes=media.bytes,
+        poster_path=media.poster_path,
+        feed_path=media.feed_path,
+        stream_path=media.stream_path,
+        processing_status=media.processing_status,
+    )
 
 
 async def _get_active_post(db: AsyncSession, post_id: str) -> Post:
@@ -157,6 +180,12 @@ async def list_posts(
     exclude_media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
     category: str | None = Query(default=None, max_length=40),
     exclude_category: str | None = Query(default=None, max_length=40),
+    # Paginacion por cursor (keyset): "lo publicado ANTES de este punto". A
+    # diferencia de offset, no se descuadra cuando entran publicaciones nuevas
+    # entre pagina y pagina, y Postgres salta directo por el indice en vez de
+    # recorrer y descartar filas. Si llega, tiene prioridad sobre `offset`.
+    before_created_at: str | None = Query(default=None),
+    before_id: str | None = Query(default=None),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -181,10 +210,26 @@ async def list_posts(
         select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
         .join(Profile, Profile.id == Post.author_id)
         .where(Post.status == "published")
-        .order_by(Post.created_at.desc())
+        # Desempate por id: dos publicaciones pueden compartir instante y sin
+        # un orden total el cursor podria saltarse una o repetirla.
+        .order_by(Post.created_at.desc(), Post.id.desc())
         .limit(page.limit)
-        .offset(page.offset)
     )
+    if before_created_at:
+        try:
+            cursor_at = datetime.fromisoformat(before_created_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValidationAppError("Cursor de paginacion no valido.")
+        if before_id:
+            ensure_uuid(before_id, "Cursor de paginacion no valido.")
+            stmt = stmt.where(
+                (Post.created_at < cursor_at)
+                | ((Post.created_at == cursor_at) & (Post.id < before_id))
+            )
+        else:
+            stmt = stmt.where(Post.created_at < cursor_at)
+    else:
+        stmt = stmt.offset(page.offset)
     # Bloquear tiene que servir de algo: sin esto la persona bloqueada seguiria
     # apareciendo en el muro. Se filtra en la consulta, igual que el resto de
     # criterios, para no descuadrar la paginacion.
@@ -236,6 +281,7 @@ async def list_posts(
 @router.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
 async def create_post(
     payload: PostCreate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostRead:
@@ -250,26 +296,41 @@ async def create_post(
     await db.refresh(post)
 
     # Medios con tipo explícito + compatibilidad con image_paths (sin tipo).
-    entries: list[tuple[str, str]] = [
-        (item.storage_path, item.media_type) for item in payload.media
+    entries: list[PostMediaInput] = list(payload.media)
+    entries += [
+        PostMediaInput(storage_path=path, media_type="image")
+        for path in payload.image_paths
     ]
-    entries += [(path, "image") for path in payload.image_paths]
 
     media: list[PostMediaRead] = []
-    for index, (path, media_type) in enumerate(entries):
-        db.add(
-            PostMedia(
-                post_id=post.id,
-                storage_path=path,
-                media_type=media_type,
-                sort_order=index,
-            )
+    for index, item in enumerate(entries):
+        row = PostMedia(
+            post_id=post.id,
+            storage_path=item.storage_path,
+            media_type=item.media_type,
+            sort_order=index,
+            # Metadata calculada en el dispositivo al subir (si el movil pudo).
+            width=item.width,
+            height=item.height,
+            duration_s=item.duration_s,
+            bytes=item.bytes,
+            poster_path=item.poster_path,
         )
-        media.append(
-            PostMediaRead(storage_path=path, media_type=media_type, sort_order=index)
-        )
+        db.add(row)
+        media.append(_media_read(row))
     if media:
         await db.commit()
+        if processing_configured():
+            # DESPUES de responder: genera la version ligera de la imagen y el
+            # poster del video si el dispositivo no lo mando. Publicar no
+            # espera a nada de esto.
+            for row in (
+                await db.scalars(
+                    select(PostMedia).where(PostMedia.post_id == post.id)
+                )
+            ).all():
+                if row.media_type in ("image", "video"):
+                    background.add_task(process_media, row.id)
 
     profile = await db.get(Profile, current_user.id)
     if profile is None:
@@ -342,6 +403,11 @@ async def update_post(
                     storage_path=item.storage_path,
                     media_type=item.media_type,
                     sort_order=index,
+                    width=item.width,
+                    height=item.height,
+                    duration_s=item.duration_s,
+                    bytes=item.bytes,
+                    poster_path=item.poster_path,
                 )
             )
 
@@ -363,6 +429,80 @@ async def delete_post(
         raise ForbiddenError("No puedes eliminar esta publicacion.")
     post.status = "deleted"  # soft delete
     await db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# HLS: playlists con segmentos firmados
+# --------------------------------------------------------------------------- #
+_PLAYLIST_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,40}\.m3u8$")
+#: Lineas de una playlist que apuntan a un archivo de segmento.
+_SEGMENT_LINE = re.compile(r"^[^#].*\.(ts|m4s|mp4)$")
+
+
+@router.get("/media/{media_id}/hls/{playlist}")
+async def media_hls_playlist(
+    media_id: str,
+    playlist: str,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Sirve una playlist HLS del empaquetado de un video.
+
+    El bucket es privado y una playlist guarda referencias RELATIVAS a sus
+    segmentos: servida tal cual desde una URL firmada, el reproductor pediria
+    los segmentos sin firma y recibiria un 400 por cada uno. Este endpoint
+    descarga la playlist y reescribe cada segmento como URL firmada (en un
+    solo lote); las referencias a otras playlists (master → renditions) se
+    dejan relativas, porque resuelven contra esta misma ruta.
+
+    Es publico a proposito: los videos del muro ya se pueden ver sin cuenta
+    (migracion 0018) y el reproductor nativo no envia cabeceras de sesion al
+    pedir playlists.
+    """
+    ensure_uuid(media_id, "Medio no encontrado.")
+    if not _PLAYLIST_NAME.match(playlist):
+        raise NotFoundError("Playlist no encontrada.")
+    media = await db.get(PostMedia, media_id)
+    if media is None or not media.stream_path:
+        raise NotFoundError("Este video no tiene streaming.")
+    if not _mp.processing_configured():
+        raise NotFoundError("Streaming no configurado en este servidor.")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        firmada = await _mp._signed_url(client, f"{media.stream_path}/{playlist}")
+        respuesta = await client.get(firmada)
+        if respuesta.status_code != 200:
+            raise NotFoundError("Playlist no encontrada.")
+        lineas = respuesta.text.splitlines()
+
+        segmentos = [l.strip() for l in lineas if _SEGMENT_LINE.match(l.strip())]
+        firmas: dict[str, str] = {}
+        if segmentos:
+            base = get_settings().supabase_url
+            r = await client.post(
+                f"{base}/storage/v1/object/sign/{_mp.BUCKET}",
+                headers=_mp._headers(),
+                json={
+                    "paths": [f"{media.stream_path}/{s}" for s in segmentos],
+                    "expiresIn": 3600,
+                },
+            )
+            r.raise_for_status()
+            for item in r.json():
+                if item.get("path") and item.get("signedURL"):
+                    firmas[item["path"].rsplit("/", 1)[-1]] = (
+                        f"{base}/storage/v1{item['signedURL']}"
+                    )
+
+    cuerpo = "\n".join(
+        firmas.get(linea.strip(), linea) for linea in lineas
+    )
+    return Response(
+        content=cuerpo,
+        media_type="application/vnd.apple.mpegurl",
+        # Corta pero cacheable: las firmas duran una hora; la playlist puede
+        # reutilizarse unos minutos sin volver a firmar nada.
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -13,9 +13,22 @@ class AuthorSummary(BaseModel):
 
 
 class PostMediaRead(BaseModel):
+    # Identificador del medio: lo usa el movil para pedir la playlist HLS
+    # (/media/{id}/hls/...). Opcional por compatibilidad con filas al vuelo.
+    id: str | None = None
     storage_path: str
     media_type: str
     sort_order: int = 0
+    # Metadata (migracion 0021). Opcional: los medios anteriores no la tienen y
+    # el movil sabe pintar sin ella, como hasta ahora.
+    width: int | None = None
+    height: int | None = None
+    duration_s: float | None = None
+    bytes: int | None = None
+    poster_path: str | None = None
+    feed_path: str | None = None
+    stream_path: str | None = None
+    processing_status: str | None = None
 
 
 class PostMediaInput(BaseModel):
@@ -23,6 +36,15 @@ class PostMediaInput(BaseModel):
 
     storage_path: str = Field(min_length=1, max_length=500)
     media_type: str = Field(pattern=r"^(image|video|audio|document)$")
+    # Metadata calculada en el dispositivo al subir. Un movil anterior no la
+    # manda y el pipeline del backend puede completarla despues.
+    width: int | None = Field(default=None, ge=1, le=20000)
+    height: int | None = Field(default=None, ge=1, le=20000)
+    duration_s: float | None = Field(default=None, ge=0, le=24 * 3600)
+    bytes: int | None = Field(default=None, ge=0)
+    # El poster tambien lo sube el cliente a su carpeta del bucket; aqui llega
+    # solo la ruta. La RLS de Storage ya impide escribir fuera de la propia.
+    poster_path: str | None = Field(default=None, max_length=500)
 
 
 class PostCreate(BaseModel):
