@@ -109,7 +109,26 @@ el navegador (`localhost:8081`) o el iPhone con Expo Go.
   `stories` de la API FastAPI sin usar.
 
 Detalle por escrito en `docs/`: `ARQUITECTURA.md`, `ESTADO_DEL_PROYECTO.md`,
-`VALIDACION.md` y `IOS_EN_DISPOSITIVO.md` (probar en iPhone y publicar).
+`VALIDACION.md`, `IOS_EN_DISPOSITIVO.md` (probar en iPhone y publicar) y
+`RENDIMIENTO.md` (carga rapida: cache local del feed, derivados de media,
+HLS y que ejecutar para reprocesar lo existente).
+
+## Rendimiento — reglas del pipeline de media
+
+- **El original de Storage NUNCA se sobreescribe.** Los derivados (poster,
+  WebP del feed, MP4 720p, HLS) viven en `<uid>/derived/<media_id>/…` y la
+  base de datos solo guarda referencias adicionales (migracion 0021).
+  Rollback = borrar la referencia.
+- **Las caches se indexan por RUTA de Storage, no por URL firmada** (la firma
+  cambia en cada emision). Al pintar media remota con expo-image, pasar
+  `cacheKey` con la ruta; si no, cada refirma re-descarga el archivo.
+- **El feed pinta en dos fases** (JSON primero, firmas despues) y arranca de
+  una instantanea local. No anadir `await` de Storage antes del primer
+  render del muro.
+- **Transcodificar video NO corre en Render** (0.1 CPU): lo nuevo genera solo
+  poster/WebP en segundo plano; lo pesado va por `scripts/procesar_media.py`.
+- Instrumentacion de arranque: `EXPO_PUBLIC_PERFORMANCE_DEBUG=1` en `.env`
+  (no dejarla activa en produccion).
 
 ## Idioma
 

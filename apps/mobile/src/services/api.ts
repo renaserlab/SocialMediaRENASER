@@ -177,7 +177,11 @@ export async function apiRequest<T>(
  * lista. Si ya estaba despierta, esta llamada cuesta ~250 ms y nada mas.
  */
 export function warmUpApi(): void {
-  fetch(`${API_URL}/health`).catch(() => {
+  // `no-cors`: la respuesta no interesa, solo que la peticion LLEGUE y
+  // despierte la instancia. Sin esto, en un navegador servido desde un origen
+  // no autorizado (desarrollo local) la consola se llenaba de errores CORS
+  // por una llamada cuyo resultado nunca se lee.
+  fetch(`${API_URL}/health`, { mode: 'no-cors' }).catch(() => {
     // Sin conexion o servidor caido: el feed ya ensena su propio error.
   });
 }

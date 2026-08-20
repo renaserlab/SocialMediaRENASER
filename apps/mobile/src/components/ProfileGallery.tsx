@@ -109,7 +109,11 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
               <View style={StyleSheet.absoluteFill} pointerEvents="none">
                 {post.mediaType === 'video' && post.mediaUrl ? (
                   // Sin reproductor: en una cuadricula no se reproduce nada.
-                  <VideoTile uri={post.mediaUrl} />
+                  <VideoTile
+                    uri={post.mediaUrl}
+                    posterUrl={post.posterUrl}
+                    posterCacheKey={post.posterPath}
+                  />
                 ) : post.mediaUrl || post.imageKey ? (
                   <ExpoImage
                     source={post.mediaUrl ? { uri: post.mediaUrl } : assets[post.imageKey!]}
