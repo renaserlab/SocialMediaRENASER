@@ -137,7 +137,7 @@ export function ExploreScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="EXPLORAR" rightIcon="search" onRightPress={() => router.push('/search' as never)} />
       <AppScreen
-        contentStyle={{ paddingBottom: 100 }}
+        contentStyle={{ paddingBottom: 120 }}
         scrollProps={{
           refreshControl: (
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />

@@ -100,6 +100,16 @@ const light = {
   danger: '#B3261E', // state/error   (usar con icono/texto)
   // overlays
   overlay: 'rgba(0,0,0,0.55)',
+  /*
+    Vidrio (barra flotante). `glassSurface` acompaña al blur real (iOS/web);
+    `glassSurfaceStrong` es el respaldo SIN blur de Android: mas opaco para
+    que el contenido de debajo no ensucie la lectura de los iconos.
+  */
+  glassSurface: 'rgba(255,255,255,0.70)',
+  glassSurfaceStrong: 'rgba(250,250,250,0.94)',
+  glassBorder: 'rgba(0,0,0,0.10)',
+  glassActive: 'rgba(0,0,0,0.08)', // capsula del tab activo
+  glassShadow: '#000000',
 } as const;
 
 const dark = {
@@ -117,6 +127,11 @@ const dark = {
   success: '#5BD68A',
   danger: '#FF8A80',
   overlay: 'rgba(0,0,0,0.72)',
+  glassSurface: 'rgba(20,20,20,0.70)',
+  glassSurfaceStrong: 'rgba(18,18,18,0.94)',
+  glassBorder: 'rgba(255,255,255,0.14)',
+  glassActive: 'rgba(255,255,255,0.14)',
+  glassShadow: '#000000',
 } as const;
 
 export const palette = (mode: ThemeMode) => (mode === 'dark' ? dark : light);

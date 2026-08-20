@@ -124,7 +124,7 @@ export function CreatePostScreen() {
         behavior={Platform.select({ ios: 'padding', android: 'height' })}
         keyboardVerticalOffset={keyboardOffset}
       >
-      <AppScreen contentStyle={{ paddingBottom: 100 }}>
+      <AppScreen contentStyle={{ paddingBottom: 120 }}>
         <View style={styles.container}>
           <Text style={[styles.title, { color: colors.text }]}>Comparte algo que pueda transformar a alguien.</Text>
 

@@ -174,7 +174,7 @@ export function MessagesScreen() {
 }
 
 const styles = StyleSheet.create({
-  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 100 },
+  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
   searchWrapper: {
     position: 'relative',
     marginBottom: spacing.md,

@@ -1,9 +1,9 @@
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Tabs } from 'expo-router';
 
+import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -16,9 +16,6 @@ const icon = (name: keyof typeof Feather.glyphMap) => ({ color, size }: { color:
 export default function TabsLayout() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
-  // Sin esto, fijar `height` anula el calculo height + inset de React Navigation
-  // y los iconos quedan bajo la barra de gestos / home indicator.
-  const insets = useSafeAreaInsets();
 
   const hydrated = useAppStore((state) => state.hydrated);
   const authStatus = useAuthStore((state) => state.status);
@@ -59,6 +56,12 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      /*
+        Barra propia: capsula flotante con acabado de vidrio (ver
+        FloatingGlassTabBar). Las rutas y los `href: null` de abajo no cambian;
+        solo cambia quien pinta la barra.
+      */
+      tabBar={(props) => <FloatingGlassTabBar {...props} />}
       screenOptions={{
         headerShown: false,
         /*
@@ -79,14 +82,6 @@ export default function TabsLayout() {
         freezeOnBlur: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-          height: 64 + insets.bottom,
-          paddingTop: 8,
-          paddingBottom: 8 + insets.bottom,
-        },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },
       }}
     >
       <Tabs.Screen name="home" options={{ title: t('tabs.home'), tabBarIcon: icon('home') }} />

@@ -425,7 +425,7 @@ export function ProfileScreen() {
           id ? () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/home')) : undefined
         }
       />
-      <AppScreen contentStyle={{ paddingBottom: 100 }}>
+      <AppScreen contentStyle={{ paddingBottom: 120 }}>
         {/*
           Sin foto de portada. Ocupaba el primer tercio de la pantalla con una
           imagen que casi nadie cambiaba, y empujaba hacia abajo lo que de

@@ -52,18 +52,29 @@ export function HomeScreen() {
   const [adminId, setAdminId] = useState<string | null>(null);
   useEffect(() => {
     if (!AuthRepository.enabled) return;
-    CommunityRepository.list()
-      .then((list) => setCircle(list[0] ?? null))
-      .catch((error) => {
-        console.warn('[inicio] no se pudo cargar el circulo destacado', error);
-        setCircle(null);
-      });
-    ProfileRepository.listFeatured()
-      .then((list) => setAdminId((list.find((m) => m.isAdmin) ?? list[0])?.id ?? null))
-      .catch((error) => {
-        console.warn('[inicio] no se pudo resolver el administrador', error);
-        setAdminId(null);
-      });
+    /*
+      Datos SECUNDARIOS del inicio (contador del circulo, perfil del
+      administrador para las tarjetas). Se retrasan un instante a proposito:
+      en el arranque compiten con el feed por la misma conexion y por un
+      servidor recien despierto, y ninguno de los dos es lo que la persona
+      vino a ver. El muro primero; esto llega medio segundo despues sin que
+      nadie lo note.
+    */
+    const timer = setTimeout(() => {
+      CommunityRepository.list()
+        .then((list) => setCircle(list[0] ?? null))
+        .catch((error) => {
+          console.warn('[inicio] no se pudo cargar el circulo destacado', error);
+          setCircle(null);
+        });
+      ProfileRepository.listFeatured()
+        .then((list) => setAdminId((list.find((m) => m.isAdmin) ?? list[0])?.id ?? null))
+        .catch((error) => {
+          console.warn('[inicio] no se pudo resolver el administrador', error);
+          setAdminId(null);
+        });
+    }, 600);
+    return () => clearTimeout(timer);
   }, []);
 
   /**
@@ -356,7 +367,8 @@ export function HomeScreen() {
               <Skeleton width="90%" height={14} />
             </View>
           ) : (
-            <View style={{ height: 100 }} />
+            // Hueco para que el ultimo post no quede bajo la barra flotante.
+            <View style={{ height: 120 }} />
           )
         }
         onEndReached={onEndReached}
