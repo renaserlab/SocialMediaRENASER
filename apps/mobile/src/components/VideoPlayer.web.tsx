@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { VideoScrubber } from '@/components/VideoScrubber';
@@ -30,10 +31,14 @@ export function VideoPlayer({
   active,
   shortsControls = false,
   controlsBottomInset = 0,
+  hidePlayButton = false,
   onMutedChange,
 }: VideoPlayerProps) {
   const ref = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(autoPlay);
+  // Igual que en nativo: el circulo de play solo reaparece si la pausa la pidio
+  // la persona. Ver `hidePlayButton` en VideoPlayer.types.ts.
+  const [userPaused, setUserPaused] = useState(false);
   const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
 
   // El silencio puede cambiarlo la persona con el boton de sonido, y ademas lo
@@ -52,6 +57,7 @@ export function VideoPlayer({
       el.pause();
       return;
     }
+    setUserPaused(false);
     void el.play().catch(() => {
       /*
         Los navegadores no dejan que un video empiece con sonido si la persona
@@ -64,6 +70,26 @@ export function VideoPlayer({
       void el.play().catch(() => {});
     });
   }, [active, onMutedChange]);
+
+  /*
+    Cambiar de pestaña PARA el video, igual que en la version nativa.
+
+    Las pantallas ya visitadas siguen montadas, asi que sin esto un video del
+    muro seguia descargando y decodificando mientras la persona estaba en
+    Explorar o en Perfil. En movil lo evitaba `useFocusEffect`, pero esta
+    variante para navegador no lo tenia, y ahora que pueden sonar varios videos
+    a la vez el desperdicio se multiplicaba. Al volver, solo se reanuda el que
+    de verdad le toca reproducir.
+  */
+  useFocusEffect(
+    useCallback(() => {
+      const el = ref.current;
+      if (el && (autoPlay || active)) void el.play().catch(() => {});
+      return () => {
+        ref.current?.pause();
+      };
+    }, [autoPlay, active]),
+  );
 
   // Estado y avance para los controles propios.
   useEffect(() => {
@@ -94,8 +120,13 @@ export function VideoPlayer({
   const toggle = useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    if (el.paused) void el.play().catch(() => {});
-    else el.pause();
+    if (el.paused) {
+      setUserPaused(false);
+      void el.play().catch(() => {});
+    } else {
+      el.pause();
+      setUserPaused(true);
+    }
   }, []);
 
   const seek = useCallback((seconds: number) => {
@@ -140,7 +171,12 @@ export function VideoPlayer({
         loop={loop}
         muted={muted}
         playsInline
-        preload="metadata"
+        /*
+          Cuando este video ya tiene turno para reproducirse no tiene sentido
+          pedir solo la cabecera y esperar: se pide contenido desde el primer
+          momento. Los que estan de paso siguen costando solo los metadatos.
+        */
+        preload={active || autoPlay ? 'auto' : 'metadata'}
         // Sin esto el menu "..." del navegador ofrece Descargar / Imagen en
         // imagen: no queremos que el contenido se difunda fuera de la app.
         controlsList="nodownload noplaybackrate noremoteplayback"
@@ -170,7 +206,7 @@ export function VideoPlayer({
             accessibilityRole="button"
             accessibilityLabel={playing ? 'Pausar video' : 'Reproducir video'}
           >
-            {!playing ? (
+            {!playing && (!hidePlayButton || userPaused) ? (
               <View style={styles.centered} pointerEvents="none">
                 <View style={[styles.playCircle, { backgroundColor: media.overlay, borderColor: media.text }]}>
                   <Feather name="play" size={30} color={media.text} />

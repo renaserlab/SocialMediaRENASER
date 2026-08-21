@@ -11,6 +11,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { StoryGroup } from '@/types';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 
 const BUBBLE = 54;
 
@@ -68,6 +69,12 @@ export function StoriesRow() {
 
   return (
     <View>
+      {/*
+        Este carrusel ya usa el arrastre horizontal: sin blindarlo, mover las
+        historias se llevaba por delante la pantalla entera y cambiaba de
+        seccion.
+      */}
+      <SinCambioDeSeccion>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -142,6 +149,7 @@ export function StoriesRow() {
           </View>
         ) : null}
       </ScrollView>
+      </SinCambioDeSeccion>
 
     </View>
   );

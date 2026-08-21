@@ -38,11 +38,15 @@ const PROGRESS_INTERVAL_SECONDS = 0.25;
  * mientras el video se ve— y le pone suelo: aunque coincidan dos en pantalla,
  * entre ambos no llegan a comprometer la memoria de la aplicacion.
  *
- * Dieciseis megas son unos diez segundos por delante incluso en los videos mas
+ * Doce megas son unos siete segundos por delante incluso en los videos mas
  * pesados que hay subidos, de sobra para que no se entrecorte en un muro donde
  * se cambia de video constantemente.
+ *
+ * Bajo de dieciseis a doce porque en el muro ahora puede haber hasta cuatro
+ * reproductores vivos (los visibles reproduciendo, mas el siguiente
+ * preparandose) en vez de dos. Menos por reproductor, mismo techo de memoria.
  */
-const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+const MAX_BUFFER_BYTES = 12 * 1024 * 1024;
 const BUFFER_SECONDS = 15;
 
 /**
@@ -76,6 +80,51 @@ function readNumber(read: () => number): number {
   }
 }
 
+/**
+ * Barra de avance, con su propio estado.
+ *
+ * Vive aparte a proposito: el reproductor avisa de por donde va cuatro veces
+ * por segundo, y mientras ese dato se guardaba en el componente grande, CADA
+ * aviso repintaba el video entero, la portada y la zona pulsable. Con dos o
+ * tres videos a la vez en el muro eso eran una docena de repintados por
+ * segundo tirando del mismo hilo que anima el desplazamiento. Aqui dentro,
+ * cada aviso repinta solo esta barra.
+ */
+function VideoProgress({
+  player,
+  onSeek,
+  bottom,
+}: {
+  player: ReturnType<typeof useVideoPlayer>;
+  onSeek: (seconds: number) => void;
+  bottom: number;
+}) {
+  const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
+
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
+    setProgress({ currentTime, duration: readNumber(() => player.duration) });
+  });
+
+  const seek = useCallback(
+    (seconds: number) => {
+      onSeek(seconds);
+      // Se adelanta el pintado: el reproductor tarda en confirmar la nueva
+      // posicion y, mientras, la barra volveria un instante a donde estaba.
+      setProgress((prev) => ({ ...prev, currentTime: seconds }));
+    },
+    [onSeek],
+  );
+
+  return (
+    <VideoScrubber
+      currentTime={progress.currentTime}
+      duration={progress.duration}
+      onSeek={seek}
+      bottom={bottom}
+    />
+  );
+}
+
 export function VideoPlayer({
   uri,
   poster,
@@ -91,6 +140,7 @@ export function VideoPlayer({
   visible,
   shortsControls = false,
   controlsBottomInset = 0,
+  hidePlayButton = false,
 }: VideoPlayerProps) {
   /*
     `useCaching` guarda el video en la cache de disco de expo-video: volver a
@@ -110,14 +160,34 @@ export function VideoPlayer({
       // clavada en el minuto cero.
       p.timeUpdateEventInterval = PROGRESS_INTERVAL_SECONDS;
     }
-    if (autoPlay) {
+    /*
+      Arranca aqui, en la propia creacion del reproductor, y no en un efecto
+      posterior.
+
+      Antes, un video del muro nacia parado y solo se le decia `play()` cuando
+      React terminaba de montar y corria el efecto de `active`: dos pasadas de
+      render de retraso antes siquiera de empezar a pedir bytes. Pidiendolo en
+      la fabrica, la descarga empieza en el mismo instante en que el
+      reproductor existe.
+    */
+    if (autoPlay || active) {
       p.play();
     }
   });
 
-  const [started, setStarted] = useState(autoPlay);
-  const [playing, setPlaying] = useState(autoPlay);
-  const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
+  // Nace ya iniciado si le toca reproducir: sin esto se pintaba un instante la
+  // portada con su boton encima antes de que el efecto lo quitara.
+  const [started, setStarted] = useState(autoPlay || active === true);
+  const [playing, setPlaying] = useState(autoPlay || active === true);
+  /*
+    La persona ha pausado a proposito.
+
+    Solo sirve para decidir si se ensena el circulo de reproduccion cuando se
+    pidio esconderlo (`hidePlayButton`): en un muro que reproduce solo, el
+    circulo sobra... salvo justo despues de que alguien toque para pausar, que
+    es cuando hace falta ver que esta parado y como seguir.
+  */
+  const [userPaused, setUserPaused] = useState(false);
   /*
     El reproductor ya pinto su primer fotograma. Hasta ese momento, si hay
     poster, se mantiene por encima: sin esto, en los shorts el poster
@@ -135,9 +205,6 @@ export function VideoPlayer({
   }, [muted, player]);
 
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
-  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
-    setProgress({ currentTime, duration: readNumber(() => player.duration) });
-  });
 
   /*
     Muro: pausar al perder de vista, sin arrancar al aparecer.
@@ -156,6 +223,9 @@ export function VideoPlayer({
     if (active === undefined) return;
     if (active) {
       setStarted(true);
+      // Volver a entrar en pantalla borra la pausa manual: si no, el circulo
+      // de play se quedaria pegado sobre un video que ya esta reproduciendo.
+      setUserPaused(false);
       safely(() => player.play());
     } else {
       safely(() => player.pause());
@@ -198,8 +268,13 @@ export function VideoPlayer({
   /** Un toque en el video: pausa si sonaba, reanuda si estaba parado. */
   const toggle = useCallback(() => {
     safely(() => {
-      if (player.playing) player.pause();
-      else player.play();
+      if (player.playing) {
+        player.pause();
+        setUserPaused(true);
+      } else {
+        player.play();
+        setUserPaused(false);
+      }
     });
   }, [player]);
 
@@ -208,9 +283,6 @@ export function VideoPlayer({
       safely(() => {
         player.currentTime = seconds;
       });
-      // Se adelanta el pintado: el reproductor tarda en confirmar la nueva
-      // posicion y, mientras, la barra volveria un instante a donde estaba.
-      setProgress((prev) => ({ ...prev, currentTime: seconds }));
     },
     [player],
   );
@@ -290,7 +362,13 @@ export function VideoPlayer({
             accessibilityRole="button"
             accessibilityLabel={playing ? 'Pausar video' : 'Reproducir video'}
           >
-            {!playing ? (
+            {/*
+              El circulo solo aparece si de verdad aporta algo: cuando el video
+              esta parado Y (o bien esta pantalla usa play manual, o bien la
+              persona acaba de pausarlo aqui mismo). En el muro, mientras el
+              video se prepara para arrancar solo, no se pinta nada.
+            */}
+            {!playing && (!hidePlayButton || userPaused) ? (
               <View style={styles.centered} pointerEvents="none">
                 <View style={[styles.playCircle, { backgroundColor: media.overlay, borderColor: media.text }]}>
                   <Feather name="play" size={30} color={media.text} />
@@ -298,15 +376,31 @@ export function VideoPlayer({
               </View>
             ) : null}
           </Pressable>
-          <VideoScrubber
-            currentTime={progress.currentTime}
-            duration={progress.duration}
-            onSeek={seek}
-            bottom={controlsBottomInset}
-          />
+          <VideoProgress player={player} onSeek={seek} bottom={controlsBottomInset} />
         </>
       ) : null}
-      {!started && (
+      {/*
+        Reproductor montado pero todavia sin arrancar porque le toca esperar
+        turno (es el SIGUIENTE video del muro, preparandose). Solo la portada:
+        ni boton, ni velo, ni zona pulsable. Es exactamente lo que se veia mal
+        en la captura del documento —el segundo video con un play enorme
+        encima— y lo que hacia que pareciera roto.
+      */}
+      {!started && hidePlayButton ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {posterSource ? (
+            <ExpoImage
+              source={posterSource}
+              style={StyleSheet.absoluteFill}
+              contentFit={contentFit === 'fill' ? 'cover' : contentFit}
+              cachePolicy="disk"
+              recyclingKey={posterCacheKey}
+              transition={120}
+            />
+          ) : null}
+        </View>
+      ) : null}
+      {!started && !hidePlayButton && (
         <Pressable
           style={styles.posterLayer}
           onPress={start}

@@ -27,6 +27,39 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
 
+/**
+ * Cuantos videos del muro pueden sonar a la vez.
+ *
+ * Si en la pantalla caben dos publicaciones con video, las dos se reproducen:
+ * es lo que se ve en cualquier red social y lo que pedia el documento (antes
+ * mandaba uno solo y el segundo se quedaba congelado con un boton de play).
+ * El tope existe para que "los que se ven" no se convierta en "todos los que
+ * la lista tenga montados": tres es mas de lo que cabe de verdad en un movil.
+ */
+const MAX_VIDEOS_REPRODUCIENDO = 3;
+
+/**
+ * Cuantos videos se preparan por delante sin reproducirse.
+ *
+ * Es lo que hace que al llegar a ellos ya tengan bytes descargados y empiecen
+ * al instante en vez de en negro.
+ */
+const MAX_VIDEOS_PREPARANDO = 2;
+
+/**
+ * Techo duro de reproductores vivos en todo el muro.
+ *
+ * Cada reproductor reserva memoria nativa (ver MAX_BUFFER_BYTES en
+ * VideoPlayer), y quedarse sin ella es lo que cerraba la aplicacion de golpe
+ * en Android. Reproduciendo + preparando nunca pasan de aqui.
+ */
+const MAX_REPRODUCTORES = 4;
+
+/** Dos listas de ids con el mismo contenido y el mismo orden. */
+function mismasListas(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
 export function HomeScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -140,30 +173,37 @@ export function HomeScreen() {
   }, [feedHasMore, feedLoadingMore, loadMoreFeed]);
 
   /*
-    Publicaciones a la vista y video protagonista.
+    Publicaciones a la vista y videos que suenan.
 
     Los videos del muro se reproducen SOLOS al aparecer, como en Instagram, y
-    en silencio (quien quiera sonido lo activa en el propio video). Para que
-    eso no se convierta en cinco reproductores a la vez —que es justo lo que
-    agotaba la memoria en Android— manda uno solo: el primer video visible.
+    en silencio (quien quiera sonido lo activa en el propio video).
 
-    Ademas se prepara el SIGUIENTE video del muro aunque todavia no se vea. Es
-    lo que hace que al llegar a el ya este listo en vez de empezar en negro.
-    Como mucho, por tanto, hay dos reproductores vivos: el que suena y el que
-    espera.
+    La regla, en una linea: se ve → puede reproducirse; no se ve → se pausa y
+    se suelta. Todo lo que este de verdad en pantalla suena, hasta
+    MAX_VIDEOS_REPRODUCIENDO; nada de lo que no este en pantalla suena nunca.
+    Antes mandaba UNO SOLO —el primero de arriba—, y por eso en la captura del
+    documento se ven dos videos y solo uno reproduce.
+
+    Ademas se preparan los siguientes videos del muro aunque todavia no se
+    vean: al llegar a ellos ya tienen bytes descargados y empiezan al instante
+    en vez de en negro. Preparar NO es reproducir; esos reproductores existen
+    callados y parados.
 
     Se guardan ids y no indices porque la lista se reordena al recargar; con
     indices, el video que se pausa despues de un refresco no seria el mismo.
 
-    El umbral es del 60 %: lo bastante alto para que no arranque un video que
-    apenas asoma por el borde, y lo bastante bajo para que empiece antes de
-    que termines de colocarlo en el centro.
+    El umbral baja del 60 % al 35 %: ya no hace falta que la publicacion ocupe
+    casi toda la pantalla para que su video arranque, basta con que una parte
+    util haya entrado. `minimumViewTime` evita el otro extremo —arrancar
+    veinte videos de golpe al pasar el dedo rapido—: la publicacion tiene que
+    seguir ahi cien milisegundos, un tiempo que nadie percibe pero que un
+    desplazamiento rapido no le concede a nada.
   */
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
-  const [videoEnCurso, setVideoEnCurso] = useState<{
-    activo: string | null;
-    siguiente: string | null;
-  }>({ activo: null, siguiente: null });
+  const [videosEnCurso, setVideosEnCurso] = useState<{
+    reproduciendo: string[];
+    preparando: string[];
+  }>({ reproduciendo: [], preparando: [] });
 
   /*
     La lista actual, accesible desde el manejador de visibilidad sin volver a
@@ -174,35 +214,50 @@ export function HomeScreen() {
   const postsRef = useRef(posts);
   postsRef.current = posts;
 
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 35,
+    minimumViewTime: 100,
+  }).current;
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ key?: string; item?: Post }> }) => {
-      setVisibleIds(
-        new Set(
-          viewableItems
-            .map((entry) => entry.item?.id ?? entry.key)
-            .filter((id): id is string => typeof id === 'string'),
-        ),
-      );
+      const idsVisibles = viewableItems
+        .map((entry) => entry.item?.id ?? entry.key)
+        .filter((id): id is string => typeof id === 'string');
+      setVisibleIds(new Set(idsVisibles));
 
-      // Protagonista: el primer video visible (el de mas arriba manda, que es
-      // el orden en que se leen las publicaciones).
-      const activo =
-        viewableItems.find((entry) => entry.item?.mediaType === 'video')?.item?.id ?? null;
+      // Todos los videos que estan de verdad en pantalla, en el orden en que se
+      // leen las publicaciones (arriba primero), con tope de seguridad.
+      const reproduciendo = viewableItems
+        .filter((entry) => entry.item?.mediaType === 'video')
+        .map((entry) => entry.item!.id)
+        .slice(0, MAX_VIDEOS_REPRODUCIENDO);
 
-      // Y el siguiente video que vendra, para tenerlo preparado al llegar.
-      let siguiente: string | null = null;
-      if (activo) {
-        const lista = postsRef.current;
-        const desde = lista.findIndex((post) => post.id === activo);
-        siguiente =
-          lista.slice(desde + 1).find((post) => post.mediaType === 'video')?.id ?? null;
-      }
+      /*
+        Y los siguientes videos del muro, para tenerlos preparados al llegar.
+        Se cuentan desde el ultimo video que suena; si no suena ninguno (solo
+        hay fotos en pantalla), desde la ultima publicacion visible, que es
+        hacia donde va el dedo.
+      */
+      const lista = postsRef.current;
+      const referencia = reproduciendo.length
+        ? reproduciendo[reproduciendo.length - 1]
+        : idsVisibles[idsVisibles.length - 1];
+      const desde = referencia ? lista.findIndex((post) => post.id === referencia) : -1;
+      const cupo = Math.min(MAX_REPRODUCTORES - reproduciendo.length, MAX_VIDEOS_PREPARANDO);
+      const preparando =
+        desde >= 0 && cupo > 0
+          ? lista
+              .slice(desde + 1)
+              .filter((post) => post.mediaType === 'video')
+              .slice(0, cupo)
+              .map((post) => post.id)
+          : [];
 
-      setVideoEnCurso((previo) =>
-        previo.activo === activo && previo.siguiente === siguiente
+      setVideosEnCurso((previo) =>
+        mismasListas(previo.reproduciendo, reproduciendo) &&
+        mismasListas(previo.preparando, preparando)
           ? previo
-          : { activo, siguiente },
+          : { reproduciendo, preparando },
       );
     },
   ).current;
@@ -400,8 +455,8 @@ export function HomeScreen() {
             <PostCard
               post={item}
               visible={visibleIds.has(item.id)}
-              videoActive={videoEnCurso.activo === item.id}
-              videoPreload={videoEnCurso.siguiente === item.id}
+              videoActive={videosEnCurso.reproduciendo.includes(item.id)}
+              videoPreload={videosEnCurso.preparando.includes(item.id)}
             />
           </View>
         )}

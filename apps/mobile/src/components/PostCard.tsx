@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import { Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -69,7 +69,18 @@ type Props = {
   videoPreload?: boolean;
 };
 
-export function PostCard({ post, onRemoved, visible, videoActive, videoPreload }: Props) {
+/**
+ * Tarjeta de publicacion.
+ *
+ * Se exporta MEMOIZADA (ver el final del archivo): en el muro, cada vez que
+ * cambia que videos se ven —y eso pasa en cada tramo de desplazamiento— el
+ * componente de la lista se vuelve a dibujar entero. Sin memo, ese repintado
+ * arrastraba consigo TODAS las tarjetas en pantalla, con su cabecera, su
+ * cuerpo, sus contadores y su media, aunque a la mayoria no les hubiera
+ * cambiado ni una propiedad. Con memo solo se repintan las que de verdad
+ * cambian de estado (la que entra, la que sale, la que empieza a reproducir).
+ */
+function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: Props) {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [showComments, setShowComments] = useState(false);
@@ -329,6 +340,13 @@ export function PostCard({ post, onRemoved, visible, videoActive, videoPreload }
               */
               nativeControls={!autoFeed}
               shortsControls={autoFeed}
+              /*
+                Sin circulo de play en el muro: el video arranca solo, asi que
+                ese boton solo conseguia que pareciera parado mientras cargaba
+                —y en el que espera turno, que pareciera que hay que pulsarlo.
+                Reaparece si la persona pausa a mano, para poder reanudar.
+              */
+              hidePlayButton={autoFeed}
               /*
                 Los navegadores no dejan arrancar con sonido si la persona aun
                 no ha tocado la pagina: el reproductor se silencia solo para
@@ -604,3 +622,11 @@ const styles = StyleSheet.create({
   commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   commentInput: { flex: 1, height: 40, borderRadius: radius.pill, borderWidth: 1, paddingHorizontal: spacing.lg, fontSize: 13 },
 });
+
+/*
+  La comparacion por omision (superficial) es la correcta aqui: `post` viene del
+  estado global y conserva su identidad mientras no cambie de verdad —dar un
+  «me gusta» crea un objeto nuevo, y entonces SI hay que repintar—, y el resto
+  de propiedades son booleanos.
+*/
+export const PostCard = memo(PostCardBase);

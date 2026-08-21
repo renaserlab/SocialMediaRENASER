@@ -9,6 +9,7 @@ import {
   stepSeconds,
 } from '@/lib/videoScrub';
 import { palette } from '@/theme/tokens';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 
 // Va siempre encima de un video, asi que el contexto es oscuro en ambos temas.
 const media = palette('dark');
@@ -93,6 +94,14 @@ export function VideoScrubber({ currentTime, duration, onSeek, bottom = 0 }: Pro
   const step = stepSeconds(duration);
 
   return (
+    /*
+      Arrastrar esta barra es buscar dentro del video, no cambiar de seccion.
+      `activarAlTocar` reserva el gesto desde el primer contacto: esto no es un
+      ScrollView que "empiece a moverse", asi que no hay otra senal a la que
+      esperar. Sin esto, mover el dedo sobre la barra de un video del muro
+      saltaba a Explorar.
+    */
+    <SinCambioDeSeccion activarAlTocar>
     <View
       {...responder.panHandlers}
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
@@ -151,6 +160,7 @@ export function VideoScrubber({ currentTime, duration, onSeek, bottom = 0 }: Pro
         ) : null}
       </View>
     </View>
+    </SinCambioDeSeccion>
   );
 }
 

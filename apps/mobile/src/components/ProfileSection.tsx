@@ -30,6 +30,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/types';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 
 /** Secciones del perfil que se abren desde los accesos circulares. */
 export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast' | 'testimonios';
@@ -305,6 +306,8 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     return (
       <View>
         {/* Filtros por categoria; "Todos" es simplemente sin filtro. */}
+        {/* Blindado frente al gesto de cambiar de seccion: ver tabSwipe.tsx. */}
+        <SinCambioDeSeccion>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -320,6 +323,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
             />
           ))}
         </ScrollView>
+        </SinCambioDeSeccion>
 
         {canAddAudio ? (
           <Button

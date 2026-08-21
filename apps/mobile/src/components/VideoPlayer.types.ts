@@ -52,6 +52,21 @@ export type VideoPlayerProps = {
   /** Separación de la barra de progreso respecto al borde inferior. */
   controlsBottomInset?: number;
   /**
+   * Quita el circulo de reproduccion del centro.
+   *
+   * En un muro que reproduce SOLO, ese boton es una instruccion falsa: anuncia
+   * que hay que pulsar algo cuando en realidad el video va a empezar por su
+   * cuenta. Lo unico que consigue es que el video parezca parado durante el
+   * medio segundo que tarda en arrancar (justo lo que se ve en la captura del
+   * documento). Fuera del muro —formato corto, detalle— el circulo sigue
+   * teniendo sentido: ahi la pausa la decide la persona.
+   *
+   * Ojo: solo esconde el circulo mientras nadie ha tocado el video. Si la
+   * persona lo pausa a proposito, vuelve a aparecer; si no, no habria forma de
+   * saber que esta pausado ni de reanudarlo.
+   */
+  hidePlayButton?: boolean;
+  /**
    * Avisa de que el reproductor tuvo que silenciarse para poder arrancar.
    *
    * Los navegadores no dejan que un vídeo empiece con sonido si la persona aún

@@ -4,6 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
 import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar';
+import { CambioDeSeccionPorGesto } from '@/navigation/tabSwipe';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -55,6 +56,13 @@ export default function TabsLayout() {
   */
 
   return (
+    /*
+      Arrastrar en horizontal cambia de seccion, como en Facebook o Instagram.
+      No es un segundo navegador: el gesto acaba llamando a lo MISMO que pulsar
+      la barra de abajo, asi que barra y gesto no pueden desincronizarse. El
+      detalle esta en `src/navigation/tabSwipe.tsx`.
+    */
+    <CambioDeSeccionPorGesto>
     <Tabs
       /*
         Barra propia: capsula flotante con acabado de vidrio (ver
@@ -62,6 +70,20 @@ export default function TabsLayout() {
         solo cambia quien pinta la barra.
       */
       tabBar={(props) => <FloatingGlassTabBar {...props} />}
+      /*
+        Atras vuelve a la pestaña ANTERIOR, no siempre a Inicio.
+
+        Por omision React Navigation usa `firstRoute`: desde cualquier pestaña,
+        Atras saltaba directamente a Inicio y la siguiente pulsacion cerraba la
+        aplicacion, perdiendo por el camino todo lo que la persona habia
+        recorrido. Con `history` el propio TabRouter guarda el orden de visita y
+        deshace paso a paso —Explorar → Perfil → Inicio—, que es justo lo que
+        pedia el documento.
+
+        Es el mecanismo de la libreria, no un historial nuestro en paralelo:
+        vale igual para el gesto, para la barra y para un enlace externo.
+      */
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         /*
@@ -105,5 +127,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="followers/[id]" options={{ href: null }} />
       <Tabs.Screen name="following/[id]" options={{ href: null }} />
     </Tabs>
+    </CambioDeSeccionPorGesto>
   );
 }

@@ -11,6 +11,8 @@ export const es = {
   'tabs.create': 'Crear',
   'tabs.messages': 'Mensajes',
   'tabs.profile': 'Perfil',
+  // Aviso al pulsar Atras en la raiz de la aplicacion (solo Android).
+  'app.pressAgainToExit': 'Presiona otra vez para salir',
 
   // Inicio
   'home.forYou': 'Para ti',

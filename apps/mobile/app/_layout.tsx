@@ -19,6 +19,7 @@ import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { DialogHost } from '@/components/DialogHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
+import { useSalidaConDoblePulsacion } from '@/hooks/useSalidaConDoblePulsacion';
 import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -51,6 +52,11 @@ export default function RootLayout() {
   // raiz porque el enlace puede llegar con cualquier pantalla delante, o con la
   // aplicacion cerrada.
   useAuthDeepLink();
+
+  // Boton fisico Atras de Android: primero retrocede de verdad y, ya en la
+  // raiz, avisa antes de cerrar en vez de salir de golpe. Va en la raiz porque
+  // el boton existe en toda la aplicacion, no solo en las pestañas.
+  useSalidaConDoblePulsacion();
 
   // El segundo valor es el error de carga: si la fuente falla (sin red, cache
   // vacia) hay que continuar igualmente con la tipografia del sistema.

@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, View, ViewStyle } from 'react-native
 import { Text } from '@/components/Text';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 
 type TabsProps = {
   tabs: string[];
@@ -55,13 +56,16 @@ export function Tabs({ tabs, activeTab, onChangeTab, scrollable = false, style }
 
   if (scrollable) {
     return (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={[styles.scrollContainer, style]}
-      >
-        {content}
-      </ScrollView>
+      /* Blindado frente al gesto de cambiar de seccion: ver tabSwipe.tsx. */
+      <SinCambioDeSeccion>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={[styles.scrollContainer, style]}
+        >
+          {content}
+        </ScrollView>
+      </SinCambioDeSeccion>
     );
   }
 
