@@ -307,6 +307,23 @@ function VistaDeSecciones({ state, descriptors, navigation, barra }: PropsDeVist
   return (
     <ProveedorDeGestoDeSeccion gesto={gesto}>
       <View style={styles.lleno}>
+        {/*
+          VENTANA QUE RECORTA. Quieta, nunca se mueve, y es lo unico que se ve.
+
+          Sin ella, las secciones vecinas —que estan colocadas a un ancho de
+          pantalla a cada lado— quedaban dibujadas FUERA del contenedor, y el
+          documento pasaba a medir cinco pantallas de ancho (1875 px en un movil
+          de 375). Con un documento mas ancho que la ventana, el navegador del
+          telefono se cree con derecho a desplazarlo en horizontal, asi que al
+          arrastrar movia la PAGINA ENTERA en vez de solo el carrusel: la barra
+          inferior se iba con el contenido y la seccion vecina aparecia sin
+          barra encima. Recortando aqui, el documento nunca es mas ancho que la
+          pantalla, no hay nada que el navegador pueda desplazar, y lo unico que
+          se mueve es el carrusel de dentro.
+
+          Tambien hace falta en movil nativo: iOS no recorta por defecto.
+        */}
+        <View style={styles.ventana}>
         <GestureDetector
           gesture={gesto}
           /*
@@ -366,6 +383,7 @@ function VistaDeSecciones({ state, descriptors, navigation, barra }: PropsDeVist
             })}
           </Animated.View>
         </GestureDetector>
+        </View>
 
         {/*
           Destino que no es seccion (perfil ajeno, circulo, audio, seguidores).
@@ -424,6 +442,13 @@ export const createSwipeTabNavigator = createNavigatorFactory(NavegadorDeSeccion
 
 const styles = StyleSheet.create({
   lleno: { flex: 1 },
+  /*
+    La barra flotante va FUERA de esta ventana (es hermana suya y se pinta
+    despues), asi que se queda fija encima mientras las secciones pasan por
+    debajo. Es justo lo que hacen las aplicaciones de referencia: lo que cambia
+    es el contenido, nunca la barra.
+  */
+  ventana: { flex: 1, overflow: 'hidden' },
   carrusel: { flex: 1 },
   pagina: { position: 'absolute', top: 0, bottom: 0 },
 });
