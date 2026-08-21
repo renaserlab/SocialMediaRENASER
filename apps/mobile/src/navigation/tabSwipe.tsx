@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useMemo } from 'react';
+import { Platform } from 'react-native';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 
 /**
@@ -59,5 +60,20 @@ export function SinCambioDeSeccion({
   }, [gestoDeSeccion, activarAlTocar]);
 
   if (!bloqueo) return children;
-  return <GestureDetector gesture={bloqueo}>{children}</GestureDetector>;
+
+  /*
+    En el navegador ademas hay que marcarlo para el CSS del carrusel (ver
+    CSS_WEB en SwipeTabs.tsx): sin la marca, la regla que suelta el arrastre
+    horizontal en toda la seccion tambien se lo quitaria a esta fila, y dejaria
+    de poder moverse. En movil la marca no existe y no estorba.
+  */
+  const hijo =
+    Platform.OS === 'web'
+      ? React.cloneElement(children, {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          dataSet: { ...((children.props as any)?.dataSet ?? {}), swipelibre: '1' },
+        } as never)
+      : children;
+
+  return <GestureDetector gesture={bloqueo}>{hijo}</GestureDetector>;
 }

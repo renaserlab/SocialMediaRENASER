@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Freeze } from 'react-freeze';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -83,6 +83,57 @@ const REGRESO = { duration: 160, easing: Easing.out(Easing.cubic) };
  * antes del primer arrastre.
  */
 const ESPERA_PARA_PREPARAR_VECINAS = 700;
+
+/**
+ * Marca un elemento para el CSS de abajo. Solo tiene efecto en el navegador:
+ * `dataSet` es una propiedad de react-native-web y en movil se ignora.
+ *
+ * Devuelve `any` a proposito: los tipos de React Native no conocen `dataSet`
+ * porque no existe en movil, y no merece la pena inventar un tipo para algo
+ * que el propio React Native descarta.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function marcaWeb(nombre: string): any {
+  return Platform.OS === 'web' ? { dataSet: { [nombre]: '1' } } : {};
+}
+
+/**
+ * QUIEN SE QUEDA EL DEDO EN EL NAVEGADOR.
+ *
+ * En movil nativo, arrastrar en horizontal sobre una lista funciona sin mas: el
+ * gesto y el desplazamiento vertical se reparten solos. En el navegador NO, y
+ * este fue el sintoma: el arrastre solo cambiaba de seccion si el dedo estaba
+ * en la franja de arriba.
+ *
+ * El motivo, medido: entre el punto que se toca y el carrusel hay un contenedor
+ * con desplazamiento vertical (la lista del muro) cuyo `touch-action` es `auto`.
+ * `auto` significa "yo me encargo del dedo, en las dos direcciones", asi que el
+ * navegador se queda el gesto y no llega a JavaScript. Arriba, donde no hay
+ * ninguna lista por medio, si llegaba: de ahi la franja.
+ *
+ * La regla de abajo pone `pan-y` a TODO lo que hay dentro del carrusel: el
+ * navegador sigue encargandose del desplazamiento vertical —que es lo que tiene
+ * que hacer, y nativo va mas fino— pero suelta el horizontal, que es el nuestro.
+ *
+ * La segunda regla es la excepcion: lo que ya usa el arrastre horizontal para
+ * otra cosa (carrusel de historias, filtros, barra de avance del video) vuelve a
+ * `auto`, tambien en sus hijos. Tiene que incluir a los hijos porque el
+ * navegador decide mirando desde el elemento tocado hacia arriba: si la burbuja
+ * de una historia dijera `pan-y`, la fila no se movería aunque su contenedor
+ * dijera lo contrario. Va despues para ganar a igualdad de especificidad.
+ */
+const CSS_WEB = `
+[data-swipetabs="1"] * { touch-action: pan-y; }
+[data-swipelibre="1"], [data-swipelibre="1"] * { touch-action: auto; }
+`;
+
+const ID_ESTILO = 'estilo-carrusel-secciones';
+if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById(ID_ESTILO)) {
+  const estilo = document.createElement('style');
+  estilo.id = ID_ESTILO;
+  estilo.textContent = CSS_WEB;
+  document.head.appendChild(estilo);
+}
 
 export type OpcionesDeSeccion = {
   title?: string;
@@ -338,6 +389,7 @@ function VistaDeSecciones({ state, descriptors, navigation, barra }: PropsDeVist
             style={[styles.carrusel, estiloDelCarrusel]}
             collapsable={false}
             pointerEvents={enSeccion ? 'auto' : 'none'}
+            {...marcaWeb('swipetabs')}
           >
             {paginas.map((ruta, posicion_) => {
               if (!ruta || !montadas.has(ruta.key)) return null;
