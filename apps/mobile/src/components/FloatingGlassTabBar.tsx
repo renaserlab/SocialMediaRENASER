@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SECCIONES } from '@/navigation/secciones';
+import type { PropsDeBarra } from '@/navigation/SwipeTabs';
 import { useAppStore } from '@/store/useAppStore';
 import { getFontFamily, motion, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -20,19 +21,16 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * la textura en cada fotograma de scroll y eso son FPS que este proyecto ya
  * no esta dispuesto a perder (rendimiento > adorno).
  *
- * Solo pinta las pestañas visibles del grupo (tabs); las rutas con
- * `href: null` del layout (perfil ajeno, circulos, audio...) siguen viviendo
- * dentro del navegador pero no aparecen aqui, igual que antes.
+ * Solo pinta las cinco secciones principales; las demas rutas del grupo
+ * (perfil ajeno, circulos, audio, seguidores) siguen viviendo dentro del
+ * navegador pero no aparecen aqui, igual que antes.
+ *
+ * El orden y los iconos ya no se declaran aqui: vienen de
+ * `navigation/secciones.ts`, que es tambien lo que decide la posicion de cada
+ * pantalla en el carrusel. Con dos listas separadas bastaba con anadir una
+ * seccion en un sitio y no en el otro para que la barra senalara una pestana y
+ * el dedo llevara a otra.
  */
-
-/** Pestañas visibles, en su orden. Igual que las Tabs.Screen del layout. */
-const VISIBLE_TABS: Record<string, { icon: keyof typeof Feather.glyphMap }> = {
-  home: { icon: 'home' },
-  explore: { icon: 'search' },
-  create: { icon: 'plus-square' },
-  messages: { icon: 'message-square' },
-  'profile/index': { icon: 'user' },
-};
 
 const BAR_HEIGHT = 62;
 
@@ -66,7 +64,7 @@ function ActivePill({ focused, color }: { focused: boolean; color: string }) {
   );
 }
 
-export function FloatingGlassTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeBarra) {
   const insets = useSafeAreaInsets();
   const { colors, mode } = useAppTheme();
 
@@ -78,7 +76,21 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: BottomTa
     s.conversations.reduce((total, c) => total + (c.unread ?? 0), 0),
   );
 
-  const rutas = state.routes.filter((route) => VISIBLE_TABS[route.name]);
+  /*
+    Los botones salen de la lista de secciones, no del orden en que el navegador
+    tenga las rutas: asi la barra y el carrusel no pueden discrepar nunca.
+  */
+  const botones = useMemo(() => {
+    const lista: Array<{
+      ruta: (typeof state.routes)[number];
+      icono: keyof typeof Feather.glyphMap;
+    }> = [];
+    for (const seccion of SECCIONES) {
+      const ruta = state.routes.find((r) => r.name === seccion.nombre);
+      if (ruta) lista.push({ ruta, icono: seccion.icono });
+    }
+    return lista;
+  }, [state.routes]);
 
   /*
     El desenfoque real solo donde no cuesta rendimiento. En Android el respaldo
@@ -126,12 +138,11 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: BottomTa
             />
           ) : null}
 
-          {rutas.map((route) => {
+          {botones.map(({ ruta: route, icono }) => {
             const focused = state.routes[state.index]?.key === route.key;
             const opciones = descriptors[route.key]?.options;
             const etiqueta =
               typeof opciones?.title === 'string' ? opciones.title : route.name;
-            const icono = VISIBLE_TABS[route.name]!.icon;
             const color = focused ? colors.primary : colors.textMuted;
             const globo = route.name === 'messages' && unread > 0;
 
