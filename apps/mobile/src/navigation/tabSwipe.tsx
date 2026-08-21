@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useRef } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import { usePathname, useRouter } from 'expo-router';
 
@@ -54,8 +54,8 @@ const MARGEN_VERTICAL = 18;
 
 /**
  * El gesto de cambiar de seccion, para que lo que hay dentro pueda bloquearlo.
- * Vale `null` donde el gesto no existe (web), y entonces `SinCambioDeSeccion`
- * no hace nada.
+ * Vale `null` fuera de las pestañas, y entonces `SinCambioDeSeccion` no hace
+ * nada (el mismo reproductor se usa en pantallas que no son seccion).
  */
 const GestoDeSeccion = createContext<GestureType | null>(null);
 
@@ -79,6 +79,10 @@ export function SinCambioDeSeccion({
 }) {
   const gestoDeSeccion = useContext(GestoDeSeccion);
 
+  /*
+    Sin gesto arriba (por ejemplo, un reproductor que se usa fuera de las
+    pestañas) no hay nada que bloquear y esto es un simple paso a traves.
+  */
   const bloqueo = useMemo(() => {
     if (!gestoDeSeccion) return null;
     const nativo = Gesture.Native().blocksExternalGesture(gestoDeSeccion);
@@ -93,8 +97,12 @@ export function SinCambioDeSeccion({
  * Envuelve el navegador de pestañas y traduce los arrastres horizontales en
  * cambios de seccion.
  *
- * Solo en movil: en el navegador se cambia de pagina con el raton y el teclado,
- * y un arrastre horizontal ahi es seleccionar texto, no pasar de pantalla.
+ * Vale en las tres plataformas, tambien en el navegador. Al principio quedo
+ * fuera de web pensando que ahi se navega con el raton y el teclado, pero la
+ * web de este producto se abre sobre todo desde el movil: la version de Vercel
+ * ES la aplicacion para mucha gente, y sin el gesto se sentia a medio hacer.
+ * react-native-gesture-handler tiene implementacion propia para navegador, asi
+ * que es el mismo codigo, no una version aparte.
  */
 export function CambioDeSeccionPorGesto({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -111,8 +119,6 @@ export function CambioDeSeccionPorGesto({ children }: { children: React.ReactNod
   vivo.current.router = router;
 
   const gesto = useMemo(() => {
-    if (Platform.OS === 'web') return null;
-
     return (
       Gesture.Pan()
         .activeOffsetX([-MARGEN_HORIZONTAL, MARGEN_HORIZONTAL])
@@ -148,11 +154,31 @@ export function CambioDeSeccionPorGesto({ children }: { children: React.ReactNod
     );
   }, []);
 
-  if (!gesto) return <>{children}</>;
-
   return (
     <GestoDeSeccion.Provider value={gesto}>
-      <GestureDetector gesture={gesto}>
+      <GestureDetector
+        gesture={gesto}
+        /*
+          Solo para navegador. `pan-y` le dice al navegador: el desplazamiento
+          VERTICAL siguelo llevando tu, del horizontal me encargo yo. Sin esto
+          pasan las dos cosas malas a la vez: el muro deja de desplazarse con
+          suavidad porque el navegador espera a ver si vamos a cancelar el
+          gesto, y un arrastre horizontal cerca del borde dispara el "atras"
+          del propio navegador en vez de cambiar de seccion.
+        */
+        touchAction="pan-y"
+        /*
+          Tambien solo para navegador, y tambien obligatorio: al detectar
+          gestos, la libreria pone `user-select: none` por defecto en todo lo
+          que envuelve. Aqui dentro esta el muro entero, asi que eso dejaba el
+          texto de las publicaciones sin poder seleccionarse ni copiarse en la
+          web —una capacidad que ya existia y que nadie pidio quitar—. El
+          efecto secundario de devolverlo a `auto` es que arrastrar con el
+          RATON tambien selecciona texto mientras cambia de seccion; con el
+          dedo, que es como se usa esto, no pasa nada de eso.
+        */
+        userSelect="auto"
+      >
         <View style={styles.lleno} collapsable={false}>
           {children}
         </View>
