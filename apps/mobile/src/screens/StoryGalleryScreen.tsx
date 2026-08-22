@@ -30,6 +30,11 @@ type Props = {
   onClose: () => void;
   /** Vuelve a la camara. */
   onOpenCamera: () => void;
+  /**
+   * Solo videos. Lo usa el modo Reel de Crear: ensenar fotos en una cuadricula
+   * de la que no se puede elegir ninguna es peor que no ensenarlas.
+   */
+  soloVideo?: boolean;
 };
 
 /**
@@ -43,7 +48,7 @@ type Props = {
  * historia admite 15 s, asi que conviene saberlo ANTES de elegir y no despues
  * de que el aviso lo rechace.
  */
-export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera }: Props) {
+export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera, soloVideo = false }: Props) {
   const [permission, setPermission] = useState<MediaLibrary.PermissionResponse | null>(null);
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -65,7 +70,7 @@ export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera }: Props) {
         const page = await MediaLibrary.getAssetsAsync({
           first: PAGE,
           after,
-          mediaType: ['photo', 'video'],
+          mediaType: soloVideo ? ['video'] : ['photo', 'video'],
           sortBy: ['creationTime'],
         });
         setAssets((prev) => (after ? [...prev, ...page.assets] : page.assets));
@@ -75,7 +80,7 @@ export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera }: Props) {
         setLoading(false);
       }
     },
-    [],
+    [soloVideo],
   );
 
   useEffect(() => {

@@ -75,6 +75,19 @@ type Props = {
   onClose: () => void;
   /** Miniatura de la ultima foto del carrete, para el acceso a la galeria. */
   lastPhotoUri?: string | null;
+  /**
+   * Tope de grabacion. Por omision el de una historia (15 s, que es lo que
+   * admite el CHECK de la migracion 0003); un reel puede pedir mas.
+   */
+  duracionMaximaMs?: number;
+  /**
+   * Franja propia justo encima de los controles.
+   *
+   * La usa la pantalla de Crear para poner ahi el selector de modo
+   * (Publicacion · Historia · Reel · Vivo) sin duplicar la camara entera: la
+   * camara es la misma, lo unico que cambia es que se hace con lo capturado.
+   */
+  pie?: React.ReactNode;
 };
 
 /**
@@ -89,7 +102,13 @@ export function StoryCaptureScreen({
   onOpenGallery,
   onClose,
   lastPhotoUri,
+  duracionMaximaMs = MAX_STORY_MS,
+  pie,
 }: Props) {
+  // El tope efectivo. Se usa en TODOS los sitios que antes miraban la
+  // constante, para que el anillo de progreso, el corte de seguridad y el
+  // limite de la camara no puedan decir cosas distintas.
+  const topeMs = duracionMaximaMs;
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   // El microfono solo hace falta para el video, asi que se pide al grabar y no
@@ -199,7 +218,7 @@ export function StoryCaptureScreen({
     haptics.medium();
     Animated.timing(progress, {
       toValue: 1,
-      duration: MAX_STORY_MS,
+      duration: topeMs,
       easing: Easing.linear,
       useNativeDriver: false,
     }).start();
@@ -215,11 +234,11 @@ export function StoryCaptureScreen({
     const inicio = Date.now();
     const corte = setTimeout(() => {
       cameraRef.current?.stopRecording();
-    }, MAX_STORY_MS);
+    }, topeMs);
 
     try {
       const video = await cameraRef.current.recordAsync({
-        maxDuration: MAX_STORY_MS / 1000,
+        maxDuration: topeMs / 1000,
       });
       if (video?.uri) {
         /*
@@ -229,7 +248,7 @@ export function StoryCaptureScreen({
           volando y parecia que la reproduccion iba acelerada. `recordAsync` no
           devuelve la duracion, asi que se cronometra.
         */
-        const duracion = Math.min(Date.now() - inicio, MAX_STORY_MS);
+        const duracion = Math.min(Date.now() - inicio, topeMs);
         onCaptured({
           uri: video.uri,
           kind: 'video',
@@ -422,6 +441,12 @@ export function StoryCaptureScreen({
         </View>
       ) : null}
 
+      {pie ? (
+        <View style={styles.pie} pointerEvents="box-none">
+          {pie}
+        </View>
+      ) : null}
+
       {/* Barra inferior: galeria, disparador y girar camara. */}
       <View style={styles.bottomBar} pointerEvents="box-none">
         <Pressable
@@ -578,6 +603,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: media.overlay,
   },
+  // Justo encima del disparador: cerca de los controles, sin taparlos.
+  pie: { position: 'absolute', left: 0, right: 0, bottom: 148 },
   bottomBar: {
     position: 'absolute',
     bottom: 58,

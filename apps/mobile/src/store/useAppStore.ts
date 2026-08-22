@@ -271,7 +271,13 @@ export const useAppStore = create<AppState>()(
       },
       createPost: async (body, media = []) => {
         const trimmed = body.trim();
-        if (!trimmed) return;
+        /*
+          Sin texto Y sin adjunto no hay nada que publicar. Con adjunto SI se
+          publica aunque no haya texto: un reel o una foto se explican solos, y
+          obligar a escribir algo para poder compartirlos era un requisito
+          nuestro, no de la persona.
+        */
+        if (!trimmed && media.length === 0) return;
 
         if (backendEnabled) {
           const uid = get().user?.id ?? null;

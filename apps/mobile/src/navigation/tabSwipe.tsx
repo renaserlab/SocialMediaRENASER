@@ -34,6 +34,21 @@ export function ProveedorDeGestoDeSeccion({
 }
 
 /**
+ * El gesto de seccion, para componer con el uno propio.
+ *
+ * `SinCambioDeSeccion` cubre el caso normal —una fila que se arrastra y ya—,
+ * pero una pantalla puede necesitar SU PROPIO arrastre horizontal con reglas
+ * suyas: la de Crear cambia de tipo de publicacion deslizando. Esa pantalla
+ * declara su gesto y le anade `.blocksExternalGesture(gestoDeSeccion)`, que es
+ * lo que hace que el suyo tenga prioridad sobre el carrusel.
+ *
+ * Devuelve `null` fuera de las pestanas, y entonces no hay nada que bloquear.
+ */
+export function useGestoDeSeccion(): GestureType | null {
+  return useContext(GestoDeSeccion);
+}
+
+/**
  * Zona en la que arrastrar NO cambia de seccion.
  *
  * Envuelve lo que ya usa el arrastre horizontal para otra cosa: un carrusel de

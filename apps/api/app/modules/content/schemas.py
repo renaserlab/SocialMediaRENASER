@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AuthorSummary(BaseModel):
@@ -49,7 +49,13 @@ class PostMediaInput(BaseModel):
 
 class PostCreate(BaseModel):
     # OJO: sin author_id. El autor se toma del JWT (current_user.id).
-    body: str = Field(min_length=1, max_length=3000)
+    #
+    # El texto puede ir vacio SI la publicacion lleva algun medio: un reel o una
+    # foto se explican solos y exigir una descripcion era un requisito nuestro,
+    # no de quien publica. Que no llegue todo vacio se comprueba abajo, porque
+    # es la unica capa que ve el texto y los medios a la vez (un CHECK de tabla
+    # no puede mirar `post_media`, que se inserta despues).
+    body: str = Field(default="", max_length=3000)
     visibility: str = Field(default="public", pattern=r"^(public|followers|circle)$")
     # Medios (imagen/video/audio) ya subidos a Storage.
     media: list[PostMediaInput] = Field(default_factory=list, max_length=4)
@@ -57,6 +63,12 @@ class PostCreate(BaseModel):
     image_paths: list[str] = Field(default_factory=list, max_length=4)
     # Etiqueta tematica (los filtros del podcast). Libre pero acotada.
     category: str | None = Field(default=None, max_length=40)
+
+    @model_validator(mode="after")
+    def _algo_que_publicar(self) -> "PostCreate":
+        if not self.body.strip() and not self.media and not self.image_paths:
+            raise ValueError("Escribe algo o adjunta una foto, un video o un audio.")
+        return self
 
 
 class PostUpdate(BaseModel):

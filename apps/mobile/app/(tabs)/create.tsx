@@ -1,2 +1,2 @@
-import { CreatePostScreen } from '@/screens/CreatePostScreen';
-export default CreatePostScreen;
+import { CrearScreen } from '@/screens/CrearScreen';
+export default CrearScreen;
