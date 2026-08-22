@@ -18,6 +18,10 @@ export type ProfileDto = {
   followers_count?: number;
   following_count?: number;
   posts_count?: number;
+  likes_count?: number;
+  intro_audio_path?: string | null;
+  intro_audio_duration_s?: number | null;
+  intro_audio_updated_at?: string | null;
   is_following?: boolean;
   is_blocked?: boolean;
 };
@@ -65,6 +69,15 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     followers: dto.followers_count ?? 0,
     following: dto.following_count ?? 0,
     posts: dto.posts_count ?? 0,
+    likes: dto.likes_count ?? 0,
+    /*
+      Se guarda la RUTA, no una URL. Las de Storage van firmadas y caducan: una
+      URL guardada en el estado dejaria de sonar al rato sin explicacion. La
+      firma se pide al reproducir (ver `AudioDePresentacion`).
+    */
+    introAudioPath: dto.intro_audio_path ?? null,
+    introAudioDurationS: dto.intro_audio_duration_s ?? null,
+    introAudioUpdatedAt: dto.intro_audio_updated_at ?? null,
     isFollowing: dto.is_following ?? false,
     isBlocked: dto.is_blocked ?? false,
     // El backend guarda la ruta dentro del bucket; la vista necesita una URL.
@@ -124,6 +137,9 @@ export type ProfileUpdatePatch = Partial<
 > & {
   avatarPath?: string | null;
   coverPath?: string | null;
+  /** Ruta del audio de presentación. `null` lo quita. */
+  introAudioPath?: string | null;
+  introAudioDurationS?: number | null;
 };
 
 export function toProfileUpdatePayload(patch: ProfileUpdatePatch): Record<string, unknown> {
@@ -134,5 +150,16 @@ export function toProfileUpdatePayload(patch: ProfileUpdatePatch): Record<string
   // Cadena vacia = borrar. `undefined` deja el campo intacto (exclude_unset).
   if (patch.avatarPath !== undefined) payload.avatar_path = patch.avatarPath ?? '';
   if (patch.coverPath !== undefined) payload.cover_path = patch.coverPath ?? '';
+  /*
+    Mismo criterio que las imagenes: cadena vacia = quitar. El backend lo
+    traduce a NULL y ademas borra la duracion, para que un perfil sin audio no
+    siga anunciando «0:34».
+  */
+  if (patch.introAudioPath !== undefined) {
+    payload.intro_audio_path = patch.introAudioPath ?? '';
+  }
+  if (patch.introAudioDurationS !== undefined) {
+    payload.intro_audio_duration_s = patch.introAudioDurationS;
+  }
   return payload;
 }

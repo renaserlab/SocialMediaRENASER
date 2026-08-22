@@ -1,13 +1,21 @@
 /**
- * Categorías temáticas del contenido (filtros del podcast).
+ * Etiquetas ANTIGUAS del podcast.
  *
- * Se definen aquí y solo aquí: el backend guarda el `id` como texto libre a
- * propósito, para que cambiar esta lista no exija una migración. Añadir una
- * categoría es añadir una línea.
+ * Ya no se ofrecen al publicar ni al filtrar: cada creador define ahora sus
+ * propias categorías (tabla `podcast_categories`, ver
+ * `PodcastCategoryRepository`). Estas tres describían el podcast de una
+ * persona concreta y no le sirven de nada a quien quiere ordenar lo suyo en
+ * «Mis experiencias» o «Carpintería».
+ *
+ * La lista SE QUEDA aquí, y no se borra, porque `posts.category` es texto
+ * libre y hay audios ya publicados que guardan uno de estos valores. Sin este
+ * mapa se verían con la etiqueta en crudo («dinero») o sin nombre. Los
+ * episodios que la tengan aparecen en «Todos» hasta que su dueño les asigne
+ * una categoría suya.
  */
 export type CategoryId = 'mente' | 'cuerpo' | 'dinero';
 
-export const CATEGORIES: Array<{ id: CategoryId; label: string }> = [
+export const CATEGORIAS_ANTIGUAS: Array<{ id: CategoryId; label: string }> = [
   { id: 'mente', label: 'Mente y Emociones' },
   { id: 'cuerpo', label: 'Cuerpo' },
   { id: 'dinero', label: 'Dinero' },
@@ -22,7 +30,12 @@ export const CATEGORIES: Array<{ id: CategoryId; label: string }> = [
  */
 export const PRIVATE_AUDIO_CATEGORY = 'privado';
 
-/** Etiqueta legible de una categoría; vacío si no tiene o no se reconoce. */
+/**
+ * Etiqueta legible de una categoría ANTIGUA; vacío si no es una de ellas.
+ *
+ * Las categorías propias de cada creador no pasan por aquí: su nombre viene de
+ * la base de datos y lo resuelve quien pinta la lista.
+ */
 export function categoryLabel(id?: string | null): string {
-  return CATEGORIES.find((c) => c.id === id)?.label ?? '';
+  return CATEGORIAS_ANTIGUAS.find((c) => c.id === id)?.label ?? '';
 }

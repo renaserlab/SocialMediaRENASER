@@ -115,3 +115,26 @@ class CommentRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PodcastCategoryRead(BaseModel):
+    id: str
+    owner_id: str
+    name: str
+    position: int = 0
+    #: Cuantos audios tiene asignados. Evita que el movil pida la lista entera
+    #: solo para saber si una categoria esta vacia.
+    episodes_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PodcastCategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class PodcastCategoryUpdate(BaseModel):
+    """Renombrar o reordenar. Todo opcional."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    position: int | None = Field(default=None, ge=0, le=999)

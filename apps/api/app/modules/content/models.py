@@ -139,3 +139,34 @@ class Comment(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class PodcastCategory(Base):
+    """Categoria con la que un creador organiza sus audios (migracion 0024).
+
+    Vive en este modulo, y no en uno propio, porque lo que agrupa son
+    publicaciones: `posts.category` guarda el ID de una de estas filas. Sacarla
+    a otro modulo habria separado la etiqueta de lo etiquetado.
+
+    Las etiquetas antiguas ('mente', 'cuerpo', 'dinero') y la reservada del
+    audio privado ('privado') siguen siendo validas en esa misma columna: por
+    eso el contenido ya publicado no necesito ninguna conversion.
+    """
+
+    __tablename__ = "podcast_categories"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(Text)
+    # Orden elegido por su dueno; empata por fecha de creacion.
+    position: Mapped[int] = mapped_column(Integer, server_default="0", default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, Float, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
@@ -23,6 +23,13 @@ class Profile(Base):
     cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Inicio de la liberacion progresiva del podcast (un episodio cada 8 h).
     podcast_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Audio de presentacion: RUTA dentro del bucket post-media, nunca el audio
+    # ni una URL firmada (caducaria). Ver migracion 0023.
+    intro_audio_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    intro_audio_duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    intro_audio_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     role: Mapped[str] = mapped_column(app_role, default="user", server_default="user")

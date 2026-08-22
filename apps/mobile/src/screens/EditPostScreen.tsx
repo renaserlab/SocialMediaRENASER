@@ -6,10 +6,9 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
-import { Chip } from '@/components/Chip';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
-import { CATEGORIES, type CategoryId } from '@/data/categories';
+import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { PostRepository } from '@/repositories/PostRepository';
 import {
@@ -48,7 +47,7 @@ export function EditPostScreen() {
   const [text, setText] = useState('');
   const [media, setMedia] = useState<MediaChange>(null);
   /** Categoría, solo relevante en los audios (episodios del podcast). */
-  const [category, setCategory] = useState<CategoryId | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState<UploadProgress['phase'] | null>(null);
@@ -61,7 +60,7 @@ export function EditPostScreen() {
     if (cached) {
       setPost(cached);
       setText(cached.body);
-      setCategory((cached.category as CategoryId | null) ?? null);
+      setCategory(cached.category ?? null);
       setLoading(false);
       return;
     }
@@ -78,7 +77,7 @@ export function EditPostScreen() {
         if (!alive) return;
         setPost(found);
         setText(found.body);
-        setCategory((found.category as CategoryId | null) ?? null);
+        setCategory(found.category ?? null);
       })
       .catch((error) => {
         console.warn('[editar publicacion] no se pudo cargar', error);
@@ -235,17 +234,11 @@ export function EditPostScreen() {
               filtros de esa sección. */}
           {post.mediaType === 'audio' ? (
             <View style={styles.categories}>
-              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Categoría</Text>
-              <View style={styles.chips}>
-                {CATEGORIES.map((c) => (
-                  <Chip
-                    key={c.id}
-                    label={c.label}
-                    selected={category === c.id}
-                    onPress={() => setCategory(category === c.id ? null : c.id)}
-                  />
-                ))}
-              </View>
+              <SelectorDeCategoria
+                ownerId={post.authorId}
+                valor={category}
+                alCambiar={setCategory}
+              />
             </View>
           ) : null}
 
@@ -284,7 +277,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
   },
   categories: { gap: spacing.sm, marginBottom: spacing.lg },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   removedNote: { fontSize: 13, marginBottom: spacing.lg },
   errorBox: {
     flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,

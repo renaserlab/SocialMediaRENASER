@@ -24,6 +24,20 @@ export type UserProfile = {
    * podcast. Nulo mientras no se haya abierto el podcast por primera vez.
    */
   podcastStartedAt?: string | null;
+  /**
+   * "Me gusta" RECIBIDOS en sus publicaciones.
+   *
+   * Es la cifra que se muestra en el perfil junto a seguidores y seguidos. No
+   * son los que ha dado: cuantos ha repartido una persona no dice nada de ella
+   * para quien la visita.
+   */
+  likes?: number;
+  /** Ruta en Storage del audio de presentación. Sin valor, no tiene. */
+  introAudioPath?: string | null;
+  /** Duración de ese audio, en segundos. */
+  introAudioDurationS?: number | null;
+  /** Cuándo se subió el audio vigente; sirve de clave de caché. */
+  introAudioUpdatedAt?: string | null;
 };
 
 export type QuizArea = 'mentalidad' | 'relaciones' | 'negocios' | 'salud' | 'proposito';

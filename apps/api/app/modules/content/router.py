@@ -12,7 +12,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
-from sqlalchemy import delete, func, literal, select
+from sqlalchemy import Text as SAText, delete, func, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -20,11 +20,21 @@ from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppErro
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
-from app.modules.content.models import Comment, Post, PostLike, PostMedia, SavedPost
+from app.modules.content.models import (
+    Comment,
+    PodcastCategory,
+    Post,
+    PostLike,
+    PostMedia,
+    SavedPost,
+)
 from app.modules.content.schemas import (
     AuthorSummary,
     CommentCreate,
     CommentRead,
+    PodcastCategoryCreate,
+    PodcastCategoryRead,
+    PodcastCategoryUpdate,
     PostCreate,
     PostMediaInput,
     PostMediaRead,
@@ -662,3 +672,191 @@ async def create_comment(
     if profile is None:
         raise NotFoundError("Perfil del autor no encontrado.")
     return _to_comment_read(comment, profile)
+
+
+# --------------------------------------------------------------------------- #
+# Categorias de podcast
+# --------------------------------------------------------------------------- #
+#
+# Cada creador organiza sus audios como quiera. Antes habia TRES categorias
+# escritas en el codigo del movil ("Mente y Emociones", "Cuerpo", "Dinero"):
+# servian para un podcast de una sola persona y no dicen nada del carpintero
+# que quiere "Mis experiencias", "Carpinteria" e "Historias".
+#
+# La categoria de un audio se sigue guardando en `posts.category`, que es texto
+# libre; lo que se guarda ahi es el ID de una de estas filas. Por eso las
+# etiquetas antiguas siguen funcionando y no hizo falta convertir nada.
+
+
+def _categoria_read(fila: PodcastCategory, episodios: int) -> PodcastCategoryRead:
+    return PodcastCategoryRead(
+        id=fila.id,
+        owner_id=fila.owner_id,
+        name=fila.name,
+        position=fila.position,
+        episodes_count=episodios or 0,
+    )
+
+
+@router.get("/podcast-categories", response_model=list[PodcastCategoryRead])
+async def list_podcast_categories(
+    owner_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> list[PodcastCategoryRead]:
+    """Categorias de un perfil, en su orden, con cuantos audios tiene cada una.
+
+    Publico: las categorias se ven al visitar un perfil, igual que sus
+    episodios. Esconderlas dejaria la lista sin agrupar para todo el que no
+    fuera su dueno.
+    """
+    ensure_uuid(owner_id, "Perfil no encontrado.")
+    # `posts.category` es texto y el id es uuid: se compara en texto, que es
+    # como esta guardado.
+    episodios = (
+        select(func.count())
+        .select_from(Post)
+        .where(
+            Post.author_id == PodcastCategory.owner_id,
+            Post.category == func.cast(PodcastCategory.id, SAText),
+            Post.status == "published",
+        )
+        .scalar_subquery()
+    )
+    filas = (
+        await db.execute(
+            select(PodcastCategory, episodios)
+            .where(PodcastCategory.owner_id == owner_id)
+            .order_by(PodcastCategory.position, PodcastCategory.created_at)
+        )
+    ).all()
+    return [_categoria_read(fila, n) for fila, n in filas]
+
+
+@router.post(
+    "/podcast-categories",
+    response_model=PodcastCategoryRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_podcast_category(
+    payload: PodcastCategoryCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PodcastCategoryRead:
+    """Crea una categoria en el perfil de quien la pide.
+
+    El dueno sale del token, nunca del cuerpo: si viniera del cliente,
+    cualquiera podria crear categorias en el perfil de otra persona.
+    """
+    nombre = payload.name.strip()
+    if not nombre:
+        raise ValidationAppError("Ponle un nombre a la categoria.")
+
+    # Dos categorias con el mismo nombre no son dos categorias, son un error de
+    # dedo: repartirian los episodios sin motivo. Se avisa antes de insertar
+    # para poder explicarlo; el indice unico de la migracion 0024 lo garantiza
+    # aunque dos peticiones lleguen a la vez.
+    repetida = (
+        await db.execute(
+            select(PodcastCategory.id).where(
+                PodcastCategory.owner_id == current_user.id,
+                func.lower(func.trim(PodcastCategory.name)) == nombre.lower(),
+            )
+        )
+    ).first()
+    if repetida:
+        raise ValidationAppError("Ya tienes una categoria con ese nombre.")
+
+    ultima = (
+        await db.execute(
+            select(func.coalesce(func.max(PodcastCategory.position), -1)).where(
+                PodcastCategory.owner_id == current_user.id
+            )
+        )
+    ).scalar_one()
+
+    fila = PodcastCategory(
+        owner_id=current_user.id, name=nombre, position=int(ultima) + 1
+    )
+    db.add(fila)
+    await db.commit()
+    await db.refresh(fila)
+    return _categoria_read(fila, 0)
+
+
+async def _categoria_propia(
+    db: AsyncSession, categoria_id: str, user_id: str
+) -> PodcastCategory:
+    ensure_uuid(categoria_id, "Categoria no encontrada.")
+    fila = await db.get(PodcastCategory, categoria_id)
+    if fila is None:
+        raise NotFoundError("Categoria no encontrada.")
+    # La comprobacion de verdad esta aqui, en el servidor. Que el movil solo
+    # ensene el boton en el perfil propio es comodidad, no seguridad.
+    if fila.owner_id != user_id:
+        raise ForbiddenError("Solo puedes cambiar tus propias categorias.")
+    return fila
+
+
+@router.patch("/podcast-categories/{categoria_id}", response_model=PodcastCategoryRead)
+async def update_podcast_category(
+    categoria_id: str,
+    payload: PodcastCategoryUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PodcastCategoryRead:
+    """Renombra o reordena una categoria propia.
+
+    Renombrar NO toca los audios: `posts.category` guarda el ID, no el nombre,
+    asi que cambiar el texto no puede dejar episodios sueltos.
+    """
+    fila = await _categoria_propia(db, categoria_id, current_user.id)
+
+    if payload.name is not None:
+        nombre = payload.name.strip()
+        if not nombre:
+            raise ValidationAppError("Ponle un nombre a la categoria.")
+        repetida = (
+            await db.execute(
+                select(PodcastCategory.id).where(
+                    PodcastCategory.owner_id == current_user.id,
+                    PodcastCategory.id != fila.id,
+                    func.lower(func.trim(PodcastCategory.name)) == nombre.lower(),
+                )
+            )
+        ).first()
+        if repetida:
+            raise ValidationAppError("Ya tienes una categoria con ese nombre.")
+        fila.name = nombre
+
+    if payload.position is not None:
+        fila.position = payload.position
+
+    await db.commit()
+    await db.refresh(fila)
+    return _categoria_read(fila, 0)
+
+
+@router.delete(
+    "/podcast-categories/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_podcast_category(
+    categoria_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Borra una categoria SIN borrar sus audios.
+
+    Los episodios que la tenian se quedan sin categoria y vuelven a aparecer en
+    "Todos". Borrarlos con ella seria destruir contenido por reorganizar una
+    estanteria, y nadie espera eso al quitar una etiqueta.
+    """
+    fila = await _categoria_propia(db, categoria_id, current_user.id)
+
+    await db.execute(
+        update(Post)
+        .where(Post.author_id == current_user.id, Post.category == fila.id)
+        .values(category=None)
+    )
+    await db.delete(fila)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

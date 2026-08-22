@@ -8,6 +8,7 @@ import { haptics } from '@/lib/haptics';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
+import { AudioDePresentacion } from '@/components/AudioDePresentacion';
 import { AppScreen } from '@/components/AppScreen';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BookSessionSheet } from '@/components/BookSessionSheet';
@@ -375,6 +376,9 @@ export function ProfileScreen() {
         followers: 1200000,
         following: 42,
         posts: 180,
+        likes: 0,
+        introAudioPath: null as string | null,
+        introAudioDurationS: null as number | null,
         avatar: 'speaker' as const,
       }
     : isRealPublic
@@ -385,6 +389,9 @@ export function ProfileScreen() {
         followers: followersCount,
         following: publicProfile?.following ?? 0,
         posts: publicProfile?.posts ?? 0,
+        likes: publicProfile?.likes ?? 0,
+        introAudioPath: publicProfile?.introAudioPath ?? null,
+        introAudioDurationS: publicProfile?.introAudioDurationS ?? null,
         avatar: 'avatar' as const,
       }
     : {
@@ -396,6 +403,9 @@ export function ProfileScreen() {
         followers: currentUser?.followers ?? 0,
         following: currentUser?.following ?? 0,
         posts: currentUser?.posts ?? 0,
+        likes: currentUser?.likes ?? 0,
+        introAudioPath: currentUser?.introAudioPath ?? null,
+        introAudioDurationS: currentUser?.introAudioDurationS ?? null,
         avatar: 'avatar' as const,
       };
 
@@ -432,7 +442,16 @@ export function ProfileScreen() {
           verdad identifica a la persona: su foto, sus cifras y su descripcion.
         */}
         <View style={[styles.profileBlock, { backgroundColor: colors.background }]}>
-          <View style={styles.avatarRow}>
+          {/*
+            LA PERSONA PRIMERO.
+
+            La foto va centrada y el nombre justo debajo, no una fila con la
+            foto a un lado y tres cifras al otro. El perfil de Z tiene que
+            leerse como la presentacion de alguien, no como una ficha
+            administrativa: quien llega aqui viene a decidir si quiere hablar
+            con esta persona, y para eso lo primero que necesita es verla.
+          */}
+          <View style={styles.identidad}>
             <Pressable
               onPress={isPublic ? undefined : () => openPhotoSheet('avatar')}
               disabled={isPublic}
@@ -440,7 +459,7 @@ export function ProfileScreen() {
               accessibilityLabel={isPublic ? undefined : 'Cambiar foto de perfil'}
               style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
             >
-              <Avatar size={90} image={avatarSource} />
+              <Avatar size={104} image={avatarSource} />
               {!isPublic && (
                 <View
                   style={[
@@ -452,28 +471,54 @@ export function ProfileScreen() {
                 </View>
               )}
             </Pressable>
-            {/*
-              Las cifras van al costado de la foto, no en una banda aparte mas
-              abajo: asi la primera linea del perfil ya dice quien es y cuanta
-              gente le sigue, sin desplazar la pantalla.
-            */}
-            <View style={styles.headStats}>
-              <Stat
-                label="Publicaciones"
-                value={profileData.posts}
-              />
-              <Stat
-                label="Seguidores"
-                value={profileData.followers}
-                onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
-              />
-              <Stat
-                label="Siguiendo"
-                value={profileData.following}
-                onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
-              />
-            </View>
+
+            <Text style={[styles.name, styles.centrado, { color: colors.text }]}>
+              {profileData.fullName}
+            </Text>
+            <Text style={[styles.username, styles.centrado, { color: colors.textMuted }]}>
+              {profileData.username}
+            </Text>
           </View>
+
+          {/*
+            SIGUIENDO · SEGUIDORES · ME GUSTA.
+
+            «Me gusta» son los RECIBIDOS en sus publicaciones, no los que ha
+            dado: cuantos ha repartido no dice nada de alguien para quien lo
+            visita. Lo calcula el backend (`likes_count`), no el movil sumando
+            lo que tenga cargado, que solo veria las publicaciones de la
+            primera pagina.
+
+            «Publicaciones» sale de aqui porque ya se cuenta sola: la galeria
+            esta justo debajo.
+          */}
+          <View style={[styles.metricas, { borderColor: colors.border }]}>
+            <Stat
+              label="Siguiendo"
+              value={profileData.following}
+              onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
+            />
+            <View style={[styles.separador, { backgroundColor: colors.border }]} />
+            <Stat
+              label="Seguidores"
+              value={profileData.followers}
+              onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
+            />
+            <View style={[styles.separador, { backgroundColor: colors.border }]} />
+            <Stat label="Me gusta" value={profileData.likes} />
+          </View>
+
+          {/*
+            El audio va ANTES de la descripcion, como pedia el documento. Es lo
+            que mas dice de una persona en menos tiempo, y detras del texto casi
+            nadie llegaria a el.
+          */}
+          <AudioDePresentacion
+            rutaDelAudio={profileData.introAudioPath}
+            duracionS={profileData.introAudioDurationS}
+            esPropio={!isPublic}
+            nombre={profileData.fullName}
+          />
 
           <View style={styles.actionRow}>
               {isPublic ? (
@@ -521,12 +566,6 @@ export function ProfileScreen() {
                   style={styles.actionBtn}
                 />
               )}
-          </View>
-
-          {/* Nombre y descripcion, debajo de la foto y las cifras. */}
-          <View style={styles.infoBlock}>
-            <Text style={[styles.name, { color: colors.text }]}>{profileData.fullName}</Text>
-            <Text style={[styles.username, { color: colors.textMuted }]}>{profileData.username}</Text>
           </View>
 
           {profileData.bio ? (
@@ -742,7 +781,19 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   profileBlock: { padding: spacing.lg },
-  avatarRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  identidad: { alignItems: 'center', gap: spacing.xs },
+  centrado: { textAlign: 'center' },
+  metricas: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  // Separadores finos entre cifras: agrupan las tres sin convertirlas en una
+  // tabla.
+  separador: { width: StyleSheet.hairlineWidth, height: 26 },
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   // Las tres cifras reparten el ancho que queda junto a la foto.
   headStats: { flex: 1, flexDirection: 'row', alignItems: 'center' },
@@ -757,7 +808,7 @@ const styles = StyleSheet.create({
   actionBtn: { minWidth: 100, minHeight: 40, height: 40 },
   infoBlock: { marginTop: spacing.md },
   // `stats` se conserva: lo usa la ficha de otros perfiles.
-  name: { fontSize: 20, fontWeight: '900' },
+  name: { fontSize: 21, fontWeight: '900', marginTop: spacing.sm },
   username: { fontSize: 13, marginTop: 2 },
   stats: { flexDirection: 'row', marginVertical: spacing.lg, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: spacing.md },
   statBox: { alignItems: 'center', flex: 1 },

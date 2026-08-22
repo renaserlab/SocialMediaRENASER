@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.content.models import Post
+from app.modules.content.models import Post, PostLike
 from app.modules.profiles.models import Profile
 from app.modules.profiles.schemas import (
     FeaturedProfile,
@@ -57,6 +57,21 @@ def _count_columns(viewer_id: str | None):
         .where(Post.author_id == Profile.id, Post.status == "published")
         .scalar_subquery()
     )
+    """
+    "Me gusta" del perfil = los RECIBIDOS en sus publicaciones.
+
+    Es la cifra que el documento pide junto a seguidores y seguidos, y la unica
+    lectura util de las dos posibles: cuantos ha dado una persona no dice nada
+    de ella para quien la visita. Se cuentan solo los de publicaciones
+    publicadas, para que borrar o archivar una no deje likes fantasma.
+    """
+    likes = (
+        select(func.count())
+        .select_from(PostLike)
+        .join(Post, Post.id == PostLike.post_id)
+        .where(Post.author_id == Profile.id, Post.status == "published")
+        .scalar_subquery()
+    )
     if viewer_id:
         is_following = (
             select(func.count())
@@ -66,11 +81,17 @@ def _count_columns(viewer_id: str | None):
         )
     else:
         is_following = literal(0)
-    return followers, following, posts, is_following
+    return followers, following, posts, likes, is_following
 
 
 def _to_profile_read(
-    profile: Profile, fc: int, gc: int, pc: int, isf: int, blocked: bool = False
+    profile: Profile,
+    fc: int,
+    gc: int,
+    pc: int,
+    lc: int,
+    isf: int,
+    blocked: bool = False,
 ) -> ProfileRead:
     return ProfileRead(
         id=profile.id,
@@ -88,6 +109,10 @@ def _to_profile_read(
         followers_count=fc or 0,
         following_count=gc or 0,
         posts_count=pc or 0,
+        likes_count=lc or 0,
+        intro_audio_path=profile.intro_audio_path,
+        intro_audio_duration_s=profile.intro_audio_duration_s,
+        intro_audio_updated_at=profile.intro_audio_updated_at,
         is_following=(isf or 0) > 0,
         is_blocked=bool(blocked),
     )
@@ -96,11 +121,13 @@ def _to_profile_read(
 async def _load_profile(
     db: AsyncSession, profile_id: str, viewer_id: str | None
 ) -> ProfileRead:
-    fc, gc, pc, isf = _count_columns(viewer_id)
+    fc, gc, pc, lc, isf = _count_columns(viewer_id)
     blocked = _blocked_column(viewer_id)
     row = (
         await db.execute(
-            select(Profile, fc, gc, pc, isf, blocked).where(Profile.id == profile_id)
+            select(Profile, fc, gc, pc, lc, isf, blocked).where(
+                Profile.id == profile_id
+            )
         )
     ).first()
     if row is None:
@@ -132,9 +159,21 @@ async def update_my_profile(
         # `exclude_unset` ya distingue "no enviado" de "enviado". Para las
         # imagenes hace falta un valor que signifique "quitar": la cadena vacia
         # se guarda como NULL para volver a la imagen por defecto.
-        if field in {"avatar_path", "cover_path"} and value == "":
+        if field in {"avatar_path", "cover_path", "intro_audio_path"} and value == "":
             value = None
         setattr(profile, field, value)
+    """
+    Quitar el audio quita tambien lo que lo describe.
+
+    Si no, un perfil sin audio seguiria anunciando "0:34" y el reproductor
+    pintaria una barra de un audio que ya no existe.
+    """
+    if "intro_audio_path" in payload.model_fields_set:
+        profile.intro_audio_updated_at = (
+            datetime.now(timezone.utc) if profile.intro_audio_path else None
+        )
+        if profile.intro_audio_path is None:
+            profile.intro_audio_duration_s = None
     await db.commit()
     return await _load_profile(db, current_user.id, viewer_id=None)
 
@@ -175,7 +214,7 @@ async def list_featured_profiles(
     palabra "featured" y responderia 404.
     """
     viewer_id = current_user.id if current_user else None
-    followers_sq, _, posts_sq, is_following_sq = _count_columns(viewer_id)
+    followers_sq, _, posts_sq, _, is_following_sq = _count_columns(viewer_id)
     stmt = (
         select(Profile, followers_sq, posts_sq, is_following_sq)
         .where(Profile.is_featured.is_(True))
@@ -211,7 +250,7 @@ async def search_profiles(
     if len(term) < 2:
         return []
     viewer_id = current_user.id if current_user else None
-    _, _, _, is_following_sq = _count_columns(viewer_id)
+    *_, is_following_sq = _count_columns(viewer_id)
     pattern = f"%{term}%"
     stmt = (
         select(Profile, is_following_sq)
@@ -240,7 +279,7 @@ async def list_profiles(
     db: AsyncSession = Depends(get_db),
 ) -> list[ProfileSummary]:
     viewer_id = current_user.id if current_user else None
-    _, _, _, is_following_sq = _count_columns(viewer_id)
+    *_, is_following_sq = _count_columns(viewer_id)
     stmt = (
         select(Profile, is_following_sq)
         .order_by(Profile.created_at.desc())

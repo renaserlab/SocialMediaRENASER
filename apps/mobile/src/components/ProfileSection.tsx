@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -11,12 +11,13 @@ import { ImageViewer } from '@/components/ImageViewer';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { Button } from '@/components/Button';
-import { Chip } from '@/components/Chip';
 import { EventCard } from '@/components/EventCard';
 import { EventDetailSheet } from '@/components/EventDetailSheet';
 import { ListRow } from '@/components/ListRow';
 import { PodcastList } from '@/components/PodcastList';
-import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
+import { CategoriasDePodcast } from '@/components/CategoriasDePodcast';
+import { useCategoriasDePodcast } from '@/hooks/useCategoriasDePodcast';
+import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
@@ -30,7 +31,6 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/types';
-import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 
 /** Secciones del perfil que se abren desde los accesos circulares. */
 export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast' | 'testimonios';
@@ -160,8 +160,14 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const [creating, setCreating] = useState(false);
   /** Testimonio en edicion; solo lo abre el administrador. */
   const [editingTestimonial, setEditingTestimonial] = useState<TestimonialEditable | null>(null);
-  /** Filtro del podcast; `null` = Todos. */
-  const [category, setCategory] = useState<CategoryId | null>(null);
+  /**
+   * Filtro del podcast; `null` = Todos.
+   *
+   * Guarda el ID de una categoría del creador (o una etiqueta antigua, que
+   * sigue valiendo porque `posts.category` es texto libre).
+   */
+  const [category, setCategory] = useState<string | null>(null);
+  const categorias = useCategoriasDePodcast(kind === 'podcast' ? profileId : null);
   /** Evento cuya ficha se esta viendo. */
   const [detail, setDetail] = useState<EventItem | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
@@ -305,25 +311,20 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     const canAddAudio = canManage;
     return (
       <View>
-        {/* Filtros por categoria; "Todos" es simplemente sin filtro. */}
-        {/* Blindado frente al gesto de cambiar de seccion: ver tabSwipe.tsx. */}
-        <SinCambioDeSeccion>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filters}
-        >
-          <Chip label="Todos" selected={category === null} onPress={() => setCategory(null)} />
-          {CATEGORIES.map((c) => (
-            <Chip
-              key={c.id}
-              label={c.label}
-              selected={category === c.id}
-              onPress={() => setCategory(c.id)}
-            />
-          ))}
-        </ScrollView>
-        </SinCambioDeSeccion>
+        {/*
+          Categorias propias del creador. «Todos» sigue siendo simplemente no
+          filtrar, asi que los audios sin categoria —y los que arrastran una
+          etiqueta antigua— nunca se quedan sin sitio donde verse.
+        */}
+        <CategoriasDePodcast
+          categorias={categorias.categorias}
+          seleccionada={category}
+          alSeleccionar={setCategory}
+          puedeGestionar={canManage}
+          crear={categorias.crear}
+          renombrar={categorias.renombrar}
+          borrar={categorias.borrar}
+        />
 
         {canAddAudio ? (
           <Button
@@ -605,7 +606,6 @@ const styles = StyleSheet.create({
   list: { marginTop: spacing.md },
   // `filters` es de los chips de categoria del podcast. El de la galeria se
   // llama `testimonialFilters` para no pisarlo: ambos se anadieron a la vez.
-  filters: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm },
   testimonialFilters: { marginTop: spacing.md },
   gallery: { marginTop: spacing.md, gap: spacing.md },
   testimonialCard: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden' },

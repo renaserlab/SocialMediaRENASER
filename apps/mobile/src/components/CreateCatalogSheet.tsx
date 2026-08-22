@@ -5,13 +5,14 @@ import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
-import { Chip } from '@/components/Chip';
 import { DateField } from '@/components/DateField';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { FEATURE_PURCHASES } from '@/config/features';
-import { CATEGORIES, PRIVATE_AUDIO_CATEGORY, type CategoryId } from '@/data/categories';
+import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
+import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
+import { useAppStore } from '@/store/useAppStore';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { CourseContentRepository } from '@/repositories/CourseContentRepository';
@@ -84,6 +85,12 @@ function parseDateTime(day: string, time: string): Date | null {
  * `profiles.role`). Esta hoja solo se muestra a quien puede usarla.
  */
 export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing, onDeleted }: Props) {
+  /*
+    De quien seran las categorias que se ofrecen: de quien esta publicando. El
+    backend crea el episodio a nombre de quien manda la peticion, asi que
+    ofrecerle las de otra persona daria una categoria que no es suya.
+  */
+  const autorId = useAppStore((state) => state.user?.id ?? null);
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
   /** El audio privado usa el mismo formulario que un episodio. */
@@ -104,7 +111,8 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
   const [whatsapp, setWhatsapp] = useState('');
   const [price, setPrice] = useState('');
   /** Solo podcast: categoria del episodio, para los filtros. */
-  const [category, setCategory] = useState<CategoryId | null>(null);
+  /** Categoria elegida: el ID de una del creador, o null. */
+  const [category, setCategory] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -370,19 +378,19 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         />
         ) : null}
 
+        {/*
+          Las categorias son las del creador, no tres fijas escritas en el
+          codigo. Se pueden crear aqui mismo: el momento en que uno se da
+          cuenta de que le falta «Carpinteria» es justo cuando esta subiendo un
+          audio de carpinteria.
+        */}
         {isPodcast && !isPrivate ? (
           <View style={styles.categories}>
-            <Text variant="secondary" color={colors.textMuted}>Categoría</Text>
-            <View style={styles.chips}>
-              {CATEGORIES.map((c) => (
-                <Chip
-                  key={c.id}
-                  label={c.label}
-                  selected={category === c.id}
-                  onPress={() => setCategory(category === c.id ? null : c.id)}
-                />
-              ))}
-            </View>
+            <SelectorDeCategoria
+              ownerId={autorId}
+              valor={category}
+              alCambiar={setCategory}
+            />
           </View>
         ) : null}
 
@@ -482,7 +490,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   categories: { gap: spacing.sm, marginBottom: spacing.md },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   audioPicker: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md,

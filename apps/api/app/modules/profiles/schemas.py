@@ -22,6 +22,14 @@ class ProfileRead(BaseModel):
     followers_count: int = 0
     following_count: int = 0
     posts_count: int = 0
+    #: "Me gusta" del perfil = los que ha RECIBIDO en sus publicaciones.
+    #: No los que ha dado: lo que dice algo de alguien es cuanta gente ha
+    #: valorado lo que comparte, no cuanto ha valorado el a otros.
+    likes_count: int = 0
+    #: Audio de presentacion. Ruta en Storage; el movil la firma para oirla.
+    intro_audio_path: str | None = None
+    intro_audio_duration_s: float | None = None
+    intro_audio_updated_at: datetime | None = None
     # Si el usuario autenticado sigue a este perfil (false para el perfil propio).
     is_following: bool = False
     #: Si el usuario autenticado ha bloqueado a este perfil.
@@ -64,3 +72,7 @@ class ProfileUpdate(BaseModel):
     avatar_path: str | None = Field(default=None, max_length=500)
     cover_path: str | None = Field(default=None, max_length=500)
     is_private: bool | None = None
+    # Igual que las imagenes: cadena vacia = quitar el audio (a null).
+    intro_audio_path: str | None = Field(default=None, max_length=500)
+    # Tope generoso; el limite util lo pone el movil (ver MAX_INTRO_MS).
+    intro_audio_duration_s: float | None = Field(default=None, ge=0, le=600)
