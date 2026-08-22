@@ -34,7 +34,14 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "like": ("Nueva reacción", "A {actor} le gustó tu publicación."),
     "comment": ("Nuevo comentario", "{actor} comentó tu publicación."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
-    "session_booked": ("Nueva reserva", "{actor} reservó una sesión contigo."),
+    "session_booked": ("Nueva solicitud de sesión", "{actor} quiere agendar contigo."),
+    # Cada respuesta lleva su propio texto. Con un unico tipo para todo, a
+    # quien le rechazaban una sesion le llegaba «reservó una sesión contigo».
+    "session_accepted": ("Sesión confirmada", "{actor} aceptó tu solicitud."),
+    "session_rejected": ("Solicitud rechazada", "{actor} no puede en esta ocasión."),
+    "session_cancelled": ("Sesión cancelada", "{actor} canceló la sesión."),
+    "session_rescheduled": ("Nueva fecha propuesta", "{actor} propone otra fecha."),
+    "session_completed": ("Sesión realizada", "{actor} dio la sesión por hecha."),
 }
 
 #: Canal de Android por tipo. Permite que el usuario silencie las
@@ -44,6 +51,11 @@ CHANNELS: dict[str, str] = {
     "comment": "interacciones",
     "follow": "interacciones",
     "session_booked": "contenido",
+    "session_accepted": "contenido",
+    "session_rejected": "contenido",
+    "session_cancelled": "contenido",
+    "session_rescheduled": "contenido",
+    "session_completed": "contenido",
 }
 
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { Feather } from '@expo/vector-icons';
 
@@ -55,6 +56,7 @@ export function FeedVerticalDeVideos({
 }: Props) {
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
   const onViewableItemsChanged = useRef(
@@ -113,7 +115,15 @@ export function FeedVerticalDeVideos({
         entender por que.
       */}
       {feed.desdeCache && activo ? (
-        <View style={[styles.sinRed, { borderColor: media.border }]} pointerEvents="none">
+        <View
+          /*
+            Justo debajo de la cabecera, que ya respeta la zona segura. Con un
+            valor fijo, en un movil con muesca alta el aviso se solapaba con
+            las pestañas de arriba.
+          */
+          style={[styles.sinRed, { borderColor: media.border, top: Math.max(insets.top, spacing.md) + 56 }]}
+          pointerEvents="none"
+        >
           <Feather name="wifi-off" size={13} color={media.text} />
           <Text variant="caption" weight="700" color={media.text}>
             Sin conexión · contenido guardado
@@ -176,7 +186,6 @@ const styles = StyleSheet.create({
   sinRed: {
     position: 'absolute',
     alignSelf: 'center',
-    top: 108,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,

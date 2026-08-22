@@ -5,11 +5,7 @@ import {
   leerInstantaneaDeVideos,
 } from '@/feed/cacheDeVideos';
 import { perfMark } from '@/lib/perf';
-import {
-  VIDEOS_POR_PAGINA,
-  type CursorDeVideos,
-  type FuenteDeVideos,
-} from '@/feed/fuenteDeVideos';
+import { VIDEOS_POR_PAGINA, type CursorDeVideos, type FuenteDeVideos } from '@/feed/fuenteDeVideos';
 import type { ReelItem } from '@/components/ShortVideoItem';
 
 export type EstadoDelFeed = 'cargando' | 'listo' | 'error';
@@ -75,6 +71,13 @@ export function useFeedDeVideos(
     leerian el valor viejo y saldrian las dos.
   */
   const enVuelo = useRef(false);
+  /*
+    Por donde seguir pidiendo. Lo dice la fuente, no la lista que se ve: una
+    publicacion con video puede no ser reproducible y quedarse fuera, y
+    entonces la lista no sabe por donde iba el servidor (ver `siguienteCursor`
+    en `fuenteDeVideos.ts`).
+  */
+  const cursor = useRef<CursorDeVideos | null>(null);
   const clave = fuente.clave;
 
   /*
@@ -100,6 +103,7 @@ export function useFeedDeVideos(
         perfMark('INICIO_PRIMERA_PAGINA', { once: true });
         setItems(lote.items);
         setDesdeCache(false);
+        cursor.current = lote.siguienteCursor;
         setHayMas(lote.hayMas);
         setEstado('listo');
         if (conCache) void guardarInstantaneaDeVideos(lote.items);
@@ -118,6 +122,7 @@ export function useFeedDeVideos(
         if (guardados.length > 0) {
           setItems(guardados);
           setDesdeCache(true);
+          cursor.current = null;
           setHayMas(false);
           setEstado('listo');
           return;
@@ -137,29 +142,28 @@ export function useFeedDeVideos(
     // `clave` identifica la fuente; `intento` es el boton de reintentar.
   }, [clave, intento, activo, conCache]);
 
-  const cursorDelFinal = useCallback((lista: ReelItem[]): CursorDeVideos | null => {
-    const ultimo = lista[lista.length - 1];
-    if (!ultimo) return null;
-    return { creadoEn: ultimo.createdAtIso, id: ultimo.id, desplazamiento: lista.length };
-  }, []);
-
   const cargarMas = useCallback(() => {
     // Con la instantánea no se pagina: lo guardado es lo que hay, y pedir más
     // volvería a fallar por el mismo motivo que fallo la primera carga.
     if (desdeCache) return;
     if (!activo || !hayMas || enVuelo.current || estado !== 'listo') return;
-    const cursor = cursorDelFinal(items);
-    if (!cursor) return;
+    const desde = cursor.current;
+    if (!desde) return;
     enVuelo.current = true;
     setCargandoMas(true);
     fuenteRef.current
-      .cargar(cursor, VIDEOS_POR_PAGINA)
+      .cargar(desde, VIDEOS_POR_PAGINA)
       .then((lote) => {
         const conocidos = new Set(items.map((i) => i.id));
         const nuevos = lote.items.filter((i) => !conocidos.has(i.id));
         if (nuevos.length > 0) setItems((prev) => [...prev, ...nuevos]);
-        // Pagina corta o sin novedades: no queda nada por traer.
-        setHayMas(lote.hayMas && nuevos.length > 0);
+        cursor.current = lote.siguienteCursor;
+        /*
+          Se sigue mientras el servidor tenga mas. Antes se exigia ademas que
+          la pagina trajera novedades, y eso apagaba la paginacion para siempre
+          en cuanto una pagina entera fuera de videos no reproducibles.
+        */
+        setHayMas(lote.hayMas && lote.siguienteCursor !== null);
       })
       .catch((e: unknown) => {
         // No se rompe nada: lo que ya se ve sigue ahi y se reintentara la
@@ -170,7 +174,7 @@ export function useFeedDeVideos(
         enVuelo.current = false;
         setCargandoMas(false);
       });
-  }, [activo, hayMas, estado, items, cursorDelFinal, desdeCache]);
+  }, [activo, hayMas, estado, items, desdeCache]);
 
   const refrescar = useCallback(async () => {
     if (enVuelo.current) return;
@@ -179,6 +183,7 @@ export function useFeedDeVideos(
       const lote = await fuenteRef.current.cargar(null, VIDEOS_POR_PAGINA);
       setItems(lote.items);
       setDesdeCache(false);
+      cursor.current = lote.siguienteCursor;
       setHayMas(lote.hayMas);
       setEstado('listo');
       setError(null);

@@ -833,7 +833,21 @@ async def update_podcast_category(
 
     await db.commit()
     await db.refresh(fila)
-    return _categoria_read(fila, 0)
+
+    # El contador se vuelve a calcular: devolver 0 al renombrar dejaba una
+    # categoria con doce audios anunciando que estaba vacia.
+    episodios = (
+        await db.execute(
+            select(func.count())
+            .select_from(Post)
+            .where(
+                Post.author_id == fila.owner_id,
+                Post.category == fila.id,
+                Post.status == "published",
+            )
+        )
+    ).scalar_one()
+    return _categoria_read(fila, int(episodios or 0))
 
 
 @router.delete(

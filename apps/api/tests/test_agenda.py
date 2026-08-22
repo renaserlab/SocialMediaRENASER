@@ -7,15 +7,20 @@ con ella, la resena verificable que dependera de que una sesion llegue a
 `completed`.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from pydantic import ValidationError
 
+from app.modules.bookings.models import Booking
+from app.modules.bookings.router import _leer
 from app.modules.bookings.schemas import (
     ESTADOS,
     BookingCreate,
     BookingUpdate,
     transicion_permitida,
 )
+from app.modules.profiles.models import Profile
 
 PROVEEDOR = "provider"
 SOLICITANTE = "requester"
@@ -120,3 +125,60 @@ def test_nadie_puede_marcar_una_sesion_como_caducada_a_mano():
     """`expired` lo decide el paso del tiempo, no una peticion."""
     with pytest.raises(ValidationError):
         BookingUpdate(status="expired")
+
+
+# --------------------------------------------------------------------------- #
+# Como llega cada sesion al movil
+# --------------------------------------------------------------------------- #
+#
+# `my_role` es lo que decide que botones se pintan: a quien le PIDEN una sesion
+# se le ofrece aceptar o rechazar, y a quien la pidio, cancelar. Si se calcula
+# mal, las dos partes ven los botones de la otra.
+def _perfil(uid: str, nombre: str) -> Profile:
+    p = Profile()
+    p.id = uid
+    p.full_name = nombre
+    p.username = nombre.lower()
+    p.avatar_path = None
+    p.bio = ""
+    return p
+
+
+def _reserva(estado: str = "pending") -> Booking:
+    b = Booking()
+    b.id = "22222222-2222-2222-2222-222222222222"
+    b.requester_id = "ana"
+    b.provider_id = "beto"
+    b.topic = "Carpintería básica"
+    b.note = ""
+    b.status = estado
+    b.scheduled_at = None
+    b.timezone = None
+    b.conversation_id = None
+    b.completed_at = None
+    b.created_at = datetime.now(timezone.utc)
+    b.updated_at = b.created_at
+    return b
+
+
+def test_a_quien_le_piden_la_sesion_se_le_dice_que_es_el_proveedor():
+    leido = _leer(_reserva(), _perfil("ana", "Ana"), _perfil("beto", "Beto"), "beto")
+    assert leido.my_role == "provider"
+
+
+def test_a_quien_la_pidio_se_le_dice_que_es_el_solicitante():
+    leido = _leer(_reserva(), _perfil("ana", "Ana"), _perfil("beto", "Beto"), "ana")
+    assert leido.my_role == "requester"
+
+
+def test_las_dos_partes_viajan_resueltas_para_no_pedir_un_perfil_por_fila():
+    leido = _leer(_reserva(), _perfil("ana", "Ana"), _perfil("beto", "Beto"), "ana")
+    assert leido.requester.full_name == "Ana"
+    assert leido.provider.full_name == "Beto"
+
+
+def test_una_nota_vacia_no_llega_como_nula():
+    """La pantalla la pinta directamente; un `None` saldria como «null»."""
+    reserva = _reserva()
+    reserva.note = None
+    assert _leer(reserva, _perfil("ana", "Ana"), _perfil("beto", "B"), "ana").note == ""

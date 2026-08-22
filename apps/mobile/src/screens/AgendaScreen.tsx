@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -71,6 +71,13 @@ export function AgendaScreen() {
   const [refrescando, setRefrescando] = useState(false);
   /** Sesion sobre la que hay una accion en curso: apaga sus botones. */
   const [ocupada, setOcupada] = useState<string | null>(null);
+  /*
+    El cerrojo de verdad va en una referencia. Con estado, dos toques en el
+    mismo instante leen el valor viejo y salen los dos: el segundo falla con
+    «esa acción ya no es posible», que se lee como un error cuando en realidad
+    ya se hizo. Es el mismo motivo por el que `usePublicacion` usa `ocupadoRef`.
+  */
+  const ocupadaRef = useRef<string | null>(null);
 
   const cargar = useCallback(async () => {
     if (supabaseEnabled && !signedIn) {
@@ -110,10 +117,8 @@ export function AgendaScreen() {
 
   const responder = useCallback(
     async (sesion: Sesion, nuevo: Exclude<EstadoDeSesion, 'pending' | 'expired'>) => {
-      // Cerrojo por sesion: sin el, dos toques seguidos mandan dos peticiones y
-      // la segunda falla con «esa accion ya no es posible», que se lee como un
-      // error cuando en realidad ya se hizo.
-      if (ocupada) return;
+      if (ocupadaRef.current) return;
+      ocupadaRef.current = sesion.id;
       setOcupada(sesion.id);
       try {
         const actualizada = await BookingRepository.update(sesion.id, nuevo);
@@ -132,10 +137,11 @@ export function AgendaScreen() {
       } catch (e) {
         toast(describeError(e, 'No se pudo actualizar la sesión.'));
       } finally {
+        ocupadaRef.current = null;
         setOcupada(null);
       }
     },
-    [ocupada],
+    [],
   );
 
   const solicitudes = useMemo(

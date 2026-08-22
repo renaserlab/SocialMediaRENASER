@@ -7,7 +7,7 @@ cuerpo. Y ninguna peticion puede tocar una sesion en la que no participe.
 from datetime import datetime, timezone as tz
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
@@ -29,6 +29,19 @@ from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
+
+#: Que aviso corresponde a cada estado al que se pasa.
+#:
+#: Son tipos distintos y no uno solo con el estado dentro porque el aviso se
+#: lee de un vistazo en una lista: «Sesión confirmada» y «Solicitud rechazada»
+#: tienen que distinguirse sin abrir nada.
+TIPO_DE_AVISO: dict[str, str] = {
+    "accepted": "session_accepted",
+    "rejected": "session_rejected",
+    "cancelled": "session_cancelled",
+    "reschedule_requested": "session_rescheduled",
+    "completed": "session_completed",
+}
 
 
 def _resumen(perfil: Profile) -> ProfileSummary:
@@ -205,9 +218,9 @@ async def create_booking(
     # El aviso lo crea el SERVIDOR, no el movil.
     #
     # La migracion 0019 tuvo que abrir la insercion de `session_booked` desde el
-    # cliente porque no habia backend que lo hiciera. Ahora si lo hay, y con el
-    # id de la reserva dentro: quien recibe el aviso puede abrir la solicitud
-    # concreta en vez de aterrizar en una lista.
+    # cliente porque no habia backend que lo hiciera. Ahora si lo hay, y con
+    # `entity_type='booking'` y el id dentro: por eso tocar el aviso abre la
+    # AGENDA y no el perfil de quien lo mando, que es donde caian todos antes.
     add_notification(
         db,
         user_id=payload.provider_id,
@@ -271,35 +284,30 @@ async def update_booking(
     reserva.updated_at = datetime.now(tz.utc)
 
     # A quien hay que avisar: siempre a la OTRA parte.
+    #
+    # Y con un tipo POR RESPUESTA, no uno solo para todo: con un unico
+    # `session_booked`, a quien le rechazaban una sesion le llegaba «reservó una
+    # sesión contigo», que dice justo lo contrario de lo que paso.
     otra_parte = reserva.requester_id if rol == "provider" else reserva.provider_id
+    tipo = TIPO_DE_AVISO.get(reserva.status, "session_booked")
     add_notification(
         db,
         user_id=otra_parte,
         actor_id=current_user.id,
-        type="session_booked",
+        type=tipo,
         entity_type="booking",
         entity_id=reserva.id,
         payload={"topic": reserva.topic, "status": reserva.status},
     )
     await db.commit()
     await db.refresh(reserva)
+
+    # El push tambien: sin el, quien pidio la sesion no se enteraba de que se la
+    # habian aceptado hasta que volviera a abrir la aplicacion por su cuenta.
+    await send_push(
+        db,
+        user_id=otra_parte,
+        notification_type=tipo,
+        data={"type": "booking", "id": reserva.id},
+    )
     return await _cargar(db, reserva, current_user.id)
-
-
-@router.get("/pending-count")
-async def pending_count(
-    current_user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, int]:
-    """Cuantas solicitudes esperan respuesta. Alimenta el punto de la agenda."""
-    total = (
-        await db.execute(
-            select(func.count())
-            .select_from(Booking)
-            .where(
-                Booking.provider_id == current_user.id,
-                Booking.status.in_(["pending", "reschedule_requested"]),
-            )
-        )
-    ).scalar_one()
-    return {"count": int(total or 0)}

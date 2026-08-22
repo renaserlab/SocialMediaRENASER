@@ -150,10 +150,4 @@ export const BookingRepository = {
     });
     return aSesion(dto);
   },
-
-  /** Cuantas solicitudes esperan respuesta. Alimenta el punto de la agenda. */
-  async pendientes(): Promise<number> {
-    const dto = await apiRequest<{ count: number }>(`${API_V1}/bookings/pending-count`);
-    return dto.count ?? 0;
-  },
 };

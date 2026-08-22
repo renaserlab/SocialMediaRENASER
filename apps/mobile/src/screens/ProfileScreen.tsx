@@ -754,21 +754,6 @@ function Shortcut({ icon, label, onPress }: { icon: keyof typeof Feather.glyphMa
 }
 
 const styles = StyleSheet.create({
-  cover: { width: '100%', height: 180, resizeMode: 'cover' },
-  // Se separa del borde inferior para no quedar bajo el bloque de perfil (marginTop: -20).
-  coverEditBtn: {
-    position: 'absolute',
-    right: spacing.lg,
-    bottom: spacing.lg + 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    height: 32,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  coverEditLabel: { fontSize: 11, fontWeight: '700' },
   // Badge sólido con borde del color del fondo: se lee sobre cualquier foto.
   avatarEditBtn: {
     position: 'absolute',
@@ -803,8 +788,6 @@ const styles = StyleSheet.create({
   // tabla.
   separador: { width: StyleSheet.hairlineWidth, height: 26 },
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  // Las tres cifras reparten el ancho que queda junto a la foto.
-  headStats: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   blockBtn: {
     width: 44,
     height: 44,
@@ -814,17 +797,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionBtn: { minWidth: 100, minHeight: 40, height: 40 },
-  infoBlock: { marginTop: spacing.md },
   // `stats` se conserva: lo usa la ficha de otros perfiles.
   name: { fontSize: 21, fontWeight: '900', marginTop: spacing.sm },
   username: { fontSize: 13, marginTop: 2 },
-  stats: { flexDirection: 'row', marginVertical: spacing.lg, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: spacing.md },
   statBox: { alignItems: 'center', flex: 1 },
   bio: { fontSize: 13, lineHeight: 18, marginTop: spacing.sm, marginBottom: spacing.lg },
   audioBtn: { width: '100%', marginBottom: spacing.lg },
   shortcuts: { flexDirection: 'row', marginVertical: spacing.md, gap: spacing.sm },
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },
   shortcutIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginTop: spacing.lg },
-  gridImage: { width: '32.6%', aspectRatio: 1, borderWidth: 1 },
 });

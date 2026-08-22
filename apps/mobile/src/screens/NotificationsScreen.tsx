@@ -160,8 +160,16 @@ export function NotificationsScreen() {
               title={item.title}
               subtitle={`${item.subtitle} • ${item.time}`}
               leftIcon={item.icon}
+              /*
+                Cada aviso lleva a donde esta lo que anuncia. Antes TODOS
+                llevaban al perfil de quien lo provoco, asi que tocar «Sesión
+                confirmada» abria un perfil en vez de la agenda donde esta la
+                sesion.
+              */
               onPress={() =>
-                item.actorId
+                item.entityType === 'booking'
+                  ? router.push('/agenda' as never)
+                  : item.actorId
                   ? router.push(`/profile/${item.actorId}` as never)
                   : undefined
               }

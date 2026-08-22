@@ -184,7 +184,7 @@ avisos conservados.
 |---|---|
 | `npx tsc --noEmit` (mobile) | 0 errores |
 | `npm test` (mobile) | 61/61 |
-| `pytest` (api) | 109/109 |
+| `pytest` (api) | 113/113 |
 | `npx expo-doctor@latest` | 18/18 |
 | `npm run build:web` | OK |
 

@@ -35,6 +35,21 @@ export type LoteDeVideos = {
   items: ReelItem[];
   /** false cuando el servidor ya no tiene nada mas que dar. */
   hayMas: boolean;
+  /**
+   * Por donde seguir. Lo calcula la FUENTE, a partir de lo que devolvio el
+   * servidor, no de lo que sobrevive al filtro.
+   *
+   * Importa mas de lo que parece. Una publicacion con video puede no ser
+   * reproducible (por ejemplo, si fallo el firmado de su URL) y entonces se
+   * descarta. Si el cursor saliera de la lista ya filtrada:
+   *
+   *  - una pagina entera de descartes dejaria el feed vacio Y sin cursor, es
+   *    decir, sin forma de pedir la siguiente: «todavia no hay videos» para
+   *    siempre, con contenido de sobra al otro lado;
+   *  - y el `desplazamiento` contaria de menos, asi que contra un servidor que
+   *    solo entienda `offset` la pagina siguiente se solaparia con la anterior.
+   */
+  siguienteCursor: CursorDeVideos | null;
 };
 
 export type FuenteDeVideos = {
@@ -43,8 +58,6 @@ export type FuenteDeVideos = {
    * usa para saber que tiene que empezar de cero y no mezclar dos listas.
    */
   clave: string;
-  /** true si la fuente necesita sesion para tener algo que decir. */
-  necesitaSesion: boolean;
   cargar(cursor: CursorDeVideos | null, limite: number): Promise<LoteDeVideos>;
 };
 
@@ -89,11 +102,9 @@ function fuenteDelBackend(
   clave: string,
   feed: FeedKind,
   usuarioId: string | null | undefined,
-  necesitaSesion: boolean,
 ): FuenteDeVideos {
   return {
     clave,
-    necesitaSesion,
     async cargar(cursor, limite) {
       const posts = await PostRepository.listVideos(usuarioId, {
         limit: limite,
@@ -107,7 +118,16 @@ function fuenteDelBackend(
         beforeId: cursor?.id,
       });
       const items = posts.map(aReel).filter((r): r is ReelItem => r !== null);
-      return { items, hayMas: posts.length === limite };
+      // El cursor sale del ULTIMO POST recibido, reproducible o no.
+      const ultimo = posts[posts.length - 1];
+      const siguienteCursor = ultimo
+        ? {
+            creadoEn: ultimo.createdAtIso,
+            id: ultimo.id,
+            desplazamiento: (cursor?.desplazamiento ?? 0) + posts.length,
+          }
+        : null;
+      return { items, hayMas: posts.length === limite, siguienteCursor };
     },
   };
 }
@@ -126,6 +146,6 @@ export function fuenteDeInicio(
   usuarioId: string | null | undefined,
 ): FuenteDeVideos {
   return pestana === 'siguiendo'
-    ? fuenteDelBackend('siguiendo', 'following', usuarioId, true)
-    : fuenteDelBackend('paraTi', 'all', usuarioId, false);
+    ? fuenteDelBackend('siguiendo', 'following', usuarioId)
+    : fuenteDelBackend('paraTi', 'all', usuarioId);
 }

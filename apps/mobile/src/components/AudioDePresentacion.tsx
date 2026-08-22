@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import {
   RecordingPresets,
@@ -8,6 +8,7 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
+import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
@@ -124,6 +125,19 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
 
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  /*
+    Cerrojo del guardado.
+
+    Va en una referencia y no en el estado por el mismo motivo que en
+    `usePublicacion`: se consulta y se escribe dentro del mismo manejador, y con
+    estado la segunda llamada leeria el valor viejo y pasaria igual.
+
+    Hace falta de verdad: el corte automatico al llegar al minuto se dispara
+    desde un efecto que se reejecuta cada 250 ms (`useAudioRecorderState`), y
+    `grabando` no pasa a `false` hasta el sondeo siguiente. Sin cerrojo, el
+    mismo audio se subia dos veces y el perfil se guardaba dos veces.
+  */
+  const guardandoRef = useRef(false);
 
   const empezar = useCallback(async () => {
     setAviso(null);
@@ -150,6 +164,8 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
   }, [grabadora]);
 
   const parar = useCallback(async () => {
+    if (guardandoRef.current) return;
+    guardandoRef.current = true;
     try {
       const duracionMs = Math.min(msGrabados, MAX_INTRO_MS);
       await grabadora.stop();
@@ -175,6 +191,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
     } catch (e) {
       setAviso(describeError(e, 'No se pudo guardar tu presentación.'));
     } finally {
+      guardandoRef.current = false;
       setGuardando(false);
     }
   }, [grabadora, msGrabados, setUser]);
@@ -182,10 +199,39 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
   /*
     Corte automatico al llegar al minuto. Sin el, la grabacion sigue y despues
     hay que rechazarla: se habria gastado el tiempo de la persona para nada.
+
+    El cerrojo de `parar` es lo que evita que este efecto —que se reevalua cada
+    250 ms— lo dispare varias veces mientras la grabacion se cierra.
   */
   useEffect(() => {
     if (grabando && msGrabados >= MAX_INTRO_MS) void parar();
   }, [grabando, msGrabados, parar]);
+
+  /*
+    Al salir del perfil, se calla.
+
+    Las secciones del carrusel NO se desmontan (ver SwipeTabs): sin esto,
+    escuchar una presentacion y deslizar a Inicio dejaba la voz sonando por
+    debajo del video del muro, y encima seguia con la aplicacion en segundo
+    plano —`useBackgroundAudio` lo permite para todo el proceso—.
+
+    `useCallback` sin dependencias a proposito: solo hace falta la accion de
+    salir, no reengancharla cada vez que cambia el estado del reproductor.
+  */
+  const reproductorRef = useRef(reproductor);
+  reproductorRef.current = reproductor;
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        try {
+          reproductorRef.current?.pause();
+        } catch {
+          // El reproductor puede haberse liberado ya; no hay nada que parar.
+        }
+      },
+      [],
+    ),
+  );
 
   const borrar = useCallback(async () => {
     const seguro = await confirm({
