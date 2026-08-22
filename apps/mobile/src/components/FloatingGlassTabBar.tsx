@@ -34,6 +34,18 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 const BAR_HEIGHT = 62;
 
+/**
+ * Cuanto ocupa la barra flotante contando desde el borde inferior.
+ *
+ * Lo necesita cualquier pantalla a pantalla completa —el Inicio de video, la
+ * camara— para no colocar sus controles justo debajo de la capsula. Se calcula
+ * aqui, junto a la barra, para que mover la barra no obligue a acordarse de
+ * corregir un numero suelto en otro archivo.
+ */
+export function espacioParaLaBarra(insetInferior: number): number {
+  return Math.max(insetInferior, spacing.sm) + spacing.sm + BAR_HEIGHT;
+}
+
 /** Capsula animada tras el icono activo. */
 function ActivePill({ focused, color }: { focused: boolean; color: string }) {
   const progreso = useRef(new Animated.Value(focused ? 1 : 0)).current;

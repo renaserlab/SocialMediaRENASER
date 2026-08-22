@@ -54,7 +54,7 @@ const GROUPS: Group[] = [
     title: 'Social (nuevas)',
     items: [
       { label: 'Historias (visor)', href: '/stories/0' },
-      { label: 'Reels (feed vertical)', href: '/reels' },
+      { label: 'Inicio (feed vertical)', href: '/(tabs)/home' },
       { label: 'Detalle de publicación', href: '/post/post-1' },
       { label: 'Seguidores', href: '/followers/me' },
       { label: 'Siguiendo', href: '/following/me' },

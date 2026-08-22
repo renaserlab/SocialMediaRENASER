@@ -78,7 +78,7 @@ const REGRESO = { duration: 160, easing: Easing.out(Easing.cubic) };
  *
  * No en el primer render: al arrancar compiten con el muro por la misma
  * conexion y por un servidor recien despierto, y el muro es lo que la persona
- * vino a ver (mismo criterio que ya usa HomeScreen con sus datos secundarios).
+ * vino a ver (mismo criterio que usa Explorar con su catalogo).
  * Setecientos milisegundos despues ya no molestan a nadie y llegan de sobra
  * antes del primer arrastre.
  */

@@ -1,0 +1,331 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { CabeceraDeInicio } from '@/components/CabeceraDeInicio';
+import { FeedVerticalDeVideos } from '@/components/FeedVerticalDeVideos';
+import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { SeccionLive } from '@/components/SeccionLive';
+import { Text } from '@/components/Text';
+import { fuenteDeInicio, type PestanaDeInicio } from '@/feed/fuenteDeVideos';
+import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
+import { useFeedDeVideos } from '@/hooks/useFeedDeVideos';
+import { perfMark } from '@/lib/perf';
+import { useAppStore } from '@/store/useAppStore';
+import { useAuthStore } from '@/store/useAuthStore';
+import { palette, radius, spacing } from '@/theme/tokens';
+
+const media = palette('dark');
+
+/**
+ * Inicio: video vertical a pantalla completa.
+ *
+ * QUE CAMBIA Y POR QUE. Lo que antes era "Shorts de la comunidad" —una pantalla
+ * escondida detras de una fila de Explorar, sin barra de secciones y sin forma
+ * de volver que no fuera una flecha— pasa a ser la primera pantalla de la
+ * aplicacion. El muro de publicaciones que habia aqui no desaparece: se muda a
+ * Explorar entero (ver `ExploreScreen`).
+ *
+ * La barra de secciones NO se va. Antes desaparecia porque los shorts vivian en
+ * `/reels`, una ruta fuera del grupo de pestanas; ahora esto ES la pestana
+ * Inicio, asi que la barra flotante se pinta encima como en cualquier otra
+ * seccion. El video sigue ocupando la pantalla completa y pasa por debajo de
+ * ella; lo unico que se aparta son los controles (`espacioInferior`).
+ *
+ * Las tres vistas —Para ti, Siguiendo, Live— se quedan montadas una vez
+ * visitadas. Volver a una pestana no vuelve a pedir su contenido ni reinicia
+ * su posicion, que es lo que se espera y lo que evita peticiones repetidas.
+ * Solo la vista activa reproduce: los demas reproductores existen callados.
+ */
+export function InicioScreen() {
+  const router = useRouter();
+  const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  const usuario = useAppStore((state) => state.user);
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+
+  /*
+    Prepara la sesion de audio del sistema. Sin esto, en un iPhone con el
+    interruptor de silencio puesto el video se ve pero no se oye, y parece que
+    el sonido siga roto.
+  */
+  useBackgroundAudio();
+
+  useEffect(() => {
+    perfMark('INICIO_MONTADO');
+  }, []);
+
+  const [pestana, setPestana] = useState<PestanaDeInicio>('paraTi');
+  /*
+    El sonido se decide una vez para todo el Inicio, no video a video: si cada
+    uno recordase el suyo, bajar la lista seria un sobresalto continuo.
+  */
+  const [silenciado, setSilenciado] = useState(false);
+  const cambiarSilencio = useCallback(() => setSilenciado((s) => !s), []);
+  const forzarSilencio = useCallback(() => setSilenciado(true), []);
+
+  /*
+    Pestanas ya abiertas. Montar las tres de entrada significaria pedir dos
+    feeds en el arranque, compitiendo por la misma conexion justo cuando lo que
+    importa es que se vea el PRIMER video. Una vez abierta, se queda.
+  */
+  const [visitadas, setVisitadas] = useState<Set<PestanaDeInicio>>(
+    () => new Set<PestanaDeInicio>(['paraTi']),
+  );
+  const cambiarPestana = useCallback((siguiente: PestanaDeInicio) => {
+    setPestana(siguiente);
+    setVisitadas((previas) =>
+      previas.has(siguiente) ? previas : new Set(previas).add(siguiente),
+    );
+  }, []);
+
+  const usuarioId = usuario?.id ?? null;
+  const fuenteParaTi = useMemo(() => fuenteDeInicio('paraTi', usuarioId), [usuarioId]);
+  const fuenteSiguiendo = useMemo(() => fuenteDeInicio('siguiendo', usuarioId), [usuarioId]);
+
+  const feedParaTi = useFeedDeVideos(fuenteParaTi);
+  const feedSiguiendo = useFeedDeVideos(fuenteSiguiendo, {
+    // Sin sesion no hay a quien seguir: pedirlo devolveria vacio siempre.
+    activo: visitadas.has('siguiendo') && (!supabaseEnabled || signedIn),
+  });
+
+  const espacioInferior = espacioParaLaBarra(insets.bottom);
+
+  /*
+    "Siguiendo" sin contenido no es un caso, son cuatro, y cada uno pide una
+    salida distinta. Mezclarlos en un unico "no hay nada" es lo que deja al
+    usuario sin saber si le falta seguir a alguien, iniciar sesion, o si la
+    aplicacion esta rota.
+  */
+  const sigueAAlguien = (usuario?.following ?? 0) > 0;
+  const sinSesion = supabaseEnabled && !signedIn;
+  const siguiendoVacio = feedSiguiendo.estado === 'listo' && feedSiguiendo.items.length === 0;
+  /*
+    Sigue a gente pero no hay nada reciente suyo. En vez de dejar la pestana
+    muerta se ensena contenido sugerido —el mismo de "Para ti", ya cargado, sin
+    una segunda peticion— pero DICIENDOLO. Colarlo en silencio como si fuera de
+    quien sigue seria enganar sobre el origen del contenido.
+  */
+  const conSugerencias = siguiendoVacio && sigueAAlguien && !sinSesion;
+
+  const irACrear = useCallback(() => router.navigate('/(tabs)/create'), [router]);
+  const irAExplorar = useCallback(() => router.navigate('/(tabs)/explore'), [router]);
+
+  return (
+    <View style={styles.raiz}>
+      {/* PARA TI */}
+      <Pane visible={pestana === 'paraTi'}>
+        <FeedVerticalDeVideos
+          feed={feedParaTi}
+          altura={height}
+          activo={pestana === 'paraTi'}
+          silenciado={silenciado}
+          alCambiarSilencio={cambiarSilencio}
+          alForzarSilencio={forzarSilencio}
+          espacioInferior={espacioInferior}
+          vacio={
+            <Vacio
+              icono="video-off"
+              titulo="Todavía no hay videos"
+              cuerpo="Cuando alguien publique un video, aparecerá aquí."
+              accion={{ etiqueta: 'Publicar el primero', alPulsar: irACrear }}
+              espacioInferior={espacioInferior}
+            />
+          }
+        />
+      </Pane>
+
+      {/* SIGUIENDO */}
+      {visitadas.has('siguiendo') ? (
+        <Pane visible={pestana === 'siguiendo'}>
+          {sinSesion ? (
+            <Vacio
+              icono="user-plus"
+              titulo="Regístrate o inicia sesión"
+              cuerpo="Necesitamos saber quién eres para mostrarte el contenido de las personas que sigues."
+              accion={{ etiqueta: 'Crear cuenta', alPulsar: () => router.push('/register' as never) }}
+              secundaria={{ etiqueta: 'Iniciar sesión', alPulsar: () => router.push('/login' as never) }}
+              espacioInferior={espacioInferior}
+            />
+          ) : siguiendoVacio && !sigueAAlguien ? (
+            <Vacio
+              icono="users"
+              titulo="Sigue personas para ver su contenido"
+              cuerpo="Aquí aparecerá lo que publiquen las personas que sigas."
+              accion={{ etiqueta: 'Descubrir personas', alPulsar: irAExplorar }}
+              espacioInferior={espacioInferior}
+            />
+          ) : (
+            <View style={styles.lleno}>
+              <FeedVerticalDeVideos
+                feed={conSugerencias ? feedParaTi : feedSiguiendo}
+                altura={height}
+                activo={pestana === 'siguiendo'}
+                silenciado={silenciado}
+                alCambiarSilencio={cambiarSilencio}
+                alForzarSilencio={forzarSilencio}
+                espacioInferior={espacioInferior}
+                vacio={
+                  <Vacio
+                    icono="users"
+                    titulo="Nada nuevo por ahora"
+                    cuerpo="Las personas que sigues no han publicado videos recientes."
+                    accion={{ etiqueta: 'Descubrir personas', alPulsar: irAExplorar }}
+                    espacioInferior={espacioInferior}
+                  />
+                }
+              />
+              {conSugerencias ? (
+                <View
+                  pointerEvents="none"
+                  style={[styles.aviso, { top: insets.top + 68, borderColor: media.border }]}
+                >
+                  <Feather name="info" size={13} color={media.text} />
+                  <Text variant="caption" weight="700" color={media.text}>
+                    Sugerencias: quien sigues no ha publicado nada nuevo
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+        </Pane>
+      ) : null}
+
+      {/* LIVE */}
+      {visitadas.has('live') ? (
+        <Pane visible={pestana === 'live'}>
+          <SeccionLive
+            activo={pestana === 'live'}
+            espacioInferior={espacioInferior}
+            alDescubrir={irAExplorar}
+          />
+        </Pane>
+      ) : null}
+
+      <CabeceraDeInicio activa={pestana} alCambiar={cambiarPestana} alCrear={irACrear} />
+    </View>
+  );
+}
+
+/**
+ * Una vista del Inicio.
+ *
+ * Las no visibles se quedan montadas pero fuera del alcance del dedo y sin
+ * pintar. Desmontarlas obligaria a recargar y a perder la posicion cada vez
+ * que se cambia de pestana, que es justo lo que no se quiere.
+ */
+function Pane({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+  return (
+    <View
+      style={[StyleSheet.absoluteFill, { opacity: visible ? 1 : 0, zIndex: visible ? 1 : 0 }]}
+      pointerEvents={visible ? 'auto' : 'none'}
+      // Sin esto, la vista oculta seguiria recibiendo el foco del lector de
+      // pantalla y se leerian dos feeds a la vez.
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+    >
+      {children}
+    </View>
+  );
+}
+
+function Vacio({
+  icono,
+  titulo,
+  cuerpo,
+  accion,
+  secundaria,
+  espacioInferior,
+}: {
+  icono: keyof typeof Feather.glyphMap;
+  titulo: string;
+  cuerpo: string;
+  accion?: { etiqueta: string; alPulsar: () => void };
+  secundaria?: { etiqueta: string; alPulsar: () => void };
+  espacioInferior: number;
+}) {
+  return (
+    <View style={[styles.vacio, { paddingBottom: espacioInferior }]}>
+      <View style={[styles.vacioIcono, { borderColor: media.border }]}>
+        <Feather name={icono} size={26} color={media.text} />
+      </View>
+      <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
+        {titulo}
+      </Text>
+      <Text variant="body" color={media.textMuted} style={styles.centrado}>
+        {cuerpo}
+      </Text>
+      <View style={styles.vacioAcciones}>
+        {accion ? (
+          <Pressable
+            onPress={accion.alPulsar}
+            style={[styles.boton, { backgroundColor: media.text }]}
+            accessibilityRole="button"
+          >
+            <Text variant="body" weight="700" color={media.background}>
+              {accion.etiqueta}
+            </Text>
+          </Pressable>
+        ) : null}
+        {secundaria ? (
+          <Pressable
+            onPress={secundaria.alPulsar}
+            style={[styles.boton, { borderWidth: 1, borderColor: media.border }]}
+            accessibilityRole="button"
+          >
+            <Text variant="body" weight="700" color={media.text}>
+              {secundaria.etiqueta}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  raiz: { flex: 1, backgroundColor: media.background },
+  lleno: { flex: 1 },
+  vacio: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+  },
+  vacioIcono: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  centrado: { textAlign: 'center' },
+  vacioAcciones: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  boton: {
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  aviso: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    backgroundColor: media.overlay,
+    zIndex: 25,
+  },
+});

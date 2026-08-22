@@ -172,11 +172,14 @@ export const PostRepository = {
     {
       limit = 6,
       offset = 0,
+      feed = 'all',
       beforeCreatedAt,
       beforeId,
     }: {
       limit?: number;
       offset?: number;
+      /** 'all' = "Para ti"; 'following' = solo de quien se sigue. */
+      feed?: FeedKind;
       beforeCreatedAt?: string;
       beforeId?: string;
     } = {},
@@ -185,6 +188,7 @@ export const PostRepository = {
       limit: String(limit),
       offset: String(offset),
       media: 'video',
+      feed,
     });
     if (beforeCreatedAt) params.set('before_created_at', beforeCreatedAt);
     if (beforeId) params.set('before_id', beforeId);

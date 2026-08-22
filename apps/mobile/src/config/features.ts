@@ -29,3 +29,31 @@
  * no se pida un dato que hoy no significa nada.
  */
 export const FEATURE_PURCHASES = false;
+
+/**
+ * Transmisiones en vivo.
+ *
+ * En `false` la pestana "Live" del Inicio existe y explica con claridad que
+ * todavia no hay transmisiones, en lugar de inventarse una.
+ *
+ * Por que esta apagado: NO hay infraestructura de directo en el proyecto. Se
+ * comprobo antes de escribir una linea de interfaz. Lo que hay es HLS de
+ * VIDEO YA GRABADO —el backend empaqueta cada video subido y firma su playlist
+ * en `/media/{id}/hls/...`—, que no tiene nada que ver: no existe punto de
+ * ingesta (RTMP/WHIP), ni servidor de reparto en tiempo real, ni entidad de
+ * emision, ni permisos, ni moderacion de directo. La pantalla `/live/[id]` que
+ * habia reproducia un video de ejemplo con un chat guardado en memoria: eso es
+ * una maqueta, y ensenarla como si fuera un directo es exactamente lo que el
+ * documento prohibe.
+ *
+ * Que hace falta para encenderlo (bloqueo externo, no de codigo):
+ *   1. Un proveedor de directo (LiveKit, Mux, Cloudflare Stream o similar) con
+ *      cuenta, claves y coste asumido.
+ *   2. Entidad `live_sessions` (emisor, estado, inicio/fin, grabacion) con RLS.
+ *   3. Emision de tokens de publicacion/visionado desde el backend.
+ *   4. Moderacion en directo y limites anti-abuso.
+ *
+ * El contrato de datos ya esta escrito en `src/feed/transmisiones.ts`: cuando
+ * exista el proveedor, se implementa esa unica funcion y se enciende esto.
+ */
+export const FEATURE_LIVE = false;

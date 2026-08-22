@@ -58,9 +58,27 @@ type Props = {
   onToggleMuted: () => void;
   /** El navegador obligo a silenciar para poder arrancar. */
   onForcedMute: () => void;
+  /**
+   * Hueco reservado abajo.
+   *
+   * En el nuevo Inicio la barra de secciones flota SIEMPRE encima del video
+   * (es lo que pedia el documento: nunca desaparece). Sin este hueco, la
+   * columna de acciones y el pie de texto quedaban justo debajo de ella y
+   * dejaban de poder tocarse. Vale 0 donde no hay barra.
+   */
+  espacioInferior?: number;
 };
 
-function ShortVideoItemBase({ short, active, preload, height, muted, onToggleMuted, onForcedMute }: Props) {
+function ShortVideoItemBase({
+  short,
+  active,
+  preload,
+  height,
+  muted,
+  onToggleMuted,
+  onForcedMute,
+  espacioInferior = 0,
+}: Props) {
   const router = useRouter();
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(short.likes);
@@ -126,7 +144,7 @@ function ShortVideoItemBase({ short, active, preload, height, muted, onToggleMut
       )}
       <LinearGradient colors={['transparent', media.overlay]} style={styles.bottomScrim} pointerEvents="none" />
 
-      <View style={styles.sidebar}>
+      <View style={[styles.sidebar, { bottom: 140 + espacioInferior }]}>
         <Pressable
           onPress={openProfile}
           disabled={!short.authorId}
@@ -182,7 +200,7 @@ function ShortVideoItemBase({ short, active, preload, height, muted, onToggleMut
         </Pressable>
       </View>
 
-      <View style={styles.bottomInfo}>
+      <View style={[styles.bottomInfo, { bottom: 60 + espacioInferior }]}>
         {/*
           El nombre lleva al perfil, igual que la foto: es lo que se espera al
           leerlo y era el gesto natural que no respondia.
@@ -212,13 +230,14 @@ function ShortVideoItemBase({ short, active, preload, height, muted, onToggleMut
 const styles = StyleSheet.create({
   container: { width: '100%', backgroundColor: media.background },
   bottomScrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '40%' },
-  sidebar: { position: 'absolute', right: spacing.md, bottom: 140, alignItems: 'center', gap: spacing.xl, zIndex: 10 },
+  // `bottom` lo pone el componente: depende de si hay barra flotante encima.
+  sidebar: { position: 'absolute', right: spacing.md, alignItems: 'center', gap: spacing.xl, zIndex: 10 },
   sidebarItem: { alignItems: 'center', justifyContent: 'center', minWidth: 44, minHeight: 44 },
   avatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: media.text },
   // Circulo de 40 con borde: se lee como un ajuste, no como una accion mas.
   soundButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, marginTop: spacing.sm },
   sidebarLabel: { fontSize: 12, fontWeight: '600', marginTop: spacing.xs },
-  bottomInfo: { position: 'absolute', left: spacing.lg, right: 80, bottom: 60, zIndex: 10, gap: spacing.xs },
+  bottomInfo: { position: 'absolute', left: spacing.lg, right: 80, zIndex: 10, gap: spacing.xs },
   authorButton: { alignSelf: 'flex-start' },
   author: { fontSize: 16, fontWeight: '700' },
   caption: { fontSize: 13, lineHeight: 18 },
