@@ -106,6 +106,20 @@ export function FeedVerticalDeVideos({
   return (
     <View style={styles.raiz}>
       {aviso}
+
+      {/*
+        Se dice que lo que se ve esta guardado y que los videos no van a sonar.
+        Callarlo dejaria a alguien tocando una portada sin que pasara nada, sin
+        entender por que.
+      */}
+      {feed.desdeCache && activo ? (
+        <View style={[styles.sinRed, { borderColor: media.border }]} pointerEvents="none">
+          <Feather name="wifi-off" size={13} color={media.text} />
+          <Text variant="caption" weight="700" color={media.text}>
+            Sin conexión · contenido guardado
+          </Text>
+        </View>
+      ) : null}
       <FlashList
         data={feed.items}
         keyExtractor={(item: ReelItem) => item.id}
@@ -159,6 +173,20 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   avisoTexto: { textAlign: 'center' },
+  sinRed: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: 108,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    backgroundColor: media.overlay,
+    zIndex: 26,
+  },
   avisoBoton: {
     marginTop: spacing.md,
     borderWidth: 1,

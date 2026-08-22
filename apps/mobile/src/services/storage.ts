@@ -1,6 +1,8 @@
 import 'react-native-url-polyfill/auto';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { olvidarInstantaneaDeVideos } from '@/feed/cacheDeVideos';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -755,4 +757,7 @@ export async function signMediaUrls(
 export function clearSignedUrlCache(): void {
   signedUrlCache.clear();
   AsyncStorage.removeItem(SIGNED_CACHE_STORAGE_KEY).catch(() => {});
+  // La instantanea del Inicio tambien: el contenido guardado es de quien lo
+  // vio, y quedaria visible para la siguiente persona que entrara sin red.
+  void olvidarInstantaneaDeVideos();
 }

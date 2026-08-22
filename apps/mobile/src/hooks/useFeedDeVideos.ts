@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  guardarInstantaneaDeVideos,
+  leerInstantaneaDeVideos,
+} from '@/feed/cacheDeVideos';
 import { perfMark } from '@/lib/perf';
 import {
   VIDEOS_POR_PAGINA,
@@ -17,6 +21,14 @@ export type FeedDeVideos = {
   error: string | null;
   /** Se esta trayendo la siguiente pagina (no el primer lote). */
   cargandoMas: boolean;
+  /**
+   * Lo que se ve viene de la instantánea guardada, no de la red.
+   *
+   * La pantalla lo DICE en vez de disimularlo: los vídeos no se reproducen sin
+   * conexión —sus direcciones caducan y los bytes no están descargados— y
+   * dejar que alguien toque y no pase nada es peor que avisar.
+   */
+  desdeCache: boolean;
   hayMas: boolean;
   cargarMas: () => void;
   reintentar: () => void;
@@ -43,7 +55,14 @@ export function useFeedDeVideos(
   fuente: FuenteDeVideos,
   { activo = true }: { activo?: boolean } = {},
 ): FeedDeVideos {
+  /*
+    Solo «Para ti» guarda instantánea: es lo que se abre por defecto.
+    «Siguiendo» depende de a quién sigue cada quien y guardarlo también
+    duplicaría el espacio para algo que se visita mucho menos.
+  */
+  const conCache = fuente.clave === 'paraTi';
   const [items, setItems] = useState<ReelItem[]>([]);
+  const [desdeCache, setDesdeCache] = useState(false);
   const [estado, setEstado] = useState<EstadoDelFeed>('cargando');
   const [error, setError] = useState<string | null>(null);
   const [cargandoMas, setCargandoMas] = useState(false);
@@ -80,13 +99,31 @@ export function useFeedDeVideos(
         // reproducir. Se marca una sola vez por sesion.
         perfMark('INICIO_PRIMERA_PAGINA', { once: true });
         setItems(lote.items);
+        setDesdeCache(false);
         setHayMas(lote.hayMas);
         setEstado('listo');
+        if (conCache) void guardarInstantaneaDeVideos(lote.items);
       })
-      .catch((e: unknown) => {
+      .catch(async (e: unknown) => {
         console.warn('[inicio] no se pudieron cargar los videos', e);
         if (!vigente) return;
+        /*
+          Sin red, lo guardado es mejor que una pantalla negra con un error.
+          Se marca `desdeCache` para poder DECIRLO: los vídeos no se
+          reproducirán, y dejar que alguien toque sin que pase nada sería peor
+          que avisar. La opción de reintentar sigue estando.
+        */
+        const guardados = conCache ? await leerInstantaneaDeVideos() : [];
+        if (!vigente) return;
+        if (guardados.length > 0) {
+          setItems(guardados);
+          setDesdeCache(true);
+          setHayMas(false);
+          setEstado('listo');
+          return;
+        }
         setItems([]);
+        setDesdeCache(false);
         setError(e instanceof Error ? e.message : null);
         setEstado('error');
       })
@@ -98,7 +135,7 @@ export function useFeedDeVideos(
       enVuelo.current = false;
     };
     // `clave` identifica la fuente; `intento` es el boton de reintentar.
-  }, [clave, intento, activo]);
+  }, [clave, intento, activo, conCache]);
 
   const cursorDelFinal = useCallback((lista: ReelItem[]): CursorDeVideos | null => {
     const ultimo = lista[lista.length - 1];
@@ -107,6 +144,9 @@ export function useFeedDeVideos(
   }, []);
 
   const cargarMas = useCallback(() => {
+    // Con la instantánea no se pagina: lo guardado es lo que hay, y pedir más
+    // volvería a fallar por el mismo motivo que fallo la primera carga.
+    if (desdeCache) return;
     if (!activo || !hayMas || enVuelo.current || estado !== 'listo') return;
     const cursor = cursorDelFinal(items);
     if (!cursor) return;
@@ -130,7 +170,7 @@ export function useFeedDeVideos(
         enVuelo.current = false;
         setCargandoMas(false);
       });
-  }, [activo, hayMas, estado, items, cursorDelFinal]);
+  }, [activo, hayMas, estado, items, cursorDelFinal, desdeCache]);
 
   const refrescar = useCallback(async () => {
     if (enVuelo.current) return;
@@ -138,9 +178,11 @@ export function useFeedDeVideos(
     try {
       const lote = await fuenteRef.current.cargar(null, VIDEOS_POR_PAGINA);
       setItems(lote.items);
+      setDesdeCache(false);
       setHayMas(lote.hayMas);
       setEstado('listo');
       setError(null);
+      if (conCache) void guardarInstantaneaDeVideos(lote.items);
     } catch (e) {
       console.warn('[inicio] no se pudo refrescar', e);
       // Refrescar no vacia la pantalla: si falla, se conserva lo que hubiera.
@@ -151,9 +193,19 @@ export function useFeedDeVideos(
     } finally {
       enVuelo.current = false;
     }
-  }, [items.length]);
+  }, [items.length, conCache]);
 
   const reintentar = useCallback(() => setIntento((n) => n + 1), []);
 
-  return { items, estado, error, cargandoMas, hayMas, cargarMas, reintentar, refrescar };
+  return {
+    items,
+    estado,
+    error,
+    cargandoMas,
+    hayMas,
+    desdeCache,
+    cargarMas,
+    reintentar,
+    refrescar,
+  };
 }

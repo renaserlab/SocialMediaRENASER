@@ -2,6 +2,15 @@ import { Linking, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera } from 'expo-camera';
 
+import {
+  interpretarPermiso as traducir,
+  type EstadoDePermiso,
+} from '@/lib/estadoDePermiso';
+
+// Se reexporta para que el resto de la aplicacion siga pidiendo el tipo aqui,
+// junto a las funciones que lo devuelven.
+export type { EstadoDePermiso };
+
 /**
  * Permisos del dispositivo, con los cuatro estados que existen de verdad.
  *
@@ -20,37 +29,7 @@ import { Camera } from 'expo-camera';
  * que hace que se rechacen, y un rechazo en iOS es para siempre.
  */
 
-export type EstadoDePermiso =
-  /** Concedido por completo. */
-  | 'concedido'
-  /** Concedido a medias: solo una seleccion de fotos (iOS). */
-  | 'limitado'
-  /** Rechazado, pero el sistema todavia dejaria volver a preguntar. */
-  | 'denegado'
-  /** Rechazado para siempre: solo se puede cambiar en los ajustes. */
-  | 'bloqueado';
-
 export type TipoDePermiso = 'fotos' | 'camara' | 'microfono';
-
-/**
- * Traduce la respuesta del sistema a uno de los cuatro estados.
- *
- * `accessPrivileges` solo existe en iOS; en Android y en la web no hay acceso
- * parcial y el campo llega indefinido, asi que un permiso concedido es
- * concedido y punto.
- */
-function traducir(respuesta: {
-  granted: boolean;
-  canAskAgain?: boolean;
-  accessPrivileges?: string;
-}): EstadoDePermiso {
-  if (respuesta.granted) {
-    return respuesta.accessPrivileges === 'limited' ? 'limitado' : 'concedido';
-  }
-  // `canAskAgain` indefinido se trata como "todavia se puede preguntar": es la
-  // suposicion que no deja a nadie encerrado sin salida.
-  return respuesta.canAskAgain === false ? 'bloqueado' : 'denegado';
-}
 
 /** Consulta el permiso SIN pedirlo. Sirve para decidir que pintar. */
 export async function consultarPermiso(tipo: TipoDePermiso): Promise<EstadoDePermiso> {
