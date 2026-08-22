@@ -598,10 +598,18 @@ export function ProfileScreen() {
               label={t('profile.testimonials')}
               onPress={() => setActiveSection((v) => (v === 'testimonios' ? null : 'testimonios'))}
             />
+            {/*
+              «Agenda» en el perfil propio abre TU agenda —lo que te piden y lo
+              que has pedido—; en el de otra persona, la solicitud. Antes solo
+              existia lo segundo: se podia pedir una sesion pero no habia donde
+              ver las que te pedian a ti.
+            */}
             <Shortcut
               icon="calendar"
               label={t('profile.bookSession')}
-              onPress={() => setBookingVisible(true)}
+              onPress={() =>
+                isPublic ? setBookingVisible(true) : router.push('/agenda' as never)
+              }
             />
           </View>
 

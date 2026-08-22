@@ -12,8 +12,8 @@ import { TimeField } from '@/components/TimeField';
 import { toHumanTime } from '@/components/TimeField.types';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { toast } from '@/lib/toast';
+import { BookingRepository } from '@/repositories/BookingRepository';
 import { MessageRepository } from '@/repositories/MessageRepository';
-import { NotificationRepository } from '@/repositories/NotificationRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -43,6 +43,21 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
 
   /** Lo que se enseña y se envía: «12/08/2026 a las 4:00 PM». */
   const propuesta = date && time ? `${date} a las ${toHumanTime(time)}` : '';
+
+  /**
+   * La fecha elegida, en el formato que entiende el servidor.
+   *
+   * El formulario trabaja con «12/08/2026» y «16:00» porque es lo que se lee y
+   * se escribe; la base de datos necesita un instante. Convertirlo AQUÍ evita
+   * que cada pantalla se invente su propio formato.
+   */
+  const cuandoIso = (dia: string, hora: string): string | null => {
+    const [d, m, a] = dia.split('/').map((n) => Number(n));
+    const [hh, mm] = hora.split(':').map((n) => Number(n));
+    if (!d || !m || !a || Number.isNaN(hh) || Number.isNaN(mm)) return null;
+    const fecha = new Date(a, m - 1, d, hh, mm);
+    return Number.isNaN(fecha.getTime()) ? null : fecha.toISOString();
+  };
 
   const reset = () => {
     setDate('');
@@ -100,12 +115,15 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   };
 
   /**
-   * Confirma la reserva: avisa a la otra persona y le deja la propuesta por
-   * escrito en el chat.
+   * Crea la reserva de verdad y deja la propuesta por escrito en el chat.
    *
-   * Las dos cosas, porque la notificación se lee una vez y se pierde entre las
-   * demás; el mensaje queda en la conversación y ahí se puede responder y
-   * acordar el detalle.
+   * Antes esto solo insertaba un AVISO: la otra persona lo leía una vez, no
+   * podía aceptar ni rechazar, y no quedaba registro de nada. Ahora se crea una
+   * sesión con estado propio, que aparece en la agenda de las dos partes.
+   *
+   * El mensaje se sigue enviando porque el aviso se pierde entre los demás y en
+   * la conversación queda por escrito, se puede responder y se acuerda el
+   * detalle.
    */
   const handleBook = async () => {
     if (!date || !time) {
@@ -122,14 +140,17 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     setSaving(true);
     setError(null);
     try {
-      await NotificationRepository.notifySessionBooked({
-        targetUserId: targetUser.id,
-        dateText: propuesta,
-        note: note.trim(),
+      await BookingRepository.create({
+        proveedorId: targetUser.id,
+        // El tema es lo que la agenda enseña como titulo: sin nota se usa el
+        // generico, que sigue siendo mas util que una fila sin asunto.
+        tema: note.trim() || 'Sesión 1:1',
+        nota: note.trim(),
+        cuandoIso: cuandoIso(date, time),
       });
 
-      // Si el aviso llega pero el mensaje falla, la reserva sigue siendo válida:
-      // no se deshace nada ni se avisa de un error que no impide nada.
+      // Si la sesión se crea pero el mensaje falla, la reserva sigue siendo
+      // válida: no se deshace nada ni se avisa de un error que no impide nada.
       try {
         const conv = await MessageRepository.getOrCreateDirect(targetUser.id);
         await MessageRepository.sendMessage(conv.id, redactarMensaje());
@@ -153,7 +174,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
-        Agenda tu sesión 1:1
+        Pedir una sesión 1:1
       </Text>
       <Text variant="secondary" color={colors.textMuted} style={styles.subtitle}>
         Reserva un espacio personalizado con {targetUser.fullName}.

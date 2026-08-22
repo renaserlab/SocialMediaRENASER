@@ -45,6 +45,7 @@ async def create_all_dev() -> None:
             "El esquema se gestiona con supabase/migrations."
         )
     # Importa los modelos para que queden registrados en Base.metadata.
+    from app.modules.bookings import models as _bookings  # noqa: F401
     from app.modules.catalog import models as _catalog  # noqa: F401
     from app.modules.communities import models as _communities  # noqa: F401
     from app.modules.content import models as _content  # noqa: F401

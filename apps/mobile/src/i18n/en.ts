@@ -45,7 +45,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'profile.courses': 'Courses',
   'profile.circles': 'Circles',
   'profile.testimonials': 'Reviews',
-  'profile.bookSession': 'Book session',
+  'profile.bookSession': 'Schedule',
   'profile.noPosts': 'No posts yet.',
   'profile.noEvents': 'No events published yet.',
   'profile.noCourses': 'No courses published yet.',

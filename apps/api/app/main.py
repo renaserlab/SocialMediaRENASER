@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.modules.bookings.router import router as bookings_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.communities.router import router as communities_router
 from app.modules.content.router import router as content_router
@@ -95,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(learning_router, prefix=prefix)
     app.include_router(notifications_router, prefix=prefix)
     app.include_router(moderation_router, prefix=prefix)
+    app.include_router(bookings_router, prefix=prefix)
     # Portal de pagos. Se monta siempre para poder probarlo y documentarlo,
     # pero responde 503 mientras `payments_enabled` este en false.
     app.include_router(payments_router, prefix=prefix)

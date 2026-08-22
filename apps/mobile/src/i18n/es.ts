@@ -51,7 +51,7 @@ export const es = {
   'profile.courses': 'Cursos',
   'profile.circles': 'Círculos',
   'profile.testimonials': 'Reseñas',
-  'profile.bookSession': 'Agenda tu sesión',
+  'profile.bookSession': 'Agenda',
   'profile.noPosts': 'Aún no hay publicaciones.',
   'profile.noEvents': 'Aún no hay eventos publicados.',
   'profile.noCourses': 'Aún no hay cursos publicados.',
