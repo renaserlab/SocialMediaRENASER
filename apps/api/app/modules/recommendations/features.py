@@ -22,18 +22,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.modules.recommendations.config import (
-    RELACION_POR_CONEXION,
+    COMPATIBILIDAD,
+    INTENSIDAD_DE_DEMANDA,
     RELACIONES_DE_OFERTA,
     SATURACION_DE_SENALES,
     VENTANA_DE_ACTIVIDAD_DIAS,
 )
 from app.modules.recommendations.repository import ActividadDeAutor
-
-#: Cuanto vale que coincida un tema que la persona dijo querer APRENDER frente
-#: a uno que solo marco como interes. Querer aprender algo es una peticion;
-#: marcar un interes es una pista.
-PESO_DEMANDA_FUERTE = 1.0
-PESO_DEMANDA_SUAVE = 0.6
 
 #: Con cuantos temas coincidentes se considera cubierta la necesidad. Mas alla
 #: de tres, coincidir en un cuarto no hace a nadie mucho mas relevante, y sin
@@ -43,12 +38,20 @@ TEMAS_PARA_SATURAR = 3
 
 @dataclass(frozen=True)
 class PerfilDeDemanda:
-    """Lo que la persona que mira necesita. Se construye una vez por peticion."""
+    """Lo que la persona que mira necesita. Se construye una vez por peticion.
+
+    Las tres necesidades van SEPARADAS y no en un saco comun. Es el cambio que
+    permite emparejarlas con la oferta correcta: quien quiere aprender necesita
+    a alguien que explique, y quien busca orientacion necesita a alguien que ya
+    haya pasado por ahi. Ver `COMPATIBILIDAD` en `config.py`.
+    """
 
     usuario_id: str
-    #: Temas que declaro querer aprender o sobre los que busca orientacion.
-    temas_a_aprender: frozenset[str] = frozenset()
-    #: Temas marcados solo como interes.
+    #: `learn` — quiero aprender esto.
+    aprender: frozenset[str] = frozenset()
+    #: `seek_guidance` — busco orientacion sobre esto.
+    orientacion: frozenset[str] = frozenset()
+    #: `interest` — me interesa. Es una pista, no una peticion.
     intereses: frozenset[str] = frozenset()
     #: Que relaciones busca en la otra persona, derivadas del tipo de conexion
     #: que pidio ("un mentor" -> ensena / puede ayudar).
@@ -60,13 +63,31 @@ class PerfilDeDemanda:
     #: Afinidad por tema acumulada por el uso. Es el bucle de aprendizaje: sube
     #: sola segun lo que la persona abre, sin que nadie reentrene nada.
     afinidad_por_tema: dict[str, float] = field(default_factory=dict)
+    #: Castigo por tema, de 0 a 1, acumulado por los «no me interesa». Resta
+    #: relevancia sin borrar el tema: la persona cambia, y un sistema que no le
+    #: deja volver deja de servirle.
+    penalizacion_por_tema: dict[str, float] = field(default_factory=dict)
     #: Si esta persona tiene alguna senal registrada. Sin ninguna, el
     #: componente de comportamiento no aplica en vez de valer cero.
     tiene_senales: bool = False
 
     @property
+    def por_relacion(self) -> dict[str, frozenset[str]]:
+        """La demanda tal y como la consume la matriz de compatibilidad."""
+        return {
+            "learn": self.aprender,
+            "seek_guidance": self.orientacion,
+            "interest": self.intereses,
+        }
+
+    @property
+    def temas_a_aprender(self) -> frozenset[str]:
+        """Lo que la persona PIDE (frente a lo que solo le interesa)."""
+        return self.aprender | self.orientacion
+
+    @property
     def temas_buscados(self) -> frozenset[str]:
-        return self.temas_a_aprender | self.intereses
+        return self.aprender | self.orientacion | self.intereses
 
     @property
     def tiene_demanda(self) -> bool:
@@ -93,6 +114,17 @@ class Candidato:
         for relacion in RELACIONES_DE_OFERTA:
             salida |= self.oferta.get(relacion, frozenset())
         return frozenset(salida)
+
+    @property
+    def tiene_oferta(self) -> bool:
+        """Si esta persona ha declarado que puede aportar algo.
+
+        Lo usa la explicacion: a quien nunca dijo que ensena no se le puede
+        presentar como alguien «que puede ensenarte». Aparecera igual —por
+        afinidad, por actividad o por exploracion— pero el motivo dira la
+        verdad.
+        """
+        return bool(self.temas_ofrecidos())
 
 
 @dataclass(frozen=True)
@@ -142,21 +174,64 @@ def exploracion_de(usuario_id: str, candidato_id: str, semilla: str) -> float:
 
 
 def _rasgo_de_tema(
-    demanda: PerfilDeDemanda, ofrecidos: frozenset[str]
-) -> tuple[float | None, tuple[str, ...]]:
-    """Cuanto de lo que la persona busca cubre este candidato."""
+    demanda: PerfilDeDemanda, candidato: Candidato
+) -> tuple[float | None, tuple[str, ...], tuple[str, ...]]:
+    """Cuanto de lo que la persona NECESITA resuelve lo que este candidato OFRECE.
+
+    Aqui esta el cambio de fondo de la V1.1. Antes se cruzaban dos conjuntos:
+    «los temas que busco» contra «los temas que ofrece». Eso trataba igual a
+    quien ENSENA carpinteria y a quien dice tener experiencia en carpinteria,
+    frente a alguien que quiere APRENDERLA. Y son cosas distintas: para
+    aprender hace falta quien explique; para orientarse, quien ya lo vivio.
+
+    Ahora se cruzan PARES (necesidad, oferta) y cada par tiene su valor en
+    `COMPATIBILIDAD`. De cada tema se queda el mejor par, porque una persona
+    que ademas de ensenar tiene experiencia no cubre el tema «dos veces»: lo
+    cubre por su mejor via.
+
+    Devuelve tambien QUE relaciones de oferta produjeron las coincidencias, que
+    es lo unico con lo que se puede escribir un motivo verdadero: «ensena X»
+    solo se puede decir de quien declaro `teach` sobre X.
+    """
     if not demanda.tiene_demanda:
-        return None, ()
-    fuertes = demanda.temas_a_aprender & ofrecidos
-    suaves = (demanda.intereses - demanda.temas_a_aprender) & ofrecidos
-    if not fuertes and not suaves:
-        return 0.0, ()
-    bruto = len(fuertes) * PESO_DEMANDA_FUERTE + len(suaves) * PESO_DEMANDA_SUAVE
+        return None, (), ()
+
+    mejor_por_tema: dict[str, float] = {}
+    relaciones: set[str] = set()
+
+    for relacion_demanda, temas in demanda.por_relacion.items():
+        if not temas:
+            continue
+        intensidad = INTENSIDAD_DE_DEMANDA.get(relacion_demanda, 0.0)
+        compatibles = COMPATIBILIDAD.get(relacion_demanda, {})
+        for tema in temas:
+            for relacion_oferta, factor in compatibles.items():
+                if tema not in candidato.oferta.get(relacion_oferta, frozenset()):
+                    continue
+                valor = intensidad * factor
+                if valor > mejor_por_tema.get(tema, 0.0):
+                    mejor_por_tema[tema] = valor
+                relaciones.add(relacion_oferta)
+
+    if not mejor_por_tema:
+        return 0.0, (), ()
+
+    # El castigo por «no me interesa» resta relevancia al tema, no lo borra.
+    for tema in list(mejor_por_tema):
+        castigo = demanda.penalizacion_por_tema.get(tema, 0.0)
+        if castigo:
+            mejor_por_tema[tema] *= max(0.0, 1.0 - castigo)
+
+    # De mas a menos fuerte: si hay que recortar la lista al explicar, que
+    # sobrevivan los temas que mas resuelven.
+    ordenados = sorted(mejor_por_tema.items(), key=lambda par: (-par[1], par[0]))
+    bruto = sum(valor for _, valor in ordenados[:TEMAS_PARA_SATURAR])
     objetivo = min(TEMAS_PARA_SATURAR, max(1, len(demanda.temas_buscados)))
-    # Los fuertes primero: si hay que recortar la lista al explicar, que
-    # sobrevivan los temas que la persona dijo querer aprender.
-    coincidentes = tuple(sorted(fuertes)) + tuple(sorted(suaves))
-    return min(1.0, bruto / objetivo), coincidentes
+    return (
+        min(1.0, bruto / objetivo),
+        tuple(tema for tema, _ in ordenados),
+        tuple(sorted(relaciones)),
+    )
 
 
 def _rasgo_de_intencion(
@@ -179,6 +254,19 @@ def _rasgo_de_intencion(
     if not cumplidas:
         return 0.0, ()
     return len(cumplidas) / len(demanda.relaciones_buscadas), tuple(cumplidas)
+
+
+def _penalizacion_media(demanda: PerfilDeDemanda, temas: frozenset[str]) -> float:
+    """Cuanto se ha rechazado, de media, lo que ofrece este candidato.
+
+    Se aplica al componente de comportamiento —no al de tema, que ya lleva el
+    suyo por tema— para que varios «no me interesa» sobre programacion tambien
+    enfrien a quien programa, sin llegar a excluirle.
+    """
+    if not demanda.penalizacion_por_tema or not temas:
+        return 0.0
+    castigos = [demanda.penalizacion_por_tema.get(t, 0.0) for t in temas]
+    return sum(castigos) / len(castigos)
 
 
 def _rasgo_de_formato(
@@ -257,7 +345,9 @@ def _rasgo_de_comportamiento(
     if demanda.afinidad_por_tema and ofrecidos:
         acumulado = sum(demanda.afinidad_por_tema.get(t, 0.0) for t in ofrecidos)
         por_tema = _saturar(acumulado, SATURACION_DE_SENALES)
-    return min(1.0, 0.65 * directo + 0.35 * por_tema)
+    bruto = min(1.0, 0.65 * directo + 0.35 * por_tema)
+    # Lo rechazado enfria, pero no borra: ver `_penalizacion_media`.
+    return bruto * max(0.0, 1.0 - _penalizacion_media(demanda, ofrecidos))
 
 
 def construir(
@@ -269,8 +359,8 @@ def construir(
 ) -> Rasgos:
     """Mide a un candidato frente a lo que la persona necesita."""
     ofrecidos = candidato.temas_ofrecidos()
-    tema, temas_coincidentes = _rasgo_de_tema(demanda, ofrecidos)
-    intencion, relaciones = _rasgo_de_intencion(demanda, candidato, temas_coincidentes)
+    tema, temas_coincidentes, relaciones = _rasgo_de_tema(demanda, candidato)
+    intencion, _pedidas = _rasgo_de_intencion(demanda, candidato, temas_coincidentes)
     formato, formatos = _rasgo_de_formato(demanda, candidato)
     actividad, activo = _rasgo_de_actividad(candidato.actividad, ahora)
     comportamiento = _rasgo_de_comportamiento(demanda, candidato, ofrecidos)
@@ -289,6 +379,8 @@ def construir(
         reputacion=None,
         exploracion=exploracion_de(demanda.usuario_id, candidato.id, semilla),
         temas_coincidentes=temas_coincidentes,
+        # Las relaciones salen de la COINCIDENCIA real, no de lo que se pidio:
+        # es lo unico con lo que se puede escribir un motivo verdadero.
         relaciones_coincidentes=relaciones,
         formatos_coincidentes=formatos,
         interes_comun=interes_comun,

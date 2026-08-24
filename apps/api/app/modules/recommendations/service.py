@@ -32,6 +32,7 @@ from app.modules.profiles.models import Profile
 from app.modules.recommendations import cache, candidate_generator, repository as repo
 from app.modules.recommendations.config import (
     CANDIDATOS_MAXIMOS,
+    MAX_TEMAS_POR_PUBLICACION,
     CONTENT_ALGORITHM_VERSION,
     FORMATOS,
     MAX_SEGUIDAS_DEL_MISMO_AUTOR,
@@ -344,7 +345,8 @@ async def _construir_demanda(
     preferencias = await repo.cargar_preferencias(db, user_id)
     relaciones = (await repo.relaciones_de(db, [user_id])).get(user_id, {})
 
-    a_aprender = relaciones.get("learn", set()) | relaciones.get("seek_guidance", set())
+    aprender = relaciones.get("learn", set())
+    orientacion = relaciones.get("seek_guidance", set())
     intereses = relaciones.get("interest", set())
 
     tipos = list(preferencias.preferred_connection_types or []) if preferencias else []
@@ -356,17 +358,20 @@ async def _construir_demanda(
         db,
         user_id,
         desde=ahora - timedelta(days=VENTANA_DE_COMPORTAMIENTO_DIAS),
+        ahora=ahora,
         limite=SENALES_MAXIMAS,
     )
 
     return PerfilDeDemanda(
         usuario_id=user_id,
-        temas_a_aprender=frozenset(a_aprender),
+        aprender=frozenset(aprender),
+        orientacion=frozenset(orientacion),
         intereses=frozenset(intereses),
         relaciones_buscadas=frozenset(buscadas),
         busca_afines="afines" in tipos,
         formatos=frozenset(preferencias.preferred_content_formats or []) if preferencias else frozenset(),
         afinidad_por_tema=senales.por_tema,
+        penalizacion_por_tema=senales.penalizacion_por_tema,
         tiene_senales=bool(senales.por_perfil or senales.por_tema),
     ), senales
 
@@ -450,6 +455,7 @@ async def personas_puntuadas(
         db,
         user_id,
         desde=ahora - timedelta(days=VENTANA_DE_COMPORTAMIENTO_DIAS),
+        ahora=ahora,
         limite=SENALES_MAXIMAS,
     )
 
@@ -542,6 +548,11 @@ async def personas_para(
 
     items = [
         PersonRecommendation(
+            # La posicion la pone el SERVIDOR y viaja de vuelta en la impresion.
+            # Dejarsela calcular al movil funcionaria hoy, pero cualquier filtro
+            # que hiciera por su cuenta desplazaria los numeros y las metricas
+            # medirian otra cosa sin que nadie se diera cuenta.
+            rank=offset + posicion,
             id=persona.id,
             full_name=persona.full_name,
             username=persona.username,
@@ -559,7 +570,7 @@ async def personas_para(
             ],
             debug=persona.puntuacion.desglose if debug else None,
         )
-        for persona in pagina
+        for posicion, persona in enumerate(pagina)
     ]
     return items, estrategia
 
@@ -571,6 +582,59 @@ async def personas_para(
 class ContenidoOrdenado:
     post_ids: list[str]
     estrategia: str
+    #: Cuantas de las devueltas tenian temas PROPIOS (frente a heredados del
+    #: autor). Es la medida honesta de cuanto sabe de verdad el recomendador
+    #: sobre el contenido que esta ordenando.
+    con_tema_propio: int = 0
+
+
+def _afinidad_tematica(
+    demanda: PerfilDeDemanda,
+    temas_del_post: set[str] | None,
+    temas_del_autor: set[str] | None,
+) -> tuple[float, bool]:
+    """Cuanto encaja una publicacion con lo que la persona busca, y por que via.
+
+    EL ORDEN IMPORTA, y es el cambio de fondo de la V1.1:
+
+    1. Los temas PROPIOS de la publicacion, si los tiene. Es lo unico que dice
+       de verdad de que trata: un carpintero tambien publica recetas, y
+       heredarle «carpinteria» a todo lo que sube es lo que hacia que el feed
+       mintiera.
+
+    2. Si no los tiene, los temas del AUTOR, con un descuento. Sirve para las
+       publicaciones anteriores a la 0027 y para las que nadie etiqueto: son
+       una pista razonable, no un hecho, y por eso no valen lo mismo.
+
+    3. Si no hay ninguna de las dos cosas, cero. No se inventa afinidad.
+
+    Devuelve tambien SI la via fue el tema propio, para poder decir la verdad
+    al explicar y para poder medir cuanto contenido esta clasificado.
+    """
+    buscados = demanda.temas_buscados
+    if not buscados:
+        return 0.0, False
+
+    def _encaje(temas: set[str]) -> float:
+        coincidentes = temas & buscados
+        if not coincidentes:
+            return 0.0
+        castigo = max(
+            (demanda.penalizacion_por_tema.get(t, 0.0) for t in coincidentes),
+            default=0.0,
+        )
+        # Con uno basta para que sea relevante; el segundo y el tercero suman
+        # menos. Coincidir en tres temas no hace un video tres veces mejor.
+        bruto = min(1.0, len(coincidentes) / MAX_TEMAS_POR_PUBLICACION + 0.34)
+        return bruto * max(0.0, 1.0 - castigo)
+
+    if temas_del_post:
+        return _encaje(temas_del_post), True
+    if temas_del_autor:
+        # Descuento del respaldo: es una pista sobre el autor, no un hecho
+        # sobre esta publicacion concreta.
+        return _encaje(temas_del_autor) * 0.6, False
+    return 0.0, False
 
 
 def _recencia(creado: datetime, ahora: datetime, dias: int = 14) -> float:
@@ -599,6 +663,7 @@ async def contenido_para(
     solo hay tres videos, se ordenan tres videos.
     """
     ahora = ahora or ahora_utc()
+    demanda, senales = await _construir_demanda(db, user_id, ahora)
     puntuadas, estrategia = await personas_puntuadas(db, user_id, ahora=ahora)
     score_por_autor = {p.id: p.score for p in puntuadas}
 
@@ -612,6 +677,10 @@ async def contenido_para(
     )
     if bloqueados:
         consulta = consulta.where(Post.author_id.not_in(list(bloqueados)))
+    # Lo que la persona ya rechazo no vuelve. Su AUTOR si: rechazar un video no
+    # es rechazar a quien lo publico.
+    if senales.contenido_descartado:
+        consulta = consulta.where(Post.id.not_in(list(senales.contenido_descartado)))
     if media:
         con_medio = select(PostMedia.post_id).where(PostMedia.media_type == media)
         consulta = consulta.where(Post.id.in_(con_medio))
@@ -635,6 +704,19 @@ async def contenido_para(
             )
         ).all()
     )
+    # De que trata cada publicacion. UNA consulta para el lote entero.
+    temas_por_post = await repo.temas_de_publicaciones(db, post_ids)
+
+    # Y de que trata cada AUTOR, para las publicaciones que nadie etiqueto.
+    autores = {fila[1] for fila in filas}
+    oferta_de_autores = await repo.relaciones_de(db, autores)
+    temas_por_autor: dict[str, set[str]] = {}
+    for autor_id, relaciones in oferta_de_autores.items():
+        acumulado: set[str] = set()
+        for relacion in RELACIONES_DE_OFERTA:
+            acumulado |= relaciones.get(relacion, set())
+        if acumulado:
+            temas_por_autor[autor_id] = acumulado
 
     semilla = semilla_de_exploracion(ahora)
     pesos = PESOS_DE_CONTENIDO
@@ -645,21 +727,30 @@ async def contenido_para(
         id: str
         autor: str
         score: float
+        por_tema_propio: bool
 
-    puntuados = [
-        _Puntuado(
-            id=post_id,
-            autor=autor_id,
-            score=(
-                pesos.autor * score_por_autor.get(autor_id, 0.0)
-                + pesos.recencia * _recencia(creado, ahora)
-                + pesos.interaccion * min(1.0, (reacciones.get(post_id, 0) or 0) / 20.0)
-                + pesos.exploracion * exploracion_de(user_id, post_id, semilla)
-            )
-            / total,
+    puntuados = []
+    for post_id, autor_id, creado in filas:
+        propios = temas_por_post.get(post_id)
+        tema, por_tema_propio = _afinidad_tematica(
+            demanda, propios, temas_por_autor.get(autor_id)
         )
-        for post_id, autor_id, creado in filas
-    ]
+        puntuados.append(
+            _Puntuado(
+                id=post_id,
+                autor=autor_id,
+                por_tema_propio=por_tema_propio,
+                score=(
+                    pesos.tema * tema
+                    + pesos.autor * score_por_autor.get(autor_id, 0.0)
+                    + pesos.recencia * _recencia(creado, ahora)
+                    + pesos.interaccion
+                    * min(1.0, (reacciones.get(post_id, 0) or 0) / 20.0)
+                    + pesos.exploracion * exploracion_de(user_id, post_id, semilla)
+                )
+                / total,
+            )
+        )
     puntuados.sort(key=lambda p: (-p.score, p.id))
 
     # Sin rachas del mismo autor: nadie se queda fuera, solo se intercala. Con
@@ -670,7 +761,11 @@ async def contenido_para(
         maximo_seguidos=MAX_SEGUIDAS_DEL_MISMO_AUTOR,
     )
     pagina = intercalados[offset : offset + limite]
-    return ContenidoOrdenado(post_ids=[p.id for p in pagina], estrategia=estrategia)
+    return ContenidoOrdenado(
+        post_ids=[p.id for p in pagina],
+        estrategia=estrategia,
+        con_tema_propio=sum(1 for p in pagina if p.por_tema_propio),
+    )
 
 
 VERSIONES = {

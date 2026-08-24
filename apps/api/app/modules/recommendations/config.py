@@ -24,11 +24,11 @@ ONBOARDING_VERSION = 1
 
 #: Version del algoritmo. Viaja en cada respuesta para poder comparar
 #: resultados entre versiones el dia que haya una segunda.
-RECOMMENDATION_ALGORITHM_VERSION = "people-v1"
+RECOMMENDATION_ALGORITHM_VERSION = "people-v1.1"
 
 #: Version del recomendador de contenido. Va aparte del de personas porque
 #: evolucionaran a ritmos distintos.
-CONTENT_ALGORITHM_VERSION = "content-v1"
+CONTENT_ALGORITHM_VERSION = "content-v1.1"
 
 
 # --------------------------------------------------------------------------- #
@@ -42,6 +42,43 @@ RELACIONES_DE_DEMANDA: tuple[str, ...] = ("interest", "learn", "seek_guidance")
 RELACIONES_DE_OFERTA: tuple[str, ...] = ("can_help", "teach", "experienced")
 
 RELACIONES: tuple[str, ...] = RELACIONES_DE_DEMANDA + RELACIONES_DE_OFERTA
+
+
+# --------------------------------------------------------------------------- #
+# Compatibilidad DEMANDA <-> OFERTA
+# --------------------------------------------------------------------------- #
+#: Cuanto resuelve cada tipo de oferta cada tipo de necesidad, sobre el MISMO
+#: tema. En 0..1.
+#:
+#: POR QUE ESTA MATRIZ EXISTE. Antes las tres relaciones de demanda se juntaban
+#: en un saco y las tres de oferta en otro, asi que «quiero aprender React» y
+#: «alguien que tiene experiencia en React» valian lo mismo que «quiero
+#: aprender React» y «alguien que ENSENA React». No es lo mismo: quien busca
+#: aprender necesita a alguien que explique, y quien busca orientacion necesita
+#: a alguien que ya haya pasado por ahi. Confundirlo es lo que hace que un
+#: recomendador «encuentre gente del tema» en vez de encontrar a quien sirve.
+#:
+#: Y hay un caso que NO esta en esta tabla a proposito: `interest` del
+#: candidato. Que a alguien le interese la carpinteria no le convierte en
+#: alguien que pueda ensenarla. Eso se mide aparte, como afinidad social, y su
+#: motivo dice otra cosa (ver `MOTIVO_INTERES_COMUN`).
+COMPATIBILIDAD: dict[str, dict[str, float]] = {
+    # Quiero APRENDER esto -> lo mejor es alguien que lo ensene.
+    "learn": {"teach": 1.00, "can_help": 0.75, "experienced": 0.60},
+    # Busco ORIENTACION -> lo mejor es alguien que ya lo ha vivido.
+    "seek_guidance": {"experienced": 1.00, "can_help": 0.90, "teach": 0.70},
+    # Me INTERESA -> cualquier oferta sirve, pero es una pista, no una peticion.
+    "interest": {"teach": 0.55, "can_help": 0.50, "experienced": 0.50},
+}
+
+#: Cuanta necesidad expresa cada relacion de demanda. `learn` y `seek_guidance`
+#: son peticiones; `interest` es una preferencia. Multiplica al resultado de la
+#: matriz para que un interes nunca pese como una peticion.
+INTENSIDAD_DE_DEMANDA: dict[str, float] = {
+    "learn": 1.00,
+    "seek_guidance": 1.00,
+    "interest": 0.60,
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -189,23 +226,37 @@ PESOS_DE_PERSONAS = PesosDePersonas()
 class PesosDeContenido:
     """Como se ordena el contenido.
 
-    Deliberadamente mas pobre que el de personas, y por un motivo honesto: una
-    publicacion no declara de que trata. Lo unico que se sabe de su tema es lo
-    que declara QUIEN la publico, asi que la afinidad se hereda del autor. El
-    dia que el contenido tenga temas propios (o embeddings) este es el sitio
-    donde entran.
+    QUE CAMBIA EN LA V1.1. Antes el tema del contenido se heredaba entero del
+    autor, porque una publicacion no declaraba de que trataba. Eso convertia a
+    un carpintero en «carpinteria» tambien cuando publicaba una receta. Ahora
+    `post_topics` dice de que trata cada publicacion y ese componente pasa a
+    mandar; el autor sigue pesando —quien publica importa— pero ya no decide
+    solo.
+
+    El respaldo del autor sigue existiendo para el contenido anterior a la
+    migracion 0027 y para lo que nadie etiquete, con un descuento explicito:
+    es una pista, no un hecho (ver `service._afinidad_tematica`).
     """
 
+    #: De que trata la publicacion frente a lo que la persona busca. El
+    #: componente que faltaba, y ahora el que mas pesa.
+    tema: float = 0.40
     #: Afinidad con el autor (el mismo score de personas, ya calculado).
-    autor: float = 0.55
+    autor: float = 0.30
     #: Que sea reciente. Sin esto el feed se congela en lo de siempre.
-    recencia: float = 0.25
+    recencia: float = 0.18
     #: Que a otra gente le haya interesado.
-    interaccion: float = 0.10
-    exploracion: float = 0.10
+    interaccion: float = 0.06
+    exploracion: float = 0.06
 
     def total(self) -> float:
-        return self.autor + self.recencia + self.interaccion + self.exploracion
+        return (
+            self.tema
+            + self.autor
+            + self.recencia
+            + self.interaccion
+            + self.exploracion
+        )
 
 
 PESOS_DE_CONTENIDO = PesosDeContenido()
@@ -247,3 +298,91 @@ def pesos_desde(overrides: dict[str, float] | None = None) -> PesosDePersonas:
         return PESOS_DE_PERSONAS
     validos = {k: v for k, v in overrides.items() if hasattr(PESOS_DE_PERSONAS, k)}
     return replace(PESOS_DE_PERSONAS, **validos)
+
+
+# --------------------------------------------------------------------------- #
+# Decaimiento temporal de las senales
+# --------------------------------------------------------------------------- #
+#: Cada cuantos dias una senal de uso vale la MITAD.
+#:
+#: Sin esto, lo que alguien miro hace cuarenta dias pesaba igual que lo de
+#: ayer, y el recomendador se quedaba anclado en un interes que quiza ya paso.
+#: Con media vida de 30 dias:
+#:
+#:      hoy      1.00
+#:      30 dias  0.50
+#:      60 dias  0.25
+#:      90 dias  0.125
+#:
+#: Treinta dias, y no siete ni noventa, porque la ventana de comportamiento son
+#: 45 dias (`VENTANA_DE_COMPORTAMIENTO_DIAS`): con media vida mucho mas corta,
+#: casi toda la ventana valdria cero y leerla seria trabajo tirado; con una
+#: mucho mas larga, el decaimiento no cambiaria nada.
+MEDIA_VIDA_DE_SENAL_DIAS = 30.0
+
+#: Suelo del decaimiento. Una senal antigua PIERDE fuerza, no se convierte en
+#: mentira: sigue diciendo algo sobre esa persona. Sin suelo, el final de la
+#: ventana valdria exactamente cero y habria un salto brusco entre «cuenta un
+#: poco» y «no existe».
+PESO_MINIMO_POR_ANTIGUEDAD = 0.10
+
+#: LO QUE NO DECAE, y es deliberado: lo que la persona DIJO. El onboarding, los
+#: temas que declara poder ensenar y los que dice haber vivido son
+#: declaraciones, no rastros de uso. Que alguien no haya tocado la aplicacion
+#: en dos meses no le quita la carpinteria que sabe. El decaimiento se aplica
+#: SOLO a `behavior_events`.
+
+
+# --------------------------------------------------------------------------- #
+# Senal negativa
+# --------------------------------------------------------------------------- #
+#: Cuanto castiga a un TEMA que se rechace un contenido suyo.
+#:
+#: Pequeno a proposito. Rechazar un video no es rechazar un tema: puede que el
+#: video no gustara, que ya se hubiera visto, o que llegara en mal momento. Con
+#: 0.15, hacen falta varios rechazos del mismo tema para que se note de verdad,
+#: que es exactamente lo que debe pasar.
+PENALIZACION_POR_RECHAZO = 0.15
+
+#: Hasta donde puede hundirse un tema por rechazos acumulados. Un solo tema no
+#: puede desaparecer para siempre por una mala racha: la persona cambia, y un
+#: sistema que no le deja volver deja de servirle.
+PENALIZACION_MAXIMA_POR_TEMA = 0.60
+
+
+# --------------------------------------------------------------------------- #
+# Superficies: donde se mostro una recomendacion
+# --------------------------------------------------------------------------- #
+#: Los valores tienen que coincidir con el CHECK de la migracion 0027. Una
+#: superficie escrita a mano en dos sitios acaba siendo dos superficies, y las
+#: metricas dejan de sumar.
+SUPERFICIE_PERSONAS = "people_for_you"
+SUPERFICIE_FEED = "for_you_feed"
+SUPERFICIE_SIGUIENDO = "following_feed"
+SUPERFICIE_BUSQUEDA = "search"
+SUPERFICIE_PERFIL = "profile"
+
+SUPERFICIES = frozenset(
+    {
+        SUPERFICIE_PERSONAS,
+        SUPERFICIE_FEED,
+        SUPERFICIE_SIGUIENDO,
+        SUPERFICIE_BUSQUEDA,
+        SUPERFICIE_PERFIL,
+    }
+)
+
+#: Cuanto tiempo despues de ver una recomendacion se considera que una accion
+#: viene de ella. Siete dias: agendar una sesion con alguien a quien se
+#: descubrio el lunes puede pasar el jueves, y contarlo como no atribuido
+#: infravalorarian justo las conexiones que mas importan.
+VENTANA_DE_ATRIBUCION_DIAS = 7
+
+
+# --------------------------------------------------------------------------- #
+# Temas del contenido
+# --------------------------------------------------------------------------- #
+#: Cuantos temas admite una publicacion. Tres: con mas, etiquetar deja de
+#: significar «de esto trata» y pasa a significar «que me vea todo el mundo»,
+#: que es como mueren las taxonomias.
+MAX_TEMAS_POR_PUBLICACION = 3

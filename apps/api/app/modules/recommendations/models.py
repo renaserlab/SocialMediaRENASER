@@ -129,6 +129,38 @@ class BehaviorEvent(Base):
     dwell_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str] = mapped_column(Text, default="client", server_default="client")
     event_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Contexto de la recomendacion (migracion 0027). Los tres son OPCIONALES:
+    # una senal sin superficie es una accion que ocurrio FUERA de una
+    # recomendacion, y eso es informacion, no un hueco.
+    surface: Mapped[str | None] = mapped_column(Text, nullable=True)
+    algorithm_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class PostTopic(Base):
+    """De que trata una publicacion (migracion 0027).
+
+    Vive en este modulo y no en `content` porque apunta a `topics`, que es del
+    recomendador: es la arista que permite cruzar «esta persona quiere aprender
+    carpinteria» con «esta publicacion trata de carpinteria». Ponerla en
+    `content` habria obligado a ese modulo a conocer la taxonomia entera.
+
+    La clave es el PAR: etiquetar dos veces el mismo tema no es etiquetar dos
+    veces, es un error de dedo.
+    """
+
+    __tablename__ = "post_topics"
+
+    post_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    topic_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("topics.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(Text, default="manual", server_default="manual")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

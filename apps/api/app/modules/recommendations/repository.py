@@ -15,7 +15,7 @@ consulta por persona: con doscientos candidatos, doscientos viajes.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,8 +24,15 @@ from app.modules.bookings.models import Booking
 from app.modules.catalog.models import Course
 from app.modules.content.models import Post, PostLike, PostMedia
 from app.modules.profiles.models import Profile
+from app.modules.recommendations.config import (
+    MEDIA_VIDA_DE_SENAL_DIAS,
+    PENALIZACION_MAXIMA_POR_TEMA,
+    PENALIZACION_POR_RECHAZO,
+    PESO_MINIMO_POR_ANTIGUEDAD,
+)
 from app.modules.recommendations.models import (
     BehaviorEvent,
+    PostTopic,
     RecommendationPreference,
     Topic,
     UserTopicRelation,
@@ -72,6 +79,13 @@ class SenalesDelUsuario:
     por_tema: dict[str, float] = field(default_factory=dict)
     #: Perfiles que la persona marco como «no me interesa». No se recomiendan.
     descartados: set[str] = field(default_factory=set)
+    #: Publicaciones concretas rechazadas. Se excluyen del feed, pero NO se
+    #: bloquea a su autor: rechazar un video no es rechazar a una persona.
+    contenido_descartado: set[str] = field(default_factory=set)
+    #: Cuanto se ha rechazado cada tema, de 0 a 1. Resta relevancia sin borrar
+    #: el tema: hacen falta varios rechazos para que se note, y nunca llega a
+    #: hundirlo del todo (ver `PENALIZACION_MAXIMA_POR_TEMA`).
+    penalizacion_por_tema: dict[str, float] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- #
@@ -409,13 +423,40 @@ PESO_POR_SENAL: dict[str, float] = {
 }
 
 
+def peso_por_antiguedad(creado: datetime, ahora: datetime) -> float:
+    """Cuanto vale HOY una senal de hace N dias.
+
+    Decaimiento exponencial con media vida configurable
+    (`MEDIA_VIDA_DE_SENAL_DIAS`): a los 30 dias vale la mitad, a los 60 un
+    cuarto, a los 90 un octavo. Sin esto, lo que alguien miro hace mes y medio
+    pesaba igual que lo de ayer, y el recomendador se quedaba anclado en un
+    interes que quiza ya paso.
+
+    NUNCA baja de `PESO_MINIMO_POR_ANTIGUEDAD`. Una senal antigua pierde
+    fuerza, no se convierte en mentira: sigue diciendo algo de esa persona. Sin
+    suelo habria un salto brusco entre «cuenta un poco» y «no existe».
+
+    Recibe el reloj por parametro y no lo consulta: asi se puede comprobar el
+    decaimiento de noventa dias sin esperarlos.
+    """
+    if creado.tzinfo is None:
+        creado = creado.replace(tzinfo=timezone.utc)
+    dias = max(0.0, (ahora - creado).total_seconds() / 86400.0)
+    factor = 0.5 ** (dias / MEDIA_VIDA_DE_SENAL_DIAS)
+    return max(PESO_MINIMO_POR_ANTIGUEDAD, factor)
+
+
 async def senales_de(
-    db: AsyncSession, user_id: str, *, desde: datetime, limite: int
+    db: AsyncSession, user_id: str, *, desde: datetime, ahora: datetime, limite: int
 ) -> SenalesDelUsuario:
     """Lo que ha hecho esta persona, ya sumado por perfil y por tema.
 
     Se leen las mas RECIENTES primero y con tope: alguien muy activo no puede
     hacer que su propia pantalla tarde mas que la de los demas.
+
+    Cada senal se pondera por su ANTIGUEDAD (ver `peso_por_antiguedad`): lo de
+    ayer manda sobre lo del mes pasado. El reloj llega por parametro para poder
+    comprobar el decaimiento sin esperar noventa dias.
     """
     filas = (
         await db.scalars(
@@ -427,28 +468,47 @@ async def senales_de(
     ).all()
 
     senales = SenalesDelUsuario()
+    rechazos_por_tema: dict[str, int] = {}
+
     for evento in filas:
         if evento.event_type == "not_interested":
-            if evento.entity_type == "profile" and evento.entity_id:
-                senales.descartados.add(evento.entity_id)
+            # Rechazar tiene DOS efectos y conviene no mezclarlos: la entidad
+            # exacta desaparece, y su tema se enfria un poco. Rechazar un video
+            # NO bloquea a quien lo publico.
+            if evento.entity_id:
+                if evento.entity_type == "profile":
+                    senales.descartados.add(evento.entity_id)
+                elif evento.entity_type == "post":
+                    senales.contenido_descartado.add(evento.entity_id)
+            for topic_id in evento.topic_ids or ():
+                rechazos_por_tema[topic_id] = rechazos_por_tema.get(topic_id, 0) + 1
             continue
+
         peso = PESO_POR_SENAL.get(evento.event_type, 0.0)
         if peso <= 0:
             continue
-        # Lo visto a medias vale menos que lo visto entero.
+        # Lo visto a medias vale menos que lo visto entero...
         if evento.value is not None:
             peso *= max(0.2, float(evento.value))
+        # ...y lo de hace un mes, menos que lo de ayer.
+        peso *= peso_por_antiguedad(evento.created_at, ahora)
+
         if evento.entity_type == "profile" and evento.entity_id:
             senales.por_perfil[evento.entity_id] = (
                 senales.por_perfil.get(evento.entity_id, 0.0) + peso
             )
         for topic_id in evento.topic_ids or ():
             senales.por_tema[topic_id] = senales.por_tema.get(topic_id, 0.0) + peso
+
+    senales.penalizacion_por_tema = {
+        topic_id: min(PENALIZACION_MAXIMA_POR_TEMA, veces * PENALIZACION_POR_RECHAZO)
+        for topic_id, veces in rechazos_por_tema.items()
+    }
     return senales
 
 
 async def autores_de_senales(
-    db: AsyncSession, user_id: str, *, desde: datetime, limite: int
+    db: AsyncSession, user_id: str, *, desde: datetime, ahora: datetime, limite: int
 ) -> dict[str, float]:
     """Afinidad con AUTORES a partir de senales sobre su contenido.
 
@@ -458,7 +518,12 @@ async def autores_de_senales(
     """
     filas = (
         await db.execute(
-            select(Post.author_id, BehaviorEvent.event_type, BehaviorEvent.value)
+            select(
+                Post.author_id,
+                BehaviorEvent.event_type,
+                BehaviorEvent.value,
+                BehaviorEvent.created_at,
+            )
             .join(Post, Post.id == BehaviorEvent.entity_id)
             .where(
                 BehaviorEvent.user_id == user_id,
@@ -469,11 +534,41 @@ async def autores_de_senales(
         )
     ).all()
     salida: dict[str, float] = {}
-    for autor, tipo, valor in filas:
+    for autor, tipo, valor, creado in filas:
         peso = PESO_POR_SENAL.get(tipo, 0.0)
         if peso <= 0:
             continue
         if valor is not None:
             peso *= max(0.2, float(valor))
+        peso *= peso_por_antiguedad(creado, ahora)
         salida[autor] = salida.get(autor, 0.0) + peso
+    return salida
+
+
+# --------------------------------------------------------------------------- #
+# Temas del contenido (migracion 0027)
+# --------------------------------------------------------------------------- #
+async def temas_de_publicaciones(
+    db: AsyncSession, post_ids: list[str]
+) -> dict[str, set[str]]:
+    """De que trata cada publicacion. UNA consulta para el lote entero.
+
+    Solo devuelve las que TIENEN temas. Las que faltan son las publicaciones
+    anteriores a la 0027 y las que nadie etiqueto; para esas, el ranker cae a
+    los temas del autor (ver `service.contenido_para`). Distinguir «no tiene»
+    de «tiene cero» es justo lo que permite que el contenido antiguo siga
+    funcionando en vez de quedarse sin puntuar.
+    """
+    if not post_ids:
+        return {}
+    filas = (
+        await db.execute(
+            select(PostTopic.post_id, PostTopic.topic_id).where(
+                PostTopic.post_id.in_(post_ids)
+            )
+        )
+    ).all()
+    salida: dict[str, set[str]] = {}
+    for post_id, topic_id in filas:
+        salida.setdefault(post_id, set()).add(topic_id)
     return salida
