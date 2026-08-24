@@ -169,7 +169,7 @@ export const course: Course = {
   id: 'lider-vida-empresa',
   title: 'Líder de tu vida y de tu empresa',
   subtitle: 'Programa online',
-  price: 1497,
+  priceMinor: 149700,
   currency: 'MXN',
   modules: 8,
   lessons: 45,

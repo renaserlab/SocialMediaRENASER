@@ -166,11 +166,42 @@ export type Course = {
   /** URL firmada de la portada, ya resuelta por el repositorio. */
   coverUrl?: string;
   subtitle: string;
-  price: number;
+  /**
+   * Precio en la unidad MENOR (centavos). Nunca decimales.
+   *
+   * Antes era `price` en unidad mayor y el servidor multiplicaba por 100, con
+   * lo que «49.90» no se podia expresar. Ver `lib/dinero.ts`.
+   */
+  priceMinor: number;
   currency: 'PEN' | 'MXN' | 'USD';
   modules: number;
   lessons: number;
   description: string;
+  /** `draft` | `published` | `hidden`. Un borrador solo lo ve su autor. */
+  status?: string;
+  /** Temas del catálogo común. Vacío mientras la 0028 no esté aplicada. */
+  topicIds?: string[];
+  /** Anunciado pero todavía sin contenido. No es lo mismo que borrador. */
+  comingSoon?: boolean;
+};
+
+/** Un curso al que se tiene acceso, con el avance real. Lo devuelve el servidor. */
+export type MyCourse = {
+  id: string;
+  title: string;
+  subtitle: string;
+  coverPath?: string | null;
+  coverUrl?: string;
+  authorId: string;
+  priceMinor: number;
+  currency: 'PEN' | 'MXN' | 'USD';
+  lessonsTotal: number;
+  lessonsCompleted: number;
+  progressPercent: number;
+  /** `not_started` | `in_progress` | `completed`. Tres cosas distintas. */
+  state: 'not_started' | 'in_progress' | 'completed';
+  /** Primera lección pendiente, para «Continuar». */
+  nextLessonId: string | null;
 };
 
 export type Circle = {
@@ -198,6 +229,14 @@ export type Lesson = {
   resources: LessonResource[];
   /** Ruta del video en Storage; la pantalla la firma para reproducirlo. */
   mediaPath?: string | null;
+  /** Por dónde iba: el reproductor arranca ahí en vez de desde el principio. */
+  progressSeconds?: number;
+  completed?: boolean;
+  durationSeconds?: number;
+  /** Si puede editar esta lección: el autor del curso o la administración. */
+  canManage?: boolean;
+  /** Si tiene acceso al contenido de pago del curso. */
+  hasAccess?: boolean;
 };
 
 /** Un tramo real de historia, tal y como lo devuelve el backend. */
