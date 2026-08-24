@@ -44,6 +44,7 @@ from app.modules.content.schemas import (
 from app.modules.notifications.push import send_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
+from app.modules.recommendations import temas_de_contenido
 from app.modules.social_graph.models import Follow
 from app.modules.social_graph.service import blocked_either_way
 from app.shared.database import get_db
@@ -111,6 +112,7 @@ def _to_post_read(
     lk: int | bool,
     sv: int | bool,
     media: list[PostMediaRead] | None = None,
+    topic_ids: list[str] | None = None,
 ) -> PostRead:
     return PostRead(
         id=post.id,
@@ -125,6 +127,7 @@ def _to_post_read(
         comments_count=cc or 0,
         liked_by_me=(lk or 0) > 0,
         saved_by_me=(sv or 0) > 0,
+        topic_ids=topic_ids or [],
     )
 
 
@@ -284,8 +287,18 @@ async def list_posts(
         of_type = select(PostMedia.post_id).where(PostMedia.media_type == exclude_media)
         stmt = stmt.where(Post.id.not_in(of_type))
     rows = (await db.execute(stmt)).all()
-    media_map = await _load_media_map(db, [row[0].id for row in rows])
-    return [_to_post_read(*row, media=media_map.get(row[0].id, [])) for row in rows]
+    ids = [row[0].id for row in rows]
+    media_map = await _load_media_map(db, ids)
+    # Una consulta para los temas de todo el lote, no una por publicacion.
+    temas = await temas_de_contenido.leer(db, ids)
+    return [
+        _to_post_read(
+            *row,
+            media=media_map.get(row[0].id, []),
+            topic_ids=temas.get(row[0].id, []),
+        )
+        for row in rows
+    ]
 
 
 @router.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
@@ -302,6 +315,14 @@ async def create_post(
         category=payload.category,
     )
     db.add(post)
+    # Los temas se validan ANTES del commit y viajan con el: una publicacion
+    # guardada sin sus temas se quedaria sin clasificar para siempre y nadie se
+    # enteraria. Si un tema no existe, no se guarda nada.
+    await db.flush()
+    if payload.topic_ids:
+        await temas_de_contenido.fijar(
+            db, post.id, payload.topic_ids, autor_id=current_user.id
+        )
     await db.commit()
     await db.refresh(post)
 
@@ -345,7 +366,12 @@ async def create_post(
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil del autor no encontrado.")
-    return _to_post_read(post, profile, 0, 0, 0, 0, media=media)
+    # Los temas se devuelven leidos de la base y no del payload: asi lo que ve
+    # quien publica es exactamente lo que quedo guardado, y no lo que pidio.
+    temas = await temas_de_contenido.leer(db, [post.id])
+    return _to_post_read(
+        post, profile, 0, 0, 0, 0, media=media, topic_ids=temas.get(post.id, [])
+    )
 
 
 async def _load_single_post(
@@ -363,7 +389,12 @@ async def _load_single_post(
     if row is None:
         raise NotFoundError("Publicacion no encontrada.")
     media_map = await _load_media_map(db, [row[0].id])
-    return _to_post_read(*row, media=media_map.get(row[0].id, []))
+    temas = await temas_de_contenido.leer(db, [row[0].id])
+    return _to_post_read(
+        *row,
+        media=media_map.get(row[0].id, []),
+        topic_ids=temas.get(row[0].id, []),
+    )
 
 
 async def leer_posts_por_id(
@@ -391,8 +422,13 @@ async def leer_posts_por_id(
         )
     ).all()
     media_map = await _load_media_map(db, [fila[0].id for fila in filas])
+    temas = await temas_de_contenido.leer(db, [fila[0].id for fila in filas])
     por_id = {
-        fila[0].id: _to_post_read(*fila, media=media_map.get(fila[0].id, []))
+        fila[0].id: _to_post_read(
+            *fila,
+            media=media_map.get(fila[0].id, []),
+            topic_ids=temas.get(fila[0].id, []),
+        )
         for fila in filas
     }
     return [por_id[pid] for pid in post_ids if pid in por_id]
@@ -433,6 +469,14 @@ async def update_post(
         post.visibility = payload.visibility
     if payload.category is not None:
         post.category = payload.category
+
+    # `topic_ids` ausente deja los temas como estaban; presente los REEMPLAZA
+    # (una lista vacia equivale a quitarlos todos). Solo los de ESTA
+    # publicacion: el borrado va acotado por `post_id`.
+    if payload.topic_ids is not None:
+        await temas_de_contenido.fijar(
+            db, post_id, payload.topic_ids, autor_id=current_user.id
+        )
 
     # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
     # lista vacia equivale a quitarlo).

@@ -63,6 +63,16 @@ class PostCreate(BaseModel):
     image_paths: list[str] = Field(default_factory=list, max_length=4)
     # Etiqueta tematica (los filtros del podcast). Libre pero acotada.
     category: str | None = Field(default=None, max_length=40)
+    # De que TRATA la publicacion (migracion 0027). Son ids de `topics`, la
+    # misma taxonomia que usan las personas: por eso se pueden cruzar «quiero
+    # aprender carpinteria» con «este video trata de carpinteria».
+    #
+    # No confundir con `category`, que es la carpeta con la que un creador
+    # ordena SUS audios. Una es de quien publica; la otra, del producto.
+    #
+    # El maximo real lo comprueba el servidor (MAX_TEMAS_POR_PUBLICACION); aqui
+    # solo se acota el tamano de la peticion.
+    topic_ids: list[str] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def _algo_que_publicar(self) -> "PostCreate":
@@ -82,6 +92,9 @@ class PostUpdate(BaseModel):
     visibility: str | None = Field(default=None, pattern=r"^(public|followers|circle)$")
     media: list[PostMediaInput] | None = Field(default=None, max_length=4)
     category: str | None = Field(default=None, max_length=40)
+    # Ausente = no se tocan los temas. Presente (aunque sea vacio) = se
+    # reemplazan por lo que llegue, lo que permite QUITAR uno mal elegido.
+    topic_ids: list[str] | None = Field(default=None, max_length=10)
 
 
 class PostRead(BaseModel):
@@ -97,6 +110,9 @@ class PostRead(BaseModel):
     comments_count: int = 0
     liked_by_me: bool = False
     saved_by_me: bool = False
+    #: De que trata. Vacio en el contenido anterior a la 0027 y en el que nadie
+    #: etiqueto: para ese, el recomendador cae a los temas del autor.
+    topic_ids: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
