@@ -19,7 +19,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from uuid import uuid4
+
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +29,13 @@ from app.core.config import Settings, get_settings
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.router import leer_posts_por_id
 from app.modules.content.schemas import PostRead
-from app.modules.recommendations import cache, metrics, service, temas_de_contenido
+from app.modules.recommendations import (
+    cache,
+    esquema,
+    metrics,
+    service,
+    temas_de_contenido,
+)
 from app.modules.recommendations.config import (
     CONTENT_ALGORITHM_VERSION,
     ONBOARDING_VERSION,
@@ -269,6 +277,11 @@ async def registrar_eventos(
         await temas_de_contenido.leer(db, rechazados) if rechazados else {}
     )
 
+    # Sin la 0027 las senales se guardan igual, pero sin decir de donde venian:
+    # se sigue aprendiendo, no se puede medir el embudo. Perder informacion es
+    # aceptable; que la aplicacion deje de registrar nada, no.
+    con_contexto = await esquema.hay_atribucion(db)
+
     aceptadas = 0
     duplicadas = 0
     vistas_en_el_lote: set[str] = set()
@@ -279,26 +292,30 @@ async def registrar_eventos(
             continue
         if clave:
             vistas_en_el_lote.add(clave)
-        db.add(
-            BehaviorEvent(
-                user_id=current_user.id,
-                event_type=evento.event_type,
-                entity_type=evento.entity_type,
-                entity_id=evento.entity_id,
-                value=evento.value,
-                dwell_ms=evento.dwell_ms,
-                event_key=clave,
-                source="client",
-                # De donde venia. Es lo que convierte una senal suelta en una
-                # linea de un embudo que se puede medir.
-                surface=evento.surface,
-                algorithm_version=evento.algorithm_version,
-                rank=evento.rank,
-                # Los temas del contenido rechazado, para que «no me interesa»
-                # enfrie el tema y no solo la publicacion concreta.
-                topic_ids=temas_rechazados.get(evento.entity_id or "") or None,
-            )
-        )
+        # INSERT con columnas nombradas, no `db.add(BehaviorEvent(...))`: el ORM
+        # escribe TODAS las del modelo aunque no se toquen, y las tres de la
+        # 0027 no existen mientras esa migracion no este aplicada.
+        campos: dict[str, object] = {
+            "id": str(uuid4()),
+            "user_id": current_user.id,
+            "event_type": evento.event_type,
+            "entity_type": evento.entity_type,
+            "entity_id": evento.entity_id,
+            "value": evento.value,
+            "dwell_ms": evento.dwell_ms,
+            "event_key": clave,
+            "source": "client",
+            # Los temas del contenido rechazado, para que «no me interesa»
+            # enfrie el tema y no solo la publicacion concreta.
+            "topic_ids": temas_rechazados.get(evento.entity_id or "") or None,
+        }
+        if con_contexto:
+            # De donde venia. Es lo que convierte una senal suelta en una linea
+            # de un embudo que se puede medir.
+            campos["surface"] = evento.surface
+            campos["algorithm_version"] = evento.algorithm_version
+            campos["rank"] = evento.rank
+        await db.execute(insert(BehaviorEvent).values(campos))
         aceptadas += 1
 
     try:
@@ -353,7 +370,13 @@ async def metricas(
     """
     ahora = datetime.now(timezone.utc)
     desde = ahora - timedelta(days=days)
-    embudos = await metrics.embudo(db, desde=desde, ahora=ahora)
+    # Sin la 0027 no hay columnas de contexto que leer. Se responde vacio, que
+    # es la verdad —«no hay nada medido»—, en vez de un 500.
+    embudos = (
+        await metrics.embudo(db, desde=desde, ahora=ahora)
+        if await esquema.hay_atribucion(db)
+        else []
+    )
     return RecommendationMetrics(
         since=desde,
         attribution_window_days=VENTANA_DE_ATRIBUCION_DIAS,

@@ -160,7 +160,7 @@ async def get_or_create_direct(
         # Solo cuando la conversacion se CREA. Abrir un chat que ya existia no
         # es una decision nueva, y contarla cada vez que se entra convertiria
         # una senal fuerte en ruido.
-        registrar_senal(
+        await registrar_senal(
             db,
             user_id=current_user.id,
             event_type="message_started",

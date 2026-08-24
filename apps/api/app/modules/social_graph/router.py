@@ -191,7 +191,7 @@ async def follow_profile(
         # es aqui donde consta que ocurrio de verdad. Viaja en el mismo commit
         # que el seguimiento, asi que no puede quedar una senal de algo que no
         # llego a pasar.
-        registrar_senal(
+        await registrar_senal(
             db,
             user_id=current_user.id,
             event_type="follow",

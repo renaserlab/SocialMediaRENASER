@@ -21,7 +21,9 @@ DOS REGLAS QUE NO SE NEGOCIAN:
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
+from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.recommendations import cache
@@ -36,7 +38,7 @@ EVENTOS_DE_SERVIDOR = frozenset(
 )
 
 
-def registrar_senal(
+async def registrar_senal(
     db: AsyncSession,
     *,
     user_id: str,
@@ -50,6 +52,14 @@ def registrar_senal(
     Si el tipo no es de servidor, no se anota: es un error de programacion y es
     preferible que no se guarde nada a que una senal de cliente entre por la
     puerta de atras marcada como verificada.
+
+    POR QUE UN INSERT EXPLICITO Y NO `db.add(BehaviorEvent(...))`. Porque el ORM
+    escribe TODAS las columnas del modelo en el INSERT, aunque no se toquen: al
+    anadir las tres de la migracion 0027, seguir a alguien empezo a fallar
+    contra una base donde esa migracion todavia no estaba aplicada. Nombrando
+    las columnas se escribe exactamente lo que se quiere escribir, y una senal
+    de servidor nunca lleva contexto de recomendacion —no viene de ninguna
+    pantalla— asi que aqui esas tres columnas sobran siempre.
     """
     if event_type not in EVENTOS_DE_SERVIDOR:
         logger.warning(
@@ -57,8 +67,9 @@ def registrar_senal(
         )
         return
     try:
-        db.add(
-            BehaviorEvent(
+        await db.execute(
+            insert(BehaviorEvent).values(
+                id=str(uuid4()),
                 user_id=user_id,
                 event_type=event_type,
                 entity_type=entity_type,

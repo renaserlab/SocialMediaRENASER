@@ -22,7 +22,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationAppError
-from app.modules.recommendations import cache
+from app.modules.recommendations import cache, esquema
 from app.modules.recommendations.config import MAX_TEMAS_POR_PUBLICACION
 from app.modules.recommendations.models import PostTopic, Topic
 
@@ -74,6 +74,12 @@ async def fijar(
     juntos: una publicacion guardada sin sus temas se quedaria sin clasificar
     para siempre sin que nadie se entere.
     """
+    if not await esquema.hay_temas_de_contenido(db):
+        # Sin la 0027 no hay donde guardarlos. Se publica igual —etiquetar es
+        # opcional— y el recomendador cae al respaldo del autor. Lo que no puede
+        # pasar es que no se pueda publicar por esto.
+        return
+
     limpios = await validar(db, topic_ids)
 
     await db.execute(delete(PostTopic).where(PostTopic.post_id == post_id))
@@ -94,6 +100,11 @@ async def leer(db: AsyncSession, post_ids: list[str]) -> dict[str, list[str]]:
     viajes para pintar unas etiquetas.
     """
     if not post_ids:
+        return {}
+    if not await esquema.hay_temas_de_contenido(db):
+        # Ninguna publicacion tiene temas porque la tabla no existe. Vacio es la
+        # respuesta correcta, no un error: es lo mismo que decir «nadie ha
+        # etiquetado nada todavia».
         return {}
     filas = (
         await db.execute(

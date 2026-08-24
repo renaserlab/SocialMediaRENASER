@@ -234,7 +234,7 @@ async def create_booking(
     # Pedir una sesion es la senal mas fuerte que hay hoy: alguien ha decidido
     # dedicarle tiempo a otra persona. La escribe el servidor, en el mismo
     # commit que la reserva.
-    registrar_senal(
+    await registrar_senal(
         db,
         user_id=current_user.id,
         event_type="booking_requested",
@@ -295,7 +295,7 @@ async def update_booking(
             (reserva.requester_id, reserva.provider_id),
             (reserva.provider_id, reserva.requester_id),
         ):
-            registrar_senal(
+            await registrar_senal(
                 db,
                 user_id=quien,
                 event_type="booking_completed",

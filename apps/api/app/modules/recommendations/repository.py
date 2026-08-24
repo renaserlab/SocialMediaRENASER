@@ -24,6 +24,7 @@ from app.modules.bookings.models import Booking
 from app.modules.catalog.models import Course
 from app.modules.content.models import Post, PostLike, PostMedia
 from app.modules.profiles.models import Profile
+from app.modules.recommendations import esquema
 from app.modules.recommendations.config import (
     MEDIA_VIDA_DE_SENAL_DIAS,
     PENALIZACION_MAXIMA_POR_TEMA,
@@ -458,9 +459,21 @@ async def senales_de(
     ayer manda sobre lo del mes pasado. El reloj llega por parametro para poder
     comprobar el decaimiento sin esperar noventa dias.
     """
+    # Columnas EXPLICITAS, no la entidad entera. Dos motivos, y el segundo se
+    # aprendio por las malas: se lee menos de lo que no se usa, y sobre todo
+    # esta consulta no menciona las columnas de la 0027, asi que funciona igual
+    # antes y despues de aplicarla. Con `select(BehaviorEvent)`, SQLAlchemy
+    # pedia `surface` y la peticion entera reventaba contra una base sin migrar.
     filas = (
-        await db.scalars(
-            select(BehaviorEvent)
+        await db.execute(
+            select(
+                BehaviorEvent.event_type,
+                BehaviorEvent.entity_type,
+                BehaviorEvent.entity_id,
+                BehaviorEvent.topic_ids,
+                BehaviorEvent.value,
+                BehaviorEvent.created_at,
+            )
             .where(BehaviorEvent.user_id == user_id, BehaviorEvent.created_at >= desde)
             .order_by(BehaviorEvent.created_at.desc())
             .limit(limite)
@@ -560,6 +573,10 @@ async def temas_de_publicaciones(
     funcionando en vez de quedarse sin puntuar.
     """
     if not post_ids:
+        return {}
+    if not await esquema.hay_temas_de_contenido(db):
+        # Sin la 0027 nadie tiene temas propios y todo el contenido se ordena
+        # por el respaldo del autor, igual que en la V1.
         return {}
     filas = (
         await db.execute(
