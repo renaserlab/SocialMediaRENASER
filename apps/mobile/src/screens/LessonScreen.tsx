@@ -12,10 +12,10 @@ import { ListRow } from '@/components/ListRow';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useLesson } from '@/hooks/useLesson';
+import { useProgresoDeLeccion } from '@/hooks/useProgresoDeLeccion';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { CourseContentRepository } from '@/repositories/CourseContentRepository';
-import { useAppStore } from '@/store/useAppStore';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { assets } from '@/data/assets';
 import { SAMPLE_VIDEO_URL } from '@/data/media';
@@ -29,7 +29,30 @@ export function LessonScreen() {
   const router = useRouter();
 
   const { lesson, loading, error, reload } = useLesson(id);
-  const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
+  /*
+    Quien puede editar ESTA leccion lo decide el SERVIDOR (`can_manage`), no el
+    rol de administrador. Antes se usaba `isAdmin`, asi que el autor de un curso
+    no podia tocar su propia leccion: podia crearla por la base de datos y no
+    veia un solo boton para editarla. Y esconder un boton no es seguridad: el
+    servidor y la RLS vuelven a comprobarlo en cada escritura.
+  */
+  const canManage = lesson?.canManage === true;
+  /*
+    Guardar el avance NO es una peticion por aviso del reproductor: el hook
+    decide cada cuanto (ver `lib/ritmoDeProgreso.ts`) y fuerza el guardado en
+    los momentos en que puede no haber otra oportunidad —pausa, salir, segundo
+    plano, final—.
+
+    Solo con acceso: sin el, el servidor devolveria 403 en cada tramo y seria
+    ruido en el registro por algo que ya se sabe de antemano.
+  */
+  const { alAvanzar, alTerminar } = useProgresoDeLeccion(id, {
+    habilitado: lesson?.hasAccess === true,
+    alCompletar: (cursoCompleto) => {
+      toast(cursoCompleto ? '¡Curso completado!' : 'Lección completada');
+    },
+  });
+
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [savingDescription, setSavingDescription] = useState(false);
@@ -137,8 +160,8 @@ export function LessonScreen() {
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
         // Eliminar vive aqui y no en el temario: alli tocar la fila borraba la
         // leccion, de modo que no habia forma de abrirla para revisarla.
-        rightIcon={isAdmin ? 'trash-2' : undefined}
-        onRightPress={isAdmin ? () => void removeLesson() : undefined}
+        rightIcon={canManage ? 'trash-2' : undefined}
+        onRightPress={canManage ? () => void removeLesson() : undefined}
       />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/*
@@ -152,6 +175,11 @@ export function LessonScreen() {
             style={[styles.playerContainer, { borderBottomWidth: 1, borderColor: colors.border }]}
             contentFit="cover"
             nativeControls
+            // Retomar por donde iba. Es la diferencia entre «volver al curso» y
+            // «volver a empezar el curso».
+            startAtSeconds={lesson.progressSeconds ?? 0}
+            onProgressSeconds={alAvanzar}
+            onEnded={alTerminar}
           />
         ) : (
           <View
@@ -203,12 +231,12 @@ export function LessonScreen() {
           </Text>
 
           {/* Descripcion de la leccion; solo la edita la administracion. */}
-          {lesson.summary || isAdmin ? (
+          {lesson.summary || canManage ? (
             <>
               <View style={[styles.divider, { backgroundColor: colors.border }]} />
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>Descripción</Text>
-                {isAdmin ? (
+                {canManage ? (
                   <Pressable
                     onPress={() => {
                       setDescriptionDraft(lesson.summary ?? '');
@@ -229,7 +257,7 @@ export function LessonScreen() {
           ) : null}
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <LessonResources lessonId={lesson.id} canEdit={isAdmin} />
+          <LessonResources lessonId={lesson.id} courseId={lesson.courseId} canEdit={canManage} />
         </View>
       </ScrollView>
 

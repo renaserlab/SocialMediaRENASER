@@ -96,7 +96,6 @@ type AppState = {
   likedPostIds: string[];
   savedPostIds: string[];
   reservedEventIds: string[];
-  purchasedCourseIds: string[];
   conversations: Conversation[];
   liveMessages: Array<{ id: string; author: string; text: string }>;
 
@@ -167,7 +166,6 @@ type AppState = {
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
   toggleReservation: (eventId: string) => void;
-  purchaseCourse: (courseId: string) => void;
   sendMessage: (conversationId: string, text: string) => void;
   sendLiveMessage: (text: string) => void;
   resetDemo: () => void;
@@ -215,7 +213,6 @@ export const useAppStore = create<AppState>()(
       likedPostIds: [],
       savedPostIds: [],
       reservedEventIds: [],
-      purchasedCourseIds: [],
       conversations: backendEnabled ? [] : conversations,
       liveMessages: [
         { id: 'l1', author: 'María G.', text: 'Gracias Darren, este era el punto que necesitaba.' },
@@ -659,12 +656,6 @@ export const useAppStore = create<AppState>()(
             ? state.reservedEventIds.filter((id) => id !== eventId)
             : [...state.reservedEventIds, eventId],
         })),
-      purchaseCourse: (courseId) =>
-        set((state) => ({
-          purchasedCourseIds: state.purchasedCourseIds.includes(courseId)
-            ? state.purchasedCourseIds
-            : [...state.purchasedCourseIds, courseId],
-        })),
       sendMessage: (conversationId, text) => {
         const trimmed = text.trim();
         if (!trimmed) return;
@@ -703,7 +694,6 @@ export const useAppStore = create<AppState>()(
           likedPostIds: [],
           savedPostIds: [],
           reservedEventIds: [],
-          purchasedCourseIds: [],
           conversations,
           dismissedGuides: [],
           languageSelected: false,
@@ -734,7 +724,6 @@ export const useAppStore = create<AppState>()(
         likedPostIds: state.likedPostIds,
         savedPostIds: state.savedPostIds,
         reservedEventIds: state.reservedEventIds,
-        purchasedCourseIds: state.purchasedCourseIds,
       }),
       // La firma real es (state, error). Si la rehidratacion falla, `state` llega
       // undefined y el arranque se quedaba bloqueado para siempre en el splash.

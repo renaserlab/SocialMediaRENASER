@@ -221,11 +221,23 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
               );
             }
           })
-        : LearningRepository.listCourses().then((list) => {
-            // Solo los que publica este perfil, igual que con los eventos.
+        : /*
+             En el perfil propio se piden LOS MIOS, que incluyen borradores.
+
+             Con el catalogo publico, un curso recien creado no aparecia por
+             ninguna parte —crear ya no publica— y parecia no haberse guardado.
+             En el perfil de otra persona se sigue usando el catalogo publico:
+             sus borradores son suyos.
+           */
+          (isOwner
+            ? LearningRepository.listMine()
+            : LearningRepository.listCourses()
+          ).then((list) => {
             if (alive) {
               setCourses(
-                profileId ? list.filter((c) => !c.authorId || c.authorId === profileId) : list,
+                profileId && !isOwner
+                  ? list.filter((c) => !c.authorId || c.authorId === profileId)
+                  : list,
               );
             }
           });
@@ -248,7 +260,10 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     };
     // `testimonialFilter` es de la galeria y `category` del podcast: cada
     // seccion recarga cuando cambia el suyo.
-  }, [kind, profileId, reloadKey, testimonialFilter, category]);
+    // `isOwner` decide si los cursos se piden del catalogo publico o de los
+    // propios (con borradores): sin el en la lista, cambiar de perfil sin
+    // desmontar dejaria la decision anterior.
+  }, [kind, profileId, reloadKey, testimonialFilter, category, isOwner]);
 
   const removeTestimonial = async (id: string) => {
     const accepted = await confirm({
@@ -535,7 +550,8 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                         id: course.id,
                         title: course.title,
                         description: course.description,
-                        price: course.price,
+                        priceMinor: course.priceMinor,
+                        topicIds: course.topicIds,
                       })
                   : undefined
               }

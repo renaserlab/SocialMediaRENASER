@@ -43,6 +43,24 @@ function formatDuration(seconds: number): string {
  * el editor. Quien puede escribir lo impone la RLS (0012_course_content.sql);
  * `canEdit` solo evita mostrar botones que no llevarian a ninguna parte.
  */
+/*
+  CUANTO PUEDE DURAR UNA LECCION.
+
+  Aqui habia un limite duro de 15 a 20 minutos, y una leccion de catorce
+  minutos y medio no se podia guardar. No responde a ninguna regla del producto
+  que se haya podido encontrar: el backend tenia la misma validacion escrita en
+  `LessonCreate`, pero ese esquema NO lo usa ningun endpoint —el contenido se
+  escribe contra Supabase directamente— asi que la regla solo existia aqui y
+  nunca se aplico en el servidor.
+
+  Se sustituye por un limite de cordura: lo justo para que un toque accidental
+  no se guarde como leccion y para que un archivo de doce horas no se suba por
+  error. Si el producto SI quiere una duracion pedagogica concreta, se cambian
+  estas dos constantes y vuelve, pero como decision tomada y no heredada.
+*/
+const DURACION_MINIMA = 30;
+const DURACION_MAXIMA = 4 * 60 * 60;
+
 export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged }: Props) {
   const { colors } = useAppTheme();
   const [modules, setModules] = useState<CourseModule[]>([]);
@@ -357,14 +375,21 @@ function AddLessonSheet({
   const save = async () => {
     if (!title.trim()) return;
     const durationSeconds = video?.durationMs ? Math.round(video.durationMs / 1000) : 0;
-    if (video && (durationSeconds < 900 || durationSeconds > 1200)) {
-      setError('La duración de la lección debe estar entre 15 y 20 minutos (15:00 a 20:00).');
+    if (video && (durationSeconds < DURACION_MINIMA || durationSeconds > DURACION_MAXIMA)) {
+      setError(
+        `El vídeo debe durar entre ${Math.round(DURACION_MINIMA / 60)} minuto(s) y ` +
+          `${Math.round(DURACION_MAXIMA / 3600)} horas.`,
+      );
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const mediaPath = video ? await uploadCourseMedia(video, setProgress) : null;
+      const mediaPath = video
+        ? // `module.courseId` y no una prop nueva: el modulo ya sabe de que curso es,
+          // y pasarlo otra vez seria un segundo sitio donde equivocarse.
+          await uploadCourseMedia(video, module.courseId, setProgress)
+        : null;
       await CourseContentRepository.createLesson({
         moduleId: module.id,
         title: title.trim(),

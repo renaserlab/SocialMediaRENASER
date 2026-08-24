@@ -10,6 +10,9 @@ import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { FEATURE_PURCHASES } from '@/config/features';
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { SelectorDeTemas } from '@/components/SelectorDeTemas';
+import { aCentavos, aTextoEditable } from '@/lib/dinero';
 import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import { useAppStore } from '@/store/useAppStore';
@@ -35,8 +38,10 @@ export type CatalogEditable = {
   endsAt?: Date | null;
   location?: string;
   whatsappUrl?: string;
-  /** Solo cursos, en la unidad mayor. */
-  price?: number;
+  /** Solo cursos: precio en la unidad MENOR. Ver `lib/dinero.ts`. */
+  priceMinor?: number;
+  /** Solo cursos: temas ya elegidos. */
+  topicIds?: string[];
 };
 
 type Props = {
@@ -110,6 +115,13 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
   const [endTime, setEndTime] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [price, setPrice] = useState('');
+  /**
+   * Gratuito o de pago. Es una decision aparte del importe porque son dos
+   * preguntas distintas: «se cobra?» y «cuanto?». Sin separarlas, un campo de
+   * precio vacio significaba a la vez «gratis» y «todavia no lo he decidido».
+   */
+  const [dePago, setDePago] = useState(false);
+  const [temas, setTemas] = useState<string[]>([]);
   /** Solo podcast: categoria del episodio, para los filtros. */
   /** Categoria elegida: el ID de una del creador, o null. */
   const [category, setCategory] = useState<string | null>(null);
@@ -125,7 +137,9 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     }
     setTitle(editing.title);
     setDescription(editing.description);
-    setPrice(editing.price != null ? String(editing.price) : '');
+    setPrice(aTextoEditable(editing.priceMinor ?? 0));
+    setDePago((editing.priceMinor ?? 0) > 0);
+    setTemas(editing.topicIds ?? []);
     setPlace(editing.location ?? '');
     setWhatsapp(editing.whatsappUrl ?? '');
     const two = (n: number) => String(n).padStart(2, '0');
@@ -288,10 +302,29 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         if (editing) await CatalogRepository.updateEvent(editing.id, data);
         else await CatalogRepository.createEvent({ ...data, coverPath });
       } else {
+        // El precio se lee UNA vez y en un sitio (`lib/dinero.ts`): repartir
+        // el calculo por los componentes acaba en dos importes distintos para
+        // el mismo curso.
+        let priceMinor = 0;
+        if (dePago) {
+          const leido = aCentavos(price);
+          if (!leido.ok) {
+            setError(leido.motivo);
+            setSaving(false);
+            return;
+          }
+          if (leido.centavos === 0) {
+            setError('Un curso de pago necesita un precio mayor que cero.');
+            setSaving(false);
+            return;
+          }
+          priceMinor = leido.centavos;
+        }
         const data = {
           title: title.trim(),
           description: description.trim(),
-          price: Number(price) || 0,
+          priceMinor,
+          topicIds: temas,
           ...(coverPath ? { coverPath } : {}),
         };
         if (editing) await LearningRepository.updateCourse(editing.id, data);
@@ -424,16 +457,57 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
               autoCapitalize="none"
             />
           </>
-        ) : isPodcast || !FEATURE_PURCHASES ? null : (
-          // Sin venta, pedir un precio no tiene sentido: el curso se guarda con
-          // 0 y se muestra como incluido en la membresia.
-          <Input
-            label="Precio (PEN)"
-            value={price}
-            onChangeText={setPrice}
-            placeholder="0"
-            keyboardType="numeric"
-          />
+        ) : isPodcast ? null : (
+          <>
+            {/*
+              De que trata el curso. Es lo que permite recomendarlo a quien
+              queria aprender justo eso; sin un tema, un curso solo se encuentra
+              buscandolo por su nombre. El selector se esconde solo si el
+              servidor todavia no puede guardarlos.
+            */}
+            <Text style={[styles.etiqueta, { color: colors.textMuted }]}>
+              ¿Sobre qué aprenderán en este curso?
+            </Text>
+            <SelectorDeTemas
+              seleccionados={temas}
+              alCambiar={setTemas}
+              para="curso"
+              maximo={5}
+            />
+
+            {/*
+              CONFIGURAR EL PRECIO Y COBRAR SON DOS COSAS DISTINTAS. Que todavia
+              no haya pasarela no puede impedir que el creador diga cuanto vale
+              su curso: eso es un dato del curso, no una venta. Lo que no se
+              hace es ofrecerle a nadie un boton de comprar que no lleva a
+              ninguna parte.
+            */}
+            <Text style={[styles.etiqueta, { color: colors.textMuted }]}>
+              Tipo de acceso
+            </Text>
+            <SegmentedControl
+              options={['Gratuito', 'De pago']}
+              selectedIndex={dePago ? 1 : 0}
+              onChange={(indice) => setDePago(indice === 1)}
+            />
+            {dePago ? (
+              <>
+                <Input
+                  label="Precio (PEN)"
+                  value={price}
+                  onChangeText={setPrice}
+                  placeholder="49.90"
+                  keyboardType="decimal-pad"
+                />
+                {!FEATURE_PURCHASES ? (
+                  <Text style={[styles.aviso, { color: colors.textMuted }]}>
+                    El precio queda configurado. Las ventas todavía no están
+                    habilitadas, así que nadie podrá comprarlo aún.
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+          </>
         )}
 
         <InlineError message={error} />
@@ -474,6 +548,8 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
 }
 
 const styles = StyleSheet.create({
+  etiqueta: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  aviso: { fontSize: 12, lineHeight: 17 },
   sheetTitle: {
     fontSize: 13,
     fontWeight: '800',

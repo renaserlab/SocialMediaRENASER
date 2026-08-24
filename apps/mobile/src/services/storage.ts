@@ -643,12 +643,28 @@ const COURSE_BUCKET = 'course-media';
  * Sube el video (o material) de una leccion y devuelve su RUTA.
  *
  * Va al bucket `course-media`, no a `post-media`: admite 2 GB por archivo
- * (0004_storage_limits) y sus politicas solo dejan escribir a la
- * administracion. Se guarda la ruta, no la URL, porque el bucket es privado y
- * las firmas caducan.
+ * (0004_storage_limits). Se guarda la ruta, no la URL, porque el bucket es
+ * privado y las firmas caducan.
+ *
+ * LA RUTA ES LA PRUEBA DE PROPIEDAD:  `<uid>/<courseId>/<archivo>`
+ *
+ * Hasta la migracion 0028, escribir en este bucket estaba reservado a la
+ * administracion, asi que cualquiera podia montar el esqueleto de un curso
+ * —modulos y lecciones si le dejaba la RLS— y no podia subirle un solo video.
+ * Un curso sin video no es un curso.
+ *
+ * Abrirlo del todo (`using (true)`) habria dejado que cualquiera escribiese
+ * sobre cualquier archivo del bucket. En vez de eso, la carpeta dice de quien
+ * es y de que curso, y la politica lo comprueba CONTRA LA TABLA `courses`: da
+ * igual lo que mande el cliente, si ese curso no es suyo la base lo rechaza.
+ *
+ * El `courseId` no es opcional a proposito. Con un valor por defecto, olvidarlo
+ * en una llamada nueva daria una ruta que la RLS rechaza, y el fallo aparece en
+ * el unico sitio donde nadie lo esta mirando: subiendo un archivo grande.
  */
 export async function uploadCourseMedia(
   media: PickedMedia,
+  courseId: string,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<string> {
   if (!supabase) throw new Error('Almacenamiento no disponible.');
@@ -669,8 +685,13 @@ export async function uploadCourseMedia(
     }
   }
 
+  if (!courseId) throw new Error('Falta el curso al que pertenece el material.');
+
   const ext = resolveExtension({ ...media, uri, name: null });
-  const path = `${uid}/${randomName(ext)}`;
+  // `<uid>/<courseId>/…`: las dos carpetas que comprueba la politica de la
+  // migracion 0028. Los archivos subidos ANTES viven en `<uid>/…` y se siguen
+  // leyendo igual; no se mueve ni se renombra nada.
+  const path = `${uid}/${courseId}/${randomName(ext)}`;
   const contentType = resolveContentType({ ...media, mimeType: null }, ext);
 
   const local = await readLocalFile(uri);

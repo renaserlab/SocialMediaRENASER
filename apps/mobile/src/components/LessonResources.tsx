@@ -21,7 +21,10 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 type Props = {
   lessonId: string;
-  /** Solo la administracion sube y borra; la RLS lo impone de verdad. */
+  /** El curso al que pertenece: la ruta de subida lo necesita para demostrar
+   *  de quien es el material (migracion 0028). */
+  courseId: string;
+  /** El autor del curso o la administracion; la RLS lo impone de verdad. */
   canEdit: boolean;
 };
 
@@ -37,7 +40,7 @@ function formatSize(bytes: number | null): string {
  * A diferencia de los testimonios, aqui la descarga SI se quiere: son
  * documentos del curso pensados para llevarselos.
  */
-export function LessonResources({ lessonId, canEdit }: Props) {
+export function LessonResources({ lessonId, courseId, canEdit }: Props) {
   const { colors } = useAppTheme();
   const [items, setItems] = useState<LessonResourceFile[]>([]);
   const [adding, setAdding] = useState(false);
@@ -84,14 +87,17 @@ export function LessonResources({ lessonId, canEdit }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const storagePath = await uploadCourseMedia({
-        uri: file.uri,
-        // El bucket admite documentos; `kind` solo decide la extension por
-        // defecto, y el nombre real ya trae la suya.
-        kind: 'image',
-        mimeType: file.mimeType ?? null,
-        name: file.name,
-      });
+      const storagePath = await uploadCourseMedia(
+        {
+          uri: file.uri,
+          // El bucket admite documentos; `kind` solo decide la extension por
+          // defecto, y el nombre real ya trae la suya.
+          kind: 'image',
+          mimeType: file.mimeType ?? null,
+          name: file.name,
+        },
+        courseId,
+      );
       await CourseContentRepository.addResource({
         lessonId,
         title: title.trim(),

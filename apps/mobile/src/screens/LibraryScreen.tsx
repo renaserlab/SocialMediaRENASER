@@ -1,43 +1,81 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
-import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { ListRow } from '@/components/ListRow';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
-import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import type { Course } from '@/types';
+import type { MyCourse } from '@/types';
 
+/**
+ * Lo que esta persona tiene, desde el SERVIDOR.
+ *
+ * POR QUE CAMBIA. La pantalla se apoyaba en `purchasedCourseIds`, una lista
+ * guardada en el telefono. Eso significaba que la biblioteca se vaciaba al
+ * reinstalar, no se compartia entre dispositivos y podia seguir ensenando un
+ * curso al que ya no se tiene acceso. Lo que alguien tiene es un hecho del
+ * servidor, no una preferencia local.
+ *
+ * Y POR QUE SE SEPARAN LOS ESTADOS. «Empezado» y «terminado» piden cosas
+ * opuestas de quien mira: uno invita a continuar y el otro a elegir algo nuevo.
+ * Mezclarlos en una lista los convierte a los dos en ruido.
+ */
 export function LibraryScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const purchasedCourseIds = useAppStore((state) => state.purchasedCourseIds);
 
-  const [activeTab, setActiveTab] = useState(0);
-  // Catalogo real, para resolver el titulo de cada curso comprado.
-  const [courses, setCourses] = useState<Course[]>([]);
-  useEffect(() => {
-    if (!AuthRepository.enabled) return;
-    LearningRepository.listCourses()
-      .then(setCourses)
-      .catch((error) => {
-        // Sin el catalogo los cursos comprados salen con un titulo generico.
-        // No rompe la pantalla, pero tampoco puede desaparecer sin dejar rastro.
-        console.warn('[biblioteca] no se pudo cargar el catalogo de cursos', error);
-        setCourses([]);
-      });
+  const [pestana, setPestana] = useState(0);
+  const [cursos, setCursos] = useState<MyCourse[] | null>(null);
+  const [fallo, setFallo] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    if (!AuthRepository.enabled) {
+      setCursos([]);
+      return;
+    }
+    try {
+      setCursos(await LearningRepository.myCourses());
+      setFallo(null);
+    } catch (error) {
+      // Sin biblioteca no se inventa una: se dice que no se pudo cargar.
+      setFallo(error instanceof Error ? error.message : 'No se pudo cargar tu biblioteca.');
+      setCursos([]);
+    }
   }, []);
 
-  const hasCourses = purchasedCourseIds.length > 0;
-  const hasAudios = audios.length > 0;
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
 
-  const activeState = activeTab === 0 ? (hasCourses ? 'content' : 'empty') : (hasAudios ? 'content' : 'empty');
+  // Al volver de un curso el progreso ha cambiado: se vuelve a pedir en vez de
+  // ensenar el porcentaje con el que se salio.
+  useFocusEffect(
+    useCallback(() => {
+      void cargar();
+    }, [cargar]),
+  );
+
+  const enCurso = (cursos ?? []).filter((c) => c.state === 'in_progress');
+  const terminados = (cursos ?? []).filter((c) => c.state === 'completed');
+  const sinEmpezar = (cursos ?? []).filter((c) => c.state === 'not_started');
+
+  const hayCursos = (cursos ?? []).length > 0;
+  const hayAudios = audios.length > 0;
+  const cargando = cursos === null;
+  const estado = cargando
+    ? 'loading'
+    : pestana === 0
+    ? hayCursos
+      ? 'content'
+      : 'empty'
+    : hayAudios
+    ? 'content'
+    : 'empty';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -45,52 +83,84 @@ export function LibraryScreen() {
       <View style={styles.header}>
         <SegmentedControl
           options={['Mis Cursos', 'Mis Audios']}
-          selectedIndex={activeTab}
-          onChange={setActiveTab}
+          selectedIndex={pestana}
+          onChange={setPestana}
         />
       </View>
 
       <StateView
-        state={activeState}
-        title={activeTab === 0 ? 'No tienes cursos adquiridos' : 'Historial de audios vacío'}
+        state={estado}
+        title={pestana === 0 ? 'Todavía no tienes cursos' : 'Historial de audios vacío'}
         description={
-          activeTab === 0
-            ? 'Adquiere un curso para verlo disponible en tu biblioteca.'
+          pestana === 0
+            ? fallo ?? 'Cuando empieces un curso aparecerá aquí con tu avance.'
             : 'Los audios que escuches se guardarán aquí.'
         }
-        icon={activeTab === 0 ? 'book' : 'headphones'}
+        icon={pestana === 0 ? 'book' : 'headphones'}
       >
         <ScrollView contentContainerStyle={styles.list}>
-          {activeTab === 0
-            ? purchasedCourseIds.map((courseId) => {
-                // Con backend real el id es un UUID: sin buscar el curso, la
-                // biblioteca mostraba ese UUID como titulo.
-                const real = courses.find((c) => c.id === courseId);
-                return (
-                  <ListRow
-                    key={courseId}
-                    title={real?.title ?? 'Curso'}
-                    subtitle={real?.subtitle || 'Ver contenido'}
-                    leftIcon="play-circle"
-                    rightIcon="chevron-right"
-                    onPress={() => router.push(`/course/${courseId}` as never)}
-                  />
-                );
-              })
-            : audios.map((audio) => (
-                <ListRow
-                  key={audio.id}
-                  title={audio.title}
-                  subtitle={audio.subtitle}
-                  leftIcon="headphones"
-                  rightIcon="play"
-                  onPress={() => router.push(`/audio/${audio.id}` as any)}
-                />
-              ))}
+          {pestana === 0 ? (
+            <>
+              <Grupo titulo="Continúa aprendiendo" cursos={enCurso} router={router} />
+              <Grupo titulo="Sin empezar" cursos={sinEmpezar} router={router} />
+              <Grupo titulo="Completados" cursos={terminados} router={router} />
+            </>
+          ) : (
+            audios.map((audio) => (
+              <ListRow
+                key={audio.id}
+                title={audio.title}
+                subtitle={audio.subtitle}
+                leftIcon="headphones"
+                rightIcon="play"
+                onPress={() => router.push(`/audio/${audio.id}` as any)}
+              />
+            ))
+          )}
         </ScrollView>
       </StateView>
     </View>
   );
+}
+
+function Grupo({
+  titulo,
+  cursos,
+  router,
+}: {
+  titulo: string;
+  cursos: MyCourse[];
+  router: ReturnType<typeof useRouter>;
+}) {
+  const { colors } = useAppTheme();
+  if (cursos.length === 0) return null;
+  return (
+    <View style={styles.grupo}>
+      <Text style={[styles.tituloDeGrupo, { color: colors.textMuted }]}>{titulo}</Text>
+      {cursos.map((curso) => (
+        <ListRow
+          key={curso.id}
+          title={curso.title}
+          subtitle={subtituloDe(curso)}
+          leftIcon={curso.state === 'completed' ? 'check-circle' : 'play-circle'}
+          rightIcon="chevron-right"
+          // Siempre al curso real. Continuar desde la leccion pendiente vive
+          // dentro, junto al temario, que es donde se ve por que se continua.
+          onPress={() => router.push(`/course/${curso.id}` as never)}
+        />
+      ))}
+    </View>
+  );
+}
+
+/** Lo que de verdad se sabe del avance, sin adornos. */
+function subtituloDe(curso: MyCourse): string {
+  if (curso.lessonsTotal === 0) return 'Sin contenido todavía';
+  if (curso.state === 'completed') return `Completado · ${curso.lessonsTotal} lecciones`;
+  if (curso.state === 'in_progress') {
+    return `${curso.progressPercent}% · ${curso.lessonsCompleted} de ${curso.lessonsTotal} lecciones`;
+  }
+  return `${curso.lessonsTotal} lecciones`;
 }
 
 // Audios disponibles en la biblioteca (mock). Al integrar backend vendrán del repositorio.
@@ -105,5 +175,14 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  grupo: { marginBottom: spacing.lg },
+  tituloDeGrupo: {
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.sm,
   },
 });
