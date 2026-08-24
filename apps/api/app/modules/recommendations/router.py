@@ -35,8 +35,10 @@ from app.modules.recommendations import (
     metrics,
     service,
     temas_de_contenido,
+    temas_de_curso,
 )
 from app.modules.recommendations.config import (
+    COURSE_ALGORITHM_VERSION,
     SUPERFICIE_CURSOS,
     CONTENT_ALGORITHM_VERSION,
     ONBOARDING_VERSION,
@@ -48,13 +50,16 @@ from app.modules.recommendations.schemas import (
     BehaviorEventBatch,
     BehaviorEventResult,
     ContentRecommendations,
+    CourseRecommendations,
     OnboardingCatalog,
     OnboardingStatus,
     PeopleRecommendations,
     PreferencesInput,
     PreferencesRead,
     ProfileOffer,
+    RecommendationReason,
     RecommendationMetrics,
+    RecommendedCourse,
     SurfaceFunnel,
 )
 from app.shared.database import get_db
@@ -231,6 +236,79 @@ async def contenido_para_ti(
 
 
 # --------------------------------------------------------------------------- #
+# Cursos
+# --------------------------------------------------------------------------- #
+@router.get("/courses", response_model=CourseRecommendations)
+async def cursos_para_ti(
+    limit: int = Query(default=10, ge=1, le=30),
+    offset: int = Query(default=0, ge=0),
+    debug: bool = Query(default=False),
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> CourseRecommendations:
+    """Cursos que pueden aportarle algo a quien pregunta.
+
+    NO SE ORDENA POR POPULARIDAD. La pregunta que responde esta lista es «que
+    quiere aprender esta persona y que curso publicado puede darselo», no «que
+    curso tiene mas alumnos». Por eso el tema pesa casi la mitad y la
+    popularidad no llega al cinco por ciento.
+
+    QUE NO SALE AQUI: lo que ya empezo —su sitio es «Continúa aprendiendo», y
+    volver a proponerlo como novedad seria no haber entendido lo que hizo—, lo
+    que ya termino, lo que descarto, sus propios cursos, los de gente
+    bloqueada, y los anunciados sin contenido (`coming_soon`), porque mandar a
+    alguien a una puerta cerrada no es una recomendacion.
+
+    Una lista vacia NO es un error: significa «no hay nada que recomendar
+    todavia». La aplicacion cae al catalogo publico.
+
+    `debug=1` devuelve el desglose numerico del score, y SOLO fuera de
+    produccion: en produccion no le aporta nada a quien mira la pantalla y
+    ensena como funciona el orden a quien quisiera manipularlo.
+    """
+    if not (
+        settings.feature_recommendations_v1
+        and settings.feature_course_recommendations_v1
+    ):
+        return CourseRecommendations(
+            algorithm_version=COURSE_ALGORITHM_VERSION,
+            strategy=ORIGEN_APAGADO,
+            items=[],
+        )
+
+    ordenados = await service.cursos_para(
+        db, current_user.id, limite=limit, offset=offset
+    )
+    mostrar_debug = debug and not settings.is_production
+    return CourseRecommendations(
+        algorithm_version=COURSE_ALGORITHM_VERSION,
+        strategy=ordenados.estrategia,
+        with_topics=ordenados.con_tema,
+        items=[
+            RecommendedCourse(
+                id=curso.id,
+                author_id=curso.author_id,
+                title=curso.title,
+                description=curso.description,
+                cover_path=curso.cover_path,
+                price_minor=curso.price_minor,
+                currency=curso.currency,
+                topic_ids=list(curso.topic_ids),
+                modules=curso.modulos,
+                lessons=curso.lecciones,
+                reasons=[
+                    RecommendationReason(code=m.code, topics=list(m.topics))
+                    for m in curso.puntuacion.motivos
+                ],
+                debug=curso.puntuacion.desglose if mostrar_debug else None,
+            )
+            for curso in ordenados.cursos
+        ],
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Senales
 # --------------------------------------------------------------------------- #
 @router.post("/events", response_model=BehaviorEventResult)
@@ -269,14 +347,25 @@ async def registrar_eventos(
     # Cuando alguien rechaza una publicacion, se guardan tambien SUS TEMAS: sin
     # ellos, «no me interesa» solo podria esconder ese video concreto y nunca
     # aprenderia nada. Se resuelve de UNA consulta para todo el lote.
-    rechazados = [
-        e.entity_id
-        for e in payload.events
-        if e.event_type == "not_interested" and e.entity_type == "post" and e.entity_id
-    ]
-    temas_rechazados = (
-        await temas_de_contenido.leer(db, rechazados) if rechazados else {}
-    )
+    def _rechazados(entidad: str) -> list[str]:
+        return [
+            e.entity_id
+            for e in payload.events
+            if e.event_type == "not_interested"
+            and e.entity_type == entidad
+            and e.entity_id
+        ]
+
+    publicaciones = _rechazados("post")
+    cursos = _rechazados("course")
+    temas_rechazados: dict[str, list[str]] = {}
+    if publicaciones:
+        temas_rechazados.update(await temas_de_contenido.leer(db, publicaciones))
+    if cursos:
+        # Mismo criterio para un curso: rechazarlo enfria un poco su tema, no
+        # solo esconde ese curso. Sin esto, «no me interesa» sobre cinco cursos
+        # de marketing seguiria ofreciendo el sexto.
+        temas_rechazados.update(await temas_de_curso.leer(db, cursos))
 
     # Sin la 0027 las senales se guardan igual, pero sin decir de donde venian:
     # se sigue aprendiendo, no se puede medir el embudo. Perder informacion es
@@ -306,8 +395,8 @@ async def registrar_eventos(
             "dwell_ms": evento.dwell_ms,
             "event_key": clave,
             "source": "client",
-            # Los temas del contenido rechazado, para que «no me interesa»
-            # enfrie el tema y no solo la publicacion concreta.
+            # Los temas de lo rechazado —publicacion o curso—, para que «no me
+            # interesa» enfrie el tema y no solo esa fila concreta.
             "topic_ids": temas_rechazados.get(evento.entity_id or "") or None,
         }
         if con_contexto and evento.surface == SUPERFICIE_CURSOS:

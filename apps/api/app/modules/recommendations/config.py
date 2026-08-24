@@ -267,6 +267,92 @@ class PesosDeContenido:
 PESOS_DE_CONTENIDO = PesosDeContenido()
 
 
+@dataclass(frozen=True)
+class PesosDeCursos:
+    """Como se ordenan los cursos.
+
+    LA MISION MANDA SOBRE EL REPARTO. Z no ordena cursos por lo populares que
+    son: ordena por cuanto pueden aportarle a esta persona. Por eso el tema es
+    casi la mitad del peso y la popularidad no llega al cinco por ciento.
+
+    QUE NO ESTA AQUI, y no por olvido:
+
+    - **El precio no es un rasgo.** Ni caro ni gratis significan mejor. Es
+      metadato de acceso, no una senal de calidad, y hay una prueba que lo fija.
+    - **La reputacion vale 0.** No existen resenas verificadas; los
+      `testimonials` no lo son. Inventar estrellas seria peor que no tenerlas.
+    - **La calidad por finalizacion espera datos.** «Cuanta gente lo termina»
+      sera una senal excelente cuando haya volumen. Con tres inscritos es ruido
+      con aspecto de metrica, asi que hoy no aplica en vez de valer cero.
+    """
+
+    #: De que trata el curso frente a lo que la persona quiere aprender. Es LA
+    #: pregunta; todo lo demas matiza.
+    tema: float = 0.45
+    #: Que la persona dijera que viene a aprender o a buscar cursos. Empuja,
+    #: no filtra: alguien que dijo «conectar» tambien puede querer un curso.
+    intencion: float = 0.12
+    #: Que prefiera aprender en formato curso.
+    formato: float = 0.08
+    #: Afinidad con quien lo creo: a quien ya sigue o cuyo contenido consume.
+    #: Moderado a proposito — un creador popular no hace un curso mejor.
+    autor: float = 0.15
+    #: Interes reciente por esos temas, medido por lo que la persona hace.
+    comportamiento: float = 0.10
+    #: Que a otra gente le haya servido. Solo cuando hay suficientes datos
+    #: para que signifique algo (ver `MINIMO_PARA_POPULARIDAD`).
+    popularidad: float = 0.04
+    #: Dar oportunidad a lo que todavia no tiene senales a favor.
+    exploracion: float = 0.06
+
+    def total(self) -> float:
+        return (
+            self.tema
+            + self.intencion
+            + self.formato
+            + self.autor
+            + self.comportamiento
+            + self.popularidad
+            + self.exploracion
+        )
+
+
+PESOS_DE_CURSOS = PesosDeCursos()
+
+#: Objetivos del cuestionario que hacen mas relevante un curso.
+#:
+#: «Encontrar cursos» es el evidente. «Aprender algo nuevo» y «mejorar
+#: profesionalmente» tambien: quien responde eso esta pidiendo formacion, la
+#: llame curso o no. NO estan «compartir» ni «ensenar», que describen lo que la
+#: persona OFRECE, ni «conectar», que busca gente y no material.
+OBJETIVOS_QUE_PIDEN_CURSOS = frozenset(
+    {"aprender", "cursos", "mejorar_profesionalmente"}
+)
+
+#: La clave del formato «curso» en `FORMATOS`.
+FORMATO_DE_CURSO = "curso"
+
+#: Cuantos cursos publicados se traen como maximo para ordenar. Igual que en
+#: personas: ordenar bien doscientos y quedarse con veinte es mejor que traer
+#: el catalogo entero para descartarlo casi todo.
+CANDIDATOS_DE_CURSOS = 200
+
+#: A partir de cuantos accesos la popularidad significa algo.
+#:
+#: Con menos, un curso con dos inscritos y otro con uno se ordenarian como si
+#: el primero fuera el doble de bueno. Por debajo de este numero el componente
+#: NO APLICA (sale del reparto), que no es lo mismo que valer cero.
+MINIMO_PARA_POPULARIDAD = 5
+
+#: Donde satura la popularidad. Por encima, mas inscritos no suben mas: la
+#: diferencia entre 60 y 600 no dice nada sobre si te sirve a TI.
+SATURACION_DE_POPULARIDAD = 50
+
+#: Cuantos dias tarda un curso en dejar de contar como novedad.
+DIAS_DE_NOVEDAD_DE_CURSO = 30
+
+
+
 # --------------------------------------------------------------------------- #
 # Diversidad y exploracion
 # --------------------------------------------------------------------------- #

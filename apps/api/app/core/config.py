@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     #: borrar una sola fila. Las tablas nuevas se quedan donde estan, quietas.
     #: Un rollback que exija borrar informacion de gente real no es un rollback.
     feature_recommendations_v1: bool = True
+    #: «Cursos para ti». Interruptor propio y no el de siempre: apagar los
+    #: cursos si algo sale mal no puede llevarse por delante las personas y el
+    #: feed, que llevan funcionando desde antes. Apagado, Explorar vuelve al
+    #: catalogo publico sin borrar una sola fila.
+    feature_course_recommendations_v1: bool = True
 
     # --- CORS ---
     cors_origins: str = "*"

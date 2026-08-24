@@ -60,6 +60,10 @@ class PerfilDeDemanda:
     busca_afines: bool = False
     #: Formatos en los que prefiere aprender o conectar.
     formatos: frozenset[str] = frozenset()
+    #: Lo que dijo que venia a hacer. No se usa para personas —ahi manda el
+    #: tipo de conexion— pero si para cursos: quien respondio «encontrar
+    #: cursos» esta pidiendo justo esta superficie.
+    objetivos: frozenset[str] = frozenset()
     #: Afinidad por tema acumulada por el uso. Es el bucle de aprendizaje: sube
     #: sola segun lo que la persona abre, sin que nadie reentrene nada.
     afinidad_por_tema: dict[str, float] = field(default_factory=dict)

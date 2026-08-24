@@ -37,6 +37,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.recommendations.config import (
+    CONTENT_ALGORITHM_VERSION,
+    COURSE_ALGORITHM_VERSION,
+    RECOMMENDATION_ALGORITHM_VERSION,
+    SUPERFICIE_CURSOS,
     SUPERFICIE_FEED,
     SUPERFICIE_PERSONAS,
     VENTANA_DE_ATRIBUCION_DIAS,
@@ -60,6 +64,46 @@ PASOS_DE_PERSONAS = (
 
 #: Los del feed. Aqui la entidad es la publicacion, no una persona.
 PASOS_DE_CONTENIDO = ("content_engaged", "content_completed", "not_interested")
+
+#: Los de CURSOS. Mismos tipos, entidad distinta: aqui `content_completed` no
+#: es «vio el video entero» sino «termino el curso», y lo afirma el SERVIDOR al
+#: quedarse sin lecciones pendientes, no el cliente.
+#:
+#: NO HAY UN PASO «empezo el curso», y no es un olvido. Ningun evento existente
+#: significa eso: `content_engaged` es abrir la tarjeta, que no es lo mismo que
+#: ponerse. Anadir un tipo nuevo solo para esta tabla seria inventar una senal
+#: para poder ensenar una fila. Cuando haga falta de verdad, se anade con su
+#: migracion y se dice por que.
+PASOS_DE_CURSOS = ("content_engaged", "content_completed", "not_interested")
+
+
+def _pasos_de(surface: str) -> tuple[str, ...]:
+    """Que pasos tiene el embudo de cada superficie.
+
+    Una funcion y no un `if` repartido: estaba escrito tres veces en este
+    fichero, y con tres superficies eso son tres sitios donde olvidarse de la
+    cuarta.
+    """
+    if surface == SUPERFICIE_PERSONAS:
+        return PASOS_DE_PERSONAS
+    if surface == SUPERFICIE_CURSOS:
+        return PASOS_DE_CURSOS
+    return PASOS_DE_CONTENIDO
+
+
+#: Las superficies que el informe ensena aunque no tengan ni una impresion.
+#: Verlas a cero dice «esto todavia no ha pasado», que es informacion; que
+#: falten dice «esto no se mide», que es otra cosa muy distinta.
+SUPERFICIES_ESPERADAS = (SUPERFICIE_PERSONAS, SUPERFICIE_CURSOS, SUPERFICIE_FEED)
+
+#: Que version ordena cada superficie. Solo se usa para las que aun no tienen
+#: ni una impresion: en cuanto haya una, la version la dice la propia senal,
+#: que es la que de verdad estaba vigente cuando ocurrio.
+VERSION_POR_SUPERFICIE = {
+    SUPERFICIE_PERSONAS: RECOMMENDATION_ALGORITHM_VERSION,
+    SUPERFICIE_CURSOS: COURSE_ALGORITHM_VERSION,
+    SUPERFICIE_FEED: CONTENT_ALGORITHM_VERSION,
+}
 
 
 @dataclass
@@ -155,7 +199,7 @@ async def embudo(
         mostrado_en, surface, version = impresion
         if creado < mostrado_en or (creado - mostrado_en) > ventana:
             continue
-        pasos = PASOS_DE_PERSONAS if surface == SUPERFICIE_PERSONAS else PASOS_DE_CONTENIDO
+        pasos = _pasos_de(surface)
         if tipo not in pasos:
             continue
         marca = (user_id, entity_id, tipo)
@@ -168,14 +212,25 @@ async def embudo(
     # 3. Los pasos que no ocurrieron salen a CERO y no ausentes: «no paso» es
     #    un dato, y un hueco en la tabla se lee como «no se midio».
     for (surface, _version), grupo in grupos.items():
-        pasos = PASOS_DE_PERSONAS if surface == SUPERFICIE_PERSONAS else PASOS_DE_CONTENIDO
+        pasos = _pasos_de(surface)
         for paso in pasos:
             grupo.conversions.setdefault(paso, 0)
+
+    # 4. Las superficies que todavia no han tenido ni una impresion aparecen a
+    #    CERO. Verlas asi dice «esto no ha pasado todavia», que es informacion;
+    #    que falte la fila dice «esto no se mide», que es otra cosa. Hasta ahora
+    #    esta constante estaba declarada y no la usaba nadie, asi que una
+    #    superficie recien estrenada simplemente no salia en el informe.
+    for surface in SUPERFICIES_ESPERADAS:
+        version = VERSION_POR_SUPERFICIE.get(surface, "desconocida")
+        if (surface, version) in grupos:
+            continue
+        grupo = EmbudoDeSuperficie(surface=surface, algorithm_version=version)
+        for paso in _pasos_de(surface):
+            grupo.conversions[paso] = 0
+        grupos[(surface, version)] = grupo
 
     return sorted(grupos.values(), key=lambda g: (g.surface, g.algorithm_version))
 
 
-#: Las superficies que el informe ensena aunque no tengan ni una impresion.
-#: Verlas a cero dice «esto todavia no ha pasado», que es informacion; que
-#: falten dice «esto no se mide», que es otra cosa muy distinta.
-SUPERFICIES_ESPERADAS = (SUPERFICIE_PERSONAS, SUPERFICIE_FEED)
+

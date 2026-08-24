@@ -80,6 +80,12 @@ class SenalesDelUsuario:
     por_tema: dict[str, float] = field(default_factory=dict)
     #: Perfiles que la persona marco como «no me interesa». No se recomiendan.
     descartados: set[str] = field(default_factory=set)
+    #: Cursos concretos rechazados. Conjunto APARTE del de publicaciones aunque
+    #: los dos guarden ids: si compartieran uno, el filtro del feed cargaria
+    #: ids de curso que no puede encontrar y el de cursos ids de publicacion,
+    #: y una consulta con cientos de ids que nunca casan es trabajo regalado.
+    #: Rechazar un curso tampoco bloquea a quien lo hizo.
+    cursos_descartados: set[str] = field(default_factory=set)
     #: Publicaciones concretas rechazadas. Se excluyen del feed, pero NO se
     #: bloquea a su autor: rechazar un video no es rechazar a una persona.
     contenido_descartado: set[str] = field(default_factory=set)
@@ -493,6 +499,8 @@ async def senales_de(
                     senales.descartados.add(evento.entity_id)
                 elif evento.entity_type == "post":
                     senales.contenido_descartado.add(evento.entity_id)
+                elif evento.entity_type == "course":
+                    senales.cursos_descartados.add(evento.entity_id)
             for topic_id in evento.topic_ids or ():
                 rechazos_por_tema[topic_id] = rechazos_por_tema.get(topic_id, 0) + 1
             continue

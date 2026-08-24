@@ -293,6 +293,47 @@ class ContentRecommendations(BaseModel):
     items: list = Field(default_factory=list)
 
 
+class RecommendedCourse(BaseModel):
+    """Un curso recomendado, con SOLO informacion que existe de verdad.
+
+    NO lleva valoracion, ni numero de alumnos inflado, ni «bestseller», ni
+    «certificado». Nada de eso existe en la base, y ponerlo convertiria la
+    tarjeta en publicidad. Lo que si dice —de que trata, cuanto ocupa, si es
+    gratis y POR QUE aparece— es lo que de verdad ayuda a decidir.
+    """
+
+    id: str
+    author_id: str
+    title: str
+    description: str
+    cover_path: str | None = None
+    price_minor: int
+    currency: str
+    topic_ids: list[str] = Field(default_factory=list)
+    modules: int = 0
+    lessons: int = 0
+    #: Por que aparece. La interfaz los traduce a una frase; el score NO sale.
+    reasons: list[RecommendationReason] = Field(default_factory=list)
+    #: Solo fuera de produccion, con `?debug=1`.
+    debug: dict[str, float] | None = None
+
+
+class CourseRecommendations(BaseModel):
+    """Los cursos ordenados, con el contexto necesario para poder medirlos.
+
+    Misma envoltura que personas y contenido, y por el mismo motivo: la version
+    del algoritmo la decide el SERVIDOR. Si el movil la llevara escrita, una
+    version antigua de la aplicacion mediria contra una etiqueta equivocada.
+    """
+
+    algorithm_version: str
+    strategy: str
+    #: Cuantos de los devueltos declaran sus temas. Es la medida honesta de
+    #: cuanto sabe el recomendador sobre lo que esta ordenando.
+    with_topics: int = 0
+    items: list[RecommendedCourse] = Field(default_factory=list)
+
+
 class BehaviorEventInput(BaseModel):
     event_type: str
     entity_type: str

@@ -650,15 +650,33 @@ async def test_el_embudo_relaciona_la_impresion_con_lo_que_paso_despues(entorno)
 
 
 @pytest.mark.asyncio
-async def test_sin_actividad_las_metricas_devuelven_vacio_y_no_inventan_nada(entorno):
+async def test_sin_actividad_las_metricas_salen_a_cero_y_no_inventan_nada(entorno):
+    """Cero no es lo mismo que ausente.
+
+    Las superficies aparecen con todos sus pasos a cero: eso dice «esto
+    todavia no ha pasado», que es informacion. Si faltara la fila, se leeria
+    como «esto no se mide», que es otra cosa muy distinta —y es justo lo que
+    pasaba con «Cursos para ti» recien estrenada—.
+
+    Lo que sigue sin haber es NADA inventado: ni una impresion, ni una
+    conversion, ni una tasa distinta de cero.
+    """
     http, sesiones, _ = entorno
     async with sesiones() as db:
         ana = await db.get(Profile, ANA)
         ana.role = "admin"
         await db.commit()
     datos = (await http.get(f"{API}/metrics")).json()
-    assert datos["funnels"] == []
     assert datos["attribution_window_days"] > 0
+
+    superficies = {f["surface"] for f in datos["funnels"]}
+    assert "courses_for_you" in superficies
+    assert "people_for_you" in superficies
+
+    for embudo in datos["funnels"]:
+        assert embudo["impressions"] == 0
+        assert set(embudo["conversions"].values()) == {0}
+        assert all(tasa == 0 for tasa in embudo["rates"].values())
 
 
 @pytest.mark.asyncio

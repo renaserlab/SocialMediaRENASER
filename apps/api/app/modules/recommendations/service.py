@@ -33,9 +33,14 @@ from app.modules.recommendations import (
     cache,
     candidate_generator,
     esquema,
+    ranker_de_cursos,
+    rasgos_de_curso,
+    repositorio_de_cursos as repo_cursos,
     repository as repo,
+    temas_de_curso,
 )
 from app.modules.recommendations.config import (
+    CANDIDATOS_DE_CURSOS,
     CANDIDATOS_MAXIMOS,
     MAX_TEMAS_POR_PUBLICACION,
     CONTENT_ALGORITHM_VERSION,
@@ -45,6 +50,7 @@ from app.modules.recommendations.config import (
     OBJETIVOS,
     ONBOARDING_VERSION,
     PESOS_DE_CONTENIDO,
+    PESOS_DE_CURSOS,
     PESOS_DE_PERSONAS,
     RECOMMENDATION_ALGORITHM_VERSION,
     RELACION_POR_CONEXION,
@@ -54,8 +60,11 @@ from app.modules.recommendations.config import (
     TIPOS_DE_CONEXION,
     VENTANA_DE_ACTIVIDAD_DIAS,
     VENTANA_DE_COMPORTAMIENTO_DIAS,
+    PesosDeCursos,
     PesosDePersonas,
 )
+from app.modules.recommendations.ranker_de_cursos import PuntuacionDeCurso
+from app.modules.recommendations.rasgos_de_curso import CursoCandidato, RasgosDeCurso
 from app.modules.recommendations.features import Candidato, PerfilDeDemanda, Rasgos
 from app.modules.recommendations.features import construir as construir_rasgos
 from app.modules.recommendations.features import exploracion_de
@@ -431,6 +440,7 @@ async def _construir_demanda(
         relaciones_buscadas=frozenset(buscadas),
         busca_afines="afines" in tipos,
         formatos=frozenset(preferencias.preferred_content_formats or []) if preferencias else frozenset(),
+        objetivos=frozenset(preferencias.goals or []) if preferencias else frozenset(),
         afinidad_por_tema=senales.por_tema,
         penalizacion_por_tema=senales.penalizacion_por_tema,
         tiene_senales=bool(senales.por_perfil or senales.por_tema),
@@ -703,6 +713,170 @@ def _recencia(creado: datetime, ahora: datetime, dias: int = 14) -> float:
         creado = creado.replace(tzinfo=timezone.utc)
     transcurridos = max(0.0, (ahora - creado).total_seconds() / 86400.0)
     return max(0.0, 1.0 - transcurridos / dias)
+
+
+# --------------------------------------------------------------------------- #
+# Cursos
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class CursoRecomendado:
+    """Un curso ya medido y puntuado.
+
+    Lleva los datos COPIADOS y no la fila del ORM: es lo que permite guardarlo
+    en la memoria corta, porque una fila del ORM pertenece a la sesion que la
+    trajo y deja de ser legible cuando esa sesion se cierra.
+    """
+
+    id: str
+    author_id: str
+    title: str
+    description: str
+    cover_path: str | None
+    price_minor: int
+    currency: str
+    topic_ids: tuple[str, ...]
+    modulos: int
+    lecciones: int
+    puntuacion: PuntuacionDeCurso
+    rasgos: RasgosDeCurso
+
+    @property
+    def score(self) -> float:
+        return self.puntuacion.score
+
+
+@dataclass
+class CursosOrdenados:
+    cursos: list[CursoRecomendado]
+    estrategia: str
+    #: Cuantos de los devueltos tenian temas declarados. Es la medida honesta
+    #: de cuanto sabe de verdad el recomendador sobre lo que esta ordenando.
+    con_tema: int = 0
+
+
+async def cursos_puntuados(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    ahora: datetime | None = None,
+    pesos: PesosDeCursos = PESOS_DE_CURSOS,
+) -> tuple[list[CursoRecomendado], str]:
+    """Candidatos, rasgos y orden. Sin paginar.
+
+    NUMERO DE CONSULTAS CONSTANTE: no depende de cuantos cursos haya. Se traen
+    los candidatos, y despues sus temas, sus accesos, su tamano y sus datos, en
+    una consulta cada cosa. Una por curso convertiria una pagina de veinte en
+    sesenta viajes a la base.
+    """
+    ahora = ahora or ahora_utc()
+    semilla = semilla_de_exploracion(ahora)
+
+    demanda, senales = await _demanda_con_memoria(db, user_id, ahora)
+    bloqueados = await repo.bloqueos_en_ambos_sentidos(db, user_id)
+    seguidos = await repo.seguidos_por(db, user_id)
+    mios = await repo_cursos.mis_cursos(db, user_id)
+
+    # Lo empezado y lo terminado salen del DESCUBRIMIENTO, no de la aplicacion:
+    # lo empezado vive en «Continúa aprendiendo» y lo terminado en la
+    # biblioteca. Volver a proponer un curso que alguien ya acabo es no haber
+    # entendido nada de lo que hizo.
+    excluidos = set(senales.cursos_descartados) | mios.empezados | mios.completados
+
+    filas = await repo_cursos.candidatos(
+        db,
+        autor_excluido=user_id,
+        autores_bloqueados=bloqueados,
+        cursos_excluidos=excluidos,
+        limite=CANDIDATOS_DE_CURSOS,
+    )
+    if not filas:
+        return [], "cold_start" if not demanda.tiene_demanda else "personalized"
+
+    ids = [f.id for f in filas]
+    temas = await temas_de_curso.leer(db, ids)
+    accesos = await repo_cursos.accesos_por_curso(db, ids)
+    tamanos = await repo_cursos.tamano_de_cursos(db, ids)
+    completos = await repo_cursos.resumen(db, ids)
+
+    estrategia = "personalized" if demanda.tiene_demanda else "cold_start"
+
+    salida: list[CursoRecomendado] = []
+    for fila in filas:
+        curso = completos.get(fila.id)
+        if curso is None:
+            continue
+        modulos, lecciones = tamanos.get(fila.id, (0, 0))
+        candidato = CursoCandidato(
+            id=fila.id,
+            author_id=fila.author_id,
+            temas=frozenset(temas.get(fila.id, ())),
+            creado=fila.creado,
+            inscritos=accesos.get(fila.id, 0),
+            senal_del_autor=senales.por_perfil.get(fila.author_id, 0.0),
+            ya_sigue_al_autor=fila.author_id in seguidos,
+        )
+        rasgos = rasgos_de_curso.construir(
+            demanda,
+            candidato,
+            objetivos=demanda.objetivos,
+            semilla=semilla,
+            ahora=ahora,
+        )
+        salida.append(
+            CursoRecomendado(
+                id=curso.id,
+                author_id=curso.author_id,
+                title=curso.title,
+                description=curso.description,
+                cover_path=curso.cover_path,
+                price_minor=curso.price_minor,
+                currency=curso.currency,
+                topic_ids=tuple(temas.get(fila.id, ())),
+                modulos=modulos,
+                lecciones=lecciones,
+                puntuacion=ranker_de_cursos.puntuar(rasgos, pesos),
+                rasgos=rasgos,
+            )
+        )
+
+    # Desempate por id, no por orden de llegada: sin el, dos cursos con el mismo
+    # score podrian intercambiarse entre la pagina 1 y la 2 y uno de ellos no
+    # se veria nunca.
+    salida.sort(key=lambda c: (-c.score, c.id))
+    return salida, estrategia
+
+
+async def cursos_para(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    limite: int,
+    offset: int = 0,
+    ahora: datetime | None = None,
+) -> CursosOrdenados:
+    """Que cursos, y en que orden. Con memoria corta para que paginar sea barato.
+
+    El ranking se calcula UNA vez y se pagina sobre el resultado. Recalcularlo
+    en cada pagina no solo costaria lo mismo otra vez: con la exploracion
+    cambiando de valor, el orden podria moverse entre paginas y repetir cursos
+    o saltarselos.
+    """
+    ahora = ahora or ahora_utc()
+    semilla = semilla_de_exploracion(ahora)
+
+    guardado = cache.obtener(user_id, semilla, "cursos")
+    if guardado is not None:
+        ordenados, estrategia = guardado
+    else:
+        ordenados, estrategia = await cursos_puntuados(db, user_id, ahora=ahora)
+        cache.guardar(user_id, semilla, (ordenados, estrategia), "cursos")
+
+    pagina = ordenados[offset : offset + limite]
+    return CursosOrdenados(
+        cursos=pagina,
+        estrategia=estrategia,
+        con_tema=sum(1 for c in pagina if c.topic_ids),
+    )
 
 
 async def contenido_para(
