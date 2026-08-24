@@ -1,7 +1,12 @@
 # Recommendation Engine V1 — el primer cerebro de Z
 
-Rama: `Edson`. Estado: implementado y verificado en local. **La migración
-`0026` NO se ha aplicado a producción**: espera aprobación explícita.
+Rama: `Edson`. La migración `0026` **ya está aplicada** en producción.
+
+> **Continuación:** varias decisiones de este documento cambiaron en la V1.1
+> —el emparejamiento necesidad↔oferta, los temas propios del contenido, el
+> decaimiento temporal y la atribución de resultados—. Lo que cambia está en
+> [Z_RECOMMENDATION_V1_1.md](Z_RECOMMENDATION_V1_1.md); el resto de este
+> documento sigue vigente.
 
 Este documento explica **qué se construyó, por qué así, y qué NO está
 demostrado todavía**. Lo último importa tanto como lo primero.
