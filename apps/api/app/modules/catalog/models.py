@@ -6,7 +6,16 @@ Coinciden con public.events / public.courses de la migracion inicial.
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
@@ -80,6 +89,13 @@ class Course(Base):
     price_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     currency: Mapped[str] = mapped_column(String(3), server_default="PEN")
     status: Mapped[str] = mapped_column(content_status, server_default="draft")
+    # Anunciado pero sin contenido todavia (migracion 0014). NO es `draft`: un
+    # borrador solo lo ve su autor, esto lo ve todo el mundo como «Proximamente».
+    # La columna existe en produccion desde la 0014; se mapea ahora porque el
+    # servidor necesita decidir si un curso asi puede recomendarse.
+    coming_soon: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
