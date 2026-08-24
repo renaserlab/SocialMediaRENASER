@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { ALTO_DE_LA_BARRA_DE_PROGRESO } from '@/components/VideoScrubber';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
 import { snapToPage } from '@/lib/snapToPage';
@@ -36,6 +37,28 @@ export type ReelItem = {
 
 // Superficie full-bleed sobre video → contexto de media (siempre oscuro).
 const media = palette('dark');
+
+/**
+ * Alto que ocupa la barra de progreso, contando su zona de toque.
+ *
+ * Viene de quien la dibuja, no de una estimacion: con un numero puesto aqui a
+ * ojo, el nombre de quien publica caia DENTRO de la zona de arrastre de la
+ * barra y pulsarlo movia el video en vez de abrir su perfil.
+ */
+const ALTURA_DEL_PROGRESO = ALTO_DE_LA_BARRA_DE_PROGRESO;
+
+/** Aire entre el texto y la barra de progreso. */
+const AIRE = 10;
+
+/**
+ * Alto reservado para el nombre de quien publica y su descripcion.
+ *
+ * Dos lineas de descripcion (`numberOfLines={2}`) mas el nombre. Es un alto
+ * FIJO a proposito: si la columna de acciones se colocara segun lo que mida el
+ * texto de cada video, saltaria de sitio al pasar de uno a otro, que es
+ * exactamente lo que hace que un feed se sienta inestable.
+ */
+const ALTURA_DE_LA_INFORMACION = 62;
 
 type Props = {
   short: ReelItem;
@@ -80,6 +103,29 @@ function ShortVideoItemBase({
   espacioInferior = 0,
 }: Props) {
   const router = useRouter();
+
+  /*
+    DE ABAJO A ARRIBA, cada cosa apoyada en la anterior. Antes eran dos numeros
+    escritos a mano —`bottom: 140 + espacioInferior` y `bottom: 60 + ...`— que
+    no median nada: dejaban 82 px muertos entre el nombre de quien publica y la
+    barra de secciones, y 140 px entre el boton de sonido y la barra. Casi un
+    quinto de la pantalla desperdiciado, justo lo que el documento señala.
+
+    El orden, que es el de las aplicaciones de referencia:
+
+        video
+        acciones (columna derecha)
+        autor + descripcion
+        progreso
+        ────────────────────────
+        barra de secciones
+
+    Todo se calcula desde `espacioInferior`, que ya sabe cuanto ocupa la barra
+    flotante y la zona segura del aparato. Cambiar la altura de la barra mueve
+    esto solo.
+  */
+  const alturaDeInformacion = espacioInferior + ALTURA_DEL_PROGRESO;
+  const alturaDeAcciones = alturaDeInformacion + ALTURA_DE_LA_INFORMACION + AIRE;
   const [liked, setLiked] = useState(false);
   const [likes, setLikes] = useState(short.likes);
 
@@ -121,6 +167,18 @@ function ShortVideoItemBase({
           // Controles propios: un toque pausa o reanuda y abajo hay una barra
           // arrastrable. Los del sistema taparian el video con su botonera.
           shortsControls
+          /*
+            La barra de progreso se aparta de la barra de secciones.
+
+            Sin esto se quedaba en `bottom: 0`, es decir, DEBAJO de la barra de
+            navegacion: medido, la barra ocupaba 734-796 y el progreso caia en
+            768-812. Se veia por debajo, cortado, y arrastrarlo era imposible.
+            Ahora se apoya en la misma medida que usa la barra flotante para
+            saber cuanto ocupa, asi que se coloca justo ENCIMA de ella —como en
+            las aplicaciones de referencia— en cualquier pantalla y con
+            cualquier zona segura, sin numeros puestos a ojo.
+          */
+          controlsBottomInset={espacioInferior}
           onMutedChange={onForcedMute}
         />
       ) : (
@@ -144,7 +202,7 @@ function ShortVideoItemBase({
       )}
       <LinearGradient colors={['transparent', media.overlay]} style={styles.bottomScrim} pointerEvents="none" />
 
-      <View style={[styles.sidebar, { bottom: 140 + espacioInferior }]}>
+      <View style={[styles.sidebar, { bottom: alturaDeAcciones }]}>
         <Pressable
           onPress={openProfile}
           disabled={!short.authorId}
@@ -200,7 +258,7 @@ function ShortVideoItemBase({
         </Pressable>
       </View>
 
-      <View style={[styles.bottomInfo, { bottom: 60 + espacioInferior }]}>
+      <View style={[styles.bottomInfo, { bottom: alturaDeInformacion }]}>
         {/*
           El nombre lleva al perfil, igual que la foto: es lo que se espera al
           leerlo y era el gesto natural que no respondia.

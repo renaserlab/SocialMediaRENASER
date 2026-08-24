@@ -18,7 +18,16 @@ const TRACK_HEIGHT = 3;
 const TRACK_HEIGHT_DRAGGING = 6;
 const THUMB_SIZE = 14;
 /** Alto de la zona sensible al dedo. El minimo comodo es 44 px. */
-const HIT_HEIGHT = 44;
+/**
+ * Alto de la zona de toque de la barra.
+ *
+ * Se EXPORTA porque quien coloca contenido encima necesita saber cuanto ocupa
+ * de verdad. La barra dibujada es fina, pero su zona util es esta; estimarla
+ * por fuera es como se acaba con un texto que no se puede pulsar porque el
+ * arrastre de la barra se le adelanta.
+ */
+export const ALTO_DE_LA_BARRA_DE_PROGRESO = 44;
+const HIT_HEIGHT = ALTO_DE_LA_BARRA_DE_PROGRESO;
 
 type Props = {
   /** Segundo por el que va el video. */

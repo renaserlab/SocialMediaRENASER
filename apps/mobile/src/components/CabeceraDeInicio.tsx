@@ -100,9 +100,18 @@ export function CabeceraDeInicio({ activa, alCambiar, alCrear }: Props) {
           })}
         </View>
 
-        {/* Hueco simetrico al boton de crear: sin el, las pestanas quedarian
-            descentradas hacia la derecha. */}
-        <View style={styles.crear} pointerEvents="none" />
+        {/*
+          Hueco simetrico al boton de crear: sin el, las pestañas quedarian
+          descentradas hacia la derecha.
+
+          Tiene estilo PROPIO. Antes reutilizaba `styles.crear`, que lleva
+          `borderWidth: 1` y `borderRadius: 10`; el color del borde solo se le
+          daba al boton de verdad, asi que este se quedaba con el negro por
+          defecto y se dibujaba encima del video como un recuadro vacio en la
+          esquina. Se veia, no hacia nada y nadie sabia que era. Un hueco solo
+          tiene que ocupar sitio.
+        */}
+        <View style={styles.hueco} pointerEvents="none" />
       </View>
     </View>
   );
@@ -131,6 +140,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Mismo tamaño que el boton, cero decoracion: reserva sitio y nada mas.
+  hueco: { width: 36, height: 36 },
   pestanas: {
     flex: 1,
     flexDirection: 'row',
