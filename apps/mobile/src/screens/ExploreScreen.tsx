@@ -13,6 +13,7 @@ import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { MuroDePublicaciones } from '@/components/MuroDePublicaciones';
+import { PersonasParaTi } from '@/components/PersonasParaTi';
 import type { ProfileSectionKind } from '@/components/ProfileSection';
 import { SectionTitle } from '@/components/SectionTitle';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -26,6 +27,7 @@ import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { resultadoAbierto } from '@/services/senales';
 import { profileImageUrl } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -344,7 +346,19 @@ export function ExploreScreen() {
   );
 
   const pie = (
-    <View style={styles.container}>
+    <View>
+      {/*
+        «Personas para ti» va ANTES del catalogo y fuera del padding lateral:
+        es un carrusel y tiene que poder llegar al borde de la pantalla.
+
+        Va aqui, en Explorar, y no en una pantalla nueva: es donde ya se viene a
+        buscar gente —el buscador de personas esta arriba— y donde tiene sentido
+        encontrarse con quien puede aportarte algo. Si no hay a quien recomendar
+        (o falla), la seccion no se pinta y el resto de Explorar sigue igual.
+      */}
+      <PersonasParaTi />
+
+      <View style={styles.container}>
       {/*
         Un fallo del servidor se dice, no se disfraza de «todavia no hay nada».
         Lleva icono y texto ademas del color, y ofrece la salida (reintentar) en
@@ -436,6 +450,7 @@ export function ExploreScreen() {
         </View>
         <Feather name="users" size={48} color={colors.onPrimary} style={styles.circleIcon} />
       </Pressable>
+      </View>
     </View>
   );
 
@@ -534,7 +549,16 @@ export function ExploreScreen() {
                       />
                     }
                     rightIcon="chevron-right"
-                    onPress={() => router.push(`/profile/${person.id}` as never)}
+                    onPress={() => {
+                      /*
+                        Elegir un resultado dice QUE se buscaba de verdad. Se
+                        guarda a quien se abrio, NUNCA lo que se escribio: un
+                        termino de busqueda puede contener cualquier cosa y no
+                        hace falta para ordenar nada.
+                      */
+                      resultadoAbierto('profile', person.id);
+                      router.push(`/profile/${person.id}` as never);
+                    }}
                   />
                 ))}
               </StateView>
