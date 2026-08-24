@@ -90,6 +90,15 @@ type Props = {
    * dejaban de poder tocarse. Vale 0 donde no hay barra.
    */
   espacioInferior?: number;
+  /**
+   * «No me interesa»: quien mira pide no volver a ver ESTA publicacion.
+   *
+   * Lo resuelve el feed (quitarla de la lista y avisar al recomendador), no
+   * este componente, porque la lista no es suya. Sin callback no se pinta el
+   * boton: en un reproductor suelto, fuera de un feed, no habria de donde
+   * quitar nada.
+   */
+  alDescartar?: (postId: string) => void;
 };
 
 function ShortVideoItemBase({
@@ -101,6 +110,7 @@ function ShortVideoItemBase({
   onToggleMuted,
   onForcedMute,
   espacioInferior = 0,
+  alDescartar,
 }: Props) {
   const router = useRouter();
 
@@ -237,6 +247,29 @@ function ShortVideoItemBase({
         <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel="Compartir">
           <Feather name="share-2" size={28} color={media.text} />
         </Pressable>
+
+        {/*
+          «No me interesa». Va en la columna porque es una accion sobre el
+          video, pero mas pequena y en gris: es la unica de aqui que hace
+          DESAPARECER algo y no se puede deshacer, asi que darle el mismo peso
+          que a «me gusta» invitaria a tocarla sin querer.
+
+          RECHAZAR EL VIDEO NO ES RECHAZAR A SU AUTOR. Esto no deja de seguir a
+          nadie, no bloquea a nadie y no esconde el resto de lo que publique esa
+          persona: pedir menos de UNA publicacion y pedir menos de ALGUIEN son
+          dos decisiones distintas, y la segunda se toma en el perfil.
+        */}
+        {alDescartar ? (
+          <Pressable
+            onPress={() => alDescartar(short.id)}
+            style={styles.sidebarItem}
+            accessibilityRole="button"
+            accessibilityLabel="No me interesa este video"
+            accessibilityHint="Deja de mostrarte esta publicación. No afecta a quien la publicó."
+          >
+            <Feather name="slash" size={22} color={media.textMuted} />
+          </Pressable>
+        ) : null}
 
         {/*
           El sonido va al final y aparte del resto. Arriba tapaba la foto de

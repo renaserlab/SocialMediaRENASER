@@ -105,10 +105,25 @@ export type RecommendedPerson = {
   bio: string;
   isFollowing: boolean;
   reasons: RecommendationReason[];
+  /**
+   * En que puesto lo puso el SERVIDOR. Viaja de vuelta en la impresion: lo
+   * primero se toca mas, sea bueno o no, y sin la posicion las tasas no se
+   * pueden leer.
+   */
+  rank: number;
 };
 
 export type PeopleRecommendations = {
   items: RecommendedPerson[];
+  /**
+   * Con que version del algoritmo se ordeno esta lista. Viaja de vuelta en cada
+   * impresion: sin ella, dos ordenaciones distintas se mezclan en la misma
+   * metrica y no hay forma de saber cual de las dos funcionaba.
+   *
+   * La decide el SERVIDOR. Escrita en el movil, una version antigua de la
+   * aplicacion mediria para siempre contra una etiqueta equivocada.
+   */
+  algorithmVersion: string;
   /**
    * `personalized` = hubo con que personalizar.
    * `cold_start`   = es un respaldo, y la pantalla puede decirlo.
@@ -128,10 +143,38 @@ type PeopleDto = {
     bio: string;
     is_following: boolean;
     reasons: RecommendationReason[];
+    rank: number;
   }>;
 };
 
+/* -------------------------------------------------------------- Contenido -- */
+
+export type ContentRecommendations = {
+  items: Post[];
+  algorithmVersion: string;
+  strategy: 'personalized' | 'cold_start' | 'disabled';
+};
+
+type ContentDto = {
+  algorithm_version: string;
+  strategy: ContentRecommendations['strategy'];
+  with_own_topics: number;
+  items: PostDto[];
+};
+
 /* ---------------------------------------------------------------- Senales -- */
+
+/**
+ * Donde se mostro algo. Los valores los fija el servidor (migracion 0027): una
+ * superficie escrita a mano en dos sitios acaba siendo dos superficies y las
+ * metricas dejan de sumar.
+ */
+export type Superficie =
+  | 'people_for_you'
+  | 'for_you_feed'
+  | 'following_feed'
+  | 'search'
+  | 'profile';
 
 export type BehaviorEvent = {
   eventType:
@@ -148,7 +191,49 @@ export type BehaviorEvent = {
   dwellMs?: number;
   /** Idempotencia: reintentar un lote no debe duplicar sus senales. */
   eventKey?: string;
+  /**
+   * De donde venia. Los tres son opcionales: una accion sin superficie es una
+   * accion que ocurrio FUERA de una recomendacion —un perfil abierto desde un
+   * comentario— y eso es informacion, no un hueco que rellenar.
+   */
+  surface?: Superficie;
+  algorithmVersion?: string;
+  rank?: number;
 };
+
+/* ------------------------------------------------------- Oferta publica -- */
+
+/**
+ * Las tres unicas formas de OFRECER algo. La otra mitad del recomendador
+ * —`interest`, `learn`, `seek_guidance`— es privada y no viaja por aqui.
+ */
+export type RelacionDeOferta = 'can_help' | 'teach' | 'experienced';
+
+/** Un tema que alguien declara poder aportar, y en que forma. */
+export type OfferedTopic = {
+  topicId: string;
+  name: string;
+  relations: Array<RelacionDeOferta>;
+};
+
+type OfferedTopicDto = {
+  topic_id: string;
+  name: string;
+  relations: string[];
+};
+
+type ProfileOfferDto = {
+  topics: OfferedTopicDto[];
+};
+
+/**
+ * Relaciones que ESTA version de la aplicacion sabe escribir en castellano.
+ *
+ * Si el servidor gana una relacion nueva, una aplicacion vieja la recibiria sin
+ * saber traducirla; se descarta aqui, en la frontera, para que ninguna pantalla
+ * tenga que decidir que hacer con un codigo crudo como `mentors`.
+ */
+const RELACIONES_CONOCIDAS: readonly string[] = ['can_help', 'teach', 'experienced'];
 
 export const RecommendationRepository = {
   async getOnboardingStatus(signal?: AbortSignal): Promise<OnboardingStatus> {
@@ -163,6 +248,18 @@ export const RecommendationRepository = {
       completed: dto.completed,
       skipped: dto.skipped,
     };
+  },
+
+  /**
+   * Solo los temas, para el selector de Crear y Editar.
+   *
+   * Reutiliza el catalogo del cuestionario en vez de tener su propio endpoint:
+   * es la MISMA taxonomia, y dos fuentes para la misma lista acaban
+   * discrepando.
+   */
+  async listTopics(): Promise<TopicDto[]> {
+    const dto = await apiRequest<CatalogDto>(`${API_V1}/recommendations/onboarding/catalog`);
+    return dto.topics;
   },
 
   async getCatalog(): Promise<OnboardingCatalog> {
@@ -210,6 +307,7 @@ export const RecommendationRepository = {
       `${API_V1}/recommendations/people?limit=${limit}&offset=${offset}`,
     );
     return {
+      algorithmVersion: dto.algorithm_version,
       strategy: dto.strategy,
       items: dto.items.map((item) => ({
         id: item.id,
@@ -219,13 +317,17 @@ export const RecommendationRepository = {
         bio: item.bio,
         isFollowing: item.is_following,
         reasons: item.reasons ?? [],
+        rank: item.rank ?? 0,
       })),
     };
   },
 
   /**
-   * Contenido recomendado, con la MISMA forma que el feed normal. Por eso la
-   * pantalla no distingue una fuente de otra.
+   * Contenido recomendado. Los elementos son `Post` normales —el mismo mapper
+   * que el feed cronologico—, envueltos en el contexto necesario para poder
+   * medir: la version del algoritmo la decide el SERVIDOR, y si el movil la
+   * llevara escrita en su codigo, una version antigua de la aplicacion mediria
+   * contra una etiqueta equivocada.
    */
   async listContent(
     {
@@ -234,13 +336,17 @@ export const RecommendationRepository = {
       media,
     }: { limit?: number; offset?: number; media?: 'video' | 'image' } = {},
     currentUserId?: string | null,
-  ): Promise<Post[]> {
+  ): Promise<ContentRecommendations> {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (media) params.set('media', media);
-    const dtos = await apiRequest<PostDto[]>(
+    const dto = await apiRequest<ContentDto>(
       `${API_V1}/recommendations/content?${params.toString()}`,
     );
-    return dtos.map((dto) => toPost(dto, currentUserId));
+    return {
+      algorithmVersion: dto.algorithm_version,
+      strategy: dto.strategy,
+      items: (dto.items ?? []).map((item) => toPost(item, currentUserId)),
+    };
   },
 
   /**
@@ -262,6 +368,9 @@ export const RecommendationRepository = {
               value: e.value ?? null,
               dwell_ms: e.dwellMs ?? null,
               event_key: e.eventKey ?? null,
+              surface: e.surface ?? null,
+              algorithm_version: e.algorithmVersion ?? null,
+              rank: e.rank ?? null,
             })),
           }),
         },
@@ -270,6 +379,30 @@ export const RecommendationRepository = {
       // Se registra pero no se propaga: medir no puede estropear el uso.
       console.warn('[recomendaciones] no se pudieron enviar las senales', error);
     }
+  },
+
+  /**
+   * Lo que una persona declara poder APORTAR. Solo eso.
+   *
+   * No existe el endpoint simetrico —«que busca esta persona»— y no es un
+   * olvido del backend: la demanda es privada. Ofrecerse a ensenar carpinteria
+   * es una declaracion que alguien hace para que le encuentren; buscar
+   * orientacion sobre su familia, no. Como la demanda no cabe en el contrato,
+   * no puede escaparse a un perfil publico aunque la interfaz se equivoque.
+   *
+   * `relations` llega filtrada: ver `RELACIONES_CONOCIDAS`.
+   */
+  async getProfileOffer(profileId: string): Promise<OfferedTopic[]> {
+    const dto = await apiRequest<ProfileOfferDto>(
+      `${API_V1}/recommendations/profiles/${profileId}/offer`,
+    );
+    return (dto.topics ?? []).map((tema) => ({
+      topicId: tema.topic_id,
+      name: tema.name,
+      relations: (tema.relations ?? []).filter((r): r is RelacionDeOferta =>
+        RELACIONES_CONOCIDAS.includes(r),
+      ),
+    }));
   },
 };
 

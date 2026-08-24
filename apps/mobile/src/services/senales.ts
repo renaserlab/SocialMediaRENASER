@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import {
   RecommendationRepository,
   type BehaviorEvent,
+  type Superficie,
 } from '@/repositories/RecommendationRepository';
 import { haySesion } from '@/services/api';
 
@@ -134,13 +135,34 @@ export function descartar(): void {
 
 /* -------------------------------------------------------------- Atajos ---- */
 
+/**
+ * De donde venia lo que se toco.
+ *
+ * POR QUE HACE FALTA. Una impresion sin origen solo dice «esto se vio»; con
+ * origen dice «esto se vio PORQUE lo pusimos aqui, en este puesto y con esta
+ * version del algoritmo», que es la unica forma de saber despues si aquella
+ * recomendacion produjo algo o si la persona habria llegado igual.
+ *
+ * Es OPCIONAL entero y a proposito: lo que ocurre fuera de una recomendacion
+ * —un video abierto desde un enlace, un perfil abierto desde un comentario— no
+ * tiene superficie, y eso es un dato en si mismo, no un hueco que rellenar con
+ * un valor por defecto.
+ */
+export type ContextoDeRecomendacion = {
+  surface?: Superficie;
+  algorithmVersion?: string;
+  /** Puesto en la lista donde se mostro. Lo primero se toca mas, sea bueno o no. */
+  rank?: number;
+};
+
 /** El video que se esta viendo ahora. Una vez por video y sesion. */
-export function videoVisible(postId: string): void {
+export function videoVisible(postId: string, contexto?: ContextoDeRecomendacion): void {
   registrar({
     eventType: 'content_impression',
     entityType: 'post',
     entityId: postId,
     eventKey: `imp:${postId}`,
+    ...contexto,
   });
 }
 
@@ -151,7 +173,12 @@ export function videoVisible(postId: string): void {
  * largo ya quedo contado como impresion, y guardar ademas «lo vio un 4 %»
  * seria ruido con forma de dato.
  */
-export function videoVisto(postId: string, proporcion: number, msVisible: number): void {
+export function videoVisto(
+  postId: string,
+  proporcion: number,
+  msVisible: number,
+  contexto?: ContextoDeRecomendacion,
+): void {
   if (!Number.isFinite(proporcion) || proporcion < 0.33) return;
   const completo = proporcion >= 0.9;
   registrar({
@@ -161,16 +188,37 @@ export function videoVisto(postId: string, proporcion: number, msVisible: number
     value: Math.min(1, proporcion),
     dwellMs: Math.min(600_000, Math.max(0, Math.round(msVisible))),
     eventKey: `${completo ? 'fin' : 'vis'}:${postId}`,
+    ...contexto,
+  });
+}
+
+/**
+ * La tarjeta de una persona recomendada esta a la vista.
+ *
+ * Se cuenta cuando SE VE, no cuando llega la respuesta: media lista sigue fuera
+ * de la pantalla al recibirla, y contar aquellas tarjetas como mostradas hunde
+ * la tasa de acierto de las que si se vieron.
+ */
+export function personaVisible(profileId: string, contexto?: ContextoDeRecomendacion): void {
+  registrar({
+    eventType: 'content_impression',
+    entityType: 'profile',
+    entityId: profileId,
+    // Clave propia: un perfil y una publicacion pueden compartir identificador
+    // y sin este prefijo una impresion taparia la otra.
+    eventKey: `imp:perfil:${profileId}`,
+    ...contexto,
   });
 }
 
 /** Abrio un perfil. */
-export function perfilVisto(profileId: string): void {
+export function perfilVisto(profileId: string, contexto?: ContextoDeRecomendacion): void {
   registrar({
     eventType: 'profile_view',
     entityType: 'profile',
     entityId: profileId,
     eventKey: `perfil:${profileId}`,
+    ...contexto,
   });
 }
 
@@ -184,4 +232,33 @@ export function resultadoAbierto(entityType: 'profile' | 'post', entityId: strin
     entityType,
     entityId,
   });
+}
+
+/**
+ * «No me interesa» sobre una publicacion.
+ *
+ * ESTA NO ESPERA AL LOTE. Todo lo demas aqui es medicion —da igual que llegue
+ * ocho segundos tarde—, pero esto es una PETICION de la persona: ha dicho que
+ * no quiere volver a ver algo. Si se quedara en la cola, refrescar el feed en
+ * ese hueco devolveria el mismo video que se acaba de rechazar, y lo que se
+ * rompe entonces no es una metrica, es la confianza en que el boton hace algo.
+ *
+ * Es explicita y poco frecuente, asi que su peticion suelta no tiene nada que
+ * ver con el motivo por el que las impresiones van por lotes.
+ *
+ * Rechazar un video NO es rechazar a quien lo publico: aqui se manda el POST y
+ * nada mas. Ni deja de seguirse a nadie, ni se bloquea, ni se esconde el resto
+ * de su contenido.
+ */
+export function contenidoNoInteresa(postId: string, contexto?: ContextoDeRecomendacion): void {
+  registrar({
+    eventType: 'not_interested',
+    entityType: 'post',
+    entityId: postId,
+    eventKey: `no:${postId}`,
+    ...contexto,
+  });
+  // Sale ya, sin esperar los ESPERA_MS del lote. No se devuelve la promesa: la
+  // interfaz ya ha quitado el video y no tiene nada que esperar.
+  void vaciar();
 }

@@ -52,6 +52,16 @@ export type LoteDeVideos = {
    *    solo entienda `offset` la pagina siguiente se solaparia con la anterior.
    */
   siguienteCursor: CursorDeVideos | null;
+  /**
+   * Con que version del algoritmo se ordeno este lote, para poder mandarla en
+   * las impresiones y saber DESPUES si aquella ordenacion producia algo.
+   *
+   * Es OPCIONAL porque hay lotes que no vienen de ningun algoritmo: los de la
+   * fuente cronologica y los del respaldo. Ahi no se rellena con un valor
+   * inventado; un lote sin version es exactamente eso, y decirlo asi evita
+   * apuntarle al recomendador un orden que no es suyo.
+   */
+  versionDelAlgoritmo?: string;
 };
 
 export type FuenteDeVideos = {
@@ -169,10 +179,17 @@ function fuenteRecomendada(usuarioId: string | null | undefined): FuenteDeVideos
       if (usarRespaldo) return respaldo.cargar(cursor, limite);
       const desplazamiento = cursor?.desplazamiento ?? 0;
       try {
-        const posts = await RecommendationRepository.listContent(
+        /*
+          El recomendador ya no devuelve una lista pelada, sino la lista MAS el
+          contexto con el que se ordeno. Ese contexto es lo que despues permite
+          leer las impresiones: sin la version del algoritmo, «se vio» y «se vio
+          gracias a esta ordenacion» son el mismo dato.
+        */
+        const respuesta = await RecommendationRepository.listContent(
           { limit: limite, offset: desplazamiento, media: 'video' },
           usuarioId,
         );
+        const posts = respuesta.items;
         // Las firmas de Storage van en una segunda fase, igual que en el muro:
         // lo que se mide es cuanto tarda en verse el PRIMER video.
         const conMedios = posts.length > 0 ? await resolveMediaUrls(posts) : [];
@@ -198,6 +215,7 @@ function fuenteRecomendada(usuarioId: string | null | undefined): FuenteDeVideos
           // (ver `semilla_de_exploracion` en el backend), asi que avanzar por
           // desplazamiento no repite ni salta.
           siguienteCursor: { desplazamiento: desplazamiento + posts.length },
+          versionDelAlgoritmo: respuesta.algorithmVersion,
         };
       } catch (error) {
         console.warn('[inicio] el recomendador fallo; se usa el orden cronologico', error);

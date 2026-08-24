@@ -7,7 +7,15 @@ import { Feather } from '@expo/vector-icons';
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
 import { Text } from '@/components/Text';
 import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
-import { videoVisible, videoVisto } from '@/services/senales';
+import { haptics } from '@/lib/haptics';
+import { toast } from '@/lib/toast';
+import type { Superficie } from '@/repositories/RecommendationRepository';
+import {
+  contenidoNoInteresa,
+  videoVisible,
+  videoVisto,
+  type ContextoDeRecomendacion,
+} from '@/services/senales';
 import { palette, spacing } from '@/theme/tokens';
 
 // Superficie a pantalla completa sobre video → contexto de media (oscuro).
@@ -27,6 +35,21 @@ type Props = {
   espacioInferior: number;
   /** Que ensenar cuando no hay ni un video (cada pestana dice lo suyo). */
   vacio?: React.ReactNode;
+  /**
+   * En que superficie se esta ensenando este feed.
+   *
+   * Viaja con cada impresion. Sin ella, «Para ti» y «Siguiendo» son el mismo
+   * dato en el servidor y no hay forma de saber cual de los dos funciona: el
+   * segundo lo ordena la gente a la que se sigue y el primero un algoritmo, asi
+   * que mezclarlos hace ilegibles a los dos.
+   */
+  superficie?: Superficie;
+  /**
+   * Con que version del algoritmo se ordeno lo que se ve, si es que lo ordeno
+   * alguna. Vacio en los feeds cronologicos: no se atribuye a nadie un orden
+   * que no hizo.
+   */
+  versionDelAlgoritmo?: string;
 };
 
 /**
@@ -54,12 +77,28 @@ export function FeedVerticalDeVideos({
   alForzarSilencio,
   espacioInferior,
   vacio,
+  superficie,
+  versionDelAlgoritmo,
 }: Props) {
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
   const insets = useSafeAreaInsets();
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
+
+  /*
+    De donde viene lo que se esta viendo, en una referencia.
+
+    `onViewableItemsChanged` se crea UNA vez —la lista no admite cambiarlo sobre
+    la marcha— asi que si leyera las props directamente se quedaria con las del
+    primer render y mediria «Para ti» eternamente aunque el feed fuera otro. La
+    referencia se reescribe en cada render sin redibujar nada, que es lo unico
+    que puede hacer la medicion aqui dentro: no costar.
+  */
+  // El `rank` NO vive aqui: es de cada elemento, no del feed.
+  const contexto = useRef<Omit<ContextoDeRecomendacion, 'rank'>>({});
+  contexto.current.surface = superficie;
+  contexto.current.algorithmVersion = versionDelAlgoritmo;
 
   /*
     Cuanto lleva en pantalla el video actual, y cual era.
@@ -70,7 +109,7 @@ export function FeedVerticalDeVideos({
     redibujar nada: esto es medicion, y medir no puede costar un render por
     deslizamiento.
   */
-  const videoEnPantalla = useRef<{ id: string; desde: number } | null>(null);
+  const videoEnPantalla = useRef<{ id: string; desde: number; rank: number } | null>(null);
 
   const cerrarMedicion = useCallback(() => {
     const anterior = videoEnPantalla.current;
@@ -83,7 +122,10 @@ export function FeedVerticalDeVideos({
       es una senal fuerte se acabe o no. Es deliberadamente conservador; mejor
       quedarse corto que inventarse un porcentaje.
     */
-    videoVisto(anterior.id, Math.min(1, visible / 15000), visible);
+    videoVisto(anterior.id, Math.min(1, visible / 15000), visible, {
+      ...contexto.current,
+      rank: anterior.rank,
+    });
   }, []);
 
   const onViewableItemsChanged = useRef(
@@ -99,8 +141,15 @@ export function FeedVerticalDeVideos({
       const id = primero.item?.id;
       if (!id || videoEnPantalla.current?.id === id) return;
       cerrarMedicion();
-      videoEnPantalla.current = { id, desde: Date.now() };
-      videoVisible(id);
+      /*
+        El puesto es la POSICION EN LA LISTA, no el orden en que se recibio del
+        servidor: es lo que de verdad tuvo delante quien mira. Sin el, la
+        primera posicion y la vigesima son el mismo dato, y como lo primero se
+        toca mas —sea bueno o no— las tasas no se pueden comparar.
+      */
+      const rank = primero.index;
+      videoEnPantalla.current = { id, desde: Date.now(), rank };
+      videoVisible(id, { ...contexto.current, rank });
     },
   ).current;
 
@@ -113,6 +162,47 @@ export function FeedVerticalDeVideos({
   useEffect(() => {
     if (!activo) cerrarMedicion();
   }, [activo, cerrarMedicion]);
+
+  /*
+    «No me interesa» sobre ESTE video.
+
+    RECHAZAR UN VIDEO NO ES RECHAZAR A QUIEN LO PUBLICO. Aqui no se deja de
+    seguir a nadie, no se bloquea a nadie y no se esconde el resto de su
+    contenido: lo unico que ocurre es que esta publicacion sale de la lista y el
+    recomendador se entera. Quien quiera dejar de ver a una persona entera tiene
+    para eso el boton de dejar de seguir y el de bloquear, que son decisiones
+    distintas, se toman en otro sitio y se pueden deshacer.
+
+    `quitarDelFeed` viene del hook y es estable: si su identidad cambiara en
+    cada render, esta funcion tambien, y con ella la prop de todos los videos
+    montados —que estan memoizados justo para no redibujarse al deslizar.
+  */
+  const quitarDelFeed = feed.descartar;
+  const descartarVideo = useCallback(
+    (postId: string) => {
+      const enCurso = videoEnPantalla.current;
+      const esElQueSeVe = enCurso?.id === postId;
+      /*
+        La medicion en curso se OLVIDA, no se cierra. Haber tenido el video
+        delante unos segundos cuenta como interes, y mandar «se quedo mirandolo»
+        junto a «no me interesa» seria darle al recomendador dos senales que se
+        contradicen sobre el mismo video.
+      */
+      if (esElQueSeVe) videoEnPantalla.current = null;
+
+      contenidoNoInteresa(postId, {
+        ...contexto.current,
+        rank: esElQueSeVe ? enCurso?.rank : undefined,
+      });
+      quitarDelFeed(postId);
+      haptics.light();
+      // No se ofrece deshacer: el toast de la aplicacion solo lleva mensaje e
+      // icono, no accion. Por eso el texto dice lo que pasa, sin prometer una
+      // vuelta atras que no existe.
+      toast('No volveremos a mostrártelo', 'eye-off');
+    },
+    [quitarDelFeed],
+  );
 
   const refrescar = useCallback(async () => {
     setRefrescando(true);
@@ -195,6 +285,7 @@ export function FeedVerticalDeVideos({
             onToggleMuted={alCambiarSilencio}
             onForcedMute={alForzarSilencio}
             espacioInferior={espacioInferior}
+            alDescartar={descartarVideo}
           />
         )}
         pagingEnabled

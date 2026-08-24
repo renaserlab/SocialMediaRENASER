@@ -26,10 +26,32 @@ export type FeedDeVideos = {
    */
   desdeCache: boolean;
   hayMas: boolean;
+  /**
+   * Con qué versión del algoritmo se ordenó lo que se está viendo, si es que lo
+   * ordenó alguna. La pantalla la manda en cada impresión para poder saber
+   * después si aquella ordenación producía algo.
+   *
+   * Vacía cuando el lote no viene de ningún algoritmo: orden cronológico,
+   * respaldo o instantánea guardada. No se hereda la versión del lote anterior
+   * —le apuntaría al recomendador un orden que ya no es suyo—; ante la duda se
+   * mide de menos, nunca de más.
+   */
+  versionDelAlgoritmo?: string;
   cargarMas: () => void;
   reintentar: () => void;
   /** Vuelve a pedir la primera pagina conservando lo que ya se ve. */
   refrescar: () => Promise<void>;
+  /**
+   * Quita un vídeo de la lista que se está viendo, sin recargar nada.
+   *
+   * Lo usa «No me interesa»: la promesa que se le hace a quien pulsa es que ESE
+   * vídeo desaparece, y desaparecer dentro de tres segundos no es desaparecer.
+   * Quitarlo aquí, en el estado, es lo único que lo hace inmediato.
+   *
+   * Es sobre el VÍDEO, nunca sobre quien lo publicó: el resto de su contenido
+   * sigue en la lista y en el feed.
+   */
+  descartar: (postId: string) => void;
 };
 
 /**
@@ -64,6 +86,7 @@ export function useFeedDeVideos(
   const [cargandoMas, setCargandoMas] = useState(false);
   const [hayMas, setHayMas] = useState(true);
   const [intento, setIntento] = useState(0);
+  const [versionDelAlgoritmo, setVersionDelAlgoritmo] = useState<string | undefined>(undefined);
 
   /*
     La peticion en curso. Es una referencia y no estado porque se consulta y se
@@ -78,6 +101,23 @@ export function useFeedDeVideos(
     en `fuenteDeVideos.ts`).
   */
   const cursor = useRef<CursorDeVideos | null>(null);
+  /*
+    Vídeos que esta persona ha rechazado en esta sesión.
+
+    Va en una referencia porque no se pinta: solo sirve para filtrar. Y hace
+    falta además de quitarlos de la lista porque la paginación sigue en marcha:
+    la página siguiente se pidió con un desplazamiento calculado ANTES del
+    rechazo, así que puede traer de vuelta el vídeo que se acaba de quitar. Sin
+    esto, «no volveremos a mostrártelo» duraría hasta el siguiente deslizamiento.
+  */
+  const descartados = useRef(new Set<string>());
+  /*
+    Espejo de la lista, para poder quitar un vídeo sin que `descartar` dependa
+    del estado (ver más abajo por qué su identidad no puede cambiar). Mismo
+    patrón que `fuenteRef`.
+  */
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const clave = fuente.clave;
 
   /*
@@ -101,12 +141,14 @@ export function useFeedDeVideos(
         // Lo que de verdad se mide del Inicio: cuanto tarda en haber algo que
         // reproducir. Se marca una sola vez por sesion.
         perfMark('INICIO_PRIMERA_PAGINA', { once: true });
-        setItems(lote.items);
+        const visibles = sinDescartados(lote.items, descartados.current);
+        setItems(visibles);
         setDesdeCache(false);
         cursor.current = lote.siguienteCursor;
         setHayMas(lote.hayMas);
+        setVersionDelAlgoritmo(lote.versionDelAlgoritmo);
         setEstado('listo');
-        if (conCache) void guardarInstantaneaDeVideos(lote.items);
+        if (conCache) void guardarInstantaneaDeVideos(visibles);
       })
       .catch(async (e: unknown) => {
         console.warn('[inicio] no se pudieron cargar los videos', e);
@@ -120,10 +162,13 @@ export function useFeedDeVideos(
         const guardados = conCache ? await leerInstantaneaDeVideos() : [];
         if (!vigente) return;
         if (guardados.length > 0) {
-          setItems(guardados);
+          setItems(sinDescartados(guardados, descartados.current));
           setDesdeCache(true);
           cursor.current = null;
           setHayMas(false);
+          // Lo guardado se ordeno en otra sesion y quiza con otra version: no
+          // se le atribuye ninguna.
+          setVersionDelAlgoritmo(undefined);
           setEstado('listo');
           return;
         }
@@ -155,9 +200,12 @@ export function useFeedDeVideos(
       .cargar(desde, VIDEOS_POR_PAGINA)
       .then((lote) => {
         const conocidos = new Set(items.map((i) => i.id));
-        const nuevos = lote.items.filter((i) => !conocidos.has(i.id));
+        const nuevos = sinDescartados(lote.items, descartados.current).filter(
+          (i) => !conocidos.has(i.id),
+        );
         if (nuevos.length > 0) setItems((prev) => [...prev, ...nuevos]);
         cursor.current = lote.siguienteCursor;
+        setVersionDelAlgoritmo(lote.versionDelAlgoritmo);
         /*
           Se sigue mientras el servidor tenga mas. Antes se exigia ademas que
           la pagina trajera novedades, y eso apagaba la paginacion para siempre
@@ -181,13 +229,15 @@ export function useFeedDeVideos(
     enVuelo.current = true;
     try {
       const lote = await fuenteRef.current.cargar(null, VIDEOS_POR_PAGINA);
-      setItems(lote.items);
+      const visibles = sinDescartados(lote.items, descartados.current);
+      setItems(visibles);
       setDesdeCache(false);
       cursor.current = lote.siguienteCursor;
       setHayMas(lote.hayMas);
+      setVersionDelAlgoritmo(lote.versionDelAlgoritmo);
       setEstado('listo');
       setError(null);
-      if (conCache) void guardarInstantaneaDeVideos(lote.items);
+      if (conCache) void guardarInstantaneaDeVideos(visibles);
     } catch (e) {
       console.warn('[inicio] no se pudo refrescar', e);
       // Refrescar no vacia la pantalla: si falla, se conserva lo que hubiera.
@@ -202,6 +252,28 @@ export function useFeedDeVideos(
 
   const reintentar = useCallback(() => setIntento((n) => n + 1), []);
 
+  /*
+    Sin dependencias A PROPOSITO: esta función viaja como prop hasta cada vídeo
+    de la lista, que está memoizado. Si su identidad cambiara con el estado,
+    cambiaría en cada deslizamiento y volvería a dibujar todos los vídeos
+    montados —con sus reproductores— justo mientras el dedo arrastra.
+  */
+  const descartar = useCallback(
+    (postId: string) => {
+      descartados.current.add(postId);
+      const quedan = itemsRef.current.filter((item) => item.id !== postId);
+      if (quedan.length === itemsRef.current.length) return;
+      setItems(quedan);
+      /*
+        La instantánea se reescribe sin él. Si no, abrir la aplicación sin
+        cobertura devolvería el vídeo rechazado, que es justo lo que se acaba de
+        prometer que no pasaría.
+      */
+      if (conCache) void guardarInstantaneaDeVideos(quedan);
+    },
+    [conCache],
+  );
+
   return {
     items,
     estado,
@@ -209,8 +281,21 @@ export function useFeedDeVideos(
     cargandoMas,
     hayMas,
     desdeCache,
+    versionDelAlgoritmo,
     cargarMas,
     reintentar,
     refrescar,
+    descartar,
   };
+}
+
+/**
+ * Quita de un lote lo que esta persona ya rechazó.
+ *
+ * Vive fuera del hook para no tener identidad: se llama desde dentro de las
+ * cargas, nunca se pasa como prop.
+ */
+function sinDescartados(items: ReelItem[], descartados: Set<string>): ReelItem[] {
+  if (descartados.size === 0) return items;
+  return items.filter((item) => !descartados.has(item.id));
 }

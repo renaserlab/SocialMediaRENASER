@@ -135,6 +135,8 @@ export function InicioScreen() {
     quien sigue seria enganar sobre el origen del contenido.
   */
   const conSugerencias = siguiendoVacio && sigueAAlguien && !sinSesion;
+  /** El feed que pinta «Siguiendo»: el suyo, o el de «Para ti» si esta vacio. */
+  const feedDeEstaPestana = conSugerencias ? feedParaTi : feedSiguiendo;
 
   const irACrear = useCallback(() => router.navigate('/(tabs)/create'), [router]);
   const irAExplorar = useCallback(() => router.navigate('/(tabs)/explore'), [router]);
@@ -151,6 +153,18 @@ export function InicioScreen() {
           alCambiarSilencio={cambiarSilencio}
           alForzarSilencio={forzarSilencio}
           espacioInferior={espacioInferior}
+          /*
+            De donde sale cada impresion. «Para ti» y «Siguiendo» son dos
+            superficies distintas —una la ordena un algoritmo y la otra la
+            gente a la que se sigue—, asi que sin distinguirlas las metricas de
+            las dos quedan mezcladas y no se puede leer ninguna.
+
+            La version del algoritmo la pone el feed, y solo cuando la hay: si
+            el recomendador se cayo al orden cronologico, no llega ninguna y no
+            se le atribuye nada.
+          */
+          superficie="for_you_feed"
+          versionDelAlgoritmo={feedParaTi.versionDelAlgoritmo}
           vacio={
             <Vacio
               icono="video-off"
@@ -186,13 +200,21 @@ export function InicioScreen() {
           ) : (
             <View style={styles.lleno}>
               <FeedVerticalDeVideos
-                feed={conSugerencias ? feedParaTi : feedSiguiendo}
+                feed={feedDeEstaPestana}
                 altura={height}
                 activo={seccionActiva && pestana === 'siguiendo'}
                 silenciado={silenciado}
                 alCambiarSilencio={cambiarSilencio}
                 alForzarSilencio={forzarSilencio}
                 espacioInferior={espacioInferior}
+                /*
+                  La superficie es DONDE se vio, no de donde salio el contenido:
+                  aunque con sugerencias los videos vengan de «Para ti», quien
+                  los mira esta en «Siguiendo». La version del algoritmo si sale
+                  del feed que se este pintando, que es quien lo ordeno.
+                */
+                superficie="following_feed"
+                versionDelAlgoritmo={feedDeEstaPestana.versionDelAlgoritmo}
                 vacio={
                   <Vacio
                     icono="users"

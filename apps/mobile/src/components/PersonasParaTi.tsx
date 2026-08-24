@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -19,7 +27,7 @@ import {
   type PeopleRecommendations,
   type RecommendedPerson,
 } from '@/repositories/RecommendationRepository';
-import { perfilVisto } from '@/services/senales';
+import { perfilVisto, personaVisible } from '@/services/senales';
 import { profileImageUrl } from '@/services/storage';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -44,6 +52,30 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 /** Cuantas caben sin convertir la seccion en una pantalla entera. */
 const CUANTAS = 8;
+
+/**
+ * Ancho de una tarjeta. Vive aqui, y no solo en los estilos, porque saber que
+ * tarjeta se esta viendo se calcula con el: si el numero estuviera escrito dos
+ * veces, cambiar el diseno desajustaria las impresiones en silencio.
+ */
+const ANCHO_TARJETA = 172;
+
+/**
+ * Cuanta tarjeta tiene que asomar para contarla como vista. La mitad: un borde
+ * de dos pixeles no es haber visto a nadie, y exigir la tarjeta entera dejaria
+ * sin contar la ultima de cada pantalla, que casi siempre se ve a medias.
+ */
+const VISIBLE_MINIMA = ANCHO_TARJETA / 2;
+
+/**
+ * Cada cuanto se mira el desplazamiento, como MUCHO.
+ *
+ * MEDIR NO PUEDE ESTROPEAR LO QUE SE MIDE: sin freno, `onScroll` dispara en
+ * cada fotograma y el carrusel se arrastraria a tirones por culpa de contarlo.
+ * Doscientos milisegundos son de sobra para saber que tarjetas han estado
+ * delante, porque nadie recorre ocho tarjetas en menos que eso.
+ */
+const CADA_CUANTO_MS = 200;
 
 export function PersonasParaTi() {
   const { colors } = useAppTheme();
@@ -120,14 +152,98 @@ export function PersonasParaTi() {
     }
   };
 
+  /*
+    QUE TARJETAS SE HAN VISTO DE VERDAD.
+
+    Una recomendacion puede venir en la respuesta y no verla nadie: el carrusel
+    ensena dos tarjetas y media, y las otras cinco y media estan fuera de la
+    pantalla. Contarlas todas como mostradas hundiria la tasa de acierto de las
+    que si se vieron, y las metricas dirian que el recomendador funciona peor
+    de lo que funciona.
+
+    Se calcula a partir del desplazamiento y del ancho visible, no con
+    `onLayout` por tarjeta: son ocho elementos de ancho fijo en una fila, asi
+    que la aritmetica es exacta y no cuesta ni un render.
+
+    Todo en referencias: esto es MEDICION, y medir no puede provocar un
+    repintado por cada pixel de scroll.
+  */
+  const anchoVisible = useRef(0);
+  const ultimaMedicion = useRef(0);
+
+  const medirVisibles = useCallback(
+    (desplazamiento: number) => {
+      const lista = datos?.items;
+      if (!lista || lista.length === 0 || anchoVisible.current === 0) return;
+
+      const paso = ANCHO_TARJETA + spacing.md;
+      const izquierda = desplazamiento;
+      const derecha = desplazamiento + anchoVisible.current;
+
+      lista.forEach((persona, indice) => {
+        const inicio = spacing.lg + indice * paso;
+        const asomado = Math.min(derecha, inicio + ANCHO_TARJETA) - Math.max(izquierda, inicio);
+        if (asomado < VISIBLE_MINIMA) return;
+        // `personaVisible` lleva clave propia, asi que repetirlo al ir y volver
+        // por el carrusel no cuenta dos veces la misma tarjeta.
+        personaVisible(persona.id, {
+          surface: 'people_for_you',
+          algorithmVersion: datos?.algorithmVersion,
+          // El puesto lo decidio el SERVIDOR y viene en la respuesta. No se usa
+          // el indice del array: cualquier filtro que hiciera esta pantalla
+          // desplazaria los numeros y las metricas medirian otra cosa.
+          rank: persona.rank,
+        });
+      });
+    },
+    [datos],
+  );
+
+  const alMedirAncho = useCallback(
+    (evento: LayoutChangeEvent) => {
+      anchoVisible.current = evento.nativeEvent.layout.width;
+      // La primera pantalla se cuenta en cuanto se sabe cuanto cabe: si solo se
+      // midiera al desplazar, quien no toca el carrusel no generaria ninguna
+      // impresion y sus tarjetas figurarian como no mostradas.
+      medirVisibles(0);
+    },
+    [medirVisibles],
+  );
+
+  const alDesplazar = useCallback(
+    (evento: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const ahora = Date.now();
+      if (ahora - ultimaMedicion.current < CADA_CUANTO_MS) return;
+      ultimaMedicion.current = ahora;
+      medirVisibles(evento.nativeEvent.contentOffset.x);
+    },
+    [medirVisibles],
+  );
+
+  /*
+    Y al llegar una lista nueva. `onLayout` no se vuelve a disparar si el ancho
+    no cambia, asi que sin esto la segunda carga —tras seguir a alguien, por
+    ejemplo— no contaria ninguna impresion.
+  */
+  useEffect(() => {
+    if (estado === 'listo') medirVisibles(0);
+  }, [estado, medirVisibles]);
+
   const verPerfil = (persona: RecommendedPerson) => {
     /*
       Abrir un perfil es una senal: dice mas que una impresion y menos que un
       seguimiento. Va por la COLA y no por una peticion suelta —tocar cinco
       tarjetas serian cinco peticiones—, y con clave, para que abrir el mismo
       perfil dos veces no lo cuente dos veces.
+
+      Lleva el mismo contexto que la impresion: es lo que permite cruzar
+      «se mostro» con «se abrio» y saber si aquella recomendacion sirvio.
     */
-    perfilVisto(persona.id);
+    perfilVisto(persona.id, {
+      surface: 'people_for_you',
+      algorithmVersion: datos?.algorithmVersion,
+      rank: persona.rank,
+    });
     router.push(`/profile/${persona.id}` as never);
   };
 
@@ -140,7 +256,14 @@ export function PersonasParaTi() {
       devolveria a la persona que se acaba de descartar.
     */
     await RecommendationRepository.sendEvents([
-      { eventType: 'not_interested', entityType: 'profile', entityId: persona.id },
+      {
+        eventType: 'not_interested',
+        entityType: 'profile',
+        entityId: persona.id,
+        surface: 'people_for_you',
+        algorithmVersion: datos?.algorithmVersion,
+        rank: persona.rank,
+      },
     ]);
     setDatos((previo) =>
       previo ? { ...previo, items: previo.items.filter((p) => p.id !== persona.id) } : previo,
@@ -179,6 +302,15 @@ export function PersonasParaTi() {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.fila}
+        onLayout={alMedirAncho}
+        onScroll={alDesplazar}
+        /*
+          16 ms es el minimo que admite React Native; el freno de verdad lo pone
+          `CADA_CUANTO_MS` dentro del manejador. Se deja bajo aqui para que el
+          primer movimiento se note enseguida y no haya que esperar un cuarto de
+          segundo a que empiece a contar.
+        */
+        scrollEventThrottle={16}
       >
         {estado === 'cargando'
           ? [0, 1, 2].map((i) => (
