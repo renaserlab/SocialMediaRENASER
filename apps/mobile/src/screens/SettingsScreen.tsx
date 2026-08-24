@@ -141,6 +141,20 @@ export function SettingsScreen() {
             leftIcon="user"
           />
         )}
+        {isLoggedIn ? (
+          /*
+            El cuestionario se pregunta UNA vez, pero lo que alguien busca
+            cambia. Sin esta puerta, cambiar de intereses obligaria a borrar la
+            cuenta: es la unica forma de volver a verlo.
+          */
+          <ListRow
+            title="Tus intereses"
+            subtitle="Qué quieres aprender y en qué puedes ayudar"
+            leftIcon="compass"
+            rightIcon="chevron-right"
+            onPress={() => router.push('/onboarding?modo=editar' as never)}
+          />
+        ) : null}
         <ListRow
           title={t('settings.verification')}
           subtitle={t('settings.verificationBody')}

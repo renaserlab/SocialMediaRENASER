@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
-import { postAuthRoute } from '@/lib/postAuthRoute';
+import { rutaTrasAutenticar } from '@/lib/postAuthRoute';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -67,7 +67,7 @@ export function LoginScreen() {
     setSubmitting(true);
     try {
       await signInEmail({ email: cleanEmail, password });
-      router.replace(postAuthRoute() as never);
+      router.replace((await rutaTrasAutenticar()) as never);
     } catch (error) {
       /*
         Antes se pintaba `error.message` tal cual, y Supabase responde en ingles
@@ -99,7 +99,7 @@ export function LoginScreen() {
       await signInWithProvider('google');
       // En web la pagina se redirige sola; en nativo ya hay sesion al volver.
       if (useAuthStore.getState().status === 'authenticated') {
-        router.replace(postAuthRoute() as never);
+        router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
       notify('No se pudo acceder con Google', mensajeDeAuth(error, 'acceso'));

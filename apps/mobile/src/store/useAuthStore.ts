@@ -13,8 +13,10 @@ import { perfMark } from '@/lib/perf';
 import { setAuthTokenProvider, warmUpApi, ApiError } from '@/services/api';
 import { enlaceAuthInicial } from '@/services/supabase';
 import { registerForPush, unregisterPush } from '@/services/notifications';
+import { descartar as descartarSenales } from '@/services/senales';
 import { clearSignedUrlCache } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
+import { usePreferenciasStore } from '@/store/usePreferenciasStore';
 import type { UserProfile } from '@/types';
 
 export type ProfilePatch = Partial<Pick<UserProfile, 'fullName' | 'username' | 'bio'>>;
@@ -60,6 +62,16 @@ type AuthState = {
 };
 
 let unsubscribeAuth: (() => void) | null = null;
+
+/**
+ * Pregunta al servidor si a esta persona le toca el cuestionario de
+ * recomendacion. Se dispara junto al perfil, no antes: es informacion para
+ * decidir una ruta, no permiso de acceso, y nada debe esperarla.
+ */
+function resolverCuestionario(usuarioId: string | undefined): void {
+  if (!usuarioId) return;
+  void usePreferenciasStore.getState().cargarEstado(usuarioId);
+}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'loading',
@@ -135,6 +147,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           // Mismo criterio que abajo: la sesion decide, el perfil acompana.
           set({ status: 'authenticated' });
           void get().refreshProfile();
+          // Y con el, si a esta persona le toca el cuestionario. Va en
+          // paralelo: el arranque lo espera solo un par de segundos.
+          void resolverCuestionario(nextSession.user?.id);
           // El dispositivo se registra al iniciar sesion, no al arrancar la
           // app: el permiso se pide cuando ya tiene sentido para quien la usa.
           // Si falla (Expo Go, emulador, permiso denegado) devuelve null y no
@@ -159,6 +174,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // segundos mirando una rueda girar.
         set({ status: 'authenticated' });
         void get().refreshProfile();
+        void resolverCuestionario(session.user?.id);
       } else {
         set({ status: 'anonymous' });
       }
@@ -258,6 +274,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.signOut();
     // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
     clearSignedUrlCache();
+    // Lo que sabiamos del cuestionario era de la cuenta anterior, y las
+    // senales pendientes tambien: enviarlas ahora las atribuiria a quien entre
+    // despues en este mismo telefono.
+    descartarSenales();
+    usePreferenciasStore.getState().reiniciar();
     set({ passwordRecovery: false, recoveryError: null });
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });
@@ -269,6 +290,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.deleteAccount();
     // A partir de aqui es el mismo cierre que signOut: la cuenta ya no existe.
     clearSignedUrlCache();
+    // Lo que sabiamos del cuestionario era de la cuenta anterior, y las
+    // senales pendientes tambien: enviarlas ahora las atribuiria a quien entre
+    // despues en este mismo telefono.
+    descartarSenales();
+    usePreferenciasStore.getState().reiniciar();
     set({ passwordRecovery: false, recoveryError: null });
     useAppStore.getState().setUser(null);
     set({ status: 'anonymous' });

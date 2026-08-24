@@ -1,56 +1,61 @@
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
+import { rutaDeArranque } from '@/lib/rutaDeArranque';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { usePreferenciasStore } from '@/store/usePreferenciasStore';
 import { useAppTheme } from '@/theme/useAppTheme';
 
+/**
+ * La puerta de entrada. Lee el estado y obedece a `rutaDeArranque`.
+ *
+ * La DECISION —y sobre todo el orden en que se comprueban las cosas— vive en
+ * `@/lib/rutaDeArranque`, aparte y probada. Aqui no hay ninguna regla: solo
+ * estado, indicador de carga y redireccion. Es lo que impide que alguien
+ * cuele mañana una condicion por delante de la recuperación de contraseña sin
+ * enterarse de lo que rompe.
+ */
 export default function IndexRoute() {
   const hydrated = useAppStore((state) => state.hydrated);
-  const onboardingComplete = useAppStore((state) => state.onboardingComplete);
   const languageSelected = useAppStore((state) => state.languageSelected);
   const authStatus = useAuthStore((state) => state.status);
   const passwordRecovery = useAuthStore((state) => state.passwordRecovery);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const cuestionario = usePreferenciasStore((state) => state.estado);
   const { colors } = useAppTheme();
 
-  // Espera a la hidratación del store y (si hay Supabase) a resolver la sesión,
-  // para no mostrar el flujo de onboarding un instante antes de redirigir al home.
-  const authResolving = supabaseEnabled && authStatus === 'loading';
+  const destino = rutaDeArranque({
+    hidratado: hydrated,
+    conBackend: supabaseEnabled,
+    sesion:
+      authStatus === 'loading'
+        ? 'resolviendo'
+        : authStatus === 'authenticated'
+        ? 'conCuenta'
+        : 'sinCuenta',
+    recuperandoContrasena: passwordRecovery,
+    cuestionario,
+    idiomaElegido: languageSelected,
+  });
 
-  if (!hydrated || authResolving) {
+  // `null` = todavia no se puede decidir. Ninguna de las esperas es indefinida:
+  // la sesion resuelve o degrada a anonima, y el cuestionario tiene su propio
+  // reloj (ver `usePreferenciasStore`).
+  if (destino === null) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.background,
+        }}
+      >
         <ActivityIndicator color={colors.text} />
       </View>
     );
   }
 
-  /*
-    La recuperacion de contrasena va PRIMERO, antes que la sesion.
-
-    Al pulsar el enlace del correo Supabase abre sesion, asi que sin esta
-    comprobacion el usuario aterrizaba en el feed con la contrasena vieja
-    intacta y sin llegar a cambiarla: pedia recuperarla y la aplicacion se
-    comportaba como si no hubiera pasado nada. `passwordRecovery` ya se leia
-    aqui, pero no se usaba para nada.
-  */
-  if (passwordRecovery) return <Redirect href="/reset-password" />;
-
-  // Con sesión activa se va directo al home.
-  if (authStatus === 'authenticated') return <Redirect href="/(tabs)/home" />;
-
-  // Sin sesión TAMBIEN se entra al muro. Antes habia por delante una portada y
-  // un cuestionario de siete preguntas, de modo que no se veia ni una sola
-  // publicacion sin registrarse primero: quien llegaba por un enlace tenia que
-  // rellenar un formulario para descubrir de que iba la aplicacion.
-  //
-  // Ahora se navega libremente, como en TikTok, y la cuenta se pide en el
-  // momento en que hace falta de verdad —publicar, comentar, reaccionar o
-  // guardar—, que es cuando ya se entiende para que sirve (ver `useRequireAuth`).
-  //
-  // El idioma se sigue preguntando primero: condiciona todo lo que se lee
-  // despues y no cuesta nada responderlo.
-  if (!languageSelected) return <Redirect href="/language" />;
-  return <Redirect href="/(tabs)/home" />;
+  return <Redirect href={destino as never} />;
 }

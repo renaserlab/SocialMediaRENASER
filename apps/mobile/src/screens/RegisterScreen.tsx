@@ -2,6 +2,8 @@ import React, { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
+
+import { rutaTrasAutenticar } from '@/lib/postAuthRoute';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -63,7 +65,8 @@ export function RegisterScreen() {
     // Sin Supabase configurado: se mantiene el flujo demo local.
     if (!supabaseEnabled) {
       register({ fullName: cleanName, email: cleanEmail });
-      router.replace('/onboarding');
+      // Sin servidor no hay donde guardar lo que responda el cuestionario.
+      router.replace('/(tabs)/home');
       return;
     }
 
@@ -78,7 +81,9 @@ export function RegisterScreen() {
         );
         router.replace('/verification');
       } else {
-        router.replace('/onboarding');
+        // Cuenta recien creada: le toca el cuestionario, salvo que la
+        // personalizacion este apagada en el servidor.
+        router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
       // Igual que en el acceso: el texto tecnico de Supabase no llega a la
@@ -105,7 +110,7 @@ export function RegisterScreen() {
     try {
       await signInWithProvider('google');
       if (useAuthStore.getState().status === 'authenticated') {
-        router.replace('/onboarding');
+        router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
       notify('No se pudo continuar con Google', mensajeDeAuth(error, 'registro'));
