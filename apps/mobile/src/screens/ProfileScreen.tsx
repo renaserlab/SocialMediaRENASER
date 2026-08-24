@@ -17,6 +17,7 @@ import { BookSessionSheet } from '@/components/BookSessionSheet';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { ListRow } from '@/components/ListRow';
+import { OfertaDelPerfil } from '@/components/OfertaDelPerfil';
 import { ProfileGallery } from '@/components/ProfileGallery';
 import { ProfileSection, type ProfileSectionKind } from '@/components/ProfileSection';
 import { StateView } from '@/components/StateView';
@@ -584,6 +585,25 @@ export function ProfileScreen() {
 
           {profileData.bio ? (
             <Text style={[styles.bio, { color: colors.text }]}>{profileData.bio}</Text>
+          ) : null}
+
+          {/*
+            LO QUE ESTA PERSONA PUEDE APORTAR.
+
+            Va detras de la presentacion —audio y descripcion— y delante de los
+            accesos a Podcast, Cursos, Reseñas y Agenda. Ese orden no es
+            casual: quien llega a un perfil viene decidiendo si quiere hablar
+            con alguien, y los temas que declara aportar son la ultima pieza de
+            esa respuesta; los accesos de abajo ya son el «donde» —su podcast,
+            sus cursos, su agenda—, y tienen mas sentido cuando ya se sabe de
+            que sabe. Justo encima de «Agenda» tambien es donde mas ayuda:
+            pedir una sesion se decide por el tema.
+
+            Darren queda fuera: es un perfil de demostracion sin uuid, y pedir
+            su oferta al backend seria un 404 seguro.
+          */}
+          {!isDarren && galleryOwnerId ? (
+            <OfertaDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
           ) : null}
 
           {isDarren && (
