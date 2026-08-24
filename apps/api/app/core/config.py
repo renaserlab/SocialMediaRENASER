@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     #: donde si hay CPU. Encenderlo aqui es decision de infraestructura.
     video_transcode_enabled: bool = False
 
+    # --- Recomendaciones ---
+    #: Personalizacion (onboarding + "Personas para ti" + "Para ti" ordenado).
+    #: ENCENDIDO por defecto, y apagable en caliente desde una variable de
+    #: entorno sin desplegar nada.
+    #:
+    #: Es el plan de vuelta atras de esta fase: apagarlo devuelve la aplicacion
+    #: al comportamiento anterior —feed cronologico, sin cuestionario— sin
+    #: borrar una sola fila. Las tablas nuevas se quedan donde estan, quietas.
+    #: Un rollback que exija borrar informacion de gente real no es un rollback.
+    feature_recommendations_v1: bool = True
+
     # --- CORS ---
     cors_origins: str = "*"
 
