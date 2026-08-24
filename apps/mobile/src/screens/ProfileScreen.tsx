@@ -508,19 +508,17 @@ export function ProfileScreen() {
             «Publicaciones» sale de aqui porque ya se cuenta sola: la galeria
             esta justo debajo.
           */}
-          <View style={[styles.metricas, { borderColor: colors.border }]}>
+          <View style={styles.metricas}>
             <Stat
               label="Siguiendo"
               value={profileData.following}
               onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
             />
-            <View style={[styles.separador, { backgroundColor: colors.border }]} />
             <Stat
               label="Seguidores"
               value={profileData.followers}
               onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
             />
-            <View style={[styles.separador, { backgroundColor: colors.border }]} />
             <Stat label="Me gusta" value={profileData.likes} />
           </View>
 
@@ -792,17 +790,21 @@ const styles = StyleSheet.create({
   profileBlock: { padding: spacing.lg },
   identidad: { alignItems: 'center', gap: spacing.xs },
   centrado: { textAlign: 'center' },
+  /*
+    Las tres cifras, SIN reglas ni separadores.
+
+    Antes iban encerradas entre dos lineas horizontales y partidas por dos
+    verticales. Dibujaban una tabla en medio del perfil: cuatro trazos para
+    separar tres numeros que ya se separan solos por el espacio, y que ademas
+    competian visualmente con la unica linea que si significa algo (la que abre
+    la galeria). La separacion la hace el reparto en tres partes iguales.
+  */
   metricas: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: spacing.lg,
     paddingVertical: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  // Separadores finos entre cifras: agrupan las tres sin convertirlas en una
-  // tabla.
-  separador: { width: StyleSheet.hairlineWidth, height: 26 },
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   blockBtn: {
     width: 44,
