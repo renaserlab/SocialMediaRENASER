@@ -1,4 +1,4 @@
-"""Que partes de la migracion 0027 estan aplicadas en ESTA base de datos.
+"""Que partes de las migraciones 0027 y 0028 estan aplicadas en ESTA base.
 
 POR QUE EXISTE ESTE FICHERO, Y ES UNA LECCION CARA.
 
@@ -22,7 +22,7 @@ cacheado. No se detecta por excepcion: en PostgreSQL una sentencia fallida deja
 la transaccion inservible, asi que descubrirlo «probando» obligaria a
 recuperarse de un error en mitad de una operacion buena.
 
-CUANDO SE BORRA ESTE FICHERO. Cuando la 0027 lleve aplicada el tiempo
+CUANDO SE BORRA ESTE FICHERO. Cuando las migraciones lleven aplicadas el tiempo
 suficiente en todos los entornos. Entonces esto es peso muerto y quitarlo es
 una linea por sitio. Mientras tanto, es lo que permite que la rama se pueda
 probar antes de que la migracion se apruebe.
@@ -92,6 +92,23 @@ async def hay_atribucion(db: AsyncSession) -> bool:
                 "superficie ni version, asi que el embudo de metricas saldra vacio."
             )
     return _cache["behavior_events.surface"]
+
+
+async def hay_temas_de_curso(db: AsyncSession) -> bool:
+    """Si existe `course_topics` (migracion 0028).
+
+    Sin ella un curso no puede decir de que trata, asi que no se le puede exigir
+    un tema para publicarlo ni ordenarlo por afinidad tematica. El catalogo
+    sigue funcionando igual que hoy; solo se sabe menos.
+    """
+    if "course_topics" not in _cache:
+        _cache["course_topics"] = await _hay_tabla(db, "course_topics")
+        if not _cache["course_topics"]:
+            logger.warning(
+                "La migracion 0028 no esta aplicada: los cursos no pueden llevar "
+                "temas propios y no se exigen para publicar."
+            )
+    return _cache["course_topics"]
 
 
 def olvidar() -> None:

@@ -164,3 +164,33 @@ class PostTopic(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class CourseTopic(Base):
+    """De que trata un curso (migracion 0028).
+
+    Tabla PROPIA y no `post_topics` reutilizada: un curso no es una publicacion.
+    Comparten la taxonomia (`topics`, migracion 0026) —que es lo que permite
+    cruzar «quiero aprender IA» con un curso de IA sin traducir nada— pero no la
+    fila: mezclarlos obligaria a que `post_id` apuntase a dos tablas distintas
+    segun el caso, que es como se pierde la clave foranea y, con ella, la unica
+    garantia de que el tema existe.
+
+    La clave es el PAR: etiquetar dos veces el mismo tema no es etiquetar dos
+    veces, es un error de dedo.
+    """
+
+    __tablename__ = "course_topics"
+
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    topic_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("topics.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(Text, default="manual", server_default="manual")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -37,6 +37,7 @@ from app.modules.recommendations import (
     temas_de_contenido,
 )
 from app.modules.recommendations.config import (
+    SUPERFICIE_CURSOS,
     CONTENT_ALGORITHM_VERSION,
     ONBOARDING_VERSION,
     RECOMMENDATION_ALGORITHM_VERSION,
@@ -309,6 +310,12 @@ async def registrar_eventos(
             # enfrie el tema y no solo la publicacion concreta.
             "topic_ids": temas_rechazados.get(evento.entity_id or "") or None,
         }
+        if con_contexto and evento.surface == SUPERFICIE_CURSOS:
+            # «Cursos para ti» es una superficie que la base solo admite desde
+            # la migracion 0028. Sin ella, escribirla romperia el CHECK y la
+            # peticion entera se caeria; se guarda la senal sin contexto, que es
+            # perder informacion pero no perder la senal.
+            con_contexto = await esquema.hay_temas_de_curso(db)
         if con_contexto:
             # De donde venia. Es lo que convierte una senal suelta en una linea
             # de un embudo que se puede medir.

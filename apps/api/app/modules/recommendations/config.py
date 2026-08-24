@@ -30,6 +30,11 @@ RECOMMENDATION_ALGORITHM_VERSION = "people-v1.1"
 #: evolucionaran a ritmos distintos.
 CONTENT_ALGORITHM_VERSION = "content-v1.1"
 
+#: Version del ordenador de CURSOS. Se versiona aparte de personas y contenido
+#: porque se va a poder comparar por separado: cambiar los pesos de cursos no
+#: puede ensuciar la medicion de lo que ya estaba funcionando.
+COURSE_ALGORITHM_VERSION = "course-v1"
+
 
 # --------------------------------------------------------------------------- #
 # Vocabulario de las relaciones PERSONA -> TEMA
@@ -361,10 +366,17 @@ SUPERFICIE_FEED = "for_you_feed"
 SUPERFICIE_SIGUIENDO = "following_feed"
 SUPERFICIE_BUSQUEDA = "search"
 SUPERFICIE_PERFIL = "profile"
+#: La seccion «Cursos para ti». Su valor tiene que estar tambien en el CHECK de
+#: `behavior_events.surface`, que lo amplia la migracion 0028: mientras esa
+#: migracion no este aplicada, la base RECHAZA esta cadena y una impresion con
+#: ella tumbaria la peticion. Por eso el endpoint de senales la comprueba antes
+#: de escribirla.
+SUPERFICIE_CURSOS = "courses_for_you"
 
 SUPERFICIES = frozenset(
     {
         SUPERFICIE_PERSONAS,
+        SUPERFICIE_CURSOS,
         SUPERFICIE_FEED,
         SUPERFICIE_SIGUIENDO,
         SUPERFICIE_BUSQUEDA,
@@ -386,3 +398,9 @@ VENTANA_DE_ATRIBUCION_DIAS = 7
 #: significar «de esto trata» y pasa a significar «que me vea todo el mundo»,
 #: que es como mueren las taxonomias.
 MAX_TEMAS_POR_PUBLICACION = 3
+
+#: Cuantos temas admite un CURSO. Mas que una publicacion (3) porque un curso
+#: dura semanas y toca varias cosas de verdad: un curso de «IA aplicada a
+#: negocios» es honestamente IA, programacion y negocios. Cinco sigue obligando
+#: a elegir; veinte seria no clasificar nada.
+MAX_TEMAS_POR_CURSO = 5

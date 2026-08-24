@@ -22,6 +22,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pathlib
+import re
+
 import pytest
 
 from app.modules.recommendations.config import (
@@ -341,9 +344,35 @@ def test_el_castigo_del_tema_tambien_llega_al_contenido():
 # --------------------------------------------------------------------------- #
 # 5. Superficies: el vocabulario de la atribucion
 # --------------------------------------------------------------------------- #
-def test_las_superficies_son_una_lista_cerrada():
-    """Una superficie escrita a mano en dos sitios acaba siendo dos, y las
-    metricas dejan de sumar."""
-    assert "people_for_you" in SUPERFICIES
-    assert "for_you_feed" in SUPERFICIES
-    assert len(SUPERFICIES) == 5
+def test_las_superficies_del_codigo_son_las_que_acepta_la_base():
+    """El CHECK de la base y `SUPERFICIES` tienen que decir lo mismo.
+
+    Si el codigo conoce una superficie que la base rechaza, cada impresion de
+    esa seccion es un 500. Si la base admite una que el codigo no conoce, el
+    validador la rechaza antes de llegar y esa parte del embudo no se mide
+    nunca. Las dos direcciones son fallos, asi que se comparan los conjuntos
+    enteros y no una lista escrita a mano.
+
+    La lista viva es la de la ultima migracion que toca el CHECK: la 0028
+    reemplaza la que puso la 0027.
+    """
+    migracion = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "0028_temas_de_curso_y_material_del_autor.sql"
+    )
+    sql = migracion.read_text(encoding="utf-8")
+    bloque = sql.split("add constraint behavior_events_surface_check", 1)[1]
+    bloque = bloque.split(";", 1)[0]
+    en_la_base = set(re.findall(r"'([a-z_]+)'", bloque))
+
+    assert en_la_base == set(SUPERFICIES), (
+        f"El codigo dice {sorted(SUPERFICIES)} y la base admite "
+        f"{sorted(en_la_base)}."
+    )
+    # Las cinco de la 0027 siguen ahi: ampliar la lista no puede perder ninguna.
+    assert {"people_for_you", "for_you_feed", "following_feed", "search", "profile"} <= (
+        en_la_base
+    )
+    assert "courses_for_you" in en_la_base
