@@ -115,9 +115,12 @@ alter table public.behavior_events
   add column if not exists rank integer;
 
 -- Valores acotados: una superficie escrita a mano en dos sitios acaba siendo
--- dos superficies y las metricas dejan de sumar. Se anaden con NOT VALID y se
--- validan despues para no bloquear la tabla mientras se comprueba lo ya
--- escrito (que ademas es todo nulo y pasa por definicion).
+-- dos superficies, y las metricas dejan de sumar.
+--
+-- Se anaden dentro de un `do` porque `add constraint` no admite
+-- `if not exists`, y esta migracion tiene que poder repetirse. La comprobacion
+-- es inmediata: las tres columnas acaban de crearse y valen NULL en todas las
+-- filas existentes, asi que no hay nada que recorrer.
 do $$
 begin
   if not exists (
@@ -133,8 +136,7 @@ begin
           'search',          -- resultados de busqueda
           'profile'          -- llegada directa a un perfil
         )
-      ) not valid;
-    alter table public.behavior_events validate constraint behavior_events_surface_check;
+      );
   end if;
 
   if not exists (
@@ -142,8 +144,7 @@ begin
   ) then
     alter table public.behavior_events
       add constraint behavior_events_rank_check
-      check (rank is null or (rank >= 0 and rank <= 1000)) not valid;
-    alter table public.behavior_events validate constraint behavior_events_rank_check;
+      check (rank is null or (rank between 0 and 1000));
   end if;
 end
 $$;
