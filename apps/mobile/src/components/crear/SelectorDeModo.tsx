@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { LayoutChangeEvent, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -29,6 +29,18 @@ export function posicionDeModo(modo: ModoDeCreacion): number {
   return MODOS.findIndex((m) => m.id === modo);
 }
 
+/**
+ * Lee el modo que llega por la URL (`/(tabs)/create?modo=historia`).
+ *
+ * Existe para que TODOS los accesos a crear contenido —el `+` de la cabecera de
+ * Inicio, el de la fila de historias, el del muro y la propia pestaña— entren
+ * por la misma puerta y solo se diferencien en con que modo abren. Cualquier
+ * valor que no reconozcamos cae en Publicacion, que es el modo por defecto.
+ */
+export function modoDesdeParametro(valor: unknown): ModoDeCreacion {
+  return MODOS.some((m) => m.id === valor) ? (valor as ModoDeCreacion) : 'publicacion';
+}
+
 type Props = {
   activo: ModoDeCreacion;
   alCambiar: (modo: ModoDeCreacion) => void;
@@ -51,6 +63,21 @@ type Props = {
 export function SelectorDeModo({ activo, alCambiar, arrastre }: Props) {
   const indice = useSharedValue(posicionDeModo(activo));
 
+  /*
+    Ancho real de la franja, medido.
+
+    Hace falta para poder centrar el modo ACTIVO. Antes solo se centraba la
+    fila entera —cuatro huecos de 116, es decir 464 px— dentro de una pantalla
+    de 375: sobraban 44,5 px por cada lado y las etiquetas de los extremos
+    salian cortadas por la mitad. Es el «cación … Viv» del documento, no un
+    fallo de fuente ni de recorte.
+
+    Con el ancho se puede desplazar la fila para que el hueco elegido caiga
+    justo en el centro, que es lo que hace que se lea como un carrete.
+  */
+  const [ancho, setAncho] = useState(0);
+  const alMedir = (evento: LayoutChangeEvent) => setAncho(evento.nativeEvent.layout.width);
+
   useEffect(() => {
     // 180 ms: dentro del rango que se percibe como respuesta y no como
     // animacion, el mismo criterio que usa la barra de secciones.
@@ -60,12 +87,15 @@ export function SelectorDeModo({ activo, alCambiar, arrastre }: Props) {
     });
   }, [activo, indice]);
 
+  // Cuanto hay que correr la fila para que el primer hueco quede centrado.
+  const centrado = ancho > 0 ? (ancho - ANCHO) / 2 : 0;
+
   const estilo = useAnimatedStyle(() => ({
-    transform: [{ translateX: -(indice.value + (arrastre?.value ?? 0)) * ANCHO }],
+    transform: [{ translateX: centrado - (indice.value + (arrastre?.value ?? 0)) * ANCHO }],
   }));
 
   return (
-    <View style={styles.host} pointerEvents="box-none">
+    <View style={styles.host} pointerEvents="box-none" onLayout={alMedir}>
       <Animated.View style={[styles.fila, estilo]}>
         {MODOS.map(({ id, etiqueta }) => {
           const seleccionado = id === activo;
@@ -101,11 +131,16 @@ const styles = StyleSheet.create({
     // Recorta lo que se sale por los lados: sin esto las etiquetas de los
     // extremos se dibujarian fuera y ensancharian la pantalla.
     overflow: 'hidden',
-    alignItems: 'center',
     justifyContent: 'center',
     height: 40,
   },
-  fila: { flexDirection: 'row', alignItems: 'center' },
+  /*
+    `alignSelf: flex-start` es lo que permite centrar el hueco ACTIVO en vez de
+    la fila entera. Con el centrado de la caja, la fila se colocaba por su
+    punto medio —entre Historia y Reel— y desde ahi ningun desplazamiento podia
+    dejar bien Publicacion ni Vivo.
+  */
+  fila: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
   hueco: { width: ANCHO, alignItems: 'center', justifyContent: 'center', minHeight: 40 },
   etiqueta: {
     fontSize: 14,

@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -16,6 +16,7 @@ import { ModoVivo } from '@/components/crear/ModoVivo';
 import {
   MODOS,
   SelectorDeModo,
+  modoDesdeParametro,
   posicionDeModo,
   type ModoDeCreacion,
 } from '@/components/crear/SelectorDeModo';
@@ -63,7 +64,28 @@ export function CrearScreen() {
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
 
-  const [modo, setModo] = useState<ModoDeCreacion>('publicacion');
+  /*
+    Con que modo se abre. Llega por la URL para que todos los accesos a crear
+    contenido entren POR AQUI y se diferencien solo en eso: el `+` de la fila de
+    historias abre en Historia, el del muro y el de la cabecera en Publicacion,
+    y la pestaña en el ultimo que se dejara.
+
+    Antes el de la fila de historias abria una ruta suya, fuera del grupo de
+    pestañas, y por eso desaparecia la barra de secciones y no habia forma de
+    cambiar de tipo de publicacion sin salir.
+  */
+  const { modo: modoPedido } = useLocalSearchParams<{ modo?: string }>();
+  const [modo, setModo] = useState<ModoDeCreacion>(() => modoDesdeParametro(modoPedido));
+
+  /*
+    Si el parametro cambia estando ya en Crear —se pulsa el `+` de historias
+    desde Explorar, por ejemplo— hay que obedecerlo. Leerlo solo en el valor
+    inicial dejaba la pantalla en el modo anterior y la pulsacion parecia no
+    hacer nada.
+  */
+  useEffect(() => {
+    if (modoPedido) setModo(modoDesdeParametro(modoPedido));
+  }, [modoPedido]);
   /** Avance del arrastre en huecos (-1..1). Lo lee la fila de nombres. */
   const arrastre = useSharedValue(0);
 
@@ -153,7 +175,7 @@ export function CrearScreen() {
         {modo === 'publicacion' ? (
           <React.Fragment>
             <AppHeader title="CREAR" />
-            <ModoPublicacion pie={selector} alSalir={salir} espacioInferior={espacioInferior} />
+            <ModoPublicacion pie={selector} alSalir={salir} activo={enfocada} />
           </React.Fragment>
         ) : modo === 'historia' ? (
           <ModoHistoria pie={selector} alSalir={salir} activo={enfocada} />

@@ -33,9 +33,10 @@ type Props = {
 /**
  * Crear una historia: camara o carrete → revision → publicar.
  *
- * Es la MISMA implementacion que usa la ruta `/stories/nueva`, no una copia:
- * el flujo de historia solo puede existir una vez, o cada arreglo habria que
- * hacerlo dos veces y una de las dos se quedaria atras.
+ * Es el UNICO flujo de historia que hay. La ruta `/stories/nueva` ya no es una
+ * pantalla: redirige aqui. Con dos copias, cada arreglo del limite de duracion,
+ * de los permisos o del reintento habria que hacerlo dos veces y una de las dos
+ * se quedaria atras.
  */
 export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
   const createStory = useAppStore((state) => state.createStory);

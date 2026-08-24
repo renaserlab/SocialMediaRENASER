@@ -6,6 +6,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { Text } from '@/components/Text';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { pickImage, type PickedMedia } from '@/services/storage';
@@ -35,6 +36,14 @@ type Props = {
    * de la que no se puede elegir ninguna es peor que no ensenarlas.
    */
   soloVideo?: boolean;
+  /**
+   * Selector de modo de Crear. Se pinta sobre la cuadricula, encima de la barra
+   * de secciones: es donde se espera poder cambiar de tipo de publicacion sin
+   * salir antes del carrete.
+   */
+  pie?: React.ReactNode;
+  /** Salida secundaria junto al carrete (por ejemplo, «Escribir sin foto»). */
+  alternativa?: { etiqueta: string; alPulsar: () => void };
 };
 
 /**
@@ -48,7 +57,14 @@ type Props = {
  * historia admite 15 s, asi que conviene saberlo ANTES de elegir y no despues
  * de que el aviso lo rechace.
  */
-export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera, soloVideo = false }: Props) {
+export function StoryGalleryScreen({
+  onSelect,
+  onClose,
+  onOpenCamera,
+  soloVideo = false,
+  pie,
+  alternativa,
+}: Props) {
   const [permission, setPermission] = useState<MediaLibrary.PermissionResponse | null>(null);
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -270,6 +286,29 @@ export function StoryGalleryScreen({ onSelect, onClose, onOpenCamera, soloVideo 
           }}
         />
       )}
+
+      {/*
+        El pie va por ENCIMA de la cuadricula y apartado de la barra de
+        secciones, no dentro del desplazamiento: tiene que seguir ahi despues de
+        bajar cien fotos.
+      */}
+      {pie || alternativa ? (
+        <View style={styles.pie} pointerEvents="box-none">
+          {alternativa ? (
+            <Pressable
+              onPress={alternativa.alPulsar}
+              hitSlop={8}
+              accessibilityRole="button"
+              style={styles.alternativa}
+            >
+              <Text variant="secondary" weight="700" color={media.text}>
+                {alternativa.etiqueta}
+              </Text>
+            </Pressable>
+          ) : null}
+          {pie}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -283,6 +322,21 @@ function formatDuration(seconds: number): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: media.background },
+  pie: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    // Apoyado en la misma medida que usa la barra flotante para saber cuanto
+    // ocupa: asi queda justo encima de ella y no por detras.
+    bottom: espacioParaLaBarra(0),
+    gap: spacing.sm,
+  },
+  alternativa: {
+    alignSelf: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
   center: { alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
   deniedTitle: { marginTop: spacing.lg },
   deniedBody: { textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 },

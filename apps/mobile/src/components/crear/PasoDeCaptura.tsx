@@ -3,6 +3,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { AvisoDePermiso } from '@/components/AvisoDePermiso';
+import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { Text } from '@/components/Text';
 import { consultarPermiso, pedirPermiso, type EstadoDePermiso } from '@/lib/permisos';
 import { lastGalleryPhoto, StoryCaptureScreen } from '@/screens/StoryCaptureScreen';
@@ -31,6 +32,13 @@ type Props = {
    * en una pantalla que ni siquiera se ve.
    */
   activo?: boolean;
+  /**
+   * Salida secundaria junto al carrete (por ejemplo, «Escribir sin foto»).
+   *
+   * Va aqui y no en una pantalla aparte porque es una ALTERNATIVA a elegir un
+   * medio, y este es el momento en que esa decision tiene sentido.
+   */
+  alternativa?: { etiqueta: string; alPulsar: () => void };
 };
 
 /**
@@ -57,6 +65,7 @@ export function PasoDeCaptura({
   alElegir,
   alCerrar,
   activo = true,
+  alternativa,
 }: Props) {
   const enWeb = Platform.OS === 'web';
   const [paso, setPaso] = useState<'camara' | 'galeria'>(enWeb ? 'galeria' : 'camara');
@@ -140,6 +149,13 @@ export function PasoDeCaptura({
               </Pressable>
             ) : null}
           </View>
+          {alternativa ? (
+            <Pressable onPress={alternativa.alPulsar} hitSlop={8} accessibilityRole="button">
+              <Text variant="secondary" weight="700" color={media.textMuted} style={styles.enlace}>
+                {alternativa.etiqueta}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
         {pie ? <View style={styles.pieWeb}>{pie}</View> : null}
       </View>
@@ -154,6 +170,8 @@ export function PasoDeCaptura({
         onClose={alCerrar}
         onOpenCamera={() => setPaso('camara')}
         soloVideo={soloVideo}
+        pie={pie}
+        alternativa={alternativa}
       />
     );
   }
@@ -200,6 +218,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
   },
+  enlace: { textDecorationLine: 'underline', marginTop: spacing.md },
   icono: {
     width: 58,
     height: 58,
@@ -219,5 +238,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secundario: { borderWidth: 1 },
-  pieWeb: { paddingBottom: spacing.xl },
+  /*
+    El selector se aparta de la barra de secciones.
+
+    Antes eran 24 px, es decir, DENTRO de la franja que ocupa la barra flotante:
+    la fila quedaba por detras de la capsula y lo unico que asomaba era el
+    trocito de etiqueta que sobresalia por su izquierda. Eso es el texto suelto
+    y cortado que aparece junto a la barra en el documento. Se apoya en la misma
+    medida que usa la barra para saber cuanto ocupa.
+  */
+  pieWeb: { paddingBottom: espacioParaLaBarra(0) },
 });

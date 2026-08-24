@@ -44,15 +44,17 @@ export function StoriesRow() {
   };
 
   /**
-   * Abre la pantalla de crear historia.
+   * Abre crear contenido, en modo Historia.
    *
-   * Sustituye a la hoja con tres opciones: ahora se entra directo a la camara,
-   * como en Instagram, y desde alli se pasa a la galeria. La hoja obligaba a
-   * decidir "foto o video" antes de ver nada.
+   * Va a la PESTAÑA Crear, no a una ruta propia. Antes abria `/stories/nueva`,
+   * que vive fuera del grupo de pestañas: la barra de secciones desaparecia y,
+   * peor, este `+` y el del muro acababan en dos pantallas distintas aunque los
+   * dos significan lo mismo. Ahora hay una sola puerta y lo unico que cambia es
+   * con que modo se abre.
    */
   const nuevaHistoria = () => {
     haptics.light();
-    router.push('/stories/nueva' as never);
+    router.navigate('/(tabs)/create?modo=historia' as never);
   };
 
   const onOwnPress = () => {
