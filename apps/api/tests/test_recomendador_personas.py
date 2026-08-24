@@ -83,7 +83,7 @@ def _motivos(candidato: Candidato, demanda: PerfilDeDemanda) -> list[str]:
 # --------------------------------------------------------------------------- #
 ANA = PerfilDeDemanda(
     usuario_id="ana",
-    temas_a_aprender=frozenset({CARPINTERIA}),
+    aprender=frozenset({CARPINTERIA}),
     intereses=frozenset({CARPINTERIA}),
     relaciones_buscadas=frozenset({"teach", "can_help"}),
     formatos=frozenset({"video"}),
@@ -112,7 +112,7 @@ def test_dos_candidatos_de_otro_tema_no_se_ordenan_por_casualidad():
 # --------------------------------------------------------------------------- #
 BRUNO = PerfilDeDemanda(
     usuario_id="bruno",
-    temas_a_aprender=frozenset({REACT}),
+    aprender=frozenset({REACT}),
     intereses=frozenset({REACT}),
     relaciones_buscadas=frozenset({"teach"}),
 )
@@ -190,7 +190,7 @@ def test_el_motivo_de_intereses_comunes_no_nombra_ningun_tema():
 def test_ofrecer_sesiones_se_dice_cuando_es_lo_que_la_persona_prefiere():
     quiere_sesiones = PerfilDeDemanda(
         usuario_id="ana",
-        temas_a_aprender=frozenset({CARPINTERIA}),
+        aprender=frozenset({CARPINTERIA}),
         formatos=frozenset({"sesion_1a1"}),
     )
     mentor = _candidato(
@@ -273,7 +273,7 @@ def test_lo_que_la_persona_ya_miro_sube_a_quien_miro():
     """Sin entrenar nada: la senal entra en el score la siguiente vez."""
     con_senales = PerfilDeDemanda(
         usuario_id="ana",
-        temas_a_aprender=frozenset({CARPINTERIA}),
+        aprender=frozenset({CARPINTERIA}),
         tiene_senales=True,
     )
     ignorado = _candidato("x", {"teach": {CARPINTERIA}})
@@ -285,7 +285,7 @@ def test_el_interes_se_mueve_con_el_uso_aunque_no_se_toquen_las_preferencias():
     """Empieza en negocios, acaba abriendo programacion: tecnologia sube."""
     deriva = PerfilDeDemanda(
         usuario_id="ana",
-        temas_a_aprender=frozenset({MARKETING}),
+        aprender=frozenset({MARKETING}),
         tiene_senales=True,
         afinidad_por_tema={REACT: 5.0},
     )

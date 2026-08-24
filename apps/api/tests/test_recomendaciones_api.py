@@ -488,12 +488,17 @@ async def test_el_resultado_depende_de_quien_pregunta(entorno):
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_el_contenido_recomendado_llega_con_la_misma_forma_que_el_feed(entorno):
-    """Misma forma = el movil cambia de fuente sin cambiar de pantalla."""
+    """Los elementos son `PostRead` sin tocar: el movil no cambia de mapper.
+
+    La envoltura lleva la version del algoritmo, que es lo que el movil
+    devuelve luego en cada impresion para poder comparar versiones.
+    """
     http, _, _ = entorno
     await _preferir_carpinteria(http)
     datos = (await http.get(f"{API}/content?limit=6&media=video")).json()
-    assert datos
-    assert {"id", "author", "media", "likes_count"} <= set(datos[0])
+    assert datos["algorithm_version"]
+    assert datos["items"]
+    assert {"id", "author", "media", "likes_count", "topic_ids"} <= set(datos["items"][0])
 
 
 @pytest.mark.asyncio
@@ -501,7 +506,7 @@ async def test_el_contenido_de_quien_encaja_sube(entorno):
     http, _, _ = entorno
     await _preferir_carpinteria(http)
     datos = (await http.get(f"{API}/content?limit=6&media=video")).json()
-    assert datos[0]["author"]["id"] == CARLOS
+    assert datos["items"][0]["author"]["id"] == CARLOS
 
 
 @pytest.mark.asyncio
@@ -511,7 +516,7 @@ async def test_el_contenido_de_un_bloqueado_no_aparece(entorno):
         db.add(UserBlock(blocker_id=ANA, blocked_id=CARLOS))
         await db.commit()
     datos = (await http.get(f"{API}/content?limit=10&media=video")).json()
-    assert CARLOS not in [p["author"]["id"] for p in datos]
+    assert CARLOS not in [p["author"]["id"] for p in datos["items"]]
 
 
 @pytest.mark.asyncio
@@ -519,7 +524,7 @@ async def test_no_se_inventa_contenido_que_no_existe(entorno):
     """Tres videos son tres videos. Pedir treinta no rellena con nada."""
     http, _, _ = entorno
     datos = (await http.get(f"{API}/content?limit=30&media=video")).json()
-    assert len(datos) == 3
+    assert len(datos["items"]) == 3
 
 
 # --------------------------------------------------------------------------- #
@@ -696,7 +701,8 @@ async def test_apagar_la_personalizacion_no_rompe_nada(entorno, monkeypatch):
 
     assert personas.status_code == 200 and personas.json()["items"] == []
     assert personas.json()["strategy"] == "disabled"
-    assert contenido.status_code == 200 and contenido.json() == []
+    assert contenido.status_code == 200 and contenido.json()["items"] == []
+    assert contenido.json()["strategy"] == "disabled"
     assert estado.status_code == 200 and estado.json()["should_show"] is False
 
 
