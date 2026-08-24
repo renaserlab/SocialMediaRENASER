@@ -58,6 +58,13 @@ services:
       # integradas de Apple y Google, con su comision.
       - key: PAYMENTS_RETURN_URL
         value: https://social-media-renaser.vercel.app/pago
+      # Personalizacion (cuestionario de intereses, "Personas para ti" y el
+      # orden de "Para ti"). ENCENDIDA. Se declara aqui para que el interruptor
+      # este a la vista: ponerlo en "false" desde el dashboard devuelve la
+      # aplicacion al feed cronologico al instante, sin desplegar nada y sin
+      # borrar una sola fila. Es el plan de vuelta atras de esta fase.
+      - key: FEATURE_RECOMMENDATIONS_V1
+        value: "true"
       # --- Secretos: configúralos en el dashboard de Render ---
       # DATABASE_URL: postgresql+asyncpg://postgres.<ref>:<PWD_%23>@aws-0-us-east-1.pooler.supabase.com:5432/postgres
       - key: DATABASE_URL
