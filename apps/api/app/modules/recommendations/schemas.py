@@ -54,6 +54,12 @@ class OnboardingCatalog(BaseModel):
     connection_types: list[OpcionRead]
     content_formats: list[OpcionRead]
     offer_modes: list[OpcionRead]
+    #: Si una publicacion puede llevar temas propios en ESTA base de datos.
+    #:
+    #: Es false mientras la migracion 0027 no este aplicada. Lo usa el selector
+    #: de Crear para no aparecer: ofrecer «elige hasta 3 temas» y luego
+    #: descartarlos en silencio seria prometer algo que no se cumple.
+    content_topics_available: bool = True
 
 
 # --------------------------------------------------------------------------- #

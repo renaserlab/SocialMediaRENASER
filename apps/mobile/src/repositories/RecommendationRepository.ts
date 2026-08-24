@@ -38,6 +38,7 @@ export type OnboardingCatalog = {
 
 type CatalogDto = {
   onboarding_version: number;
+  content_topics_available?: boolean;
   topics: TopicDto[];
   goals: OptionDto[];
   connection_types: OptionDto[];
@@ -259,6 +260,14 @@ export const RecommendationRepository = {
    */
   async listTopics(): Promise<TopicDto[]> {
     const dto = await apiRequest<CatalogDto>(`${API_V1}/recommendations/onboarding/catalog`);
+    /*
+      Lista vacia cuando el servidor NO puede guardar temas de contenido.
+
+      El selector se esconde solo al no recibir ninguno (ver `SelectorDeTemas`),
+      que es justo lo que tiene que pasar: ofrecer «elige hasta 3 temas» y luego
+      descartarlos en silencio seria prometer algo que no se cumple.
+    */
+    if (dto.content_topics_available === false) return [];
     return dto.topics;
   },
 

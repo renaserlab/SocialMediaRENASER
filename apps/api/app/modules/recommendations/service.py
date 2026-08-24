@@ -29,7 +29,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictError, ValidationAppError
 from app.modules.content.models import Post, PostLike, PostMedia
 from app.modules.profiles.models import Profile
-from app.modules.recommendations import cache, candidate_generator, repository as repo
+from app.modules.recommendations import (
+    cache,
+    candidate_generator,
+    esquema,
+    repository as repo,
+)
 from app.modules.recommendations.config import (
     CANDIDATOS_MAXIMOS,
     MAX_TEMAS_POR_PUBLICACION,
@@ -148,6 +153,7 @@ async def catalogo(db: AsyncSession) -> OnboardingCatalog:
     temas = await repo.topics_activos(db)
     return OnboardingCatalog(
         onboarding_version=ONBOARDING_VERSION,
+        content_topics_available=await esquema.hay_temas_de_contenido(db),
         topics=[TopicRead.model_validate(t) for t in temas],
         goals=_opciones(OBJETIVOS),
         connection_types=_opciones(TIPOS_DE_CONEXION),
