@@ -99,7 +99,16 @@ export function InicioScreen() {
   }, []);
 
   const usuarioId = usuario?.id ?? null;
-  const fuenteParaTi = useMemo(() => fuenteDeInicio('paraTi', usuarioId), [usuarioId]);
+  /*
+    Solo se personaliza con sesion. Y la condicion mira la SESION, no el
+    perfil: el perfil llega despues y con el habriamos pedido la primera pagina
+    —la unica que se mide— sin personalizar, sin poder rehacerla luego.
+  */
+  const personalizar = !supabaseEnabled ? false : signedIn;
+  const fuenteParaTi = useMemo(
+    () => fuenteDeInicio('paraTi', usuarioId, { personalizar }),
+    [usuarioId, personalizar],
+  );
   const fuenteSiguiendo = useMemo(() => fuenteDeInicio('siguiendo', usuarioId), [usuarioId]);
 
   const feedParaTi = useFeedDeVideos(fuenteParaTi);

@@ -1,4 +1,6 @@
-import { PostRepository, type FeedKind } from '@/repositories/PostRepository';
+import { decidirLote } from '@/feed/decisionDeFuente';
+import { PostRepository, resolveMediaUrls, type FeedKind } from '@/repositories/PostRepository';
+import { RecommendationRepository } from '@/repositories/RecommendationRepository';
 import { bestVideoSource } from '@/lib/videoSource';
 import type { ReelItem } from '@/components/ShortVideoItem';
 import type { Post } from '@/types';
@@ -132,6 +134,80 @@ function fuenteDelBackend(
   };
 }
 
+/**
+ * Fuente RECOMENDADA, con la cronologica debajo por si acaso.
+ *
+ * Aqui es donde el recomendador entra en Inicio, y entra sin que la pantalla se
+ * entere: devuelve exactamente el mismo `LoteDeVideos` que la fuente de
+ * siempre. Esa era toda la razon de ser de esta capa.
+ *
+ * EL RESPALDO NO ES DECORATIVO, es una condicion de aceptacion. El
+ * recomendador puede fallar, estar apagado o no tener todavia con que
+ * personalizar, y en ninguno de esos casos puede quedarse Inicio en negro. Se
+ * cae a la fuente cronologica y la persona ve videos igual; lo unico que
+ * cambia es el orden.
+ *
+ * Los tres caminos de vuelta a lo cronologico:
+ *
+ *   - la peticion falla (red, servidor dormido, 500);
+ *   - responde vacio (personalizacion apagada, o nada que ordenar);
+ *   - la primera pagina no trae ni un video reproducible.
+ *
+ * Una vez que se cae, se queda caido para el resto de la sesion de esa fuente:
+ * paginar mezclando dos ordenaciones distintas repetiria y saltaria videos.
+ */
+function fuenteRecomendada(usuarioId: string | null | undefined): FuenteDeVideos {
+  const respaldo = fuenteDelBackend('paraTi', 'all', usuarioId);
+  let usarRespaldo = false;
+
+  return {
+    // La MISMA clave que la fuente cronologica a proposito: para la pantalla
+    // sigue siendo «Para ti». Cambiarla vaciaria la lista y la instantanea
+    // guardada cada vez que el recomendador dejara de estar disponible.
+    clave: 'paraTi',
+    async cargar(cursor, limite) {
+      if (usarRespaldo) return respaldo.cargar(cursor, limite);
+      const desplazamiento = cursor?.desplazamiento ?? 0;
+      try {
+        const posts = await RecommendationRepository.listContent(
+          { limit: limite, offset: desplazamiento, media: 'video' },
+          usuarioId,
+        );
+        // Las firmas de Storage van en una segunda fase, igual que en el muro:
+        // lo que se mide es cuanto tarda en verse el PRIMER video.
+        const conMedios = posts.length > 0 ? await resolveMediaUrls(posts) : [];
+        const items = conMedios.map(aReel).filter((r): r is ReelItem => r !== null);
+
+        const decision = decidirLote({
+          recibidas: posts.length,
+          reproducibles: items.length,
+          desplazamiento,
+        });
+        if (decision === 'respaldo') {
+          usarRespaldo = true;
+          return respaldo.cargar(null, limite);
+        }
+        if (decision === 'fin') {
+          return { items: [], hayMas: false, siguienteCursor: null };
+        }
+        return {
+          items,
+          hayMas: posts.length === limite,
+          // El recomendador ordena por relevancia, no por fecha, asi que su
+          // paginacion es por posicion. El orden es estable dentro del dia
+          // (ver `semilla_de_exploracion` en el backend), asi que avanzar por
+          // desplazamiento no repite ni salta.
+          siguienteCursor: { desplazamiento: desplazamiento + posts.length },
+        };
+      } catch (error) {
+        console.warn('[inicio] el recomendador fallo; se usa el orden cronologico', error);
+        usarRespaldo = true;
+        return respaldo.cargar(cursor, limite);
+      }
+    },
+  };
+}
+
 /** Las pestanas del Inicio. `live` no es un feed de videos: se pinta aparte. */
 export type PestanaDeInicio = 'paraTi' | 'siguiendo' | 'live';
 
@@ -140,12 +216,27 @@ export type PestanaDeInicio = 'paraTi' | 'siguiendo' | 'live';
  *
  * `usuarioId` solo sirve para marcar cuales son propios al pintar; quien pide
  * el contenido —y a quien sigue— lo resuelve el backend desde el token.
+ *
+ * `personalizar` sale de la SESION, no del perfil. Parece un detalle y no lo
+ * es: el perfil se carga en paralelo al arrancar y puede tardar, asi que
+ * decidir con el habria dejado el Inicio en orden cronologico durante toda esa
+ * primera carga —justo la que importa— y sin forma de rehacerla despues.
  */
 export function fuenteDeInicio(
   pestana: Exclude<PestanaDeInicio, 'live'>,
   usuarioId: string | null | undefined,
+  { personalizar = false }: { personalizar?: boolean } = {},
 ): FuenteDeVideos {
-  return pestana === 'siguiendo'
-    ? fuenteDelBackend('siguiendo', 'following', usuarioId)
+  if (pestana === 'siguiendo') return fuenteDelBackend('siguiendo', 'following', usuarioId);
+  /*
+    «Siguiendo» NO se personaliza y no debe hacerlo: quien entra ahi ha pedido
+    ver lo de la gente que sigue, en el orden en que ocurrio. Reordenarlo seria
+    quitarle el control de lo unico que controla.
+
+    «Para ti» sin sesion tampoco: el recomendador necesita saber para quien
+    recomienda, y sin token no hay a quien preguntar.
+  */
+  return personalizar
+    ? fuenteRecomendada(usuarioId)
     : fuenteDelBackend('paraTi', 'all', usuarioId);
 }
