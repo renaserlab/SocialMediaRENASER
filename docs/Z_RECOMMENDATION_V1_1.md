@@ -3,8 +3,10 @@
 Rama: `Edson`. Continúa [Z_RECOMMENDATION_V1.md](Z_RECOMMENDATION_V1.md), que
 sigue siendo válido: aquí solo está **lo que cambia**.
 
-Estado: implementado y verificado en local. La migración `0026` ya está
-aplicada en producción. **La `0027` NO**: espera aprobación explícita.
+Estado: implementado y verificado en local. Las migraciones `0026` y `0027`
+están **aplicadas en producción** (Edson, 24 de agosto de 2026). El código
+sigue funcionando sin la `0027`, y esa propiedad se mantiene a propósito: es
+lo que permite volver atrás sin tumbar la aplicación.
 
 ---
 
@@ -23,7 +25,7 @@ Y una que faltaba entera: **no se sabía si una recomendación producía algo**.
 
 ---
 
-## 2. Migración `0027` (aditiva, pendiente de aprobación)
+## 2. Migración `0027` (aditiva, aplicada el 24/08/2026)
 
 Dos cosas, y ninguna toca datos existentes:
 
@@ -69,10 +71,27 @@ que no se cumple.
 `tests/test_sin_migracion_0027.py` crea el esquema y después **deshace** la
 0027. Si algo vuelve a depender de ella a la fuerza, se cae.
 
-> **Al aplicar la 0027, reinicia la API.** La comprobación se cachea por
-> proceso: un servidor levantado desde antes seguirá creyendo que las tablas no
-> están. Es el precio de que la aplicación no se caiga mientras la migración
-> espera aprobación.
+> **Al aplicar la 0027 hay que reiniciar la API.** La comprobación se cachea
+> por proceso: un servidor levantado desde antes sigue creyendo que las tablas
+> no están. Es el precio de que la aplicación no se caiga mientras la migración
+> espera aprobación, y vale igual para cualquier despliegue futuro que añada
+> esquema.
+
+**Verificación tras aplicarla** (24 de agosto de 2026). Nada existente cambió:
+
+| Tabla | Antes | Después |
+|---|---|---|
+| `profiles` | 37 | 37 |
+| `posts` | 26 | 26 |
+| `topics` | 25 | 25 |
+| `user_topic_relations` | 13 | 13 |
+| `recommendation_preferences` | 1 | 1 |
+| `behavior_events` | 16 | 16 |
+| `post_topics` | — | 0 (nueva, vacía) |
+
+`behavior_events.surface` responde `0` en vez de dar error: la columna existe y
+nadie ha registrado todavía una impresión con contexto, que es lo correcto —
+las 16 señales previas se guardaron cuando la columna no existía.
 
 ### Por qué NO una tabla de analítica aparte
 
