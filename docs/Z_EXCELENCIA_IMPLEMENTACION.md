@@ -234,3 +234,75 @@ AGENDA
 [x] Estados y backend
 [x] Preparada para reseñas
 ```
+
+---
+
+## CORRECCIONES — `correcciones nuevas vistas z.docx`
+
+Cada observación con su causa raíz medida, no supuesta.
+
+| Observación | Causa raíz | Estado |
+|---|---|---|
+| El audio de Inicio sigue sonando en otras vistas | `activo` se calculaba solo con la pestaña interna; nunca preguntaba si la sección se estaba viendo | HECHO |
+| Silenciar no silencia | Tres sitios escribían `muted` y ninguno mandaba | HECHO |
+| Barra de progreso por debajo de la navbar | `ShortVideoItem` no pasaba `controlsBottomInset`; quedaba en 0 | HECHO |
+| Demasiado espacio entre metadata/mute y navbar | Offsets escritos a mano (`140 +`, `60 +`) que no medían nada | HECHO |
+| Recuadro vacío arriba a la derecha | El hueco de simetría reutilizaba el estilo del botón `+`, con borde | HECHO |
+| Texto cortado junto a la navbar en Crear | La fila centraba el conjunto, no el modo activo; y se colocaba dentro de la franja de la barra | HECHO |
+| Crear conserva la vista antigua | El editor de texto seguía siendo el flujo principal | HECHO |
+| Los dos `+` llevan a sitios distintos | El de historias abría una ruta fuera del grupo de pestañas | HECHO |
+| La navbar desaparece al crear historia | Misma causa que el anterior | HECHO |
+| Residuos de vistas antiguas | `NewStoryScreen` | HECHO |
+
+### Medido antes y después
+
+| | Antes | Después |
+|---|---|---|
+| Vídeo de Inicio al ir a Explorar | `paused=false`, tiempo 2 s → 13,7 s | `paused=true`, 0 con audio |
+| Reproductores al salir de Inicio | 3 vivos | 1 |
+| UI «silenciado» vs elemento | `muted=false` sonando | 0 audibles en los 4 pasos |
+| Barra de progreso | 768–812 (navbar 734–796) | 690–734, justo encima |
+| Hueco autor → navbar | 82 px vacíos | 22 px |
+| Recuadros fantasma | 1 | 0 |
+| Peticiones API duplicadas en Inicio | — | 0 de 6 |
+| Tiempo a primer frame | — | 226 ms (caché templada, localhost) |
+
+### Política única de reproducción
+
+`src/navigation/foco.ts` responde una sola pregunta: **¿se está viendo esta
+pantalla?** Combina foco de navegación, estado de la aplicación y visibilidad de
+la pestaña del navegador. Las pantallas la consultan; el reproductor solo
+obedece. Queda separado lo que estaba mezclado:
+
+```
+MONTADO        el componente existe
+ACTIVO         además, se está viendo
+REPRODUCIENDO  además, le toca a ese vídeo
+```
+
+`useFocusEffect` dentro del reproductor no bastaba: solo cubre la transición
+enfocado → desenfocado, y una sección vecina puede montarse sin haber estado
+enfocada nunca.
+
+### Una sola puerta a Crear
+
+Todos los accesos entran por la pestaña Crear y solo se diferencian en el modo,
+que viaja en la URL:
+
+```
++ cabecera Inicio ─┐
++ fila historias ──┤→ /(tabs)/create[?modo=historia]
++ muro Explorar ───┤
+pestaña Crear ─────┘
+```
+
+`/stories/nueva` deja de ser pantalla y queda solo como desvío: borrar el
+archivo haría que `/stories/[id]` capturase la palabra «nueva» y un enlace viejo
+acabaría en «historia no encontrada».
+
+### Pendiente real
+
+- **Vivo** sigue BLOQUEADO: no hay infraestructura de directo (ver arriba).
+- El interior de Crear (los cuatro modos, permisos, subida) **no lo he podido
+  ver yo**: requiere sesión iniciada y no puedo introducir contraseñas. La
+  navegación hasta él sí está verificada.
