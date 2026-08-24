@@ -13,6 +13,7 @@ from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.notifications.push import send_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
+from app.modules.recommendations.signals import registrar_senal
 from app.modules.profiles.schemas import ProfileSummary
 from app.modules.social_graph.models import Follow, UserBlock
 from app.shared.database import get_db
@@ -186,14 +187,31 @@ async def follow_profile(
         add_notification(
             db, user_id=profile_id, actor_id=current_user.id, type="follow"
         )
+        # Seguir es una de las senales que mas dice, y la escribe el SERVIDOR:
+        # es aqui donde consta que ocurrio de verdad. Viaja en el mismo commit
+        # que el seguimiento, asi que no puede quedar una senal de algo que no
+        # llego a pasar.
+        registrar_senal(
+            db,
+            user_id=current_user.id,
+            event_type="follow",
+            entity_type="profile",
+            entity_id=profile_id,
+        )
         await db.commit()
         # Despues del commit: un aviso de algo que no se guardo seria peor que
         # no avisar.
+        #
+        # El nombre sale del PERFIL de quien sigue, no del token: `AuthUser`
+        # lleva la identidad (id, correo, rol), no el nombre para mostrar, y
+        # pedirselo reventaba el seguimiento con un AttributeError justo
+        # despues de haberlo guardado.
+        actor = await db.get(Profile, current_user.id)
         await send_push(
             db,
             user_id=profile_id,
             notification_type="follow",
-            actor_name=current_user.full_name,
+            actor_name=actor.full_name if actor else None,
             data={"type": "follow", "profileId": current_user.id},
         )
     return {"following": True, "followers_count": await _followers_count(db, profile_id)}

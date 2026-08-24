@@ -22,6 +22,7 @@ from app.modules.bookings.schemas import (
 from app.modules.notifications.push import send_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
+from app.modules.recommendations.signals import registrar_senal
 from app.modules.profiles.schemas import ProfileSummary
 from app.modules.social_graph.models import UserBlock
 from app.shared.database import get_db
@@ -230,6 +231,16 @@ async def create_booking(
         entity_id=reserva.id,
         payload={"topic": reserva.topic},
     )
+    # Pedir una sesion es la senal mas fuerte que hay hoy: alguien ha decidido
+    # dedicarle tiempo a otra persona. La escribe el servidor, en el mismo
+    # commit que la reserva.
+    registrar_senal(
+        db,
+        user_id=current_user.id,
+        event_type="booking_requested",
+        entity_type="profile",
+        entity_id=payload.provider_id,
+    )
     await db.commit()
     await db.refresh(reserva)
 
@@ -277,6 +288,20 @@ async def update_booking(
     reserva.status = payload.status
     if payload.status == "completed":
         reserva.completed_at = datetime.now(tz.utc)
+        # La sesion OCURRIO. Es la senal mas fuerte del sistema y se anota para
+        # las DOS partes: cada una aprendio algo de la otra, y manana sera
+        # ademas lo que permita verificar una resena.
+        for quien, con_quien in (
+            (reserva.requester_id, reserva.provider_id),
+            (reserva.provider_id, reserva.requester_id),
+        ):
+            registrar_senal(
+                db,
+                user_id=quien,
+                event_type="booking_completed",
+                entity_type="profile",
+                entity_id=con_quien,
+            )
     if payload.scheduled_at is not None:
         reserva.scheduled_at = payload.scheduled_at
     if payload.timezone is not None:

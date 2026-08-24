@@ -21,6 +21,7 @@ from app.modules.messaging.schemas import (
     MessageRead,
 )
 from app.modules.profiles.models import Profile
+from app.modules.recommendations.signals import registrar_senal
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
@@ -156,6 +157,16 @@ async def get_or_create_direct(
         await db.flush()
         db.add(ConversationMember(conversation_id=conv.id, user_id=current_user.id))
         db.add(ConversationMember(conversation_id=conv.id, user_id=payload.user_id))
+        # Solo cuando la conversacion se CREA. Abrir un chat que ya existia no
+        # es una decision nueva, y contarla cada vez que se entra convertiria
+        # una senal fuerte en ruido.
+        registrar_senal(
+            db,
+            user_id=current_user.id,
+            event_type="message_started",
+            entity_type="profile",
+            entity_id=payload.user_id,
+        )
         await db.commit()
         conv_id = conv.id
 

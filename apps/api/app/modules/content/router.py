@@ -366,6 +366,38 @@ async def _load_single_post(
     return _to_post_read(*row, media=media_map.get(row[0].id, []))
 
 
+async def leer_posts_por_id(
+    db: AsyncSession, post_ids: list[str], viewer_id: str | None
+) -> list[PostRead]:
+    """Publicaciones concretas, EN EL ORDEN PEDIDO.
+
+    La escribe este modulo porque `PostRead` es suyo: es aqui donde se sabe
+    como se arma una publicacion con su autor, sus medios y sus contadores.
+    La usa el recomendador, que decide el ORDEN pero no tiene por que saber
+    montar una tarjeta de feed —ni volver a escribir esas cuatro consultas.
+
+    El orden lo impone quien llama. Una consulta `IN (...)` devuelve las filas
+    en el orden que le conviene al motor, asi que reordenar aqui es lo unico
+    que impide que el trabajo del ranker se pierda en el ultimo paso.
+    """
+    if not post_ids:
+        return []
+    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(viewer_id)
+    filas = (
+        await db.execute(
+            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+            .join(Profile, Profile.id == Post.author_id)
+            .where(Post.id.in_(post_ids), Post.status == "published")
+        )
+    ).all()
+    media_map = await _load_media_map(db, [fila[0].id for fila in filas])
+    por_id = {
+        fila[0].id: _to_post_read(*fila, media=media_map.get(fila[0].id, []))
+        for fila in filas
+    }
+    return [por_id[pid] for pid in post_ids if pid in por_id]
+
+
 @router.get("/posts/{post_id}", response_model=PostRead)
 async def get_post(
     post_id: str,
