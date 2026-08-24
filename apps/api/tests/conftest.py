@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.config import get_settings
+from app.modules.recommendations import cache, esquema
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -35,3 +36,24 @@ def _sin_salidas_a_produccion() -> None:
     ajustes = get_settings()
     ajustes.media_processing_enabled = False
     ajustes.video_transcode_enabled = False
+
+
+@pytest.fixture(autouse=True)
+def _sin_estado_heredado() -> None:
+    """Cada prueba empieza sin lo que averiguo la anterior.
+
+    Dos memorias viven en el PROCESO y no en la base de datos: la del ranking
+    (`cache`) y la del esquema disponible (`esquema`). Las dos estan indexadas
+    por identificadores —usuario, nombre de tabla— que se repiten entre pruebas,
+    y cada prueba levanta su propia base en memoria.
+
+    Sin esto funcionaba igual, pero por casualidad: porque las pruebas corren en
+    el orden en que estan escritas y porque la unica que usa un esquema distinto
+    se limpia a si misma. Con `pytest-randomly`, con reparto en paralelo o con
+    un segundo fichero «sin migracion», una prueba heredaria la respuesta de
+    otra y el fallo apareceria en un sitio que no tiene nada que ver.
+
+    `autouse`: no hay forma de olvidarse de aplicarla.
+    """
+    cache.vaciar()
+    esquema.olvidar()

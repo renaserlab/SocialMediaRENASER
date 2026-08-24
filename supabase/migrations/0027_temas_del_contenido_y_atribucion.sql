@@ -30,6 +30,14 @@
 -- funcionando con esas publicaciones mediante el respaldo del autor.
 --
 -- El script es REPETIBLE e IDEMPOTENTE: aditivo de principio a fin.
+--
+-- DESPUES DE APLICARLA, REINICIA LA API. El backend comprueba UNA VEZ por
+-- proceso que partes de esta migracion existen —para poder funcionar sin ella
+-- mientras espera aprobacion— y se queda con la respuesta. Si el servidor
+-- llevaba levantado desde antes, seguira creyendo que estas tablas no estan y
+-- se comportara como si nada hubiera cambiado. No es un fallo: es el precio de
+-- que la aplicacion no se caiga cuando la migracion todavia no esta puesta.
+-- Ver `app/modules/recommendations/esquema.py`.
 
 
 -- --------------------------------------------------------------------------

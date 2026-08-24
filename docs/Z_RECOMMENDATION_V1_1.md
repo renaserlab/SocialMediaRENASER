@@ -43,6 +43,37 @@ parte de la publicación, no una entidad con vida propia.
 - **Escribir**: solo su autor. Etiquetar decide a quién se le recomienda algo;
   no es cosmético.
 
+### La aplicación funciona con y sin ella
+
+Se escribió el código de esta fase contra un esquema que todavía no estaba
+aplicado, y eso dejó la rama sin funcionar contra la base real: cada petición
+que tocaba `post_topics` o `behavior_events.surface` devolvía 500. El navegador
+lo reportaba como error de **CORS**, porque Starlette no añade esas cabeceras a
+una respuesta que sale de una excepción sin capturar — un fallo de esquema
+disfrazado de fallo de red.
+
+Dos causas concretas, las dos mecánicas y las dos fáciles de repetir:
+
+| Patrón | Por qué rompe |
+|---|---|
+| `select(BehaviorEvent)` | Trae la entidad **entera**: pide `surface` aunque nadie la use |
+| `db.add(BehaviorEvent(...))` | Escribe **todas** las columnas del modelo aunque no se toquen |
+
+Ahora ambos nombran columnas explícitamente, y `esquema.py` comprueba una vez
+por proceso qué hay disponible. Sin la 0027: se publica igual (sin temas), se
+ordena por el respaldo del autor, las señales se guardan sin contexto y las
+métricas responden vacío. El selector de temas de Crear **se esconde**, porque
+ofrecer «elige hasta 3 temas» y descartarlos en silencio sería prometer algo
+que no se cumple.
+
+`tests/test_sin_migracion_0027.py` crea el esquema y después **deshace** la
+0027. Si algo vuelve a depender de ella a la fuerza, se cae.
+
+> **Al aplicar la 0027, reinicia la API.** La comprobación se cachea por
+> proceso: un servidor levantado desde antes seguirá creyendo que las tablas no
+> están. Es el precio de que la aplicación no se caiga mientras la migración
+> espera aprobación.
+
 ### Por qué NO una tabla de analítica aparte
 
 Sería el mismo hecho contado dos veces, y reconstruir un embudo que cabe en una
