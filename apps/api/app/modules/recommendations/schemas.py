@@ -172,6 +172,34 @@ class PreferencesRead(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# La oferta publica de un perfil
+# --------------------------------------------------------------------------- #
+class OfferedTopic(BaseModel):
+    """Un tema que alguien declara poder aportar, y en que forma."""
+
+    topic_id: str
+    name: str
+    #: Solo `can_help` / `teach` / `experienced`. Ver `ProfileOffer`.
+    relations: list[str]
+
+
+class ProfileOffer(BaseModel):
+    """Lo que una persona declara poder aportar. SOLO el lado publico.
+
+    Este esquema no tiene ningun campo para la demanda, y no es un descuido: es
+    la garantia. Que alguien se ofrezca a ensenar carpinteria es una
+    declaracion que hace para que le encuentren; que busque orientacion sobre
+    relaciones y familia, no. Si la demanda no cabe en el contrato, no puede
+    escaparse por aqui aunque alguien se equivoque mas abajo.
+
+    Y `relations` son declaraciones, no credenciales: la interfaz escribe
+    «Puede ayudar en» o «Experiencia declarada en», nunca «experto verificado».
+    """
+
+    topics: list[OfferedTopic] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
 # Recomendaciones de personas
 # --------------------------------------------------------------------------- #
 class RecommendationReason(BaseModel):

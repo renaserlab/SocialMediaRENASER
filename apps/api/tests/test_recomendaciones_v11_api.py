@@ -698,3 +698,123 @@ async def test_una_accion_fuera_de_la_ventana_no_se_atribuye(entorno):
     embudo = next(f for f in datos["funnels"] if f["surface"] == "people_for_you")
     assert embudo["impressions"] == 1
     assert embudo["conversions"]["follow"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# La oferta publica de un perfil
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_la_oferta_declarada_se_puede_consultar(entorno):
+    http, _, identidad = entorno
+    identidad["uid"] = PEDRO
+    await http.put(
+        f"{API}/preferences",
+        json={
+            "offer_modes": ["puedo_ayudar", "puedo_ensenar"],
+            "offer_topic_ids": [CARPINTERIA],
+        },
+    )
+
+    identidad["uid"] = ANA
+    datos = (await http.get(f"{API}/profiles/{PEDRO}/offer")).json()
+    assert len(datos["topics"]) == 1
+    tema = datos["topics"][0]
+    assert tema["name"] == "Carpintería"
+    assert set(tema["relations"]) == {"can_help", "teach"}
+
+
+@pytest.mark.asyncio
+async def test_la_demanda_privada_NO_sale_por_la_oferta(entorno):
+    """La regla de privacidad, comprobada.
+
+    Pedro dice que quiere aprender cocina y que puede ayudar en carpinteria.
+    Ana solo puede ver lo segundo.
+    """
+    http, _, identidad = entorno
+    identidad["uid"] = PEDRO
+    await http.put(
+        f"{API}/preferences",
+        json={
+            "goals": ["orientacion"],
+            "learning_topic_ids": [COCINA],
+            "offer_modes": ["puedo_ayudar"],
+            "offer_topic_ids": [CARPINTERIA],
+        },
+    )
+
+    identidad["uid"] = ANA
+    datos = (await http.get(f"{API}/profiles/{PEDRO}/offer")).json()
+    temas = {t["topic_id"] for t in datos["topics"]}
+    assert temas == {CARPINTERIA}
+    assert COCINA not in temas
+    # Ni una sola relacion de demanda puede colarse.
+    todas = {r for t in datos["topics"] for r in t["relations"]}
+    assert todas <= {"can_help", "teach", "experienced"}
+    assert not todas & {"learn", "seek_guidance", "interest"}
+
+
+@pytest.mark.asyncio
+async def test_quien_no_ha_declarado_nada_tiene_la_oferta_vacia(entorno):
+    """Vacia, no inventada a partir de la biografia."""
+    http, _, _ = entorno
+    datos = (await http.get(f"{API}/profiles/{PEDRO}/offer")).json()
+    assert datos["topics"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_existe_forma_de_consultar_lo_que_otra_persona_busca(entorno):
+    """`/preferences` devuelve SIEMPRE lo propio, venga como venga la peticion.
+
+    Es la puerta que habria que dejar abierta para filtrar la demanda ajena, y
+    no lo esta: no acepta ningun identificador.
+    """
+    http, _, identidad = entorno
+    identidad["uid"] = PEDRO
+    await http.put(f"{API}/preferences", json={"learning_topic_ids": [COCINA]})
+
+    identidad["uid"] = ANA
+    mias = (await http.get(f"{API}/preferences")).json()
+    assert mias["learning_topic_ids"] == []
+    # Y no hay ruta alternativa: la de otra persona responde 404, no su demanda.
+    assert (await http.get(f"{API}/preferences/{PEDRO}")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_editar_la_oferta_la_reemplaza(entorno):
+    """Cambiar de opinion tiene que poder QUITAR, no solo anadir."""
+    http, _, _ = entorno
+    await http.put(
+        f"{API}/preferences",
+        json={"offer_modes": ["puedo_ensenar"], "offer_topic_ids": [CARPINTERIA]},
+    )
+    await http.put(
+        f"{API}/preferences",
+        json={"offer_modes": ["tengo_experiencia"], "offer_topic_ids": [NEGOCIOS]},
+    )
+    datos = (await http.get(f"{API}/profiles/{ANA}/offer")).json()
+    assert [t["topic_id"] for t in datos["topics"]] == [NEGOCIOS]
+    assert datos["topics"][0]["relations"] == ["experienced"]
+
+
+@pytest.mark.asyncio
+async def test_nadie_puede_escribir_la_oferta_de_otra_persona(entorno):
+    http, sesiones, _ = entorno
+    await http.put(
+        f"{API}/preferences",
+        json={
+            "user_id": PEDRO,
+            "offer_modes": ["puedo_ensenar"],
+            "offer_topic_ids": [CARPINTERIA],
+        },
+    )
+    # Lo guardado es de Ana, que fue quien hizo la peticion.
+    de_pedro = (await http.get(f"{API}/profiles/{PEDRO}/offer")).json()
+    de_ana = (await http.get(f"{API}/profiles/{ANA}/offer")).json()
+    assert de_pedro["topics"] == []
+    assert len(de_ana["topics"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_un_perfil_con_id_invalido_responde_404_y_no_revienta(entorno):
+    http, _, _ = entorno
+    assert (await http.get(f"{API}/profiles/no-es-un-uuid/offer")).status_code == 404

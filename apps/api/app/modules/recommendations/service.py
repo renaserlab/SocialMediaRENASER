@@ -61,12 +61,14 @@ from app.modules.recommendations.models import (
 from app.modules.recommendations.ranker import Puntuacion, puntuar
 from app.modules.recommendations.reranker import por_grupo, sin_rachas
 from app.modules.recommendations.schemas import (
+    OfferedTopic,
     OnboardingCatalog,
     OnboardingStatus,
     OpcionRead,
     PersonRecommendation,
     PreferencesInput,
     PreferencesRead,
+    ProfileOffer,
     RecommendationReason,
     TopicRead,
     TopicRelationRead,
@@ -232,6 +234,36 @@ async def leer_preferencias(db: AsyncSession, user_id: str) -> PreferencesRead:
     )
 
 
+async def oferta_publica(db: AsyncSession, profile_id: str) -> ProfileOffer:
+    """Lo que esta persona declara poder aportar. Nada mas.
+
+    Se filtra a `RELACIONES_DE_OFERTA` AQUI, en el servidor, aunque la RLS de
+    la 0026 ya lo haga: el backend se conecta con su propio rol y no pasa por
+    RLS, asi que si esta linea no estuviera, la demanda privada de cualquiera
+    saldria por este endpoint. Las dos capas dicen lo mismo a proposito.
+    """
+    relaciones = (await repo.relaciones_de(db, [profile_id], RELACIONES_DE_OFERTA)).get(
+        profile_id, {}
+    )
+    por_tema: dict[str, set[str]] = {}
+    for relacion, temas in relaciones.items():
+        for topic_id in temas:
+            por_tema.setdefault(topic_id, set()).add(relacion)
+
+    nombres = await repo.topics_por_id(db, set(por_tema))
+    return ProfileOffer(
+        topics=[
+            OfferedTopic(
+                topic_id=topic_id,
+                name=nombres[topic_id].name,
+                relations=sorted(rels),
+            )
+            for topic_id, rels in por_tema.items()
+            if topic_id in nombres
+        ]
+    )
+
+
 async def guardar_preferencias(
     db: AsyncSession, user_id: str, payload: PreferencesInput
 ) -> PreferencesRead:
@@ -333,6 +365,28 @@ async def _escribir_preferencias(
 # --------------------------------------------------------------------------- #
 # Personas
 # --------------------------------------------------------------------------- #
+async def _demanda_con_memoria(
+    db: AsyncSession, user_id: str, ahora: datetime
+) -> tuple[PerfilDeDemanda, repo.SenalesDelUsuario]:
+    """La demanda, calculada UNA vez por peticion aunque se pida dos veces.
+
+    El feed la necesita dos veces: para ordenar el contenido por tema y, dentro
+    de `personas_puntuadas`, para saber a quien le encaja cada autor. Sin esta
+    memoria eran tres consultas repetidas —preferencias, relaciones y senales—
+    en cada pagina del scroll infinito, para obtener exactamente lo mismo.
+
+    Comparte caducidad e invalidacion con el ranking: lo que cambia una cosa
+    cambia la otra.
+    """
+    semilla = semilla_de_exploracion(ahora)
+    guardado = cache.obtener(user_id, semilla, "demanda")
+    if guardado is not None:
+        return guardado
+    resultado = await _construir_demanda(db, user_id, ahora)
+    cache.guardar(user_id, semilla, resultado, "demanda")
+    return resultado
+
+
 async def _construir_demanda(
     db: AsyncSession, user_id: str, ahora: datetime
 ) -> tuple[PerfilDeDemanda, repo.SenalesDelUsuario]:
@@ -426,7 +480,7 @@ async def personas_puntuadas(
         if guardado is not None:
             return guardado
 
-    demanda, senales = await _construir_demanda(db, user_id, ahora)
+    demanda, senales = await _demanda_con_memoria(db, user_id, ahora)
 
     # EXCLUSIONES. No son un detalle: son la diferencia entre recomendar y
     # molestar. Uno mismo; quien bloqueo o me bloqueo; y a quien ya dije que no
@@ -663,7 +717,7 @@ async def contenido_para(
     solo hay tres videos, se ordenan tres videos.
     """
     ahora = ahora or ahora_utc()
-    demanda, senales = await _construir_demanda(db, user_id, ahora)
+    demanda, senales = await _demanda_con_memoria(db, user_id, ahora)
     puntuadas, estrategia = await personas_puntuadas(db, user_id, ahora=ahora)
     score_por_autor = {p.id: p.score for p in puntuadas}
 

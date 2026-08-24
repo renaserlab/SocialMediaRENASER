@@ -44,10 +44,12 @@ from app.modules.recommendations.schemas import (
     PeopleRecommendations,
     PreferencesInput,
     PreferencesRead,
+    ProfileOffer,
     RecommendationMetrics,
     SurfaceFunnel,
 )
 from app.shared.database import get_db
+from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import require_admin
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
@@ -112,6 +114,29 @@ async def guardar_preferencias(
     pulsa dos veces o la red obliga a reintentar.
     """
     return await service.guardar_preferencias(db, current_user.id, payload)
+
+
+# --------------------------------------------------------------------------- #
+# La oferta publica de un perfil
+# --------------------------------------------------------------------------- #
+@router.get("/profiles/{profile_id}/offer", response_model=ProfileOffer)
+async def oferta_de_un_perfil(
+    profile_id: str,
+    _: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileOffer:
+    """Lo que esa persona declara poder aportar. SOLO eso.
+
+    No existe el endpoint simetrico —«que busca esta persona»— y no es un olvido:
+    la demanda es privada y no debe poder consultarse de ninguna forma sobre
+    otra cuenta. Quien quiera ver la suya, la tiene en `/preferences`.
+
+    Pide sesion aunque la informacion sea publica dentro de Z: el grafo entero
+    de quien sabe que no tiene por que ser descargable por cualquiera con la
+    direccion del proyecto. Es el mismo criterio que la RLS de la 0026.
+    """
+    ensure_uuid(profile_id, "Perfil no encontrado.")
+    return await service.oferta_publica(db, profile_id)
 
 
 # --------------------------------------------------------------------------- #

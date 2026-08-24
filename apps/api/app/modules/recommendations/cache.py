@@ -32,21 +32,26 @@ from typing import Any
 #: pantallas seguidas no repitan el trabajo, no un almacen de resultados.
 VIGENCIA_S = 60.0
 
-#: Cuantas personas caben. Con techo para que la memoria del proceso no crezca
-#: con el numero de usuarios activos.
-MAXIMO = 500
+#: Cuantas ENTRADAS caben (unas dos por persona: el ranking y su demanda).
+#: Con techo para que la memoria del proceso no crezca con el numero de
+#: usuarios activos.
+MAXIMO = 1000
 
+#: Que se guarda de cada persona. Van con etiqueta y no en diccionarios
+#: distintos para que invalidar siga siendo UNA operacion: cuando alguien
+#: cambia sus preferencias, todo lo que sabiamos de esa persona deja de valer a
+#: la vez, y dos almacenes se olvidarian de uno de ellos antes o despues.
 _entradas: "OrderedDict[str, tuple[float, Any]]" = OrderedDict()
 
 
-def _clave(user_id: str, semilla: str) -> str:
+def _clave(user_id: str, semilla: str, que: str = "ranking") -> str:
     # La semilla entra en la clave porque al cambiar de dia cambia la
     # exploracion: sin ella, el resultado de ayer sobreviviria a la medianoche.
-    return f"{user_id}|{semilla}"
+    return f"{user_id}|{semilla}|{que}"
 
 
-def obtener(user_id: str, semilla: str) -> Any | None:
-    clave = _clave(user_id, semilla)
+def obtener(user_id: str, semilla: str, que: str = "ranking") -> Any | None:
+    clave = _clave(user_id, semilla, que)
     entrada = _entradas.get(clave)
     if entrada is None:
         return None
@@ -58,8 +63,8 @@ def obtener(user_id: str, semilla: str) -> Any | None:
     return valor
 
 
-def guardar(user_id: str, semilla: str, valor: Any) -> None:
-    clave = _clave(user_id, semilla)
+def guardar(user_id: str, semilla: str, valor: Any, que: str = "ranking") -> None:
+    clave = _clave(user_id, semilla, que)
     _entradas[clave] = (time.monotonic(), valor)
     _entradas.move_to_end(clave)
     while len(_entradas) > MAXIMO:
