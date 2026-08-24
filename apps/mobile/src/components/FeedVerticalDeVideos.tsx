@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
@@ -7,6 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
 import { Text } from '@/components/Text';
 import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
+import { videoVisible, videoVisto } from '@/services/senales';
 import { palette, spacing } from '@/theme/tokens';
 
 // Superficie a pantalla completa sobre video → contexto de media (oscuro).
@@ -59,12 +60,59 @@ export function FeedVerticalDeVideos({
   const insets = useSafeAreaInsets();
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
+
+  /*
+    Cuanto lleva en pantalla el video actual, y cual era.
+
+    Van en referencias y no en estado porque se leen y se escriben dentro del
+    mismo manejador: con estado se leeria el valor del render anterior y el
+    tiempo medido seria el del video equivocado. Y porque cambiarlas NO debe
+    redibujar nada: esto es medicion, y medir no puede costar un render por
+    deslizamiento.
+  */
+  const videoEnPantalla = useRef<{ id: string; desde: number } | null>(null);
+
+  const cerrarMedicion = useCallback(() => {
+    const anterior = videoEnPantalla.current;
+    if (!anterior) return;
+    videoEnPantalla.current = null;
+    const visible = Date.now() - anterior.desde;
+    /*
+      No se sabe cuanto dura cada video (la duracion es opcional en el medio),
+      asi que se aproxima el interes por el TIEMPO: quince segundos mirando algo
+      es una senal fuerte se acabe o no. Es deliberadamente conservador; mejor
+      quedarse corto que inventarse un porcentaje.
+    */
+    videoVisto(anterior.id, Math.min(1, visible / 15000), visible);
+  }, []);
+
   const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+    ({
+      viewableItems,
+    }: {
+      viewableItems: Array<{ index: number | null; item?: ReelItem }>;
+    }) => {
       const primero = viewableItems[0];
-      if (primero && typeof primero.index === 'number') setIndiceActivo(primero.index);
+      if (!primero || typeof primero.index !== 'number') return;
+      setIndiceActivo(primero.index);
+
+      const id = primero.item?.id;
+      if (!id || videoEnPantalla.current?.id === id) return;
+      cerrarMedicion();
+      videoEnPantalla.current = { id, desde: Date.now() };
+      videoVisible(id);
     },
   ).current;
+
+  /*
+    Al salir del feed (cambiar de pestana, de seccion o cerrar) se cierra la
+    medicion en curso. Sin esto, el ultimo video de cada sesion no contaria
+    nunca: siempre falta el que se estaba viendo al irse.
+  */
+  useEffect(() => cerrarMedicion, [cerrarMedicion]);
+  useEffect(() => {
+    if (!activo) cerrarMedicion();
+  }, [activo, cerrarMedicion]);
 
   const refrescar = useCallback(async () => {
     setRefrescando(true);

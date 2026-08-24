@@ -1,0 +1,168 @@
+import { AppState } from 'react-native';
+
+import {
+  RecommendationRepository,
+  type BehaviorEvent,
+} from '@/repositories/RecommendationRepository';
+
+/**
+ * Las senales de uso, enviadas por lotes.
+ *
+ * MEDIR NO PUEDE ESTROPEAR LO QUE SE MIDE. Una peticion por impresion
+ * convertiria bajar el feed en una tormenta de red: con seis videos por
+ * pantalla y un deslizamiento por segundo, serian decenas de peticiones por
+ * minuto compitiendo con el propio contenido por la conexion. Y el contenido
+ * es lo que la persona vino a ver.
+ *
+ * Por eso aqui se acumula y se manda de golpe:
+ *
+ *   - cuando hay LOTE_MAXIMO senales;
+ *   - cuando pasan ESPERA_MS sin novedades;
+ *   - cuando la aplicacion pasa a segundo plano, para no perder lo acumulado.
+ *
+ * Lo que NUNCA se guarda: texto escrito, mensajes, terminos de busqueda ni
+ * nada que pueda decir algo intimo de nadie. Solo QUE se toco, de que tipo era
+ * y cuanto se quedo. Con eso basta para ordenar; con mas, esto seria otra cosa.
+ */
+
+/** Un lote no puede crecer sin fin: el backend acepta 50 como maximo. */
+const LOTE_MAXIMO = 25;
+
+/**
+ * Cuanto se espera antes de mandar lo acumulado.
+ *
+ * Ocho segundos son suficientes para juntar un puñado de videos y lo bastante
+ * poco para que cerrar la aplicacion no pierda casi nada.
+ */
+const ESPERA_MS = 8000;
+
+let cola: BehaviorEvent[] = [];
+let temporizador: ReturnType<typeof setTimeout> | null = null;
+let suscrito = false;
+
+/** Claves ya encoladas o enviadas en esta sesion. Evita duplicar sin red. */
+const yaVistas = new Set<string>();
+
+/**
+ * Tope de la memoria de claves. Sin el, una sesion larga acumularia una clave
+ * por cada video visto para siempre.
+ */
+const MAX_CLAVES_RECORDADAS = 1000;
+
+function programarEnvio(): void {
+  if (temporizador) return;
+  temporizador = setTimeout(() => {
+    temporizador = null;
+    void vaciar();
+  }, ESPERA_MS);
+}
+
+/** Manda ya lo acumulado. No lanza nunca. */
+export async function vaciar(): Promise<void> {
+  if (temporizador) {
+    clearTimeout(temporizador);
+    temporizador = null;
+  }
+  if (cola.length === 0) return;
+  const lote = cola;
+  cola = [];
+  await RecommendationRepository.sendEvents(lote);
+}
+
+function asegurarSuscripcion(): void {
+  if (suscrito) return;
+  suscrito = true;
+  // Al irse a segundo plano se manda lo pendiente: si no, cerrar la aplicacion
+  // tiraria los ultimos ocho segundos de uso, que son justo los mas recientes.
+  AppState.addEventListener('change', (estado) => {
+    if (estado !== 'active') void vaciar();
+  });
+}
+
+/**
+ * Encola una senal. Devuelve enseguida: nada de lo que hace esta funcion puede
+ * hacer esperar a quien la llama.
+ *
+ * `eventKey` es la idempotencia. Con ella, la misma senal no se cuenta dos
+ * veces aunque el lote se reintente o la pantalla se vuelva a montar.
+ */
+export function registrar(evento: BehaviorEvent): void {
+  asegurarSuscripcion();
+
+  if (evento.eventKey) {
+    if (yaVistas.has(evento.eventKey)) return;
+    if (yaVistas.size >= MAX_CLAVES_RECORDADAS) yaVistas.clear();
+    yaVistas.add(evento.eventKey);
+  }
+
+  cola.push(evento);
+  if (cola.length >= LOTE_MAXIMO) {
+    void vaciar();
+    return;
+  }
+  programarEnvio();
+}
+
+/** Al cerrar sesion: lo acumulado era de la cuenta anterior. */
+export function descartar(): void {
+  if (temporizador) {
+    clearTimeout(temporizador);
+    temporizador = null;
+  }
+  cola = [];
+  yaVistas.clear();
+}
+
+/* -------------------------------------------------------------- Atajos ---- */
+
+/** El video que se esta viendo ahora. Una vez por video y sesion. */
+export function videoVisible(postId: string): void {
+  registrar({
+    eventType: 'content_impression',
+    entityType: 'post',
+    entityId: postId,
+    eventKey: `imp:${postId}`,
+  });
+}
+
+/**
+ * Cuanto se vio de un video, al salir de el.
+ *
+ * `proporcion` es 0..1. Por debajo de un tercio no se manda nada: pasar de
+ * largo ya quedo contado como impresion, y guardar ademas «lo vio un 4 %»
+ * seria ruido con forma de dato.
+ */
+export function videoVisto(postId: string, proporcion: number, msVisible: number): void {
+  if (!Number.isFinite(proporcion) || proporcion < 0.33) return;
+  const completo = proporcion >= 0.9;
+  registrar({
+    eventType: completo ? 'content_completed' : 'content_engaged',
+    entityType: 'post',
+    entityId: postId,
+    value: Math.min(1, proporcion),
+    dwellMs: Math.min(600_000, Math.max(0, Math.round(msVisible))),
+    eventKey: `${completo ? 'fin' : 'vis'}:${postId}`,
+  });
+}
+
+/** Abrio un perfil. */
+export function perfilVisto(profileId: string): void {
+  registrar({
+    eventType: 'profile_view',
+    entityType: 'profile',
+    entityId: profileId,
+    eventKey: `perfil:${profileId}`,
+  });
+}
+
+/**
+ * Eligio un resultado de busqueda. Se guarda QUE abrio, NUNCA que escribio:
+ * el termino de busqueda puede contener cualquier cosa.
+ */
+export function resultadoAbierto(entityType: 'profile' | 'post', entityId: string): void {
+  registrar({
+    eventType: 'search_result_opened',
+    entityType,
+    entityId,
+  });
+}

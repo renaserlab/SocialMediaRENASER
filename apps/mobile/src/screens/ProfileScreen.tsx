@@ -4,6 +4,8 @@ import { afterSheetClose } from '@/lib/afterSheetClose';
 import { confirm, notify } from '@/lib/confirm';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
+import { perfilVisto } from '@/services/senales';
+
 import { haptics } from '@/lib/haptics';
 import { Feather } from '@expo/vector-icons';
 
@@ -113,6 +115,20 @@ export function ProfileScreen() {
   useEffect(() => {
     loadPublic();
   }, [loadPublic]);
+
+  /*
+    Abrir un perfil ajeno es una senal, y de las buenas: dice mas que ver pasar
+    un video y menos que seguir a alguien.
+
+    Lo que NO hace: avisar a nadie. Que alguien mire tu perfil no se le cuenta
+    al duenno —eso convertiria mirar en una accion publica sin que nadie lo
+    haya decidido—, se usa solo para ordenar lo que se te recomienda a TI. Y se
+    manda una vez por perfil y sesion, no en cada repintado (ver `senales`).
+  */
+  useEffect(() => {
+    if (!isRealPublic || !id || !signedIn) return;
+    perfilVisto(id);
+  }, [id, isRealPublic, signedIn]);
 
   /**
    * Invitacion a crear cuenta al asomarse al perfil de otra persona.
