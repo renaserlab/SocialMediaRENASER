@@ -60,6 +60,10 @@ class OnboardingCatalog(BaseModel):
     #: de Crear para no aparecer: ofrecer «elige hasta 3 temas» y luego
     #: descartarlos en silencio seria prometer algo que no se cumple.
     content_topics_available: bool = True
+    #: Lo mismo para los CURSOS. Es false mientras la migracion 0028 no este
+    #: aplicada. Son dos banderas y no una porque son dos tablas y dos
+    #: migraciones: una puede estar puesta y la otra no.
+    course_topics_available: bool = True
 
 
 # --------------------------------------------------------------------------- #

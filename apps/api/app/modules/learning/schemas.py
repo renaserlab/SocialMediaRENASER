@@ -27,6 +27,13 @@ class LessonDetailRead(LessonRead):
     #: la app pero este endpoint no la devolvia, asi que quien la escribia veia
     #: «Sin descripción todavía» justo despues de guardarla.
     body: str = ""
+    #: Si quien pregunta puede editar o borrar ESTA leccion: el autor del curso
+    #: o la administracion. La pantalla la abre por su id sin conocer el curso,
+    #: asi que sin este campo tendria que pedir el curso entero solo para saber
+    #: si ensenar un boton.
+    can_manage: bool = False
+    #: Si tiene acceso al contenido de pago del curso al que pertenece.
+    has_access: bool = False
 
 
 class ModuleRead(BaseModel):

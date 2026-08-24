@@ -39,6 +39,7 @@ export type OnboardingCatalog = {
 type CatalogDto = {
   onboarding_version: number;
   content_topics_available?: boolean;
+  course_topics_available?: boolean;
   topics: TopicDto[];
   goals: OptionDto[];
   connection_types: OptionDto[];
@@ -258,16 +259,22 @@ export const RecommendationRepository = {
    * es la MISMA taxonomia, y dos fuentes para la misma lista acaban
    * discrepando.
    */
-  async listTopics(): Promise<TopicDto[]> {
+  async listTopics(para: 'contenido' | 'curso' = 'contenido'): Promise<TopicDto[]> {
     const dto = await apiRequest<CatalogDto>(`${API_V1}/recommendations/onboarding/catalog`);
     /*
-      Lista vacia cuando el servidor NO puede guardar temas de contenido.
+      Lista vacia cuando el servidor NO puede guardar los temas de ESO.
 
       El selector se esconde solo al no recibir ninguno (ver `SelectorDeTemas`),
       que es justo lo que tiene que pasar: ofrecer «elige hasta 3 temas» y luego
       descartarlos en silencio seria prometer algo que no se cumple.
+
+      Son dos banderas distintas porque son dos migraciones distintas: las
+      publicaciones pueden llevar temas desde la 0027 y los cursos desde la
+      0028, y una puede estar aplicada sin la otra.
     */
-    if (dto.content_topics_available === false) return [];
+    const disponible =
+      para === 'curso' ? dto.course_topics_available : dto.content_topics_available;
+    if (disponible === false) return [];
     return dto.topics;
   },
 

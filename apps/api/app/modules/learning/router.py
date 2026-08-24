@@ -412,6 +412,8 @@ async def get_lesson_detail(
         media_path=leccion.media_path,
         progress_seconds=avance.progress_seconds if avance else 0,
         body=leccion.body or "",
+        can_manage=await _puede_gestionar(db, uid, curso),
+        has_access=await _tiene_acceso(db, uid, curso),
         course_id=curso.id,
         course_title=curso.title,
         module_title=modulo.title,

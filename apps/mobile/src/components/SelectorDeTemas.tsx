@@ -19,23 +19,26 @@ const MAXIMO_POR_DEFECTO = 3;
   una y otra vez. Se guarda a nivel de modulo, y ademas se comparte la peticion
   en curso para que dos montajes casi simultaneos no la dupliquen.
 */
-let temasCacheados: TopicDto[] | null = null;
-let peticionEnCurso: Promise<TopicDto[]> | null = null;
+type Para = 'contenido' | 'curso';
 
-function pedirTemas(): Promise<TopicDto[]> {
-  if (temasCacheados) return Promise.resolve(temasCacheados);
-  if (!peticionEnCurso) {
-    peticionEnCurso = RecommendationRepository.listTopics()
+const temasCacheados: Partial<Record<Para, TopicDto[]>> = {};
+const peticionEnCurso: Partial<Record<Para, Promise<TopicDto[]>>> = {};
+
+function pedirTemas(para: Para): Promise<TopicDto[]> {
+  const guardado = temasCacheados[para];
+  if (guardado) return Promise.resolve(guardado);
+  if (!peticionEnCurso[para]) {
+    peticionEnCurso[para] = RecommendationRepository.listTopics(para)
       .then((lista) => {
-        temasCacheados = lista;
+        temasCacheados[para] = lista;
         return lista;
       })
       .finally(() => {
         // El fallo NO se cachea: quien lo intente despues vuelve a pedirlo.
-        peticionEnCurso = null;
+        delete peticionEnCurso[para];
       });
   }
-  return peticionEnCurso;
+  return peticionEnCurso[para]!;
 }
 
 type Props = {
@@ -44,6 +47,14 @@ type Props = {
   /** Paleta de superficie sobre vídeo (Crear) vs. pantalla normal (Editar). */
   variante?: 'clara' | 'sobreMedia';
   maximo?: number;
+  /**
+   * Para que se piden: una publicacion o un curso.
+   *
+   * Cambia QUE migracion tiene que estar aplicada para que el selector
+   * aparezca, no la lista de temas: la taxonomia es la misma en los dos casos,
+   * y eso es justamente lo que permite cruzarlos.
+   */
+  para?: 'contenido' | 'curso';
 };
 
 /**
@@ -63,14 +74,15 @@ export function SelectorDeTemas({
   alCambiar,
   variante = 'clara',
   maximo = MAXIMO_POR_DEFECTO,
+  para = 'contenido',
 }: Props) {
   const { colors } = useAppTheme();
   // Si ya se pidio antes, se pinta en el primer fotograma y no hay parpadeo.
-  const [temas, setTemas] = useState<TopicDto[]>(temasCacheados ?? []);
+  const [temas, setTemas] = useState<TopicDto[]>(temasCacheados[para] ?? []);
 
   useEffect(() => {
     let vivo = true;
-    pedirTemas()
+    pedirTemas(para)
       .then((lista) => {
         if (vivo) setTemas(lista);
       })
@@ -80,7 +92,7 @@ export function SelectorDeTemas({
     return () => {
       vivo = false;
     };
-  }, []);
+  }, [para]);
 
   /** Grupos en el orden que decide el servidor; aqui no se reordena nada. */
   const grupos = useMemo(() => {

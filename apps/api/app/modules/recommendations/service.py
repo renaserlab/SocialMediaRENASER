@@ -154,6 +154,7 @@ async def catalogo(db: AsyncSession) -> OnboardingCatalog:
     return OnboardingCatalog(
         onboarding_version=ONBOARDING_VERSION,
         content_topics_available=await esquema.hay_temas_de_contenido(db),
+        course_topics_available=await esquema.hay_temas_de_curso(db),
         topics=[TopicRead.model_validate(t) for t in temas],
         goals=_opciones(OBJETIVOS),
         connection_types=_opciones(TIPOS_DE_CONEXION),
