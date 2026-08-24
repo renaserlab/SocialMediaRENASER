@@ -1,5 +1,6 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { toPost, type PostDto } from '@/mappers/postMapper';
+import { signMediaUrls } from '@/services/storage';
 import type { Post } from '@/types';
 
 /**
@@ -164,6 +165,72 @@ type ContentDto = {
   items: PostDto[];
 };
 
+/* ----------------------------------------------------------------- Cursos -- */
+
+/**
+ * Un curso recomendado, con SOLO lo que existe de verdad.
+ *
+ * No hay valoracion, ni numero de alumnos, ni «bestseller», ni «certificado»:
+ * nada de eso esta en la base, y pintarlo convertiria la tarjeta en publicidad.
+ * Lo que si se sabe —de que trata, cuanto ocupa, cuanto cuesta y POR QUE
+ * aparece— es lo que ayuda a decidir.
+ */
+export type RecommendedCourse = {
+  id: string;
+  authorId: string;
+  title: string;
+  description: string;
+  /** Ruta en el bucket PRIVADO `post-media`. Hay que firmarla para verla. */
+  coverPath: string | null;
+  /** La firma ya resuelta. `undefined` cuando no hay portada o no se pudo firmar. */
+  coverUrl?: string;
+  /** SIEMPRE en la unidad menor. Ver `lib/dinero.ts`. */
+  priceMinor: number;
+  currency: string;
+  topicIds: string[];
+  modules: number;
+  lessons: number;
+  /**
+   * Por que aparece. OJO: aqui `topics` son IDENTIFICADORES, no nombres (al
+   * contrario que en las personas). Los declara quien publica el curso, asi que
+   * son publicos, pero traducirlos a nombres es cosa de la interfaz: ver
+   * `lib/motivoDeCurso.ts`.
+   */
+  reasons: RecommendationReason[];
+};
+
+export type CourseRecommendations = {
+  items: RecommendedCourse[];
+  /** La decide el SERVIDOR; viaja de vuelta en cada senal. Ver `PeopleRecommendations`. */
+  algorithmVersion: string;
+  strategy: 'personalized' | 'cold_start' | 'disabled';
+  /**
+   * Cuantos de los devueltos declaran sus temas. Es la medida honesta de cuanto
+   * sabe el recomendador sobre lo que esta ordenando.
+   */
+  withTopics: number;
+};
+
+type CoursesDto = {
+  algorithm_version: string;
+  strategy: CourseRecommendations['strategy'];
+  with_topics: number;
+  items: Array<{
+    id: string;
+    author_id: string;
+    title: string;
+    description: string;
+    cover_path: string | null;
+    price_minor: number;
+    currency: string;
+    topic_ids: string[];
+    modules: number;
+    lessons: number;
+    reasons: RecommendationReason[];
+    debug: Record<string, number> | null;
+  }>;
+};
+
 /* ---------------------------------------------------------------- Senales -- */
 
 /**
@@ -173,6 +240,12 @@ type ContentDto = {
  */
 export type Superficie =
   | 'people_for_you'
+  /**
+   * «Cursos para ti». Su valor entra en el CHECK con la migracion 0028: hasta
+   * que este aplicada, el servidor descarta la superficie en vez de escribirla
+   * (la base la rechazaria y tumbaria el lote entero).
+   */
+  | 'courses_for_you'
   | 'for_you_feed'
   | 'following_feed'
   | 'search'
@@ -362,6 +435,59 @@ export const RecommendationRepository = {
       algorithmVersion: dto.algorithm_version,
       strategy: dto.strategy,
       items: (dto.items ?? []).map((item) => toPost(item, currentUserId)),
+    };
+  },
+
+  /**
+   * Cursos recomendados, con el contexto necesario para poder medirlos.
+   *
+   * LAS PORTADAS SE FIRMAN AQUI Y EN LOTE. `cover_path` es una ruta del bucket
+   * PRIVADO `post-media` —es donde las sube `CreateCatalogSheet`—, asi que sin
+   * firma no se ve nada. Se firman todas de una sola vez, igual que en
+   * `LearningRepository.listCourses()`: una firma por tarjeta serian diez
+   * peticiones a Storage para pintar una fila.
+   *
+   * Que la firma falle NO tumba la lista. Un curso sin portada se sigue
+   * pudiendo leer y abrir; quedarse sin seccion por una imagen seria cambiar un
+   * problema pequeno por uno grande.
+   */
+  async listCourses(
+    { limit = 10, offset = 0 }: { limit?: number; offset?: number } = {},
+  ): Promise<CourseRecommendations> {
+    const dto = await apiRequest<CoursesDto>(
+      `${API_V1}/recommendations/courses?limit=${limit}&offset=${offset}`,
+    );
+    const items: RecommendedCourse[] = (dto.items ?? []).map((item) => ({
+      id: item.id,
+      authorId: item.author_id,
+      title: item.title,
+      description: item.description ?? '',
+      coverPath: item.cover_path ?? null,
+      priceMinor: item.price_minor ?? 0,
+      currency: item.currency ?? 'PEN',
+      topicIds: item.topic_ids ?? [],
+      modules: item.modules ?? 0,
+      lessons: item.lessons ?? 0,
+      reasons: item.reasons ?? [],
+    }));
+
+    const rutas = items.map((curso) => curso.coverPath).filter((p): p is string => !!p);
+    if (rutas.length > 0) {
+      try {
+        const urls = await signMediaUrls(rutas);
+        items.forEach((curso) => {
+          if (curso.coverPath) curso.coverUrl = urls[curso.coverPath];
+        });
+      } catch (error) {
+        console.warn('[cursos] no se pudieron firmar las portadas', error);
+      }
+    }
+
+    return {
+      algorithmVersion: dto.algorithm_version,
+      strategy: dto.strategy,
+      withTopics: dto.with_topics ?? 0,
+      items,
     };
   },
 

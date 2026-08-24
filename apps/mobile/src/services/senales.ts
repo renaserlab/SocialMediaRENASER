@@ -223,6 +223,46 @@ export function perfilVisto(profileId: string, contexto?: ContextoDeRecomendacio
 }
 
 /**
+ * La tarjeta de un curso recomendado esta a la vista.
+ *
+ * Igual que con las personas: se cuenta cuando SE VE, no cuando llega la
+ * respuesta. En un carrusel de diez cursos caben dos y medio en pantalla, y
+ * contar los otros siete y medio como mostrados hundiria la tasa de acierto de
+ * los que si se vieron.
+ */
+export function cursoVisible(courseId: string, contexto?: ContextoDeRecomendacion): void {
+  registrar({
+    eventType: 'content_impression',
+    entityType: 'course',
+    entityId: courseId,
+    // Clave propia por tipo: un curso, un perfil y una publicacion pueden
+    // compartir identificador, y sin el prefijo una impresion taparia otra.
+    eventKey: `imp:curso:${courseId}`,
+    ...contexto,
+  });
+}
+
+/**
+ * Abrio un curso desde una recomendacion.
+ *
+ * Es `content_engaged` y no `profile_view`: lo que se abrio es contenido. Lleva
+ * el mismo contexto que la impresion, que es lo que permite cruzar «se mostro»
+ * con «se abrio» y saber si aquella recomendacion sirvio de algo.
+ *
+ * La clave hace que volver al carrusel y abrir el mismo curso otra vez —o que
+ * la pantalla se vuelva a montar— no lo cuente dos veces.
+ */
+export function cursoAbierto(courseId: string, contexto?: ContextoDeRecomendacion): void {
+  registrar({
+    eventType: 'content_engaged',
+    entityType: 'course',
+    entityId: courseId,
+    eventKey: `abre:curso:${courseId}`,
+    ...contexto,
+  });
+}
+
+/**
  * Eligio un resultado de busqueda. Se guarda QUE abrio, NUNCA que escribio:
  * el termino de busqueda puede contener cualquier cosa.
  */
@@ -260,5 +300,29 @@ export function contenidoNoInteresa(postId: string, contexto?: ContextoDeRecomen
   });
   // Sale ya, sin esperar los ESPERA_MS del lote. No se devuelve la promesa: la
   // interfaz ya ha quitado el video y no tiene nada que esperar.
+  void vaciar();
+}
+
+/**
+ * «No me interesa» sobre un CURSO.
+ *
+ * Mismo trato que la version de contenido y por el mismo motivo: no es
+ * medicion, es una PETICION. Si se quedara en la cola, refrescar la seccion en
+ * esos ocho segundos devolveria el curso que se acaba de descartar, y lo que se
+ * rompe entonces no es una metrica, es la confianza en que el boton hace algo.
+ *
+ * Rechazar un curso NO es rechazar a quien lo publico: aqui viaja el curso y
+ * nada mas. Ni deja de seguirse al autor, ni se le bloquea, ni desaparece el
+ * resto de lo suyo. Alguien puede no querer un curso de contabilidad de una
+ * persona cuyos videos ve todos los dias.
+ */
+export function cursoNoInteresa(courseId: string, contexto?: ContextoDeRecomendacion): void {
+  registrar({
+    eventType: 'not_interested',
+    entityType: 'course',
+    entityId: courseId,
+    eventKey: `no:curso:${courseId}`,
+    ...contexto,
+  });
   void vaciar();
 }

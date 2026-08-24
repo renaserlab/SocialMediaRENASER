@@ -9,6 +9,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { Avatar } from '@/components/Avatar';
 import { CoachMark } from '@/components/CoachMark';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
+import { CursosParaTi } from '@/components/CursosParaTi';
 import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
@@ -342,6 +343,22 @@ export function ExploreScreen() {
           <Feather name="chevron-right" size={15} color={colors.text} />
         </Pressable>
       </View>
+
+      {/*
+        «Cursos para ti» va en la CABECERA, es decir por encima del muro, y no
+        abajo con «Personas para ti». En esta iteracion un curso pesa mas que
+        una publicacion: es lo que alguien viene a buscar cuando quiere
+        aprender algo, y dejarlo debajo del muro lo convertia en algo que solo
+        encontraba quien bajaba mucho.
+
+        Fuera del padding lateral a proposito: es un carrusel y tiene que poder
+        llegar al borde de la pantalla.
+
+        No hace falta reservarle sitio: si no hay cursos que recomendar, si la
+        personalizacion esta apagada o si la peticion falla, la seccion no se
+        pinta y la cabecera queda exactamente como estaba.
+      */}
+      <CursosParaTi />
     </View>
   );
 
@@ -355,6 +372,9 @@ export function ExploreScreen() {
         buscar gente —el buscador de personas esta arriba— y donde tiene sentido
         encontrarse con quien puede aportarte algo. Si no hay a quien recomendar
         (o falla), la seccion no se pinta y el resto de Explorar sigue igual.
+
+        Queda POR DEBAJO de «Cursos para ti», que vive en la cabecera: en esta
+        iteracion lo que se puede aprender manda sobre a quien se puede conocer.
       */}
       <PersonasParaTi />
 
