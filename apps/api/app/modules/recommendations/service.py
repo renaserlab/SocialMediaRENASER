@@ -23,12 +23,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ValidationAppError
+from app.core.exceptions import ConflictError, ValidationAppError
 from app.modules.content.models import Post, PostLike, PostMedia
 from app.modules.profiles.models import Profile
-from app.modules.recommendations import candidate_generator, repository as repo
+from app.modules.recommendations import cache, candidate_generator, repository as repo
 from app.modules.recommendations.config import (
     CANDIDATOS_MAXIMOS,
     CONTENT_ALGORITHM_VERSION,
@@ -261,6 +262,37 @@ async def guardar_preferencias(
             details={"topic_ids": sorted(desconocidos)},
         )
 
+    # Guardar de verdad. Se separa porque puede tener que repetirse: dos
+    # dispositivos guardando a la vez chocan contra la restriccion de unicidad
+    # de (usuario, tema, relacion), y la segunda vez ya no choca porque el
+    # borrado de esta misma funcion deja la mesa limpia.
+    try:
+        await _escribir_preferencias(db, user_id, payload, derivadas)
+    except IntegrityError:
+        await db.rollback()
+        try:
+            await _escribir_preferencias(db, user_id, payload, derivadas)
+        except IntegrityError as choque:
+            await db.rollback()
+            raise ConflictError(
+                "Estás guardando tus preferencias desde dos sitios a la vez. "
+                "Inténtalo de nuevo."
+            ) from choque
+
+    # Lo recomendado hasta ahora se calculo con las respuestas VIEJAS. Sin esto,
+    # quien acaba de contestar veria durante un minuto justo lo de antes de
+    # contestar, que es el momento en el que hay que demostrar que sirve.
+    cache.invalidar(user_id)
+    return await leer_preferencias(db, user_id)
+
+
+async def _escribir_preferencias(
+    db: AsyncSession,
+    user_id: str,
+    payload: PreferencesInput,
+    derivadas: dict[str, set[str]],
+) -> None:
+    """El guardado en si. Una transaccion: o entra todo, o no entra nada."""
     ahora = ahora_utc()
     preferencias = await repo.cargar_preferencias(db, user_id)
     if preferencias is None:
@@ -295,7 +327,6 @@ async def guardar_preferencias(
                 )
             )
     await db.commit()
-    return await leer_preferencias(db, user_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -340,10 +371,20 @@ async def _construir_demanda(
     ), senales
 
 
-@dataclass
+@dataclass(frozen=True)
 class PersonaPuntuada:
+    """Una persona ya medida y puntuada.
+
+    Lleva los datos del perfil COPIADOS y no el objeto del ORM. Es lo que
+    permite guardarla en la memoria corta: una fila del ORM pertenece a la
+    sesion que la trajo y deja de ser legible cuando esa sesion se cierra.
+    """
+
     id: str
-    perfil: Profile
+    full_name: str
+    username: str | None
+    avatar_path: str | None
+    bio: str
     puntuacion: Puntuacion
     rasgos: Rasgos
 
@@ -367,6 +408,19 @@ async def personas_puntuadas(
     seria pagar dos veces la misma consulta.
     """
     ahora = ahora or ahora_utc()
+    semilla = semilla_de_exploracion(ahora)
+
+    # El mismo ranking lo piden «Personas para ti» y cada pagina del feed. Se
+    # calcula una vez y se reutiliza durante unos segundos; cualquier cosa que
+    # cambie lo que hay que recomendarle a alguien lo invalida al momento (ver
+    # `cache.invalidar`). Solo con los pesos de siempre: una peticion con pesos
+    # ajustados es un experimento y no debe leer ni escribir la memoria.
+    usa_memoria = pesos is PESOS_DE_PERSONAS and limite_candidatos == CANDIDATOS_MAXIMOS
+    if usa_memoria:
+        guardado = cache.obtener(user_id, semilla)
+        if guardado is not None:
+            return guardado
+
     demanda, senales = await _construir_demanda(db, user_id, ahora)
 
     # EXCLUSIONES. No son un detalle: son la diferencia entre recomendar y
@@ -379,7 +433,10 @@ async def personas_puntuadas(
         db, demanda, excluidos=excluidos, ahora=ahora, limite=limite_candidatos
     )
     if not candidatos.ids:
-        return [], ORIGEN_ARRANQUE_EN_FRIO
+        vacio: tuple[list[PersonaPuntuada], str] = ([], ORIGEN_ARRANQUE_EN_FRIO)
+        if usa_memoria:
+            cache.guardar(user_id, semilla, vacio)
+        return vacio
 
     # Todo lo que se sabe de TODOS los candidatos, en un punado de consultas
     # fijas. Ninguna crece con el numero de candidatos.
@@ -396,7 +453,6 @@ async def personas_puntuadas(
         limite=SENALES_MAXIMAS,
     )
 
-    semilla = semilla_de_exploracion(ahora)
     salida: list[PersonaPuntuada] = []
     for candidato_id in candidatos.ids:
         perfil = perfiles.get(candidato_id)
@@ -424,7 +480,10 @@ async def personas_puntuadas(
         salida.append(
             PersonaPuntuada(
                 id=candidato_id,
-                perfil=perfil,
+                full_name=perfil.full_name,
+                username=perfil.username,
+                avatar_path=perfil.avatar_path,
+                bio=perfil.bio or "",
                 puntuacion=puntuar(rasgos, pesos),
                 rasgos=rasgos,
             )
@@ -438,7 +497,10 @@ async def personas_puntuadas(
         if candidatos.hubo_coincidencia_real
         else ORIGEN_ARRANQUE_EN_FRIO
     )
-    return salida, estrategia
+    resultado = (salida, estrategia)
+    if usa_memoria:
+        cache.guardar(user_id, semilla, resultado)
+    return resultado
 
 
 async def personas_para(
@@ -481,10 +543,10 @@ async def personas_para(
     items = [
         PersonRecommendation(
             id=persona.id,
-            full_name=persona.perfil.full_name,
-            username=persona.perfil.username,
-            avatar_path=persona.perfil.avatar_path,
-            bio=persona.perfil.bio or "",
+            full_name=persona.full_name,
+            username=persona.username,
+            avatar_path=persona.avatar_path,
+            bio=persona.bio,
             is_following=persona.rasgos.ya_seguido,
             reasons=[
                 RecommendationReason(

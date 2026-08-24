@@ -24,6 +24,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.recommendations import cache
 from app.modules.recommendations.models import BehaviorEvent
 
 logger = logging.getLogger("renaser.recommendations")
@@ -66,6 +67,10 @@ def registrar_senal(
                 source="server",
             )
         )
+        # Lo que se le recomienda a esta persona acaba de cambiar. Si no se
+        # invalida, seguir a alguien no tendria efecto visible hasta pasado un
+        # minuto y pareceria que la senal no sirve para nada.
+        cache.invalidar(user_id)
     except Exception:  # pragma: no cover - defensa, no logica
         # Deliberadamente ancho y CON registro: una senal perdida es un dato
         # menos; una excepcion aqui seria una accion del usuario que falla.

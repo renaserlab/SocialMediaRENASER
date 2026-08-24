@@ -25,6 +25,7 @@ from app.core.security import AuthUser, get_current_user
 from app.main import app
 from app.modules.content.models import Post, PostMedia
 from app.modules.profiles.models import Profile
+from app.modules.recommendations import cache
 from app.modules.recommendations.models import (
     BehaviorEvent,
     RecommendationPreference,
@@ -54,6 +55,11 @@ async def entorno():
     falso: asi lo que se prueba es el codigo de produccion tal cual, incluido
     que ningun endpoint acepte un `user_id` del cliente.
     """
+    # La memoria corta del ranking vive en el proceso y las personas de prueba
+    # comparten identificadores entre pruebas: sin vaciarla, una heredaria el
+    # resultado calculado por la anterior.
+    cache.vaciar()
+
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         from app.modules.bookings import models as _b  # noqa: F401
@@ -692,3 +698,83 @@ async def test_apagar_la_personalizacion_no_rompe_nada(entorno, monkeypatch):
     assert personas.json()["strategy"] == "disabled"
     assert contenido.status_code == 200 and contenido.json() == []
     assert estado.status_code == 200 and estado.json()["should_show"] is False
+
+
+# --------------------------------------------------------------------------- #
+# La memoria corta del ranking
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_responder_el_cuestionario_cambia_las_recomendaciones_al_momento(entorno):
+    """Sin esto, quien acaba de contestar veria un minuto lo de antes de hacerlo.
+
+    Es el momento exacto de la demostracion: se responde «quiero aprender
+    carpinteria» y Carlos tiene que estar arriba a la siguiente pantalla, no
+    cuando caduque una cache.
+    """
+    http, _, _ = entorno
+    # Se calienta la memoria con el ranking de arranque en frio.
+    antes = (await http.get(f"{API}/people?limit=10")).json()
+    assert antes["strategy"] == "cold_start"
+
+    await _preferir_carpinteria(http)
+
+    despues = (await http.get(f"{API}/people?limit=10")).json()
+    assert despues["strategy"] == "personalized"
+    assert despues["items"][0]["id"] == CARLOS
+
+
+@pytest.mark.asyncio
+async def test_seguir_a_alguien_se_nota_en_la_lista_sin_esperar(entorno):
+    http, _, _ = entorno
+    await _preferir_carpinteria(http)
+    assert CARLOS in [p["id"] for p in (await http.get(f"{API}/people?limit=20")).json()["items"]]
+
+    await http.post(f"/api/v1/profiles/{CARLOS}/follow")
+
+    despues = (await http.get(f"{API}/people?limit=20")).json()
+    assert CARLOS not in [p["id"] for p in despues["items"]]
+
+
+@pytest.mark.asyncio
+async def test_dos_paginas_seguidas_no_repiten_ni_saltan_a_nadie(entorno):
+    """La paginacion tiene que ser estable, o la lista se descuadra al bajar."""
+    http, _, _ = entorno
+    primera = (await http.get(f"{API}/people?limit=2&offset=0")).json()["items"]
+    segunda = (await http.get(f"{API}/people?limit=2&offset=2")).json()["items"]
+    ids = [p["id"] for p in primera] + [p["id"] for p in segunda]
+    assert len(ids) == len(set(ids))
+
+
+@pytest.mark.asyncio
+async def test_guardar_dos_veces_a_la_vez_no_deja_las_preferencias_a_medias(entorno):
+    """Dos dispositivos guardando en paralelo: o entra todo, o no entra nada."""
+    import asyncio
+
+    http, sesiones, _ = entorno
+    cuerpo = {"learning_topic_ids": [CARPINTERIA, MARKETING], "goals": ["aprender"]}
+    respuestas = await asyncio.gather(
+        http.put(f"{API}/preferences", json=cuerpo),
+        http.put(f"{API}/preferences", json=cuerpo),
+        return_exceptions=True,
+    )
+    # Ninguna puede acabar en un 500: o guarda, o dice claramente que no pudo.
+    for respuesta in respuestas:
+        assert not isinstance(respuesta, Exception), respuesta
+        assert respuesta.status_code in (200, 409), respuesta.text
+
+    # Y lo guardado tiene que ser coherente: las dos relaciones de cada tema,
+    # ni duplicadas ni a medias.
+    async with sesiones() as db:
+        from sqlalchemy import select
+
+        filas = (
+            await db.execute(
+                select(UserTopicRelation.topic_id, UserTopicRelation.relation).where(
+                    UserTopicRelation.user_id == ANA
+                )
+            )
+        ).all()
+    assert sorted(filas) == sorted(
+        [(CARPINTERIA, "interest"), (CARPINTERIA, "learn"),
+         (MARKETING, "interest"), (MARKETING, "learn")]
+    )

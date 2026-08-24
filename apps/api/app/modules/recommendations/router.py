@@ -25,7 +25,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.router import leer_posts_por_id
 from app.modules.content.schemas import PostRead
-from app.modules.recommendations import service
+from app.modules.recommendations import cache, service
 from app.modules.recommendations.config import (
     CONTENT_ALGORITHM_VERSION,
     ONBOARDING_VERSION,
@@ -244,6 +244,10 @@ async def registrar_eventos(
         # idempotencia hace su trabajo. No es un fallo que deba ver nadie.
         await db.rollback()
         return BehaviorEventResult(accepted=0, duplicated=len(payload.events))
+    if aceptadas:
+        # Decir «no me interesa» tiene que quitar a alguien de la lista YA, no
+        # dentro de un minuto.
+        cache.invalidar(current_user.id)
     return BehaviorEventResult(accepted=aceptadas, duplicated=duplicadas)
 
 
