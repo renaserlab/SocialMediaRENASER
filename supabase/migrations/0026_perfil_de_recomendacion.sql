@@ -134,7 +134,12 @@ create policy user_topic_relations_select_own on public.user_topic_relations
 
 drop policy if exists user_topic_relations_select_oferta on public.user_topic_relations;
 create policy user_topic_relations_select_oferta on public.user_topic_relations
-  for select to anon, authenticated
+  -- Solo `authenticated`, no `anon`. Es informacion publica DENTRO de Z, no
+  -- para cualquiera con la direccion del proyecto: sin sesion, el grafo entero
+  -- de quien sabe que seria descargable de una peticion. Nada se pierde por
+  -- ello, porque quien lee esto para recomendar es el backend, que se conecta
+  -- con su propio rol y no pasa por aqui.
+  for select to authenticated
   using (relation in ('can_help', 'teach', 'experienced'));
 
 drop policy if exists user_topic_relations_insert on public.user_topic_relations;
