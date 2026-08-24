@@ -34,7 +34,17 @@ logger = logging.getLogger("renaser.recommendations")
 #: Los tipos que solo el servidor puede afirmar. Estan aqui y no en los
 #: esquemas de entrada a proposito: el cliente no puede declararlos.
 EVENTOS_DE_SERVIDOR = frozenset(
-    {"follow", "message_started", "booking_requested", "booking_completed"}
+    {
+        "follow",
+        "message_started",
+        "booking_requested",
+        "booking_completed",
+        # Terminar un curso lo sabe el servidor y solo el servidor: se deduce de
+        # que no queda ninguna leccion pendiente. Que este tipo tambien exista
+        # en `EVENTOS_DE_CLIENTE` no lo debilita —alli significa «el video llego
+        # al final»— porque la columna `source` distingue quien lo afirmo.
+        "content_completed",
+    }
 )
 
 
