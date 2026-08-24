@@ -12,23 +12,41 @@ type ChipProps = {
   onPress?: () => void;
   style?: ViewStyle;
   icon?: keyof typeof Feather.glyphMap;
+  /**
+   * Se ve, pero no se puede elegir ahora mismo. El caso real: un selector con
+   * tope —«hasta 3 temas»— donde los demas se apagan al llegar al maximo.
+   *
+   * Existe porque atenuarlo por fuera no basta: quien navega con lector de
+   * pantalla no ve la opacidad, y sin `accessibilityState` se le anuncia como
+   * pulsable algo que no responde. Que se vea apagado y que se ANUNCIE apagado
+   * son dos cosas distintas.
+   */
+  disabled?: boolean;
 };
 
-export function Chip({ label, selected = false, onPress, style, icon }: ChipProps) {
+export function Chip({
+  label,
+  selected = false,
+  onPress,
+  style,
+  icon,
+  disabled = false,
+}: ChipProps) {
   const { colors } = useAppTheme();
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
       accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected }}
+      accessibilityState={{ checked: selected, disabled }}
       accessibilityLabel={label}
       style={({ pressed }: { pressed: boolean }) => [
         styles.base,
         {
           backgroundColor: selected ? colors.primary : colors.background,
           borderColor: selected ? colors.primary : colors.border,
-          opacity: pressed ? 0.8 : 1,
+          opacity: disabled ? 0.4 : pressed ? 0.8 : 1,
         },
         style,
       ]}

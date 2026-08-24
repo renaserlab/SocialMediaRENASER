@@ -101,6 +101,12 @@ export type Post = {
   processingStatus?: 'uploaded' | 'processing' | 'ready' | 'failed';
   /** Categoría temática; alimenta los filtros del podcast. */
   category?: string | null;
+  /**
+   * De qué trata: ids de la taxonomía común de `topics`, la misma que eligen
+   * las personas. No confundir con `category`, que es la carpeta con la que un
+   * creador ordena SUS audios.
+   */
+  topicIds?: string[];
   likes: number;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */

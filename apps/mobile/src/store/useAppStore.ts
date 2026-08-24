@@ -158,7 +158,8 @@ type AppState = {
   setOnboardingComplete: (value: boolean) => void;
   answerQuiz: (questionId: string, value: QuizArea) => void;
   finishQuiz: () => QuizArea;
-  createPost: (body: string, media?: UploadedMedia[]) => Promise<void>;
+  /** `topicIds`: de qué trata la publicación (taxonomía de `topics`, hasta 3). */
+  createPost: (body: string, media?: UploadedMedia[], topicIds?: string[]) => Promise<void>;
   deletePost: (postId: string) => Promise<void>;
   /** `media` a null quita la foto y devuelve la imagen por defecto. */
   setProfileImage: (kind: 'avatar' | 'cover', media: PickedMedia | null) => Promise<void>;
@@ -269,7 +270,7 @@ export const useAppStore = create<AppState>()(
         set({ quizResult: result });
         return result;
       },
-      createPost: async (body, media = []) => {
+      createPost: async (body, media = [], topicIds = []) => {
         const trimmed = body.trim();
         /*
           Sin texto Y sin adjunto no hay nada que publicar. Con adjunto SI se
@@ -281,7 +282,9 @@ export const useAppStore = create<AppState>()(
 
         if (backendEnabled) {
           const uid = get().user?.id ?? null;
-          const post = await PostRepository.createPost(trimmed, media, uid);
+          // La categoría va sin valor a propósito: es la carpeta de audios del
+          // podcast y no tiene nada que ver con de qué trata la publicación.
+          const post = await PostRepository.createPost(trimmed, media, uid, undefined, topicIds);
           set((state) => ({
             posts: [post, ...state.posts],
             user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,

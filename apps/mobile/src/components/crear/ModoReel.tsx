@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
+import { SelectorDeTemas } from '@/components/SelectorDeTemas';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
@@ -49,6 +50,8 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
 
   const [elegido, setElegido] = useState<PickedMedia | null>(null);
   const [texto, setTexto] = useState('');
+  /** De que trata: ids de la taxonomia comun. Etiquetar es opcional. */
+  const [temas, setTemas] = useState<string[]>([]);
   const envio = usePublicacion();
 
   const publicar = useCallback(() => {
@@ -68,13 +71,14 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
       const subido = await uploadPostMedia(elegido, avance);
       if (cancelado()) throw new PublicacionCancelada();
 
-      await createPost(texto.trim(), [subido]);
+      await createPost(texto.trim(), [subido], temas);
       setElegido(null);
       setTexto('');
+      setTemas([]);
       alSalir();
       toast('Reel publicado');
     });
-  }, [elegido, texto, envio, createPost, alSalir]);
+  }, [elegido, texto, temas, envio, createPost, alSalir]);
 
   if (!elegido) {
     return (
@@ -135,6 +139,12 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
             {texto.length}/{MAX_TEXTO}
           </Text>
         </View>
+
+        {/*
+          Debajo del editor y no encima: los temas afinan lo que ya se ha
+          contado, y asi quedan al alcance del pulgar, pegados a Publicar.
+        */}
+        <SelectorDeTemas seleccionados={temas} alCambiar={setTemas} variante="sobreMedia" />
 
         <ProgresoDePublicacion
           fase={envio.fase}

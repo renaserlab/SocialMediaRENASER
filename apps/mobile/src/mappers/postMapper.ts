@@ -34,6 +34,8 @@ export type PostMediaDto = {
 };
 
 export type PostDto = {
+  /** De que trata (migracion 0027). Vacio en el contenido sin clasificar. */
+  topic_ids?: string[];
   id: string;
   author: PostAuthorDto;
   body: string;
@@ -100,6 +102,9 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
   const first = dto.media[0];
   return {
     category: dto.category ?? null,
+    // Un backend anterior a la migracion 0027 no manda el campo: sin temas, no
+    // sin publicacion.
+    topicIds: dto.topic_ids ?? [],
     id: dto.id,
     author: authorName(dto.author),
     authorId: dto.author.id,

@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
+import { SelectorDeTemas } from '@/components/SelectorDeTemas';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
@@ -59,6 +60,8 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
   /** Camino secundario: publicar sin foto ni video. */
   const [soloTexto, setSoloTexto] = useState(false);
   const [texto, setTexto] = useState('');
+  /** De que trata: ids de la taxonomia comun. Etiquetar es opcional. */
+  const [temas, setTemas] = useState<string[]>([]);
   const envio = usePublicacion();
 
   const publicar = useCallback(() => {
@@ -69,20 +72,22 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
       const subidos = elegido ? [await uploadPostMedia(elegido, avance)] : [];
       if (cancelado()) throw new PublicacionCancelada();
 
-      await createPost(cuerpo, subidos);
+      await createPost(cuerpo, subidos, temas);
       setElegido(null);
       setTexto('');
+      setTemas([]);
       setSoloTexto(false);
       alSalir();
       toast('Publicado');
     });
-  }, [elegido, texto, envio, createPost, alSalir]);
+  }, [elegido, texto, temas, envio, createPost, alSalir]);
 
   const volverAElegir = useCallback(() => {
     envio.limpiar();
     setElegido(null);
     setSoloTexto(false);
     setTexto('');
+    setTemas([]);
   }, [envio]);
 
   /* ------------------------------------------------------------ elegir --- */
@@ -159,6 +164,12 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
             {texto.length}/{MAX_TEXTO}
           </Text>
         </View>
+
+        {/*
+          Debajo del editor y no encima: los temas afinan lo que ya se ha
+          contado, y asi quedan al alcance del pulgar, pegados a Publicar.
+        */}
+        <SelectorDeTemas seleccionados={temas} alCambiar={setTemas} variante="sobreMedia" />
 
         <ProgresoDePublicacion
           fase={envio.fase}

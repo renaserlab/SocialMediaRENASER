@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
+import { SelectorDeTemas } from '@/components/SelectorDeTemas';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { PostRepository } from '@/repositories/PostRepository';
 import {
@@ -48,6 +49,8 @@ export function EditPostScreen() {
   const [media, setMedia] = useState<MediaChange>(null);
   /** Categoría, solo relevante en los audios (episodios del podcast). */
   const [category, setCategory] = useState<string | null>(null);
+  /** De qué trata: taxonomía común, la misma que eligen las personas. */
+  const [topicIds, setTopicIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState<UploadProgress['phase'] | null>(null);
@@ -61,6 +64,7 @@ export function EditPostScreen() {
       setPost(cached);
       setText(cached.body);
       setCategory(cached.category ?? null);
+      setTopicIds(cached.topicIds ?? []);
       setLoading(false);
       return;
     }
@@ -78,6 +82,7 @@ export function EditPostScreen() {
         setPost(found);
         setText(found.body);
         setCategory(found.category ?? null);
+        setTopicIds(found.topicIds ?? []);
       })
       .catch((error) => {
         console.warn('[editar publicacion] no se pudo cargar', error);
@@ -113,9 +118,22 @@ export function EditPostScreen() {
         body?: string;
         media?: Awaited<ReturnType<typeof uploadPostMedia>>[];
         category?: string | null;
+        topicIds?: string[];
       } = {};
       if (text.trim() !== post.body) changes.body = text.trim();
       if ((category ?? null) !== (post.category ?? null)) changes.category = category;
+      /*
+        Los temas solo viajan si cambiaron. Es una distincion con consecuencias:
+        el campo AUSENTE significa «no los toques» y `[]` significa «quitalos
+        todos», asi que mandarlos siempre borraria los de una publicacion cuyo
+        selector ni siquiera llego a pintarse (la taxonomia se carga aparte y
+        puede fallar).
+      */
+      const temasPrevios = post.topicIds ?? [];
+      const temasCambiaron =
+        topicIds.length !== temasPrevios.length ||
+        topicIds.some((id) => !temasPrevios.includes(id));
+      if (temasCambiaron) changes.topicIds = topicIds;
       if (media === 'remove') {
         changes.media = [];
       } else if (media) {
@@ -230,6 +248,10 @@ export function EditPostScreen() {
             </Text>
           ) : null}
 
+          <View style={styles.temas}>
+            <SelectorDeTemas seleccionados={topicIds} alCambiar={setTopicIds} variante="clara" />
+          </View>
+
           {/* Los audios son episodios del podcast: su categoría alimenta los
               filtros de esa sección. */}
           {post.mediaType === 'audio' ? (
@@ -276,6 +298,7 @@ const styles = StyleSheet.create({
     width: 30, height: 30, borderRadius: 15,
     backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
   },
+  temas: { marginBottom: spacing.lg },
   categories: { gap: spacing.sm, marginBottom: spacing.lg },
   removedNote: { fontSize: 13, marginBottom: spacing.lg },
   errorBox: {

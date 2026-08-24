@@ -213,12 +213,23 @@ export const PostRepository = {
     media: UploadedMedia[] = [],
     currentUserId?: string | null,
     category?: string | null,
+    /**
+     * De que TRATA la publicacion: ids de la taxonomia de `topics`, la misma
+     * que usan las personas. No confundir con `category`, que es la carpeta con
+     * la que un creador ordena SUS audios.
+     *
+     * Va en la misma peticion que la publicacion a proposito: un segundo viaje
+     * para etiquetar podria fallar y dejar el video publicado y sin clasificar
+     * para siempre.
+     */
+    topicIds: string[] = [],
   ): Promise<Post> {
     const dto = await apiRequest<PostDto>(`${API_V1}/posts`, {
       method: 'POST',
       body: JSON.stringify({
         body,
         category: category ?? null,
+        topic_ids: topicIds,
         media: media.map((m) => ({
           storage_path: m.storagePath,
           media_type: m.mediaType,
@@ -244,12 +255,22 @@ export const PostRepository = {
    */
   async updatePost(
     postId: string,
-    changes: { body?: string; media?: UploadedMedia[]; category?: string | null },
+    changes: {
+      body?: string;
+      media?: UploadedMedia[];
+      category?: string | null;
+      /**
+       * Ausente = no se tocan los temas. Presente (aunque sea vacio) = se
+       * reemplazan, lo que permite QUITAR uno mal elegido.
+       */
+      topicIds?: string[];
+    },
     currentUserId?: string | null,
   ): Promise<Post> {
     const payload: Record<string, unknown> = {};
     if (changes.body !== undefined) payload.body = changes.body;
     if (changes.category !== undefined) payload.category = changes.category;
+    if (changes.topicIds !== undefined) payload.topic_ids = changes.topicIds;
     if (changes.media !== undefined) {
       payload.media = changes.media.map((m) => ({
         storage_path: m.storagePath,

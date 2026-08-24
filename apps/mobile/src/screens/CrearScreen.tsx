@@ -20,7 +20,7 @@ import {
   posicionDeModo,
   type ModoDeCreacion,
 } from '@/components/crear/SelectorDeModo';
-import { useGestoDeSeccion } from '@/navigation/tabSwipe';
+import { ProveedorDeGestoDeSeccion, useGestoDeSeccion } from '@/navigation/tabSwipe';
 import { useAuthStore } from '@/store/useAuthStore';
 import { palette } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -163,6 +163,17 @@ export function CrearScreen() {
   }
 
   return (
+    /*
+      El arrastre de Crear se PUBLICA, no solo se aplica.
+
+      Dentro de esta pantalla hay filas que se deslizan —los temas de una
+      publicacion, por ejemplo— y competian con dos gestos, no con uno:
+      blindarse contra el carrusel de secciones no bastaba, porque arrastrar la
+      fila seguia cambiando de tipo de publicacion. Publicandolo, cualquier
+      `SinCambioDeSeccion` de aqui dentro lo bloquea tambien, sin tener que
+      saber que existe.
+    */
+    <ProveedorDeGestoDeSeccion gesto={gesto}>
     <GestureDetector gesture={gesto}>
       <View
         style={[
@@ -190,6 +201,7 @@ export function CrearScreen() {
         )}
       </View>
     </GestureDetector>
+    </ProveedorDeGestoDeSeccion>
   );
 }
 

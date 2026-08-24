@@ -17,12 +17,29 @@ import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture
  */
 
 /**
- * El gesto de cambiar de seccion, para que lo que hay dentro pueda bloquearlo.
- * Vale `null` fuera de las pestanas —el mismo reproductor de video se usa en
+ * Los arrastres horizontales que hay POR ENCIMA de un punto del arbol.
+ *
+ * Empezo siendo uno solo —el carrusel de secciones— y resulto no bastar. La
+ * pantalla de Crear tiene ADEMAS su propio arrastre para cambiar de tipo de
+ * publicacion, asi que dentro de ella una fila que se desliza compite con dos
+ * gestos, no con uno: blindarse solo contra el carrusel dejaba que arrastrar
+ * los temas de una publicacion cambiara de modo.
+ *
+ * Por eso es una lista y los proveedores se ANIDAN. Cada pantalla que declare
+ * un arrastre propio lo anade, y `SinCambioDeSeccion` los bloquea todos: quien
+ * se blinda no tiene por que saber cuantos hay ni de quien son.
+ *
+ * Vacia fuera de las pestanas —el mismo reproductor de video se usa en
  * pantallas que no son seccion—, y entonces `SinCambioDeSeccion` no hace nada.
  */
-const GestoDeSeccion = createContext<GestureType | null>(null);
+const GestosDeArriba = createContext<readonly GestureType[]>([]);
 
+/**
+ * Publica un arrastre horizontal para que lo de dentro pueda blindarse de el.
+ *
+ * Lo usan el carrusel de secciones y cualquier pantalla con arrastre propio.
+ * Se anida: el de dentro no sustituye al de fuera, se suma.
+ */
 export function ProveedorDeGestoDeSeccion({
   gesto,
   children,
@@ -30,7 +47,9 @@ export function ProveedorDeGestoDeSeccion({
   gesto: GestureType;
   children: React.ReactNode;
 }) {
-  return <GestoDeSeccion.Provider value={gesto}>{children}</GestoDeSeccion.Provider>;
+  const heredados = useContext(GestosDeArriba);
+  const todos = useMemo(() => [...heredados, gesto], [heredados, gesto]);
+  return <GestosDeArriba.Provider value={todos}>{children}</GestosDeArriba.Provider>;
 }
 
 /**
@@ -45,7 +64,10 @@ export function ProveedorDeGestoDeSeccion({
  * Devuelve `null` fuera de las pestanas, y entonces no hay nada que bloquear.
  */
 export function useGestoDeSeccion(): GestureType | null {
-  return useContext(GestoDeSeccion);
+  // El de mas afuera, que es el del carrusel de secciones. Una pantalla que
+  // declara su propio arrastre lo hace ANTES de publicarlo, asi que aqui
+  // todavia no se ve el suyo: recibe el que tiene que bloquear.
+  return useContext(GestosDeArriba)[0] ?? null;
 }
 
 /**
@@ -66,13 +88,14 @@ export function SinCambioDeSeccion({
   children: React.ReactElement;
   activarAlTocar?: boolean;
 }) {
-  const gestoDeSeccion = useContext(GestoDeSeccion);
+  const gestosDeArriba = useContext(GestosDeArriba);
 
   const bloqueo = useMemo(() => {
-    if (!gestoDeSeccion) return null;
-    const nativo = Gesture.Native().blocksExternalGesture(gestoDeSeccion);
+    if (gestosDeArriba.length === 0) return null;
+    // TODOS los de arriba, no solo el primero: dentro de Crear hay dos.
+    const nativo = Gesture.Native().blocksExternalGesture(...gestosDeArriba);
     return activarAlTocar ? nativo.shouldActivateOnStart(true).disallowInterruption(true) : nativo;
-  }, [gestoDeSeccion, activarAlTocar]);
+  }, [gestosDeArriba, activarAlTocar]);
 
   if (!bloqueo) return children;
 
