@@ -333,3 +333,72 @@ async def test_el_esquema_se_detecta_una_sola_vez(base_sin_0028):
     assert e._cache.get("course_topics") is False
     await http.get(f"{CATALOGO}/courses")
     assert e._cache.get("course_topics") is False
+
+
+# --------------------------------------------------------------------------- #
+# «Cursos para ti» sin la migración
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_el_recomendador_de_cursos_responde(base_sin_0028):
+    """Sin `course_topics` nadie declara de qué trata un curso, así que la
+    afinidad temática vale 0 para todos. No es un error: es que no se sabe.
+
+    Lo que NO puede pasar es un 500, que además el navegador reportaría como
+    un fallo de CORS y mandaría a buscar al sitio equivocado.
+    """
+    http, sesiones, _ = base_sin_0028
+    course_id = await _curso_con_contenido(http, sesiones)
+    await http.post(f"{CATALOGO}/courses/{course_id}/publish")
+
+    respuesta = await http.get(f"{RECOMENDACIONES}/courses?limit=10")
+    assert respuesta.status_code == 200
+    datos = respuesta.json()
+    assert datos["algorithm_version"] == "course-v1"
+    # Sin temas, ninguno puede decir de qué trata. Se dice, no se disimula.
+    assert datos["with_topics"] == 0
+
+
+@pytest.mark.asyncio
+async def test_los_cursos_recomendados_siguen_explicandose(base_sin_0028):
+    """Sin tema no se puede explicar por el tema, pero sí decir la verdad."""
+    http, sesiones, identidad = base_sin_0028
+    course_id = await _curso_con_contenido(http, sesiones)
+    await http.post(f"{CATALOGO}/courses/{course_id}/publish")
+
+    identidad["uid"] = PEDRO  # no es el autor, así que sí es candidato
+    items = (await http.get(f"{RECOMENDACIONES}/courses")).json()["items"]
+    assert len(items) == 1
+    assert items[0]["topic_ids"] == []
+    motivos = [m["code"] for m in items[0]["reasons"]]
+    assert motivos
+    assert "COURSE_TOPIC_MATCH" not in motivos
+
+
+@pytest.mark.asyncio
+async def test_rechazar_un_curso_no_falla_por_los_temas(base_sin_0028):
+    """El evento se guarda igual; lo que no lleva son los temas que enfriar."""
+    http, sesiones, _ = base_sin_0028
+    course_id = await _curso_con_contenido(http, sesiones)
+    respuesta = await http.post(
+        f"{RECOMENDACIONES}/events",
+        json={
+            "events": [
+                {
+                    "event_type": "not_interested",
+                    "entity_type": "course",
+                    "entity_id": course_id,
+                    "event_key": "no-1",
+                }
+            ]
+        },
+    )
+    assert respuesta.status_code == 200
+    async with sesiones() as db:
+        senal = (
+            await db.scalars(
+                select(BehaviorEvent).where(
+                    BehaviorEvent.event_type == "not_interested"
+                )
+            )
+        ).one()
+    assert senal.topic_ids is None

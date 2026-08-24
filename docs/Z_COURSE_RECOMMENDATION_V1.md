@@ -2,14 +2,12 @@
 
 Rama: `Edson`. Continúa [Z_RECOMMENDATION_V1_1.md](Z_RECOMMENDATION_V1_1.md).
 
-**Estado honesto.** Esto documenta la PLATAFORMA de cursos, que es lo que está
-hecho. El **CourseRanker `course-v1` todavía no existe**: se construye después
-de que la migración `0028` esté aplicada. Se decidió así a propósito — poner un
-ranker encima de un dominio donde crear un curso lo publicaba vacío y donde un
-curso de pago se regalaba habría sido ordenar cosas rotas.
+**Estado.** La plataforma de cursos y el **CourseRanker `course-v1`** están
+implementados. El ranker se construyó *después* de arreglar el dominio, a
+propósito: poner un ranker encima de un sitio donde crear un curso lo publicaba
+vacío y donde un curso de pago se regalaba habría sido ordenar cosas rotas.
 
-Migraciones: `0026` y `0027` **aplicadas** (24/08/2026). `0028` **escrita y
-pendiente de aprobación**.
+Migraciones `0026`, `0027` y `0028`: **aplicadas** (24/08/2026).
 
 ---
 
@@ -286,24 +284,94 @@ leyendo exactamente igual; no se mueve ni se renombra nada.
 
 ---
 
-## 13. Lo que NO está hecho
+## 13. CourseRanker `course-v1`
+
+`GET /api/v1/recommendations/courses` → `{ algorithm_version, strategy,
+with_topics, items }`. Estrategia: `personalized` | `cold_start` | `disabled`.
+
+**No es un sistema paralelo.** Reutiliza el mismo Recommendation Profile que
+alimenta personas y contenido: la demanda declarada, la taxonomía `topics`, las
+señales con decaimiento, la memoria corta, la exploración determinista y la
+atribución.
+
+```
+                   Recommendation Profile
+                          │
+            ┌─────────────┼─────────────┐
+            ▼             ▼             ▼
+         PERSONAS       CURSOS        POSTS
+      people-v1.1     course-v1    content-v1.1
+```
+
+### Reparto de pesos
+
+| Componente | Peso | Por qué |
+|---|---|---|
+| Tema | **0.45** | Es LA pregunta: qué quiere aprender esta persona |
+| Autor | 0.15 | Ayuda, no manda: un creador popular no hace mejor curso |
+| Objetivo declarado | 0.12 | Empuja, no filtra |
+| Comportamiento reciente | 0.10 | El bucle de aprendizaje, con decaimiento |
+| Formato preferido | 0.08 | |
+| Exploración | 0.06 | Determinista (`blake2b`), no azar |
+| Popularidad | **0.04** | Más alumnos no hace un curso más útil para TI |
+| Precio | **—** | No es un rasgo. Ni caro ni gratis significan mejor |
+| Reputación | **—** | No hay reseñas verificadas. No se inventan estrellas |
+
+`None` no es cero: lo que no aplica sale del **denominador**. Un curso con
+menos de 5 accesos no arrastra una popularidad de cero — sería castigarlo por
+ser nuevo.
+
+### Un curso sin temas NO hereda los de su autor
+
+Al contrario que una publicación. Un curso es una obra deliberada y quien lo
+publica elige sus temas al publicarlo; suponerlos pondría cursos de cocina
+delante de quien pidió carpintería solo porque los firma la misma persona.
+
+### Qué queda fuera del descubrimiento
+
+Lo empezado (su sitio es «Continúa aprendiendo»), lo terminado, lo descartado,
+los propios, los de gente bloqueada en cualquier sentido, y los `coming_soon`
+— mandar a alguien a una puerta cerrada no es recomendar.
+
+Tener acceso **no** excluye: inscribirse no es empezar.
+
+### Explicabilidad
+
+`COURSE_TOPIC_MATCH` · `LEARNING_GOAL_MATCH` · `PREFERRED_COURSE_FORMAT` ·
+`CREATOR_AFFINITY` · `RECENT_INTEREST` · `NEW_COURSE` · `WORTH_A_LOOK`.
+
+El score **no sale a pantalla**: «0.8734261» no significa nada para quien lo
+lee y aparenta una precisión que no existe. Sin nada que contar se dice la
+verdad (`WORTH_A_LOOK`) en vez de inventar una coincidencia.
+`?debug=1` devuelve el desglose, y solo fuera de producción.
+
+### Interruptor propio
+
+`FEATURE_COURSE_RECOMMENDATIONS_V1`. Apagar los cursos no puede llevarse por
+delante las personas y el feed, que llevan funcionando desde antes. Apagado,
+Explorar vuelve al catálogo público sin borrar una fila.
+
+---
+
+## 14. Lo que NO está hecho
 
 Dicho para que nadie lo dé por supuesto:
 
-- **CourseRanker `course-v1`.** Después de la `0028`.
-- **`GET /recommendations/courses`** y la sección «Cursos para ti».
-- **Métricas del embudo de cursos** en `metrics.py`.
+- **Un paso «empezó el curso» en el embudo.** Ningún evento existente significa
+  eso —`content_engaged` es abrir la tarjeta— y añadir un tipo nuevo solo para
+  poder enseñar una fila sería inventar una señal.
+- **Conversión de compra.** Sin pasarela no hay nada que medir.
 - **Checkout real.** Bloqueado por decisión de negocio, no por código.
 - **Reseñas verificadas.** No existen; los `testimonials` no lo son. Ninguna
   puntuación de curso puede salir de ahí.
 - **Clasificación automática de temas.** Los 25 temas se eligen a mano.
-- **QA en dispositivo.** Verificado: 352 pruebas de API, 118 de móvil,
+- **QA en dispositivo.** Verificado: 414 pruebas de API, 118 de móvil,
   `tsc --noEmit` limpio y `expo export --platform web` correcto. **No** se ha
   probado en un teléfono real ni con datos de producción.
 
 ---
 
-## 14. Decisión de producto que conviene revisar
+## 15. Decisión de producto que conviene revisar
 
 La duración de una lección estaba limitada a **15–20 minutos exactos**, y una
 lección de catorce minutos y medio no se podía guardar. No se encontró ninguna
