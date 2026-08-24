@@ -11,6 +11,27 @@ export function setAuthTokenProvider(provider: TokenProvider | null): void {
   tokenProvider = provider;
 }
 
+/**
+ * ¿Hay sesion ahora mismo?
+ *
+ * Vive aqui y no en el store de auth porque la respuesta tiene que salir de la
+ * MISMA fuente que usaria la peticion: el proveedor de token. Preguntarselo al
+ * store daria una respuesta parecida pero no identica —el estado se actualiza
+ * un instante antes o despues que el token— y justo en ese hueco es donde se
+ * cuelan las peticiones sin cabecera.
+ *
+ * Ademas evita que los servicios tengan que importar el store, que a su vez
+ * importa servicios: una dependencia circular esperando a ocurrir.
+ */
+export async function haySesion(): Promise<boolean> {
+  if (!tokenProvider) return false;
+  try {
+    return Boolean(await tokenProvider());
+  } catch {
+    return false;
+  }
+}
+
 /** Error uniforme del backend: { error: { code, message, details } }. */
 export class ApiError extends Error {
   readonly status: number;

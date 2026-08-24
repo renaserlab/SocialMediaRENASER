@@ -4,6 +4,7 @@ import {
   RecommendationRepository,
   type BehaviorEvent,
 } from '@/repositories/RecommendationRepository';
+import { haySesion } from '@/services/api';
 
 /**
  * Las senales de uso, enviadas por lotes.
@@ -57,13 +58,31 @@ function programarEnvio(): void {
   }, ESPERA_MS);
 }
 
-/** Manda ya lo acumulado. No lanza nunca. */
+/**
+ * Manda ya lo acumulado. No lanza nunca.
+ *
+ * SIN SESION NO SE MANDA NADA, y ademas se TIRA. Una senal se guarda contra
+ * una persona (`behavior_events.user_id`), asi que sin sesion no hay a quien
+ * atribuirla: la peticion salia sin cabecera y el servidor respondia 401.
+ *
+ * Y se tira en vez de guardarse para despues a proposito. Retenerla y enviarla
+ * al iniciar sesion significaria atribuir a esa cuenta todo lo que la persona
+ * miro ANTES de identificarse, que es una decision de privacidad que nadie ha
+ * tomado. La aplicacion se puede recorrer entera sin cuenta; recorrerla no
+ * deberia dejar un rastro que aparezca luego bajo un nombre.
+ */
 export async function vaciar(): Promise<void> {
   if (temporizador) {
     clearTimeout(temporizador);
     temporizador = null;
   }
   if (cola.length === 0) return;
+
+  if (!(await haySesion())) {
+    descartar();
+    return;
+  }
+
   const lote = cola;
   cola = [];
   await RecommendationRepository.sendEvents(lote);

@@ -19,6 +19,7 @@ import {
   type PeopleRecommendations,
   type RecommendedPerson,
 } from '@/repositories/RecommendationRepository';
+import { perfilVisto } from '@/services/senales';
 import { profileImageUrl } from '@/services/storage';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -120,16 +121,24 @@ export function PersonasParaTi() {
   };
 
   const verPerfil = (persona: RecommendedPerson) => {
-    // Abrir un perfil es una senal: dice mas que una impresion y menos que un
-    // seguimiento. Se manda y se olvida; si falla, no pasa nada.
-    void RecommendationRepository.sendEvents([
-      { eventType: 'profile_view', entityType: 'profile', entityId: persona.id },
-    ]);
+    /*
+      Abrir un perfil es una senal: dice mas que una impresion y menos que un
+      seguimiento. Va por la COLA y no por una peticion suelta —tocar cinco
+      tarjetas serian cinco peticiones—, y con clave, para que abrir el mismo
+      perfil dos veces no lo cuente dos veces.
+    */
+    perfilVisto(persona.id);
     router.push(`/profile/${persona.id}` as never);
   };
 
   const noInteresa = async (persona: RecommendedPerson) => {
     setDetalle(null);
+    /*
+      Esta SI va directa y no por la cola. Es una decision explicita y poco
+      frecuente, y tiene que surtir efecto en el servidor cuanto antes: si
+      esperara los ocho segundos de la cola, refrescar la lista en ese hueco
+      devolveria a la persona que se acaba de descartar.
+    */
     await RecommendationRepository.sendEvents([
       { eventType: 'not_interested', entityType: 'profile', entityId: persona.id },
     ]);
