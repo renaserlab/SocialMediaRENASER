@@ -41,13 +41,44 @@ export function VideoPlayer({
   const [userPaused, setUserPaused] = useState(false);
   const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
 
-  // El silencio puede cambiarlo la persona con el boton de sonido, y ademas lo
-  // toca el propio componente cuando el navegador bloquea el autoarranque con
-  // audio: se mantiene el elemento al dia en las dos direcciones.
+  /*
+    UNA SOLA VERDAD SOBRE EL SILENCIO.
+
+    Esto se sincroniza en CADA render y ademas cada vez que el elemento carga
+    algo nuevo. No es un exceso de celo: se midio el caso contrario —la interfaz
+    anunciando «Activar el sonido» (es decir, silenciado) mientras el elemento
+    tenia `muted=false` y sonaba—, que es exactamente el fallo que se reporto.
+
+    Por que se desincronizaba:
+
+     - El efecto anterior dependia solo de `[muted]`, asi que no volvia a
+       ejecutarse cuando la lista RECICLABA la celda y aparecia un elemento
+       distinto con el mismo valor de la propiedad.
+     - `muted` viajaba ademas como propiedad de JSX. Al cambiar de fuente, el
+       navegador reajusta el elemento a partir de su ATRIBUTO, y React no ve
+       ningun cambio que reconciliar porque para el el valor sigue siendo el
+       mismo. Nadie volvia a ponerlo.
+     - Y el respaldo de autoarranque (abajo) escribe sobre el elemento por su
+       cuenta, porque el navegador exige que sea sincrono.
+
+    Con tres sitios escribiendo y ninguno mandando, era cuestion de tiempo. Una
+    asignacion por render no se nota; una interfaz que miente, si.
+  */
   useEffect(() => {
     const el = ref.current;
-    if (el) el.muted = muted;
-  }, [muted]);
+    if (!el) return;
+    el.muted = muted;
+    // Cargar una fuente nueva reinicia el elemento: se vuelve a aplicar.
+    const reaplicar = () => {
+      if (ref.current) ref.current.muted = muted;
+    };
+    el.addEventListener('loadedmetadata', reaplicar);
+    el.addEventListener('play', reaplicar);
+    return () => {
+      el.removeEventListener('loadedmetadata', reaplicar);
+      el.removeEventListener('play', reaplicar);
+    };
+  });
 
   // Reproduccion por viewport (feeds tipo reels), igual que en nativo.
   useEffect(() => {
@@ -169,7 +200,9 @@ export function VideoPlayer({
         controls={nativeControls && !shortsControls}
         autoPlay={autoPlay}
         loop={loop}
-        muted={muted}
+        /* `muted` NO va aqui: lo lleva el efecto de arriba, que es quien manda.
+           Como atributo solo fijaria el valor inicial y volveria a abrir la
+           puerta a que elemento y estado digan cosas distintas. */
         playsInline
         /*
           Cuando este video ya tiene turno para reproducirse no tiene sentido

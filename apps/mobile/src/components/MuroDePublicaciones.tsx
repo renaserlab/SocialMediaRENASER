@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/Skeleton';
 import { StateView } from '@/components/StateView';
 import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { useTranslation } from '@/i18n/useTranslation';
+import { useSeccionActiva } from '@/navigation/foco';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -139,6 +140,13 @@ export function MuroDePublicaciones({
     milisegundos, un tiempo que nadie percibe pero que un desplazamiento rapido
     no le concede a nada.
   */
+  /*
+    Misma regla que en Inicio: si no se esta viendo esta seccion, no reproduce
+    nada. Sin esto, los videos del muro seguian descargando y decodificando
+    mientras la persona estaba en Inicio o en Perfil.
+  */
+  const seccionActiva = useSeccionActiva();
+
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
   const [videosEnCurso, setVideosEnCurso] = useState<{
     reproduciendo: string[];
@@ -247,9 +255,9 @@ export function MuroDePublicaciones({
           <View style={styles.container}>
             <PostCard
               post={item}
-              visible={visibleIds.has(item.id)}
-              videoActive={videosEnCurso.reproduciendo.includes(item.id)}
-              videoPreload={videosEnCurso.preparando.includes(item.id)}
+              visible={seccionActiva && visibleIds.has(item.id)}
+              videoActive={seccionActiva && videosEnCurso.reproduciendo.includes(item.id)}
+              videoPreload={seccionActiva && videosEnCurso.preparando.includes(item.id)}
             />
           </View>
         )}

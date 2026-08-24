@@ -12,6 +12,7 @@ import { Text } from '@/components/Text';
 import { fuenteDeInicio, type PestanaDeInicio } from '@/feed/fuenteDeVideos';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { useFeedDeVideos } from '@/hooks/useFeedDeVideos';
+import { useSeccionActiva } from '@/navigation/foco';
 import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -54,6 +55,20 @@ export function InicioScreen() {
     el sonido siga roto.
   */
   useBackgroundAudio();
+
+  /*
+    Si ESTA seccion es la que se esta viendo.
+
+    Nada de lo de abajo puede reproducir sin esto. El carrusel deja montadas las
+    secciones vecinas —y una vez montada, una seccion ya no se desmonta—, asi
+    que sin preguntarlo el video de Inicio seguia sonando desde Explorar, desde
+    Perfil, con la aplicacion en segundo plano y hasta en una pestaña del
+    navegador que ni se veia. Se midio: el tiempo del video seguia corriendo.
+
+    Va aqui, en la PANTALLA, y no dentro del reproductor, porque es la pantalla
+    la que sabe que le toca a cada vista. El reproductor solo obedece.
+  */
+  const seccionActiva = useSeccionActiva();
 
   useEffect(() => {
     perfMark('INICIO_MONTADO');
@@ -122,7 +137,7 @@ export function InicioScreen() {
         <FeedVerticalDeVideos
           feed={feedParaTi}
           altura={height}
-          activo={pestana === 'paraTi'}
+          activo={seccionActiva && pestana === 'paraTi'}
           silenciado={silenciado}
           alCambiarSilencio={cambiarSilencio}
           alForzarSilencio={forzarSilencio}
@@ -164,7 +179,7 @@ export function InicioScreen() {
               <FeedVerticalDeVideos
                 feed={conSugerencias ? feedParaTi : feedSiguiendo}
                 altura={height}
-                activo={pestana === 'siguiendo'}
+                activo={seccionActiva && pestana === 'siguiendo'}
                 silenciado={silenciado}
                 alCambiarSilencio={cambiarSilencio}
                 alForzarSilencio={forzarSilencio}
@@ -199,7 +214,7 @@ export function InicioScreen() {
       {visitadas.has('live') ? (
         <Pane visible={pestana === 'live'}>
           <SeccionLive
-            activo={pestana === 'live'}
+            activo={seccionActiva && pestana === 'live'}
             espacioInferior={espacioInferior}
             alDescubrir={irAExplorar}
           />
