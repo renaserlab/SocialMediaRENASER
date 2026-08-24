@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
@@ -141,6 +141,9 @@ export function VideoPlayer({
   shortsControls = false,
   controlsBottomInset = 0,
   hidePlayButton = false,
+  startAtSeconds = 0,
+  onProgressSeconds,
+  onEnded,
 }: VideoPlayerProps) {
   /*
     `useCaching` guarda el video en la cache de disco de expo-video: volver a
@@ -155,9 +158,9 @@ export function VideoPlayer({
       maxBufferBytes: MAX_BUFFER_BYTES,
       preferredForwardBufferDuration: BUFFER_SECONDS,
     };
-    if (shortsControls) {
-      // Sin esto el reproductor no informa de su avance y la barra se quedaria
-      // clavada en el minuto cero.
+    if (shortsControls || onProgressSeconds) {
+      // Sin esto el reproductor no informa de su avance: la barra se quedaria
+      // clavada en el minuto cero y el progreso del curso no se guardaria.
       p.timeUpdateEventInterval = PROGRESS_INTERVAL_SECONDS;
     }
     /*
@@ -205,6 +208,43 @@ export function VideoPlayer({
   }, [muted, player]);
 
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
+
+  /*
+    Progreso hacia fuera y final del video.
+
+    Se avisa del avance en crudo; decidir cada cuanto guardarlo es de quien
+    escucha (ver `useProgresoDeLeccion`). Aqui mandar una peticion por aviso
+    seria cuatro por segundo.
+
+    Las referencias evitan volver a suscribir el listener en cada render: sin
+    ellas, una funcion nueva por render reiniciaria la suscripcion
+    constantemente.
+  */
+  const avisoDeProgreso = useRef(onProgressSeconds);
+  avisoDeProgreso.current = onProgressSeconds;
+  const avisoDeFinal = useRef(onEnded);
+  avisoDeFinal.current = onEnded;
+
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
+    avisoDeProgreso.current?.(currentTime);
+  });
+
+  useEventListener(player, 'playToEnd', () => {
+    avisoDeFinal.current?.();
+  });
+
+  /*
+    Retomar por donde iba. UNA sola vez: si se reaplicara con cada cambio de
+    `startAtSeconds`, rebobinar devolveria al punto guardado al instante.
+  */
+  const yaSeSalto = useRef(false);
+  useEffect(() => {
+    if (yaSeSalto.current || startAtSeconds <= 0) return;
+    yaSeSalto.current = true;
+    safely(() => {
+      player.currentTime = startAtSeconds;
+    });
+  }, [player, startAtSeconds]);
 
   /*
     Muro: pausar al perder de vista, sin arrancar al aparecer.

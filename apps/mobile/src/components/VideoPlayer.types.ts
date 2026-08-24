@@ -74,4 +74,21 @@ export type VideoPlayerProps = {
    * audio mientras no se oye nada.
    */
   onMutedChange?: (muted: boolean) => void;
+  /**
+   * Segundo por el que empezar. Es lo que convierte «volver al curso» en
+   * seguir donde se dejo en vez de volver al principio.
+   *
+   * Solo se aplica UNA vez, al estar listo el video: aplicarlo en cada cambio
+   * devolveria a la persona al punto guardado justo despues de rebobinar.
+   */
+  startAtSeconds?: number;
+  /**
+   * Por donde va, en segundos, cada pocos segundos.
+   *
+   * NO es una peticion por segundo: quien lo recibe decide cada cuanto
+   * guardar. Aqui solo se avisa.
+   */
+  onProgressSeconds?: (seconds: number) => void;
+  /** El video llego al final. Lo sabe el reproductor y nadie mas. */
+  onEnded?: () => void;
 };
