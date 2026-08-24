@@ -16,6 +16,8 @@ DOS COSAS QUE ATRAVIESAN TODO EL FICHERO:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -25,23 +27,28 @@ from app.core.config import Settings, get_settings
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.router import leer_posts_por_id
 from app.modules.content.schemas import PostRead
-from app.modules.recommendations import cache, service
+from app.modules.recommendations import cache, metrics, service, temas_de_contenido
 from app.modules.recommendations.config import (
     CONTENT_ALGORITHM_VERSION,
     ONBOARDING_VERSION,
     RECOMMENDATION_ALGORITHM_VERSION,
+    VENTANA_DE_ATRIBUCION_DIAS,
 )
 from app.modules.recommendations.models import BehaviorEvent
 from app.modules.recommendations.schemas import (
     BehaviorEventBatch,
     BehaviorEventResult,
+    ContentRecommendations,
     OnboardingCatalog,
     OnboardingStatus,
     PeopleRecommendations,
     PreferencesInput,
     PreferencesRead,
+    RecommendationMetrics,
+    SurfaceFunnel,
 )
 from app.shared.database import get_db
+from app.shared.permissions import require_admin
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
@@ -151,7 +158,7 @@ async def personas_para_ti(
 # --------------------------------------------------------------------------- #
 # Contenido
 # --------------------------------------------------------------------------- #
-@router.get("/content", response_model=list[PostRead])
+@router.get("/content", response_model=ContentRecommendations)
 async def contenido_para_ti(
     limit: int = Query(default=6, ge=1, le=30),
     offset: int = Query(default=0, ge=0),
@@ -159,22 +166,34 @@ async def contenido_para_ti(
     current_user: AuthUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
-) -> list[PostRead]:
-    """El "Para ti" ordenado. Misma forma que `/posts`, distinto orden.
+) -> ContentRecommendations:
+    """El "Para ti" ordenado. Los `items` son `PostRead` sin tocar.
 
-    Devuelve `PostRead` y no una forma propia para que el movil pueda cambiar
-    de fuente sin cambiar de mapper, de tipos ni de pantalla: la lista de
-    respaldo y esta se pintan con el mismo codigo.
+    La envoltura existe para que la version del algoritmo la diga el SERVIDOR:
+    el movil la devuelve en cada impresion y, si la llevara escrita en su
+    codigo, una version antigua de la aplicacion mediria contra una etiqueta
+    equivocada. Los elementos siguen siendo `PostRead`, asi que la pantalla usa
+    el mismo mapper que el feed cronologico.
 
     Una lista vacia NO es un error: significa «no hay nada que personalizar».
     El movil sabe leerla y cae a la fuente cronologica de siempre.
     """
     if not settings.feature_recommendations_v1:
-        return []
+        return ContentRecommendations(
+            algorithm_version=CONTENT_ALGORITHM_VERSION,
+            strategy=ORIGEN_APAGADO,
+            items=[],
+        )
     ordenado = await service.contenido_para(
         db, current_user.id, limite=limit, offset=offset, media=media
     )
-    return await leer_posts_por_id(db, ordenado.post_ids, current_user.id)
+    items = await leer_posts_por_id(db, ordenado.post_ids, current_user.id)
+    return ContentRecommendations(
+        algorithm_version=CONTENT_ALGORITHM_VERSION,
+        strategy=ordenado.estrategia,
+        with_own_topics=ordenado.con_tema_propio,
+        items=items,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +232,18 @@ async def registrar_eventos(
         ).all()
         ya_registradas = {c for c in filas if c}
 
+    # Cuando alguien rechaza una publicacion, se guardan tambien SUS TEMAS: sin
+    # ellos, «no me interesa» solo podria esconder ese video concreto y nunca
+    # aprenderia nada. Se resuelve de UNA consulta para todo el lote.
+    rechazados = [
+        e.entity_id
+        for e in payload.events
+        if e.event_type == "not_interested" and e.entity_type == "post" and e.entity_id
+    ]
+    temas_rechazados = (
+        await temas_de_contenido.leer(db, rechazados) if rechazados else {}
+    )
+
     aceptadas = 0
     duplicadas = 0
     vistas_en_el_lote: set[str] = set()
@@ -233,6 +264,14 @@ async def registrar_eventos(
                 dwell_ms=evento.dwell_ms,
                 event_key=clave,
                 source="client",
+                # De donde venia. Es lo que convierte una senal suelta en una
+                # linea de un embudo que se puede medir.
+                surface=evento.surface,
+                algorithm_version=evento.algorithm_version,
+                rank=evento.rank,
+                # Los temas del contenido rechazado, para que «no me interesa»
+                # enfrie el tema y no solo la publicacion concreta.
+                topic_ids=temas_rechazados.get(evento.entity_id or "") or None,
             )
         )
         aceptadas += 1
@@ -263,3 +302,44 @@ async def version() -> dict[str, str | int]:
         "content": CONTENT_ALGORITHM_VERSION,
         "onboarding": ONBOARDING_VERSION,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Metricas
+# --------------------------------------------------------------------------- #
+@router.get("/metrics", response_model=RecommendationMetrics)
+async def metricas(
+    days: int = Query(default=30, ge=1, le=180),
+    _: AuthUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> RecommendationMetrics:
+    """¿Las recomendaciones producen algo?
+
+    SOLO ADMINISTRACION. Es informacion agregada del producto, no de una
+    persona, pero aun asi no tiene por que verla cualquiera: dice cuanta gente
+    hay al otro lado y como se comporta.
+
+    Es un endpoint, no un panel. Un panel es una pantalla que mantener; esto es
+    una consulta que se hace cuando hay algo que decidir. Si mas adelante hace
+    falta ensenarlo, ya existe de donde leerlo.
+
+    Si todo sale a cero, es que todavia no ha ocurrido nada. Eso es un
+    resultado, no un fallo, y no se rellena con nada.
+    """
+    ahora = datetime.now(timezone.utc)
+    desde = ahora - timedelta(days=days)
+    embudos = await metrics.embudo(db, desde=desde, ahora=ahora)
+    return RecommendationMetrics(
+        since=desde,
+        attribution_window_days=VENTANA_DE_ATRIBUCION_DIAS,
+        funnels=[
+            SurfaceFunnel(
+                surface=e.surface,
+                algorithm_version=e.algorithm_version,
+                impressions=e.impressions,
+                conversions=e.conversions,
+                rates=e.tasas(),
+            )
+            for e in embudos
+        ],
+    )

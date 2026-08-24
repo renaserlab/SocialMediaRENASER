@@ -17,6 +17,7 @@ from app.modules.recommendations.config import (
     CLAVES_DE_OBJETIVO,
     CLAVES_DE_OFERTA,
     RELACIONES,
+    SUPERFICIES,
 )
 
 # --------------------------------------------------------------------------- #
@@ -195,6 +196,10 @@ class PersonRecommendation(BaseModel):
     bio: str = ""
     is_following: bool = False
     reasons: list[RecommendationReason] = Field(default_factory=list)
+    #: En que puesto salio. Viaja de vuelta en la impresion para poder medir:
+    #: lo primero se toca mas, sea bueno o no, y sin la posicion las tasas no
+    #: se pueden leer. La calcula el servidor, no el movil: es SU orden.
+    rank: int = 0
     #: Desglose del score. Solo viaja con `?debug=1` y fuera de produccion.
     debug: dict[str, float] | None = None
 
@@ -227,6 +232,29 @@ EVENTOS_DE_CLIENTE = frozenset(
 ENTIDADES = frozenset({"post", "profile", "course", "booking", "conversation"})
 
 
+class ContentRecommendations(BaseModel):
+    """El feed ordenado, con el contexto necesario para poder medirlo.
+
+    POR QUE UNA ENVOLTURA y no una lista pelada. El movil tiene que devolver
+    `algorithm_version` en cada impresion para que las metricas puedan comparar
+    versiones, y esa version la decide el SERVIDOR. Con una lista suelta, el
+    movil tendria que llevar la version escrita en su codigo: dos sitios
+    diciendo lo mismo, y uno de ellos desactualizado en cuanto alguien no
+    actualice la aplicacion.
+
+    `items` son `PostRead` sin tocar, para que la pantalla siga usando el mismo
+    mapper que el feed cronologico.
+    """
+
+    algorithm_version: str
+    strategy: str
+    #: Cuantas de las devueltas tenian temas PROPIOS (frente a heredados del
+    #: autor). Es la medida honesta de cuanto sabe el recomendador del
+    #: contenido que esta ordenando; hoy sera 0 mientras nadie etiquete nada.
+    with_own_topics: int = 0
+    items: list = Field(default_factory=list)
+
+
 class BehaviorEventInput(BaseModel):
     event_type: str
     entity_type: str
@@ -238,6 +266,24 @@ class BehaviorEventInput(BaseModel):
     dwell_ms: int | None = Field(default=None, ge=0, le=600_000)
     #: Clave de idempotencia. Repetir un lote no debe duplicar sus senales.
     event_key: str | None = Field(default=None, max_length=120)
+
+    #: DE DONDE VENIA lo que se toco (migracion 0027). Los tres son opcionales
+    #: a proposito: una accion sin superficie es una accion que ocurrio FUERA
+    #: de una recomendacion —un perfil abierto desde un comentario, por
+    #: ejemplo— y eso es informacion, no un hueco que rellenar.
+    surface: str | None = None
+    algorithm_version: str | None = Field(default=None, max_length=40)
+    rank: int | None = Field(default=None, ge=0, le=1000)
+
+    @field_validator("surface")
+    @classmethod
+    def _superficie_conocida(cls, v: str | None) -> str | None:
+        # La lista tiene que coincidir con el CHECK de la migracion 0027. Una
+        # superficie escrita a mano en dos sitios acaba siendo dos superficies
+        # y las metricas dejan de sumar.
+        if v is not None and v not in SUPERFICIES:
+            raise ValueError(f"Superficie no reconocida: '{v}'.")
+        return v
 
     @field_validator("event_type")
     @classmethod
@@ -270,3 +316,28 @@ class BehaviorEventResult(BaseModel):
     accepted: int
     #: Cuantas se descartaron por venir ya registradas.
     duplicated: int
+
+
+class SurfaceFunnel(BaseModel):
+    """El embudo de una superficie con una version del algoritmo."""
+
+    surface: str
+    algorithm_version: str
+    impressions: int
+    #: Cuantas impresiones llegaron a cada paso.
+    conversions: dict[str, int]
+    #: Las mismas, en proporcion. Comparar versiones exige normalizar: la que
+    #: se mostro mas veces convierte mas en absoluto aunque sea peor.
+    rates: dict[str, float]
+
+
+class RecommendationMetrics(BaseModel):
+    """Lo que se puede afirmar hoy sobre si las recomendaciones sirven.
+
+    Si todo sale a cero, es que todavia no ha pasado nada. Eso es un resultado,
+    no un fallo, y no se rellena con nada.
+    """
+
+    since: datetime
+    attribution_window_days: int
+    funnels: list[SurfaceFunnel]
