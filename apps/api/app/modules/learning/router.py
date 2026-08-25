@@ -316,15 +316,20 @@ async def my_courses(
     for course_id, lesson_id in filas:
         por_curso.setdefault(course_id, []).append(lesson_id)
 
-    hechas = set(
-        await db.scalars(
-            select(LessonProgress.lesson_id).where(
-                LessonProgress.user_id == uid,
-                LessonProgress.completed.is_(True),
-                LessonProgress.lesson_id.in_([f[1] for f in filas] or [""]),
+    # Un curso sin ninguna leccion deja `filas` vacio. Preguntar entonces por
+    # `in_([""])` mandaria la cadena vacia a una columna `uuid`: PostgreSQL la
+    # rechaza. Si no hay lecciones, no hay nada terminado que buscar.
+    hechas: set[str] = set()
+    if filas:
+        hechas = set(
+            await db.scalars(
+                select(LessonProgress.lesson_id).where(
+                    LessonProgress.user_id == uid,
+                    LessonProgress.completed.is_(True),
+                    LessonProgress.lesson_id.in_({f[1] for f in filas}),
+                )
             )
         )
-    )
 
     salida: list[MyCourseRead] = []
     for curso in cursos:
@@ -473,15 +478,17 @@ async def _guardar_progreso(
             .where(CourseModule.course_id == curso.id)
         )
     )
-    hechas = set(
-        await db.scalars(
-            select(LessonProgress.lesson_id).where(
-                LessonProgress.user_id == uid,
-                LessonProgress.completed.is_(True),
-                LessonProgress.lesson_id.in_(lecciones or [""]),
+    hechas: set[str] = set()
+    if lecciones:
+        hechas = set(
+            await db.scalars(
+                select(LessonProgress.lesson_id).where(
+                    LessonProgress.user_id == uid,
+                    LessonProgress.completed.is_(True),
+                    LessonProgress.lesson_id.in_(lecciones),
+                )
             )
         )
-    )
     curso_completo = bool(lecciones) and len(hechas) >= len(lecciones)
 
     # Solo al cruzar la linea, no cada vez que se guarda un segundo.

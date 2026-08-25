@@ -502,14 +502,24 @@ async def historial(
     )
     filas.reverse()  # se leen en el orden en que se dijeron
 
-    autores = {
-        p.id: p
-        for p in (
-            await db.scalars(
-                select(Profile).where(Profile.id.in_([m.user_id for m in filas] or [""]))
-            )
-        ).all()
-    }
+    # Sin mensajes no se pregunta por ningun autor. El `or [""]` que habia aqui
+    # mandaba la cadena vacia a una columna `uuid`: en SQLite colaba, y en
+    # PostgreSQL asyncpg la rechaza y el manejador de errores lo convertia en
+    # un 404. Es decir, el historial de una emision recien empezada —o de una
+    # donde todo lo escrito quedo filtrado por bloqueos— respondia «no
+    # encontrado» en vez de una lista vacia.
+    autores: dict[str, Profile] = {}
+    if filas:
+        autores = {
+            p.id: p
+            for p in (
+                await db.scalars(
+                    select(Profile).where(
+                        Profile.id.in_({m.user_id for m in filas})
+                    )
+                )
+            ).all()
+        }
     return [
         LiveMessageRead(
             id=m.id,

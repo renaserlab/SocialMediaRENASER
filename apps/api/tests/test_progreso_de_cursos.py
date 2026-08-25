@@ -436,3 +436,50 @@ async def test_la_biblioteca_no_pregunta_una_vez_por_curso(entorno):
     assert len(respuesta.json()) == 6
     selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
     assert len(selects) <= 5, f"{len(selects)} consultas: {selects}"
+
+
+@pytest.mark.asyncio
+async def test_un_curso_sin_lecciones_no_rompe_la_biblioteca(entorno):
+    """Mismo fallo que en el chat de los directos, en otro sitio.
+
+    La biblioteca resolvía el progreso con `lesson_id.in_(lista or [""])`. Un
+    curso al que alguien tiene acceso pero que todavía no tiene ninguna lección
+    deja esa lista vacía, y entonces la cadena vacía viajaba a una columna
+    `uuid`. En SQLite cuela; PostgreSQL la rechaza y la biblioteca entera
+    respondería con un error.
+
+    No es un caso raro: es el estado de todo curso gratuito recién creado al
+    que alguien entró antes de que su autor le pusiera contenido.
+    """
+    http, sesiones, _, _, _ = entorno
+    vacio = "cccccccc-0000-0000-0000-0000000000ff"
+    async with sesiones() as db:
+        db.add(
+            Course(
+                id=vacio,
+                author_id=ANA,
+                title="Todavía sin contenido",
+                description="x",
+                price_minor=0,
+                currency="PEN",
+                status="published",
+            )
+        )
+        db.add(
+            Purchase(
+                user_id=PEDRO,
+                course_id=vacio,
+                provider="manual",
+                amount_minor=0,
+                currency="PEN",
+                status="paid",
+            )
+        )
+        await db.commit()
+
+    respuesta = await http.get(f"{LEARNING}/me/courses")
+    assert respuesta.status_code == 200
+    fila = next(c for c in respuesta.json() if c["id"] == vacio)
+    assert fila["lessons_total"] == 0
+    assert fila["state"] == "not_started"
+    assert fila["next_lesson_id"] is None
