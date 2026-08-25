@@ -1,4 +1,4 @@
-"""Que partes de las migraciones 0027 y 0028 estan aplicadas en ESTA base.
+"""Que partes de las migraciones 0027, 0028 y 0029 estan aplicadas en ESTA base.
 
 POR QUE EXISTE ESTE FICHERO, Y ES UNA LECCION CARA.
 
@@ -109,6 +109,23 @@ async def hay_temas_de_curso(db: AsyncSession) -> bool:
                 "temas propios y no se exigen para publicar."
             )
     return _cache["course_topics"]
+
+
+async def hay_directos(db: AsyncSession) -> bool:
+    """Si existen las tablas de transmisiones en vivo (migracion 0029).
+
+    Sin ellas no hay emisiones, ni chat de emision, ni reacciones. La pestana
+    «Live» sigue existiendo y sigue diciendo la verdad —que no hay nada
+    emitiendo— igual que decia antes de que existiera el modulo.
+    """
+    if "live_sessions" not in _cache:
+        _cache["live_sessions"] = await _hay_tabla(db, "live_sessions")
+        if not _cache["live_sessions"]:
+            logger.warning(
+                "La migracion 0029 no esta aplicada: las transmisiones en vivo "
+                "responden vacio."
+            )
+    return _cache["live_sessions"]
 
 
 def olvidar() -> None:
