@@ -219,6 +219,42 @@ Expo. Semanas de fontanería nativa.
 riesgo innecesario) y Cloudflare por WHIP (en su beta WebRTC **no hay
 grabación**, lo que mata «ver después»).
 
+### El estado real de los SDK en Expo (24/08/2026)
+
+Antes que el precio, esto: **ninguna opción de emisión funciona en Expo Go.**
+Todas exigen `expo-dev-client` + `prebuild`. No es un obstáculo —ya se publica
+con EAS— pero conviene saberlo antes de prometer fechas. La *reproducción* sí
+funciona en Expo Go con `expo-video` para HLS básico.
+
+| Proveedor | SDK de emisión en RN | Plugin de Expo | ¿`expo-video` reproduce? |
+|---|---|---|---|
+| **LiveKit** | Oficial, activo (push diario) | **Oficial** `@livekit/react-native-expo-plugin` | Solo vía Egress a HLS |
+| **Mux** | **No existe** | vía `react-native-nitro-rtmp-publisher` (trae el suyo) | **Sí, directo** — Mux lo documenta así |
+| **Cloudflare** | **No existe** (usa `react-native-whip-whep`) | Sí, pero **falta en el paquete npm 0.7.1** | **No si publicas por WHIP** |
+| **Amazon IVS** | **No existe** — solo el *player* es oficial | Ninguno | Sí en low-latency |
+| **Agora** | Oficial | Ninguno (hay ejemplo oficial de Expo) | Solo vía Media Push a CDN |
+| **api.video** | Oficial, pero **19 meses sin un commit** | Ninguno | Sí, directo |
+
+### Tres cosas concretas que evitan perder días
+
+1. **Cloudflare: WHIP y HLS son excluyentes.** Cita textual de sus docs: *no se
+   puede publicar por WHIP y reproducir por HLS*. Publicar por WHIP obliga a
+   que **toda** la audiencia vea por WHEP, y en su beta WebRTC **no hay
+   grabación**. Eso mata «ver después».
+2. **`react-native-whip-whep@0.7.1` tiene un fallo de empaquetado**: su
+   `app.plugin.js` no viaja en el paquete de npm, así que la forma documentada
+   de declarar el plugin falla. Hay que apuntar a la ruta completa.
+3. **La elección de *publisher* y la de *proveedor* son independientes** si se
+   va por RTMP. `react-native-nitro-rtmp-publisher` y el de api.video aceptan
+   cualquier URL RTMP, así que se puede probar el mismo código contra Mux, IVS
+   low-latency y LiveKit Ingress, y decidir el proveedor después. Es la forma
+   más barata de no casarse con nadie el primer día.
+
+**Aviso sobre `react-native-nitro-rtmp-publisher`**: es lo mejor que existe hoy
+para RTMP en Expo —trae plugin propio, es MIT y se apoya en RootEncoder y
+HaishinKit, que son bases probadas— pero tiene **tres estrellas y un único
+mantenedor**, y tres meses de vida. Técnicamente correcto, apuesta arriesgada.
+
 ### Letra pequeña que muerde
 
 - **Mux**: los 100.000 min gratis son recurrentes incluso con tarjeta añadida.
