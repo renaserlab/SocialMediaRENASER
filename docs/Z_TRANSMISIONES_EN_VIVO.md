@@ -169,6 +169,86 @@ imagen que no va a llegar.
 
 ---
 
+## 7.b Elegir proveedor — los datos para decidir
+
+Precios consultados el **24/08/2026** en las páginas oficiales. Conviene
+reconfirmarlos antes de firmar nada: cambian sin avisar.
+
+Escenario del cálculo: **20 h de emisión al mes, 50 espectadores de media**
+(= 1.200 min de emisión y 60.000 min-espectador), 720p, grabando todo.
+
+| Proveedor | Coste/mes | SDK en Expo | Latencia |
+|---|---|---|---|
+| **LiveKit Cloud** (Ship) | ≈ $113 | **Plugin de Expo oficial** | **< 1 s** (WebRTC) |
+| **Mux Video Live** | ≈ $33 | **No hay SDK de RN** | ~5 s (LL-HLS) |
+| **Amazon IVS** (Adv-SD) | ≈ $53 | Player oficial, **broadcast solo comunitario** | < 5 s |
+| **Cloudflare Stream** | ≈ $66 | **No hay SDK de RN** | ~3 s (LL-HLS beta) |
+| **Agora** | ≈ $124 | Sin config plugin oficial | < 1 s |
+
+### El dato que decide, y no es el precio
+
+**Si el vídeo va por HLS estándar (25–30 s) y el chat va por Supabase Realtime
+(sub-segundo), el chat corre veinticinco segundos por delante del vídeo.** La
+gente responde a algo que quien emite todavía no ha dicho. Eso no es un
+inconveniente de calidad: rompe la interacción entera, que es justamente lo que
+esta funcionalidad existe para dar.
+
+De ahí salen las dos únicas opciones coherentes:
+
+- **WebRTC (< 1 s)** — chat y vídeo sincronizados. LiveKit o IVS Real-Time.
+- **LL-HLS (~3–5 s)** — desfase tolerable. Mux o Cloudflare. **Ojo**: LL-HLS
+  funciona bien en iOS (AVPlayer) y de forma irregular en Android
+  (ExoPlayer/Media3). En Perú, Android domina.
+
+### La recomendación, con su motivo
+
+**LiveKit Cloud** no es el más barato — es el único que se puede poner en
+producción esta semana. Es el único con **plugin de Expo oficial y mantenido**
+que cubre emisión *y* reproducción; todos los demás obligan a pegar librerías
+nativas de terceros o de la comunidad. Para un equipo pequeño esa diferencia
+vale más que la diferencia de precio. Tiene región en **São Paulo**, razonable
+desde Lima. A la escala real de hoy (~15–20 espectadores) sale **≈ $64/mes**.
+
+**Mux** es 3× más barato y **escala mejor** —100.000 min de entrega gratis cada
+mes, permanentes— pero no tiene SDK de React Native ni soporta WHIP: habría que
+emitir por RTMP con una librería de terceros y escribir el config plugin de
+Expo. Semanas de fontanería nativa.
+
+**Se descartan**: Agora (el más caro y sin plugin oficial), IVS (su SDK de
+*broadcast* en RN es comunitario — apoyar la función principal en eso es un
+riesgo innecesario) y Cloudflare por WHIP (en su beta WebRTC **no hay
+grabación**, lo que mata «ver después»).
+
+### Letra pequeña que muerde
+
+- **Mux**: los 100.000 min gratis son recurrentes incluso con tarjeta añadida.
+  Es el dato que sostiene toda su ventaja — **confírmalo por escrito** antes de
+  decidir.
+- **LiveKit**: los 600 min de egress del plan Ship son un bote compartido entre
+  grabación, transcodificación y exportación. 20 h de emisión se los comen.
+  El ancho de banda es la variable que muerde: bajar a 480p reduce el coste a
+  la mitad. Pon una alerta al pasar de ~400 GB/mes.
+- **Agora**: los 10.000 min gratis **desaparecen** al contratar cualquier plan.
+- **AWS**: desde el 1/12/2024 cobra **18 % de IGV** a clientes B2C en Perú.
+  Registrar el RUC en *Tax Settings* el primer día lo evita.
+- Ninguno de los recomendados tiene mínimo contractual.
+
+### Lo que hay que decidir antes, y no puedo decidirlo yo
+
+1. **¿Cuántos espectadores a la vez, de verdad?** Es el 80 % del coste. Por
+   debajo de ~30, LiveKit casi no cobra; por encima de ~150, Mux gana claro.
+2. **¿Cuánto desfase entre vídeo y chat se tolera?** Si valen 3–8 s, se abren
+   las opciones baratas.
+3. **¿Emisión de uno a muchos, o con invitados en directo?** Con invitados,
+   HLS queda descartado.
+4. **¿Cuánto se guardan las grabaciones?** El almacenamiento es acumulativo y
+   es el coste que se cuela sin avisar.
+5. **¿480p, 720p o 1080p?** Multiplica el coste entre 2× y 4×.
+6. **¿Cuántas horas de ingeniería se pueden gastar?** Es la pregunta que separa
+   LiveKit (caro, días) de Mux (barato, semanas).
+
+---
+
 ## 8. Sin la migración `0029`
 
 Misma regla que la `0027` y la `0028`: desplegar código no puede exigir que una
