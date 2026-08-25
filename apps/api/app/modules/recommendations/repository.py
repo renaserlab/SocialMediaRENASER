@@ -93,6 +93,15 @@ class SenalesDelUsuario:
     #: el tema: hacen falta varios rechazos para que se note, y nunca llega a
     #: hundirlo del todo (ver `PENALIZACION_MAXIMA_POR_TEMA`).
     penalizacion_por_tema: dict[str, float] = field(default_factory=dict)
+    #: Cuantas senales con peso se leyeron, caigan donde caigan.
+    #:
+    #: HACE FALTA APARTE, y es la correccion de un fallo real: mirar solo
+    #: `por_perfil` y `por_tema` para decidir si alguien «tiene historial»
+    #: dejaba fuera las senales sobre PUBLICACIONES sin temas, que son las mas
+    #: frecuentes. Consecuencia: ver los videos de alguien no contaba para esa
+    #: persona, porque el componente de comportamiento se apagaba entero antes
+    #: de llegar a mirar la afinidad por autor.
+    con_peso: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -508,6 +517,7 @@ async def senales_de(
         peso = PESO_POR_SENAL.get(evento.event_type, 0.0)
         if peso <= 0:
             continue
+        senales.con_peso += 1
         # Lo visto a medias vale menos que lo visto entero...
         if evento.value is not None:
             peso *= max(0.2, float(evento.value))

@@ -652,6 +652,20 @@ async def test_las_senales_alimentan_el_orden_la_proxima_vez(entorno):
 
 @pytest.mark.asyncio
 async def test_una_senal_sobre_un_video_cuenta_para_su_autor(entorno):
+    """Ver los videos de alguien SUBE a esa persona en las recomendaciones.
+
+    POR QUE NO SE COMPRUEBA QUE SALGA LA PRIMERA. Se comprobaba, y era una
+    prueba dependiente del DIA: la exploracion cambia de valor una vez cada
+    veinticuatro horas (`semilla_de_exploracion`), asi que dos candidatos con
+    puntuaciones parecidas se intercambian el primer puesto de un dia para
+    otro. La prueba paso meses en verde y empezo a fallar sola, sin que nadie
+    tocara el recomendador.
+
+    Lo que de verdad afirma esta prueba es que la senal CUENTA. Eso se mide
+    comparando a la misma persona consigo misma, antes y despues, dentro del
+    mismo dia: da igual cuanto valga hoy la exploracion, porque vale lo mismo
+    en las dos mediciones.
+    """
     http, sesiones, _ = entorno
     async with sesiones() as db:
         from sqlalchemy import select
@@ -659,6 +673,15 @@ async def test_una_senal_sobre_un_video_cuenta_para_su_autor(entorno):
         post_id = (
             await db.scalars(select(Post.id).where(Post.author_id == LUCIA))
         ).first()
+
+    def _de_lucia(items: list[dict]) -> tuple[int, float]:
+        for posicion, item in enumerate(items):
+            if item["id"] == LUCIA:
+                assert item["debug"] is not None, "hace falta el desglose"
+                return posicion, item["debug"]["final"]
+        raise AssertionError("Lucía no aparece entre las recomendaciones")
+
+    antes = _de_lucia((await http.get(f"{API}/people?limit=10&debug=1")).json()["items"])
 
     await http.post(
         f"{API}/events",
@@ -675,8 +698,13 @@ async def test_una_senal_sobre_un_video_cuenta_para_su_autor(entorno):
             ]
         },
     )
-    items = (await http.get(f"{API}/people?limit=10")).json()["items"]
-    assert items[0]["id"] == LUCIA
+
+    # El ranking se guarda un minuto; sin vaciarlo se leeria el de antes.
+    cache.vaciar()
+    despues = _de_lucia((await http.get(f"{API}/people?limit=10&debug=1")).json()["items"])
+
+    assert despues[1] > antes[1], "la señal tiene que subir su puntuación"
+    assert despues[0] <= antes[0], "y no puede hacerla bajar de puesto"
 
 
 # --------------------------------------------------------------------------- #

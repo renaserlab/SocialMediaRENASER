@@ -443,7 +443,11 @@ async def _construir_demanda(
         objetivos=frozenset(preferencias.goals or []) if preferencias else frozenset(),
         afinidad_por_tema=senales.por_tema,
         penalizacion_por_tema=senales.penalizacion_por_tema,
-        tiene_senales=bool(senales.por_perfil or senales.por_tema),
+        # Cualquier senal con peso cuenta como historial, no solo las que
+        # aterrizan en un perfil o en un tema. Ver `SenalesDelUsuario.con_peso`:
+        # mirar solo esas dos apagaba el comportamiento entero para quien solo
+        # habia visto videos, que es justo el caso mas comun.
+        tiene_senales=bool(senales.con_peso or senales.por_perfil or senales.por_tema),
     ), senales
 
 
