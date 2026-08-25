@@ -36,24 +36,29 @@ export const FEATURE_PURCHASES = false;
  * En `false` la pestana "Live" del Inicio existe y explica con claridad que
  * todavia no hay transmisiones, en lugar de inventarse una.
  *
- * Por que esta apagado: NO hay infraestructura de directo en el proyecto. Se
- * comprobo antes de escribir una linea de interfaz. Lo que hay es HLS de
- * VIDEO YA GRABADO —el backend empaqueta cada video subido y firma su playlist
- * en `/media/{id}/hls/...`—, que no tiene nada que ver: no existe punto de
- * ingesta (RTMP/WHIP), ni servidor de reparto en tiempo real, ni entidad de
- * emision, ni permisos, ni moderacion de directo. La pantalla `/live/[id]` que
- * habia reproducia un video de ejemplo con un chat guardado en memoria: eso es
- * una maqueta, y ensenarla como si fuera un directo es exactamente lo que el
- * documento prohibe.
+ * Por que esta apagado: FALTA EL VIDEO. La sala si existe ya —`live_sessions`
+ * y `live_messages` con RLS, chat y reacciones en tiempo real, moderacion y
+ * limites anti-abuso, todo en el backend—, pero no hay proveedor de directo
+ * contratado, asi que no hay ni punto de ingesta (RTMP/WHIP) ni reparto en
+ * tiempo real. Lo unico parecido que hay es HLS de VIDEO YA GRABADO —el backend
+ * empaqueta cada video subido y firma su playlist en `/media/{id}/hls/...`—,
+ * que no tiene nada que ver.
  *
- * Que hace falta para encenderlo (bloqueo externo, no de codigo):
+ * Y LO QUE NUNCA SE VUELVE A HACER: la pantalla `/live/[id]` que hubo aqui
+ * reproducia un video de ejemplo con un chat guardado en memoria y un contador
+ * de espectadores inventado. Eso es una maqueta, y ensenarla como si fuera un
+ * directo es exactamente lo que el documento prohibe. Se borro a proposito.
+ *
+ * Que falta para encenderlo (bloqueo externo, no de codigo):
  *   1. Un proveedor de directo (LiveKit, Mux, Cloudflare Stream o similar) con
  *      cuenta, claves y coste asumido.
- *   2. Entidad `live_sessions` (emisor, estado, inicio/fin, grabacion) con RLS.
- *   3. Emision de tokens de publicacion/visionado desde el backend.
- *   4. Moderacion en directo y limites anti-abuso.
+ *   2. Que `POST /live/sessions/{id}/credential` devuelva credencial de
+ *      publicacion/visionado en vez del 503 `live_provider_not_configured` de
+ *      hoy, y que la respuesta traiga `playback_available` en true.
  *
- * El contrato de datos ya esta escrito en `src/feed/transmisiones.ts`: cuando
- * exista el proveedor, se implementa esa unica funcion y se enciende esto.
+ * El resto ya esta escrito: `repositories/LiveRepository.ts` habla con el
+ * dominio entero, `services/directoEnVivo.ts` lleva el tiempo real y
+ * `screens/LiveScreen.tsx` pinta la sala. Mientras `playback_available` sea
+ * false, esa pantalla dice que no hay video en lugar de fingir uno.
  */
 export const FEATURE_LIVE = false;

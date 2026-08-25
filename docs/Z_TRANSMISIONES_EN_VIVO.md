@@ -24,11 +24,18 @@ Nada, y no por descuido. La auditoría encontró:
 | `/media/{id}/hls/...` | Sí existe — pero es vídeo **ya grabado** que el backend empaqueta. No tiene nada que ver con un directo |
 | `events.event_type = 'live'` | Es una **etiqueta** de una entrada de calendario con enlace de WhatsApp, no una emisión |
 
-Lo que sí había era honesto: una pestaña «Live» que decía que no había
-transmisiones, un `ModoVivo` que decía que no se podía emitir, `FEATURE_LIVE =
-false` y un contrato de datos escrito. Alguien ya había **borrado** una pantalla
-anterior que reproducía un vídeo de ejemplo con un chat guardado en memoria y lo
-enseñaba como si fuera una emisión.
+Lo honesto era **solo la mitad**: la pestaña «Live» decía que no había
+transmisiones, `ModoVivo` decía que no se podía emitir, `FEATURE_LIVE = false`.
+
+Pero **la pantalla del directo falso seguía viva y era accesible**. La ruta
+`app/live/[id].tsx` existía y apuntaba a un `LiveScreen` que reproducía
+`SAMPLE_VIDEO_URL` —un clip de ejemplo—, pintaba un chat guardado en el store
+del teléfono y anunciaba **«1.245» espectadores inventados**. El comentario de
+`FEATURE_LIVE` daba por hecho que esa pantalla se había borrado; no era cierto.
+
+Es el recordatorio de por qué esto importa: apagar la entrada y dejar la
+habitación montada no es lo mismo que desmontarla, y cualquiera con la URL
+llegaba igual.
 
 ---
 

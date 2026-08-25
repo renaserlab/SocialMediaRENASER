@@ -97,7 +97,6 @@ type AppState = {
   savedPostIds: string[];
   reservedEventIds: string[];
   conversations: Conversation[];
-  liveMessages: Array<{ id: string; author: string; text: string }>;
 
   /**
    * Silencio de los videos del muro, compartido por todas las tarjetas.
@@ -167,7 +166,6 @@ type AppState = {
   addComment: (postId: string, text: string) => Promise<void>;
   toggleReservation: (eventId: string) => void;
   sendMessage: (conversationId: string, text: string) => void;
-  sendLiveMessage: (text: string) => void;
   resetDemo: () => void;
 };
 
@@ -214,10 +212,6 @@ export const useAppStore = create<AppState>()(
       savedPostIds: [],
       reservedEventIds: [],
       conversations: backendEnabled ? [] : conversations,
-      liveMessages: [
-        { id: 'l1', author: 'María G.', text: 'Gracias Darren, este era el punto que necesitaba.' },
-        { id: 'l2', author: 'Carlos R.', text: 'Anotando todo. Vamos al siguiente nivel.' },
-      ],
 
       feedMuted: true,
       toggleFeedMuted: () => set((state) => ({ feedMuted: !state.feedMuted })),
@@ -674,16 +668,6 @@ export const useAppStore = create<AppState>()(
           ),
         }));
       },
-      sendLiveMessage: (text) => {
-        const trimmed = text.trim();
-        if (!trimmed) return;
-        set((state) => ({
-          liveMessages: [
-            ...state.liveMessages,
-            { id: `live-${Date.now()}`, author: state.user?.fullName ?? 'Tú', text: trimmed },
-          ],
-        }));
-      },
       resetDemo: () =>
         set({
           user: null,
@@ -708,10 +692,10 @@ export const useAppStore = create<AppState>()(
       name: 'renaser-universo-v1',
       storage: createJSONStorage(() => AsyncStorage),
       // Solo se persisten preferencias y estado ligero del usuario.
-      // `posts`, `conversations` y `liveMessages` quedan FUERA a proposito: son
-      // colecciones sin techo que se repueblan con loadFeed()/los repositorios, y
-      // persistirlas obligaba a reserializar todo el feed a AsyncStorage en cada
-      // like (jank de disco y riesgo de superar la cuota de SQLite).
+      // `posts` y `conversations` quedan FUERA a proposito: son colecciones sin
+      // techo que se repueblan con loadFeed()/los repositorios, y persistirlas
+      // obligaba a reserializar todo el feed a AsyncStorage en cada like (jank
+      // de disco y riesgo de superar la cuota de SQLite).
       partialize: (state: AppState) => ({
         themeMode: state.themeMode,
         user: state.user,

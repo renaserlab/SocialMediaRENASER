@@ -1,9 +1,12 @@
-import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
+import { describeError } from '@/lib/describeError';
+import { LiveRepository } from '@/repositories/LiveRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
 
 const media = palette('dark');
@@ -18,17 +21,85 @@ type Props = {
 /**
  * Modo "Vivo" de Crear.
  *
- * No emite nada, y lo dice. El proyecto no tiene infraestructura de directo
- * —no hay punto de ingesta, ni reparto en tiempo real, ni entidad de emision,
- * ni moderacion de directo— y lo unico que habia era una pantalla que
- * reproducia un video de ejemplo con un chat guardado en memoria. Ensenar eso
- * como si fuera una emision es exactamente lo que el documento prohibe.
+ * CON `FEATURE_LIVE` APAGADO —que es como esta hoy— no emite nada, y lo dice.
+ * El backend ya tiene sala, chat y reacciones, pero sigue sin haber proveedor
+ * de video: dar un boton de «emitir» que abre una sala sin imagen es prometer
+ * una cosa y entregar otra. El detalle del bloqueo esta junto a `FEATURE_LIVE`
+ * en `config/features.ts`.
  *
- * El detalle del bloqueo y lo que hace falta para levantarlo esta junto a
- * `FEATURE_LIVE` en `config/features.ts`. Cuando exista proveedor, este modo
- * pasa a abrir la emision y el resto de la pantalla no cambia.
+ * Con el encendido, el camino que se activa es el de abajo: se crea la emision
+ * —sin `scheduled_for`, o sea que nace ya en directo— y se abre su sala.
  */
 export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
+  if (!FEATURE_LIVE) {
+    return (
+      <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+        <View style={styles.centro}>
+          <View style={[styles.icono, { borderColor: media.border }]}>
+            <Feather name="radio" size={26} color={media.text} />
+          </View>
+          <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
+            Emitir en vivo todavía no está disponible
+          </Text>
+          <Text variant="body" color={media.textMuted} style={styles.centrado}>
+            Estamos montando la infraestructura de directo. Preferimos no darte
+            un botón que no emita de verdad.
+          </Text>
+
+          <Pressable
+            onPress={alGrabarReel}
+            style={[styles.boton, { backgroundColor: media.text }]}
+            accessibilityRole="button"
+          >
+            <Text variant="body" weight="700" color={media.background}>
+              Grabar un reel
+            </Text>
+          </Pressable>
+        </View>
+
+        {pie ? <View style={styles.pie}>{pie}</View> : null}
+      </View>
+    );
+  }
+
+  return <CrearEmision pie={pie} espacioInferior={espacioInferior} />;
+}
+
+/**
+ * Abrir una emision.
+ *
+ * Solo pide el titulo. Es lo unico obligatorio del endpoint y lo unico que se
+ * puede rellenar de verdad antes de empezar: la descripcion se edita luego con
+ * `PATCH`, y programarla para mas tarde es otro flujo, no un campo mas en el
+ * boton de «empezar ahora».
+ */
+function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacioInferior: number }) {
+  const router = useRouter();
+  const [titulo, setTitulo] = useState('');
+  const [creando, setCreando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const listo = titulo.trim().length > 0 && !creando;
+
+  const empezar = async () => {
+    const nombre = titulo.trim();
+    if (!nombre || creando) return;
+    setCreando(true);
+    setError(null);
+    try {
+      // Sin `programadaParaIso` la emision nace EN DIRECTO: es justo lo que
+      // significa este boton.
+      const emision = await LiveRepository.crear({ titulo: nombre });
+      // `replace` y no `push`: al salir de la sala no se vuelve al formulario
+      // que acaba de crearla, porque volver ahi invitaria a crear otra.
+      router.replace(`/live/${emision.id}` as never);
+    } catch (fallo) {
+      setError(describeError(fallo, 'No se pudo abrir la emisión.'));
+    } finally {
+      setCreando(false);
+    }
+  };
+
   return (
     <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
       <View style={styles.centro}>
@@ -36,22 +107,38 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
           <Feather name="radio" size={26} color={media.text} />
         </View>
         <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-          Emitir en vivo todavía no está disponible
+          Empezar una emisión
         </Text>
         <Text variant="body" color={media.textMuted} style={styles.centrado}>
-          {FEATURE_LIVE
-            ? 'Estamos preparando tu emisión.'
-            : 'Estamos montando la infraestructura de directo. Preferimos no ' +
-              'darte un botón que no emita de verdad.'}
+          Ponle un título para que se sepa de qué vas a hablar.
         </Text>
 
+        <TextInput
+          value={titulo}
+          onChangeText={setTitulo}
+          onSubmitEditing={() => void empezar()}
+          returnKeyType="go"
+          placeholder="¿De qué va tu directo?"
+          placeholderTextColor={media.textMuted}
+          accessibilityLabel="Título de la emisión"
+          style={[styles.campo, { borderColor: media.border, color: media.text }]}
+        />
+
+        {error ? (
+          <Text variant="caption" weight="700" color={media.danger} style={styles.centrado}>
+            {error}
+          </Text>
+        ) : null}
+
         <Pressable
-          onPress={alGrabarReel}
-          style={[styles.boton, { backgroundColor: media.text }]}
+          onPress={() => void empezar()}
+          disabled={!listo}
+          style={[styles.boton, { backgroundColor: media.text, opacity: listo ? 1 : 0.45 }]}
           accessibilityRole="button"
+          accessibilityState={{ disabled: !listo }}
         >
           <Text variant="body" weight="700" color={media.background}>
-            Grabar un reel
+            {creando ? 'Abriendo…' : 'Empezar ahora'}
           </Text>
         </Pressable>
       </View>
@@ -80,6 +167,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   centrado: { textAlign: 'center' },
+  campo: {
+    alignSelf: 'stretch',
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    fontSize: 14,
+  },
   boton: {
     marginTop: spacing.lg,
     borderRadius: radius.pill,
