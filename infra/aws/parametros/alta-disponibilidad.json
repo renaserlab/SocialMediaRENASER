@@ -1,0 +1,27 @@
+[
+  { "ParameterKey": "Entorno", "ParameterValue": "produccion" },
+  { "ParameterKey": "PerfilDeCapacidad", "ParameterValue": "alta-disponibilidad" },
+  { "ParameterKey": "PrefijoDeRecursos", "ParameterValue": "renaser" },
+  { "ParameterKey": "PilaDeFundacion", "ParameterValue": "renaser-fundacion" },
+
+  { "ParameterKey": "CidrDeLaVpc", "ParameterValue": "10.20.0.0/16" },
+  { "ParameterKey": "NumeroDeNatGateways", "ParameterValue": "0" },
+  { "ParameterKey": "RegistroDeFlujoDeRed", "ParameterValue": "Si" },
+
+  { "ParameterKey": "CertificadoAcmArn", "ParameterValue": "" },
+  { "ParameterKey": "NombreDeDominio", "ParameterValue": "" },
+  { "ParameterKey": "ProteccionContraBorrado", "ParameterValue": "Si" },
+  { "ParameterKey": "LogsDeAccesoDelBalanceador", "ParameterValue": "Si" },
+
+  { "ParameterKey": "EtiquetaDeImagen", "ParameterValue": "latest" },
+  { "ParameterKey": "NombreDelSecreto", "ParameterValue": "renaser/produccion/api" },
+  { "ParameterKey": "CorsOrigins", "ParameterValue": "https://social-media-renaser.vercel.app" },
+  { "ParameterKey": "FeatureRecommendationsV1", "ParameterValue": "true" },
+  { "ParameterKey": "PaymentsEnabled", "ParameterValue": "false" },
+  { "ParameterKey": "PaymentsReturnUrl", "ParameterValue": "https://social-media-renaser.vercel.app/pago" },
+
+  { "ParameterKey": "RetencionDeLogsEnDias", "ParameterValue": "30" },
+  { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "" },
+  { "ParameterKey": "CpuObjetivo", "ParameterValue": "60" },
+  { "ParameterKey": "PeticionesPorInstanciaObjetivo", "ParameterValue": "600" }
+]

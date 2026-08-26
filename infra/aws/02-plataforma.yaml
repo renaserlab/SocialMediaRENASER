@@ -1,0 +1,1508 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# =============================================================================
+# PILA 2 de 2 — PLATAFORMA (red, balanceador y maquinas de la API)
+# =============================================================================
+#
+# POR QUE SE HACE ESTO. Hoy la API vive en Render plan Free. Medido contra
+# produccion el 2026-08-20: la primera peticion despues de un rato sin trafico
+# tarda 21,77 s porque el servicio se DUERME y hay que despertarlo; en caliente
+# /health responde en 0,30 s. El movil corta a los 20 s, asi que el primer feed
+# del dia fallaba. El problema no es la potencia: es que no hay nadie
+# escuchando. Aqui siempre hay al menos una maquina encendida y detras de un
+# health check, asi que no existe el primer arranque lento.
+#
+# LO QUE **NO** SE MUEVE. Supabase se queda entero donde esta (proyecto
+# jbdlqzimfwyrmmatztqu): PostgreSQL, Auth y Storage. Solo se muda el proceso
+# FastAPI de apps/api. Mover la base de datos seria otro proyecto, con
+# migracion de datos, de RLS y de las URLs firmadas del Storage, y ninguna de
+# esas tres cosas tiene nada que ver con el arranque en frio.
+#
+#   Internet --HTTPS--> ALB (2 AZ) --HTTP:8000--> ASG con EC2 + Docker
+#                                                        |
+#                                                        +--> Supabase (PG/Auth/Storage)
+#
+# =============================================================================
+
+Description: >-
+  RENASER — Plataforma de la API FastAPI en AWS: VPC en 2 zonas, Application
+  Load Balancer, Auto Scaling Group con EC2 + Docker, CloudWatch y secretos en
+  Secrets Manager. Requiere la pila de fundacion desplegada. Region: us-east-1.
+
+# -----------------------------------------------------------------------------
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: {default: Identidad y perfil}
+        Parameters: [Entorno, PerfilDeCapacidad, PrefijoDeRecursos, PilaDeFundacion]
+      - Label: {default: Red}
+        Parameters: [CidrDeLaVpc, NumeroDeNatGateways, RegistroDeFlujoDeRed]
+      - Label: {default: Publicacion y TLS}
+        Parameters: [CertificadoAcmArn, NombreDeDominio, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
+      - Label: {default: Aplicacion}
+        Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl]
+      - Label: {default: Observabilidad y escalado}
+        Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
+    ParameterLabels:
+      PerfilDeCapacidad: {default: Perfil de capacidad (coste vs disponibilidad)}
+      NumeroDeNatGateways: {default: NAT Gateways (0 = instancias en subred publica)}
+
+# -----------------------------------------------------------------------------
+Parameters:
+
+  Entorno:
+    Type: String
+    Default: produccion
+    AllowedValues: [produccion, staging]
+
+  PrefijoDeRecursos:
+    Type: String
+    Default: renaser
+    AllowedPattern: '^[a-z][a-z0-9-]{1,20}$'
+    Description: >-
+      Tiene que coincidir con el de la pila de fundacion: el rol de despliegue
+      de GitHub solo puede renovar grupos que empiecen por este prefijo.
+
+  PilaDeFundacion:
+    Type: String
+    Default: renaser-fundacion
+    Description: Nombre de la pila 01-fundacion.yaml, de la que se importan ECR y registro.
+
+  PerfilDeCapacidad:
+    Type: String
+    Default: costo-controlado
+    AllowedValues: [costo-controlado, alta-disponibilidad]
+    Description: >-
+      UNICA palanca de capacidad. `costo-controlado` = 1 maquina (min 1, max 2):
+      mas barato, pero si cae su zona de disponibilidad hay unos minutos de
+      corte mientras el grupo levanta otra en la zona buena.
+      `alta-disponibilidad` = 2 maquinas repartidas en 2 zonas (min 2, max 3):
+      la caida de una zona entera no se nota. Los numeros exactos estan en el
+      Mapping `PerfilesDeCapacidad`, mas abajo, con su razonamiento.
+
+  CidrDeLaVpc:
+    Type: String
+    Default: 10.20.0.0/16
+    # Se corta en /22: la plantilla parte la VPC en 4 subredes /24 con Fn::Cidr,
+    # y un rango mas pequeno no da para cuatro.
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(1[6-9]|2[0-2])$'
+    Description: >-
+      Rango privado de la VPC. 10.20/16 se elige para no chocar con los rangos
+      por defecto (172.31/16 de la VPC default, 10.0/16 de casi cualquier
+      tutorial) por si algun dia hay que emparejar redes.
+
+  NumeroDeNatGateways:
+    Type: String
+    Default: '0'
+    AllowedValues: ['0', '1', '2']
+    Description: >-
+      DECISION DE COSTE, EXPLICADA EN docs/AWS_DESPLIEGUE.md.
+      0 (por defecto) = las maquinas van en subred PUBLICA con IP publica y su
+      grupo de seguridad NO acepta NADA de fuera salvo del balanceador; salen a
+      Internet por el Internet Gateway, que es gratis.
+      1 = subredes privadas con una sola salida (unos 33 USD/mes; si cae esa
+      zona, las dos se quedan sin salida a Internet).
+      2 = subredes privadas con salida propia por zona (unos 66 USD/mes).
+      Para esta app, 2 NAT costarian MAS que todas las maquinas juntas.
+
+  RegistroDeFlujoDeRed:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      VPC Flow Logs a CloudWatch. Solo hacen falta para investigar un incidente
+      de red; encenderlos "por si acaso" es pagar 0,50 USD por GB de trafico
+      registrado sin que nadie los mire.
+
+  CertificadoAcmArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN del certificado de ACM en us-east-1 para el dominio de la API.
+      VACIO = el balanceador solo escucha en HTTP:80, y eso SOLO vale para la
+      primera prueba de humo: sin TLS viajan en claro los tokens de Supabase.
+      Ver el paso manual 3 en docs/AWS_DESPLIEGUE.md.
+
+  NombreDeDominio:
+    Type: String
+    Default: ''
+    Description: >-
+      Solo informativo (aparece en las salidas). El DNS no se gestiona aqui a
+      proposito: la zona del dominio suele vivir en otro proveedor y que dos
+      sistemas se peleen por un registro DNS es una caida garantizada.
+
+  ProteccionContraBorrado:
+    Type: String
+    Default: 'Si'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      Impide borrar el balanceador por accidente. Ojo: con `Si`, borrar la pila
+      FALLA hasta que se desactive a mano. Es intencionado.
+
+  LogsDeAccesoDelBalanceador:
+    Type: String
+    Default: 'Si'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      Guarda en S3 quien llamo, a que, con que codigo y cuanto tardo. Cuesta
+      centimos y es lo unico que permite reconstruir un incidente pasado: las
+      metricas dicen que hubo 5xx, los logs de acceso dicen en que ruta.
+      OJO: el bucket de destino se crea igualmente con `No` (vacio no cuesta
+      nada); este interruptor solo decide si el balanceador escribe en el.
+
+  EtiquetaDeImagen:
+    Type: String
+    Default: latest
+    AllowedPattern: '^[A-Za-z0-9._-]{1,128}$'
+    Description: >-
+      Etiqueta INICIAL de la imagen en ECR. A partir del primer despliegue, el
+      valor vivo lo manda el parametro de SSM que crea esta pila y que mueve el
+      CI (ver ParametroDeLaImagen). Este valor solo se vuelve a aplicar si
+      alguien lo cambia aqui y actualiza la pila.
+
+  NombreDelSecreto:
+    Type: String
+    Default: renaser/produccion/api
+    Description: >-
+      Nombre del secreto de Secrets Manager con DATABASE_URL, SUPABASE_URL,
+      SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY y SUPABASE_JWT_SECRET.
+      ESTA PILA NO LO CREA: se crea a mano una sola vez (paso manual 4). Si lo
+      creara la plantilla, cada actualizacion de la pila correria el riesgo de
+      pisar las claves de produccion con el valor de relleno del fichero.
+
+  CorsOrigins:
+    Type: String
+    Default: https://social-media-renaser.vercel.app
+    Description: >-
+      Dominios de navegador autorizados, separados por comas. Con
+      ENVIRONMENT=production la API RECHAZA el comodin `*` (ver config.py), asi
+      que aqui va la lista real o la web deja de cargar por CORS.
+
+  FeatureRecommendationsV1:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Interruptor de personalizacion. `false` devuelve el feed cronologico sin borrar datos.
+
+  PaymentsEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Portal de pagos. Encenderlo sin pasarela real es rechazo directo en las tiendas.
+
+  PaymentsReturnUrl:
+    Type: String
+    Default: https://social-media-renaser.vercel.app/pago
+
+  RetencionDeLogsEnDias:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 3653]
+    Description: >-
+      Sin retencion los logs se guardan PARA SIEMPRE y la factura de CloudWatch
+      crece sola. 30 dias cubre de sobra cualquier investigacion util.
+
+  CorreoDeAlertas:
+    Type: String
+    Default: ''
+    Description: >-
+      Correo que recibe las alarmas. Vacio = las alarmas se crean igual y se ven
+      en la consola, pero NADIE se entera de una caida hasta que la reporta un
+      usuario. AWS envia un correo de confirmacion que hay que aceptar.
+
+  CpuObjetivo:
+    Type: Number
+    Default: 60
+    MinValue: 20
+    MaxValue: 90
+    Description: >-
+      CPU media objetivo del grupo. 60 % deja margen para el pico mientras
+      arranca la maquina nueva (unos 3 minutos entre que se decide escalar y la
+      instancia esta sirviendo).
+
+  PeticionesPorInstanciaObjetivo:
+    Type: Number
+    Default: 600
+    MinValue: 50
+    MaxValue: 100000
+    Description: >-
+      Peticiones por minuto y por instancia antes de escalar. Esta app es de
+      espera (habla con Supabase y devuelve JSON), asi que se satura por
+      concurrencia mucho antes que por CPU: por eso hay una segunda politica
+      mirando peticiones y no solo procesador. Calibrar con el dato real de
+      CloudWatch tras la primera semana.
+
+  AmiDeAmazonLinux2023:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+    Description: >-
+      No se fija un AMI a mano: se lee el puntero publico de AWS a la ultima
+      Amazon Linux 2023. Asi cada instancia nueva nace con los parches de
+      seguridad al dia sin tocar la plantilla. El identificador queda anotado en
+      la pila, asi que siempre se sabe con cual se desplego.
+
+# -----------------------------------------------------------------------------
+Mappings:
+
+  # Los dos perfiles del enunciado, en un solo sitio. Cambiar de perfil es
+  # cambiar UN parametro; no hay dos plantillas que mantener sincronizadas.
+  PerfilesDeCapacidad:
+
+    costo-controlado:
+      Minimo: '1'
+      Deseadas: '1'
+      Maximo: '2'
+      # t3.small = 2 vCPU + 2 GiB. El razonamiento, porque el "por si acaso" es
+      # lo que infla las facturas de AWS:
+      #  - MEMORIA. Es el limite real, no la CPU. Python 3.13 + FastAPI +
+      #    SQLAlchemy + asyncpg + Pillow ronda 250-400 MB residentes, y Pillow
+      #    tiene picos al derivar imagenes. Con 1 GiB (t3.micro) el margen es de
+      #    centenares de MB: un pico concurrente mata el proceso por falta de
+      #    memoria. 2 GiB da holgura de verdad.
+      #  - CPU. La API espera a Supabase casi todo el tiempo; gasta procesador
+      #    en serializar JSON y poco mas. 37 perfiles y 26 publicaciones no
+      #    mueven la aguja. 2 vCPU sobran.
+      #  - ARRANQUE. Importa: cuanto tarda en levantar el contenedor decide la
+      #    velocidad de un despliegue y de un rollback. t3.small arranca uvicorn
+      #    en segundos; una instancia mas pequena alargaria justo lo que hemos
+      #    venido a arreglar.
+      # Si el trafico crece de verdad, el salto NO es a una maquina mas grande:
+      # es subir Maximo y dejar que el grupo ponga mas maquinas iguales.
+      TipoDeInstancia: t3.small
+
+    alta-disponibilidad:
+      # 2 maquinas en 2 zonas distintas. Con min=2 el grupo reparte una por
+      # zona, asi que perder una zona deja la mitad de la capacidad sirviendo,
+      # no cero. Maximo 3 para absorber un pico mientras nace la de repuesto.
+      Minimo: '2'
+      Deseadas: '2'
+      Maximo: '3'
+      TipoDeInstancia: t3.small
+
+  # Cuenta de AWS que escribe los logs de acceso del balanceador. Es un valor
+  # publicado por AWS y distinto en cada region; la plantilla esta fijada a
+  # us-east-1, pero se deja en un Mapping para que anadir una region sea anadir
+  # una linea y no buscar un numero magico perdido en el fichero.
+  CuentaDeLogsDeElb:
+    us-east-1: {Cuenta: '127311923021'}
+    us-east-2: {Cuenta: '033677994240'}
+    us-west-2: {Cuenta: '797873946194'}
+    eu-west-1: {Cuenta: '156460612806'}
+
+# -----------------------------------------------------------------------------
+Conditions:
+
+  EsAltaDisponibilidad: !Equals [!Ref PerfilDeCapacidad, alta-disponibilidad]
+  HayCertificado: !Not [!Equals [!Ref CertificadoAcmArn, '']]
+  HayDominio: !Not [!Equals [!Ref NombreDeDominio, '']]
+  EsProteccionActiva: !Equals [!Ref ProteccionContraBorrado, 'Si']
+  HayCorreoDeAlertas: !Not [!Equals [!Ref CorreoDeAlertas, '']]
+  HayLogsDeAcceso: !Equals [!Ref LogsDeAccesoDelBalanceador, 'Si']
+  HayFlowLogs: !Equals [!Ref RegistroDeFlujoDeRed, 'Si']
+  # Con 1 o 2 NAT las maquinas se van a las subredes privadas. Con 0 se quedan
+  # en las publicas con IP publica (ver la explicacion en NumeroDeNatGateways).
+  MaquinasEnPrivada: !Not [!Equals [!Ref NumeroDeNatGateways, '0']]
+  HayNatEnZonaA: !Not [!Equals [!Ref NumeroDeNatGateways, '0']]
+  HayNatEnZonaB: !Equals [!Ref NumeroDeNatGateways, '2']
+
+# -----------------------------------------------------------------------------
+Resources:
+
+  # ===========================================================================
+  # RED
+  # ===========================================================================
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref CidrDeLaVpc
+      EnableDnsSupport: true
+      # Necesario para que las instancias resuelvan los nombres de los endpoints
+      # de AWS (ECR, Secrets Manager) y el host de Supabase.
+      EnableDnsHostnames: true
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}'}
+        - {Key: Proyecto, Value: RENASER}
+
+  PasarelaDeInternet:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-igw'}
+
+  UnionDeLaPasarela:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref PasarelaDeInternet
+
+  # Dos zonas de disponibilidad. El balanceador EXIGE dos subredes publicas en
+  # zonas distintas aunque solo haya una maquina: es su propio requisito de
+  # tolerancia a fallos, y ademas deja el perfil de alta disponibilidad a un
+  # solo cambio de parametro.
+  SubredPublicaA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!Ref CidrDeLaVpc, 4, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-publica-a'}
+
+  SubredPublicaB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [1, !Cidr [!Ref CidrDeLaVpc, 4, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-publica-b'}
+
+  # Las privadas se crean SIEMPRE aunque no se usen: las subredes son gratis y
+  # tenerlas ya definidas convierte "pasar las maquinas a red privada" en
+  # cambiar NumeroDeNatGateways a 1, sin rehacer la red con la app en marcha.
+  SubredPrivadaA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [2, !Cidr [!Ref CidrDeLaVpc, 4, 8]]
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-privada-a'}
+
+  SubredPrivadaB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [3, !Cidr [!Ref CidrDeLaVpc, 4, 8]]
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-privada-b'}
+
+  TablaDeRutasPublica:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-rutas-publicas'}
+
+  RutaAInternet:
+    Type: AWS::EC2::Route
+    DependsOn: UnionDeLaPasarela
+    Properties:
+      RouteTableId: !Ref TablaDeRutasPublica
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref PasarelaDeInternet
+
+  AsociacionPublicaA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref SubredPublicaA, RouteTableId: !Ref TablaDeRutasPublica}
+
+  AsociacionPublicaB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref SubredPublicaB, RouteTableId: !Ref TablaDeRutasPublica}
+
+  TablaDeRutasPrivadaA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-rutas-privadas-a'}
+
+  TablaDeRutasPrivadaB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-rutas-privadas-b'}
+
+  AsociacionPrivadaA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref SubredPrivadaA, RouteTableId: !Ref TablaDeRutasPrivadaA}
+
+  AsociacionPrivadaB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref SubredPrivadaB, RouteTableId: !Ref TablaDeRutasPrivadaB}
+
+  IpFijaDelNatA:
+    Type: AWS::EC2::EIP
+    Condition: HayNatEnZonaA
+    Properties:
+      Domain: vpc
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-nat-a'}
+
+  NatA:
+    Type: AWS::EC2::NatGateway
+    Condition: HayNatEnZonaA
+    Properties:
+      AllocationId: !GetAtt IpFijaDelNatA.AllocationId
+      SubnetId: !Ref SubredPublicaA
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-nat-a'}
+
+  IpFijaDelNatB:
+    Type: AWS::EC2::EIP
+    Condition: HayNatEnZonaB
+    Properties:
+      Domain: vpc
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-nat-b'}
+
+  NatB:
+    Type: AWS::EC2::NatGateway
+    Condition: HayNatEnZonaB
+    Properties:
+      AllocationId: !GetAtt IpFijaDelNatB.AllocationId
+      SubnetId: !Ref SubredPublicaB
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-nat-b'}
+
+  RutaPrivadaAlNatA:
+    Type: AWS::EC2::Route
+    Condition: HayNatEnZonaA
+    Properties:
+      RouteTableId: !Ref TablaDeRutasPrivadaA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatA
+
+  # Con un solo NAT, la zona B sale por el NAT de la zona A. Funciona y ahorra
+  # 33 USD/mes, pero deja una dependencia cruzada: si cae la zona A, la zona B
+  # se queda sin salida a Internet. Con NumeroDeNatGateways=2 cada zona es
+  # autonoma. Esta linea es exactamente donde se paga esa diferencia.
+  RutaPrivadaAlNatB:
+    Type: AWS::EC2::Route
+    Condition: HayNatEnZonaA
+    Properties:
+      RouteTableId: !Ref TablaDeRutasPrivadaB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [HayNatEnZonaB, !Ref NatB, !Ref NatA]
+
+  # Endpoint de S3 tipo Gateway: GRATIS, sin excusa para no ponerlo. Las capas
+  # de las imagenes de ECR se descargan de S3, y son cientos de MB en cada
+  # arranque. Sin esto, ese trafico o bien sale a Internet, o bien (con NAT)
+  # se paga a 0,045 USD por GB procesado.
+  EndpointDeS3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref TablaDeRutasPublica
+        - !Ref TablaDeRutasPrivadaA
+        - !Ref TablaDeRutasPrivadaB
+
+  # --- Registro de flujo de red (opcional) ----------------------------------
+  GrupoDeLogsDeFlujo:
+    Type: AWS::Logs::LogGroup
+    Condition: HayFlowLogs
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/${PrefijoDeRecursos}/${Entorno}/flujo-de-red'
+      RetentionInDays: 14
+
+  RolDeFlowLogs:
+    Type: AWS::IAM::Role
+    Condition: HayFlowLogs
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: vpc-flow-logs.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: escribir-flujo
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !GetAtt GrupoDeLogsDeFlujo.Arn
+
+  FlujoDeRed:
+    Type: AWS::EC2::FlowLog
+    Condition: HayFlowLogs
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref Vpc
+      # Solo lo RECHAZADO: es lo que sirve para detectar un escaneo o un grupo
+      # de seguridad mal puesto. Registrar tambien lo aceptado multiplica el
+      # volumen (y la factura) sin anadir casi nada.
+      TrafficType: REJECT
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref GrupoDeLogsDeFlujo
+      DeliverLogsPermissionArn: !GetAtt RolDeFlowLogs.Arn
+
+  # ===========================================================================
+  # GRUPOS DE SEGURIDAD
+  # ===========================================================================
+  # Abierto a Internet a proposito: es literalmente el trabajo del balanceador.
+  # Lo que NO esta abierto es la maquina que hay detras.
+  GrupoDeSeguridadDelBalanceador:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Entrada publica HTTP/HTTPS al balanceador de la API RENASER
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP - solo para redirigir a HTTPS cuando hay certificado
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS - trafico real de la API
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-sg-alb'}
+
+  GrupoDeSeguridadDeLasMaquinas:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Maquinas de la API RENASER - solo aceptan trafico del balanceador
+      VpcId: !Ref Vpc
+      # NO HAY REGLA DE ENTRADA AQUI, y no es un olvido: la unica entrada se
+      # declara abajo como regla suelta, referenciando el grupo del balanceador.
+      # Consecuencia: aunque la maquina tenga IP publica (perfil sin NAT), desde
+      # Internet no se puede abrir ni un puerto. Y no hay puerto 22: para entrar
+      # a una maquina se usa SSM Session Manager, que no necesita puerto abierto
+      # ni clave SSH que alguien pueda perder.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS hacia ECR, Secrets Manager, CloudWatch, SSM y la API de Supabase
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+          Description: PostgreSQL de Supabase (pooler en modo sesion)
+        - IpProtocol: tcp
+          FromPort: 6543
+          ToPort: 6543
+          CidrIp: 0.0.0.0/0
+          Description: PostgreSQL de Supabase (pooler en modo transaccion)
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: DNS
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: DNS sobre TCP (respuestas grandes)
+      Tags:
+        - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-sg-maquinas'}
+
+  # Se declara como recurso aparte, y no dentro del grupo, para evitar la
+  # dependencia circular entre los dos grupos de seguridad.
+  EntradaDesdeElBalanceador:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GrupoDeSeguridadDeLasMaquinas
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      # Origen = el GRUPO del balanceador, no un rango de IPs. Si AWS cambia las
+      # IPs del balanceador (lo hace solo, al escalar), esto sigue valiendo.
+      SourceSecurityGroupId: !GetAtt GrupoDeSeguridadDelBalanceador.GroupId
+      Description: uvicorn - unica entrada permitida a las maquinas
+
+  SalidaDelBalanceadorHaciaLasMaquinas:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref GrupoDeSeguridadDelBalanceador
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      DestinationSecurityGroupId: !GetAtt GrupoDeSeguridadDeLasMaquinas.GroupId
+      Description: El balanceador solo habla con las maquinas de la API
+
+  # ===========================================================================
+  # BALANCEADOR
+  # ===========================================================================
+  # El bucket y su politica se crean SIEMPRE, aunque los logs esten apagados.
+  # Dos razones: un bucket vacio en S3 cuesta 0,00 USD, y el balanceador se
+  # niega a crearse si la politica del bucket no existe YA — hacer que la
+  # politica dependa de un interruptor obligaria a borrar y recrear el
+  # balanceador cada vez que alguien cambia de idea sobre los logs.
+  # El interruptor solo decide si se ESCRIBE en el (access_logs.s3.enabled).
+  BucketDeLogsDeAcceso:
+    Type: AWS::S3::Bucket
+    # Retain: los logs de acceso son la prueba de lo que paso. Que borrar la
+    # pila se lleve por delante la unica evidencia de un incidente seria mal
+    # negocio; se borran solos a los 30 dias por la regla de ciclo de vida.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${PrefijoDeRecursos}-${Entorno}-logs-alb-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          # AES256 y no KMS a proposito: el balanceador NO sabe escribir en un
+          # bucket cifrado con clave gestionada por el cliente. Con KMS aqui,
+          # los logs simplemente no aparecerian y nadie se enteraria.
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: caducar-a-los-30-dias
+            Status: Enabled
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 3}
+      Tags:
+        - {Key: Proyecto, Value: RENASER}
+
+  PoliticaDelBucketDeLogs:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketDeLogsDeAcceso
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Sin este permiso el balanceador NO se crea: AWS comprueba que puede
+          # escribir en el bucket ANTES de aceptar la configuracion de logs, y
+          # si no puede, falla la pila entera. No es opcional.
+          - Sid: DejarEscribirAlBalanceador
+            Effect: Allow
+            Principal:
+              AWS: !Sub
+                - 'arn:${AWS::Partition}:iam::${CuentaElb}:root'
+                - CuentaElb: !FindInMap [CuentaDeLogsDeElb, !Ref 'AWS::Region', Cuenta]
+            Action: s3:PutObject
+            Resource: !Sub '${BucketDeLogsDeAcceso.Arn}/alb/AWSLogs/${AWS::AccountId}/*'
+          - Sid: NadaSinTls
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt BucketDeLogsDeAcceso.Arn
+              - !Sub '${BucketDeLogsDeAcceso.Arn}/*'
+            Condition:
+              Bool: {'aws:SecureTransport': 'false'}
+
+  GrupoDeDestino:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-api'
+      VpcId: !Ref Vpc
+      Protocol: HTTP
+      Port: 8000
+      TargetType: instance
+      # ESTE es el mecanismo que sustituye al arranque en frio de Render: el
+      # balanceador pregunta cada 15 s por /health y solo manda trafico a
+      # maquinas que ya han contestado. Nadie llega nunca a un proceso a medio
+      # arrancar.
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      # 2 aciertos para entrar (rapido en despliegues), 3 fallos para salir (no
+      # sacar una maquina buena por un pico puntual de latencia).
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: {HttpCode: '200'}
+      TargetGroupAttributes:
+        # 30 s en vez de los 300 por defecto: es lo que tarda un despliegue en
+        # vaciar una maquina antes de apagarla. Con 300, cada despliegue se
+        # arrastraba 5 minutos extra por instancia sin ninguna razon: esta API
+        # no tiene peticiones largas.
+        - {Key: deregistration_delay.timeout_seconds, Value: '30'}
+        - {Key: load_balancing.algorithm.type, Value: least_outstanding_requests}
+      Tags:
+        - {Key: Proyecto, Value: RENASER}
+
+  Balanceador:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # La politica del bucket TIENE que existir antes: al crearse, el balanceador
+    # hace una escritura de prueba y aborta si le deniegan el acceso.
+    # (CloudFormation ignora este DependsOn cuando el bucket no se crea.)
+    DependsOn: PoliticaDelBucketDeLogs
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-alb'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets: [!Ref SubredPublicaA, !Ref SubredPublicaB]
+      SecurityGroups: [!Ref GrupoDeSeguridadDelBalanceador]
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: !If [EsProteccionActiva, 'true', 'false']
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: 'true'
+        - Key: routing.http.desync_mitigation_mode
+          Value: defensive
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+        # Apagar y encender los logs es cambiar SOLO este booleano: el destino
+        # queda configurado siempre, asi que no hay que recrear nada.
+        - Key: access_logs.s3.enabled
+          Value: !If [HayLogsDeAcceso, 'true', 'false']
+        - Key: access_logs.s3.bucket
+          Value: !Ref BucketDeLogsDeAcceso
+        - Key: access_logs.s3.prefix
+          Value: alb
+      Tags:
+        - {Key: Proyecto, Value: RENASER}
+
+  EscuchaHttps:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HayCertificado
+    Properties:
+      LoadBalancerArn: !Ref Balanceador
+      Protocol: HTTPS
+      Port: 443
+      Certificates: [{CertificateArn: !Ref CertificadoAcmArn}]
+      # Politica de 2021 con TLS 1.3: descarta TLS 1.0/1.1 y los cifrados
+      # rotos. La app movil (React Native) y cualquier navegador actual hablan
+      # TLS 1.2+ sin problema.
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GrupoDeDestino
+
+  EscuchaHttp:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Balanceador
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        # Con certificado, el puerto 80 NO sirve la API: redirige (301) a HTTPS.
+        # Sin certificado, sirve directamente, y eso es solo aceptable para la
+        # prueba de humo del primer despliegue.
+        - !If
+          - HayCertificado
+          - Type: redirect
+            RedirectConfig: {Protocol: HTTPS, Port: '443', StatusCode: HTTP_301}
+          - Type: forward
+            TargetGroupArn: !Ref GrupoDeDestino
+
+  # ===========================================================================
+  # OBSERVABILIDAD
+  # ===========================================================================
+  GrupoDeLogsDeLaApi:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/${PrefijoDeRecursos}/${Entorno}/api'
+      RetentionInDays: !Ref RetencionDeLogsEnDias
+
+  TemaDeAlertas:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${PrefijoDeRecursos}-${Entorno}-alertas'
+      DisplayName: Alertas API RENASER
+
+  SuscripcionDeCorreo:
+    Type: AWS::SNS::Subscription
+    Condition: HayCorreoDeAlertas
+    Properties:
+      TopicArn: !Ref TemaDeAlertas
+      Protocol: email
+      Endpoint: !Ref CorreoDeAlertas
+
+  # ===========================================================================
+  # PUNTERO DE VERSION DESPLEGADA
+  # ===========================================================================
+  #
+  # Aqui vive el nombre de la imagen que se esta ejecutando. Cada maquina lo lee
+  # AL ARRANCAR, no en el momento de crear la plantilla.
+  #
+  # Por que asi y no metiendo la etiqueta en la plantilla: un rollback pasa a
+  # ser "escribe la etiqueta anterior aqui y renueva las instancias" — unos 3
+  # minutos, sin actualizar CloudFormation y sin tocar infraestructura. Si la
+  # version viviera en la plantilla, volver atras significaria un update de la
+  # pila entera, con su ventana de riesgo, para cambiar una cadena de texto.
+  #
+  # El CI sobreescribe este valor en cada despliegue. CloudFormation NO lo pisa
+  # mientras nadie cambie el parametro EtiquetaDeImagen en la plantilla (solo
+  # actualiza los recursos cuyas propiedades cambian), asi que no hay pelea.
+  ParametroDeLaImagen:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${PrefijoDeRecursos}/${Entorno}/imagen-api'
+      Type: String
+      # Standard: gratis. Advanced solo hace falta a partir de 4 KB o para
+      # politicas de caducidad, y aqui el valor es una etiqueta de docker.
+      Tier: Standard
+      Value: !Ref EtiquetaDeImagen
+      Description: Etiqueta de la imagen de ECR que ejecutan las maquinas de la API.
+
+  # ===========================================================================
+  # IAM DE LAS MAQUINAS — privilegio minimo
+  # ===========================================================================
+  RolDeLasMaquinas:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Unica politica gestionada por AWS que se usa. Da acceso a SSM Session
+        # Manager, y con eso se puede entrar a depurar una maquina SIN abrir el
+        # puerto 22, sin claves SSH y con la sesion registrada en CloudTrail.
+        # Cambia una clave privada que alguien tiene que custodiar por un
+        # permiso que se quita con un clic.
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+
+        - PolicyName: bajar-la-imagen
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: TokenDelRegistro
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: SoloLecturaYSoloNuestroRepositorio
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                # NO hay ecr:PutImage: una maquina de produccion comprometida no
+                # debe poder publicar una imagen que luego se despliegue sola.
+                # Subir imagenes es cosa del CI, y solo del CI.
+                Resource: !ImportValue
+                  'Fn::Sub': '${PilaDeFundacion}-ArnDelRepositorio'
+
+        - PolicyName: leer-la-configuracion
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SoloEsteSecreto
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                # El comodin final cubre el sufijo aleatorio de 6 caracteres que
+                # AWS anade al ARN de todo secreto.
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${NombreDelSecreto}-??????'
+              - Sid: DescifrarSoloAtravesDeSecretsManager
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    # Sin esta condicion, el permiso valdria para descifrar
+                    # CUALQUIER cosa de la cuenta. Con ella, la clave solo se
+                    # puede usar cuando quien llama es Secrets Manager.
+                    kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
+              - Sid: PunteroDeVersionYRamaDelEntorno
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${PrefijoDeRecursos}/${Entorno}/*'
+
+        - PolicyName: escribir-telemetria
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: LogsSoloEnNuestroGrupo
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                # El ARN que devuelve CloudFormation ya termina en `:*`, que es
+                # lo que cubre los flujos de dentro del grupo. Anadirle otro `:*`
+                # daria un ARN que no casa con nada y el contenedor arrancaria
+                # sin poder escribir un solo log.
+                Resource: !GetAtt GrupoDeLogsDeLaApi.Arn
+              - Sid: MetricasSoloEnElEspacioDelAgente
+                Effect: Allow
+                Action: cloudwatch:PutMetricData
+                # PutMetricData no admite ARN de recurso; la condicion de espacio
+                # de nombres es la forma de acotarlo que si funciona.
+                Resource: '*'
+                Condition:
+                  StringEquals: {cloudwatch:namespace: CWAgent}
+
+        - PolicyName: avisar-del-arranque
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Permite a la maquina decirle a CloudFormation "he arrancado bien"
+              # o "he fallado". Es lo que hace que un despliegue roto se revierta
+              # solo en lugar de dejar el servicio caido esperando a que alguien
+              # mire la consola.
+              - Sid: SenalarSoloEstaPila
+                Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+
+      Tags:
+        - {Key: Proyecto, Value: RENASER}
+
+  PerfilDeLasMaquinas:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref RolDeLasMaquinas]
+
+  # ===========================================================================
+  # PLANTILLA DE ARRANQUE
+  # ===========================================================================
+  PlantillaDeArranque:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${PrefijoDeRecursos}-${Entorno}-api'
+      LaunchTemplateData:
+        ImageId: !Ref AmiDeAmazonLinux2023
+        InstanceType: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, TipoDeInstancia]
+        IamInstanceProfile: {Arn: !GetAtt PerfilDeLasMaquinas.Arn}
+        # NO se declara KeyName: sin clave SSH no hay clave SSH que perder,
+        # rotar ni compartir. El acceso de emergencia es SSM Session Manager.
+        MetadataOptions:
+          # IMDSv2 obligatorio: cierra la via clasica por la que una SSRF en la
+          # aplicacion se convierte en robo de las credenciales del rol.
+          HttpTokens: required
+          HttpEndpoint: enabled
+          # 1 salto = solo procesos del ANFITRION llegan a los metadatos. El
+          # contenedor pasa por el puente de Docker, que cuenta como salto
+          # extra, asi que la app NO puede leer credenciales de AWS ni aunque la
+          # comprometan. No las necesita: el anfitrion le entrega la
+          # configuracion ya resuelta como variables de entorno.
+          HttpPutResponseHopLimit: 1
+        Monitoring:
+          # Metricas cada minuto solo en alta disponibilidad. Cuestan unos 2 USD
+          # por maquina y mes; lo que compran es que el autoescalado reaccione en
+          # 1 minuto en vez de en 5. En el perfil economico, con una sola maquina
+          # y trafico bajo, esa diferencia no vale el gasto.
+          Enabled: !If [EsAltaDisponibilidad, true, false]
+        CreditSpecification:
+          # `standard` y no `unlimited`: con `unlimited`, un bucle infinito o un
+          # ataque generan CPU extra que se FACTURA sin techo. En `standard` la
+          # maquina se frena al agotar los creditos, que es un problema visible
+          # (hay alarma) en vez de una factura sorpresa. El credito base de
+          # t3.small son 24 creditos/hora, muy por encima de esta carga.
+          CpuCredits: standard
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeType: gp3
+              # 20 GiB: el sistema ocupa ~3, y la imagen de Python con sus capas
+              # ronda 1 GiB por version. Deja sitio para varias versiones sin
+              # que un disco lleno tire el despliegue.
+              VolumeSize: 20
+              # Cifrado siempre: cuesta cero y es la diferencia entre un disco
+              # retirado y un incidente de datos que hay que notificar.
+              Encrypted: true
+              DeleteOnTermination: true
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            Groups: [!Ref GrupoDeSeguridadDeLasMaquinas]
+            # Con 0 NAT hace falta IP publica para hablar con ECR y CloudWatch.
+            # Cuesta 3,65 USD/mes por IP, frente a 33 USD/mes de un NAT. La
+            # contrapartida esta comentada en el grupo de seguridad: la maquina
+            # es enrutable, pero no acepta ni un paquete que no venga del
+            # balanceador.
+            AssociatePublicIpAddress: !If [MaquinasEnPrivada, false, true]
+            DeleteOnTermination: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-api'}
+              - {Key: Proyecto, Value: RENASER}
+              - {Key: Entorno, Value: !Ref Entorno}
+          - ResourceType: volume
+            Tags:
+              - {Key: Proyecto, Value: RENASER}
+
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              set -euo pipefail
+
+              # Todo el arranque queda en un fichero y en el journal. Cuando una
+              # maquina nace mal, este log dice en que linea exacta se rompio;
+              # sin el solo se ve "unhealthy" y a adivinar.
+              exec > >(tee /var/log/renaser-arranque.log | logger -t renaser -s 2>/dev/console) 2>&1
+              echo "=== Arranque RENASER API $(date -Is) ==="
+
+              REGION="${AWS::Region}"
+              PILA="${AWS::StackName}"
+              REGISTRO="${RegistroEcr}"
+              REPO_IMAGEN="${UriDelRepositorio}"
+              PARAM_IMAGEN="/${PrefijoDeRecursos}/${Entorno}/imagen-api"
+              SECRETO="${NombreDelSecreto}"
+              GRUPO_DE_LOGS="${GrupoDeLogsDeLaApi}"
+
+              TOKEN=$(curl -sS -X PUT "http://169.254.169.254/latest/api/token" \
+                -H "X-aws-ec2-metadata-token-ttl-seconds: 600" || echo "")
+              ID_INSTANCIA=$(curl -sS -H "X-aws-ec2-metadata-token: ${!TOKEN}" \
+                http://169.254.169.254/latest/meta-data/instance-id || echo "desconocida")
+
+              avisar() {
+                aws cloudformation signal-resource \
+                  --region "${!REGION}" \
+                  --stack-name "${!PILA}" \
+                  --logical-resource-id GrupoDeAutoescalado \
+                  --unique-id "${!ID_INSTANCIA}" \
+                  --status "${!1}" || true
+              }
+              # Si CUALQUIER linea falla, CloudFormation se entera al momento y
+              # revierte, en vez de quedarse 15 minutos esperando un aviso que
+              # no va a llegar.
+              trap 'echo "FALLO en la linea ${!LINENO}"; avisar FAILURE' ERR
+
+              dnf install -y --setopt=install_weak_deps=False docker jq
+              systemctl enable --now docker
+
+              # Agente de CloudWatch: aporta memoria y disco, que EC2 no publica
+              # por su cuenta. En esta app la memoria es el limite real, asi que
+              # sin esto se vuela a ciegas. Es "best effort": que falle el agente
+              # no es motivo para tirar una maquina que si puede servir trafico.
+              if dnf install -y amazon-cloudwatch-agent; then
+                cat > /opt/aws/amazon-cloudwatch-agent/etc/renaser.json <<'FIN_CW'
+              {
+                "agent": {"metrics_collection_interval": 60, "omit_hostname": true},
+                "metrics": {
+                  "namespace": "CWAgent",
+                  "append_dimensions": {"AutoScalingGroupName": "${!aws:AutoScalingGroupName}"},
+                  "aggregation_dimensions": [["AutoScalingGroupName"]],
+                  "metrics_collected": {
+                    "mem": {"measurement": [{"name": "mem_used_percent"}]},
+                    "disk": {"measurement": [{"name": "used_percent"}], "resources": ["/"]}
+                  }
+                }
+              }
+              FIN_CW
+                /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+                  -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/renaser.json || true
+              else
+                echo "AVISO: no se pudo instalar el agente de CloudWatch; se sigue sin metricas de memoria."
+              fi
+
+              # --- Configuracion -------------------------------------------
+              # Los secretos NUNCA estan en esta plantilla ni en el repositorio:
+              # se leen de Secrets Manager en el arranque y se dejan en un
+              # fichero que solo puede leer root.
+              install -d -m 0700 /etc/renaser
+              umask 077
+              aws secretsmanager get-secret-value \
+                --region "${!REGION}" --secret-id "${!SECRETO}" \
+                --query SecretString --output text \
+                | jq -r 'to_entries[] | "\(.key)=\(.value)"' > /etc/renaser/api.env
+
+              # Lo que no es secreto va en claro y a la vista: quien mire la
+              # plantilla sabe con que banderas corre produccion.
+              {
+                echo "APP_NAME=RENASER Social Media API"
+                echo "ENVIRONMENT=production"
+                echo "PORT=8000"
+                echo "CORS_ORIGINS=${CorsOrigins}"
+                echo "SUPABASE_JWT_ALGORITHM=HS256"
+                echo "SUPABASE_JWT_AUDIENCE=authenticated"
+                echo "FEATURE_RECOMMENDATIONS_V1=${FeatureRecommendationsV1}"
+                echo "PAYMENTS_ENABLED=${PaymentsEnabled}"
+                echo "PAYMENTS_RETURN_URL=${PaymentsReturnUrl}"
+              } >> /etc/renaser/api.env
+              chmod 600 /etc/renaser/api.env
+
+              # --- Imagen ---------------------------------------------------
+              ETIQUETA=$(aws ssm get-parameter --region "${!REGION}" \
+                --name "${!PARAM_IMAGEN}" --query 'Parameter.Value' --output text)
+              IMAGEN="${!REPO_IMAGEN}:${!ETIQUETA}"
+              echo "Desplegando ${!IMAGEN}"
+
+              aws ecr get-login-password --region "${!REGION}" \
+                | docker login --username AWS --password-stdin "${!REGISTRO}"
+              docker pull "${!IMAGEN}"
+
+              docker run -d --name renaser-api --restart always \
+                -p 8000:8000 \
+                --env-file /etc/renaser/api.env \
+                --log-driver=awslogs \
+                --log-opt awslogs-region="${!REGION}" \
+                --log-opt awslogs-group="${!GRUPO_DE_LOGS}" \
+                --log-opt awslogs-stream="${!ID_INSTANCIA}" \
+                --memory=1500m --memory-reservation=768m \
+                --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+                --security-opt no-new-privileges \
+                "${!IMAGEN}"
+              # Notas de las banderas de arriba, porque no son decorativas:
+              #  --memory=1500m: si la app se desmadra, muere el CONTENEDOR (y
+              #    --restart always lo repone) en vez de morir la maquina entera
+              #    arrastrando al agente y dejandola muda.
+              #  --read-only: el sistema de ficheros del contenedor no se puede
+              #    escribir. Efecto util de propina: si faltara DATABASE_URL, la
+              #    API caeria a SQLite local (ver config.py) y arrancaria
+              #    "bien" con la base VACIA — una app en marcha y sin datos, que
+              #    es peor que una caida porque nadie la detecta. En solo
+              #    lectura eso falla en el acto y el health check lo denuncia.
+              #  --tmpfs /tmp: Pillow usa tempfile.TemporaryDirectory() al
+              #    derivar imagenes (media_processing.py), y eso vive en /tmp.
+              #  --security-opt no-new-privileges: ningun proceso del contenedor
+              #    puede escalar privilegios con un binario setuid.
+
+              # --- Solo se avisa cuando la API responde de verdad -------------
+              for intento in $(seq 1 40); do
+                if curl -fsS --max-time 3 http://127.0.0.1:8000/health > /dev/null; then
+                  echo "API viva tras ${!intento} intentos"
+                  avisar SUCCESS
+                  echo "=== Arranque completado $(date -Is) ==="
+                  exit 0
+                fi
+                sleep 3
+              done
+
+              echo "ERROR: /health no respondio en 120 s"
+              docker logs --tail 100 renaser-api || true
+              avisar FAILURE
+              exit 1
+            - RegistroEcr: !ImportValue
+                'Fn::Sub': '${PilaDeFundacion}-RegistroDeEcr'
+              UriDelRepositorio: !ImportValue
+                'Fn::Sub': '${PilaDeFundacion}-UriDelRepositorio'
+
+  # ===========================================================================
+  # GRUPO DE AUTOESCALADO
+  # ===========================================================================
+  GrupoDeAutoescalado:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: [RutaAInternet, ParametroDeLaImagen]
+    CreationPolicy:
+      ResourceSignal:
+        # Se exige 1 aviso (no `Deseadas`) a proposito: CreationPolicy no admite
+        # funciones, y ademas con 1 maquina sana ya se sabe si la imagen y la
+        # configuracion son correctas. Del resto se encarga el grupo.
+        Count: 1
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: 1
+        PauseTime: PT10M
+        # Sin esto, CloudFormation daria por bueno el cambio en cuanto la
+        # maquina EXISTE. Con esto, espera a que la maquina diga "mi API
+        # responde"; si no lo dice, revierte a la version anterior sola.
+        WaitOnResourceSignals: true
+        # Se congelan durante el despliegue para que el autoescalado no meta ni
+        # saque maquinas en mitad del reemplazo y confunda el resultado.
+        SuspendProcesses: [HealthCheck, ReplaceUnhealthy, AZRebalance, AlarmNotification, ScheduledActions]
+    Properties:
+      AutoScalingGroupName: !Sub '${PrefijoDeRecursos}-api-${Entorno}'
+      MinSize: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, Minimo]
+      DesiredCapacity: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, Deseadas]
+      MaxSize: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, Maximo]
+      VPCZoneIdentifier: !If
+        - MaquinasEnPrivada
+        - [!Ref SubredPrivadaA, !Ref SubredPrivadaB]
+        - [!Ref SubredPublicaA, !Ref SubredPublicaB]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref PlantillaDeArranque
+        Version: !GetAtt PlantillaDeArranque.LatestVersionNumber
+      TargetGroupARNs: [!Ref GrupoDeDestino]
+      # ELB y no EC2: para EC2 una maquina esta "sana" mientras el hardware
+      # responda, aunque el contenedor este muerto. Con ELB, sana significa "mi
+      # /health devuelve 200". Es la diferencia entre reponer una maquina rota y
+      # tener una maquina encendida que no sirve a nadie.
+      HealthCheckType: ELB
+      # Margen de arranque: descargar ~1 GB de imagen desde ECR y levantar
+      # uvicorn lleva entre 1 y 3 minutos. Con un margen corto, el grupo mataria
+      # a la maquina justo antes de que terminara de arrancar, en bucle.
+      HealthCheckGracePeriod: 300
+      DefaultInstanceWarmup: 300
+      MetricsCollection:
+        - Granularity: 1Minute
+      Tags:
+        - {Key: Proyecto, Value: RENASER, PropagateAtLaunch: true}
+        - {Key: Entorno, Value: !Ref Entorno, PropagateAtLaunch: true}
+        - {Key: Perfil, Value: !Ref PerfilDeCapacidad, PropagateAtLaunch: true}
+        - {Key: Gestionado-por, Value: CloudFormation, PropagateAtLaunch: true}
+
+  # --- Politicas de escalado -------------------------------------------------
+  EscaladoPorCpu:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref GrupoDeAutoescalado
+      PolicyType: TargetTrackingScaling
+      # Seguimiento de objetivo y no pasos manuales: AWS calcula solo cuantas
+      # maquinas hacen falta para mantener el numero. Menos que configurar y
+      # menos que equivocarse.
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification: {PredefinedMetricType: ASGAverageCPUUtilization}
+        TargetValue: !Ref CpuObjetivo
+        DisableScaleIn: false
+      EstimatedInstanceWarmup: 300
+
+  EscaladoPorPeticiones:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref GrupoDeAutoescalado
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Join
+            - '/'
+            - - !GetAtt Balanceador.LoadBalancerFullName
+              - !GetAtt GrupoDeDestino.TargetGroupFullName
+        TargetValue: !Ref PeticionesPorInstanciaObjetivo
+        DisableScaleIn: false
+      EstimatedInstanceWarmup: 300
+    # La segunda politica existe porque esta API se pasa el tiempo ESPERANDO a
+    # Supabase: se puede quedar sin capacidad de atender con la CPU al 20 %, y
+    # una politica que solo mire el procesador no escalaria nunca. Teniendo las
+    # dos, el grupo crece con la que primero lo pida y solo se encoge cuando las
+    # dos estan tranquilas.
+
+  # --- Alarmas ---------------------------------------------------------------
+  AlarmaSinInstanciasSanas:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-sin-instancias-sanas'
+      AlarmDescription: >-
+        No queda ninguna maquina pasando el health check: la API esta caida.
+        Es la alarma que de verdad importa.
+      Namespace: AWS/ApplicationELB
+      MetricName: HealthyHostCount
+      Dimensions:
+        - {Name: LoadBalancer, Value: !GetAtt Balanceador.LoadBalancerFullName}
+        - {Name: TargetGroup, Value: !GetAtt GrupoDeDestino.TargetGroupFullName}
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      # breaching: si dejan de llegar datos es que no hay nada vivo detras del
+      # balanceador. Callarse ahi seria justo el peor momento para callarse.
+      TreatMissingData: breaching
+      AlarmActions: [!Ref TemaDeAlertas]
+      OKActions: [!Ref TemaDeAlertas]
+
+  AlarmaErrores5xxDelBalanceador:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-5xx-del-balanceador'
+      AlarmDescription: El balanceador no consigue hablar con ninguna maquina (502/503/504).
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Dimensions:
+        - {Name: LoadBalancer, Value: !GetAtt Balanceador.LoadBalancerFullName}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
+  AlarmaErrores5xxDeLaApi:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-5xx-de-la-api'
+      AlarmDescription: La API responde, pero devuelve errores de servidor. Suele ser Supabase o una excepcion sin capturar.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - {Name: LoadBalancer, Value: !GetAtt Balanceador.LoadBalancerFullName}
+        - {Name: TargetGroup, Value: !GetAtt GrupoDeDestino.TargetGroupFullName}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
+  AlarmaLatenciaAlta:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-latencia-alta'
+      AlarmDescription: >-
+        El percentil 95 pasa de 2 s durante 3 minutos. Referencia medida en
+        Render: 0,30 s en caliente. Si esto salta, algo se ha torcido.
+      Namespace: AWS/ApplicationELB
+      MetricName: TargetResponseTime
+      Dimensions:
+        - {Name: LoadBalancer, Value: !GetAtt Balanceador.LoadBalancerFullName}
+        - {Name: TargetGroup, Value: !GetAtt GrupoDeDestino.TargetGroupFullName}
+      # Percentil 95 y no media: la media la tapa el trafico bueno, y lo que se
+      # quiere detectar es que a una parte de la gente le va lento.
+      ExtendedStatistic: p95
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
+  AlarmaMemoriaAlta:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-memoria-alta'
+      AlarmDescription: >-
+        Memoria por encima del 85 %. En esta app la memoria es el limite real
+        (Python + Pillow), asi que esta alarma es el aviso previo a un reinicio
+        del contenedor por falta de memoria.
+      Namespace: CWAgent
+      MetricName: mem_used_percent
+      Dimensions:
+        - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      # notBreaching: si el agente de CloudWatch no llego a instalarse, no hay
+      # datos; eso no es una emergencia, solo falta de visibilidad.
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
+  AlarmaCreditosDeCpu:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-creditos-de-cpu-bajos'
+      AlarmDescription: >-
+        Las instancias t3 en modo `standard` se FRENAN al quedarse sin creditos.
+        Esta alarma avisa antes de que pase: es la senal de que hay que subir de
+        tipo de instancia o de numero de maquinas.
+      Namespace: AWS/EC2
+      MetricName: CPUCreditBalance
+      Dimensions:
+        - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 20
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
+  Panel:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${PrefijoDeRecursos}-${Entorno}-api'
+      # Un panel donde se ve de un vistazo si la API esta viva, cuanto tarda y
+      # cuanto le queda de margen. Los 3 primeros paneles de la cuenta son
+      # gratis. Se pone porque la alternativa (buscar seis metricas sueltas en
+      # mitad de un incidente) cuesta minutos justo cuando no sobran.
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {
+                "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Salud: maquinas sanas vs no sanas",
+                  "region": "${AWS::Region}",
+                  "stat": "Minimum", "period": 60,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", "${GrupoTg}", "LoadBalancer", "${AlbNombre}"],
+                    [".", "UnHealthyHostCount", ".", ".", ".", "."]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Latencia de la API (p50 / p95 / p99)",
+                  "region": "${AWS::Region}", "period": 60,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "TargetResponseTime", "TargetGroup", "${GrupoTg}", "LoadBalancer", "${AlbNombre}", {"stat": "p50"}],
+                    ["...", {"stat": "p95"}],
+                    ["...", {"stat": "p99"}]
+                  ],
+                  "yAxis": {"left": {"label": "segundos", "showUnits": false}}
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Trafico y errores",
+                  "region": "${AWS::Region}", "stat": "Sum", "period": 300,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${AlbNombre}"],
+                    [".", "HTTPCode_Target_5XX_Count", ".", "."],
+                    [".", "HTTPCode_ELB_5XX_Count", ".", "."]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Capacidad: CPU, memoria y maquinas",
+                  "region": "${AWS::Region}", "period": 300,
+                  "metrics": [
+                    ["AWS/EC2", "CPUUtilization", "AutoScalingGroupName", "${GrupoAsg}", {"stat": "Average"}],
+                    ["CWAgent", "mem_used_percent", ".", ".", {"stat": "Average"}],
+                    ["AWS/AutoScaling", "GroupInServiceInstances", ".", ".", {"stat": "Average"}]
+                  ],
+                  "yAxis": {"left": {"min": 0}}
+                }
+              }
+            ]
+          }
+        - AlbNombre: !GetAtt Balanceador.LoadBalancerFullName
+          GrupoTg: !GetAtt GrupoDeDestino.TargetGroupFullName
+          GrupoAsg: !Ref GrupoDeAutoescalado
+
+# -----------------------------------------------------------------------------
+Outputs:
+
+  UrlDeLaApi:
+    Description: >-
+      Punto de entrada real. Con certificado es HTTPS; sin el, HTTP y solo para
+      la prueba de humo. El dominio propio se apunta aqui con un CNAME/ALIAS.
+    Value: !If
+      - HayCertificado
+      - !Sub 'https://${Balanceador.DNSName}'
+      - !Sub 'http://${Balanceador.DNSName}'
+
+  DnsDelBalanceador:
+    Description: Nombre DNS del balanceador (destino del CNAME o del ALIAS del dominio).
+    Value: !GetAtt Balanceador.DNSName
+    Export: {Name: !Sub '${AWS::StackName}-DnsDelBalanceador'}
+
+  ZonaHostedDelBalanceador:
+    Description: Hosted zone del ALB, necesaria si el dominio se resuelve con un registro ALIAS de Route 53.
+    Value: !GetAtt Balanceador.CanonicalHostedZoneID
+
+  DominioPrevisto:
+    Condition: HayDominio
+    Description: Dominio que la persona debe apuntar al balanceador a mano.
+    Value: !Ref NombreDeDominio
+
+  NombreDelGrupoDeAutoescalado:
+    Description: Lo usa el workflow de despliegue para lanzar el Instance Refresh.
+    Value: !Ref GrupoDeAutoescalado
+    Export: {Name: !Sub '${AWS::StackName}-GrupoDeAutoescalado'}
+
+  ParametroDeLaVersion:
+    Description: >-
+      Parametro de SSM que decide que imagen corre. Cambiarlo y renovar las
+      instancias ES el rollback.
+    Value: !Ref ParametroDeLaImagen
+    Export: {Name: !Sub '${AWS::StackName}-ParametroDeLaVersion'}
+
+  GrupoDeLogs:
+    Description: Donde salen los logs del contenedor.
+    Value: !Ref GrupoDeLogsDeLaApi
+
+  TemaDeAlertasArn:
+    Description: Tema SNS de las alarmas.
+    Value: !Ref TemaDeAlertas
+
+  PerfilActivo:
+    Description: Perfil de capacidad con el que se desplego, y su capacidad efectiva.
+    Value: !Sub
+      - '${PerfilDeCapacidad} (min ${Min} / deseadas ${Des} / max ${Max}, ${Tipo})'
+      - Min: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, Minimo]
+        Des: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, Deseadas]
+        Max: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, Maximo]
+        Tipo: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, TipoDeInstancia]
