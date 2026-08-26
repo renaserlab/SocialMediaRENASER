@@ -14,6 +14,7 @@ import { setAuthTokenProvider, warmUpApi, ApiError } from '@/services/api';
 import { enlaceAuthInicial } from '@/services/supabase';
 import { registerForPush, unregisterPush } from '@/services/notifications';
 import { descartar as descartarSenales } from '@/services/senales';
+import { olvidarFirmasDeAdjuntos } from '@/services/messageMedia';
 import { clearSignedUrlCache } from '@/services/storage';
 import { olvidarPerfiles } from '@/services/cachePerfil';
 import { useAppStore } from '@/store/useAppStore';
@@ -275,6 +276,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.signOut();
     // Las firmas van atadas a la sesion: no deben sobrevivir al cierre.
     clearSignedUrlCache();
+    // Y las de los adjuntos de chat aparte, que viven en su propio bucket
+    // privado: una firma vigente es un enlace a una conversacion ajena.
+    olvidarFirmasDeAdjuntos();
     // Y lo mismo los perfiles ya vistos: quien entre despues en este telefono
     // no tiene por que ver de quien era la cuenta anterior.
     olvidarPerfiles();
@@ -294,6 +298,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await AuthRepository.deleteAccount();
     // A partir de aqui es el mismo cierre que signOut: la cuenta ya no existe.
     clearSignedUrlCache();
+    olvidarFirmasDeAdjuntos();
     olvidarPerfiles();
     // Lo que sabiamos del cuestionario era de la cuenta anterior, y las
     // senales pendientes tambien: enviarlas ahora las atribuiria a quien entre

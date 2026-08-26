@@ -1,5 +1,13 @@
-import React, { useCallback, useState } from 'react';
-import { Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -9,7 +17,10 @@ import { Input } from '@/components/Input';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
-import { MessageRepository } from '@/repositories/MessageRepository';
+import {
+  CONVERSACIONES_POR_PAGINA,
+  MessageRepository,
+} from '@/repositories/MessageRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -27,34 +38,96 @@ export function MessagesScreen() {
   const [remote, setRemote] = useState<Conversation[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
   const [refreshing, setRefreshing] = useState(false);
+  // Si queda algo por debajo, y si se esta trayendo ahora mismo.
+  const [hayMas, setHayMas] = useState(true);
+  const [cargandoMas, setCargandoMas] = useState(false);
 
-  const load = useCallback(() => {
-    // Sin sesion no se pide nada: las conversaciones son de alguien y el
-    // servidor responderia que no esta autorizado.
-    if (!supabaseEnabled || !signedIn) {
-      setStatus('idle');
-      return;
-    }
-    setStatus('loading');
-    MessageRepository.listConversations()
-      .then((data) => {
-        setRemote(data);
+  /*
+    Lo que hay pintado, accesible desde los callbacks sin volver a crearlos.
+
+    `onEndReached` se dispara mientras alguien baja; si dependiera del estado,
+    cada carga cambiaria la funcion y la lista la volveria a montar en mitad del
+    desplazamiento.
+  */
+  const conversacionesRef = useRef<Conversation[]>([]);
+  conversacionesRef.current = remote;
+
+  /**
+   * Trae la primera pagina.
+   *
+   * `silencioso` es la diferencia entre volver a esta pantalla y verla parpadear
+   * en blanco o no. Antes cada vuelta al foco ponia el estado en «cargando», y
+   * eso vacia la lista y pinta el esqueleto AUNQUE ya hubiera datos buenos
+   * delante: salir a un chat y volver hacia atras costaba un fogonazo. Lo que
+   * cambia entre ida y vuelta suele ser un contador de no leidos, no la lista
+   * entera, asi que se refresca por debajo y se sustituye cuando llega.
+   */
+  const load = useCallback(
+    (silencioso = false) => {
+      // Sin sesion no se pide nada: las conversaciones son de alguien y el
+      // servidor responderia que no esta autorizado.
+      if (!supabaseEnabled || !signedIn) {
         setStatus('idle');
+        return Promise.resolve();
+      }
+      if (!silencioso || conversacionesRef.current.length === 0) setStatus('loading');
+      return MessageRepository.listConversations()
+        .then((data) => {
+          setRemote(data);
+          setHayMas(data.length >= CONVERSACIONES_POR_PAGINA);
+          setStatus('idle');
+        })
+        .catch(() => {
+          // Un refresco silencioso que falla NO borra lo que se esta leyendo:
+          // sustituir una lista buena por una pantalla de error porque se cayo
+          // la red un segundo es peor que no refrescar.
+          if (silencioso && conversacionesRef.current.length > 0) return;
+          setStatus('error');
+        });
+    },
+    [supabaseEnabled, signedIn],
+  );
+
+  /** La pagina siguiente, al llegar al final de la lista. */
+  const cargarMas = useCallback(() => {
+    if (!supabaseEnabled || !signedIn) return;
+    if (cargandoMas || !hayMas || status === 'loading') return;
+
+    setCargandoMas(true);
+    MessageRepository.listConversations({ offset: conversacionesRef.current.length })
+      .then((mas) => {
+        if (mas.length === 0) {
+          // Sin esto, cada rebote al final de la lista lanzaria otra peticion
+          // para recibir siempre lo mismo.
+          setHayMas(false);
+          return;
+        }
+        setRemote((previas) => {
+          // Por identificador y no concatenando a secas: entre una pagina y la
+          // siguiente puede entrar un mensaje que reordene la lista, y entonces
+          // una conversacion sale en las dos paginas.
+          const vistas = new Set(previas.map((c) => c.id));
+          return [...previas, ...mas.filter((c) => !vistas.has(c.id))];
+        });
+        setHayMas(mas.length >= CONVERSACIONES_POR_PAGINA);
       })
-      .catch(() => setStatus('error'));
-  }, [supabaseEnabled, signedIn]);
+      .catch(() => {
+        // Lo ya cargado se queda; se puede volver a intentar bajando otra vez.
+      })
+      .finally(() => setCargandoMas(false));
+  }, [supabaseEnabled, signedIn, cargandoMas, hayMas, status]);
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load(true);
     }, [load]),
   );
 
-  // Sin espera artificial: `load()` ya gestiona su propio estado de carga.
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    load();
-    setRefreshing(false);
+    // Se espera de verdad: antes se apagaba el indicador en la misma vuelta,
+    // asi que el gesto de estirar no llegaba a verse.
+    void load(true).finally(() => setRefreshing(false));
   }, [load]);
 
   const conversations = supabaseEnabled ? remote : demoConversations;
@@ -109,10 +182,22 @@ export function MessagesScreen() {
             </View>
           </View>
         }
+        // La busqueda filtra lo que YA se ha traido, asi que paginar mientras
+        // se busca daria la sensacion de que la lista se completa sola. Solo se
+        // pide mas cuando se esta viendo la lista entera.
+        onEndReached={searchText ? undefined : cargarMas}
+        onEndReachedThreshold={0.6}
+        ListFooterComponent={
+          cargandoMas ? (
+            <View style={styles.cargandoMas}>
+              <ActivityIndicator size="small" color={colors.textMuted} />
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <StateView
             state={uiState}
-            onRetry={load}
+            onRetry={() => void load()}
             title={uiState === 'empty' ? 'No hay conversaciones' : undefined}
             description={
               uiState === 'empty'
@@ -175,6 +260,7 @@ export function MessagesScreen() {
 
 const styles = StyleSheet.create({
   listContent: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
+  cargandoMas: { paddingVertical: spacing.lg, alignItems: 'center' },
   searchWrapper: {
     position: 'relative',
     marginBottom: spacing.md,

@@ -170,6 +170,15 @@ export function NotificationsScreen() {
               onPress={() =>
                 item.entityType === 'booking'
                   ? router.push('/agenda' as never)
+                  : /*
+                      Si el aviso se refiere a una PUBLICACION, se abre la
+                      publicacion. Hace falta para «te etiquetaron» —la etiqueta
+                      esta en la publicacion, y el perfil es justo donde no
+                      esta— y de paso arregla los «me gusta» y los comentarios,
+                      que tambien llevaban al perfil de quien reacciono.
+                    */
+                  item.entityType === 'post' && item.entityId
+                  ? router.push(`/post/${item.entityId}` as never)
                   : item.actorId
                   ? irAlPerfil(router, item.actorId)
                   : undefined

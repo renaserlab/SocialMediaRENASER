@@ -279,7 +279,7 @@ export async function pickAudio(): Promise<PickedMedia | null> {
 // Subida
 // --------------------------------------------------------------------------
 
-function randomName(ext: string): string {
+export function randomName(ext: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${Date.now()}-${rand}.${ext}`;
 }
@@ -306,7 +306,7 @@ function resolveContentType(media: PickedMedia, ext: string): string {
  * solo para fallar rapido y con un mensaje claro; quien manda es el servidor.
  */
 const MAX_UPLOAD_MB = Number(process.env.EXPO_PUBLIC_MAX_UPLOAD_MB ?? 500);
-const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 /**
  * Tope para un video que NO ha pasado por el compresor.
@@ -324,7 +324,7 @@ const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
  */
 const MAX_VIDEO_SIN_COMPRIMIR_BYTES = 60 * 1024 * 1024;
 
-function formatMb(bytes: number): string {
+export function formatMb(bytes: number): string {
   const mb = bytes / 1024 / 1024;
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
 }
@@ -335,7 +335,7 @@ function formatMb(bytes: number): string {
  * Storage responde SIEMPRE con HTTP 400 y mete el codigo real en el cuerpo
  * (`statusCode`), asi que sin esto en consola solo se ve "400 (Bad Request)".
  */
-function describeStorageError(error: unknown): string {
+export function describeStorageError(error: unknown): string {
   const err = error as {
     message?: string;
     statusCode?: string | number;
@@ -370,10 +370,10 @@ function describeStorageError(error: unknown): string {
  * A partir de este tamaño se usa subida reanudable (TUS) en vez de un POST
  * unico. Es el umbral que recomienda Supabase.
  */
-const RESUMABLE_THRESHOLD = 6 * 1024 * 1024;
+export const RESUMABLE_THRESHOLD = 6 * 1024 * 1024;
 
 /** Archivo local ya leido, listo para subir por cualquiera de las dos vias. */
-type LocalFile = {
+export type LocalFile = {
   /** Tamaño real en bytes. */
   size: number;
   /** Cuerpo para el POST directo de supabase-js. */
@@ -396,7 +396,7 @@ type LocalFile = {
  * que supabase-js sube correctamente. En web el Blob funciona y se conserva tal
  * cual, sin cargar nada extra en memoria.
  */
-async function readLocalFile(uri: string): Promise<LocalFile> {
+export async function readLocalFile(uri: string): Promise<LocalFile> {
   if (Platform.OS === 'web') {
     const response = await fetch(uri);
     if (!response.ok) throw new Error('No se pudo leer el archivo seleccionado.');

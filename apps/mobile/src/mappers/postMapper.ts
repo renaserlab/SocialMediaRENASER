@@ -36,6 +36,13 @@ export type PostMediaDto = {
 export type PostDto = {
   /** De que trata (migracion 0027). Vacio en el contenido sin clasificar. */
   topic_ids?: string[];
+  /**
+   * Etiquetas sociales del texto, como se escribieron (migracion 0031).
+   * Opcional: un backend anterior no manda el campo y no pasa nada.
+   */
+  hashtags?: string[];
+  /** A quien etiqueta la publicacion (migracion 0032). Opcional por lo mismo. */
+  mentions?: PostAuthorDto[];
   id: string;
   author: PostAuthorDto;
   body: string;
@@ -103,8 +110,17 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
   return {
     category: dto.category ?? null,
     // Un backend anterior a la migracion 0027 no manda el campo: sin temas, no
-    // sin publicacion.
+    // sin publicacion. Lo mismo vale para las etiquetas (0031) y las personas
+    // etiquetadas (0032): el `?? []` es lo que permite desplegar el movil antes
+    // de que un humano apruebe las migraciones.
     topicIds: dto.topic_ids ?? [],
+    hashtags: dto.hashtags ?? [],
+    mentions: (dto.mentions ?? []).map((persona) => ({
+      id: persona.id,
+      nombre: authorName(persona),
+      usuario: persona.username ?? undefined,
+      avatarUrl: profileImageUrl(persona.avatar_path),
+    })),
     id: dto.id,
     author: authorName(dto.author),
     authorId: dto.author.id,

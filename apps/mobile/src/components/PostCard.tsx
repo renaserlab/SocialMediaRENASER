@@ -10,6 +10,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
+import { TextoDePublicacion } from '@/components/TextoDePublicacion';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
@@ -308,8 +309,15 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         un bloque de texto vacio con su margen entero justo encima de la
         imagen, que se lee como si algo hubiera fallado al cargar.
       */}
+      {/*
+        Y el cuerpo ya no es texto plano: las etiquetas se tocan y llevan a
+        /hashtag/..., y debajo va la gente etiquetada. El contenedor conserva
+        el mismo relleno de antes para no mover nada de sitio.
+      */}
       {post.body.trim() !== '' && (
-        <Text variant="body" style={styles.body}>{post.body}</Text>
+        <View style={styles.body}>
+          <TextoDePublicacion cuerpo={post.body} menciones={post.mentions} />
+        </View>
       )}
       {post.mediaType === 'video' ? (
         /*
