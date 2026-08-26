@@ -23,22 +23,48 @@ const media = palette('dark');
 export function VideoTile({
   uri,
   posterUrl,
+  fondo,
 }: {
   uri?: string | null;
   posterUrl?: string | null;
   /** Solo lo usa la variante nativa; aqui la cache la lleva el navegador. */
   posterCacheKey?: string | null;
+  /** Color de la espera; una cuadricula pasa el gris de su tema, no casi-negro. */
+  fondo?: string;
+  /** Solo lo usa la variante nativa (aqui no se dibuja simbolo). */
+  colorSimbolo?: string;
 }) {
   const src = uri && !uri.includes('#') ? `${uri}#t=0.001` : uri;
 
+  /*
+    CON POSTER, UNA IMAGEN; SIN EL, EL VIDEO.
+
+    Antes se montaba el elemento `<video>` SIEMPRE, y solo se le decia que no
+    precargara si habia poster. Los bytes se ahorraban, pero el elemento seguia
+    creandose: una cuadricula de perfil llega a sesenta, cada uno con su
+    decodificador esperando, y el navegador se atragantaba justo mientras
+    cargaban las fotos. Cuando ya hay un poster guardado, una imagen normal
+    enseña exactamente lo mismo y no cuesta nada.
+  */
   return (
-    <View style={[styles.wrap, { backgroundColor: media.surfaceAlt }]}>
-      {src ? (
+    <View style={[styles.wrap, { backgroundColor: fondo ?? media.surfaceAlt }]}>
+      {posterUrl ? (
+        <img
+          src={posterUrl}
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            pointerEvents: 'none',
+          }}
+        />
+      ) : src ? (
         <video
           src={src}
-          poster={posterUrl ?? undefined}
-          // Con poster guardado no hace falta tocar el video para la miniatura.
-          preload={posterUrl ? 'none' : 'metadata'}
+          preload="metadata"
           muted
           playsInline
           // Es una miniatura, no un reproductor: sin controles y sin opciones

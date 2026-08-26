@@ -26,8 +26,10 @@ import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { guardarPerfil, pedirPerfil, perfilEnCache } from '@/services/cachePerfil';
 import { PermisoDenegadoError, pickImage, takePhoto } from '@/services/storage';
 import { useTranslation } from '@/i18n/useTranslation';
+import { GRID_COLUMNS, GRID_GAP, gridItemSize } from '@/lib/gridLayout';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -87,8 +89,22 @@ export function ProfileScreen() {
     );
   }, [section, id]);
 
-  const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
-  const [publicState, setPublicState] = useState<'loading' | 'error' | 'idle'>('loading');
+  /*
+    LO QUE YA SE SABE, DESDE EL PRIMER FOTOGRAMA.
+
+    Este par de estados arrancaba siempre en (null, 'loading'), y mas abajo eso
+    tapaba la pantalla ENTERA con un indicador de carga hasta que respondiera
+    `/profiles/{id}`. Con la latencia real de la base son cerca de dos segundos
+    en los que la persona ya ha tocado, ya ha visto entrar la pantalla... y no
+    hay nada dentro. Si el perfil se visito antes —o si la precarga que se
+    dispara AL TOCAR ya llego— se pinta entero de salida y se refresca detras.
+  */
+  const [publicProfile, setPublicProfile] = useState<UserProfile | null>(() =>
+    isRealPublic ? perfilEnCache(id) : null,
+  );
+  const [publicState, setPublicState] = useState<'loading' | 'error' | 'idle'>(() =>
+    isRealPublic && perfilEnCache(id) ? 'idle' : 'loading',
+  );
 
   // Publicaciones del perfil que se esta viendo (el propio o el de otro).
   const galleryOwnerId = isRealPublic ? id : currentUser?.id;
@@ -99,19 +115,36 @@ export function ProfileScreen() {
     error: postsError,
   } = useProfilePosts(isDarren ? null : galleryOwnerId);
 
-  const loadPublic = React.useCallback(() => {
-    if (!isRealPublic || !id) return;
-    setPublicState('loading');
-    ProfileRepository.getById(id)
-      .then((p) => {
-        setPublicProfile(p);
-        setFollowing(p.isFollowing ?? false);
-        setBlocked(p.isBlocked ?? false);
-        setFollowersCount(p.followers);
-        setPublicState('idle');
-      })
-      .catch(() => setPublicState('error'));
-  }, [id, isRealPublic]);
+  const aplicarPerfil = React.useCallback((p: UserProfile) => {
+    setPublicProfile(p);
+    setFollowing(p.isFollowing ?? false);
+    setBlocked(p.isBlocked ?? false);
+    setFollowersCount(p.followers);
+    setPublicState('idle');
+  }, []);
+
+  /**
+   * Trae el perfil ajeno. `refrescar` salta lo guardado y va al servidor: se
+   * usa al reintentar y despues de bloquear, que cambia contadores.
+   *
+   * El error solo se enseña si NO habia nada que enseñar. Tapar un perfil ya
+   * pintado con un «no se pudo cargar» porque fallo el REFRESCO seria cambiar
+   * algo correcto por nada.
+   */
+  const loadPublic = React.useCallback(
+    (refrescar = false) => {
+      if (!isRealPublic || !id) return;
+      const guardado = perfilEnCache(id);
+      if (guardado) aplicarPerfil(guardado);
+      else setPublicState('loading');
+      pedirPerfil(id, { refrescar })
+        .then(aplicarPerfil)
+        .catch(() => {
+          if (!guardado) setPublicState('error');
+        });
+    },
+    [id, isRealPublic, aplicarPerfil],
+  );
 
   useEffect(() => {
     loadPublic();
@@ -204,6 +237,12 @@ export function ProfileScreen() {
         ? await ProfileRepository.unfollow(id)
         : await ProfileRepository.follow(id);
       setFollowersCount(count);
+      // Lo guardado tiene que quedar igual que la pantalla: si no, volver a
+      // este perfil enseñaria «Seguir» durante un instante a quien acaba de
+      // darle, y eso se lee como que no funciono.
+      if (publicProfile) {
+        guardarPerfil({ ...publicProfile, isFollowing: !wasFollowing, followers: count });
+      }
     } catch {
       setFollowing(wasFollowing);
       setFollowersCount((c) => Math.max(0, c + (wasFollowing ? 1 : -1)));
@@ -244,7 +283,9 @@ export function ProfileScreen() {
     try {
       if (estaba) await ProfileRepository.unblock(id);
       else await ProfileRepository.block(id);
-      await loadPublic();
+      // Refresco de verdad: bloquear deshace seguimientos en ambos sentidos,
+      // asi que los contadores guardados ya no valen.
+      loadPublic(true);
     } catch {
       setBlocked(estaba);
       notify(
@@ -375,12 +416,29 @@ export function ProfileScreen() {
     );
   }
 
-  // Perfil público real: carga/error.
+  /*
+    Perfil público real que aún no ha llegado.
+
+    Fallo: se enseña el aviso con su boton de reintentar, porque ahi no hay nada
+    mejor que ofrecer.
+
+    Espera: se enseña el ESQUELETO del perfil, no un indicador de carga suelto.
+    La diferencia no es estetica. Un giro en mitad de una pantalla vacia no dice
+    nada; unas formas donde van a ir la foto, el nombre y las miniaturas dicen
+    «esto es un perfil y esta llegando», y cuando llega no hay salto porque las
+    piezas ya estaban en su sitio. Ademas, la cuadricula real casi siempre esta
+    lista antes que la ficha —son dos peticiones a la vez—, asi que este
+    esqueleto dura lo que tarda la mas lenta, no la suma de las dos.
+  */
   if (isRealPublic && publicState !== 'idle') {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title="PERFIL" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-        <StateView state={publicState === 'error' ? 'error' : 'loading'} onRetry={loadPublic} />
+        {publicState === 'error' ? (
+          <StateView state="error" onRetry={() => loadPublic(true)} />
+        ) : (
+          <EsqueletoDePerfil />
+        )}
       </View>
     );
   }
@@ -744,6 +802,59 @@ export function ProfileScreen() {
   );
 }
 
+/**
+ * El perfil antes de que llegue el perfil.
+ *
+ * Solo formas: el circulo de la foto, dos lineas de identidad, las tres cifras
+ * y tres filas de cuadricula. Ni texto inventado ni cifras a cero, que se leen
+ * como datos reales y equivocados.
+ *
+ * El lado de las celdas se mide igual que en la galeria de verdad
+ * (`gridItemSize`), asi que al llegar las publicaciones ocupan exactamente
+ * estos huecos y nada se mueve.
+ */
+function EsqueletoDePerfil() {
+  const { colors } = useAppTheme();
+  const [ancho, setAncho] = useState(0);
+  const lado = gridItemSize(ancho);
+  const hueco = { backgroundColor: colors.surfaceAlt };
+
+  return (
+    <View style={styles.profileBlock} pointerEvents="none" accessibilityElementsHidden>
+      <View style={styles.identidad}>
+        <View style={[styles.esqAvatar, hueco]} />
+        <View style={[styles.esqLinea, { width: 160, height: 18, marginTop: spacing.sm }, hueco]} />
+        <View style={[styles.esqLinea, { width: 100, height: 12, marginTop: 6 }, hueco]} />
+      </View>
+
+      <View style={styles.metricas}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={styles.statBox}>
+            <View style={[styles.esqLinea, { width: 40, height: 14 }, hueco]} />
+            <View style={[styles.esqLinea, { width: 56, height: 10, marginTop: 6 }, hueco]} />
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.actionRow}>
+        <View style={[styles.esqBoton, hueco]} />
+        <View style={[styles.esqBoton, hueco]} />
+      </View>
+
+      <View
+        style={[styles.esqGrid, { gap: GRID_GAP }]}
+        onLayout={(event) => setAncho(event.nativeEvent.layout.width)}
+      >
+        {lado === 0
+          ? null
+          : Array.from({ length: GRID_COLUMNS * 3 }, (_, i) => (
+              <View key={i} style={[{ width: lado, height: lado }, hueco]} />
+            ))}
+      </View>
+    </View>
+  );
+}
+
 function Stat({ label, value, onPress }: { label: string; value: number; onPress?: () => void }) {
   const { colors } = useAppTheme();
   const display = value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}K` : String(value);
@@ -844,4 +955,9 @@ const styles = StyleSheet.create({
   shortcuts: { flexDirection: 'row', marginVertical: spacing.md, gap: spacing.sm },
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },
   shortcutIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  // Formas de la espera. Mismas medidas que las piezas que sustituyen.
+  esqAvatar: { width: 104, height: 104, borderRadius: 52 },
+  esqLinea: { borderRadius: radius.sm },
+  esqBoton: { flex: 1, height: 40, borderRadius: radius.md },
+  esqGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.xxl },
 });

@@ -34,14 +34,28 @@ const media = palette('dark');
 export function VideoTile({
   posterUrl,
   posterCacheKey,
+  fondo,
+  colorSimbolo,
 }: {
   uri?: string | null;
   posterUrl?: string | null;
   /** Ruta del poster en Storage: clave de cache estable frente a refirmas. */
   posterCacheKey?: string | null;
+  /**
+   * Color de la espera. Por defecto la superficie oscura de media, que es la
+   * correcta detras de un video a pantalla completa.
+   *
+   * Una CUADRICULA es otra cosa: ahi son celdas pequeñas y todas a la vez, y
+   * pintarlas de casi-negro convertia el perfil en un tablero de agujeros
+   * mientras llegaban los posters. Por eso quien dibuja una cuadricula pasa el
+   * gris de su tema.
+   */
+  fondo?: string;
+  /** Color del simbolo de video. Va con `fondo`: uno claro necesita otro. */
+  colorSimbolo?: string;
 }) {
   return (
-    <View style={[styles.wrap, { backgroundColor: media.surfaceAlt }]}>
+    <View style={[styles.wrap, { backgroundColor: fondo ?? media.surfaceAlt }]}>
       {/*
         Cuando exista una miniatura guardada junto al video se pinta aqui. Sin
         ella queda el fondo con el simbolo, que es preferible a un hueco negro:
@@ -58,7 +72,7 @@ export function VideoTile({
         />
       ) : (
         <View style={styles.center}>
-          <Feather name="video" size={22} color={media.textMuted} />
+          <Feather name="video" size={22} color={colorSimbolo ?? media.textMuted} />
         </View>
       )}
     </View>
