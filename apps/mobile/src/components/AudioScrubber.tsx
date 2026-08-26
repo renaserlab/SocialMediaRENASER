@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { LayoutChangeEvent, PanResponder, StyleSheet, View } from 'react-native';
 
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -106,6 +107,22 @@ export function AudioScrubber({
   const dragging = scrubRatio != null;
 
   return (
+    /*
+      Arrastrar esta barra es buscar dentro del audio, no cambiar de seccion.
+
+      Las tres pantallas donde aparece —el reproductor del muro, el de la lista
+      de podcast y `(tabs)/audio/[id]`— viven DENTRO de las pestanas, asi que el
+      carrusel de secciones escucha el arrastre horizontal desde arriba y, al
+      activarse, cancela este `PanResponder`. Sin blindar, mover el dedo sobre
+      la barra saltaba de seccion en vez de adelantar el audio. Es exactamente
+      lo mismo que ya hacia la barra del video (`VideoScrubber`), y a esta se le
+      habia pasado.
+
+      `activarAlTocar` reserva el gesto desde el primer contacto: esto no es un
+      ScrollView que "empiece a moverse", asi que no hay otra senal a la que
+      esperar.
+    */
+    <SinCambioDeSeccion activarAlTocar>
     <View
       // La zona que responde al dedo es más alta que la barra visible, para
       // poder cogerla sin apuntar con precisión.
@@ -133,6 +150,7 @@ export function AudioScrubber({
         ]}
       />
     </View>
+    </SinCambioDeSeccion>
   );
 }
 

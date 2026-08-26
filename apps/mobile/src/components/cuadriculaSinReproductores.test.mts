@@ -105,7 +105,55 @@ test('las celdas a la espera no son negras', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Abrir un perfil precarga: nadie navega por su cuenta
+// 4. En el perfil solo suena un video: el que se ha abierto
+// ---------------------------------------------------------------------------
+
+/**
+ * Cuantos caracteres se miran hacia atras buscando la condicion que protege a
+ * un reproductor. Da de sobra para el `?` de un ternario y sus props, y se
+ * queda muy corto para saltar a otro bloque del JSX.
+ */
+const VENTANA_DE_GUARDA = 300;
+
+test('la seccion de perfil no monta un reproductor por elemento', () => {
+  /*
+    El mismo fallo que ya se pago en la cuadricula y en los testimonios, y que
+    quedo VIVO en las resenas recibidas: `resena.medios.map(...)` montaba un
+    `<VideoPlayer />` por cada video de cada resena, sin condicion ninguna. El
+    listado trae hasta veinte resenas (`ReviewRepository.listarRecibidas`), asi
+    que abrir un perfil con resenas en video creaba veinte reproductores
+    nativos de golpe —cada uno reservando memoria por delante— cuando ninguno
+    estaba reproduciendo.
+
+    La regla es la misma en todo el perfil: el reproductor existe SOLO para el
+    video que se ha abierto (`videoAbierto`), el resto son una superficie con
+    su boton de play.
+  */
+  const seccion = fuente('components/ProfileSection.tsx');
+  const sinGuarda: number[] = [];
+
+  let desde = 0;
+  for (;;) {
+    const posicion = seccion.indexOf('<VideoPlayer', desde);
+    if (posicion === -1) break;
+    desde = posicion + 1;
+    const antes = seccion.slice(Math.max(0, posicion - VENTANA_DE_GUARDA), posicion);
+    if (!antes.includes('videoAbierto ===')) {
+      // Se informa por LINEA, que es lo que se abre para arreglarlo.
+      sinGuarda.push(seccion.slice(0, posicion).split('\n').length);
+    }
+  }
+
+  assert.deepEqual(
+    sinGuarda,
+    [],
+    `Hay reproductores sin la guarda 'videoAbierto ===' en ProfileSection.tsx (lineas ${sinGuarda.join(', ')}). ` +
+      'Cada uno reserva memoria nativa aunque no reproduzca: monta solo el que se ha abierto.',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 5. Abrir un perfil precarga: nadie navega por su cuenta
 // ---------------------------------------------------------------------------
 
 function ficherosDeCodigo(dir: string, encontrados: string[] = []): string[] {

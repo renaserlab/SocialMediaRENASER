@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -147,8 +147,14 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   /** Filtro de la galeria: 0 todos, 1 fotos, 2 videos. */
   const [testimonialFilter, setTestimonialFilter] = useState(0);
   /**
-   * Que reseña en video esta abierta. UNA como mucho: solo esa monta
+   * Que video esta abierto en toda la seccion. UNO como mucho: solo ese monta
    * reproductor, el resto son una superficie con su boton.
+   *
+   * Lo COMPARTEN las resenas recibidas y la galeria de testimonios a
+   * proposito, y no es un descuido: son dos listas de la misma pantalla, asi
+   * que con un estado para cada una se podrian tener dos reproductores vivos
+   * a la vez. Con uno solo, abrir un video cierra el anterior venga de donde
+   * venga, y el techo de reproductores nativos del perfil es uno.
    */
   const [videoAbierto, setVideoAbierto] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -210,11 +216,30 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   );
 
   /**
-   * Se recarga al volver a la pantalla. Sin esto, publicar un episodio (o un
+   * Se recarga al VOLVER a la pantalla. Sin esto, publicar un episodio (o un
    * evento) desde otra vista no se reflejaba aqui: la lista se habia pedido al
    * montar y no se volvia a pedir, asi que lo recien subido no aparecia.
+   *
+   * EL PRIMER FOCO SE SALTA A PROPOSITO. `useFocusEffect` tambien dispara al
+   * MONTAR, asi que `reloadKey` pasaba de 0 a 1 antes de que llegara la
+   * primera respuesta; y como los dos efectos de datos lo llevan en las
+   * dependencias, pedian TODO dos veces en cada apertura. La primera tanda se
+   * tiraba a la basura (`alive = false`) en cuanto volvia la segunda: dos
+   * viajes donde hace falta uno, en podcast, cursos y eventos, y SEIS donde
+   * hacen falta tres en testimonios —listado, resenas disponibles y resenas
+   * recibidas—. Al montar ya carga el efecto de datos; esto solo tiene que
+   * ocuparse de las VUELTAS.
    */
-  useFocusEffect(reload);
+  const yaSeEnfoco = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!yaSeEnfoco.current) {
+        yaSeEnfoco.current = true;
+        return;
+      }
+      reload();
+    }, [reload]),
+  );
 
   /** Alta desde la propia seccion; solo el administrador la ve. */
   const [creating, setCreating] = useState(false);
@@ -617,12 +642,42 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
 
                 {resena.medios.map((medio) =>
                   !medio.url ? null : medio.tipo === 'video' ? (
-                    <VideoPlayer
-                      key={medio.id}
-                      uri={medio.url}
-                      style={styles.resenaMedia}
-                      nativeControls
-                    />
+                    /*
+                      UN reproductor, el del video que se ha abierto. Misma
+                      regla que en los testimonios de aqui abajo y que en la
+                      cuadricula, y por el mismo motivo medido: se montaba uno
+                      por CADA video de CADA resena, sin condicion. El listado
+                      trae hasta veinte resenas, asi que un perfil con resenas
+                      en video creaba veinte reproductores nativos de golpe
+                      —cada uno reservando memoria por delante— sin que
+                      ninguno estuviera reproduciendo. Eso es lo que agota lo
+                      que Android concede a la aplicacion y la cierra.
+
+                      La tabla de resenas no guarda poster, asi que en reposo
+                      se pinta la superficie de media con su boton: dice que
+                      ahi hay un video y cuesta cero.
+                    */
+                    videoAbierto === medio.id ? (
+                      <VideoPlayer
+                        key={medio.id}
+                        uri={medio.url}
+                        style={styles.resenaMedia}
+                        nativeControls
+                        autoPlay
+                      />
+                    ) : (
+                      <Pressable
+                        key={medio.id}
+                        onPress={() => setVideoAbierto(medio.id)}
+                        style={[styles.resenaMedia, styles.videoEnReposo]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Reproducir el video de la reseña"
+                      >
+                        <View style={styles.botonDeReproduccion}>
+                          <Feather name="play" size={22} color="#FFFFFF" />
+                        </View>
+                      </Pressable>
+                    )
                   ) : (
                     <Pressable
                       key={medio.id}

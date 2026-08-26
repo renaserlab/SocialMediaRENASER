@@ -114,8 +114,22 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   const feedMuted = useAppStore((state) => state.feedMuted);
   const toggleFeedMuted = useAppStore((state) => state.toggleFeedMuted);
 
-  // Solo existe reproductor para el video que suena y para el siguiente: dos
-  // como mucho en todo el muro, aunque haya veinte publicaciones con video.
+  /*
+    Solo existe reproductor para los videos que suenan y para el siguiente que
+    se prepara, nunca uno por publicacion: haya veinte publicaciones con video
+    o doscientas, el numero de reproductores vivos no depende de la longitud de
+    la lista.
+
+    Cuantos son exactamente lo decide el muro, no esta tarjeta: hasta
+    MAX_VIDEOS_REPRODUCIENDO (3) sonando mas lo que quepa de
+    MAX_VIDEOS_PREPARANDO (2), con un techo duro de MAX_REPRODUCTORES (4). Ver
+    `MuroDePublicaciones`, donde estan los tres numeros y el motivo de cada uno.
+
+    (Aqui ponia «dos como mucho». Lo fue mientras solo sonaba un video; al pasar
+    a reproducir todos los que se ven de verdad, el techo subio a cuatro y este
+    comentario se quedo atras. Se corrige porque un comentario que miente sobre
+    la memoria nativa es peor que no tener ninguno.)
+  */
   const montarReproductor = autoFeed
     ? Boolean(videoActive || videoPreload)
     : videoStarted && visible !== false;

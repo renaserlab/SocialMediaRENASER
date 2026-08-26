@@ -65,6 +65,20 @@ export function ProfileScreen() {
   const [followersCount, setFollowersCount] = useState(0);
   const [blocked, setBlocked] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
+  /**
+   * Se esta abriendo la conversacion.
+   *
+   * Abrir un chat es la UNICA accion de este perfil que no puede navegar en el
+   * acto: la pantalla `/chat/[id]` necesita el id de la conversacion, y ese id
+   * lo devuelve el servidor al crearla (`POST /conversations/direct`). No hay
+   * nada que precargar como en `irAlPerfil`, porque todavia no se sabe adonde
+   * se va.
+   *
+   * Lo que si se puede es no dejar el boton muerto en la mano mientras tanto, y
+   * sobre todo no dejar que se pulse dos veces: sin este cerrojo, dos toques
+   * seguidos mandaban dos peticiones de creacion a la vez.
+   */
+  const [chatBusy, setChatBusy] = useState(false);
   const [bookingVisible, setBookingVisible] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
   /**
@@ -371,11 +385,17 @@ export function ProfileScreen() {
       return;
     }
     if (!id) return;
+    // Dos toques seguidos creaban dos conversaciones: el cerrojo se mira ANTES
+    // de pedir nada.
+    if (chatBusy) return;
+    setChatBusy(true);
     try {
       const conv = await MessageRepository.getOrCreateDirect(id);
       router.push({ pathname: '/chat/[id]', params: { id: conv.id, name: profileData.fullName } } as never);
     } catch {
       notify('No se pudo abrir el chat', 'Inténtalo de nuevo.');
+    } finally {
+      setChatBusy(false);
     }
   };
 
@@ -616,6 +636,7 @@ export function ProfileScreen() {
                     <Button
                       label="Mensaje"
                       variant="secondary"
+                      loading={chatBusy}
                       onPress={openChat}
                       style={styles.actionBtn}
                     />

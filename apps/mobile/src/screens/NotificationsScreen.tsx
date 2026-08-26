@@ -75,7 +75,11 @@ export function NotificationsScreen() {
       .then((data) => {
         setItems(data);
         setStatus('idle');
-        // Al abrir, marcamos todas como leídas (limpia el badge).
+        // Al abrir, marcamos todas como leídas (limpia el badge). VA DESPUES
+        // del listado a proposito, aunque no dependa de el: lanzadas a la vez
+        // se corren, y si «marcar» llegara primero el listado volveria con
+        // todo en leido y la pantalla no resaltaria nada. Un viaje de mas a
+        // cambio de que se vea lo que estaba sin leer.
         NotificationRepository.markAllRead().catch(() => {});
       })
       .catch(() => setStatus('error'));
