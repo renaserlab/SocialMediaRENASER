@@ -46,18 +46,34 @@ export function useProfilePosts(userId?: string | null) {
         setLoading(false);
         return;
       }
-      // Con algo guardado se refresca EN SILENCIO: quitar lo que ya se ve para
-      // poner un indicador de carga es un parpadeo gratis.
+      /*
+        PINTAR LO GUARDADO Y COMPROBAR DETRAS.
+
+        Si hay algo guardado no se enseña indicador de carga —quitar lo que ya
+        se ve para poner un giro es un parpadeo gratis— pero SI se vuelve a
+        preguntar. Servir la cache sin comprobar tenia un precio inaceptable:
+        publicar una foto y entrar en tu perfil no la habria enseñado hasta un
+        par de minutos despues, y eso se lee como que la publicacion se perdio.
+
+        La primera visita es la contraria: ahi no se fuerza nada, para
+        engancharse a la peticion que ya lanzo la precarga al tocar el perfil en
+        vez de abrir una segunda.
+      */
       const yaHay = galeriaEnCache(userId);
       if (!yaHay) setLoading(true);
       setError(null);
       try {
-        const posts = await pedirGaleria(userId, { refrescar });
+        const posts = await pedirGaleria(userId, { refrescar: refrescar || !!yaHay });
         const repartido = repartir(posts);
         setGallery(repartido.gallery);
         setAudios(repartido.audios);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'No se pudieron cargar las publicaciones.');
+        // Un refresco fallido NO borra lo que ya se esta viendo. Cambiar una
+        // cuadricula correcta por «no se pudieron cargar» porque se cayo la red
+        // un segundo es perder informacion buena a cambio de nada.
+        if (!yaHay) {
+          setError(err instanceof Error ? err.message : 'No se pudieron cargar las publicaciones.');
+        }
       } finally {
         setLoading(false);
       }
