@@ -236,6 +236,15 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const [detail, setDetail] = useState<EventItem | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
   /**
+   * Quien esta mirando.
+   *
+   * Hace falta para distinguir MI resena de una que simplemente puedo moderar:
+   * `puedeGestionar` es cierto tambien para la administracion, asi que
+   * usarlo para decidir el boton haria que un moderador viera «Editar mi
+   * reseña» sobre la opinion de otra persona.
+   */
+  const miId = useAppStore((state) => state.user?.id ?? null);
+  /**
    * Puede publicar y editar en ESTA seccion: en su propio perfil cualquiera,
    * y quien administra en cualquiera (para moderar).
    *
@@ -490,6 +499,8 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
 
   // Galeria de testimonios / reseñas: se ve dentro del perfil, como el podcast.
   if (kind === 'testimonios') {
+    //: La resena que YO he escrito sobre este perfil, si ya escribi una.
+    const miResena = miId ? resenas.find((r) => r.autorId === miId) ?? null : null;
     return (
       <View>
         {/*
@@ -509,18 +520,22 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
           </Text>
           {!isOwner && resenasDisponibles ? (
             <Button
-              label={
-                resenas.some((r) => r.puedeGestionar && r.autorId !== profileId)
-                  ? 'Editar mi reseña'
-                  : 'Escribir reseña'
-              }
+              /*
+                Solo se puede escribir UNA por persona (indice unico de la
+                0030). Si ya hay una mia, el boton lleva a editarla en vez de a
+                escribir otra que el servidor rechazaria con 409.
+
+                Se busca por `autorId === miId`, NO por `puedeGestionar`: eso
+                ultimo tambien es cierto para la administracion, y un moderador
+                acabaria editando la opinion de otra persona creyendo que era
+                la suya.
+              */
+              label={miResena ? 'Editar mi reseña' : 'Escribir reseña'}
               variant="secondary"
               icon="edit-2"
-              onPress={() => {
-                const mia = resenas.find((r) => r.puedeGestionar);
-                if (mia) setEditandoResena(mia);
-                else setEscribiendoResena(true);
-              }}
+              onPress={() =>
+                miResena ? setEditandoResena(miResena) : setEscribiendoResena(true)
+              }
             />
           ) : null}
         </View>
