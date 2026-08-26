@@ -59,6 +59,7 @@ from app.modules.recommendations.config import (
     SENALES_MAXIMAS,
     TIPOS_DE_CONEXION,
     VENTANA_DE_ACTIVIDAD_DIAS,
+    SATURACION_DE_HASHTAG,
     VENTANA_DE_COMPORTAMIENTO_DIAS,
     PesosDeCursos,
     PesosDePersonas,
@@ -883,6 +884,30 @@ async def cursos_para(
     )
 
 
+def _bonus_de_hashtag(
+    etiquetas: set[str] | None,
+    afinidad: dict[str, float],
+    pesos: PesosDeContenido,
+) -> float:
+    """Cuanto sube una publicacion por llevar etiquetas que a esta persona le tiran.
+
+    SE QUEDA CON LA MEJOR, NO CON LA SUMA. Sumar premiaria escribir quince
+    etiquetas: bastaria con rociar la publicacion de almohadillas para aparecer
+    en el feed de todo el mundo. Con el maximo, poner etiquetas de mas no
+    aporta nada —solo cuenta la que de verdad interesa— y la unica forma de
+    subir es acertar.
+
+    Devuelve 0 cuando no hay nada que decir: sin etiquetas, sin historial, o el
+    primer dia de alguien. Eso es lo que mantiene intacto el arranque en frio.
+    """
+    if not etiquetas or not afinidad:
+        return 0.0
+    mejor = max((afinidad.get(e, 0.0) for e in etiquetas), default=0.0)
+    if mejor <= 0:
+        return 0.0
+    return pesos.hashtag * min(1.0, mejor / SATURACION_DE_HASHTAG)
+
+
 async def contenido_para(
     db: AsyncSession,
     user_id: str,
@@ -957,6 +982,20 @@ async def contenido_para(
         if acumulado:
             temas_por_autor[autor_id] = acumulado
 
+    # Etiquetas del lote y afinidad de esta persona con ellas. Las dos son UNA
+    # consulta cada una, y las dos devuelven vacio sin la migracion 0031, asi
+    # que el feed sigue ordenandose igual mientras no exista.
+    hashtags_por_post = await repo.hashtags_de_publicaciones(db, post_ids)
+    afinidad_hashtag: dict[str, float] = {}
+    if hashtags_por_post:
+        afinidad_hashtag = await repo.hashtags_de_senales(
+            db,
+            user_id,
+            desde=ahora - timedelta(days=VENTANA_DE_COMPORTAMIENTO_DIAS),
+            ahora=ahora,
+            limite=SENALES_MAXIMAS,
+        )
+
     semilla = semilla_de_exploracion(ahora)
     pesos = PESOS_DE_CONTENIDO
     total = pesos.total()
@@ -987,7 +1026,14 @@ async def contenido_para(
                     * min(1.0, (reacciones.get(post_id, 0) or 0) / 20.0)
                     + pesos.exploracion * exploracion_de(user_id, post_id, semilla)
                 )
-                / total,
+                / total
+                # El bonus de etiquetas se SUMA a la media, no entra en ella:
+                # ver `PesosDeContenido.hashtag`. Sin afinidad acumulada vale
+                # cero y no mueve nada, que es lo que tiene que pasar el primer
+                # dia de alguien.
+                + _bonus_de_hashtag(
+                    hashtags_por_post.get(post_id), afinidad_hashtag, pesos
+                ),
             )
         )
     puntuados.sort(key=lambda p: (-p.score, p.id))
