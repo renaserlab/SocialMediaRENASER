@@ -1,6 +1,7 @@
 import { Image as ExpoImage } from 'expo-image';
 
 import { miniaturaDePublicacion } from '@/lib/miniaturaDePublicacion';
+import type { FeaturedMember } from '@/mappers/profileMapper';
 import { PostRepository } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import type { Post, UserProfile } from '@/types';
@@ -146,6 +147,54 @@ export async function pedirGaleria(
   return peticion;
 }
 
+// ---------------------------------------------------------------------------
+// Perfiles destacados (/profiles/featured)
+// ---------------------------------------------------------------------------
+
+/*
+  La MISMA lista la piden cinco pantallas: Explorar, Avisos, Miembros, el audio
+  privado y las secciones del perfil. Cada una la pedia por su cuenta, asi que
+  recorrer la aplicacion disparaba la misma consulta una y otra vez contra una
+  base que tarda casi un segundo en responder. Es contenido de portada: cambia
+  cada varios dias, no cada minuto.
+*/
+let destacados: Entrada<FeaturedMember[]> | undefined;
+let destacadosEnVuelo: Promise<FeaturedMember[]> | null = null;
+
+/** Diez minutos: es la vitrina de la casa, no un contador en movimiento. */
+const VIGENCIA_DESTACADOS_MS = 10 * 60 * 1000;
+
+export function destacadosEnCache(): FeaturedMember[] | null {
+  return destacados?.valor ?? null;
+}
+
+/**
+ * Quien administra RENASER, si ya se sabe. Sin peticion y sin espera: sirve
+ * para poder NAVEGAR en el mismo toque en vez de averiguarlo primero.
+ */
+export function adminEnCache(): string | null {
+  const lista = destacados?.valor;
+  if (!lista?.length) return null;
+  return (lista.find((m) => m.isAdmin) ?? lista[0])?.id ?? null;
+}
+
+export async function pedirDestacados(): Promise<FeaturedMember[]> {
+  if (destacados && Date.now() - destacados.momento < VIGENCIA_DESTACADOS_MS) {
+    return destacados.valor;
+  }
+  if (destacadosEnVuelo) return destacadosEnVuelo;
+
+  destacadosEnVuelo = ProfileRepository.listFeatured()
+    .then((lista) => {
+      destacados = { valor: lista, momento: Date.now() };
+      return lista;
+    })
+    .finally(() => {
+      destacadosEnVuelo = null;
+    });
+  return destacadosEnVuelo;
+}
+
 /**
  * Calienta las imagenes de las primeras celdas.
  *
@@ -200,4 +249,7 @@ export function olvidarPerfiles(): void {
   galerias.clear();
   perfilEnVuelo.clear();
   galeriaEnVuelo.clear();
+  // Los destacados dependen de quien mira: la lista EXCLUYE a quien la pide.
+  destacados = undefined;
+  destacadosEnVuelo = null;
 }

@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { CourseCard } from '@/components/CourseCard';
 import { CreateCatalogSheet, type CatalogEditable } from '@/components/CreateCatalogSheet';
+import { CreateReviewSheet } from '@/components/CreateReviewSheet';
 import { CreateTestimonialSheet, type TestimonialEditable } from '@/components/CreateTestimonialSheet';
 import { ImageViewer } from '@/components/ImageViewer';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -22,9 +23,10 @@ import { Text } from '@/components/Text';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
-import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { TestimonialRepository } from '@/repositories/TestimonialRepository';
+import { irAlPerfil } from '@/lib/irAlPerfil';
+import { adminEnCache, pedirDestacados } from '@/services/cachePerfil';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -127,26 +129,56 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  /*
+    Quien administra RENASER se averigua ANTES de que nadie toque nada.
+
+    El boton de abajo lleva a la seccion equivalente en su perfil, y el id no
+    va escrito: hay que preguntarlo. Antes se preguntaba AL PULSAR, y como esa
+    consulta tarda casi un segundo, el boton se quedaba muerto en la mano y la
+    pantalla no se movia hasta que respondiera. Preguntandolo al montar —y con
+    la respuesta compartida entre las cinco pantallas que la usan— el toque ya
+    encuentra el id resuelto y navega en el acto.
+  */
+  const [adminId, setAdminId] = useState<string | null>(() => adminEnCache());
+  useEffect(() => {
+    if (adminId) return;
+    let vivo = true;
+    pedirDestacados()
+      .then((lista) => {
+        if (!vivo) return;
+        setAdminId((lista.find((m) => m.isAdmin) ?? lista[0])?.id ?? null);
+      })
+      .catch(() => {
+        // Sin red no se puede resolver; se puede llegar desde el inicio.
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [adminId]);
+
   /**
    * Lleva a la seccion equivalente en el perfil del administrador, que es
-   * donde vive el contenido de RENASER. El id se resuelve, no va escrito.
+   * donde vive el contenido de RENASER.
+   *
+   * Si el id todavia no llego se espera a el, como se hacia siempre: es
+   * preferible una pausa rara a un boton que no hace nada. Pero eso ya solo
+   * pasa si se toca en el primer segundo de vida de la pantalla.
    */
   const openAdminSection = useCallback(
     async (target: ProfileSectionKind) => {
+      if (adminId) {
+        irAlPerfil(router, adminId, target);
+        return;
+      }
       try {
-        const featured = await ProfileRepository.listFeatured();
+        const featured = await pedirDestacados();
         const admin = featured.find((m) => m.isAdmin) ?? featured[0];
-        if (admin) {
-          router.push({
-            pathname: '/profile/[id]',
-            params: { id: admin.id, section: target },
-          } as never);
-        }
+        if (admin) irAlPerfil(router, admin.id, target);
       } catch {
         // Sin red no se puede resolver; se puede llegar desde el inicio.
       }
     },
-    [router],
+    [router, adminId],
   );
 
   /**

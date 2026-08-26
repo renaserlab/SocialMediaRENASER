@@ -36,6 +36,8 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { ProfileSummary } from '@/mappers/profileMapper';
 import type { Course, EventItem } from '@/types';
+import { irAlPerfil } from '@/lib/irAlPerfil';
+import { pedirDestacados } from '@/services/cachePerfil';
 
 /**
  * Explorar: buscar personas y descubrir todo lo que publica la comunidad.
@@ -92,7 +94,7 @@ export function ExploreScreen() {
       LearningRepository.listCourses(),
       CatalogRepository.listEvents(),
       CommunityRepository.list(),
-      ProfileRepository.listFeatured(),
+      pedirDestacados(),
     ]);
 
     if (cursos.status === 'fulfilled') setFeaturedCourse(cursos.value[0] ?? null);
@@ -137,7 +139,7 @@ export function ExploreScreen() {
   const catalogProfileId = isAdmin ? (user?.id ?? null) : adminId;
   const openAdminSection = (section: ProfileSectionKind) => {
     if (!catalogProfileId) return;
-    router.push({ pathname: '/profile/[id]', params: { id: catalogProfileId, section } } as never);
+    irAlPerfil(router, catalogProfileId, section);
   };
 
   /**
@@ -577,7 +579,7 @@ export function ExploreScreen() {
                         hace falta para ordenar nada.
                       */
                       resultadoAbierto('profile', person.id);
-                      router.push(`/profile/${person.id}` as never);
+                      irAlPerfil(router, person.id);
                     }}
                   />
                 ))}

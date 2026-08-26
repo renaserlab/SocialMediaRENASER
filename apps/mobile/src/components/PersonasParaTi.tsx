@@ -32,6 +32,7 @@ import { profileImageUrl } from '@/services/storage';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 /**
  * «Personas para ti»: el corazon de Z, hecho pantalla.
@@ -244,7 +245,7 @@ export function PersonasParaTi() {
       algorithmVersion: datos?.algorithmVersion,
       rank: persona.rank,
     });
-    router.push(`/profile/${persona.id}` as never);
+    irAlPerfil(router, persona.id);
   };
 
   const noInteresa = async (persona: RecommendedPerson) => {

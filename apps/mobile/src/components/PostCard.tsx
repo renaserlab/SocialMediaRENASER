@@ -24,6 +24,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { Post } from '@/types';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 /**
  * Los iconos de acción miden 18-20 px. Ampliamos el area tactil con hitSlop
@@ -275,7 +276,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       <View style={styles.header}>
         <Pressable
           style={styles.headerInfo}
-          onPress={() => post.authorId && router.push(`/profile/${post.authorId}` as never)}
+          onPress={() => irAlPerfil(router, post.authorId)}
           disabled={!post.authorId}
           accessibilityRole="button"
           accessibilityLabel={`Ver perfil de ${post.author}`}
@@ -532,7 +533,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
             leftIcon="user"
             onPress={() => {
               setMenuOpen(false);
-              router.push(`/profile/${post.authorId}` as never);
+              irAlPerfil(router, post.authorId);
             }}
           />
         ) : null}

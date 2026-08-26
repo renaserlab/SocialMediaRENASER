@@ -23,6 +23,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Course, EventItem, Post } from '@/types';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 const RECENTS_KEY = 'renaser-recent-searches';
 const MAX_RECENTS = 6;
@@ -233,7 +234,7 @@ export function SearchScreen() {
                   rightIcon="chevron-right"
                   onPress={() => {
                     persistRecent(query);
-                    router.push(`/profile/${row.person.id}` as never);
+                    irAlPerfil(router, row.person.id);
                   }}
                 />
               );

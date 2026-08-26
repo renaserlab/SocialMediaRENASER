@@ -11,6 +11,7 @@ import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
 import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 /**
  * Reel normalizado. Antes el componente consumia el tipo `Short` del demo, con
@@ -153,7 +154,7 @@ function ShortVideoItemBase({
     hacer nada, que es justo lo que pasaba con el nombre.
   */
   const openProfile = () => {
-    if (short.authorId) router.push(`/profile/${short.authorId}` as never);
+    irAlPerfil(router, short.authorId);
   };
 
   const onShare = () => {
