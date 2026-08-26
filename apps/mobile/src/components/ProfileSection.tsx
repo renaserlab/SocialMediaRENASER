@@ -24,6 +24,11 @@ import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { PostRepository } from '@/repositories/PostRepository';
+import {
+  ReviewRepository,
+  mensajeDeErrorDeResena,
+  type Resena,
+} from '@/repositories/ReviewRepository';
 import { TestimonialRepository } from '@/repositories/TestimonialRepository';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { adminEnCache, pedirDestacados } from '@/services/cachePerfil';
@@ -117,12 +122,35 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const [courses, setCourses] = useState<Course[]>([]);
   const [episodes, setEpisodes] = useState<Post[]>([]);
   const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  /**
+   * Las resenas que ha RECIBIDO este perfil (migracion 0030).
+   *
+   * NO es lo mismo que `testimonials`, y ahi estaba el fallo: la galeria son
+   * las fotos y videos que ha publicado esta persona, filtrados por
+   * `author_id`. Es decir, lo que ella ESCRIBIO, nunca lo que le dijeron. Una
+   * resena de A sobre B tiene que salir en el perfil de B, y para eso hacia
+   * falta una tabla con `reviewed_user_id`, que la galeria no tiene.
+   */
+  const [resenas, setResenas] = useState<Resena[]>([]);
+  /**
+   * Si el servidor tiene montado el dominio de resenas.
+   *
+   * Mientras la 0030 espere aprobacion responde false y no se ensena el boton
+   * de escribir. Ofrecerlo y fallar al pulsarlo es la misma pantalla cargando
+   * de siempre, solo que con otro motivo.
+   */
+  const [resenasDisponibles, setResenasDisponibles] = useState(false);
   /** Imagen abierta a pantalla completa, o null si el visor esta cerrado. */
   const [viewerImage, setViewerImage] = useState<{ uri: string; caption: string | null } | null>(
     null,
   );
   /** Filtro de la galeria: 0 todos, 1 fotos, 2 videos. */
   const [testimonialFilter, setTestimonialFilter] = useState(0);
+  /**
+   * Que reseña en video esta abierta. UNA como mucho: solo esa monta
+   * reproductor, el resto son una superficie con su boton.
+   */
+  const [videoAbierto, setVideoAbierto] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   /** Elemento en edicion; solo el administrador puede abrirlo. */
   const [editing, setEditing] = useState<CatalogEditable | null>(null);
@@ -192,6 +220,10 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   const [creating, setCreating] = useState(false);
   /** Testimonio en edicion; solo lo abre el administrador. */
   const [editingTestimonial, setEditingTestimonial] = useState<TestimonialEditable | null>(null);
+  /** La hoja de escribir una resena SOBRE el dueno de este perfil. */
+  const [escribiendoResena, setEscribiendoResena] = useState(false);
+  /** La resena propia que se esta editando, si hay alguna. */
+  const [editandoResena, setEditandoResena] = useState<Resena | null>(null);
   /**
    * Filtro del podcast; `null` = Todos.
    *
@@ -296,6 +328,64 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     // propios (con borradores): sin el en la lista, cambiar de perfil sin
     // desmontar dejaria la decision anterior.
   }, [kind, profileId, reloadKey, testimonialFilter, category, isOwner]);
+
+  /**
+   * Las resenas recibidas por este perfil.
+   *
+   * EFECTO APARTE Y NO DENTRO DEL DE ARRIBA a proposito: aquel se vuelve a
+   * lanzar cada vez que se toca el filtro Todos/Fotos/Videos, que es de la
+   * galeria y no tiene nada que ver con las resenas. Metidas ahi, cambiar de
+   * pestana costaria dos peticiones de mas por toque.
+   */
+  useEffect(() => {
+    if (kind !== 'testimonios' || !profileId || !AuthRepository.enabled) return;
+    let alive = true;
+
+    // La disponibilidad se pregunta primero: sin la migracion 0030 el listado
+    // viene vacio igualmente, pero es esto lo que decide si se ensena el boton
+    // de escribir.
+    void ReviewRepository.disponibles().then((hay) => {
+      if (alive) setResenasDisponibles(hay);
+    });
+    ReviewRepository.listarRecibidas(profileId)
+      .then((lista) => {
+        if (alive) setResenas(lista);
+      })
+      .catch(() => {
+        // Que no se puedan traer las resenas NO puede tumbar la seccion: la
+        // galeria de este perfil sigue siendo contenido real y se pinta igual.
+        if (alive) setResenas([]);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [kind, profileId, reloadKey]);
+
+  /**
+   * Borra una resena PROPIA.
+   *
+   * Solo aparece la papelera si `puedeGestionar` viene a true, que el servidor
+   * calcula para quien la ESCRIBIO y para quien modera. El dueno del perfil no
+   * puede borrar lo que se dice de el: su via es reportarlo. Si pudiera, en
+   * cada perfil quedaria solo lo favorable y leerlas no serviria para nada.
+   */
+  const borrarResena = async (resena: Resena) => {
+    const aceptado = await confirm({
+      title: 'Eliminar tu reseña',
+      message: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      destructive: true,
+    });
+    if (!aceptado) return;
+    try {
+      await ReviewRepository.borrar(resena.id);
+      toast('Reseña eliminada');
+      reload();
+    } catch (fallo) {
+      notify('No se pudo eliminar', mensajeDeErrorDeResena(fallo));
+    }
+  };
 
   const removeTestimonial = async (id: string) => {
     const accepted = await confirm({
@@ -402,9 +492,175 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   if (kind === 'testimonios') {
     return (
       <View>
+        {/*
+          1. LO QUE HAN ESCRITO SOBRE ESTA PERSONA.
+
+          Esto es lo que faltaba. La galeria de abajo son las fotos y videos que
+          esta persona publico —lo que ELLA escribio—, y se conserva tal cual
+          porque tiene contenido real. Lo que no existia es esto: una opinion de
+          otra persona, que sale AQUI, en el perfil de quien la recibe.
+
+          El boton no aparece en el perfil propio: nadie se resena a si mismo, y
+          el servidor lo rechaza ademas por un CHECK en la base.
+        */}
+        <View style={styles.resenasCabecera}>
+          <Text variant="body" weight="700" style={{ flex: 1 }}>
+            Reseñas recibidas
+          </Text>
+          {!isOwner && resenasDisponibles ? (
+            <Button
+              label={
+                resenas.some((r) => r.puedeGestionar && r.autorId !== profileId)
+                  ? 'Editar mi reseña'
+                  : 'Escribir reseña'
+              }
+              variant="secondary"
+              icon="edit-2"
+              onPress={() => {
+                const mia = resenas.find((r) => r.puedeGestionar);
+                if (mia) setEditandoResena(mia);
+                else setEscribiendoResena(true);
+              }}
+            />
+          ) : null}
+        </View>
+
+        {resenas.length === 0 ? (
+          <View style={styles.center}>
+            <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
+              {isOwner
+                ? 'Todavía no te ha escrito nadie.'
+                : resenasDisponibles
+                ? 'Aún no tiene reseñas. Puedes ser la primera persona en escribir una.'
+                : 'Aún no tiene reseñas.'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.resenas}>
+            {resenas.map((resena) => (
+              <View
+                key={resena.id}
+                style={[styles.resenaCard, { borderColor: colors.border }]}
+              >
+                <View style={styles.resenaCabecera}>
+                  <ExpoImage
+                    source={resena.autorAvatarUrl ? { uri: resena.autorAvatarUrl } : undefined}
+                    style={styles.resenaAvatar}
+                    contentFit="cover"
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text variant="body" weight="600">
+                      {resena.autorNombre || 'Alguien'}
+                    </Text>
+                    {/*
+                      El sello solo se pinta cuando el servidor manda su FUENTE.
+                      No se deduce aqui: el telefono no ve las reservas ni las
+                      compras de nadie, asi que cualquier calculo local seria
+                      inventado.
+                    */}
+                    {resena.verificadaPor ? (
+                      <View style={styles.selloFila}>
+                        <Feather name="check-circle" size={12} color={colors.textMuted} />
+                        <Text variant="secondary" color={colors.textMuted} style={styles.sello}>
+                          {resena.verificadaPor === 'booking'
+                            ? 'Tuvieron una sesión'
+                            : 'Compró su curso'}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {/*
+                    Editar y borrar SOLO si el servidor dice que se puede, que
+                    es para quien la escribio y para quien modera. El dueno del
+                    perfil NO los ve: no puede quitar lo que se dice de el.
+                  */}
+                  {resena.puedeGestionar ? (
+                    <React.Fragment>
+                      <Pressable
+                        onPress={() => setEditandoResena(resena)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="Editar mi reseña"
+                      >
+                        <Feather name="edit-2" size={16} color={colors.textMuted} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => void borrarResena(resena)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="Eliminar mi reseña"
+                      >
+                        <Feather name="trash-2" size={16} color={colors.textMuted} />
+                      </Pressable>
+                    </React.Fragment>
+                  ) : null}
+                </View>
+
+                <Text variant="body" style={styles.resenaTexto}>
+                  {resena.texto}
+                </Text>
+
+                {resena.medios.map((medio) =>
+                  !medio.url ? null : medio.tipo === 'video' ? (
+                    <VideoPlayer
+                      key={medio.id}
+                      uri={medio.url}
+                      style={styles.resenaMedia}
+                      nativeControls
+                    />
+                  ) : (
+                    <Pressable
+                      key={medio.id}
+                      onPress={() => setViewerImage({ uri: medio.url!, caption: resena.texto })}
+                      accessibilityRole="button"
+                      accessibilityLabel="Ver la imagen completa"
+                    >
+                      <ExpoImage
+                        source={{ uri: medio.url }}
+                        style={styles.resenaMedia}
+                        contentFit="cover"
+                        transition={150}
+                      />
+                    </Pressable>
+                  ),
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {escribiendoResena && profileId ? (
+          <CreateReviewSheet
+            visible
+            sobreId={profileId}
+            onClose={() => setEscribiendoResena(false)}
+            onSaved={reload}
+          />
+        ) : null}
+        {editandoResena && profileId ? (
+          <CreateReviewSheet
+            visible
+            sobreId={profileId}
+            editando={editandoResena}
+            onClose={() => setEditandoResena(null)}
+            onSaved={reload}
+          />
+        ) : null}
+
+        {/*
+          2. LA GALERIA DE ESTE PERFIL, intacta.
+
+          `testimonials` sigue siendo lo que siempre fue y conserva sus filas.
+          Lo unico que cambia es el rotulo: llamarla «reseñas» era lo que hacia
+          creer que publicar ahi era opinar sobre alguien.
+        */}
+        <Text variant="body" weight="700" style={styles.galeriaTitulo}>
+          Su galería
+        </Text>
+
         {canManage ? (
           <Button
-            label="Agregar reseña"
+            label="Añadir a la galería"
             variant="secondary"
             icon="plus"
             onPress={() => setCreating(true)}
@@ -421,7 +677,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
         {testimonials.length === 0 ? (
           <View style={styles.center}>
             <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-              Aún no hay reseñas publicadas.
+              Aún no hay nada en la galería.
             </Text>
           </View>
         ) : (
@@ -433,7 +689,43 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
               >
                 <View {...noSaveProps}>
                   {item.mediaType === 'video' && item.mediaUrl ? (
-                    <VideoPlayer uri={item.mediaUrl} style={styles.testimonialMedia} nativeControls />
+                    /*
+                      UN reproductor, el de la reseña que se ha abierto.
+
+                      Antes se montaba uno por cada reseña en video de la lista.
+                      Cada reproductor reserva memoria para adelantarse a la
+                      reproduccion, asi que un perfil con unas cuantas reseñas
+                      agotaba lo que Android concede a la aplicacion; y mientras
+                      tanto ninguno estaba reproduciendo, de modo que lo unico
+                      que se veia era una hilera de rectangulos oscuros. Es el
+                      mismo motivo por el que la cuadricula de publicaciones no
+                      monta reproductores.
+
+                      No hay poster que enseñar —la tabla de reseñas no guarda
+                      ninguno—, asi que en reposo se pinta la superficie de
+                      media con el boton: dice lo que hay y cuesta cero.
+                    */
+                    videoAbierto === item.id ? (
+                      <VideoPlayer
+                        uri={item.mediaUrl}
+                        style={styles.testimonialMedia}
+                        nativeControls
+                        autoPlay
+                      />
+                    ) : (
+                      <Pressable
+                        onPress={() => setVideoAbierto(item.id)}
+                        style={[styles.testimonialMedia, styles.videoEnReposo]}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          item.caption ? `Reproducir: ${item.caption}` : 'Reproducir el video'
+                        }
+                      >
+                        <View style={styles.botonDeReproduccion}>
+                          <Feather name="play" size={22} color="#FFFFFF" />
+                        </View>
+                      </Pressable>
+                    )
                   ) : (
                     /*
                       En la tarjeta la imagen va recortada para que todas midan
@@ -452,9 +744,21 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                       }
                     >
                       <ExpoImage
-                        source={item.mediaUrl ? { uri: item.mediaUrl } : undefined}
+                        source={
+                          item.mediaUrl
+                            ? { uri: item.mediaUrl, cacheKey: item.storagePath }
+                            : undefined
+                        }
                         style={styles.testimonialMedia}
                         contentFit="cover"
+                        /*
+                          La clave es la RUTA en Storage, no la firma. Sin ella
+                          la galeria se guardaba bajo una URL que caduca cada
+                          hora, asi que volver al perfil un rato despues
+                          descargaba todas las fotos otra vez.
+                        */
+                        cachePolicy="disk"
+                        recyclingKey={item.storagePath}
                         transition={150}
                       />
                       {/* Pista de que se puede abrir; sin ella nadie lo prueba. */}
@@ -655,9 +959,35 @@ const styles = StyleSheet.create({
   // `filters` es de los chips de categoria del podcast. El de la galeria se
   // llama `testimonialFilters` para no pisarlo: ambos se anadieron a la vez.
   testimonialFilters: { marginTop: spacing.md },
+  // Resenas RECIBIDAS (migracion 0030). Nombres propios y no reutilizando los
+  // de `testimonial*`: son dos cosas distintas —lo que le dijeron y lo que
+  // publico— y compartir estilos invita a volver a mezclarlas.
+  resenasCabecera: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  resenas: { marginTop: spacing.md, gap: spacing.md },
+  resenaCard: { borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm },
+  resenaCabecera: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  resenaAvatar: { width: 34, height: 34, borderRadius: 17 },
+  resenaTexto: { lineHeight: 20 },
+  resenaMedia: { width: '100%', height: 200, borderRadius: radius.md, overflow: 'hidden' },
+  selloFila: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  sello: { fontSize: 11 },
+  // Separa la galeria de las resenas: sin este aire las dos listas se leen como
+  // una sola, que es exactamente la confusion que habia que deshacer.
+  galeriaTitulo: { marginTop: spacing.xl, marginBottom: spacing.sm },
   gallery: { marginTop: spacing.md, gap: spacing.md },
   testimonialCard: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden' },
   testimonialMedia: { width: '100%', height: 220 },
+  // Superficie de la reseña en video antes de abrirla. Oscura porque es media,
+  // pero con el boton bien visible: sin el pareceria un hueco roto.
+  videoEnReposo: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#141414' },
+  botonDeReproduccion: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
   expandBadge: {
     position: 'absolute',
     top: spacing.sm,

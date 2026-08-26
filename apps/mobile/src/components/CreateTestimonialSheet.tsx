@@ -34,10 +34,21 @@ type Props = {
 };
 
 /**
- * Alta de un testimonio: titulo + una foto o un video.
+ * Alta en la GALERIA de un perfil: titulo + una foto o un video.
  *
- * Solo la abre el administrador, pero quien decide de verdad es la RLS de
- * `testimonials`, que exige `public.is_admin()` para insertar.
+ * ESTO NO ES UNA RESEÑA, aunque durante un tiempo se llamara asi. `testimonials`
+ * guarda las fotos y videos que publica UNA persona: el archivo es obligatorio
+ * (`storage_path` NOT NULL, por eso el boton de abajo exige elegir uno) y no hay
+ * ninguna columna que diga sobre QUIEN se opina. Con esa forma, lo que alguien
+ * escribia salia en su PROPIO perfil.
+ *
+ * Para opinar sobre otra persona esta `CreateReviewSheet`, que escribe en
+ * `profile_reviews` (migracion 0030): ahi el texto es lo obligatorio, el archivo
+ * es opcional y la resena aparece en el perfil de quien la recibe.
+ *
+ * Quien puede publicar aqui lo decide la RLS de `testimonials`: desde la
+ * migracion 0017, cualquiera en su propio nombre (`author_id = auth.uid()`).
+ * La comprobacion de la interfaz solo evita ensenar botones inutiles.
  */
 export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }: Props) {
   const { colors } = useAppTheme();

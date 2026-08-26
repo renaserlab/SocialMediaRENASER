@@ -286,11 +286,19 @@ async def recibidas(
             )
         )
 
-    # Los bloqueos cortan en los dos sentidos. La lista vacia NO se manda a la
-    # consulta: `in_([])` contra una columna uuid es el 404 silencioso de la
-    # nota de arriba.
+    # Los bloqueos cortan en los dos sentidos, y sobre LAS DOS PERSONAS de la
+    # resena. Filtrar solo por quien la escribio no bastaba: si Ana y Bruno se
+    # bloquean, a Ana le seguia apareciendo en el perfil de Bruno la resena que
+    # ella misma le escribio —su propio `reviewer_id` nunca esta en la lista de
+    # bloqueados—. La RLS de la 0030 mira los dos extremos; esto hace lo mismo.
+    #
+    # La lista vacia NO se manda a la consulta: `in_([])` contra una columna
+    # uuid es el 404 silencioso de la nota de arriba.
     bloqueados = await _bloqueados(db, current_user.id)
     if bloqueados:
+        if user_id in bloqueados:
+            # El perfil entero esta cortado: no hay nada que ensenar de el.
+            return []
         consulta = consulta.where(ProfileReview.reviewer_id.not_in(list(bloqueados)))
 
     filas = list(
