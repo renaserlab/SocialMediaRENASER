@@ -24,7 +24,17 @@ ONBOARDING_VERSION = 1
 
 #: Version del algoritmo. Viaja en cada respuesta para poder comparar
 #: resultados entre versiones el dia que haya una segunda.
-RECOMMENDATION_ALGORITHM_VERSION = "people-v1.1"
+RECOMMENDATION_ALGORITHM_VERSION = "people-v1.2"
+
+#: Suelo del divisor con el que se mide el bonus de comportamiento.
+#:
+#: El bonus se divide entre el peso de los componentes que SI aplican, para que
+#: pese mas cuando se sabe poco por otras vias. Sin suelo, alguien con un unico
+#: componente aplicable veria su score saltar a 1 con la primera senal, y todos
+#: los que hubiera tocado empatarian arriba sin poder ordenarse entre si. 0,25
+#: es aproximadamente el peso de dos componentes: por debajo de eso el sistema
+#: sabe tan poco que conviene dejar de amplificar.
+PESO_MINIMO_DE_REFERENCIA = 0.25
 
 #: Version del recomendador de contenido. Va aparte del de personas porque
 #: evolucionaran a ritmos distintos.
