@@ -63,8 +63,16 @@ class ProfileUpdate(BaseModel):
     """Actualizacion parcial del perfil propio. Todos los campos opcionales."""
 
     full_name: str | None = Field(default=None, min_length=1, max_length=120)
+    # Cadena vacia = SIN nombre de usuario, igual que en las imagenes. Y aqui
+    # no es una comodidad: en la base es NULL mientras nadie elija uno (el
+    # registro no lo pide), asi que la pantalla de editar perfil lo manda vacio
+    # y con `min_length=3` la peticion entera se rechazaba con un 422. Quien no
+    # tenia nombre de usuario no podia guardar ni su nombre ni su biografia.
+    #
+    # El patron acepta las dos formas —vacio, o de 3 a 50 caracteres validos—
+    # para que la longitud siga comprobandose donde estaba.
     username: str | None = Field(
-        default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$"
+        default=None, max_length=50, pattern=r"^([a-zA-Z0-9_.-]{3,50})?$"
     )
     bio: str | None = Field(default=None, max_length=600)
     # Cadena vacia = quitar la foto (a null). Es lo que distingue "no tocar este

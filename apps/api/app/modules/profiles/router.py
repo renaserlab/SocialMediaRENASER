@@ -8,9 +8,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, literal, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.content.models import Post, PostLike
 from app.modules.profiles.models import Profile
@@ -155,11 +156,45 @@ async def update_my_profile(
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil no encontrado para el usuario actual.")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    datos = payload.model_dump(exclude_unset=True)
+
+    # EL NOMBRE DE USUARIO ES UNICO EN LA BASE, y hasta aqui eso se descubria
+    # chocando: elegir uno ya cogido reventaba el `commit` con un IntegrityError
+    # sin capturar, o sea un 500 —que ademas sale sin cabeceras CORS y en el
+    # navegador se disfraza de fallo de red—. La pantalla de editar perfil YA
+    # sabe pintar «Ese nombre de usuario ya está en uso» cuando recibe un 409
+    # (`EditProfileScreen`), asi que lo unico que faltaba era mandarselo.
+    #
+    # Se compara EXACTAMENTE como lo compara el indice unico de la 0001: una
+    # comprobacion mas estricta rechazaria nombres que la base si aceptaria.
+    nuevo_usuario = datos.get("username")
+    if nuevo_usuario and nuevo_usuario != profile.username:
+        cogido = await db.scalar(
+            select(Profile.id).where(
+                Profile.username == nuevo_usuario, Profile.id != current_user.id
+            )
+        )
+        if cogido is not None:
+            raise ConflictError(
+                "Ese nombre de usuario ya está en uso.", code="username_taken"
+            )
+
+    for field, value in datos.items():
         # `exclude_unset` ya distingue "no enviado" de "enviado". Para las
         # imagenes hace falta un valor que signifique "quitar": la cadena vacia
         # se guarda como NULL para volver a la imagen por defecto.
-        if field in {"avatar_path", "cover_path", "intro_audio_path"} and value == "":
+        #
+        # `username` va en el mismo grupo, y no por simetria: en la base es
+        # NULL mientras nadie elija uno —el registro no lo pide (ver el
+        # disparador `handle_new_user`)—, asi que la pantalla de editar perfil
+        # lo manda vacio y con eso la peticion ENTERA se rechazaba con un 422.
+        # Quien no habia elegido nombre de usuario no podia guardar tampoco su
+        # nombre ni su biografia.
+        if (
+            field in {"avatar_path", "cover_path", "intro_audio_path", "username"}
+            and value == ""
+        ):
             value = None
         setattr(profile, field, value)
     """
@@ -174,7 +209,16 @@ async def update_my_profile(
         )
         if profile.intro_audio_path is None:
             profile.intro_audio_duration_s = None
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # Red de seguridad para la carrera: dos personas eligiendo el mismo
+        # nombre a la vez pasan las dos la comprobacion de arriba y solo una
+        # llega. Quien pierde recibe un 409, no un 500.
+        await db.rollback()
+        raise ConflictError(
+            "Ese nombre de usuario ya está en uso.", code="username_taken"
+        ) from exc
     return await _load_profile(db, current_user.id, viewer_id=None)
 
 
