@@ -123,6 +123,26 @@ Parameters:
       primera prueba de humo: sin TLS viajan en claro los tokens de Supabase.
       Ver el paso manual 3 en docs/AWS_DESPLIEGUE.md.
 
+  FrenteHttpsDeEmergencia:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      Pone una distribucion de CloudFront delante del balanceador para tener
+      HTTPS SIN dominio propio, usando el certificado que AWS da a
+      *.cloudfront.net.
+
+      PARA QUE SIRVE Y PARA QUE NO. Resuelve el unico problema que impide que
+      un navegador hable con la API desde una pagina servida por HTTPS: el
+      contenido mixto. NO es HTTPS de extremo a extremo — el tramo entre
+      CloudFront y el balanceador sigue siendo HTTP dentro de la red de AWS—,
+      asi que es una solucion de puente y no el destino. Lo definitivo es
+      dominio propio + certificado de ACM en el listener 443, que esta
+      plantilla ya soporta con `CertificadoAcmArn`.
+
+      Mientras esto valga 'Si', los pagos reales siguen obligatoriamente
+      apagados.
+
   NombreDeDominio:
     Type: String
     Default: ''
@@ -295,6 +315,7 @@ Conditions:
   EsAltaDisponibilidad: !Equals [!Ref PerfilDeCapacidad, alta-disponibilidad]
   HayCertificado: !Not [!Equals [!Ref CertificadoAcmArn, '']]
   HayDominio: !Not [!Equals [!Ref NombreDeDominio, '']]
+  HayFrenteHttps: !Equals [!Ref FrenteHttpsDeEmergencia, 'Si']
   EsProteccionActiva: !Equals [!Ref ProteccionContraBorrado, 'Si']
   HayCorreoDeAlertas: !Not [!Equals [!Ref CorreoDeAlertas, '']]
   HayLogsDeAcceso: !Equals [!Ref LogsDeAccesoDelBalanceador, 'Si']
@@ -1472,6 +1493,49 @@ Resources:
           GrupoAsg: !Ref GrupoDeAutoescalado
 
 # -----------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Frente HTTPS de emergencia (CloudFront)
+  # ---------------------------------------------------------------------------
+  FrenteHttps:
+    Type: AWS::CloudFront::Distribution
+    Condition: HayFrenteHttps
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'HTTPS para ${PrefijoDeRecursos}-${Entorno} sin dominio propio'
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: balanceador
+            DomainName: !GetAtt Balanceador.DNSName
+            CustomOriginConfig:
+              # HTTP a proposito: el balanceador no tiene certificado todavia.
+              # Es justo el tramo que deja de ser cifrado, y por eso esto es
+              # temporal.
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+              OriginReadTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: balanceador
+          # Redirige, no bloquea: quien llegue por http acaba en https en vez
+          # de encontrarse un error que parece que la API esta caida.
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # SIN CACHE. Esto es una API, no una web: cachear respuestas
+          # autenticadas serviria la sesion de una persona a otra. La politica
+          # gestionada de AWS es la que garantiza que no se guarda nada.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # Reenvia TODO lo del visitante menos la cabecera Host —que tiene que
+          # seguir siendo la del balanceador—. Sin esto no viajaria
+          # `Authorization` y no habria forma de autenticarse.
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+      Tags:
+        - {Key: Proyecto, Value: RENASER}
+        - {Key: Entorno, Value: !Ref Entorno}
+
 Outputs:
 
   UrlDeLaApi:
@@ -1482,6 +1546,14 @@ Outputs:
       - HayCertificado
       - !Sub 'https://${Balanceador.DNSName}'
       - !Sub 'http://${Balanceador.DNSName}'
+
+  UrlHttpsDeEmergencia:
+    Condition: HayFrenteHttps
+    Description: >-
+      Punto de entrada HTTPS sin dominio propio. Usar como EXPO_PUBLIC_API_URL
+      mientras no exista dominio + certificado en el listener 443.
+    Value: !Sub 'https://${FrenteHttps.DomainName}'
+    Export: {Name: !Sub '${AWS::StackName}-UrlHttpsDeEmergencia'}
 
   DnsDelBalanceador:
     Description: Nombre DNS del balanceador (destino del CNAME o del ALIAS del dominio).
