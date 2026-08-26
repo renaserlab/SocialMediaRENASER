@@ -27,6 +27,7 @@ from app.modules.notifications.router import router as notifications_router
 from app.modules.payments.router import router as payments_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.recommendations.router import router as recommendations_router
+from app.modules.reviews.router import router as reviews_router
 from app.modules.social_graph.router import router as social_graph_router
 from app.modules.stories.router import router as stories_router
 
@@ -100,6 +101,9 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router, prefix=prefix)
     app.include_router(moderation_router, prefix=prefix)
     app.include_router(bookings_router, prefix=prefix)
+    # Resenas entre personas. Se monta siempre: sin la migracion 0030 los
+    # listados responden vacio y las escrituras 503, en vez de reventar.
+    app.include_router(reviews_router, prefix=prefix)
     app.include_router(recommendations_router, prefix=prefix)
     # Portal de pagos. Se monta siempre para poder probarlo y documentarlo,
     # pero responde 503 mientras `payments_enabled` este en false.
