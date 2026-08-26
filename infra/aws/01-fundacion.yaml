@@ -256,7 +256,31 @@ Resources:
                 # Y sin esta, valdria cualquier rama de este repositorio:
                 # abrir una rama lo puede hacer cualquiera con permiso de
                 # escritura, asi que "el repo correcto" por si solo no basta.
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${RepositorioDeGitHub}:ref:refs/heads/${RamaQuePuedeDesplegar}'
+                # DOS FORMAS, Y HACEN FALTA LAS DOS.
+                #
+                # GitHub ha empezado a mandar el `sub` con los IDENTIFICADORES
+                # NUMERICOS de la organizacion y del repositorio pegados con
+                # arroba:
+                #
+                #   repo:renaserlab@282251145/SocialMediaRENASER@1304359761:ref:refs/heads/main
+                #
+                # en vez del clasico `repo:owner/repo:ref:...`. Con la condicion
+                # escrita solo a la manera clasica, AWS rechazaba cada
+                # despliegue con «Not authorized to perform
+                # sts:AssumeRoleWithWebIdentity», y el mensaje no dice cual es
+                # el `sub` que llego: hubo que sacarlo de CloudTrail.
+                #
+                # Se aceptan las dos formas porque no controlamos cual manda
+                # GitHub, y quedarse solo con la nueva volveria a romper el dia
+                # que la retiren. El comodin cubre unicamente el hueco del `@id`,
+                # no el nombre: `repo:renaserlab*` a secas tambien casaria con
+                # `renaserlab-loquesea`, que es de otro dueno.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub 'repo:${RepositorioDeGitHub}:ref:refs/heads/${RamaQuePuedeDesplegar}'
+                  - !Sub
+                    - 'repo:${Duenyo}@*/${Nombre}@*:ref:refs/heads/${RamaQuePuedeDesplegar}'
+                    - Duenyo: !Select [0, !Split ['/', !Ref RepositorioDeGitHub]]
+                      Nombre: !Select [1, !Split ['/', !Ref RepositorioDeGitHub]]
       Policies:
 
         - PolicyName: publicar-imagen-en-ecr
