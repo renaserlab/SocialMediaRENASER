@@ -11,6 +11,18 @@ export type LessonDto = {
   media_path?: string | null;
   /** Por donde iba esta persona. Existia en la base y nadie lo devolvia. */
   progress_seconds?: number;
+  /**
+   * Si la leccion TIENE medio, se entregue su ruta o no.
+   *
+   * Sin esto, esconder la ruta a quien no tiene acceso convertiria «no tienes
+   * acceso» en «esta leccion todavia no tiene video», que son dos cosas muy
+   * distintas delante de quien mira.
+   */
+  has_media?: boolean;
+  /** `video` | `text` (migracion 0034). Sin ella, todas son de video. */
+  kind?: string;
+  /** Leccion abierta sin comprar. Sin la 0034 ninguna lo es. */
+  is_preview?: boolean;
 };
 
 export type LessonDetailDto = LessonDto & {
@@ -27,11 +39,32 @@ export type ModuleDto = {
   id: string;
   title: string;
   sort_order: number;
+  /** De que va el bloque (0034). Vacia sin la migracion. */
+  description?: string;
   lessons: LessonDto[];
 };
 
+/**
+ * La ficha ampliada de la 0034, tal y como la devuelven los dos endpoints.
+ *
+ * Se declara UNA vez y la comparten el listado y el detalle: dos copias del
+ * mismo contrato es como acaban divergiendo.
+ */
+export type FichaDeCursoDto = {
+  subtitle?: string | null;
+  promo_video_path?: string | null;
+  primary_topic_id?: string | null;
+  language?: string;
+  level?: string | null;
+  highlights?: string[];
+  target_audience?: string[];
+  prerequisites?: string[];
+  review_status?: string;
+  rejection_reason?: string | null;
+};
+
 /** GET /learning/courses/{id} */
-export type CourseDetailDto = {
+export type CourseDetailDto = FichaDeCursoDto & {
   id: string;
   author_id: string;
   title: string;
@@ -50,6 +83,8 @@ export type CourseDetailDto = {
   progress_percent: number;
   lessons_total: number;
   lessons_completed: number;
+  /** La duracion del curso entero, sumada por el SERVIDOR. */
+  duration_seconds_total?: number;
   modules: ModuleDto[];
 };
 
@@ -71,7 +106,9 @@ export type MyCourseDto = {
 };
 
 /** GET /catalog/courses */
-export type CourseDto = {
+export type CourseDto = FichaDeCursoDto & {
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
   id: string;
   author_id: string;
   title: string;
@@ -91,10 +128,44 @@ function toCurrency(value: string): Course['currency'] {
   return CURRENCIES.includes(upper) ? upper : 'PEN';
 }
 
-/** Primera frase de la descripcion: el backend no tiene campo `subtitle`. */
-function deriveSubtitle(description: string): string {
+/**
+ * El subtitulo del curso.
+ *
+ * Desde la 0034 es un campo de verdad y se usa tal cual. Mientras no este
+ * aplicada —o mientras un curso antiguo no lo tenga escrito— se recorta la
+ * primera frase de la descripcion, que es lo que se hacia hasta ahora: sale a
+ * medias, pero sale algo, y eso es mejor que un hueco.
+ */
+function deriveSubtitle(description: string, subtitle?: string | null): string {
+  if (subtitle && subtitle.trim()) return subtitle.trim();
   const first = description?.split(/[.\n]/)[0]?.trim() ?? '';
   return first.length > 90 ? `${first.slice(0, 87)}…` : first;
+}
+
+/** Los campos de la 0034, mapeados una sola vez para los dos DTO de curso. */
+function fichaDe(dto: FichaDeCursoDto): Pick<
+  Course,
+  | 'primaryTopicId'
+  | 'language'
+  | 'level'
+  | 'highlights'
+  | 'targetAudience'
+  | 'prerequisites'
+  | 'promoVideoPath'
+  | 'reviewStatus'
+  | 'rejectionReason'
+> {
+  return {
+    primaryTopicId: dto.primary_topic_id ?? null,
+    language: dto.language ?? 'es',
+    level: dto.level ?? null,
+    highlights: dto.highlights ?? [],
+    targetAudience: dto.target_audience ?? [],
+    prerequisites: dto.prerequisites ?? [],
+    promoVideoPath: dto.promo_video_path ?? null,
+    reviewStatus: dto.review_status ?? 'draft',
+    rejectionReason: dto.rejection_reason ?? null,
+  };
 }
 
 export function toCourseFromDetail(dto: CourseDetailDto): Course {
@@ -102,7 +173,7 @@ export function toCourseFromDetail(dto: CourseDetailDto): Course {
     id: dto.id,
     title: dto.title,
     coverPath: dto.cover_path ?? null,
-    subtitle: deriveSubtitle(dto.description),
+    subtitle: deriveSubtitle(dto.description, dto.subtitle),
     authorId: dto.author_id,
     priceMinor: dto.price_minor ?? 0,
     currency: toCurrency(dto.currency),
@@ -112,6 +183,7 @@ export function toCourseFromDetail(dto: CourseDetailDto): Course {
     status: dto.status,
     topicIds: dto.topic_ids ?? [],
     comingSoon: dto.coming_soon ?? false,
+    ...fichaDe(dto),
   };
 }
 
@@ -121,7 +193,7 @@ export function toCourseFromSummary(dto: CourseDto): Course {
     authorId: dto.author_id,
     title: dto.title,
     coverPath: dto.cover_path ?? null,
-    subtitle: deriveSubtitle(dto.description),
+    subtitle: deriveSubtitle(dto.description, dto.subtitle),
     priceMinor: dto.price_minor ?? 0,
     currency: toCurrency(dto.currency),
     // El listado no trae el desglose; el detalle del curso si.
@@ -131,6 +203,7 @@ export function toCourseFromSummary(dto: CourseDto): Course {
     status: dto.status,
     topicIds: dto.topic_ids ?? [],
     comingSoon: dto.coming_soon ?? false,
+    ...fichaDe(dto),
   };
 }
 
@@ -175,6 +248,7 @@ export function toLesson(dto: LessonDetailDto): Lesson {
     summary: dto.body ?? '',
     resources: [],
     mediaPath: dto.media_path ?? null,
+    hasMedia: dto.has_media ?? Boolean(dto.media_path),
     progressSeconds: dto.progress_seconds ?? 0,
     completed: dto.completed ?? false,
     durationSeconds: dto.duration_seconds ?? 0,

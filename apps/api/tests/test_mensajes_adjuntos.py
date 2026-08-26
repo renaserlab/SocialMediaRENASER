@@ -7,13 +7,19 @@ dos cosas; que la RUTA del archivo tenga que corresponder a ESTA conversacion y
 a la carpeta de quien lo manda; que nadie de fuera lea nada; y que el historial
 no pague una consulta por mensaje para traer sus archivos.
 
-LO QUE NO SE PRUEBA AQUI, y a proposito: las politicas RLS del bucket
+LO QUE NO SE PRUEBA AQUI, y a proposito: EJECUTAR las politicas RLS del bucket
 `message-media`. Viven en PostgreSQL y en Supabase Storage, y esto corre sobre
-SQLite; comprobarlas exigiria un proyecto real. Lo que si se prueba es la otra
-mitad de esa defensa, la que si es del backend: que la ruta que se GUARDA no
-pueda apuntar a otra conversacion ni a la carpeta de otra persona. Las dos
-comprueban lo mismo desde los dos lados a proposito, porque si una falla la otra
-sigue en pie.
+SQLite; comprobarlas de verdad exigiria un proyecto real. Lo que si se prueba es
+la otra mitad de esa defensa, la que si es del backend: que la ruta que se
+GUARDA no pueda apuntar a otra conversacion ni a la carpeta de otra persona. Las
+dos comprueban lo mismo desde los dos lados a proposito, porque si una falla la
+otra sigue en pie.
+
+Y al final del fichero hay una tercera cosa, mas barata: LEER la migracion 0033
+y comprobar que el bucket sigue declarado privado y con las politicas que lo
+hacen privado. No ejecuta nada, asi que no sustituye a un proyecto real; lo que
+impide es que un cambio futuro abra el bucket sin que nadie se entere, que es la
+unica forma realista de que estas fotos dejen de ser privadas.
 
 Los archivos de estos escenarios NO existen: aqui solo viajan rutas. Nada llega
 a Supabase y nada se sube a ningun sitio.
@@ -21,7 +27,9 @@ a Supabase y nada se sube a ningun sitio.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -517,3 +525,120 @@ async def test_after_trae_solo_lo_nuevo_con_sus_adjuntos(entorno):
     assert len(nuevos) == 1
     assert nuevos[0]["sender"]["id"] == BRUNO
     assert nuevos[0]["attachments"][0]["storage_path"] == f"{CHAT}/{BRUNO}/b.jpg"
+
+
+# --------------------------------------------------------------------------- #
+# 7. El bucket sigue siendo PRIVADO
+#
+# Esto lee la migracion, no ejecuta la politica: no hay PostgreSQL aqui. Aun
+# asi es lo unico que puede fallar en silencio. Una foto mandada por privado se
+# vuelve legible por toda la aplicacion con un `public = true` en una migracion
+# futura, o quitando la comprobacion de pertenencia de la politica de lectura, y
+# nada de eso rompe ninguna prueba ni da ningun error: simplemente, un dia, los
+# adjuntos de los chats de otros se pueden abrir.
+#
+# Se recorren TODAS las migraciones y no solo la 0033, porque el riesgo no es
+# que la 0033 este mal —esta bien— sino que otra posterior la deshaga.
+# --------------------------------------------------------------------------- #
+MIGRACIONES = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
+
+
+@pytest.fixture(scope="module")
+def sql_0033() -> str:
+    ruta = MIGRACIONES / "0033_adjuntos_de_chat.sql"
+    assert ruta.exists(), f"No se encuentra la migracion en {ruta}"
+    return ruta.read_text(encoding="utf-8")
+
+
+def test_el_bucket_de_los_adjuntos_nace_privado(sql_0033):
+    """`public = false`. Con `true`, cualquiera con la URL abre el fichero."""
+    assert re.search(
+        r"insert\s+into\s+storage\.buckets.*?values\s*\(\s*'message-media'\s*,"
+        r"\s*'message-media'\s*,\s*false\s*\)",
+        sql_0033,
+        re.IGNORECASE | re.DOTALL,
+    ), "El bucket message-media ya no se crea privado."
+
+
+def test_leer_un_adjunto_exige_ser_miembro_de_la_conversacion(sql_0033):
+    """La politica de lectura pregunta por la PERTENENCIA, no por tener cuenta.
+
+    Es justo lo contrario que `post-media`, donde basta con estar registrado
+    (y desde la 0018, ni eso). Si esta politica se relajara a `authenticated` a
+    secas, toda la aplicacion podria leer los chats de todos.
+    """
+    politica = re.search(
+        r"create\s+policy\s+message_media_member_read.*?;",
+        sql_0033,
+        re.IGNORECASE | re.DOTALL,
+    )
+    assert politica, "Ya no existe la politica de lectura del bucket."
+    cuerpo = politica.group(0)
+    assert "to authenticated" in cuerpo.lower(), (
+        "La lectura del bucket dejo de exigir sesion."
+    )
+    assert "es_miembro_de_la_ruta" in cuerpo, (
+        "La lectura del bucket ya no comprueba que quien pregunta sea miembro "
+        "de la conversacion que nombra la ruta."
+    )
+
+
+def test_escribir_exige_miembro_y_carpeta_propia(sql_0033):
+    """La ruta lleva el permiso: <conversacion>/<quien sube>/<fichero>.
+
+    Es la MISMA forma que valida `_validar_rutas` en el backend. Si una de las
+    dos mitades se cae, la otra sigue en pie; si se cae esta, alguien podria
+    subir haciendose pasar por otro.
+    """
+    politica = re.search(
+        r"create\s+policy\s+message_media_member_write.*?;",
+        sql_0033,
+        re.IGNORECASE | re.DOTALL,
+    )
+    assert politica, "Ya no existe la politica de escritura del bucket."
+    cuerpo = politica.group(0)
+    assert "es_miembro_de_la_ruta" in cuerpo
+    assert "auth.uid()" in cuerpo, (
+        "La escritura dejo de exigir que la segunda carpeta sea la de quien sube."
+    )
+
+
+def test_la_comprobacion_de_la_ruta_no_revienta_con_una_carpeta_que_no_es_uuid():
+    """`es_miembro_de_la_ruta` devuelve false, no lanza.
+
+    Una politica que LANZA no deniega el acceso: revienta la consulta entera.
+    Bastaria con que alguien subiera `basura/x.jpg` para tumbar el listado del
+    bucket. Por eso la funcion comprueba la forma antes de convertir a uuid.
+    """
+    sql = (MIGRACIONES / "0033_adjuntos_de_chat.sql").read_text(encoding="utf-8")
+    funcion = re.search(
+        r"create\s+or\s+replace\s+function\s+public\.es_miembro_de_la_ruta.*?\$\$;",
+        sql,
+        re.IGNORECASE | re.DOTALL,
+    )
+    assert funcion, "Ya no existe es_miembro_de_la_ruta."
+    cuerpo = funcion.group(0)
+    assert "return false" in cuerpo.lower(), (
+        "La funcion ya no devuelve false ante una carpeta con forma invalida."
+    )
+
+
+def test_ninguna_migracion_posterior_abre_el_bucket():
+    """Nadie vuelve `message-media` publico mas adelante."""
+    for ruta in sorted(MIGRACIONES.glob("*.sql")):
+        texto = ruta.read_text(encoding="utf-8")
+        if "message-media" not in texto:
+            continue
+        for linea in re.findall(
+            r"update\s+storage\.buckets.*?where\s+id\s*=\s*'message-media'",
+            texto,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            assert not re.search(r"public\s*=\s*true", linea, re.IGNORECASE), (
+                f"{ruta.name} vuelve publico el bucket de los adjuntos de chat."
+            )
+        assert not re.search(
+            r"values\s*\(\s*'message-media'\s*,\s*'message-media'\s*,\s*true\s*\)",
+            texto,
+            re.IGNORECASE,
+        ), f"{ruta.name} crea publico el bucket de los adjuntos de chat."

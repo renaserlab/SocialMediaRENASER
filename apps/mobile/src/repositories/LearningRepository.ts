@@ -38,6 +38,13 @@ export type CourseDetail = {
    */
   canManage: boolean;
   progressPercent: number;
+  /**
+   * La duracion del curso entero, en segundos y sumada por el SERVIDOR.
+   *
+   * La aplicacion podia sumarla sola, pero entonces la ficha y la vista previa
+   * del asistente sumarian por su cuenta y un dia dirian cosas distintas.
+   */
+  durationSecondsTotal: number;
   /** Lecciones en orden, aplanadas de todos los modulos. */
   lessons: LessonSummary[];
 };
@@ -61,6 +68,19 @@ export type DatosDeCurso = {
   coverPath?: string | null;
   topicIds?: string[];
   comingSoon?: boolean;
+
+  // --- Ficha ampliada (0034). El servidor los acepta siempre; si la migración
+  // no está aplicada NO los guarda, y el resto del curso se guarda igual.
+  subtitle?: string | null;
+  promoVideoPath?: string | null;
+  /** Categoría principal. Cuenta también como tema, y va la primera. */
+  primaryTopicId?: string | null;
+  language?: string;
+  level?: string | null;
+  /** Lo que aprenderás: es `courses.highlights`, no una columna nueva. */
+  highlights?: string[];
+  targetAudience?: string[];
+  prerequisites?: string[];
 };
 
 function cuerpoDeCurso(datos: DatosDeCurso): Record<string, unknown> {
@@ -73,8 +93,32 @@ function cuerpoDeCurso(datos: DatosDeCurso): Record<string, unknown> {
   if (datos.coverPath !== undefined) payload.cover_path = datos.coverPath;
   if (datos.topicIds !== undefined) payload.topic_ids = datos.topicIds;
   if (datos.comingSoon !== undefined) payload.coming_soon = datos.comingSoon;
+  if (datos.subtitle !== undefined) payload.subtitle = datos.subtitle;
+  if (datos.promoVideoPath !== undefined) payload.promo_video_path = datos.promoVideoPath;
+  if (datos.primaryTopicId !== undefined) payload.primary_topic_id = datos.primaryTopicId;
+  if (datos.language !== undefined) payload.language = datos.language;
+  if (datos.level !== undefined) payload.level = datos.level;
+  if (datos.highlights !== undefined) payload.highlights = datos.highlights;
+  if (datos.targetAudience !== undefined) payload.target_audience = datos.targetAudience;
+  if (datos.prerequisites !== undefined) payload.prerequisites = datos.prerequisites;
   return payload;
 }
+
+/** Lo que le falta a un curso para poder publicarse. Lo decide el SERVIDOR. */
+export type RequisitosDeCurso = {
+  status: string;
+  reviewStatus: string;
+  ready: boolean;
+  /** Frases para enseñar tal cual. Vacío cuando no falta nada. */
+  missing: string[];
+  /**
+   * Si esta base sabe de revisión.
+   *
+   * Sin la 0034 no hay a quién enviar nada, así que la pantalla ofrece
+   * «Publicar» y no «Enviar a revisión». Nunca un botón que responda 503.
+   */
+  reviewAvailable: boolean;
+};
 
 async function firmarPortadas(courses: Course[]): Promise<Course[]> {
   const paths = courses.map((c) => c.coverPath).filter((p): p is string => !!p);
@@ -147,6 +191,74 @@ export const LearningRepository = {
     });
   },
 
+  /**
+   * Que le falta al curso, SIN cambiar nada.
+   *
+   * Las reglas viven en el servidor y esta llamada solo las lee: repetirlas
+   * aqui garantiza que un dia la pantalla diga que todo esta listo y el
+   * servidor diga que no.
+   */
+  async requirements(courseId: string): Promise<RequisitosDeCurso> {
+    const dto = await apiRequest<{
+      status: string;
+      review_status: string;
+      ready: boolean;
+      missing: string[];
+      review_available: boolean;
+    }>(`${API_V1}/catalog/courses/${courseId}/requirements`);
+    return {
+      status: dto.status,
+      reviewStatus: dto.review_status,
+      ready: dto.ready,
+      missing: dto.missing ?? [],
+      reviewAvailable: dto.review_available ?? false,
+    };
+  },
+
+  /**
+   * Pide que administración mire el curso.
+   *
+   * Como al publicar, cuando falta algo NO lanza: devuelve `submitted: false` y
+   * la lista entera de lo que falta, que es lo único útil.
+   */
+  async submitForReview(
+    courseId: string,
+  ): Promise<{ submitted: boolean; reviewStatus: string; missing: string[] }> {
+    const dto = await apiRequest<{
+      submitted: boolean;
+      review_status: string;
+      missing: string[];
+    }>(`${API_V1}/catalog/courses/${courseId}/submit`, { method: 'POST' });
+    return {
+      submitted: dto.submitted,
+      reviewStatus: dto.review_status,
+      missing: dto.missing ?? [],
+    };
+  },
+
+  /** La bandeja de administración: cursos esperando revisión. */
+  async reviewQueue(): Promise<Course[]> {
+    const dtos = await apiRequest<CourseDto[]>(
+      `${API_V1}/catalog/courses/review-queue?limit=50`,
+    );
+    return firmarPortadas(dtos.map(toCourseFromSummary));
+  },
+
+  /**
+   * Aprueba o rechaza. Solo administración, y lo impone el backend contra
+   * `profiles.role`: esconder el botón no es el permiso.
+   *
+   * Aprobar NO publica. La decisión de estar en el catálogo sigue siendo de
+   * quien creó el curso.
+   */
+  async review(courseId: string, decision: 'approve' | 'reject', reason?: string): Promise<Course> {
+    const dto = await apiRequest<CourseDto>(
+      `${API_V1}/catalog/courses/${courseId}/review`,
+      { method: 'POST', body: JSON.stringify({ decision, reason: reason ?? null }) },
+    );
+    return toCourseFromSummary(dto);
+  },
+
   /** Retira el curso del catalogo sin borrar nada. */
   async unpublish(courseId: string): Promise<Course> {
     const dto = await apiRequest<CourseDto>(
@@ -189,6 +301,11 @@ export const LearningRepository = {
       hasAccess: dto.has_access ?? false,
       canManage: dto.can_manage ?? false,
       progressPercent: dto.progress_percent ?? 0,
+      durationSecondsTotal:
+        dto.duration_seconds_total ??
+        // Respaldo para un backend anterior a la 0034: si el servidor no la
+        // manda, se suma lo que hay. Es la misma cuenta, hecha aqui.
+        lessons.reduce((total, l) => total + (l.durationSeconds ?? 0), 0),
       lessons,
     };
   },

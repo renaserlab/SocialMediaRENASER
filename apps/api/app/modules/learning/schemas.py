@@ -11,10 +11,28 @@ class LessonRead(BaseModel):
     completed: bool = False
     # Ruta del video dentro de Storage. La columna existia desde 0001 pero no
     # se exponia, asi que la app no podia reproducir el video real de nadie.
+    #
+    # SOLO SE ENTREGA A QUIEN PUEDE VERLA: la leccion es muestra, o esta persona
+    # tiene acceso al curso. No es la seguridad —esa es la RLS del bucket, que
+    # sigue exigiendo `has_course_access` para firmar la URL— pero repartir la
+    # ruta de todos los videos de un curso de pago a quien solo mira la ficha es
+    # regalar informacion que no hace falta dar.
     media_path: str | None = None
+    #: Si la leccion TIENE medio, se pueda entregar su ruta o no.
+    #:
+    #: Sin esto, esconder la ruta convertiria «no tienes acceso» en «esta
+    #: leccion todavia no tiene video», que son dos cosas muy distintas delante
+    #: de quien mira: la primera se resuelve comprando y la segunda esperando a
+    #: que su autor lo suba. Decir cual es no regala nada.
+    has_media: bool = False
     #: Segundos vistos. Existia en la base desde 0001 y nadie lo devolvia, asi
     #: que el reproductor no tenia por donde retomar.
     progress_seconds: int = 0
+    #: `video` | `text` (0034). Sin la migracion, todas son de video, que es lo
+    #: que hay hoy.
+    kind: str = "video"
+    #: Leccion abierta sin comprar. Sin la 0034 ninguna lo es.
+    is_preview: bool = False
 
 
 class LessonDetailRead(LessonRead):
@@ -33,6 +51,10 @@ class LessonDetailRead(LessonRead):
     #: si ensenar un boton.
     can_manage: bool = False
     #: Si tiene acceso al contenido de pago del curso al que pertenece.
+    #:
+    #: `kind` e `is_preview` los hereda de `LessonRead`: son de la leccion, no
+    #: del contexto, y declararlos otra vez aqui seria un sitio mas donde
+    #: cambiar el valor por defecto y olvidarse del otro.
     has_access: bool = False
 
 
@@ -40,6 +62,9 @@ class ModuleRead(BaseModel):
     id: str
     title: str
     sort_order: int
+    #: De que va el bloque (0034). Un temario de titulos sueltos no explica
+    #: nada; vacia mientras la migracion no este aplicada.
+    description: str = ""
     lessons: list[LessonRead] = []
 
 
@@ -69,7 +94,26 @@ class CourseDetailRead(BaseModel):
     progress_percent: int = 0
     lessons_total: int = 0
     lessons_completed: int = 0
+    #: La duracion del curso entero, sumada por el SERVIDOR. La aplicacion podia
+    #: sumarla sola, pero entonces la ficha y la vista previa del asistente
+    #: sumarian por su cuenta y un dia dirian cosas distintas.
+    duration_seconds_total: int = 0
     modules: list[ModuleRead] = []
+
+    # --- Ficha ampliada (0034). Vacia mientras la migracion no este puesta. ---
+    subtitle: str | None = None
+    promo_video_path: str | None = None
+    primary_topic_id: str | None = None
+    language: str = "es"
+    level: str | None = None
+    #: «Lo que aprenderas»: `courses.highlights` (0013), reutilizada.
+    highlights: list[str] = Field(default_factory=list)
+    target_audience: list[str] = Field(default_factory=list)
+    prerequisites: list[str] = Field(default_factory=list)
+
+    # --- Revision (0034). EJE APARTE de `status`, que es visibilidad. ---
+    review_status: str = "draft"
+    rejection_reason: str | None = None
 
 
 class LessonProgressInput(BaseModel):

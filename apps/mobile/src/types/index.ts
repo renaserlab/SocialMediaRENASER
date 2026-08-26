@@ -238,6 +238,32 @@ export type Course = {
   topicIds?: string[];
   /** Anunciado pero todavía sin contenido. No es lo mismo que borrador. */
   comingSoon?: boolean;
+
+  // --- Ficha ampliada (migración 0034). Vacía mientras no esté aplicada. ---
+  /** Categoría principal: uno de los temas de la taxonomía común. */
+  primaryTopicId?: string | null;
+  /** Idioma en que se imparte, en ISO 639-1. */
+  language?: string;
+  /** `beginner` | `intermediate` | `advanced`. */
+  level?: string | null;
+  /** Lo que aprenderás. Es `courses.highlights`, no una columna nueva. */
+  highlights?: string[];
+  /** Para quién es el curso. */
+  targetAudience?: string[];
+  /** Qué hace falta saber antes. */
+  prerequisites?: string[];
+  /** Ruta en Storage del vídeo de presentación. NO es una lección. */
+  promoVideoPath?: string | null;
+
+  /**
+   * Revisión: `draft` | `pending_review` | `approved` | `rejected`.
+   *
+   * EJE APARTE de `status`, que es visibilidad. Un curso puede estar aprobado y
+   * retirado del catálogo a la vez, y no es una contradicción.
+   */
+  reviewStatus?: string;
+  /** Por qué se rechazó. Solo lo recibe quien puede gestionar el curso. */
+  rejectionReason?: string | null;
 };
 
 /** Un curso al que se tiene acceso, con el avance real. Lo devuelve el servidor. */
@@ -282,8 +308,19 @@ export type Lesson = {
   mentor: string;
   summary: string;
   resources: LessonResource[];
-  /** Ruta del video en Storage; la pantalla la firma para reproducirlo. */
+  /**
+   * Ruta del video en Storage; la pantalla la firma para reproducirlo.
+   *
+   * Llega VACIA cuando no hay acceso al curso: el temario se entrega sin
+   * comprar porque es lo que vende el curso, pero el archivo no.
+   */
   mediaPath?: string | null;
+  /**
+   * Si la leccion tiene video, aunque no se haya entregado su ruta.
+   *
+   * Es lo que distingue «no tienes acceso» de «todavia no hay video».
+   */
+  hasMedia?: boolean;
   /** Por dónde iba: el reproductor arranca ahí en vez de desde el principio. */
   progressSeconds?: number;
   completed?: boolean;
