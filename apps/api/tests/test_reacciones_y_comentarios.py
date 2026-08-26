@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.security import AuthUser, get_current_user
 from app.main import app
+from app.modules.content import router as content_router
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import cache, esquema
 from app.shared.database import Base, get_db
@@ -83,6 +84,30 @@ async def entorno():
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_current_user, None)
     await engine.dispose()
+
+
+@pytest.fixture
+def avisos(monkeypatch):
+    """Retiene los avisos en vez de mandarlos, para poder mirarlos por dentro.
+
+    Se parchea `send_push` en el modulo del router y no en el suyo propio
+    porque el router lo importo por nombre (`from ... import send_push`): a
+    partir de ese momento su copia es la que se llama, y cambiar el original no
+    tendria efecto.
+
+    Lo que se vigila con esto NO es que salga el push, sino DE DONDE sale el
+    nombre. Es el unico dato del aviso que no venia en la peticion y hay que ir
+    a buscarlo, o sea el unico que se puede buscar en el sitio equivocado.
+    Volver a leerlo del token pasaria las pruebas de mas abajo sin despeinarse,
+    porque el endpoint seguiria devolviendo 200.
+    """
+    capturados: list[dict] = []
+
+    async def _retener(db, **kwargs):
+        capturados.append(kwargs)
+
+    monkeypatch.setattr(content_router, "send_push", _retener)
+    return capturados
 
 
 async def _publicacion_de_bruno(http: AsyncClient, identidad: dict) -> str:
@@ -142,3 +167,68 @@ async def test_darse_me_gusta_a_uno_mismo_tampoco_revienta(entorno):
 
     respuesta = await http.post(f"{POSTS}/{post_id}/like")
     assert respuesta.status_code == 200, respuesta.text
+
+
+# --------------------------------------------------------------------------- #
+# De donde sale el nombre del aviso
+# --------------------------------------------------------------------------- #
+#
+# Las pruebas de arriba comprueban que la ruta no revienta. Estas comprueban lo
+# otro, que es lo que de verdad se rompio: que el nombre venga del PERFIL.
+# Distinguir una cosa de otra importa porque leer el nombre del sitio
+# equivocado no siempre revienta —si el campo existiera en `AuthUser`, la ruta
+# respondaria 200 tan feliz— y entonces solo se notaria en el movil de otra
+# persona, en un aviso con el nombre cambiado o viejo.
+
+
+@pytest.mark.asyncio
+async def test_el_aviso_del_me_gusta_lleva_el_nombre_del_perfil(entorno, avisos):
+    """«Ana» esta en `profiles`; en la identidad del token no hay ningun nombre."""
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+
+    assert (await http.post(f"{POSTS}/{post_id}/like")).status_code == 200
+
+    assert len(avisos) == 1, avisos
+    assert avisos[0]["notification_type"] == "like"
+    assert avisos[0]["user_id"] == BRUNO
+    assert avisos[0]["actor_name"] == "Ana"
+
+
+@pytest.mark.asyncio
+async def test_el_aviso_del_comentario_lleva_el_nombre_del_perfil(entorno, avisos):
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+
+    respuesta = await http.post(f"{POSTS}/{post_id}/comments", json={"body": "Va"})
+    assert respuesta.status_code in (200, 201), respuesta.text
+
+    assert len(avisos) == 1, avisos
+    assert avisos[0]["notification_type"] == "comment"
+    assert avisos[0]["user_id"] == BRUNO
+    assert avisos[0]["actor_name"] == "Ana"
+
+
+@pytest.mark.asyncio
+async def test_el_nombre_del_aviso_se_lee_al_avisar_y_no_es_una_foto_antigua(
+    entorno, avisos
+):
+    """Cambiar de nombre tiene efecto en el siguiente aviso, no dentro de una hora.
+
+    Esta es la prueba que sujeta la decision de NO meter `full_name` en
+    `AuthUser`. Un dato sacado del token seria el del momento en que se emitio,
+    y el token dura una hora larga: quien se cambie el nombre seguiria firmando
+    los avisos con el anterior hasta que le tocara renovar. Leyendolo del perfil
+    al momento de avisar, no hay ventana en la que el aviso mienta.
+    """
+    http, sesiones, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+
+    async with sesiones() as db:
+        ana = await db.get(Profile, ANA)
+        ana.full_name = "Ana Torres"
+        await db.commit()
+
+    assert (await http.post(f"{POSTS}/{post_id}/like")).status_code == 200
+
+    assert avisos[0]["actor_name"] == "Ana Torres"

@@ -759,18 +759,18 @@ async def like_post(
         await db.commit()
         # El push va DESPUES del commit: si la transaccion fallara, no puede
         # haberse avisado ya de algo que no llego a ocurrir.
-        # EL NOMBRE SALE DEL PERFIL, NO DEL TOKEN. `AuthUser` solo tiene id,
-        # email, role y claims: el token dice QUIEN eres, no como te llamas.
-        # Pedirle `full_name` lanzaba AttributeError DESPUES del commit, asi
-        # que la reaccion se guardaba y la peticion moria con un 500 que el
-        # navegador enseñaba como error de CORS (Starlette no pone cabeceras
-        # CORS en excepciones sin capturar). Meses invisible.
-        autor_de_la_accion = await db.get(Profile, current_user.id)
+        #
+        # El nombre sale del PERFIL, no del token; el porque completo esta en
+        # `_nombre_del_actor`. Se usa el helper y no `db.get(Profile, ...)`
+        # porque aqui no hace falta la fila entera: solo el nombre. Y que sea
+        # el mismo helper que en los avisos de mencion evita que este sitio
+        # vuelva a divergir, que es justo como empezo el fallo.
+        actor = await _nombre_del_actor(db, current_user.id)
         await send_push(
             db,
             user_id=post.author_id,
             notification_type="like",
-            actor_name=autor_de_la_accion.full_name if autor_de_la_accion else None,
+            actor_name=actor,
             data={"type": "like", "postId": post_id},
         )
     return {"liked": True, "likes_count": await _likes_count(db, post_id)}
@@ -886,21 +886,26 @@ async def create_comment(
     )
     await db.commit()
     # Despues del commit, por el mismo motivo que en el "me gusta".
-    # Mismo motivo que en el «me gusta»: el nombre vive en el perfil.
-    quien_comenta = await db.get(Profile, current_user.id)
+    #
+    # El nombre sale del PERFIL, no del token: el porque esta en
+    # `_nombre_del_actor`. Aqui, a diferencia del "me gusta", NO se llama a ese
+    # helper: la respuesta ya necesita la fila entera del perfil para pintar al
+    # autor del comentario, asi que se lee UNA vez y sirve para el aviso y para
+    # la respuesta. Usar el helper ademas seria una consulta de mas para traer
+    # un dato que ya esta en la mano.
+    autor = await db.get(Profile, current_user.id)
     await send_push(
         db,
         user_id=post.author_id,
         notification_type="comment",
-        actor_name=quien_comenta.full_name if quien_comenta else None,
+        actor_name=autor.full_name if autor else None,
         data={"type": "comment", "postId": post_id},
     )
     await db.refresh(comment)
 
-    profile = await db.get(Profile, current_user.id)
-    if profile is None:
+    if autor is None:
         raise NotFoundError("Perfil del autor no encontrado.")
-    return _to_comment_read(comment, profile)
+    return _to_comment_read(comment, autor)
 
 
 # --------------------------------------------------------------------------- #

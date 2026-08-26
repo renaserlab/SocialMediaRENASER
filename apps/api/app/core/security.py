@@ -44,7 +44,33 @@ def _get_jwks_client(settings: Settings) -> PyJWKClient:
 
 @dataclass(frozen=True)
 class AuthUser:
-    """Identidad autenticada, derivada del token (fuente de verdad)."""
+    """Identidad autenticada, derivada del token (fuente de verdad).
+
+    NO LLEVA `full_name`, Y ES A PROPOSITO. El token dice QUIEN eres, no como
+    te llamas; el nombre para mostrar vive en `profiles.full_name` y se lee de
+    la base (ver `_nombre_del_actor` en content/router.py). Anadirlo aqui se ha
+    valorado y se descarta por tres motivos:
+
+    1. Se puede falsear. El movil manda el nombre en `user_metadata` al
+       registrarse (`auth.signUp({ data: { full_name } })`), y esa parte del
+       token la reescribe el propio cliente cuando quiera con
+       `auth.updateUser({ data })`, hablando con Supabase DIRECTAMENTE, sin
+       pasar por esta API ni por sus validaciones. Alguien podria ponerse
+       «Soporte de Z» y aparecer asi en los avisos que le llegan a los demas,
+       mientras en la app se le sigue viendo con su nombre real. El aviso y lo
+       que se ve en pantalla dejarian de coincidir, que es justo lo que hace
+       util a un aviso.
+    2. Se queda viejo. El token es una foto del momento en que se emitio y dura
+       una hora larga. Quien cambie su nombre en el perfil seguiria firmando
+       los avisos con el anterior hasta que le toque renovar.
+    3. Ya hay linea trazada, y esta abajo: `_user_from_claims` saca el rol de
+       `app_metadata` (que solo toca el servidor con la clave de servicio) y
+       nunca de `user_metadata`. Meter aqui un dato que escribe el cliente
+       cruzaria esa linea y convertiria este dataclass en algo a medio fiar.
+
+    Regla: lo que decida permisos o identidad, del token; lo que se enseñe a
+    otra persona, del perfil.
+    """
 
     id: str
     email: str | None = None
