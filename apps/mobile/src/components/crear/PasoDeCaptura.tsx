@@ -1,12 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { AvisoDePermiso } from '@/components/AvisoDePermiso';
 import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { Text } from '@/components/Text';
 import { consultarPermiso, pedirPermiso, type EstadoDePermiso } from '@/lib/permisos';
-import { lastGalleryPhoto, StoryCaptureScreen } from '@/screens/StoryCaptureScreen';
+import {
+  alturaDelSelector,
+  lastGalleryPhoto,
+  StoryCaptureScreen,
+} from '@/screens/StoryCaptureScreen';
 import { StoryGalleryScreen } from '@/screens/StoryGalleryScreen';
 import { pickImage, pickVideo, PermisoDenegadoError, type PickedMedia } from '@/services/storage';
 import { palette, radius, spacing } from '@/theme/tokens';
@@ -75,6 +80,7 @@ export function PasoDeCaptura({
   alternativa,
 }: Props) {
   const enWeb = Platform.OS === 'web';
+  const insets = useSafeAreaInsets();
   const [paso, setPaso] = useState<'camara' | 'galeria'>(enWeb ? 'galeria' : 'camara');
   const [ultimaFoto, setUltimaFoto] = useState<string | null>(null);
   const [permisoCamara, setPermisoCamara] = useState<EstadoDePermiso | null>(null);
@@ -295,7 +301,11 @@ export function PasoDeCaptura({
   if (permisoCamara !== 'concedido') {
     return (
       <View style={styles.raiz}>
-        {pie ? <View style={styles.piePendiente}>{pie}</View> : null}
+        {pie ? (
+          <View style={[styles.piePendiente, { bottom: alturaDelSelector(insets.bottom) }]}>
+            {pie}
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -358,5 +368,5 @@ const styles = StyleSheet.create({
     `StoryCaptureScreen`), para que al conceder el permiso la fila de modos no
     de un salto: lo unico que cambia es que detras aparece la imagen.
   */
-  piePendiente: { position: 'absolute', left: 0, right: 0, bottom: 148 },
+  piePendiente: { position: 'absolute', left: 0, right: 0 },
 });
