@@ -21,6 +21,7 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
 import { haptics } from '@/lib/haptics';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { palette, radius, spacing } from '@/theme/tokens';
 import type { PickedMedia } from '@/services/storage';
 
@@ -159,11 +160,43 @@ export function StoryCaptureScreen({
   // Anillo de progreso mientras se graba.
   const progress = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    if (!permission?.granted && permission?.canAskAgain) {
-      void requestPermission();
-    }
-  }, [permission, requestPermission]);
+  /*
+    AQUI NO SE PIDE EL PERMISO DE CAMARA. Lo pide quien abre esta pantalla
+    (`PasoDeCaptura`), que es el unico que sabe en que momento del flujo esta la
+    persona.
+
+    Lo que habia era un efecto que llamaba a `requestPermission()` solo, nada
+    mas montarse, y ademas dependia del propio permiso: cada rechazo lo volvia a
+    lanzar. En Android eso quema los dos intentos que da el sistema en un par de
+    segundos y deja el permiso bloqueado PARA SIEMPRE —a partir de ahi la camara
+    no aparece nunca mas y no hay forma de arreglarlo desde la aplicacion—. Y
+    como el que abre esta pantalla estaba consultando el permiso a la vez, el
+    dialogo saltaba justo cuando esta vista se desmontaba: la respuesta se
+    perdia.
+
+    El estado se sigue LEYENDO (`useCameraPermissions`) porque el permiso puede
+    revocarse desde los ajustes con la aplicacion abierta, y entonces hay que
+    dejar de ensenar un visor negro y decir lo que pasa. Pero preguntar, solo a
+    peticion de la persona: el boton de abajo.
+  */
+
+  /*
+    Al irse de la camara no puede quedar nada corriendo.
+
+    Dos cosas se escapaban: el temporizador de la pulsacion larga, que podia
+    pedir grabar a una camara ya desmontada, y una grabacion en curso cuando se
+    cambia de seccion a media captura. Cerrar la sesion de captura a mano es lo
+    que apaga el piloto de la camara del telefono; dejarlo a la destruccion de
+    la vista nativa lo dejaba encendido unos segundos.
+  */
+  useEffect(
+    () => () => {
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+      pressing.current = false;
+      if (didRecord.current) cameraRef.current?.stopRecording();
+    },
+    [],
+  );
 
   const stopProgress = useCallback(() => {
     progress.stopAnimation();
@@ -462,6 +495,22 @@ export function StoryCaptureScreen({
           )}
         </Pressable>
 
+        {/*
+          El disparador NO cambia de seccion ni de modo.
+
+          Dentro de las pestanas hay dos arrastres horizontales por encima —el
+          carrusel de secciones y el selector de tipo de publicacion de Crear— y
+          cuando uno de ellos se activa CANCELA el gesto nativo de lo que haya
+          debajo. Aqui debajo hay un `PanResponder`, asi que mantener pulsado
+          con el dedo minimamente inclinado abortaba la foto o cortaba la
+          grabacion, y deslizar para acercar se iba a cambiar de modo.
+
+          `activarAlTocar` porque esto no es un ScrollView: hay que reservar el
+          gesto desde el primer contacto, que no hay ningun desplazamiento
+          nativo al que asomarse. Es el mismo blindaje que ya usa la barra de
+          avance del video, que tambien es un `PanResponder`.
+        */}
+        <SinCambioDeSeccion activarAlTocar>
         <View
           {...disparador.panHandlers}
           accessibilityRole="button"
@@ -524,13 +573,28 @@ export function StoryCaptureScreen({
             )}
           </View>
         </View>
+        </SinCambioDeSeccion>
 
         <Pressable
+          /*
+            Frontal ↔ trasera. No se puede voltear MIENTRAS se graba: cambiar de
+            camara reinicia la sesion de captura y `recordAsync` termina con
+            error, asi que el video se perderia entero. Se apaga y se dice por
+            que en la etiqueta, en vez de dejar un boton que estropea la toma.
+          */
           onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))}
+          disabled={recording}
           hitSlop={12}
-          style={styles.roundButton}
+          style={[styles.roundButton, recording ? styles.apagado : null]}
           accessibilityRole="button"
-          accessibilityLabel="Cambiar de cámara"
+          accessibilityState={{ disabled: recording }}
+          accessibilityLabel={
+            recording
+              ? 'No se puede cambiar de cámara mientras grabas'
+              : facing === 'back'
+                ? 'Cambiar a la cámara frontal'
+                : 'Cambiar a la cámara trasera'
+          }
         >
           <Feather name="refresh-cw" size={22} color={media.text} />
         </Pressable>
@@ -578,6 +642,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: media.overlay,
   },
+  /** Un control apagado se ve apagado; no basta con que no responda. */
+  apagado: { opacity: 0.35 },
   recordingPill: {
     position: 'absolute',
     top: 108,

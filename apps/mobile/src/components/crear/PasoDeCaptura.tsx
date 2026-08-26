@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
@@ -48,10 +48,17 @@ type Props = {
  * la cuadricula del carrete y el reparto de permisos son exactamente los
  * mismos; lo unico que cambia es que se hace despues con lo capturado.
  *
- * PERMISOS AL USARLOS, NO AL ENTRAR. Nada se pide hasta que la persona toca
- * algo que lo necesita, y cuando falta se explica con salida: volver a pedirlo
- * si el sistema todavia deja, ir a los ajustes cuando ya no, o hacerlo por el
- * otro camino (el carrete no necesita camara).
+ * PERMISOS AL USARLOS, NO AL ENTRAR. Nada se pide al arrancar la aplicacion:
+ * el de camara se pide al llegar a este paso —que es cuando hace falta— y solo
+ * si no se habia preguntado nunca; el de microfono lo pide la camara al empezar
+ * a grabar, y el del carrete lo pide la cuadricula al abrirse. Cuando falta se
+ * explica con salida: volver a pedirlo si el sistema todavia deja, ir a los
+ * ajustes cuando ya no, o hacerlo por el otro camino (el carrete no necesita
+ * camara).
+ *
+ * Y SE PIDE DESDE UN SOLO SITIO: este. Ver el comentario del efecto de abajo —
+ * tener dos duenos del mismo permiso fue la causa de que la camara no
+ * apareciera.
  *
  * EN EL NAVEGADOR no hay camara ni carrete que recorrer, asi que se usa el
  * selector de archivos, que es lo que el navegador si sabe hacer. Es
@@ -79,11 +86,73 @@ export function PasoDeCaptura({
     void lastGalleryPhoto().then(setUltimaFoto);
   }, [enWeb]);
 
-  // Se consulta SIN pedir: pedirlo solo por entrar es lo que hace que se
-  // rechace, y en iOS un rechazo no tiene vuelta atras dentro de la app.
+  /**
+   * EL PERMISO DE CAMARA SE LLEVA AQUI, Y EN UN SOLO SITIO.
+   *
+   * Antes habia DOS duenos y se pisaban. Esta pantalla consultaba el permiso
+   * (sin pedirlo) mientras `StoryCaptureScreen`, ya montada debajo, lo PEDIA
+   * sola nada mas aparecer. Lo que pasaba, en este orden: saltaba el dialogo
+   * del sistema; la consulta de aqui resolvia «todavia no concedido» y
+   * DESMONTABA la camara con el dialogo abierto; la respuesta —incluido un
+   * «permitir»— llegaba a un componente que ya no existia, y este estado se
+   * quedaba clavado en la pantalla de aviso. La camara no volvia a aparecer.
+   *
+   * En Android era peor: el efecto de alla dependia del propio permiso, asi
+   * que cada «no» relanzaba el dialogo. Dos noes seguidos y el sistema deja de
+   * preguntar PARA SIEMPRE; a partir de ahi la camara ya no aparecia nunca y
+   * no habia forma de arreglarlo desde dentro de la aplicacion.
+   *
+   * CUANDO SE PIDE. Al llegar al paso de camara y solo si no se ha preguntado
+   * nunca, que es exactamente el momento en que hace falta: Crear → cámara →
+   * permiso. No al arrancar la aplicacion, y nunca sobre un «no» ya dado —eso
+   * lo decide la persona pulsando en el aviso—.
+   */
+  const pidiendo = useRef(false);
   useEffect(() => {
     if (enWeb || paso !== 'camara' || !activo) return;
-    void consultarPermiso('camara').then(setPermisoCamara);
+    let vigente = true;
+
+    void (async () => {
+      try {
+        const estado = await consultarPermiso('camara');
+        if (!vigente) return;
+        setPermisoCamara(estado);
+
+        /*
+          Primera vez: se pide aqui mismo. El `ref` evita que un segundo pase
+          del efecto —volver del segundo plano, por ejemplo— lance un dialogo
+          encima de otro que ya esta abierto.
+        */
+        if (estado === 'sinPreguntar' && !pidiendo.current) {
+          pidiendo.current = true;
+          try {
+            const respuesta = await pedirPermiso('camara');
+            if (vigente) setPermisoCamara(respuesta);
+          } finally {
+            pidiendo.current = false;
+          }
+        }
+      } catch {
+        /*
+          Si el modulo de permisos falla, se cae al aviso —que tiene boton y
+          salida por el carrete— y NO a una pantalla negra sin nada que tocar.
+          Quedarse en `null` dejaba justo eso.
+        */
+        if (vigente) setPermisoCamara('denegado');
+      }
+    })();
+
+    return () => {
+      vigente = false;
+    };
+    /*
+      `activo` en las dependencias es lo que cumple la promesa del aviso
+      («volvemos aquí en cuanto lo hagas»): al volver de los ajustes del
+      telefono la pantalla se reactiva, el permiso se vuelve a leer y la camara
+      aparece sola. Antes el estado se leia UNA vez y no se miraba nunca mas,
+      asi que conceder el permiso fuera no servia de nada: habia que cerrar la
+      aplicacion entera.
+    */
   }, [enWeb, paso, activo]);
 
   const pedirCamara = useCallback(() => {
@@ -197,6 +266,24 @@ export function PasoDeCaptura({
   // veria: nadie esta mirando esta pantalla.
   if (!activo) return <View style={styles.raiz} />;
 
+  /*
+    Todavia sin respuesta: o se esta leyendo el estado (`null`) o el dialogo del
+    sistema esta abierto encima («sinPreguntar»). Se deja el fondo oscuro de la
+    camara, que es justo lo que hay detras del dialogo.
+
+    Es lo que evita el fallo de antes: montar `CameraView` sin permiso concedido
+    la dejaba en negro y, sobre todo, arrancaba su propia peticion de permiso en
+    paralelo a la de aqui. Ahora la camara solo se monta cuando de verdad puede
+    ensenar imagen.
+  */
+  if (permisoCamara !== 'concedido') {
+    return (
+      <View style={styles.raiz}>
+        {pie ? <View style={styles.piePendiente}>{pie}</View> : null}
+      </View>
+    );
+  }
+
   return (
     <StoryCaptureScreen
       onCaptured={alElegir}
@@ -248,4 +335,12 @@ const styles = StyleSheet.create({
     medida que usa la barra para saber cuanto ocupa.
   */
   pieWeb: { paddingBottom: espacioParaLaBarra(0) },
+  /*
+    El selector mientras el permiso se resuelve.
+
+    A la MISMA altura a la que lo pinta la camara (`pie` de
+    `StoryCaptureScreen`), para que al conceder el permiso la fila de modos no
+    de un salto: lo unico que cambia es que detras aparece la imagen.
+  */
+  piePendiente: { position: 'absolute', left: 0, right: 0, bottom: 148 },
 });
