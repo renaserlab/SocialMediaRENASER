@@ -33,3 +33,5 @@ legal/publicar/
 # proyecto, pero si alguien apunta `RESPALDO_VIDEOS_DIR` aqui dentro, que no
 # acaben en el repositorio. Son cientos de megas de contenido, no codigo.
 respaldo_videos/
+.vercel
+.env*
