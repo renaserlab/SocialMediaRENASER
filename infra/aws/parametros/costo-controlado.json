@@ -10,7 +10,7 @@
 
   { "ParameterKey": "CertificadoAcmArn", "ParameterValue": "" },
   { "ParameterKey": "NombreDeDominio", "ParameterValue": "" },
-  { "ParameterKey": "ProteccionContraBorrado", "ParameterValue": "Si" },
+  { "ParameterKey": "ProteccionContraBorrado", "ParameterValue": "No" },
   { "ParameterKey": "LogsDeAccesoDelBalanceador", "ParameterValue": "Si" },
 
   { "ParameterKey": "EtiquetaDeImagen", "ParameterValue": "latest" },
@@ -21,7 +21,7 @@
   { "ParameterKey": "PaymentsReturnUrl", "ParameterValue": "https://social-media-renaser.vercel.app/pago" },
 
   { "ParameterKey": "RetencionDeLogsEnDias", "ParameterValue": "30" },
-  { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "" },
+  { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "renaserlab@gmail.com" },
   { "ParameterKey": "CpuObjetivo", "ParameterValue": "60" },
   { "ParameterKey": "PeticionesPorInstanciaObjetivo", "ParameterValue": "600" }
 ]
