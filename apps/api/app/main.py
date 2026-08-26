@@ -18,6 +18,7 @@ from app.modules.bookings.router import router as bookings_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.communities.router import router as communities_router
 from app.modules.content.router import router as content_router
+from app.modules.content.router_etiquetas import router as etiquetas_router
 from app.modules.identity.router import router as identity_router
 from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
@@ -92,6 +93,12 @@ def create_app() -> FastAPI:
     app.include_router(profiles_router, prefix=prefix)
     app.include_router(social_graph_router, prefix=prefix)
     app.include_router(content_router, prefix=prefix)
+    # Etiquetas sociales y candidatos a mencion. Es el MISMO modulo que
+    # `content_router`, en otro fichero para que el trabajo sobre el feed y el
+    # trabajo sobre las etiquetas no choquen en las mismas novecientas lineas.
+    # Se monta siempre: sin las migraciones 0031/0032 responde vacio, que es la
+    # verdad, en vez de reventar.
+    app.include_router(etiquetas_router, prefix=prefix)
     app.include_router(stories_router, prefix=prefix)
     app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)

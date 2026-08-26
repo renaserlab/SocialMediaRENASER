@@ -42,6 +42,10 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "session_cancelled": ("Sesión cancelada", "{actor} canceló la sesión."),
     "session_rescheduled": ("Nueva fecha propuesta", "{actor} propone otra fecha."),
     "session_completed": ("Sesión realizada", "{actor} dio la sesión por hecha."),
+    # Etiquetar a alguien (migracion 0032). El texto dice QUE pasó y no «tienes
+    # una notificación»: quien lo lee en la pantalla de bloqueo tiene que poder
+    # decidir si abre la aplicación sin abrirla.
+    "post_mention": ("Te etiquetaron", "{actor} te etiquetó en una publicación."),
 }
 
 #: Canal de Android por tipo. Permite que el usuario silencie las
@@ -56,6 +60,10 @@ CHANNELS: dict[str, str] = {
     "session_cancelled": "contenido",
     "session_rescheduled": "contenido",
     "session_completed": "contenido",
+    # Va en «interacciones» con los «me gusta» y los comentarios: es alguien
+    # actuando sobre contenido, y quien silencie ese canal espera silenciar
+    # tambien esto.
+    "post_mention": "interacciones",
 }
 
 

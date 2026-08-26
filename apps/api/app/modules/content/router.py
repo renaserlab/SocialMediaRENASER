@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.modules.content import hashtags, menciones
 from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import (
@@ -113,6 +114,8 @@ def _to_post_read(
     sv: int | bool,
     media: list[PostMediaRead] | None = None,
     topic_ids: list[str] | None = None,
+    hashtags: list[str] | None = None,
+    mentions: list[dict] | None = None,
 ) -> PostRead:
     return PostRead(
         id=post.id,
@@ -128,6 +131,28 @@ def _to_post_read(
         liked_by_me=(lk or 0) > 0,
         saved_by_me=(sv or 0) > 0,
         topic_ids=topic_ids or [],
+        hashtags=hashtags or [],
+        mentions=[AuthorSummary(**m) for m in (mentions or [])],
+    )
+
+
+async def _etiquetas_del_lote(
+    db: AsyncSession, post_ids: list[str]
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[dict]]]:
+    """Temas, hashtags y menciones de un lote entero: TRES consultas, no 3xN.
+
+    Existe para que los cuatro sitios que arman publicaciones (el feed, el
+    detalle, la lista del recomendador y la de una etiqueta) pidan lo mismo de
+    la misma forma. Cuando se anadio el segundo, ya se habia olvidado uno.
+
+    Las tres degradan solas: sin la 0027 no hay temas, sin la 0031 no hay
+    etiquetas, sin la 0032 no hay menciones, y en los tres casos la respuesta
+    correcta es un diccionario vacio y no un error.
+    """
+    return (
+        await temas_de_contenido.leer(db, post_ids),
+        await hashtags.leer(db, post_ids),
+        await menciones.leer(db, post_ids),
     )
 
 
@@ -289,13 +314,15 @@ async def list_posts(
     rows = (await db.execute(stmt)).all()
     ids = [row[0].id for row in rows]
     media_map = await _load_media_map(db, ids)
-    # Una consulta para los temas de todo el lote, no una por publicacion.
-    temas = await temas_de_contenido.leer(db, ids)
+    # Una consulta por cosa para el lote entero, no una por publicacion.
+    temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
     return [
         _to_post_read(
             *row,
             media=media_map.get(row[0].id, []),
             topic_ids=temas.get(row[0].id, []),
+            hashtags=etiquetas.get(row[0].id, []),
+            mentions=personas.get(row[0].id, []),
         )
         for row in rows
     ]
@@ -323,8 +350,43 @@ async def create_post(
         await temas_de_contenido.fijar(
             db, post.id, payload.topic_ids, autor_id=current_user.id
         )
+
+    # Las etiquetas salen del TEXTO, no del payload: si el cliente mandara la
+    # lista, cualquiera podria colgar su publicacion de #python sin que la
+    # palabra aparezca por ningun lado.
+    await hashtags.fijar(db, post.id, post.body)
+
+    # Las menciones si vienen elegidas, porque cada una manda una notificacion
+    # y «@ana» es ambiguo. `fijar` devuelve solo a QUIEN HAY QUE AVISAR: ya ha
+    # descartado a quien esta bloqueado y al propio autor.
+    nuevas_menciones = await menciones.fijar(
+        db, post.id, current_user.id, payload.mentioned_user_ids
+    )
+    for mencionado in nuevas_menciones:
+        add_notification(
+            db,
+            user_id=mencionado,
+            actor_id=current_user.id,
+            type="post_mention",
+            entity_type="post",
+            entity_id=post.id,
+        )
+
     await db.commit()
     await db.refresh(post)
+
+    # Los push van DESPUES del commit: si la transaccion fallara, no puede
+    # haberse avisado ya de algo que no llego a ocurrir.
+    for mencionado in nuevas_menciones:
+        await send_push(
+            db,
+            user_id=mencionado,
+            notification_type="post_mention",
+            actor_name=current_user.full_name,
+            # `postId` es lo que hace que tocar el aviso abra /post/{id} y no
+            # el perfil de quien etiqueto, que es donde no esta la publicacion.
+            data={"type": "post_mention", "postId": post.id},
+        )
 
     # Medios con tipo explícito + compatibilidad con image_paths (sin tipo).
     entries: list[PostMediaInput] = list(payload.media)
@@ -366,11 +428,24 @@ async def create_post(
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil del autor no encontrado.")
-    # Los temas se devuelven leidos de la base y no del payload: asi lo que ve
-    # quien publica es exactamente lo que quedo guardado, y no lo que pidio.
-    temas = await temas_de_contenido.leer(db, [post.id])
+    # Temas, etiquetas y menciones se devuelven LEIDOS DE LA BASE y no del
+    # payload: asi lo que ve quien publica es exactamente lo que quedo
+    # guardado. Importa especialmente aqui, porque las tres cosas pueden salir
+    # distintas de lo que se pidio —las etiquetas se extraen del texto y se
+    # cortan en diez, y una mencion bloqueada no se guarda— y ensenar la lista
+    # pedida seria decirle a alguien que etiqueto a una persona a la que no.
+    temas, etiquetas, personas = await _etiquetas_del_lote(db, [post.id])
     return _to_post_read(
-        post, profile, 0, 0, 0, 0, media=media, topic_ids=temas.get(post.id, [])
+        post,
+        profile,
+        0,
+        0,
+        0,
+        0,
+        media=media,
+        topic_ids=temas.get(post.id, []),
+        hashtags=etiquetas.get(post.id, []),
+        mentions=personas.get(post.id, []),
     )
 
 
@@ -389,11 +464,13 @@ async def _load_single_post(
     if row is None:
         raise NotFoundError("Publicacion no encontrada.")
     media_map = await _load_media_map(db, [row[0].id])
-    temas = await temas_de_contenido.leer(db, [row[0].id])
+    temas, etiquetas, personas = await _etiquetas_del_lote(db, [row[0].id])
     return _to_post_read(
         *row,
         media=media_map.get(row[0].id, []),
         topic_ids=temas.get(row[0].id, []),
+        hashtags=etiquetas.get(row[0].id, []),
+        mentions=personas.get(row[0].id, []),
     )
 
 
@@ -421,13 +498,16 @@ async def leer_posts_por_id(
             .where(Post.id.in_(post_ids), Post.status == "published")
         )
     ).all()
-    media_map = await _load_media_map(db, [fila[0].id for fila in filas])
-    temas = await temas_de_contenido.leer(db, [fila[0].id for fila in filas])
+    ids_cargados = [fila[0].id for fila in filas]
+    media_map = await _load_media_map(db, ids_cargados)
+    temas, etiquetas, personas = await _etiquetas_del_lote(db, ids_cargados)
     por_id = {
         fila[0].id: _to_post_read(
             *fila,
             media=media_map.get(fila[0].id, []),
             topic_ids=temas.get(fila[0].id, []),
+            hashtags=etiquetas.get(fila[0].id, []),
+            mentions=personas.get(fila[0].id, []),
         )
         for fila in filas
     }
@@ -478,6 +558,38 @@ async def update_post(
             db, post_id, payload.topic_ids, autor_id=current_user.id
         )
 
+    # Las etiquetas se vuelven a extraer SOLO si cambio el texto, porque el
+    # texto es su unica fuente. Si no cambio, no hay nada que recalcular y
+    # rehacerlo seria borrar y reescribir las mismas filas.
+    #
+    # Y se recalculan SIEMPRE que cambie: editar para quitar una almohadilla
+    # tiene que quitar la etiqueta, o la publicacion seguiria apareciendo en una
+    # busqueda por una palabra que ya no dice.
+    if payload.body is not None:
+        await hashtags.fijar(db, post_id, post.body)
+
+    # `mentioned_user_ids` ausente deja las menciones como estaban; presente las
+    # REEMPLAZA (vacio = desetiquetar a todo el mundo).
+    #
+    # AQUI ESTA LO FACIL DE HACER MAL: se avisa solo a quien NO ESTABA ANTES.
+    # `fijar` lee las anteriores antes de borrarlas y devuelve la diferencia, asi
+    # que corregir una falta de ortografia en una publicacion con cinco personas
+    # etiquetadas no vuelve a hacer sonar cinco telefonos.
+    nuevas_menciones: list[str] = []
+    if payload.mentioned_user_ids is not None:
+        nuevas_menciones = await menciones.fijar(
+            db, post_id, current_user.id, payload.mentioned_user_ids
+        )
+        for mencionado in nuevas_menciones:
+            add_notification(
+                db,
+                user_id=mencionado,
+                actor_id=current_user.id,
+                type="post_mention",
+                entity_type="post",
+                entity_id=post_id,
+            )
+
     # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
     # lista vacia equivale a quitarlo).
     if payload.media is not None:
@@ -498,6 +610,18 @@ async def update_post(
             )
 
     await db.commit()
+
+    # DESPUES del commit, como en el resto del modulo: si la transaccion
+    # fallara, no puede haberse avisado ya de algo que no llego a ocurrir.
+    for mencionado in nuevas_menciones:
+        await send_push(
+            db,
+            user_id=mencionado,
+            notification_type="post_mention",
+            actor_name=current_user.full_name,
+            data={"type": "post_mention", "postId": post_id},
+        )
+
     return await _load_single_post(db, post_id, current_user.id)
 
 
