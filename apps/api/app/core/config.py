@@ -51,6 +51,45 @@ class Settings(BaseSettings):
     #: integradas de Apple y Google, con su comision.
     payments_return_url: str = "https://social-media-renaser.vercel.app/pago"
 
+    #: A donde vuelve quien CANCELA el pago en Stripe. Distinta de la anterior a
+    #: proposito: volver a la pagina de "gracias por tu compra" despues de darle
+    #: a cancelar es mentirle a la persona sobre lo que acaba de pasar.
+    payments_cancel_url: str = "https://social-media-renaser.vercel.app/pago/cancelado"
+
+    # --- Pagos: nativo (RevenueCat) ---
+    #: Verificacion servidor a servidor de las compras de las tiendas. APAGADA
+    #: por defecto. Mientras este en false, `POST /payments/native/sync`
+    #: responde 503 y NO concede nada: un "exito" del cliente jamas basta.
+    revenuecat_verification_enabled: bool = False
+
+    #: Webhook de RevenueCat. Bandera propia y aparte porque todavia no sabemos
+    #: si vamos a tener webhooks configurados. Las devoluciones NO dependen de
+    #: el: la reconciliacion de `native/sync` ya revoca por su cuenta.
+    revenuecat_webhook_enabled: bool = False
+
+    #: Clave SECRETA de RevenueCat (prefijo `sk_`). Solo backend. Jamas con
+    #: prefijo EXPO_PUBLIC_: con ella se pueden conceder entitlements y borrar
+    #: subscriptores de todo el proyecto.
+    revenuecat_secret_api_key: str = ""
+    #: Identificador del proyecto en RevenueCat (`proj...`). La API v2 va
+    #: siempre acotada a un proyecto.
+    revenuecat_project_id: str = ""
+    #: Secreto compartido que se declara en el webhook de RevenueCat y llega en
+    #: la cabecera Authorization. Sin el, el webhook no se acepta.
+    revenuecat_webhook_secret: str = ""
+    #: Base de la API v2. Se deja configurable para poder apuntarla a un doble
+    #: en las pruebas de integracion sin tocar codigo.
+    revenuecat_api_base: str = "https://api.revenuecat.com/v2"
+
+    # --- Pagos: web (Stripe) ---
+    #: Cobro por Stripe Checkout alojado. APAGADO por defecto. Solo WEB: en el
+    #: movil se compra con las tiendas, y meter Stripe ahi es motivo de rechazo.
+    stripe_payments_enabled: bool = False
+    #: Secretos de Stripe. Solo backend, nunca en el cliente.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_api_base: str = "https://api.stripe.com"
+
     # --- Procesado de media (derivados) ---
     #: Genera en segundo plano la version ligera de las imagenes nuevas y el
     #: poster de los videos que suban sin el. Necesita la service_role key.
@@ -106,6 +145,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def payments_environment(self) -> str:
+        """'sandbox' o 'production', para casar con `provider_products`.
+
+        Se deriva del entorno del despliegue en vez de leerse de una variable
+        propia: una variable mas es una variable mas que se puede olvidar, y
+        olvidarla aqui significaria buscar los productos de pruebas en el
+        servidor de verdad (o al reves, que es peor: conceder cursos por una
+        compra de juguete).
+        """
+        return "production" if self.is_production else "sandbox"
 
     @property
     def uses_sqlite(self) -> bool:

@@ -1,3 +1,5 @@
+import { comprasHabilitadas } from '@/services/comprasConfig';
+
 /**
  * Interruptores de funcionalidad.
  *
@@ -9,26 +11,33 @@
 /**
  * Compras dentro de la aplicacion.
  *
- * En `false` RENASER se comporta como una app de MIEMBROS: los cursos forman
- * parte del acceso y no se muestra precio ni ningun boton de compra.
+ * YA NO ES UNA CONSTANTE: sale de `EXPO_PUBLIC_PURCHASES_MODE`, que vale
+ * `off` (por defecto), `test` o `stores`. En `off` la aplicacion se comporta
+ * como hasta ahora —no se muestra precio ni ningun boton de compra— y en los
+ * otros dos si se vende.
  *
- * Por que esta apagado: no hay ninguna pasarela de pago. La habia simulada, y
- * se elimino —siempre terminaba en «transaccion rechazada» y su boton de
- * reintentar regalaba el curso—, porque las tiendas rechazan los flujos de
- * compra que no completan una transaccion («app incompleta», directriz 2.1 de
- * Apple).
+ * QUE CAMBIO DESDE QUE ESTO ERA `false` A SECAS. Habia dos motivos para
+ * tenerlo apagado y los dos se han resuelto:
  *
- * Encenderlo NO es solo cambiar esta constante. Vender contenido digital
- * dentro de la app obliga a usar las compras integradas de Apple y la
- * facturacion de Google Play, con su comision: es una decision de negocio, y
- * hay que construir el cobro de cero (la pantalla anterior ya no existe; vive
- * en el historial de git, commit 2a85dad).
+ * 1. «No hay pasarela de pago». Ahora si: RevenueCat sobre Google Play y
+ *    StoreKit en movil, y Stripe Checkout alojado en web.
+ * 2. «Vender dentro de la app obliga a usar las compras integradas, con su
+ *    comision». Cierto, y esa es justamente la decision que se ha tomado: se
+ *    usan. La alternativa —cobrar fuera y enlazar desde la app— es lo que
+ *    prohibe la directriz 3.1.1 de Apple, asi que no era una opcion.
  *
- * Mientras tanto la constante SI se usa: mantiene ocultos el precio en la
- * pantalla de curso y el campo de importe del panel de administracion, para que
- * no se pida un dato que hoy no significa nada.
+ * LO QUE SIGUE VALIENDO, Y NO SE REPITE: no hay compras SIMULADAS. La pantalla
+ * que hubo aqui terminaba siempre en «transaccion rechazada» y su boton de
+ * reintentar regalaba el curso; las tiendas rechazan los flujos de compra que
+ * no completan una transaccion (directriz 2.1). El modo `test` no es una
+ * simulacion local: es el Test Store de RevenueCat, que entrega `CustomerInfo`
+ * de verdad y concede entitlements de verdad, asi que el codigo que se prueba
+ * es el mismo que se publica.
+ *
+ * La comprobacion de que una release no lleve la clave del Test Store vive en
+ * `services/comprasConfig.ts`.
  */
-export const FEATURE_PURCHASES = false;
+export const FEATURE_PURCHASES = comprasHabilitadas();
 
 /**
  * Transmisiones en vivo.

@@ -9,10 +9,12 @@ import { Button } from '@/components/Button';
 import { CoachMark } from '@/components/CoachMark';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { CourseHighlights } from '@/components/CourseHighlights';
-import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { StateView } from '@/components/StateView';
-import { FEATURE_PURCHASES } from '@/config/features';
+import { esMovil, explicar, ofertaPara, comprarEnTienda, restaurarCompras } from '@/services/compras';
+import type { OfertaDeCompra } from '@/services/compras';
+import { CommerceRepository } from '@/repositories/PaymentRepository';
 import { confirm, notify } from '@/lib/confirm';
+import * as WebBrowser from 'expo-web-browser';
 import { etiquetaDePrecio } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -22,7 +24,6 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function CourseScreen() {
-  const [editing, setEditing] = React.useState(false);
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,10 +35,106 @@ export function CourseScreen() {
   const empezado = lessons.some((l) => l.completed || l.progressSeconds > 0);
   const [enrolling, setEnrolling] = useState(false);
   const [publicando, setPublicando] = useState(false);
+  /**
+   * Que se puede comprar aqui, segun el SERVIDOR y la TIENDA. `null` mientras
+   * se averigua: hasta saberlo no se pinta ningun boton de compra, porque un
+   * boton que aparece y luego resulta imposible es peor que esperar medio
+   * segundo.
+   */
+  const [oferta, setOferta] = useState<OfertaDeCompra | null>(null);
+  const [comprando, setComprando] = useState(false);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
   const retirado = course?.status === 'hidden';
+
+  /**
+   * Se pregunta que hay a la venta solo cuando hace falta: curso de pago y sin
+   * acceso todavia. Para un curso gratis, o para quien ya lo tiene, no hay
+   * nada que consultar y se ahorra la llamada.
+   */
+  React.useEffect(() => {
+    let vigente = true;
+    if (!course || !esDePago || hasAccess) {
+      setOferta(null);
+      return;
+    }
+    void ofertaPara(course.id).then((resultado) => {
+      if (vigente) setOferta(resultado);
+    });
+    return () => {
+      vigente = false;
+    };
+  }, [course, esDePago, hasAccess]);
+
+  /**
+   * Comprar. En movil lo cobra la tienda; en web, Stripe Checkout alojado.
+   *
+   * Cancelar NO ensena ningun error: que alguien abra el dialogo de la tienda
+   * y se lo piense es una decision normal, no un fallo.
+   */
+  const comprar = async () => {
+    if (!course || !oferta?.sePuedeComprar) return;
+    setComprando(true);
+    try {
+      if (oferta.plataforma === 'web') {
+        const { checkoutUrl } = await CommerceRepository.stripeCheckout(course.id);
+        await WebBrowser.openBrowserAsync(checkoutUrl);
+        // Al volver del navegador no se sabe nada: quien concede es el webhook
+        // de Stripe. Se recarga para leer el acceso que el servidor ya tenga.
+        reload();
+        return;
+      }
+      if (!oferta.productoDeTienda) return;
+      const resultado = await comprarEnTienda(oferta.productoDeTienda);
+      if (resultado.estado === 'cancelada') return;
+      if (resultado.estado === 'error') {
+        notify('No se pudo completar la compra', resultado.mensaje);
+        return;
+      }
+      if (resultado.estado === 'pendiente_de_sincronizar') {
+        // La compra NO se ha perdido: esta en la tienda. Decirle a quien acaba
+        // de pagar que «no se ha podido comprar» seria mentira y ademas un
+        // susto.
+        notify(
+          'Compra recibida',
+          'Estamos activando tu acceso. Si no aparece en un momento, usa ' +
+            '«Restaurar compras».',
+        );
+        reload();
+        return;
+      }
+      toast('Curso comprado');
+      reload();
+    } catch (e) {
+      notify('No se pudo completar la compra', e instanceof Error ? e.message : 'Inténtalo de nuevo.');
+    } finally {
+      setComprando(false);
+    }
+  };
+
+  /**
+   * Restaurar compras. OBLIGATORIO en movil.
+   *
+   * Sin esto, quien reinstale o cambie de telefono no puede recuperar lo que
+   * pago, y las tiendas lo exigen.
+   */
+  const restaurar = async () => {
+    setComprando(true);
+    try {
+      const resultado = await restaurarCompras();
+      if (resultado.estado === 'comprada') {
+        toast('Compras restauradas');
+        reload();
+      } else if (resultado.estado === 'error') {
+        notify('No se pudieron restaurar', resultado.mensaje);
+      } else {
+        notify('Casi', 'Estamos comprobando tus compras. Inténtalo de nuevo en un momento.');
+      }
+    } finally {
+      setComprando(false);
+    }
+  };
 
   /**
    * Inscribe y abre la leccion por la que iba.
@@ -124,10 +221,16 @@ export function CourseScreen() {
       <AppHeader
         title="Programa"
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-        // Editar los datos del curso vive aqui, junto al temario: asi quien lo
-        // gestiona lo hace todo desde un solo sitio.
+        /*
+          Editar abre el ASISTENTE, no una hoja.
+
+          La ficha de un curso dejo de caber en un BottomSheet: son cuatro
+          decisiones distintas —que es, que ofrece, que contiene y cuanto
+          cuesta— mas la vista previa y el envio a revision. En una hoja de 460
+          puntos de alto eso se rellenaba a medias y se abandonaba.
+        */
         rightIcon={canManage ? 'edit-2' : undefined}
-        onRightPress={canManage ? () => setEditing(true) : undefined}
+        onRightPress={canManage ? () => router.push(`/editar-curso/${course?.id}` as never) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         {/* Portada real del curso; el asset local solo mientras no tenga. */}
@@ -164,15 +267,28 @@ export function CourseScreen() {
               {etiquetaDePrecio(course.priceMinor, course.currency)}
             </Text>
           </View>
-          {esDePago && !hasAccess && !FEATURE_PURCHASES ? (
-            /*
-              Se comunica la puerta, no se vende. Un boton de compra que no
-              lleva a ninguna parte —o peor, a un cobro fuera de la app— es
-              motivo de rechazo (directriz 3.1.1) ademas de una promesa falsa.
-            */
-            <Text style={[styles.notaDeAcceso, { color: colors.textMuted }]}>
-              Curso de pago. Todavía no está disponible su compra.
-            </Text>
+          {/*
+            EL BLOQUE DE COMPRA. La regla es que SIEMPRE diga algo: o se puede
+            comprar y se ensena el precio, o no se puede y se explica por que.
+            Un boton desactivado sin explicacion es lo mismo que un boton
+            muerto, y un boton muerto es motivo de rechazo (directriz 2.1)
+            ademas de una promesa falsa.
+
+            El precio que se ensena en movil es el de la TIENDA —localizado,
+            con la moneda y los impuestos del pais de la cuenta—, no
+            `price_minor`: ese es referencia de catalogo y precio web, y
+            mostrarlo aqui ensenaria un numero distinto del que se va a cobrar.
+          */}
+          {esDePago && !hasAccess && oferta ? (
+            oferta.sePuedeComprar ? (
+              <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
+                {`Precio: ${oferta.precio}`}
+              </Text>
+            ) : (
+              <Text style={[styles.notaDeAcceso, { color: colors.textMuted }]}>
+                {explicar(oferta.motivo)}
+              </Text>
+            )
           ) : null}
 
           <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
@@ -214,17 +330,61 @@ export function CourseScreen() {
             />
           </View>
 
-          <Button
-            label={
-              enrolling ? 'Abriendo…' : empezado ? 'Continuar' : 'Empezar curso'
-            }
-            // Antes abria siempre '/lesson/1', un id de demo: con datos reales
-            // llevaba a una leccion inexistente. Ahora va a la que toca.
-            disabled={!firstLessonId || enrolling}
-            loading={enrolling}
-            onPress={() => void startCourse()}
-            style={{ marginTop: spacing.xl }}
-          />
+          {/*
+            La llamada a la accion, en sus tres estados:
+              - gratis            -> «Empezar curso»
+              - de pago con acceso -> «Continuar curso»
+              - de pago sin acceso -> «Comprar curso», y solo si de verdad se
+                puede comprar. Si no, no hay boton: hay la explicacion de
+                arriba.
+          */}
+          {esDePago && !hasAccess ? (
+            oferta?.sePuedeComprar ? (
+              <Button
+                label={comprando ? 'Procesando…' : 'Comprar curso'}
+                disabled={comprando}
+                loading={comprando}
+                onPress={() => void comprar()}
+                style={{ marginTop: spacing.xl }}
+              />
+            ) : null
+          ) : (
+            <Button
+              label={
+                enrolling
+                  ? 'Abriendo…'
+                  : esDePago || empezado
+                    ? 'Continuar curso'
+                    : 'Empezar curso'
+              }
+              // Antes abria siempre '/lesson/1', un id de demo: con datos reales
+              // llevaba a una leccion inexistente. Ahora va a la que toca.
+              disabled={!firstLessonId || enrolling}
+              loading={enrolling}
+              onPress={() => void startCourse()}
+              style={{ marginTop: spacing.xl }}
+            />
+          )}
+
+          {/*
+            Restaurar compras. Obligatorio en movil y visible cuando hace
+            falta: quien reinstala o cambia de telefono llega justo aqui, a un
+            curso que pago y que no puede abrir.
+          */}
+          {esDePago && !hasAccess && esMovil() ? (
+            <Pressable
+              onPress={() => void restaurar()}
+              disabled={comprando}
+              style={styles.retirar}
+              accessibilityRole="button"
+              accessibilityLabel="Restaurar compras"
+            >
+              <Feather name="refresh-cw" size={14} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: '700' }}>
+                Restaurar compras
+              </Text>
+            </Pressable>
+          ) : null}
 
           {/* Publicar y retirar, solo para quien gestiona el curso. */}
           {canManage ? (
@@ -253,22 +413,6 @@ export function CourseScreen() {
         </View>
       </AppScreen>
 
-      {editing ? (
-        <CreateCatalogSheet
-          kind="curso"
-          visible
-          editing={{
-            id: course.id,
-            title: course.title,
-            description: course.description,
-            priceMinor: course.priceMinor,
-            topicIds: course.topicIds,
-          }}
-          onClose={() => setEditing(false)}
-          onCreated={reload}
-          onDeleted={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-        />
-      ) : null}
     </View>
   );
 }

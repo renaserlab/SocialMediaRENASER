@@ -13,6 +13,8 @@ import { perfMark } from '@/lib/perf';
 import { setAuthTokenProvider, warmUpApi, ApiError } from '@/services/api';
 import { enlaceAuthInicial } from '@/services/supabase';
 import { registerForPush, unregisterPush } from '@/services/notifications';
+import { sincronizarAlEntrar } from '@/services/compras';
+import { cerrarSesion as cerrarSesionDeCompras } from '@/services/revenueCat';
 import { descartar as descartarSenales } from '@/services/senales';
 import { olvidarFirmasDeAdjuntos } from '@/services/messageMedia';
 import { clearSignedUrlCache } from '@/services/storage';
@@ -157,9 +159,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           // Si falla (Expo Go, emulador, permiso denegado) devuelve null y no
           // pasa nada mas: la app funciona igual, sin avisos en el telefono.
           void registerForPush();
+          // Y las compras de las tiendas se atan a ESTA cuenta. El
+          // `appUserID` de RevenueCat es el UUID de Supabase, nunca el correo:
+          // un correo se cambia, y si el identificador cambia se pierden las
+          // compras y la persona pagaria dos veces por lo mismo.
+          //
+          // Es silencioso a proposito, igual que el registro de avisos: entrar
+          // en la aplicacion no puede depender de que la tienda responda. Si
+          // falla, la siguiente sincronizacion lo recupera, y siempre queda
+          // «Restaurar compras» en la pantalla del curso.
+          const uuid = nextSession.user?.id;
+          if (uuid) void sincronizarAlEntrar(uuid);
         } else {
           useAppStore.getState().setUser(null);
           set({ status: 'anonymous' });
+          // Se desata la cuenta de la tienda. Sin esto, quien inicie sesion
+          // despues en el mismo telefono heredaria el `appUserID` anterior y
+          // con el las compras de otra persona.
+          void cerrarSesionDeCompras();
         }
       }, 0);
     });

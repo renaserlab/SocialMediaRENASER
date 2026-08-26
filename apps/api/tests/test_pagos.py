@@ -110,17 +110,58 @@ def test_la_pasarela_registrada_cumple_el_contrato():
 
 
 def test_el_nombre_de_la_pasarela_cabe_en_la_base_de_datos():
-    """`purchases.provider` tiene un CHECK: apple, google, web o manual.
+    """El nombre de cada pasarela tiene que caber en la columna DONDE ESCRIBE.
 
-    Registrar una pasarela con otro nombre haria fallar el INSERT justo al
-    cobrar, que es el peor momento posible para descubrirlo.
+    Registrar una pasarela con un nombre que su columna no admite haria fallar
+    el INSERT justo al cobrar, que es el peor momento posible para descubrirlo.
+    Eso es lo que protege esta prueba, y sigue en pie.
+
+    LO QUE CAMBIO, Y POR QUE. Ya no hay UNA columna, hay dos, porque conviven
+    dos esquemas mientras dura el trasvase de la migracion 0036:
+
+      * `purchases.provider` — el camino heredado. CHECK de cuatro valores:
+        apple, google, web, manual.
+      * `orders.provider` y `provider_products.provider` — el dominio comercial
+        de la 0035. Otro CHECK, que si admite 'stripe'.
+
+    Stripe NO escribe en `purchases`: sus cobros van a `orders` y
+    `payment_transactions`, y el acceso a `entitlements`. El limite de la tabla
+    antigua no le aplica porque nunca inserta ahi. Renombrarlo a 'web' para
+    caber en una columna que no toca seria mentir sobre quien cobro y perder la
+    capacidad de distinguirlo de cualquier futuro proveedor web en los
+    registros financieros.
+
+    Y no se resuelve con una lista de excepciones: cada pasarela DECLARA en que
+    dominio escribe (`PaymentProvider.dominio`), asi que la comprobacion se
+    hace sola tambien para la siguiente que se anada. El valor por defecto es
+    'purchases', el mas estricto, para que quien no piense en esto quede del
+    lado seguro.
     """
-    permitidos = {"apple", "google", "web", "manual"}
     for nombre, proveedor in providers.PROVIDERS.items():
+        permitidos = proveedor.nombres_admitidos
+        assert proveedor.dominio in {"purchases", "comercio"}, (
+            f"La pasarela '{nombre}' declara un dominio desconocido: "
+            f"'{proveedor.dominio}'."
+        )
         assert proveedor.name in permitidos, (
             f"La pasarela '{nombre}' se identifica como '{proveedor.name}', "
-            f"que no admite la columna purchases.provider ({permitidos})."
+            f"que no admite la columna del dominio '{proveedor.dominio}' "
+            f"({sorted(permitidos)})."
         )
+
+
+def test_stripe_no_escribe_en_la_tabla_heredada():
+    """La excepcion de Stripe se sostiene sobre un hecho, no sobre una lista.
+
+    Si algun dia el flujo de Stripe empezara a escribir en `purchases`, esta
+    prueba tendria que fallar: su nombre no cabe en ese CHECK. Se comprueba el
+    hecho —que su dominio es el comercial— en vez de confiar en que nadie lo
+    cambie.
+    """
+    stripe = providers.PROVIDERS["stripe"]
+    assert stripe.dominio == "comercio"
+    assert stripe.name not in providers.NOMBRES_EN_PURCHASES
+    assert stripe.name in providers.NOMBRES_EN_COMERCIO
 
 
 # ---------------------------------------------------------------------------
