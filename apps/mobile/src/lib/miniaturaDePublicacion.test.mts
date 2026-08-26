@@ -83,3 +83,34 @@ test('un audio no tiene miniatura', () => {
 test('una publicacion sin medio tampoco', () => {
   assert.equal(miniaturaDePublicacion({}), null);
 });
+
+/*
+  Tercera regla, la que ahorra megas: una FOTO en una cuadricula es su
+  miniatura de 400 px, no la imagen del feed de 1080. La celda mide 118 puntos.
+  Con sesenta publicaciones, servir la del feed son varios megas para pintar
+  sesenta cuadraditos, y ese es exactamente el rato que el perfil pasa en
+  negro.
+*/
+test('una foto en la cuadricula usa la miniatura, no la imagen del feed', () => {
+  const m = miniaturaDePublicacion({
+    mediaType: 'image',
+    mediaUrl: 'https://x/feed.webp?firma=1',
+    mediaPath: 'uid/derived/1/feed.webp',
+    posterUrl: 'https://x/thumb.webp?firma=1',
+    posterPath: 'uid/derived/1/thumb.webp',
+  });
+  assert.equal(m?.uri, 'https://x/thumb.webp?firma=1');
+  assert.equal(m?.cacheKey, 'uid/derived/1/thumb.webp');
+});
+
+test('sin miniatura, una foto sigue cayendo al derivado del feed', () => {
+  // Lo publicado antes de que existiera la miniatura tiene que seguir
+  // viendose igual que hasta hoy, no desaparecer.
+  const m = miniaturaDePublicacion({
+    mediaType: 'image',
+    mediaUrl: 'https://x/feed.webp?firma=1',
+    mediaPath: 'uid/derived/1/feed.webp',
+  });
+  assert.equal(m?.uri, 'https://x/feed.webp?firma=1');
+  assert.equal(m?.cacheKey, 'uid/derived/1/feed.webp');
+});

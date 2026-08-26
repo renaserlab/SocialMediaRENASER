@@ -46,11 +46,16 @@ export function miniaturaDePublicacion(post: {
   }
 
   if (post.mediaType === 'image') {
-    // `mediaPath` ya es el derivado del feed cuando existe (lo elige el mapper);
-    // el original solo queda para lo publicado antes del pipeline.
-    if (post.mediaUrl) return { uri: post.mediaUrl, cacheKey: post.mediaPath };
-    // Una imagen con poster es rara, pero si el backend lo genero, sirve.
+    // LA MINIATURA MANDA. Para una foto, `posterPath` es el derivado de 400 px
+    // que el backend genera para las cuadriculas. Va PRIMERO porque `mediaUrl`
+    // es la imagen del feed —1080 px— y bajarla para una celda de 118 puntos
+    // es justo lo que dejaba los perfiles en negro: sesenta celdas eran varios
+    // megas.
     if (post.posterUrl) return { uri: post.posterUrl, cacheKey: post.posterPath };
+    // Sin miniatura se cae al derivado del feed. Es lo que le pasa a todo lo
+    // publicado antes de que existiera, que sigue viendose igual que hasta hoy
+    // en vez de desaparecer.
+    if (post.mediaUrl) return { uri: post.mediaUrl, cacheKey: post.mediaPath };
     return null;
   }
 
