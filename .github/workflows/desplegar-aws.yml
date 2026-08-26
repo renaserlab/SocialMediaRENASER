@@ -1,0 +1,346 @@
+# =============================================================================
+# Despliegue de la API en AWS — sin claves permanentes
+# =============================================================================
+#
+# Publica la imagen de apps/api en ECR, apunta el parametro de SSM a la version
+# nueva y renueva las maquinas del grupo de autoescalado.
+#
+# NO TOCA CLOUDFORMATION. Es deliberado: el rol que asume este workflow solo
+# puede subir imagenes, mover un parametro y renovar instancias. Cambiar la
+# infraestructura (red, balanceador, IAM) lo hace una persona con permisos de
+# administrador, a mano y mirando el changeset. Un CI que puede reescribir la
+# infraestructura es un CI que puede borrarla.
+#
+# CI (ci.yml) sigue siendo quien valida cada pull request; aqui se vuelven a
+# lanzar los tests a proposito, porque un push a `main` no espera a ci.yml y sin
+# esta comprobacion se podria publicar una imagen con los tests en rojo.
+#
+# VOLVER ATRAS: Actions > este workflow > "Run workflow" y escribir en
+# `etiqueta_para_volver_atras` una etiqueta que ya este en ECR (por ejemplo
+# sha-a1b2c3d). No construye nada: solo repunta y renueva. Unos 3 minutos.
+# =============================================================================
+
+name: Desplegar API en AWS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/desplegar-aws.yml'
+  workflow_dispatch:
+    inputs:
+      etiqueta_para_volver_atras:
+        description: 'Etiqueta YA publicada en ECR a la que volver (ej. sha-a1b2c3d). Vacio = desplegar el commit actual.'
+        required: false
+        default: ''
+
+permissions:
+  # id-token es lo que permite a GitHub pedir un token OIDC y cambiarlo por
+  # credenciales temporales de AWS. Sin esta linea, no hay despliegue.
+  id-token: write
+  contents: read
+
+concurrency:
+  group: desplegar-aws-produccion
+  # NUNCA cancelar a mitad: un despliegue interrumpido puede dejar el grupo con
+  # instancias a medio reemplazar. Que el segundo espere.
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  PILA_PLATAFORMA: renaser-plataforma-produccion
+  REPOSITORIO_ECR: renaser/api
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  pruebas:
+    name: Tests de la API
+    runs-on: ubuntu-latest
+    # En un rollback no se ejecutan: esa imagen ya paso por aqui cuando se
+    # publico, y volver atras rapido es justamente el objetivo.
+    if: ${{ inputs.etiqueta_para_volver_atras == '' }}
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: pytest
+
+  # ---------------------------------------------------------------------------
+  publicar:
+    name: Construir y publicar imagen
+    runs-on: ubuntu-latest
+    needs: pruebas
+    if: ${{ inputs.etiqueta_para_volver_atras == '' }}
+    outputs:
+      etiqueta: ${{ steps.version.outputs.etiqueta }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Calcular etiqueta
+        id: version
+        # El SHA del commit y no un numero incremental: dada una etiqueta en
+        # produccion siempre se puede ir al codigo exacto que la genero.
+        run: echo "etiqueta=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Credenciales temporales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Variable de repositorio (Settings > Variables), no secreto: un ARN
+          # no abre nada sin un token OIDC del repositorio autorizado.
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-publicar-${{ github.run_id }}
+
+      - name: Entrar en ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Construir y subir
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          file: apps/api/Dockerfile
+          push: true
+          # Dos etiquetas con papeles distintos: la del SHA es la que se
+          # despliega y a la que se vuelve; `latest` solo existe como red de
+          # seguridad para una maquina que arranque con el parametro de SSM sin
+          # tocar (primer despliegue).
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORIO_ECR }}:${{ steps.version.outputs.etiqueta }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORIO_ECR }}:latest
+          provenance: false
+          # Cache entre ejecuciones: la capa de pip install es la cara y solo
+          # cambia cuando cambia requirements.txt.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  desplegar:
+    name: Renovar instancias
+    runs-on: ubuntu-latest
+    needs: [pruebas, publicar]
+    # Tiene que correr tambien cuando `pruebas` y `publicar` se saltan (rollback).
+    if: >-
+      ${{ !cancelled()
+          && needs.pruebas.result != 'failure'
+          && needs.publicar.result != 'failure' }}
+    steps:
+
+      - name: Credenciales temporales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-desplegar-${{ github.run_id }}
+
+      - name: Leer datos de la pila
+        id: pila
+        run: |
+          set -euo pipefail
+          leer() {
+            aws cloudformation describe-stacks \
+              --stack-name "$PILA_PLATAFORMA" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+              --output text
+          }
+          {
+            echo "grupo=$(leer NombreDelGrupoDeAutoescalado)"
+            echo "parametro=$(leer ParametroDeLaVersion)"
+            echo "url=$(leer UrlDeLaApi)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decidir que version se despliega
+        id: destino
+        env:
+          ETIQUETA_MANUAL: ${{ inputs.etiqueta_para_volver_atras }}
+          ETIQUETA_NUEVA: ${{ needs.publicar.outputs.etiqueta }}
+          PARAMETRO: ${{ steps.pila.outputs.parametro }}
+        run: |
+          set -euo pipefail
+          ETIQUETA="${ETIQUETA_MANUAL:-$ETIQUETA_NUEVA}"
+          if [ -z "$ETIQUETA" ]; then
+            echo "No hay ninguna etiqueta que desplegar." >&2
+            exit 1
+          fi
+
+          # Antes de tocar nada se guarda la version que hay AHORA. Es lo que se
+          # restaura si el despliegue sale mal; sin este dato, un fallo dejaria
+          # la produccion apuntando a una imagen rota y a nadie sabiendo a que
+          # volver.
+          ANTERIOR=$(aws ssm get-parameter --name "$PARAMETRO" \
+            --query 'Parameter.Value' --output text)
+
+          # En un rollback se comprueba que la etiqueta EXISTE antes de apuntar
+          # a ella: si no, las maquinas nuevas no arrancarian y el "arreglo"
+          # seria peor que el problema.
+          if [ -n "$ETIQUETA_MANUAL" ]; then
+            aws ecr describe-images \
+              --repository-name "$REPOSITORIO_ECR" \
+              --image-ids imageTag="$ETIQUETA" > /dev/null
+            echo "Volviendo atras a $ETIQUETA (ahora mismo corre $ANTERIOR)"
+          fi
+
+          {
+            echo "etiqueta=$ETIQUETA"
+            echo "anterior=$ANTERIOR"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apuntar a la version nueva y renovar
+        id: renovar
+        env:
+          GRUPO: ${{ steps.pila.outputs.grupo }}
+          PARAMETRO: ${{ steps.pila.outputs.parametro }}
+          ETIQUETA: ${{ steps.destino.outputs.etiqueta }}
+        run: |
+          set -euo pipefail
+          aws ssm put-parameter --name "$PARAMETRO" --type String \
+            --value "$ETIQUETA" --overwrite > /dev/null
+          echo "Parametro $PARAMETRO -> $ETIQUETA"
+
+          # MinHealthyPercentage=100: primero levanta la maquina nueva y solo
+          # cuando pasa el health check apaga la vieja. Con una imagen rota, la
+          # nueva nunca llega a estar sana, la renovacion falla y la version
+          # anterior SIGUE SIRVIENDO. Esta es la razon de que los dos perfiles
+          # tengan max = deseadas + 1: sin ese hueco, AWS tendria que apagar
+          # antes de encender.
+          #
+          # AutoRollback se deja en false a proposito: la version vive en SSM,
+          # no en la plantilla de arranque, asi que el rollback automatico de
+          # AWS volveria a la MISMA plantilla, que releeria el mismo parametro y
+          # traeria otra vez la imagen rota. El paso "Volver atras" de mas abajo
+          # si hace lo correcto: devolver el parametro a la version anterior.
+          ID=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$GRUPO" \
+            --preferences '{"MinHealthyPercentage":100,"InstanceWarmup":300,"AutoRollback":false,"ScaleInProtectedInstances":"Ignore","StandbyInstances":"Ignore"}' \
+            --query InstanceRefreshId --output text)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "Renovacion $ID en marcha"
+
+      - name: Esperar a que terminen las maquinas
+        env:
+          GRUPO: ${{ steps.pila.outputs.grupo }}
+          ID: ${{ steps.renovar.outputs.id }}
+        # 25 min: reemplazar 2 maquinas con 5 min de margen de arranque cada una
+        # cabe de sobra. Si se pasa de aqui, algo esta atascado.
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          while true; do
+            LEIDO=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$GRUPO" --instance-refresh-ids "$ID" \
+              --query 'InstanceRefreshes[0].[Status,PercentageComplete,StatusReason]' \
+              --output text)
+            ESTADO=$(echo "$LEIDO" | cut -f1)
+            PORCENTAJE=$(echo "$LEIDO" | cut -f2)
+            echo "  $ESTADO ($PORCENTAJE%)"
+            case "$ESTADO" in
+              Successful)
+                echo "Maquinas renovadas."; exit 0 ;;
+              Failed|Cancelled|RollbackSuccessful|RollbackFailed)
+                echo "::error::La renovacion termino en $ESTADO: $(echo "$LEIDO" | cut -f3)"
+                exit 1 ;;
+            esac
+            sleep 20
+          done
+
+      - name: Prueba de humo contra el balanceador
+        env:
+          URL: ${{ steps.pila.outputs.url }}
+        run: |
+          set -euo pipefail
+          # Se comprueba el CONTENIDO, no solo el codigo 200: un balanceador
+          # puede devolver 200 desde una pagina de error intermedia.
+          RESPUESTA=$(curl -fsS --max-time 10 -w '\n%{time_total}' "$URL/health")
+          CUERPO=$(echo "$RESPUESTA" | head -n1)
+          SEGUNDOS=$(echo "$RESPUESTA" | tail -n1)
+          echo "$CUERPO (en ${SEGUNDOS}s)"
+          echo "$CUERPO" | grep -q '"status":"ok"'
+          {
+            echo "### API desplegada"
+            echo ""
+            echo "- Version: \`${{ steps.destino.outputs.etiqueta }}\`"
+            echo "- URL: $URL"
+            echo "- /health: ${SEGUNDOS}s"
+            echo ""
+            echo "Referencia: en Render plan Free el primer acceso tras inactividad tardaba 21,77 s."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Volver atras
+        # Salta si falla CUALQUIER paso anterior, incluida la prueba de humo:
+        # una renovacion "correcta" que deja la API respondiendo mal tambien es
+        # un despliegue fallido.
+        if: failure() && steps.destino.outputs.anterior != ''
+        env:
+          GRUPO: ${{ steps.pila.outputs.grupo }}
+          PARAMETRO: ${{ steps.pila.outputs.parametro }}
+          ANTERIOR: ${{ steps.destino.outputs.anterior }}
+          ETIQUETA: ${{ steps.destino.outputs.etiqueta }}
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          if [ "$ANTERIOR" = "$ETIQUETA" ]; then
+            echo "La version anterior y la nueva son la misma; no hay a donde volver."
+            exit 1
+          fi
+          echo "::warning::Despliegue fallido. Devolviendo produccion a $ANTERIOR"
+
+          # Si quedo una renovacion en curso hay que cancelarla: AWS no admite
+          # dos a la vez sobre el mismo grupo.
+          EN_CURSO=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name "$GRUPO" \
+            --query "InstanceRefreshes[?Status=='InProgress'||Status=='Pending'||Status=='Cancelling'].InstanceRefreshId" \
+            --output text)
+          if [ -n "$EN_CURSO" ]; then
+            aws autoscaling cancel-instance-refresh --auto-scaling-group-name "$GRUPO" > /dev/null || true
+            for _ in $(seq 1 60); do
+              PENDIENTE=$(aws autoscaling describe-instance-refreshes \
+                --auto-scaling-group-name "$GRUPO" \
+                --query "InstanceRefreshes[?Status=='InProgress'||Status=='Pending'||Status=='Cancelling'] | length(@)" \
+                --output text)
+              [ "$PENDIENTE" = "0" ] && break
+              sleep 10
+            done
+          fi
+
+          aws ssm put-parameter --name "$PARAMETRO" --type String \
+            --value "$ANTERIOR" --overwrite > /dev/null
+
+          ID=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$GRUPO" \
+            --preferences '{"MinHealthyPercentage":100,"InstanceWarmup":300,"AutoRollback":false,"ScaleInProtectedInstances":"Ignore","StandbyInstances":"Ignore"}' \
+            --query InstanceRefreshId --output text)
+
+          while true; do
+            ESTADO=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$GRUPO" --instance-refresh-ids "$ID" \
+              --query 'InstanceRefreshes[0].Status' --output text)
+            echo "  vuelta atras: $ESTADO"
+            case "$ESTADO" in
+              Successful) break ;;
+              Failed|Cancelled|RollbackFailed)
+                echo "::error::No se pudo volver atras automaticamente. Ver el procedimiento manual en docs/AWS_DESPLIEGUE.md"
+                exit 1 ;;
+            esac
+            sleep 20
+          done
+
+          {
+            echo "### Despliegue revertido"
+            echo ""
+            echo "- Version que fallo: \`$ETIQUETA\`"
+            echo "- Version restaurada: \`$ANTERIOR\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Se sale en error igualmente: la produccion esta sana, pero el
+          # despliegue NO salio bien y eso tiene que verse en rojo.
+          exit 1
