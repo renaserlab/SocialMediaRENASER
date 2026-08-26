@@ -1059,8 +1059,23 @@ Resources:
               # no va a llegar.
               trap 'echo "FALLO en la linea ${!LINENO}"; avisar FAILURE' ERR
 
-              dnf install -y --setopt=install_weak_deps=False docker jq
+              dnf install -y docker jq
               systemctl enable --now docker
+
+              # Amazon Linux 2023 trae la CLI de AWS, pero TODO lo que viene
+              # despues depende de ella (secretos, imagen, aviso a
+              # CloudFormation). Si un dia deja de venir, sin esta red la
+              # maquina fallaria sin poder ni avisar, y la pila se quedaria 15
+              # minutos esperando un aviso que no llega.
+              if ! command -v aws > /dev/null 2>&1; then
+                echo "AVISO: la AMI no trae la CLI de AWS; instalandola."
+                dnf install -y awscli-2 || {
+                  dnf install -y unzip
+                  curl -sS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscli.zip
+                  unzip -q /tmp/awscli.zip -d /tmp
+                  /tmp/aws/install
+                }
+              fi
 
               # Agente de CloudWatch: aporta memoria y disco, que EC2 no publica
               # por su cuenta. En esta app la memoria es el limite real, asi que
@@ -1093,6 +1108,10 @@ Resources:
               # fichero que solo puede leer root.
               install -d -m 0700 /etc/renaser
               umask 077
+              # El secreto tiene que ser un JSON plano de clave/valor y sin
+              # saltos de linea en los valores: cada pareja se convierte en una
+              # linea del fichero de entorno, y un salto de linea partiria la
+              # variable en dos.
               aws secretsmanager get-secret-value \
                 --region "${!REGION}" --secret-id "${!SECRETO}" \
                 --query SecretString --output text \
