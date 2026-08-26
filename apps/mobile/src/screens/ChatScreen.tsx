@@ -161,20 +161,30 @@ export function ChatScreen() {
         mensaje.
       */
       const desde = instanteMasReciente(
-        mensajesRef.current.filter((m) => (m.attachments?.length ?? 0) > 0 || m.id !== row.id),
+        // Sin contar la fila recién llegada: el instante tiene que ser ANTERIOR
+        // a ella para que la petición la incluya.
+        mensajesRef.current.filter((m) => m.id !== row.id),
       );
-      if (desde) {
-        MessageRepository.listMessagesSince(conversationId, desde, currentUserId)
-          .then((nuevos) => {
-            if (montado && nuevos.length) {
-              aplicar(fusionar(mensajesRef.current, nuevos));
-            }
-          })
-          .catch(() => {
-            // La burbuja de texto ya está puesta; sin esto solo faltaría el
-            // adjunto, y volverá con el siguiente mensaje o al reabrir.
-          });
-      }
+      /*
+        Sin nada anterior de donde colgar el corte —el primer mensaje de una
+        conversación recién abierta— se pide la primera página entera. Es una
+        petición más grande, pero pasa una vez por conversación y es la
+        diferencia entre que la primera foto que alguien manda se vea o quede en
+        un hueco vacío hasta reabrir el chat.
+      */
+      const completar = desde
+        ? MessageRepository.listMessagesSince(conversationId, desde, currentUserId)
+        : MessageRepository.listMessages(conversationId, currentUserId);
+      completar
+        .then((nuevos) => {
+          if (montado && nuevos.length) {
+            aplicar(fusionar(mensajesRef.current, nuevos));
+          }
+        })
+        .catch(() => {
+          // La burbuja de texto ya está puesta; sin esto solo faltaría el
+          // adjunto, y volverá con el siguiente mensaje o al reabrir.
+        });
       MessageRepository.markRead(conversationId).catch(() => {});
     });
 
