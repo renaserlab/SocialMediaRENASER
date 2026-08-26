@@ -4,6 +4,48 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+#: Nivel del curso. Los mismos tres valores que el CHECK de la 0034.
+NIVEL = "^(beginner|intermediate|advanced)$"
+#: Idioma en codigo ISO 639-1 (dos letras minusculas). No se admite `es-PE`:
+#: mezclar idioma y region en la misma columna acaba con «es», «es-PE» y
+#: «es_pe» significando lo mismo y sin forma de agruparlos.
+IDIOMA = "^[a-z]{2}$"
+
+#: Tope de frases en cada lista de la ficha. No es una regla de negocio: es lo
+#: que impide que un cliente mal escrito guarde diez mil lineas en una columna
+#: que se pinta entera en la pantalla del curso.
+MAX_FRASES = 12
+MAX_FRASE = 200
+
+
+class _FichaDeCursoV2(BaseModel):
+    """Los metadatos que anade la 0034. Todos opcionales, en alta y en edicion.
+
+    Sin la migracion aplicada se aceptan igual y NO se guardan: el resto del
+    curso (titulo, descripcion, precio, temas) se guarda como siempre. Un campo
+    que todavia no tiene donde vivir no puede impedir editar el titulo.
+    """
+
+    #: Una linea bajo el titulo. Antes se recortaba la descripcion y salia a
+    #: medias, con la frase cortada por donde tocara.
+    subtitle: str | None = Field(default=None, max_length=200)
+    #: Ruta en `course-media` del video de presentacion. NO es una leccion: no
+    #: cuenta para la duracion ni para el progreso.
+    promo_video_path: str | None = Field(default=None, max_length=500)
+    #: Categoria principal: uno de los temas de `topics` (0026). Los demas
+    #: siguen en `topic_ids` / `course_topics`.
+    primary_topic_id: str | None = None
+    language: str | None = Field(default=None, pattern=IDIOMA)
+    level: str | None = Field(default=None, pattern=NIVEL)
+    #: Para quien es el curso.
+    target_audience: list[str] | None = Field(default=None, max_length=MAX_FRASES)
+    #: Que hace falta saber antes de empezarlo.
+    prerequisites: list[str] | None = Field(default=None, max_length=MAX_FRASES)
+    #: «Lo que aprenderas». Es `courses.highlights` (0013), NO una columna
+    #: nueva: los puntos que ya escribieron los cursos existentes son estos.
+    #: Presente REEMPLAZA la lista entera; ausente la deja como esta.
+    highlights: list[str] | None = Field(default=None, max_length=MAX_FRASES)
+
 
 class EventCreate(BaseModel):
     """Alta de evento. Solo para administradores."""
@@ -53,7 +95,7 @@ class _PrecioDeCurso(BaseModel):
         return por_defecto
 
 
-class CourseCreate(_PrecioDeCurso):
+class CourseCreate(_PrecioDeCurso, _FichaDeCursoV2):
     """Alta de curso. La crea su autor; nace como BORRADOR."""
 
     title: str = Field(min_length=1, max_length=160)
@@ -78,7 +120,7 @@ class EventUpdate(BaseModel):
     event_type: str | None = Field(default=None, pattern="^(online|presential|live)$")
 
 
-class CourseUpdate(_PrecioDeCurso):
+class CourseUpdate(_PrecioDeCurso, _FichaDeCursoV2):
     """Edicion de curso. Su autor o la administracion; todo opcional."""
 
     title: str | None = Field(default=None, min_length=1, max_length=160)
@@ -127,6 +169,23 @@ class CourseRead(BaseModel):
     #: se dice «ninguno», que es la verdad, en lugar de fallar.
     topic_ids: list[str] = Field(default_factory=list)
 
+    # --- Ficha ampliada (0034). Vacia mientras la migracion no este puesta. ---
+    subtitle: str | None = None
+    promo_video_path: str | None = None
+    primary_topic_id: str | None = None
+    language: str = "es"
+    level: str | None = None
+    #: «Lo que aprenderas»: `courses.highlights` (0013), reutilizada.
+    highlights: list[str] = Field(default_factory=list)
+    target_audience: list[str] = Field(default_factory=list)
+    prerequisites: list[str] = Field(default_factory=list)
+
+    # --- Revision (0034). EJE APARTE de `status`, que es visibilidad. ---
+    review_status: str = "draft"
+    submitted_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    rejection_reason: str | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -137,4 +196,49 @@ class CoursePublishResult(BaseModel):
     status: str
     published: bool
     #: Frases para ensenar tal cual. Vacio cuando se publico.
+    #:
+    #: NO se anade aqui el estado de revision, aunque publicar dependa de el:
+    #: este cuerpo es un contrato que ya consumen clientes instalados, y donde
+    #: mejor se lee la revision es en el propio curso (`CourseRead`) y en
+    #: `/requirements`. Un dato repetido en tres sitios es un dato que un dia
+    #: dice tres cosas.
     missing: list[str] = Field(default_factory=list)
+
+
+class CourseRequirements(BaseModel):
+    """Que le falta a un curso para poder publicarse. Sin cambiar nada.
+
+    Lo pide el paso «revisar y enviar» del asistente para pintar la lista de
+    pendientes ANTES de que alguien pulse nada. Las reglas son las mismas que
+    aplica el servidor al publicar, leidas del mismo sitio: repetirlas en la
+    aplicacion garantiza que un dia digan cosas distintas.
+    """
+
+    id: str
+    status: str
+    review_status: str
+    ready: bool
+    missing: list[str] = Field(default_factory=list)
+    #: Si esta base sabe de revision. Sin la 0034 no hay a quien enviar nada y
+    #: la pantalla ensena «Publicar» en vez de «Enviar a revisión».
+    review_available: bool = False
+
+
+class CourseSubmitResult(BaseModel):
+    """Resultado de pedir revision, con lo que falta si no se pudo pedir."""
+
+    id: str
+    review_status: str
+    submitted: bool
+    missing: list[str] = Field(default_factory=list)
+
+
+class CourseReviewDecision(BaseModel):
+    """La decision de administracion sobre un curso en revision."""
+
+    #: `approve` o `reject`. Un tercer valor no existe: dejarlo a medias es
+    #: exactamente lo que hace que una cola de revision no se vacie nunca.
+    decision: str = Field(pattern="^(approve|reject)$")
+    #: Obligatorio al rechazar. Un «no» sin motivo es un muro sin puerta: quien
+    #: lo recibe no sabe que corregir y vuelve a enviar lo mismo.
+    reason: str | None = Field(default=None, max_length=1000)

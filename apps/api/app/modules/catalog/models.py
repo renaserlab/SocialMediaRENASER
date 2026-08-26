@@ -7,6 +7,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -16,10 +17,16 @@ from sqlalchemy import (
     Uuid,
     func,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
 from app.shared.enums import content_status
+
+#: `text[]` en PostgreSQL, JSON en SQLite (la base de los tests), igual que en
+#: `recommendations/models.py`. Sin la variante, los tests no podrian ni crear
+#: las tablas.
+_LISTA_DE_TEXTO = ARRAY(Text).with_variant(JSON, "sqlite")
 
 
 def _uuid() -> str:
@@ -96,6 +103,18 @@ class Course(Base):
     coming_soon: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # «Lo que aprenderas», con su orden. La columna existe en produccion desde
+    # la 0013 y la app ya la escribe, asi que mapearla es seguro: `select(Course)`
+    # la pide y esta ahi.
+    #
+    # NO SE DUPLICA. La 0034 podria haber anadido un `learning_outcomes` con el
+    # mismo significado, y entonces la mitad de los cursos tendria sus puntos en
+    # una columna y la mitad en la otra. Los resultados de aprendizaje son ESTO.
+    #
+    # Sin `server_default`: en PostgreSQL la columna ya lo trae de la 0013, y
+    # declararlo aqui haria que SQLite (los tests) escribiera literalmente la
+    # cadena '{}', que al releerla sale como diccionario y no como lista.
+    highlights: Mapped[list[str]] = mapped_column(_LISTA_DE_TEXTO, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

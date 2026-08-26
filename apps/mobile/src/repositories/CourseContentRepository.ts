@@ -13,6 +13,9 @@ import { supabase } from '@/services/supabase';
  * curso o administracion), no esta capa.
  */
 
+/** Los tipos de lección que la aplicación sabe pintar (migración 0034). */
+export type LessonKind = 'video' | 'text';
+
 export type CourseLesson = {
   id: string;
   moduleId: string;
@@ -24,12 +27,23 @@ export type CourseLesson = {
   mediaUrl?: string;
   durationSeconds: number;
   sortOrder: number;
+  /**
+   * `video` o `text`. Sin la 0034 todas son de vídeo, que es lo que hay hoy.
+   *
+   * NO se ofrecen cuestionarios ni directos aunque la columna pueda crecer: una
+   * lección de un tipo que ninguna pantalla sabe abrir es una lección rota.
+   */
+  kind: LessonKind;
+  /** Lección abierta sin comprar. Sin la 0034 ninguna lo es. */
+  isPreview: boolean;
 };
 
 export type CourseModule = {
   id: string;
   courseId: string;
   title: string;
+  /** De qué va el bloque (0034). Vacía mientras la migración no esté puesta. */
+  description: string;
   sortOrder: number;
   lessons: CourseLesson[];
 };
@@ -57,7 +71,13 @@ type ResourceRow = {
   sort_order: number;
 };
 
-type ModuleRow = { id: string; course_id: string; title: string; sort_order: number };
+type ModuleRow = {
+  id: string;
+  course_id: string;
+  title: string;
+  sort_order: number;
+  description?: string | null;
+};
 type LessonRow = {
   id: string;
   module_id: string;
@@ -66,6 +86,8 @@ type LessonRow = {
   media_path: string | null;
   duration_seconds: number;
   sort_order: number;
+  kind?: string | null;
+  is_preview?: boolean | null;
 };
 
 function client() {
@@ -73,36 +95,129 @@ function client() {
   return supabase;
 }
 
+/*
+  ¿SABE ESTA BASE DE LA 0034?
+
+  El contenido de un curso se escribe contra Supabase directamente (es la RLS de
+  0012 la que decide quién puede), así que aquí no hay un backend que degrade
+  por nosotros: si se manda `kind` a una base sin esa columna, PostgREST rechaza
+  la fila ENTERA y la lección no se guarda. Perder una lección por un campo
+  accesorio es exactamente lo que no puede pasar.
+
+  Se pregunta UNA vez por sesión y se recuerda la respuesta, igual que hace el
+  backend en `catalog/esquema.py`. Y solo se recuerda cuando la respuesta es
+  concluyente: un fallo de red no puede dejar la aplicación creyendo para
+  siempre que la migración no está.
+*/
+let soporteV2: boolean | null = null;
+let preguntaEnCurso: Promise<boolean> | null = null;
+
+/** La columna no existe. Es el código de PostgreSQL para «undefined_column». */
+function esColumnaQueNoExiste(error: { code?: string; message?: string }): boolean {
+  return error.code === '42703' || /column .* does not exist/i.test(error.message ?? '');
+}
+
+async function preguntarPorV2(): Promise<boolean> {
+  const { error } = await client()
+    .from('course_lessons')
+    .select('id, kind, is_preview')
+    .limit(1);
+  if (!error) {
+    soporteV2 = true;
+    return true;
+  }
+  if (esColumnaQueNoExiste(error)) {
+    soporteV2 = false;
+    return false;
+  }
+  // Ni sí ni no: se degrada por esta vez y se volverá a preguntar.
+  throw new Error(error.message);
+}
+
+/**
+ * Si esta base admite la ficha de contenido de la 0034.
+ *
+ * La usa el asistente para no ofrecer lo que no se puede guardar: sin la
+ * migración no aparecen ni el tipo de lección ni la muestra gratuita, en vez de
+ * aparecer y fallar al guardar.
+ */
+export async function soportaContenidoV2(): Promise<boolean> {
+  if (soporteV2 !== null) return soporteV2;
+  if (!preguntaEnCurso) {
+    preguntaEnCurso = preguntarPorV2().finally(() => {
+      preguntaEnCurso = null;
+    });
+  }
+  try {
+    return await preguntaEnCurso;
+  } catch {
+    return false;
+  }
+}
+
+/** Solo para las pruebas: que una no herede lo que averiguó la anterior. */
+export function olvidarSoporteV2(): void {
+  soporteV2 = null;
+  preguntaEnCurso = null;
+}
+
+function aTipo(valor: string | null | undefined): LessonKind {
+  return valor === 'text' ? 'text' : 'video';
+}
+
+/**
+ * Escribe `sort_order` = posición para toda la lista.
+ *
+ * Las escrituras van EN SERIE y no en paralelo a propósito: son pocas y así, si
+ * una falla, se sabe cuántas se aplicaron. Un `Promise.all` que falla a la
+ * mitad deja el temario en un orden que nadie pidió y sin forma de saber cuál.
+ */
+async function ordenar(tabla: 'course_modules' | 'course_lessons', ids: string[]): Promise<void> {
+  const db = client();
+  for (let posicion = 0; posicion < ids.length; posicion += 1) {
+    const { error } = await db
+      .from(tabla)
+      .update({ sort_order: posicion })
+      .eq('id', ids[posicion]);
+    if (error) throw new Error(error.message);
+  }
+}
+
 export const CourseContentRepository = {
   /** Modulos de un curso con sus lecciones, en orden y con las URLs firmadas. */
   async listContent(courseId: string): Promise<CourseModule[]> {
     const db = client();
+    // Se pregunta ANTES de nombrar columnas: pedir `kind` a una base sin la
+    // 0034 no devuelve la fila sin ese campo, devuelve un error y ninguna fila.
+    const v2 = await soportaContenidoV2();
 
     const { data: moduleRows, error: modulesError } = await db
       .from('course_modules')
-      .select('id, course_id, title, sort_order')
+      .select(v2 ? 'id, course_id, title, sort_order, description' : 'id, course_id, title, sort_order')
       .eq('course_id', courseId)
       .order('sort_order', { ascending: true });
     if (modulesError) throw new Error(modulesError.message);
 
-    const modules: CourseModule[] = ((moduleRows ?? []) as ModuleRow[]).map((row) => ({
+    const modules: CourseModule[] = ((moduleRows ?? []) as unknown as ModuleRow[]).map((row) => ({
       id: row.id,
       courseId: row.course_id,
       title: row.title,
+      description: row.description ?? '',
       sortOrder: row.sort_order,
       lessons: [],
     }));
     if (modules.length === 0) return modules;
 
+    const camposDeLeccion = 'id, module_id, title, body, media_path, duration_seconds, sort_order';
     const { data: lessonRows, error: lessonsError } = await db
       .from('course_lessons')
-      .select('id, module_id, title, body, media_path, duration_seconds, sort_order')
+      .select(v2 ? `${camposDeLeccion}, kind, is_preview` : camposDeLeccion)
       .in('module_id', modules.map((m) => m.id))
       .order('sort_order', { ascending: true });
     if (lessonsError) throw new Error(lessonsError.message);
 
     const byModule = new Map(modules.map((m) => [m.id, m]));
-    const lessons: CourseLesson[] = ((lessonRows ?? []) as LessonRow[]).map((row) => ({
+    const lessons: CourseLesson[] = ((lessonRows ?? []) as unknown as LessonRow[]).map((row) => ({
       id: row.id,
       moduleId: row.module_id,
       title: row.title,
@@ -110,6 +225,8 @@ export const CourseContentRepository = {
       mediaPath: row.media_path,
       durationSeconds: row.duration_seconds,
       sortOrder: row.sort_order,
+      kind: aTipo(row.kind),
+      isPreview: row.is_preview === true,
     }));
 
     // Una sola firma en lote para todos los videos del curso.
@@ -233,16 +350,56 @@ export const CourseContentRepository = {
     if (error) throw new Error(error.message);
   },
 
-  async createModule(courseId: string, title: string, sortOrder: number): Promise<void> {
-    const { error } = await client()
-      .from('course_modules')
-      .insert({ course_id: courseId, title, sort_order: sortOrder });
+  async createModule(
+    courseId: string,
+    title: string,
+    sortOrder: number,
+    description = '',
+  ): Promise<void> {
+    const fila: Record<string, unknown> = {
+      course_id: courseId,
+      title,
+      sort_order: sortOrder,
+    };
+    // La descripción solo viaja si hay dónde guardarla: sin la 0034, mandarla
+    // haría que PostgREST rechazara el módulo entero.
+    if (description && (await soportaContenidoV2())) fila.description = description;
+    const { error } = await client().from('course_modules').insert(fila);
     if (error) throw new Error(error.message);
   },
 
-  async renameModule(moduleId: string, title: string): Promise<void> {
-    const { error } = await client().from('course_modules').update({ title }).eq('id', moduleId);
+  async updateModule(
+    moduleId: string,
+    cambios: { title?: string; description?: string },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = {};
+    if (cambios.title !== undefined) patch.title = cambios.title;
+    if (cambios.description !== undefined && (await soportaContenidoV2())) {
+      patch.description = cambios.description;
+    }
+    if (Object.keys(patch).length === 0) return;
+    const { error } = await client().from('course_modules').update(patch).eq('id', moduleId);
     if (error) throw new Error(error.message);
+  },
+
+  /** Se mantiene por los sitios que solo cambian el título. */
+  async renameModule(moduleId: string, title: string): Promise<void> {
+    return CourseContentRepository.updateModule(moduleId, { title });
+  },
+
+  /**
+   * Deja los módulos EN ESTE orden. `ids` es la lista completa y definitiva.
+   *
+   * Se escribe el orden de todos y no solo el del que se movió: `sort_order`
+   * empatados dejan el temario a merced de cómo devuelva las filas la base, que
+   * es lo mismo que no tener orden.
+   */
+  async reorderModules(ids: string[]): Promise<void> {
+    await ordenar('course_modules', ids);
+  },
+
+  async reorderLessons(ids: string[]): Promise<void> {
+    await ordenar('course_lessons', ids);
   },
 
   /** Borrar un modulo arrastra sus lecciones (cascada en la base). */
@@ -258,27 +415,48 @@ export const CourseContentRepository = {
     mediaPath?: string | null;
     durationSeconds?: number;
     sortOrder: number;
+    kind?: LessonKind;
+    isPreview?: boolean;
   }): Promise<void> {
-    const { error } = await client().from('course_lessons').insert({
+    const fila: Record<string, unknown> = {
       module_id: input.moduleId,
       title: input.title,
       body: input.body ?? '',
       media_path: input.mediaPath ?? null,
       duration_seconds: input.durationSeconds ?? 0,
       sort_order: input.sortOrder,
-    });
+    };
+    if (await soportaContenidoV2()) {
+      fila.kind = input.kind ?? 'video';
+      fila.is_preview = input.isPreview ?? false;
+    }
+    const { error } = await client().from('course_lessons').insert(fila);
     if (error) throw new Error(error.message);
   },
 
   async updateLesson(
     lessonId: string,
-    changes: { title?: string; body?: string; mediaPath?: string | null; durationSeconds?: number },
+    changes: {
+      title?: string;
+      body?: string;
+      mediaPath?: string | null;
+      durationSeconds?: number;
+      kind?: LessonKind;
+      isPreview?: boolean;
+    },
   ): Promise<void> {
     const patch: Record<string, unknown> = {};
     if (changes.title !== undefined) patch.title = changes.title;
     if (changes.body !== undefined) patch.body = changes.body;
     if (changes.mediaPath !== undefined) patch.media_path = changes.mediaPath;
     if (changes.durationSeconds !== undefined) patch.duration_seconds = changes.durationSeconds;
+    if (changes.kind !== undefined || changes.isPreview !== undefined) {
+      if (await soportaContenidoV2()) {
+        if (changes.kind !== undefined) patch.kind = changes.kind;
+        if (changes.isPreview !== undefined) patch.is_preview = changes.isPreview;
+      }
+    }
+    if (Object.keys(patch).length === 0) return;
     const { error } = await client().from('course_lessons').update(patch).eq('id', lessonId);
     if (error) throw new Error(error.message);
   },

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
@@ -96,6 +97,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     ofrecerle las de otra persona daria una categoria que no es suya.
   */
   const autorId = useAppStore((state) => state.user?.id ?? null);
+  const router = useRouter();
   const { colors } = useAppTheme();
   const isEvent = kind === 'evento';
   /** El audio privado usa el mismo formulario que un episodio. */
@@ -273,6 +275,8 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
 
     setSaving(true);
     setError(null);
+    //: El curso que se acaba de crear, para abrir su asistente al terminar.
+    let nuevoCurso: string | null = null;
     try {
       // La portada se sube primero: se guarda su RUTA, no una URL.
       const coverPath = cover ? (await uploadPostMedia(cover)).storagePath : null;
@@ -328,7 +332,14 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           ...(coverPath ? { coverPath } : {}),
         };
         if (editing) await LearningRepository.updateCourse(editing.id, data);
-        else await LearningRepository.createCourse({ ...data, currency: 'PEN', coverPath });
+        else {
+          const creado = await LearningRepository.createCourse({
+            ...data,
+            currency: 'PEN',
+            coverPath,
+          });
+          nuevoCurso = creado.id;
+        }
       }
       onCreated?.();
       // El aviso va DESPUES de cerrar. Mientras la hoja (un Modal) siga
@@ -339,8 +350,18 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         editing
           ? isEvent ? 'Evento actualizado' : 'Curso actualizado'
           : isPodcast ? 'Episodio publicado'
-          : isEvent ? 'Evento publicado' : 'Curso publicado',
+          : isEvent ? 'Evento publicado' : 'Borrador de curso creado',
       );
+      /*
+        UN CURSO RECIEN CREADO NO ESTA TERMINADO, y esta hoja no puede
+        terminarlo: le faltan el temario, lo que se aprende, el nivel y la
+        vista previa. Antes se cerraba aqui y el borrador se quedaba en una
+        lista, sin que nada dijera que el siguiente paso existia.
+
+        Se abre el asistente, que es donde se completa. Nunca ANTES de cerrar:
+        en iOS esta hoja es un Modal y navegar por debajo la dejaria encima.
+      */
+      if (nuevoCurso) router.push(`/editar-curso/${nuevoCurso}` as never);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo publicar.');
     } finally {
@@ -510,6 +531,40 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           </>
         )}
 
+        {/*
+          La ficha completa de un curso no cabe aqui: nivel, idioma, lo que se
+          aprende, para quien es, el temario y la vista previa viven en el
+          asistente. Esta hoja se queda con lo rapido —nombre, descripcion,
+          portada, temas y precio— y ofrece la puerta al resto en vez de
+          fingir que esto es todo lo que hay.
+        */}
+        {editing && kind === 'curso' ? (
+          <Pressable
+            onPress={() => {
+              const destino = editing.id;
+              close();
+              router.push(`/editar-curso/${destino}` as never);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir el asistente del curso"
+            style={({ pressed }) => [
+              styles.asistente,
+              { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Feather name="sliders" size={16} color={colors.text} />
+            <View style={{ flex: 1 }}>
+              <Text variant="secondary" weight="700">
+                Ficha completa y temario
+              </Text>
+              <Text variant="caption" color={colors.textMuted}>
+                Nivel, qué se aprende, contenido y enviar a revisión.
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={16} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
+
         <InlineError message={error} />
 
         <Button
@@ -571,6 +626,16 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md,
   },
   coverEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  asistente: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    minHeight: 56,
+  },
   error: { marginTop: spacing.sm },
   delete: {
     flexDirection: 'row',
