@@ -136,6 +136,22 @@ def _to_post_read(
     )
 
 
+async def _nombre_del_actor(db: AsyncSession, uid: str) -> str | None:
+    """El nombre con el que aparece quien provoca un aviso.
+
+    SALE DE `profiles`, NO DE `current_user`. Y no es un rodeo: `AuthUser` es un
+    dataclass con id, email, role y claims —lo que trae el JWT— y NO tiene
+    `full_name`. Leerlo de ahi lanza AttributeError DESPUES del commit, o sea
+    un 500 con la operacion ya guardada, que ademas el navegador reporta como
+    error de CORS porque Starlette no pone cabeceras CORS en una excepcion sin
+    capturar. Es exactamente la trampa numero 3 del proyecto.
+
+    Devolver None es valido: `send_push` escribe «Alguien» y el aviso sale
+    igual. Un aviso con el nombre generico es infinitamente mejor que ninguno.
+    """
+    return await db.scalar(select(Profile.full_name).where(Profile.id == uid))
+
+
 async def _etiquetas_del_lote(
     db: AsyncSession, post_ids: list[str]
 ) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[dict]]]:
@@ -377,16 +393,18 @@ async def create_post(
 
     # Los push van DESPUES del commit: si la transaccion fallara, no puede
     # haberse avisado ya de algo que no llego a ocurrir.
-    for mencionado in nuevas_menciones:
-        await send_push(
-            db,
-            user_id=mencionado,
-            notification_type="post_mention",
-            actor_name=current_user.full_name,
-            # `postId` es lo que hace que tocar el aviso abra /post/{id} y no
-            # el perfil de quien etiqueto, que es donde no esta la publicacion.
-            data={"type": "post_mention", "postId": post.id},
-        )
+    if nuevas_menciones:
+        actor = await _nombre_del_actor(db, current_user.id)
+        for mencionado in nuevas_menciones:
+            await send_push(
+                db,
+                user_id=mencionado,
+                notification_type="post_mention",
+                actor_name=actor,
+                # `postId` es lo que hace que tocar el aviso abra /post/{id} y
+                # no el perfil de quien etiqueto, donde no esta la publicacion.
+                data={"type": "post_mention", "postId": post.id},
+            )
 
     # Medios con tipo explícito + compatibilidad con image_paths (sin tipo).
     entries: list[PostMediaInput] = list(payload.media)
@@ -613,14 +631,16 @@ async def update_post(
 
     # DESPUES del commit, como en el resto del modulo: si la transaccion
     # fallara, no puede haberse avisado ya de algo que no llego a ocurrir.
-    for mencionado in nuevas_menciones:
-        await send_push(
-            db,
-            user_id=mencionado,
-            notification_type="post_mention",
-            actor_name=current_user.full_name,
-            data={"type": "post_mention", "postId": post_id},
-        )
+    if nuevas_menciones:
+        actor = await _nombre_del_actor(db, current_user.id)
+        for mencionado in nuevas_menciones:
+            await send_push(
+                db,
+                user_id=mencionado,
+                notification_type="post_mention",
+                actor_name=actor,
+                data={"type": "post_mention", "postId": post_id},
+            )
 
     return await _load_single_post(db, post_id, current_user.id)
 
