@@ -231,9 +231,11 @@ async def _resena_gestionable(
         return resena
     if resena.reviewed_user_id == uid:
         # Mensaje propio: es la confusion mas probable de todas y merece una
-        # explicacion, no un «no tienes permiso» seco.
+        # explicacion, no un «no tienes permiso» seco. Cubre borrar Y editar,
+        # porque editar es la otra forma de hacerla desaparecer: dejar el texto
+        # en «genial» borra la opinion sin borrar la fila.
         raise ForbiddenError(
-            "No puedes borrar una reseña que han escrito sobre ti. "
+            "No puedes modificar ni borrar una reseña que han escrito sobre ti. "
             "Si crees que incumple las normas, repórtala.",
             code="review_not_yours_to_delete",
         )
