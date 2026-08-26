@@ -1,5 +1,5 @@
 import { profileImageUrl } from '@/services/storage';
-import type { Conversation, Message } from '@/types';
+import type { Conversation, Message, MessageAttachment } from '@/types';
 
 export type MsgAuthorDto = {
   id: string;
@@ -19,12 +19,30 @@ export type ConversationDto = {
   updated_at: string;
 };
 
+export type AttachmentDto = {
+  id: string;
+  storage_path: string;
+  kind: 'image' | 'video' | 'document';
+  mime_type: string | null;
+  file_name: string | null;
+  bytes: number | null;
+  width: number | null;
+  height: number | null;
+  duration_s: number | null;
+};
+
 export type MessageDto = {
   id: string;
   conversation_id: string;
   sender: MsgAuthorDto;
   body: string;
   created_at: string;
+  /**
+   * Opcional a propósito: mientras la migración 0033 espere aprobación el
+   * backend no manda este campo, y un mapeador que lo diera por seguro dejaría
+   * el chat entero en blanco por una función que todavía no está.
+   */
+  attachments?: AttachmentDto[];
 };
 
 /** Fila cruda de la tabla messages que entrega Supabase Realtime. */
@@ -59,21 +77,48 @@ export function toConversation(dto: ConversationDto): Conversation {
   };
 }
 
+export function toAttachment(dto: AttachmentDto): MessageAttachment {
+  return {
+    id: dto.id,
+    storagePath: dto.storage_path,
+    kind: dto.kind,
+    mimeType: dto.mime_type,
+    fileName: dto.file_name,
+    bytes: dto.bytes,
+    width: dto.width,
+    height: dto.height,
+    durationS: dto.duration_s,
+  };
+}
+
 export function toMessage(dto: MessageDto, currentUserId?: string | null): Message {
   return {
     id: dto.id,
     text: dto.body,
     sender: currentUserId && dto.sender.id === currentUserId ? 'me' : 'them',
     createdAt: formatTime(dto.created_at),
+    // El instante sin formatear: es lo que ordena la lista y lo que se manda
+    // como `before`/`after`. `createdAt` solo lleva hora y minuto.
+    createdAtIso: dto.created_at,
+    attachments: (dto.attachments ?? []).map(toAttachment),
   };
 }
 
-/** Mapea una fila de Realtime (solo trae sender_id, no el perfil). */
+/**
+ * Mapea una fila de Realtime.
+ *
+ * La fila cruda de `messages` NO sabe nada de los archivos que cuelgan de ella:
+ * Realtime entrega la tabla, no la respuesta del API. Por eso el mensaje sale
+ * de aquí sin adjuntos y la pantalla los completa después pidiendo las
+ * novedades con `after`, en una sola petición para toda la ráfaga. El texto se
+ * pinta al instante, que es lo que hace que un chat se sienta vivo.
+ */
 export function toMessageFromRow(row: MessageRow, currentUserId?: string | null): Message {
   return {
     id: row.id,
     text: row.body,
     sender: currentUserId && row.sender_id === currentUserId ? 'me' : 'them',
     createdAt: formatTime(row.created_at),
+    createdAtIso: row.created_at,
   };
 }

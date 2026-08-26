@@ -15,7 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.modules.catalog import cursos_v2
 from app.modules.catalog.models import Course
+from app.modules.commerce import esquema as esquema_comercio
+from app.modules.commerce import service as comercio_service
 from app.modules.learning import progreso
 from app.modules.learning.models import (
     CourseLesson,
@@ -55,10 +58,21 @@ async def _is_enrolled(db: AsyncSession, uid: str, course_id: str) -> bool:
 
 
 async def _tiene_acceso(db: AsyncSession, uid: str | None, course: Course) -> bool:
-    """Las mismas cuatro vias que `has_course_access()` en la base de datos.
+    """Las mismas cinco vias que `has_course_access()` en la base de datos.
 
-    Gratuito, autor, administracion o compra PAGADA. `pending` no cuenta: un
-    cobro iniciado y no completado no es un cobro.
+    Gratuito, autor, administracion, DERECHO ACTIVO o compra PAGADA. `pending`
+    no cuenta: un cobro iniciado y no completado no es un cobro.
+
+    LA CUARTA VIA SE DELEGA, y no es un detalle de estilo. Desde la 0035/0036 el
+    acceso lo concede `entitlements`, y una compra por Stripe o por las tiendas
+    NO escribe en `purchases`. Mirar solo la tabla vieja aqui significaba que
+    quien pagaba veia `has_access: false` y se quedaba sin la ruta de su video,
+    mientras `/payments/courses/{id}/access` y la RLS del almacenamiento le
+    decian que si. Dos respuestas a la misma pregunta, que es justo el fallo que
+    corrigio la 0016; se pregunta al comercio para que solo haya una.
+
+    Sin la 0035 aplicada, `hay_comercio` es False y esto se comporta
+    EXACTAMENTE como antes: desplegar no puede exigir la migracion.
     """
     if course.price_minor <= 0:
         return True
@@ -68,6 +82,13 @@ async def _tiene_acceso(db: AsyncSession, uid: str | None, course: Course) -> bo
         return True
     if await is_admin(db, uid):
         return True
+    if await esquema_comercio.hay_comercio(db):
+        # `es_admin=False` porque ya se ha comprobado arriba: pasarlo evita
+        # repetir la consulta a `profiles`.
+        acceso = await comercio_service.resolver_acceso_al_curso(
+            db, user_id=uid, course_id=course.id, es_admin=False
+        )
+        return acceso.tiene_acceso
     return await _is_enrolled(db, uid, course.id)
 
 
@@ -165,18 +186,29 @@ async def get_course_detail(
     temario = await _temario(db, course.id)
     lesson_ids = [leccion.id for _, lecciones in temario for leccion in lecciones]
     progreso_por_leccion = await _progreso_de(db, uid, lesson_ids)
+    tipos = await cursos_v2.tipos_de_lecciones(db, lesson_ids)
+    descripciones = await cursos_v2.descripciones_de_modulos(
+        db, [modulo.id for modulo, _ in temario]
+    )
+
+    tiene_acceso = await _tiene_acceso(db, uid, course)
 
     module_reads: list[ModuleRead] = []
     lessons_total = 0
     lessons_completed = 0
+    duracion_total = 0
     for modulo, lecciones in temario:
         lesson_reads: list[LessonRead] = []
         for leccion in lecciones:
             avance = progreso_por_leccion.get(leccion.id)
             hecha = bool(avance and avance.completed)
             lessons_total += 1
+            duracion_total += leccion.duration_seconds or 0
             if hecha:
                 lessons_completed += 1
+            # Sin la 0034 no hay tipo ni muestra: video y cerrada, que es
+            # exactamente lo que hay hoy y ademas es el lado seguro.
+            kind, es_muestra = tipos.get(leccion.id, ("video", False))
             lesson_reads.append(
                 LessonRead(
                     id=leccion.id,
@@ -184,8 +216,13 @@ async def get_course_detail(
                     duration_seconds=leccion.duration_seconds,
                     sort_order=leccion.sort_order,
                     completed=hecha,
-                    media_path=leccion.media_path,
+                    media_path=_media_visible(
+                        leccion.media_path, acceso=tiene_acceso, muestra=es_muestra
+                    ),
+                    has_media=bool(leccion.media_path),
                     progress_seconds=avance.progress_seconds if avance else 0,
+                    kind=kind,
+                    is_preview=es_muestra,
                 )
             )
         module_reads.append(
@@ -193,11 +230,13 @@ async def get_course_detail(
                 id=modulo.id,
                 title=modulo.title,
                 sort_order=modulo.sort_order,
+                description=descripciones.get(modulo.id, ""),
                 lessons=lesson_reads,
             )
         )
 
     temas = await temas_de_curso.leer(db, [course.id])
+    ficha = await cursos_v2.leer_una(db, course.id)
     return CourseDetailRead(
         id=course.id,
         author_id=course.author_id,
@@ -210,13 +249,76 @@ async def get_course_detail(
         coming_soon=course.coming_soon,
         topic_ids=temas.get(course.id, []),
         enrolled=bool(uid) and await _is_enrolled(db, uid, course.id),
-        has_access=await _tiene_acceso(db, uid, course),
+        has_access=tiene_acceso,
         can_manage=await _puede_gestionar(db, uid, course),
         progress_percent=progreso.porcentaje(lessons_completed, lessons_total),
         lessons_total=lessons_total,
         lessons_completed=lessons_completed,
+        duration_seconds_total=duracion_total,
         modules=module_reads,
+        subtitle=ficha.subtitle,
+        promo_video_path=ficha.promo_video_path,
+        primary_topic_id=ficha.primary_topic_id,
+        language=ficha.language,
+        level=ficha.level,
+        highlights=list(course.highlights or []),
+        target_audience=ficha.target_audience,
+        prerequisites=ficha.prerequisites,
+        review_status=ficha.review_status,
+        # El motivo del rechazo es para quien tiene que corregirlo, no para
+        # quien mira el curso: se manda solo a quien puede gestionarlo.
+        rejection_reason=(
+            ficha.rejection_reason
+            if await _puede_gestionar(db, uid, course)
+            else None
+        ),
     )
+
+
+def _media_visible(
+    media_path: str | None, *, acceso: bool, muestra: bool
+) -> str | None:
+    """La ruta del medio, SOLO para quien puede reproducirlo.
+
+    POR QUE EXISTE ESTA FUNCION. El temario se entrega entero sin acceso —
+    titulos, duraciones y descripciones son lo que vende el curso— pero la RUTA
+    del video no es temario: es el archivo. Este endpoint las devolvia todas a
+    cualquiera que abriera la ficha de un curso de pago.
+
+    No era una brecha: el bucket `course-media` es privado y sus politicas
+    exigen `has_course_access()` para firmar una URL, asi que la descarga se
+    deniega igual. Pero es informacion que no hace falta dar, y el dia que
+    alguien afloje una politica de almacenamiento la ruta ya estaria repartida.
+
+    Una leccion marcada como MUESTRA si entrega su ruta: para eso es una
+    muestra. Esa parte la respalda `has_lesson_access` en la base de datos
+    (0036), que es quien de verdad deja firmar la URL de una preview.
+    """
+    if media_path is None:
+        return None
+    return media_path if (acceso or muestra) else None
+
+
+def _texto_visible(
+    body: str | None, *, kind: str, acceso: bool, muestra: bool
+) -> str:
+    """El cuerpo de una leccion ESCRITA, solo para quien puede leerla.
+
+    POR QUE NO BASTA CON ESCONDER `media_path`. En una leccion de video el
+    cuerpo son notas y la puerta de verdad la cierra el almacenamiento: sin
+    `has_lesson_access` no se firma la URL, diga lo que diga este endpoint.
+
+    En una leccion `kind='text'` (0034) NO HAY ARCHIVO. El contenido es este
+    texto, viaja en la respuesta JSON y el almacenamiento no puede protegerlo
+    porque nunca llega a existir un objeto que proteger. Entregarlo sin mirar el
+    acceso deja leer entero un curso escrito con solo abrir la leccion, aunque
+    todo lo demas del muro este bien puesto.
+
+    Una MUESTRA si entrega su texto: para eso esta marcada.
+    """
+    if kind != "text" or acceso or muestra:
+        return body or ""
+    return ""
 
 
 @router.post("/courses/{course_id}/enroll")
@@ -284,13 +386,12 @@ async def my_courses(
     """
     uid = current_user.id
 
-    accesos = list(
-        await db.scalars(
-            select(Purchase.course_id).where(
-                Purchase.user_id == uid, Purchase.status == "paid"
-            )
-        )
-    )
+    # Lo comprado por el flujo nuevo vive en `entitlements` y NO deja fila en
+    # `purchases`; la tabla vieja sigue contando mientras dure el trasvase de la
+    # 0036. `cursos_con_acceso` junta las dos, que es exactamente lo que
+    # significa «mis cursos». Mirar solo `purchases` dejaba fuera de la
+    # biblioteca al que acababa de pagar.
+    accesos = await comercio_service.cursos_con_acceso(db, user_id=uid)
     if not accesos:
         return []
 
@@ -394,8 +495,9 @@ async def get_lesson_detail(
 
     Se devuelven titulo, duracion y descripcion aunque no haya acceso: eso es
     el temario, que es lo que vende el curso. Lo que no se entrega sin acceso
-    es el VIDEO, y de eso se encarga la RLS del almacenamiento: sin ella no se
-    puede firmar la URL, diga lo que diga este endpoint.
+    es el VIDEO —ni siquiera su ruta— y de eso se encarga ademas la RLS del
+    almacenamiento: sin ella no se puede firmar la URL, diga lo que diga este
+    endpoint. Salvo que la leccion sea MUESTRA, que es justo para lo que existe.
     """
     leccion, modulo, curso = await _leccion_con_curso(db, lesson_id)
     uid = current_user.id if current_user else None
@@ -408,17 +510,28 @@ async def get_lesson_detail(
             LessonProgress, {"user_id": uid, "lesson_id": lesson_id}
         )
 
+    kind, es_muestra = (await cursos_v2.tipos_de_lecciones(db, [leccion.id])).get(
+        leccion.id, ("video", False)
+    )
+    tiene_acceso = await _tiene_acceso(db, uid, curso)
     return LessonDetailRead(
         id=leccion.id,
         title=leccion.title,
         duration_seconds=leccion.duration_seconds,
         sort_order=leccion.sort_order,
         completed=bool(avance and avance.completed),
-        media_path=leccion.media_path,
+        media_path=_media_visible(
+            leccion.media_path, acceso=tiene_acceso, muestra=es_muestra
+        ),
+        has_media=bool(leccion.media_path),
         progress_seconds=avance.progress_seconds if avance else 0,
-        body=leccion.body or "",
+        body=_texto_visible(
+            leccion.body, kind=kind, acceso=tiene_acceso, muestra=es_muestra
+        ),
+        kind=kind,
+        is_preview=es_muestra,
         can_manage=await _puede_gestionar(db, uid, curso),
-        has_access=await _tiene_acceso(db, uid, curso),
+        has_access=tiene_acceso,
         course_id=curso.id,
         course_title=curso.title,
         module_title=modulo.title,

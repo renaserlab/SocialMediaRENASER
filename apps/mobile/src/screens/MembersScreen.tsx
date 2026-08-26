@@ -16,6 +16,8 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { irAlPerfil } from '@/lib/irAlPerfil';
+import { pedirDestacados } from '@/services/cachePerfil';
 
 /**
  * Sugerencias tras crear la cuenta. Sin esto el usuario nuevo entraba a un feed
@@ -42,7 +44,7 @@ export function MembersScreen() {
       return;
     }
     setState('loading');
-    ProfileRepository.listFeatured()
+    pedirDestacados()
       .then((list) => {
         // Solo se sugiere a quien el usuario aun NO sigue. Si ya sigue a todos
         // los destacados (o es Darren, que no se sugiere a si mismo) esta
@@ -142,7 +144,7 @@ export function MembersScreen() {
               style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
               <Pressable
-                onPress={() => router.push(`/profile/${member.id}` as never)}
+                onPress={() => irAlPerfil(router, member.id)}
                 accessibilityRole="button"
                 accessibilityLabel={`Ver perfil de ${member.fullName}`}
                 style={styles.avatarWrap}
@@ -190,7 +192,7 @@ export function MembersScreen() {
                 <Button
                   label="Ver perfil"
                   variant="secondary"
-                  onPress={() => router.push(`/profile/${member.id}` as never)}
+                  onPress={() => irAlPerfil(router, member.id)}
                   style={styles.action}
                 />
               </View>

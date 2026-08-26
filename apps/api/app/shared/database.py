@@ -20,7 +20,36 @@ settings = get_settings()
 
 # El engine es perezoso: no abre conexion hasta la primera consulta,
 # por lo que la app puede levantar aunque DATABASE_URL aun no apunte a Supabase.
-engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
+#
+# POR QUE ESTOS PARAMETROS Y NO LOS DE POR DEFECTO. Medido el 25/08/2026 contra
+# produccion: la base vive en `aws-0-us-east-1` (Virginia) y la API en Oregon,
+# asi que CADA viaje de ida y vuelta a la base cuesta unos 70 ms. Con los
+# valores por defecto eso se paga mas veces de las necesarias:
+#
+#   * `pool_pre_ping` manda un SELECT 1 ANTES de entregar cada conexion. Es la
+#     forma robusta de no servir una conexion que el pooler ya cerro, pero
+#     cuesta un viaje entero. En la misma region es ~1 ms y no se nota; a
+#     traves del pais son ~70 ms EN CADA PETICION. Se mantiene porque perder
+#     peticiones es peor que tardar, y porque al mover la API a us-east-1 el
+#     coste desaparece solo. Si alguna vez estorba, la alternativa NO es
+#     quitarlo a secas: es bajar `pool_recycle` y reintentar la desconexion.
+#   * `pool_recycle` cierra por iniciativa propia las conexiones que llevan
+#     media hora abiertas. El pooler de Supabase las corta por su cuenta al
+#     cabo de un rato; reciclarlas antes convierte un error en una reconexion
+#     silenciosa, y ademas hace que el pre-ping falle mucho menos.
+#   * El tamano se fija explicitamente para que sea una decision y no un
+#     descuido. Diez conexiones simultaneas sobran para la carga de hoy y
+#     siguen estando muy por debajo del limite del plan de Supabase, que es lo
+#     que de verdad hay que no agotar: si el pool crece sin techo, quien se
+#     queda sin conexiones es la base, no la API.
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_size=5,
+    max_overflow=5,
+)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -56,6 +85,7 @@ async def create_all_dev() -> None:
     from app.modules.notifications import models as _notifications  # noqa: F401
     from app.modules.profiles import models as _profiles  # noqa: F401
     from app.modules.recommendations import models as _recs  # noqa: F401
+    from app.modules.reviews import models as _reviews  # noqa: F401
     from app.modules.social_graph import models as _social  # noqa: F401
 
     async with engine.begin() as conn:

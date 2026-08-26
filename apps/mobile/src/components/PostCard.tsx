@@ -10,6 +10,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
+import { TextoDePublicacion } from '@/components/TextoDePublicacion';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
@@ -24,6 +25,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { Post } from '@/types';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 /**
  * Los iconos de acción miden 18-20 px. Ampliamos el area tactil con hitSlop
@@ -112,8 +114,22 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   const feedMuted = useAppStore((state) => state.feedMuted);
   const toggleFeedMuted = useAppStore((state) => state.toggleFeedMuted);
 
-  // Solo existe reproductor para el video que suena y para el siguiente: dos
-  // como mucho en todo el muro, aunque haya veinte publicaciones con video.
+  /*
+    Solo existe reproductor para los videos que suenan y para el siguiente que
+    se prepara, nunca uno por publicacion: haya veinte publicaciones con video
+    o doscientas, el numero de reproductores vivos no depende de la longitud de
+    la lista.
+
+    Cuantos son exactamente lo decide el muro, no esta tarjeta: hasta
+    MAX_VIDEOS_REPRODUCIENDO (3) sonando mas lo que quepa de
+    MAX_VIDEOS_PREPARANDO (2), con un techo duro de MAX_REPRODUCTORES (4). Ver
+    `MuroDePublicaciones`, donde estan los tres numeros y el motivo de cada uno.
+
+    (Aqui ponia «dos como mucho». Lo fue mientras solo sonaba un video; al pasar
+    a reproducir todos los que se ven de verdad, el techo subio a cuatro y este
+    comentario se quedo atras. Se corrige porque un comentario que miente sobre
+    la memoria nativa es peor que no tener ninguno.)
+  */
   const montarReproductor = autoFeed
     ? Boolean(videoActive || videoPreload)
     : videoStarted && visible !== false;
@@ -275,7 +291,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       <View style={styles.header}>
         <Pressable
           style={styles.headerInfo}
-          onPress={() => post.authorId && router.push(`/profile/${post.authorId}` as never)}
+          onPress={() => irAlPerfil(router, post.authorId)}
           disabled={!post.authorId}
           accessibilityRole="button"
           accessibilityLabel={`Ver perfil de ${post.author}`}
@@ -301,7 +317,22 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         </Pressable>
       </View>
 
-      <Text variant="body" style={styles.body}>{post.body}</Text>
+      {/*
+        Solo si hay algo que leer. Una publicacion puede ser solo foto o solo
+        video —el backend lo acepta a proposito— y sin esta condicion quedaba
+        un bloque de texto vacio con su margen entero justo encima de la
+        imagen, que se lee como si algo hubiera fallado al cargar.
+      */}
+      {/*
+        Y el cuerpo ya no es texto plano: las etiquetas se tocan y llevan a
+        /hashtag/..., y debajo va la gente etiquetada. El contenedor conserva
+        el mismo relleno de antes para no mover nada de sitio.
+      */}
+      {post.body.trim() !== '' && (
+        <View style={styles.body}>
+          <TextoDePublicacion cuerpo={post.body} menciones={post.mentions} />
+        </View>
+      )}
       {post.mediaType === 'video' ? (
         /*
           16:9 en vez de una caja fija: la mayoria de videos son apaisados y
@@ -532,7 +563,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
             leftIcon="user"
             onPress={() => {
               setMenuOpen(false);
-              router.push(`/profile/${post.authorId}` as never);
+              irAlPerfil(router, post.authorId);
             }}
           />
         ) : null}

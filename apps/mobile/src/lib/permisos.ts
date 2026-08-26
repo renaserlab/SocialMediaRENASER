@@ -45,6 +45,12 @@ export async function consultarPermiso(tipo: TipoDePermiso): Promise<EstadoDePer
 /**
  * Pide el permiso. Si ya estaba bloqueado, NO vuelve a preguntar: el sistema
  * ignoraria la peticion y quien mira solo veria un boton que no hace nada.
+ *
+ * Los dos estados que SI preguntan son «sinPreguntar» —la primera vez— y
+ * «denegado» —se dijo que no y el sistema todavia deja insistir—. En Android
+ * cada «no» cuenta: al segundo, el sistema deja de preguntar para siempre. Por
+ * eso esto no se llama solo desde ningun efecto; siempre lo dispara un gesto de
+ * la persona o el momento exacto en que la camara hace falta.
  */
 export async function pedirPermiso(tipo: TipoDePermiso): Promise<EstadoDePermiso> {
   const actual = await consultarPermiso(tipo);
@@ -99,6 +105,21 @@ export function textoDePermiso(
         'o ampliar la selección desde los ajustes.',
       accion: 'Gestionar selección',
       vaAAjustes: true,
+    };
+  }
+  if (estado === 'denegado') {
+    /*
+      Ya se dijo que no UNA vez. No es lo mismo que no haber preguntado nunca:
+      repetir el texto de invitacion suena a que la aplicacion no se ha enterado
+      de la respuesta. Se reconoce el «no» y se dice que se puede cambiar.
+    */
+    return {
+      titulo: `Sin ${NOMBRE[tipo]} no se puede grabar`,
+      cuerpo:
+        'Dijiste que no, y está bien. Si cambias de idea puedes darle acceso ' +
+        'ahora; solo se usa mientras estés creando algo.',
+      accion: 'Volver a intentarlo',
+      vaAAjustes: false,
     };
   }
   return {

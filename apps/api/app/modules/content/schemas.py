@@ -73,6 +73,17 @@ class PostCreate(BaseModel):
     # El maximo real lo comprueba el servidor (MAX_TEMAS_POR_PUBLICACION); aqui
     # solo se acota el tamano de la peticion.
     topic_ids: list[str] = Field(default_factory=list, max_length=10)
+    # A QUIEN se etiqueta (migracion 0032). Son ids de perfiles elegidos de una
+    # lista, no nombres escritos: «@ana» es ambiguo y aqui hay una notificacion
+    # de por medio.
+    #
+    # OJO: NO hay campo para los hashtags. Esos los extrae el SERVIDOR de
+    # `body`, porque si el cliente mandara la lista se podria colgar una
+    # publicacion de #python sin que la palabra aparezca en el texto.
+    #
+    # El maximo real lo comprueba el servidor (MAX_MENCIONES_POR_PUBLICACION);
+    # aqui solo se acota el tamano de la peticion.
+    mentioned_user_ids: list[str] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def _algo_que_publicar(self) -> "PostCreate":
@@ -95,6 +106,13 @@ class PostUpdate(BaseModel):
     # Ausente = no se tocan los temas. Presente (aunque sea vacio) = se
     # reemplazan por lo que llegue, lo que permite QUITAR uno mal elegido.
     topic_ids: list[str] | None = Field(default=None, max_length=10)
+    # Ausente = no se tocan las etiquetas de personas. Presente (aunque sea
+    # vacio) = se reemplazan, lo que permite DESETIQUETAR a alguien.
+    #
+    # Al reemplazar solo se avisa a QUIEN NO ESTABA ANTES: corregir una falta de
+    # ortografia en una publicacion con cinco personas etiquetadas no puede
+    # volver a hacer sonar cinco telefonos.
+    mentioned_user_ids: list[str] | None = Field(default=None, max_length=10)
 
 
 class PostRead(BaseModel):
@@ -113,8 +131,30 @@ class PostRead(BaseModel):
     #: De que trata. Vacio en el contenido anterior a la 0027 y en el que nadie
     #: etiqueto: para ese, el recomendador cae a los temas del autor.
     topic_ids: list[str] = Field(default_factory=list)
+    #: Las etiquetas sociales del texto, TAL Y COMO SE ESCRIBIERON la primera
+    #: vez («#MiNegocio», no «#minegocio»). Vacio sin la migracion 0031 y en
+    #: todo lo publicado antes de ella: el texto sigue mostrandose igual, lo que
+    #: no hay es nada que tocar.
+    hashtags: list[str] = Field(default_factory=list)
+    #: A quien etiqueta. Vacio sin la migracion 0032.
+    mentions: list[AuthorSummary] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HashtagRead(BaseModel):
+    """Una etiqueta y cuantas publicaciones tiene DE VERDAD.
+
+    `posts_count` cuenta solo lo publicado. Si contara borradores y contenido
+    retirado, la pantalla diria «12 publicaciones» y ensenaria ocho, que es
+    peor que no poner numero.
+    """
+
+    #: Forma normalizada. Es la que va en la URL de /hashtag/[name].
+    tag: str
+    #: Como se escribio la primera vez. Es la que se pinta.
+    display_tag: str
+    posts_count: int = 0
 
 
 class CommentCreate(BaseModel):

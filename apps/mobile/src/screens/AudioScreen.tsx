@@ -14,11 +14,11 @@ import { assets } from '@/data/assets';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
-import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { useAppStore } from '@/store/useAppStore';
 import type { Post } from '@/types';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { pedirDestacados } from '@/services/cachePerfil';
 
 function formatTime(value: number) {
   const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -49,7 +49,7 @@ export function AudioScreen() {
       // quien es: si el propio usuario lo es, es su perfil.
       let adminId = currentUser?.isAdmin ? currentUser.id : null;
       if (!adminId) {
-        const featured = await ProfileRepository.listFeatured();
+        const featured = await pedirDestacados();
         adminId = (featured.find((m) => m.isAdmin) ?? featured[0])?.id ?? null;
       }
       if (!adminId) return;

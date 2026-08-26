@@ -70,6 +70,16 @@ export function LessonScreen() {
    */
   const [locked, setLocked] = useState(false);
   const mediaPath = lesson?.mediaPath ?? null;
+  /**
+   * La leccion tiene video aunque no se haya recibido su ruta.
+   *
+   * El servidor dejo de entregar `media_path` a quien no tiene acceso: repartir
+   * la ruta de todos los videos de un curso de pago a cualquiera que abra la
+   * ficha era regalar informacion. Pero sin este dato, «no tienes acceso» se
+   * veria como «esta leccion todavia no tiene video», que se resuelve de otra
+   * manera y encima hace pensar que el curso esta a medias.
+   */
+  const hayVideo = lesson?.hasMedia ?? Boolean(lesson?.mediaPath);
   useEffect(() => {
     let alive = true;
     if (!AuthRepository.enabled) {
@@ -78,7 +88,8 @@ export function LessonScreen() {
     }
     if (!mediaPath) {
       setVideoUrl(null);
-      setLocked(false);
+      // Hay video pero no ha llegado su ruta: falta el acceso, no el video.
+      setLocked(hayVideo);
       return;
     }
     // El video de una leccion se sube al bucket course-media (2 GB), no a
@@ -99,7 +110,7 @@ export function LessonScreen() {
     return () => {
       alive = false;
     };
-  }, [mediaPath]);
+  }, [mediaPath, hayVideo]);
 
   if (loading) {
     return (

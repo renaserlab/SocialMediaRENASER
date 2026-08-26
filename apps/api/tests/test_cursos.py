@@ -42,6 +42,7 @@ INACTIVO = "44444444-4444-4444-4444-444444444444"
 ANA = "aaaaaaaa-0000-0000-0000-000000000001"  # crea cursos
 PEDRO = "aaaaaaaa-0000-0000-0000-000000000002"  # alumno cualquiera
 ADMIN = "aaaaaaaa-0000-0000-0000-000000000003"  # modera
+OTRA = "aaaaaaaa-0000-0000-0000-000000000004"  # sin ninguna via de acceso
 
 
 @pytest_asyncio.fixture
@@ -502,6 +503,84 @@ async def test_la_administracion_entra(entorno):
     identidad["uid"] = ADMIN
     detalle = await http.get(f"{LEARNING}/courses/{course_id}")
     assert detalle.json()["has_access"] is True
+
+
+@pytest.mark.asyncio
+async def test_los_dos_endpoints_de_acceso_dicen_lo_mismo(entorno):
+    """`/payments/.../access` y `/learning/courses/{id}` no pueden discrepar.
+
+    LO QUE FIJA ESTA PRUEBA. El endpoint de pagos preguntaba por un
+    `current_user.is_admin` que `AuthUser` NUNCA ha tenido —el rol de la
+    aplicacion vive en `profiles.role`, no en el token— y el `getattr` con valor
+    por defecto lo tapaba: la rama no se cumplia jamas y no habia ni un error
+    que lo delatara. A la administracion, ese endpoint le respondia
+    «sin_acceso» sobre un curso de pago que la base de datos
+    (`has_course_access()`, migracion 0016) y el detalle del curso SI le dejan
+    ver. Dos respuestas distintas a la misma pregunta, y la pantalla se creia la
+    equivocada.
+
+    Se comprueban las CUATRO vias a la vez y no solo la del administrador,
+    porque el fallo no fue «falta un caso» sino «los dos caminos se separaron»:
+    si manana se anade una via nueva a uno, esto falla en vez de dejar la
+    interfaz negando contenido que la base de datos entrega.
+    """
+    http, sesiones, identidad = entorno
+    de_pago = await _curso_de_pago(http, sesiones)
+    gratis = await _crear_curso(
+        http,
+        description="Una descripción larga de verdad.",
+        price_minor=0,
+        topic_ids=[IA],
+    )
+    await _con_contenido(sesiones, gratis["id"])
+    await http.post(f"{CATALOGO}/courses/{gratis['id']}/publish")
+
+    async with sesiones() as db:
+        db.add(
+            Purchase(
+                user_id=PEDRO,
+                course_id=de_pago,
+                provider="web",
+                amount_minor=15000,
+                currency="PEN",
+                status="paid",
+            )
+        )
+        await db.commit()
+
+    casos = [
+        (ANA, gratis["id"], True, "gratuito"),
+        (ANA, de_pago, True, "autor"),
+        (ADMIN, de_pago, True, "administracion"),
+        (PEDRO, de_pago, True, "comprado"),
+        (ADMIN, gratis["id"], True, "gratuito"),
+    ]
+    for uid, course_id, esperado, motivo in casos:
+        identidad["uid"] = uid
+        pagos = await http.get(f"/api/v1/payments/courses/{course_id}/access")
+        assert pagos.status_code == 200, pagos.text
+        cuerpo = pagos.json()
+        assert cuerpo["has_access"] is esperado, (uid, motivo, cuerpo)
+        assert cuerpo["reason"] == motivo, (uid, cuerpo)
+
+        detalle = await http.get(f"{LEARNING}/courses/{course_id}")
+        assert detalle.json()["has_access"] is cuerpo["has_access"], (
+            f"los dos endpoints discrepan para {motivo}"
+        )
+
+    # Y quien no tiene ninguna via sigue sin acceso por los dos caminos.
+    async with sesiones() as db:
+        db.add(Profile(id=OTRA, full_name="Otra", username="otra"))
+        await db.commit()
+    identidad["uid"] = OTRA
+    pagos = await http.get(f"/api/v1/payments/courses/{de_pago}/access")
+    assert pagos.json() == {
+        "course_id": de_pago,
+        "has_access": False,
+        "reason": "sin_acceso",
+    }
+    detalle = await http.get(f"{LEARNING}/courses/{de_pago}")
+    assert detalle.json()["has_access"] is False
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 /**
  * Persona tal y como la pinta esta lista.
@@ -78,7 +79,7 @@ export function PeopleList({
         <View style={[styles.row, { borderBottomColor: colors.border }]}>
           <Pressable
             style={styles.info}
-            onPress={() => router.push(`/profile/${item.id}` as never)}
+            onPress={() => irAlPerfil(router, item.id)}
             accessibilityRole="button"
             accessibilityLabel={`Ver perfil de ${item.fullName}`}
           >

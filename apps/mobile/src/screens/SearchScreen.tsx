@@ -15,6 +15,7 @@ import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
+import { HashtagRepository, type HashtagDto } from '@/repositories/HashtagRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import type { ProfileSummary } from '@/mappers/profileMapper';
@@ -23,6 +24,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Course, EventItem, Post } from '@/types';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 
 const RECENTS_KEY = 'renaser-recent-searches';
 const MAX_RECENTS = 6;
@@ -34,6 +36,7 @@ type SearchRow =
   | { kind: 'section'; key: string; title: string; onAction?: () => void }
   | { kind: 'recent'; key: string; value: string }
   | { kind: 'person'; key: string; person: ProfileSummary }
+  | { kind: 'hashtag'; key: string; hashtag: HashtagDto }
   | { kind: 'post'; key: string; post: Post }
   | { kind: 'catalog'; key: string; item: CatalogHit };
 
@@ -93,6 +96,40 @@ export function SearchScreen() {
     };
   }, [term, isSearching]);
 
+  /*
+    Etiquetas: las resuelve el backend, igual que las personas y por el mismo
+    motivo. Buscarlas en cliente solo encontraria las que ya estan en el feed
+    descargado, o sea las de las ultimas veinte publicaciones: «#carpinteria»
+    con doscientas publicaciones no aparecería si ninguna de esas veinte la
+    lleva. Ademas es lo unico que puede contar cuantas publicaciones tiene cada
+    una y ordenar por uso.
+
+    Si falla —o si la migracion 0031 todavia no esta aplicada, y entonces el
+    backend contesta vacio— no se pinta la seccion y el resto de la busqueda
+    sigue funcionando igual.
+  */
+  const [remoteHashtags, setRemoteHashtags] = useState<HashtagDto[]>([]);
+  useEffect(() => {
+    if (!isSearching || !AuthRepository.enabled) {
+      setRemoteHashtags([]);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      HashtagRepository.buscar(term)
+        .then((list) => {
+          if (alive) setRemoteHashtags(list);
+        })
+        .catch(() => {
+          if (alive) setRemoteHashtags([]);
+        });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [term, isSearching]);
+
   // Catalogo real, cargado una vez.
   const [courses, setCourses] = useState<Course[]>([]);
   const [allEvents, setAllEvents] = useState<EventItem[]>([]);
@@ -115,12 +152,14 @@ export function SearchScreen() {
   }, []);
 
   const results = useMemo(() => {
-    if (!isSearching) return { people: [], posts: [], catalog: [] };
+    if (!isSearching) return { people: [], hashtags: [], posts: [], catalog: [] };
     const match = (text: string) => text.toLowerCase().includes(term);
     return {
-      // Las personas las resuelve el backend (ver el efecto de arriba); el
-      // catalogo se filtra en cliente porque son pocos elementos.
+      // Las personas y las etiquetas las resuelve el backend (ver los efectos
+      // de arriba); el catalogo se filtra en cliente porque son pocos
+      // elementos.
       people: remotePeople,
+      hashtags: remoteHashtags,
       posts: posts.filter((p) => match(p.body) || match(p.author)),
       catalog: [
         ...courses
@@ -131,9 +170,13 @@ export function SearchScreen() {
           .map((e) => ({ id: e.id, title: e.title, subtitle: `${e.date} · ${e.location}`, href: '/events' })),
       ],
     };
-  }, [term, isSearching, posts, remotePeople, courses, allEvents]);
+  }, [term, isSearching, posts, remotePeople, remoteHashtags, courses, allEvents]);
 
-  const total = results.people.length + results.posts.length + results.catalog.length;
+  const total =
+    results.people.length +
+    results.hashtags.length +
+    results.posts.length +
+    results.catalog.length;
 
   // Las 3 secciones se aplanan en una sola lista virtualizada: con datos reales
   // del backend, mapear todo dentro de un ScrollView no escala.
@@ -149,6 +192,19 @@ export function SearchScreen() {
     if (results.people.length > 0) {
       out.push({ kind: 'section', key: 'sec-people', title: 'Personas' });
       results.people.forEach((person) => out.push({ kind: 'person', key: `p-${person.id}`, person }));
+    }
+    /*
+      Las etiquetas van DESPUES de las personas y ANTES de las publicaciones: se
+      busca sobre todo a alguien, y una etiqueta es un atajo a muchas
+      publicaciones, asi que ofrecerla antes que las publicaciones sueltas
+      ahorra un paso. Con la 0031 sin aplicar la lista viene vacia y la seccion
+      sencillamente no aparece.
+    */
+    if (results.hashtags.length > 0) {
+      out.push({ kind: 'section', key: 'sec-hashtags', title: 'Etiquetas' });
+      results.hashtags.forEach((hashtag) =>
+        out.push({ kind: 'hashtag', key: `h-${hashtag.tag}`, hashtag }),
+      );
     }
     if (results.posts.length > 0) {
       out.push({ kind: 'section', key: 'sec-posts', title: 'Publicaciones' });
@@ -233,7 +289,28 @@ export function SearchScreen() {
                   rightIcon="chevron-right"
                   onPress={() => {
                     persistRecent(query);
-                    router.push(`/profile/${row.person.id}` as never);
+                    irAlPerfil(router, row.person.id);
+                  }}
+                />
+              );
+            case 'hashtag':
+              return (
+                <ListRow
+                  title={`#${row.hashtag.display_tag}`}
+                  // La cuenta la da el servidor y es la REAL (solo publicado).
+                  // El plural se escribe entero: «1 publicaciones» se lee mal.
+                  subtitle={
+                    row.hashtag.posts_count === 1
+                      ? '1 publicación'
+                      : `${row.hashtag.posts_count} publicaciones`
+                  }
+                  leftIcon="hash"
+                  rightIcon="chevron-right"
+                  onPress={() => {
+                    persistRecent(query);
+                    // Se navega con la forma NORMALIZADA (`tag`), que es la que
+                    // de verdad existe: `display_tag` es solo para pintar.
+                    router.push(`/hashtag/${encodeURIComponent(row.hashtag.tag)}` as never);
                   }}
                 />
               );

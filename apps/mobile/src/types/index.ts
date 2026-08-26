@@ -107,6 +107,20 @@ export type Post = {
    * creador ordena SUS audios.
    */
   topicIds?: string[];
+  /**
+   * Etiquetas sociales del texto, TAL Y COMO SE ESCRIBIERON («MiNegocio», sin
+   * almohadilla). Las extrae el servidor del propio cuerpo, no las manda el
+   * cliente: si no, cualquiera aparecería en #python sin decir «python».
+   *
+   * No confundir con `topicIds`, que es la taxonomía cerrada del producto. Los
+   * hashtags son vocabulario abierto de la gente y conviven con los temas.
+   *
+   * Vacío en el contenido anterior a la migración 0031: el texto se ve igual,
+   * lo que no hay es nada que tocar.
+   */
+  hashtags?: string[];
+  /** A quién etiqueta la publicación (migración 0032). */
+  mentions?: PersonaEtiquetada[];
   likes: number;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */
@@ -114,11 +128,52 @@ export type Post = {
   isOwn?: boolean;
 };
 
+/** Alguien etiquetado en una publicación: lo justo para pintarlo y abrirlo. */
+export type PersonaEtiquetada = {
+  id: string;
+  nombre: string;
+  usuario?: string;
+  /** URL pública del avatar; sin valor se usa el marcador de posición. */
+  avatarUrl?: string;
+};
+
+/** Un archivo colgado de un mensaje: foto, vídeo o documento. */
+export type MessageAttachment = {
+  id: string;
+  /** Ruta dentro del bucket privado `message-media`. Se firma para verla. */
+  storagePath: string;
+  kind: 'image' | 'video' | 'document';
+  mimeType?: string | null;
+  /** El nombre original; para un documento es lo único que lo identifica. */
+  fileName?: string | null;
+  bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  durationS?: number | null;
+  /** URL firmada, cuando ya se ha pedido. Caduca. */
+  url?: string;
+};
+
 export type Message = {
   id: string;
   text: string;
   sender: 'me' | 'them';
+  /** Hora ya formateada para pintarla. */
   createdAt: string;
+  /**
+   * El instante exacto del servidor, sin formatear.
+   *
+   * Es lo que ordena la lista y lo que se manda como `before`/`after` para
+   * pedir historial o novedades. `createdAt` no sirve para eso: solo lleva la
+   * hora y el minuto, así que dos mensajes de días distintos parecen el mismo
+   * momento. Los mensajes que todavía no han llegado al servidor no lo tienen.
+   */
+  createdAtIso?: string;
+  attachments?: MessageAttachment[];
+  /** Lo que está pasando con este mensaje mientras se envía. */
+  estado?: 'enviando' | 'error';
+  /** Avance de la subida de sus archivos, de 0 a 1. */
+  progreso?: number;
 };
 
 export type Conversation = {
@@ -183,6 +238,32 @@ export type Course = {
   topicIds?: string[];
   /** Anunciado pero todavía sin contenido. No es lo mismo que borrador. */
   comingSoon?: boolean;
+
+  // --- Ficha ampliada (migración 0034). Vacía mientras no esté aplicada. ---
+  /** Categoría principal: uno de los temas de la taxonomía común. */
+  primaryTopicId?: string | null;
+  /** Idioma en que se imparte, en ISO 639-1. */
+  language?: string;
+  /** `beginner` | `intermediate` | `advanced`. */
+  level?: string | null;
+  /** Lo que aprenderás. Es `courses.highlights`, no una columna nueva. */
+  highlights?: string[];
+  /** Para quién es el curso. */
+  targetAudience?: string[];
+  /** Qué hace falta saber antes. */
+  prerequisites?: string[];
+  /** Ruta en Storage del vídeo de presentación. NO es una lección. */
+  promoVideoPath?: string | null;
+
+  /**
+   * Revisión: `draft` | `pending_review` | `approved` | `rejected`.
+   *
+   * EJE APARTE de `status`, que es visibilidad. Un curso puede estar aprobado y
+   * retirado del catálogo a la vez, y no es una contradicción.
+   */
+  reviewStatus?: string;
+  /** Por qué se rechazó. Solo lo recibe quien puede gestionar el curso. */
+  rejectionReason?: string | null;
 };
 
 /** Un curso al que se tiene acceso, con el avance real. Lo devuelve el servidor. */
@@ -227,8 +308,19 @@ export type Lesson = {
   mentor: string;
   summary: string;
   resources: LessonResource[];
-  /** Ruta del video en Storage; la pantalla la firma para reproducirlo. */
+  /**
+   * Ruta del video en Storage; la pantalla la firma para reproducirlo.
+   *
+   * Llega VACIA cuando no hay acceso al curso: el temario se entrega sin
+   * comprar porque es lo que vende el curso, pero el archivo no.
+   */
   mediaPath?: string | null;
+  /**
+   * Si la leccion tiene video, aunque no se haya entregado su ruta.
+   *
+   * Es lo que distingue «no tienes acceso» de «todavia no hay video».
+   */
+  hasMedia?: boolean;
   /** Por dónde iba: el reproductor arranca ahí en vez de desde el principio. */
   progressSeconds?: number;
   completed?: boolean;

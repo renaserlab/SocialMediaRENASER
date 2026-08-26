@@ -1,4 +1,4 @@
-"""Que partes de las migraciones 0027, 0028 y 0029 estan aplicadas en ESTA base.
+"""Que partes de las migraciones 0027 a 0032 estan aplicadas en ESTA base.
 
 POR QUE EXISTE ESTE FICHERO, Y ES UNA LECCION CARA.
 
@@ -126,6 +126,71 @@ async def hay_directos(db: AsyncSession) -> bool:
                 "responden vacio."
             )
     return _cache["live_sessions"]
+
+
+async def hay_resenas_de_perfil(db: AsyncSession) -> bool:
+    """Si existe `profile_reviews` (migracion 0030).
+
+    Sin ella no se puede opinar de nadie: no hay donde guardar sobre QUIEN se
+    opina, que es la columna que `testimonials` nunca tuvo. La seccion de un
+    perfil sigue mostrando lo de siempre —su galeria— y el boton de escribir no
+    aparece, en vez de aparecer y fallar al pulsarlo.
+
+    Es la misma regla de las 0027, 0028 y 0029: desplegar codigo no puede exigir
+    que una migracion concreta ya este puesta. Este modulo se puede subir hoy y
+    la 0030 aplicarse el dia que la aprueben.
+    """
+    if "profile_reviews" not in _cache:
+        _cache["profile_reviews"] = await _hay_tabla(db, "profile_reviews")
+        if not _cache["profile_reviews"]:
+            logger.warning(
+                "La migracion 0030 no esta aplicada: no se pueden publicar "
+                "resenas entre personas y los listados responden vacio."
+            )
+    return _cache["profile_reviews"]
+
+
+async def hay_hashtags(db: AsyncSession) -> bool:
+    """Si existen `hashtags` y `post_hashtags` (migracion 0031).
+
+    Sin ellas una publicacion se guarda IGUAL —el texto con sus almohadillas
+    incluido, que es lo que la persona escribio— pero nada queda indexado: las
+    etiquetas no se extraen, `/hashtags/...` responde vacio y buscar por
+    etiqueta no encuentra nada. Es exactamente lo que hace la aplicacion hoy.
+
+    Se comprueban LAS DOS. Con solo una, extraer etiquetas escribiria en una
+    tabla que no existe a mitad de la transaccion de publicar, y en PostgreSQL
+    eso deja la transaccion inservible: se perderia la publicacion entera por
+    un adorno.
+    """
+    if "post_hashtags" not in _cache:
+        _cache["post_hashtags"] = await _hay_tabla(db, "hashtags") and await _hay_tabla(
+            db, "post_hashtags"
+        )
+        if not _cache["post_hashtags"]:
+            logger.warning(
+                "La migracion 0031 no esta aplicada: las publicaciones se guardan "
+                "sin extraer sus etiquetas y la busqueda por hashtag va vacia."
+            )
+    return _cache["post_hashtags"]
+
+
+async def hay_menciones(db: AsyncSession) -> bool:
+    """Si existe `post_mentions` (migracion 0032).
+
+    Sin ella no se puede etiquetar a nadie: la publicacion se guarda igual y no
+    sale ninguna notificacion de mencion. Lo que NO puede pasar es que no se
+    pueda publicar por esto, ni que se avise a alguien de una mencion que no
+    llego a guardarse.
+    """
+    if "post_mentions" not in _cache:
+        _cache["post_mentions"] = await _hay_tabla(db, "post_mentions")
+        if not _cache["post_mentions"]:
+            logger.warning(
+                "La migracion 0032 no esta aplicada: no se puede etiquetar a nadie "
+                "en una publicacion y no se envian avisos de mencion."
+            )
+    return _cache["post_mentions"]
 
 
 def olvidar() -> None:

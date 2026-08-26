@@ -3,13 +3,22 @@ import { supabase } from '@/services/supabase';
 import type { Testimonial, TestimonialFilter } from '@/types';
 
 /**
- * Testimonios contra Supabase (PostgREST), igual que las historias: la API
- * desplegada se construye desde otra rama.
+ * La GALERIA de fotos y videos de un perfil, contra Supabase (PostgREST).
  *
- * Quien puede publicar NO lo decide esta capa: lo decide la RLS de
- * 0008_testimonials.sql, que exige `public.is_admin()` para insertar y borrar.
- * La comprobacion de `isAdmin` en la interfaz solo sirve para no ensenar
- * botones inutiles.
+ * ESTO NO SON RESEÑAS, aunque se llamaran asi durante un tiempo. La tabla
+ * `testimonials` guarda lo que publica UN autor: archivo obligatorio, texto
+ * opcional y ninguna columna que diga sobre QUIEN se opina. Por eso `list`
+ * filtra por `author_id`: ensena lo que esa persona SUBIO, nunca lo que le
+ * dijeron. Se conserva tal cual porque tiene contenido real.
+ *
+ * Para opinar sobre otra persona esta `ReviewRepository`, que habla con el
+ * backend (`/api/v1/reviews`) y escribe en `profile_reviews` (migracion 0030).
+ *
+ * Quien puede publicar aqui NO lo decide esta capa: lo decide la RLS. La 0008
+ * exigia `public.is_admin()` para insertar, editar y borrar, y la 0017 lo abrio
+ * a cualquiera EN SU PROPIO NOMBRE (`author_id = auth.uid()`), dejando la
+ * administracion con paso franco para moderar. Si en alguna base la 0017 no
+ * estuviera aplicada, el insert lo seguiria rechazando la base.
  */
 
 type TestimonialRow = {

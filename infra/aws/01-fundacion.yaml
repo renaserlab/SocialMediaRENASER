@@ -1,0 +1,360 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# =============================================================================
+# PILA 1 de 2 — FUNDACION (se despliega UNA vez y casi nunca se toca)
+# =============================================================================
+#
+# POR QUE ESTA PILA EXISTE APARTE Y NO TODO EN UNA SOLA:
+#
+# 1. Huevo y gallina. La pila de plataforma arranca maquinas que, al nacer,
+#    hacen `docker pull` de una imagen que TIENE que estar ya en ECR. Si el
+#    repositorio de imagenes naciera en la misma pila, la primera instancia
+#    arrancaria contra un repositorio vacio, fallaria el health check y
+#    CloudFormation revertiria la pila entera. Separando: primero se crea el
+#    repositorio, se sube una imagen, y solo despues se levanta la plataforma.
+#
+# 2. Ciclos de vida distintos. La plataforma (red, balanceador, maquinas) se
+#    puede borrar y rehacer un lunes por la manana sin drama. El repositorio de
+#    imagenes y el rol de confianza con GitHub NO: borrarlos rompe el
+#    despliegue y tira el historial de imagenes al que volveriamos en un
+#    rollback. Lo que no se debe borrar por accidente, no vive en la pila que
+#    se borra.
+#
+# 3. Ambito distinto. El proveedor OIDC de GitHub es UNICO POR CUENTA de AWS.
+#    Si manana hay una pila de staging, no puede volver a crearlo. Vive aqui,
+#    solo una vez, y las demas pilas lo dan por hecho.
+#
+# COSTE DE ESTA PILA: practicamente cero. ECR cobra 0,10 USD por GB-mes de
+# imagenes almacenadas; el proveedor OIDC y los roles de IAM son gratis.
+#
+# DESPLIEGUE (lo ejecuta una persona con permisos de administrador, NO el CI):
+#   aws cloudformation deploy \
+#     --region us-east-1 \
+#     --stack-name renaser-fundacion \
+#     --template-file infra/aws/01-fundacion.yaml \
+#     --capabilities CAPABILITY_NAMED_IAM
+#
+# =============================================================================
+
+Description: >-
+  RENASER — Fundacion: repositorio ECR de la API, proveedor OIDC de GitHub y
+  rol de despliegue sin claves permanentes. Region objetivo: us-east-1.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Repositorio de imagenes
+        Parameters:
+          - NombreDelRepositorio
+          - ImagenesEtiquetadasAConservar
+          - DiasParaBorrarImagenesSinEtiqueta
+      - Label:
+          default: Confianza con GitHub (OIDC)
+        Parameters:
+          - RepositorioDeGitHub
+          - RamaQuePuedeDesplegar
+          - CrearProveedorOidc
+          - ArnDelProveedorOidcExistente
+      - Label:
+          default: Alcance del rol de despliegue
+        Parameters:
+          - PrefijoDeRecursos
+
+Parameters:
+
+  NombreDelRepositorio:
+    Type: String
+    Default: renaser/api
+    AllowedPattern: '^[a-z0-9][a-z0-9._/-]{1,255}$'
+    Description: >-
+      Nombre del repositorio ECR donde vive la imagen de apps/api.
+
+  ImagenesEtiquetadasAConservar:
+    Type: Number
+    Default: 10
+    MinValue: 3
+    MaxValue: 100
+    Description: >-
+      Cuantas imagenes etiquetadas se guardan. Es el ALCANCE DEL ROLLBACK: solo
+      se puede volver a una version que siga aqui. 10 despliegues de margen.
+
+  DiasParaBorrarImagenesSinEtiqueta:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Las capas huerfanas (de builds que se re-etiquetaron) no sirven para
+      volver atras y solo ocupan. Se limpian solas.
+
+  RepositorioDeGitHub:
+    Type: String
+    Default: renaserlab/SocialMediaRENASER
+    AllowedPattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+    Description: >-
+      organizacion/repositorio exacto. Es la frontera de seguridad: solo los
+      workflows de ESTE repositorio podran asumir el rol.
+
+  RamaQuePuedeDesplegar:
+    Type: String
+    Default: main
+    AllowedPattern: '^[A-Za-z0-9_./*-]{1,100}$'
+    Description: >-
+      Rama cuyos workflows pueden desplegar. Por defecto solo `main`, que es de
+      donde ya publican Vercel y Render: una sola rama publicada, un solo sitio
+      que mirar. Poner `Edson` aqui daria salida a produccion a una rama de
+      trabajo; no se hace. Admite comodin (`releases/*`), pero NO pongas `*`:
+      eso deja desplegar desde cualquier rama, y abrir una rama es algo que
+      puede hacer cualquiera con permiso de escritura.
+
+  CrearProveedorOidc:
+    Type: String
+    Default: 'Si'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      El proveedor OIDC de GitHub es UNICO POR CUENTA. Si la cuenta ya lo tiene
+      (otro proyecto lo creo antes), pon `No` y rellena el ARN existente, o la
+      pila fallara con EntityAlreadyExists. Comprobar con:
+      aws iam list-open-id-connect-providers
+
+  ArnDelProveedorOidcExistente:
+    Type: String
+    Default: ''
+    Description: >-
+      Solo si CrearProveedorOidc = No. Formato:
+      arn:aws:iam::<cuenta>:oidc-provider/token.actions.githubusercontent.com
+
+  PrefijoDeRecursos:
+    Type: String
+    Default: renaser
+    AllowedPattern: '^[a-z][a-z0-9-]{1,20}$'
+    Description: >-
+      Prefijo con el que empiezan el grupo de autoescalado y los parametros de
+      SSM. El rol de despliegue solo puede tocar recursos que empiecen asi;
+      cambiarlo aqui obliga a cambiarlo tambien en la pila de plataforma.
+
+Conditions:
+
+  HayQueCrearElProveedorOidc: !Equals [!Ref CrearProveedorOidc, 'Si']
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Repositorio de imagenes
+  # ---------------------------------------------------------------------------
+  RepositorioDeImagenes:
+    Type: AWS::ECR::Repository
+    # Retain: aunque alguien borre esta pila, las imagenes sobreviven. Sin
+    # imagenes no hay a donde volver en un incidente, y el historial de
+    # despliegues es justamente el plan B.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref NombreDelRepositorio
+      # Mutable a proposito: el CI publica cada imagen con el SHA del commit
+      # (inmutable en la practica, porque un SHA no se repite) y ademas mueve
+      # la etiqueta `latest`. Con IMMUTABLE, mover `latest` fallaria.
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        # Escaneo basico de vulnerabilidades al subir. Es gratis y avisa de CVEs
+        # en la imagen base de Python sin que nadie tenga que acordarse.
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      # false = borrar la pila NO borra las imagenes. Redundante con el
+      # DeletionPolicy de arriba, pero se declara para que quede a la vista.
+      EmptyOnDelete: false
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Borrar capas sin etiqueta: no sirven para volver atras.",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${DiasParaBorrarImagenesSinEtiqueta}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Conservar solo las N imagenes etiquetadas mas recientes.",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${ImagenesEtiquetadasAConservar}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Proyecto
+          Value: RENASER
+        - Key: Gestionado-por
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # Confianza con GitHub: OIDC en lugar de claves de acceso
+  # ---------------------------------------------------------------------------
+  #
+  # POR QUE OIDC Y NO UNA CLAVE EN LOS SECRETS DE GITHUB:
+  # una AWS_SECRET_ACCESS_KEY guardada en GitHub es una credencial permanente:
+  # no caduca, no se rota sola, y si se filtra (un log, un fork, un miembro que
+  # se va) sigue abriendo la cuenta hasta que alguien se da cuenta. Con OIDC,
+  # GitHub firma un token de un solo uso que dice "soy el workflow tal, del
+  # repo tal, en la rama tal"; AWS lo verifica y devuelve credenciales que
+  # caducan en una hora. No hay nada que filtrar porque no hay nada guardado.
+  ProveedorOidcDeGitHub:
+    Type: AWS::IAM::OIDCProvider
+    Condition: HayQueCrearElProveedorOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS ya no valida estas huellas para este proveedor concreto (usa su
+      # propia cadena de confianza), pero el campo se sigue rellenando porque
+      # es la forma documentada y no cuesta nada.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - Key: Proyecto
+          Value: RENASER
+
+  RolDeDespliegueDesdeGitHub:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PrefijoDeRecursos}-despliegue-github'
+      Description: >-
+        Rol que asumen los workflows de GitHub Actions por OIDC para publicar la
+        imagen en ECR y renovar las instancias. Sin claves permanentes.
+      # Una hora es mas que de sobra: un despliegue completo (build, push,
+      # instance refresh) ronda los 10 minutos.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - HayQueCrearElProveedorOidc
+                - !Ref ProveedorOidcDeGitHub
+                - !Ref ArnDelProveedorOidcExistente
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                # Sin esta condicion, el token de CUALQUIER repositorio publico
+                # de GitHub valdria para entrar. Es la linea mas importante del
+                # fichero.
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Y sin esta, valdria cualquier rama de este repositorio:
+                # abrir una rama lo puede hacer cualquiera con permiso de
+                # escritura, asi que "el repo correcto" por si solo no basta.
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${RepositorioDeGitHub}:ref:refs/heads/${RamaQuePuedeDesplegar}'
+      Policies:
+
+        - PolicyName: publicar-imagen-en-ecr
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetAuthorizationToken no admite recurso concreto: la propia API
+              # de AWS solo acepta "*". Es solo el token de login del registro.
+              - Sid: LoginEnElRegistro
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: SubirYBajarSoloEsteRepositorio
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt RepositorioDeImagenes.Arn
+
+        - PolicyName: apuntar-la-version-desplegada
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # El parametro de SSM es el "puntero" a la version en produccion.
+              # El CI lo mueve al SHA nuevo; el rollback lo mueve al SHA viejo.
+              # Escribir aqui es lo unico que hace falta para cambiar de version.
+              - Sid: MoverElPunteroDeVersion
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:GetParameterHistory
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${PrefijoDeRecursos}/*'
+
+        - PolicyName: renovar-instancias
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RenovarSoloNuestrosGrupos
+                Effect: Allow
+                Action:
+                  - autoscaling:StartInstanceRefresh
+                  - autoscaling:CancelInstanceRefresh
+                  - autoscaling:RollbackInstanceRefresh
+                Resource: !Sub 'arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${PrefijoDeRecursos}-*'
+              # Las llamadas Describe* de autoscaling y ELB no admiten recurso
+              # concreto (limitacion de la API, no descuido). Son de solo
+              # lectura: dejan ver el estado, no cambiarlo.
+              - Sid: LeerEstadoParaEsperarElDespliegue
+                Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeInstanceRefreshes
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeLoadBalancers
+                Resource: '*'
+              - Sid: LeerSalidasDeLaPilaDePlataforma
+                Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${PrefijoDeRecursos}-*/*'
+
+      Tags:
+        - Key: Proyecto
+          Value: RENASER
+        - Key: Gestionado-por
+          Value: CloudFormation
+
+Outputs:
+
+  UriDelRepositorio:
+    Description: URI del repositorio ECR (la que usa `docker push`).
+    Value: !GetAtt RepositorioDeImagenes.RepositoryUri
+    Export:
+      Name: !Sub '${AWS::StackName}-UriDelRepositorio'
+
+  ArnDelRepositorio:
+    Description: ARN del repositorio ECR (lo consume la pila de plataforma para el IAM de las maquinas).
+    Value: !GetAtt RepositorioDeImagenes.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ArnDelRepositorio'
+
+  RegistroDeEcr:
+    Description: Host del registro privado de la cuenta (para `docker login`).
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com'
+    Export:
+      Name: !Sub '${AWS::StackName}-RegistroDeEcr'
+
+  ArnDelRolDeDespliegue:
+    Description: >-
+      Pegar en GitHub como variable de repositorio AWS_ROLE_ARN. Es un ARN, no
+      un secreto: no abre nada sin un token OIDC valido del repo autorizado.
+    Value: !GetAtt RolDeDespliegueDesdeGitHub.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ArnDelRolDeDespliegue'

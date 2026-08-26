@@ -365,3 +365,76 @@ def test_con_un_solo_creador_la_lista_sale_entera_igualmente():
 def test_desactivar_la_diversidad_devuelve_el_orden_tal_cual(maximo):
     posts = [("ana", 1), ("ana", 2), ("beto", 1)]
     assert sin_rachas(posts, grupo_de=lambda p: p[0], maximo_seguidos=maximo) == posts
+
+
+# --------------------------------------------------------------------------- #
+# Que una senal a favor no pueda restar
+# --------------------------------------------------------------------------- #
+def test_haber_interactuado_nunca_deja_a_alguien_peor_que_no_haberle_visto():
+    """La propiedad que se rompio una vez y no puede volver a romperse.
+
+    Ver el video de alguien le BAJABA la puntuacion. El motivo era sutil:
+    mientras no habia ninguna senal el componente de comportamiento no aplicaba
+    y se quedaba fuera del denominador; en cuanto aparecia la primera, se
+    calculaba para todo el mundo, y con una sola visita valia poco. Un numero
+    pequeno metido en una media alta la baja. Resultado: la senal positiva
+    castigaba justo a la persona sobre la que iba.
+
+    Se comprueba en todo el rango, no en un caso suelto: para cualquier base y
+    cualquier cantidad de evidencia, tener evidencia no puede puntuar por
+    debajo de no tenerla.
+    """
+    from app.modules.recommendations.features import Rasgos
+    from app.modules.recommendations.ranker import puntuar
+
+    def _rasgos(comportamiento, tema):
+        return Rasgos(
+            tema=tema,
+            intencion=None,
+            formato=None,
+            actividad=0.5,
+            comportamiento=comportamiento,
+            reputacion=None,
+            exploracion=0.4,
+        )
+
+    for tema in (0.0, 0.25, 0.5, 0.75, 1.0):
+        sin_senal = puntuar(_rasgos(None, tema)).score
+        anterior = sin_senal
+        for evidencia in (0.0, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0):
+            con_senal = puntuar(_rasgos(evidencia, tema)).score
+            assert con_senal >= sin_senal - 1e-9, (
+                f"con tema={tema} y evidencia={evidencia} la senal RESTO: "
+                f"{con_senal} < {sin_senal}"
+            )
+            # Y ademas mas evidencia nunca puede puntuar menos que menos
+            # evidencia: si no fuera monotono, mirar mas a alguien podria
+            # bajarle, que es la misma trampa por otro camino.
+            assert con_senal >= anterior - 1e-9, (
+                f"no es monotono: {evidencia} dio {con_senal} < {anterior}"
+            )
+            anterior = con_senal
+
+
+def test_lo_rechazado_si_puede_restar():
+    """La penalizacion es lo unico que baja, porque es evidencia EN CONTRA.
+
+    Sin esta prueba, el arreglo de arriba se podria «cumplir» a base de dejar
+    que nada reste nunca, y entonces los «no me interesa» dejarian de servir.
+    """
+    from app.modules.recommendations.features import Rasgos
+    from app.modules.recommendations.ranker import puntuar
+
+    def _rasgos(penalizacion):
+        return Rasgos(
+            tema=0.6,
+            intencion=None,
+            formato=None,
+            actividad=0.5,
+            comportamiento=0.3,
+            reputacion=None,
+            exploracion=0.4,
+            penalizacion=penalizacion,
+        )
+
+    assert puntuar(_rasgos(1.0)).score < puntuar(_rasgos(0.0)).score

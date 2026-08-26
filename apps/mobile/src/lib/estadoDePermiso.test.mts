@@ -28,7 +28,32 @@ test('en Android y en la web no hay acceso parcial que valga', () => {
 });
 
 test('un rechazo que todavia se puede reintentar es denegado, no bloqueado', () => {
-  assert.equal(interpretarPermiso({ granted: false, canAskAgain: true }), 'denegado');
+  assert.equal(
+    interpretarPermiso({ granted: false, canAskAgain: true, status: 'denied' }),
+    'denegado',
+  );
+});
+
+test('no haber preguntado todavia NO es un rechazo', () => {
+  /*
+    Telefono recien instalado. `granted:false` y `canAskAgain:true` son los
+    mismos valores que trae un rechazo reintentable, asi que sin mirar `status`
+    los dos casos eran indistinguibles: la camara abria en el cartel de
+    «Z necesita la camara» sin haber preguntado nunca, y no aparecia sola jamas.
+  */
+  assert.equal(
+    interpretarPermiso({ granted: false, canAskAgain: true, status: 'undetermined' }),
+    'sinPreguntar',
+  );
+});
+
+test('si el sistema ya no pregunta, esta bloqueado aunque diga «sin preguntar»', () => {
+  // El orden importa: da igual como se llegara ahi, la unica salida son los
+  // ajustes, y ofrecer «Permitir» seria un boton que no hace nada.
+  assert.equal(
+    interpretarPermiso({ granted: false, canAskAgain: false, status: 'undetermined' }),
+    'bloqueado',
+  );
 });
 
 test('cuando el sistema ya no volvera a preguntar, esta bloqueado', () => {
@@ -40,4 +65,11 @@ test('sin saber si se puede volver a preguntar, se supone que si', () => {
   // La suposicion que NO deja a nadie encerrado sin salida: dar por bloqueado
   // lo que no lo esta mandaria a los ajustes a quien solo tenia que aceptar.
   assert.equal(interpretarPermiso({ granted: false }), 'denegado');
+});
+
+test('una respuesta sin `status` sigue leyendose como antes', () => {
+  // Compatibilidad: el campo lo trae Expo siempre, pero si un dia faltara la
+  // lectura tiene que seguir siendo la conservadora, no «sin preguntar»
+  // (que volveria a lanzar el dialogo del sistema a quien ya dijo que no).
+  assert.equal(interpretarPermiso({ granted: false, canAskAgain: true }), 'denegado');
 });

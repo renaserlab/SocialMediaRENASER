@@ -141,6 +141,90 @@ class Comment(Base):
     )
 
 
+class Hashtag(Base):
+    """Una etiqueta social, como entidad (migracion 0031).
+
+    NO CONFUNDIR CON `Topic`. `topics` es la taxonomia cerrada del producto —25
+    temas sembrados— y es lo que cruza el recomendador con lo que cada persona
+    dijo que busca. `hashtags` es vocabulario abierto: nace cuando alguien lo
+    escribe y no lo valida nadie. Conviven; ninguna sustituye a la otra.
+
+    Es una tabla y no una columna de texto en `posts` porque una etiqueta tiene
+    que poder responder «¿cuantas publicaciones tengo?» con un COUNT sobre un
+    indice, y no con un LIKE sobre la tabla entera que ademas confundiria
+    «#python» con «#pythonista».
+    """
+
+    __tablename__ = "hashtags"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    #: Forma normalizada, sin almohadilla. UNICA: es lo que hace que #IA, #ia y
+    #: #Ia sean una sola etiqueta y no tres con un tercio de publicaciones cada
+    #: una. La normaliza `hashtags.normalizar`, nunca la base.
+    tag: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    #: Como se escribio la PRIMERA vez. Solo se pinta; nunca se busca por aqui.
+    #: No se reescribe con cada uso: si no, la etiqueta cambiaria de aspecto
+    #: sola en la pantalla de todo el mundo.
+    display_tag: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PostHashtag(Base):
+    """Que publicacion lleva que etiqueta (migracion 0031).
+
+    La clave es el par: escribir «#ia» dos veces en el mismo texto es enfasis,
+    no dos etiquetas. Sin eso, la cuenta de publicaciones de una etiqueta
+    mentiria a favor de quien la repite.
+    """
+
+    __tablename__ = "post_hashtags"
+
+    post_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("posts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    hashtag_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("hashtags.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PostMention(Base):
+    """A quien etiqueta una publicacion (migracion 0032).
+
+    A diferencia de un hashtag, esto NO se extrae del texto: lo elige quien
+    publica de una lista de perfiles reales. El motivo es que una mencion manda
+    una notificacion, y «@ana» es ambiguo —hay varias Anas y los nombres de
+    usuario cambian—. Adivinar aqui significa avisar a la persona equivocada.
+
+    La clave es el par, y eso es lo que garantiza —en la base, no en el
+    codigo— que nadie reciba dos avisos por una sola publicacion.
+    """
+
+    __tablename__ = "post_mentions"
+
+    post_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("posts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    mentioned_user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class PodcastCategory(Base):
     """Categoria con la que un creador organiza sus audios (migracion 0024).
 

@@ -24,11 +24,21 @@ ONBOARDING_VERSION = 1
 
 #: Version del algoritmo. Viaja en cada respuesta para poder comparar
 #: resultados entre versiones el dia que haya una segunda.
-RECOMMENDATION_ALGORITHM_VERSION = "people-v1.1"
+RECOMMENDATION_ALGORITHM_VERSION = "people-v1.2"
+
+#: Suelo del divisor con el que se mide el bonus de comportamiento.
+#:
+#: El bonus se divide entre el peso de los componentes que SI aplican, para que
+#: pese mas cuando se sabe poco por otras vias. Sin suelo, alguien con un unico
+#: componente aplicable veria su score saltar a 1 con la primera senal, y todos
+#: los que hubiera tocado empatarian arriba sin poder ordenarse entre si. 0,25
+#: es aproximadamente el peso de dos componentes: por debajo de eso el sistema
+#: sabe tan poco que conviene dejar de amplificar.
+PESO_MINIMO_DE_REFERENCIA = 0.25
 
 #: Version del recomendador de contenido. Va aparte del de personas porque
 #: evolucionaran a ritmos distintos.
-CONTENT_ALGORITHM_VERSION = "content-v1.1"
+CONTENT_ALGORITHM_VERSION = "content-v1.2"
 
 #: Version del ordenador de CURSOS. Se versiona aparte de personas y contenido
 #: porque se va a poder comparar por separado: cambiar los pesos de cursos no
@@ -254,7 +264,26 @@ class PesosDeContenido:
     interaccion: float = 0.06
     exploracion: float = 0.06
 
+    #: Afinidad con las ETIQUETAS que la persona acaba tocando. Va FUERA de
+    #: `total()` a proposito: no es un sexto componente de la media, es un
+    #: bonus que se suma.
+    #:
+    #: POR QUE NO PROMEDIA. Si entrara en el denominador, estrenar la primera
+    #: etiqueta hundiria de golpe todo el contenido que no lleve ninguna —que
+    #: hoy es casi todo—, y el feed cambiaria entero por haber tocado un video.
+    #: Es el mismo fallo que se corrigio en el ranker de personas: un
+    #: componente que aparece de repente y vale poco baja una media alta.
+    #:
+    #: POR QUE 0,07 Y NO MAS. Una etiqueta la escribe quien publica, no un
+    #: sistema, y se puede poner cualquiera. Es una senal util pero barata de
+    #: falsificar: con peso alto, escribir #python en una receta seria la forma
+    #: mas facil de colarse en el feed de quien programa. Siete centesimas
+    #: mueven el orden entre cosas parecidas sin poder imponerse al tema, que
+    #: pesa 0,40 y si esta respaldado por la taxonomia de Z.
+    hashtag: float = 0.07
+
     def total(self) -> float:
+        """El divisor de la media. `hashtag` NO entra: se suma aparte."""
         return (
             self.tema
             + self.autor
@@ -263,6 +292,12 @@ class PesosDeContenido:
             + self.exploracion
         )
 
+
+#: Cuanta afinidad acumulada con una etiqueta se considera «mucho». Por encima
+#: da igual: quien ha visto cuarenta videos de #python no esta cuarenta veces
+#: mas interesado que quien vio ocho, y sin techo una sola etiqueta obsesiva
+#: aplastaria a todas las demas.
+SATURACION_DE_HASHTAG = 8.0
 
 PESOS_DE_CONTENIDO = PesosDeContenido()
 

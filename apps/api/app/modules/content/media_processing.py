@@ -53,6 +53,25 @@ FEED_WEBP_QUALITY = 80
 #: copia mas que mantener sin ahorro que lo justifique.
 FEED_MIN_BYTES = 250 * 1024
 
+#: Lado mayor de la MINIATURA de imagen, la que se pinta en las cuadriculas.
+#:
+#: POR QUE HACIA FALTA. La celda de una cuadricula mide unos 118 puntos, y ahi
+#: se estaba bajando la imagen del feed: 1080 px. Con sesenta publicaciones eso
+#: son varios megas para pintar sesenta cuadraditos, y en una conexion normal
+#: es exactamente el rato que el perfil se queda en negro.
+#:
+#: 400 y no 320 porque una pantalla de movil moderna pinta a tres veces la
+#: densidad: 118 puntos son 354 pixeles reales, y con 320 la miniatura saldria
+#: ligeramente borrosa justo en los telefonos buenos.
+MINIATURA_MAX_SIDE = 400
+#: Calidad mas baja que la del feed a proposito: a ese tamano no se distingue,
+#: y es la mitad del peso.
+MINIATURA_WEBP_QUALITY = 70
+
+#: Por debajo de esto el original ya es mas pequeno que la miniatura que
+#: generariamos: copiarlo seria pagar almacenamiento por nada.
+MINIATURA_MIN_BYTES = 60 * 1024
+
 _TIMEOUT = httpx.Timeout(60.0)
 
 
@@ -131,9 +150,58 @@ def _make_feed_image(original: bytes) -> tuple[bytes, int, int, int, int] | None
         return salida.getvalue(), ancho, alto, img.size[0], img.size[1]
 
 
+def _make_thumbnail(original: bytes) -> bytes | None:
+    """La version de cuadricula. `None` si no se puede leer el formato."""
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return None
+
+    try:
+        with Image.open(io.BytesIO(original)) as img:
+            img = ImageOps.exif_transpose(img)
+            ancho, alto = img.size
+            lado_mayor = max(ancho, alto)
+            if lado_mayor > MINIATURA_MAX_SIDE:
+                escala = MINIATURA_MAX_SIDE / lado_mayor
+                img = img.resize(
+                    (round(ancho * escala), round(alto * escala)), Image.LANCZOS
+                )
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            salida = io.BytesIO()
+            img.save(
+                salida, format="WEBP", quality=MINIATURA_WEBP_QUALITY, method=4
+            )
+            return salida.getvalue()
+    except Exception:
+        # Una imagen ilegible NO puede tumbar el procesado: sin miniatura la
+        # cuadricula cae al derivado del feed, que es lo que hacia antes.
+        logger.warning("No se pudo generar la miniatura", exc_info=True)
+        return None
+
+
 async def _process_image(client: httpx.AsyncClient, media: PostMedia) -> None:
     original = await _download(client, media.storage_path)
     media.bytes = media.bytes or len(original)
+
+    # La MINIATURA primero, porque es la que decide si un perfil se ve o se
+    # queda en negro. Va en `poster_path`, que ya existia para el fotograma de
+    # los videos y significa exactamente lo mismo: «lo que se pinta en una
+    # celda». Reutilizarla evita una migracion y hace que la cuadricula trate
+    # igual a fotos y videos.
+    if not media.poster_path and len(original) >= MINIATURA_MIN_BYTES:
+        miniatura = await asyncio.to_thread(_make_thumbnail, original)
+        if miniatura is not None and len(miniatura) < len(original) * 0.9:
+            thumb_path = f"{media.storage_path.split('/', 1)[0]}/derived/{media.id}/thumb.webp"
+            await _upload(client, thumb_path, miniatura, "image/webp")
+            media.poster_path = thumb_path
+            logger.info(
+                "Imagen %s: miniatura %.1f KB (original %.1f KB)",
+                media.id,
+                len(miniatura) / 1024,
+                len(original) / 1024,
+            )
 
     resultado = await asyncio.to_thread(_make_feed_image, original)
     if resultado is None:

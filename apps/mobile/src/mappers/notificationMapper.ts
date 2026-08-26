@@ -21,7 +21,7 @@ export type NotificationItem = {
   id: string;
   title: string;
   subtitle: string;
-  icon: 'bell' | 'award' | 'message-square' | 'calendar';
+  icon: 'bell' | 'award' | 'message-square' | 'calendar' | 'at-sign';
   time: string;
   read: boolean;
   actorId?: string;
@@ -57,6 +57,20 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       title = 'Nuevo comentario';
       subtitle = `${actor} comentó tu publicación`;
       icon = 'message-square';
+      break;
+    /*
+      Te etiquetaron (migración 0032). Icono propio: en una lista larga, lo
+      primero que se distingue es la forma, y compartir el de «me gusta» haría
+      que las dos cosas parecieran la misma de un vistazo.
+
+      Al tocarlo abre /post/{id}, no el perfil de quien etiquetó: la publicación
+      es donde está la etiqueta, y el perfil es justo donde no está. Eso lo
+      resuelve `entityType === 'post'` en NotificationsScreen.
+    */
+    case 'post_mention':
+      title = 'Te etiquetaron';
+      subtitle = `${actor} te etiquetó en una publicación`;
+      icon = 'at-sign';
       break;
     /*
       La agenda. Un tipo por respuesta y no uno solo: «Sesión confirmada» y

@@ -143,6 +143,12 @@ class Rasgos:
     reputacion: float | None
     exploracion: float
 
+    #: Cuanto se ha rechazado lo que ofrece este candidato, de 0 a 1. Va
+    #: SEPARADO de `comportamiento` a proposito: uno mide evidencia a favor y
+    #: el otro evidencia en contra, y cuando se multiplicaban en un solo numero
+    #: no habia forma de distinguir «apenas le conozco» de «le he dicho que no».
+    penalizacion: float = 0.0
+
     #: Pruebas de lo anterior, para poder explicarlo despues.
     temas_coincidentes: tuple[str, ...] = ()
     relaciones_coincidentes: tuple[str, ...] = ()
@@ -349,9 +355,11 @@ def _rasgo_de_comportamiento(
     if demanda.afinidad_por_tema and ofrecidos:
         acumulado = sum(demanda.afinidad_por_tema.get(t, 0.0) for t in ofrecidos)
         por_tema = _saturar(acumulado, SATURACION_DE_SENALES)
-    bruto = min(1.0, 0.65 * directo + 0.35 * por_tema)
-    # Lo rechazado enfria, pero no borra: ver `_penalizacion_media`.
-    return bruto * max(0.0, 1.0 - _penalizacion_media(demanda, ofrecidos))
+    # Solo la parte POSITIVA. Lo rechazado ya no se multiplica aqui: viaja
+    # aparte en `Rasgos.penalizacion` y lo aplica `puntuar()`. Mezclarlas en un
+    # solo numero obligaba a leer «poca evidencia» y «evidencia rechazada» como
+    # lo mismo, que son cosas opuestas.
+    return min(1.0, 0.65 * directo + 0.35 * por_tema)
 
 
 def construir(
@@ -377,6 +385,7 @@ def construir(
         formato=formato,
         actividad=actividad,
         comportamiento=comportamiento,
+        penalizacion=_penalizacion_media(demanda, ofrecidos),
         # Hoy NO hay reputacion comprobable: el sistema de resenas verificadas
         # no existe y los testimonios actuales no lo son. Devolver `None` deja
         # el hueco hecho sin fabricar una confianza que nadie ha ganado.

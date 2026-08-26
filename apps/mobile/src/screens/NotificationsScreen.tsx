@@ -11,12 +11,13 @@ import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import type { NotificationItem } from '@/mappers/notificationMapper';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
-import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { irAlPerfil } from '@/lib/irAlPerfil';
+import { pedirDestacados } from '@/services/cachePerfil';
 
 const demoNotifications: NotificationItem[] = [
   { id: '1', title: 'Nueva publicación de Darren Hardy', subtitle: 'Hizo un nuevo post sobre disciplina.', icon: 'bell', time: 'Hace 10 m', read: false },
@@ -44,7 +45,7 @@ export function NotificationsScreen() {
   const [adminId, setAdminId] = useState<string | null>(null);
   useEffect(() => {
     if (!supabaseEnabled || noticeDismissed) return;
-    ProfileRepository.listFeatured()
+    pedirDestacados()
       .then((list) => setAdminId(list.find((member) => member.isAdmin)?.id ?? null))
       .catch((error) => {
         console.warn('[avisos] no se pudo resolver el administrador', error);
@@ -59,7 +60,7 @@ export function NotificationsScreen() {
   const openDarren = () => {
     if (!adminId) return;
     dismissGuide(DARREN_NOTICE_ID);
-    router.push(`/profile/${adminId}` as never);
+    irAlPerfil(router, adminId);
   };
 
   const load = useCallback(() => {
@@ -74,7 +75,11 @@ export function NotificationsScreen() {
       .then((data) => {
         setItems(data);
         setStatus('idle');
-        // Al abrir, marcamos todas como leídas (limpia el badge).
+        // Al abrir, marcamos todas como leídas (limpia el badge). VA DESPUES
+        // del listado a proposito, aunque no dependa de el: lanzadas a la vez
+        // se corren, y si «marcar» llegara primero el listado volveria con
+        // todo en leido y la pantalla no resaltaria nada. Un viaje de mas a
+        // cambio de que se vea lo que estaba sin leer.
         NotificationRepository.markAllRead().catch(() => {});
       })
       .catch(() => setStatus('error'));
@@ -169,8 +174,17 @@ export function NotificationsScreen() {
               onPress={() =>
                 item.entityType === 'booking'
                   ? router.push('/agenda' as never)
+                  : /*
+                      Si el aviso se refiere a una PUBLICACION, se abre la
+                      publicacion. Hace falta para «te etiquetaron» —la etiqueta
+                      esta en la publicacion, y el perfil es justo donde no
+                      esta— y de paso arregla los «me gusta» y los comentarios,
+                      que tambien llevaban al perfil de quien reacciono.
+                    */
+                  item.entityType === 'post' && item.entityId
+                  ? router.push(`/post/${item.entityId}` as never)
                   : item.actorId
-                  ? router.push(`/profile/${item.actorId}` as never)
+                  ? irAlPerfil(router, item.actorId)
                   : undefined
               }
             />

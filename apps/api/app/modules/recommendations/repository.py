@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.bookings.models import Booking
 from app.modules.catalog.models import Course
-from app.modules.content.models import Post, PostLike, PostMedia
+from app.modules.content.models import Post, PostHashtag, PostLike, PostMedia
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import esquema
 from app.modules.recommendations.config import (
@@ -573,6 +573,79 @@ async def autores_de_senales(
             peso *= max(0.2, float(valor))
         peso *= peso_por_antiguedad(creado, ahora)
         salida[autor] = salida.get(autor, 0.0) + peso
+    return salida
+
+
+# --------------------------------------------------------------------------- #
+# Afinidad por hashtag (migracion 0031)
+# --------------------------------------------------------------------------- #
+async def hashtags_de_senales(
+    db: AsyncSession, user_id: str, *, desde: datetime, ahora: datetime, limite: int
+) -> dict[str, float]:
+    """Que ETIQUETAS acaba tocando esta persona, sin preguntarselo.
+
+    POR QUE NO HAY UN EVENTO NUEVO. `behavior_events` ya guarda que
+    publicaciones toco cada quien; `post_hashtags` ya dice que etiquetas lleva
+    cada publicacion. Unir las dos cosas es una consulta, no un sistema. Meter
+    un `hashtag_ids` en el evento habria significado que el movil decidiera que
+    etiquetas contar —y el movil no es fuente de verdad de nada— y ademas
+    congelaria las etiquetas del momento del clic: asi, si una publicacion se
+    reetiqueta despues, la afinidad se corrige sola.
+
+    Se reutiliza el mismo decaimiento que el resto de senales
+    (`peso_por_antiguedad`): lo de ayer manda sobre lo del mes pasado. Sin eso,
+    una racha de hace seis semanas seguiria mandando en el feed de hoy, que es
+    exactamente el defecto que hace que estas cosas se sientan pegajosas.
+    """
+    if not await esquema.hay_hashtags(db):
+        return {}
+    filas = (
+        await db.execute(
+            select(
+                PostHashtag.hashtag_id,
+                BehaviorEvent.event_type,
+                BehaviorEvent.value,
+                BehaviorEvent.created_at,
+            )
+            .join(PostHashtag, PostHashtag.post_id == BehaviorEvent.entity_id)
+            .where(
+                BehaviorEvent.user_id == user_id,
+                BehaviorEvent.entity_type == "post",
+                BehaviorEvent.created_at >= desde,
+            )
+            .limit(limite)
+        )
+    ).all()
+    salida: dict[str, float] = {}
+    for hashtag_id, tipo, valor, creado in filas:
+        peso = PESO_POR_SENAL.get(tipo, 0.0)
+        if peso <= 0:
+            continue
+        if valor is not None:
+            peso *= max(0.2, float(valor))
+        peso *= peso_por_antiguedad(creado, ahora)
+        salida[hashtag_id] = salida.get(hashtag_id, 0.0) + peso
+    return salida
+
+
+async def hashtags_de_publicaciones(
+    db: AsyncSession, post_ids: list[str]
+) -> dict[str, set[str]]:
+    """Que etiquetas lleva cada publicacion. UNA consulta para el lote entero."""
+    if not post_ids:
+        return {}
+    if not await esquema.hay_hashtags(db):
+        return {}
+    filas = (
+        await db.execute(
+            select(PostHashtag.post_id, PostHashtag.hashtag_id).where(
+                PostHashtag.post_id.in_(post_ids)
+            )
+        )
+    ).all()
+    salida: dict[str, set[str]] = {}
+    for post_id, hashtag_id in filas:
+        salida.setdefault(post_id, set()).add(hashtag_id)
     return salida
 
 

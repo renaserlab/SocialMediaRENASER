@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.modules.recommendations.config import PESOS_DE_PERSONAS, PesosDePersonas
+from app.modules.recommendations.config import (
+    PESO_MINIMO_DE_REFERENCIA,
+    PESOS_DE_PERSONAS,
+    PesosDePersonas,
+)
 from app.modules.recommendations.features import Rasgos
 
 # --------------------------------------------------------------------------- #
@@ -96,7 +100,6 @@ def puntuar(rasgos: Rasgos, pesos: PesosDePersonas = PESOS_DE_PERSONAS) -> Puntu
         ("intencion", pesos.intencion, rasgos.intencion),
         ("formato", pesos.formato, rasgos.formato),
         ("actividad", pesos.actividad, rasgos.actividad),
-        ("comportamiento", pesos.comportamiento, rasgos.comportamiento),
         ("reputacion", pesos.reputacion, rasgos.reputacion),
         ("exploracion", pesos.exploracion, rasgos.exploracion),
     ]
@@ -112,7 +115,51 @@ def puntuar(rasgos: Rasgos, pesos: PesosDePersonas = PESOS_DE_PERSONAS) -> Puntu
         acumulado += aporte
         total_peso += peso
 
-    score = acumulado / total_peso if total_peso > 0 else 0.0
+    base = acumulado / total_peso if total_peso > 0 else 0.0
+
+    # EL COMPORTAMIENTO NO PROMEDIA: SUMA.
+    #
+    # Antes entraba en la media como un componente mas, y eso producia algo
+    # absurdo: ver el video de alguien por primera vez le BAJABA la puntuacion.
+    # El motivo es que mientras no hay ninguna senal el componente vale `None`
+    # y se queda fuera del denominador; en cuanto aparece la primera, se
+    # calcula para TODO el mundo, y con una sola visita su valor es pequeno.
+    # Un numero pequeno metido en una media alta la baja. Asi que la senal
+    # positiva castigaba justo a la persona sobre la que iba.
+    #
+    # Ahora es un bonus que se suma y se acota en 1. Se probo primero repartir
+    # el hueco que queda hasta 1 (`peso * (1 - base) * valor`) y estaba MAL:
+    # cuanto mejor puntuaba alguien, menos podia moverle su propio historial,
+    # y con una base de 0,83 la senal quedaba seis veces mas debil que antes,
+    # incapaz de reordenar nada. Sumar conserva la fuerza que tenia y ademas
+    # garantiza lo unico que aqui no es negociable: haber interactuado con
+    # alguien NUNCA puede dejarle peor que no haberle visto nunca.
+    # El bonus se mide EN PROPORCION a lo que se sabe por otras vias. Quien no
+    # declaro preferencias solo tiene dos componentes aplicables —actividad y
+    # exploracion, unos 0,22 de peso— y ahi lo que hace con la aplicacion es
+    # practicamente lo unico que se sabe de esa persona: tiene que mandar. Con
+    # el cuestionario entero contestado el mismo bonus queda en su peso normal,
+    # porque entonces hay motivos mejores para ordenar.
+    #
+    # El suelo del divisor evita el disparate del extremo: sin el, a alguien
+    # con un solo componente aplicable cualquier senal minima le pondria el
+    # score en 1 y todos empatarian arriba.
+    if rasgos.comportamiento is not None and pesos.comportamiento > 0:
+        referencia = max(total_peso, PESO_MINIMO_DE_REFERENCIA)
+        empuje = pesos.comportamiento * rasgos.comportamiento / referencia
+        desglose["comportamiento"] = round(empuje, 6)
+        base = min(1.0, base + empuje)
+
+    # Lo rechazado enfria, y esto SI puede restar: es evidencia en contra, no
+    # ausencia de evidencia. Se acota al peso del comportamiento para que
+    # conserve la fuerza que tenia cuando iba multiplicado dentro de el
+    # —enfriar sin excluir— en vez de convertirse en una condena.
+    if rasgos.penalizacion > 0 and pesos.comportamiento > 0:
+        castigo = min(1.0, rasgos.penalizacion) * pesos.comportamiento
+        desglose["penalizacion"] = round(-base * castigo, 6)
+        base *= 1.0 - castigo
+
+    score = base
     desglose["final"] = round(score, 6)
     return Puntuacion(score=score, desglose=desglose, motivos=_motivos(rasgos))
 

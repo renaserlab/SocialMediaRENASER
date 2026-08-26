@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +19,7 @@ import {
   posicionDeModo,
   type ModoDeCreacion,
 } from '@/components/crear/SelectorDeModo';
+import { useSeccionActiva } from '@/navigation/foco';
 import { ProveedorDeGestoDeSeccion, useGestoDeSeccion } from '@/navigation/tabSwipe';
 import { useAuthStore } from '@/store/useAuthStore';
 import { palette } from '@/theme/tokens';
@@ -56,11 +56,23 @@ export function CrearScreen() {
   const { colors } = useAppTheme();
 
   /*
-    Si esta pantalla es la que se esta viendo. El carrusel de secciones
-    mantiene montadas las vecinas para que aparezcan al instante, y una camara
-    montada consume igual aunque nadie la mire.
+    Si esta pantalla es la que se esta viendo AHORA MISMO. El carrusel de
+    secciones mantiene montadas las vecinas para que aparezcan al instante, y
+    una camara montada consume igual aunque nadie la mire.
+
+    Es el mismo hook que usa el reproductor de video, y no `useIsFocused` a
+    secas, porque «no se esta viendo» tiene mas de una forma: estar en otra
+    seccion, pero tambien tener la aplicacion en segundo plano. Con solo el foco
+    de navegacion, dejar el telefono con Crear abierto mantenia la camara viva y
+    el piloto encendido en el bolsillo.
+
+    Y ademas es lo que hace que el permiso se vuelva a leer al VOLVER: quien va
+    a los ajustes del telefono a conceder la camara manda la aplicacion al
+    fondo, y al regresar esto pasa de `false` a `true`, que es la senal que
+    `PasoDeCaptura` escucha para mirar otra vez. Sin ella, conceder el permiso
+    desde los ajustes no servia de nada hasta reiniciar la aplicacion.
   */
-  const enfocada = useIsFocused();
+  const enfocada = useSeccionActiva();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
 

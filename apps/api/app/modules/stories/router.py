@@ -22,10 +22,9 @@ from app.modules.profiles.models import Profile
 from app.modules.stories.models import Story, StoryView
 from app.modules.stories.schemas import StoryCreate, StoryGroupRead, StoryRead, StoryViewerRead
 from app.shared.database import get_db
+from app.shared.permissions import is_admin
 
 router = APIRouter(tags=["stories"])
-
-_ADMIN_ROLES = {"admin", "moderator"}
 
 
 def _author_summary(profile: Profile) -> AuthorSummary:
@@ -161,8 +160,12 @@ async def delete_story(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     story = await _get_story(db, story_id)
-    is_admin = (current_user.role or "") in _ADMIN_ROLES
-    if story.author_id != current_user.id and not is_admin:
+    # El rol de la aplicacion vive en `profiles.role`, NO en el token: en el JWT
+    # de Supabase `role` vale SIEMPRE "authenticated", asi que compararlo con
+    # "admin" o "moderator" no se cumplia nunca y la moderacion no podia retirar
+    # una historia denunciada. Es el mismo fallo que ya se corrigio en
+    # `/payments/courses/{id}/access`.
+    if story.author_id != current_user.id and not await is_admin(db, current_user.id):
         raise ForbiddenError("No puedes eliminar esta historia.")
     # Borrado real: una historia es efimera por definicion y las vistas caen en
     # cascada. El archivo del bucket se limpia aparte.
@@ -201,8 +204,8 @@ async def list_story_viewers(
 ) -> list[StoryViewerRead]:
     """Quien vio la historia. Solo para su autor."""
     story = await _get_story(db, story_id)
-    is_admin = (current_user.role or "") in _ADMIN_ROLES
-    if story.author_id != current_user.id and not is_admin:
+    # Mismo motivo que en el borrado: `profiles.role`, nunca el `role` del token.
+    if story.author_id != current_user.id and not await is_admin(db, current_user.id):
         raise ForbiddenError("Solo el autor puede ver esta informacion.")
 
     rows = (

@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.config import get_settings
+from app.modules.catalog import esquema as esquema_de_catalogo
 from app.modules.recommendations import cache, esquema
 
 
@@ -53,7 +54,15 @@ def _sin_estado_heredado() -> None:
     un segundo fichero «sin migracion», una prueba heredaria la respuesta de
     otra y el fallo apareceria en un sitio que no tiene nada que ver.
 
+    El de CATALOGO es el mas peligroso de los tres y por eso esta aqui y no en
+    un fichero suelto: las pruebas de la 0034 aplican esas columnas a SU base en
+    memoria, asi que la memoria del proceso se queda con un «si» que en la base
+    de la prueba siguiente es mentira. Sin limpiarlo, cualquier prueba posterior
+    que tocara un curso preguntaria por columnas que no existen y reventaria en
+    un sitio que no tiene nada que ver con lo que estaba probando.
+
     `autouse`: no hay forma de olvidarse de aplicarla.
     """
     cache.vaciar()
     esquema.olvidar()
+    esquema_de_catalogo.olvidar()
