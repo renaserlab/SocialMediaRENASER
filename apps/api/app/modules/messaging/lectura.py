@@ -37,9 +37,25 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging.models import ConversationMember, Message
-from app.modules.messaging.schemas import ConversationRead
+from app.modules.messaging import esquema
+from app.modules.messaging.models import (
+    ConversationMember,
+    Message,
+    MessageAttachment,
+)
+from app.modules.messaging.schemas import AttachmentRead, ConversationRead
 from app.modules.profiles.models import Profile
+
+#: Como se resume en la lista de conversaciones un mensaje que no lleva texto.
+#: Sin esto, mandar una foto dejaba la fila diciendo «Sin mensajes aun», que es
+#: falso: si hay mensaje, y quien lo recibio necesita saber que le ha llegado
+#: algo. Texto plano y no un icono: el icono lo pone la pantalla, que es quien
+#: sabe como se ve.
+_RESUMEN_SIN_TEXTO = {
+    "image": "Foto",
+    "video": "Vídeo",
+    "document": "Archivo",
+}
 
 
 async def otros_participantes(
@@ -188,6 +204,88 @@ async def no_leidos(
     return {conv_id: int(total or 0) for conv_id, total in filas}
 
 
+async def adjuntos_por_mensaje(
+    db: AsyncSession, message_ids: list[str]
+) -> dict[str, list[AttachmentRead]]:
+    """Los adjuntos de VARIOS mensajes, en UNA consulta.
+
+    Sin la migracion 0033 devuelve el diccionario vacio sin tocar la base: la
+    tabla no existe todavia y preguntar por ella seria un 500 que el navegador
+    ademas reportaria como error de CORS. Que no haya adjuntos no es un fallo,
+    es el estado de hoy.
+
+    Con la lista vacia tampoco se consulta, por la trampa de siempre:
+    `columna_uuid.in_([])` acaba «arreglandose» con `or [""]` y esa cadena vacia
+    cuela en SQLite pero PostgreSQL la rechaza, convirtiendose en un 404 mudo.
+    """
+    if not message_ids or not await esquema.hay_adjuntos_de_chat(db):
+        return {}
+
+    filas = (
+        await db.execute(
+            select(
+                MessageAttachment.id,
+                MessageAttachment.message_id,
+                MessageAttachment.storage_path,
+                MessageAttachment.kind,
+                MessageAttachment.mime_type,
+                MessageAttachment.file_name,
+                MessageAttachment.bytes,
+                MessageAttachment.width,
+                MessageAttachment.height,
+                MessageAttachment.duration_s,
+            )
+            .where(MessageAttachment.message_id.in_(message_ids))
+            # El orden que eligio quien los mando; el id desempata para que dos
+            # archivos con el mismo `sort_order` no bailen entre peticiones.
+            .order_by(MessageAttachment.sort_order.asc(), MessageAttachment.id.asc())
+        )
+    ).all()
+
+    salida: dict[str, list[AttachmentRead]] = {}
+    for fila in filas:
+        salida.setdefault(fila.message_id, []).append(
+            AttachmentRead(
+                id=fila.id,
+                storage_path=fila.storage_path,
+                kind=fila.kind,
+                mime_type=fila.mime_type,
+                file_name=fila.file_name,
+                bytes=fila.bytes,
+                width=fila.width,
+                height=fila.height,
+                duration_s=fila.duration_s,
+            )
+        )
+    return salida
+
+
+async def _resumen_de_los_sin_texto(
+    db: AsyncSession, message_ids: list[str]
+) -> dict[str, str]:
+    """Que poner de resumen en los mensajes que solo llevan archivos.
+
+    Solo se pregunta por los mensajes que de verdad no tienen texto, que son los
+    pocos: en una lista normal esta consulta ni llega a lanzarse.
+    """
+    if not message_ids or not await esquema.hay_adjuntos_de_chat(db):
+        return {}
+
+    filas = (
+        await db.execute(
+            select(MessageAttachment.message_id, MessageAttachment.kind)
+            .where(MessageAttachment.message_id.in_(message_ids))
+            .order_by(MessageAttachment.sort_order.asc(), MessageAttachment.id.asc())
+        )
+    ).all()
+
+    salida: dict[str, str] = {}
+    for message_id, kind in filas:
+        # El primero manda: un mensaje con tres fotos se resume como «Foto».
+        salida.setdefault(message_id, _RESUMEN_SIN_TEXTO.get(kind, "Archivo"))
+    return salida
+
+
 async def leer_conversaciones(
     db: AsyncSession, filas, uid: str
 ) -> list[ConversationRead]:
@@ -206,9 +304,25 @@ async def leer_conversaciones(
     ultimos = await ultimos_mensajes(db, ids)
     pendientes = await no_leidos(db, ids, uid)
 
+    # Los ultimos mensajes que no llevan texto: solo de esos hay que averiguar
+    # que archivo son. Si no hay ninguno —el caso normal— no se consulta nada.
+    sin_texto = [
+        ultimo.id for ultimo in ultimos.values() if not (ultimo.body or "").strip()
+    ]
+    resumenes = await _resumen_de_los_sin_texto(db, sin_texto)
+
     salida: list[ConversationRead] = []
     for fila in filas:
         ultimo = ultimos.get(fila.id)
+        if ultimo is None:
+            resumen = None
+        elif (ultimo.body or "").strip():
+            resumen = ultimo.body
+        else:
+            # Un mensaje sin texto y sin adjunto legible no deberia existir,
+            # pero si aparece se dice «Archivo» y no una cadena vacia, que la
+            # pantalla pintaria como «Sin mensajes aun»: una mentira.
+            resumen = resumenes.get(ultimo.id, "Archivo")
         salida.append(
             ConversationRead(
                 id=fila.id,
@@ -217,7 +331,7 @@ async def leer_conversaciones(
                 # Solo los chats directos tienen «el otro»; en un grupo el
                 # nombre lo pone el titulo.
                 other=otros.get(fila.id) if fila.kind == "direct" else None,
-                last_message=ultimo.body if ultimo is not None else None,
+                last_message=resumen,
                 last_message_at=ultimo.created_at if ultimo is not None else None,
                 unread_count=pendientes.get(fila.id, 0),
                 updated_at=fila.updated_at,

@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.security import AuthUser, get_current_user
 from app.main import app
+from app.modules.messaging import esquema as esquema_mensajes
 from app.modules.messaging.models import Conversation, ConversationMember, Message
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import cache, esquema
@@ -60,6 +61,10 @@ def _instante(segundos: int) -> datetime:
 async def entorno():
     cache.vaciar()
     esquema.olvidar()
+    # La memoria de que existe `message_attachments` vive en el PROCESO, no en
+    # la base, y cada prueba levanta la suya. Sin vaciarla, la que corre «sin la
+    # 0033» heredaria el «si» de esta y comprobaria otra cosa.
+    esquema_mensajes.olvidar()
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:

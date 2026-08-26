@@ -13,16 +13,29 @@ Mensajes tardara segundos en abrirse.
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
+from app.core.exceptions import (
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationAppError,
+)
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging.lectura import leer_conversaciones
-from app.modules.messaging.models import Conversation, ConversationMember, Message
+from app.modules.messaging import esquema
+from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
+from app.modules.messaging.models import (
+    Conversation,
+    ConversationMember,
+    Message,
+    MessageAttachment,
+)
 from app.modules.messaging.schemas import (
+    AttachmentCreate,
+    AttachmentRead,
     ConversationRead,
     DirectConversationCreate,
     MessageCreate,
@@ -66,6 +79,58 @@ async def _require_member(
     if member is None:
         raise ForbiddenError("No perteneces a esta conversación.")
     return member
+
+
+def _validar_rutas(
+    adjuntos: list[AttachmentCreate], conversation_id: str, uid: str
+) -> None:
+    """Que cada archivo viva donde dice vivir. Es la mitad de la privacidad.
+
+    Los bytes se suben directamente a Storage desde la aplicación; aquí solo
+    llega la RUTA. Sin esta comprobación, un miembro de esta conversación podría
+    registrar como adjunto suyo la ruta de un archivo de OTRA conversación, y
+    aunque Storage le negaría los bytes, el listado de este chat pasaría a
+    enseñar el nombre del fichero y su tamaño a quien no debe verlos. Peor: al
+    resto de miembros, que sí pueden leer todo lo que cuelga de su carpeta, les
+    quedaría accesible un archivo ajeno.
+
+    La forma obligatoria es la misma que exige la política RLS del bucket:
+
+        <id de conversacion>/<id de quien sube>/<fichero>
+
+    El identificador viene del JWT, nunca del cuerpo de la petición.
+    """
+    prefijo = f"{conversation_id}/{uid}/"
+    for adjunto in adjuntos:
+        ruta = adjunto.storage_path
+        if not ruta.startswith(prefijo) or len(ruta) <= len(prefijo):
+            raise ValidationAppError(
+                "La ruta del adjunto no corresponde a esta conversación.",
+                code="attachment_path_invalid",
+            )
+        # `..` escaparía de la carpeta al resolverse en algunos clientes, y una
+        # barra de más produce nombres que la política de Storage lee distinto.
+        resto = ruta[len(prefijo) :]
+        if ".." in resto or "/" in resto:
+            raise ValidationAppError(
+                "La ruta del adjunto no es válida.",
+                code="attachment_path_invalid",
+            )
+
+
+async def _exigir_esquema_de_adjuntos(db: AsyncSession) -> None:
+    """503 mientras la 0033 espere aprobación, nunca un 500.
+
+    503 y no 404: la ruta existe y está bien escrita, lo que falta es que la
+    migración esté puesta. Y con un código propio para que la aplicación pueda
+    decir «los archivos todavía no están disponibles» en vez de un error
+    genérico.
+    """
+    if not await esquema.hay_adjuntos_de_chat(db):
+        raise ServiceUnavailableError(
+            "Todavía no se pueden enviar archivos por el chat.",
+            code="chat_attachments_not_available",
+        )
 
 
 async def _leer_una(db: AsyncSession, conversation_id: str, uid: str) -> ConversationRead:
@@ -179,6 +244,10 @@ async def list_messages(
         default=None,
         description="Trae solo mensajes anteriores a este instante (historial).",
     ),
+    after: datetime | None = Query(
+        default=None,
+        description="Trae solo mensajes posteriores a este instante (novedades).",
+    ),
     page: Page = Depends(pagination_params),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -192,8 +261,16 @@ async def list_messages(
     la ventana un puesto. Con `offset` eso repite o se salta mensajes al pedir
     la pagina siguiente; con un instante fijo, lo que ya paso no se mueve.
 
-    Los autores se resuelven con un JOIN, no con una consulta por mensaje: el
-    historial completo cuesta UNA consulta.
+    `after` es el camino contrario y existe por los ADJUNTOS. Realtime entrega
+    la fila cruda de `messages`, que no sabe nada de los archivos que cuelgan de
+    ella: la burbuja de texto sale al instante, pero para completar sus adjuntos
+    hace falta preguntar. Con `after` se piden de una vez todas las novedades
+    desde el ultimo mensaje conocido, en lugar de una peticion por mensaje. De
+    paso repara el hueco cuando Realtime se pierde algo —el telefono estuvo en
+    segundo plano, el canal se cayo— sin recargar el historial entero.
+
+    Los autores se resuelven con un JOIN y los adjuntos con UNA consulta para
+    todos los mensajes de la pagina: el historial no crece en consultas.
     """
     ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
@@ -217,6 +294,8 @@ async def list_messages(
     )
     if before is not None:
         consulta = consulta.where(Message.created_at < before)
+    if after is not None:
+        consulta = consulta.where(Message.created_at > after)
 
     rows = (
         await db.execute(
@@ -225,6 +304,11 @@ async def list_messages(
             .offset(page.offset)
         )
     ).all()
+
+    # Los adjuntos de TODOS los mensajes de la pagina, de una vez. Sin la 0033
+    # devuelve el diccionario vacio y cada mensaje sale con `attachments: []`,
+    # que es la verdad: no hay adjuntos.
+    adjuntos = await adjuntos_por_mensaje(db, [fila[0] for fila in rows])
 
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
@@ -236,6 +320,7 @@ async def list_messages(
             ),
             body=body,
             created_at=created_at,
+            attachments=adjuntos.get(msg_id, []),
         )
         for (
             msg_id,
@@ -261,31 +346,101 @@ async def send_message(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRead:
+    """Guarda un mensaje: solo texto, solo archivos, o las dos cosas.
+
+    Los bytes NO pasan por aquí. La aplicación sube al bucket `message-media`
+    con su propio token —que es lo que permite subir un vídeo por trozos
+    reanudables sin que la API sostenga la conexión— y esta petición solo
+    registra las rutas, después de comprobar que apuntan a esta conversación y a
+    la carpeta de quien las manda.
+    """
     ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
-    message = Message(
-        conversation_id=conversation_id,
-        sender_id=current_user.id,
-        body=payload.body,
-    )
-    db.add(message)
+
+    if payload.attachments:
+        await _exigir_esquema_de_adjuntos(db)
+        _validar_rutas(payload.attachments, conversation_id, current_user.id)
+    elif not payload.body.strip():
+        # Sin la 0033 el esquema todavía exige al menos un carácter en `body`,
+        # así que un mensaje vacío se rechaza aquí con un mensaje legible en vez
+        # de reventar contra la restricción de la tabla.
+        raise ValidationAppError("Escribe algo o adjunta un archivo.")
+
+    # `insert().values()` y no `db.add(Message(...))`: el segundo inserta TODAS
+    # las columnas mapeadas, así que el día que el modelo se adelante a la
+    # migración deja de poder escribir. `returning` evita además el viaje extra
+    # que costaba `db.refresh`.
+    fila = (
+        await db.execute(
+            insert(Message)
+            .values(
+                conversation_id=conversation_id,
+                # La identidad sale del JWT. Nunca de la petición.
+                sender_id=current_user.id,
+                body=payload.body,
+            )
+            .returning(Message.id, Message.created_at)
+        )
+    ).one()
+    message_id, created_at = fila
+
+    adjuntos: list[AttachmentRead] = []
+    if payload.attachments:
+        filas = [
+            {
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "storage_path": adjunto.storage_path,
+                "kind": adjunto.kind,
+                "mime_type": adjunto.mime_type,
+                "file_name": adjunto.file_name,
+                "bytes": adjunto.bytes,
+                "width": adjunto.width,
+                "height": adjunto.height,
+                "duration_s": adjunto.duration_s,
+                "sort_order": posicion,
+            }
+            for posicion, adjunto in enumerate(payload.attachments)
+        ]
+        # Una sola sentencia para todos: mandar diez fotos no puede costar diez
+        # viajes a la base.
+        ids = (
+            await db.execute(
+                insert(MessageAttachment).values(filas).returning(MessageAttachment.id)
+            )
+        ).scalars().all()
+        adjuntos = [
+            AttachmentRead(
+                id=adjunto_id,
+                storage_path=adjunto.storage_path,
+                kind=adjunto.kind,
+                mime_type=adjunto.mime_type,
+                file_name=adjunto.file_name,
+                bytes=adjunto.bytes,
+                width=adjunto.width,
+                height=adjunto.height,
+                duration_s=adjunto.duration_s,
+            )
+            for adjunto_id, adjunto in zip(ids, payload.attachments, strict=True)
+        ]
+
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id)
         .values(updated_at=func.now())
     )
     await db.commit()
-    await db.refresh(message)
 
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil del remitente no encontrado.")
     return MessageRead(
-        id=message.id,
-        conversation_id=message.conversation_id,
+        id=message_id,
+        conversation_id=conversation_id,
         sender=_author(profile),
-        body=message.body,
-        created_at=message.created_at,
+        body=payload.body,
+        created_at=created_at,
+        attachments=adjuntos,
     )
 
 
