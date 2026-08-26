@@ -302,7 +302,15 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         </Pressable>
       </View>
 
-      <Text variant="body" style={styles.body}>{post.body}</Text>
+      {/*
+        Solo si hay algo que leer. Una publicacion puede ser solo foto o solo
+        video —el backend lo acepta a proposito— y sin esta condicion quedaba
+        un bloque de texto vacio con su margen entero justo encima de la
+        imagen, que se lee como si algo hubiera fallado al cargar.
+      */}
+      {post.body.trim() !== '' && (
+        <Text variant="body" style={styles.body}>{post.body}</Text>
+      )}
       {post.mediaType === 'video' ? (
         /*
           16:9 en vez de una caja fija: la mayoria de videos son apaisados y
