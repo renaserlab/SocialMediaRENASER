@@ -481,12 +481,17 @@ async def personas_puntuadas(
     ahora: datetime | None = None,
     pesos: PesosDePersonas = PESOS_DE_PERSONAS,
     limite_candidatos: int = CANDIDATOS_MAXIMOS,
+    bloqueados: set[str] | None = None,
 ) -> tuple[list[PersonaPuntuada], str]:
     """El nucleo: candidatos, rasgos y orden. Sin paginar y sin diversificar.
 
     Se expone aparte del endpoint porque el recomendador de CONTENIDO necesita
     exactamente esto —a quien le interesa esta persona— y calcularlo dos veces
     seria pagar dos veces la misma consulta.
+
+    `bloqueados` se acepta de fuera por lo mismo: quien ya los ha pedido para
+    filtrar sus propias publicaciones no tiene por que provocar aqui una
+    segunda consulta identica a `user_blocks` dentro de la misma peticion.
     """
     ahora = ahora or ahora_utc()
     semilla = semilla_de_exploracion(ahora)
@@ -507,7 +512,8 @@ async def personas_puntuadas(
     # EXCLUSIONES. No son un detalle: son la diferencia entre recomendar y
     # molestar. Uno mismo; quien bloqueo o me bloqueo; y a quien ya dije que no
     # me interesa.
-    bloqueados = await repo.bloqueos_en_ambos_sentidos(db, user_id)
+    if bloqueados is None:
+        bloqueados = await repo.bloqueos_en_ambos_sentidos(db, user_id)
     excluidos = {user_id} | bloqueados | senales.descartados
 
     candidatos = await candidate_generator.generar(
@@ -908,16 +914,29 @@ def _bonus_de_hashtag(
     return pesos.hashtag * min(1.0, mejor / SATURACION_DE_HASHTAG)
 
 
-async def contenido_para(
+@dataclass
+class _PublicacionPuntuada:
+    """Una publicacion ya puntuada, antes de paginar.
+
+    Vive fuera de la funcion —y no como clase local— porque es lo que se
+    guarda en la memoria corta: lo que se recuerda entre paginas tiene que
+    poder nombrarse.
+    """
+
+    id: str
+    autor: str
+    score: float
+    por_tema_propio: bool
+
+
+async def contenido_puntuado(
     db: AsyncSession,
     user_id: str,
     *,
-    limite: int,
-    offset: int = 0,
     media: str | None = None,
     ahora: datetime | None = None,
-) -> ContenidoOrdenado:
-    """Que publicaciones, y en que orden.
+) -> tuple[list[_PublicacionPuntuada], str]:
+    """El orden completo del feed. Sin paginar.
 
     HONESTIDAD SOBRE LO QUE SE PUEDE HACER HOY. Una publicacion no declara de
     que trata: no hay temas en `posts` ni embeddings. Lo unico que se sabe de
@@ -928,14 +947,36 @@ async def contenido_para(
     """
     ahora = ahora or ahora_utc()
     demanda, senales = await _demanda_con_memoria(db, user_id, ahora)
-    puntuadas, estrategia = await personas_puntuadas(db, user_id, ahora=ahora)
-    score_por_autor = {p.id: p.score for p in puntuadas}
 
+    # Se piden ANTES que el ranking y se le pasan: `personas_puntuadas`
+    # necesita exactamente los mismos bloqueos y, calculandolos alli dentro,
+    # esta misma consulta salia DOS VECES en la misma peticion.
     bloqueados = await repo.bloqueos_en_ambos_sentidos(db, user_id)
+    puntuadas, estrategia = await personas_puntuadas(
+        db, user_id, ahora=ahora, bloqueados=bloqueados
+    )
+    score_por_autor = {p.id: p.score for p in puntuadas}
 
     consulta = (
         select(Post.id, Post.author_id, Post.created_at)
         .where(Post.status == "published")
+        # UNO MISMO NO SE RECOMIENDA A SI MISMO, tampoco lo que publica.
+        # «Para ti» es DESCUBRIMIENTO: lo que alguien acaba de escribir ya lo
+        # conoce, y devolverselo aqui gasta un sitio de una lista corta con lo
+        # unico que no le puede sorprender. Es la misma exclusion que ya hacen
+        # las otras dos superficies —`personas_puntuadas` empieza por
+        # `excluidos = {user_id} | ...` y `cursos_puntuados` pasa
+        # `autor_excluido=user_id`—; esta faltaba, y era la unica de las tres
+        # sin comprobar.
+        #
+        # Quedarse sin nada que recomendar NO deja Inicio en blanco: la lista
+        # vacia es una respuesta valida y el movil cae a la fuente cronologica
+        # (`fuenteRecomendada` en `feed/fuenteDeVideos.ts`), donde lo propio
+        # sigue estando, que es su sitio.
+        #
+        # Comparacion escalar y no `not_in([...])`: la trampa de la lista vacia
+        # contra una columna uuid no llega a existir aqui.
+        .where(Post.author_id != user_id)
         .order_by(Post.created_at.desc())
         .limit(CANDIDATOS_DE_CONTENIDO)
     )
@@ -956,7 +997,7 @@ async def contenido_para(
 
     filas = (await db.execute(consulta)).all()
     if not filas:
-        return ContenidoOrdenado(post_ids=[], estrategia=estrategia)
+        return [], estrategia
 
     post_ids = [fila[0] for fila in filas]
     reacciones = dict(
@@ -1000,21 +1041,14 @@ async def contenido_para(
     pesos = PESOS_DE_CONTENIDO
     total = pesos.total()
 
-    @dataclass
-    class _Puntuado:
-        id: str
-        autor: str
-        score: float
-        por_tema_propio: bool
-
-    puntuados = []
+    puntuados: list[_PublicacionPuntuada] = []
     for post_id, autor_id, creado in filas:
         propios = temas_por_post.get(post_id)
         tema, por_tema_propio = _afinidad_tematica(
             demanda, propios, temas_por_autor.get(autor_id)
         )
         puntuados.append(
-            _Puntuado(
+            _PublicacionPuntuada(
                 id=post_id,
                 autor=autor_id,
                 por_tema_propio=por_tema_propio,
@@ -1045,6 +1079,55 @@ async def contenido_para(
         grupo_de=lambda p: p.autor,
         maximo_seguidos=MAX_SEGUIDAS_DEL_MISMO_AUTOR,
     )
+    return intercalados, estrategia
+
+
+async def contenido_para(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    limite: int,
+    offset: int = 0,
+    media: str | None = None,
+    ahora: datetime | None = None,
+) -> ContenidoOrdenado:
+    """Una pagina del feed. Con memoria corta para que desplazarse sea barato.
+
+    EL FALLO QUE ARREGLA, MEDIDO CONTANDO CONSULTAS. Cada pagina del scroll
+    infinito volvia a ordenar el feed ENTERO —bloqueos, los 300 candidatos,
+    sus reacciones, sus temas, los de sus autores, sus etiquetas y la afinidad
+    con ellas— para quedarse con diez publicaciones y tirar el resto. Doce
+    consultas por pagina, y todas devolvian exactamente lo mismo que en la
+    anterior, porque el ranking de personas ya estaba en memoria y la semilla
+    de exploracion solo cambia una vez al dia. Cuatro paginas costaban 64
+    consultas donde bastan 28 + 3x5.
+
+    Y NO ERA SOLO EL COSTE. Al recalcular en cada pagina, una publicacion nueva
+    que entrara mientras alguien se desplaza corria la ventana un puesto: la
+    pagina siguiente repetia lo ultimo ya visto o se saltaba algo. Congelar el
+    orden durante unos segundos es lo que hace que paginar sea correcto, que es
+    el mismo motivo por el que `cursos_para` ya lo hacia.
+
+    LA MEMORIA LLEVA `media` EN LA CLAVE porque el feed se puede filtrar a solo
+    imagen o solo video, y esos son ordenes distintos. Sin eso, entrar al feed
+    de videos despues del general devolveria el orden del general.
+
+    Se invalida con todo lo demas: `cache.invalidar` borra por usuario, asi que
+    decir «no me interesa» o responder el cuestionario se nota al momento.
+    """
+    ahora = ahora or ahora_utc()
+    semilla = semilla_de_exploracion(ahora)
+    que = f"contenido:{media or 'todo'}"
+
+    guardado = cache.obtener(user_id, semilla, que)
+    if guardado is not None:
+        intercalados, estrategia = guardado
+    else:
+        intercalados, estrategia = await contenido_puntuado(
+            db, user_id, media=media, ahora=ahora
+        )
+        cache.guardar(user_id, semilla, (intercalados, estrategia), que)
+
     pagina = intercalados[offset : offset + limite]
     return ContenidoOrdenado(
         post_ids=[p.id for p in pagina],
