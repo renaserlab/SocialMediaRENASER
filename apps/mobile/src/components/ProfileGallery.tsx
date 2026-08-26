@@ -32,6 +32,12 @@ type Props = {
 const CELDAS_DE_ESPERA = GRID_COLUMNS * 3;
 
 /**
+ * Cuantas celdas se descargan con prioridad. Cuatro filas: lo que cabe en
+ * pantalla mas un poco de margen para el primer desplazamiento.
+ */
+const PRIMERAS_VISIBLES = GRID_COLUMNS * 4;
+
+/**
  * Galeria de un perfil: cuadricula de fotos/videos y lista de audios.
  *
  * Antes eran seis imagenes fijas del paquete de demo, asi que un perfil real
@@ -115,7 +121,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
                   ]}
                 />
               ))
-            : items.map((post) => {
+            : items.map((post, indice) => {
                 /*
                   Que imagen va en la celda lo decide `miniaturaDePublicacion`,
                   el mismo sitio que consulta la precarga al tocar el perfil. Si
@@ -123,6 +129,17 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
                   pediria otro.
                 */
                 const mini = miniaturaDePublicacion(post);
+                /*
+                  PRIMERO LO QUE SE VE.
+
+                  La cuadricula no se recicla: se dibujan las sesenta celdas de
+                  golpe, asi que las sesenta descargas arrancan a la vez y las
+                  cuatro primeras filas —las unicas que hay en pantalla—
+                  compiten por la conexion con cincuenta miniaturas que nadie
+                  esta mirando. En una red movil eso es exactamente la
+                  diferencia entre ver el perfil enseguida y verlo tarde.
+                */
+                const prioridad = indice < PRIMERAS_VISIBLES ? 'high' : 'low';
                 return (
                   <Pressable
                     key={post.id}
@@ -162,6 +179,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
                           posterCacheKey={mini?.cacheKey}
                           fondo={colors.surfaceAlt}
                           colorSimbolo={colors.textMuted}
+                          prioridad={prioridad}
                         />
                       ) : mini || post.imageKey ? (
                         <ExpoImage
@@ -185,6 +203,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
                           // ocupando memoria hasta que le toca soltarse. Va la RUTA,
                           // no la firma: la firma cambia en cada refirma.
                           recyclingKey={mini?.cacheKey ?? mini?.uri ?? post.imageKey}
+                          priority={prioridad}
                           transition={120}
                         />
                       ) : (

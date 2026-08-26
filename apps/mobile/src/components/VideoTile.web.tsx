@@ -33,6 +33,8 @@ export function VideoTile({
   fondo?: string;
   /** Solo lo usa la variante nativa (aqui no se dibuja simbolo). */
   colorSimbolo?: string;
+  /** Solo lo usa la variante nativa; en el navegador ordena el la cola. */
+  prioridad?: 'low' | 'normal' | 'high';
 }) {
   const src = uri && !uri.includes('#') ? `${uri}#t=0.001` : uri;
 

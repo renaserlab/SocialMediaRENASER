@@ -36,6 +36,7 @@ export function VideoTile({
   posterCacheKey,
   fondo,
   colorSimbolo,
+  prioridad,
 }: {
   uri?: string | null;
   posterUrl?: string | null;
@@ -53,6 +54,12 @@ export function VideoTile({
   fondo?: string;
   /** Color del simbolo de video. Va con `fondo`: uno claro necesita otro. */
   colorSimbolo?: string;
+  /**
+   * Que se descarga antes. En una cuadricula sin reciclaje arrancan todas las
+   * descargas a la vez, y las celdas que estan en pantalla tienen que ganarle
+   * la conexion a las que nadie esta mirando.
+   */
+  prioridad?: 'low' | 'normal' | 'high';
 }) {
   return (
     <View style={[styles.wrap, { backgroundColor: fondo ?? media.surfaceAlt }]}>
@@ -68,6 +75,7 @@ export function VideoTile({
           contentFit="cover"
           cachePolicy="disk"
           recyclingKey={posterCacheKey ?? posterUrl}
+          priority={prioridad}
           transition={120}
         />
       ) : (
