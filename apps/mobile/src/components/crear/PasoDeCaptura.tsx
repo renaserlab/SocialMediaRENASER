@@ -155,8 +155,24 @@ export function PasoDeCaptura({
     */
   }, [enWeb, paso, activo]);
 
+  /**
+   * Pedirlo a peticion de la persona, desde el aviso.
+   *
+   * Comparte el cerrojo con el efecto: en iOS el dialogo del sistema deja la
+   * aplicacion «inactiva», eso reactiva el efecto al cerrarse y sin el cerrojo
+   * podrian solaparse dos peticiones. En Android cada peticion de mas gasta uno
+   * de los dos intentos que da el sistema antes de bloquear el permiso para
+   * siempre.
+   */
   const pedirCamara = useCallback(() => {
-    void pedirPermiso('camara').then(setPermisoCamara);
+    if (pidiendo.current) return;
+    pidiendo.current = true;
+    void pedirPermiso('camara')
+      .then(setPermisoCamara)
+      .catch(() => setPermisoCamara('denegado'))
+      .finally(() => {
+        pidiendo.current = false;
+      });
   }, []);
 
   /* ------------------------------------------------------------ web ------ */
