@@ -759,11 +759,18 @@ async def like_post(
         await db.commit()
         # El push va DESPUES del commit: si la transaccion fallara, no puede
         # haberse avisado ya de algo que no llego a ocurrir.
+        # EL NOMBRE SALE DEL PERFIL, NO DEL TOKEN. `AuthUser` solo tiene id,
+        # email, role y claims: el token dice QUIEN eres, no como te llamas.
+        # Pedirle `full_name` lanzaba AttributeError DESPUES del commit, asi
+        # que la reaccion se guardaba y la peticion moria con un 500 que el
+        # navegador enseñaba como error de CORS (Starlette no pone cabeceras
+        # CORS en excepciones sin capturar). Meses invisible.
+        autor_de_la_accion = await db.get(Profile, current_user.id)
         await send_push(
             db,
             user_id=post.author_id,
             notification_type="like",
-            actor_name=current_user.full_name,
+            actor_name=autor_de_la_accion.full_name if autor_de_la_accion else None,
             data={"type": "like", "postId": post_id},
         )
     return {"liked": True, "likes_count": await _likes_count(db, post_id)}
@@ -879,11 +886,13 @@ async def create_comment(
     )
     await db.commit()
     # Despues del commit, por el mismo motivo que en el "me gusta".
+    # Mismo motivo que en el «me gusta»: el nombre vive en el perfil.
+    quien_comenta = await db.get(Profile, current_user.id)
     await send_push(
         db,
         user_id=post.author_id,
         notification_type="comment",
-        actor_name=current_user.full_name,
+        actor_name=quien_comenta.full_name if quien_comenta else None,
         data={"type": "comment", "postId": post_id},
     )
     await db.refresh(comment)
