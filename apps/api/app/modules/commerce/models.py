@@ -1,0 +1,390 @@
+"""Modelos del dominio comercial. Mapean las siete tablas de la 0035.
+
+LOS UNIQUE DE ESTE FICHERO NO SON ADORNO: son la idempotencia entera.
+
+Las tiendas y las pasarelas REINTENTAN sus avisos. Si la proteccion contra
+repeticiones se escribe en Python —«mira si ya existe y, si no, insertalo»—, dos
+avisos que llegan a la vez leen los dos antes de que escriba ninguno, los dos
+ven que no existe y los dos insertan. El resultado es un cobro contado dos veces
+o dos derechos sobre el mismo producto. Un indice unico no se puede esquivar: la
+segunda insercion choca contra la base y no hay carrera que valga.
+
+Por eso las restricciones se declaran TAMBIEN aqui y no solo en el SQL de la
+migracion: las pruebas corren sobre SQLite, que respeta los indices unicos
+parciales y los CHECK igual que PostgreSQL. Sin declararlas, las pruebas de
+idempotencia pasarian por casualidad —porque en una prueba no hay concurrencia—
+y no probarian nada.
+
+Regla del proyecto que se aplica aqui: el esquema es propiedad de las
+migraciones. Estos modelos solo mapean; `create_all` es una comodidad de
+desarrollo y de pruebas.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import uuid4
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.shared.database import Base
+
+
+def _uuid() -> str:
+    return str(uuid4())
+
+
+#: `jsonb` en PostgreSQL, JSON de texto en SQLite. El payload de un aviso se
+#: guarda entero y en crudo: cuando un cobro no cuadra, lo unico que permite
+#: saber que dijo la tienda es lo que dijo la tienda.
+_payload = JSON().with_variant(JSONB, "postgresql")
+
+
+class CommerceProduct(Base):
+    """Que se vende, sin mencionar a ninguna tienda.
+
+    Un producto es «el derecho que se compra», no «el archivo que se descarga».
+    """
+
+    __tablename__ = "commerce_products"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    #: Hoy solo 'course_lifetime'. La columna existe desde el principio porque
+    #: añadirla a una tabla ya llena obliga a decidir que significan las filas
+    #: viejas, y esa decision se toma mal con prisa.
+    kind: Mapped[str] = mapped_column(
+        String(32), default="course_lifetime", server_default="course_lifetime"
+    )
+    course_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="RESTRICT"), nullable=True
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("kind in ('course_lifetime')", name="commerce_products_kind"),
+        CheckConstraint(
+            "kind <> 'course_lifetime' or course_id is not null",
+            name="commerce_products_curso_obligatorio",
+        ),
+        # Un curso, un producto de acceso permanente. PARCIAL: el dia que `kind`
+        # tenga mas valores, dos productos distintos del mismo curso seran
+        # legitimos. Lo que no puede haber son dos «acceso permanente» del mismo
+        # curso, porque entonces comprar uno u otro daria derechos distintos al
+        # mismo contenido y nadie sabria cual mirar.
+        Index(
+            "commerce_products_curso_unico",
+            "course_id",
+            unique=True,
+            postgresql_where=text("kind = 'course_lifetime'"),
+            sqlite_where=text("kind = 'course_lifetime'"),
+        ),
+    )
+
+
+class ProviderProduct(Base):
+    """Como se llama ese producto en cada tienda y en cada entorno.
+
+    Es la tabla que `purchases` nunca tuvo y por la que hubo que rehacer el
+    dominio: el mismo curso tiene un identificador distinto en Apple, en Google
+    y en Stripe, y sin esta traduccion el webhook no puede pasar de «te han
+    comprado ESTE producto de la tienda» a «esta persona tiene derecho a ESTE
+    curso».
+    """
+
+    __tablename__ = "provider_products"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    commerce_product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("commerce_products.id", ondelete="CASCADE"),
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    #: `sandbox` y `production` conviven: las tiendas mandan compras de prueba
+    #: con la misma forma que las de verdad. Sin separar los identificadores,
+    #: una compra en sandbox concede acceso real.
+    environment: Mapped[str] = mapped_column(String(16))
+    external_product_id: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "provider in ('revenuecat_test', 'google', 'apple', 'stripe')",
+            name="provider_products_provider",
+        ),
+        CheckConstraint(
+            "environment in ('sandbox', 'production')",
+            name="provider_products_environment",
+        ),
+        # Un identificador de tienda apunta a UN producto nuestro: con dos, la
+        # misma compra podria mandar a dos cursos y cual gana dependeria del
+        # orden de lectura.
+        UniqueConstraint(
+            "provider", "environment", "external_product_id",
+            name="provider_products_externo_unico",
+        ),
+        # Y al reves: un producto nuestro tiene UN identificador por tienda y
+        # entorno, o la pantalla no sabria cual pedirle a la tienda.
+        UniqueConstraint(
+            "commerce_product_id", "provider", "environment",
+            name="provider_products_producto_unico",
+        ),
+    )
+
+
+class Order(Base):
+    """La INTENCION de comprar. No concede nada.
+
+    Se crea en nuestro servidor ANTES de hablar con la tienda, y es donde se
+    congela el importe: si el precio del curso sube mientras alguien esta
+    pagando, paga lo que se le enseño.
+    """
+
+    __tablename__ = "orders"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True
+    )
+    commerce_product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("commerce_products.id", ondelete="RESTRICT")
+    )
+    #: QUIEN cobra.
+    provider: Mapped[str] = mapped_column(String(32))
+    #: DONDE se compra. No es lo mismo: una compra en Android puede cobrarla
+    #: Google o Stripe segun como este configurado el producto.
+    channel: Mapped[str] = mapped_column(String(16))
+    environment: Mapped[str] = mapped_column(
+        String(16), default="production", server_default="production"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
+    #: Unidad MENOR de la moneda y ENTERO. Nunca coma flotante: en dinero eso
+    #: acaba en descuadres de un centimo que nadie sabe explicar.
+    amount_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(3), server_default="PEN")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    #: Solo lo escribe una confirmacion servidor a servidor. Un «success» del
+    #: cliente no lo toca.
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("channel in ('ios', 'android', 'web')", name="orders_channel"),
+        CheckConstraint(
+            "status in ('pending', 'paid', 'failed', 'cancelled', 'refunded')",
+            name="orders_status",
+        ),
+        CheckConstraint("amount_minor >= 0", name="orders_amount_minor"),
+    )
+
+
+class PaymentTransaction(Base):
+    """El cobro que de verdad ocurrio, tal y como lo nombra la tienda.
+
+    Un reembolso es OTRA fila (`kind='refund'`), no un `update` de la compra:
+    machacar la fila borraria que la compra existio, y hace falta para cuadrar
+    cuentas y para saber por que se revoco un acceso.
+    """
+
+    __tablename__ = "payment_transactions"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    #: Nulo a proposito: una compra recuperada de la tienda puede llegar sin
+    #: orden nuestra. Perder el cobro por no tener a que engancharlo seria peor
+    #: que guardarlo suelto.
+    order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    environment: Mapped[str] = mapped_column(
+        String(16), default="production", server_default="production"
+    )
+    external_transaction_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(
+        String(16), default="purchase", server_default="purchase"
+    )
+    amount_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(3), server_default="PEN")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind in ('purchase', 'refund')", name="payment_transactions_kind"
+        ),
+        CheckConstraint("amount_minor >= 0", name="payment_transactions_amount_minor"),
+        # LA IDEMPOTENCIA DEL DINERO. Aqui y no en un `if` de Python.
+        UniqueConstraint(
+            "provider", "environment", "external_transaction_id",
+            name="payment_transactions_externa_unica",
+        ),
+    )
+
+
+class PaymentEvent(Base):
+    """El aviso recibido, en crudo y antes de interpretarlo.
+
+    Dos razones, las dos aprendidas caras: el UNIQUE hace que reenviar un aviso
+    capturado no vuelva a ejecutar nada (ANTI-REPLAY), y el payload entero es lo
+    unico que permite reconstruir que dijo la tienda cuando algo no cuadra —un
+    resumen nuestro ya es una interpretacion, y la interpretacion es justo lo
+    que se sospecha—.
+    """
+
+    __tablename__ = "payment_events"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String(32))
+    external_event_id: Mapped[str] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(Text)
+    environment: Mapped[str] = mapped_column(
+        String(16), default="production", server_default="production"
+    )
+    payload: Mapped[dict] = mapped_column(_payload, default=dict)
+    #: Nulo = recibido y todavia no aplicado. Con `error` a la vez = se intento
+    #: y fallo. Los dos juntos permiten reprocesar sin adivinar.
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "external_event_id", name="payment_events_externo_unico"
+        ),
+    )
+
+
+class Entitlement(Base):
+    """EL DERECHO. La unica fuente de verdad del acceso.
+
+    Se separa del cobro para que el acceso sobreviva a cambiar de pasarela, y
+    para que un regalo, una beca o una compensacion se puedan conceder sin
+    inventarse un cobro que no existio.
+    """
+
+    __tablename__ = "entitlements"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True
+    )
+    commerce_product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("commerce_products.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active"
+    )
+    source_provider: Mapped[str] = mapped_column(
+        String(32), default="manual", server_default="manual"
+    )
+    transaction_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("payment_transactions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: NULO en compra unica, que es lo unico que hay hoy. La columna existe
+    #: desde el principio porque el dia que haya suscripcion no se puede añadir
+    #: a una tabla con derechos ya concedidos sin decidir que significan los
+    #: antiguos, y esa decision tomada con prisa deja gente fuera.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('active', 'revoked', 'expired')", name="entitlements_status"
+        ),
+        # LA IDEMPOTENCIA DEL ACCESO, y es PARCIAL por una razon concreta: un
+        # derecho ACTIVO solo puede haber uno por persona y producto, pero
+        # revocados puede haber varios —se compro, se reembolso, se volvio a
+        # comprar— y ese historial no se puede perder. Un unique total obligaria
+        # a borrar la fila vieja, es decir, a borrar que aquello paso.
+        Index(
+            "entitlements_activo_unico",
+            "user_id",
+            "commerce_product_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+
+class CourseEnrollment(Base):
+    """La matricula: «este curso esta en mi lista».
+
+    Es una pregunta DISTINTA de la del derecho. Un curso gratuito al que alguien
+    se apunta genera matricula y no genera derecho —no hay nada que comprar—;
+    una compra genera las dos cosas. `source` guarda por que esta ahi, para que
+    el dia que se limpien matriculas no se borre la de quien pago creyendo que
+    era la de quien pulso «apuntarme».
+    """
+
+    __tablename__ = "course_enrollments"
+
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    source: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source in ('free', 'entitlement', 'author', 'admin', 'legacy')",
+            name="course_enrollments_source",
+        ),
+        Index("course_enrollments_curso_idx", "course_id"),
+    )
