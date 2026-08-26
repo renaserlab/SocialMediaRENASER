@@ -23,6 +23,7 @@ import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
+import { alturasDeCamara, ALTO_PISTA, ANILLO } from '@/lib/controlesDeCamara';
 import { haptics } from '@/lib/haptics';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { palette, radius, spacing } from '@/theme/tokens';
@@ -47,11 +48,8 @@ const MANTENER_MS = 350;
  */
 const CAMBIO_DE_MODO_MS = 600;
 
-/** Alto de la linea de pista de abajo. Se usa para apilar los controles. */
-const ALTO_PISTA = 18;
-
-/* --- Medidas del anillo de grabacion --- */
-const ANILLO = 76;
+/* --- Medidas del anillo de grabacion. `ANILLO` vive en `controlesDeCamara`,
+       que es quien apila los controles y quien lo prueba. --- */
 const GROSOR = 4;
 /** El radio se mide al CENTRO del trazo, o el circulo se sale del lienzo. */
 const RADIO = (ANILLO - GROSOR) / 2;
@@ -75,9 +73,7 @@ const RECORRIDO_ZOOM_PX = 220;
  * daba un salto en el momento exacto en que aparecia la imagen.
  */
 export function alturaDelSelector(insetInferior: number): number {
-  return (
-    espacioParaLaBarra(insetInferior) + spacing.sm + ALTO_PISTA + spacing.sm + ANILLO + spacing.sm
-  );
+  return alturasDeCamara(espacioParaLaBarra(insetInferior)).selector;
 }
 
 /**
@@ -147,10 +143,12 @@ export function StoryCaptureScreen({
     corregir numeros sueltos aqui.
   */
   const insets = useSafeAreaInsets();
-  /** De abajo arriba: pista, disparador y selector de modo, sin solaparse. */
-  const altoPista = espacioParaLaBarra(insets.bottom) + spacing.sm;
-  const altoControles = altoPista + ALTO_PISTA + spacing.sm;
-  const altoPie = alturaDelSelector(insets.bottom);
+  /*
+    De abajo arriba: pista, disparador, selector de modo y nivel de zoom, sin
+    solaparse y ninguno por debajo de la barra. El calculo y su prueba estan en
+    `lib/controlesDeCamara`.
+  */
+  const alturas = alturasDeCamara(espacioParaLaBarra(insets.bottom));
 
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -510,7 +508,7 @@ export function StoryCaptureScreen({
       {recording && zoom > 0.01 ? (
         // Por encima del selector de modo: antes compartian los mismos 148 px y
         // el nivel de zoom se pintaba justo sobre las etiquetas.
-        <View style={[styles.zoomPill, { bottom: altoPie + 40 + spacing.sm }]}>
+        <View style={[styles.zoomPill, { bottom: alturas.zoom }]}>
           <Feather name="search" size={13} color={media.text} />
           <Text variant="secondary" weight="700" color={media.text}>
             {(1 + zoom * 4).toFixed(1)}x
@@ -519,13 +517,13 @@ export function StoryCaptureScreen({
       ) : null}
 
       {pie ? (
-        <View style={[styles.pie, { bottom: altoPie }]} pointerEvents="box-none">
+        <View style={[styles.pie, { bottom: alturas.selector }]} pointerEvents="box-none">
           {pie}
         </View>
       ) : null}
 
       {/* Barra inferior: galeria, disparador y girar camara. */}
-      <View style={[styles.bottomBar, { bottom: altoControles }]} pointerEvents="box-none">
+      <View style={[styles.bottomBar, { bottom: alturas.controles }]} pointerEvents="box-none">
         <Pressable
           onPress={onOpenGallery}
           style={styles.thumb}
@@ -647,7 +645,7 @@ export function StoryCaptureScreen({
       <Text
         variant="secondary"
         color={media.textMuted}
-        style={[styles.hint, { bottom: altoPista }]}
+        style={[styles.hint, { bottom: alturas.pista }]}
       >
         Toca para una foto · Mantén para grabar · Desliza para acercar
       </Text>
