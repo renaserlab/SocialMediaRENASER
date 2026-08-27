@@ -134,3 +134,39 @@ test('cada archivo se guarda bajo la carpeta de su dueno', () => {
     'Las rutas de subida deben empezar por el id del usuario.',
   );
 });
+
+// ---------------------------------------------------------------------------
+// 4. Una misma ruta no se firma dos veces a la vez
+// ---------------------------------------------------------------------------
+//
+// Estas dos son ESTRUCTURALES —miran el texto del fichero, como el resto de
+// este archivo— porque `storage.ts` necesita las claves de Supabase para poder
+// importarse siquiera. No prueban el comportamiento; sirven para que quitar la
+// deduplicacion no pase desapercibido.
+
+test('las firmas en vuelo se deduplican por ruta', () => {
+  // Al arrancar hay tres llamadas a la vez con rutas que se solapan (la
+  // instantanea del feed, la primera pagina de red y el feed de video). Sin
+  // esto, las tres firmaban las mismas rutas por separado.
+  //
+  // Y cada firma devuelve una URL DISTINTA, que es lo grave: expo-image y
+  // expo-video cachean POR URL, asi que tres firmas del mismo video son tres
+  // descargas del mismo video (medido en la web desplegada).
+  assert.ok(
+    FUENTE.includes('firmasEnVuelo'),
+    'Sin el mapa de firmas en vuelo, la misma ruta se firma varias veces a la vez.',
+  );
+  assert.ok(
+    /firmasEnVuelo\.has\(/.test(FUENTE),
+    'Hay que CONSULTAR el mapa antes de pedir una firma nueva.',
+  );
+});
+
+test('una firma fallida no deja la ruta bloqueada para siempre', () => {
+  // Si una entrada se quedara marcada como «en vuelo» tras fallar, esa imagen
+  // no se volveria a pedir en toda la sesion.
+  assert.ok(
+    /firmasEnVuelo\.delete\(/.test(FUENTE),
+    'Las firmas en vuelo deben soltarse al terminar, tambien si fallan.',
+  );
+});
