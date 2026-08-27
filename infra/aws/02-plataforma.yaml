@@ -38,7 +38,7 @@ Metadata:
       - Label: {default: Red}
         Parameters: [CidrDeLaVpc, NumeroDeNatGateways, RegistroDeFlujoDeRed]
       - Label: {default: Publicacion y TLS}
-        Parameters: [CertificadoAcmArn, NombreDeDominio, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
+        Parameters: [CertificadoAcmArn, NombreDeDominio, SoloDesdeCloudFront, ListaDePrefijosDeCloudFront, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
       - Label: {default: Aplicacion}
         Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl]
       - Label: {default: Observabilidad y escalado}
@@ -160,6 +160,58 @@ Parameters:
       Solo informativo (aparece en las salidas). El DNS no se gestiona aqui a
       proposito: la zona del dominio suele vivir en otro proveedor y que dos
       sistemas se peleen por un registro DNS es una caida garantizada.
+
+  # MEDIDO CONTRA LA CUENTA EL 27/08/2026, no es una precaucion teorica:
+  #
+  #   curl http://renaser-produccion-alb-151836231.us-east-1.elb.amazonaws.com/api/v1/notifications
+  #   -> HTTP 401
+  #
+  # Ese 401 es la API contestando EN CLARO desde Internet abierto, sin pasar por
+  # CloudFront. El balanceador tenia un unico listener (HTTP:80, forward) porque
+  # `CertificadoAcmArn` esta vacio, de modo que el puerto 80 no redirige: sirve.
+  # Por ahi un `Authorization: Bearer <token de Supabase>` viaja legible, y ese
+  # token ES la sesion: quien lo capture actua como esa persona hasta que caduque.
+  #
+  # Mientras no haya dominio propio no se puede pedir certificado —ACM emite para
+  # un nombre que puedas demostrar que controlas, y el nombre del balanceador es
+  # de Amazon—. Asi que en vez de ponerle cerradura a la puerta, se quita la
+  # puerta: que el balanceador solo acepte a CloudFront, que ya obliga a HTTPS.
+  #
+  # NO sustituye al certificado. El tramo CloudFront -> balanceador sigue sin
+  # cifrar; lo que se cierra es que cualquiera hable con la API en claro. Cuando
+  # haya dominio, `CertificadoAcmArn` sigue siendo el destino.
+  SoloDesdeCloudFront:
+    Type: String
+    Default: 'Si'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      El balanceador solo acepta trafico de CloudFront en vez de estar abierto a
+      0.0.0.0/0. Ponlo en 'No' si algun dia el trafico llega directo al
+      balanceador con dominio propio y certificado, en vez de a traves de
+      CloudFront.
+
+      VUELTA ATRAS: es un parametro, no una edicion de emergencia. Si algo va
+      mal, volver a desplegar con 'No' reabre la entrada.
+
+  # Parametro y no un valor escrito a fuego porque el id CAMBIA segun la region:
+  # dejarlo incrustado es una bomba para el dia que alguien despliegue fuera de
+  # us-east-1 y no entienda por que no entra nadie. Se consulta con:
+  #   aws ec2 describe-managed-prefix-lists --region <region> \
+  #     --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing
+  #
+  # OJO CON LA CUOTA: una lista gestionada NO cuenta como una regla, sino como su
+  # numero maximo de entradas (55 para esta; 46 en uso el 27/08/2026), contra un
+  # limite de 60 reglas por grupo. Por eso al restringir queda UNA sola regla: dos
+  # sumarian 110 y el despliegue fallaria. Tampoco hace falta mas —CloudFront
+  # habla con el origen por el 80 (`OriginProtocolPolicy: http-only`) y no hay
+  # nada escuchando en el 443 mientras no exista certificado.
+  ListaDePrefijosDeCloudFront:
+    Type: String
+    Default: 'pl-3b927c52'
+    Description: >-
+      Lista de prefijos gestionada por AWS con las IPs desde las que CloudFront
+      contacta con los origenes (com.amazonaws.global.cloudfront.origin-facing).
+      Solo se usa cuando SoloDesdeCloudFront vale 'Si'.
 
   ProteccionContraBorrado:
     Type: String
@@ -323,6 +375,7 @@ Mappings:
 Conditions:
 
   EsAltaDisponibilidad: !Equals [!Ref PerfilDeCapacidad, alta-disponibilidad]
+  EsSoloDesdeCloudFront: !Equals [!Ref SoloDesdeCloudFront, 'Si']
   HayCertificado: !Not [!Equals [!Ref CertificadoAcmArn, '']]
   HayDominio: !Not [!Equals [!Ref NombreDeDominio, '']]
   HayFrenteHttps: !Equals [!Ref FrenteHttpsDeEmergencia, 'Si']
@@ -571,8 +624,14 @@ Resources:
   # ===========================================================================
   # GRUPOS DE SEGURIDAD
   # ===========================================================================
-  # Abierto a Internet a proposito: es literalmente el trabajo del balanceador.
-  # Lo que NO esta abierto es la maquina que hay detras.
+  # Quien puede hablar con el balanceador. Lo que NO esta abierto en ningun caso
+  # es la maquina que hay detras (ver `GrupoDeSeguridadDeLasMaquinas`).
+  #
+  # Con `SoloDesdeCloudFront` en 'Si' —lo normal mientras no haya certificado—
+  # queda UNA sola regla, la del puerto 80 desde la lista de CloudFront. No es
+  # un descuido que falte el 443: no hay nada escuchando ahi sin certificado, y
+  # una segunda regla con lista gestionada se saldria de la cuota (ver el
+  # comentario de `ListaDePrefijosDeCloudFront`).
   GrupoDeSeguridadDelBalanceador:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -582,13 +641,23 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: HTTP - solo para redirigir a HTTPS cuando hay certificado
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS - trafico real de la API
+          CidrIp: !If [EsSoloDesdeCloudFront, !Ref 'AWS::NoValue', '0.0.0.0/0']
+          SourcePrefixListId: !If
+            - EsSoloDesdeCloudFront
+            - !Ref ListaDePrefijosDeCloudFront
+            - !Ref 'AWS::NoValue'
+          Description: !If
+            - EsSoloDesdeCloudFront
+            - HTTP - solo desde CloudFront, que es quien obliga a HTTPS
+            - HTTP - solo para redirigir a HTTPS cuando hay certificado
+        - !If
+          - EsSoloDesdeCloudFront
+          - !Ref 'AWS::NoValue'
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+            Description: HTTPS - trafico real de la API
       Tags:
         - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-sg-alb'}
 
