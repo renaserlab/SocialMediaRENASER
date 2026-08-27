@@ -1,4 +1,12 @@
 # Por qué Z va lenta: lo que dicen las mediciones
+>
+> **Seguimiento, 27 de agosto de 2026.** El diagnostico de este documento era
+> correcto, pero la solucion solo habia llegado a la WEB: las builds del movil
+> seguian apuntando a Render (21,5 s medidos con la instancia dormida). Ya
+> apuntan a AWS. Ademas se encontro una causa mayor que ninguna de las tres de
+> aqui —las imagenes se servian a tamano original: 24,7 MB en una pantalla—.
+> Todo medido en [`Z_AUDITORIA_RENDIMIENTO_2026-08.md`](Z_AUDITORIA_RENDIMIENTO_2026-08.md).
+
 
 Medido contra producción el **25 de agosto de 2026**, antes de tocar nada. Este
 documento existe porque el diagnóstico escrito en el documento de correcciones

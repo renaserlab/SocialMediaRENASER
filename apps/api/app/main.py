@@ -29,6 +29,7 @@ from app.modules.payments.router import router as payments_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.recommendations.router import router as recommendations_router
 from app.modules.reviews.router import router as reviews_router
+from app.modules.search.router import router as search_router
 from app.modules.social_graph.router import router as social_graph_router
 from app.modules.stories.router import router as stories_router
 
@@ -112,6 +113,9 @@ def create_app() -> FastAPI:
     # listados responden vacio y las escrituras 503, en vez de reventar.
     app.include_router(reviews_router, prefix=prefix)
     app.include_router(recommendations_router, prefix=prefix)
+    # Busqueda global. Se monta siempre y NO depende del recomendador: comparte
+    # su tabla de temas, no su servicio. Sin la 0040 funciona igual, mas lento.
+    app.include_router(search_router, prefix=prefix)
     # Portal de pagos. Se monta siempre para poder probarlo y documentarlo,
     # pero responde 503 mientras `payments_enabled` este en false.
     app.include_router(payments_router, prefix=prefix)

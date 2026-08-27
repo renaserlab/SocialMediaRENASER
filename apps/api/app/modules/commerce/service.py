@@ -97,6 +97,20 @@ MUESTRA = "muestra"
 SIN_ACCESO = "sin_acceso"
 
 
+# --------------------------------------------------------------------------- #
+# Origenes de un derecho (`entitlements.source_provider`)
+#
+# La columna no tiene CHECK a proposito —«aqui caben origenes que no son
+# pasarelas» (0035)—, asi que anadir uno nuevo NO necesita migracion.
+# --------------------------------------------------------------------------- #
+#: Concedido durante la BETA GRATUITA. No es una pasarela y no lo pretende: no
+#: hubo cobro, asi que el derecho se guarda con `transaction_id` NULO y sin
+#: orden ni transaccion detras. Es lo que permite distinguir para siempre, y con
+#: una sola consulta, lo regalado de lo comprado —«select ... where
+#: source_provider = 'beta_free'»— el dia que haya que cuadrar cuentas.
+BETA_GRATIS = "beta_free"
+
+
 @dataclass(frozen=True)
 class Acceso:
     """Si se puede ver, y POR QUE.
@@ -834,6 +848,7 @@ __all__ = [
     "Acceso",
     "ADMINISTRACION",
     "AUTOR",
+    "BETA_GRATIS",
     "COMPRA_HEREDADA",
     "ENTITLEMENT",
     "GRATUITO",

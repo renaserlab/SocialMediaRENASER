@@ -5,23 +5,37 @@ de 96-161 MB (subidos antes de la compresion en el dispositivo). Este modulo
 genera, DESPUES de responder la peticion de publicar:
 
 - imagenes: una version para el feed (lado mayor 1080 px, WebP) que pesa una
-  fraccion del original;
-- videos: el poster (un fotograma), si el dispositivo no pudo generarlo.
+  fraccion del original, y una miniatura para las cuadriculas;
+- videos: el poster (un fotograma), un MP4 de 720p y, si se pide, HLS.
+
+DE DONDE VIENE CADA COSA. La app movil ya comprime en el telefono antes de
+subir (~2.5 Mbps) y saca el poster alli mismo, asi que sus videos llegan
+listos. Desde la WEB no: la libreria de compresion no existe en navegador
+(`compressionAvailable` es false), y por ahi entraba el original de 100+ MB sin
+poster. Ese era el agujero, y es lo que cubre el procesado de video de aqui.
 
 Principios:
 - El original NUNCA se toca: los derivados viven en rutas nuevas dentro de la
   carpeta del propietario y `storage_path` no cambia. Rollback = borrar la
   referencia.
 - Todo fallo degrada a "se sirve el original", exactamente lo que pasaba antes.
-- La transcodificacion de video NO corre aqui por defecto (0.1 CPU en el plan
-  free de Render la haria eterna): la cubre scripts/procesar_media.py, que se
-  ejecuta donde hay maquina. `VIDEO_TRANSCODE_ENABLED` existe para cuando la
-  infraestructura crezca.
+- Lo que ya llega ligero no se vuelve a codificar (ver `video_bitrate_umbral`):
+  gastar CPU en mejorar un video que ya esta bien es gastarla para nada. La
+  escalera HLS, que cuesta el triple, va ademas acotada a los videos donde la
+  adaptacion llega a notarse (ver `merece_hls`).
 
-El trabajo corre en el mismo proceso (BackgroundTasks de FastAPI). Con el
-volumen actual del proyecto es suficiente y no anade infraestructura; si las
-subidas crecen, el mismo `process_media` puede moverse a una cola sin cambiar
-nada mas.
+EL TRABAJO CORRE EN EL MISMO PROCESO (BackgroundTasks de FastAPI), y por eso
+hay dos frenos que no son opcionales:
+
+1. Un SEMAFORO limita cuantos videos se codifican a la vez
+   (`video_jobs_concurrentes`, 1 por defecto). Sin el, diez subidas
+   simultaneas lanzan diez ffmpeg sobre 2 vCPU y frenan toda la API.
+2. La SESION de base de datos no se mantiene abierta durante la codificacion.
+   Ver `process_media`.
+
+Si las subidas crecen de verdad, el siguiente paso es mover `process_media` a
+una cola en su propia maquina. El codigo ya esta preparado para eso: es una
+funcion que recibe un id y no depende de la peticion.
 """
 
 from __future__ import annotations
@@ -30,6 +44,8 @@ import asyncio
 import io
 import logging
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -72,7 +88,11 @@ MINIATURA_WEBP_QUALITY = 70
 #: generariamos: copiarlo seria pagar almacenamiento por nada.
 MINIATURA_MIN_BYTES = 60 * 1024
 
-_TIMEOUT = httpx.Timeout(60.0)
+#: Espera de las llamadas a Storage. Generosa a proposito: aqui se bajan
+#: originales de 100-160 MB y se suben decenas de segmentos HLS. httpx cuenta
+#: este tiempo entre trozos, no de principio a fin, asi que un archivo grande
+#: pero constante no lo agota; lo que corta es una conexion que se queda muda.
+_TIMEOUT = httpx.Timeout(300.0)
 
 
 def processing_configured() -> bool:
@@ -237,11 +257,48 @@ def _ffprobe() -> str | None:
     return shutil.which("ffprobe")
 
 
+def _nice() -> str | None:
+    return shutil.which("nice")
+
+
+#: Cuanto se rebaja la prioridad de ffmpeg en Linux (0 = normal, 19 = minimo).
+#: 10 lo deja claramente por detras de la API sin llegar al fondo, donde una
+#: maquina ocupada podria dejar la codificacion sin avanzar nunca.
+NICE_FFMPEG = 10
+
+
+def _prioridad_baja(cmd: list[str]) -> tuple[list[str], dict[str, int]]:
+    """ffmpeg cede el procesador a las peticiones de la API.
+
+    QUE MITIGA: la LATENCIA mientras se codifica. El planificador atiende antes
+    a uvicorn que a ffmpeg, asi que una peticion deja de esperar a que termine
+    un fotograma.
+
+    QUE NO MITIGA: los CREDITOS DE CPU. El trabajo es exactamente el mismo, se
+    gastan los mismos ciclos y la t3.small quema los mismos creditos. Contra eso
+    estan el semaforo, `merece_hls` y la alarma de CPUCreditBalance; esto no.
+
+    Portable porque tiene que serlo: en Windows (desarrollo) es una clase de
+    prioridad del proceso y en Linux (produccion) se antepone `nice`. Si `nice`
+    no esta, se lanza normal: quedarse sin la rebaja no puede impedir que un
+    video se procese.
+    """
+    if sys.platform == "win32":
+        marca = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+        return cmd, ({"creationflags": marca} if marca else {})
+    nice = _nice()
+    if nice is None:
+        return cmd, {}
+    return [nice, "-n", str(NICE_FFMPEG), *cmd], {}
+
+
 async def _run(cmd: list[str], timeout: float = 120) -> tuple[int, bytes, bytes]:
+    lanzamiento, extra = _prioridad_baja(cmd)
     proceso = await asyncio.create_subprocess_exec(
-        *cmd,
+        *lanzamiento,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **extra,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proceso.communicate(), timeout)
@@ -282,10 +339,217 @@ async def _probe_video(url: str) -> tuple[int | None, int | None, float | None]:
     return ancho, alto, duracion
 
 
+#: Escalera HLS: (nombre, lado menor en px, bitrate de video en kbps).
+#: La misma que scripts/procesar_media.py, para que un video procesado aqui y
+#: otro procesado alli se vean igual.
+HLS_LADDER = [("360p", 360, 800), ("540p", 540, 1400), ("720p", 720, 2400)]
+
+#: Espera maxima de una codificacion. Un video largo en una t3.small tarda
+#: minutos; media hora es holgado y a la vez impide que un archivo corrupto
+#: deje un ffmpeg colgado para siempre.
+ESPERA_CODIFICACION_S = 1800
+
+#: `veryfast` y no `medium` como en el script offline, a proposito. Con el
+#: bitrate fijado, el preset decide cuanta CPU se gasta para acercarse a el.
+#: `medium` da algo mas de calidad por bit y cuesta varias veces mas CPU, y
+#: aqui la CPU se comparte con las peticiones de la aplicacion. El script,
+#: que corre en una maquina dedicada, si puede permitirse `medium`.
+PRESET_X264 = "veryfast"
+
+#: Un solo video a la vez, por defecto. Se crea perezosamente porque el limite
+#: sale de la configuracion y esta no esta disponible al importar el modulo.
+_semaforo_video: asyncio.Semaphore | None = None
+
+
+def _turno_de_video() -> asyncio.Semaphore:
+    """El freno que impide que N subidas a la vez se coman la maquina."""
+    global _semaforo_video
+    if _semaforo_video is None:
+        limite = max(1, get_settings().video_jobs_concurrentes)
+        _semaforo_video = asyncio.Semaphore(limite)
+    return _semaforo_video
+
+
+def merece_transcodificar(tamano: int | None, duracion: float | None) -> bool:
+    """¿Vale la pena recodificar este video?
+
+    Solo si viene con un bitrate alto. La app movil ya sube a ~2.5 Mbps
+    (`VIDEO_OPCIONES` en mediaCompressor.ts), asi que sus videos NO pasan por
+    aqui: ya estan bien y recodificarlos seria gastar CPU para empeorar la
+    calidad. Lo que si pasa es lo que entra por la web, que llega tal cual sale
+    de la camara (10-12 Mbps medidos en el contenido real).
+
+    SIN MEDIDAS NO SE TOCA. Si falta el tamano o la duracion no se puede
+    calcular el bitrate, y ante la duda es mejor servir el original que quemar
+    CPU en algo que a lo mejor ya estaba bien.
+    """
+    if not tamano or not duracion or duracion <= 0:
+        return False
+    bitrate = tamano * 8 / duracion
+    return bitrate > get_settings().video_bitrate_umbral
+
+
+def merece_hls(duracion: float | None, ancho: int | None, alto: int | None) -> bool:
+    """¿Vale la pena la escalera HLS de este video?
+
+    Mismo espiritu que `merece_transcodificar`, distinto motivo: alli se mide si
+    el archivo viene gordo, aqui si la ADAPTACION va a llegar a notarse. Tres
+    codificaciones cuestan el triple de CPU —y de creditos— que una, asi que
+    solo se pagan donde compensan: video largo y con resolucion para que los
+    peldanos se distingan (`video_hls_duracion_minima_s`,
+    `video_hls_lado_menor_minimo`).
+
+    El BITRATE no entra en la cuenta, y no es un olvido: lo que arregla HLS es
+    una red mala, y eso no depende de lo gordo que venga el original.
+
+    SIN MEDIDAS NO SE TOCA, igual que con el MP4: ante la duda, el original.
+    """
+    ajustes = get_settings()
+    if not duracion or duracion < ajustes.video_hls_duracion_minima_s:
+        return False
+    if not ancho or not alto:
+        return False
+    # El lado MENOR, porque es el que fija `_escala`: un telefono graba en
+    # vertical y mirar el ancho daria por bueno cualquier cosa.
+    return min(ancho, alto) >= ajustes.video_hls_lado_menor_minimo
+
+
+def _escala(lado_menor: int) -> str:
+    """El lado MENOR al objetivo y el otro en proporcion (siempre par).
+
+    Sirve igual para apaisado (1920x1080 -> x720) que para vertical
+    (1080x1920 -> 720x), que es como graba un telefono.
+    """
+    return f"scale=w='if(gte(iw,ih),-2,{lado_menor})':h='if(gte(iw,ih),{lado_menor},-2)'"
+
+
+async def _descargar_a_disco(client: httpx.AsyncClient, url: str, destino: Path) -> None:
+    """Baja el original a disco por trozos.
+
+    Por trozos y no a memoria porque un original de camara son 100-160 MB y la
+    maquina tiene 2 GiB compartidos con la aplicacion: cargarlo entero en RAM
+    para transcodificarlo es la clase de cosa que funciona en pruebas y mata el
+    proceso el dia que coinciden dos.
+    """
+    async with client.stream("GET", url) as respuesta:
+        respuesta.raise_for_status()
+        with destino.open("wb") as salida:
+            async for trozo in respuesta.aiter_bytes(1024 * 1024):
+                salida.write(trozo)
+
+
+async def _extraer_poster(ffmpeg: str, entrada: str, destino: Path) -> bool:
+    codigo, _, stderr = await _run(
+        [
+            ffmpeg,
+            "-v", "error",
+            "-ss", "0.1",
+            "-i", entrada,
+            "-frames:v", "1",
+            "-vf", f"scale='min({FEED_MAX_SIDE},iw)':-2",
+            "-q:v", "3",
+            str(destino),
+        ]
+    )
+    if codigo != 0 or not destino.exists():
+        logger.warning("No se pudo extraer el poster: %s", stderr[-300:])
+        return False
+    return True
+
+
+async def _transcodificar_mp4(ffmpeg: str, origen: Path, destino: Path) -> bool:
+    codigo, _, stderr = await _run(
+        [
+            ffmpeg, "-v", "error", "-y", "-i", str(origen),
+            "-vf", _escala(720),
+            "-c:v", "libx264", "-preset", PRESET_X264, "-profile:v", "main",
+            "-b:v", "2400k", "-maxrate", "2600k", "-bufsize", "4800k",
+            "-c:a", "aac", "-b:a", "128k",
+            # El indice al principio: el reproductor arranca sin ir a buscarlo
+            # al final del archivo.
+            "-movflags", "+faststart",
+            str(destino),
+        ],
+        timeout=ESPERA_CODIFICACION_S,
+    )
+    if codigo != 0 or not destino.exists():
+        logger.warning("La transcodificacion a MP4 fallo: %s", stderr[-300:])
+        return False
+    return True
+
+
+async def _generar_hls(
+    ffmpeg: str, origen: Path, carpeta: Path, ancho: int | None, alto: int | None
+) -> bool:
+    """Escalera HLS en disposicion PLANA: master.m3u8, 360p.m3u8, 360p_000.ts...
+
+    Plana a proposito: el endpoint que sirve las playlists firma
+    `<stream_path>/<archivo>`, y con subcarpetas habria que reescribir rutas
+    ademas de firmar.
+    """
+    carpeta.mkdir(parents=True, exist_ok=True)
+    variantes: list[tuple[str, int, str]] = []
+    for nombre, lado, kbps in HLS_LADDER:
+        playlist = carpeta / f"{nombre}.m3u8"
+        codigo, _, stderr = await _run(
+            [
+                ffmpeg, "-v", "error", "-y", "-i", str(origen),
+                "-vf", _escala(lado),
+                "-c:v", "libx264", "-preset", PRESET_X264, "-profile:v", "main",
+                "-b:v", f"{kbps}k", "-maxrate", f"{int(kbps * 1.1)}k",
+                "-bufsize", f"{kbps * 2}k",
+                "-c:a", "aac", "-b:a", "96k",
+                # Un keyframe cada 2 s para poder cortar segmentos exactos.
+                "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
+                "-hls_time", "4", "-hls_playlist_type", "vod",
+                "-hls_segment_filename", str(carpeta / f"{nombre}_%03d.ts"),
+                str(playlist),
+            ],
+            timeout=ESPERA_CODIFICACION_S,
+        )
+        if codigo != 0 or not playlist.exists():
+            logger.warning("HLS %s fallo: %s", nombre, stderr[-300:])
+            return False
+        if ancho and alto:
+            if ancho >= alto:
+                res = f"{round(ancho * lado / alto / 2) * 2}x{lado}"
+            else:
+                res = f"{lado}x{round(alto * lado / ancho / 2) * 2}"
+        else:
+            res = ""
+        variantes.append((nombre, kbps, res))
+
+    lineas = ["#EXTM3U", "#EXT-X-VERSION:3"]
+    for nombre, kbps, res in variantes:
+        atributos = f"BANDWIDTH={(kbps + 96) * 1000}"
+        if res:
+            atributos += f",RESOLUTION={res}"
+        lineas.append(f"#EXT-X-STREAM-INF:{atributos}")
+        lineas.append(f"{nombre}.m3u8")
+    (carpeta / "master.m3u8").write_text("\n".join(lineas) + "\n", encoding="ascii")
+    return True
+
+
+def _tipo_hls(nombre: str) -> str:
+    if nombre.endswith(".m3u8"):
+        return "application/vnd.apple.mpegurl"
+    return "video/mp2t"
+
+
 async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
-    """Poster y medidas. La transcodificacion NO corre aqui (ver cabecera)."""
+    """Poster, MP4 de 720p y —si se pide— HLS.
+
+    QUE CAMBIO Y POR QUE. Antes esto solo sacaba el poster, y ni eso cuando
+    faltaba ffmpeg en la imagen (que era siempre). El resultado: un video
+    subido DESDE LA WEB se quedaba a tamano original y sin poster, porque la
+    libreria que comprime en el telefono no existe en navegador.
+
+    El trabajo caro va detras de un semaforo y con UNA sola descarga del
+    original para las tres cosas.
+    """
     ffmpeg = _ffmpeg()
-    url = await _signed_url(client, media.storage_path)
+    ajustes = get_settings()
+    url = await _signed_url(client, media.storage_path, expires=ESPERA_CODIFICACION_S + 600)
 
     if media.width is None or media.duration_s is None:
         ancho, alto, duracion = await _probe_video(url)
@@ -293,46 +557,122 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
         media.height = media.height or alto
         media.duration_s = media.duration_s or duracion
 
-    if media.poster_path or not ffmpeg:
+    if not ffmpeg:
         return
 
-    # Un solo fotograma: con faststart el indice esta al principio y ffmpeg
-    # descarga unos cientos de KB por rangos, no el archivo entero.
-    with tempfile.TemporaryDirectory() as tmp:
-        destino = Path(tmp) / "poster.jpg"
-        codigo, _, stderr = await _run(
-            [
-                ffmpeg,
-                "-v", "error",
-                "-ss", "0.1",
-                "-i", url,
-                "-frames:v", "1",
-                "-vf", f"scale='min({FEED_MAX_SIDE},iw)':-2",
-                "-q:v", "3",
-                str(destino),
-            ]
-        )
-        if codigo != 0 or not destino.exists():
-            logger.warning("No se pudo extraer poster de %s: %s", media.id, stderr[-300:])
-            return
-        owner = media.storage_path.split("/", 1)[0]
-        poster_path = f"{owner}/derived/{media.id}/poster.jpg"
-        await _upload(client, poster_path, destino.read_bytes(), "image/jpeg")
-        media.poster_path = poster_path
-        logger.info("Poster generado para el video %s", media.id)
+    quiere_mp4 = (
+        ajustes.video_transcode_enabled
+        and not media.feed_path
+        and merece_transcodificar(media.bytes, media.duration_s)
+    )
+    quiere_hls = (
+        ajustes.video_hls_enabled
+        and not media.stream_path
+        and merece_hls(media.duration_s, media.width, media.height)
+    )
+    falta_poster = not media.poster_path
+
+    if not falta_poster and not quiere_mp4 and not quiere_hls:
+        return
+
+    owner = media.storage_path.split("/", 1)[0]
+
+    # CAMINO BARATO: solo falta el poster. Se saca leyendo por rangos unos
+    # cientos de KB, sin bajar el archivo entero y sin ocupar el semaforo.
+    if not quiere_mp4 and not quiere_hls:
+        with tempfile.TemporaryDirectory() as tmp:
+            destino = Path(tmp) / "poster.jpg"
+            if not await _extraer_poster(ffmpeg, url, destino):
+                return
+            poster_path = f"{owner}/derived/{media.id}/poster.jpg"
+            await _upload(client, poster_path, destino.read_bytes(), "image/jpeg")
+            media.poster_path = poster_path
+            logger.info("Poster generado para el video %s", media.id)
+        return
+
+    # CAMINO CARO: hace falta el archivo entero. De uno en uno.
+    async with _turno_de_video():
+        with tempfile.TemporaryDirectory() as tmp:
+            carpeta = Path(tmp)
+            local = carpeta / "original"
+            await _descargar_a_disco(client, url, local)
+
+            if falta_poster:
+                destino = carpeta / "poster.jpg"
+                if await _extraer_poster(ffmpeg, str(local), destino):
+                    poster_path = f"{owner}/derived/{media.id}/poster.jpg"
+                    await _upload(client, poster_path, destino.read_bytes(), "image/jpeg")
+                    media.poster_path = poster_path
+
+            if quiere_mp4:
+                destino = carpeta / "feed.mp4"
+                if await _transcodificar_mp4(ffmpeg, local, destino):
+                    # Solo se adopta si de verdad ahorra: un derivado igual o
+                    # mayor que el original no compensa la copia.
+                    if destino.stat().st_size < local.stat().st_size * 0.9:
+                        feed_path = f"{owner}/derived/{media.id}/feed.mp4"
+                        await _upload(
+                            client, feed_path, destino.read_bytes(), "video/mp4"
+                        )
+                        media.feed_path = feed_path
+                        logger.info(
+                            "Video %s: original %.1f MB -> feed %.1f MB",
+                            media.id,
+                            local.stat().st_size / 1048576,
+                            destino.stat().st_size / 1048576,
+                        )
+
+            if quiere_hls:
+                hls = carpeta / "hls"
+                if await _generar_hls(ffmpeg, local, hls, media.width, media.height):
+                    stream_path = f"{owner}/derived/{media.id}/hls"
+                    for archivo in sorted(hls.iterdir()):
+                        await _upload(
+                            client,
+                            f"{stream_path}/{archivo.name}",
+                            archivo.read_bytes(),
+                            _tipo_hls(archivo.name),
+                        )
+                    media.stream_path = stream_path
+                    logger.info("HLS generado para el video %s", media.id)
 
 
 # --------------------------------------------------------------------------- #
 # Entrada
 # --------------------------------------------------------------------------- #
+#: Lo unico que este modulo puede escribir. Se listan para poder guardarlas
+#: campo a campo en vez de volcar el objeto entero: la fila puede haber
+#: cambiado mientras se codificaba, y machacarla seria perder ese cambio.
+CAMPOS_DERIVADOS = (
+    "width",
+    "height",
+    "duration_s",
+    "bytes",
+    "poster_path",
+    "feed_path",
+    "stream_path",
+)
+
+
 async def process_media(media_id: str) -> None:
     """Procesa UN medio recien subido. Pensado para BackgroundTasks.
 
-    Sesion propia: la de la peticion ya se cerro cuando esto corre. Cualquier
-    fallo marca `failed` y deja el original sirviendose como siempre.
+    LA SESION NO SE QUEDA ABIERTA MIENTRAS SE TRABAJA, y eso es lo importante
+    aqui. Antes se abria una sesion, se hacia todo dentro y se cerraba al
+    final. Con una imagen daba igual —son milisegundos—, pero transcodificar un
+    video son MINUTOS, y durante todo ese rato la sesion mantiene su conexion
+    ocupada. El pool son 5 conexiones mas 5 de reserva: dos o tres videos a la
+    vez y la aplicacion entera se queda sin conexiones esperando a ffmpeg.
+
+    Asi que son tres tramos: una sesion CORTA para leer y marcar «en curso»,
+    el trabajo pesado SIN sesion, y otra sesion CORTA para guardar.
+
+    Cualquier fallo marca `failed` y deja el original sirviendose como siempre.
     """
     if not processing_configured():
         return
+
+    # 1. Leer y marcar. Sesion corta.
     async with SessionLocal() as db:
         media = (
             await db.scalars(select(PostMedia).where(PostMedia.id == media_id))
@@ -341,14 +681,34 @@ async def process_media(media_id: str) -> None:
             return
         media.processing_status = "processing"
         await db.commit()
-        try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                if media.media_type == "image":
-                    await _process_image(client, media)
-                else:
-                    await _process_video(client, media)
-            media.processing_status = "ready"
-        except Exception:  # noqa: BLE001 — el post ya existe; esto es mejora, no requisito
-            logger.exception("Fallo procesando el medio %s", media_id)
-            media.processing_status = "failed"
+        # Se desliga de la sesion para poder seguir usandolo como un objeto
+        # normal —los helpers escriben en sus atributos— sin que quede nada
+        # atado a una conexion que va a cerrarse.
+        db.expunge(media)
+
+    # 2. El trabajo. Aqui no hay ninguna conexion a la base retenida.
+    estado = "ready"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            if media.media_type == "image":
+                await _process_image(client, media)
+            else:
+                await _process_video(client, media)
+    except Exception:  # noqa: BLE001 — el post ya existe; esto es mejora, no requisito
+        logger.exception("Fallo procesando el medio %s", media_id)
+        estado = "failed"
+
+    # 3. Guardar lo que se haya conseguido. Sesion corta.
+    #
+    # Se guarda AUNQUE el estado sea `failed`: si se generaron el poster y el
+    # MP4 y solo fallo el HLS, tirar los dos primeros seria absurdo.
+    async with SessionLocal() as db:
+        fila = await db.get(PostMedia, media_id)
+        if fila is None:
+            return
+        for campo in CAMPOS_DERIVADOS:
+            valor = getattr(media, campo, None)
+            if valor is not None:
+                setattr(fila, campo, valor)
+        fila.processing_status = estado
         await db.commit()

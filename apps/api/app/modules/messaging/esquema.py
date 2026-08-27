@@ -1,4 +1,4 @@
-"""Si la migracion 0033 esta aplicada en ESTA base.
+"""Que migraciones de mensajeria estan aplicadas en ESTA base (0033 y 0039).
 
 POR QUE EXISTE, y es la misma leccion cara que cuenta
 `app/modules/recommendations/esquema.py`.
@@ -33,9 +33,12 @@ detecta por excepcion: en PostgreSQL una sentencia fallida deja la transaccion
 inservible, asi que descubrirlo «probando» obligaria a recuperarse de un error
 en mitad de una operacion buena.
 
-CUANDO SE BORRA ESTE FICHERO. Cuando la 0033 lleve aplicada el tiempo suficiente
-en todos los entornos. Entonces esto es peso muerto y quitarlo es una linea por
-sitio.
+QUE PASA HOY, SIN LA 0039: abrir un chat directo funciona igual, pero la
+unicidad de la pareja no esta garantizada por la base. Ver `hay_pares_directos`.
+
+CUANDO SE BORRA ESTE FICHERO. Cuando la 0033 y la 0039 lleven aplicadas el
+tiempo suficiente en todos los entornos. Entonces esto es peso muerto y quitarlo
+es una linea por sitio.
 """
 
 from __future__ import annotations
@@ -64,6 +67,29 @@ async def hay_adjuntos_de_chat(db: AsyncSession) -> bool:
                 "llevar texto y el boton de adjuntar responde 503."
             )
     return _cache["message_attachments"]
+
+
+async def hay_pares_directos(db: AsyncSession) -> bool:
+    """Si existe `direct_conversation_pairs` (migracion 0039).
+
+    Es la tabla cuya clave primaria impide que dos peticiones simultaneas creen
+    dos conversaciones directas para la MISMA pareja. Mientras la 0039 espere
+    aprobacion, crear un chat funciona igual que hoy y la unica proteccion
+    contra el doble toque sigue siendo la del cliente: no se degrada nada, pero
+    la garantia de verdad —la que no depende de que nadie se equivoque— llega
+    con la migracion.
+    """
+    if "direct_conversation_pairs" not in _cache:
+        conexion = await db.connection()
+        _cache["direct_conversation_pairs"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("direct_conversation_pairs")
+        )
+        if not _cache["direct_conversation_pairs"]:
+            logger.warning(
+                "La migracion 0039 no esta aplicada: abrir un chat directo dos "
+                "veces a la vez todavia puede crear dos conversaciones."
+            )
+    return _cache["direct_conversation_pairs"]
 
 
 def olvidar() -> None:

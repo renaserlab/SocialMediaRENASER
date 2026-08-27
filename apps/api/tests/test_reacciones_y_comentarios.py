@@ -90,10 +90,14 @@ async def entorno():
 def avisos(monkeypatch):
     """Retiene los avisos en vez de mandarlos, para poder mirarlos por dentro.
 
-    Se parchea `send_push` en el modulo del router y no en el suyo propio
-    porque el router lo importo por nombre (`from ... import send_push`): a
+    Se parchea `encolar_push` en el modulo del router y no en el suyo propio
+    porque el router lo importo por nombre (`from ... import encolar_push`): a
     partir de ese momento su copia es la que se llama, y cambiar el original no
     tendria efecto.
+
+    `encolar_push` es SINCRONA —solo programa la tarea— porque el envio ya no
+    ocurre dentro de la peticion: esperaba a `exp.host` con la conexion a la
+    base ocupada. Aqui se retiene lo que se habria programado.
 
     Lo que se vigila con esto NO es que salga el push, sino DE DONDE sale el
     nombre. Es el unico dato del aviso que no venia en la peticion y hay que ir
@@ -103,10 +107,10 @@ def avisos(monkeypatch):
     """
     capturados: list[dict] = []
 
-    async def _retener(db, **kwargs):
+    def _retener(background, **kwargs):
         capturados.append(kwargs)
 
-    monkeypatch.setattr(content_router, "send_push", _retener)
+    monkeypatch.setattr(content_router, "encolar_push", _retener)
     return capturados
 
 
@@ -191,7 +195,7 @@ async def test_el_aviso_del_me_gusta_lleva_el_nombre_del_perfil(entorno, avisos)
 
     assert len(avisos) == 1, avisos
     assert avisos[0]["notification_type"] == "like"
-    assert avisos[0]["user_id"] == BRUNO
+    assert avisos[0]["user_ids"] == [BRUNO]
     assert avisos[0]["actor_name"] == "Ana"
 
 
@@ -205,7 +209,7 @@ async def test_el_aviso_del_comentario_lleva_el_nombre_del_perfil(entorno, aviso
 
     assert len(avisos) == 1, avisos
     assert avisos[0]["notification_type"] == "comment"
-    assert avisos[0]["user_id"] == BRUNO
+    assert avisos[0]["user_ids"] == [BRUNO]
     assert avisos[0]["actor_name"] == "Ana"
 
 

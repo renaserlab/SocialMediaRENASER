@@ -49,6 +49,23 @@ export type CourseDetail = {
   lessons: LessonSummary[];
 };
 
+/**
+ * El acceso gratuito de la BETA para un curso concreto, segun el SERVIDOR.
+ *
+ * El interruptor vive en el backend (`BETA_FREE_ACCESS_ENABLED`) y no aqui: asi
+ * apagarlo hace desaparecer el boton sin publicar una version nueva de la
+ * aplicacion, y ninguna pantalla puede conceder por su cuenta lo que el
+ * servidor ya no concede.
+ */
+export type AccesoDeBeta = {
+  /** Si el modo esta encendido en el servidor. */
+  enabled: boolean;
+  /** Si a ESTE curso se le puede pedir ahora mismo. */
+  available: boolean;
+  /** Si ya se tiene acceso, por la beta o por lo que sea. */
+  hasAccess: boolean;
+};
+
 /** Lo que devuelve guardar progreso. */
 export type ProgresoGuardado = {
   lessonId: string;
@@ -319,6 +336,33 @@ export const LearningRepository = {
 
   async enroll(courseId: string): Promise<void> {
     await apiRequest(`${API_V1}/learning/courses/${courseId}/enroll`, {
+      method: 'POST',
+    });
+  },
+
+  /** Si este curso se puede pedir gratis durante la Beta. Lo decide el servidor. */
+  async betaAccess(courseId: string): Promise<AccesoDeBeta> {
+    const dto = await apiRequest<{
+      enabled?: boolean;
+      available?: boolean;
+      has_access?: boolean;
+    }>(`${API_V1}/learning/courses/${courseId}/beta-access`);
+    return {
+      enabled: dto.enabled ?? false,
+      available: dto.available ?? false,
+      hasAccess: dto.has_access ?? false,
+    };
+  },
+
+  /**
+   * Pide el acceso gratuito de la Beta. NO ES UNA COMPRA: no hay cobro, no hay
+   * transaccion y el precio del curso no cambia.
+   *
+   * Repetirlo no concede dos veces: el servidor lo asegura con un indice unico,
+   * asi que reintentar cuando se cae la red es seguro.
+   */
+  async grantBetaAccess(courseId: string): Promise<void> {
+    await apiRequest(`${API_V1}/learning/courses/${courseId}/beta-access`, {
       method: 'POST',
     });
   },

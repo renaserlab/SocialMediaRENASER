@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.config import get_settings
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.catalog import cursos_v2
 from app.modules.catalog.models import Course
@@ -367,6 +368,114 @@ async def enroll_course(
         )
         await db.commit()
     return {"enrolled": True}
+
+
+# --------------------------------------------------------------------------- #
+# La Beta gratuita
+#
+# QUE ES. Mientras `BETA_FREE_ACCESS_ENABLED` este encendido, un curso de pago
+# se puede conceder GRATIS a quien lo pide. Es una decision de negocio para la
+# fase de pruebas: no hay pasarela lista y no va a haber cobros.
+#
+# QUE NO ES, Y ES LO QUE MAS IMPORTA. No es una compra ni finge serlo. NO se
+# crea orden, NO se crea `payment_transaction`, NO se marca nada como 'paid', NO
+# se inventa ningun evento de tienda y NO se toca `price_minor`: el curso sigue
+# costando lo que cuesta y se seguira cobrando cuando la beta acabe. Un cobro
+# falso de importe cero es una mentira contable que sobrevive a la beta y que
+# alguien acaba desenredando con dinero real de por medio.
+#
+# POR QUE UN `entitlement` Y NO UNA VIA NUEVA. Porque la via ya existe y es la
+# CUARTA de las cinco: `entitlements` es la fuente de verdad del acceso desde la
+# 0035/0036, la mira `has_course_access()` en la base de datos —o sea, la que
+# protege los ARCHIVOS— y la 0035 la dejo abierta a proposito para «un regalo,
+# una beca o una compensacion... sin inventarse un cobro que no existio».
+# Inventar una sexta via obligaria a ensenarsela tambien a la RLS y a mantener
+# dos verdades sobre lo mismo, que es justo el fallo que corrigio la 0016.
+#
+# COMO SE DISTINGUE DE UNA COMPRA, PARA SIEMPRE. Por `source_provider`, que
+# vale `'beta_free'` (`comercio_service.BETA_GRATIS`) y nunca el nombre de una
+# pasarela, y por `transaction_id` NULO, porque no hubo cobro que apuntar.
+#
+# APAGAR EL INTERRUPTOR NO REVOCA NADA. Solo cierra la puerta: deja de
+# concederse. Los derechos ya dados siguen 'active' y `has_course_access()` no
+# pregunta de donde vienen. Un rollback que le quite el curso a gente real no es
+# un rollback.
+# --------------------------------------------------------------------------- #
+@router.get("/courses/{course_id}/beta-access")
+async def beta_access_state(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    """Si a este curso se le puede pedir el acceso gratuito de la Beta.
+
+    Existe para que la pantalla no tenga que adivinarlo ni repetir la regla: el
+    interruptor vive en el servidor, asi que apagarlo tiene que hacer
+    desaparecer el boton sin publicar una version nueva de la aplicacion.
+    """
+    course = await _curso_visible(db, course_id, current_user.id)
+    encendida = get_settings().beta_free_access_enabled
+    tiene_acceso = await _tiene_acceso(db, current_user.id, course)
+    return {
+        "enabled": encendida,
+        # Un curso gratuito ya entra por la primera via: no hay nada que
+        # conceder. Y a quien ya tiene acceso no se le vuelve a ofrecer.
+        "available": encendida and course.price_minor > 0 and not tiene_acceso,
+        "has_access": tiene_acceso,
+    }
+
+
+@router.post("/courses/{course_id}/beta-access")
+async def grant_beta_access(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    """Concede el acceso gratuito de la Beta. NO ES UNA COMPRA.
+
+    IDEMPOTENTE, Y LO GARANTIZA LA BASE. `conceder_entitlement` inserta con `on
+    conflict do nothing` contra el indice unico parcial
+    `entitlements_activo_unico`: repetir la operacion —o pulsar dos veces, o dos
+    telefonos a la vez— deja UN derecho, no dos. No hay ningun `if ya existe`
+    aqui, porque dos peticiones simultaneas lo pasarian las dos.
+
+    El acceso queda en el SERVIDOR, asi que la misma cuenta lo tiene desde
+    cualquier dispositivo sin restaurar nada.
+    """
+    course = await _curso_visible(db, course_id, current_user.id)
+
+    if not get_settings().beta_free_access_enabled:
+        raise ForbiddenError(
+            "El acceso gratuito de la Beta no está disponible.",
+            code="beta_free_access_disabled",
+        )
+
+    # Un curso gratuito no necesita derecho —entra por la primera via— y ya
+    # tiene su propio camino en `/enroll`. Concederlo tambien aqui serian dos
+    # formas de apuntarse a lo mismo, y dos formas acaban diciendo cosas
+    # distintas.
+    if course.price_minor <= 0:
+        raise ValidationAppError(
+            "Este curso ya es gratuito: no necesita el acceso de la Beta.",
+            code="course_is_free",
+        )
+
+    producto = await comercio_service.asegurar_producto_de_curso(
+        db, course_id=course.id
+    )
+    _, es_nuevo = await comercio_service.conceder_entitlement(
+        db,
+        user_id=current_user.id,
+        commerce_product_id=producto.id,
+        source_provider=comercio_service.BETA_GRATIS,
+        # NULO porque no hubo cobro. No es un descuido: es el dato.
+        transaction_id=None,
+        # Crea o asegura tambien la matricula, para que el curso salga en la
+        # biblioteca. Es idempotente por su clave primaria.
+        matricular_tambien=True,
+    )
+    await db.commit()
+    return {"granted": True, "already_granted": not es_nuevo}
 
 
 @router.get("/me/courses", response_model=list[MyCourseRead])

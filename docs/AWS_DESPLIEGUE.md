@@ -3,10 +3,22 @@
 Rama `Edson`, agosto de 2026. Plantillas en `infra/aws/`, workflow en
 `.github/workflows/desplegar-aws.yml`.
 
-> **Estado: nada desplegado.** En AWS no se ha creado ni un solo recurso. Este
-> documento y las plantillas están listos para que una persona ejecute el
-> despliegue cuando lo autorice. Todo lo que hay aquí se ha validado en local
-> con `cfn-lint` y `actionlint`, sin credenciales de AWS.
+> **Estado: DESPLEGADO** (comprobado el 27 de agosto de 2026). La pila esta
+> viva en `us-east-1` y sirve a la web publicada. La entrada real es la
+> distribucion de CloudFront `https://d33u17ka1rcaax.cloudfront.net`
+> (`/health` responde en 0,29-0,66 s medidos).
+>
+> Buena parte de lo que sigue se escribio ANTES de desplegar y describe cosas
+> que ya ocurrieron o que se hicieron de otra forma —en particular, el paso de
+> dominio propio + certificado de ACM se salto, y por eso existe CloudFront—.
+> Leerlo como historia de la decision, no como estado actual. Lo medido esta en
+> [`Z_AUDITORIA_RENDIMIENTO_2026-08.md`](Z_AUDITORIA_RENDIMIENTO_2026-08.md).
+>
+> **AVISO antes de cambiar de perfil de capacidad:** el fichero de parametros
+> tiene que llevar `FrenteHttpsDeEmergencia=Si`. Sin esa clave, CloudFormation
+> aplica el valor por defecto ('No') y BORRA la distribucion de CloudFront, que
+> es la unica entrada HTTPS y cuyo dominio va dentro de la web y de las builds
+> del movil. Una distribucion nueva nace con otro dominio.
 
 ---
 

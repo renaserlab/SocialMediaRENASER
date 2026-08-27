@@ -46,8 +46,9 @@ const GROUPS: Group[] = [
       { label: 'Comentarios', href: '/comments/1' },
       { label: 'Círculo', href: '/circle/1' },
       { label: 'En vivo', href: '/live/1' },
-      { label: 'Short', href: '/short/1' },
-      { label: 'Audio', href: '/audio/1' },
+      // `/audio/private` y no un id cualquiera: esa pantalla no lee el id,
+      // siempre abre el audio privado vigente. Con "1" parecia otra cosa.
+      { label: 'Audio', href: '/audio/private' },
     ],
   },
   {

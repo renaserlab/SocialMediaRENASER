@@ -253,25 +253,65 @@ async def test_marcar_leido_pone_los_no_leidos_a_cero(entorno):
 
 @pytest.mark.asyncio
 async def test_una_conversacion_sin_mensajes_no_desaparece_ni_inventa_un_ultimo(entorno):
-    """Una conversacion recien creada es el caso NORMAL, no un caso de borde.
+    """Una conversacion sin mensajes es el caso NORMAL, no un caso de borde.
 
     Con la funcion de ventana es facil escribir un JOIN que se coma las filas
-    sin mensajes; entonces abrir un chat nuevo lo haria desaparecer de la lista.
+    sin mensajes; entonces una conversacion recien creada desapareceria de la
+    lista, y ademas por el motivo equivocado.
+
+    SE PRUEBA CON UN GRUPO, y antes se probaba con un chat directo. El cambio no
+    es cosmetico: los chats directos SIN MENSAJES ya no salen en la bandeja a
+    proposito (ver `_TIENE_ALGUN_MENSAJE` en `messaging/router.py`), porque
+    pulsar «Mensaje» en un perfil creaba la conversacion aunque luego no se
+    escribiera y eso llenaba Mensajes de filas «Sin mensajes aun». Un grupo si
+    sale vacio —se crea a proposito y con titulo— asi que sigue habiendo un
+    camino por el que una fila SIN MENSAJES llega hasta `leer_conversaciones`,
+    que es lo que este fichero tiene que vigilar. Que el filtro esconda los
+    directos vacios lo prueba `test_chat_directo_unico.py`; lo que se comprueba
+    aqui es que quien SI tiene que salir, sale, y sin inventarse un ultimo
+    mensaje.
     """
     http, sesiones, _ = entorno
     async with sesiones() as db:
         conv_id = "cccccccc-1111-0000-0000-000000000000"
-        db.add(Conversation(id=conv_id, kind="direct", created_by=ANA))
+        db.add(
+            Conversation(id=conv_id, kind="group", title="Equipo", created_by=ANA)
+        )
         db.add(ConversationMember(conversation_id=conv_id, user_id=ANA))
         db.add(ConversationMember(conversation_id=conv_id, user_id=CARLA))
         await db.commit()
 
     filas = (await http.get(API)).json()
     assert len(filas) == 1
+    assert filas[0]["id"] == conv_id
     assert filas[0]["last_message"] is None
     assert filas[0]["last_message_at"] is None
     assert filas[0]["unread_count"] == 0
-    assert filas[0]["other"]["id"] == CARLA
+
+
+@pytest.mark.asyncio
+async def test_abrir_un_chat_directo_vacio_lo_devuelve_aunque_no_salga_en_la_lista(
+    entorno,
+):
+    """Esconder una fila de la bandeja no es borrarla.
+
+    `POST /conversations/direct` responde con la conversacion recien creada
+    —vacia— porque la pantalla de chat necesita ese id para abrirse. El filtro
+    de vacios vive SOLO en la consulta del listado; si se colara en el lector
+    comun (`leer_conversaciones`), pulsar «Mensaje» devolveria un 404 y el boton
+    dejaria de funcionar.
+    """
+    http, _, _ = entorno
+
+    respuesta = await http.post(f"{API}/direct", json={"user_id": CARLA})
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["other"]["id"] == CARLA
+    assert cuerpo["last_message"] is None
+    assert cuerpo["unread_count"] == 0
+    # Y sin embargo no ensucia la bandeja.
+    assert cuerpo["id"] not in [f["id"] for f in (await http.get(API)).json()]
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-import { profileImageUrl } from '@/services/storage';
+import { coverImageUrl, profileImageUrl } from '@/services/storage';
 import type { UserProfile } from '@/types';
 
 /** Forma en que el backend (FastAPI /profiles) devuelve un perfil. */
@@ -82,7 +82,7 @@ export function toUserProfile(dto: ProfileDto): UserProfile {
     isBlocked: dto.is_blocked ?? false,
     // El backend guarda la ruta dentro del bucket; la vista necesita una URL.
     avatarUrl: profileImageUrl(dto.avatar_path),
-    coverUrl: profileImageUrl(dto.cover_path),
+    coverUrl: coverImageUrl(dto.cover_path),
     isAdmin: dto.role === 'admin',
     podcastStartedAt: dto.podcast_started_at ?? null,
   };

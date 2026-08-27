@@ -1,4 +1,9 @@
 # Rendimiento de carga — diagnóstico, arquitectura y operación
+>
+> **Actualizado el 27 de agosto de 2026.** Varias afirmaciones de este
+> documento dejaron de ser ciertas al migrar el backend a AWS. Lo medido y
+> corregido está en [`Z_AUDITORIA_RENDIMIENTO_2026-08.md`](Z_AUDITORIA_RENDIMIENTO_2026-08.md).
+
 
 Trabajo realizado en la rama `Edson` (agosto 2026). Objetivo: que abrir la
 aplicación y recorrer muro, imágenes, videos y shorts se sienta inmediato,
@@ -29,11 +34,11 @@ volumen actual.
 
 ```text
 ABRIR LA APP
-  ├─ warmUpApi(): GET /health despierta Render EN PARALELO (fire-and-forget)
+  │  (ya NO hay warmUpApi: existia para despertar Render, y AWS no duerme)
   ├─ instantánea local del feed (AsyncStorage) → se pinta YA         [L2]
   ├─ firmas persistidas del arranque anterior → URLs idénticas       [L2]
   │    └─ expo-image cacheKey = ruta de Storage → disco, sin red     [L3]
-  ├─ GET /posts (30 s + 1 reintento tras timeout)
+  ├─ GET /posts (espera estandar + 1 reintento tras timeout)
   │    ├─ fase 1: JSON → texto + huecos exactos (width/height)
   │    └─ fase 2: firmas por lote → se funden por id
   └─ reconciliación silenciosa + instantánea actualizada
@@ -110,7 +115,8 @@ API con el código nuevo desplegado.
 
 1. **Migración**: pegar `supabase/migrations/0021_media_metadata.sql` en el
    SQL Editor de Supabase (repetible; termina con su comprobación).
-2. **Desplegar el API** (merge a `main` cuando Edson apruebe → Render). Las
+2. **Desplegar el API** (merge a `main` cuando Edson apruebe). El despliegue
+   lo hace `.github/workflows/desplegar-aws.yml`, contra AWS, no Render. Las
    publicaciones nuevas generan derivados solas a partir de aquí.
 3. **Reprocesar lo existente** (cualquier máquina con ffmpeg). El script lee
    la dirección del proyecto de `apps/mobile/.env` y pide la **service role
@@ -152,8 +158,10 @@ Queda **borrarlo a mano** desde Storage en el panel de Supabase. Con la
 variable ya configurada, los borrados de cuenta futuros sí limpian solos.
 
 **Por costo (decisiones de negocio, NO tomadas aquí)** —
-- Render de pago o keep-alive externo: el warm-up mitiga, pero el plan free
-  seguirá durmiendo. Un plan Starter (~7 USD/mes) elimina los 23 s de raíz.
+- ~~Render de pago o keep-alive externo~~. RESUELTO de otra forma: el backend
+  vive en AWS y no duerme (0,29-0,66 s medidos). Las builds del movil apuntan
+  ahi desde el 27/08/2026; Render solo sigue vivo para las que ya estan
+  instaladas.
 - CDN de video dedicado (Cloudflare Stream ~5 USD/1000 min, Bunny Stream,
   Mux): solo si el volumen de video crece en serio; con HLS + Supabase basta
   hoy.

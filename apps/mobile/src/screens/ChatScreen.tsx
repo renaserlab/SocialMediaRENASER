@@ -73,21 +73,15 @@ export function ChatScreen() {
   const conversations = useAppStore((state) => state.conversations);
   const sendMessageDemo = useAppStore((state) => state.sendMessage);
 
-  const demoConversation = useMemo(() => {
-    let found = conversations.find((item) => item.id === params.id);
-    if (!found && params.id === 'darren') {
-      found = {
-        id: 'darren',
-        name: 'Darren Hardy',
-        subtitle: 'Mentor de líderes',
-        unread: 0,
-        messages: [
-          { id: 'd1', sender: 'them', text: '¡Hola! Qué gusto saludarte. ¿En qué puedo apoyarte hoy en tu camino de crecimiento?', createdAt: '10:00 AM' },
-        ],
-      };
-    }
-    return found;
-  }, [conversations, params.id]);
+  // Solo lo que hay en el store. Antes, un id 'darren' se inventaba aqui una
+  // conversacion con un mentor y su saludo escrito a mano. No se veia en
+  // produccion —hace falta Supabase apagado—, pero era el mismo dato falso que
+  // llevo a borrar `/short/[id]` y la rama demo de `ProfileScreen`: un chat que
+  // parece de alguien y no lo es.
+  const demoConversation = useMemo(
+    () => conversations.find((item) => item.id === params.id),
+    [conversations, params.id],
+  );
 
   const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');

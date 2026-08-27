@@ -1,8 +1,9 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
-import { signMediaUrls, type UploadedMedia } from '@/services/storage';
+import { profileImageUrl, signMediaUrls, type UploadedMedia } from '@/services/storage';
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import type { Comment, Post } from '@/types';
+import { toProfileSummary, type ProfileSummary, type ProfileSummaryDto } from '@/mappers/profileMapper';
 
 export type FeedPage = {
   items: Post[];
@@ -12,6 +13,25 @@ export type FeedPage = {
 
 /** 'all' = pestaña "Para ti"; 'following' = pestaña "Siguiendo". */
 export type FeedKind = 'all' | 'following';
+
+/** Punto por el que sigue la página siguiente de comentarios (keyset). */
+export type ComentarioCursor = { createdAt: string; id: string };
+
+/**
+ * El comentario con la foto de quien lo escribió.
+ *
+ * Se añade AQUÍ y no en el `Comment` del modelo de vista porque el DTO ya trae
+ * `author.avatar_path` y lo único que faltaba era construir la URL. Ampliar el
+ * tipo compartido arrastraría al mapper y a todo lo que lo usa, y esto es una
+ * foto en una lista, no un refactor.
+ */
+export type ComentarioConAvatar = Comment & { avatarUrl?: string };
+
+export type ComentariosPagina = {
+  items: ComentarioConAvatar[];
+  /** null = no queda nada más que pedir. */
+  siguiente: ComentarioCursor | null;
+};
 
 /**
  * Firma las URLs del medio y del poster de cada post y devuelve copias con
@@ -167,6 +187,21 @@ export const PostRepository = {
    * paginacion por cursor ignora los parametros que no conoce y usa el offset,
    * asi que la misma app funciona contra ambas versiones.
    */
+  /**
+   * Quien reacciono a una publicacion, de lo mas reciente a lo mas antiguo.
+   *
+   * Es lo que abre la notificacion agrupada: sin esta lista, «Edson y 99
+   * personas mas» no lleva a ningun sitio. Devuelve la misma forma que
+   * seguidores y seguidos para poder reutilizar `PeopleList` en vez de
+   * inventarse otra pantalla de gente.
+   */
+  async listLikes(postId: string): Promise<ProfileSummary[]> {
+    const dtos = await apiRequest<ProfileSummaryDto[]>(
+      `${API_V1}/posts/${postId}/likes?limit=50`,
+    );
+    return dtos.map(toProfileSummary);
+  },
+
   async listVideos(
     currentUserId?: string | null,
     {
@@ -329,6 +364,71 @@ export const PostRepository = {
       { auth: false },
     );
     return dtos.map(toComment);
+  },
+
+  /**
+   * Una página de comentarios, del más reciente al más antiguo.
+   *
+   * POR QUÉ NO BASTA CON `listComments`. Esa devuelve `Comment[]`, y el
+   * `Comment` de la vista guarda la fecha ya formateada («2h»), que no sirve
+   * para pedir la página siguiente. El cursor se calcula aquí, donde todavía
+   * está el ISO original, y así el tipo de la vista no se entera de nada.
+   *
+   * `siguiente` a null significa que ya no queda nada: si el servidor devolvió
+   * menos de lo pedido, no hay más páginas que pedir.
+   *
+   * `auth: false` igual que arriba: leer comentarios es público, y pedirlos con
+   * una sesión caducada no puede vaciar la lista de quien solo pasaba a leer.
+   */
+  async listCommentsPage(
+    postId: string,
+    { limit = 20, before }: { limit?: number; before?: ComentarioCursor | null } = {},
+  ): Promise<ComentariosPagina> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (before) {
+      params.set('before_created_at', before.createdAt);
+      params.set('before_id', before.id);
+    }
+    const dtos = await apiRequest<CommentDto[]>(
+      `${API_V1}/posts/${encodeURIComponent(postId)}/comments?${params.toString()}`,
+      { auth: false },
+    );
+    const ultimo = dtos[dtos.length - 1];
+    return {
+      items: dtos.map((dto) => ({
+        ...toComment(dto),
+        avatarUrl: profileImageUrl(dto.author.avatar_path),
+      })),
+      siguiente:
+        dtos.length < limit || !ultimo
+          ? null
+          : { createdAt: ultimo.created_at, id: ultimo.id },
+    };
+  },
+
+  /**
+   * Lo que ESTA persona ha guardado, según el servidor.
+   *
+   * Antes no existía: el móvil cruzaba una lista de ids del teléfono con el
+   * muro que tuviera en memoria. Se perdía al reinstalar, no se compartía
+   * entre dispositivos y podía enseñar algo ya retirado.
+   *
+   * `media` separa los audios del resto, que es lo que necesita la biblioteca.
+   */
+  async listSaved(
+    {
+      limit = 20,
+      offset = 0,
+      media,
+    }: { limit?: number; offset?: number; media?: 'image' | 'video' | 'audio' } = {},
+    currentUserId?: string | null,
+  ): Promise<Post[]> {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (media) params.set('media', media);
+    const dtos = await apiRequest<PostDto[]>(`${API_V1}/saved-posts?${params.toString()}`);
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
   },
 
   async addComment(postId: string, body: string): Promise<Comment> {

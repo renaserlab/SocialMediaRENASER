@@ -3,14 +3,14 @@
 La identidad (quién sigue o bloquea) se toma siempre del JWT.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import delete, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.notifications.push import send_push
+from app.modules.notifications.push import encolar_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -173,6 +173,7 @@ async def list_following(
 @router.post("/{profile_id}/follow")
 async def follow_profile(
     profile_id: str,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
@@ -207,9 +208,9 @@ async def follow_profile(
         # pedirselo reventaba el seguimiento con un AttributeError justo
         # despues de haberlo guardado.
         actor = await db.get(Profile, current_user.id)
-        await send_push(
-            db,
-            user_id=profile_id,
+        encolar_push(
+            background,
+            user_ids=[profile_id],
             notification_type="follow",
             actor_name=actor.full_name if actor else None,
             data={"type": "follow", "profileId": current_user.id},

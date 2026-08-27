@@ -5,23 +5,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# AQUI NO SE INSTALA ffmpeg, y es a proposito.
+# ffmpeg SI se instala, desde el 27 de agosto de 2026.
 #
-# Se intento: `media_processing.py` sabe usarlo para sacar el poster de un
-# video que llegue sin el. Pero ffmpeg arrastra ~400 MB de paquetes y el build
-# del plan gratuito de Render no lo aguanta: el despliegue quedo en
-# `no-deploy`, es decir, sin ninguna version viva.
+# Antes no estaba, y el motivo escrito aqui era este: «ffmpeg arrastra ~400 MB
+# de paquetes y el build del plan gratuito de Render no lo aguanta». Era cierto
+# y era la decision correcta entonces. Ya no: el backend corre en AWS sobre una
+# t3.small (2 vCPU, 2 GiB) y el build no tiene ese limite.
 #
-# No se pierde nada, porque el poster ya viene cubierto dos veces:
-#   1. lo genera el TELEFONO al subir (services/mediaCompressor.ts), que es
-#      donde el video ya esta en local y sacar un fotograma es instantaneo;
-#   2. para el contenido antiguo lo genera scripts/procesar_media.py, que
-#      corre en una maquina de verdad.
-# Y el codigo ya degrada solo: sin ffmpeg en el sistema simplemente se salta
-# ese paso (ver `_ffmpeg()`), sin romper nada.
+# QUE ARREGLA. Sin ffmpeg, un video subido DESDE LA WEB se quedaba tal cual:
+# sin poster (un rectangulo negro hasta darle al play) y sin version ligera.
+# El respaldo que justificaba su ausencia solo cubria la app movil, porque la
+# libreria de compresion no existe en navegador: `compressionAvailable` es
+# false alli. O sea que el agujero era exactamente «publicar un video desde la
+# web», y no se veia porque casi todo se sube desde el movil.
 #
-# Si algun dia el servicio deja de ser gratuito, basta con reponer aqui el
-# apt-get install de ffmpeg para que el respaldo del servidor vuelva a estar.
+# `--no-install-recommends` deja la imagen en lo justo, y se limpia el indice
+# de apt para no arrastrarlo en la capa final.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

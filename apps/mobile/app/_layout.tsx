@@ -1,5 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { Stack, type ErrorBoundaryProps } from 'expo-router';
@@ -58,16 +59,30 @@ export default function RootLayout() {
   // el boton existe en toda la aplicacion, no solo en las pestañas.
   useSalidaConDoblePulsacion();
 
-  // El segundo valor es el error de carga: si la fuente falla (sin red, cache
-  // vacia) hay que continuar igualmente con la tipografia del sistema.
-  const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    Inter_800ExtraBold,
-    Inter_900Black,
-  });
+  /*
+    El segundo valor es el error de carga: si la fuente falla (sin red, cache
+    vacia) hay que continuar igualmente con la tipografia del sistema.
+
+    EN iOS NO SE CARGA NINGUNA, y no es un olvido: `theme/tokens.ts` devuelve
+    'System' —San Francisco— para los seis pesos cuando `Platform.OS` es
+    'ios'. Ni un solo texto de la aplicacion pide Inter alli. Aun asi se
+    registraban las seis, y el splash ESPERABA a que terminaran: seis ficheros
+    de ~165 KB leidos y registrados para no pintar con ellos ni una letra.
+
+    En web y Android si se usan, asi que alli se cargan igual que siempre.
+  */
+  const [fontsLoaded, fontError] = useFonts(
+    Platform.OS === 'ios'
+      ? {}
+      : {
+          Inter_400Regular,
+          Inter_500Medium,
+          Inter_600SemiBold,
+          Inter_700Bold,
+          Inter_800ExtraBold,
+          Inter_900Black,
+        },
+  );
 
   // Red de seguridad: pase lo que pase, la app se muestra a los 3 s. Evita que
   // un fallo de hidratacion o de fuentes deje al usuario en el splash para siempre.

@@ -122,6 +122,15 @@ export type Post = {
   /** A quién etiqueta la publicación (migración 0032). */
   mentions?: PersonaEtiquetada[];
   likes: number;
+  /**
+   * Si QUIEN PREGUNTA ya reaccionó. Lo dice el servidor (`liked_by_me`).
+   *
+   * Existe porque antes se tiraba. `listFeed` lo recogía aparte para el muro,
+   * pero el feed de vídeo mapeaba las publicaciones y perdía el dato por el
+   * camino: Inicio no tenía forma de saber a qué habías reaccionado, así que
+   * pintaba todos los corazones vacíos aunque el muro los pintara llenos.
+   */
+  likedByMe?: boolean;
   comments: Comment[];
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */
   commentsCount?: number;

@@ -18,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { etiquetaDePrecio } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import type { AccesoDeBeta } from '@/repositories/LearningRepository';
 import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
 import { radius, spacing } from '@/theme/tokens';
@@ -43,6 +44,14 @@ export function CourseScreen() {
    */
   const [oferta, setOferta] = useState<OfertaDeCompra | null>(null);
   const [comprando, setComprando] = useState(false);
+  /**
+   * Si este curso se puede pedir GRATIS durante la Beta. Lo decide el servidor
+   * y por eso se pregunta: el interruptor vive alli, asi que apagarlo tiene que
+   * hacer desaparecer el boton sin publicar una version nueva de la aplicacion.
+   * `null` mientras se averigua, por lo mismo que la oferta de compra.
+   */
+  const [beta, setBeta] = useState<AccesoDeBeta | null>(null);
+  const [pidiendoBeta, setPidiendoBeta] = useState(false);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
@@ -66,6 +75,51 @@ export function CourseScreen() {
       vigente = false;
     };
   }, [course, esDePago, hasAccess]);
+
+  /**
+   * Y si hay Beta gratuita para este curso. Se pregunta en las mismas
+   * condiciones que la oferta —de pago y sin acceso— porque en cualquier otro
+   * caso no hay nada que conceder.
+   */
+  React.useEffect(() => {
+    let vigente = true;
+    if (!course || !esDePago || hasAccess) {
+      setBeta(null);
+      return;
+    }
+    LearningRepository.betaAccess(course.id)
+      // Que falle preguntando no puede romper la ficha del curso: sin respuesta
+      // no hay boton, que es el lado seguro.
+      .catch(() => null)
+      .then((resultado) => {
+        if (vigente) setBeta(resultado);
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [course, esDePago, hasAccess]);
+
+  /**
+   * Pedir el acceso gratuito de la Beta. NO ES UNA COMPRA y no se le dice a
+   * nadie que lo sea: no hay cobro, no hay recibo y el precio del curso no
+   * cambia. Quien concede es el servidor, de forma idempotente.
+   */
+  const pedirAccesoDeBeta = async () => {
+    if (!course) return;
+    setPidiendoBeta(true);
+    try {
+      await LearningRepository.grantBetaAccess(course.id);
+      toast('Acceso concedido');
+      reload();
+    } catch (e) {
+      notify(
+        'No se pudo activar el acceso',
+        e instanceof Error ? e.message : 'Inténtalo de nuevo.',
+      );
+    } finally {
+      setPidiendoBeta(false);
+    }
+  };
 
   /**
    * Comprar. En movil lo cobra la tienda; en web, Stripe Checkout alojado.
@@ -279,7 +333,18 @@ export function CourseScreen() {
             `price_minor`: ese es referencia de catalogo y precio web, y
             mostrarlo aqui ensenaria un numero distinto del que se va a cobrar.
           */}
-          {esDePago && !hasAccess && oferta ? (
+          {/*
+            LA BETA GRATUITA VA PRIMERO. Mientras el servidor la tenga
+            encendida, lo cierto es que este curso se puede tener gratis, y
+            enseñar «las compras no están disponibles» seria contar la mitad.
+            El precio de arriba NO desaparece: el curso sigue costando lo que
+            cuesta, y lo que se dice es que durante la beta no se cobra.
+          */}
+          {esDePago && !hasAccess && beta?.available ? (
+            <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
+              Acceso gratuito durante la Beta. No se te cobrará nada.
+            </Text>
+          ) : esDePago && !hasAccess && oferta ? (
             oferta.sePuedeComprar ? (
               <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
                 {`Precio: ${oferta.precio}`}
@@ -339,7 +404,15 @@ export function CourseScreen() {
                 arriba.
           */}
           {esDePago && !hasAccess ? (
-            oferta?.sePuedeComprar ? (
+            beta?.available ? (
+              <Button
+                label={pidiendoBeta ? 'Activando…' : 'Acceso gratuito durante la Beta'}
+                disabled={pidiendoBeta}
+                loading={pidiendoBeta}
+                onPress={() => void pedirAccesoDeBeta()}
+                style={{ marginTop: spacing.xl }}
+              />
+            ) : oferta?.sePuedeComprar ? (
               <Button
                 label={comprando ? 'Procesando…' : 'Comprar curso'}
                 disabled={comprando}

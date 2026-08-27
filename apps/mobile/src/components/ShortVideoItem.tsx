@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,10 +8,13 @@ import { Feather } from '@expo/vector-icons';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { ALTO_DE_LA_BARRA_DE_PROGRESO } from '@/components/VideoScrubber';
 import { assets } from '@/data/assets';
+import { compartirPublicacion } from '@/lib/enlaces';
 import { haptics } from '@/lib/haptics';
 import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { useAppStore } from '@/store/useAppStore';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 
 /**
  * Reel normalizado. Antes el componente consumia el tipo `Short` del demo, con
@@ -137,14 +140,33 @@ function ShortVideoItemBase({
   */
   const alturaDeInformacion = espacioInferior + ALTURA_DEL_PROGRESO;
   const alturaDeAcciones = alturaDeInformacion + ALTURA_DE_LA_INFORMACION + AIRE;
-  const [liked, setLiked] = useState(false);
-  const [likes, setLikes] = useState(short.likes);
+  /*
+    LA REACCION SALE DEL ESTADO COMPARTIDO, no de un `useState` de la celda.
+
+    Antes esto era `useState(false)` y `useState(short.likes)`, y el boton solo
+    tocaba esas dos variables: no llamaba al servidor NI al store. O sea que
+    dar me gusta en Inicio no guardaba nada. Se veia de dos formas:
+
+      - Reaccionabas en Explorar y el mismo video salia con el corazon vacio en
+        Inicio, porque el `useState` nacia en `false` pasara lo que pasara.
+      - Reaccionabas en Inicio y al desplazar se perdia: FlashList recicla las
+        celdas y el estado local no vuelve a nacer.
+
+    Leyendolo del store, las dos pantallas cuentan lo mismo porque miran lo
+    mismo. El contador sale de `likeCounts` —que mantiene el propio store— y
+    cae a `short.likes` mientras no haya llegado nada del servidor.
+  */
+  const liked = useAppStore((state) => state.likedPostIds.includes(short.id));
+  const likes = useAppStore((state) => state.likeCounts[short.id] ?? short.likes);
+  const toggleLikePost = useAppStore((state) => state.toggleLikePost);
+  // Reaccionar queda asociado a una cuenta. Mismo gesto que en el muro
+  // (`PostCard`): se pide al usarlo, no al entrar en la aplicacion.
+  const requireAuth = useRequireAuth();
 
   const toggleLike = () => {
-    haptics.light();
-    setLiked((prev) => {
-      setLikes((c) => c + (prev ? -1 : 1));
-      return !prev;
+    void requireAuth('para reaccionar', () => {
+      haptics.light();
+      toggleLikePost(short.id);
     });
   };
 
@@ -157,8 +179,18 @@ function ShortVideoItemBase({
     irAlPerfil(router, short.authorId);
   };
 
+  /*
+    Compartir con enlace. El `id` del reel ES el id de la publicacion de video,
+    asi que la ruta canonica `/post/{id}` sirve igual que para el muro y no hace
+    falta una pantalla aparte para los reels.
+  */
   const onShare = () => {
-    Share.share({ message: `Mira este short de ${short.author} en Z.` }).catch(() => {});
+    const { message } = compartirPublicacion({
+      postId: short.id,
+      autor: short.author,
+      clase: 'video',
+    });
+    Share.share({ message }).catch(() => {});
   };
 
   return (

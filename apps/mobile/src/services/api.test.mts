@@ -112,3 +112,56 @@ test('la sesion caducada se explica, no se numera', async () => {
   assert.equal(fallo.status, 401);
   assert.match(fallo.message, /sesión ha caducado/i);
 });
+
+/*
+  Las dos siguientes fijan una decision de RENDIMIENTO, no de comportamiento.
+
+  `Content-Type: application/json` no esta en la lista segura de CORS: en el
+  navegador obliga a una peticion `OPTIONS` previa. El muro se puede leer sin
+  cuenta, asi que en la primera pantalla que ve alguien sin registrarse cada
+  GET costaba dos viajes en vez de uno. Si alguien vuelve a ponerla siempre,
+  esto se pone rojo.
+*/
+test('un GET sin cuerpo no manda Content-Type (evita el preflight de CORS)', async () => {
+  let enviadas: Record<string, string> = {};
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    enviadas = (init?.headers ?? {}) as Record<string, string>;
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  }) as typeof fetch;
+
+  await apiRequest('/muro', { auth: false });
+
+  assert.equal(
+    enviadas['Content-Type'],
+    undefined,
+    'un GET sin cuerpo no necesita declarar el formato de algo que no manda',
+  );
+});
+
+test('una peticion CON cuerpo si declara que manda JSON', async () => {
+  let enviadas: Record<string, string> = {};
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    enviadas = (init?.headers ?? {}) as Record<string, string>;
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  }) as typeof fetch;
+
+  await apiRequest('/muro', {
+    auth: false,
+    method: 'POST',
+    body: JSON.stringify({ texto: 'hola' }),
+  });
+
+  assert.equal(enviadas['Content-Type'], 'application/json');
+});
+
+test('ya no existe una llamada de arranque para despertar el servidor', async () => {
+  // El backend en AWS no duerme. `warmUpApi()` existia para el plan gratuito
+  // de Render y hoy solo seria una peticion mas compitiendo con la del feed
+  // justo en el arranque.
+  const modulo = await import('./api.ts');
+  assert.equal(
+    'warmUpApi' in modulo,
+    false,
+    'warmUpApi volvio: era una suposicion sobre Render, no sobre AWS',
+  );
+});

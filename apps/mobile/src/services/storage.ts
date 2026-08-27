@@ -33,6 +33,14 @@ const SIGNED_URL_TTL = 60 * 60; // 1 hora
 const CACHE_TTL_MS = (SIGNED_URL_TTL - 600) * 1000;
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
+/**
+ * Firmas que ya se estan pidiendo ahora mismo, por ruta.
+ *
+ * Evita que dos llamadas simultaneas firmen el mismo archivo dos veces. El
+ * porque largo esta en `signMediaUrls`, donde se usa.
+ */
+const firmasEnVuelo = new Map<string, Promise<string | undefined>>();
+
 /*
   La cache de firmas SOBREVIVE al cierre de la aplicacion.
 
@@ -583,15 +591,55 @@ export async function uploadPostMedia(
 const AVATAR_BUCKET = 'avatars';
 
 /**
+ * Ancho que se pide para una foto de perfil, en pixeles.
+ *
+ * Se sirve a 44 px como mucho, pero en una pantalla de 3x eso son 132 px
+ * reales; 160 deja margen sin llegar a notarse en la factura de bytes.
+ */
+const ANCHO_AVATAR = 160;
+
+/** Ancho para la portada, que si ocupa el ancho de la pantalla. */
+const ANCHO_PORTADA = 1080;
+
+/**
  * URL publica de una ruta del bucket `avatars` (avatar o portada).
  *
  * El bucket es publico, asi que no hace falta firmar y la URL no caduca, algo
  * importante porque la foto de perfil se pinta en cada tarjeta del feed.
  * Devuelve undefined cuando no hay foto, para que la vista use el placeholder.
+ *
+ * POR QUE SE PIDE UNA VERSION REDIMENSIONADA. Lo que se guarda es el fichero
+ * tal cual sale de la camara. Medido contra produccion, un avatar real pesaba
+ * 3 909 KB (1170x2532) y se pintaba en un circulo de 40 px: el telefono
+ * descargaba 3,9 MB para ensenar el equivalente a 6 KB de pixeles. Con diez
+ * caras en el muro eso son decenas de MB por pantalla, y es la causa principal
+ * de que la aplicacion se sintiera lenta.
+ *
+ * Pidiendo el mismo fichero por `render/image` Storage devuelve la version ya
+ * escalada: el mismo avatar baja a 17 KB a 96 px (230 veces menos). El
+ * original no se toca ni se pierde; esto solo cambia lo que se pide.
+ *
+ * La URL sigue siendo estable —mismos parametros siempre— asi que la cache en
+ * disco de `expo-image` sigue acertando. Si algun dia hiciera falta volver
+ * atras, basta con devolver `getPublicUrl(path)` sin opciones.
  */
-export function profileImageUrl(path: string | null | undefined): string | undefined {
+export function profileImageUrl(
+  path: string | null | undefined,
+  opciones?: { ancho?: number },
+): string | undefined {
   if (!supabase || !path) return undefined;
-  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+  const width = opciones?.ancho ?? ANCHO_AVATAR;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path, {
+    transform: { width, height: width, resize: 'cover', quality: 75 },
+  }).data.publicUrl;
+}
+
+/** URL de una portada de perfil: misma foto, ancho de pantalla. */
+export function coverImageUrl(path: string | null | undefined): string | undefined {
+  if (!supabase || !path) return undefined;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path, {
+    transform: { width: ANCHO_PORTADA, resize: 'contain', quality: 75 },
+  }).data.publicUrl;
 }
 
 /**
@@ -759,18 +807,75 @@ export async function signMediaUrls(
   }
   if (missing.length === 0) return map;
 
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .createSignedUrls(missing, SIGNED_URL_TTL);
-  if (error || !data) return map;
-  const expiresAt = now + CACHE_TTL_MS;
-  for (const item of data) {
-    if (item.path && item.signedUrl) {
-      map[item.path] = item.signedUrl;
-      signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
-    }
+  /*
+    LO QUE YA SE ESTA FIRMANDO NO SE VUELVE A FIRMAR.
+
+    Al arrancar hay tres llamadas a la vez con rutas que se solapan: la
+    instantanea del feed, la primera pagina de red y el feed de video. Las tres
+    calculaban `missing` ANTES de que ninguna hubiera escrito en la cache, asi
+    que una misma ruta se firmaba dos o tres veces.
+
+    Y cada firma de la misma ruta devuelve una URL DISTINTA, que es el problema
+    de verdad: `expo-image` y `expo-video` guardan en disco POR URL, asi que
+    tres firmas del mismo video son tres descargas del mismo video. Medido en
+    la web desplegada: el mismo .mp4 bajado tres veces en una sola visita a
+    Inicio, con tres firmas distintas.
+
+    Con este mapa, quien llega segundo espera el resultado del primero en vez
+    de pedir otra firma. Mismo fichero, misma URL, una sola descarga.
+  */
+  const esperando: string[] = [];
+  const nuevas: string[] = [];
+  for (const path of missing) {
+    if (firmasEnVuelo.has(path)) esperando.push(path);
+    else nuevas.push(path);
   }
-  scheduleSignedCacheSave();
+
+  const promesas = new Map<string, Promise<string | undefined>>();
+  for (const path of esperando) {
+    const enVuelo = firmasEnVuelo.get(path);
+    if (enVuelo) promesas.set(path, enVuelo);
+  }
+
+  if (nuevas.length > 0) {
+    const lote = (async (): Promise<Record<string, string>> => {
+      const salida: Record<string, string> = {};
+      const { data, error } = await supabase!.storage
+        .from(BUCKET)
+        .createSignedUrls(nuevas, SIGNED_URL_TTL);
+      if (error || !data) return salida;
+      const expiresAt = Date.now() + CACHE_TTL_MS;
+      for (const item of data) {
+        if (item.path && item.signedUrl) {
+          salida[item.path] = item.signedUrl;
+          signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
+        }
+      }
+      scheduleSignedCacheSave();
+      return salida;
+    })();
+
+    for (const path of nuevas) {
+      // Una promesa por ruta, para que quien espere solo dependa de LO SUYO.
+      const suya = lote.then((s) => s[path]).catch(() => undefined);
+      promesas.set(path, suya);
+      firmasEnVuelo.set(path, suya);
+    }
+    // Se sueltan pase lo que pase: dejar una firma fallida marcada como «en
+    // vuelo» bloquearia esa imagen para siempre.
+    void lote
+      .catch(() => {})
+      .finally(() => {
+        for (const path of nuevas) firmasEnVuelo.delete(path);
+      });
+  }
+
+  const pendientes = [...promesas.keys()];
+  const resueltas = await Promise.all(pendientes.map((p) => promesas.get(p)!));
+  pendientes.forEach((path, i) => {
+    const url = resueltas[i];
+    if (url) map[path] = url;
+  });
   return map;
 }
 

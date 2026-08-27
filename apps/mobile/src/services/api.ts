@@ -109,8 +109,22 @@ export async function apiRequest<T>(
   path: string,
   { auth = true, headers, timeoutMs = ESPERA_MAXIMA_MS, ...init }: ApiRequestOptions = {},
 ): Promise<T> {
+  /*
+    `Content-Type` SOLO cuando se manda cuerpo.
+
+    En el navegador, `Content-Type: application/json` no esta en la lista
+    segura de CORS: ponerlo obliga a una peticion `OPTIONS` previa ANTES de
+    cada llamada. En una peticion autenticada da igual —la cabecera
+    `Authorization` ya obliga a esa comprobacion de todos modos—, pero el muro
+    se puede leer SIN cuenta (migracion 0018), y ahi esta cabecera era el unico
+    motivo por el que se pagaba: cada GET anonimo costaba dos viajes en vez de
+    uno, y CloudFront no guarda esas comprobaciones en cache. Justo en la
+    primera pantalla que ve quien todavia no tiene cuenta.
+
+    Un GET sin cuerpo no necesita declarar el formato de algo que no manda.
+  */
   const finalHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(init.body != null ? { 'Content-Type': 'application/json' } : {}),
     ...(headers as Record<string, string> | undefined),
   };
 
@@ -184,28 +198,19 @@ export async function apiRequest<T>(
   return response.json() as Promise<T>;
 }
 
-/**
- * Despierta el servidor sin esperar respuesta.
- *
- * El backend vive en el plan gratuito de Render, que SUSPENDE la instancia
- * tras un rato sin trafico y tarda ~20-25 segundos en levantarla (medido
- * contra produccion). Si la primera peticion que la despierta es la del feed,
- * el usuario mira una pantalla vacia todo ese tiempo.
- *
- * Llamando a /health en cuanto arranca la aplicacion, el servidor se levanta
- * EN PARALELO mientras la persona ya esta viendo el contenido cacheado. Para
- * cuando el feed de red se pide (o se reintenta), la instancia suele estar
- * lista. Si ya estaba despierta, esta llamada cuesta ~250 ms y nada mas.
- */
-export function warmUpApi(): void {
-  // `no-cors`: la respuesta no interesa, solo que la peticion LLEGUE y
-  // despierte la instancia. Sin esto, en un navegador servido desde un origen
-  // no autorizado (desarrollo local) la consola se llenaba de errores CORS
-  // por una llamada cuyo resultado nunca se lee.
-  fetch(`${API_URL}/health`, { mode: 'no-cors' }).catch(() => {
-    // Sin conexion o servidor caido: el feed ya ensena su propio error.
-  });
-}
+/*
+  AQUI VIVIA `warmUpApi()`, y se ha quitado a proposito.
+
+  Llamaba a /health nada mas arrancar para despertar la instancia del plan
+  gratuito de Render, que se suspendia tras un rato sin trafico y tardaba
+  ~21 s en volver (medido). Con el backend en AWS detras de un grupo de
+  autoescalado la instancia NO duerme: /health responde en 0,3-0,7 s medidos
+  contra produccion, este y cualquier otro dia.
+
+  Ya no despierta nada, pero seguia costando: una peticion mas compitiendo con
+  la del feed justo en el arranque (1 s medido en la web desplegada). Una
+  llamada que no aporta y se paga en el peor momento posible.
+*/
 
 export const API_BASE_URL = API_URL;
 export const API_V1 = '/api/v1';

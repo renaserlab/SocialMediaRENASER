@@ -15,6 +15,7 @@ import { VideoPlayer } from '@/components/VideoPlayer';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
+import { compartirPublicacion } from '@/lib/enlaces';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
 import { bestVideoSource } from '@/lib/videoSource';
@@ -200,10 +201,16 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     setTimeout(action, 250);
   };
 
+  /*
+    Compartir con enlace. Antes solo se mandaba el texto de la publicacion
+    entrecomillado, asi que quien lo recibia leia la frase y no tenia por donde
+    llegar al contenido. El enlace lo construye `lib/enlaces` —uno solo para los
+    tres botones de la app— y si falta la configuracion sale el texto a secas,
+    que es mejor que una URL que no abre.
+  */
   const sharePost = () => {
-    Share.share({
-      message: `"${post.body}" — ${post.author} en Z.`,
-    }).catch(() => {
+    const { message } = compartirPublicacion({ postId: post.id, autor: post.author });
+    Share.share({ message }).catch(() => {
       // El usuario cancelo, o el navegador no expone navigator.share.
     });
   };
@@ -480,21 +487,40 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       ) : null}
 
       <View style={styles.actions}>
-        <Pressable
-          style={styles.action}
-          hitSlop={ACTION_HIT_SLOP}
-          onPress={() =>
-            void requireAuth('para dar me gusta', () => {
-              toggleLike(post.id);
-              haptics.light();
-            })
-          }
-          accessibilityLabel="Me gusta"
-          accessibilityRole="button"
-        >
-          <Feather name="heart" size={20} color={liked ? colors.danger : colors.text} />
-          <Text variant="secondary" weight="600" style={styles.count}>{post.likes}</Text>
-        </Pressable>
+        {/*
+          El corazon y el NUMERO son dos botones, como en Facebook: uno
+          reacciona y el otro abre la lista de quien reacciono. Antes el numero
+          formaba parte del mismo boton y no llevaba a ningun sitio, asi que la
+          notificacion agrupada («Edson y 99 personas mas») no tenia donde
+          aterrizar. El aspecto no cambia: siguen en la misma fila con el mismo
+          espacio.
+        */}
+        <View style={styles.action}>
+          <Pressable
+            hitSlop={ACTION_HIT_SLOP}
+            onPress={() =>
+              void requireAuth('para dar me gusta', () => {
+                toggleLike(post.id);
+                haptics.light();
+              })
+            }
+            accessibilityLabel="Me gusta"
+            accessibilityRole="button"
+          >
+            <Feather name="heart" size={20} color={liked ? colors.danger : colors.text} />
+          </Pressable>
+          <Pressable
+            hitSlop={ACTION_HIT_SLOP}
+            onPress={() => router.push(`/reacciones/${post.id}` as never)}
+            // Sin reacciones no hay lista que abrir: el numero se queda quieto
+            // en vez de llevar a una pantalla vacia.
+            disabled={post.likes === 0}
+            accessibilityLabel="Ver quién reaccionó"
+            accessibilityRole="button"
+          >
+            <Text variant="secondary" weight="600" style={styles.count}>{post.likes}</Text>
+          </Pressable>
+        </View>
         <Pressable
           style={styles.action}
           hitSlop={ACTION_HIT_SLOP}
