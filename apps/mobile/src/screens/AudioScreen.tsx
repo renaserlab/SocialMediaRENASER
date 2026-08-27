@@ -11,6 +11,7 @@ import { AudioScrubber } from '@/components/AudioScrubber';
 import { Button } from '@/components/Button';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { assets } from '@/data/assets';
+import { compartirPublicacion } from '@/lib/enlaces';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
@@ -96,10 +97,25 @@ export function AudioScreen() {
     player.seekTo(clamped);
   };
 
+  /*
+    Compartir el episodio que suena AHORA, por su id de publicacion.
+
+    Esta pantalla no lee el parametro `id` de la ruta: siempre carga el audio
+    privado vigente del administrador, asi que `/(tabs)/audio/{id}` no identifica
+    un episodio y no serviria como enlace. El audio SI es una publicacion con id
+    real, y `/post/{id}` la abre para siempre —tambien cuando el administrador
+    suba uno nuevo—, que es la unica ruta estable que hay aqui.
+
+    Sin audio cargado no se manda enlace: se comparte la frase a secas antes que
+    inventarse una direccion que no lleva a ninguna parte.
+  */
   const onShare = () => {
-    Share.share({
-      message: `Escucha "${audio?.body ?? 'Tu enfoque de esta semana'}" en Z.`,
-    }).catch(() => {});
+    const { message } = compartirPublicacion({
+      postId: audio?.id,
+      autor: audio?.author,
+      clase: 'audio',
+    });
+    Share.share({ message }).catch(() => {});
   };
 
   return (

@@ -15,6 +15,7 @@ import { VideoPlayer } from '@/components/VideoPlayer';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
+import { compartirPublicacion } from '@/lib/enlaces';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
 import { bestVideoSource } from '@/lib/videoSource';
@@ -200,10 +201,16 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     setTimeout(action, 250);
   };
 
+  /*
+    Compartir con enlace. Antes solo se mandaba el texto de la publicacion
+    entrecomillado, asi que quien lo recibia leia la frase y no tenia por donde
+    llegar al contenido. El enlace lo construye `lib/enlaces` —uno solo para los
+    tres botones de la app— y si falta la configuracion sale el texto a secas,
+    que es mejor que una URL que no abre.
+  */
   const sharePost = () => {
-    Share.share({
-      message: `"${post.body}" — ${post.author} en Z.`,
-    }).catch(() => {
+    const { message } = compartirPublicacion({ postId: post.id, autor: post.author });
+    Share.share({ message }).catch(() => {
       // El usuario cancelo, o el navegador no expone navigator.share.
     });
   };

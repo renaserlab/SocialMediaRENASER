@@ -8,6 +8,7 @@ import { Feather } from '@expo/vector-icons';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { ALTO_DE_LA_BARRA_DE_PROGRESO } from '@/components/VideoScrubber';
 import { assets } from '@/data/assets';
+import { compartirPublicacion } from '@/lib/enlaces';
 import { haptics } from '@/lib/haptics';
 import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
@@ -178,8 +179,18 @@ function ShortVideoItemBase({
     irAlPerfil(router, short.authorId);
   };
 
+  /*
+    Compartir con enlace. El `id` del reel ES el id de la publicacion de video,
+    asi que la ruta canonica `/post/{id}` sirve igual que para el muro y no hace
+    falta una pantalla aparte para los reels.
+  */
   const onShare = () => {
-    Share.share({ message: `Mira este short de ${short.author} en Z.` }).catch(() => {});
+    const { message } = compartirPublicacion({
+      postId: short.id,
+      autor: short.author,
+      clase: 'video',
+    });
+    Share.share({ message }).catch(() => {});
   };
 
   return (
