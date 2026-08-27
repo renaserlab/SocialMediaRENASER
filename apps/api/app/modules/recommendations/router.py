@@ -375,6 +375,19 @@ async def registrar_eventos(
     aceptadas = 0
     duplicadas = 0
     vistas_en_el_lote: set[str] = set()
+    # Las filas se JUNTAN y se escriben al final, no una a una dentro del bucle.
+    #
+    # POR QUE. Un lote trae hasta 25 senales (`services/senales.ts`), y el
+    # esquema admite 50. Con un `INSERT` por vuelta eso son hasta 50 viajes a
+    # la base, en fila; contra Supabase cada viaje son ~70 ms medidos, asi que
+    # guardar las senales de un rato de scroll costaba varios segundos de puro
+    # ir y venir. Es la unica N+1 de escritura que quedaba.
+    #
+    # Van en DOS listas y no en una porque `con_contexto` puede cambiar a mitad
+    # del bucle: un `INSERT` de varias filas exige que todas traigan las MISMAS
+    # columnas, y mezclarlas fallaria. Dos INSERT como mucho, en vez de 50.
+    filas_con_contexto: list[dict[str, object]] = []
+    filas_sin_contexto: list[dict[str, object]] = []
     for evento in payload.events:
         clave = evento.event_key
         if clave and (clave in ya_registradas or clave in vistas_en_el_lote):
@@ -411,8 +424,15 @@ async def registrar_eventos(
             campos["surface"] = evento.surface
             campos["algorithm_version"] = evento.algorithm_version
             campos["rank"] = evento.rank
-        await db.execute(insert(BehaviorEvent).values(campos))
+            filas_con_contexto.append(campos)
+        else:
+            filas_sin_contexto.append(campos)
         aceptadas += 1
+
+    if filas_sin_contexto:
+        await db.execute(insert(BehaviorEvent), filas_sin_contexto)
+    if filas_con_contexto:
+        await db.execute(insert(BehaviorEvent), filas_con_contexto)
 
     try:
         await db.commit()
