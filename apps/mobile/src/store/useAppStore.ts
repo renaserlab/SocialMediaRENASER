@@ -16,6 +16,7 @@ import { StoryRepository } from '@/repositories/StoryRepository';
 import { ApiError } from '@/services/api';
 import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
 import { perfMark } from '@/lib/perf';
+import { mezclarReacciones } from '@/lib/reacciones';
 import type { Language } from '@/i18n';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
 
@@ -95,6 +96,20 @@ type AppState = {
   posts: Post[];
   likedPostIds: string[];
   savedPostIds: string[];
+  /**
+   * Cuántas reacciones tiene cada publicación, para las pantallas que NO
+   * mantienen su propia lista de publicaciones.
+   *
+   * El muro lee el contador de `posts`, pero el feed de vídeo de Inicio tiene
+   * su propia cola de elementos y no puede: sin esto, cada celda se guardaba
+   * el número en un `useState` que nacía del valor de carga y se quedaba
+   * congelado ahí. Reaccionar en Inicio subía un número que no existía en
+   * ningún otro sitio y se perdía al desmontar la celda.
+   *
+   * NO se persiste: es una foto del servidor, no una preferencia. Guardarla
+   * en disco solo serviría para enseñar un número viejo al abrir.
+   */
+  likeCounts: Record<string, number>;
   reservedEventIds: string[];
   conversations: Conversation[];
 
@@ -162,6 +177,16 @@ type AppState = {
   /** `media` a null quita la foto y devuelve la imagen por defecto. */
   setProfileImage: (kind: 'avatar' | 'cover', media: PickedMedia | null) => Promise<void>;
   toggleLikePost: (postId: string) => void;
+  /**
+   * Aplica lo que dice el SERVIDOR sobre las reacciones de una tanda.
+   *
+   * Se pasa la tanda entera y no solo lo que tiene me gusta a propósito: sin
+   * saber qué publicaciones venían en la respuesta no se puede distinguir
+   * «esta no le gusta» de «esta no venía». Con las dos listas se corrige solo
+   * lo que el servidor ha hablado y no se toca el resto, que es lo que permite
+   * que Inicio y Explorar se pisen sin borrarse el estado.
+   */
+  aplicarLikesDelServidor: (idsDeLaTanda: string[], idsConMeGusta: string[], contadores?: Record<string, number>) => void;
   toggleSavePost: (postId: string) => void;
   addComment: (postId: string, text: string) => Promise<void>;
   toggleReservation: (eventId: string) => void;
@@ -210,6 +235,7 @@ export const useAppStore = create<AppState>()(
       posts: backendEnabled ? [] : initialPosts,
       likedPostIds: [],
       savedPostIds: [],
+      likeCounts: {},
       reservedEventIds: [],
       conversations: backendEnabled ? [] : conversations,
 
@@ -241,7 +267,18 @@ export const useAppStore = create<AppState>()(
 
       setHydrated: (hydrated) => set({ hydrated }),
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
-      setUser: (user) => set({ user }),
+      /*
+        Al salir se olvidan las reacciones, y va AQUI y no en `signOut` porque
+        hay tres caminos distintos que dejan la sesion a null y bastaba con que
+        uno se olvidara.
+
+        `likedPostIds` y `savedPostIds` se persisten en disco, asi que sin esto
+        la siguiente persona que iniciara sesion en el mismo telefono veria los
+        corazones de la cuenta anterior encendidos —y al tocarlos estaria
+        quitando un me gusta que nunca dio—.
+      */
+      setUser: (user) =>
+        set(user ? { user } : { user: null, likedPostIds: [], savedPostIds: [], likeCounts: {} }),
       setPosts: (posts) => set({ posts }),
       setConversations: (conversations) => set({ conversations }),
       registerLocalUser: ({ fullName, email }) =>
@@ -421,11 +458,29 @@ export const useAppStore = create<AppState>()(
       },
       toggleLikePost: (postId) => {
         const wasLiked = get().likedPostIds.includes(postId);
+        /*
+          El contador vive en DOS sitios y los dos se mueven a la vez.
+
+          `posts` es el del muro, que tiene la publicacion entera. `likeCounts`
+          es el de las pantallas que no la tienen —el feed de video de Inicio
+          lleva su propia cola de elementos—. Antes solo existia el primero, y
+          por eso Inicio se guardaba el numero en un `useState` suyo que no se
+          enteraba de nada.
+
+          `contadorActual` sale de donde haya: del mapa si ya se conoce, y si
+          no de la publicacion del muro.
+        */
+        const estado = get();
+        const enElMuro = estado.posts.find((post) => post.id === postId);
+        const contadorActual = estado.likeCounts[postId] ?? enElMuro?.likes ?? 0;
+        const contadorOptimista = Math.max(0, contadorActual + (wasLiked ? -1 : 1));
+
         // Actualización optimista.
         set((state) => ({
           likedPostIds: wasLiked
             ? state.likedPostIds.filter((id) => id !== postId)
             : [...state.likedPostIds, postId],
+          likeCounts: { ...state.likeCounts, [postId]: contadorOptimista },
           posts: state.posts.map((post) =>
             post.id === postId
               ? { ...post, likes: Math.max(0, post.likes + (wasLiked ? -1 : 1)) }
@@ -437,7 +492,9 @@ export const useAppStore = create<AppState>()(
         const op = wasLiked ? PostRepository.unlike(postId) : PostRepository.like(postId);
         op
           .then((likesCount) =>
+            // La cuenta REAL del servidor manda sobre la optimista.
             set((state) => ({
+              likeCounts: { ...state.likeCounts, [postId]: likesCount },
               posts: state.posts.map((post) =>
                 post.id === postId ? { ...post, likes: likesCount } : post,
               ),
@@ -449,6 +506,7 @@ export const useAppStore = create<AppState>()(
               likedPostIds: wasLiked
                 ? [...state.likedPostIds, postId]
                 : state.likedPostIds.filter((id) => id !== postId),
+              likeCounts: { ...state.likeCounts, [postId]: contadorActual },
               posts: state.posts.map((post) =>
                 post.id === postId
                   ? { ...post, likes: Math.max(0, post.likes + (wasLiked ? 1 : -1)) }
@@ -456,6 +514,16 @@ export const useAppStore = create<AppState>()(
               ),
             })),
           );
+      },
+
+      aplicarLikesDelServidor: (idsDeLaTanda, idsConMeGusta, contadores) => {
+        if (idsDeLaTanda.length === 0) return;
+        // La regla de mezcla vive en `lib/reacciones` y esta probada alli: es
+        // donde estaba el fallo y donde tiene que quedar fijado.
+        set((state) => ({
+          likedPostIds: mezclarReacciones(state.likedPostIds, idsDeLaTanda, idsConMeGusta),
+          likeCounts: contadores ? { ...state.likeCounts, ...contadores } : state.likeCounts,
+        }));
       },
       toggleSavePost: (postId) => {
         const wasSaved = get().savedPostIds.includes(postId);
@@ -578,12 +646,28 @@ export const useAppStore = create<AppState>()(
             perfMark('FEED_RESPONSE');
             set({
               posts: page.items,
-              likedPostIds: page.likedIds,
-              savedPostIds: page.savedIds,
               feedStatus: 'idle',
               feedOffset: page.items.length,
               feedHasMore: page.items.length === FEED_PAGE,
             });
+            /*
+              Las reacciones se APLICAN, no se sustituyen.
+
+              Antes esto era `likedPostIds: page.likedIds`, que borra de un
+              plumazo los me gusta de cualquier publicacion que no viniera en
+              esta pagina. Como Inicio y Explorar comparten la lista, cargar el
+              muro apagaba los corazones de los videos de Inicio: el sintoma que
+              se reporto. Se corrige solo lo que el servidor ha hablado.
+            */
+            const idsDeLaTanda = page.items.map((post) => post.id);
+            get().aplicarLikesDelServidor(
+              idsDeLaTanda,
+              page.likedIds,
+              Object.fromEntries(page.items.map((post) => [post.id, post.likes])),
+            );
+            set((state) => ({
+              savedPostIds: mezclarReacciones(state.savedPostIds, idsDeLaTanda, page.savedIds),
+            }));
             const withUrls = await resolveMediaUrls(page.items);
             perfMark('FEED_URLS_READY');
             set((state) => ({ posts: mergeMediaUrls(state.posts, withUrls) }));

@@ -130,6 +130,10 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     createdAt: formatRelativeTime(dto.created_at),
     createdAtIso: dto.created_at,
     likes: dto.likes_count,
+    // La reaccion propia viaja CON la publicacion. El muro la recogia aparte
+    // (`listFeed`), pero el feed de video se quedaba sin ella y pintaba todos
+    // los corazones vacios.
+    likedByMe: dto.liked_by_me ?? undefined,
     comments: [],
     commentsCount: dto.comments_count,
     isOwn: currentUserId ? dto.author.id === currentUserId : undefined,

@@ -3,6 +3,7 @@ import { PostRepository, resolveMediaUrls, type FeedKind } from '@/repositories/
 import { RecommendationRepository } from '@/repositories/RecommendationRepository';
 import { bestVideoSource } from '@/lib/videoSource';
 import type { ReelItem } from '@/components/ShortVideoItem';
+import { useAppStore } from '@/store/useAppStore';
 import type { Post } from '@/types';
 
 /**
@@ -82,6 +83,29 @@ export type FuenteDeVideos = {
  */
 export const VIDEOS_POR_PAGINA = 6;
 
+/**
+ * Lleva al estado compartido lo que el servidor dice de estas publicaciones.
+ *
+ * POR QUE HACE FALTA. El feed de video mapea `Post` a `ReelItem` y el elemento
+ * resultante no lleva la reaccion propia. Sin esto, Inicio no tenia forma de
+ * saber a que habia reaccionado quien mira, y pintaba TODOS los corazones
+ * vacios aunque el muro los pintara llenos: los dos ensenan las mismas
+ * publicaciones, asi que la diferencia se veia a simple vista.
+ *
+ * Va al store y no dentro de `ReelItem` a proposito: la cola de videos se
+ * guarda en disco como instantanea (`cacheDeVideos`), y meter ahi el estado de
+ * una cuenta significaria enseñarle a la siguiente persona que inicie sesion en
+ * ese telefono los me gusta de la anterior.
+ */
+function sembrarReacciones(posts: Post[]): void {
+  if (posts.length === 0) return;
+  useAppStore.getState().aplicarLikesDelServidor(
+    posts.map((post) => post.id),
+    posts.filter((post) => post.likedByMe).map((post) => post.id),
+    Object.fromEntries(posts.map((post) => [post.id, post.likes])),
+  );
+}
+
 /** Publicacion con video → elemento del feed vertical. */
 export function aReel(post: Post): ReelItem | null {
   const source = bestVideoSource(post);
@@ -129,6 +153,7 @@ function fuenteDelBackend(
         beforeCreatedAt: cursor?.creadoEn,
         beforeId: cursor?.id,
       });
+      sembrarReacciones(posts);
       const items = posts.map(aReel).filter((r): r is ReelItem => r !== null);
       // El cursor sale del ULTIMO POST recibido, reproducible o no.
       const ultimo = posts[posts.length - 1];
@@ -193,6 +218,7 @@ function fuenteRecomendada(usuarioId: string | null | undefined): FuenteDeVideos
         // Las firmas de Storage van en una segunda fase, igual que en el muro:
         // lo que se mide es cuanto tarda en verse el PRIMER video.
         const conMedios = posts.length > 0 ? await resolveMediaUrls(posts) : [];
+        sembrarReacciones(conMedios);
         const items = conMedios.map(aReel).filter((r): r is ReelItem => r !== null);
 
         const decision = decidirLote({
