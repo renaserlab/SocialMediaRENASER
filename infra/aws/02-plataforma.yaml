@@ -123,6 +123,16 @@ Parameters:
       primera prueba de humo: sin TLS viajan en claro los tokens de Supabase.
       Ver el paso manual 3 en docs/AWS_DESPLIEGUE.md.
 
+  # CUIDADO AL CAMBIAR DE PERFIL: este parametro TIENE que estar en los DOS
+  # ficheros de infra/aws/parametros/. Si falta en uno, `aws cloudformation
+  # deploy` aplica el valor por defecto de aqui abajo ('No'), la condicion
+  # `HayFrenteHttps` pasa a falso y la distribucion de CloudFront se ELIMINA.
+  #
+  # Esa distribucion es hoy la unica entrada HTTPS de la API —el balanceador no
+  # tiene certificado— y su dominio va escrito dentro de la web publicada y de
+  # las builds del movil (apps/mobile/eas.json). Borrarla no se arregla
+  # volviendo a desplegar: una distribucion nueva nace con OTRO dominio, y
+  # habria que republicar web y aplicaciones.
   FrenteHttpsDeEmergencia:
     Type: String
     Default: 'No'
