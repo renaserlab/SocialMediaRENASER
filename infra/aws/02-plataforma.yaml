@@ -40,7 +40,7 @@ Metadata:
       - Label: {default: Publicacion y TLS}
         Parameters: [CertificadoAcmArn, NombreDeDominio, SoloDesdeCloudFront, ListaDePrefijosDeCloudFront, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
       - Label: {default: Aplicacion}
-        Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl]
+        Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl, BetaFreeAccessEnabled]
       - Label: {default: Observabilidad y escalado}
         Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
     ParameterLabels:
@@ -275,6 +275,23 @@ Parameters:
   PaymentsReturnUrl:
     Type: String
     Default: https://social-media-renaser.vercel.app/pago
+
+  # Sin este parametro el interruptor NO SE PUEDE ENCENDER en produccion: las
+  # variables del contenedor se escriben en /etc/renaser/api.env desde aqui, y
+  # lo que no aparezca se queda con el valor por defecto del codigo (false).
+  #
+  # Defecto 'false' por la misma razon que el codigo: un interruptor cuyo
+  # defecto sea «regalar» acaba encendido el dia que alguien despliegue sin
+  # ponerlo, o cuando la beta termine y nadie se acuerde de apagarlo.
+  BetaFreeAccessEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Concede acceso gratuito a cursos de pago durante la beta. NO simula un
+      cobro: escribe un derecho en `entitlements` con source_provider
+      'beta_free' y sin transaction_id, y no toca el precio del curso.
+      Apagarlo no revoca los accesos ya concedidos.
 
   RetencionDeLogsEnDias:
     Type: Number
@@ -1234,6 +1251,7 @@ Resources:
                 echo "FEATURE_RECOMMENDATIONS_V1=${FeatureRecommendationsV1}"
                 echo "PAYMENTS_ENABLED=${PaymentsEnabled}"
                 echo "PAYMENTS_RETURN_URL=${PaymentsReturnUrl}"
+                echo "BETA_FREE_ACCESS_ENABLED=${BetaFreeAccessEnabled}"
               } >> /etc/renaser/api.env
               chmod 600 /etc/renaser/api.env
 

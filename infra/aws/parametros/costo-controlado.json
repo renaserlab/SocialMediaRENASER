@@ -80,6 +80,10 @@
     "ParameterValue": "https://social-media-renaser.vercel.app/pago"
   },
   {
+    "ParameterKey": "BetaFreeAccessEnabled",
+    "ParameterValue": "true"
+  },
+  {
     "ParameterKey": "RetencionDeLogsEnDias",
     "ParameterValue": "30"
   },
