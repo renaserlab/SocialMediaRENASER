@@ -16,6 +16,8 @@ DOS COSAS QUE ATRAVIESAN TODO EL FICHERO:
 
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -66,10 +68,19 @@ from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import require_admin
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 #: Lo que se responde cuando la personalizacion esta apagada.
 ORIGEN_APAGADO = "disabled"
+
+#: Lo que se responde cuando el recomendador se ha caido.
+#:
+#: Se distingue de `disabled` a proposito: apagado es una decision, caido es un
+#: fallo. Con la misma etiqueta para las dos cosas, las metricas no podrian
+#: separar «lo apagamos» de «se rompio».
+ORIGEN_FALLO = "fallback"
 
 
 # --------------------------------------------------------------------------- #
@@ -179,14 +190,24 @@ async def personas_para_ti(
             strategy=ORIGEN_APAGADO,
             items=[],
         )
-    items, estrategia = await service.personas_para(
-        db,
-        current_user.id,
-        limite=limit,
-        offset=offset,
-        incluir_seguidos=include_following,
-        debug=debug and not settings.is_production,
-    )
+    try:
+        items, estrategia = await service.personas_para(
+            db,
+            current_user.id,
+            limite=limit,
+            offset=offset,
+            incluir_seguidos=include_following,
+            debug=debug and not settings.is_production,
+        )
+    except Exception:  # noqa: BLE001
+        # Mismo criterio que en el muro: sugerir personas no puede tumbar
+        # Explorar. Sin sugerencias la pantalla sigue teniendo todo lo demas.
+        logger.exception("[recomendaciones] «personas para ti» fallo")
+        return PeopleRecommendations(
+            algorithm_version=RECOMMENDATION_ALGORITHM_VERSION,
+            strategy=ORIGEN_FALLO,
+            items=[],
+        )
     return PeopleRecommendations(
         algorithm_version=RECOMMENDATION_ALGORITHM_VERSION,
         strategy=estrategia,
@@ -223,10 +244,29 @@ async def contenido_para_ti(
             strategy=ORIGEN_APAGADO,
             items=[],
         )
-    ordenado = await service.contenido_para(
-        db, current_user.id, limite=limit, offset=offset, media=media
-    )
-    items = await leer_posts_por_id(db, ordenado.post_ids, current_user.id)
+    try:
+        ordenado = await service.contenido_para(
+            db, current_user.id, limite=limit, offset=offset, media=media
+        )
+        items = await leer_posts_por_id(db, ordenado.post_ids, current_user.id)
+    except Exception:  # noqa: BLE001
+        # ORDENAR EL MURO NO PUEDE TUMBAR EL MURO.
+        #
+        # Sin esto, cualquier fallo dentro del recomendador —una columna que
+        # falta porque una migracion no se aplico, un candidato con datos
+        # raros— salia como un 500. Y un 500 de Starlette NO lleva cabeceras
+        # CORS, asi que en la web ni siquiera se leia como un error del
+        # servidor: se leia como «sin conexion».
+        #
+        # La respuesta vacia ya esta contemplada por quien llama: el movil cae
+        # a la fuente cronologica de siempre. Lo que se pierde es el orden
+        # personalizado; lo que se salva es la pantalla.
+        logger.exception("[recomendaciones] el orden personalizado fallo")
+        return ContentRecommendations(
+            algorithm_version=CONTENT_ALGORITHM_VERSION,
+            strategy=ORIGEN_FALLO,
+            items=[],
+        )
     return ContentRecommendations(
         algorithm_version=CONTENT_ALGORITHM_VERSION,
         strategy=ordenado.estrategia,
@@ -277,9 +317,20 @@ async def cursos_para_ti(
             items=[],
         )
 
-    ordenados = await service.cursos_para(
-        db, current_user.id, limite=limit, offset=offset
-    )
+    try:
+        ordenados = await service.cursos_para(
+            db, current_user.id, limite=limit, offset=offset
+        )
+    except Exception:  # noqa: BLE001
+        # La aplicacion cae al catalogo publico, que es lo que ya hace cuando
+        # no hay nada que recomendar. Un fallo al ORDENAR cursos no puede
+        # dejar sin cursos.
+        logger.exception("[recomendaciones] «cursos para ti» fallo")
+        return CourseRecommendations(
+            algorithm_version=COURSE_ALGORITHM_VERSION,
+            strategy=ORIGEN_FALLO,
+            items=[],
+        )
     mostrar_debug = debug and not settings.is_production
     return CourseRecommendations(
         algorithm_version=COURSE_ALGORITHM_VERSION,
