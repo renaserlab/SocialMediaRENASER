@@ -97,12 +97,51 @@ class Settings(BaseSettings):
     #: responder la peticion, asi que no anade latencia a publicar.
     media_processing_enabled: bool = True
 
-    #: Transcodificar VIDEO en el servidor (720p H.264). Apagado por defecto:
-    #: en el plan gratuito de Render (0.1 CPU, 512 MB) un video de un minuto
-    #: tardaria decenas de minutos y podria morir al dormirse la instancia.
-    #: Para el contenido existente esta scripts/procesar_media.py, que corre
-    #: donde si hay CPU. Encenderlo aqui es decision de infraestructura.
-    video_transcode_enabled: bool = False
+    #: Transcodificar VIDEO en el servidor (720p H.264). ENCENDIDO desde el
+    #: 27/08/2026.
+    #:
+    #: Estuvo apagado porque «en el plan gratuito de Render (0.1 CPU, 512 MB)
+    #: un video de un minuto tardaria decenas de minutos». Era cierto. Hoy el
+    #: backend corre en AWS sobre una t3.small (2 vCPU, 2 GiB) y ese
+    #: razonamiento ya no aplica.
+    #:
+    #: Sin esto, un video subido DESDE LA WEB se quedaba a tamano original: la
+    #: libreria que comprime en el telefono no existe en navegador, asi que la
+    #: web era el unico camino por el que entraba un video de 100+ MB.
+    video_transcode_enabled: bool = True
+
+    #: Generar tambien la escalera HLS (360/540/720 en segmentos de 4 s).
+    #: APAGADO por defecto, y no por inercia: HLS son TRES codificaciones del
+    #: mismo video en vez de una, y la t3.small usa creditos de CPU
+    #: (`CpuCredits: standard`, 24/hora). Agotarlos no ralentiza solo el
+    #: procesado: frena la maquina entera, o sea toda la API.
+    #:
+    #: El MP4 de 720p ya da el ahorro grande de bytes. HLS anade calidad
+    #: adaptativa, que es una mejora real pero no urgente. Encenderlo es una
+    #: decision de capacidad: hacerlo cuando el procesado viva en su propia
+    #: maquina o en una cola aparte, no compartiendo CPU con las peticiones.
+    video_hls_enabled: bool = False
+
+    #: Cuantos videos se procesan A LA VEZ en este proceso.
+    #:
+    #: ES EL FRENO QUE PROTEGE LA API. `BackgroundTasks` no limita nada por su
+    #: cuenta: si diez personas publican un video a la vez, se lanzan diez
+    #: ffmpeg simultaneos sobre 2 vCPU, se agotan los creditos y CUALQUIER
+    #: peticion —el muro, el perfil, los mensajes— se arrastra.
+    #:
+    #: Con 1, los videos se procesan en fila. Tardan mas en estar listos, y da
+    #: igual: mientras tanto se sirve el original, que es exactamente lo que
+    #: pasaba antes. Lo que no puede pasar es que publicar un video degrade la
+    #: aplicacion para quien no esta publicando nada.
+    video_jobs_concurrentes: int = 1
+
+    #: Por encima de estos bits por segundo, un video merece transcodificarse.
+    #:
+    #: El movil ya sube a ~2.5 Mbps (`VIDEO_OPCIONES` en mediaCompressor.ts),
+    #: asi que con este umbral los videos de la app se saltan el trabajo: ya
+    #: estan bien. Solo se transcodifica lo que llega gordo de verdad, que en
+    #: la practica es lo subido desde la web.
+    video_bitrate_umbral: int = 3_500_000
 
     # --- Recomendaciones ---
     #: Personalizacion (onboarding + "Personas para ti" + "Para ti" ordenado).
