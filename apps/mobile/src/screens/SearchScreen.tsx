@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,40 +13,94 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
-import { AuthRepository } from '@/repositories/AuthRepository';
-import { CatalogRepository } from '@/repositories/CatalogRepository';
-import { HashtagRepository, type HashtagDto } from '@/repositories/HashtagRepository';
-import { LearningRepository } from '@/repositories/LearningRepository';
-import { ProfileRepository } from '@/repositories/ProfileRepository';
-import type { ProfileSummary } from '@/mappers/profileMapper';
+import { SearchRepository } from '@/repositories/SearchRepository';
 import { profileImageUrl } from '@/services/storage';
-import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import type { Course, EventItem, Post } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import {
+  ampliar,
+  anotarTecleo,
+  aplicar,
+  debeDecirSinResultados,
+  esBuscable,
+  estadoInicial,
+  estaOcupado,
+  ESPERA_DE_TECLEO_MS,
+  lanzar,
+  marcarFallo,
+  normalizarTermino,
+  totalDeResultados,
+  type CursoDto,
+  type EstadoDeBusqueda,
+  type EtiquetaDto,
+  type EventoDto,
+  type Grupo,
+  type PersonaDto,
+  type PublicacionDto,
+} from '@/lib/busquedaProgresiva';
 
 const RECENTS_KEY = 'renaser-recent-searches';
 const MAX_RECENTS = 6;
 
-type CatalogHit = { id: string; title: string; subtitle: string; href: string };
-
 /** Fila de la lista aplanada (secciones + resultados en una sola FlashList). */
 type SearchRow =
-  | { kind: 'section'; key: string; title: string; onAction?: () => void }
+  | { kind: 'section'; key: string; title: string; action?: string; onAction?: () => void }
+  | { kind: 'temas'; key: string; texto: string }
   | { kind: 'recent'; key: string; value: string }
-  | { kind: 'person'; key: string; person: ProfileSummary }
-  | { kind: 'hashtag'; key: string; hashtag: HashtagDto }
-  | { kind: 'post'; key: string; post: Post }
-  | { kind: 'catalog'; key: string; item: CatalogHit };
+  | { kind: 'person'; key: string; persona: PersonaDto }
+  | { kind: 'hashtag'; key: string; etiqueta: EtiquetaDto }
+  | { kind: 'post'; key: string; publicacion: PublicacionDto }
+  | { kind: 'course'; key: string; curso: CursoDto }
+  | { kind: 'event'; key: string; evento: EventoDto };
 
+/** El dia y el mes de un evento, o nada si la fecha no vino o no se entiende. */
+function fechaCorta(iso: string | null): string {
+  if (!iso) return '';
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) return '';
+  return fecha.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' });
+}
+
+/**
+ * La pantalla de buscar.
+ *
+ * TODO LO QUE SE VE AQUI LO RESUELVE `GET /api/v1/search`. Antes esta pantalla
+ * filtraba `state.posts` —las veinte publicaciones ya descargadas, asi que una
+ * publicacion de hace tres meses no aparecia jamas— y se bajaba el catalogo
+ * entero de cursos para pasarle un `includes`. Ahora pregunta a la base, que es
+ * donde estan todas las filas, y de paso encuentra por TEMA: «muebles» saca
+ * carpinteria aunque esa palabra no este escrita en ningun sitio.
+ *
+ * LA LOGICA DE LA CARRERA NO ESTA AQUI, esta en `lib/busquedaProgresiva.ts`, y
+ * es lo que impide que la respuesta lenta de «carp» pise a la de
+ * «carpinteria». Esta pantalla solo mueve datos: pide, entrega el sello y
+ * pinta.
+ */
 export function SearchScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const posts = useAppStore((state) => state.posts);
 
   const [query, setQuery] = useState('');
   const [recents, setRecents] = useState<string[]>([]);
+  const [estado, setEstado] = useState<EstadoDeBusqueda>(estadoInicial);
+
+  /*
+    El estado tambien en una referencia.
+
+    Hace falta porque lanzar una peticion NECESITA el sello que sale de la misma
+    transicion que actualiza el estado, y los actualizadores de `useState` tienen
+    que ser puros: sacar el sello desde dentro de uno es un efecto colateral que
+    en modo estricto se ejecuta dos veces. Con la referencia, la transicion se
+    calcula una vez, fuera, y `setEstado` recibe el resultado ya hecho.
+  */
+  const refEstado = useRef(estado);
+  const cambiar = useCallback((paso: (previo: EstadoDeBusqueda) => EstadoDeBusqueda) => {
+    const siguiente = paso(refEstado.current);
+    if (siguiente === refEstado.current) return;
+    refEstado.current = siguiente;
+    setEstado(siguiente);
+  }, []);
 
   useEffect(() => {
     AsyncStorage.getItem(RECENTS_KEY)
@@ -69,155 +123,148 @@ export function SearchScreen() {
     AsyncStorage.removeItem(RECENTS_KEY).catch(() => {});
   };
 
-  const term = query.trim().toLowerCase();
-  const isSearching = term.length >= 2;
-
-  // Personas: busqueda en el backend, no sobre una lista fija de demo.
-  const [remotePeople, setRemotePeople] = useState<ProfileSummary[]>([]);
-  useEffect(() => {
-    if (!isSearching || !AuthRepository.enabled) {
-      setRemotePeople([]);
-      return;
-    }
-    let alive = true;
-    // Pequeña espera para no lanzar una peticion por cada tecla.
-    const timer = setTimeout(() => {
-      ProfileRepository.search(term)
-        .then((list) => {
-          if (alive) setRemotePeople(list);
-        })
-        .catch(() => {
-          if (alive) setRemotePeople([]);
-        });
-    }, 250);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [term, isSearching]);
-
   /*
-    Etiquetas: las resuelve el backend, igual que las personas y por el mismo
-    motivo. Buscarlas en cliente solo encontraria las que ya estan en el feed
-    descargado, o sea las de las ultimas veinte publicaciones: «#carpinteria»
-    con doscientas publicaciones no aparecería si ninguna de esas veinte la
-    lleva. Ademas es lo unico que puede contar cuantas publicaciones tiene cada
-    una y ordenar por uso.
+    Una sola peticion por pausa al teclear, y se cancela si el texto cambia.
 
-    Si falla —o si la migracion 0031 todavia no esta aplicada, y entonces el
-    backend contesta vacio— no se pinta la seccion y el resto de la busqueda
-    sigue funcionando igual.
+    La cancelacion es un ahorro, NO la garantia: una respuesta puede estar ya
+    viajando cuando se aborta, y en la web el `fetch` cancelado a veces resuelve
+    igual. Lo que de verdad evita pintar resultados de otra busqueda es el sello
+    que se comprueba al aplicar.
   */
-  const [remoteHashtags, setRemoteHashtags] = useState<HashtagDto[]>([]);
   useEffect(() => {
-    if (!isSearching || !AuthRepository.enabled) {
-      setRemoteHashtags([]);
-      return;
-    }
-    let alive = true;
-    const timer = setTimeout(() => {
-      HashtagRepository.buscar(term)
-        .then((list) => {
-          if (alive) setRemoteHashtags(list);
-        })
+    cambiar((previo) => anotarTecleo(previo, query));
+    const texto = normalizarTermino(query);
+    if (!esBuscable(texto)) return;
+
+    const control = new AbortController();
+    const temporizador = setTimeout(() => {
+      const { estado: enVuelo, sello } = lanzar(refEstado.current, texto);
+      refEstado.current = enVuelo;
+      setEstado(enVuelo);
+
+      SearchRepository.buscar(texto, { signal: control.signal })
+        .then((respuesta) => cambiar((previo) => aplicar(previo, sello, respuesta)))
         .catch(() => {
-          if (alive) setRemoteHashtags([]);
+          // Cancelar no es fallar: el aviso de error seria de una busqueda que
+          // ya nadie espera.
+          if (control.signal.aborted) return;
+          cambiar((previo) => marcarFallo(previo, sello));
         });
-    }, 250);
+    }, ESPERA_DE_TECLEO_MS);
+
     return () => {
-      alive = false;
-      clearTimeout(timer);
+      clearTimeout(temporizador);
+      control.abort();
     };
-  }, [term, isSearching]);
+  }, [query, cambiar]);
 
-  // Catalogo real, cargado una vez.
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [allEvents, setAllEvents] = useState<EventItem[]>([]);
-  useEffect(() => {
-    if (!AuthRepository.enabled) return;
-    // Si el catalogo no carga, buscar un curso devuelve «sin resultados» y
-    // parece que ese curso no existe. Queda constancia en el log.
-    LearningRepository.listCourses()
-      .then(setCourses)
-      .catch((error) => {
-        console.warn('[buscar] no se pudo cargar el catalogo de cursos', error);
-        setCourses([]);
-      });
-    CatalogRepository.listEvents()
-      .then((page) => setAllEvents(page.items))
-      .catch((error) => {
-        console.warn('[buscar] no se pudieron cargar los eventos', error);
-        setAllEvents([]);
-      });
-  }, []);
+  /** Pide la pagina siguiente de un grupo, sin tocar los demas. */
+  const verMas = useCallback(
+    (grupo: Grupo) => {
+      const paso = ampliar(refEstado.current, grupo);
+      if (!paso) return;
+      refEstado.current = paso.estado;
+      setEstado(paso.estado);
+      SearchRepository.buscar(paso.sello.termino, { grupo, salto: paso.sello.salto })
+        .then((respuesta) => cambiar((previo) => aplicar(previo, paso.sello, respuesta)))
+        .catch(() => cambiar((previo) => marcarFallo(previo, paso.sello)));
+    },
+    [cambiar],
+  );
 
-  const results = useMemo(() => {
-    if (!isSearching) return { people: [], hashtags: [], posts: [], catalog: [] };
-    const match = (text: string) => text.toLowerCase().includes(term);
-    return {
-      // Las personas y las etiquetas las resuelve el backend (ver los efectos
-      // de arriba); el catalogo se filtra en cliente porque son pocos
-      // elementos.
-      people: remotePeople,
-      hashtags: remoteHashtags,
-      posts: posts.filter((p) => match(p.body) || match(p.author)),
-      catalog: [
-        ...courses
-          .filter((c) => match(c.title) || match(c.description))
-          .map((c) => ({ id: c.id, title: c.title, subtitle: 'Programa', href: `/course/${c.id}` })),
-        ...allEvents
-          .filter((e) => match(e.title) || match(e.description))
-          .map((e) => ({ id: e.id, title: e.title, subtitle: `${e.date} · ${e.location}`, href: '/events' })),
-      ],
-    };
-  }, [term, isSearching, posts, remotePeople, remoteHashtags, courses, allEvents]);
+  /** Vuelve a lanzar la busqueda actual tal cual, para el boton de reintentar. */
+  const reintentar = useCallback(() => {
+    const texto = normalizarTermino(query);
+    if (!esBuscable(texto)) return;
+    const { estado: enVuelo, sello } = lanzar(refEstado.current, texto);
+    refEstado.current = enVuelo;
+    setEstado(enVuelo);
+    SearchRepository.buscar(texto)
+      .then((respuesta) => cambiar((previo) => aplicar(previo, sello, respuesta)))
+      .catch(() => cambiar((previo) => marcarFallo(previo, sello)));
+  }, [query, cambiar]);
 
-  const total =
-    results.people.length +
-    results.hashtags.length +
-    results.posts.length +
-    results.catalog.length;
+  const buscando = esBuscable(estado.tecleado);
+  const ocupado = estaOcupado(estado);
+  const total = totalDeResultados(estado);
+  const { resultados } = estado;
 
-  // Las 3 secciones se aplanan en una sola lista virtualizada: con datos reales
-  // del backend, mapear todo dentro de un ScrollView no escala.
   const rows = useMemo<SearchRow[]>(() => {
-    if (!isSearching) {
+    if (!buscando) {
       if (recents.length === 0) return [];
       return [
-        { kind: 'section', key: 'sec-recents', title: 'Búsquedas recientes', onAction: clearRecents },
+        { kind: 'section', key: 'sec-recents', title: 'Búsquedas recientes', action: 'Borrar', onAction: clearRecents },
         ...recents.map((value) => ({ kind: 'recent' as const, key: `r-${value}`, value })),
       ];
     }
+
     const out: SearchRow[] = [];
-    if (results.people.length > 0) {
-      out.push({ kind: 'section', key: 'sec-people', title: 'Personas' });
-      results.people.forEach((person) => out.push({ kind: 'person', key: `p-${person.id}`, person }));
+
+    /*
+      Por que se dice en que temas se esta buscando: sin esta linea, encontrar
+      un curso de carpinteria escribiendo «muebles» parece un fallo. Un buscador
+      que acierta sin explicar por que no se lee como listo, se lee como averiado.
+    */
+    if (resultados.temas.length > 0) {
+      out.push({
+        kind: 'temas',
+        key: 'temas',
+        texto: `También buscamos en ${resultados.temas.map((t) => t.name).join(', ')}`,
+      });
+    }
+
+    /** La cabecera de un grupo, con su «Ver más» si el backend dijo que hay más. */
+    const seccion = (grupo: Grupo, titulo: string) => {
+      const hayMas = resultados.siguiente[grupo] != null;
+      out.push({
+        kind: 'section',
+        key: `sec-${grupo}`,
+        title: titulo,
+        action: hayMas ? (estado.ampliando === grupo ? 'Cargando…' : 'Ver más') : undefined,
+        onAction: hayMas && estado.ampliando === null ? () => verMas(grupo) : undefined,
+      });
+    };
+
+    if (resultados.people.length > 0) {
+      seccion('people', 'Personas');
+      resultados.people.forEach((persona) =>
+        out.push({ kind: 'person', key: `p-${persona.id}`, persona }),
+      );
     }
     /*
       Las etiquetas van DESPUES de las personas y ANTES de las publicaciones: se
       busca sobre todo a alguien, y una etiqueta es un atajo a muchas
       publicaciones, asi que ofrecerla antes que las publicaciones sueltas
-      ahorra un paso. Con la 0031 sin aplicar la lista viene vacia y la seccion
-      sencillamente no aparece.
+      ahorra un paso.
     */
-    if (results.hashtags.length > 0) {
-      out.push({ kind: 'section', key: 'sec-hashtags', title: 'Etiquetas' });
-      results.hashtags.forEach((hashtag) =>
-        out.push({ kind: 'hashtag', key: `h-${hashtag.tag}`, hashtag }),
+    if (resultados.hashtags.length > 0) {
+      seccion('hashtags', 'Etiquetas');
+      resultados.hashtags.forEach((etiqueta) =>
+        out.push({ kind: 'hashtag', key: `h-${etiqueta.tag}`, etiqueta }),
       );
     }
-    if (results.posts.length > 0) {
-      out.push({ kind: 'section', key: 'sec-posts', title: 'Publicaciones' });
-      results.posts.forEach((post) => out.push({ kind: 'post', key: `o-${post.id}`, post }));
+    if (resultados.posts.length > 0) {
+      seccion('posts', 'Publicaciones');
+      resultados.posts.forEach((publicacion) =>
+        out.push({ kind: 'post', key: `o-${publicacion.id}`, publicacion }),
+      );
     }
-    if (results.catalog.length > 0) {
-      out.push({ kind: 'section', key: 'sec-catalog', title: 'Cursos y eventos' });
-      results.catalog.forEach((item) => out.push({ kind: 'catalog', key: `c-${item.id}`, item }));
+    if (resultados.courses.length > 0) {
+      seccion('courses', 'Cursos');
+      resultados.courses.forEach((curso) =>
+        out.push({ kind: 'course', key: `c-${curso.id}`, curso }),
+      );
+    }
+    if (resultados.events.length > 0) {
+      seccion('events', 'Eventos');
+      resultados.events.forEach((evento) =>
+        out.push({ kind: 'event', key: `e-${evento.id}`, evento }),
+      );
     }
     return out;
     // `recents`/`clearRecents` solo afectan al modo sin búsqueda.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSearching, results, recents]);
+  }, [buscando, resultados, estado.ampliando, recents, verMas]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -248,39 +295,78 @@ export function SearchScreen() {
         keyExtractor={(row: SearchRow) => row.key}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        /*
+          Mientras llega la respuesta nueva se siguen viendo los resultados
+          anteriores con este aviso encima. Vaciar la lista en cada tecla hace
+          que escribir sea un parpadeo, y esconde justo el resultado que a lo
+          mejor ya estaba en pantalla.
+        */
+        ListHeaderComponent={
+          ocupado && total > 0 ? (
+            <Text variant="secondary" color={colors.textMuted} style={styles.buscando}>
+              Buscando…
+            </Text>
+          ) : null
+        }
         ListEmptyComponent={
-          isSearching && total === 0 ? (
-            <StateView
-              state="empty"
-              icon="search"
-              title="Sin resultados"
-              description={`No encontramos nada para "${query.trim()}".`}
-            />
-          ) : (
+          !buscando ? (
             <StateView
               state="empty"
               icon="search"
               title="Busca en Z"
               description="Encuentra personas, publicaciones, cursos y eventos."
             />
+          ) : estado.fallo ? (
+            <StateView
+              state="error"
+              title="No pudimos buscar"
+              description="Revisa tu conexión e inténtalo de nuevo."
+              onRetry={reintentar}
+            />
+          ) : debeDecirSinResultados(estado) ? (
+            <StateView
+              state="empty"
+              icon="search"
+              title="Sin resultados"
+              description={`No encontramos nada para "${estado.termino}".`}
+            />
+          ) : (
+            <StateView state="loading" />
           )
         }
         renderItem={({ item: row }: { item: SearchRow }) => {
           switch (row.kind) {
             case 'section':
-              return <SectionTitle title={row.title} action={row.onAction ? 'Borrar' : undefined} onActionPress={row.onAction} />;
+              return (
+                <SectionTitle title={row.title} action={row.action} onActionPress={row.onAction} />
+              );
+            case 'temas':
+              return (
+                <Text variant="secondary" color={colors.textMuted} style={styles.temas}>
+                  {row.texto}
+                </Text>
+              );
             case 'recent':
               return (
                 <ListRow title={row.value} leftIcon="clock" rightIcon="chevron-right" onPress={() => setQuery(row.value)} />
               );
-            case 'person':
+            case 'person': {
+              const avatar = profileImageUrl(row.persona.avatar_path);
+              /*
+                El subtitulo es el @usuario y, si no lo tiene, lo que declara
+                PODER APORTAR. Nunca lo que quiere aprender: el contrato del
+                backend ni siquiera trae ese dato.
+              */
+              const subtitulo = row.persona.username
+                ? `@${row.persona.username}`
+                : row.persona.offer_topics.join(' · ') || row.persona.bio;
               return (
                 <ListRow
-                  title={row.person.fullName}
-                  subtitle={row.person.username}
+                  title={row.persona.full_name}
+                  subtitle={subtitulo || undefined}
                   leftComponent={
                     <ExpoImage
-                      source={profileImageUrl(row.person.avatarPath) ? { uri: profileImageUrl(row.person.avatarPath)! } : assets.avatar}
+                      source={avatar ? { uri: avatar } : assets.avatar}
                       style={styles.avatar}
                       contentFit="cover"
                       cachePolicy="memory-disk"
@@ -289,20 +375,21 @@ export function SearchScreen() {
                   rightIcon="chevron-right"
                   onPress={() => {
                     persistRecent(query);
-                    irAlPerfil(router, row.person.id);
+                    irAlPerfil(router, row.persona.id);
                   }}
                 />
               );
+            }
             case 'hashtag':
               return (
                 <ListRow
-                  title={`#${row.hashtag.display_tag}`}
+                  title={`#${row.etiqueta.display_tag}`}
                   // La cuenta la da el servidor y es la REAL (solo publicado).
                   // El plural se escribe entero: «1 publicaciones» se lee mal.
                   subtitle={
-                    row.hashtag.posts_count === 1
+                    row.etiqueta.posts_count === 1
                       ? '1 publicación'
-                      : `${row.hashtag.posts_count} publicaciones`
+                      : `${row.etiqueta.posts_count} publicaciones`
                   }
                   leftIcon="hash"
                   rightIcon="chevron-right"
@@ -310,7 +397,7 @@ export function SearchScreen() {
                     persistRecent(query);
                     // Se navega con la forma NORMALIZADA (`tag`), que es la que
                     // de verdad existe: `display_tag` es solo para pintar.
-                    router.push(`/hashtag/${encodeURIComponent(row.hashtag.tag)}` as never);
+                    router.push(`/hashtag/${encodeURIComponent(row.etiqueta.tag)}` as never);
                   }}
                 />
               );
@@ -319,29 +406,49 @@ export function SearchScreen() {
                 <Pressable
                   onPress={() => {
                     persistRecent(query);
-                    router.push(`/post/${row.post.id}` as never);
+                    router.push(`/post/${row.publicacion.id}` as never);
                   }}
                   style={({ pressed }) => [styles.postRow, { borderBottomColor: colors.border, opacity: pressed ? 0.75 : 1 }]}
                   accessibilityRole="button"
-                  accessibilityLabel={`Ver publicación de ${row.post.author}`}
+                  accessibilityLabel={`Ver publicación de ${row.publicacion.author_name}`}
                 >
-                  <Text variant="secondary" weight="700">{row.post.author}</Text>
-                  <Text variant="body" color={colors.textMuted} numberOfLines={2}>{row.post.body}</Text>
+                  <Text variant="secondary" weight="700">{row.publicacion.author_name}</Text>
+                  <Text variant="body" color={colors.textMuted} numberOfLines={2}>{row.publicacion.body}</Text>
                 </Pressable>
               );
-            case 'catalog':
+            case 'course':
               return (
                 <ListRow
-                  title={row.item.title}
-                  subtitle={row.item.subtitle}
+                  title={row.curso.title}
+                  subtitle={
+                    row.curso.coming_soon
+                      ? 'Próximamente'
+                      : row.curso.subtitle || row.curso.author_name || 'Programa'
+                  }
                   leftIcon="book"
                   rightIcon="chevron-right"
                   onPress={() => {
                     persistRecent(query);
-                    router.push(row.item.href as never);
+                    router.push(`/course/${row.curso.id}` as never);
                   }}
                 />
               );
+            case 'event': {
+              const cuando = fechaCorta(row.evento.starts_at);
+              const donde = row.evento.location ?? '';
+              return (
+                <ListRow
+                  title={row.evento.title}
+                  subtitle={[cuando, donde].filter(Boolean).join(' · ') || undefined}
+                  leftIcon="calendar"
+                  rightIcon="chevron-right"
+                  onPress={() => {
+                    persistRecent(query);
+                    router.push('/events' as never);
+                  }}
+                />
+              );
+            }
           }
         }}
       />
@@ -356,4 +463,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
   avatar: { width: 40, height: 40, borderRadius: 20 },
   postRow: { paddingVertical: spacing.md, borderBottomWidth: 1, gap: 4 },
+  temas: { marginBottom: spacing.sm },
+  buscando: { paddingVertical: spacing.sm },
 });
