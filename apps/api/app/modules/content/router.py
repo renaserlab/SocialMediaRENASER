@@ -863,6 +863,84 @@ async def list_post_likes(
 # --------------------------------------------------------------------------- #
 # Guardados
 # --------------------------------------------------------------------------- #
+#
+# LA RUTA ES `/saved-posts` Y NO `/posts/saved` PORQUE `/posts/{post_id}` YA
+# EXISTE: FastAPI resuelve por orden de registro y "saved" acabaria entrando
+# como identificador de publicacion en cuanto alguien moviera una funcion de
+# sitio. Una ruta que no se puede romper reordenando el fichero vale mas que
+# una ruta bonita.
+
+
+@router.get("/saved-posts", response_model=list[PostRead])
+async def list_saved_posts(
+    page: Page = Depends(pagination_params),
+    media: str | None = Query(default=None, pattern="^(image|video|audio)$"),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PostRead]:
+    """Lo que ha guardado QUIEN PREGUNTA. Nunca lo de otra persona.
+
+    POR QUE EXISTE. El movil resolvia los guardados filtrando una lista de ids
+    del telefono contra el muro que hubiera en memoria: se vaciaba al
+    reinstalar, no se compartia entre dispositivos y podia seguir ensenando
+    algo ya retirado. Guardar es un hecho del servidor, igual que ya se
+    corrigio con los cursos.
+
+    Devuelve lo mismo que el muro (`PostRead`) a proposito: la pantalla pinta
+    las publicaciones con la misma tarjeta, y una forma resumida obligaria a
+    pedir cada publicacion otra vez para tener el medio y los contadores.
+
+    `media` separa los audios guardados del resto, que es lo que necesita la
+    biblioteca. Se filtra aqui y no en el cliente por lo mismo que en el muro:
+    descartar despues de recibir descuadra la paginacion.
+    """
+    uid = current_user.id
+    likes_sq, comments_sq, liked_sq, _ = _feed_columns(uid)
+    # Alias para el JOIN, y `literal(True)` en vez del `saved_by_me` de
+    # `_feed_columns`: esa columna es un EXISTS sobre la MISMA tabla que aqui se
+    # une, asi que SQLAlchemy la autocorrelaciona y la subconsulta se queda sin
+    # FROM. Ademas seria trabajo tirado: todo lo que sale de esta lista esta
+    # guardado por definicion.
+    guardado = aliased(SavedPost)
+    stmt = (
+        select(Post, Profile, likes_sq, comments_sq, liked_sq, literal(True))
+        .join(Profile, Profile.id == Post.author_id)
+        .join(guardado, guardado.post_id == Post.id)
+        # `status == published` no es un detalle: sin esto, una publicacion
+        # retirada seguiria en los guardados de todo el que la marco.
+        .where(guardado.user_id == uid, Post.status == "published")
+        # Por cuando SE GUARDO, no por cuando se publico: lo ultimo que aparto
+        # esta persona es lo que espera ver arriba.
+        .order_by(guardado.created_at.desc(), Post.id.desc())
+        .limit(page.limit)
+        # Offset y no cursor, al reves que en los comentarios: esta lista solo
+        # la mueve su dueno, y con una sola persona anadiendo no hay pagina que
+        # se descuadre por debajo.
+        .offset(page.offset)
+    )
+    # Bloquear tiene que servir de algo tambien aqui: lo guardado antes de
+    # bloquear a alguien no puede seguir apareciendo.
+    stmt = stmt.where(Post.author_id.not_in(blocked_either_way(uid)))
+    if media:
+        with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
+        stmt = stmt.where(Post.id.in_(with_media))
+
+    rows = (await db.execute(stmt)).all()
+    ids = [row[0].id for row in rows]
+    media_map = await _load_media_map(db, ids)
+    temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
+    return [
+        _to_post_read(
+            *row,
+            media=media_map.get(row[0].id, []),
+            topic_ids=temas.get(row[0].id, []),
+            hashtags=etiquetas.get(row[0].id, []),
+            mentions=personas.get(row[0].id, []),
+        )
+        for row in rows
+    ]
+
+
 @router.post("/posts/{post_id}/save")
 async def save_post(
     post_id: str,
@@ -910,17 +988,53 @@ def _to_comment_read(comment: Comment, profile: Profile) -> CommentRead:
 async def list_comments(
     post_id: str,
     page: Page = Depends(pagination_params),
+    # Cursor (keyset): "lo comentado ANTES de este punto", igual que en el feed.
+    before_created_at: str | None = Query(default=None),
+    before_id: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[CommentRead]:
+    """Comentarios de una publicacion, del mas reciente al mas antiguo.
+
+    LECTURA PUBLICA a proposito: leer no pide cuenta, escribir si. No se toca.
+
+    POR QUE DEL MAS RECIENTE AL MAS ANTIGUO. Antes se ordenaba de antiguo a
+    nuevo y se recortaba con `limit`, asi que en una publicacion con 100
+    comentarios el movil recibia los 20 PRIMEROS y los recientes eran
+    inalcanzables: no habia forma de llegar al final sin pedir las cinco
+    paginas. Quien abre los comentarios quiere lo ultimo, asi que lo ultimo es
+    lo que cabe en la primera pagina.
+
+    Y POR QUE CURSOR Y NO OFFSET. Aqui entran comentarios MIENTRAS se lee. Con
+    offset, un comentario nuevo empuja la lista y la pagina siguiente repite el
+    que ya se vio; el cursor apunta a una fila concreta, asi que lo que llega
+    despues no descuadra nada. `offset` se conserva como respaldo para un movil
+    anterior a este cambio, que no manda cursor.
+    """
     ensure_uuid(post_id, "Publicacion no encontrada.")
     stmt = (
         select(Comment, Profile)
         .join(Profile, Profile.id == Comment.author_id)
         .where(Comment.post_id == post_id, Comment.status == "published")
-        .order_by(Comment.created_at.asc())
+        # Desempate por id: dos comentarios pueden compartir instante y sin un
+        # orden total el cursor podria saltarse uno o repetirlo.
+        .order_by(Comment.created_at.desc(), Comment.id.desc())
         .limit(page.limit)
-        .offset(page.offset)
     )
+    if before_created_at:
+        try:
+            cursor_at = datetime.fromisoformat(before_created_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValidationAppError("Cursor de paginacion no valido.")
+        if before_id:
+            ensure_uuid(before_id, "Cursor de paginacion no valido.")
+            stmt = stmt.where(
+                (Comment.created_at < cursor_at)
+                | ((Comment.created_at == cursor_at) & (Comment.id < before_id))
+            )
+        else:
+            stmt = stmt.where(Comment.created_at < cursor_at)
+    else:
+        stmt = stmt.offset(page.offset)
     rows = (await db.execute(stmt)).all()
     return [_to_comment_read(comment, profile) for comment, profile in rows]
 

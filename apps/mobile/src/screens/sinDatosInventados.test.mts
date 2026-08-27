@@ -41,8 +41,12 @@ test('la biblioteca no trae audios escritos a mano', () => {
     Eran dos: «Tu enfoque de esta semana» y «El poder de la disciplina diaria».
     Se pintaban como el historial de quien miraba, y ademas los dos abrian el
     MISMO contenido, porque `/audio/[id]` ignora el id y siempre carga el audio
-    privado vigente. No hay de donde sacar un historial de escucha —no existe
-    ni tabla ni endpoint—, asi que la pestaña sale vacia hasta que lo haya.
+    privado vigente.
+
+    SIGUE SIN HABER HISTORIAL DE ESCUCHA: no existe ni tabla ni endpoint que
+    registre lo que alguien ha oido. La pestaña ya no esta vacia, pero lo que
+    enseña son los audios GUARDADOS (`/saved-posts?media=audio`), un hecho del
+    servidor. Lo que no puede volver es prometer un historial.
   */
   const pantalla = readFileSync(join(SRC, 'screens', 'LibraryScreen.tsx'), 'utf8');
   assert.ok(
@@ -55,10 +59,22 @@ test('la biblioteca no trae audios escritos a mano', () => {
       'audios abririan el mismo contenido.',
   );
   assert.ok(
-    pantalla.includes('Historial de audios vacío'),
-    'Falta el estado vacio de «Mis Audios»: es lo que dice la verdad mientras no ' +
-      'exista una fuente real de audios.',
+    /listSaved\(/.test(pantalla) && /media: 'audio'/.test(pantalla),
+    '«Mis Audios» tiene que salir del servidor (`listSaved` con media audio); ' +
+      'cualquier otra fuente se pierde al reinstalar.',
   );
+  /*
+    Los textos que prometian escuchas. Se buscan tal cual se pintaban y no por
+    la palabra «historial» a secas, porque el comentario de cabecera de la
+    pantalla explica justo por que NO existe ese historial: buscarla suelta
+    convertiria esa explicacion en un fallo.
+  */
+  for (const promesa of ['Historial de audios vacío', 'audios que escuches']) {
+    assert.ok(
+      !pantalla.includes(promesa),
+      `«Mis Audios» vuelve a prometer un historial de escucha ("${promesa}") que no existe.`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
