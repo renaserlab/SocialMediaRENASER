@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
@@ -52,10 +52,25 @@ export function LibraryScreen() {
     void cargar();
   }, [cargar]);
 
-  // Al volver de un curso el progreso ha cambiado: se vuelve a pedir en vez de
-  // ensenar el porcentaje con el que se salio.
+  /*
+    Al volver de un curso el progreso ha cambiado: se vuelve a pedir en vez de
+    ensenar el porcentaje con el que se salio.
+
+    EL PRIMER FOCO SE SALTA A PROPOSITO. `useFocusEffect` tambien dispara al
+    MONTAR, asi que junto con el efecto de arriba la biblioteca pedia
+    `/catalog/courses/mine` DOS veces en cada apertura, siempre, y la primera
+    respuesta se tiraba. Es el mismo fallo que ya estaba resuelto en
+    `ProfileSection` (ver el comentario de `yaSeEnfoco` alli); aqui nunca se
+    aplico. Al montar ya carga el efecto de arriba; esto solo tiene que
+    ocuparse de las VUELTAS.
+  */
+  const yaSeEnfoco = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      if (!yaSeEnfoco.current) {
+        yaSeEnfoco.current = true;
+        return;
+      }
       void cargar();
     }, [cargar]),
   );

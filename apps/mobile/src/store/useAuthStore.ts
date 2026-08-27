@@ -145,10 +145,40 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (nextSession) {
           // Mismo criterio que abajo: la sesion decide, el perfil acompana.
           set({ status: 'authenticated' });
-          void get().refreshProfile();
-          // Y con el, si a esta persona le toca el cuestionario. Va en
-          // paralelo: el arranque lo espera solo un par de segundos.
-          void resolverCuestionario(nextSession.user?.id);
+
+          /*
+            RENOVAR UN TOKEN NO ES INICIAR SESION.
+
+            `TOKEN_REFRESHED` llega sola cada vez que caduca el token y en cada
+            vuelta a primer plano. Sin distinguirla, cada renovacion repetia
+            las cuatro cosas de abajo: perfil, cuestionario, registro de avisos
+            y sincronizacion con la tienda. Nada de eso ha cambiado porque el
+            token sea nuevo.
+          */
+          if (event === 'TOKEN_REFRESHED') return;
+
+          /*
+            EL PERFIL Y EL CUESTIONARIO, SOLO UNA VEZ POR ARRANQUE.
+
+            supabase-js emite `INITIAL_SESSION` nada mas suscribirse, con la
+            sesion que ya habia en disco. Como el `bootstrap` de mas abajo pide
+            las dos cosas para esa misma sesion, el arranque las pedia POR
+            DUPLICADO: dos `/profiles/me` y dos consultas de cuestionario, y
+            esta ultima esta en el camino critico de lo primero que se pinta.
+
+            Lo de abajo si sigue corriendo en `INITIAL_SESSION`, y a proposito:
+            el token de avisos puede haber rotado desde la ultima vez y la
+            compra puede haberse hecho en otro dispositivo. Eso hay que
+            comprobarlo al abrir la aplicacion, no solo al escribir la
+            contrasena.
+          */
+          if (event !== 'INITIAL_SESSION') {
+            void get().refreshProfile();
+            // Y con el, si a esta persona le toca el cuestionario. Va en
+            // paralelo: el arranque lo espera solo un par de segundos.
+            void resolverCuestionario(nextSession.user?.id);
+          }
+
           // El dispositivo se registra al iniciar sesion, no al arrancar la
           // app: el permiso se pide cuando ya tiene sentido para quien la usa.
           // Si falla (Expo Go, emulador, permiso denegado) devuelve null y no

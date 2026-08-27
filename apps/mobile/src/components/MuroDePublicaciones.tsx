@@ -172,7 +172,22 @@ export function MuroDePublicaciones({
       const idsVisibles = viewableItems
         .map((entry) => entry.item?.id ?? entry.key)
         .filter((id): id is string => typeof id === 'string');
-      setVisibleIds(new Set(idsVisibles));
+      /*
+        Solo se cambia el conjunto si de verdad cambio LO VISIBLE.
+
+        `onViewableItemsChanged` dispara muchas veces durante un scroll, y con
+        `new Set(...)` a secas cada disparo era un objeto nuevo: el muro se
+        volvia a renderizar aunque siguieran en pantalla exactamente las mismas
+        publicaciones. `PostCard` esta memoizado y aguanta, pero FlashList
+        vuelve a ejecutar `renderItem` de cada celda montada, en el mismo hilo
+        de JS que esta moviendo el dedo.
+
+        Es la misma comprobacion que ya se hacia dos lineas mas abajo para
+        `videosEnCurso`, con el mismo ayudante; aqui faltaba.
+      */
+      setVisibleIds((previo) =>
+        mismasListas([...previo], idsVisibles) ? previo : new Set(idsVisibles),
+      );
 
       // Todos los videos que estan de verdad en pantalla, en el orden en que se
       // leen las publicaciones (arriba primero), con tope de seguridad.
