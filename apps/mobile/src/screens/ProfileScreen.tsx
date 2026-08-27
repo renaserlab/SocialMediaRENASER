@@ -55,10 +55,16 @@ export function ProfileScreen() {
   const profileError = useAuthStore((state) => state.profileError);
   const refreshProfile = useAuthStore((state) => state.refreshProfile);
 
-  // Tipos de perfil: propio (sin id), Darren (demo), o público real (uuid).
-  const isDarren = id === 'darren';
-  const isRealPublic = !!id && !isDarren && id !== currentUser?.id;
-  const isPublic = isDarren || isRealPublic;
+  // Tipos de perfil: propio (sin id) o publico real (uuid).
+  //
+  // HUBO UN TERCERO Y SE BORRO: `id === 'darren'` pintaba a un mentor inventado
+  // —«Darren Hardy», 1,2 M de seguidores, una biografia escrita a mano— y
+  // `/profile/darren` era una URL alcanzable en produccion. Ni el fichero de
+  // ruta ni esta rama comprobaban `__DEV__`. Es la misma familia que la ruta
+  // `/short/[id]` y el chat de demostracion, borrados por el mismo motivo: un
+  // perfil que parece de alguien y no lo es.
+  const isRealPublic = !!id && id !== currentUser?.id;
+  const isPublic = isRealPublic;
 
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
@@ -127,7 +133,7 @@ export function ProfileScreen() {
     audios,
     loading: postsLoading,
     error: postsError,
-  } = useProfilePosts(isDarren ? null : galleryOwnerId);
+  } = useProfilePosts(galleryOwnerId);
 
   const aplicarPerfil = React.useCallback((p: UserProfile) => {
     setPublicProfile(p);
@@ -204,9 +210,7 @@ export function ProfileScreen() {
     if (avisadoRef.current === clave) return;
     avisadoRef.current = clave;
 
-    const nombre = isDarren
-      ? 'Darren'
-      : publicProfile?.fullName?.split(' ')[0] ?? 'esta persona';
+    const nombre = publicProfile?.fullName?.split(' ')[0] ?? 'esta persona';
 
     // Un respiro antes de preguntar. Da tiempo a que el dialogo propio de la
     // aplicacion este montado —si no, se cae al del navegador, que anuncia
@@ -226,7 +230,7 @@ export function ProfileScreen() {
       })();
     }, 700);
     return () => clearTimeout(temporizador);
-  }, [isPublic, supabaseEnabled, anonimo, id, isDarren, isRealPublic, publicProfile, router]);
+  }, [isPublic, supabaseEnabled, anonimo, id, isRealPublic, publicProfile, router]);
 
   const toggleFollow = async () => {
     haptics.light();
@@ -237,10 +241,6 @@ export function ProfileScreen() {
     });
     if (!autorizado) return;
 
-    if (isDarren) {
-      setFollowing((v) => !v);
-      return;
-    }
     if (!isRealPublic || !id) return;
     const wasFollowing = following;
     setFollowBusy(true);
@@ -380,10 +380,6 @@ export function ProfileScreen() {
     });
     if (!autorizado) return;
 
-    if (isDarren) {
-      router.push('/chat/darren' as never);
-      return;
-    }
     if (!id) return;
     // Dos toques seguidos creaban dos conversaciones: el cerrojo se mira ANTES
     // de pedir nada.
@@ -463,20 +459,7 @@ export function ProfileScreen() {
     );
   }
 
-  const profileData = isDarren
-    ? {
-        fullName: 'Darren Hardy',
-        username: '@darrenhardy',
-        bio: 'Mentor de líderes. Autor de The Compound Effect. Te enseño a multiplicar tu productividad y alcanzar tu potencial.',
-        followers: 1200000,
-        following: 42,
-        posts: 180,
-        likes: 0,
-        introAudioPath: null as string | null,
-        introAudioDurationS: null as number | null,
-        avatar: 'speaker' as const,
-      }
-    : isRealPublic
+  const profileData = isRealPublic
     ? {
         fullName: publicProfile?.fullName ?? '',
         username: publicProfile?.username ?? '',
@@ -677,22 +660,10 @@ export function ProfileScreen() {
             sus cursos, su agenda—, y tienen mas sentido cuando ya se sabe de
             que sabe. Justo encima de «Agenda» tambien es donde mas ayuda:
             pedir una sesion se decide por el tema.
-
-            Darren queda fuera: es un perfil de demostracion sin uuid, y pedir
-            su oferta al backend seria un 404 seguro.
           */}
-          {!isDarren && galleryOwnerId ? (
+          {galleryOwnerId ? (
             <OfertaDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
           ) : null}
-
-          {isDarren && (
-            <Button
-              label="Escuchar Audio Privado"
-              icon="headphones"
-              onPress={() => router.push('/audio/private')}
-              style={styles.audioBtn}
-            />
-          )}
 
           {/* TODO: Reactivar el shortcut "Círculos" (icon="users") cuando el perfil alcance un umbral de seguidores */}
           <View style={styles.shortcuts}>
