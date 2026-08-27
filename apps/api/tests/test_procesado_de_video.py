@@ -25,7 +25,7 @@ import asyncio
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.modules.content import media_processing as mp
 
 
@@ -156,3 +156,128 @@ def test_solo_se_escriben_columnas_derivadas():
         "feed_path",
         "stream_path",
     }
+
+
+# --------------------------------------------------------------------------- #
+# 5. A quien le toca la escalera HLS
+#
+# HLS son TRES codificaciones del mismo video en vez de una. El criterio de aqui
+# es lo que impide que encender el interruptor multiplique por tres el gasto de
+# creditos de la t3.small a cambio de nada.
+# --------------------------------------------------------------------------- #
+def test_un_clip_corto_no_lleva_hls():
+    """15 s son cuatro segmentos de 4 s: el video se acaba antes de que el
+    reproductor tenga con que medir la red y cambiar de variante. Las tres
+    codificaciones se pagarian enteras para que no se note nada."""
+    assert mp.merece_hls(15.0, 1080, 1920) is False
+
+
+def test_un_video_largo_y_grande_si_lleva_hls():
+    """Vertical de movil, minuto y medio: aqui la calidad adaptativa se nota."""
+    assert mp.merece_hls(90.0, 1080, 1920) is True
+
+
+def test_el_criterio_mira_el_lado_menor_no_el_ancho():
+    """Un telefono graba en vertical. Si se mirara el ancho, un 480x854 pasaria
+    por bueno con sus 854 px, que es justo el error que evita `_escala`."""
+    assert mp.merece_hls(90.0, 1280, 720) is True
+    assert mp.merece_hls(90.0, 480, 854) is False
+
+
+def test_un_original_de_baja_resolucion_no_lleva_hls():
+    """Con 480p el peldano alto es un reescalado hacia arriba: triple de CPU
+    para tres copias que no se distinguen entre si."""
+    assert mp.merece_hls(120.0, 854, 480) is False
+
+
+def test_sin_medidas_no_hay_hls():
+    """Misma regla que en el MP4: sin datos, el original."""
+    assert mp.merece_hls(None, 1080, 1920) is False
+    assert mp.merece_hls(90.0, None, 1920) is False
+    assert mp.merece_hls(90.0, 1080, None) is False
+    assert mp.merece_hls(0, 1080, 1920) is False
+
+
+def test_los_umbrales_de_hls_son_configuracion():
+    """Se pueden mover sin desplegar codigo, como el umbral de bitrate."""
+    ajustes = get_settings()
+    duracion = ajustes.video_hls_duracion_minima_s
+    lado = ajustes.video_hls_lado_menor_minimo
+    try:
+        ajustes.video_hls_duracion_minima_s = 5.0
+        ajustes.video_hls_lado_menor_minimo = 360
+        assert mp.merece_hls(15.0, 854, 480) is True
+    finally:
+        ajustes.video_hls_duracion_minima_s = duracion
+        ajustes.video_hls_lado_menor_minimo = lado
+
+
+def test_hls_sigue_apagado_por_defecto():
+    """Lo enciende una persona que ha mirado el saldo de creditos de CPU y la
+    alarma que lo vigila, no un despliegue que se lo encuentra puesto."""
+    assert Settings.model_fields["video_hls_enabled"].default is False
+
+
+# --------------------------------------------------------------------------- #
+# 6. La prioridad de ffmpeg
+#
+# Rebajarla mejora la LATENCIA de las peticiones mientras se codifica. NO ahorra
+# creditos de CPU: el trabajo es el mismo. De eso se ocupan el semaforo, el
+# criterio de HLS y la alarma de CloudWatch.
+# --------------------------------------------------------------------------- #
+def test_en_linux_ffmpeg_va_por_detras_de_la_api(monkeypatch):
+    monkeypatch.setattr(mp.sys, "platform", "linux")
+    monkeypatch.setattr(mp, "_nice", lambda: "/usr/bin/nice")
+    cmd, extra = mp._prioridad_baja(["ffmpeg", "-i", "x.mp4"])
+    assert cmd[:3] == ["/usr/bin/nice", "-n", str(mp.NICE_FFMPEG)]
+    assert cmd[3:] == ["ffmpeg", "-i", "x.mp4"], "los argumentos no se tocan"
+    assert extra == {}, "`creationflags` es de Windows: en Linux reventaria"
+
+
+def test_sin_nice_el_video_se_procesa_igual(monkeypatch):
+    """Perder la rebaja de prioridad es peor rendimiento, no una averia."""
+    monkeypatch.setattr(mp.sys, "platform", "linux")
+    monkeypatch.setattr(mp, "_nice", lambda: None)
+    cmd, extra = mp._prioridad_baja(["ffmpeg", "-i", "x.mp4"])
+    assert cmd == ["ffmpeg", "-i", "x.mp4"]
+    assert extra == {}
+
+
+def test_en_windows_no_se_antepone_nice(monkeypatch):
+    """El desarrollo es Windows y alli `nice` no existe: anteponerlo dejaria el
+    procesado de video roto en local."""
+    monkeypatch.setattr(mp.sys, "platform", "win32")
+    monkeypatch.setattr(
+        mp.subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 16384, raising=False
+    )
+    cmd, extra = mp._prioridad_baja(["ffmpeg", "-i", "x.mp4"])
+    assert cmd == ["ffmpeg", "-i", "x.mp4"]
+    assert extra == {"creationflags": 16384}
+
+
+@pytest.mark.asyncio
+async def test_todo_ffmpeg_sale_con_la_prioridad_rebajada(monkeypatch):
+    """Que exista el ayudante no basta: tiene que usarlo `_run`, que es por
+    donde pasan el poster, el MP4 y los tres peldanos de HLS."""
+    visto: dict = {}
+
+    class _ProcesoFalso:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def _exec_falso(*cmd, **kwargs):
+        visto["cmd"] = list(cmd)
+        visto["kwargs"] = kwargs
+        return _ProcesoFalso()
+
+    monkeypatch.setattr(
+        mp, "_prioridad_baja", lambda cmd: (["ANTEPUESTO", *cmd], {"marca": 1})
+    )
+    monkeypatch.setattr(mp.asyncio, "create_subprocess_exec", _exec_falso)
+
+    codigo, _, _ = await mp._run(["ffmpeg", "-version"])
+    assert codigo == 0
+    assert visto["cmd"] == ["ANTEPUESTO", "ffmpeg", "-version"]
+    assert visto["kwargs"].get("marca") == 1

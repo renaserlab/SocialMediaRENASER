@@ -1439,6 +1439,40 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref TemaDeAlertas]
 
+  AlarmaCreditosDeCpuBajando:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-creditos-de-cpu-bajando'
+      AlarmDescription: >-
+        Aviso TEMPRANO del saldo de creditos, hermano de
+        `creditos-de-cpu-bajos`. Aquella salta en 20, que con dos vCPU al 100 %
+        son unos diez minutos de margen: sirve para explicar un incidente, no
+        para evitarlo. Esta salta en 144 (un cuarto de los 576 acumulables de
+        una t3.small) y deja alrededor de hora y media para reaccionar: apagar
+        `VIDEO_HLS_ENABLED`, bajar `VIDEO_JOBS_CONCURRENTES` o subir de maquina.
+        Es la condicion que convierte encender HLS —tres codificaciones por
+        video en vez de una— en una operacion vigilada en lugar de una apuesta.
+      Namespace: AWS/EC2
+      MetricName: CPUCreditBalance
+      Dimensions:
+        - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+      Statistic: Minimum
+      # 3 periodos de 5 minutos: la metrica de creditos solo se publica cada 5,
+      # y el saldo baja despacio. Exigir 15 minutos sostenidos evita el aviso
+      # por un pico suelto sin perder margen de reaccion.
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 144
+      ComparisonOperator: LessThanThreshold
+      # notBreaching: sin datos no hay nada que decir. Una maquina que acaba de
+      # arrancar, o un tipo de instancia no burstable, no publican esta metrica
+      # y eso no es una emergencia.
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+      # OKActions tambien: el aviso solo es util si se sabe cuando se ha
+      # recuperado el saldo, que es lo que da permiso para volver a encender.
+      OKActions: [!Ref TemaDeAlertas]
+
   Panel:
     Type: AWS::CloudWatch::Dashboard
     Properties:

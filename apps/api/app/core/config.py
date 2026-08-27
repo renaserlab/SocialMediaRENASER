@@ -117,10 +117,41 @@ class Settings(BaseSettings):
     #: procesado: frena la maquina entera, o sea toda la API.
     #:
     #: El MP4 de 720p ya da el ahorro grande de bytes. HLS anade calidad
-    #: adaptativa, que es una mejora real pero no urgente. Encenderlo es una
-    #: decision de capacidad: hacerlo cuando el procesado viva en su propia
-    #: maquina o en una cola aparte, no compartiendo CPU con las peticiones.
+    #: adaptativa, que es una mejora real pero no urgente.
+    #:
+    #: QUE TIENE QUE CUMPLIRSE ANTES DE PONERLO EN True:
+    #:  1. Que la alarma `creditos-de-cpu-bajando` (infra/aws/02-plataforma.yaml)
+    #:     este desplegada y llegando a alguien que la lea. Sin ese aviso,
+    #:     encenderlo es apostar: el sintoma que nota la gente no es «falta HLS»
+    #:     sino «la aplicacion va lenta», y para entonces ya es tarde.
+    #:  2. Que con el MP4 ya encendido el saldo de creditos lleve un dia entero
+    #:     plano. Si UNA codificacion ya lo hace bajar, tres lo triplican.
+    #:  3. Que `video_jobs_concurrentes` siga en 1.
+    #:
+    #: Aun cumpliendose, el gasto se acota a los videos donde la adaptacion se
+    #: nota (`video_hls_duracion_minima_s`, `video_hls_lado_menor_minimo`). La
+    #: salida definitiva sigue siendo la misma: que el procesado viva en su
+    #: propia maquina o en una cola aparte, sin compartir CPU con las peticiones.
     video_hls_enabled: bool = False
+
+    #: Duracion minima para que un video merezca escalera HLS.
+    #:
+    #: HLS son tres codificaciones a cambio de calidad ADAPTATIVA, y adaptarse
+    #: lleva tiempo: los segmentos son de 4 s y el reproductor necesita varios
+    #: para medir la red y cambiar de variante. En un clip de 15 s el video se
+    #: acaba antes de que ese cambio se note, pero las tres codificaciones se
+    #: pagan enteras igual. 30 s son unos siete segmentos: por debajo se paga
+    #: todo el coste a cambio de nada.
+    video_hls_duracion_minima_s: float = 30.0
+
+    #: Lado menor minimo del original para generar HLS. 720 es el peldano ALTO
+    #: de `HLS_LADDER`.
+    #:
+    #: Con un original de 480p los tres peldanos salen del mismo material y el
+    #: de arriba es un reescalado hacia arriba: triple de CPU para tres copias
+    #: que no se distinguen. La adaptacion solo sirve si hay diferencia real
+    #: entre variantes, y eso empieza cuando el original da para el peldano alto.
+    video_hls_lado_menor_minimo: int = 720
 
     #: Cuantos videos se procesan A LA VEZ en este proceso.
     #:

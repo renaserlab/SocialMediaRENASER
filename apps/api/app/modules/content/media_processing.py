@@ -20,7 +20,9 @@ Principios:
   referencia.
 - Todo fallo degrada a "se sirve el original", exactamente lo que pasaba antes.
 - Lo que ya llega ligero no se vuelve a codificar (ver `video_bitrate_umbral`):
-  gastar CPU en mejorar un video que ya esta bien es gastarla para nada.
+  gastar CPU en mejorar un video que ya esta bien es gastarla para nada. La
+  escalera HLS, que cuesta el triple, va ademas acotada a los videos donde la
+  adaptacion llega a notarse (ver `merece_hls`).
 
 EL TRABAJO CORRE EN EL MISMO PROCESO (BackgroundTasks de FastAPI), y por eso
 hay dos frenos que no son opcionales:
@@ -42,6 +44,8 @@ import asyncio
 import io
 import logging
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -253,11 +257,48 @@ def _ffprobe() -> str | None:
     return shutil.which("ffprobe")
 
 
+def _nice() -> str | None:
+    return shutil.which("nice")
+
+
+#: Cuanto se rebaja la prioridad de ffmpeg en Linux (0 = normal, 19 = minimo).
+#: 10 lo deja claramente por detras de la API sin llegar al fondo, donde una
+#: maquina ocupada podria dejar la codificacion sin avanzar nunca.
+NICE_FFMPEG = 10
+
+
+def _prioridad_baja(cmd: list[str]) -> tuple[list[str], dict[str, int]]:
+    """ffmpeg cede el procesador a las peticiones de la API.
+
+    QUE MITIGA: la LATENCIA mientras se codifica. El planificador atiende antes
+    a uvicorn que a ffmpeg, asi que una peticion deja de esperar a que termine
+    un fotograma.
+
+    QUE NO MITIGA: los CREDITOS DE CPU. El trabajo es exactamente el mismo, se
+    gastan los mismos ciclos y la t3.small quema los mismos creditos. Contra eso
+    estan el semaforo, `merece_hls` y la alarma de CPUCreditBalance; esto no.
+
+    Portable porque tiene que serlo: en Windows (desarrollo) es una clase de
+    prioridad del proceso y en Linux (produccion) se antepone `nice`. Si `nice`
+    no esta, se lanza normal: quedarse sin la rebaja no puede impedir que un
+    video se procese.
+    """
+    if sys.platform == "win32":
+        marca = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+        return cmd, ({"creationflags": marca} if marca else {})
+    nice = _nice()
+    if nice is None:
+        return cmd, {}
+    return [nice, "-n", str(NICE_FFMPEG), *cmd], {}
+
+
 async def _run(cmd: list[str], timeout: float = 120) -> tuple[int, bytes, bytes]:
+    lanzamiento, extra = _prioridad_baja(cmd)
     proceso = await asyncio.create_subprocess_exec(
-        *cmd,
+        *lanzamiento,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **extra,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proceso.communicate(), timeout)
@@ -346,6 +387,31 @@ def merece_transcodificar(tamano: int | None, duracion: float | None) -> bool:
         return False
     bitrate = tamano * 8 / duracion
     return bitrate > get_settings().video_bitrate_umbral
+
+
+def merece_hls(duracion: float | None, ancho: int | None, alto: int | None) -> bool:
+    """¿Vale la pena la escalera HLS de este video?
+
+    Mismo espiritu que `merece_transcodificar`, distinto motivo: alli se mide si
+    el archivo viene gordo, aqui si la ADAPTACION va a llegar a notarse. Tres
+    codificaciones cuestan el triple de CPU —y de creditos— que una, asi que
+    solo se pagan donde compensan: video largo y con resolucion para que los
+    peldanos se distingan (`video_hls_duracion_minima_s`,
+    `video_hls_lado_menor_minimo`).
+
+    El BITRATE no entra en la cuenta, y no es un olvido: lo que arregla HLS es
+    una red mala, y eso no depende de lo gordo que venga el original.
+
+    SIN MEDIDAS NO SE TOCA, igual que con el MP4: ante la duda, el original.
+    """
+    ajustes = get_settings()
+    if not duracion or duracion < ajustes.video_hls_duracion_minima_s:
+        return False
+    if not ancho or not alto:
+        return False
+    # El lado MENOR, porque es el que fija `_escala`: un telefono graba en
+    # vertical y mirar el ancho daria por bueno cualquier cosa.
+    return min(ancho, alto) >= ajustes.video_hls_lado_menor_minimo
 
 
 def _escala(lado_menor: int) -> str:
@@ -499,7 +565,11 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
         and not media.feed_path
         and merece_transcodificar(media.bytes, media.duration_s)
     )
-    quiere_hls = ajustes.video_hls_enabled and not media.stream_path
+    quiere_hls = (
+        ajustes.video_hls_enabled
+        and not media.stream_path
+        and merece_hls(media.duration_s, media.width, media.height)
+    )
     falta_poster = not media.poster_path
 
     if not falta_poster and not quiere_mp4 and not quiere_hls:
