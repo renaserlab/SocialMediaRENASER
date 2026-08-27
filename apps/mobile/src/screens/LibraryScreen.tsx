@@ -24,6 +24,15 @@ import type { MyCourse } from '@/types';
  * Y POR QUE SE SEPARAN LOS ESTADOS. «Empezado» y «terminado» piden cosas
  * opuestas de quien mira: uno invita a continuar y el otro a elegir algo nuevo.
  * Mezclarlos en una lista los convierte a los dos en ruido.
+ *
+ * «MIS AUDIOS» SALE VACIA A PROPOSITO. Habia dos audios escritos a mano aqui
+ * —«Tu enfoque de esta semana» y «El poder de la disciplina diaria»— que
+ * ademas abrian los DOS el mismo contenido: iban a `/audio/{id}` y esa
+ * pantalla ignora el id, siempre carga el audio privado vigente. No existe un
+ * historial de escucha en ningun sitio: no hay tabla ni endpoint que registre
+ * lo que alguien ha oido, y `/posts?media=audio` lista los audios de un
+ * CREADOR, que no es lo mismo. Hasta que esa fuente exista la pestaña dice que
+ * esta vacia, que es la verdad. No se vuelve a rellenar a mano.
  */
 export function LibraryScreen() {
   const { colors } = useAppTheme();
@@ -80,17 +89,9 @@ export function LibraryScreen() {
   const sinEmpezar = (cursos ?? []).filter((c) => c.state === 'not_started');
 
   const hayCursos = (cursos ?? []).length > 0;
-  const hayAudios = audios.length > 0;
-  const cargando = cursos === null;
-  const estado = cargando
-    ? 'loading'
-    : pestana === 0
-    ? hayCursos
-      ? 'content'
-      : 'empty'
-    : hayAudios
-    ? 'content'
-    : 'empty';
+  // La pestaña de audios no espera a nada: no hay nada que pedir.
+  const estado =
+    pestana === 1 ? 'empty' : cursos === null ? 'loading' : hayCursos ? 'content' : 'empty';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -114,24 +115,9 @@ export function LibraryScreen() {
         icon={pestana === 0 ? 'book' : 'headphones'}
       >
         <ScrollView contentContainerStyle={styles.list}>
-          {pestana === 0 ? (
-            <>
-              <Grupo titulo="Continúa aprendiendo" cursos={enCurso} router={router} />
-              <Grupo titulo="Sin empezar" cursos={sinEmpezar} router={router} />
-              <Grupo titulo="Completados" cursos={terminados} router={router} />
-            </>
-          ) : (
-            audios.map((audio) => (
-              <ListRow
-                key={audio.id}
-                title={audio.title}
-                subtitle={audio.subtitle}
-                leftIcon="headphones"
-                rightIcon="play"
-                onPress={() => router.push(`/audio/${audio.id}` as any)}
-              />
-            ))
-          )}
+          <Grupo titulo="Continúa aprendiendo" cursos={enCurso} router={router} />
+          <Grupo titulo="Sin empezar" cursos={sinEmpezar} router={router} />
+          <Grupo titulo="Completados" cursos={terminados} router={router} />
         </ScrollView>
       </StateView>
     </View>
@@ -177,12 +163,6 @@ function subtituloDe(curso: MyCourse): string {
   }
   return `${curso.lessonsTotal} lecciones`;
 }
-
-// Audios disponibles en la biblioteca (mock). Al integrar backend vendrán del repositorio.
-const audios = [
-  { id: 'private', title: 'Tu enfoque de esta semana', subtitle: 'Audio guiado • 3 min' },
-  { id: 'disciplina', title: 'El poder de la disciplina diaria', subtitle: 'Audio guiado • 5 min' },
-];
 
 const styles = StyleSheet.create({
   header: {
