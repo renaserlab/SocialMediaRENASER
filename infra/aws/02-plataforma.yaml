@@ -1024,9 +1024,14 @@ Resources:
           - DeviceName: /dev/xvda
             Ebs:
               VolumeType: gp3
-              # 20 GiB: el sistema ocupa ~3, y la imagen de Python con sus capas
-              # ronda 1 GiB por version. Deja sitio para varias versiones sin
-              # que un disco lleno tire el despliegue.
+              # 20 GiB: el sistema ocupa ~3, y la imagen ronda 1,5 GiB por
+              # version desde que incluye ffmpeg (27/08/2026). Deja sitio para
+              # varias versiones sin que un disco lleno tire el despliegue.
+              #
+              # Cuenta ademas con el espacio temporal del procesado de video:
+              # un original de camara (~160 MB) mas sus derivados no pasa de
+              # ~250 MB, y solo se procesa un video a la vez
+              # (`video_jobs_concurrentes`), asi que no compite por el disco.
               VolumeSize: 20
               # Cifrado siempre: cuesta cero y es la diferencia entre un disco
               # retirado y un incidente de datos que hay que notificar.
