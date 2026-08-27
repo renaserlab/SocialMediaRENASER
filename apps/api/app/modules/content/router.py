@@ -42,7 +42,7 @@ from app.modules.content.schemas import (
     PostUpdate,
     PostRead,
 )
-from app.modules.notifications.push import send_push
+from app.modules.notifications.push import encolar_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import temas_de_contenido
@@ -395,16 +395,15 @@ async def create_post(
     # haberse avisado ya de algo que no llego a ocurrir.
     if nuevas_menciones:
         actor = await _nombre_del_actor(db, current_user.id)
-        for mencionado in nuevas_menciones:
-            await send_push(
-                db,
-                user_id=mencionado,
-                notification_type="post_mention",
-                actor_name=actor,
-                # `postId` es lo que hace que tocar el aviso abra /post/{id} y
-                # no el perfil de quien etiqueto, donde no esta la publicacion.
-                data={"type": "post_mention", "postId": post.id},
-            )
+        encolar_push(
+            background,
+            user_ids=nuevas_menciones,
+            notification_type="post_mention",
+            actor_name=actor,
+            # `postId` es lo que hace que tocar el aviso abra /post/{id} y
+            # no el perfil de quien etiqueto, donde no esta la publicacion.
+            data={"type": "post_mention", "postId": post.id},
+        )
 
     # Medios con tipo explícito + compatibilidad con image_paths (sin tipo).
     entries: list[PostMediaInput] = list(payload.media)
@@ -548,6 +547,7 @@ async def get_post(
 async def update_post(
     post_id: str,
     payload: PostUpdate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostRead:
@@ -633,14 +633,13 @@ async def update_post(
     # fallara, no puede haberse avisado ya de algo que no llego a ocurrir.
     if nuevas_menciones:
         actor = await _nombre_del_actor(db, current_user.id)
-        for mencionado in nuevas_menciones:
-            await send_push(
-                db,
-                user_id=mencionado,
-                notification_type="post_mention",
-                actor_name=actor,
-                data={"type": "post_mention", "postId": post_id},
-            )
+        encolar_push(
+            background,
+            user_ids=nuevas_menciones,
+            notification_type="post_mention",
+            actor_name=actor,
+            data={"type": "post_mention", "postId": post_id},
+        )
 
     return await _load_single_post(db, post_id, current_user.id)
 
@@ -741,6 +740,7 @@ async def media_hls_playlist(
 @router.post("/posts/{post_id}/like")
 async def like_post(
     post_id: str,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
@@ -766,9 +766,9 @@ async def like_post(
         # el mismo helper que en los avisos de mencion evita que este sitio
         # vuelva a divergir, que es justo como empezo el fallo.
         actor = await _nombre_del_actor(db, current_user.id)
-        await send_push(
-            db,
-            user_id=post.author_id,
+        encolar_push(
+            background,
+            user_ids=[post.author_id],
             notification_type="like",
             actor_name=actor,
             data={"type": "like", "postId": post_id},
@@ -864,6 +864,7 @@ async def list_comments(
 async def create_comment(
     post_id: str,
     payload: CommentCreate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CommentRead:
@@ -894,9 +895,9 @@ async def create_comment(
     # la respuesta. Usar el helper ademas seria una consulta de mas para traer
     # un dato que ya esta en la mano.
     autor = await db.get(Profile, current_user.id)
-    await send_push(
-        db,
-        user_id=post.author_id,
+    encolar_push(
+        background,
+        user_ids=[post.author_id],
         notification_type="comment",
         actor_name=autor.full_name if autor else None,
         data={"type": "comment", "postId": post_id},

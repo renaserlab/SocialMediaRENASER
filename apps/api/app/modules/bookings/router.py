@@ -6,7 +6,7 @@ cuerpo. Y ninguna peticion puede tocar una sesion en la que no participe.
 
 from datetime import datetime, timezone as tz
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +19,7 @@ from app.modules.bookings.schemas import (
     BookingUpdate,
     transicion_permitida,
 )
-from app.modules.notifications.push import send_push
+from app.modules.notifications.push import encolar_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -157,6 +157,7 @@ async def list_bookings(
 @router.post("", response_model=BookingRead, status_code=status.HTTP_201_CREATED)
 async def create_booking(
     payload: BookingCreate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BookingRead:
@@ -244,9 +245,9 @@ async def create_booking(
     await db.commit()
     await db.refresh(reserva)
 
-    await send_push(
-        db,
-        user_id=payload.provider_id,
+    encolar_push(
+        background,
+        user_ids=[payload.provider_id],
         notification_type="session_booked",
         data={"type": "booking", "id": reserva.id},
     )
@@ -257,6 +258,7 @@ async def create_booking(
 async def update_booking(
     booking_id: str,
     payload: BookingUpdate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BookingRead:
@@ -329,9 +331,9 @@ async def update_booking(
 
     # El push tambien: sin el, quien pidio la sesion no se enteraba de que se la
     # habian aceptado hasta que volviera a abrir la aplicacion por su cuenta.
-    await send_push(
-        db,
-        user_id=otra_parte,
+    encolar_push(
+        background,
+        user_ids=[otra_parte],
         notification_type=tipo,
         data={"type": "booking", "id": reserva.id},
     )
