@@ -11,13 +11,16 @@ Mensajes tardara segundos en abrirse.
 """
 
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.exceptions import (
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
@@ -30,6 +33,7 @@ from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversacio
 from app.modules.messaging.models import (
     Conversation,
     ConversationMember,
+    DirectConversationPair,
     Message,
     MessageAttachment,
 )
@@ -59,6 +63,45 @@ _COLUMNAS_DE_CONVERSACION = (
     Conversation.title,
     Conversation.updated_at,
 )
+
+#: «Esta conversacion tiene al menos un mensaje vivo».
+#:
+#: POR QUE EXISTE. Abrir el perfil de alguien y pulsar «Mensaje» CREA la
+#: conversacion aunque despues no se escriba nada, porque la pantalla de chat
+#: necesita un id al que ir. El resultado era que curiosear perfiles ensuciaba
+#: la bandeja: filas con «Sin mensajes aun» de gente con la que nunca se ha
+#: hablado. Una conversacion vacia no es una conversacion, es una intencion.
+#:
+#: `deleted_at is null` a proposito, y no por simetria: `ultimos_mensajes` y
+#: `no_leidos` (ver `lectura.py`) tambien ignoran lo borrado. Sin esa condicion
+#: aqui, un chat cuyos mensajes se borraron todos volveria a la bandeja
+#: diciendo «Sin mensajes aun» —justo la fila que este filtro quita— y con el
+#: contador de no leidos a cero. Con ella, las tres consultas cuentan LO MISMO:
+#: si esta en la lista, hay algo que leer.
+_TIENE_ALGUN_MENSAJE = (
+    select(Message.id)
+    .where(
+        Message.conversation_id == Conversation.id,
+        Message.deleted_at.is_(None),
+    )
+    .exists()
+)
+
+
+def _clave_de_pareja(uno: str, otro: str) -> tuple[str, str]:
+    """Los dos identificadores de un chat directo, SIEMPRE en el mismo orden.
+
+    Es lo que convierte «la pareja» en una clave. Sin normalizar, (Ana, Bruno) y
+    (Bruno, Ana) serian dos claves distintas y la restriccion de la 0039 no
+    impediria nada: bastaria con que cada uno pulsara desde su lado.
+
+    Pasa por `UUID` y no compara las cadenas tal cual porque el mismo
+    identificador se escribe de varias formas —mayusculas, sin guiones— y dos
+    formas distintas del MISMO par volverian a ser dos claves. `str(UUID(...))`
+    devuelve siempre la forma canonica en minusculas.
+    """
+    a, b = str(UUID(uno)), str(UUID(otro))
+    return (a, b) if a <= b else (b, a)
 
 
 def _author(profile: Profile) -> AuthorSummary:
@@ -162,8 +205,22 @@ async def list_conversations(
     lista entera cada vez que abria la pestana, para ver diez filas. Ahora se
     piden las que caben en una pantalla y el resto se va trayendo al bajar.
 
+    LOS CHATS DIRECTOS VACIOS NO SALEN. Ver `_TIENE_ALGUN_MENSAJE`: pulsar
+    «Mensaje» en un perfil crea la conversacion aunque luego no se escriba, y
+    eso llenaba la bandeja de filas «Sin mensajes aun». El filtro va AQUI, en la
+    consulta, y no en la pantalla, por tres motivos: la paginacion cuenta filas
+    (filtrar despues devolveria paginas de tres elementos y un «hay mas» que
+    miente), quien lo esconda tiene que ser el mismo sitio que decide el orden,
+    y el telefono no puede saber si una fila vacia se quedara vacia. En cuanto
+    alguien escribe, la conversacion aparece sola: no hace falta nada mas.
+
+    Los GRUPOS si salen vacios, y no es un olvido. Un grupo se crea a proposito
+    y con un titulo, asi que existe aunque nadie haya hablado todavia; un chat
+    directo vacio solo dice que alguien miro un perfil.
+
     El coste en consultas es CONSTANTE: cuatro, con tres conversaciones y con
-    ochenta. Ver `lectura.py`.
+    ochenta. Ver `lectura.py`. El filtro no anade ninguna: es un `exists`
+    correlacionado dentro de la consulta que ya se hacia.
     """
     filas = (
         await db.execute(
@@ -172,7 +229,10 @@ async def list_conversations(
                 ConversationMember,
                 ConversationMember.conversation_id == Conversation.id,
             )
-            .where(ConversationMember.user_id == current_user.id)
+            .where(
+                ConversationMember.user_id == current_user.id,
+                or_(Conversation.kind != "direct", _TIENE_ALGUN_MENSAJE),
+            )
             # Desempate por id: `updated_at` puede repetirse (en SQLite tiene
             # resolucion de segundo) y sin un segundo criterio una misma fila
             # podria salir en dos paginas o en ninguna.
@@ -184,54 +244,142 @@ async def list_conversations(
     return await leer_conversaciones(db, filas, current_user.id)
 
 
-@router.post("/direct", response_model=ConversationRead)
-async def get_or_create_direct(
-    payload: DirectConversationCreate,
-    current_user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ConversationRead:
-    if payload.user_id == current_user.id:
-        raise ValidationAppError("No puedes iniciar una conversación contigo mismo.")
-    target = await db.get(Profile, payload.user_id)
-    if target is None:
-        raise NotFoundError("Perfil no encontrado.")
+async def _buscar_directa(db: AsyncSession, uid: str, otro_id: str) -> str | None:
+    """La conversacion directa que YA existe entre dos personas, o None.
 
+    ORDENADA A PROPOSITO aunque solo se quiera una. Antes era `limit(1)` sin
+    orden: si por lo que fuera existieran dos conversaciones para la misma
+    pareja —el fallo que cierra la 0039, y que ya pudo dejar duplicados
+    historicos—, el motor podia devolver hoy una y manana la otra, y la persona
+    veria su chat cambiar de contenido segun le pareciera al planificador.
+
+    Se elige SIEMPRE la mas antigua: es la que tiene el historial. El desempate
+    por `id` no es adorno, porque `created_at` en SQLite tiene resolucion de
+    segundo y dos conversaciones creadas por un doble toque comparten marca.
+    """
     m1 = aliased(ConversationMember)
     m2 = aliased(ConversationMember)
-    existing = (
+    return (
         await db.execute(
             select(Conversation.id)
             .join(m1, m1.conversation_id == Conversation.id)
             .join(m2, m2.conversation_id == Conversation.id)
             .where(
                 Conversation.kind == "direct",
-                m1.user_id == current_user.id,
-                m2.user_id == payload.user_id,
+                m1.user_id == uid,
+                m2.user_id == otro_id,
             )
+            .order_by(Conversation.created_at.asc(), Conversation.id.asc())
             .limit(1)
         )
     ).scalar_one_or_none()
 
-    if existing is not None:
-        conv_id = existing
-    else:
-        conv = Conversation(kind="direct", created_by=current_user.id)
+
+async def _crear_directa(db: AsyncSession, uid: str, otro_id: str) -> str:
+    """Crea el chat directo, o devuelve el que gano la carrera.
+
+    AQUI ESTABA EL FALLO. `buscar y si no crear` no es atomico: dos peticiones
+    simultaneas —un doble toque, o un toque mas el reintento de una red lenta—
+    hacen las dos el SELECT, las dos no encuentran nada, y las dos insertan. La
+    bandeja acababa mostrando a la misma persona varias veces.
+
+    LA GARANTIA LA PONE LA BASE, no este codigo. Con la 0039 aplicada, la clave
+    primaria de `direct_conversation_pairs` hace que la SEGUNDA insercion de la
+    misma pareja sea imposible: la perdedora recibe un error de integridad. Lo
+    que aporta esta funcion es que ese error no se lo coma nadie: se
+    deshace la transaccion, se vuelve a buscar —y ahora si esta, porque el
+    conflicto solo salta cuando la ganadora ya ha confirmado— y se devuelve la
+    conversacion de la ganadora. Las dos peticiones responden lo mismo.
+
+    SIN LA 0039 esto sigue funcionando y no empeora nada: no hay restriccion que
+    violar, asi que no hay `IntegrityError` que capturar y el comportamiento es
+    el de hoy. La proteccion que queda es la del cliente (el cerrojo `chatBusy`
+    de `ProfileScreen`), que es de un solo telefono y no cubre el reintento de
+    la red. Por eso la garantia de verdad necesita la migracion.
+
+    EL FLUSH EXPLICITO ANTES DE `registrar_senal` NO ES ADORNO, y costo un fallo
+    en pruebas encontrarlo. `signals.py` se traga sus errores a proposito —anotar
+    una senal no puede tumbar la operacion que la provoco— pero su consulta
+    dispara el AUTOFLUSH de la sesion, asi que sin este flush la violacion de
+    clave saltaba DENTRO de `registrar_senal`, que la capturaba y la registraba
+    como «no se pudo anotar la senal». La sesion quedaba muerta y el `commit` de
+    despues fallaba con `PendingRollbackError` —que NO es `IntegrityError`—, o
+    sea: un 500 en la cara del usuario por el fallo que esto arregla. Se fuerza
+    la escritura aqui, donde el error tiene quien lo espere.
+    """
+    con_pares = await esquema.hay_pares_directos(db)
+    try:
+        conv = Conversation(kind="direct", created_by=uid)
         db.add(conv)
         await db.flush()
-        db.add(ConversationMember(conversation_id=conv.id, user_id=current_user.id))
-        db.add(ConversationMember(conversation_id=conv.id, user_id=payload.user_id))
+        db.add(ConversationMember(conversation_id=conv.id, user_id=uid))
+        db.add(ConversationMember(conversation_id=conv.id, user_id=otro_id))
+        if con_pares:
+            bajo, alto = _clave_de_pareja(uid, otro_id)
+            db.add(
+                DirectConversationPair(
+                    user_low=bajo, user_high=alto, conversation_id=conv.id
+                )
+            )
+        # Aqui, y no en el commit, es donde se decide quien gana la carrera.
+        await db.flush()
         # Solo cuando la conversacion se CREA. Abrir un chat que ya existia no
         # es una decision nueva, y contarla cada vez que se entra convertiria
         # una senal fuerte en ruido.
         await registrar_senal(
             db,
-            user_id=current_user.id,
+            user_id=uid,
             event_type="message_started",
             entity_type="profile",
-            entity_id=payload.user_id,
+            entity_id=otro_id,
         )
         await db.commit()
-        conv_id = conv.id
+    except IntegrityError:
+        # Perder la carrera no es un error para quien esta mirando: queria un
+        # chat con esa persona y hay exactamente uno. Se le da ese.
+        await db.rollback()
+        ganadora = await _buscar_directa(db, uid, otro_id)
+        if ganadora is None:
+            # No deberia ocurrir: el conflicto implica que otra transaccion ya
+            # confirmo la pareja. Si aun asi pasa, 409 y no 500: el cliente
+            # puede reintentar, y un 500 saldria en el movil como fallo de red.
+            raise ConflictError(
+                "No se pudo abrir la conversación. Inténtalo de nuevo.",
+                code="direct_conversation_race",
+            ) from None
+        return ganadora
+    return conv.id
+
+
+@router.post("/direct", response_model=ConversationRead)
+async def get_or_create_direct(
+    payload: DirectConversationCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ConversationRead:
+    """Abre el chat directo con alguien. IDEMPOTENTE: siempre la misma.
+
+    Abrirlo tres veces, o cien, devuelve la misma conversacion. Lo que lo
+    garantiza no es el orden de estas lineas —eso es lo que fallaba— sino la
+    clave primaria de `direct_conversation_pairs` (migracion 0039); ver
+    `_crear_directa`.
+
+    Entrar aqui y no escribir NO deja rastro en la bandeja: la conversacion se
+    crea, porque la pantalla de chat necesita un id, pero el listado no muestra
+    los chats directos sin mensajes. Ver `_TIENE_ALGUN_MENSAJE`.
+    """
+    # Antes de tocar la base: un id con otro formato llegaba hasta el driver y
+    # salia como 500. Es un 404, que es lo que de verdad pasa.
+    ensure_uuid(payload.user_id, "Perfil no encontrado.")
+    if payload.user_id == current_user.id:
+        raise ValidationAppError("No puedes iniciar una conversación contigo mismo.")
+    target = await db.get(Profile, payload.user_id)
+    if target is None:
+        raise NotFoundError("Perfil no encontrado.")
+
+    conv_id = await _buscar_directa(db, current_user.id, payload.user_id)
+    if conv_id is None:
+        conv_id = await _crear_directa(db, current_user.id, payload.user_id)
 
     await _require_member(db, conv_id, current_user.id)
     return await _leer_una(db, conv_id, current_user.id)

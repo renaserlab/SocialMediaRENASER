@@ -59,6 +59,21 @@ async function conUrlsFirmadas(mensajes: Message[]): Promise<Message[]> {
 }
 
 export const MessageRepository = {
+  /**
+   * Una página de la bandeja.
+   *
+   * LOS CHATS DIRECTOS SIN NINGÚN MENSAJE NO VIENEN, y no es un descuido del
+   * servidor que haya que compensar aquí. Pulsar «Mensaje» en un perfil CREA la
+   * conversación aunque después no se escriba nada —la pantalla de chat
+   * necesita un id al que ir—, y eso llenaba la bandeja de filas «Sin mensajes
+   * aún» de gente con la que nunca se había hablado. El filtro está en la
+   * consulta del listado, que es el único sitio donde puede convivir con la
+   * paginación: si se hiciera aquí, `hayMas` contaría filas que ya no están y
+   * las páginas llegarían medio vacías.
+   *
+   * En cuanto alguien escribe, la conversación aparece sola en la siguiente
+   * carga. No hay nada que sincronizar desde el teléfono.
+   */
   async listConversations(
     { limit = CONVERSACIONES_POR_PAGINA, offset = 0 } = {},
   ): Promise<Conversation[]> {
@@ -68,6 +83,20 @@ export const MessageRepository = {
     return dtos.map(toConversation);
   },
 
+  /**
+   * El chat directo con alguien, creándolo si hace falta.
+   *
+   * ES IDEMPOTENTE EN EL SERVIDOR: llamarlo tres veces devuelve la MISMA
+   * conversación. Antes no lo era —dos peticiones a la vez creaban dos chats, y
+   * la bandeja acababa enseñando a la misma persona repetida— y lo único que lo
+   * frenaba era el cerrojo `chatBusy` de `ProfileScreen`, que es de este
+   * teléfono y no cubre el reintento de una red lenta. Ese cerrojo se queda
+   * donde está porque evita la petición de más, pero ya no es lo que garantiza
+   * nada: la garantía es la clave primaria de `direct_conversation_pairs`
+   * (migración 0039).
+   *
+   * Por eso reintentar esta llamada es seguro y no hace falta deduplicar aquí.
+   */
   async getOrCreateDirect(userId: string): Promise<Conversation> {
     const dto = await apiRequest<ConversationDto>(`${API_V1}/conversations/direct`, {
       method: 'POST',

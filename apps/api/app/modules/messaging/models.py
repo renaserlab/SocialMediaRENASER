@@ -65,6 +65,53 @@ class ConversationMember(Base):
     )
 
 
+class DirectConversationPair(Base):
+    """La pareja de un chat directo, con la unicidad puesta en la BASE (0039).
+
+    QUE FALLO ARREGLA. `POST /conversations/direct` buscaba la conversacion y,
+    si no la encontraba, la creaba. Nada impedia crear dos: dos peticiones
+    simultaneas —un doble toque, o un toque mas el reintento de una red lenta—
+    hacen las dos el SELECT, las dos no encuentran nada, y las dos insertan. La
+    bandeja acababa con la misma persona repetida varias veces.
+
+    POR QUE UNA TABLA APARTE Y NO UNA COLUMNA EN `conversations`. Por lo mismo
+    que explica `MessageAttachment`: un `select(Entidad)` de SQLAlchemy pide
+    TODAS las columnas mapeadas, asi que anadir una a `conversations` rompe
+    produccion en cuanto el modelo se adelanta a la migracion. Una tabla nueva
+    solo se consulta cuando existe, y quien lo comprueba es
+    `esquema.hay_pares_directos`.
+
+    Y POR QUE NO BASTA UN INDICE SOBRE `conversation_members`. Porque la pareja
+    son DOS filas de esa tabla, y un indice unico solo puede hablar de una fila.
+    Aqui la pareja es UNA fila, y su clave primaria es la garantia.
+
+    `user_low` / `user_high` son los dos identificadores ORDENADOS. Sin
+    normalizar, (Ana, Bruno) y (Bruno, Ana) serian claves distintas y la
+    restriccion no impediria nada: quien pulsa primero decide el orden.
+    """
+
+    __tablename__ = "direct_conversation_pairs"
+
+    user_low: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_high: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Message(Base):
     __tablename__ = "messages"
 
