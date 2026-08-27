@@ -6,7 +6,14 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "development",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
+        "EXPO_PUBLIC_API_URL": "https://d33u17ka1rcaax.cloudfront.net",
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+      }
     },
     "preview": {
       "distribution": "internal",
@@ -21,7 +28,7 @@
         "EXPO_PUBLIC_APP_ENV": "preview",
         "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
-        "EXPO_PUBLIC_API_URL": "https://renaser-api.onrender.com",
+        "EXPO_PUBLIC_API_URL": "https://d33u17ka1rcaax.cloudfront.net",
         "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
       }
     },
@@ -44,7 +51,7 @@
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
-        "EXPO_PUBLIC_API_URL": "https://renaser-api.onrender.com",
+        "EXPO_PUBLIC_API_URL": "https://d33u17ka1rcaax.cloudfront.net",
         "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
       }
     }
