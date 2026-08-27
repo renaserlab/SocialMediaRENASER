@@ -1,3 +1,25 @@
+# =============================================================================
+# HEREDADO. Render YA NO es el backend de produccion.
+# =============================================================================
+#
+# Produccion vive en AWS desde agosto de 2026: plantillas en `infra/aws/`,
+# despliegue en `.github/workflows/desplegar-aws.yml`, y la entrada real es la
+# distribucion de CloudFront que llevan escrita la web y `apps/mobile/eas.json`.
+#
+# POR QUE NO SE BORRA ESTE FICHERO TODAVIA. Las aplicaciones YA INSTALADAS en
+# telefonos se compilaron apuntando a Render y lo seguiran haciendo hasta que
+# se publiquen builds nuevas: la URL va dentro del paquete, no se configura en
+# caliente. Apagar Render hoy dejaria a esa gente sin datos.
+#
+# CUANDO SE PUEDE RETIRAR: cuando las builds nuevas esten publicadas y en uso.
+# Entonces se apaga el servicio en el panel de Render y se borra esto.
+#
+# OJO CON EL PLAN GRATUITO, que es el motivo de que Render se sintiera lento:
+# la instancia SE DUERME y tarda en volver. Medido el 27/08/2026 contra este
+# mismo servicio: 21,5 s la primera peticion, 0,4 s ya despierta. En AWS,
+# 0,29-0,66 s siempre. Ver docs/Z_AUDITORIA_RENDIMIENTO_2026-08.md.
+# =============================================================================
+#
 # Blueprint de Render para el backend FastAPI (Z).
 # En Render: New > Blueprint > conecta este repo > usa la rama main.
 # Los valores marcados como sync:false se configuran en el dashboard (secretos).

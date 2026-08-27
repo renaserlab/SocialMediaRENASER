@@ -1,4 +1,9 @@
 # RENASER Universo — Estado del proyecto (todo lo trabajado)
+>
+> **Actualizado el 27 de agosto de 2026.** Varias afirmaciones de este
+> documento dejaron de ser ciertas al migrar el backend a AWS. Lo medido y
+> corregido está en [`Z_AUDITORIA_RENDIMIENTO_2026-08.md`](Z_AUDITORIA_RENDIMIENTO_2026-08.md).
+
 
 > Documento vivo con **absolutamente todo** lo construido: arquitectura, backend,
 > app móvil, base de datos, configuración, despliegue y cómo probarlo.
@@ -241,9 +246,11 @@ npm --workspace apps/mobile run start -- --web --port 8082   # http://localhost:
 
 ## 11. Pendientes / próximos pasos
 
-1. **Desplegar el backend en Render** (config lista: `render.yaml` + Dockerfile).
-   Sin esto, el APK no carga datos fuera de la red local. `EXPO_PUBLIC_API_URL` ya
-   apunta a `https://renaser-api.onrender.com`.
+1. ~~**Desplegar el backend en Render**~~. HECHO y luego SUPERADO: el backend
+   de produccion esta en AWS (`infra/aws/`, desplegado por
+   `.github/workflows/desplegar-aws.yml`) detras de CloudFront.
+   `EXPO_PUBLIC_API_URL` apunta a esa distribucion desde el 27/08/2026.
+   Render sigue encendido solo por las builds ya instaladas.
 2. **Recompilar el APK** tras el último merge (trae dependencias nativas nuevas).
 3. Conectar a fondo las pantallas de **círculo / curso / lección** (backend y datos listos).
 4. Conectar al backend las pantallas nuevas de andy que hoy usan mock:
