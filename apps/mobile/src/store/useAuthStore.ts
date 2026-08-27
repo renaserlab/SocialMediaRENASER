@@ -10,7 +10,7 @@ import {
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { esEnlaceDeRecuperacion, mensajeDeEnlace } from '@/lib/authLink';
 import { perfMark } from '@/lib/perf';
-import { setAuthTokenProvider, warmUpApi, ApiError } from '@/services/api';
+import { setAuthTokenProvider, ApiError } from '@/services/api';
 import { enlaceAuthInicial } from '@/services/supabase';
 import { registerForPush, unregisterPush } from '@/services/notifications';
 import { sincronizarAlEntrar } from '@/services/compras';
@@ -105,11 +105,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ status: 'anonymous', supabaseEnabled: false });
       return;
     }
-
-    // Lo PRIMERO de todo: despertar la instancia de Render (el plan gratuito
-    // duerme y tarda ~25 s en volver). Corre en paralelo con el resto del
-    // arranque, mientras la persona ya ve la instantanea local del feed.
-    warmUpApi();
 
     // La ultima tanda de publicaciones guardada se pinta sin esperar a nada.
     void useAppStore.getState().hydrateFeedFromCache();

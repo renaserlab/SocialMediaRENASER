@@ -560,17 +560,14 @@ export const useAppStore = create<AppState>()(
               // Dos fases: primero el JSON (texto + metadata), despues las
               // firmas. El primer post no espera a Storage.
               withMediaUrls: false,
-              // Mas holgura que los 20 s estandar: la primera peticion del dia
-              // puede coincidir con el arranque de Render (~25 s medidos).
-              timeoutMs: 30_000,
             };
             let page: FeedPage;
             try {
               page = await PostRepository.listFeed(options, uid);
             } catch (error) {
-              // Un unico reintento tras agotar la espera: para entonces el
-              // aviso de arranque (warmUpApi) ya desperto la instancia y el
-              // segundo intento responde en menos de un segundo.
+              // Un unico reintento tras agotar la espera. Se mantiene porque
+              // una red movil mala corta peticiones sin que el servidor tenga
+              // nada que ver; el segundo intento suele bastar.
               if (error instanceof ApiError && error.code === 'timeout') {
                 page = await PostRepository.listFeed(options, uid);
               } else {
