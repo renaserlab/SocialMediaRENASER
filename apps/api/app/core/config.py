@@ -90,6 +90,34 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_api_base: str = "https://api.stripe.com"
 
+    # --- Beta gratuita ---
+    #: Durante la BETA, un curso de pago se puede conceder GRATIS a quien lo
+    #: pide. APAGADO por defecto.
+    #:
+    #: POR QUE EL VALOR SEGURO ES `False`. Encendido regala el catalogo entero,
+    #: y un interruptor cuyo valor por defecto es «regalar» acaba encendido en
+    #: produccion el dia que alguien despliegue sin poner la variable, o cuando
+    #: la beta termine y nadie se acuerde de apagarlo. Olvidarse tiene que
+    #: costar que un usuario de prueba no entre a un curso —se enciende y
+    #: listo—, nunca que se regale lo que se vende. Es la misma regla que
+    #: `payments_enabled` y `stripe_payments_enabled`: lo que mueve dinero nace
+    #: apagado y se enciende a mano.
+    #:
+    #: NO ES UN PAGO Y NO FINGE SERLO. No crea orden, ni `payment_transaction`,
+    #: ni evento de ninguna pasarela, y NO toca `price_minor`: el curso sigue
+    #: costando lo que cuesta. Lo unico que escribe es un derecho en
+    #: `entitlements` con `source_provider='beta_free'` y sin `transaction_id`,
+    #: que es exactamente para lo que la 0035 dejo esa via abierta («un regalo,
+    #: una beca o una compensacion se pueden conceder sin inventarse un cobro
+    #: que no existio»). Asi la concesion se distingue de una compra para
+    #: siempre y con una sola consulta.
+    #:
+    #: APAGARLO NO REVOCA NADA. Los derechos ya concedidos siguen activos y
+    #: `has_course_access()` no mira de donde vienen: quien entro durante la
+    #: beta conserva su curso. Lo unico que cambia es que a partir de ahi no se
+    #: concede ninguno mas, y los nuevos vuelven a la monetizacion de verdad.
+    beta_free_access_enabled: bool = False
+
     # --- Procesado de media (derivados) ---
     #: Genera en segundo plano la version ligera de las imagenes nuevas y el
     #: poster de los videos que suban sin el. Necesita la service_role key.
