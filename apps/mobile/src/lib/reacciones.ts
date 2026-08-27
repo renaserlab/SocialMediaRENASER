@@ -36,3 +36,24 @@ export function mezclarReacciones(
   // visible, pero hace que quitar el me gusta deje una copia dentro.
   return [...new Set([...conservados, ...confirmados])];
 }
+
+
+/**
+ * Cómo se lee un aviso de reacciones cuando hay más de una persona.
+ *
+ * Antes salía «A Edson le gustó tu publicación» una vez POR CADA persona: con
+ * cien reacciones, cien avisos idénticos y la pantalla de notificaciones
+ * inservible. El servidor ya los agrupa y manda cuánta gente hay en total;
+ * aquí solo se escribe la frase.
+ *
+ * `total` puede faltar (un backend anterior a este cambio) o venir a 0 —nadie
+ * reaccionó, pero el aviso sigue guardado porque quitar un me gusta no borra
+ * la notificación—. En los dos casos se cae al texto de siempre, que sigue
+ * siendo correcto: hubo una reacción y la hizo esta persona.
+ */
+export function textoDeReacciones(actor: string, total?: number | null): string {
+  const otros = (total ?? 0) - 1;
+  if (otros <= 0) return `A ${actor} le gustó tu publicación`;
+  if (otros === 1) return `${actor} y 1 persona más reaccionaron a tu publicación`;
+  return `${actor} y ${otros} personas más reaccionaron a tu publicación`;
+}

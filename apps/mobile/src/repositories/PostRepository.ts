@@ -3,6 +3,7 @@ import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
 import { signMediaUrls, type UploadedMedia } from '@/services/storage';
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import type { Comment, Post } from '@/types';
+import { toProfileSummary, type ProfileSummary, type ProfileSummaryDto } from '@/mappers/profileMapper';
 
 export type FeedPage = {
   items: Post[];
@@ -167,6 +168,21 @@ export const PostRepository = {
    * paginacion por cursor ignora los parametros que no conoce y usa el offset,
    * asi que la misma app funciona contra ambas versiones.
    */
+  /**
+   * Quien reacciono a una publicacion, de lo mas reciente a lo mas antiguo.
+   *
+   * Es lo que abre la notificacion agrupada: sin esta lista, «Edson y 99
+   * personas mas» no lleva a ningun sitio. Devuelve la misma forma que
+   * seguidores y seguidos para poder reutilizar `PeopleList` en vez de
+   * inventarse otra pantalla de gente.
+   */
+  async listLikes(postId: string): Promise<ProfileSummary[]> {
+    const dtos = await apiRequest<ProfileSummaryDto[]>(
+      `${API_V1}/posts/${postId}/likes?limit=50`,
+    );
+    return dtos.map(toProfileSummary);
+  },
+
   async listVideos(
     currentUserId?: string | null,
     {

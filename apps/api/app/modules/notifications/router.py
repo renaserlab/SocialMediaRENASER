@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
+from app.modules.content.models import PostLike
 from app.modules.notifications.models import Notification
 from app.modules.notifications.schemas import NotificationRead
 from app.modules.profiles.models import Profile
@@ -31,6 +32,45 @@ async def list_notifications(
             .offset(page.offset)
         )
     ).all()
+    # UNA notificación por publicación, no una por persona.
+    #
+    # Cien personas reaccionando a un vídeo generaban cien avisos, y la pantalla
+    # de notificaciones dejaba de servir para nada: lo único que había pasado
+    # era una cosa —«gustó tu vídeo»— contada cien veces.
+    #
+    # Se agrupa AL LEER y no al escribir. Escribiendo haría falta encontrar y
+    # actualizar la fila anterior, lo que pide un índice único, y ese índice no
+    # se puede crear mientras existan los duplicados que ya hay guardados: habría
+    # que borrarlos primero. Agrupando aquí no se toca ni una fila, funciona con
+    # lo que ya está en la base y se deshace quitando este bloque.
+    #
+    # Se conserva la MÁS RECIENTE de cada publicación, que es la que trae el
+    # último actor: es lo que se lee en «Edson y 99 personas más».
+    vistas: set[str] = set()
+    agrupadas: list[tuple[Notification, Profile | None]] = []
+    for notif, actor in rows:
+        if notif.type == "like" and notif.entity_id:
+            if notif.entity_id in vistas:
+                continue
+            vistas.add(notif.entity_id)
+        agrupadas.append((notif, actor))
+    rows = agrupadas
+
+    # Cuánta gente reaccionó de verdad a cada una, en UNA consulta para todas.
+    # Se cuenta `post_likes` y no las notificaciones porque las notificaciones
+    # se duplican —quitar y volver a poner un me gusta deja dos filas— y porque
+    # al retirarlo la notificación se queda, pero la reacción no.
+    conteos: dict[str, int] = {}
+    if vistas:
+        filas = (
+            await db.execute(
+                select(PostLike.post_id, func.count())
+                .where(PostLike.post_id.in_(vistas))
+                .group_by(PostLike.post_id)
+            )
+        ).all()
+        conteos = {post_id: total for post_id, total in filas}
+
     result: list[NotificationRead] = []
     for notif, actor in rows:
         result.append(
@@ -51,6 +91,7 @@ async def list_notifications(
                 entity_id=notif.entity_id,
                 read=notif.read_at is not None,
                 created_at=notif.created_at,
+                group_count=conteos.get(notif.entity_id or "") if notif.type == "like" else None,
             )
         )
     return result

@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { mezclarReacciones } from './reacciones.ts';
+import { mezclarReacciones, textoDeReacciones } from './reacciones.ts';
 
 test('cargar una pantalla no apaga los me gusta de la otra', () => {
   // A esta persona le gustan un video (v1, que se ve en Inicio) y una foto
@@ -76,4 +76,45 @@ test('reaccionar en Inicio y luego abrir Explorar mantiene el corazon', () => {
   // 4. Vuelve a Inicio, que recarga sus videos.
   likes = mezclarReacciones(likes, ['v1', 'v2'], ['v1']);
   assert.ok(likes.includes('v1'), 'el corazon se apago al volver a Inicio');
+});
+
+
+// ---------------------------------------------------------------------------
+// Como se lee un aviso de reacciones
+// ---------------------------------------------------------------------------
+//
+// Lo que se pidio: que cien personas dando me gusta no llenen la pantalla de
+// cien avisos, sino uno que diga «Edson y 99 personas mas reaccionaron a tu
+// publicacion», con el numero REAL.
+
+test('una sola persona se lee como siempre', () => {
+  assert.equal(textoDeReacciones('Edson', 1), 'A Edson le gustó tu publicación');
+});
+
+test('varias personas se agrupan con el numero real', () => {
+  assert.equal(
+    textoDeReacciones('Edson', 100),
+    'Edson y 99 personas más reaccionaron a tu publicación',
+  );
+});
+
+test('dos personas usan el singular', () => {
+  // «y 1 personas más» es justo el detalle que delata una plantilla mal hecha.
+  assert.equal(
+    textoDeReacciones('Edson', 2),
+    'Edson y 1 persona más reaccionaron a tu publicación',
+  );
+});
+
+test('sin el dato se cae al texto de siempre', () => {
+  // Un backend anterior a este cambio no manda `group_count`. El aviso tiene
+  // que seguir leyendose bien, no quedarse a medias.
+  assert.equal(textoDeReacciones('Edson', undefined), 'A Edson le gustó tu publicación');
+  assert.equal(textoDeReacciones('Edson', null), 'A Edson le gustó tu publicación');
+});
+
+test('cero reacciones no dice «y -1 personas»', () => {
+  // Pasa de verdad: quitar un me gusta NO borra la notificacion, asi que el
+  // aviso puede sobrevivir a la reaccion que lo provoco.
+  assert.equal(textoDeReacciones('Edson', 0), 'A Edson le gustó tu publicación');
 });

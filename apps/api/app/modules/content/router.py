@@ -13,6 +13,7 @@ from datetime import datetime
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy import Text as SAText, delete, func, literal, select, update
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -45,6 +46,7 @@ from app.modules.content.schemas import (
 from app.modules.notifications.push import encolar_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
+from app.modules.profiles.schemas import ProfileSummary
 from app.modules.recommendations import temas_de_contenido
 from app.modules.social_graph.models import Follow
 from app.modules.social_graph.service import blocked_either_way
@@ -789,6 +791,73 @@ async def unlike_post(
     )
     await db.commit()
     return {"liked": False, "likes_count": await _likes_count(db, post_id)}
+
+
+@router.get("/posts/{post_id}/likes", response_model=list[ProfileSummary])
+async def list_post_likes(
+    post_id: str,
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ProfileSummary]:
+    """Quién reaccionó a una publicación, de lo más reciente a lo más antiguo.
+
+    POR QUE EXISTE. No había forma de saberlo: `post_likes` solo se consultaba
+    para contar y para responder «¿le gusta a quien pregunta?». Sin esto, la
+    notificación agrupada («Edson y 99 personas más») no lleva a ningún sitio,
+    porque no hay ninguna lista que abrir.
+
+    PIDE SESION a proposito, aunque el muro se pueda leer sin cuenta. Una lista
+    de seguidores dice a quién sigue alguien; esta dice qué le ha gustado, que
+    es una señal de comportamiento y no una relación que se declara en público.
+    Es el mismo criterio que `oferta_de_un_perfil` en recomendaciones: dentro de
+    Z es visible, descargable por cualquiera con la dirección no.
+
+    Devuelve `ProfileSummary` —la misma forma que seguidores y seguidos— para
+    que la pantalla reutilice la lista de personas que ya existe en vez de
+    inventarse otra.
+    """
+    ensure_uuid(post_id, "Publicacion no encontrada.")
+    # Que la publicacion exista y sea visible se comprueba igual que en el resto
+    # del modulo: asi una publicacion retirada no filtra quien reacciono.
+    await _get_active_post(db, post_id)
+
+    # Alias tipado, no `literal_column`: el porque esta en `_people` del grafo
+    # social —comparar un uuid contra texto revienta en PostgreSQL—.
+    seguido = aliased(Follow)
+    is_following_sq = (
+        select(func.count())
+        .select_from(seguido)
+        .where(
+            seguido.follower_id == current_user.id,
+            seguido.following_id == Profile.id,
+        )
+        .scalar_subquery()
+    )
+
+    filas = (
+        await db.execute(
+            select(Profile, is_following_sq)
+            .join(PostLike, PostLike.user_id == Profile.id)
+            .where(PostLike.post_id == post_id)
+            # Por fecha de reaccion y no por nombre: quien acaba de reaccionar
+            # es lo que se espera ver arriba al abrir la lista desde un aviso.
+            .order_by(PostLike.created_at.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+    ).all()
+    return [
+        ProfileSummary(
+            id=perfil.id,
+            full_name=perfil.full_name,
+            username=perfil.username,
+            avatar_path=perfil.avatar_path,
+            bio=perfil.bio,
+            is_following=bool(sigue),
+        )
+        for perfil, sigue in filas
+    ]
 
 
 # --------------------------------------------------------------------------- #

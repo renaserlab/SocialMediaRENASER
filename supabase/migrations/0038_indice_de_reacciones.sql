@@ -1,0 +1,35 @@
+-- =============================================================================
+-- 0038 — Índice para la lista de «quién reaccionó»
+-- =============================================================================
+--
+-- ESTA MIGRACIÓN NO SE HA APLICADO, igual que la 0037. Solo crea un índice: no
+-- borra, no altera columnas y no toca una sola fila.
+--
+-- POR QUÉ. El endpoint nuevo `GET /posts/{post_id}/likes` —el que abre la
+-- notificación agrupada, «Edson y 99 personas más»— filtra por `post_id` y
+-- ordena por `created_at desc`, que es lo que hace que arriba salga quien acaba
+-- de reaccionar.
+--
+-- La clave primaria de `post_likes` es `(post_id, user_id)`. Sirve para
+-- encontrar las filas de una publicación, pero NO para ordenarlas por fecha:
+-- PostgreSQL tiene que leerlas todas y ordenarlas después. Con dos reacciones
+-- da igual; con una publicación que se hace popular, ese orden se paga entero
+-- en cada apertura de la lista.
+--
+-- Añadir `created_at` al índice deja la lectura ya ordenada, y además convierte
+-- la paginación (`limit`/`offset`) en leer solo lo que se va a devolver.
+--
+-- COMPROBARLO ANTES DE APLICAR:
+--
+--   explain analyze
+--   select p.* from profiles p
+--     join post_likes l on l.user_id = p.id
+--    where l.post_id = '<un post con reacciones>'
+--    order by l.created_at desc
+--    limit 50;
+--
+-- `if not exists`: repetir la migración no rompe nada.
+-- =============================================================================
+
+create index if not exists post_likes_post_fecha_idx
+  on public.post_likes (post_id, created_at desc);

@@ -1,4 +1,5 @@
 import { formatRelativeTime } from '@/mappers/postMapper';
+import { textoDeReacciones } from '@/lib/reacciones';
 
 export type NotificationActorDto = {
   id: string;
@@ -15,6 +16,11 @@ export type NotificationDto = {
   entity_id: string | null;
   read: boolean;
   created_at: string;
+  /**
+   * Cuánta gente reaccionó en total. Solo viene en los avisos agrupados de
+   * «me gusta»; `null`/ausente en todo lo demás.
+   */
+  group_count?: number | null;
 };
 
 export type NotificationItem = {
@@ -50,7 +56,7 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       break;
     case 'like':
       title = 'Nuevo me gusta';
-      subtitle = `A ${actor} le gustó tu publicación`;
+      subtitle = textoDeReacciones(actor, dto.group_count);
       icon = 'award';
       break;
     case 'comment':
