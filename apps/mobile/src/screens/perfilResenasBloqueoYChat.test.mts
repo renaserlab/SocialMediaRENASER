@@ -110,11 +110,35 @@ describe('los accesos circulares del perfil', () => {
     );
   });
 
-  it('usan el icono de reseñas de Feather, sin dependencias nuevas', () => {
+  it('usan el icono de reseñas correcto, sin dependencias nuevas', () => {
+    /*
+      ESTA COMPROBACION SUSTITUYE A LA ANTERIOR, que exigia `icon="star"`.
+
+      La estrella entro para quitar la camara —que decia «fotos», por la
+      galeria que vivia empotrada en esta seccion— y arreglo aquel problema,
+      pero no acabo de decir lo que hay dentro: una estrella se lee como
+      PUNTUACION, favorito o destacado. Lo que hay son opiniones escritas por
+      otras personas, y eso se dice con comillas.
+
+      Lo que la prueba vieja protegia de verdad —que no se instale nada por un
+      icono— sigue vigente y sigue comprobado abajo: `MaterialCommunityIcons`
+      viene en `@expo/vector-icons`, el mismo paquete que Feather.
+
+      La comprobacion detallada del cambio esta en
+      `screens/cursosEventosYPerfil.test.mts`; aqui se mantiene la que vela por
+      los cuatro accesos como conjunto.
+    */
     assert.ok(
-      /icon="star"[\s\S]{0,120}profile\.testimonials/.test(PERFIL),
-      'Las reseñas van con `star`. La camara decia «fotos», que es lo que ' +
-        'hacia la galeria que vivia dentro de esta seccion.',
+      /icono=\{\{ familia: 'material', nombre: 'format-quote-close' \}\}[\s\S]{0,140}profile\.testimonials/.test(
+        PERFIL,
+      ),
+      'Las reseñas van con unas comillas (`format-quote-close`), no con una ' +
+        'estrella.',
+    );
+    assert.ok(
+      /from '@expo\/vector-icons'/.test(PERFIL) &&
+        !/from 'react-native-vector-icons|\.png'/.test(PERFIL),
+      'Ningun icono del perfil puede traer una dependencia nueva ni un PNG.',
     );
   });
 });

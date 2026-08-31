@@ -567,33 +567,45 @@ export function ProfileSection({
   }
 
   /*
-    Remite al perfil de la administracion cuando aqui no hay nada que enseñar
-    NI nada que se pueda crear.
-
-    Antes bastaba con que el perfil no fuera el de la administracion para
-    quedarse en este aviso, de modo que en el propio perfil no habia por donde
-    publicar un curso: solo el enlace a los de otro. Ahora, si es tu perfil,
-    sigue adelante y pinta la seccion con su boton de alta; este acceso baja al
-    final, debajo de lo tuyo.
+    Lo que hay en esta seccion. Se calcula AQUI ARRIBA y no donde se pinta la
+    lista porque el aviso de mas abajo necesita saber si hay algo o no.
   */
-  if (kind !== 'podcast' && !ownerIsAdmin && !canManage && ADMIN_SECTIONS[kind]) {
-    const copy = ADMIN_SECTIONS[kind]!;
+  const items = kind === 'eventos' ? events : courses;
+
+  /*
+    PERFIL AJENO Y SIN NADA QUE ENSEÑAR.
+
+    Este bloque decia «Aún no TIENES cursos» y ofrecia un boton «Ver cursos de
+    Z». Dos cosas mal en la misma pantalla: el texto le hablaba de si mismo a
+    quien esta visitando el perfil de OTRA persona, y el boton mandaba al
+    catalogo de la comunidad desde un sitio donde nadie lo habia pedido.
+
+    Pero el fallo de verdad no era el texto. La condicion NO MIRABA SI HABIA
+    CONTENIDO —le faltaba `items.length === 0`—, asi que en cualquier perfil
+    ajeno se entraba aqui y se devolvia el aviso ANTES de llegar a pintar la
+    lista. Es decir: los cursos de otra persona no se veian NUNCA, publicara
+    los que publicara. El comentario que habia aqui ya decia «cuando aqui no
+    hay nada que enseñar»; era la condicion la que no lo comprobaba.
+
+    Se conserva la parte que si era intencionada: en el perfil PROPIO no se
+    entra, para que quede sitio al boton de alta, y el acceso al catalogo de Z
+    baja al final, debajo de lo tuyo.
+  */
+  if (
+    kind !== 'podcast' &&
+    !ownerIsAdmin &&
+    !canManage &&
+    items.length === 0 &&
+    ADMIN_SECTIONS[kind]
+  ) {
     return (
       <View style={styles.center}>
-        <Feather name={copy.icon} size={30} color={colors.textMuted} />
+        <Feather name={ADMIN_SECTIONS[kind]!.icon} size={30} color={colors.textMuted} />
         <Text variant="body" weight="700" style={styles.centerText}>
-          {t(copy.title)}
+          {t(kind === 'cursos' ? 'section.otherNoCourses' : 'section.otherNoEvents', {
+            name: profileOwnerName || t('section.someone'),
+          })}
         </Text>
-        <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          {t(copy.body)}
-        </Text>
-        <Button
-          label={t(copy.action)}
-          variant="secondary"
-          icon={copy.icon}
-          onPress={() => void openAdminSection(kind)}
-          style={styles.centerAction}
-        />
       </View>
     );
   }
@@ -1113,7 +1125,6 @@ export function ProfileSection({
     );
   }
 
-  const items = kind === 'eventos' ? events : courses;
   // Vacio y sin nada que ofrecer: solo entonces se corta aqui. Si se puede
   // crear, se continua para pintar el boton de alta y el acceso al catalogo.
   if (items.length === 0 && !canManage) {

@@ -7,7 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { perfilVisto } from '@/services/senales';
 
 import { haptics } from '@/lib/haptics';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AudioDePresentacion } from '@/components/AudioDePresentacion';
@@ -35,6 +35,35 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { UserProfile } from '@/types';
+
+/**
+ * Hasta cuántas líneas se centra la descripción del perfil.
+ *
+ * Tres caben centradas sin esfuerzo y es lo que mide una presentación normal.
+ * A partir de ahí el ojo pierde el punto donde empieza cada línea, así que se
+ * alinea a la izquierda —el ancho sigue limitado y el bloque sigue centrado, lo
+ * único que cambia es dónde arrancan las líneas—.
+ */
+const LINEAS_CENTRADAS = 3;
+
+/**
+ * El icono de un acceso circular del perfil, con la familia a la que pertenece.
+ *
+ * POR QUÉ HAY DOS FAMILIAS Y NO UNA. Los cuatro accesos eran de Feather, que es
+ * lo que usa el resto de la aplicación, y lo natural sería no salir de ahí. El
+ * problema es que Feather NO tiene un icono de comillas: ni `quote`, ni
+ * `format-quote`, ni nada equivalente. Lo más cerca que se llegaba era la
+ * estrella —que es lo que había— y una estrella no dice «reseñas», dice
+ * «puntuación», «favorito» o «destacado» según a quién se le pregunte.
+ *
+ * `MaterialCommunityIcons` VIENE EN EL MISMO PAQUETE que Feather
+ * (`@expo/vector-icons`, ya instalado): no se añade ninguna dependencia, no
+ * entra ningún PNG y el icono sigue siendo vectorial, así que escala igual y se
+ * tiñe con los tokens del tema como los demás.
+ */
+type IconoDeAcceso =
+  | { familia: 'feather'; nombre: keyof typeof Feather.glyphMap }
+  | { familia: 'material'; nombre: keyof typeof MaterialCommunityIcons.glyphMap };
 
 export function ProfileScreen() {
   const { colors } = useAppTheme();
@@ -93,6 +122,15 @@ export function ProfileScreen() {
    * circulos. `null` = la galeria de publicaciones.
    */
   const [activeSection, setActiveSection] = useState<ProfileSectionKind | null>(null);
+  /**
+   * Si la descripción ocupó más líneas de las que se pueden centrar sin que
+   * cueste leerlas. Se responde midiendo el texto ya pintado (`onTextLayout`),
+   * no contando caracteres: el mismo texto ocupa distinto en cada pantalla.
+   *
+   * Arranca en `false` —centrada— porque es lo que vale para la inmensa mayoría
+   * de las descripciones, y así el caso normal no parpadea.
+   */
+  const [bioLarga, setBioLarga] = useState(false);
 
   /**
    * Sincroniza la seccion con el parametro de la ruta.
@@ -639,20 +677,14 @@ export function ProfileScreen() {
           </View>
 
           {/*
-            El audio va ANTES de la descripcion, como pedia el documento. Es lo
-            que mas dice de una persona en menos tiempo, y detras del texto casi
-            nadie llegaria a el.
-          */}
-          {/* Su audio también es contenido suyo: bloqueado, no se ofrece. */}
-          {perfilBloqueado ? null : (
-            <AudioDePresentacion
-              rutaDelAudio={profileData.introAudioPath}
-              duracionS={profileData.introAudioDurationS}
-              esPropio={!isPublic}
-              nombre={profileData.fullName}
-            />
-          )}
+            LOS BOTONES, JUSTO DEBAJO DE LAS CIFRAS.
 
+            No están en la lista del orden pedido —que va de la foto al
+            contenido— porque no son presentación: son la acción. Seguir y
+            escribir se deciden en cuanto se sabe a quién se está mirando, así
+            que quedan al alcance sin desplazar, y la presentación (descripción,
+            audio, lo que aporta) sigue entera y sin cortes justo debajo.
+          */}
           <View style={styles.actionRow}>
               {isPublic ? (
                 blocked ? (
@@ -729,9 +761,57 @@ export function ProfileScreen() {
             </View>
           ) : (
             <React.Fragment>
+          {/*
+            LA DESCRIPCIÓN, CENTRADA Y DEBAJO DE LAS CIFRAS.
+
+            ESTE ORDEN SUSTITUYE AL ANTERIOR. Aquí había un comentario diciendo
+            que «el audio va ANTES de la descripción, como pedía el documento»:
+            ese requisito cambió y el comentario ya no era verdad. Ahora manda
+            el texto —es lo primero que se lee sin decidir nada, sin sonido y
+            sin esperar a que cargue— y el audio va justo después, que es donde
+            se busca cuando el texto ha despertado interés.
+
+            El ancho está limitado a propósito: un texto centrado que llega de
+            borde a borde obliga a buscar dónde empieza cada línea. Y si la
+            descripción se pasa de larga se alinea a la izquierda —ver
+            `alineacionDeLaBio`—, porque a partir de unas pocas líneas centrar
+            deja de ser elegante y pasa a ser incómodo de leer.
+          */}
           {profileData.bio ? (
-            <Text style={[styles.bio, { color: colors.text }]}>{profileData.bio}</Text>
+            <Text
+              style={[
+                styles.bio,
+                { color: colors.text, textAlign: bioLarga ? 'left' : 'center' },
+              ]}
+              onTextLayout={(evento) => {
+                // Se mide lo que de verdad se pintó, no se adivina por el
+                // número de caracteres: la misma frase ocupa distinto en un
+                // teléfono estrecho, en una tableta o con la letra del sistema
+                // agrandada.
+                const lineas = evento.nativeEvent.lines.length;
+                setBioLarga((previo) => {
+                  const siguiente = lineas > LINEAS_CENTRADAS;
+                  return previo === siguiente ? previo : siguiente;
+                });
+              }}
+            >
+              {profileData.bio}
+            </Text>
           ) : null}
+
+          {/*
+            EL AUDIO DE PRESENTACIÓN, DESPUÉS DE LA DESCRIPCIÓN.
+
+            Va dentro de este bloque y no fuera porque es contenido de la
+            persona: en un perfil bloqueado desaparece con todo lo demás, en vez
+            de repetir aquí la comprobación del bloqueo.
+          */}
+          <AudioDePresentacion
+            rutaDelAudio={profileData.introAudioPath}
+            duracionS={profileData.introAudioDurationS}
+            esPropio={!isPublic}
+            nombre={profileData.fullName}
+          />
 
           {/*
             LO QUE ESTA PERSONA PUEDE APORTAR.
@@ -752,27 +832,35 @@ export function ProfileScreen() {
           {/* TODO: Reactivar el shortcut "Círculos" (icon="users") cuando el perfil alcance un umbral de seguidores */}
           <View style={styles.shortcuts}>
             <Shortcut
-              icon="headphones"
+              icono={{ familia: 'feather', nombre: 'headphones' }}
               label={t('profile.podcast')}
               active={activeSection === 'podcast'}
               onPress={() => setActiveSection((v) => (v === 'podcast' ? null : 'podcast'))}
             />
             <Shortcut
-              icon="book"
+              icono={{ familia: 'feather', nombre: 'book' }}
               label={t('profile.courses')}
               active={activeSection === 'cursos'}
               onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
             />
             {/*
-              `star` y no `camera`. La cámara decía «fotos», que es lo que hacía
-              la galería que vivía dentro de esta sección — y era parte de por
-              qué se confundían: el icono prometía una cosa y el contenido era
-              otra. La estrella es lo que se reconoce como «valoraciones», y es
-              de Feather, que es la librería que ya usa toda la aplicación: no
-              se añade ninguna dependencia por un icono.
+              UNAS COMILLAS, NO UNA ESTRELLA.
+
+              Antes fue una cámara —que decía «fotos», por la galería que vivía
+              empotrada aquí dentro— y después una estrella. La estrella se
+              cambia porque no significa esto: una estrella es una PUNTUACIÓN
+              (cuántas de cinco), o un favorito, o algo destacado. Lo que hay en
+              esta sección son opiniones escritas por otras personas, y el signo
+              universal de «alguien dijo esto» son las comillas.
+
+              `format-quote-close` es literalmente el glifo ”, y viene de
+              MaterialCommunityIcons, que ya está dentro de `@expo/vector-icons`
+              —el mismo paquete que Feather—: no se instala nada. Sigue siendo
+              vectorial, así que entra en el mismo círculo que Podcast, Cursos y
+              Agenda y se tiñe con los mismos tokens.
             */}
             <Shortcut
-              icon="star"
+              icono={{ familia: 'material', nombre: 'format-quote-close' }}
               label={t('profile.testimonials')}
               active={activeSection === 'testimonios'}
               onPress={() => setActiveSection((v) => (v === 'testimonios' ? null : 'testimonios'))}
@@ -792,7 +880,7 @@ export function ProfileScreen() {
               de una pantalla a la que se va no se vuelve con un círculo marcado.
             */}
             <Shortcut
-              icon="calendar"
+              icono={{ familia: 'feather', nombre: 'calendar' }}
               label={t('profile.bookSession')}
               active={isPublic && bookingVisible}
               onPress={() =>
@@ -1068,12 +1156,12 @@ function Stat({ label, value, onPress }: { label: string; value: number; onPress
  * sin un hex suelto.
  */
 function Shortcut({
-  icon,
+  icono,
   label,
   onPress,
   active = false,
 }: {
-  icon: keyof typeof Feather.glyphMap;
+  icono: IconoDeAcceso;
   label: string;
   onPress: () => void;
   active?: boolean;
@@ -1096,7 +1184,25 @@ function Shortcut({
           },
         ]}
       >
-        <Feather name={icon} size={20} color={active ? colors.onPrimary : colors.text} />
+        {icono.familia === 'feather' ? (
+          <Feather
+            name={icono.nombre}
+            size={20}
+            color={active ? colors.onPrimary : colors.text}
+          />
+        ) : (
+          <MaterialCommunityIcons
+            name={icono.nombre}
+            /*
+              Un punto más grande que los de Feather a propósito: el glifo de las
+              comillas ocupa menos alto que un icono de trazo, y al mismo tamaño
+              nominal se veía más pequeño que sus tres vecinos dentro del mismo
+              círculo.
+            */
+            size={22}
+            color={active ? colors.onPrimary : colors.text}
+          />
+        )}
       </View>
       <Text style={{ color: colors.text, fontSize: 11, fontWeight: active ? '800' : '500' }}>
         {label}
@@ -1157,7 +1263,24 @@ const styles = StyleSheet.create({
   name: { fontSize: 21, fontWeight: '900', marginTop: spacing.sm },
   username: { fontSize: 13, marginTop: 2 },
   statBox: { alignItems: 'center', flex: 1 },
-  bio: { fontSize: 13, lineHeight: 18, marginTop: spacing.sm, marginBottom: spacing.lg },
+  /*
+    El ancho tope y el centrado del BLOQUE van aquí; la alineación del TEXTO
+    dentro se decide al pintarlo, según cuántas líneas ocupe.
+
+    420 no es un número al azar: es lo ancho que puede ser una columna de texto
+    de 13 puntos sin que la vista tenga que saltar buscando el principio de la
+    línea siguiente. En un teléfono no llega a aplicarse —la pantalla es más
+    estrecha— y en tableta o en web impide que la descripción se estire de borde
+    a borde.
+  */
+  bio: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+    maxWidth: 420,
+    alignSelf: 'center',
+  },
   // Lo que se lee en lugar del contenido de un perfil bloqueado. Con ICONO y
   // TEXTO, no con un hueco: una pantalla vacia se lee como «esta persona no ha
   // publicado nada», que es justo lo que no ha pasado.

@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
-import { SectionTitle } from '@/components/SectionTitle';
 import { Text } from '@/components/Text';
 import {
   RecommendationRepository,
@@ -33,6 +32,13 @@ import { useTranslation } from '@/i18n/useTranslation';
  * ayudar» y «Experiencia declarada», y nunca «experto», «verificado» o
  * «certificado». Escribir eso seria fabricar una confianza que no existe, y
  * quien la creyera lo descubriria en la primera sesion pagada.
+ *
+ * POR QUE EMPIEZA PLEGADA. Se pintaba entera y de golpe: con tres temas y tres
+ * etiquetas en cada uno ocupaba media pantalla en medio del perfil, justo entre
+ * la presentacion de la persona y los accesos a su podcast, sus cursos y su
+ * agenda. Lo que es un detalle util para quien lo busca se habia convertido en
+ * un muro que hay que atravesar para llegar a lo demas. Plegada, la seccion
+ * ANUNCIA que existe y ocupa una linea; quien tenga interes la abre.
  */
 
 type Props = {
@@ -87,7 +93,36 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
 
   const [temas, setTemas] = useState<OfferedTopic[]>([]);
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'error'>('cargando');
+  /**
+   * Plegada al llegar. Es el estado en el que la seccion estorba menos y sigue
+   * diciendo que existe.
+   */
+  const [abierta, setAbierta] = useState(false);
 
+  /*
+    POR QUE LA PETICION SIGUE SALIENDO AL MONTAR, Y NO AL ABRIR LA SECCION.
+
+    Parece la optimizacion evidente —la seccion nace cerrada, asi que su
+    contenido no se ve— y se ha comprobado antes de descartarla:
+
+    1. NO ESTA EN EL CAMINO CRITICO. `getProfileOffer` sale a la vez que
+       `pedirPerfil` y que las publicaciones, en efectos independientes, y esta
+       pantalla no espera por ella para nada: mientras no hay respuesta este
+       componente devuelve `null` y el perfil se pinta entero igual. Aplazarla
+       no adelantaria ni un fotograma; solo moveria la espera al momento de
+       abrir, que es justo cuando alguien SI la esta mirando.
+
+    2. Y SOBRE TODO: EL ENCABEZADO DEPENDE DE LA RESPUESTA. La mayoria de los
+       perfiles no ha declarado nada, y en ese caso aqui no se pinta nada. Sin
+       pedir los datos no hay forma de saber si hay algo dentro, asi que el
+       encabezado «Lo que puede aportar» tendria que salir SIEMPRE y abrirse
+       sobre un hueco vacio la mayoria de las veces. Eso es un boton muerto, que
+       es exactamente lo que no puede haber.
+
+    Si algun dia hiciera falta, la unica forma correcta seria que el perfil
+    trajera el numero de temas ofrecidos; con eso el encabezado sabria si tiene
+    algo que abrir y la lista si podria esperar. Hoy ese dato no existe.
+  */
   useEffect(() => {
     if (!perfilId || !supabaseEnabled || !conSesion) {
       // El endpoint exige sesion. Sin ella no se pide nada: un 401 en la
@@ -163,9 +198,40 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
     );
   }
 
+  const titulo = esPropio ? t('offer.titleOwn') : t('offer.titleOther');
+
   return (
     <View>
-      <SectionTitle title={esPropio ? t('offer.titleOwn') : t('offer.titleOther')} />
+      {/*
+        EL ENCABEZADO ES EL INTERRUPTOR, no un titulo con un boton al lado: toda
+        la fila responde al toque, que es la unica forma de que se pueda dar sin
+        apuntar. `accessibilityState.expanded` es lo que hace que un lector de
+        pantalla anuncie «contraido» / «expandido» en vez de leer un titulo y
+        dejar a quien escucha sin saber que hay algo debajo.
+
+        La flecha cambia de sentido —abajo cerrada, arriba abierta— y no solo de
+        color ni de opacidad: en un sistema visual en blanco y negro, la forma es
+        lo unico que se lee siempre.
+      */}
+      <Pressable
+        onPress={() => setAbierta((previo) => !previo)}
+        accessibilityRole="button"
+        accessibilityLabel={titulo}
+        accessibilityState={{ expanded: abierta }}
+        hitSlop={6}
+        style={({ pressed }) => [styles.cabecera, { opacity: pressed ? 0.7 : 1 }]}
+      >
+        <Text variant="titleMedium" style={styles.tituloDeSeccion}>
+          {titulo}
+        </Text>
+        <Feather
+          name={abierta ? 'chevron-up' : 'chevron-down'}
+          size={20}
+          color={colors.text}
+        />
+      </Pressable>
+
+      {abierta ? (
       <View style={styles.lista}>
         {visibles.map((tema) => {
           const etiquetas = ORDEN.filter((relacion) => tema.relations.includes(relacion));
@@ -206,11 +272,27 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
           );
         })}
       </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  /*
+    Mismos margenes que `SectionTitle`, que es lo que habia aqui antes: la
+    seccion tiene que seguir separandose del resto del perfil igual, aunque el
+    titulo haya pasado a ser pulsable. Alto minimo de 44 para que sea un blanco
+    tactil de verdad y no una linea de texto que hay que acertar.
+  */
+  cabecera: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  tituloDeSeccion: { flex: 1 },
   lista: { gap: spacing.sm },
   tema: {
     borderWidth: 1,
