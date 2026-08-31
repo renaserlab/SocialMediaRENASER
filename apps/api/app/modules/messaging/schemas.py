@@ -111,4 +111,15 @@ class MessageRead(BaseModel):
     #: 0033 espere aprobación: sin la tabla no hay adjuntos que devolver.
     attachments: list[AttachmentRead] = Field(default_factory=list)
 
+    #: Cuándo lo borró quien lo escribió. `None` en la inmensa mayoría.
+    #:
+    #: POR QUÉ EL MENSAJE BORRADO SE SIGUE ENTREGANDO. Porque si desapareciera
+    #: sin dejar hueco, la conversación mentiría: quien está al otro lado leyó
+    #: algo que ahora no está y no sabría que se ha borrado ni que hubo algo
+    #: ahí. Se entrega la marca y NADA MÁS —`body` vacío y sin adjuntos, ver
+    #: `list_messages`—, y la aplicación pinta «Mensaje eliminado». El texto
+    #: original no viaja: borrar para todos tiene que borrar de verdad para
+    #: todos, y un cliente distinto del nuestro leería lo que le llegara.
+    deleted_at: datetime | None = None
+
     model_config = ConfigDict(from_attributes=True)

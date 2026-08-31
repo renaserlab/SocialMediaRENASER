@@ -169,6 +169,28 @@ export const MessageRepository = {
     return mensaje ?? toMessage(dto, currentUserId);
   },
 
+  /**
+   * Borra un mensaje PROPIO, para todo el mundo.
+   *
+   * ES UN BORRADO SUAVE EN EL SERVIDOR, no una desaparición: la burbuja se
+   * queda y pasa a decir «Mensaje eliminado». Que no desaparezca del todo es
+   * deliberado — si se esfumara sin dejar hueco, quien está al otro lado habría
+   * leído algo que de pronto no está y no sabría que se ha borrado.
+   *
+   * QUIÉN PUEDE lo decide el servidor: quien lo escribió y la moderación, nadie
+   * más (`message_not_yours`). Aquí solo se evita ofrecer la acción sobre un
+   * mensaje ajeno, que es comodidad y no permiso.
+   *
+   * Es IDEMPOTENTE: borrar dos veces responde lo mismo y la marca conserva la
+   * fecha del borrado de verdad.
+   */
+  async deleteMessage(conversationId: string, messageId: string): Promise<void> {
+    await apiRequest<void>(
+      `${API_V1}/conversations/${conversationId}/messages/${messageId}`,
+      { method: 'DELETE' },
+    );
+  },
+
   async markRead(conversationId: string): Promise<void> {
     await apiRequest<void>(`${API_V1}/conversations/${conversationId}/read`, {
       method: 'POST',

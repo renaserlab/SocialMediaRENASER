@@ -43,6 +43,14 @@ export type MessageDto = {
    * el chat entero en blanco por una función que todavía no está.
    */
   attachments?: AttachmentDto[];
+  /**
+   * Cuándo lo borró quien lo escribió, o `null`.
+   *
+   * Opcional como `attachments` y por lo mismo: una API anterior a este trabajo
+   * no manda el campo, y un mapeador que lo diera por seguro dejaría el chat en
+   * blanco por una función que todavía no está desplegada.
+   */
+  deleted_at?: string | null;
 };
 
 /** Fila cruda de la tabla messages que entrega Supabase Realtime. */
@@ -100,6 +108,12 @@ export function toMessage(dto: MessageDto, currentUserId?: string | null): Messa
     // El instante sin formatear: es lo que ordena la lista y lo que se manda
     // como `before`/`after`. `createdAt` solo lleva hora y minuto.
     createdAtIso: dto.created_at,
+    /*
+      EL SERVIDOR YA MANDA LA BURBUJA VACIA. `body` viene en blanco y sin
+      adjuntos: el texto borrado no viaja, asi que aqui no hay nada que
+      esconder — solo que decir que hubo algo.
+    */
+    eliminado: !!dto.deleted_at,
     attachments: (dto.attachments ?? []).map(toAttachment),
   };
 }

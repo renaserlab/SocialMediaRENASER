@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,13 +13,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { BottomSheet } from '@/components/BottomSheet';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { Input } from '@/components/Input';
-import { notify } from '@/lib/confirm';
+import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
   fusionar,
@@ -53,6 +51,17 @@ import type { Message, MessageAttachment } from '@/types';
 /** Un envío que se puede repetir tal cual si falla. */
 type EnvioPendiente = { texto: string; archivos: AdjuntoElegido[] };
 
+/**
+ * La lápida de un mensaje borrado: sin relleno, con el borde a la vista y en
+ * cursiva. Ver el comentario del `renderItem`.
+ */
+const ESTILO_ELIMINADO = {
+  flexDirection: 'row' as const,
+  alignItems: 'center' as const,
+  gap: 6,
+  backgroundColor: 'transparent' as const,
+};
+
 function pesoLegible(bytes?: number | null): string {
   if (!bytes) return '';
   const mb = bytes / 1024 / 1024;
@@ -64,7 +73,6 @@ export function ChatScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const keyboardOffset = useKeyboardOffset();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -410,6 +418,67 @@ export function ChatScreen() {
     [aplicar],
   );
 
+  /**
+   * Borra un mensaje PROPIO, para todo el mundo.
+   *
+   * PREGUNTA ANTES, porque no se puede deshacer: lo que se borra desaparece
+   * también del teléfono de la otra persona, y ahí ya lo ha podido leer.
+   *
+   * El diálogo se lanza desde una pulsación larga sobre la burbuja, con NINGUNA
+   * hoja abierta: es lo que permite usar `confirm()` directamente aquí. Desde
+   * dentro de un `BottomSheet` haría falta cerrarla y esperar (`afterSheetClose`),
+   * porque en iOS un Modal sobre otro Modal ni se ve ni resuelve.
+   *
+   * QUIÉN PUEDE lo decide el servidor. Aquí ni se ofrece sobre un mensaje ajeno
+   * —`sender !== 'me'`— ni sobre uno que todavía no ha llegado (no tiene id de
+   * verdad que borrar), pero eso es comodidad, no permiso.
+   *
+   * LO QUE SE VE DESPUÉS es una lápida: la burbuja se queda diciendo «Mensaje
+   * eliminado». No se quita de la lista, porque un hueco haría que la
+   * conversación mintiera sobre lo que hubo.
+   */
+  const eliminarMensaje = useCallback(
+    async (mensaje: Message) => {
+      if (!params.id || mensaje.sender !== 'me' || mensaje.estado || mensaje.eliminado) {
+        return;
+      }
+      const ok = await confirm({
+        title: 'Eliminar mensaje',
+        message:
+          'Se eliminará para todos los participantes. Verán que aquí hubo un ' +
+          'mensaje y que lo eliminaste.',
+        confirmLabel: 'Eliminar',
+        cancelLabel: 'Cancelar',
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        await MessageRepository.deleteMessage(params.id, mensaje.id);
+        /*
+          Se marca en el acto en vez de recargar el historial: el servidor ya ha
+          confirmado, y volver a pedir la página entera para cambiar una burbuja
+          es un viaje que se nota. Si algo se descuadrara, la siguiente carga
+          —o el siguiente mensaje que entre— trae la verdad del servidor.
+        */
+        aplicar(
+          mensajesRef.current.map((m) =>
+            m.id === mensaje.id
+              ? { ...m, eliminado: true, text: '', attachments: [] }
+              : m,
+          ),
+        );
+      } catch (fallo) {
+        notify(
+          'No se pudo eliminar',
+          fallo instanceof ApiError && fallo.code === 'message_not_yours'
+            ? 'Solo puedes eliminar los mensajes que has escrito tú.'
+            : 'Inténtalo de nuevo en unos momentos.',
+        );
+      }
+    },
+    [params.id, aplicar],
+  );
+
   // -------------------------------------------------------------------------
   // Pintar
   // -------------------------------------------------------------------------
@@ -470,11 +539,7 @@ export function ChatScreen() {
           {loadError}
         </Text>
       ) : null}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
         <FlashList
           data={messages}
           keyExtractor={(item: Message) => item.id}
@@ -497,6 +562,43 @@ export function ChatScreen() {
           renderItem={({ item }: { item: Message }) => {
             const mine = item.sender === 'me';
             const fallido = item.estado === 'error';
+            /*
+              LA LÁPIDA: la burbuja de un mensaje que su autor borró.
+
+              Se pinta distinta de una burbuja normal —sin relleno, con el borde
+              a la vista, en cursiva y con un icono— porque NO es un mensaje: es
+              la marca de que hubo uno. Con el mismo aspecto que los demás se
+              leería como si alguien hubiera escrito literalmente «Mensaje
+              eliminado», que es la confusión clásica de este patrón.
+
+              Y no lleva ni texto ni adjuntos porque el servidor no los manda:
+              borrar para todos borra de verdad.
+            */
+            if (item.eliminado) {
+              return (
+                <View style={mine ? styles.filaMia : styles.filaSuya}>
+                  <View
+                    style={[
+                      styles.bubble,
+                      mine ? styles.mine : styles.theirs,
+                      ESTILO_ELIMINADO,
+                      { borderColor: colors.border },
+                    ]}
+                  >
+                    <Feather name="slash" size={12} color={colors.textMuted} />
+                    <Text
+                      style={{
+                        color: colors.textMuted,
+                        fontSize: 13,
+                        fontStyle: 'italic',
+                      }}
+                    >
+                      Mensaje eliminado
+                    </Text>
+                  </View>
+                </View>
+              );
+            }
             return (
               <View style={mine ? styles.filaMia : styles.filaSuya}>
                 <View
@@ -516,40 +618,73 @@ export function ChatScreen() {
                     </View>
                   ) : null}
 
-                  {item.text ? (
-                    <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
-                      {item.text}
-                    </Text>
-                  ) : null}
+                  {/*
+                    PULSACIÓN LARGA PARA ELIMINAR, y solo sobre lo propio.
 
-                  {item.progreso !== undefined ? (
-                    <View style={[styles.barra, { backgroundColor: colors.border }]}>
-                      <View
-                        style={[
-                          styles.barraAvance,
-                          {
-                            backgroundColor: mine ? colors.onPrimary : colors.primary,
-                            width: `${Math.round(item.progreso * 100)}%`,
-                          },
-                        ]}
-                      />
-                    </View>
-                  ) : null}
+                    Es el gesto que ya espera cualquiera que venga de otro chat.
+                    No hay botón visible: uno por burbuja ensuciaría la
+                    conversación entera para algo que casi nunca se usa.
 
-                  <Text
-                    style={{
-                      color: mine ? colors.onPrimary : colors.textMuted,
-                      fontSize: 9,
-                      marginTop: 5,
-                      opacity: 0.75,
-                    }}
+                    POR QUÉ ENVUELVE EL TEXTO Y LA HORA, Y NO LA BURBUJA ENTERA.
+                    Porque en web cada `Pressable` es un `<button>`, y los
+                    adjuntos YA son `Pressable` (se tocan para ver la foto). Un
+                    Pressable rodeando a otro genera HTML inválido y rompe la
+                    hidratación — es una trampa que este proyecto ya pagó. Aquí
+                    van como HERMANOS: los adjuntos arriba, esto debajo.
+
+                    La hora se pinta siempre, así que un mensaje que solo lleva
+                    una foto conserva su franja para mantener pulsado.
+
+                    `onLongPress` sin `onPress`: tocar la burbuja sigue sin hacer
+                    nada, como antes.
+                  */}
+                  <Pressable
+                    onLongPress={
+                      mine && !item.estado ? () => void eliminarMensaje(item) : undefined
+                    }
+                    delayLongPress={400}
+                    accessibilityRole={mine && !item.estado ? 'button' : undefined}
+                    accessibilityLabel={
+                      mine && !item.estado
+                        ? 'Mantén pulsado para eliminar el mensaje'
+                        : undefined
+                    }
                   >
-                    {item.estado === 'enviando'
-                      ? 'Enviando…'
-                      : fallido
-                        ? 'No se envió'
-                        : item.createdAt}
-                  </Text>
+                    {item.text ? (
+                      <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
+                        {item.text}
+                      </Text>
+                    ) : null}
+
+                    {item.progreso !== undefined ? (
+                      <View style={[styles.barra, { backgroundColor: colors.border }]}>
+                        <View
+                          style={[
+                            styles.barraAvance,
+                            {
+                              backgroundColor: mine ? colors.onPrimary : colors.primary,
+                              width: `${Math.round(item.progreso * 100)}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    ) : null}
+
+                    <Text
+                      style={{
+                        color: mine ? colors.onPrimary : colors.textMuted,
+                        fontSize: 9,
+                        marginTop: 5,
+                        opacity: 0.75,
+                      }}
+                    >
+                      {item.estado === 'enviando'
+                        ? 'Enviando…'
+                        : fallido
+                          ? 'No se envió'
+                          : item.createdAt}
+                    </Text>
+                  </Pressable>
                 </View>
 
                 {fallido ? (
@@ -672,7 +807,7 @@ export function ChatScreen() {
             )}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
 
       <BottomSheet visible={menuAbierto} onClose={() => setMenuAbierto(false)}>
         <ListRow
