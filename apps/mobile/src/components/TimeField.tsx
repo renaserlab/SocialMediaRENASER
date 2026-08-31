@@ -8,6 +8,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 import { fromDisplayTime, toDisplayTime, toHumanTime, type TimeFieldProps } from './TimeField.types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Campo de hora con reloj del sistema (iOS / Android).
@@ -17,6 +18,7 @@ import { fromDisplayTime, toDisplayTime, toHumanTime, type TimeFieldProps } from
  * navegador. Ambas escriben HH:MM, así que quien lo consume no distingue.
  */
 export function TimeField({ label, value, onChange, placeholder = '--:--' }: TimeFieldProps) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [open, setOpen] = useState(false);
 
@@ -30,7 +32,11 @@ export function TimeField({ label, value, onChange, placeholder = '--:--' }: Tim
         onPress={() => setOpen(true)}
         style={[styles.field, { borderColor: colors.border, backgroundColor: colors.background }]}
         accessibilityRole="button"
-        accessibilityLabel={label ? `${label}: ${value || 'sin hora'}` : 'Elegir hora'}
+        accessibilityLabel={
+          label
+            ? t('field.timeWithLabel', { etiqueta: label, valor: value || t('field.noTime') })
+            : t('field.pickTime')
+        }
       >
         <Text style={{ color: value ? colors.text : colors.textMuted, fontSize: 14 }}>
           {/* Se guarda en 24 h y se lee en el formato de siempre. */}

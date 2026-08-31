@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * La lógica del asistente de curso, sin React.
  *
@@ -17,14 +19,57 @@
  * paso siguiente hasta rellenarlo entero es un formulario con más pasos.
  */
 
-/** Los pasos, en orden. El id se usa como clave; el orden es el del array. */
+/**
+ * Cómo se traduce lo que sale de aquí.
+ *
+ * Lo pasa la pantalla. Este módulo NO puede importar el diccionario: se prueba
+ * con el runner de Node, que no resuelve el alias `@/`. Sin traductor se
+ * escribe en español, que es el idioma de referencia.
+ */
+export type TraductorDelAsistente = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave.
+ *
+ * Es el mismo texto que hay en `i18n/es.ts`, y que no se desvíen lo comprueba
+ * `i18n/diccionariosSincronizados.test.mts`.
+ */
+export const RESPALDOS_ES = {
+  'wizard.stepBasic': 'Información básica',
+  'wizard.stepOffer': 'Qué ofrece',
+  'wizard.stepContent': 'Contenido',
+  'wizard.stepPrice': 'Precio',
+  'wizard.stepReview': 'Revisar y enviar',
+  'wizard.noContentYet': 'Sin contenido todavía',
+  'wizard.reviewPending': 'En revisión',
+  'wizard.reviewPendingBody': 'Alguien del equipo lo está mirando. Te avisaremos al resolverla.',
+  'wizard.reviewApproved': 'Aprobado',
+  'wizard.reviewApprovedBody': 'Ya puedes publicarlo cuando quieras. La decisión sigue siendo tuya.',
+  'wizard.reviewRejected': 'Revisión rechazada',
+  'wizard.reviewNoReason': 'No se indicó un motivo. Escríbenos si no sabes qué corregir.',
+  'wizard.reviewDraft': 'Borrador',
+  'wizard.reviewDraftBody': 'Solo lo ves tú. Cuando esté listo, envíalo a revisión.',
+} as const;
+
+const enEspanol: TraductorDelAsistente = (clave) =>
+  RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? clave;
+
+/**
+ * Los pasos, en orden. El id se usa como clave; el orden es el del array.
+ *
+ * El título se guarda como CLAVE, no como texto: se resuelve al pintar, que es
+ * cuando se sabe en qué idioma está la aplicación.
+ */
 export const PASOS = [
-  { id: 'basico', titulo: 'Información básica', icono: 'file-text' },
-  { id: 'oferta', titulo: 'Qué ofrece', icono: 'award' },
-  { id: 'contenido', titulo: 'Contenido', icono: 'list' },
-  { id: 'precio', titulo: 'Precio', icono: 'tag' },
-  { id: 'revisar', titulo: 'Revisar y enviar', icono: 'send' },
-] as const;
+  { id: 'basico', titulo: 'wizard.stepBasic', icono: 'file-text' },
+  { id: 'oferta', titulo: 'wizard.stepOffer', icono: 'award' },
+  { id: 'contenido', titulo: 'wizard.stepContent', icono: 'list' },
+  { id: 'precio', titulo: 'wizard.stepPrice', icono: 'tag' },
+  { id: 'revisar', titulo: 'wizard.stepReview', icono: 'send' },
+] as const satisfies ReadonlyArray<{ id: string; titulo: TranslationKey; icono: string }>;
 
 export type PasoId = (typeof PASOS)[number]['id'];
 
@@ -71,8 +116,11 @@ export function duracionTotal(modulos: ResumenDeModulo[]): number {
  * Nunca «0 min»: un curso sin contenido no dura cero, es que todavía no tiene
  * contenido, y son dos cosas distintas para quien lo lee.
  */
-export function duracionLegible(segundos: number): string {
-  if (!segundos || segundos <= 0) return 'Sin contenido todavía';
+export function duracionLegible(
+  segundos: number,
+  traducir: TraductorDelAsistente = enEspanol,
+): string {
+  if (!segundos || segundos <= 0) return traducir('wizard.noContentYet');
   const minutosTotales = Math.max(1, Math.round(segundos / 60));
   const horas = Math.floor(minutosTotales / 60);
   const minutos = minutosTotales % 60;
@@ -134,33 +182,35 @@ export type AvisoDeRevision = {
 export function avisoDeRevision(
   reviewStatus: string | undefined,
   motivo?: string | null,
+  traducir: TraductorDelAsistente = enEspanol,
 ): AvisoDeRevision {
+  const t = traducir;
   switch (reviewStatus) {
     case 'pending_review':
       return {
         icono: 'clock',
-        titulo: 'En revisión',
-        detalle: 'Alguien del equipo lo está mirando. Te avisaremos al resolverla.',
+        titulo: t('wizard.reviewPending'),
+        detalle: t('wizard.reviewPendingBody'),
       };
     case 'approved':
       return {
         icono: 'check-circle',
-        titulo: 'Aprobado',
-        detalle: 'Ya puedes publicarlo cuando quieras. La decisión sigue siendo tuya.',
+        titulo: t('wizard.reviewApproved'),
+        detalle: t('wizard.reviewApprovedBody'),
       };
     case 'rejected':
       return {
         icono: 'alert-circle',
-        titulo: 'Revisión rechazada',
+        titulo: t('wizard.reviewRejected'),
         // El motivo es lo único que permite corregir; si falta, se dice que
         // falta en vez de dejar un hueco que parece un fallo de la aplicación.
-        detalle: motivo?.trim() || 'No se indicó un motivo. Escríbenos si no sabes qué corregir.',
+        detalle: motivo?.trim() || t('wizard.reviewNoReason'),
       };
     default:
       return {
         icono: 'edit-3',
-        titulo: 'Borrador',
-        detalle: 'Solo lo ves tú. Cuando esté listo, envíalo a revisión.',
+        titulo: t('wizard.reviewDraft'),
+        detalle: t('wizard.reviewDraftBody'),
       };
   }
 }

@@ -6,12 +6,14 @@ import { Feather } from '@expo/vector-icons';
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Button } from '@/components/Button';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing, radius } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 export function VerificationScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const user = useAppStore((state) => state.user);
 
@@ -23,7 +25,10 @@ export function VerificationScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Verificación de Cuenta" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title={t('settings.verification')}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
       <AppScreen scroll={false}>
         <View style={styles.container}>
           <View style={styles.iconContainer}>
@@ -39,33 +44,45 @@ export function VerificationScreen() {
           <View style={styles.info}>
             <Text style={[styles.title, { color: colors.text }]}>
               {status === 'verified'
-                ? '¡Tu cuenta está verificada!'
+                ? t('verify.titleVerified')
                 : status === 'pending'
-                ? 'Verificación en proceso'
-                : 'Obtén tu cuenta verificada'}
+                ? t('verify.titlePending')
+                : t('verify.titleNone')}
             </Text>
             <Text style={[styles.description, { color: colors.textMuted }]}>
               {status === 'verified'
-                ? 'Tienes acceso completo a todas las funciones premium, mentorías exclusivas y el Círculo de Liderazgo.'
+                ? t('verify.bodyVerified')
                 : status === 'pending'
-                ? 'Estamos revisando tu solicitud. Este proceso suele tardar menos de 24 horas laborables.'
-                : 'La insignia de verificación demuestra a la comunidad que tu membresía está activa y validada.'}
+                ? t('verify.bodyPending')
+                : t('verify.bodyNone')}
             </Text>
           </View>
 
           <View style={styles.footer}>
             {status === 'none' && (
-              <Button label="Solicitar Verificación" onPress={requestVerification} />
+              <Button label={t('verify.request')} onPress={requestVerification} />
             )}
-            {status === 'pending' && (
+            {/*
+              «Simular Aprobación (Demo)» se verifica a si mismo con un toque:
+              es el mismo resto de demostracion que «Reiniciar aplicacion», y a
+              un usuario real solo le puede dar una insignia que nadie ha
+              revisado. Se esconde igual, con `__DEV__`. En produccion, quien
+              esta en revision no ve boton, que es lo correcto: no hay nada que
+              pueda hacer hasta que le respondan.
+            */}
+            {status === 'pending' && __DEV__ && (
               <Button
-                label="Simular Aprobación (Demo)"
+                label={t('verify.simulate')}
                 variant="secondary"
                 onPress={() => setStatus('verified')}
               />
             )}
             {status === 'verified' && (
-              <Button label="Volver a Ajustes" variant="ghost" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+              <Button
+                label={t('verify.back')}
+                variant="ghost"
+                onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+              />
             )}
           </View>
         </View>

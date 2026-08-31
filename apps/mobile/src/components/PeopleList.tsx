@@ -11,6 +11,7 @@ import { assets } from '@/data/assets';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Persona tal y como la pinta esta lista.
@@ -51,6 +52,7 @@ export function PeopleList({
   onToggleFollow,
   currentUserId,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -96,7 +98,7 @@ export function PeopleList({
           </Pressable>
           {onToggleFollow && item.id !== currentUserId ? (
             <Button
-              label={item.isFollowing ? 'Siguiendo' : 'Seguir'}
+              label={item.isFollowing ? t('profile.unfollow') : t('profile.follow')}
               variant={item.isFollowing ? 'secondary' : 'primary'}
               onPress={() => onToggleFollow(item)}
               style={styles.followBtn}

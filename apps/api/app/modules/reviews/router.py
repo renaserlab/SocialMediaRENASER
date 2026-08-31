@@ -42,10 +42,11 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user
+from app.modules.catalog.models import Course
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import esquema
 from app.modules.reviews import verificacion
-from app.modules.reviews.models import ProfileReview, ReviewMedia
+from app.modules.reviews.models import ProfileReview, ReviewCourse, ReviewMedia
 from app.modules.reviews.schemas import (
     ReviewCreate,
     ReviewMediaRead,
@@ -116,6 +117,79 @@ def _exigir_ruta_propia(paths: list[str], uid: str) -> None:
             )
 
 
+async def _exigir_curso_de_la_persona(
+    db: AsyncSession, course_id: str, reviewed_user_id: str
+) -> None:
+    """El curso tiene que existir Y ser de la persona resenada.
+
+    NO BASTA CON QUE SEA UN UUID VALIDO. Si aqui se aceptara cualquier id que
+    mandara el cliente, quien opina sobre Ana podria enganchar su resena al
+    curso de Bruno: en el perfil de Bruno saldria como valoracion de un programa
+    que Ana nunca dio, y en el de Ana un curso que no es suyo. La comprobacion
+    es «de quien es el curso», no «existe el curso».
+
+    Se hace ANTES de escribir nada: descubrirlo despues obligaria a deshacer una
+    insercion ya hecha.
+    """
+    ensure_uuid(course_id, "Ese curso no existe.")
+    autor = await db.scalar(select(Course.author_id).where(Course.id == course_id))
+    if autor is None:
+        raise NotFoundError("Ese curso no existe.")
+    if autor != reviewed_user_id:
+        raise ValidationAppError(
+            "Ese curso no es de la persona sobre la que estás escribiendo.",
+            code="review_course_not_from_user",
+        )
+
+
+async def _guardar_curso(
+    db: AsyncSession, review_id: str, course_id: str | None
+) -> None:
+    """Deja el enlace con el curso como diga `course_id`. `None` lo quita.
+
+    Se borra y se vuelve a escribir en vez de intentar actualizarlo: es UNA fila
+    como mucho —`review_id` es la clave primaria— y reescribirla entera no puede
+    quedar a medias.
+    """
+    await db.execute(delete(ReviewCourse).where(ReviewCourse.review_id == review_id))
+    if course_id is not None:
+        db.add(ReviewCourse(review_id=review_id, course_id=course_id))
+
+
+async def _cursos_de(
+    db: AsyncSession, review_ids: set[str]
+) -> dict[str, tuple[str, str]]:
+    """El curso de cada resena que tenga uno: `{review_id: (course_id, titulo)}`.
+
+    UNA consulta para toda la lista, no una por resena, con el mismo criterio
+    que los autores y los medios de `_leer`.
+
+    Sin la 0041 devuelve un diccionario VACIO y ninguna resena sale con curso,
+    que es la verdad: todavia no se puede decir de que curso habla ninguna.
+    Preguntarlo igualmente reventaria contra una tabla que no existe, y en
+    PostgreSQL una sentencia fallida deja la transaccion inservible.
+
+    `select(Course.id, Course.title)` y no `select(Course)`: el segundo pide
+    TODAS las columnas mapeadas del catalogo, que es mas de lo que hace falta
+    para pintar un rotulo y una trampa cada vez que el modelo se adelante a una
+    migracion del catalogo.
+    """
+    if not review_ids or not await esquema.hay_curso_en_resena(db):
+        return {}
+    # Nunca `in_(lista or [""])`: la cadena vacia contra una columna `uuid`
+    # cuela en SQLite y PostgreSQL la rechaza, y el manejador de DBAPIError lo
+    # convierte en un 404 silencioso. Aqui el conjunto nunca esta vacio: se ha
+    # salido arriba.
+    filas = (
+        await db.execute(
+            select(ReviewCourse.review_id, Course.id, Course.title).join(
+                Course, Course.id == ReviewCourse.course_id
+            ).where(ReviewCourse.review_id.in_(review_ids))
+        )
+    ).all()
+    return {review_id: (curso_id, titulo) for review_id, curso_id, titulo in filas}
+
+
 async def _leer(
     db: AsyncSession, resenas: list[ProfileReview], uid: str
 ) -> list[ReviewRead]:
@@ -151,11 +225,14 @@ async def _leer(
     ).all():
         medios.setdefault(medio.review_id, []).append(medio)
 
+    cursos = await _cursos_de(db, {r.id for r in resenas})
+
     admin = await is_admin(db, uid)
 
     salida: list[ReviewRead] = []
     for resena in resenas:
         autor = autores.get(resena.reviewer_id)
+        curso = cursos.get(resena.id)
         salida.append(
             ReviewRead(
                 id=resena.id,
@@ -176,6 +253,8 @@ async def _leer(
                     for m in medios.get(resena.id, [])
                 ],
                 verified_source=resena.verified_source,
+                course_id=curso[0] if curso else None,
+                course_title=curso[1] if curso else None,
                 created_at=resena.created_at,
                 updated_at=resena.updated_at,
                 # Quien la escribio y la moderacion. NUNCA la persona resenada:
@@ -256,7 +335,19 @@ async def disponibilidad(
     la 0030 espere aprobacion. Ofrecerlo y responder 503 al pulsarlo es la
     misma pantalla cargando de siempre, solo que con otro motivo.
     """
-    return ReviewsAvailability(available=await esquema.hay_resenas_de_perfil(db))
+    hay_resenas = await esquema.hay_resenas_de_perfil(db)
+    return ReviewsAvailability(
+        available=hay_resenas,
+        # Se pregunta aparte: con la 0030 puesta y la 0041 no, se puede escribir
+        # una resena pero no decir de que curso habla. Ofrecer el selector ahi
+        # seria pedir un dato que se va a tirar sin decirlo.
+        #
+        # Y NUNCA sin la 0030: un enlace a un curso cuelga de una resena, asi
+        # que sin resenas no significa nada. Decir que si se puede, cuando no se
+        # puede ni escribir, es ofrecer un formulario que no lleva a ningun
+        # sitio.
+        courses_available=hay_resenas and await esquema.hay_curso_en_resena(db),
+    )
 
 
 @router.get("/received/{user_id}", response_model=list[ReviewRead])
@@ -395,6 +486,20 @@ async def publicar(
 
     _exigir_ruta_propia([m.storage_path for m in payload.media], current_user.id)
 
+    # DE QUE CURSO HABLA (0041). Se valida ANTES de escribir nada y contra la
+    # base: que sea un uuid no basta, tiene que ser un curso de la persona
+    # resenada. Ver `_exigir_curso_de_la_persona`.
+    #
+    # Sin la 0041 aplicada el enlace se IGNORA en silencio en vez de responder
+    # 503: el curso es un adorno de la resena, y perder una opinion ya escrita
+    # por un adorno seria peor que publicarla sin el. Es distinto de los medios,
+    # que sin su tabla no tendrian donde guardarse.
+    con_curso = await esquema.hay_curso_en_resena(db)
+    if payload.course_id is not None and con_curso:
+        await _exigir_curso_de_la_persona(
+            db, payload.course_id, payload.reviewed_user_id
+        )
+
     resena = ProfileReview(
         reviewer_id=current_user.id,
         reviewed_user_id=payload.reviewed_user_id,
@@ -410,6 +515,8 @@ async def publicar(
     await db.flush()
 
     await _guardar_medios(db, resena.id, payload.media, current_user.id)
+    if con_curso and payload.course_id is not None:
+        await _guardar_curso(db, resena.id, payload.course_id)
     await db.commit()
     await db.refresh(resena)
     return (await _leer(db, [resena], current_user.id))[0]
@@ -436,6 +543,17 @@ async def editar(
         # `None` = no se tocan. Una lista vacia SI los quita todos, que es como
         # se borra una foto de la que uno se arrepiente.
         await _guardar_medios(db, resena.id, payload.media, resena.reviewer_id)
+
+    # El curso: solo si vino EN LA PETICION. `model_fields_set` distingue «no lo
+    # mandes» de «mandalo vacio», que es lo que permite desenlazar un curso
+    # elegido por error; con el valor por defecto las dos cosas serian la misma
+    # y no habria forma de quitarlo.
+    if "course_id" in payload.model_fields_set and await esquema.hay_curso_en_resena(db):
+        if payload.course_id is not None:
+            await _exigir_curso_de_la_persona(
+                db, payload.course_id, resena.reviewed_user_id
+            )
+        await _guardar_curso(db, resena.id, payload.course_id)
 
     await db.commit()
     await db.refresh(resena)

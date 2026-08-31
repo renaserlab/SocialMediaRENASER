@@ -8,16 +8,20 @@ import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { palette, radius, spacing } from '@/theme/tokens';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 
 // Portada intencionalmente oscura en ambos temas, como la landing.
 const media = palette('dark');
 
 /** Lo que el usuario se lleva al entrar; se explica antes de pedirle nada. */
-const PUNTOS: Array<{ icon: keyof typeof Feather.glyphMap; text: string }> = [
-  { icon: 'lock', text: 'Espacio privado: solo miembros' },
-  { icon: 'compass', text: 'Contenido guiado por Z' },
-  { icon: 'users', text: 'Una comunidad que avanza contigo' },
+// La etiqueta se guarda como CLAVE: el texto se resuelve al pintar, que es
+// cuando se sabe en que idioma esta la aplicacion.
+const PUNTOS: Array<{ icon: keyof typeof Feather.glyphMap; clave: TranslationKey }> = [
+  { icon: 'lock', clave: 'welcome.point1' },
+  { icon: 'compass', clave: 'welcome.point2' },
+  { icon: 'users', clave: 'welcome.point3' },
 ];
 
 /**
@@ -28,6 +32,7 @@ const PUNTOS: Array<{ icon: keyof typeof Feather.glyphMap; text: string }> = [
  * cuestionario.
  */
 export function WelcomeScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
 
   return (
@@ -45,34 +50,33 @@ export function WelcomeScreen() {
 
         <View style={styles.body}>
           <Text variant="display" color={media.text} style={styles.title}>
-            Bienvenido a Z
+            {t('welcome.title')}
           </Text>
           <Text variant="body" color={media.textMuted} style={styles.subtitle}>
-            Esta es una plataforma privada. Un espacio para crecer con
-            acompañamiento, sin ruido y a tu ritmo.
+            {t('welcome.subtitle')}
           </Text>
 
           <View style={styles.points}>
             {PUNTOS.map((punto) => (
-              <View key={punto.text} style={styles.point}>
+              <View key={punto.clave} style={styles.point}>
                 <View style={[styles.pointIcon, { borderColor: media.textMuted }]}>
                   <Feather name={punto.icon} size={17} color={media.text} />
                 </View>
                 <Text variant="body" color={media.text} style={{ flex: 1 }}>
-                  {punto.text}
+                  {t(punto.clave)}
                 </Text>
               </View>
             ))}
           </View>
 
           <Button
-            label="Comenzar"
+            label={t('welcome.start')}
             variant="secondary"
             onPress={() => router.push('/register' as never)}
             style={styles.cta}
           />
           <Text variant="secondary" color={media.textMuted} style={styles.hint}>
-            Antes de entrar, explora este mundo.
+            {t('welcome.hint')}
           </Text>
         </View>
       </AppScreen>

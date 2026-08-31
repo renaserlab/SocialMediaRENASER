@@ -1,3 +1,4 @@
+import { traduceEnElIdiomaActual } from '@/i18n';
 import { API_BASE_URL, API_V1 } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
 import type { Comment, Post } from '@/types';
@@ -56,6 +57,25 @@ export type PostDto = {
   comments_count: number;
   liked_by_me: boolean;
   saved_by_me: boolean;
+  /**
+   * Cuantas veces se republico y si fui yo (migracion 0042). Opcionales: un
+   * backend anterior no manda los campos y la tarjeta pinta cero, que es la
+   * verdad de antes.
+   */
+  reposts_count?: number;
+  reposted_by_me?: boolean;
+  /**
+   * QUIEN la esta compartiendo, cuando llega por una republicacion.
+   *
+   * `author` sigue siendo el autor ORIGINAL: son dos personas distintas y la
+   * tarjeta las ensena las dos. Ausente en una publicacion normal.
+   */
+  repost?: {
+    id: string;
+    author: PostAuthorDto;
+    comentario?: string;
+    created_at: string;
+  } | null;
 };
 
 export type CommentDto = {
@@ -82,7 +102,7 @@ export function formatRelativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
   const secs = Math.floor((Date.now() - then) / 1000);
-  if (secs < 60) return 'Ahora';
+  if (secs < 60) return traduceEnElIdiomaActual('time.now');
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
@@ -134,6 +154,22 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     // (`listFeed`), pero el feed de video se quedaba sin ella y pintaba todos
     // los corazones vacios.
     likedByMe: dto.liked_by_me ?? undefined,
+    repostsCount: dto.reposts_count ?? 0,
+    repostedByMe: dto.reposted_by_me ?? false,
+    /*
+      Quien comparte, APARTE de quien escribio. Nunca se sobreescribe `author`
+      con esto: republicar no cambia de quien es lo publicado.
+    */
+    repost: dto.repost
+      ? {
+          id: dto.repost.id,
+          autor: authorName(dto.repost.author),
+          autorId: dto.repost.author.id,
+          autorAvatarUrl: profileImageUrl(dto.repost.author.avatar_path),
+          comentario: dto.repost.comentario ?? '',
+          fecha: formatRelativeTime(dto.repost.created_at),
+        }
+      : undefined,
     comments: [],
     commentsCount: dto.comments_count,
     isOwn: currentUserId ? dto.author.id === currentUserId : undefined,

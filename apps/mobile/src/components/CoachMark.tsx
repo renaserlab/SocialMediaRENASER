@@ -6,6 +6,7 @@ import { Text } from '@/components/Text';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type CoachMarkProps = {
   /** Identificador estable; con el se recuerda que el usuario la cerro. */
@@ -40,6 +41,7 @@ export function CoachMark({
   onPress,
   style,
 }: CoachMarkProps) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const dismissed = useAppStore((state) => state.dismissedGuides.includes(id));
   const dismissGuide = useAppStore((state) => state.dismissGuide);
@@ -98,7 +100,7 @@ export function CoachMark({
             onPress={onPress}
             style={StyleSheet.absoluteFill}
             accessibilityRole="button"
-            accessibilityLabel={`Toca aquí: ${text}`}
+            accessibilityLabel={t('coach.tapHereA11y', { texto: text })}
           />
         ) : null}
 
@@ -106,7 +108,7 @@ export function CoachMark({
           <Feather name="arrow-up-right" size={16} color={colors.onPrimary} />
           <View style={styles.copy}>
             <Text variant="secondary" weight="800" color={colors.onPrimary}>
-              Toca aquí
+              {t('coach.tapHere')}
             </Text>
             <Text variant="secondary" color={colors.onPrimary} style={styles.text}>
               {text}
@@ -118,7 +120,7 @@ export function CoachMark({
           onPress={() => dismissGuide(id)}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Cerrar guía"
+          accessibilityLabel={t('coach.close')}
           style={styles.close}
         >
           <Feather name="x" size={15} color={colors.onPrimary} />

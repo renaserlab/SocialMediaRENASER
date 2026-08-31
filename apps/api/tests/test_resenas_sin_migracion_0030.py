@@ -144,7 +144,10 @@ async def test_la_disponibilidad_dice_que_no(base_sin_0030):
     siempre, solo que con otro motivo."""
     respuesta = await base_sin_0030[0].get(f"{API}/availability")
     assert respuesta.status_code == 200, respuesta.text
-    assert respuesta.json() == {"available": False}
+    # `courses_available` (0041) tambien en falso: un enlace a un curso cuelga
+    # de una resena, asi que sin resenas no significa nada. Decir que si se
+    # puede seria ofrecer un selector dentro de un formulario que no existe.
+    assert respuesta.json() == {"available": False, "courses_available": False}
 
 
 @pytest.mark.asyncio

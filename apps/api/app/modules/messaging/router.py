@@ -29,6 +29,7 @@ from app.core.exceptions import (
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import esquema
+from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
     Conversation,
@@ -50,8 +51,15 @@ from app.modules.recommendations.signals import registrar_senal
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
+from app.shared.permissions import is_admin
 
 router = APIRouter(prefix="/conversations", tags=["messaging"])
+
+# El CRM ligero de etiquetas privadas (`etiquetas.py`), montado ANTES que las
+# rutas de este fichero: FastAPI prueba en orden de declaracion, asi que el dia
+# que alguien anada un `GET /{conversation_id}` aqui, `/conversations/labels`
+# seguiria leyendose como lo que es y no como un id de conversacion.
+router.include_router(etiquetas_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
@@ -429,16 +437,28 @@ async def list_messages(
             Message.conversation_id,
             Message.body,
             Message.created_at,
+            Message.deleted_at,
             Profile.id,
             Profile.full_name,
             Profile.username,
             Profile.avatar_path,
         )
         .join(Profile, Profile.id == Message.sender_id)
-        .where(
-            Message.conversation_id == conversation_id,
-            Message.deleted_at.is_(None),
-        )
+        # LO BORRADO SÍ SALE, y esto es lo que cambió. Antes se filtraba aquí y
+        # el mensaje desaparecía sin dejar hueco: quien estaba al otro lado
+        # había leído algo que de pronto no estaba, sin saber que se había
+        # borrado ni que hubo nada ahí. Ahora sale la LÁPIDA —la marca y nada
+        # más— y la aplicación escribe «Mensaje eliminado».
+        #
+        # El texto NO viaja: se vacía unas líneas más abajo. Borrar para todos
+        # tiene que borrar de verdad para todos, incluido un cliente que no sea
+        # el nuestro.
+        #
+        # La BANDEJA sigue ignorando lo borrado (`_TIENE_ALGUN_MENSAJE`,
+        # `ultimos_mensajes`, `no_leidos`) y no es una incoherencia: una lápida
+        # no es algo pendiente de leer, así que no puede contar como no leído ni
+        # devolver a la bandeja un chat que se vació.
+        .where(Message.conversation_id == conversation_id)
     )
     if before is not None:
         consulta = consulta.where(Message.created_at < before)
@@ -456,7 +476,13 @@ async def list_messages(
     # Los adjuntos de TODOS los mensajes de la pagina, de una vez. Sin la 0033
     # devuelve el diccionario vacio y cada mensaje sale con `attachments: []`,
     # que es la verdad: no hay adjuntos.
-    adjuntos = await adjuntos_por_mensaje(db, [fila[0] for fila in rows])
+    #
+    # Los de un mensaje borrado NI SE PIDEN: no hay que enseñarlos, así que
+    # tampoco hay que traerlos. Los ficheros del bucket se quedan donde están
+    # (ver la nota de `borrar_mensaje`), pero su existencia no se cuenta.
+    adjuntos = await adjuntos_por_mensaje(
+        db, [fila[0] for fila in rows if fila[4] is None]
+    )
 
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
@@ -466,8 +492,13 @@ async def list_messages(
             sender=AuthorSummary(
                 id=pid, full_name=full_name, username=username, avatar_path=avatar_path
             ),
-            body=body,
+            # LA LÁPIDA NO LLEVA EL TEXTO. Vaciarlo aquí, en el servidor, y no
+            # esconderlo en la pantalla: lo que no sale de aquí no lo puede leer
+            # nadie, y lo que sale acaba viéndose antes o después —en otro
+            # cliente, en la respuesta cruda, en un registro—.
+            body="" if borrado_en is not None else body,
             created_at=created_at,
+            deleted_at=borrado_en,
             attachments=adjuntos.get(msg_id, []),
         )
         for (
@@ -475,6 +506,7 @@ async def list_messages(
             conv_id,
             body,
             created_at,
+            borrado_en,
             pid,
             full_name,
             username,
@@ -590,6 +622,82 @@ async def send_message(
         created_at=created_at,
         attachments=adjuntos,
     )
+
+
+@router.delete(
+    "/{conversation_id}/messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def borrar_mensaje(
+    conversation_id: str,
+    message_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Borra un mensaje PROPIO para todo el mundo. Borrado suave.
+
+    QUIÉN PUEDE. Quien lo escribió, y la moderación. NADIE MÁS, y esa ausencia
+    es la regla entera: si el otro lado pudiera borrar lo que le dijeron, una
+    conversación dejaría de ser prueba de nada —bastaría con quitar lo que
+    incomoda— y no habría forma de reportar un mensaje abusivo, porque quien lo
+    mandó ya no aparecería como su autor de nada.
+
+    El rol se lee de `profiles`, NUNCA del token: en el JWT de Supabase `role`
+    vale siempre "authenticated", y comprobarlo contra "admin" no se cumple
+    jamás. Ese fallo ya llegó a producción varias veces en este proyecto.
+
+    POR QUÉ SUAVE Y NO UN `DELETE`. Porque la fila la miran más cosas que la
+    burbuja: el contador de no leídos, la previsualización de la bandeja y el
+    filtro que decide si un chat directo existe. Un borrado físico deja huecos
+    en todo eso y no se puede deshacer si mañana hay que responder a un reporte.
+    Con la marca, la conversación sigue contando la verdad: aquí hubo un mensaje
+    y su autor lo retiró.
+
+    LOS FICHEROS DEL BUCKET NO SE TOCAN. Borrarlos aquí rompería el mensaje si
+    la escritura fallara después, y sobre todo son irrecuperables: la limpieza
+    de huérfanos tiene su sitio (`app/shared/storage.py`) y decide con toda la
+    información delante. Lo que sí deja de ocurrir es entregarlos: un mensaje
+    borrado sale sin adjuntos (ver `list_messages`).
+
+    IDEMPOTENTE. Borrar dos veces responde 204 las dos: la marca no se
+    sobreescribe, así que la fecha sigue siendo la del borrado de verdad.
+    """
+    ensure_uuid(conversation_id, "Conversacion no encontrada.")
+    ensure_uuid(message_id, "Mensaje no encontrado.")
+    # Pertenecer a la conversación es lo PRIMERO. Sin esto, quien no está dentro
+    # podría averiguar si un id de mensaje existe por la diferencia entre un 404
+    # y un 403.
+    await _require_member(db, conversation_id, current_user.id)
+
+    fila = (
+        await db.execute(
+            select(Message.sender_id, Message.deleted_at).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+    ).one_or_none()
+    if fila is None:
+        raise NotFoundError("Mensaje no encontrado.")
+    remitente, ya_borrado = fila
+
+    if remitente != current_user.id and not await is_admin(db, current_user.id):
+        raise ForbiddenError(
+            "Solo puedes borrar los mensajes que has escrito tú.",
+            code="message_not_yours",
+        )
+
+    if ya_borrado is not None:
+        # Ya estaba. No se vuelve a marcar: la fecha tiene que seguir siendo la
+        # del borrado real, no la del último toque en un botón.
+        return
+
+    await db.execute(
+        update(Message)
+        .where(Message.id == message_id, Message.deleted_at.is_(None))
+        .values(deleted_at=func.now())
+    )
+    await db.commit()
 
 
 @router.post("/{conversation_id}/read", status_code=status.HTTP_204_NO_CONTENT)

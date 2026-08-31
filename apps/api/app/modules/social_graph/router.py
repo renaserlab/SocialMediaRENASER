@@ -185,7 +185,16 @@ async def follow_profile(
     )
     if existing is None:
         db.add(Follow(follower_id=current_user.id, following_id=profile_id))
-        add_notification(
+        # ESTE `if` NO ES LA GARANTIA, y es justo lo que producia el aviso
+        # repetido de la captura: al dejar de seguir, la fila de `follows` SE
+        # BORRA, asi que al volver a seguir vuelve a entrar aqui y se escribia
+        # un segundo «empezo a seguirte» debajo del primero. Y dos peticiones
+        # simultaneas —doble toque, reintento al cambiar de red— pasan las dos.
+        #
+        # La idempotencia la pone ahora la base (`dedupe_key`, migracion 0043).
+        # `add_notification` devuelve si ha escrito de verdad, y de eso depende
+        # que ademas suene el telefono.
+        estrenado = await add_notification(
             db, user_id=profile_id, actor_id=current_user.id, type="follow"
         )
         # Seguir es una de las senales que mas dice, y la escribe el SERVIDOR:
@@ -207,14 +216,15 @@ async def follow_profile(
         # lleva la identidad (id, correo, rol), no el nombre para mostrar, y
         # pedirselo reventaba el seguimiento con un AttributeError justo
         # despues de haberlo guardado.
-        actor = await db.get(Profile, current_user.id)
-        encolar_push(
-            background,
-            user_ids=[profile_id],
-            notification_type="follow",
-            actor_name=actor.full_name if actor else None,
-            data={"type": "follow", "profileId": current_user.id},
-        )
+        if estrenado:
+            actor = await db.get(Profile, current_user.id)
+            encolar_push(
+                background,
+                user_ids=[profile_id],
+                notification_type="follow",
+                actor_name=actor.full_name if actor else None,
+                data={"type": "follow", "profileId": current_user.id},
+            )
     return {"following": True, "followers_count": await _followers_count(db, profile_id)}
 
 
@@ -239,9 +249,17 @@ async def block_profile(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
+    # Antes de tocar la base: un id con otro formato llegaba hasta el driver y
+    # el manejador de DBAPIError lo convertia en un 404 silencioso, que se lee
+    # como «ese perfil no existe» cuando lo que pasa es que el id esta mal.
+    ensure_uuid(profile_id, "Perfil no encontrado.")
     if profile_id == current_user.id:
         raise ValidationAppError("No puedes bloquearte a ti mismo.")
     await _require_profile(db, profile_id)
+    # IDEMPOTENTE: bloquear a quien ya esta bloqueado no es un error, es el
+    # resultado que quien pulsa venia buscando. Sin este `if`, la segunda vez
+    # reventaba con una violacion de clave primaria —que sale como 500— por
+    # pulsar dos veces o por el reintento de una red lenta.
     existing = await db.get(
         UserBlock, {"blocker_id": current_user.id, "blocked_id": profile_id}
     )
@@ -268,6 +286,13 @@ async def unblock_profile(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
+    """Quita el bloqueo. IDEMPOTENTE: desbloquear dos veces responde lo mismo.
+
+    NO devuelve el seguimiento que el bloqueo deshizo, y no es un olvido: eso
+    seria decidir por dos personas que quieren volver a seguirse. Se desbloquea
+    y cada una vuelve a seguir si quiere.
+    """
+    ensure_uuid(profile_id, "Perfil no encontrado.")
     await db.execute(
         delete(UserBlock).where(
             UserBlock.blocker_id == current_user.id,

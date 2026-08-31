@@ -11,6 +11,7 @@ import { toast } from '@/lib/toast';
 import { CourseContentRepository } from '@/repositories/CourseContentRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   courseId: string;
@@ -25,6 +26,7 @@ type Props = {
  * vive en `courses.highlights` y se edita desde la propia pantalla.
  */
 export function CourseHighlights({ courseId, canEdit }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [items, setItems] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
@@ -71,10 +73,12 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
       setItems(clean);
       // Cerrar antes del aviso: la hoja es un Modal y en iOS taparia el toast.
       setEditing(false);
-      toast('Puntos actualizados');
+      toast(t('highlights.updated'));
     } catch (failure) {
       // La hoja sigue abierta: el error se cuenta dentro de ella.
-      setError(failure instanceof Error ? failure.message : 'No se pudo guardar. Inténtalo de nuevo.');
+      setError(
+        failure instanceof Error ? failure.message : t('highlights.saveFailed'),
+      );
     } finally {
       setSaving(false);
     }
@@ -87,14 +91,14 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
     <View>
       <View style={styles.header}>
         <Text variant="body" weight="900" style={{ flex: 1 }}>
-          Lo que vas a desarrollar
+          {t('highlights.title')}
         </Text>
         {canEdit ? (
           <Pressable
             onPress={open}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel="Editar lo que vas a desarrollar"
+            accessibilityLabel={t('highlights.edit')}
           >
             <Feather name="edit-2" size={16} color={colors.textMuted} />
           </Pressable>
@@ -103,7 +107,7 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
 
       {items.length === 0 ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
-          Añade los puntos que se llevará quien haga el curso.
+          {t('highlights.empty')}
         </Text>
       ) : (
         items.map((item, index) => (
@@ -118,24 +122,31 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
 
       <BottomSheet visible={editing} onClose={() => setEditing(false)}>
         <Text style={styles.sheetTitle} color={colors.text}>
-          Lo que vas a desarrollar
+          {t('highlights.title')}
         </Text>
         {draft.map((value, index) => (
           <Input
             key={index}
             value={value}
             onChangeText={(v) => change(index, v)}
-            placeholder={index === draft.length - 1 ? 'Añadir otro punto…' : 'Punto'}
+            placeholder={
+              index === draft.length - 1 ? t('highlights.addAnother') : t('highlights.point')
+            }
             placeholderTextColor={colors.textMuted}
             style={{ color: colors.text }}
             containerStyle={styles.input}
           />
         ))}
         <Text variant="secondary" color={colors.textMuted} style={styles.hint}>
-          Deja un punto en blanco para eliminarlo.
+          {t('highlights.blankToDelete')}
         </Text>
         <InlineError message={error} />
-        <Button label="Guardar" onPress={() => void save()} loading={saving} style={styles.submit} />
+        <Button
+          label={t('common.save')}
+          onPress={() => void save()}
+          loading={saving}
+          style={styles.submit}
+        />
       </BottomSheet>
     </View>
   );

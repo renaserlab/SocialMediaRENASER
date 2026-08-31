@@ -38,43 +38,75 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/types';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
-/** Secciones del perfil que se abren desde los accesos circulares. */
-export type ProfileSectionKind = 'eventos' | 'cursos' | 'podcast' | 'testimonios';
+/**
+ * Secciones del perfil.
+ *
+ * Las cuatro primeras se abren desde los accesos circulares. `galeria` NO: son
+ * las fotos y videos que ha publicado esta persona (`testimonials`), y vivia
+ * empotrada dentro de «Reseñas», que es donde no pertenece — ver la nota de
+ * `kind === 'testimonios'`. Se llega a ella desde el menu del perfil.
+ */
+export type ProfileSectionKind =
+  | 'eventos'
+  | 'cursos'
+  | 'podcast'
+  | 'testimonios'
+  | 'galeria';
 
 /**
  * Que se dice en cada seccion cuando el perfil no administra la aplicacion.
  * Reunido aqui para que anadir una seccion sea anadir una entrada.
+ *
+ * `testimonios` YA NO ESTA AQUI, Y ES UN ARREGLO, no un olvido. Estaba, y ese
+ * era el fallo: esta tabla se consulta ANTES de pintar nada, asi que en el
+ * perfil de cualquier persona que no administre la aplicacion la seccion de
+ * reseñas ni siquiera llegaba a renderizarse. Lo que se veia en su lugar:
+ *
+ *   «Aún no tienes reseñas» — en SEGUNDA PERSONA, en el perfil de OTRO.
+ *   «Las reseñas de la comunidad están en el perfil de Darren.»
+ *   [Ver reseñas de Z]
+ *
+ * Es decir: en el perfil de Bruno se leia un mensaje dirigido a Bruno y un
+ * boton que llevaba a las reseñas de otra persona. Las reseñas de Bruno —que
+ * existen y estan a una peticion— no se pedian nunca.
+ *
+ * Ninguna otra seccion puede ocupar el sitio de las reseñas de alguien: una
+ * reseña habla de ESA persona y no hay catalogo central al que remitir.
  */
 const ADMIN_SECTIONS: Partial<
   Record<
     ProfileSectionKind,
-    { icon: 'headphones' | 'calendar' | 'book' | 'camera'; title: string; body: string; action: string }
+    {
+      icon: 'headphones' | 'calendar' | 'book' | 'camera';
+      title: TranslationKey;
+      body: TranslationKey;
+      action: TranslationKey;
+    }
   >
 > = {
+  // El nombre propio tampoco va escrito en el texto: quien administra la
+  // aplicacion se resuelve en tiempo de ejecucion (`adminId`), asi que un
+  // nombre fijo aqui es una promesa que el dia que cambie deja de cumplirse.
   podcast: {
     icon: 'headphones',
-    title: 'Aún no tienes podcast',
-    body: 'Los episodios de Z están en el perfil de Darren.',
-    action: 'Ir al podcast de Z',
+    title: 'section.noPodcast',
+    body: 'section.noPodcastBody',
+    action: 'section.goToPodcast',
   },
   eventos: {
     icon: 'calendar',
-    title: 'Aún no tienes eventos',
-    body: 'Los próximos encuentros de Z están en el perfil de Darren.',
-    action: 'Ver eventos de Z',
+    title: 'section.noEvents',
+    body: 'section.noEventsBody',
+    action: 'section.goToEvents',
   },
   cursos: {
     icon: 'book',
-    title: 'Aún no tienes cursos',
-    body: 'Los programas de Z están en el perfil de Darren.',
-    action: 'Ver cursos de Z',
-  },
-  testimonios: {
-    icon: 'camera',
-    title: 'Aún no tienes reseñas',
-    body: 'Las reseñas de la comunidad están en el perfil de Darren.',
-    action: 'Ver reseñas de Z',
+    title: 'section.noCourses',
+    body: 'section.noCoursesBody',
+    action: 'section.goToCourses',
   },
 };
 
@@ -97,24 +129,61 @@ const noSaveProps =
 
 type Props = {
   kind: ProfileSectionKind;
-  /** Perfil dueño de la sección: solo se muestra lo que ha creado. */
-  profileId?: string;
+  /**
+   * DUEÑO del perfil que se está viendo. Todo lo que se pide aquí se pide
+   * SOBRE él: sus cursos, sus episodios, las reseñas que ha recibido.
+   *
+   * Se llamaba `profileId`, que no decía de quién: en una pantalla donde
+   * conviven dos personas —quien mira y a quién mira— un nombre ambiguo es
+   * exactamente lo que hace que una consulta acabe usando la persona
+   * equivocada.
+   */
+  profileOwnerId?: string;
   /**
    * Si el dueño del perfil administra la aplicación. El podcast, los eventos
    * y los cursos son suyos: en un perfil normal no hay nada que enseñar.
    */
   ownerIsAdmin?: boolean;
-  /** Si la persona conectada es el dueño de este perfil. */
-  isOwner?: boolean;
+  /**
+   * Si quien MIRA es el DUEÑO de este perfil.
+   *
+   * NO ES LO MISMO QUE PODER ADMINISTRAR, y confundirlos ya costó un fallo
+   * aquí: `canManage` es cierto también para la moderación, así que usarlo
+   * para decidir textos en primera persona hacía que un moderador leyera «Aún
+   * no tienes reseñas» en el perfil de otra persona.
+   *
+   * Administrar es un PERMISO; ser dueño es una IDENTIDAD. Los textos, las
+   * secciones vacías y quién puede escribir una reseña dependen de la
+   * identidad; los botones de moderar, del permiso.
+   */
+  isOwnProfile?: boolean;
+  /**
+   * Su nombre. Solo para poder decir a quién se está reseñando en la hoja de
+   * escribir: «Sobre Ana. Aparecerá en su perfil con tu nombre.»
+   *
+   * Sin él, esa frase no salía —el dato nunca llegaba hasta aquí— y la hoja se
+   * abría sin decir sobre quién se estaba opinando, que en una pantalla donde
+   * conviven dos personas es justo lo que hay que dejar claro.
+   */
+  profileOwnerName?: string;
 };
 
 /**
- * Eventos o cursos publicados por un perfil.
+ * Lo que un perfil tiene dentro: su podcast, sus cursos, sus eventos, las
+ * reseñas que ha recibido y su galería.
  *
- * Darren administra la aplicacion, asi que su perfil es donde viven los
- * eventos y los cursos: las tarjetas del inicio traen aqui a cualquier usuario.
+ * El podcast, los eventos y los cursos de Z viven en el perfil de quien
+ * administra la aplicación —resuelto en tiempo de ejecución, ver `adminId`—, y
+ * las tarjetas del inicio traen aquí a cualquier usuario.
  */
-export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner = false }: Props) {
+export function ProfileSection({
+  kind,
+  profileOwnerId,
+  ownerIsAdmin = false,
+  isOwnProfile = false,
+  profileOwnerName,
+}: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -140,6 +209,24 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
    * de siempre, solo que con otro motivo.
    */
   const [resenasDisponibles, setResenasDisponibles] = useState(false);
+  /**
+   * Si ademas se puede decir DE QUE CURSO habla una resena (migracion 0041).
+   *
+   * Va aparte de `resenasDisponibles` porque son dos migraciones distintas y se
+   * aplicaran en momentos distintos: con la 0030 puesta y la 0041 no, se puede
+   * escribir una resena pero no enlazarla a un curso.
+   */
+  const [cursoEnResenaDisponible, setCursoEnResenaDisponible] = useState(false);
+  /**
+   * Si las resenas todavia estan viajando.
+   *
+   * Hace falta desde que la galeria dejo de vivir dentro de esta seccion: antes
+   * el `loading` general lo marcaba la peticion de la galeria, que se pedia a la
+   * vez. Sin esto, la seccion se pintaba vacia durante el viaje y decia «aún no
+   * tiene reseñas» a alguien que si las tiene — una lista que todavia no ha
+   * llegado no es una lista vacia.
+   */
+  const [resenasCargando, setResenasCargando] = useState(true);
   /** Imagen abierta a pantalla completa, o null si el visor esta cerrado. */
   const [viewerImage, setViewerImage] = useState<{ uri: string; caption: string | null } | null>(
     null,
@@ -256,7 +343,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
    * sigue valiendo porque `posts.category` es texto libre).
    */
   const [category, setCategory] = useState<string | null>(null);
-  const categorias = useCategoriasDePodcast(kind === 'podcast' ? profileId : null);
+  const categorias = useCategoriasDePodcast(kind === 'podcast' ? profileOwnerId : null);
   /** Evento cuya ficha se esta viendo. */
   const [detail, setDetail] = useState<EventItem | null>(null);
   const isAdmin = useAppStore((state) => state.user?.isAdmin === true);
@@ -270,14 +357,20 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
    */
   const miId = useAppStore((state) => state.user?.id ?? null);
   /**
-   * Puede publicar y editar en ESTA seccion: en su propio perfil cualquiera,
-   * y quien administra en cualquiera (para moderar).
+   * PERMISO para publicar y editar en ESTA seccion: en su propio perfil
+   * cualquiera, y quien administra en cualquiera (para moderar).
    *
    * Antes solo mandaba `isAdmin`, de modo que la comunidad no podia compartir
    * sus cursos ni sus resenas. Quien decide de verdad es el servidor: la
    * comprobacion de aqui solo evita ensenar botones que iban a fallar.
+   *
+   * NO SIRVE PARA SABER DE QUIEN ES EL PERFIL, y ese fue el fallo que se
+   * arregla en este trabajo. Es cierto tambien para la moderacion, asi que
+   * usarlo para redactar en primera persona hace que un moderador lea «Aún no
+   * tienes reseñas» en el perfil de otra persona. Para eso esta
+   * `isOwnProfile`, que es una identidad y no un permiso.
    */
-  const canManage = isOwner || isAdmin;
+  const canManage = isOwnProfile || isAdmin;
 
   useEffect(() => {
     if (!AuthRepository.enabled) {
@@ -289,32 +382,48 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     const request =
       kind === 'podcast'
         ? PostRepository.listByAuthor(
-            profileId ?? '',
+            profileOwnerId ?? '',
             {
               media: 'audio',
               limit: 60,
               excludeCategory: PRIVATE_AUDIO_CATEGORY,
               ...(category ? { category } : {}),
             },
-            profileId,
+            profileOwnerId,
           ).then((list) => {
             // El episodio 1 es el mas antiguo; el backend devuelve al reves.
             if (alive) setEpisodes([...list].reverse());
           })
-        : kind === 'testimonios'
-        ? TestimonialRepository.list(
+        : kind === 'galeria'
+        ? /*
+             LA GALERIA SOLO SE PIDE EN LA GALERIA.
+
+             Antes se pedia tambien en `testimonios`, porque la galeria vivia
+             empotrada dentro de la seccion de reseñas. Eso eran dos listados
+             distintos —lo que esta persona publico y lo que le dijeron— en la
+             misma pantalla, mezclados bajo el mismo rotulo, y una peticion de
+             mas cada vez que alguien abria las reseñas de alguien.
+           */
+          TestimonialRepository.list(
             TESTIMONIAL_FILTERS[testimonialFilter] ?? 'all',
-            profileId,
+            profileOwnerId,
           ).then((list) => {
             if (alive) setTestimonials(list);
           })
+        : kind === 'testimonios'
+        ? /*
+             Las reseñas RECIBIDAS tienen su propio efecto (el de mas abajo):
+             este se vuelve a lanzar cada vez que cambia el filtro de la
+             galeria, y las reseñas no tienen nada que ver con el.
+           */
+          Promise.resolve()
         : kind === 'eventos'
         ? CatalogRepository.listEvents().then((page) => {
             if (alive) {
               // Solo los que organiza este perfil.
               setEvents(
-                profileId
-                  ? page.items.filter((e) => !e.organizerId || e.organizerId === profileId)
+                profileOwnerId
+                  ? page.items.filter((e) => !e.organizerId || e.organizerId === profileOwnerId)
                   : page.items,
               );
             }
@@ -327,14 +436,14 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
              En el perfil de otra persona se sigue usando el catalogo publico:
              sus borradores son suyos.
            */
-          (isOwner
+          (isOwnProfile
             ? LearningRepository.listMine()
             : LearningRepository.listCourses()
           ).then((list) => {
             if (alive) {
               setCourses(
-                profileId && !isOwner
-                  ? list.filter((c) => !c.authorId || c.authorId === profileId)
+                profileOwnerId && !isOwnProfile
+                  ? list.filter((c) => !c.authorId || c.authorId === profileOwnerId)
                   : list,
               );
             }
@@ -358,10 +467,10 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     };
     // `testimonialFilter` es de la galeria y `category` del podcast: cada
     // seccion recarga cuando cambia el suyo.
-    // `isOwner` decide si los cursos se piden del catalogo publico o de los
+    // `isOwnProfile` decide si los cursos se piden del catalogo publico o de los
     // propios (con borradores): sin el en la lista, cambiar de perfil sin
     // desmontar dejaria la decision anterior.
-  }, [kind, profileId, reloadKey, testimonialFilter, category, isOwner]);
+  }, [kind, profileOwnerId, reloadKey, testimonialFilter, category, isOwnProfile]);
 
   /**
    * Las resenas recibidas por este perfil.
@@ -372,29 +481,40 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
    * pestana costaria dos peticiones de mas por toque.
    */
   useEffect(() => {
-    if (kind !== 'testimonios' || !profileId || !AuthRepository.enabled) return;
+    if (kind !== 'testimonios' || !profileOwnerId || !AuthRepository.enabled) return;
     let alive = true;
+    setResenasCargando(true);
 
     // La disponibilidad se pregunta primero: sin la migracion 0030 el listado
     // viene vacio igualmente, pero es esto lo que decide si se ensena el boton
     // de escribir.
-    void ReviewRepository.disponibles().then((hay) => {
-      if (alive) setResenasDisponibles(hay);
+    void ReviewRepository.disponibles().then((estado) => {
+      if (!alive) return;
+      setResenasDisponibles(estado.hay);
+      // Y si ademas se puede decir DE QUE CURSO habla (migracion 0041). Sin
+      // ella el selector no se ofrece: pedir un dato que se va a tirar sin
+      // decirlo es peor que no pedirlo.
+      setCursoEnResenaDisponible(estado.conCurso);
     });
-    ReviewRepository.listarRecibidas(profileId)
+    // SIEMPRE con `profileOwnerId`, que es el DUEÑO del perfil. Con quien mira
+    // —el error facil en una pantalla donde hay dos personas— la lista traeria
+    // las reseñas del visitante y las pintaria en el perfil ajeno.
+    ReviewRepository.listarRecibidas(profileOwnerId)
       .then((lista) => {
         if (alive) setResenas(lista);
       })
       .catch(() => {
-        // Que no se puedan traer las resenas NO puede tumbar la seccion: la
-        // galeria de este perfil sigue siendo contenido real y se pinta igual.
+        // Que no se puedan traer las resenas NO puede tumbar la seccion.
         if (alive) setResenas([]);
+      })
+      .finally(() => {
+        if (alive) setResenasCargando(false);
       });
 
     return () => {
       alive = false;
     };
-  }, [kind, profileId, reloadKey]);
+  }, [kind, profileOwnerId, reloadKey]);
 
   /**
    * Borra una resena PROPIA.
@@ -406,35 +526,35 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
    */
   const borrarResena = async (resena: Resena) => {
     const aceptado = await confirm({
-      title: 'Eliminar tu reseña',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('review.deleteOwnTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!aceptado) return;
     try {
       await ReviewRepository.borrar(resena.id);
-      toast('Reseña eliminada');
+      toast(t('review.deleted'));
       reload();
     } catch (fallo) {
-      notify('No se pudo eliminar', mensajeDeErrorDeResena(fallo));
+      notify(t('common.deleteFailed'), mensajeDeErrorDeResena(fallo));
     }
   };
 
   const removeTestimonial = async (id: string) => {
     const accepted = await confirm({
-      title: 'Eliminar reseña',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('review.deleteTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await TestimonialRepository.remove(id);
-      toast('Reseña eliminada');
+      toast(t('review.deleted'));
       reload();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
@@ -447,33 +567,45 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
   }
 
   /*
-    Remite al perfil de la administracion cuando aqui no hay nada que enseñar
-    NI nada que se pueda crear.
-
-    Antes bastaba con que el perfil no fuera el de la administracion para
-    quedarse en este aviso, de modo que en el propio perfil no habia por donde
-    publicar un curso: solo el enlace a los de otro. Ahora, si es tu perfil,
-    sigue adelante y pinta la seccion con su boton de alta; este acceso baja al
-    final, debajo de lo tuyo.
+    Lo que hay en esta seccion. Se calcula AQUI ARRIBA y no donde se pinta la
+    lista porque el aviso de mas abajo necesita saber si hay algo o no.
   */
-  if (kind !== 'podcast' && !ownerIsAdmin && !canManage && ADMIN_SECTIONS[kind]) {
-    const copy = ADMIN_SECTIONS[kind]!;
+  const items = kind === 'eventos' ? events : courses;
+
+  /*
+    PERFIL AJENO Y SIN NADA QUE ENSEÑAR.
+
+    Este bloque decia «Aún no TIENES cursos» y ofrecia un boton «Ver cursos de
+    Z». Dos cosas mal en la misma pantalla: el texto le hablaba de si mismo a
+    quien esta visitando el perfil de OTRA persona, y el boton mandaba al
+    catalogo de la comunidad desde un sitio donde nadie lo habia pedido.
+
+    Pero el fallo de verdad no era el texto. La condicion NO MIRABA SI HABIA
+    CONTENIDO —le faltaba `items.length === 0`—, asi que en cualquier perfil
+    ajeno se entraba aqui y se devolvia el aviso ANTES de llegar a pintar la
+    lista. Es decir: los cursos de otra persona no se veian NUNCA, publicara
+    los que publicara. El comentario que habia aqui ya decia «cuando aqui no
+    hay nada que enseñar»; era la condicion la que no lo comprobaba.
+
+    Se conserva la parte que si era intencionada: en el perfil PROPIO no se
+    entra, para que quede sitio al boton de alta, y el acceso al catalogo de Z
+    baja al final, debajo de lo tuyo.
+  */
+  if (
+    kind !== 'podcast' &&
+    !ownerIsAdmin &&
+    !canManage &&
+    items.length === 0 &&
+    ADMIN_SECTIONS[kind]
+  ) {
     return (
       <View style={styles.center}>
-        <Feather name={copy.icon} size={30} color={colors.textMuted} />
+        <Feather name={ADMIN_SECTIONS[kind]!.icon} size={30} color={colors.textMuted} />
         <Text variant="body" weight="700" style={styles.centerText}>
-          {copy.title}
+          {t(kind === 'cursos' ? 'section.otherNoCourses' : 'section.otherNoEvents', {
+            name: profileOwnerName || t('section.someone'),
+          })}
         </Text>
-        <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          {copy.body}
-        </Text>
-        <Button
-          label={copy.action}
-          variant="secondary"
-          icon={copy.icon}
-          onPress={() => void openAdminSection(kind)}
-          style={styles.centerAction}
-        />
       </View>
     );
   }
@@ -499,7 +631,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
 
         {canAddAudio ? (
           <Button
-            label="Agregar audio"
+            label={t('home.addAudio')}
             variant="secondary"
             icon="plus"
             onPress={() => setCreating(true)}
@@ -522,215 +654,44 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     );
   }
 
-  // Galeria de testimonios / reseñas: se ve dentro del perfil, como el podcast.
-  if (kind === 'testimonios') {
-    //: La resena que YO he escrito sobre este perfil, si ya escribi una.
-    const miResena = miId ? resenas.find((r) => r.autorId === miId) ?? null : null;
+  /*
+    LA GALERIA DEL PERFIL: las fotos y videos que ha publicado esta persona.
+
+    VIVIA DENTRO DE «RESEÑAS», Y ESE ERA EL FALLO. Debajo de las opiniones que
+    otros habian escrito aparecia «Su galería», «Añadir a la galería» y un
+    Todos / Fotos / Vídeos: dos listas distintas —lo que le dijeron y lo que
+    publico— una detras de otra, bajo el mismo titulo. Es exactamente la
+    confusion que ya habia costado que `testimonials` se usara como si fuera una
+    tabla de reseñas: quien pulsaba «Añadir a la galería» creyendo opinar sobre
+    alguien acababa publicando en SU PROPIO perfil.
+
+    No se esconde cuando esta vacia: se saca de ahi. Esconder lo vacio deja el
+    fallo intacto y solo lo hace mas dificil de ver.
+
+    Sigue siendo contenido REAL y con filas de gente real, asi que no se borra:
+    tiene su propia seccion, a la que se llega desde el menu del perfil.
+  */
+  if (kind === 'galeria') {
     return (
       <View>
-        {/*
-          1. LO QUE HAN ESCRITO SOBRE ESTA PERSONA.
-
-          Esto es lo que faltaba. La galeria de abajo son las fotos y videos que
-          esta persona publico —lo que ELLA escribio—, y se conserva tal cual
-          porque tiene contenido real. Lo que no existia es esto: una opinion de
-          otra persona, que sale AQUI, en el perfil de quien la recibe.
-
-          El boton no aparece en el perfil propio: nadie se resena a si mismo, y
-          el servidor lo rechaza ademas por un CHECK en la base.
-        */}
-        <View style={styles.resenasCabecera}>
-          <Text variant="body" weight="700" style={{ flex: 1 }}>
-            Reseñas recibidas
-          </Text>
-          {!isOwner && resenasDisponibles ? (
-            <Button
-              /*
-                Solo se puede escribir UNA por persona (indice unico de la
-                0030). Si ya hay una mia, el boton lleva a editarla en vez de a
-                escribir otra que el servidor rechazaria con 409.
-
-                Se busca por `autorId === miId`, NO por `puedeGestionar`: eso
-                ultimo tambien es cierto para la administracion, y un moderador
-                acabaria editando la opinion de otra persona creyendo que era
-                la suya.
-              */
-              label={miResena ? 'Editar mi reseña' : 'Escribir reseña'}
-              variant="secondary"
-              icon="edit-2"
-              onPress={() =>
-                miResena ? setEditandoResena(miResena) : setEscribiendoResena(true)
-              }
-            />
-          ) : null}
-        </View>
-
-        {resenas.length === 0 ? (
-          <View style={styles.center}>
-            <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-              {isOwner
-                ? 'Todavía no te ha escrito nadie.'
-                : resenasDisponibles
-                ? 'Aún no tiene reseñas. Puedes ser la primera persona en escribir una.'
-                : 'Aún no tiene reseñas.'}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.resenas}>
-            {resenas.map((resena) => (
-              <View
-                key={resena.id}
-                style={[styles.resenaCard, { borderColor: colors.border }]}
-              >
-                <View style={styles.resenaCabecera}>
-                  <ExpoImage
-                    source={resena.autorAvatarUrl ? { uri: resena.autorAvatarUrl } : undefined}
-                    style={styles.resenaAvatar}
-                    contentFit="cover"
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text variant="body" weight="600">
-                      {resena.autorNombre || 'Alguien'}
-                    </Text>
-                    {/*
-                      El sello solo se pinta cuando el servidor manda su FUENTE.
-                      No se deduce aqui: el telefono no ve las reservas ni las
-                      compras de nadie, asi que cualquier calculo local seria
-                      inventado.
-                    */}
-                    {resena.verificadaPor ? (
-                      <View style={styles.selloFila}>
-                        <Feather name="check-circle" size={12} color={colors.textMuted} />
-                        <Text variant="secondary" color={colors.textMuted} style={styles.sello}>
-                          {resena.verificadaPor === 'booking'
-                            ? 'Tuvieron una sesión'
-                            : 'Compró su curso'}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  {/*
-                    Editar y borrar SOLO si el servidor dice que se puede, que
-                    es para quien la escribio y para quien modera. El dueno del
-                    perfil NO los ve: no puede quitar lo que se dice de el.
-                  */}
-                  {resena.puedeGestionar ? (
-                    <React.Fragment>
-                      <Pressable
-                        onPress={() => setEditandoResena(resena)}
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel="Editar mi reseña"
-                      >
-                        <Feather name="edit-2" size={16} color={colors.textMuted} />
-                      </Pressable>
-                      <Pressable
-                        onPress={() => void borrarResena(resena)}
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel="Eliminar mi reseña"
-                      >
-                        <Feather name="trash-2" size={16} color={colors.textMuted} />
-                      </Pressable>
-                    </React.Fragment>
-                  ) : null}
-                </View>
-
-                <Text variant="body" style={styles.resenaTexto}>
-                  {resena.texto}
-                </Text>
-
-                {resena.medios.map((medio) =>
-                  !medio.url ? null : medio.tipo === 'video' ? (
-                    /*
-                      UN reproductor, el del video que se ha abierto. Misma
-                      regla que en los testimonios de aqui abajo y que en la
-                      cuadricula, y por el mismo motivo medido: se montaba uno
-                      por CADA video de CADA resena, sin condicion. El listado
-                      trae hasta veinte resenas, asi que un perfil con resenas
-                      en video creaba veinte reproductores nativos de golpe
-                      —cada uno reservando memoria por delante— sin que
-                      ninguno estuviera reproduciendo. Eso es lo que agota lo
-                      que Android concede a la aplicacion y la cierra.
-
-                      La tabla de resenas no guarda poster, asi que en reposo
-                      se pinta la superficie de media con su boton: dice que
-                      ahi hay un video y cuesta cero.
-                    */
-                    videoAbierto === medio.id ? (
-                      <VideoPlayer
-                        key={medio.id}
-                        uri={medio.url}
-                        style={styles.resenaMedia}
-                        nativeControls
-                        autoPlay
-                      />
-                    ) : (
-                      <Pressable
-                        key={medio.id}
-                        onPress={() => setVideoAbierto(medio.id)}
-                        style={[styles.resenaMedia, styles.videoEnReposo]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Reproducir el video de la reseña"
-                      >
-                        <View style={styles.botonDeReproduccion}>
-                          <Feather name="play" size={22} color="#FFFFFF" />
-                        </View>
-                      </Pressable>
-                    )
-                  ) : (
-                    <Pressable
-                      key={medio.id}
-                      onPress={() => setViewerImage({ uri: medio.url!, caption: resena.texto })}
-                      accessibilityRole="button"
-                      accessibilityLabel="Ver la imagen completa"
-                    >
-                      <ExpoImage
-                        source={{ uri: medio.url }}
-                        style={styles.resenaMedia}
-                        contentFit="cover"
-                        transition={150}
-                      />
-                    </Pressable>
-                  ),
-                )}
-              </View>
-            ))}
-          </View>
-        )}
-
-        {escribiendoResena && profileId ? (
-          <CreateReviewSheet
-            visible
-            sobreId={profileId}
-            onClose={() => setEscribiendoResena(false)}
-            onSaved={reload}
-          />
-        ) : null}
-        {editandoResena && profileId ? (
-          <CreateReviewSheet
-            visible
-            sobreId={profileId}
-            editando={editandoResena}
-            onClose={() => setEditandoResena(null)}
-            onSaved={reload}
-          />
-        ) : null}
-
-        {/*
-          2. LA GALERIA DE ESTE PERFIL, intacta.
-
-          `testimonials` sigue siendo lo que siempre fue y conserva sus filas.
-          Lo unico que cambia es el rotulo: llamarla «reseñas» era lo que hacia
-          creer que publicar ahi era opinar sobre alguien.
-        */}
         <Text variant="body" weight="700" style={styles.galeriaTitulo}>
-          Su galería
+          {isOwnProfile ? t('gallery.own') : t('gallery.other')}
         </Text>
 
-        {canManage ? (
+        {/*
+          AÑADIR SOLO EN LA PROPIA, y esto es `isOwnProfile` y no `canManage`
+          por una razón que no es de permisos: `CreateTestimonialSheet` publica
+          SIEMPRE a nombre de quien escribe (`author_id`), así que pulsarlo en
+          el perfil de otra persona añadía la foto a la galería del que pulsa —y
+          como esta lista está filtrada por el dueño del perfil, no aparecía por
+          ningún lado. El botón prometía algo que no puede hacer.
+
+          Moderar sigue siendo otra cosa: quitar o corregir una pieza ajena se
+          decide con `canManage`, ahí abajo, en cada tarjeta.
+        */}
+        {isOwnProfile ? (
           <Button
-            label="Añadir a la galería"
+            label={t('gallery.add')}
             variant="secondary"
             icon="plus"
             onPress={() => setCreating(true)}
@@ -738,7 +699,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
         ) : null}
 
         <SegmentedControl
-          options={['Todos', 'Fotos', 'Videos']}
+          options={[t('gallery.all'), t('gallery.photos'), t('gallery.videos')]}
           selectedIndex={testimonialFilter}
           onChange={setTestimonialFilter}
           style={styles.testimonialFilters}
@@ -747,7 +708,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
         {testimonials.length === 0 ? (
           <View style={styles.center}>
             <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-              Aún no hay nada en la galería.
+              {t('gallery.empty')}
             </Text>
           </View>
         ) : (
@@ -788,7 +749,9 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                         style={[styles.testimonialMedia, styles.videoEnReposo]}
                         accessibilityRole="button"
                         accessibilityLabel={
-                          item.caption ? `Reproducir: ${item.caption}` : 'Reproducir el video'
+                          item.caption
+                            ? t('gallery.playNamed', { titulo: item.caption })
+                            : t('gallery.playVideo')
                         }
                       >
                         <View style={styles.botonDeReproduccion}>
@@ -810,7 +773,9 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                       disabled={!item.mediaUrl}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        item.caption ? `Ver la imagen: ${item.caption}` : 'Ver la imagen completa'
+                        item.caption
+                          ? t('gallery.viewImageNamed', { titulo: item.caption })
+                          : t('gallery.viewImage')
                       }
                     >
                       <ExpoImage
@@ -842,7 +807,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                 </View>
                 <View style={styles.testimonialFooter}>
                   <Text variant="body" weight="600" style={{ flex: 1 }}>
-                    {item.caption || (item.mediaType === 'video' ? 'Video' : 'Foto')}
+                    {item.caption || (item.mediaType === 'video' ? t('video.video') : t('gallery.photo'))}
                   </Text>
                   {canManage ? (
                     <React.Fragment>
@@ -857,7 +822,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                         }
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Editar reseña"
+                        accessibilityLabel={t('review.edit')}
                       >
                         <Feather name="edit-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -865,7 +830,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
                         onPress={() => void removeTestimonial(item.id)}
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Eliminar reseña"
+                        accessibilityLabel={t('review.deleteTitle')}
                       >
                         <Feather name="trash-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -888,6 +853,263 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
             onCreated={reload}
           />
         ) : null}
+        <ImageViewer
+          uri={viewerImage?.uri ?? null}
+          caption={viewerImage?.caption ?? null}
+          onClose={() => setViewerImage(null)}
+        />
+      </View>
+    );
+  }
+
+  // Las reseñas que ha RECIBIDO este perfil. Solo eso: la galeria es otra cosa
+  // y tiene su propia seccion (ver arriba).
+  if (kind === 'testimonios') {
+    //: La resena que YO he escrito sobre este perfil, si ya escribi una.
+    const miResena = miId ? resenas.find((r) => r.autorId === miId) ?? null : null;
+    return (
+      <View>
+        {/*
+          1. LO QUE HAN ESCRITO SOBRE ESTA PERSONA.
+
+          Esto es lo que faltaba. La galeria de abajo son las fotos y videos que
+          esta persona publico —lo que ELLA escribio—, y se conserva tal cual
+          porque tiene contenido real. Lo que no existia es esto: una opinion de
+          otra persona, que sale AQUI, en el perfil de quien la recibe.
+
+          El boton no aparece en el perfil propio: nadie se resena a si mismo, y
+          el servidor lo rechaza ademas por un CHECK en la base.
+        */}
+        <View style={styles.resenasCabecera}>
+          <Text variant="body" weight="700" style={{ flex: 1 }}>
+            {t('review.received')}
+          </Text>
+          {!isOwnProfile && resenasDisponibles ? (
+            <Button
+              /*
+                Solo se puede escribir UNA por persona (indice unico de la
+                0030). Si ya hay una mia, el boton lleva a editarla en vez de a
+                escribir otra que el servidor rechazaria con 409.
+
+                Se busca por `autorId === miId`, NO por `puedeGestionar`: eso
+                ultimo tambien es cierto para la administracion, y un moderador
+                acabaria editando la opinion de otra persona creyendo que era
+                la suya.
+              */
+              label={miResena ? t('review.editMine') : t('review.write')}
+              variant="secondary"
+              icon="edit-2"
+              onPress={() =>
+                miResena ? setEditandoResena(miResena) : setEscribiendoResena(true)
+              }
+            />
+          ) : null}
+        </View>
+
+        {resenasCargando ? (
+          /*
+            Todavia viajando. UNA LISTA QUE NO HA LLEGADO NO ES UNA LISTA VACIA,
+            y decir «aún no tiene reseñas» mientras se piden es afirmar algo que
+            no se sabe — a alguien que quiza tenga veinte.
+          */
+          <View style={styles.center}>
+            <ActivityIndicator color={colors.textMuted} />
+          </View>
+        ) : resenas.length === 0 ? (
+          <View style={styles.center}>
+            <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
+              {/*
+                QUIEN LEE ESTO DECIDE EL TEXTO, y esa distincion es el arreglo.
+
+                En el perfil de otra persona se hablaba en SEGUNDA PERSONA
+                —«Aún no tienes reseñas»—, que es un mensaje dirigido al dueño
+                del perfil leido por un visitante. La condicion es
+                `isOwnProfile`, una IDENTIDAD, y no `canManage`, que es un
+                permiso y tambien es cierto para la moderacion: con aquella, un
+                moderador leia el texto del dueño en el perfil de cualquiera.
+              */}
+              {isOwnProfile
+                ? t('review.emptyOwn')
+                : resenasDisponibles
+                ? t('review.emptyOtherCanWrite')
+                : t('review.emptyOther')}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.resenas}>
+            {resenas.map((resena) => (
+              <View
+                key={resena.id}
+                style={[styles.resenaCard, { borderColor: colors.border }]}
+              >
+                <View style={styles.resenaCabecera}>
+                  <ExpoImage
+                    source={resena.autorAvatarUrl ? { uri: resena.autorAvatarUrl } : undefined}
+                    style={styles.resenaAvatar}
+                    contentFit="cover"
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text variant="body" weight="600">
+                      {resena.autorNombre || t('notif.someone')}
+                    </Text>
+                    {/*
+                      El sello solo se pinta cuando el servidor manda su FUENTE.
+                      No se deduce aqui: el telefono no ve las reservas ni las
+                      compras de nadie, asi que cualquier calculo local seria
+                      inventado.
+                    */}
+                    {resena.verificadaPor ? (
+                      <View style={styles.selloFila}>
+                        <Feather name="check-circle" size={12} color={colors.textMuted} />
+                        <Text variant="secondary" color={colors.textMuted} style={styles.sello}>
+                          {resena.verificadaPor === 'booking'
+                            ? t('review.verifiedBooking')
+                            : t('review.verifiedCourse')}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {/*
+                    Editar y borrar SOLO si el servidor dice que se puede, que
+                    es para quien la escribio y para quien modera. El dueno del
+                    perfil NO los ve: no puede quitar lo que se dice de el.
+                  */}
+                  {resena.puedeGestionar ? (
+                    <React.Fragment>
+                      <Pressable
+                        onPress={() => setEditandoResena(resena)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('review.editMine')}
+                      >
+                        <Feather name="edit-2" size={16} color={colors.textMuted} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => void borrarResena(resena)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('review.deleteOwnTitle')}
+                      >
+                        <Feather name="trash-2" size={16} color={colors.textMuted} />
+                      </Pressable>
+                    </React.Fragment>
+                  ) : null}
+                </View>
+
+                {/*
+                  DE QUE CURSO HABLA, si lo dice (migracion 0041). Va ENCIMA del
+                  texto porque es el contexto de lo que se va a leer: «me ayudó
+                  muchísimo» no significa lo mismo suelto que bajo el nombre de
+                  un programa concreto.
+
+                  El titulo lo resuelve el SERVIDOR y viaja con la resena: sin
+                  eso, pintar este rotulo costaria una peticion por tarjeta.
+                */}
+                {resena.cursoTitulo ? (
+                  <View style={[styles.resenaCurso, { borderColor: colors.border }]}>
+                    <Feather name="book" size={12} color={colors.textMuted} />
+                    <Text
+                      variant="secondary"
+                      color={colors.textMuted}
+                      numberOfLines={1}
+                      style={styles.resenaCursoTexto}
+                    >
+                      {`Sobre el curso · ${resena.cursoTitulo}`}
+                    </Text>
+                  </View>
+                ) : null}
+
+                <Text variant="body" style={styles.resenaTexto}>
+                  {resena.texto}
+                </Text>
+
+                {resena.medios.map((medio) =>
+                  !medio.url ? null : medio.tipo === 'video' ? (
+                    /*
+                      UN reproductor, el del video que se ha abierto. Misma
+                      regla que en los testimonios de aqui abajo y que en la
+                      cuadricula, y por el mismo motivo medido: se montaba uno
+                      por CADA video de CADA resena, sin condicion. El listado
+                      trae hasta veinte resenas, asi que un perfil con resenas
+                      en video creaba veinte reproductores nativos de golpe
+                      —cada uno reservando memoria por delante— sin que
+                      ninguno estuviera reproduciendo. Eso es lo que agota lo
+                      que Android concede a la aplicacion y la cierra.
+
+                      La tabla de resenas no guarda poster, asi que en reposo
+                      se pinta la superficie de media con su boton: dice que
+                      ahi hay un video y cuesta cero.
+                    */
+                    videoAbierto === medio.id ? (
+                      <VideoPlayer
+                        key={medio.id}
+                        uri={medio.url}
+                        style={styles.resenaMedia}
+                        nativeControls
+                        autoPlay
+                      />
+                    ) : (
+                      <Pressable
+                        key={medio.id}
+                        onPress={() => setVideoAbierto(medio.id)}
+                        style={[styles.resenaMedia, styles.videoEnReposo]}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('review.playVideo')}
+                      >
+                        <View style={styles.botonDeReproduccion}>
+                          <Feather name="play" size={22} color="#FFFFFF" />
+                        </View>
+                      </Pressable>
+                    )
+                  ) : (
+                    <Pressable
+                      key={medio.id}
+                      onPress={() => setViewerImage({ uri: medio.url!, caption: resena.texto })}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('gallery.viewImage')}
+                    >
+                      <ExpoImage
+                        source={{ uri: medio.url }}
+                        style={styles.resenaMedia}
+                        contentFit="cover"
+                        transition={150}
+                      />
+                    </Pressable>
+                  ),
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/*
+          La hoja de escribir se monta SOLO en el perfil ajeno, porque solo se
+          abre desde ahi: `escribiendoResena` no puede ponerse a cierto en el
+          propio —el boton no existe— y el servidor lo rechaza ademas por un
+          CHECK en la base (0030). Tres capas para lo mismo, y la que manda es
+          la ultima.
+        */}
+        {escribiendoResena && profileOwnerId ? (
+          <CreateReviewSheet
+            visible
+            sobreId={profileOwnerId}
+            sobreNombre={profileOwnerName}
+            cursosDisponibles={cursoEnResenaDisponible}
+            onClose={() => setEscribiendoResena(false)}
+            onSaved={reload}
+          />
+        ) : null}
+        {editandoResena && profileOwnerId ? (
+          <CreateReviewSheet
+            visible
+            sobreId={profileOwnerId}
+            sobreNombre={profileOwnerName}
+            cursosDisponibles={cursoEnResenaDisponible}
+            editando={editandoResena}
+            onClose={() => setEditandoResena(null)}
+            onSaved={reload}
+          />
+        ) : null}
 
         {/*
           Imagen a pantalla completa. Va DENTRO de esta rama porque las resenas
@@ -903,16 +1125,13 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
     );
   }
 
-  const items = kind === 'eventos' ? events : courses;
   // Vacio y sin nada que ofrecer: solo entonces se corta aqui. Si se puede
   // crear, se continua para pintar el boton de alta y el acceso al catalogo.
   if (items.length === 0 && !canManage) {
     return (
       <View style={styles.center}>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          {kind === 'eventos'
-            ? 'Aún no hay eventos publicados.'
-            : 'Aún no hay cursos publicados.'}
+          {kind === 'eventos' ? t('profile.noEvents') : t('profile.noCourses')}
         </Text>
       </View>
     );
@@ -967,7 +1186,7 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
       {/* Alta de un curso nuevo, debajo de los ya publicados. */}
       {kind === 'cursos' && canManage ? (
         <Button
-          label="Agregar curso"
+          label={t('home.addCourse')}
           variant="secondary"
           icon="plus"
           onPress={() => setCreating(true)}
@@ -983,11 +1202,13 @@ export function ProfileSection({ kind, profileId, ownerIsAdmin = false, isOwner 
         <View style={styles.catalogLink}>
           <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
             {items.length === 0
-              ? `Todavía no has publicado ${kind === 'cursos' ? 'ningún curso' : 'ningún evento'}.`
+              ? kind === 'cursos'
+                ? t('section.noneOwnCourses')
+                : t('section.noneOwnEvents')
               : ''}
           </Text>
           <Button
-            label={ADMIN_SECTIONS[kind]!.action}
+            label={t(ADMIN_SECTIONS[kind]!.action)}
             variant="secondary"
             icon={ADMIN_SECTIONS[kind]!.icon}
             onPress={() => void openAdminSection(kind)}
@@ -1038,6 +1259,20 @@ const styles = StyleSheet.create({
   resenaCabecera: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   resenaAvatar: { width: 34, height: 34, borderRadius: 17 },
   resenaTexto: { lineHeight: 20 },
+  // El curso del que habla la resena (0041). Con BORDE e ICONO, no con color:
+  // el sistema visual es blanco y negro estricto y el color nunca puede ser el
+  // unico portador de informacion.
+  resenaCurso: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  resenaCursoTexto: { fontSize: 11, flexShrink: 1 },
   resenaMedia: { width: '100%', height: 200, borderRadius: radius.md, overflow: 'hidden' },
   selloFila: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   sello: { fontSize: 11 },

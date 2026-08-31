@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Pantalla que se muestra cuando algo falla sin remedio.
@@ -25,23 +26,21 @@ import { palette, radius, spacing } from '@/theme/tokens';
 const colores = palette('light');
 
 export function AppErrorFallback({ error, retry }: { error: Error; retry: () => void }) {
+  const { t } = useTranslation();
   return (
     <View style={[styles.root, { backgroundColor: colores.background }]}>
       <Feather name="alert-triangle" size={44} color={colores.text} />
 
-      <Text style={[styles.titulo, { color: colores.text }]}>Algo no ha salido bien</Text>
-      <Text style={[styles.cuerpo, { color: colores.textMuted }]}>
-        Ha ocurrido un fallo inesperado en esta pantalla. Puedes intentarlo de nuevo; si vuelve a
-        pasar, cierra la aplicación y ábrela otra vez.
-      </Text>
+      <Text style={[styles.titulo, { color: colores.text }]}>{t('crash.title')}</Text>
+      <Text style={[styles.cuerpo, { color: colores.textMuted }]}>{t('crash.body')}</Text>
 
       <Pressable
         onPress={retry}
         style={[styles.boton, { backgroundColor: colores.primary }]}
         accessibilityRole="button"
-        accessibilityLabel="Volver a intentarlo"
+        accessibilityLabel={t('crash.retry')}
       >
-        <Text style={[styles.botonTexto, { color: colores.onPrimary }]}>Volver a intentarlo</Text>
+        <Text style={[styles.botonTexto, { color: colores.onPrimary }]}>{t('crash.retry')}</Text>
       </Pressable>
 
       {/*
@@ -51,7 +50,7 @@ export function AppErrorFallback({ error, retry }: { error: Error; retry: () => 
       */}
       <ScrollView style={styles.detalle} contentContainerStyle={{ paddingBottom: spacing.md }}>
         <Text style={[styles.detalleTexto, { color: colores.textMuted }]} selectable>
-          {error?.message ?? 'Sin detalle disponible.'}
+          {error?.message ?? t('crash.noDetail')}
         </Text>
       </ScrollView>
     </View>

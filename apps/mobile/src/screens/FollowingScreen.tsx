@@ -7,8 +7,10 @@ import { PeopleList } from '@/components/PeopleList';
 import { useFollowList } from '@/hooks/useFollowList';
 import { useAppStore } from '@/store/useAppStore';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function FollowingScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -27,7 +29,7 @@ export function FollowingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Siguiendo"
+        title={t('profile.following')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))}
       />
       <PeopleList
@@ -37,11 +39,9 @@ export function FollowingScreen() {
         onRetry={reload}
         onToggleFollow={toggleFollow}
         currentUserId={currentUserId}
-        emptyTitle={isOwn ? 'Todavía no sigues a nadie' : 'Todavía no sigue a nadie'}
+        emptyTitle={isOwn ? t('follow.noFollowingOwn') : t('follow.noFollowingOther')}
         emptyDescription={
-          isOwn
-            ? 'Explora la comunidad y sigue a quienes te inspiran.'
-            : 'Cuando siga a alguien, aparecerá aquí.'
+          isOwn ? t('follow.noFollowingOwnBody') : t('follow.noFollowingOtherBody')
         }
       />
     </View>

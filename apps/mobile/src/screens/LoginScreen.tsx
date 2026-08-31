@@ -1,16 +1,17 @@
 import React, { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { rutaTrasAutenticar } from '@/lib/postAuthRoute';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { ZLogo } from '@/components/ZLogo';
+import { useTranslation } from '@/i18n/useTranslation';
 import { mensajeDeAuth } from '@/lib/authErrors';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -19,8 +20,8 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 export function LoginScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
   const registerLocal = useAppStore((state) => state.registerLocalUser);
   const completeOnboarding = useAppStore((state) => state.setOnboardingComplete);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -42,10 +43,10 @@ export function LoginScreen() {
     if (accediendo.current) return;
     const newErrors: { email?: string; password?: string } = {};
     if (!email.includes('@')) {
-      newErrors.email = 'Introduce un correo electrónico válido';
+      newErrors.email = t('auth.errorEmail');
     }
     if (password.length < 6) {
-      newErrors.password = 'La contraseña debe tener al menos 6 caracteres';
+      newErrors.password = t('auth.errorPassword');
     }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -75,13 +76,13 @@ export function LoginScreen() {
         «Failed to fetch»). Ahora se traduce siempre y el original queda en la
         consola.
       */
-      const message = mensajeDeAuth(error, 'acceso');
+      const message = mensajeDeAuth(error, 'acceso', t);
       // Las credenciales se corrigen en el propio formulario; el resto son
       // cosas que no dependen de lo escrito y merecen un aviso aparte.
       if (/incorrect/i.test(message)) {
         setErrors({ password: message });
       } else {
-        notify('No se pudo iniciar sesión', message);
+        notify(t('auth.signInFailed'), message);
       }
     } finally {
       accediendo.current = false;
@@ -91,7 +92,7 @@ export function LoginScreen() {
 
   const continueWithGoogle = async () => {
     if (!supabaseEnabled) {
-      notify('Google no disponible', 'Conecta Supabase para acceder con Google.');
+      notify(t('auth.googleUnavailable'), t('auth.googleUnavailableSignIn'));
       return;
     }
     setSocialBusy(true);
@@ -102,7 +103,7 @@ export function LoginScreen() {
         router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
-      notify('No se pudo acceder con Google', mensajeDeAuth(error, 'acceso'));
+      notify(t('auth.googleFailedSignIn'), mensajeDeAuth(error, 'acceso', t));
     } finally {
       setSocialBusy(false);
     }
@@ -111,12 +112,19 @@ export function LoginScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
-        <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+      <SinTecladoDelante>
+        <AppScreen contentStyle={styles.screen}>
+          {/*
+            CENTRADO DE VERDAD, no un margen superior a ojo.
+
+            El formulario ocupa poco y antes se quedaba pegado arriba con media
+            pantalla vacia debajo. `AppScreen` ya da un contenedor con
+            `flexGrow: 1`, asi que basta con que este bloque lo llene
+            (`flex: 1`) y reparta el sobrante arriba y abajo
+            (`justifyContent: 'center'`). Al abrirse el teclado el alto
+            disponible se reduce, el centro se recalcula solo y, si aun asi no
+            cabe, la misma vista se desplaza. Sin numeros por telefono.
+          */}
           <View style={styles.container}>
             {/*
               La marca se pinta con su logo y en la MISMA linea. Antes llevaba
@@ -125,7 +133,7 @@ export function LoginScreen() {
               del producto.
             */}
             <View style={styles.titleRow}>
-              <Text style={[styles.title, { color: colors.text }]}>Inicia sesión en</Text>
+              <Text style={[styles.title, { color: colors.text }]}>{t('auth.signInTitle')}</Text>
               <ZLogo size={34} />
             </View>
 
@@ -169,13 +177,13 @@ export function LoginScreen() {
           */}
 
             <Input
-              label="Correo electrónico"
+              label={t('auth.email')}
               value={email}
-              onChangeText={(t) => {
-                setEmail(t);
+              onChangeText={(texto) => {
+                setEmail(texto);
                 setErrors((e) => ({ ...e, email: undefined }));
               }}
-              placeholder="ejemplo@correo.com"
+              placeholder={t('auth.emailPlaceholder')}
               keyboardType="email-address"
               autoCapitalize="none"
               error={errors.email}
@@ -183,20 +191,20 @@ export function LoginScreen() {
 
             <View style={styles.passwordContainer}>
               <Input
-                label="Contraseña"
+                label={t('auth.password')}
                 value={password}
-                onChangeText={(t) => {
-                  setPassword(t);
+                onChangeText={(texto) => {
+                  setPassword(texto);
                   setErrors((e) => ({ ...e, password: undefined }));
                 }}
-                placeholder="Tu contraseña"
+                placeholder={t('auth.passwordPlaceholder')}
                 secureTextEntry={hidden}
                 error={errors.password}
               />
               <Pressable
                 onPress={() => setHidden((v) => !v)}
                 style={styles.eyeButton}
-                accessibilityLabel={hidden ? 'Mostrar contraseña' : 'Ocultar contraseña'}
+                accessibilityLabel={hidden ? t('auth.showPassword') : t('auth.hidePassword')}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: !hidden }}
               >
@@ -204,26 +212,32 @@ export function LoginScreen() {
               </Pressable>
             </View>
 
-            <Button label="Iniciar sesión" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
+            <Button
+              label={t('auth.signIn')}
+              onPress={submit}
+              loading={submitting}
+              style={{ marginTop: spacing.sm }}
+            />
             <Pressable
               onPress={() => router.push('/forgot-password' as never)}
               style={styles.forgot}
               accessibilityRole="button"
-              accessibilityLabel="Olvidé mi contraseña"
+              accessibilityLabel={t('auth.forgot')}
             >
               <Text style={[styles.forgotText, { color: colors.textMuted }]}>
-                ¿Olvidaste tu contraseña?
+                {t('auth.forgot')}
               </Text>
             </Pressable>
 
             <Pressable onPress={() => router.replace('/register')}>
               <Text style={[styles.login, { color: colors.text }]}>
-                ¿No tienes cuenta? <Text style={{ fontWeight: '900' }}>Crear cuenta</Text>
+                {t('auth.noAccount')}{' '}
+                <Text style={{ fontWeight: '900' }}>{t('auth.signUp')}</Text>
               </Text>
             </Pressable>
           </View>
         </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }
@@ -231,7 +245,20 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   forgot: { alignSelf: 'center', paddingVertical: spacing.md },
   forgotText: { fontSize: 13, fontWeight: '600' },
-  container: { paddingHorizontal: spacing.xl, gap: spacing.md },
+  /*
+    El centrado va en el CONTENEDOR del desplazamiento, no en un hijo con
+    `flex: 1`. La diferencia importa: `flexGrow` solo estira cuando sobra sitio,
+    asi que con el formulario corto queda centrado y, cuando el teclado o un
+    idioma mas largo lo hacen mas alto que la pantalla, no se comprime: se
+    desplaza.
+  */
+  screen: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xl,
+  },
+  container: { gap: spacing.md },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   titleRow: {
     flexDirection: 'row',

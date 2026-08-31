@@ -17,9 +17,11 @@ import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { compartirPublicacion } from '@/lib/enlaces';
 import { toast } from '@/lib/toast';
+import { relacionDeVideo } from '@/lib/formaDelVideo';
 import { haptics } from '@/lib/haptics';
 import { bestVideoSource } from '@/lib/videoSource';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
+import { PostRepository } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -27,6 +29,7 @@ import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { Post } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Los iconos de acción miden 18-20 px. Ampliamos el area tactil con hitSlop
@@ -84,6 +87,7 @@ type Props = {
  * cambian de estado (la que entra, la que sale, la que empieza a reproducir).
  */
 function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const [showComments, setShowComments] = useState(false);
@@ -104,6 +108,49 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   }, [visible]);
   // HLS si el video esta transcodificado; MP4 optimizado/original si no.
   const videoSource = post.mediaType === 'video' ? bestVideoSource(post) : null;
+  /*
+    Con que proporcion se dibuja la caja del video. Sale de las medidas que
+    guarda `post_media` desde la migracion 0021; sin ellas, del 16:9 de siempre.
+  */
+  const relacionDelVideo = relacionDeVideo(post.mediaWidth, post.mediaHeight);
+
+  /*
+    Republicar, con respuesta inmediata.
+
+    El estado vive AQUI y no en el store porque republicar no cambia nada de lo
+    que el store ya guarda: la publicacion sigue siendo la misma y su autor
+    tambien. Lo que cambia es una fila en otra tabla. Se pinta al instante y se
+    deshace si el servidor dice que no, que es lo que evita que un toque parezca
+    perdido en una red lenta.
+  */
+  const [republicado, setRepublicado] = useState(post.repostedByMe ?? false);
+  const [repostsCount, setRepostsCount] = useState(post.repostsCount ?? 0);
+  const [republicando, setRepublicando] = useState(false);
+  const alternarRepost = async () => {
+    await requireAuth('auth.reasonRepost', async () => {
+      if (republicando) return;
+      const siguiente = !republicado;
+      setRepublicando(true);
+      setRepublicado(siguiente);
+      setRepostsCount((n) => Math.max(0, n + (siguiente ? 1 : -1)));
+      haptics.light();
+      try {
+        /*
+          SIEMPRE el id de la publicacion ORIGINAL. `post.id` ya lo es incluso
+          en una tarjeta republicada, porque una republicacion no tiene id de
+          publicacion propio: por ahi no puede entrar una cadena.
+        */
+        if (siguiente) await PostRepository.repost(post.id);
+        else await PostRepository.unrepost(post.id);
+      } catch {
+        setRepublicado(!siguiente);
+        setRepostsCount((n) => Math.max(0, n + (siguiente ? -1 : 1)));
+        notify(t('post.repostFailed'), t('common.tryAgain'));
+      } finally {
+        setRepublicando(false);
+      }
+    });
+  };
 
   /*
     Muro con reproduccion automatica: la pantalla anfitriona dice quien manda
@@ -173,7 +220,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     // Se comprueba antes de vaciar el campo, para no perder lo escrito si la
     // persona decide no registrarse ahora.
     let autorizado = false;
-    await requireAuth('para comentar', () => {
+    await requireAuth('auth.reasonComment', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -186,7 +233,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       // `addComment` lanza si el POST falla. Antes se llamaba con `void`, asi
       // que el fallo quedaba como rechazo sin capturar: el campo se vaciaba y
       // el comentario no aparecia nunca, sin explicacion.
-      notify('No se pudo comentar', 'Revisa tu conexión e inténtalo de nuevo.');
+      notify(t('post.commentFailed'), t('common.checkConnection'));
       setComment(body);
     }
   };
@@ -209,7 +256,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     que es mejor que una URL que no abre.
   */
   const sharePost = () => {
-    const { message } = compartirPublicacion({ postId: post.id, autor: post.author });
+    const { message } = compartirPublicacion({ postId: post.id, autor: post.author, traducir: t });
     Share.share({ message }).catch(() => {
       // El usuario cancelo, o el navegador no expone navigator.share.
     });
@@ -218,32 +265,32 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   /** Solo para publicaciones propias: confirmar y eliminar. */
   const deleteOwnPost = async () => {
     const accepted = await confirm({
-      title: 'Eliminar publicación',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('post.deleteTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await deletePost(post.id);
       haptics.light();
-      toast('Publicación eliminada');
+      toast(t('post.deleted'));
       onRemoved?.();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
   const reportPost = async () => {
     let autorizado = false;
-    await requireAuth('para reportar una publicación', () => {
+    await requireAuth('auth.reasonReport', () => {
       autorizado = true;
     });
     if (!autorizado) return;
     const accepted = await confirm({
-      title: 'Reportar publicación',
-      message: '¿Deseas reportar esta publicación?',
-      confirmLabel: 'Reportar',
+      title: t('post.reportTitle'),
+      message: t('post.reportQuestion'),
+      confirmLabel: t('post.report'),
       destructive: true,
     });
     if (!accepted) return;
@@ -254,9 +301,9 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         reportedUserId: post.authorId,
         reason: 'Contenido inapropiado',
       });
-      toast('Reporte enviado. Gracias por avisar.', 'flag');
+      toast(t('post.reportSent'), 'flag');
     } catch {
-      notify('No se pudo enviar', 'Inténtalo de nuevo.');
+      notify(t('post.sendFailed'), t('common.tryAgain'));
     }
   };
 
@@ -271,30 +318,56 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     // Los posts de demostracion no traen autor real: no hay a quien bloquear.
     if (!post.authorId) return;
     let autorizado = false;
-    await requireAuth('para bloquear a alguien', () => {
+    await requireAuth('auth.reasonBlock', () => {
       autorizado = true;
     });
     if (!autorizado) return;
     const accepted = await confirm({
-      title: `Bloquear a ${post.author}`,
-      message:
-        'Dejaréis de seguiros y no volverás a ver sus publicaciones. ' +
-        'Puedes deshacerlo desde Ajustes › Cuentas bloqueadas.',
-      confirmLabel: 'Bloquear',
+      title: t('post.blockNamed', { nombre: post.author }),
+      message: t('post.blockBody'),
+      confirmLabel: t('post.block'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await ProfileRepository.block(post.authorId);
-      toast('Cuenta bloqueada.', 'slash');
+      toast(t('post.blocked'), 'slash');
       onRemoved?.();
     } catch {
-      notify('No se pudo bloquear', 'Inténtalo de nuevo.');
+      notify(t('post.blockFailed'), t('common.tryAgain'));
     }
   };
 
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {/*
+        QUIEN LA COMPARTE VA ENCIMA; QUIEN LA ESCRIBIO SIGUE DEBAJO.
+
+        Republicar no cambia de quien es la publicacion: si esta linea
+        sustituyera la cabecera del autor, compartir seria una forma comoda de
+        apropiarse del trabajo ajeno. Por eso se anade una fila, no se
+        reemplaza ninguna, y las dos fechas conviven —cuando se compartio
+        aqui, cuando se publico abajo—.
+      */}
+      {post.repost ? (
+        <Pressable
+          style={styles.repostAviso}
+          onPress={() => irAlPerfil(router, post.repost?.autorId)}
+          disabled={!post.repost.autorId}
+          accessibilityRole="button"
+          accessibilityLabel={`Republicado por ${post.repost.autor}`}
+        >
+          <Feather name="repeat" size={13} color={colors.textMuted} />
+          <Text variant="caption" weight="700" color={colors.textMuted}>
+            {post.repost.autor} republicó · {post.repost.fecha}
+          </Text>
+        </Pressable>
+      ) : null}
+      {post.repost && post.repost.comentario ? (
+        <Text variant="body" style={styles.repostComentario}>
+          {post.repost.comentario}
+        </Text>
+      ) : null}
       <View style={styles.header}>
         <Pressable
           style={styles.headerInfo}
@@ -318,7 +391,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           onPress={() => setMenuOpen(true)}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Más opciones"
+          accessibilityLabel={t('common.moreOptions')}
         >
           <Feather name="more-horizontal" size={20} color={colors.textMuted} />
         </Pressable>
@@ -342,8 +415,18 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       )}
       {post.mediaType === 'video' ? (
         /*
-          16:9 en vez de una caja fija: la mayoria de videos son apaisados y
-          con alto fijo quedaban con franjas negras arriba y abajo.
+          LA CAJA SALE DEL VIDEO, no al reves.
+
+          Estaba fija en 16:9, asi que un video grabado en vertical —la mayoria
+          de los que se suben desde un movil— se pintaba dentro de un rectangulo
+          apaisado y quedaba reducido a una columna estrecha con franjas negras
+          a los lados que ocupaban mas que el propio video. El dato para
+          acertar ya estaba guardado desde la migracion 0021 (`width`/`height`
+          de `post_media`); solo lo leian las fotos.
+
+          `relacionDeVideo` acota la proporcion para que un caso extremo no
+          ocupe tres pantallas, y sin medidas guardadas devuelve el 16:9 de
+          antes: una publicacion antigua se sigue viendo igual.
 
           El reproductor SOLO existe despues de pulsar play y mientras la
           publicacion esta en pantalla. Antes se montaba uno por cada video
@@ -353,7 +436,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           memoria de reproductores queda en cero hasta que alguien mira uno.
         */
         montarReproductor && videoSource ? (
-          <View style={styles.video}>
+          <View style={[styles.video, { aspectRatio: relacionDelVideo }]}>
             <VideoPlayer
               uri={videoSource.uri}
               poster={post.posterUrl ? { uri: post.posterUrl } : undefined}
@@ -415,7 +498,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
                 ]}
                 accessibilityRole="switch"
                 accessibilityState={{ checked: !feedMuted }}
-                accessibilityLabel={feedMuted ? 'Activar el sonido' : 'Silenciar'}
+                accessibilityLabel={feedMuted ? t('video.unmute') : t('video.mute')}
               >
                 <Feather
                   name={feedMuted ? 'volume-x' : 'volume-2'}
@@ -427,11 +510,11 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           </View>
         ) : (
           <Pressable
-            style={styles.video}
+            style={[styles.video, { aspectRatio: relacionDelVideo }]}
             onPress={() => setVideoStarted(true)}
             disabled={autoFeed}
             accessibilityRole={autoFeed ? 'image' : 'button'}
-            accessibilityLabel={autoFeed ? 'Video' : 'Reproducir video'}
+            accessibilityLabel={autoFeed ? t('video.video') : t('video.play')}
           >
             {/*
               `uri` importa aunque no haya reproductor: en el navegador la
@@ -469,7 +552,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       ) : post.mediaUrl || post.imageKey ? (
         <DoubleTapLike
           onDoubleTap={() =>
-            void requireAuth('para dar me gusta', () => {
+            void requireAuth('auth.reasonLike', () => {
               if (!liked) toggleLike(post.id);
             })
           }
@@ -499,7 +582,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           <Pressable
             hitSlop={ACTION_HIT_SLOP}
             onPress={() =>
-              void requireAuth('para dar me gusta', () => {
+              void requireAuth('auth.reasonLike', () => {
                 toggleLike(post.id);
                 haptics.light();
               })
@@ -515,7 +598,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
             // Sin reacciones no hay lista que abrir: el numero se queda quieto
             // en vez de llevar a una pantalla vacia.
             disabled={post.likes === 0}
-            accessibilityLabel="Ver quién reaccionó"
+            accessibilityLabel={t('post.whoReacted')}
             accessibilityRole="button"
           >
             <Text variant="secondary" weight="600" style={styles.count}>{post.likes}</Text>
@@ -525,11 +608,37 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           style={styles.action}
           hitSlop={ACTION_HIT_SLOP}
           onPress={openComments}
-          accessibilityLabel="Comentarios"
+          accessibilityLabel={t('post.comments')}
           accessibilityRole="button"
         >
           <Feather name="message-square" size={18} color={colors.text} />
           <Text variant="secondary" weight="600" style={styles.count}>{commentCount}</Text>
+        </Pressable>
+        {/*
+          Republicar. Al lado de compartir porque es su pariente de dentro: uno
+          saca un enlace de la aplicacion y el otro lo comparte con quien te
+          sigue. El estado lo lleva el icono relleno mas el numero, no un color:
+          el sistema visual es blanco y negro.
+        */}
+        <Pressable
+          style={styles.action}
+          hitSlop={ACTION_HIT_SLOP}
+          onPress={() => void alternarRepost()}
+          disabled={republicando}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: republicado }}
+          accessibilityLabel={republicado ? t('post.undoRepost') : t('post.repost')}
+        >
+          <Feather
+            name="repeat"
+            size={19}
+            color={republicado ? colors.text : colors.textMuted}
+          />
+          {repostsCount > 0 ? (
+            <Text variant="secondary" weight="600" style={styles.count}>
+              {repostsCount}
+            </Text>
+          ) : null}
         </Pressable>
         <Pressable
           style={styles.action}
@@ -542,9 +651,9 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         </Pressable>
         <View style={{ flex: 1 }} />
         <Pressable
-          onPress={() => void requireAuth('para guardar contenido', () => toggleSave(post.id))}
+          onPress={() => void requireAuth('auth.reasonSave', () => toggleSave(post.id))}
           hitSlop={ACTION_HIT_SLOP}
-          accessibilityLabel="Guardar"
+          accessibilityLabel={t('common.save')}
           accessibilityRole="button"
         >
           <Feather name="bookmark" size={19} color={saved ? colors.text : colors.textMuted} />
@@ -563,7 +672,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
             <TextInput
               value={comment}
               onChangeText={setComment}
-              placeholder="Añade un comentario…"
+              placeholder={t('post.addComment')}
               placeholderTextColor={colors.textMuted}
               style={[styles.commentInput, { color: colors.text, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
               returnKeyType="send"
@@ -573,7 +682,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
               onPress={() => void submitComment()}
               disabled={!comment.trim()}
               hitSlop={ACTION_HIT_SLOP}
-              accessibilityLabel="Enviar comentario"
+              accessibilityLabel={t('post.sendComment')}
               accessibilityRole="button"
             >
               <Feather name="arrow-up-circle" size={30} color={comment.trim() ? colors.text : colors.border} />
@@ -585,7 +694,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       <BottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
         {!isOwn && post.authorId ? (
           <ListRow
-            title={`Ver perfil de ${post.author}`}
+            title={t('post.viewProfileOf', { nombre: post.author })}
             leftIcon="user"
             onPress={() => {
               setMenuOpen(false);
@@ -594,7 +703,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           />
         ) : null}
         <ListRow
-          title={saved ? 'Quitar de guardados' : 'Guardar'}
+          title={saved ? t('post.unsave') : t('common.save')}
           leftIcon="bookmark"
           onPress={() => {
             setMenuOpen(false);
@@ -602,21 +711,21 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           }}
         />
         <ListRow
-          title="Compartir"
+          title={t('post.share')}
           leftIcon="share-2"
           onPress={() => closeMenuThen(sharePost)}
         />
         {isOwn ? (
           <>
             <ListRow
-              title="Editar publicación"
+              title={t('post.editTitle')}
               leftIcon="edit-2"
               onPress={() =>
                 closeMenuThen(() => router.push(`/edit-post/${post.id}` as never))
               }
             />
             <ListRow
-              title="Eliminar publicación"
+              title={t('post.deleteTitle')}
               leftIcon="trash-2"
               destructive
               onPress={() => closeMenuThen(() => void deleteOwnPost())}
@@ -625,13 +734,13 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         ) : (
           <>
             <ListRow
-              title="Reportar publicación"
+              title={t('post.reportTitle')}
               leftIcon="flag"
               destructive
               onPress={() => closeMenuThen(() => void reportPost())}
             />
             <ListRow
-              title={`Bloquear a ${post.author}`}
+              title={t('post.blockNamed', { nombre: post.author })}
               leftIcon="slash"
               destructive
               onPress={() => closeMenuThen(() => void blockAuthor())}
@@ -646,11 +755,20 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.lg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.lg },
+  repostAviso: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  repostComentario: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs },
   headerInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
   avatar: { width: 40, height: 40, borderRadius: 20 },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
   image: { width: '100%', height: 340 },
-  video: { width: '100%', aspectRatio: 16 / 9 },
+  // `aspectRatio` lo pone la tarjeta: sale de las medidas del video.
+  video: { width: '100%' },
   actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.lg },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   count: { marginLeft: 2 },

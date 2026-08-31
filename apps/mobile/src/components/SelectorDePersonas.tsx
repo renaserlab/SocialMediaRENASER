@@ -10,6 +10,7 @@ import { MencionRepository } from '@/repositories/MencionRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { PersonaEtiquetada } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Paleta fija de lo que se pinta ENCIMA de un vídeo, como en `SelectorDeTemas`. */
 const sobreVideo = palette('dark');
@@ -54,6 +55,7 @@ export function SelectorDePersonas({
   maximo = MAXIMO_POR_DEFECTO,
   variante = 'clara',
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const superficie = variante === 'sobreMedia' ? sobreVideo : colors;
 
@@ -112,7 +114,7 @@ export function SelectorDePersonas({
     <View style={styles.raiz}>
       <View style={styles.cabecera}>
         <Text variant="secondary" weight="700" color={superficie.text} accessibilityRole="header">
-          ¿Quién sale aquí?
+          {t('tagging.question')}
         </Text>
         {/*
           El aviso del tope ocupa el sitio de la ayuda en vez de añadirse
@@ -163,17 +165,17 @@ export function SelectorDePersonas({
       <Input
         value={termino}
         onChangeText={setTermino}
-        placeholder="Buscar por nombre o usuario"
+        placeholder={t('tagging.searchPlaceholder')}
         autoCapitalize="none"
         autoCorrect={false}
-        accessibilityLabel="Buscar a quién etiquetar"
+        accessibilityLabel={t('tagging.searchLabel')}
       />
 
       {termino.trim().length >= 2 ? (
         <View style={styles.resultados}>
           {resultados.length === 0 ? (
             <Text variant="caption" color={superficie.textMuted}>
-              {buscando ? 'Buscando…' : 'Nadie con ese nombre.'}
+              {buscando ? t('search.searching') : t('tagging.noMatches')}
             </Text>
           ) : (
             resultados.map((persona) => {

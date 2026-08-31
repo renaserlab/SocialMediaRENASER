@@ -264,10 +264,25 @@ export async function pickVideo(maxDurationSec = 180): Promise<PickedMedia | nul
     kind: 'video',
     mimeType: asset.mimeType,
     name: asset.fileName,
-    durationMs: asset.duration ?? null,
+    durationMs: duracionEnMs(asset.duration),
     width: asset.width ?? null,
     height: asset.height ?? null,
   };
+}
+
+/**
+ * La duracion del selector, siempre en MILISEGUNDOS.
+ *
+ * En movil `expo-image-picker` la da en milisegundos, pero su implementacion
+ * web la saca de `HTMLVideoElement.duration`, que esta en SEGUNDOS, y aqui se
+ * copiaba tal cual. Resultado: en el navegador un video de noventa segundos
+ * llegaba como `durationMs = 90` y cualquier limite en milisegundos lo dejaba
+ * pasar. No es una conversion «por si acaso»: es que las dos plataformas
+ * devuelven unidades distintas por el mismo campo.
+ */
+function duracionEnMs(duracion: number | null | undefined): number | null {
+  if (typeof duracion !== 'number' || !Number.isFinite(duracion) || duracion <= 0) return null;
+  return Platform.OS === 'web' ? Math.round(duracion * 1000) : duracion;
 }
 
 /** Abre el selector de archivos para elegir un audio. */
@@ -417,12 +432,92 @@ export async function readLocalFile(uri: string): Promise<LocalFile> {
   }
   // El tamaño se obtiene sin cargar el archivo entero en memoria.
   const file = new File(uri);
+  const tamano = file.size ?? 0;
+  if (tamano > 0) {
+    return {
+      size: tamano,
+      directBody: () => file.arrayBuffer(),
+      // TUS lee el Blob por trozos; ahi el contenido si viaja bien en RN.
+      resumableBody: async () => (await fetch(uri)).blob(),
+    };
+  }
+
+  /*
+    Tamaño cero con una ruta `content://`: no es que el archivo este vacio.
+
+    `File` de expo-file-system solo sabe leer rutas `file://`. Varios Android
+    —depende del fabricante y de que selector abra el sistema— devuelven la foto
+    como `content://`, que es un identificador dentro del proveedor de
+    documentos, no una ruta en disco. Ahi no hay nada que medir y sale cero.
+
+    POR QUE SE COPIA Y NO SE USA EL BLOB. La tentacion es `fetch(uri).blob()`,
+    que si informa bien el tamaño. Pero en React Native ese Blob viaja VACIO
+    cuando supabase-js lo manda en el POST —es el fallo que dio origen a esta
+    funcion, y esta explicado en su cabecera—: subiria cero bytes diciendo que
+    son dos megas. Copiar deja un archivo de verdad, y a partir de ahi todo
+    funciona por el camino ya probado.
+
+    La copia va por la API antigua a proposito: es la unica que sabe leer del
+    proveedor de documentos de Android. Se importa aqui dentro para que no entre
+    en el paquete de quien nunca la necesita (web, y todo `file://`).
+  */
+  const copia = await copiarDesdeElProveedor(uri);
+  if (!copia) {
+    return { size: 0, directBody: async () => new ArrayBuffer(0), resumableBody: async () => new Blob([]) };
+  }
+  const copiado = new File(copia);
   return {
-    size: file.size ?? 0,
-    directBody: () => file.arrayBuffer(),
-    // TUS lee el Blob por trozos; ahi el contenido si viaja bien en RN.
-    resumableBody: async () => (await fetch(uri)).blob(),
+    size: copiado.size ?? 0,
+    directBody: () => copiado.arrayBuffer(),
+    resumableBody: async () => (await fetch(copia)).blob(),
   };
+}
+
+/** Carpeta propia dentro de la cache, para poder limpiarla sin tocar nada mas. */
+const CARPETA_DE_COPIAS = 'z-origen-content';
+
+/**
+ * Cuanto sobrevive una copia antes de que la borre la siguiente lectura.
+ *
+ * No se borra al terminar de subir porque `readLocalFile` no sabe cuando acaba
+ * quien la llama —son cinco sitios distintos— y obligarles a avisar seria mas
+ * facil de olvidar que de recordar. Diez minutos son de sobra para la subida
+ * mas lenta y lo bastante poco para que la cache no crezca.
+ */
+const VIDA_DE_LA_COPIA_MS = 10 * 60 * 1000;
+
+async function copiarDesdeElProveedor(uri: string): Promise<string | null> {
+  try {
+    const legacy = await import('expo-file-system/legacy');
+    const cache = legacy.cacheDirectory;
+    if (!cache) return null;
+
+    const carpeta = `${cache}${CARPETA_DE_COPIAS}/`;
+    const info = await legacy.getInfoAsync(carpeta);
+    if (!info.exists) {
+      await legacy.makeDirectoryAsync(carpeta, { intermediates: true });
+    } else {
+      // Barrido de lo viejo. Va antes de copiar y nunca despues de subir: si la
+      // aplicacion se cierra a mitad de una subida, la copia igual desaparece.
+      const ahora = Date.now();
+      for (const nombre of await legacy.readDirectoryAsync(carpeta)) {
+        const suyo = await legacy.getInfoAsync(`${carpeta}${nombre}`);
+        const nacio = suyo.exists ? (suyo.modificationTime ?? 0) * 1000 : 0;
+        if (ahora - nacio > VIDA_DE_LA_COPIA_MS) {
+          await legacy.deleteAsync(`${carpeta}${nombre}`, { idempotent: true });
+        }
+      }
+    }
+
+    const destino = `${carpeta}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await legacy.copyAsync({ from: uri, to: destino });
+    return destino;
+  } catch {
+    // Si el proveedor tampoco deja copiar, quien llama vera tamaño cero y dira
+    // la verdad. Callar aqui es correcto: el mensaje util se da arriba, con el
+    // contexto de que se estaba subiendo.
+    return null;
+  }
 }
 
 export type UploadPhase = 'compressing' | 'uploading';
@@ -589,6 +684,14 @@ export async function uploadPostMedia(
 // --------------------------------------------------------------------------
 
 const AVATAR_BUCKET = 'avatars';
+/**
+ * Tope del bucket `avatars`, fijado en la migracion 0004.
+ *
+ * Se repite aqui a proposito para poder avisar ANTES de subir: el servidor
+ * responde 413 sin decir de que bucket habla, y el mensaje generico mandaba a
+ * cambiar el limite del bucket equivocado.
+ */
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 
 /**
  * Ancho que se pide para una foto de perfil, en pixeles.
@@ -660,9 +763,16 @@ export async function uploadProfileImage(
 
   // Una foto de perfil no necesita la resolucion original de la camara.
   let uri = media.uri;
+  /*
+    Si el compresor llego a correr. Importa mas de lo que parece: la
+    recompresion cambia el FORMATO del archivo, y con el, el tipo que hay que
+    declarar al subirlo.
+  */
+  let comprimida = false;
   if (compressionAvailable) {
     try {
       uri = await compressImage(media.uri);
+      comprimida = uri !== media.uri;
     } catch {
       uri = media.uri;
     }
@@ -672,12 +782,54 @@ export async function uploadProfileImage(
   const path = `${uid}/${kind}-${randomName(ext)}`;
 
   const local = await readLocalFile(uri);
-  if (local.size === 0) throw new Error('La imagen seleccionada está vacía.');
+  if (local.size === 0) {
+    /*
+      Cero bytes casi nunca significa «la foto esta vacia».
+
+      Antes esto pasaba siempre que un Android devolvia la foto como
+      `content://`: no habia forma de leerla. Eso YA no ocurre —`readLocalFile`
+      la copia del proveedor de documentos antes de medirla—, asi que llegar
+      aqui con un `content://` significa que ni siquiera se pudo copiar, que es
+      otra cosa y merece otro mensaje.
+    */
+    throw new Error(
+      uri.startsWith('content://')
+        ? 'Tu teléfono no dejó leer esa foto desde la galería. Prueba a hacerla con ' +
+          'la cámara de la aplicación, o a elegirla desde Google Fotos.'
+        : 'No pudimos leer la imagen seleccionada.',
+    );
+  }
+  /*
+    El bucket `avatars` tiene un tope de 5 MB (migracion 0004) y hasta ahora
+    esta subida era la UNICA de las tres que no lo comprobaba: pasado el tope,
+    el servidor devolvia un 413 y el mensaje generico hablaba de otro bucket.
+    Una camara de 50 MP se lo salta sin esfuerzo cuando el compresor no esta
+    disponible (Expo Go) o falla en silencio.
+  */
+  if (local.size > MAX_AVATAR_BYTES) {
+    throw new Error(
+      `La foto pesa ${formatMb(local.size)} y el máximo para una foto de perfil son ` +
+        `${formatMb(MAX_AVATAR_BYTES)}. Recórtala o elige una más pequeña.`,
+    );
+  }
 
   const { error } = await supabase.storage
     .from(AVATAR_BUCKET)
     .upload(path, await local.directBody(), {
-      contentType: resolveContentType(media, ext),
+      /*
+        EL TIPO SE DECLARA SOBRE EL ARCHIVO QUE SE SUBE, no sobre el que se
+        eligio.
+
+        Aqui se pasaba `media` entero, asi que ganaba el `mimeType` del
+        selector. En un Android cuya galeria informa `image/heic`, el compresor
+        entrega JPEG y el objeto quedaba guardado con bytes JPEG y la etiqueta
+        `image/heic`: el bucket lo acepta (su lista permite `image/*`) pero el
+        transformador de imagenes de Supabase —por el que pasa toda foto de
+        perfil— no sabe que hacer con un archivo mal etiquetado, y el avatar
+        salia en blanco. Las otras dos subidas ya anulaban el tipo tras
+        comprimir; a esta se le habia pasado.
+      */
+      contentType: resolveContentType(comprimida ? { ...media, mimeType: null } : media, ext),
       upsert: false,
     });
   if (error) throw new Error(describeStorageError(error));

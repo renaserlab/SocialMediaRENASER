@@ -7,6 +7,7 @@ import { mensajeDeAuth } from '@/lib/authErrors';
 import { esEnlaceDeRecuperacion, leerEnlaceAuth, mensajeDeEnlace } from '@/lib/authLink';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { useAuthStore } from '@/store/useAuthStore';
+import { traduceEnElIdiomaActual } from '@/i18n';
 
 /**
  * Atiende los enlaces de correo que abren la aplicacion en el telefono.
@@ -60,7 +61,7 @@ export function useAuthDeepLink(): void {
       // El enlace ya no sirve: caducado, usado o manipulado.
       if (enlace.errorCode) {
         console.warn('[auth] enlace de recuperacion rechazado', enlace);
-        setRecoveryError(mensajeDeEnlace(enlace));
+        setRecoveryError(mensajeDeEnlace(enlace, traduceEnElIdiomaActual));
         irAReset();
         return;
       }
@@ -71,7 +72,7 @@ export function useAuthDeepLink(): void {
         const abierta = await AuthRepository.abrirSesionDesdeEnlace(enlace);
         if (!vivo) return;
         if (!abierta) {
-          setRecoveryError(mensajeDeEnlace(enlace));
+          setRecoveryError(mensajeDeEnlace(enlace, traduceEnElIdiomaActual));
           irAReset();
           return;
         }

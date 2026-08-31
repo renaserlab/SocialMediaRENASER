@@ -5,7 +5,7 @@ import { Text } from '@/components/Text';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-import { fromIso, toIso, type DateFieldProps } from './DateField.types';
+import { fromIso, toIso, toIsoDate, type DateFieldProps } from './DateField.types';
 
 /**
  * Campo de fecha en web.
@@ -14,7 +14,13 @@ import { fromIso, toIso, type DateFieldProps } from './DateField.types';
  * integrado (teclado, idioma, accesibilidad) que cualquiera que dibujemos, y
  * evita cargar el módulo nativo, que no funciona aquí.
  */
-export function DateField({ label, value, onChange, placeholder = 'dd/mm/aaaa' }: DateFieldProps) {
+export function DateField({
+  label,
+  value,
+  onChange,
+  placeholder = 'dd/mm/aaaa',
+  minDate,
+}: DateFieldProps) {
   const { colors } = useAppTheme();
 
   return (
@@ -23,10 +29,17 @@ export function DateField({ label, value, onChange, placeholder = 'dd/mm/aaaa' }
         <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text>
       ) : null}
 
+      {/*
+        `min` atenua los dias anteriores en el calendario del navegador. Es
+        cortesia, no seguridad: quien decide si una fecha vale es el servidor,
+        con SU reloj. Pero un selector que deja elegir el martes pasado para
+        despues decir que no vale se equivoca a proposito.
+      */}
       <input
         type="date"
         value={toIso(value)}
         placeholder={placeholder}
+        min={minDate ? toIsoDate(minDate) : undefined}
         aria-label={label ?? 'Fecha'}
         onChange={(event) => onChange(fromIso(event.target.value))}
         style={{

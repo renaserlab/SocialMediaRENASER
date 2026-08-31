@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +12,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Avatar } from '@/components/Avatar';
 import { Text } from '@/components/Text';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
@@ -42,6 +41,8 @@ import {
 } from '@/services/directoEnVivo';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * La pantalla de una emision en vivo.
@@ -78,13 +79,13 @@ const SIMBOLO_DE_REACCION: Record<TipoDeReaccion, string> = {
   risa: '😂',
 };
 
-/** Como se lee cada reaccion en voz alta. */
-const NOMBRE_DE_REACCION: Record<TipoDeReaccion, string> = {
-  corazon: 'corazón',
-  aplauso: 'aplauso',
-  fuego: 'fuego',
-  asombro: 'asombro',
-  risa: 'risa',
+/** Como se lee cada reaccion en voz alta. Claves, no textos. */
+const NOMBRE_DE_REACCION: Record<TipoDeReaccion, TranslationKey> = {
+  corazon: 'live.reactionHeart',
+  aplauso: 'live.reactionClap',
+  fuego: 'live.reactionFire',
+  asombro: 'live.reactionWow',
+  risa: 'live.reactionLaugh',
 };
 
 /**
@@ -126,19 +127,21 @@ type Burbuja = { clave: number; tipo: TipoDeReaccion; carril: number };
  * que hacer es esperar tres segundos.
  */
 function mensajeDeError(error: unknown, respaldo: string): string {
+  // No es un componente: el idioma se lee de `traduceEnElIdiomaActual`.
+  const t = traduceEnElIdiomaActual;
   if (error instanceof ApiError) {
     if (error.code === 'live_chat_rate_limited' || error.code === 'live_reactions_rate_limited') {
-      return 'Vas demasiado rápido. Espera unos segundos.';
+      return t('live.tooFast');
     }
-    if (error.code === 'live_chat_closed') return 'El chat de esta emisión está cerrado.';
-    if (error.code === 'live_reactions_closed') return 'Esta emisión ya no admite reacciones.';
+    if (error.code === 'live_chat_closed') return t('live.chatClosed');
+    if (error.code === 'live_reactions_closed') return t('live.reactionsClosed');
     if (error.code === 'live_not_available') {
       // El 503 del backend cuando la migracion del dominio no esta aplicada. No
       // es culpa de quien mira, y conviene que no parezca que la app se rompio.
-      return 'Los directos todavía no están disponibles. Vuelve a intentarlo más tarde.';
+      return t('live.notAvailable');
     }
     if (error.code === 'live_provider_not_configured') {
-      return 'Todavía no hay proveedor de vídeo para los directos.';
+      return t('live.noProvider');
     }
   }
   return describeError(error, respaldo);
@@ -172,15 +175,16 @@ function fechaYHora(iso: string | null): string {
  * o hay algo que contar, o se cuenta por que no lo hay.
  */
 function PanelDeVideo({ emision }: { emision: Emision }) {
+  const { t } = useTranslation();
   if (emision.estado === 'scheduled') {
     return (
       <AvisoDeVideo
         icono="clock"
-        titulo="Todavía no ha empezado"
+        titulo={t('live.notStartedTitle')}
         detalle={
           emision.programadaParaIso
-            ? `Está anunciada para el ${fechaYHora(emision.programadaParaIso)}. Puedes dejar tu mensaje cuando abra el chat.`
-            : 'Quien emite aún no la ha iniciado.'
+            ? t('live.scheduledFor', { fecha: fechaYHora(emision.programadaParaIso) })
+            : t('live.notStartedBody')
         }
       />
     );
@@ -190,8 +194,8 @@ function PanelDeVideo({ emision }: { emision: Emision }) {
     return (
       <AvisoDeVideo
         icono="slash"
-        titulo="La emisión se canceló"
-        detalle="Quien la anunció decidió no hacerla. El chat queda cerrado."
+        titulo={t('live.cancelledTitle')}
+        detalle={t('live.cancelledBody')}
       />
     );
   }
@@ -200,11 +204,11 @@ function PanelDeVideo({ emision }: { emision: Emision }) {
     return (
       <AvisoDeVideo
         icono="check-circle"
-        titulo="La emisión terminó"
+        titulo={t('live.endedTitle')}
         detalle={
           emision.terminoEnIso
-            ? `Acabó a las ${hora(emision.terminoEnIso)}. Puedes leer lo que se dijo, pero el chat ya está cerrado.`
-            : 'Puedes leer lo que se dijo, pero el chat ya está cerrado.'
+            ? t('live.endedAt', { hora: hora(emision.terminoEnIso) })
+            : t('live.endedBody')
         }
       />
     );
@@ -219,8 +223,8 @@ function PanelDeVideo({ emision }: { emision: Emision }) {
     return (
       <AvisoDeVideo
         icono="video-off"
-        titulo="El vídeo todavía no está disponible"
-        detalle="Nos falta el proveedor de directo, así que no hay imagen que enseñar. El chat y las reacciones sí funcionan: esta sala está viva."
+        titulo={t('live.noVideoTitle')}
+        detalle={t('live.noVideoBody')}
       />
     );
   }
@@ -235,8 +239,8 @@ function PanelDeVideo({ emision }: { emision: Emision }) {
   return (
     <AvisoDeVideo
       icono="alert-circle"
-      titulo="Esta versión aún no reproduce el vídeo"
-      detalle="La emisión ya trae imagen, pero la app necesita una actualización para conectarse al proveedor. El chat funciona igual."
+      titulo={t('live.needsUpdateTitle')}
+      detalle={t('live.needsUpdateBody')}
     />
   );
 }
@@ -319,6 +323,7 @@ function BurbujaDeReaccion({
 /* ------------------------------------------------------------ Pantalla ----- */
 
 export function LiveScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const parametros = useLocalSearchParams<{ id: string }>();
   const emisionId = typeof parametros.id === 'string' ? parametros.id : '';
@@ -433,7 +438,7 @@ export function LiveScreen() {
 
   useEffect(() => {
     if (!emisionId) {
-      setErrorDeCarga('No sabemos qué emisión abrir.');
+      setErrorDeCarga(t('live.unknownBroadcast'));
       return;
     }
     let vigente = true;
@@ -446,13 +451,13 @@ export function LiveScreen() {
         estadoAnterior.current = datos.estado;
       })
       .catch((error) => {
-        if (vigente) setErrorDeCarga(mensajeDeError(error, 'No pudimos abrir la emisión.'));
+        if (vigente) setErrorDeCarga(mensajeDeError(error, t('live.openFailed')));
       });
 
     cargarMensajes().catch(() => {
       // Sin esto un fallo de carga dejaba el chat vacio, como si nadie hubiera
       // escrito nunca, en vez de avisar de que no se pudo leer.
-      if (vigente) setAviso('No se pudieron cargar los mensajes.');
+      if (vigente) setAviso(t('chat.loadFailed'));
     });
 
     const dejarChat = suscribirseAlChat(emisionId, alLlegarFila);
@@ -594,7 +599,7 @@ export function LiveScreen() {
       // Lo escrito vuelve al campo: perder el texto por un limite de ritmo es
       // la forma mas rapida de que alguien deje de escribir.
       setTexto(cuerpo);
-      setAviso(mensajeDeError(error, 'No se pudo enviar el mensaje.'));
+      setAviso(mensajeDeError(error, t('live.sendFailed')));
     } finally {
       setEnviando(false);
     }
@@ -604,9 +609,9 @@ export function LiveScreen() {
 
   const terminar = useCallback(async () => {
     const seguro = await confirm({
-      title: '¿Terminar la emisión?',
-      message: 'Se cerrará el chat y nadie podrá volver a entrar. No se puede deshacer.',
-      confirmLabel: 'Terminar',
+      title: t('live.endConfirmTitle'),
+      message: t('live.endConfirmBody'),
+      confirmLabel: t('live.end'),
       destructive: true,
     });
     if (!seguro) return;
@@ -618,7 +623,7 @@ export function LiveScreen() {
       // una ficha que ya tenemos.
       estadoAnterior.current = datos.estado;
     } catch (error) {
-      setAviso(mensajeDeError(error, 'No se pudo terminar la emisión.'));
+      setAviso(mensajeDeError(error, t('live.endFailed')));
     }
   }, [emisionId]);
 
@@ -628,16 +633,16 @@ export function LiveScreen() {
       setEmision(datos);
       estadoAnterior.current = datos.estado;
     } catch (error) {
-      setAviso(mensajeDeError(error, 'No se pudo empezar la emisión.'));
+      setAviso(mensajeDeError(error, t('live.startFailed')));
     }
   }, [emisionId]);
 
   const ocultar = useCallback(
     async (mensaje: MensajeDeEmision) => {
       const seguro = await confirm({
-        title: '¿Ocultar este mensaje?',
+        title: t('live.hideConfirmTitle'),
         message: mensaje.cuerpo,
-        confirmLabel: 'Ocultar',
+        confirmLabel: t('live.hide'),
         destructive: true,
       });
       if (!seguro) return;
@@ -649,7 +654,7 @@ export function LiveScreen() {
           previos.map((otro) => (otro.id === oculto.id ? { ...otro, oculto: true } : otro)),
         );
       } catch (error) {
-        setAviso(mensajeDeError(error, 'No se pudo ocultar el mensaje.'));
+        setAviso(mensajeDeError(error, t('live.hideFailed')));
       }
     },
     [],
@@ -665,7 +670,7 @@ export function LiveScreen() {
         <SafeAreaView style={estilos.centro}>
           <Feather name="alert-triangle" size={34} color={media.text} />
           <Text variant="titleMedium" weight="800" color={media.text} style={estilos.centrado}>
-            No pudimos abrir la emisión
+            {t('live.openFailedTitle')}
           </Text>
           <Text variant="secondary" color={media.textMuted} style={estilos.centrado}>
             {errorDeCarga}
@@ -676,7 +681,7 @@ export function LiveScreen() {
             style={[estilos.botonDeTexto, { borderColor: media.border }]}
           >
             <Text variant="body" weight="700" color={media.text}>
-              Volver
+              {t('common.back')}
             </Text>
           </Pressable>
         </SafeAreaView>
@@ -692,7 +697,7 @@ export function LiveScreen() {
               de arriba, asi que esto no puede quedarse girando para siempre. */}
           <ActivityIndicator color={media.text} />
           <Text variant="secondary" color={media.textMuted}>
-            Abriendo la sala…
+            {t('live.opening')}
           </Text>
         </SafeAreaView>
       </View>
@@ -702,15 +707,12 @@ export function LiveScreen() {
   return (
     <View style={estilos.fondo}>
       <SafeAreaView style={estilos.seguro}>
-        <KeyboardAvoidingView
-          style={estilos.columna}
-          behavior={Platform.select({ ios: 'padding', android: undefined })}
-        >
+        <SinTecladoDelante style={estilos.columna}>
           {/* Cabecera */}
           <View style={estilos.cabecera}>
             <Pressable
               onPress={salir}
-              accessibilityLabel="Salir de la emisión"
+              accessibilityLabel={t('live.leave')}
               accessibilityRole="button"
               style={estilos.botonRedondo}
             >
@@ -744,7 +746,7 @@ export function LiveScreen() {
                   style={[estilos.botonDeTexto, { borderColor: media.border }]}
                 >
                   <Text variant="secondary" weight="700" color={media.text}>
-                    Empezar ahora
+                    {t('create.startNow')}
                   </Text>
                 </Pressable>
               ) : (
@@ -754,7 +756,7 @@ export function LiveScreen() {
                   style={[estilos.botonDeTexto, { borderColor: media.danger }]}
                 >
                   <Text variant="secondary" weight="700" color={media.danger}>
-                    Terminar emisión
+                    {t('live.endBroadcast')}
                   </Text>
                 </Pressable>
               )}
@@ -771,9 +773,7 @@ export function LiveScreen() {
             >
               {visibles.length === 0 ? (
                 <Text variant="secondary" color={media.textMuted} style={estilos.centrado}>
-                  {chatAbierto
-                    ? 'Nadie ha escrito todavía. Puedes empezar tú.'
-                    : 'No hay mensajes en esta sala.'}
+                  {chatAbierto ? t('live.chatEmptyOpen') : t('live.chatEmptyClosed')}
                 </Text>
               ) : (
                 visibles.map((mensaje) => (
@@ -783,7 +783,7 @@ export function LiveScreen() {
                     delayLongPress={400}
                     accessibilityRole={puedeGestionar ? 'button' : 'text'}
                     accessibilityHint={
-                      puedeGestionar ? 'Mantén pulsado para ocultar este mensaje' : undefined
+                      puedeGestionar ? t('live.holdToHide') : undefined
                     }
                     style={estilos.mensaje}
                   >
@@ -830,7 +830,9 @@ export function LiveScreen() {
                   key={tipo}
                   onPress={() => reaccionar(tipo)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Reaccionar con ${NOMBRE_DE_REACCION[tipo]}`}
+                  accessibilityLabel={t('live.reactWith', {
+                    reaccion: t(NOMBRE_DE_REACCION[tipo]),
+                  })}
                   style={[estilos.botonDeReaccion, { borderColor: media.border }]}
                 >
                   <Text style={estilos.simbolo}>{SIMBOLO_DE_REACCION[tipo]}</Text>
@@ -852,15 +854,15 @@ export function LiveScreen() {
                 onChangeText={setTexto}
                 onSubmitEditing={() => void enviar()}
                 returnKeyType="send"
-                placeholder="Escribe un mensaje…"
+                placeholder={t('live.messagePlaceholder')}
                 placeholderTextColor={media.textMuted}
-                accessibilityLabel="Mensaje para el chat"
+                accessibilityLabel={t('live.messageLabel')}
                 style={[estilos.campo, { borderColor: media.border, color: media.text }]}
               />
               <Pressable
                 onPress={() => void enviar()}
                 disabled={!texto.trim() || enviando}
-                accessibilityLabel="Enviar mensaje"
+                accessibilityLabel={t('chat.sendMessage')}
                 accessibilityRole="button"
                 style={[estilos.botonRedondo, { borderColor: media.border, borderWidth: 1 }]}
               >
@@ -873,12 +875,10 @@ export function LiveScreen() {
             </View>
           ) : (
             <Text variant="caption" color={media.textMuted} style={estilos.chatCerrado}>
-              {emision.estado === 'scheduled'
-                ? 'El chat se abre cuando empiece la emisión.'
-                : 'El chat de esta emisión está cerrado.'}
+              {emision.estado === 'scheduled' ? t('live.chatOpensLater') : t('live.chatClosed')}
             </Text>
           )}
-        </KeyboardAvoidingView>
+        </SinTecladoDelante>
       </SafeAreaView>
     </View>
   );
@@ -886,18 +886,23 @@ export function LiveScreen() {
 
 /** El estado de la sala, dicho sin adornos. */
 function Insignia({ estado }: { estado: EstadoDeEmision }) {
+  const { t } = useTranslation();
   if (estado === 'live') {
     return (
       <View style={[estilos.insignia, { backgroundColor: media.danger }]}>
         <View style={[estilos.punto, { backgroundColor: media.text }]} />
         <Text variant="caption" weight="900" color={media.text}>
-          EN VIVO
+          {t('live.badgeLive')}
         </Text>
       </View>
     );
   }
   const texto =
-    estado === 'scheduled' ? 'PROGRAMADA' : estado === 'ended' ? 'TERMINÓ' : 'CANCELADA';
+    estado === 'scheduled'
+      ? t('live.badgeScheduled')
+      : estado === 'ended'
+        ? t('live.badgeEnded')
+        : t('live.badgeCancelled');
   return (
     <View style={[estilos.insignia, { borderColor: media.border, borderWidth: 1 }]}>
       <Text variant="caption" weight="900" color={media.textMuted}>

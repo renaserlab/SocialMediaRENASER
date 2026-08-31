@@ -9,6 +9,7 @@ import { useCategoriasDePodcast } from '@/hooks/useCategoriasDePodcast';
 import { describeError } from '@/lib/describeError';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const MAX_NOMBRE = 40;
 
@@ -28,6 +29,7 @@ type Props = {
  * es como se pierde a la gente por el camino.
  */
 export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const { categorias, cargando, crear } = useCategoriasDePodcast(ownerId);
 
@@ -48,7 +50,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
       setNombre('');
       setCreando(false);
     } catch (e) {
-      setError(describeError(e, 'No se pudo crear la categoría.'));
+      setError(describeError(e, t('category.createFailed')));
     } finally {
       setOcupado(false);
     }
@@ -64,7 +66,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
   return (
     <View style={styles.raiz}>
       <Text variant="secondary" color={colors.textMuted}>
-        Categoría
+        {t('category.label')}
       </Text>
 
       {cargando ? (
@@ -93,11 +95,11 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
               onPress={() => setCreando(true)}
               style={[styles.nueva, { borderColor: colors.border }]}
               accessibilityRole="button"
-              accessibilityLabel="Crear una categoría"
+              accessibilityLabel={t('category.create')}
             >
               <Feather name="plus" size={14} color={colors.text} />
               <Text variant="caption" weight="700" color={colors.text}>
-                Nueva
+                {t('category.new')}
               </Text>
             </Pressable>
           ) : null}
@@ -109,14 +111,14 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
           <TextInput
             value={nombre}
             onChangeText={setNombre}
-            placeholder="Nombre de la categoría"
+            placeholder={t('category.namePlaceholder')}
             placeholderTextColor={colors.textMuted}
             maxLength={MAX_NOMBRE}
             autoFocus
             returnKeyType="done"
             onSubmitEditing={() => void anadir()}
             style={[styles.entrada, { color: colors.text }]}
-            accessibilityLabel="Nombre de la nueva categoría"
+            accessibilityLabel={t('category.newNameLabel')}
           />
           {ocupado ? (
             <ActivityIndicator color={colors.text} />
@@ -126,7 +128,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
               hitSlop={8}
               disabled={!nombre.trim()}
               accessibilityRole="button"
-              accessibilityLabel="Añadir la categoría"
+              accessibilityLabel={t('category.add')}
               style={styles.icono}
             >
               <Feather name="check" size={18} color={colors.text} />
@@ -140,7 +142,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
             }}
             hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel="Cancelar"
+            accessibilityLabel={t('common.cancel')}
             style={styles.icono}
           >
             <Feather name="x" size={18} color={colors.textMuted} />

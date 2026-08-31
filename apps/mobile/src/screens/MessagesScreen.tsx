@@ -17,6 +17,7 @@ import { Input } from '@/components/Input';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
+import { useTranslation } from '@/i18n/useTranslation';
 import {
   CONVERSACIONES_POR_PAGINA,
   MessageRepository,
@@ -29,6 +30,7 @@ import type { Conversation } from '@/types';
 
 export function MessagesScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
@@ -149,15 +151,15 @@ export function MessagesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="MENSAJES"
+        title={t('messages.headerTitle')}
         rightIcon={signedIn ? 'edit' : undefined}
         onRightPress={() => {}}
       />
       {supabaseEnabled && !signedIn ? (
         <SignedOutNotice
           icon="message-square"
-          title="Tus mensajes te esperan"
-          description="Crea tu cuenta para escribir a otras personas y recibir sus respuestas."
+          title={t('messages.signedOutTitle')}
+          description={t('messages.signedOutBody')}
         />
       ) : (
       <FlashList
@@ -170,7 +172,7 @@ export function MessagesScreen() {
         ListHeaderComponent={
           <View style={styles.searchWrapper}>
             <Input
-              placeholder="Buscar mensajes..."
+              placeholder={t('messages.searchPlaceholder')}
               value={searchText}
               onChangeText={setSearchText}
               placeholderTextColor={colors.textMuted}
@@ -198,12 +200,8 @@ export function MessagesScreen() {
           <StateView
             state={uiState}
             onRetry={() => void load()}
-            title={uiState === 'empty' ? 'No hay conversaciones' : undefined}
-            description={
-              uiState === 'empty'
-                ? 'Inicia un chat desde el perfil de alguien.'
-                : undefined
-            }
+            title={uiState === 'empty' ? t('messages.emptyTitle') : undefined}
+            description={uiState === 'empty' ? t('messages.emptyBody') : undefined}
             icon="message-square"
           />
         }
@@ -216,7 +214,10 @@ export function MessagesScreen() {
                   })
                 }
                 accessibilityRole="button"
-                accessibilityLabel={`Chat con ${conversation.name}. ${conversation.subtitle}`}
+                accessibilityLabel={t('messages.chatWith', {
+                  nombre: conversation.name,
+                  detalle: conversation.subtitle,
+                })}
                 style={({ pressed }) => [
                   styles.row,
                   { borderBottomColor: colors.border, opacity: pressed ? 0.78 : 1 },

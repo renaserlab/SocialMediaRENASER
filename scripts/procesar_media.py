@@ -167,12 +167,42 @@ def _ffmpeg_ok() -> bool:
     return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 
+def _rotacion(stream: dict) -> int:
+    """Grados que hay que girar el video para verlo derecho.
+
+    Un movil no gira los pixeles al grabar en vertical: guarda un cuadro
+    apaisado y anota aparte que va girado. La nota viaja como matriz de
+    presentacion (`side_data_list`) o como etiqueta `rotate` segun el codec.
+    """
+    for lado in stream.get("side_data_list") or []:
+        valor = lado.get("rotation")
+        if valor is not None:
+            try:
+                return int(float(valor)) % 360
+            except (TypeError, ValueError):
+                pass
+    etiqueta = (stream.get("tags") or {}).get("rotate")
+    if etiqueta is not None:
+        try:
+            return int(float(etiqueta)) % 360
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
 def probe(archivo: Path) -> dict:
+    """Datos del video, con el ancho y el alto TAL COMO SE VEN.
+
+    Se pide `-show_streams` en vez de una lista de campos porque la rotacion
+    vive en una lista anidada que el formato plano no sabe representar. Sin
+    ella se guardaba 1920x1080 para un video vertical y la aplicacion dibujaba
+    una caja apaisada a su alrededor: las franjas negras del muro.
+    """
     salida = subprocess.run(
         [
             "ffprobe", "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,codec_name:format=duration,size,bit_rate",
+            "-show_streams", "-show_format",
             "-of", "json", str(archivo),
         ],
         capture_output=True, text=True, check=True,
@@ -180,9 +210,12 @@ def probe(archivo: Path) -> dict:
     datos = json.loads(salida.stdout)
     stream = (datos.get("streams") or [{}])[0]
     formato = datos.get("format") or {}
+    ancho, alto = stream.get("width"), stream.get("height")
+    if ancho and alto and _rotacion(stream) % 180 == 90:
+        ancho, alto = alto, ancho
     return {
-        "width": stream.get("width"),
-        "height": stream.get("height"),
+        "width": ancho,
+        "height": alto,
         "codec": stream.get("codec_name"),
         "duration": float(formato.get("duration") or 0),
         "bytes": int(formato.get("size") or 0),
@@ -355,6 +388,22 @@ def procesa_video(fila: dict, dry_run: bool, con_hls: bool) -> None:
         ):
             if not fila.get(campo) and valor:
                 cambios[campo] = valor
+
+        # Medidas ya guardadas pero AL REVES. Los videos subidos antes de que
+        # el procesado mirara la rotacion tienen el ancho y el alto
+        # intercambiados, y como el relleno de arriba solo completa huecos,
+        # ese error no se corregia nunca. Se corrige solo cuando el par
+        # guardado es exactamente la transposicion del visible: asi no se pisa
+        # una medida distinta que pudiera venir de otro sitio.
+        if (
+            info["width"]
+            and info["height"]
+            and fila.get("width") == info["height"]
+            and fila.get("height") == info["width"]
+            and info["width"] != info["height"]
+        ):
+            cambios["width"] = info["width"]
+            cambios["height"] = info["height"]
 
         if not fila.get("poster_path"):
             poster = Path(tmp) / "poster.jpg"

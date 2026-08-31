@@ -5,6 +5,8 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { PestanaDeInicio } from '@/feed/fuenteDeVideos';
+import { useTranslation } from '@/i18n/useTranslation';
+import type { TranslationKey } from '@/i18n';
 import { getFontFamily, palette, spacing } from '@/theme/tokens';
 
 // El Inicio es video a pantalla completa: siempre fondo oscuro, sea cual sea
@@ -17,10 +19,12 @@ type Props = {
   alCrear: () => void;
 };
 
-const PESTANAS: Array<{ id: PestanaDeInicio; etiqueta: string }> = [
-  { id: 'paraTi', etiqueta: 'Para ti' },
-  { id: 'siguiendo', etiqueta: 'Siguiendo' },
-  { id: 'live', etiqueta: 'Live' },
+// La etiqueta se guarda como CLAVE, no como texto: el rotulo se resuelve al
+// pintar, que es cuando se sabe en que idioma esta la aplicacion.
+const PESTANAS: Array<{ id: PestanaDeInicio; clave: TranslationKey }> = [
+  { id: 'paraTi', clave: 'home.forYou' },
+  { id: 'siguiendo', clave: 'home.following' },
+  { id: 'live', clave: 'home.live' },
 ];
 
 /**
@@ -39,6 +43,7 @@ const PESTANAS: Array<{ id: PestanaDeInicio; etiqueta: string }> = [
  */
 export function CabeceraDeInicio({ activa, alCambiar, alCrear }: Props) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   return (
     <View
@@ -60,14 +65,15 @@ export function CabeceraDeInicio({ activa, alCambiar, alCrear }: Props) {
             { borderColor: media.border, opacity: pressed ? 0.6 : 1 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Crear contenido"
+          accessibilityLabel={t('home.createContent')}
         >
           <Feather name="plus" size={20} color={media.text} />
         </Pressable>
 
         <View style={styles.pestanas} pointerEvents="box-none">
-          {PESTANAS.map(({ id, etiqueta }) => {
+          {PESTANAS.map(({ id, clave }) => {
             const seleccionada = id === activa;
+            const etiqueta = t(clave);
             return (
               <Pressable
                 key={id}

@@ -266,17 +266,16 @@ export const CourseContentRepository = {
     if (error) throw new Error(error.message);
   },
 
-  /** ¿El curso esta anunciado pero sin contenido disponible? */
-  async getComingSoon(courseId: string): Promise<boolean> {
-    const { data, error } = await client()
-      .from('courses')
-      .select('coming_soon')
-      .eq('id', courseId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    return (data?.coming_soon as boolean | null) ?? false;
-  },
-
+  /**
+   * Marca (o desmarca) el curso como anunciado sin contenido disponible.
+   *
+   * NO HAY LECTOR AQUÍ, y es a propósito. Lo había —`getComingSoon`, contra
+   * Supabase— mientras la ficha del curso leía el MISMO dato de la API. Dos
+   * fuentes para lo mismo son dos respuestas posibles: la etiqueta de arriba
+   * decía una cosa y el bloque del temario otra. Se lee del detalle del curso,
+   * que es de donde viene todo lo demás de esa pantalla; escribir sigue aquí
+   * porque el contenido del curso se escribe contra Supabase directamente.
+   */
   async setComingSoon(courseId: string, comingSoon: boolean): Promise<void> {
     const { error } = await client()
       .from('courses')
@@ -317,13 +316,27 @@ export const CourseContentRepository = {
       sizeBytes: row.size_bytes,
       sortOrder: row.sort_order,
     }));
-    if (items.length === 0) return items;
+    /*
+      LA LISTA NO SE FIRMA. Se firma lo que se abre.
 
-    const urls = await signCourseUrls(items.map((i) => i.storagePath));
-    items.forEach((item) => {
-      item.url = urls[item.storagePath];
-    });
+      Antes se pedia una firma para CADA documento de la leccion nada mas
+      entrar, aunque nadie fuera a abrir ninguno. En una leccion con veinte
+      recursos eso son veinte firmas —y su ida y vuelta al servidor— compitiendo
+      por la misma conexion justo en el momento en que lo unico que importa es
+      que arranque el video. Y ademas caducan: una firma emitida al entrar puede
+      estar muerta cuando por fin se pulsa.
+
+      Para PINTAR la fila no hace falta la URL: el titulo, el tipo y el tamaño
+      vienen en la propia fila. La firma se pide al pulsar (`firmarRecurso`),
+      que es cuando de verdad se necesita y cuando esta recien emitida.
+    */
     return items;
+  },
+
+  /** URL firmada de UN documento, en el momento de abrirlo. */
+  async firmarRecurso(storagePath: string): Promise<string | null> {
+    const urls = await signCourseUrls([storagePath]);
+    return urls[storagePath] ?? null;
   },
 
   async addResource(input: {

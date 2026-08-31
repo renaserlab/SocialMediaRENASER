@@ -10,11 +10,13 @@ import { ALTO_DE_LA_BARRA_DE_PROGRESO } from '@/components/VideoScrubber';
 import { assets } from '@/data/assets';
 import { compartirPublicacion } from '@/lib/enlaces';
 import { haptics } from '@/lib/haptics';
+import { esVertical } from '@/lib/formaDelVideo';
 import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { useAppStore } from '@/store/useAppStore';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Reel normalizado. Antes el componente consumia el tipo `Short` del demo, con
@@ -29,6 +31,17 @@ export type ReelItem = {
   uri: string;
   /** true si `uri` es una playlist HLS (sin cache de disco del reproductor). */
   isStream?: boolean;
+  /**
+   * Medidas del video, si se guardaron (migracion 0021).
+   *
+   * A pantalla completa NO sirven para deformar nada: sirven para decidir el
+   * ENCUADRE. Un vertical llena la pantalla; un apaisado, si se llenara, se
+   * quedaria en una franja central del propio video —se veria un tercio de la
+   * escena— asi que se ensena entero con su banda arriba y abajo, que es lo que
+   * hacen las aplicaciones de referencia.
+   */
+  width?: number;
+  height?: number;
   /** Poster del video: se pinta al instante mientras el reproductor prepara. */
   posterUrl?: string;
   /** Ruta del poster en Storage: clave de cache estable frente a refirmas. */
@@ -116,7 +129,23 @@ function ShortVideoItemBase({
   espacioInferior = 0,
   alDescartar,
 }: Props) {
+  const { t } = useTranslation();
   const router = useRouter();
+
+  /*
+    Como se encuadra ESTE video en la pantalla.
+
+    Estaba fijo en `cover` para todos. Con un video vertical eso es lo correcto
+    —llena la pantalla, que es de lo que va el formato—, pero con uno apaisado
+    recorta los lados hasta dejar una franja central: se pierde la mitad de la
+    escena y no hay forma de recuperarla. Sabiendo la forma del video, cada uno
+    se encuadra como le corresponde, y sin medidas guardadas se mantiene el
+    `cover` de siempre.
+  */
+  const encuadre =
+    short.width && short.height && !esVertical(short.width, short.height)
+      ? ('contain' as const)
+      : ('cover' as const);
 
   /*
     DE ABAJO A ARRIBA, cada cosa apoyada en la anterior. Antes eran dos numeros
@@ -164,7 +193,7 @@ function ShortVideoItemBase({
   const requireAuth = useRequireAuth();
 
   const toggleLike = () => {
-    void requireAuth('para reaccionar', () => {
+    void requireAuth('auth.reasonReact', () => {
       haptics.light();
       toggleLikePost(short.id);
     });
@@ -189,6 +218,7 @@ function ShortVideoItemBase({
       postId: short.id,
       autor: short.author,
       clase: 'video',
+      traducir: t,
     });
     Share.share({ message }).catch(() => {});
   };
@@ -202,7 +232,7 @@ function ShortVideoItemBase({
           posterCacheKey={short.posterPath}
           cacheToDisk={!short.isStream}
           style={StyleSheet.absoluteFill}
-          contentFit="cover"
+          contentFit={encuadre}
           loop
           muted={muted}
           nativeControls={false}
@@ -236,7 +266,7 @@ function ShortVideoItemBase({
             <ExpoImage
               source={{ uri: short.posterUrl, cacheKey: short.posterPath }}
               style={StyleSheet.absoluteFill}
-              contentFit="cover"
+              contentFit={encuadre}
               cachePolicy="disk"
               recyclingKey={short.posterPath ?? short.posterUrl}
             />
@@ -271,13 +301,13 @@ function ShortVideoItemBase({
           onPress={() => router.push(`/comments/${short.id}` as never)}
           style={styles.sidebarItem}
           accessibilityRole="button"
-          accessibilityLabel="Comentarios"
+          accessibilityLabel={t('post.comments')}
         >
           <Feather name="message-square" size={28} color={media.text} />
           <Text style={[styles.sidebarLabel, { color: media.text }]}>{short.comments}</Text>
         </Pressable>
 
-        <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel="Compartir">
+        <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel={t('post.share')}>
           <Feather name="share-2" size={28} color={media.text} />
         </Pressable>
 
@@ -297,8 +327,8 @@ function ShortVideoItemBase({
             onPress={() => alDescartar(short.id)}
             style={styles.sidebarItem}
             accessibilityRole="button"
-            accessibilityLabel="No me interesa este video"
-            accessibilityHint="Deja de mostrarte esta publicación. No afecta a quien la publicó."
+            accessibilityLabel={t('feed.notInterested')}
+            accessibilityHint={t('feed.notInterestedHint')}
           >
             <Feather name="slash" size={22} color={media.textMuted} />
           </Pressable>
@@ -318,7 +348,7 @@ function ShortVideoItemBase({
           style={[styles.sidebarItem, styles.soundButton, { backgroundColor: media.overlay, borderColor: media.border }]}
           accessibilityRole="switch"
           accessibilityState={{ checked: !muted }}
-          accessibilityLabel={muted ? 'Activar el sonido' : 'Silenciar'}
+          accessibilityLabel={muted ? t('video.unmute') : t('video.mute')}
         >
           <Feather name={muted ? 'volume-x' : 'volume-2'} size={22} color={media.text} />
         </Pressable>

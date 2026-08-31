@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useRouter } from 'expo-router';
 
+import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
 import { confirm } from '@/lib/confirm';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -29,7 +30,7 @@ export function useRequireAuth() {
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
 
   return useCallback(
-    async (motivo: string, accion: () => void | Promise<void>): Promise<void> => {
+    async (motivo: TranslationKey, accion: () => void | Promise<void>): Promise<void> => {
       // En modo demo (sin backend) no hay sesión que exigir: la aplicación
       // funciona con datos locales y bloquear aquí la dejaría inservible.
       if (!supabaseEnabled || status === 'authenticated') {
@@ -38,10 +39,12 @@ export function useRequireAuth() {
       }
 
       const entrar = await confirm({
-        title: 'Crea tu cuenta',
-        message: `Necesitas una cuenta ${motivo}. Es rápido y podrás seguir donde lo dejaste.`,
-        confirmLabel: 'Continuar',
-        cancelLabel: 'Ahora no',
+        title: traduceEnElIdiomaActual('auth.signUpTitle'),
+        message: traduceEnElIdiomaActual('auth.needAccount', {
+          motivo: traduceEnElIdiomaActual(motivo),
+        }),
+        confirmLabel: traduceEnElIdiomaActual('language.continue'),
+        cancelLabel: traduceEnElIdiomaActual('common.notNow'),
       });
       if (entrar) router.push('/register' as never);
     },

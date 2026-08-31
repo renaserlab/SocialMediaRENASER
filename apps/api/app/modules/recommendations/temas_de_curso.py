@@ -87,9 +87,18 @@ async def fijar(
         db.add(CourseTopic(course_id=course_id, topic_id=topic_id, source=source))
 
     # Lo que se le recomienda a esta persona cambia: su curso ya no trata de lo
-    # mismo. Se invalida SOLO su memoria, no la de todos.
+    # mismo.
     if autor_id:
         cache.invalidar(autor_id)
+
+    # Y lo que se le puede recomendar A LOS DEMAS tambien: de que trata un curso
+    # es lo que decide a quien encaja. Invalidando solo al autor, reclasificar
+    # un curso no llegaba a nadie mas hasta que su entrada caducara sola.
+    #
+    # Solo el ranking de CURSOS: los temas de un curso no mueven el orden de las
+    # personas ni el del muro, y tirar esas memorias seria pagar un recalculo
+    # completo por un cambio que no las afecta.
+    cache.invalidar_tipo("cursos")
 
 
 async def tiene_alguno(db: AsyncSession, course_id: str) -> bool:

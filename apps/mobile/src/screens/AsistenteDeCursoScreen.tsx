@@ -7,6 +7,8 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Input } from '@/components/Input';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
@@ -38,11 +40,14 @@ import { LearningRepository, type RequisitosDeCurso } from '@/repositories/Learn
 import { pickImage, signMediaUrls, uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const NIVELES = ['beginner', 'intermediate', 'advanced'] as const;
-const NOMBRES_DE_NIVEL = ['Inicial', 'Intermedio', 'Avanzado'];
+const CLAVES_DE_NIVEL = ['wizard.levelBeginner', 'wizard.levelIntermediate', 'wizard.levelAdvanced'] as const;
 const IDIOMAS = ['es', 'en', 'pt'] as const;
-const NOMBRES_DE_IDIOMA = ['Español', 'Inglés', 'Português'];
+// El nombre del idioma del CURSO se lee en el idioma de quien mira: es un dato
+// de la ficha, no el selector de idioma de la aplicación.
+const CLAVES_DE_IDIOMA = ['lang.spanish', 'lang.english', 'lang.portuguese'] as const;
 
 const VACIO: BorradorDeCurso = {
   title: '',
@@ -77,7 +82,10 @@ const VACIO: BorradorDeCurso = {
  * verdad— es el SERVIDOR, en el último paso y otra vez al publicar.
  */
 export function AsistenteDeCursoScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
+  /* Cuanto hay que dejar abajo para que el boton de publicar se pueda pulsar. */
+  const espacioInferior = useEspacioInferior();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -98,7 +106,7 @@ export function AsistenteDeCursoScreen() {
 
   const cargar = useCallback(async () => {
     if (!id) {
-      setFallo('Curso no encontrado.');
+      setFallo(t('wizard.courseNotFound'));
       setCargando(false);
       return;
     }
@@ -109,7 +117,7 @@ export function AsistenteDeCursoScreen() {
         // Esconder la pantalla no es el permiso —el servidor rechaza cada
         // escritura igualmente— pero enseñar un editor que no guarda nada sí
         // sería mentir.
-        setFallo('No puedes editar este curso.');
+        setFallo(t('wizard.cannotEdit'));
         return;
       }
       const curso = detalle.course;
@@ -137,7 +145,7 @@ export function AsistenteDeCursoScreen() {
       setCoverUrl(curso.coverUrl);
       setFallo(null);
     } catch (e) {
-      setFallo(e instanceof Error ? e.message : 'No se pudo cargar el curso.');
+      setFallo(e instanceof Error ? e.message : t('wizard.loadFailed'));
     } finally {
       setCargando(false);
     }
@@ -150,7 +158,7 @@ export function AsistenteDeCursoScreen() {
   /** El precio en centavos, o `null` si lo escrito no es un importe válido. */
   const precioEnCentavos = useMemo(() => {
     if (!borrador.dePago) return 0;
-    const leido = aCentavos(borrador.precio);
+    const leido = aCentavos(borrador.precio, t);
     return leido.ok ? leido.centavos : null;
   }, [borrador.dePago, borrador.precio]);
 
@@ -162,7 +170,7 @@ export function AsistenteDeCursoScreen() {
       const elegida = await pickImage({ allowsEditing: false });
       if (elegida) setPortadaNueva(elegida);
     } catch {
-      setError('No se pudo abrir la galería.');
+      setError(t('catalog.galleryFailed'));
     }
   };
 
@@ -179,14 +187,14 @@ export function AsistenteDeCursoScreen() {
     if (borrador.dePago) {
       // El importe se lee UNA vez y en un sitio (`lib/dinero.ts`): repartir el
       // cálculo por los componentes acaba en dos precios para el mismo curso.
-      const leido = aCentavos(borrador.precio);
+      const leido = aCentavos(borrador.precio, t);
       if (!leido.ok) {
         setError(leido.motivo);
         setPaso('precio');
         return false;
       }
       if (leido.centavos === 0) {
-        setError('Un curso de pago necesita un precio mayor que cero.');
+        setError(t('catalog.priceAboveZero'));
         setPaso('precio');
         return false;
       }
@@ -214,10 +222,10 @@ export function AsistenteDeCursoScreen() {
         setCoverUrl(urls[coverPath]);
         setPortadaNueva(null);
       }
-      if (!silencioso) toast('Cambios guardados');
+      if (!silencioso) toast(t('common.changesSaved'));
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo guardar.');
+      setError(e instanceof Error ? e.message : t('editPost.saveFailed'));
       return false;
     } finally {
       setGuardando(false);
@@ -234,7 +242,7 @@ export function AsistenteDeCursoScreen() {
       setRequisitos(respuesta);
       setReviewStatus(respuesta.reviewStatus);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron comprobar los requisitos.');
+      setError(e instanceof Error ? e.message : t('wizard.requirementsFailed'));
     }
   };
 
@@ -246,7 +254,7 @@ export function AsistenteDeCursoScreen() {
       const respuesta = await LearningRepository.submitForReview(id);
       setReviewStatus(respuesta.reviewStatus);
       if (respuesta.submitted) {
-        toast('Enviado a revisión');
+        toast(t('wizard.sentForReview'));
         await cargar();
       } else {
         setRequisitos((anterior) =>
@@ -254,10 +262,10 @@ export function AsistenteDeCursoScreen() {
             ? { ...anterior, ready: false, missing: respuesta.missing }
             : anterior,
         );
-        notify('Todavía no se puede enviar', respuesta.missing.join('\n'));
+        notify(t('wizard.cannotSendYet'), respuesta.missing.join('\n'));
       }
     } catch (e) {
-      notify('No se pudo enviar', e instanceof Error ? e.message : 'Inténtalo de nuevo.');
+      notify(t('post.sendFailed'), e instanceof Error ? e.message : t('common.tryAgain'));
     } finally {
       setGuardando(false);
     }
@@ -270,16 +278,19 @@ export function AsistenteDeCursoScreen() {
     try {
       const resultado = await LearningRepository.publish(id);
       if (resultado.published) {
-        toast('Curso publicado');
+        toast(t('course.published'));
         router.replace(`/course/${id}` as never);
       } else {
         setRequisitos((anterior) =>
           anterior ? { ...anterior, ready: false, missing: resultado.missing } : anterior,
         );
-        notify('Todavía no se puede publicar', resultado.missing.join('\n'));
+        notify(t('course.cannotPublishYet'), resultado.missing.join('\n'));
       }
     } catch (e) {
-      notify('No se pudo publicar', e instanceof Error ? e.message : 'Inténtalo de nuevo.');
+      notify(
+        t('create.publishFailed'),
+        e instanceof Error ? e.message : t('common.tryAgain'),
+      );
     } finally {
       setGuardando(false);
     }
@@ -290,10 +301,10 @@ export function AsistenteDeCursoScreen() {
     const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
     if (guardando) return;
     const aceptado = await confirm({
-      title: 'Guardar antes de salir',
-      message: 'Tus cambios se guardan en el borrador del curso.',
-      confirmLabel: 'Guardar y salir',
-      cancelLabel: 'Salir sin guardar',
+      title: t('wizard.saveBeforeLeaving'),
+      message: t('wizard.saveBeforeLeavingBody'),
+      confirmLabel: t('wizard.saveAndLeave'),
+      cancelLabel: t('wizard.leaveWithoutSaving'),
     });
     if (aceptado) {
       if (!(await guardar(true))) return;
@@ -304,7 +315,7 @@ export function AsistenteDeCursoScreen() {
   if (cargando) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Editar curso" />
+        <AppHeader title={t('catalog.editCourse')} />
         <StateView state="loading" />
       </View>
     );
@@ -313,7 +324,7 @@ export function AsistenteDeCursoScreen() {
   if (fallo) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Editar curso" />
+        <AppHeader title={t('catalog.editCourse')} />
         <StateView state="error" description={fallo} onRetry={() => void cargar()} />
       </View>
     );
@@ -322,12 +333,12 @@ export function AsistenteDeCursoScreen() {
   const indice = Math.max(0, PASOS.findIndex((p) => p.id === paso));
   const anterior = PASOS[indice - 1];
   const siguiente = PASOS[indice + 1];
-  const aviso = avisoDeRevision(reviewStatus, motivoDeRechazo);
+  const aviso = avisoDeRevision(reviewStatus, motivoDeRechazo, t);
   const accion = accionFinal(requisitos?.reviewAvailable ?? false, reviewStatus);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Editar curso" onBack={() => void salir()} />
+      <AppHeader title={t('catalog.editCourse')} onBack={() => void salir()} />
 
       {/*
         El indicador de pasos se desplaza en horizontal, así que va blindado:
@@ -349,7 +360,11 @@ export function AsistenteDeCursoScreen() {
                 onPress={() => setPaso(p.id)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: activo }}
-                accessibilityLabel={`Paso ${i + 1}: ${p.titulo}${completo ? ', completo' : ''}`}
+                accessibilityLabel={
+                  completo
+                    ? t('wizard.stepDoneA11y', { numero: i + 1, titulo: t(p.titulo) })
+                    : t('wizard.stepA11y', { numero: i + 1, titulo: t(p.titulo) })
+                }
                 style={({ pressed }) => [
                   styles.paso,
                   {
@@ -373,7 +388,7 @@ export function AsistenteDeCursoScreen() {
                   weight="800"
                   color={activo ? colors.onPrimary : colors.text}
                 >
-                  {i + 1}. {p.titulo}
+                  {i + 1}. {t(p.titulo)}
                 </Text>
               </Pressable>
             );
@@ -381,7 +396,20 @@ export function AsistenteDeCursoScreen() {
         </ScrollView>
       </SinCambioDeSeccion>
 
-      <AppScreen contentStyle={styles.contenido}>
+      {/*
+        El pie del asistente —«Publicar curso» y «Guardar y continuar»— es lo
+        ultimo del contenido desplazable, asi que al escribir en cualquier campo
+        el teclado se le ponia encima y no habia forma de llegar a el: aqui no
+        habia nada que apartara el contenido. Es el mismo motivo por el que los
+        botones de publicar quedaban tapados en los otros cinco flujos, solo que
+        el estorbo aqui es el teclado y alli la barra flotante.
+
+        `paddingBottom` sale de `useEspacioInferior`: fuera de las pestañas no
+        hay capsula, pero si zona segura, y el boton no puede quedar pegado al
+        indicador de inicio.
+      */}
+      <SinTecladoDelante>
+      <AppScreen contentStyle={[styles.contenido, { paddingBottom: espacioInferior + spacing.xxxl }]}>
         {reviewStatus !== 'draft' ? (
           <View style={[styles.aviso, { borderColor: colors.border }]}>
             <Feather name={aviso.icono} size={16} color={colors.text} />
@@ -401,36 +429,37 @@ export function AsistenteDeCursoScreen() {
             <Pressable
               onPress={() => void elegirPortada()}
               accessibilityRole="button"
-              accessibilityLabel="Elegir portada del curso"
+              accessibilityLabel={t('wizard.pickCover')}
               style={[styles.portada, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
             >
               <Feather name="image" size={20} color={colors.textMuted} />
               <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>
-                {portadaNueva?.name ?? (coverUrl ? 'Cambiar la portada' : 'Elegir portada (16:9)')}
+                {portadaNueva?.name ??
+                  (coverUrl ? t('wizard.changeCover') : t('wizard.pickCoverRatio'))}
               </Text>
             </Pressable>
 
             <Input
-              label="Nombre del curso"
+              label={t('catalog.courseName')}
               value={borrador.title}
               onChangeText={(title) => cambiar({ title })}
-              placeholder="Liderazgo consciente"
+              placeholder={t('catalog.courseNameExample')}
               placeholderTextColor={colors.textMuted}
               style={{ color: colors.text }}
             />
             <Input
-              label="Una línea que lo resuma (opcional)"
+              label={t('wizard.subtitle')}
               value={borrador.subtitle}
               onChangeText={(subtitle) => cambiar({ subtitle })}
-              placeholder="Dirigir sin apagarte"
+              placeholder={t('wizard.subtitleExample')}
               placeholderTextColor={colors.textMuted}
               style={{ color: colors.text }}
             />
             <Input
-              label="Descripción"
+              label={t('lesson.description')}
               value={borrador.description}
               onChangeText={(description) => cambiar({ description })}
-              placeholder="De qué trata y por qué merece la pena"
+              placeholder={t('wizard.descriptionPlaceholder')}
               placeholderTextColor={colors.textMuted}
               multiline
               style={{ color: colors.text }}
@@ -448,19 +477,19 @@ export function AsistenteDeCursoScreen() {
             />
 
             <Text variant="caption" weight="800" color={colors.textMuted} style={styles.etiqueta}>
-              NIVEL
+              {t('wizard.level')}
             </Text>
             <SegmentedControl
-              options={[...NOMBRES_DE_NIVEL]}
+              options={CLAVES_DE_NIVEL.map((clave) => t(clave))}
               selectedIndex={NIVELES.indexOf((borrador.level ?? '') as (typeof NIVELES)[number])}
               onChange={(i) => cambiar({ level: NIVELES[i] })}
             />
 
             <Text variant="caption" weight="800" color={colors.textMuted} style={styles.etiqueta}>
-              IDIOMA
+              {t('wizard.language')}
             </Text>
             <SegmentedControl
-              options={[...NOMBRES_DE_IDIOMA]}
+              options={CLAVES_DE_IDIOMA.map((clave) => t(clave))}
               selectedIndex={Math.max(0, IDIOMAS.indexOf(borrador.language as (typeof IDIOMAS)[number]))}
               onChange={(i) => cambiar({ language: IDIOMAS[i] })}
             />
@@ -479,25 +508,25 @@ export function AsistenteDeCursoScreen() {
         {paso === 'oferta' ? (
           <View>
             <EditorDeFrases
-              etiqueta="Lo que aprenderás"
-              ayuda="Qué sabrá hacer alguien al terminarlo. Es lo que más se lee de la ficha."
+              etiqueta={t('preview.whatYouLearn')}
+              ayuda={t('wizard.highlightsHelp')}
               valores={borrador.highlights}
               alCambiar={(highlights) => cambiar({ highlights })}
-              marcador="Tomar decisiones difíciles sin quemarte"
+              marcador={t('wizard.highlightsExample')}
             />
             <EditorDeFrases
-              etiqueta="Para quién es"
-              ayuda="A quién le sirve. Decirlo evita que lo empiece quien no debería."
+              etiqueta={t('preview.whoFor')}
+              ayuda={t('wizard.audienceHelp')}
               valores={borrador.targetAudience}
               alCambiar={(targetAudience) => cambiar({ targetAudience })}
-              marcador="Quien acaba de empezar a liderar un equipo"
+              marcador={t('wizard.audienceExample')}
             />
             <EditorDeFrases
-              etiqueta="Qué necesitas antes"
-              ayuda="Qué hace falta saber o tener. Si no hace falta nada, déjalo vacío."
+              etiqueta={t('preview.prerequisites')}
+              ayuda={t('wizard.prerequisitesHelp')}
               valores={borrador.prerequisites}
               alCambiar={(prerequisites) => cambiar({ prerequisites })}
-              marcador="Ninguno"
+              marcador={t('review.none')}
             />
           </View>
         ) : null}
@@ -505,8 +534,7 @@ export function AsistenteDeCursoScreen() {
         {paso === 'contenido' && id ? (
           <View>
             <Text variant="secondary" color={colors.textMuted} style={styles.ayuda}>
-              Los módulos son los bloques del curso y dentro van las lecciones.
-              Puedes reordenarlos en cualquier momento.
+              {t('wizard.contentHelp')}
             </Text>
             <EditorDeContenido
               courseId={id}
@@ -523,7 +551,7 @@ export function AsistenteDeCursoScreen() {
               }
             />
             <Text variant="caption" color={colors.textMuted} style={styles.ayuda}>
-              Duración total: {duracionLegible(duracionTotal(modulos))}
+              {t('wizard.totalLength', { duracion: duracionLegible(duracionTotal(modulos), t) })}
             </Text>
           </View>
         ) : null}
@@ -531,17 +559,17 @@ export function AsistenteDeCursoScreen() {
         {paso === 'precio' ? (
           <View>
             <Text variant="caption" weight="800" color={colors.textMuted} style={styles.etiqueta}>
-              TIPO DE ACCESO
+              {t('wizard.accessType')}
             </Text>
             <SegmentedControl
-              options={['Gratuito', 'De pago']}
+              options={[t('catalog.free'), t('catalog.paid')]}
               selectedIndex={borrador.dePago ? 1 : 0}
               onChange={(i) => cambiar({ dePago: i === 1 })}
             />
             {borrador.dePago ? (
               <>
                 <Input
-                  label={`Precio (${currency})`}
+                  label={t('wizard.priceIn', { moneda: currency })}
                   value={borrador.precio}
                   onChangeText={(precio) => cambiar({ precio })}
                   placeholder="49.90"
@@ -550,21 +578,17 @@ export function AsistenteDeCursoScreen() {
                   style={{ color: colors.text }}
                 />
                 <Text variant="caption" color={colors.textMuted} style={styles.ayuda}>
-                  Marca al menos una lección como muestra gratuita para que se
-                  pueda probar antes de comprar, y deja el resto cerrado: una
-                  compra tiene que desbloquear algo real.
+                  {t('wizard.markFreeSample')}
                 </Text>
                 {!FEATURE_PURCHASES ? (
                   <Text variant="caption" color={colors.textMuted} style={styles.ayuda}>
-                    El precio queda configurado. Las ventas todavía no están
-                    habilitadas, así que nadie podrá comprarlo aún.
+                    {t('catalog.salesDisabled')}
                   </Text>
                 ) : null}
               </>
             ) : (
               <Text variant="caption" color={colors.textMuted} style={styles.ayuda}>
-                Cualquiera con cuenta podrá empezarlo. En un curso gratuito no
-                tiene sentido marcar lecciones como muestra: ya se abren todas.
+                {t('wizard.freeCourseNote')}
               </Text>
             )}
           </View>
@@ -573,7 +597,7 @@ export function AsistenteDeCursoScreen() {
         {paso === 'revisar' ? (
           <View>
             <Text variant="secondary" color={colors.textMuted} style={styles.ayuda}>
-              Así se verá tu curso. Repásalo antes de enviarlo.
+              {t('wizard.previewHelp')}
             </Text>
             <VistaPreviaDeCurso
               borrador={borrador}
@@ -586,7 +610,7 @@ export function AsistenteDeCursoScreen() {
             {requisitos && !requisitos.ready ? (
               <View style={[styles.pendientes, { borderColor: colors.border }]}>
                 <Text variant="secondary" weight="800">
-                  Antes de enviarlo
+                  {t('wizard.beforeSending')}
                 </Text>
                 {/*
                   Estas frases las escribe el SERVIDOR: son las mismas reglas que
@@ -609,11 +633,11 @@ export function AsistenteDeCursoScreen() {
                 <View style={styles.pendiente}>
                   <Feather name="check-circle" size={14} color={colors.text} />
                   <Text variant="caption" style={styles.textoPendiente}>
-                    No falta nada. {accion === 'enviar'
-                      ? 'Puedes enviarlo a revisión.'
+                    {accion === 'enviar'
+                      ? t('wizard.readyToSend')
                       : accion === 'publicar'
-                      ? 'Puedes publicarlo.'
-                      : 'Está en manos del equipo.'}
+                      ? t('wizard.readyToPublish')
+                      : t('wizard.readyWaiting')}
                   </Text>
                 </View>
               </View>
@@ -626,7 +650,7 @@ export function AsistenteDeCursoScreen() {
         <View style={styles.pie}>
           {anterior ? (
             <Button
-              label="Atrás"
+              label={t('wizard.back')}
               variant="secondary"
               onPress={() => setPaso(anterior.id)}
               style={styles.mitad}
@@ -636,7 +660,7 @@ export function AsistenteDeCursoScreen() {
           {paso === 'revisar' ? (
             accion === 'esperar' ? (
               <Button
-                label="En revisión"
+                label={t('wizard.reviewPending')}
                 variant="secondary"
                 disabled
                 onPress={() => {}}
@@ -644,7 +668,7 @@ export function AsistenteDeCursoScreen() {
               />
             ) : (
               <Button
-                label={accion === 'publicar' ? 'Publicar curso' : 'Enviar a revisión'}
+                label={accion === 'publicar' ? t('course.publish') : t('wizard.sendForReview')}
                 loading={guardando}
                 onPress={() => void (accion === 'publicar' ? publicar() : enviarARevision())}
                 style={styles.mitad}
@@ -652,7 +676,7 @@ export function AsistenteDeCursoScreen() {
             )
           ) : siguiente ? (
             <Button
-              label="Guardar y continuar"
+              label={t('wizard.saveAndContinue')}
               loading={guardando}
               onPress={() =>
                 void (siguiente.id === 'revisar'
@@ -666,6 +690,7 @@ export function AsistenteDeCursoScreen() {
           ) : null}
         </View>
       </AppScreen>
+      </SinTecladoDelante>
     </View>
   );
 }
@@ -682,7 +707,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     minHeight: 40,
   },
-  contenido: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  // `paddingBottom` lo completa la pantalla: depende de la zona segura.
+  contenido: { padding: spacing.lg },
   aviso: {
     flexDirection: 'row',
     alignItems: 'flex-start',

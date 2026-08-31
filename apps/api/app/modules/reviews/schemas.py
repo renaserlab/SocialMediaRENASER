@@ -53,6 +53,16 @@ class ReviewCreate(BaseModel):
     #: Fotos o videos. Vacio es lo normal y no resta nada.
     media: list[ReviewMediaInput] = Field(default_factory=list, max_length=MAXIMO_DE_MEDIOS)
 
+    #: De QUE CURSO habla, si habla de alguno (migracion 0041). OPCIONAL: la
+    #: mayoria de las resenas no van de un curso concreto, y no llevarlo no es
+    #: un defecto.
+    #:
+    #: EL SERVIDOR NO SE FIA DE ESTE VALOR. No basta con que sea un uuid: tiene
+    #: que ser un curso REAL y ADEMAS de la persona resenada. Sin esa segunda
+    #: condicion, cualquiera podria colgar su opinion sobre Ana del curso de
+    #: Bruno, y en el perfil de Bruno apareceria como valoracion de su programa.
+    course_id: str | None = None
+
     @field_validator("body")
     @classmethod
     def _texto_de_verdad(cls, v: str) -> str:
@@ -76,6 +86,13 @@ class ReviewUpdate(BaseModel):
     body: str | None = Field(default=None, min_length=1, max_length=2000)
     #: `None` = no se tocan los archivos. Una lista vacia SI los quita todos.
     media: list[ReviewMediaInput] | None = Field(default=None, max_length=MAXIMO_DE_MEDIOS)
+
+    #: El curso del que habla (0041). Aqui `None` NO significa «no lo toques»:
+    #: significa «quitalo». La diferencia entre «no lo mandes» y «mandalo vacio»
+    #: la resuelve `model_fields_set` en el router, porque con un solo valor por
+    #: defecto las dos cosas serian indistinguibles y no habria forma de
+    #: desenlazar un curso elegido por error.
+    course_id: str | None = None
 
     @field_validator("body")
     @classmethod
@@ -117,6 +134,13 @@ class ReviewRead(BaseModel):
     #: ver las reservas ni las compras de nadie.
     verified_source: str | None = None
 
+    #: El curso del que habla, si habla de alguno (0041). `None` es lo normal.
+    course_id: str | None = None
+    #: Su titulo, resuelto en el servidor. Sin el, la tarjeta tendria que pedir
+    #: el curso por separado —una peticion por resena— solo para pintar un
+    #: rotulo. Va vacio cuando no hay curso.
+    course_title: str | None = None
+
     created_at: datetime
     updated_at: datetime
 
@@ -142,3 +166,11 @@ class ReviewsAvailability(BaseModel):
     """
 
     available: bool
+
+    #: Si ADEMAS se puede decir a que curso se refiere (migracion 0041).
+    #:
+    #: Va aparte de `available` porque son dos cosas distintas y se aplicaran en
+    #: momentos distintos: con la 0030 puesta y la 0041 no, se pueden escribir
+    #: resenas pero no enlazarlas a un curso. Ofrecer el selector en ese caso
+    #: seria pedir un dato que se va a tirar sin decirlo.
+    courses_available: bool = False

@@ -6,18 +6,25 @@ import * as MediaLibrary from 'expo-media-library';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { pickImage, type PickedMedia } from '@/services/storage';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
+import { MAX_HISTORIA_MS } from '@/lib/historias';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Superficie oscura, como el resto del flujo de captura. */
 const media = palette('dark');
 
-/** Tope de una historia; coincide con el CHECK de la migracion 0003. */
-const MAX_STORY_MS = 15_000;
+/*
+  El tope sale de `lib/historias`, no de una copia local. Estaba escrito a mano
+  aqui, en el carrete, en el modo historia y en el backend: cuatro numeros que
+  habia que cambiar a la vez, y bastaba con olvidar uno para que la camara
+  cortara a un tiempo y la subida rechazara a otro.
+*/
+const MAX_STORY_MS = MAX_HISTORIA_MS;
 
 const COLUMNS = 3;
 const GAP = 2;
@@ -65,6 +72,14 @@ export function StoryGalleryScreen({
   pie,
   alternativa,
 }: Props) {
+  const { t } = useTranslation();
+  /*
+    Cuanto ocupa la barra flotante EN ESTE aparato. Antes estaba escrito en la
+    hoja de estilos como `espacioParaLaBarra(0)`, o sea, midiendo la capsula sin
+    la zona segura: 26 px de menos en cualquier telefono con indicador de
+    inicio, justo los que dejaban el pie asomando por detras de la barra.
+  */
+  const espacioInferior = useEspacioInferior();
   const [permission, setPermission] = useState<MediaLibrary.PermissionResponse | null>(null);
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -119,7 +134,7 @@ export function StoryGalleryScreen({
       const foto = await pickImage({ aspect: [9, 16] });
       if (foto) onSelect(foto);
     } catch (error) {
-      notify('No se pudo abrir el selector', describeError(error, 'Inténtalo de nuevo.'));
+      notify(t('media.pickerFailedTitle'), describeError(error, t('common.tryAgain')));
     }
   };
 
@@ -148,16 +163,16 @@ export function StoryGalleryScreen({
       <View style={[styles.root, styles.center]}>
         <Feather name="image" size={34} color={media.textMuted} />
         <Text variant="body" weight="700" color={media.text} style={styles.deniedTitle}>
-          Sin acceso a tus fotos
+          {t('media.noPhotoAccess')}
         </Text>
         <Text variant="secondary" color={media.textMuted} style={styles.deniedBody}>
           {permission.canAskAgain
-            ? 'Concede el permiso para elegir una foto o un vídeo.'
-            : 'Actívalo en Ajustes del teléfono → Z → Fotos.'}
+            ? t('media.grantPhotoPermission')
+            : t('media.enablePhotosInSettings')}
         </Text>
         {permission.canAskAgain ? (
           <Button
-            label="Dar permiso"
+            label={t('media.givePermission')}
             variant="secondary"
             onPress={() => void (async () => {
               if (await ask()) await load();
@@ -180,7 +195,7 @@ export function StoryGalleryScreen({
           ocurre fuera de la aplicacion: solo se recibe lo que la persona elige.
         */}
         <Button
-          label="Elegir con el selector del teléfono"
+          label={t('media.useSystemPicker')}
           variant="secondary"
           icon="folder"
           onPress={() => void elegirConElSistema()}
@@ -199,13 +214,13 @@ export function StoryGalleryScreen({
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Cerrar">
+        <Pressable onPress={onClose} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel={t('common.close')}>
           <Feather name="x" size={24} color={media.text} />
         </Pressable>
         <Text variant="body" weight="800" color={media.text}>
-          Agregar a tu historia
+          {t('stories.addTitle')}
         </Text>
-        <Pressable onPress={onOpenCamera} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Abrir la cámara">
+        <Pressable onPress={onOpenCamera} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel={t('media.openCamera')}>
           <Feather name="camera" size={22} color={media.text} />
         </Pressable>
       </View>
@@ -223,7 +238,7 @@ export function StoryGalleryScreen({
         >
           <Feather name="info" size={15} color={media.text} />
           <Text variant="secondary" color={media.text} style={{ flex: 1 }}>
-            Solo ves las fotos que compartiste. Toca para elegir más.
+            {t('media.limitedAccess')}
           </Text>
         </Pressable>
       ) : null}
@@ -231,7 +246,7 @@ export function StoryGalleryScreen({
       {assets.length === 0 ? (
         <View style={[styles.center, { flex: 1 }]}>
           <Text variant="secondary" color={media.textMuted}>
-            No hay fotos ni vídeos en este teléfono.
+            {t('media.noMediaOnDevice')}
           </Text>
         </View>
       ) : (
@@ -251,7 +266,7 @@ export function StoryGalleryScreen({
                 onPress={() => choose(item)}
                 style={styles.tile}
                 accessibilityRole="button"
-                accessibilityLabel={esVideo ? 'Vídeo' : 'Foto'}
+                accessibilityLabel={esVideo ? t('video.video') : t('gallery.photo')}
               >
                 <ExpoImage
                   source={{ uri: item.uri }}
@@ -293,7 +308,7 @@ export function StoryGalleryScreen({
         bajar cien fotos.
       */}
       {pie || alternativa ? (
-        <View style={styles.pie} pointerEvents="box-none">
+        <View style={[styles.pie, { bottom: espacioInferior }]} pointerEvents="box-none">
           {alternativa ? (
             <Pressable
               onPress={alternativa.alPulsar}
@@ -326,9 +341,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    // Apoyado en la misma medida que usa la barra flotante para saber cuanto
-    // ocupa: asi queda justo encima de ella y no por detras.
-    bottom: espacioParaLaBarra(0),
+    // `bottom` lo pone el componente: sale de `useEspacioInferior`, que ya
+    // cuenta la capsula flotante y la zona segura del aparato.
     gap: spacing.sm,
   },
   alternativa: {

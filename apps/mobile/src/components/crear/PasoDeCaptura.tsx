@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { AvisoDePermiso } from '@/components/AvisoDePermiso';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { consultarPermiso, pedirPermiso, type EstadoDePermiso } from '@/lib/permisos';
 import {
@@ -15,6 +15,7 @@ import {
 import { StoryGalleryScreen } from '@/screens/StoryGalleryScreen';
 import { pickImage, pickVideo, PermisoDenegadoError, type PickedMedia } from '@/services/storage';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -79,8 +80,18 @@ export function PasoDeCaptura({
   activo = true,
   alternativa,
 }: Props) {
+  const { t } = useTranslation();
   const enWeb = Platform.OS === 'web';
   const insets = useSafeAreaInsets();
+  /*
+    Cuanto ocupa la barra flotante, contando la zona segura DE ESTE aparato.
+
+    Antes era `espacioParaLaBarra(0)` escrito en la hoja de estilos, es decir,
+    la barra medida como si el telefono no tuviera indicador de inicio: se
+    reservaban 78 px donde hacian falta 104 y el selector volvia a asomar por
+    debajo de la capsula en cuanto habia muesca.
+  */
+  const espacioInferior = useEspacioInferior();
   const [paso, setPaso] = useState<'camara' | 'galeria'>(enWeb ? 'galeria' : 'camara');
   const [ultimaFoto, setUltimaFoto] = useState<string | null>(null);
   const [permisoCamara, setPermisoCamara] = useState<EstadoDePermiso | null>(null);
@@ -193,7 +204,7 @@ export function PasoDeCaptura({
         setErrorWeb(
           e instanceof PermisoDenegadoError
             ? e.message
-            : 'No se pudo abrir el selector. Inténtalo de nuevo.',
+            : t('media.pickerFailed'),
         );
       }
     },
@@ -208,10 +219,10 @@ export function PasoDeCaptura({
             <Feather name={soloVideo ? 'video' : 'image'} size={26} color={media.text} />
           </View>
           <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-            {soloVideo ? 'Elige un vídeo' : 'Elige una foto o un vídeo'}
+            {soloVideo ? t('media.chooseVideo') : t('media.choosePhotoOrVideo')}
           </Text>
           <Text variant="body" color={media.textMuted} style={styles.centrado}>
-            Desde el navegador se usa el selector de archivos de tu equipo.
+            {t('media.webPickerNote')}
           </Text>
           {errorWeb ? (
             <Text variant="secondary" weight="700" color={media.danger} style={styles.centrado}>
@@ -225,7 +236,7 @@ export function PasoDeCaptura({
               accessibilityRole="button"
             >
               <Text variant="body" weight="700" color={media.background}>
-                Elegir vídeo
+                {t('media.pickVideo')}
               </Text>
             </Pressable>
             {!soloVideo ? (
@@ -235,7 +246,7 @@ export function PasoDeCaptura({
                 accessibilityRole="button"
               >
                 <Text variant="body" weight="700" color={media.text}>
-                  Elegir foto
+                  {t('media.pickPhoto')}
                 </Text>
               </Pressable>
             ) : null}
@@ -248,7 +259,7 @@ export function PasoDeCaptura({
             </Pressable>
           ) : null}
         </View>
-        {pie ? <View style={styles.pieWeb}>{pie}</View> : null}
+        {pie ? <View style={[styles.pieWeb, { paddingBottom: espacioInferior }]}>{pie}</View> : null}
       </View>
     );
   }
@@ -277,9 +288,12 @@ export function PasoDeCaptura({
           tipo="camara"
           estado={permisoCamara}
           alPedir={pedirCamara}
-          alternativa={{ etiqueta: 'Elegir del carrete', alPulsar: () => setPaso('galeria') }}
+          alternativa={{
+            etiqueta: t('media.pickFromGallery'),
+            alPulsar: () => setPaso('galeria'),
+          }}
         />
-        {pie ? <View style={styles.pieWeb}>{pie}</View> : null}
+        {pie ? <View style={[styles.pieWeb, { paddingBottom: espacioInferior }]}>{pie}</View> : null}
       </View>
     );
   }
@@ -360,7 +374,8 @@ const styles = StyleSheet.create({
     y cortado que aparece junto a la barra en el documento. Se apoya en la misma
     medida que usa la barra para saber cuanto ocupa.
   */
-  pieWeb: { paddingBottom: espacioParaLaBarra(0) },
+  // `paddingBottom` lo pone el componente: sale de `useEspacioInferior`.
+  pieWeb: {},
   /*
     El selector mientras el permiso se resuelve.
 

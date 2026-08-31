@@ -1,6 +1,6 @@
 """Esquemas de la agenda y, sobre todo, QUE transiciones de estado valen."""
 
-from datetime import datetime
+from datetime import datetime, timezone as tz
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,6 +53,41 @@ TRANSICIONES: dict[str, dict[str, set[str]]] = {
 
 def transicion_permitida(actual: str, siguiente: str, rol: str) -> bool:
     return siguiente in TRANSICIONES.get(actual, {}).get(rol, set())
+
+
+def es_momento_futuro(momento: datetime | None, ahora: datetime) -> bool:
+    """Si `momento` todavia no ha pasado, medido contra `ahora`.
+
+    QUE PROBLEMA RESUELVE. Nada impedia proponer una sesion para el martes
+    pasado: la fila se creaba, salia en la agenda de las dos partes y se podia
+    aceptar. Una agenda que admite fechas que ya ocurrieron no es una agenda.
+
+    DOS DECISIONES QUE NO SON UN DETALLE:
+
+    1. SE COMPARAN INSTANTES, NUNCA CADENAS. «02/09/2026» y «2026-09-02» son la
+       misma fecha y dos cadenas distintas, y `'10:00' < '9:00'` es cierto como
+       texto. Comparar fechas escritas es un fallo que parece funcionar hasta
+       que cambia el formato o llega otra zona horaria.
+
+    2. `ahora` SE RECIBE, no se lee aqui. Quien manda es el reloj del SERVIDOR
+       —el del telefono lo elige quien lo lleva, y adelantarlo un dia seria todo
+       lo que hace falta para colar una fecha pasada—; pasarlo por parametro
+       ademas deja esta regla comprobable en el limite exacto sin esperar a que
+       pase el tiempo de verdad.
+
+    ZONA HORARIA. Un instante sin zona no dice cuando ocurre: las 17:00 de Lima
+    y las 17:00 de Madrid son momentos distintos. La aplicacion manda siempre
+    UTC (`toISOString`), pero si llegara uno sin zona se interpreta como UTC en
+    vez de rechazarlo: `datetime.now(utc) > naive` revienta con TypeError, y un
+    500 sin cabeceras CORS se lee en el navegador como un fallo de red.
+    """
+    if momento is None:
+        # Sin fecha no hay nada que validar: la sesion se acuerda por chat, que
+        # es un caso legitimo y el que existia antes de que hubiera selector.
+        return True
+    if momento.tzinfo is None:
+        momento = momento.replace(tzinfo=tz.utc)
+    return momento > ahora
 
 
 class BookingCreate(BaseModel):

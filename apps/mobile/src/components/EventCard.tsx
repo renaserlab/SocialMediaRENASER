@@ -3,12 +3,11 @@ import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
+import { useTranslation } from '@/i18n/useTranslation';
 import { notify } from '@/lib/confirm';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { EventItem } from '@/types';
-
-const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 /**
  * Dia (o rango de dias) que se muestra en el distintivo.
@@ -24,11 +23,11 @@ function badgeDay(start?: Date, end?: Date | null): string {
 }
 
 /** "17 ago, 13:00 — 18 ago, 13:00" (el fin solo si existe). */
-function formatRange(start?: Date, end?: Date | null): string {
+function formatRange(meses: string[], start?: Date, end?: Date | null): string {
   if (!start) return '';
   const time = (d: Date) =>
     `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const day = (d: Date) => `${d.getDate()} ${MONTHS[d.getMonth()]?.toLowerCase()}`;
+  const day = (d: Date) => `${d.getDate()} ${meses[d.getMonth()]?.toLowerCase()}`;
   const from = `${day(start)}, ${time(start)}`;
   if (!end) return from;
   return `${from} — ${day(end)}, ${time(end)}`;
@@ -47,6 +46,13 @@ type Props = {
  */
 export function EventCard({ event, onPress, onEdit }: Props) {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  /*
+    Los meses abreviados viajan en UNA clave separada por comas. Doce claves
+    sueltas serian doce sitios de los que olvidarse uno; asi el idioma que
+    falte se nota entero y no a medias.
+  */
+  const meses = t('date.monthsShort').split(',');
 
   const openWhatsApp = async () => {
     const url = event.whatsappUrl;
@@ -56,7 +62,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
     try {
       await Linking.openURL(url);
     } catch {
-      notify('No se pudo abrir WhatsApp', 'Copia el enlace del evento e inténtalo de nuevo.');
+      notify(t('event.whatsappFailed'), t('event.whatsappFailedBody'));
     }
   };
 
@@ -67,7 +73,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
         onPress={onPress}
         style={StyleSheet.absoluteFill}
         accessibilityRole="button"
-        accessibilityLabel={`Ver detalles de ${event.title}`}
+        accessibilityLabel={t('event.viewDetailsOf', { titulo: event.title })}
       />
 
       <View style={styles.row} pointerEvents="box-none">
@@ -76,7 +82,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
             {badgeDay(event.startsAtDate, event.endsAtDate)}
           </Text>
           <Text variant="secondary" color={colors.textMuted}>
-            {event.startsAtDate ? MONTHS[event.startsAtDate.getMonth()] : 'Fecha'}
+            {event.startsAtDate ? meses[event.startsAtDate.getMonth()] : t('event.dateWord')}
           </Text>
         </View>
 
@@ -86,8 +92,8 @@ export function EventCard({ event, onPress, onEdit }: Props) {
           </Text>
           <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>
             {event.startsAtDate
-              ? formatRange(event.startsAtDate, event.endsAtDate)
-              : 'Fecha y hora por confirmar'}
+              ? formatRange(meses, event.startsAtDate, event.endsAtDate)
+              : t('event.dateTbdLong')}
           </Text>
           {event.location ? (
             <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>
@@ -101,7 +107,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
             onPress={onEdit}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel={`Editar ${event.title}`}
+            accessibilityLabel={t('event.editNamed', { titulo: event.title })}
             style={styles.edit}
           >
             <Feather name="edit-2" size={16} color={colors.textMuted} />
@@ -114,11 +120,11 @@ export function EventCard({ event, onPress, onEdit }: Props) {
           onPress={() => void openWhatsApp()}
           style={[styles.whatsapp, { borderColor: colors.border }]}
           accessibilityRole="button"
-          accessibilityLabel="Unirme al grupo de WhatsApp"
+          accessibilityLabel={t('event.joinWhatsApp')}
         >
           <Feather name="message-circle" size={16} color={colors.text} />
           <Text variant="secondary" weight="700">
-            Unirme al grupo de WhatsApp
+            {t('event.joinWhatsApp')}
           </Text>
         </Pressable>
       ) : null}

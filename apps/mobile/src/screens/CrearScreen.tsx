@@ -3,10 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '@/components/AppHeader';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { StateView } from '@/components/StateView';
 import { ModoHistoria } from '@/components/crear/ModoHistoria';
 import { ModoPublicacion } from '@/components/crear/ModoPublicacion';
@@ -19,6 +17,7 @@ import {
   posicionDeModo,
   type ModoDeCreacion,
 } from '@/components/crear/SelectorDeModo';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useSeccionActiva } from '@/navigation/foco';
 import { ProveedorDeGestoDeSeccion, useGestoDeSeccion } from '@/navigation/tabSwipe';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -51,8 +50,8 @@ const UMBRAL_VELOCIDAD = 450;
  * que con un gesto propio en vez del contrato generico.
  */
 export function CrearScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
 
   /*
@@ -148,7 +147,6 @@ export function CrearScreen() {
     return pan;
   }, [arrastre, cambiarPorGesto, gestoDeSeccion]);
 
-  const espacioInferior = espacioParaLaBarra(insets.bottom);
   const salir = useCallback(() => router.navigate('/(tabs)/home'), [router]);
 
   const selector = <SelectorDeModo activo={modo} alCambiar={irA} arrastre={arrastre} />;
@@ -161,13 +159,13 @@ export function CrearScreen() {
   if (supabaseEnabled && !signedIn) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="CREAR" />
+        <AppHeader title={t('create.headerTitle')} />
         <StateView
           state="empty"
           icon="edit-3"
-          title="Crea tu cuenta para publicar"
-          description="Puedes seguir explorando sin cuenta. Para compartir algo, necesitamos saber quién eres."
-          actionLabel="Crear cuenta"
+          title={t('create.signedOutTitle')}
+          description={t('create.signedOutBody')}
+          actionLabel={t('auth.signUp')}
           onAction={() => router.push('/register' as never)}
         />
       </View>
@@ -197,7 +195,7 @@ export function CrearScreen() {
       >
         {modo === 'publicacion' ? (
           <React.Fragment>
-            <AppHeader title="CREAR" />
+            <AppHeader title={t('create.headerTitle')} />
             <ModoPublicacion pie={selector} alSalir={salir} activo={enfocada} />
           </React.Fragment>
         ) : modo === 'historia' ? (
@@ -205,11 +203,7 @@ export function CrearScreen() {
         ) : modo === 'reel' ? (
           <ModoReel pie={selector} alSalir={salir} activo={enfocada} />
         ) : (
-          <ModoVivo
-            pie={selector}
-            espacioInferior={espacioInferior}
-            alGrabarReel={() => irA('reel')}
-          />
+          <ModoVivo pie={selector} alGrabarReel={() => irA('reel')} />
         )}
       </View>
     </GestureDetector>

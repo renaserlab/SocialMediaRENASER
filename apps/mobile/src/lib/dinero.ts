@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * Dinero: siempre en la unidad MENOR, nunca en decimales.
  *
@@ -33,13 +35,44 @@ const FORMATO = /^\d+(?:[.,]\d{1,2})?$/;
  * numerico en castellano, y rechazar «49,90» por eso seria culpar a quien
  * escribe de una decision nuestra.
  */
-export function aCentavos(texto: string): ImporteLeido {
+
+/**
+ * Cómo se traduce lo que sale de aquí.
+ *
+ * Lo pasa quien pinta. Este módulo NO puede importar el diccionario: se prueba
+ * con el runner de Node, que no resuelve el alias `@/`. Sin traductor se
+ * escribe en español, que es el idioma de referencia.
+ */
+export type Traductor = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave. Es el mismo texto que hay en `i18n/es.ts`, y que no
+ * se desvíen lo comprueba `i18n/diccionariosSincronizados.test.mts`.
+ */
+export const RESPALDOS_ES = {
+  'money.needPrice': 'Escribe un precio.',
+  'money.badFormat': 'Escribe un número como 49.90, sin símbolos ni espacios.',
+  'money.tooHigh': 'Ese precio es demasiado alto.',
+} as const;
+
+const enEspanol: Traductor = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? '';
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
+
+export function aCentavos(texto: string, traducir: Traductor = enEspanol): ImporteLeido {
   const limpio = (texto ?? '').trim();
-  if (limpio === '') return { ok: false, motivo: 'Escribe un precio.' };
+  if (limpio === '') return { ok: false, motivo: traducir('money.needPrice') };
   if (!FORMATO.test(limpio)) {
     return {
       ok: false,
-      motivo: 'Escribe un número como 49.90, sin símbolos ni espacios.',
+      motivo: traducir('money.badFormat'),
     };
   }
 
@@ -49,10 +82,10 @@ export function aCentavos(texto: string): ImporteLeido {
   const centavos = Number(enteros) * 100 + Number(decimales.padEnd(2, '0'));
 
   if (!Number.isSafeInteger(centavos)) {
-    return { ok: false, motivo: 'Ese precio es demasiado alto.' };
+    return { ok: false, motivo: traducir('money.tooHigh') };
   }
   if (centavos > 100_000_000) {
-    return { ok: false, motivo: 'Ese precio es demasiado alto.' };
+    return { ok: false, motivo: traducir('money.tooHigh') };
   }
   return { ok: true, centavos };
 }

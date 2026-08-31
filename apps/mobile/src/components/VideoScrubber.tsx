@@ -10,6 +10,7 @@ import {
 } from '@/lib/videoScrub';
 import { palette } from '@/theme/tokens';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
+import { useTranslation } from '@/i18n/useTranslation';
 
 // Va siempre encima de un video, asi que el contexto es oscuro en ambos temas.
 const media = palette('dark');
@@ -53,6 +54,7 @@ type Props = {
  * veces por segundo entrecorta el video y calienta el telefono.
  */
 export function VideoScrubber({ currentTime, duration, onSeek, bottom = 0 }: Props) {
+  const { t } = useTranslation();
   const [width, setWidth] = useState(0);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
 
@@ -119,7 +121,7 @@ export function VideoScrubber({ currentTime, duration, onSeek, bottom = 0 }: Pro
       // puede recorrer; sin acciones, quien no puede arrastrar se queda fuera.
       accessible
       accessibilityRole="adjustable"
-      accessibilityLabel="Progreso del video"
+      accessibilityLabel={t('video.progress')}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(event) => {

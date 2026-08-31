@@ -14,6 +14,7 @@ import { TestimonialRepository } from '@/repositories/TestimonialRepository';
 import { pickImage, pickVideo, uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Testimonio existente cuando la hoja se usa para editar. */
 export type TestimonialEditable = {
@@ -51,6 +52,7 @@ type Props = {
  * La comprobacion de la interfaz solo evita ensenar botones inutiles.
  */
 export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const isEditing = !!editing;
   const [title, setTitle] = useState(editing?.caption ?? '');
@@ -79,18 +81,18 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
         setError(null);
       }
     } catch {
-      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
+      setError(t('resources.pickerFailed'));
     }
   };
 
   const publish = async () => {
     if (!title.trim()) {
-      setError('Escribe un título para la reseña.');
+      setError(t('testimonial.needTitle'));
       return;
     }
     // Al editar, el archivo es opcional: sin uno nuevo se conserva el actual.
     if (!isEditing && !media) {
-      setError('Elige una foto o un video.');
+      setError(t('testimonial.needMedia'));
       return;
     }
     setSaving(true);
@@ -105,7 +107,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
       } else {
         await TestimonialRepository.create(uploaded!, title.trim());
       }
-      toast(isEditing ? 'Cambios guardados' : 'Reseña publicada');
+      toast(isEditing ? t('common.changesSaved') : t('testimonial.published'));
       reset();
       onCreated?.();
       onClose();
@@ -125,13 +127,13 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
-        {isEditing ? 'Editar reseña' : 'Nueva reseña'}
+        {isEditing ? t('review.edit') : t('testimonial.newTitle')}
       </Text>
 
       <Input
         value={title}
         onChangeText={setTitle}
-        placeholder="Título de la reseña"
+        placeholder={t('testimonial.titlePlaceholder')}
         placeholderTextColor={colors.textMuted}
         maxLength={300}
         style={{ color: colors.text }}
@@ -148,7 +150,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
             onPress={() => setMedia(null)}
             style={[styles.removeBtn, { backgroundColor: colors.text }]}
             accessibilityRole="button"
-            accessibilityLabel="Quitar archivo"
+            accessibilityLabel={t('testimonial.removeFile')}
             hitSlop={8}
           >
             <Feather name="x" size={15} color={colors.background} />
@@ -173,14 +175,14 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
 
           <View style={styles.pickRow}>
             <Button
-              label={isEditing ? 'Cambiar por foto' : 'Foto'}
+              label={isEditing ? t('editPost.swapImage') : t('gallery.photo')}
               icon="image"
               variant="secondary"
               onPress={() => void choose('image')}
               style={styles.pickBtn}
             />
             <Button
-              label={isEditing ? 'Cambiar por video' : 'Video'}
+              label={isEditing ? t('editPost.swapVideo') : t('video.video')}
               icon="video"
               variant="secondary"
               onPress={() => void choose('video')}
@@ -193,7 +195,7 @@ export function CreateTestimonialSheet({ visible, onClose, onCreated, editing }:
       <InlineError message={error} />
 
       <Button
-        label={isEditing ? 'Guardar cambios' : 'Publicar'}
+        label={isEditing ? t('common.saveChanges') : t('common.publish')}
         onPress={() => void publish()}
         loading={saving}
         disabled={!title.trim() || (!isEditing && !media)}

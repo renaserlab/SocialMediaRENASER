@@ -23,8 +23,10 @@ import { assets } from '@/data/assets';
 import { useCourse } from '@/hooks/useCourse';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function CourseScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,6 +58,24 @@ export function CourseScreen() {
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
   const retirado = course?.status === 'hidden';
+
+  /*
+    «PRÓXIMAMENTE» TIENE QUE SIGNIFICAR ALGO.
+
+    `courses.coming_soon` (migración 0014) existe para anunciar un curso cuyo
+    contenido todavía no está disponible. El estado se guardaba y se pintaba,
+    pero NO GOBERNABA NADA: el temario seguía llegando entero desde el detalle
+    del curso, así que esta pantalla enseñaba a la vez «2 módulos · 1 lecciones
+    · Próximamente», el globo «Toca aquí: abre la primera lección del temario» y
+    un botón «Empezar curso» que abría esa lección — encima del recuadro que
+    acababa de decir que el contenido no estaba preparado. El curso anunciaba
+    contenido y negaba tenerlo en la misma pantalla.
+
+    A partir de aquí, para quien NO gestiona el curso, «Próximamente» apaga todo
+    lo que ofrece contenido. Quien lo gestiona sigue viéndolo todo: es
+    exactamente lo que está preparando.
+  */
+  const contenidoNoDisponible = !!course?.comingSoon && !canManage;
 
   /**
    * Se pregunta que hay a la venta solo cuando hace falta: curso de pago y sin
@@ -109,12 +129,12 @@ export function CourseScreen() {
     setPidiendoBeta(true);
     try {
       await LearningRepository.grantBetaAccess(course.id);
-      toast('Acceso concedido');
+      toast(t('course.accessGranted'));
       reload();
     } catch (e) {
       notify(
-        'No se pudo activar el acceso',
-        e instanceof Error ? e.message : 'Inténtalo de nuevo.',
+        t('course.accessFailed'),
+        e instanceof Error ? e.message : t('common.tryAgain'),
       );
     } finally {
       setPidiendoBeta(false);
@@ -143,7 +163,7 @@ export function CourseScreen() {
       const resultado = await comprarEnTienda(oferta.productoDeTienda);
       if (resultado.estado === 'cancelada') return;
       if (resultado.estado === 'error') {
-        notify('No se pudo completar la compra', resultado.mensaje);
+        notify(t('course.purchaseFailed'), resultado.mensaje);
         return;
       }
       if (resultado.estado === 'pendiente_de_sincronizar') {
@@ -151,17 +171,19 @@ export function CourseScreen() {
         // de pagar que «no se ha podido comprar» seria mentira y ademas un
         // susto.
         notify(
-          'Compra recibida',
-          'Estamos activando tu acceso. Si no aparece en un momento, usa ' +
-            '«Restaurar compras».',
+          t('course.purchaseReceived'),
+          t('course.purchaseReceivedBody'),
         );
         reload();
         return;
       }
-      toast('Curso comprado');
+      toast(t('course.purchased'));
       reload();
     } catch (e) {
-      notify('No se pudo completar la compra', e instanceof Error ? e.message : 'Inténtalo de nuevo.');
+      notify(
+        t('course.purchaseFailed'),
+        e instanceof Error ? e.message : t('common.tryAgain'),
+      );
     } finally {
       setComprando(false);
     }
@@ -178,12 +200,12 @@ export function CourseScreen() {
     try {
       const resultado = await restaurarCompras();
       if (resultado.estado === 'comprada') {
-        toast('Compras restauradas');
+        toast(t('course.purchasesRestored'));
         reload();
       } else if (resultado.estado === 'error') {
-        notify('No se pudieron restaurar', resultado.mensaje);
+        notify(t('course.restoreFailed'), resultado.mensaje);
       } else {
-        notify('Casi', 'Estamos comprobando tus compras. Inténtalo de nuevo en un momento.');
+        notify(t('course.almost'), t('course.checkingPurchases'));
       }
     } finally {
       setComprando(false);
@@ -221,13 +243,13 @@ export function CourseScreen() {
     try {
       const resultado = await LearningRepository.publish(course.id);
       if (resultado.published) {
-        toast('Curso publicado');
+        toast(t('course.published'));
         reload();
       } else {
-        notify('Todavía no se puede publicar', resultado.missing.join('\n'));
+        notify(t('course.cannotPublishYet'), resultado.missing.join('\n'));
       }
     } catch (e) {
-      notify('No se pudo publicar', e instanceof Error ? e.message : 'Inténtalo de nuevo.');
+      notify(t('create.publishFailed'), e instanceof Error ? e.message : t('common.tryAgain'));
     } finally {
       setPublicando(false);
     }
@@ -236,19 +258,17 @@ export function CourseScreen() {
   const retirar = async () => {
     if (!course) return;
     const aceptado = await confirm({
-      title: 'Retirar del catálogo',
-      message:
-        'Dejará de aparecer para los demás. No se borra nada: sus módulos, ' +
-        'lecciones y el progreso de quien lo empezó siguen ahí.',
-      confirmLabel: 'Retirar',
+      title: t('course.unpublishTitle'),
+      message: t('course.unpublishBody'),
+      confirmLabel: t('course.unpublishConfirm'),
     });
     if (!aceptado) return;
     try {
       await LearningRepository.unpublish(course.id);
-      toast('Curso retirado');
+      toast(t('course.unpublished'));
       reload();
     } catch (e) {
-      notify('No se pudo retirar', e instanceof Error ? e.message : 'Inténtalo de nuevo.');
+      notify(t('course.unpublishFailed'), e instanceof Error ? e.message : t('common.tryAgain'));
     }
   };
 
@@ -302,7 +322,7 @@ export function CourseScreen() {
             <View style={[styles.estado, { borderColor: colors.border }]}>
               <Feather name={borrador ? 'edit-3' : 'eye-off'} size={12} color={colors.textMuted} />
               <Text style={[styles.estadoTexto, { color: colors.textMuted }]}>
-                {borrador ? 'Borrador — solo lo ves tú' : 'Retirado del catálogo'}
+                {borrador ? t('course.draft') : t('course.withdrawn')}
               </Text>
             </View>
           ) : null}
@@ -342,12 +362,12 @@ export function CourseScreen() {
           */}
           {esDePago && !hasAccess && beta?.available ? (
             <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
-              Acceso gratuito durante la Beta. No se te cobrará nada.
+              {t('course.betaFreeNote')}
             </Text>
           ) : esDePago && !hasAccess && oferta ? (
             oferta.sePuedeComprar ? (
               <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
-                {`Precio: ${oferta.precio}`}
+                {t('course.price', { precio: oferta.precio ?? '' })}
               </Text>
             ) : (
               <Text style={[styles.notaDeAcceso, { color: colors.textMuted }]}>
@@ -364,9 +384,20 @@ export function CourseScreen() {
             cursos, existieran o no.
           */}
           <View style={[styles.info, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Info icon="book" label={`${course.modules} módulos`} />
-            <Info icon="play-circle" label={`${course.lessons} lecciones`} />
-            {course.comingSoon ? <Info icon="clock" label="Próximamente" /> : null}
+            {/*
+              LOS CONTADORES SOLO SI SE PUEDEN ABRIR. «2 módulos · 1 lecciones»
+              al lado de «Próximamente» es la contradicción de la captura
+              escrita en una sola línea: se anuncia contenido que la propia
+              pantalla dice que no está. Quien gestiona el curso sí los ve, que
+              es como sabe lo que lleva preparado.
+            */}
+            {contenidoNoDisponible ? null : (
+              <React.Fragment>
+                <Info icon="book" label={t('course.modules', { count: course.modules })} />
+                <Info icon="play-circle" label={t('course.lessons', { count: course.lessons })} />
+              </React.Fragment>
+            )}
+            {course.comingSoon ? <Info icon="clock" label={t('common.comingSoon')} /> : null}
           </View>
 
           <CourseHighlights courseId={course.id} canEdit={canManage} />
@@ -378,8 +409,11 @@ export function CourseScreen() {
           <CoachMark
             id="curso-temario"
             arrow="down"
-            visible={!canManage && !!firstLessonId}
-            text="Abre la primera lección del temario."
+            // Y NUNCA con el contenido sin publicar: «Toca aquí: abre la
+            // primera lección del temario» señalando a un recuadro que dice que
+            // el temario todavía no está es lo que hacía la captura.
+            visible={!canManage && !!firstLessonId && !contenidoNoDisponible}
+            text={t('course.firstLessonHint')}
             onPress={() => firstLessonId && router.push(`/lesson/${firstLessonId}` as never)}
           />
 
@@ -387,6 +421,9 @@ export function CourseScreen() {
             <CourseContentEditor
               courseId={course.id}
               canEdit={canManage}
+              // Del detalle del curso, que es de donde sale todo lo demás de
+              // esta pantalla: una sola fuente para un solo dato.
+              comingSoon={!!course.comingSoon}
               onOpenLesson={(lessonId) => router.push(`/lesson/${lessonId}` as never)}
               // Los contadores de arriba ("X modulos, Y lecciones") vienen del
               // detalle del curso, que se pide una sola vez al montar. Sin esto
@@ -403,10 +440,23 @@ export function CourseScreen() {
                 puede comprar. Si no, no hay boton: hay la explicacion de
                 arriba.
           */}
+          {/*
+            Y CON EL CONTENIDO SIN PUBLICAR, NINGUNA.
+
+            No es un botón desactivado: es que no hay nada que empezar todavía.
+            El recuadro «Próximamente» de justo encima ya dice por qué, así que
+            no queda un hueco sin explicación —que es lo único que convertiría
+            esto en un botón muerto—.
+
+            El bloque de COMPRA no entra aquí: `coming_soon` significa
+            «anunciado», y reservar plaza en algo anunciado es una decisión del
+            producto, no una incoherencia. Lo que no puede pasar es ofrecer
+            ABRIR un contenido que la pantalla acaba de decir que no está.
+          */}
           {esDePago && !hasAccess ? (
             beta?.available ? (
               <Button
-                label={pidiendoBeta ? 'Activando…' : 'Acceso gratuito durante la Beta'}
+                label={pidiendoBeta ? t('course.activating') : t('course.betaFree')}
                 disabled={pidiendoBeta}
                 loading={pidiendoBeta}
                 onPress={() => void pedirAccesoDeBeta()}
@@ -414,21 +464,21 @@ export function CourseScreen() {
               />
             ) : oferta?.sePuedeComprar ? (
               <Button
-                label={comprando ? 'Procesando…' : 'Comprar curso'}
+                label={comprando ? t('course.processing') : t('course.buy')}
                 disabled={comprando}
                 loading={comprando}
                 onPress={() => void comprar()}
                 style={{ marginTop: spacing.xl }}
               />
             ) : null
-          ) : (
+          ) : contenidoNoDisponible ? null : (
             <Button
               label={
                 enrolling
-                  ? 'Abriendo…'
+                  ? t('create.opening')
                   : esDePago || empezado
-                    ? 'Continuar curso'
-                    : 'Empezar curso'
+                    ? t('course.continue')
+                    : t('course.start')
               }
               // Antes abria siempre '/lesson/1', un id de demo: con datos reales
               // llevaba a una leccion inexistente. Ahora va a la que toca.
@@ -463,7 +513,7 @@ export function CourseScreen() {
           {canManage ? (
             borrador || retirado ? (
               <Button
-                label="Publicar curso"
+                label={t('course.publish')}
                 variant="secondary"
                 loading={publicando}
                 onPress={() => void publicar()}
@@ -474,11 +524,11 @@ export function CourseScreen() {
                 onPress={() => void retirar()}
                 style={styles.retirar}
                 accessibilityRole="button"
-                accessibilityLabel="Retirar del catálogo"
+                accessibilityLabel={t('course.unpublishTitle')}
               >
                 <Feather name="eye-off" size={14} color={colors.textMuted} />
                 <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: '700' }}>
-                  Retirar del catálogo
+                  {t('course.unpublishTitle')}
                 </Text>
               </Pressable>
             )

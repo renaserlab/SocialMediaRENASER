@@ -8,8 +8,9 @@ import { Text } from '@/components/Text';
 import { ZLogo } from '@/components/ZLogo';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
-/** Alto del header sin contar el inset superior. Lo consume useKeyboardOffset. */
+/** Alto del header sin contar el inset superior. */
 export const APP_HEADER_HEIGHT = 48;
 
 type Props = {
@@ -30,6 +31,7 @@ export function AppHeader({
   onRightPress,
   rightBadge = false,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   // El header es el primer elemento de la pantalla: debe respetar el notch /
@@ -77,7 +79,7 @@ export function AppHeader({
           <Pressable
             onPress={onRightPress}
             hitSlop={12}
-            accessibilityLabel="Acción derecha"
+            accessibilityLabel={t('common.rightAction')}
             accessibilityRole="button"
             style={styles.backButton}
           >

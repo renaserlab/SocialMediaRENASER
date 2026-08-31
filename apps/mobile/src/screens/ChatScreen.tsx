@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,13 +13,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { BottomSheet } from '@/components/BottomSheet';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { Input } from '@/components/Input';
-import { notify } from '@/lib/confirm';
+import { useTranslation } from '@/i18n/useTranslation';
+import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
   fusionar,
@@ -53,6 +52,17 @@ import type { Message, MessageAttachment } from '@/types';
 /** Un envío que se puede repetir tal cual si falla. */
 type EnvioPendiente = { texto: string; archivos: AdjuntoElegido[] };
 
+/**
+ * La lápida de un mensaje borrado: sin relleno, con el borde a la vista y en
+ * cursiva. Ver el comentario del `renderItem`.
+ */
+const ESTILO_ELIMINADO = {
+  flexDirection: 'row' as const,
+  alignItems: 'center' as const,
+  gap: 6,
+  backgroundColor: 'transparent' as const,
+};
+
 function pesoLegible(bytes?: number | null): string {
   if (!bytes) return '';
   const mb = bytes / 1024 / 1024;
@@ -62,9 +72,9 @@ function pesoLegible(bytes?: number | null): string {
 
 export function ChatScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const keyboardOffset = useKeyboardOffset();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -133,7 +143,7 @@ export function ChatScreen() {
       // Sin esto un fallo de carga dejaba el chat vacio, como si no hubiera
       // mensajes, en vez de avisar de que no se pudieron cargar.
       .catch(() => {
-        if (montado) setLoadError('No se pudieron cargar los mensajes.');
+        if (montado) setLoadError(t('chat.loadFailed'));
       });
     MessageRepository.markRead(conversationId).catch(() => {});
 
@@ -209,7 +219,7 @@ export function ChatScreen() {
       .finally(() => setCargandoHistorial(false));
   }, [supabaseEnabled, params.id, currentUserId, cargandoHistorial, hayMasHistorial, aplicar]);
 
-  const headerName = params.name ?? demoConversation?.name ?? 'Conversación';
+  const headerName = params.name ?? demoConversation?.name ?? t('chat.conversation');
   const messages = supabaseEnabled ? remoteMessages : demoConversation?.messages ?? [];
 
   // -------------------------------------------------------------------------
@@ -248,10 +258,8 @@ export function ChatScreen() {
         anadir(Array.isArray(resultado) ? resultado : [resultado]);
       } catch (error) {
         notify(
-          'No se pudo abrir',
-          error instanceof PermisoDenegadoError
-            ? error.message
-            : 'No se pudo abrir el selector de archivos.',
+          t('common.couldNotOpen'),
+          error instanceof PermisoDenegadoError ? error.message : t('chat.pickerFailed'),
         );
       }
     },
@@ -327,12 +335,12 @@ export function ChatScreen() {
         const esFaltaDeMigracion =
           error instanceof ApiError && error.code === 'chat_attachments_not_available';
         notify(
-          esFaltaDeMigracion ? 'Archivos no disponibles todavía' : 'No se pudo enviar',
+          esFaltaDeMigracion ? t('chat.attachmentsOffTitle') : t('chat.sendFailed'),
           esFaltaDeMigracion
-            ? 'Por ahora solo se pueden mandar mensajes de texto por el chat.'
+            ? t('chat.attachmentsOffBody')
             : error instanceof Error
               ? error.message
-              : 'Revisa tu conexión e inténtalo de nuevo.',
+              : t('common.checkConnection'),
         );
       } finally {
         setEnviando(false);
@@ -410,6 +418,65 @@ export function ChatScreen() {
     [aplicar],
   );
 
+  /**
+   * Borra un mensaje PROPIO, para todo el mundo.
+   *
+   * PREGUNTA ANTES, porque no se puede deshacer: lo que se borra desaparece
+   * también del teléfono de la otra persona, y ahí ya lo ha podido leer.
+   *
+   * El diálogo se lanza desde una pulsación larga sobre la burbuja, con NINGUNA
+   * hoja abierta: es lo que permite usar `confirm()` directamente aquí. Desde
+   * dentro de un `BottomSheet` haría falta cerrarla y esperar (`afterSheetClose`),
+   * porque en iOS un Modal sobre otro Modal ni se ve ni resuelve.
+   *
+   * QUIÉN PUEDE lo decide el servidor. Aquí ni se ofrece sobre un mensaje ajeno
+   * —`sender !== 'me'`— ni sobre uno que todavía no ha llegado (no tiene id de
+   * verdad que borrar), pero eso es comodidad, no permiso.
+   *
+   * LO QUE SE VE DESPUÉS es una lápida: la burbuja se queda diciendo «Mensaje
+   * eliminado». No se quita de la lista, porque un hueco haría que la
+   * conversación mintiera sobre lo que hubo.
+   */
+  const eliminarMensaje = useCallback(
+    async (mensaje: Message) => {
+      if (!params.id || mensaje.sender !== 'me' || mensaje.estado || mensaje.eliminado) {
+        return;
+      }
+      const ok = await confirm({
+        title: t('chat.deleteTitle'),
+        message: t('chat.deleteBody'),
+        confirmLabel: t('common.delete'),
+        cancelLabel: t('common.cancel'),
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        await MessageRepository.deleteMessage(params.id, mensaje.id);
+        /*
+          Se marca en el acto en vez de recargar el historial: el servidor ya ha
+          confirmado, y volver a pedir la página entera para cambiar una burbuja
+          es un viaje que se nota. Si algo se descuadrara, la siguiente carga
+          —o el siguiente mensaje que entre— trae la verdad del servidor.
+        */
+        aplicar(
+          mensajesRef.current.map((m) =>
+            m.id === mensaje.id
+              ? { ...m, eliminado: true, text: '', attachments: [] }
+              : m,
+          ),
+        );
+      } catch (fallo) {
+        notify(
+          t('common.deleteFailed'),
+          fallo instanceof ApiError && fallo.code === 'message_not_yours'
+            ? t('chat.deleteNotYours')
+            : t('common.tryAgainSoon'),
+        );
+      }
+    },
+    [params.id, aplicar],
+  );
+
   // -------------------------------------------------------------------------
   // Pintar
   // -------------------------------------------------------------------------
@@ -445,7 +512,7 @@ export function ChatScreen() {
         key={adjunto.id}
         onPress={() => (adjunto.url ? setFotoAmpliada(adjunto) : undefined)}
         accessibilityRole="button"
-        accessibilityLabel={adjunto.kind === 'video' ? 'Ver vídeo' : 'Ver foto'}
+        accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
         style={[styles.medio, { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) }]}
       >
         {adjunto.url ? (
@@ -470,11 +537,7 @@ export function ChatScreen() {
           {loadError}
         </Text>
       ) : null}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
         <FlashList
           data={messages}
           keyExtractor={(item: Message) => item.id}
@@ -497,6 +560,43 @@ export function ChatScreen() {
           renderItem={({ item }: { item: Message }) => {
             const mine = item.sender === 'me';
             const fallido = item.estado === 'error';
+            /*
+              LA LÁPIDA: la burbuja de un mensaje que su autor borró.
+
+              Se pinta distinta de una burbuja normal —sin relleno, con el borde
+              a la vista, en cursiva y con un icono— porque NO es un mensaje: es
+              la marca de que hubo uno. Con el mismo aspecto que los demás se
+              leería como si alguien hubiera escrito literalmente «Mensaje
+              eliminado», que es la confusión clásica de este patrón.
+
+              Y no lleva ni texto ni adjuntos porque el servidor no los manda:
+              borrar para todos borra de verdad.
+            */
+            if (item.eliminado) {
+              return (
+                <View style={mine ? styles.filaMia : styles.filaSuya}>
+                  <View
+                    style={[
+                      styles.bubble,
+                      mine ? styles.mine : styles.theirs,
+                      ESTILO_ELIMINADO,
+                      { borderColor: colors.border },
+                    ]}
+                  >
+                    <Feather name="slash" size={12} color={colors.textMuted} />
+                    <Text
+                      style={{
+                        color: colors.textMuted,
+                        fontSize: 13,
+                        fontStyle: 'italic',
+                      }}
+                    >
+                      {t('chat.deletedMessage')}
+                    </Text>
+                  </View>
+                </View>
+              );
+            }
             return (
               <View style={mine ? styles.filaMia : styles.filaSuya}>
                 <View
@@ -516,40 +616,73 @@ export function ChatScreen() {
                     </View>
                   ) : null}
 
-                  {item.text ? (
-                    <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
-                      {item.text}
-                    </Text>
-                  ) : null}
+                  {/*
+                    PULSACIÓN LARGA PARA ELIMINAR, y solo sobre lo propio.
 
-                  {item.progreso !== undefined ? (
-                    <View style={[styles.barra, { backgroundColor: colors.border }]}>
-                      <View
-                        style={[
-                          styles.barraAvance,
-                          {
-                            backgroundColor: mine ? colors.onPrimary : colors.primary,
-                            width: `${Math.round(item.progreso * 100)}%`,
-                          },
-                        ]}
-                      />
-                    </View>
-                  ) : null}
+                    Es el gesto que ya espera cualquiera que venga de otro chat.
+                    No hay botón visible: uno por burbuja ensuciaría la
+                    conversación entera para algo que casi nunca se usa.
 
-                  <Text
-                    style={{
-                      color: mine ? colors.onPrimary : colors.textMuted,
-                      fontSize: 9,
-                      marginTop: 5,
-                      opacity: 0.75,
-                    }}
+                    POR QUÉ ENVUELVE EL TEXTO Y LA HORA, Y NO LA BURBUJA ENTERA.
+                    Porque en web cada `Pressable` es un `<button>`, y los
+                    adjuntos YA son `Pressable` (se tocan para ver la foto). Un
+                    Pressable rodeando a otro genera HTML inválido y rompe la
+                    hidratación — es una trampa que este proyecto ya pagó. Aquí
+                    van como HERMANOS: los adjuntos arriba, esto debajo.
+
+                    La hora se pinta siempre, así que un mensaje que solo lleva
+                    una foto conserva su franja para mantener pulsado.
+
+                    `onLongPress` sin `onPress`: tocar la burbuja sigue sin hacer
+                    nada, como antes.
+                  */}
+                  <Pressable
+                    onLongPress={
+                      mine && !item.estado ? () => void eliminarMensaje(item) : undefined
+                    }
+                    delayLongPress={400}
+                    accessibilityRole={mine && !item.estado ? 'button' : undefined}
+                    accessibilityLabel={
+                      mine && !item.estado
+                        ? t('chat.holdToDelete')
+                        : undefined
+                    }
                   >
-                    {item.estado === 'enviando'
-                      ? 'Enviando…'
-                      : fallido
-                        ? 'No se envió'
-                        : item.createdAt}
-                  </Text>
+                    {item.text ? (
+                      <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
+                        {item.text}
+                      </Text>
+                    ) : null}
+
+                    {item.progreso !== undefined ? (
+                      <View style={[styles.barra, { backgroundColor: colors.border }]}>
+                        <View
+                          style={[
+                            styles.barraAvance,
+                            {
+                              backgroundColor: mine ? colors.onPrimary : colors.primary,
+                              width: `${Math.round(item.progreso * 100)}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    ) : null}
+
+                    <Text
+                      style={{
+                        color: mine ? colors.onPrimary : colors.textMuted,
+                        fontSize: 9,
+                        marginTop: 5,
+                        opacity: 0.75,
+                      }}
+                    >
+                      {item.estado === 'enviando'
+                        ? t('chat.sending')
+                        : fallido
+                          ? t('chat.notSent')
+                          : item.createdAt}
+                    </Text>
+                  </Pressable>
                 </View>
 
                 {fallido ? (
@@ -557,19 +690,23 @@ export function ChatScreen() {
                     <Pressable
                       onPress={() => reintentar(item)}
                       accessibilityRole="button"
-                      accessibilityLabel="Reintentar el envío"
+                      accessibilityLabel={t('chat.retrySend')}
                       style={styles.accionFallo}
                     >
                       <Feather name="refresh-cw" size={13} color={colors.primary} />
-                      <Text style={{ color: colors.primary, fontSize: 11 }}>Reintentar</Text>
+                      <Text style={{ color: colors.primary, fontSize: 11 }}>
+                        {t('common.retry')}
+                      </Text>
                     </Pressable>
                     <Pressable
                       onPress={() => descartar(item)}
                       accessibilityRole="button"
-                      accessibilityLabel="Descartar el mensaje"
+                      accessibilityLabel={t('chat.discardMessage')}
                       style={styles.accionFallo}
                     >
-                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>Descartar</Text>
+                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                        {t('common.discard')}
+                      </Text>
                     </Pressable>
                   </View>
                 ) : null}
@@ -610,7 +747,9 @@ export function ChatScreen() {
                 <Pressable
                   onPress={() => quitarElegido(indice)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Quitar ${archivo.name ?? 'el archivo'}`}
+                  accessibilityLabel={t('chat.removeAttachment', {
+                    nombre: archivo.name ?? t('chat.theFile'),
+                  })}
                   style={[styles.previaQuitar, { backgroundColor: colors.background }]}
                 >
                   <Feather name="x" size={12} color={colors.text} />
@@ -648,7 +787,7 @@ export function ChatScreen() {
             value={text}
             onChangeText={setText}
             onSubmitEditing={submit}
-            placeholder="Mensaje"
+            placeholder={t('profile.message')}
             placeholderTextColor={colors.textMuted}
             returnKeyType="send"
             containerStyle={styles.inputContainer}
@@ -658,7 +797,7 @@ export function ChatScreen() {
             onPress={submit}
             disabled={(!text.trim() && elegidos.length === 0) || enviando}
             style={styles.sendButton}
-            accessibilityLabel="Enviar mensaje"
+            accessibilityLabel={t('chat.sendMessage')}
             accessibilityRole="button"
           >
             {enviando ? (
@@ -672,16 +811,24 @@ export function ChatScreen() {
             )}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
 
       <BottomSheet visible={menuAbierto} onClose={() => setMenuAbierto(false)}>
         <ListRow
-          title="Fotos y vídeos"
+          title={t('chat.photosAndVideos')}
           leftIcon="image"
           onPress={() => void elegirCon(() => elegirFotosOVideos(MAX_ADJUNTOS - elegidos.length))}
         />
-        <ListRow title="Cámara" leftIcon="camera" onPress={() => void elegirCon(hacerFoto)} />
-        <ListRow title="Archivo" leftIcon="paperclip" onPress={() => void elegirCon(elegirArchivo)} />
+        <ListRow
+          title={t('chat.camera')}
+          leftIcon="camera"
+          onPress={() => void elegirCon(hacerFoto)}
+        />
+        <ListRow
+          title={t('chat.file')}
+          leftIcon="paperclip"
+          onPress={() => void elegirCon(elegirArchivo)}
+        />
       </BottomSheet>
 
       {fotoAmpliada?.url ? (

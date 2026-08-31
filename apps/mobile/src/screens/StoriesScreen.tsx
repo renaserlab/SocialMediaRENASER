@@ -18,11 +18,13 @@ import { StoryRepository } from '@/repositories/StoryRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
 import type { StoryViewer } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 // Visor a pantalla completa sobre imagen → contexto de media (siempre oscuro).
 const media = palette('dark');
 
 export function StoriesScreen() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
@@ -160,9 +162,9 @@ export function StoriesScreen() {
     if (!item) return;
     setPaused(true);
     const accepted = await confirm({
-      title: 'Eliminar historia',
-      message: 'Dejará de verse de inmediato.',
-      confirmLabel: 'Eliminar',
+      title: t('stories.deleteTitle'),
+      message: t('stories.deleteBody'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) {
@@ -171,10 +173,10 @@ export function StoriesScreen() {
     }
     try {
       await deleteStory(item.id);
-      toast('Historia eliminada');
+      toast(t('stories.deleted'));
       close();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
       setPaused(false);
     }
   };
@@ -294,12 +296,12 @@ export function StoriesScreen() {
               onPress={() => void removeStory()}
               hitSlop={12}
               accessibilityRole="button"
-              accessibilityLabel="Eliminar historia"
+              accessibilityLabel={t('stories.deleteTitle')}
             >
               <Feather name="trash-2" size={20} color={media.text} />
             </Pressable>
           ) : null}
-          <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel="Cerrar historias">
+          <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel={t('stories.close')}>
             <Feather name="x" size={24} color={media.text} />
           </Pressable>
         </View>
@@ -318,11 +320,13 @@ export function StoriesScreen() {
             onPress={() => void openViewers()}
             style={styles.viewsRow}
             accessibilityRole="button"
-            accessibilityLabel="Ver quién vio tu historia"
+            accessibilityLabel={t('stories.whoViewed')}
           >
             <Feather name="eye" size={16} color={media.text} />
             <Text style={[styles.viewsText, { color: media.text }]}>
-              {item.viewsCount} {item.viewsCount === 1 ? 'vista' : 'vistas'}
+              {item.viewsCount === 1
+                ? t('stories.viewsOne')
+                : t('stories.viewsMany', { count: item.viewsCount })}
             </Text>
           </Pressable>
         ) : null}

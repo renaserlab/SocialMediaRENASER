@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
-import { SectionTitle } from '@/components/SectionTitle';
 import { Text } from '@/components/Text';
 import {
   RecommendationRepository,
@@ -14,6 +13,8 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * «Lo que puedo aportar»: el lado PUBLICO del perfil en el recomendador.
@@ -31,6 +32,13 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * ayudar» y «Experiencia declarada», y nunca «experto», «verificado» o
  * «certificado». Escribir eso seria fabricar una confianza que no existe, y
  * quien la creyera lo descubriria en la primera sesion pagada.
+ *
+ * POR QUE EMPIEZA PLEGADA. Se pintaba entera y de golpe: con tres temas y tres
+ * etiquetas en cada uno ocupaba media pantalla en medio del perfil, justo entre
+ * la presentacion de la persona y los accesos a su podcast, sus cursos y su
+ * agenda. Lo que es un detalle util para quien lo busca se habia convertido en
+ * un muro que hay que atravesar para llegar a lo demas. Plegada, la seccion
+ * ANUNCIA que existe y ocupa una linea; quien tenga interes la abre.
  */
 
 type Props = {
@@ -42,9 +50,9 @@ type Props = {
 
 type Etiqueta = {
   /** Como se lee en el perfil de otra persona. */
-  ajena: string;
+  ajena: TranslationKey;
   /** Como se lee en el propio. */
-  propia: string;
+  propia: TranslationKey;
   icono: keyof typeof Feather.glyphMap;
 };
 
@@ -57,12 +65,14 @@ type Etiqueta = {
  * la distincion dependiera del color, en escala de grises —o para quien no lo
  * distingue— las tres relaciones serian la misma.
  */
+// Claves, no textos: el rotulo se resuelve al pintar, que es cuando se sabe
+// en que idioma esta la aplicacion.
 const ETIQUETAS: Record<RelacionDeOferta, Etiqueta> = {
-  can_help: { ajena: 'Puede ayudar', propia: 'Puedo ayudar', icono: 'life-buoy' },
-  teach: { ajena: 'Enseña', propia: 'Enseño', icono: 'book-open' },
+  can_help: { ajena: 'offer.canHelp', propia: 'offer.canHelpOwn', icono: 'life-buoy' },
+  teach: { ajena: 'offer.teaches', propia: 'offer.teachesOwn', icono: 'book-open' },
   experienced: {
-    ajena: 'Experiencia declarada',
-    propia: 'Tengo experiencia',
+    ajena: 'offer.experienced',
+    propia: 'offer.experiencedOwn',
     icono: 'clock',
   },
 };
@@ -75,6 +85,7 @@ const ETIQUETAS: Record<RelacionDeOferta, Etiqueta> = {
 const ORDEN: RelacionDeOferta[] = ['can_help', 'teach', 'experienced'];
 
 export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -82,7 +93,36 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
 
   const [temas, setTemas] = useState<OfferedTopic[]>([]);
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'error'>('cargando');
+  /**
+   * Plegada al llegar. Es el estado en el que la seccion estorba menos y sigue
+   * diciendo que existe.
+   */
+  const [abierta, setAbierta] = useState(false);
 
+  /*
+    POR QUE LA PETICION SIGUE SALIENDO AL MONTAR, Y NO AL ABRIR LA SECCION.
+
+    Parece la optimizacion evidente —la seccion nace cerrada, asi que su
+    contenido no se ve— y se ha comprobado antes de descartarla:
+
+    1. NO ESTA EN EL CAMINO CRITICO. `getProfileOffer` sale a la vez que
+       `pedirPerfil` y que las publicaciones, en efectos independientes, y esta
+       pantalla no espera por ella para nada: mientras no hay respuesta este
+       componente devuelve `null` y el perfil se pinta entero igual. Aplazarla
+       no adelantaria ni un fotograma; solo moveria la espera al momento de
+       abrir, que es justo cuando alguien SI la esta mirando.
+
+    2. Y SOBRE TODO: EL ENCABEZADO DEPENDE DE LA RESPUESTA. La mayoria de los
+       perfiles no ha declarado nada, y en ese caso aqui no se pinta nada. Sin
+       pedir los datos no hay forma de saber si hay algo dentro, asi que el
+       encabezado «Lo que puede aportar» tendria que salir SIEMPRE y abrirse
+       sobre un hueco vacio la mayoria de las veces. Eso es un boton muerto, que
+       es exactamente lo que no puede haber.
+
+    Si algun dia hiciera falta, la unica forma correcta seria que el perfil
+    trajera el numero de temas ofrecidos; con eso el encabezado sabria si tiene
+    algo que abrir y la lista si podria esperar. Hoy ese dato no existe.
+  */
   useEffect(() => {
     if (!perfilId || !supabaseEnabled || !conSesion) {
       // El endpoint exige sesion. Sin ella no se pide nada: un 401 en la
@@ -146,10 +186,10 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
       >
         <Feather name="compass" size={18} color={colors.textMuted} />
         <Text variant="secondary" color={colors.textMuted} style={styles.invitacionTexto}>
-          Cuéntanos en qué puedes ayudar a otras personas
+          {t('offer.invite')}
         </Text>
         <Button
-          label="Añadir temas"
+          label={t('offer.addTopics')}
           variant="secondary"
           onPress={() => router.push('/onboarding?modo=editar' as never)}
           style={styles.invitacionBoton}
@@ -158,9 +198,40 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
     );
   }
 
+  const titulo = esPropio ? t('offer.titleOwn') : t('offer.titleOther');
+
   return (
     <View>
-      <SectionTitle title={esPropio ? 'Lo que puedo aportar' : 'Lo que puede aportar'} />
+      {/*
+        EL ENCABEZADO ES EL INTERRUPTOR, no un titulo con un boton al lado: toda
+        la fila responde al toque, que es la unica forma de que se pueda dar sin
+        apuntar. `accessibilityState.expanded` es lo que hace que un lector de
+        pantalla anuncie «contraido» / «expandido» en vez de leer un titulo y
+        dejar a quien escucha sin saber que hay algo debajo.
+
+        La flecha cambia de sentido —abajo cerrada, arriba abierta— y no solo de
+        color ni de opacidad: en un sistema visual en blanco y negro, la forma es
+        lo unico que se lee siempre.
+      */}
+      <Pressable
+        onPress={() => setAbierta((previo) => !previo)}
+        accessibilityRole="button"
+        accessibilityLabel={titulo}
+        accessibilityState={{ expanded: abierta }}
+        hitSlop={6}
+        style={({ pressed }) => [styles.cabecera, { opacity: pressed ? 0.7 : 1 }]}
+      >
+        <Text variant="titleMedium" style={styles.tituloDeSeccion}>
+          {titulo}
+        </Text>
+        <Feather
+          name={abierta ? 'chevron-up' : 'chevron-down'}
+          size={20}
+          color={colors.text}
+        />
+      </Pressable>
+
+      {abierta ? (
       <View style={styles.lista}>
         {visibles.map((tema) => {
           const etiquetas = ORDEN.filter((relacion) => tema.relations.includes(relacion));
@@ -173,7 +244,7 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
               accessible
               accessibilityLabel={`${tema.name}. ${etiquetas
                 .map((relacion) =>
-                  esPropio ? ETIQUETAS[relacion].propia : ETIQUETAS[relacion].ajena,
+                  esPropio ? t(ETIQUETAS[relacion].propia) : t(ETIQUETAS[relacion].ajena),
                 )
                 .join('. ')}`}
             >
@@ -191,7 +262,7 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
                     >
                       <Feather name={etiqueta.icono} size={13} color={colors.textMuted} />
                       <Text variant="caption" weight="600" color={colors.textMuted}>
-                        {esPropio ? etiqueta.propia : etiqueta.ajena}
+                        {esPropio ? t(etiqueta.propia) : t(etiqueta.ajena)}
                       </Text>
                     </View>
                   );
@@ -201,11 +272,27 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
           );
         })}
       </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  /*
+    Mismos margenes que `SectionTitle`, que es lo que habia aqui antes: la
+    seccion tiene que seguir separandose del resto del perfil igual, aunque el
+    titulo haya pasado a ser pulsable. Alto minimo de 44 para que sea un blanco
+    tactil de verdad y no una linea de texto que hay que acertar.
+  */
+  cabecera: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  tituloDeSeccion: { flex: 1 },
   lista: { gap: spacing.sm },
   tema: {
     borderWidth: 1,

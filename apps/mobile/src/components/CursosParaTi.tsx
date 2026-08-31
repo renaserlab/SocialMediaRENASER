@@ -29,6 +29,8 @@ import { cursoAbierto, cursoNoInteresa, cursoVisible } from '@/services/senales'
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { traduceEnElIdiomaActual } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * «Cursos para ti»: lo que alguien puede APRENDER, ordenado para esta persona.
@@ -90,13 +92,23 @@ const CADA_CUANTO_MS = 200;
  * informacion que ayude a decidir si un curso interesa.
  */
 function resumenDeContenido(modulos: number, lecciones: number): string {
+  const t = traduceEnElIdiomaActual;
   const partes: string[] = [];
-  if (modulos > 0) partes.push(`${modulos} ${modulos === 1 ? 'módulo' : 'módulos'}`);
-  if (lecciones > 0) partes.push(`${lecciones} ${lecciones === 1 ? 'lección' : 'lecciones'}`);
+  if (modulos > 0) {
+    partes.push(
+      modulos === 1 ? t('course.moduleOne') : t('course.modules', { count: modulos }),
+    );
+  }
+  if (lecciones > 0) {
+    partes.push(
+      lecciones === 1 ? t('course.lessonOne') : t('course.lessons', { count: lecciones }),
+    );
+  }
   return partes.join(' · ');
 }
 
 export function CursosParaTi() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -299,7 +311,7 @@ export function CursosParaTi() {
   return (
     <View>
       <View style={styles.titulo}>
-        <SectionTitle title="Cursos para ti" />
+        <SectionTitle title={t('reco.coursesForYou')} />
       </View>
 
       {/*
@@ -340,7 +352,7 @@ export function CursosParaTi() {
                 </View>
               ))
             : visibles.map(({ curso, rank }) => {
-                const motivo = frasePrincipalDeCurso(curso.reasons, nombresDeTema);
+                const motivo = frasePrincipalDeCurso(curso.reasons, nombresDeTema, t);
                 const resumen = resumenDeContenido(curso.modules, curso.lessons);
                 return (
                   <View
@@ -400,12 +412,12 @@ export function CursosParaTi() {
                         onPress={() => noInteresa(curso, rank)}
                         hitSlop={8}
                         accessibilityRole="button"
-                        accessibilityLabel={`No me interesa el curso ${curso.title}`}
+                        accessibilityLabel={t('reco.notInterestedCourse', { titulo: curso.title })}
                         style={styles.descartar}
                       >
                         <Feather name="x" size={12} color={colors.textMuted} />
                         <Text variant="caption" color={colors.textMuted}>
-                          No me interesa
+                          {t('reco.notInterested')}
                         </Text>
                       </Pressable>
                     </View>

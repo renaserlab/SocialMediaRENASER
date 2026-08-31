@@ -22,6 +22,7 @@ import { olvidarPerfiles } from '@/services/cachePerfil';
 import { useAppStore } from '@/store/useAppStore';
 import { usePreferenciasStore } from '@/store/usePreferenciasStore';
 import type { UserProfile } from '@/types';
+import { traduceEnElIdiomaActual } from '@/i18n';
 
 export type ProfilePatch = Partial<Pick<UserProfile, 'fullName' | 'username' | 'bio'>>;
 
@@ -121,7 +122,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     */
     if (enlaceAuthInicial?.errorCode) {
       console.warn('[auth] el enlace de entrada traia un error', enlaceAuthInicial);
-      set({ recoveryError: mensajeDeEnlace(enlaceAuthInicial) });
+      set({ recoveryError: mensajeDeEnlace(enlaceAuthInicial, traduceEnElIdiomaActual) });
     } else if (enlaceAuthInicial && esEnlaceDeRecuperacion(enlaceAuthInicial)) {
       // La sesion la abre supabase-js; aqui solo se deja constancia de que este
       // arranque viene de una recuperacion, para no colar al usuario en el feed

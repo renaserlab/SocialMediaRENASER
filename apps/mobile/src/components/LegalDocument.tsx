@@ -7,6 +7,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Text } from '@/components/Text';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Un apartado del documento: titulo y uno o varios parrafos. */
 export type LegalSection = {
@@ -30,6 +31,7 @@ type LegalDocumentProps = {
  * URL publica que Apple exige poder revisar sin instalar nada.
  */
 export function LegalDocument({ title, updatedAt, intro, sections }: LegalDocumentProps) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -44,7 +46,7 @@ export function LegalDocument({ title, updatedAt, intro, sections }: LegalDocume
           {title}
         </Text>
         <Text variant="secondary" color={colors.textMuted} style={styles.updated}>
-          Última actualización: {updatedAt}
+          {t('legal.updatedAt', { fecha: updatedAt })}
         </Text>
 
         {/*
@@ -53,9 +55,7 @@ export function LegalDocument({ title, updatedAt, intro, sections }: LegalDocume
         */}
         <View style={[styles.draft, { borderColor: colors.border, backgroundColor: colors.backgroundAlt }]}>
           <Text variant="secondary" color={colors.textMuted} style={styles.draftText}>
-            Documento en revisión legal. El contenido refleja el funcionamiento
-            real de la plataforma, pero debe ser validado por un abogado antes
-            de considerarse definitivo.
+            {t('legal.draftNotice')}
           </Text>
         </View>
 

@@ -18,6 +18,7 @@ import {
 import { uploadCourseMedia } from '@/services/storage';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   lessonId: string;
@@ -41,6 +42,7 @@ function formatSize(bytes: number | null): string {
  * documentos del curso pensados para llevarselos.
  */
 export function LessonResources({ lessonId, courseId, canEdit }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [items, setItems] = useState<LessonResourceFile[]>([]);
   const [adding, setAdding] = useState(false);
@@ -78,7 +80,7 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
       // El nombre del archivo es un titulo razonable por defecto.
       if (!title.trim()) setTitle(asset.name.replace(/\.[^.]+$/, ''));
     } catch {
-      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
+      setError(t('resources.pickerFailed'));
     }
   };
 
@@ -111,10 +113,10 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
       // Cerrar antes del aviso: mientras la hoja siga montada, en iOS tapa el
       // toast igual que taparia un dialogo.
       setAdding(false);
-      toast('Documento añadido');
+      toast(t('resources.added'));
       await load();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'No se pudo subir. Inténtalo de nuevo.');
+      setError(failure instanceof Error ? failure.message : t('resources.uploadFailed'));
     } finally {
       setSaving(false);
     }
@@ -122,9 +124,9 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
 
   const remove = async (item: LessonResourceFile) => {
     const accepted = await confirm({
-      title: 'Eliminar documento',
+      title: t('resources.deleteTitle'),
       message: `Se quitará "${item.title}" de esta lección.`,
-      confirmLabel: 'Eliminar',
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
@@ -133,22 +135,39 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
       toast('Documento eliminado');
       await load();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
   const download = async (item: LessonResourceFile) => {
-    if (!item.url) {
-      notify('No disponible', 'No se pudo preparar la descarga. Inténtalo de nuevo.');
+    /*
+      La firma se pide AHORA, no al entrar en la leccion.
+
+      El bucket `course-media` es privado y sigue siendolo: lo que cambia es
+      CUANDO se pide el permiso de lectura. Firmar los veinte documentos al
+      abrir la pantalla gastaba conexion en el peor momento —mientras arranca el
+      video— y encima entregaba firmas que podian caducar antes de que alguien
+      pulsara.
+    */
+    let url = item.url;
+    if (!url) {
+      try {
+        url = (await CourseContentRepository.firmarRecurso(item.storagePath)) ?? undefined;
+      } catch {
+        url = undefined;
+      }
+    }
+    if (!url) {
+      notify(t('resources.unavailable'), t('resources.downloadFailed'));
       return;
     }
     try {
       // En web se abre en una pestaña (el navegador decide si ver o guardar);
       // en movil lo resuelve la aplicacion asociada al tipo de archivo.
-      if (Platform.OS === 'web') window.open(item.url, '_blank', 'noopener');
-      else await Linking.openURL(item.url);
+      if (Platform.OS === 'web') window.open(url, '_blank', 'noopener');
+      else await Linking.openURL(url);
     } catch {
-      notify('No se pudo abrir', 'Inténtalo de nuevo.');
+      notify(t('common.couldNotOpen'), t('common.tryAgain'));
     }
   };
 
@@ -159,14 +178,14 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
     <View>
       <View style={styles.header}>
         <Text variant="body" weight="700" style={{ flex: 1 }}>
-          Recursos del Curso
+          {t('resources.title')}
         </Text>
         {canEdit ? (
           <Pressable
             onPress={() => setAdding(true)}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel="Añadir documento"
+            accessibilityLabel={t('resources.add')}
           >
             <Feather name="plus" size={18} color={colors.textMuted} />
           </Pressable>
@@ -175,7 +194,7 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
 
       {items.length === 0 ? (
         <Text variant="secondary" color={colors.textMuted}>
-          Aún no hay material para descargar.
+          {t('resources.empty')}
         </Text>
       ) : (
         items.map((item) => (
@@ -202,24 +221,24 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
         }}
       >
         <Text style={styles.sheetTitle} color={colors.text}>
-          Nuevo documento
+          {t('resources.newDocument')}
         </Text>
         <Input
           value={title}
           onChangeText={setTitle}
-          placeholder="Nombre visible del documento"
+          placeholder={t('resources.namePlaceholder')}
           placeholderTextColor={colors.textMuted}
           style={{ color: colors.text }}
         />
         <ListRow
-          title={file ? file.name : 'Elegir archivo'}
-          subtitle={file ? formatSize(file.size ?? null) : 'PDF, plantillas, imágenes…'}
+          title={file ? file.name : t('resources.pickFile')}
+          subtitle={file ? formatSize(file.size ?? null) : t('resources.hint')}
           leftIcon="paperclip"
           onPress={() => void choose()}
         />
         <InlineError message={error} />
         <Button
-          label="Subir documento"
+          label={t('resources.upload')}
           onPress={() => void save()}
           loading={saving}
           disabled={!title.trim() || !file}

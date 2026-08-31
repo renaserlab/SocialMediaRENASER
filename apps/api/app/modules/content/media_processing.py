@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import shutil
 import subprocess
@@ -308,8 +309,59 @@ async def _run(cmd: list[str], timeout: float = 120) -> tuple[int, bytes, bytes]
     return proceso.returncode or 0, stdout, stderr
 
 
+def rotacion_del_stream(stream: dict) -> int:
+    """Cuantos grados hay que girar el video para verlo derecho.
+
+    Un movil NO gira los pixeles al grabar en vertical: guarda un cuadro
+    apaisado de 1920x1080 y anota aparte "esto va girado 90 grados". La nota
+    viaja de dos formas segun quien codifique —una matriz de presentacion
+    (`side_data_list`) o una etiqueta `rotate`—, asi que hay que mirar las dos.
+    """
+    for lado in stream.get("side_data_list") or []:
+        valor = lado.get("rotation")
+        if valor is not None:
+            try:
+                return int(float(valor)) % 360
+            except (TypeError, ValueError):
+                pass
+    etiqueta = (stream.get("tags") or {}).get("rotate")
+    if etiqueta is not None:
+        try:
+            return int(float(etiqueta)) % 360
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+def dimensiones_visibles(
+    ancho: int | None, alto: int | None, rotacion: int
+) -> tuple[int | None, int | None]:
+    """Las medidas TAL COMO SE VEN, no como estan guardadas en el contenedor.
+
+    EL FALLO QUE CIERRA. Se guardaba en `post_media` el ancho y el alto que
+    devuelve ffprobe, que son los del cuadro codificado. Para un video de movil
+    grabado en vertical eso es 1920x1080 —apaisado— aunque se vea 1080x1920. La
+    aplicacion, que dibuja la caja con esas medidas, pintaba entonces un
+    rectangulo apaisado alrededor de un video vertical: las franjas negras.
+
+    Curiosamente el POSTER si salia bien, porque ffmpeg endereza al decodificar
+    y la miniatura se genera decodificando. De ahi el sintoma raro: portada
+    correcta, video con franjas.
+    """
+    if not ancho or not alto:
+        return ancho, alto
+    if rotacion % 180 == 90:
+        return alto, ancho
+    return ancho, alto
+
+
 async def _probe_video(url: str) -> tuple[int | None, int | None, float | None]:
-    """(ancho, alto, duracion) leyendo solo la cabecera del archivo remoto."""
+    """(ancho, alto, duracion) leyendo solo la cabecera del archivo remoto.
+
+    El ancho y el alto son los VISIBLES: si el contenedor dice que el video va
+    girado, las medidas se devuelven ya intercambiadas (ver
+    `dimensiones_visibles`).
+    """
     ffprobe = _ffprobe()
     if not ffprobe:
         return None, None, None
@@ -318,24 +370,34 @@ async def _probe_video(url: str) -> tuple[int | None, int | None, float | None]:
             ffprobe,
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height:format=duration",
-            "-of", "csv=p=0",
+            # JSON y no CSV: la rotacion vive en una lista anidada
+            # (`side_data_list`) que el formato plano no sabe representar.
+            "-show_streams",
+            "-show_format",
+            "-of", "json",
             url,
         ]
     )
     if codigo != 0:
         return None, None, None
-    ancho = alto = None
+    try:
+        datos = json.loads(stdout.decode() or "{}")
+    except ValueError:
+        return None, None, None
+    streams = datos.get("streams") or []
+    stream = streams[0] if streams else {}
+    ancho = stream.get("width")
+    alto = stream.get("height")
+    ancho, alto = dimensiones_visibles(ancho, alto, rotacion_del_stream(stream))
     duracion = None
-    for linea in stdout.decode().strip().splitlines():
-        partes = [p for p in linea.strip().split(",") if p]
-        if len(partes) == 2 and partes[0].isdigit():
-            ancho, alto = int(partes[0]), int(partes[1])
-        elif len(partes) == 1:
-            try:
-                duracion = float(partes[0])
-            except ValueError:
-                pass
+    for candidato in ((datos.get("format") or {}).get("duration"), stream.get("duration")):
+        if candidato is None:
+            continue
+        try:
+            duracion = float(candidato)
+            break
+        except (TypeError, ValueError):
+            continue
     return ancho, alto, duracion
 
 

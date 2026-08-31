@@ -839,7 +839,32 @@ async def test_el_numero_de_consultas_no_crece_con_las_resenas(entorno):
 
     assert len(respuesta.json()) == 20
     selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
-    assert len(selects) <= 6, f"{len(selects)} consultas para 20 resenas"
+    # SIETE y no seis desde la 0041: `_cursos_de` pregunta de que curso habla
+    # cada resena, y lo hace de UNA vez para toda la lista (un `in_` con los
+    # veinte identificadores), no una por fila.
+    #
+    # Lo que este tope protege es que el numero no DEPENDA de cuantas resenas
+    # haya. Por eso la comprobacion de abajo, que es la que de verdad importa:
+    # con 20 resenas se hacen las mismas consultas que con 3.
+    assert len(selects) <= 7, f"{len(selects)} consultas para 20 resenas"
+
+    # Y con tres resenas, exactamente las MISMAS. Un tope suelto se puede ir
+    # subiendo de uno en uno hasta que deje de significar nada; esto no.
+    con_tres: list[str] = []
+
+    def _contar_tres(conn, cursor, statement, *args):  # noqa: ANN001
+        con_tres.append(statement)
+
+    event.listen(motor, "before_cursor_execute", _contar_tres)
+    try:
+        pocas = await http.get(f"{API}/received/{BRUNO}", params={"limit": 3})
+    finally:
+        event.remove(motor, "before_cursor_execute", _contar_tres)
+
+    assert len(pocas.json()) == 3
+    assert len([c for c in con_tres if c.lstrip().lower().startswith("select")]) == len(
+        selects
+    )
 
 
 # --------------------------------------------------------------------------- #

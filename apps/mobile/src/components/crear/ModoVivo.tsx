@@ -3,17 +3,19 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { describeError } from '@/lib/describeError';
 import { LiveRepository } from '@/repositories/LiveRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
 type Props = {
   pie?: React.ReactNode;
-  espacioInferior: number;
   /** Salida util: lo mas parecido que SI se puede hacer hoy. */
   alGrabarReel: () => void;
 };
@@ -30,7 +32,9 @@ type Props = {
  * Con el encendido, el camino que se activa es el de abajo: se crea la emision
  * —sin `scheduled_for`, o sea que nace ya en directo— y se abre su sala.
  */
-export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
+export function ModoVivo({ pie, alGrabarReel }: Props) {
+  const { t } = useTranslation();
+  const espacioInferior = useEspacioInferior();
   if (!FEATURE_LIVE) {
     return (
       <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
@@ -39,11 +43,10 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
             <Feather name="radio" size={26} color={media.text} />
           </View>
           <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-            Emitir en vivo todavía no está disponible
+            {t('create.liveUnavailableTitle')}
           </Text>
           <Text variant="body" color={media.textMuted} style={styles.centrado}>
-            Estamos montando la infraestructura de directo. Preferimos no darte
-            un botón que no emita de verdad.
+            {t('create.liveUnavailableBody')}
           </Text>
 
           <Pressable
@@ -52,7 +55,7 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
             accessibilityRole="button"
           >
             <Text variant="body" weight="700" color={media.background}>
-              Grabar un reel
+              {t('create.recordReel')}
             </Text>
           </Pressable>
         </View>
@@ -62,7 +65,7 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
     );
   }
 
-  return <CrearEmision pie={pie} espacioInferior={espacioInferior} />;
+  return <CrearEmision pie={pie} />;
 }
 
 /**
@@ -73,7 +76,9 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
  * `PATCH`, y programarla para mas tarde es otro flujo, no un campo mas en el
  * boton de «empezar ahora».
  */
-function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacioInferior: number }) {
+function CrearEmision({ pie }: { pie?: React.ReactNode }) {
+  const { t } = useTranslation();
+  const espacioInferior = useEspacioInferior();
   const router = useRouter();
   const [titulo, setTitulo] = useState('');
   const [creando, setCreando] = useState(false);
@@ -94,23 +99,25 @@ function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacio
       // que acaba de crearla, porque volver ahi invitaria a crear otra.
       router.replace(`/live/${emision.id}` as never);
     } catch (fallo) {
-      setError(describeError(fallo, 'No se pudo abrir la emisión.'));
+      setError(describeError(fallo, t('create.liveOpenFailed')));
     } finally {
       setCreando(false);
     }
   };
 
   return (
-    <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+    // El titulo se escribe aqui mismo: sin el patron compartido, en un telefono
+    // corto el teclado se comia el campo y el boton de empezar.
+    <SinTecladoDelante style={[styles.raiz, { paddingBottom: espacioInferior }]}>
       <View style={styles.centro}>
         <View style={[styles.icono, { borderColor: media.border }]}>
           <Feather name="radio" size={26} color={media.text} />
         </View>
         <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-          Empezar una emisión
+          {t('create.liveStartTitle')}
         </Text>
         <Text variant="body" color={media.textMuted} style={styles.centrado}>
-          Ponle un título para que se sepa de qué vas a hablar.
+          {t('create.liveStartBody')}
         </Text>
 
         <TextInput
@@ -118,9 +125,9 @@ function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacio
           onChangeText={setTitulo}
           onSubmitEditing={() => void empezar()}
           returnKeyType="go"
-          placeholder="¿De qué va tu directo?"
+          placeholder={t('create.livePlaceholder')}
           placeholderTextColor={media.textMuted}
-          accessibilityLabel="Título de la emisión"
+          accessibilityLabel={t('create.liveTitleLabel')}
           style={[styles.campo, { borderColor: media.border, color: media.text }]}
         />
 
@@ -138,13 +145,13 @@ function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacio
           accessibilityState={{ disabled: !listo }}
         >
           <Text variant="body" weight="700" color={media.background}>
-            {creando ? 'Abriendo…' : 'Empezar ahora'}
+            {creando ? t('create.opening') : t('create.startNow')}
           </Text>
         </Pressable>
       </View>
 
       {pie ? <View style={styles.pie}>{pie}</View> : null}
-    </View>
+    </SinTecladoDelante>
   );
 }
 

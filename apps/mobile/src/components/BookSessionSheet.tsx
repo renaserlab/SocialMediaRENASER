@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { DateField } from '@/components/DateField';
+import { hoyANoche } from '@/components/DateField.types';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
@@ -16,6 +17,7 @@ import { BookingRepository } from '@/repositories/BookingRepository';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   visible: boolean;
@@ -27,6 +29,7 @@ type Props = {
 };
 
 export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const requireAuth = useRequireAuth();
@@ -51,13 +54,35 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    * se escribe; la base de datos necesita un instante. Convertirlo AQUÍ evita
    * que cada pantalla se invente su propio formato.
    */
-  const cuandoIso = (dia: string, hora: string): string | null => {
+  const cuando = (dia: string, hora: string): Date | null => {
     const [d, m, a] = dia.split('/').map((n) => Number(n));
     const [hh, mm] = hora.split(':').map((n) => Number(n));
     if (!d || !m || !a || Number.isNaN(hh) || Number.isNaN(mm)) return null;
     const fecha = new Date(a, m - 1, d, hh, mm);
-    return Number.isNaN(fecha.getTime()) ? null : fecha.toISOString();
+    return Number.isNaN(fecha.getTime()) ? null : fecha;
   };
+
+  const cuandoIso = (dia: string, hora: string): string | null =>
+    cuando(dia, hora)?.toISOString() ?? null;
+
+  /**
+   * El momento propuesto ya pasó.
+   *
+   * SE COMPARAN INSTANTES, NUNCA CADENAS: «02/09/2026» y «2026-09-02» son la
+   * misma fecha y dos textos distintos, y `'10:00' < '9:00'` es cierto como
+   * texto. `toISOString()` normaliza a UTC, así que la zona horaria del
+   * teléfono queda dentro del instante en vez de perderse por el camino.
+   *
+   * NO ES LA VALIDACIÓN DE VERDAD. Quien decide es el servidor con SU reloj
+   * (`booking_date_in_past`): el del teléfono lo elige quien lo lleva, y
+   * atrasarlo un día bastaría para colar una fecha pasada si esto fuera lo
+   * único. Lo que aporta aquí es no dejar rellenar un formulario entero para
+   * que lo rechacen al final.
+   */
+  const yaPaso = (() => {
+    const momento = cuando(date, time);
+    return momento !== null && momento.getTime() <= Date.now();
+  })();
 
   const reset = () => {
     setDate('');
@@ -90,7 +115,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    */
   const handleOpenChat = async () => {
     let autorizado = false;
-    await requireAuth('para escribir a esta persona', () => {
+    await requireAuth('auth.reasonWrite', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -107,7 +132,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       } as never);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'No se pudo abrir el chat. Inténtalo de nuevo.',
+        err instanceof Error ? err.message : t('booking.chatFailed'),
       );
     } finally {
       setSending(false);
@@ -127,12 +152,18 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    */
   const handleBook = async () => {
     if (!date || !time) {
-      setError('Elige la fecha y la hora de la sesión.');
+      setError(t('booking.pickDateTime'));
+      return;
+    }
+    if (yaPaso) {
+      // El servidor lo rechazaría igualmente; decirlo aquí ahorra el viaje y,
+      // sobre todo, explica qué hay que cambiar.
+      setError(t('booking.pastDateLong'));
       return;
     }
 
     let autorizado = false;
-    await requireAuth('para agendar una sesión', () => {
+    await requireAuth('auth.reasonBook', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -144,7 +175,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         proveedorId: targetUser.id,
         // El tema es lo que la agenda enseña como titulo: sin nota se usa el
         // generico, que sigue siendo mas util que una fila sin asunto.
-        tema: note.trim() || 'Sesión 1:1',
+        tema: note.trim() || t('booking.defaultTopic'),
         nota: note.trim(),
         cuandoIso: cuandoIso(date, time),
       });
@@ -162,48 +193,72 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       close();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'No se pudo agendar la sesión. Inténtalo de nuevo.',
+        err instanceof Error ? err.message : t('booking.failed'),
       );
     } finally {
       setSaving(false);
     }
   };
 
-  const listo = !!date && !!time;
+  /*
+    LISTO PARA CONFIRMAR: fecha, hora, y que el momento no haya pasado.
+
+    El boton se desactiva en vez de dejar pulsar y fallar, pero el mensaje
+    tambien se pinta: un boton apagado sin explicacion es lo que hace que
+    alguien lo toque cinco veces sin entender que le falta.
+  */
+  const listo = !!date && !!time && !yaPaso;
 
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
-        Pedir una sesión 1:1
+        {t('booking.title')}
       </Text>
       <Text variant="secondary" color={colors.textMuted} style={styles.subtitle}>
-        Reserva un espacio personalizado con {targetUser.fullName}.
+        {t('booking.subtitle', { nombre: targetUser.fullName })}
       </Text>
 
       <View style={styles.when}>
         <View style={styles.half}>
-          <DateField label="Fecha" value={date} onChange={setDate} />
+          {/*
+            El calendario no ofrece dias anteriores a HOY. Es cortesia: quien
+            decide de verdad es el servidor con su reloj, pero ofrecer un dia
+            que se va a rechazar es equivocarse a proposito.
+
+            HOY A MEDIANOCHE y no «ahora mismo»: con la hora actual, el dia de
+            hoy dejaria de poder elegirse en cuanto pasara un minuto, y una
+            sesion para esta tarde es lo mas normal del mundo. Que la HORA
+            elegida tampoco haya pasado lo comprueba `yaPaso`.
+          */}
+          <DateField label={t('booking.date')} value={date} onChange={setDate} minDate={hoyANoche()} />
         </View>
         <View style={styles.half}>
-          <TimeField label="Hora" value={time} onChange={setTime} />
+          <TimeField label={t('booking.time')} value={time} onChange={setTime} />
         </View>
       </View>
 
       <Input
         value={note}
         onChangeText={setNote}
-        placeholder="Tema o consulta principal (opcional)"
+        placeholder={t('booking.topicPlaceholder')}
         placeholderTextColor={colors.textMuted}
         multiline
         numberOfLines={3}
         style={{ color: colors.text, marginTop: spacing.md }}
       />
 
-      <InlineError message={error} />
+      {/*
+        El aviso de fecha pasada sale SIN esperar a pulsar: en cuanto la
+        combinacion de dia y hora queda en el pasado. Enterarse al confirmar,
+        con el formulario ya relleno, es la peor version de la misma noticia.
+      */}
+      <InlineError
+        message={error ?? (yaPaso ? t('booking.pastDate') : null)}
+      />
 
       <View style={styles.actions}>
         <Button
-          label="Enviar mensaje directo"
+          label={t('booking.directMessage')}
           icon="message-circle"
           variant="secondary"
           loading={sending}
@@ -211,7 +266,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
           style={styles.fullWidth}
         />
         <Button
-          label="Confirmar reserva"
+          label={t('booking.confirm')}
           icon="calendar"
           onPress={() => void handleBook()}
           loading={saving}

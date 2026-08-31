@@ -1,6 +1,7 @@
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
+import { hayQueElegirIdioma } from '@/lib/idioma';
 import { rutaDeArranque } from '@/lib/rutaDeArranque';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -18,7 +19,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
  */
 export default function IndexRoute() {
   const hydrated = useAppStore((state) => state.hydrated);
-  const languageSelected = useAppStore((state) => state.languageSelected);
+  const idiomaElegido = useAppStore((state) => state.idiomaElegido);
   const authStatus = useAuthStore((state) => state.status);
   const passwordRecovery = useAuthStore((state) => state.passwordRecovery);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -36,7 +37,9 @@ export default function IndexRoute() {
         : 'sinCuenta',
     recuperandoContrasena: passwordRecovery,
     cuestionario,
-    idiomaElegido: languageSelected,
+    // «Ya eligio» NO es «tiene un idioma»: mientras nadie ha contestado, la
+    // aplicacion se pinta en el idioma por defecto y aun asi hay que preguntar.
+    idiomaElegido: !hayQueElegirIdioma(idiomaElegido),
   });
 
   // `null` = todavia no se puede decidir. Ninguna de las esperas es indefinida:

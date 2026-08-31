@@ -1,3 +1,4 @@
+import type { TranslationKey } from '@/i18n';
 import type { Post } from '@/types';
 
 /**
@@ -44,15 +45,47 @@ export type FilaDeAudio = {
   reproducible: boolean;
 };
 
+
+/**
+ * Cómo se traduce lo que sale de aquí.
+ *
+ * Lo pasa quien pinta. Este módulo NO puede importar el diccionario: se prueba
+ * con el runner de Node, que no resuelve el alias `@/`. Sin traductor se
+ * escribe en español, que es el idioma de referencia.
+ */
+export type Traductor = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave. Es el mismo texto que hay en `i18n/es.ts`, y que no
+ * se desvíen lo comprueba `i18n/diccionariosSincronizados.test.mts`.
+ */
+export const RESPALDOS_ES = {
+  'audio.audio': 'Audio',
+  'audio.byAuthor': 'Audio de {autor}',
+} as const;
+
+const enEspanol: Traductor = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? '';
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
+
 export function filaDeAudio(
   post: Pick<Post, 'body' | 'author' | 'mediaUrl' | 'mediaDurationS'>,
+  traducir: Traductor = enEspanol,
 ): FilaDeAudio {
   // Un audio no tiene titulo propio: su nombre es el texto de la publicacion,
   // igual que en la lista de episodios del podcast. Solo la PRIMERA linea, que
   // un cuerpo de tres parrafos no cabe en una fila.
   const primeraLinea = (post.body ?? '').split('\n').map((l) => l.trim()).find(Boolean);
   const autor = (post.author ?? '').trim();
-  const titulo = primeraLinea ?? (autor ? `Audio de ${autor}` : 'Audio');
+  const titulo =
+    primeraLinea ?? (autor ? traducir('audio.byAuthor', { autor }) : traducir('audio.audio'));
 
   const partes = [autor, duracionCorta(post.mediaDurationS)].filter(Boolean);
   return { titulo, detalle: partes.join(' · '), reproducible: !!post.mediaUrl };

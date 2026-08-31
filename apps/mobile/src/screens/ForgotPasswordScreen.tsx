@@ -1,14 +1,15 @@
 import React, { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
+import { useTranslation } from '@/i18n/useTranslation';
 import { mensajeDeAuth } from '@/lib/authErrors';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -17,8 +18,8 @@ import { useAppTheme } from '@/theme/useAppTheme';
 /** Pide el correo y envía el enlace para restablecer la contraseña. */
 export function ForgotPasswordScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
   const requestPasswordReset = useAuthStore((state) => state.requestPasswordReset);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
 
@@ -46,11 +47,11 @@ export function ForgotPasswordScreen() {
     if (enviando.current) return;
     const clean = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(clean)) {
-      setError('Escribe un correo válido.');
+      setError(t('auth.errorEmailFormat'));
       return;
     }
     if (!supabaseEnabled) {
-      setError('La recuperación necesita conexión con el servidor.');
+      setError(t('auth.resetNeedsServer'));
       return;
     }
     enviando.current = true;
@@ -67,7 +68,7 @@ export function ForgotPasswordScreen() {
         aplicacion se hubiera roto. El detalle tecnico entero queda en la
         consola; aqui solo se dice que ha pasado y que se puede hacer.
       */
-      setError(mensajeDeAuth(err, 'recuperacion'));
+      setError(mensajeDeAuth(err, 'recuperacion', t));
     } finally {
       enviando.current = false;
       setSending(false);
@@ -80,11 +81,7 @@ export function ForgotPasswordScreen() {
         title=""
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/login'))}
       />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
         <AppScreen contentStyle={styles.screen}>
           {sent ? (
             /*
@@ -96,22 +93,28 @@ export function ForgotPasswordScreen() {
                 <Feather name="mail" size={30} color={colors.text} />
               </View>
               <Text variant="title" weight="900" style={styles.centered}>
-                Revisa tu correo
+                {t('auth.checkEmail')}
               </Text>
+              {/*
+                La frase entera es UNA clave con el correo dentro: antes iba
+                partida en tres trozos alrededor del `<Text weight="700">` y el
+                orden de las palabras cambia con el idioma, asi que traducida se
+                rompia. Se pierde la negrita del correo; a cambio la frase se
+                puede escribir bien en cualquier idioma.
+              */}
               <Text variant="body" color={colors.textMuted} style={styles.centered}>
-                Si <Text weight="700">{email.trim().toLowerCase()}</Text> tiene una cuenta, le
-                enviamos un enlace para crear una contraseña nueva. Caduca en una hora.
+                {t('auth.checkEmailBody', { email: email.trim().toLowerCase() })}
               </Text>
               <Text variant="secondary" color={colors.textMuted} style={styles.centered}>
-                ¿No lo ves? Mira en spam o correo no deseado.
+                {t('auth.checkSpam')}
               </Text>
               <Button
-                label="Volver a iniciar sesión"
+                label={t('auth.backToSignIn')}
                 onPress={() => router.replace('/login')}
                 style={styles.action}
               />
               <Button
-                label="Enviar a otro correo"
+                label={t('auth.sendToAnother')}
                 variant="ghost"
                 onPress={() => {
                   setSent(false);
@@ -122,20 +125,20 @@ export function ForgotPasswordScreen() {
           ) : (
             <>
               <Text variant="title" weight="900" style={styles.title}>
-                ¿Olvidaste tu contraseña?
+                {t('auth.forgot')}
               </Text>
               <Text variant="body" color={colors.textMuted} style={styles.subtitle}>
-                Escribe tu correo y te enviamos un enlace para crear una nueva.
+                {t('auth.forgotBody')}
               </Text>
 
               <Input
-                label="Correo electrónico"
+                label={t('auth.email')}
                 value={email}
-                onChangeText={(t) => {
-                  setEmail(t);
+                onChangeText={(texto) => {
+                  setEmail(texto);
                   setError(null);
                 }}
-                placeholder="ejemplo@correo.com"
+                placeholder={t('auth.emailPlaceholder')}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
@@ -145,7 +148,7 @@ export function ForgotPasswordScreen() {
               />
 
               <Button
-                label="Enviar enlace"
+                label={t('auth.sendLink')}
                 onPress={() => void submit()}
                 loading={sending}
                 disabled={!email.trim()}
@@ -154,7 +157,7 @@ export function ForgotPasswordScreen() {
             </>
           )}
         </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

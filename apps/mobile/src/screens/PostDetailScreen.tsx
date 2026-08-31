@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { ListRow } from '@/components/ListRow';
 import { PostCard } from '@/components/PostCard';
 import { StateView } from '@/components/StateView';
@@ -13,13 +13,13 @@ import { useAppStore } from '@/store/useAppStore';
 import type { Post } from '@/types';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function PostDetailScreen() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
-
   const enFeed = useAppStore((state) => state.posts.find((p) => p.id === id));
   const currentUserId = useAppStore((state) => state.user?.id ?? null);
 
@@ -75,23 +75,23 @@ export function PostDetailScreen() {
   if (!post) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Publicación" onBack={goBack} />
+        <AppHeader title={t('post.single')} onBack={goBack} />
         {estado === 'cargando' ? (
           <StateView state="loading" />
         ) : estado === 'error' ? (
           <StateView
             state="error"
             icon="wifi-off"
-            title="No pudimos cargar la publicación"
-            description="Revisa tu conexión e inténtalo de nuevo."
+            title={t('post.loadFailed')}
+            description={t('common.checkConnection')}
             onRetry={() => setIntento((n) => n + 1)}
           />
         ) : (
           <StateView
             state="empty"
             icon="file-text"
-            title="Publicación no disponible"
-            description="Es posible que se haya eliminado o que ya no sea pública."
+            title={t('post.unavailable')}
+            description={t('post.unavailableBody')}
           />
         )}
       </View>
@@ -100,12 +100,8 @@ export function PostDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Publicación" onBack={goBack} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <AppHeader title={t('post.single')} onBack={goBack} />
+      <SinTecladoDelante>
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
@@ -113,14 +109,16 @@ export function PostDetailScreen() {
         >
           <PostCard post={post} onRemoved={goBack} />
           <ListRow
-            title="Ver todos los comentarios"
-            subtitle={`${post.commentsCount ?? post.comments.length} comentarios`}
+            title={t('post.viewAllComments')}
+            subtitle={t('post.commentsCount', {
+              count: post.commentsCount ?? post.comments.length,
+            })}
             leftIcon="message-square"
             rightIcon="chevron-right"
             onPress={() => router.push(`/comments/${post.id}` as never)}
           />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

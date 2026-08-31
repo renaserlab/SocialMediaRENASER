@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.content import hashtags, menciones
+from app.modules.content import hashtags, menciones, reposts
 from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import (
@@ -216,6 +216,102 @@ async def _get_active_post(db: AsyncSession, post_id: str) -> Post:
     return post
 
 
+def _filtros_de_contenido(
+    stmt,
+    *,
+    circle_id: str | None,
+    media: str | None,
+    exclude_media: str | None,
+    category: str | None,
+    exclude_category: str | None,
+):
+    """Los criterios del muro que miran a la PUBLICACION, no a quien la firma.
+
+    Se sacaron a una funcion cuando el muro empezo a mezclar republicaciones:
+    las dos corrientes tienen que aplicar exactamente los mismos, o el muro
+    ensenaria por la puerta de atras lo que echo por la principal. El caso
+    concreto es `exclude_media=audio`: los audios son episodios del podcast y
+    no van al muro, asi que la republicacion de un audio tampoco.
+
+    Lo que NO esta aqui es deliberado. Quien firma —el bloqueo, `following` y
+    `author_id`— significa una persona distinta en cada corriente: en una es el
+    autor y en la otra quien republica. Compartirlo seria justo el error.
+    """
+    stmt = stmt.where(Post.status == "published")
+
+    if circle_id:
+        ensure_uuid(circle_id, "Círculo no encontrado.")
+        stmt = stmt.where(Post.circle_id == circle_id)
+
+    if media:
+        with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
+        stmt = stmt.where(Post.id.in_(with_media))
+
+    if category:
+        stmt = stmt.where(Post.category == category)
+
+    if exclude_category:
+        # El audio privado es un audio con categoria reservada: se pide aparte
+        # y no debe colarse en la lista de episodios del podcast.
+        stmt = stmt.where(
+            (Post.category.is_(None)) | (Post.category != exclude_category)
+        )
+
+    if exclude_media:
+        # El feed de Inicio excluye los audios: son episodios del podcast y
+        # tienen su propia seccion, no deben repetirse en el muro.
+        of_type = select(PostMedia.post_id).where(PostMedia.media_type == exclude_media)
+        stmt = stmt.where(Post.id.not_in(of_type))
+    return stmt
+
+
+async def _hidratar_publicaciones(
+    db: AsyncSession, post_ids: list[str], uid: str | None
+) -> dict[str, PostRead]:
+    """Arma publicaciones enteras a partir de una lista de ids.
+
+    Contadores, medios, temas, etiquetas y menciones de TODO el lote, en un
+    numero fijo de consultas. Es la mitad de `list_posts` que no decide el
+    orden, sacada aparte porque hay dos sitios donde el orden lo decide otra
+    cosa: el muro cuando mezcla republicaciones, y la pestana de
+    republicaciones de un perfil.
+
+    ANTES DE ESTO la lista de republicaciones pasaba `0, 0, 0, 0` a mano. Una
+    publicacion con cuarenta me gusta salia con cero en cuanto alguien la
+    compartia, y el corazon aparecia apagado aunque estuviera dado: el dato
+    estaba en la base, simplemente no se pedia.
+
+    Devuelve un diccionario, no una lista: quien llama ya tiene su orden y ademas
+    puede necesitar la misma publicacion dos veces (el original y la
+    republicacion de alguien). Por eso hay que COPIAR antes de tocar cada
+    ocurrencia; si no, ponerle la cabecera a una se la pondria a las dos.
+    """
+    if not post_ids:
+        return {}
+    unicos = list(dict.fromkeys(post_ids))
+    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
+    filas = (
+        await db.execute(
+            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+            .join(Profile, Profile.id == Post.author_id)
+            .where(Post.id.in_(unicos))
+        )
+    ).all()
+    presentes = [fila[0].id for fila in filas]
+    medios = await _load_media_map(db, presentes)
+    temas, etiquetas, personas = await _etiquetas_del_lote(db, presentes)
+    return {
+        fila[0].id: _to_post_read(
+            *fila,
+            media=medios.get(fila[0].id, []),
+            topic_ids=temas.get(fila[0].id, []),
+            hashtags=etiquetas.get(fila[0].id, []),
+            mentions=personas.get(fila[0].id, []),
+        )
+        for fila in filas
+    }
+
+
 async def _likes_count(db: AsyncSession, post_id: str) -> int:
     value = await db.scalar(
         select(func.count()).select_from(PostLike).where(PostLike.post_id == post_id)
@@ -242,6 +338,11 @@ async def list_posts(
     # recorrer y descartar filas. Si llega, tiene prioridad sobre `offset`.
     before_created_at: str | None = Query(default=None),
     before_id: str | None = Query(default=None),
+    # Republicaciones mezcladas en el muro. Apagado por defecto A PROPOSITO:
+    # este endpoint sirve tambien la galeria de un perfil, un circulo y el feed
+    # de video, y en ninguno de esos sitios una republicacion significa lo
+    # mismo. Quien las quiere, las pide.
+    with_reposts: bool = Query(default=False),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -261,16 +362,9 @@ async def list_posts(
     quedarse en 12 y el scroll infinito pediria de mas.
     """
     uid = current_user.id if current_user else None
-    likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
-    stmt = (
-        select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
-        .join(Profile, Profile.id == Post.author_id)
-        .where(Post.status == "published")
-        # Desempate por id: dos publicaciones pueden compartir instante y sin
-        # un orden total el cursor podria saltarse una o repetirla.
-        .order_by(Post.created_at.desc(), Post.id.desc())
-        .limit(page.limit)
-    )
+
+    # El cursor se interpreta UNA vez: lo usan las dos corrientes.
+    cursor_at: datetime | None = None
     if before_created_at:
         try:
             cursor_at = datetime.fromisoformat(before_created_at.replace("Z", "+00:00"))
@@ -278,72 +372,174 @@ async def list_posts(
             raise ValidationAppError("Cursor de paginacion no valido.")
         if before_id:
             ensure_uuid(before_id, "Cursor de paginacion no valido.")
-            stmt = stmt.where(
-                (Post.created_at < cursor_at)
-                | ((Post.created_at == cursor_at) & (Post.id < before_id))
-            )
-        else:
-            stmt = stmt.where(Post.created_at < cursor_at)
-    else:
-        stmt = stmt.offset(page.offset)
-    # Bloquear tiene que servir de algo: sin esto la persona bloqueada seguiria
-    # apareciendo en el muro. Se filtra en la consulta, igual que el resto de
-    # criterios, para no descuadrar la paginacion.
-    #
-    # El corte va en los dos sentidos: no se ve a quien has bloqueado, y tampoco
-    # a quien te ha bloqueado a ti. Si solo se cortara en un sentido, bastaria
-    # con que la otra persona no te bloqueara para seguir leyendote.
-    if uid:
-        stmt = stmt.where(Post.author_id.not_in(blocked_either_way(uid)))
-    if feed == "following":
-        if not uid:
-            return []
-        followed = select(Follow.following_id).where(Follow.follower_id == uid)
-        stmt = stmt.where(Post.author_id.in_(followed))
-
     if author_id:
         # Un id con otro formato llegaria a Postgres y reventaria la consulta.
         ensure_uuid(author_id, "Perfil no encontrado.")
-        stmt = stmt.where(Post.author_id == author_id)
 
-    if circle_id:
-        ensure_uuid(circle_id, "Círculo no encontrado.")
-        stmt = stmt.where(Post.circle_id == circle_id)
-
-    if media:
-        with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
-        stmt = stmt.where(Post.id.in_(with_media))
-
-    if category:
-        stmt = stmt.where(Post.category == category)
-
-    if exclude_category:
-        # El audio privado es un audio con categoria reservada: se pide aparte
-        # y no debe colarse en la lista de episodios del podcast.
-        stmt = stmt.where(
-            (Post.category.is_(None)) | (Post.category != exclude_category)
+    def filtro_de_contenido(stmt):
+        return _filtros_de_contenido(
+            stmt,
+            circle_id=circle_id,
+            media=media,
+            exclude_media=exclude_media,
+            category=category,
+            exclude_category=exclude_category,
         )
 
-    if exclude_media:
-        # El feed de Inicio excluye los audios: son episodios del podcast y
-        # tienen su propia seccion, no deben repetirse en el muro.
-        of_type = select(PostMedia.post_id).where(PostMedia.media_type == exclude_media)
-        stmt = stmt.where(Post.id.not_in(of_type))
-    rows = (await db.execute(stmt)).all()
-    ids = [row[0].id for row in rows]
-    media_map = await _load_media_map(db, ids)
-    # Una consulta por cosa para el lote entero, no una por publicacion.
-    temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
-    return [
-        _to_post_read(
-            *row,
-            media=media_map.get(row[0].id, []),
-            topic_ids=temas.get(row[0].id, []),
-            hashtags=etiquetas.get(row[0].id, []),
-            mentions=personas.get(row[0].id, []),
+    def filtro_de_autoria(stmt):
+        """Quien firma la publicacion: bloqueos, «siguiendo» y el perfil pedido.
+
+        Aparte de `filtro_de_contenido` porque en la corriente de
+        republicaciones «quien firma» es OTRA persona —quien comparte— y estos
+        mismos criterios se aplican alli sobre ella.
+        """
+        # Bloquear tiene que servir de algo: sin esto la persona bloqueada
+        # seguiria apareciendo en el muro. Se filtra en la consulta, igual que
+        # el resto de criterios, para no descuadrar la paginacion.
+        #
+        # El corte va en los dos sentidos: no se ve a quien has bloqueado, y
+        # tampoco a quien te ha bloqueado a ti. Si solo se cortara en un
+        # sentido, bastaria con que la otra persona no te bloqueara para seguir
+        # leyendote.
+        if uid:
+            stmt = stmt.where(Post.author_id.not_in(blocked_either_way(uid)))
+        if feed == "following":
+            seguidos = select(Follow.following_id).where(Follow.follower_id == uid)
+            stmt = stmt.where(Post.author_id.in_(seguidos))
+        if author_id:
+            stmt = stmt.where(Post.author_id == author_id)
+        return stmt
+
+    def filtro_de_cursor(stmt, columna_fecha, columna_id):
+        if cursor_at is None:
+            return stmt
+        # Desempate por id: dos publicaciones pueden compartir instante y sin un
+        # orden total el cursor podria saltarse una o repetirla.
+        if before_id:
+            return stmt.where(
+                (columna_fecha < cursor_at)
+                | ((columna_fecha == cursor_at) & (columna_id < before_id))
+            )
+        return stmt.where(columna_fecha < cursor_at)
+
+    if feed == "following" and not uid:
+        return []
+
+    # ----------------------------------------------------------------- #
+    # Camino de siempre: solo publicaciones, en UNA consulta.
+    # ----------------------------------------------------------------- #
+    if not with_reposts:
+        likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
+        stmt = (
+            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+            .join(Profile, Profile.id == Post.author_id)
+            .order_by(Post.created_at.desc(), Post.id.desc())
+            .limit(page.limit)
         )
-        for row in rows
+        stmt = filtro_de_contenido(stmt)
+        stmt = filtro_de_autoria(stmt)
+        stmt = filtro_de_cursor(stmt, Post.created_at, Post.id)
+        if cursor_at is None:
+            stmt = stmt.offset(page.offset)
+        rows = (await db.execute(stmt)).all()
+        ids = [row[0].id for row in rows]
+        media_map = await _load_media_map(db, ids)
+        # Una consulta por cosa para el lote entero, no una por publicacion.
+        temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
+        salida = [
+            _to_post_read(
+                *row,
+                media=media_map.get(row[0].id, []),
+                topic_ids=temas.get(row[0].id, []),
+                hashtags=etiquetas.get(row[0].id, []),
+                mentions=personas.get(row[0].id, []),
+            )
+            for row in rows
+        ]
+        # Cuantas veces se republico cada una, y si fui yo. Se anota DESPUES en
+        # vez de meterlo en la consulta de arriba: esa esta ajustada al indice y
+        # paginada por cursor, y el dato vive en otra tabla que ademas puede no
+        # existir todavia (migracion 0042).
+        await reposts.anotar(db, salida, uid)
+        return salida
+
+    # ----------------------------------------------------------------- #
+    # Muro con republicaciones: dos corrientes, un solo orden.
+    # ----------------------------------------------------------------- #
+    #
+    # Se piden primero las CLAVES —fecha e id de lo que ordena— de cada
+    # corriente, se mezclan, y solo despues se trae el contenido de las que
+    # entran en la pagina. Traer el contenido de las dos corrientes enteras para
+    # tirar la mitad seria pagar dos veces por lo mismo.
+    #
+    # POR QUE SE PIDEN `offset + limit` DE CADA UNA. El elemento numero N de la
+    # mezcla sale de una de las dos, asi que los N primeros de la mezcla estan
+    # todos entre los N primeros de A y los N primeros de B. Pedir menos podria
+    # saltarse elementos cuando una corriente domina a la otra. Son dos columnas
+    # por fila y el indice ya las tiene ordenadas: el coste es un recorrido de
+    # indice, no de tabla.
+    cuantas = page.limit if cursor_at is not None else page.offset + page.limit
+
+    claves_stmt = (
+        select(Post.created_at, Post.id)
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .limit(cuantas)
+    )
+    claves_stmt = filtro_de_contenido(claves_stmt)
+    claves_stmt = filtro_de_autoria(claves_stmt)
+    claves_stmt = filtro_de_cursor(claves_stmt, Post.created_at, Post.id)
+    propias = [
+        reposts.ClaveDeFeed(orden_at=creado, orden_id=pid, post_id=pid, repost_id="")
+        for creado, pid in (await db.execute(claves_stmt)).all()
     ]
+
+    republicadas = await reposts.claves_del_feed(
+        db,
+        uid=uid,
+        feed=feed,
+        author_id=author_id,
+        cuantas=cuantas,
+        cursor_at=cursor_at,
+        cursor_id=before_id,
+        filtro_de_contenido=filtro_de_contenido,
+    )
+
+    mezcla = sorted(
+        propias + republicadas, key=lambda c: (c.orden_at, c.orden_id), reverse=True
+    )
+    pagina = (
+        mezcla[: page.limit]
+        if cursor_at is not None
+        else mezcla[page.offset : page.offset + page.limit]
+    )
+    if not pagina:
+        return []
+
+    publicaciones = await _hidratar_publicaciones(
+        db, [clave.post_id for clave in pagina], uid
+    )
+    cabeceras = await reposts.detalles(
+        db, [clave.repost_id for clave in pagina if clave.repost_id]
+    )
+
+    salida = []
+    for clave in pagina:
+        lectura = publicaciones.get(clave.post_id)
+        if lectura is None:
+            # La publicacion desaparecio entre la consulta de claves y esta. Se
+            # omite en vez de devolver un hueco.
+            continue
+        # Copia: la misma publicacion puede salir dos veces —el original y la
+        # republicacion de alguien— y son objetos distintos en la respuesta.
+        lectura = lectura.model_copy(deep=True)
+        if clave.repost_id:
+            cabecera = cabeceras.get(clave.repost_id)
+            if cabecera is None:
+                continue
+            lectura.repost = cabecera
+        salida.append(lectura)
+    await reposts.anotar(db, salida, uid)
+    return salida
 
 
 @router.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
@@ -380,15 +576,22 @@ async def create_post(
     nuevas_menciones = await menciones.fijar(
         db, post.id, current_user.id, payload.mentioned_user_ids
     )
+    # Se avisa a quien de verdad ha estrenado aviso. `add_notification` devuelve
+    # False cuando ya habia uno igual —misma persona, misma publicacion— y en
+    # ese caso mandar el push haria sonar el telefono por algo que ya estaba en
+    # la bandeja.
+    avisados: list[str] = []
     for mencionado in nuevas_menciones:
-        add_notification(
+        if await add_notification(
             db,
             user_id=mencionado,
             actor_id=current_user.id,
             type="post_mention",
             entity_type="post",
             entity_id=post.id,
-        )
+        ):
+            avisados.append(mencionado)
+    nuevas_menciones = avisados
 
     await db.commit()
     await db.refresh(post)
@@ -600,15 +803,19 @@ async def update_post(
         nuevas_menciones = await menciones.fijar(
             db, post_id, current_user.id, payload.mentioned_user_ids
         )
+        # Igual que al crear: solo suena el telefono de quien estrena aviso.
+        avisados: list[str] = []
         for mencionado in nuevas_menciones:
-            add_notification(
+            if await add_notification(
                 db,
                 user_id=mencionado,
                 actor_id=current_user.id,
                 type="post_mention",
                 entity_type="post",
                 entity_id=post_id,
-            )
+            ):
+                avisados.append(mencionado)
+        nuevas_menciones = avisados
 
     # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
     # lista vacia equivale a quitarlo).
@@ -750,7 +957,11 @@ async def like_post(
     existing = await db.get(PostLike, {"post_id": post_id, "user_id": current_user.id})
     if existing is None:
         db.add(PostLike(post_id=post_id, user_id=current_user.id))
-        add_notification(
+        # Quitar y volver a poner el «me gusta» dejaba DOS filas en la bandeja:
+        # `post_likes` se borra al retirarlo, asi que este `if` volvia a decir
+        # que era la primera vez. Ahora el aviso es idempotente por (persona,
+        # publicacion) y solo se manda push si de verdad se ha estrenado.
+        estrenado = await add_notification(
             db,
             user_id=post.author_id,
             actor_id=current_user.id,
@@ -767,14 +978,15 @@ async def like_post(
         # porque aqui no hace falta la fila entera: solo el nombre. Y que sea
         # el mismo helper que en los avisos de mencion evita que este sitio
         # vuelva a divergir, que es justo como empezo el fallo.
-        actor = await _nombre_del_actor(db, current_user.id)
-        encolar_push(
-            background,
-            user_ids=[post.author_id],
-            notification_type="like",
-            actor_name=actor,
-            data={"type": "like", "postId": post_id},
-        )
+        if estrenado:
+            actor = await _nombre_del_actor(db, current_user.id)
+            encolar_push(
+                background,
+                user_ids=[post.author_id],
+                notification_type="like",
+                actor_name=actor,
+                data={"type": "like", "postId": post_id},
+            )
     return {"liked": True, "likes_count": await _likes_count(db, post_id)}
 
 
@@ -1060,7 +1272,10 @@ async def create_comment(
         body=payload.body,
     )
     db.add(comment)
-    add_notification(
+    # Un comentario NO se deduplica: dos comentarios de la misma persona en la
+    # misma publicacion son dos cosas distintas que han pasado. Ver
+    # `TIPOS_IDEMPOTENTES` en `notifications/service.py`.
+    await add_notification(
         db,
         user_id=post.author_id,
         actor_id=current_user.id,

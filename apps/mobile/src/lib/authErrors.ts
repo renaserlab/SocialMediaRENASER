@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * Traduccion de los fallos de Supabase Auth a lenguaje de persona.
  *
@@ -16,14 +18,77 @@
  * comprobador de quien esta registrado en la aplicacion.
  */
 
+/**
+ * Cómo se traduce lo que sale de aquí.
+ *
+ * Lo pasa la pantalla, que es React y tiene `useTranslation`. Este módulo NO
+ * puede importar el diccionario: se prueba con el runner de Node, que no
+ * resuelve el alias `@/`, y un import de valor dejaría la prueba sin arrancar.
+ * Sin traductor se escribe en español, que es el idioma de referencia.
+ */
+export type TraductorDeAuth = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave.
+ *
+ * Es el mismo texto que hay en `i18n/es.ts`, y que no se desvíen lo comprueba
+ * `i18n/diccionariosSincronizados.test.mts`: si alguien cambia uno y olvida el
+ * otro, esa prueba falla.
+ */
+export const RESPALDOS_ES = {
+  'authError.defaultRecovery': 'No pudimos enviar el correo de recuperación. Inténtalo de nuevo.',
+  'authError.defaultNewPassword': 'No pudimos guardar tu contraseña nueva. Inténtalo de nuevo.',
+  'authError.defaultSignIn': 'No pudimos iniciar sesión. Inténtalo de nuevo.',
+  'authError.defaultSignUp': 'No pudimos crear tu cuenta. Inténtalo de nuevo.',
+  'authError.offline': 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
+  'authError.waitSeconds':
+    'Acabamos de enviarte un correo. Espera {segundos} segundos antes de pedir otro.',
+  'authError.tooManyAttempts': 'Has hecho demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
+  'authError.linkExpired': 'El enlace de recuperación ha caducado. Solicita uno nuevo.',
+  'authError.sessionLost':
+    'Tu enlace de recuperación ha caducado. Pide uno nuevo para crear tu contraseña.',
+  'authError.samePassword': 'La contraseña nueva debe ser distinta de la anterior.',
+  'authError.weakPassword': 'La contraseña es demasiado corta. Usa al menos 6 caracteres.',
+  'authError.pwnedPassword': 'Esa contraseña aparece en filtraciones conocidas. Elige otra distinta.',
+  'authError.invalidEmail': 'Ese correo no parece válido. Revísalo e inténtalo de nuevo.',
+  'authError.badCredentials': 'Correo o contraseña incorrectos.',
+  'authError.emailNotConfirmed':
+    'Todavía no has confirmado tu correo. Busca el mensaje de bienvenida y pulsa el enlace.',
+  'authError.emailTaken': 'Ese correo ya tiene una cuenta. Inicia sesión o recupera tu contraseña.',
+  'authError.banned': 'Esta cuenta está suspendida. Escríbenos si crees que es un error.',
+  'authError.signupDisabled': 'El registro no está disponible en este momento. Inténtalo más tarde.',
+  'authError.mailFailedRecovery':
+    'No pudimos enviar el correo de recuperación ahora mismo. Inténtalo de nuevo en unos minutos.',
+  'authError.mailFailed': 'No pudimos enviar el correo. Inténtalo de nuevo en unos minutos.',
+  'authError.serviceDown': 'El servicio no está disponible ahora mismo. Inténtalo de nuevo en unos minutos.',
+} as const;
+
+/** El respaldo en español, con sus huecos ya sustituidos. */
+const enEspanol: TraductorDeAuth = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? clave;
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
+
 /** Desde donde se pregunta; cambia el mensaje por defecto. */
 export type ContextoAuth = 'recuperacion' | 'nueva-contrasena' | 'acceso' | 'registro';
 
-const POR_DEFECTO: Record<ContextoAuth, string> = {
-  recuperacion: 'No pudimos enviar el correo de recuperación. Inténtalo de nuevo.',
-  'nueva-contrasena': 'No pudimos guardar tu contraseña nueva. Inténtalo de nuevo.',
-  acceso: 'No pudimos iniciar sesión. Inténtalo de nuevo.',
-  registro: 'No pudimos crear tu cuenta. Inténtalo de nuevo.',
+/*
+  Los textos viven en el diccionario, no aqui: son de los que mas se leen —basta
+  con equivocarse de contraseña— y en ingles o portugues tienen que leerse en
+  ingles o en portugues. Aqui se guardan las CLAVES; el idioma lo pone
+  `traduceEnElIdiomaActual`, que es la unica forma de traducir fuera de React.
+*/
+const POR_DEFECTO: Record<ContextoAuth, TranslationKey> = {
+  recuperacion: 'authError.defaultRecovery',
+  'nueva-contrasena': 'authError.defaultNewPassword',
+  acceso: 'authError.defaultSignIn',
+  registro: 'authError.defaultSignUp',
 };
 
 type DatosDeError = { message: string; code: string; status: number; nombre: string };
@@ -56,8 +121,13 @@ function registrar(contexto: ContextoAuth, error: unknown): void {
 /**
  * Mensaje para la pantalla. Nunca devuelve el texto original de Supabase.
  */
-export function mensajeDeAuth(error: unknown, contexto: ContextoAuth): string {
+export function mensajeDeAuth(
+  error: unknown,
+  contexto: ContextoAuth,
+  traducir?: TraductorDeAuth,
+): string {
   registrar(contexto, error);
+  const t = traducir ?? enEspanol;
 
   const { message, code, status, nombre } = leerError(error);
   const texto = `${code} ${message}`;
@@ -79,7 +149,7 @@ export function mensajeDeAuth(error: unknown, contexto: ContextoAuth): string {
     (nombre === 'AuthRetryableFetchError' && status === 0) ||
     /failed to fetch|network request failed|networkerror|load failed/i.test(texto);
   if (fallaLaConexion) {
-    return 'Sin conexión. Revisa tu internet e inténtalo de nuevo.';
+    return t('authError.offline');
   }
 
   // --- Demasiados intentos. ---
@@ -92,14 +162,14 @@ export function mensajeDeAuth(error: unknown, contexto: ContextoAuth): string {
     */
     const segundos = message.match(/after (\d+) seconds?/i)?.[1];
     if (segundos) {
-      return `Acabamos de enviarte un correo. Espera ${segundos} segundos antes de pedir otro.`;
+      return t('authError.waitSeconds', { segundos });
     }
-    return 'Has hecho demasiados intentos. Espera unos minutos e inténtalo de nuevo.';
+    return t('authError.tooManyAttempts');
   }
 
   // --- El enlace del correo ya no sirve. ---
   if (/otp_expired|expired|access_denied/i.test(texto)) {
-    return 'El enlace de recuperación ha caducado. Solicita uno nuevo.';
+    return t('authError.linkExpired');
   }
 
   // --- La sesion de recuperacion se perdio por el camino. ---
@@ -107,47 +177,47 @@ export function mensajeDeAuth(error: unknown, contexto: ContextoAuth): string {
     nombre === 'AuthSessionMissingError' ||
     /session.?(not.?found|missing)|missing sub claim|jwt expired|invalid.?claim/i.test(texto)
   ) {
-    return 'Tu enlace de recuperación ha caducado. Pide uno nuevo para crear tu contraseña.';
+    return t('authError.sessionLost');
   }
 
   // --- Contrasena nueva rechazada. ---
   if (/same_password|should be different from the old/i.test(texto)) {
-    return 'La contraseña nueva debe ser distinta de la anterior.';
+    return t('authError.samePassword');
   }
   if (/weak_password|password should be at least|password is too short/i.test(texto)) {
-    return 'La contraseña es demasiado corta. Usa al menos 6 caracteres.';
+    return t('authError.weakPassword');
   }
   if (/pwned|compromised/i.test(texto)) {
-    return 'Esa contraseña aparece en filtraciones conocidas. Elige otra distinta.';
+    return t('authError.pwnedPassword');
   }
 
   // --- Correo mal escrito. ---
   if (/validation_failed|unable to validate email|invalid format/i.test(texto)) {
-    return 'Ese correo no parece válido. Revísalo e inténtalo de nuevo.';
+    return t('authError.invalidEmail');
   }
 
   // --- Credenciales de acceso. ---
   if (/invalid_credentials|invalid login credentials|invalid grant/i.test(texto)) {
-    return 'Correo o contraseña incorrectos.';
+    return t('authError.badCredentials');
   }
   if (/email_not_confirmed|email not confirmed/i.test(texto)) {
-    return 'Todavía no has confirmado tu correo. Busca el mensaje de bienvenida y pulsa el enlace.';
+    return t('authError.emailNotConfirmed');
   }
   if (/user_already_exists|email_exists|already registered/i.test(texto)) {
-    return 'Ese correo ya tiene una cuenta. Inicia sesión o recupera tu contraseña.';
+    return t('authError.emailTaken');
   }
   if (/user_banned/i.test(texto)) {
-    return 'Esta cuenta está suspendida. Escríbenos si crees que es un error.';
+    return t('authError.banned');
   }
   if (/signup.?disabled|email_provider_disabled/i.test(texto)) {
-    return 'El registro no está disponible en este momento. Inténtalo más tarde.';
+    return t('authError.signupDisabled');
   }
 
   // --- El correo no llego a salir (SMTP caido o mal configurado). ---
   if (/smtp|error sending|email provider|failed to send/i.test(texto)) {
     return contexto === 'recuperacion'
-      ? 'No pudimos enviar el correo de recuperación ahora mismo. Inténtalo de nuevo en unos minutos.'
-      : 'No pudimos enviar el correo. Inténtalo de nuevo en unos minutos.';
+      ? t('authError.mailFailedRecovery')
+      : t('authError.mailFailed');
   }
 
   /*
@@ -161,10 +231,10 @@ export function mensajeDeAuth(error: unknown, contexto: ContextoAuth): string {
   */
   if (status >= 500) {
     if (contexto === 'recuperacion') {
-      return 'No pudimos enviar el correo de recuperación ahora mismo. Inténtalo de nuevo en unos minutos.';
+      return t('authError.mailFailedRecovery');
     }
-    return 'El servicio no está disponible ahora mismo. Inténtalo de nuevo en unos minutos.';
+    return t('authError.serviceDown');
   }
 
-  return POR_DEFECTO[contexto];
+  return t(POR_DEFECTO[contexto]);
 }

@@ -1,4 +1,4 @@
-"""Que migraciones de mensajeria estan aplicadas en ESTA base (0033 y 0039).
+"""Que migraciones de mensajeria estan aplicadas en ESTA base (0033, 0039 y 0045).
 
 POR QUE EXISTE, y es la misma leccion cara que cuenta
 `app/modules/recommendations/esquema.py`.
@@ -36,9 +36,14 @@ en mitad de una operacion buena.
 QUE PASA HOY, SIN LA 0039: abrir un chat directo funciona igual, pero la
 unicidad de la pareja no esta garantizada por la base. Ver `hay_pares_directos`.
 
-CUANDO SE BORRA ESTE FICHERO. Cuando la 0033 y la 0039 lleven aplicadas el
-tiempo suficiente en todos los entornos. Entonces esto es peso muerto y quitarlo
-es una linea por sitio.
+QUE PASA HOY, SIN LA 0045: la bandeja funciona exactamente igual, porque las
+etiquetas del CRM son una capa ENCIMA de las conversaciones y no una parte de
+ellas. Listar etiquetas devuelve vacio y crearlas responde 503. Ver
+`hay_etiquetas_de_conversacion`.
+
+CUANDO SE BORRA ESTE FICHERO. Cuando la 0033, la 0039 y la 0045 lleven aplicadas
+el tiempo suficiente en todos los entornos. Entonces esto es peso muerto y
+quitarlo es una linea por sitio.
 """
 
 from __future__ import annotations
@@ -90,6 +95,38 @@ async def hay_pares_directos(db: AsyncSession) -> bool:
                 "veces a la vez todavia puede crear dos conversaciones."
             )
     return _cache["direct_conversation_pairs"]
+
+
+async def hay_etiquetas_de_conversacion(db: AsyncSession) -> bool:
+    """Si existe `conversation_labels` (migracion 0045, el CRM de etiquetas).
+
+    SE PREGUNTA POR UNA SOLA DE LAS DOS TABLAS y no por las dos, porque las dos
+    nacen en la MISMA migracion: si esta una y no la otra, la base esta a medias
+    y eso no es un estado del que este codigo pueda recuperarse degradando. Se
+    elige `conversation_labels` porque es la que se consulta primero en todos
+    los caminos —sin etiquetas no hay asignaciones que mirar—.
+
+    SIN LA 0045: listar etiquetas devuelve `[]` (no hay ninguna, que es la
+    verdad) y crear, renombrar, asignar o quitar responden 503
+    `conversation_labels_not_available`. Nunca un 500: un 500 sin capturar sale
+    por Starlette SIN cabeceras CORS y el navegador lo enseña como un fallo de
+    red, que manda a mirar al sitio equivocado.
+
+    La bandeja, mientras tanto, no se entera de nada: las etiquetas son una capa
+    encima de las conversaciones, asi que la lista, el chat y los adjuntos
+    siguen funcionando igual que hoy.
+    """
+    if "conversation_labels" not in _cache:
+        conexion = await db.connection()
+        _cache["conversation_labels"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("conversation_labels")
+        )
+        if not _cache["conversation_labels"]:
+            logger.warning(
+                "La migracion 0045 no esta aplicada: la bandeja funciona igual, "
+                "pero no se pueden crear ni usar etiquetas de conversacion."
+            )
+    return _cache["conversation_labels"]
 
 
 def olvidar() -> None:

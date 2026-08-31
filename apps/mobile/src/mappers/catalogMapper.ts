@@ -1,3 +1,4 @@
+import { traduceEnElIdiomaActual } from '@/i18n';
 import type { EventItem } from '@/types';
 
 export type EventDto = {
@@ -15,19 +16,30 @@ export type EventDto = {
   capacity: number | null;
   registrations_count: number;
   reserved_by_me: boolean;
+  /**
+   * `upcoming` | `past` | `undated`, resuelto por el servidor contra las
+   * fechas REALES. Opcional porque una API todavía sin desplegar no lo manda.
+   */
+  time_state?: string | null;
 };
 
-const MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-
-/** Texto que ve el usuario cuando el evento aun no tiene fecha. */
-export const DATE_TBD = 'Fecha por confirmar';
+/**
+ * Texto que ve el usuario cuando el evento aun no tiene fecha.
+ *
+ * Es una FUNCION y no una constante porque el idioma se elige mientras la
+ * aplicacion corre: una constante se congelaria con el idioma que hubiera al
+ * cargar el modulo, que es antes de que nadie haya elegido nada.
+ */
+export function dateTbd(): string {
+  return traduceEnElIdiomaActual('event.dateTbd');
+}
 
 function formatEventDate(iso: string | null | undefined): string {
-  if (!iso) return DATE_TBD;
+  if (!iso) return dateTbd();
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return DATE_TBD;
+  if (Number.isNaN(d.getTime())) return dateTbd();
   const day = d.getDate();
-  const month = MONTHS[d.getMonth()] ?? '';
+  const month = traduceEnElIdiomaActual('date.monthsShortUpper').split(',')[d.getMonth()] ?? '';
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return `${day} ${month} ${d.getFullYear()} · ${time}`;
 }
@@ -36,6 +48,23 @@ function mapType(eventType: string): EventItem['type'] {
   if (eventType === 'live') return 'live';
   if (eventType === 'presential') return 'presencial';
   return 'webinar';
+}
+
+/**
+ * Si el evento está por llegar, ya pasó o no tiene fecha.
+ *
+ * LO DECIDE EL SERVIDOR y aquí solo se acepta lo que dice. La alternativa era
+ * comparar aquí `dto.starts_at`, y eso repetiría en el móvil una regla que ya
+ * vive en `catalog/eventos.py` —con `ends_at`, con el límite en «ahora mismo»,
+ * con los dos campos nulos— para que un día las dos digan cosas distintas. Lo
+ * que NUNCA se puede hacer es mirar `date`, que es el texto ya formateado.
+ *
+ * Sin respuesta del servidor se responde `undated`, que es lo único cierto
+ * cuando no se sabe: es el valor que NO afirma ni futuro ni pasado.
+ */
+function mapTimeState(valor: string | null | undefined): EventItem['timeState'] {
+  if (valor === 'upcoming' || valor === 'past' || valor === 'undated') return valor;
+  return 'undated';
 }
 
 export function toEventItem(dto: EventDto): EventItem {
@@ -51,5 +80,6 @@ export function toEventItem(dto: EventDto): EventItem {
     date: formatEventDate(dto.starts_at),
     location: dto.location ?? '',
     type: mapType(dto.event_type),
+    timeState: mapTimeState(dto.time_state),
   };
 }

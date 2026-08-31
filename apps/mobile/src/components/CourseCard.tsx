@@ -8,6 +8,7 @@ import { assets } from '@/data/assets';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Course } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   course: Course;
@@ -24,6 +25,7 @@ type Props = {
  * <button> y anidarlos rompe la hidratacion.
  */
 export function CourseCard({ course, onPress, onEdit }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
 
   return (
@@ -50,7 +52,7 @@ export function CourseCard({ course, onPress, onEdit }: Props) {
             {course.title}
           </Text>
           <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>
-            {course.subtitle || 'Ver programa'}
+            {course.subtitle || t('course.viewProgram')}
           </Text>
         </View>
 

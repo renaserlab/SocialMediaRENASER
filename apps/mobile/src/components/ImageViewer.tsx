@@ -12,6 +12,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
 import { palette, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** El visor es siempre oscuro: lo que importa es la imagen. */
 const media = palette('dark');
@@ -46,6 +47,7 @@ type Props = {
  * Se cierra con la X, tocando fuera o arrastrando hacia abajo.
  */
 export function ImageViewer({ uri, onClose, caption }: Props) {
+  const { t } = useTranslation();
   const escala = useSharedValue(1);
   const escalaBase = useSharedValue(1);
   const x = useSharedValue(0);
@@ -176,7 +178,7 @@ export function ImageViewer({ uri, onClose, caption }: Props) {
           onPress={cerrar}
           hitSlop={12}
           accessibilityRole="button"
-          accessibilityLabel="Cerrar la imagen"
+          accessibilityLabel={t('media.closeImage')}
           style={styles.cerrar}
         >
           <Feather name="x" size={24} color={media.text} />
@@ -191,7 +193,7 @@ export function ImageViewer({ uri, onClose, caption }: Props) {
         ) : null}
 
         <Text variant="secondary" color={media.textMuted} style={styles.ayuda}>
-          Pellizca o toca dos veces para acercar
+          {t('media.pinchToZoom')}
         </Text>
       </GestureHandlerRootView>
     </Modal>

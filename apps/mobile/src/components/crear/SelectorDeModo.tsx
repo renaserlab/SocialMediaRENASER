@@ -9,6 +9,8 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Text } from '@/components/Text';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 import { getFontFamily, palette, spacing } from '@/theme/tokens';
 
 const media = palette('dark');
@@ -18,11 +20,13 @@ const ANCHO = 116;
 
 export type ModoDeCreacion = 'publicacion' | 'historia' | 'reel' | 'vivo';
 
-export const MODOS: Array<{ id: ModoDeCreacion; etiqueta: string }> = [
-  { id: 'publicacion', etiqueta: 'Publicación' },
-  { id: 'historia', etiqueta: 'Historia' },
-  { id: 'reel', etiqueta: 'Reel' },
-  { id: 'vivo', etiqueta: 'Vivo' },
+// La etiqueta se guarda como CLAVE, no como texto: el rotulo se resuelve al
+// pintar, que es cuando se sabe en que idioma esta la aplicacion.
+export const MODOS: Array<{ id: ModoDeCreacion; clave: TranslationKey }> = [
+  { id: 'publicacion', clave: 'create.modePost' },
+  { id: 'historia', clave: 'create.modeStory' },
+  { id: 'reel', clave: 'create.modeReel' },
+  { id: 'vivo', clave: 'create.modeLive' },
 ];
 
 export function posicionDeModo(modo: ModoDeCreacion): number {
@@ -61,6 +65,7 @@ type Props = {
  * que se ve a donde se va antes de soltar.
  */
 export function SelectorDeModo({ activo, alCambiar, arrastre }: Props) {
+  const { t } = useTranslation();
   const indice = useSharedValue(posicionDeModo(activo));
 
   /*
@@ -97,7 +102,8 @@ export function SelectorDeModo({ activo, alCambiar, arrastre }: Props) {
   return (
     <View style={styles.host} pointerEvents="box-none" onLayout={alMedir}>
       <Animated.View style={[styles.fila, estilo]}>
-        {MODOS.map(({ id, etiqueta }) => {
+        {MODOS.map(({ id, clave }) => {
+          const etiqueta = t(clave);
           const seleccionado = id === activo;
           return (
             <Pressable

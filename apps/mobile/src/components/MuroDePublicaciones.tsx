@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, RefreshControl, StyleSheet, View } from 'react-native';
+import { RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { PostCard } from '@/components/PostCard';
 import { Skeleton } from '@/components/Skeleton';
 import { StateView } from '@/components/StateView';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useSeccionActiva } from '@/navigation/foco';
 import { useAppStore } from '@/store/useAppStore';
@@ -84,8 +84,6 @@ export function MuroDePublicaciones({
 }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
-  const keyboardOffset = useKeyboardOffset();
-
   const posts = useAppStore((state) => state.posts);
   const feedStatus = useAppStore((state) => state.feedStatus);
   const feedHasMore = useAppStore((state) => state.feedHasMore);
@@ -258,11 +256,7 @@ export function MuroDePublicaciones({
   return (
     // El comentario inline de PostCard vive dentro de esta lista: el KAV debe
     // estar a nivel de pantalla, nunca dentro del item.
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.select({ ios: 'padding', android: 'height' })}
-      keyboardVerticalOffset={keyboardOffset}
-    >
+    <SinTecladoDelante>
       <FlashList
         data={posts}
         keyExtractor={(item: Post) => item.id}
@@ -305,7 +299,7 @@ export function MuroDePublicaciones({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       />
-    </KeyboardAvoidingView>
+    </SinTecladoDelante>
   );
 }
 

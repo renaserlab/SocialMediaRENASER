@@ -18,6 +18,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { pedirDestacados } from '@/services/cachePerfil';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Sugerencias tras crear la cuenta. Sin esto el usuario nuevo entraba a un feed
@@ -25,6 +26,7 @@ import { pedirDestacados } from '@/services/cachePerfil';
  * momento.
  */
 export function MembersScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -64,7 +66,7 @@ export function MembersScreen() {
 
   const toggleFollow = async (member: FeaturedMember) => {
     let autorizado = false;
-    await requireAuth('para seguir a esta persona', () => {
+    await requireAuth('auth.reasonFollow', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -108,10 +110,10 @@ export function MembersScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppScreen contentStyle={styles.content}>
         <Text variant="title" weight="900" style={styles.title}>
-          Miembros RENASER
+          {t('members.title')}
         </Text>
         <Text variant="body" color={colors.textMuted} style={styles.subtitle}>
-          Sigue a estos perfiles para que tu espacio tenga contenido desde el primer día.
+          {t('members.subtitle')}
         </Text>
 
         {state === 'loading' && (
@@ -123,16 +125,16 @@ export function MembersScreen() {
         {state === 'error' && (
           <View style={styles.center}>
             <Text variant="body" color={colors.textMuted} style={styles.centerText}>
-              No pudimos cargar las sugerencias.
+              {t('members.loadFailed')}
             </Text>
-            <Button label="Reintentar" variant="secondary" onPress={load} />
+            <Button label={t('common.retry')} variant="secondary" onPress={load} />
           </View>
         )}
 
         {state === 'idle' && members.length === 0 && (
           <View style={styles.center}>
             <Text variant="body" color={colors.textMuted} style={styles.centerText}>
-              Aún no hay miembros destacados.
+              {t('members.empty')}
             </Text>
           </View>
         )}
@@ -146,7 +148,7 @@ export function MembersScreen() {
               <Pressable
                 onPress={() => irAlPerfil(router, member.id)}
                 accessibilityRole="button"
-                accessibilityLabel={`Ver perfil de ${member.fullName}`}
+                accessibilityLabel={t('post.viewProfileOf', { nombre: member.fullName })}
                 style={styles.avatarWrap}
               >
                 <ExpoImage
@@ -178,19 +180,19 @@ export function MembersScreen() {
                 </Text>
               ) : null}
               <Text variant="secondary" color={colors.textMuted} style={styles.stats}>
-                {member.followers} seguidores · {member.posts} publicaciones
+                {t('members.stats', { seguidores: member.followers, publicaciones: member.posts })}
               </Text>
 
               <View style={styles.actions}>
                 <Button
-                  label={member.isFollowing ? 'Siguiendo' : 'Seguir'}
+                  label={member.isFollowing ? t('profile.unfollow') : t('profile.follow')}
                   variant={member.isFollowing ? 'secondary' : 'primary'}
                   loading={busyId === member.id}
                   onPress={() => toggleFollow(member)}
                   style={styles.action}
                 />
                 <Button
-                  label="Ver perfil"
+                  label={t('members.viewProfile')}
                   variant="secondary"
                   onPress={() => irAlPerfil(router, member.id)}
                   style={styles.action}
@@ -200,7 +202,7 @@ export function MembersScreen() {
           ))}
 
         <Button
-          label={followingSomeone ? 'Continuar' : 'Ahora no'}
+          label={followingSomeone ? t('language.continue') : t('common.notNow')}
           variant={followingSomeone ? 'primary' : 'ghost'}
           onPress={finish}
           style={styles.finish}

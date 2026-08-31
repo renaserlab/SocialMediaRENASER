@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
@@ -10,7 +11,6 @@ import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { PostRepository } from '@/repositories/PostRepository';
 import {
   pickAudio,
@@ -24,6 +24,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Edicion de una publicacion propia: texto y adjunto.
@@ -35,9 +36,9 @@ import type { Post } from '@/types';
 type MediaChange = null | 'remove' | PickedMedia;
 
 export function EditPostScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const posts = useAppStore((state) => state.posts);
@@ -101,14 +102,14 @@ export function EditPostScreen() {
         kind === 'image' ? await pickImage() : kind === 'video' ? await pickVideo() : await pickAudio();
       if (picked) setMedia(picked);
     } catch {
-      setError('No se pudo abrir el selector.');
+      setError(t('editPost.pickerFailed'));
     }
   };
 
   const save = async () => {
     if (!post) return;
     if (!text.trim()) {
-      setError('La publicación no puede quedarse vacía.');
+      setError(t('editPost.emptyPost'));
       return;
     }
     setSaving(true);
@@ -151,7 +152,7 @@ export function EditPostScreen() {
       setPosts(posts.map((p) => (p.id === updated.id ? updated : p)));
       router.back();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar.');
+      setError(err instanceof Error ? err.message : t('editPost.saveFailed'));
     } finally {
       setSaving(false);
       setPhase(null);
@@ -161,7 +162,7 @@ export function EditPostScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Editar publicación" back />
+        <AppHeader title={t('post.editTitle')} back />
         <StateView state="loading" />
       </View>
     );
@@ -170,8 +171,8 @@ export function EditPostScreen() {
   if (!post) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Editar publicación" back />
-        <StateView state="empty" title="Publicación no encontrada" />
+        <AppHeader title={t('post.editTitle')} back />
+        <StateView state="empty" title={t('editPost.notFound')} />
       </View>
     );
   }
@@ -180,12 +181,8 @@ export function EditPostScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Editar publicación" back />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <AppHeader title={t('post.editTitle')} back />
+      <SinTecladoDelante>
         <AppScreen contentStyle={{ padding: spacing.lg, paddingBottom: 100 }}>
           <View style={[styles.editor, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <TextInput
@@ -195,16 +192,28 @@ export function EditPostScreen() {
               maxLength={700}
               textAlignVertical="top"
               style={[styles.input, { color: colors.text }]}
-              accessibilityLabel="Texto de la publicación"
+              accessibilityLabel={t('create.postDescription')}
             />
             <View style={styles.mediaRow}>
-              <Pressable onPress={() => choose('image')} hitSlop={8} accessibilityLabel="Cambiar por imagen">
+              <Pressable
+                onPress={() => choose('image')}
+                hitSlop={8}
+                accessibilityLabel={t('editPost.swapImage')}
+              >
                 <Feather name="image" size={20} color={colors.textMuted} />
               </Pressable>
-              <Pressable onPress={() => choose('video')} hitSlop={8} accessibilityLabel="Cambiar por video">
+              <Pressable
+                onPress={() => choose('video')}
+                hitSlop={8}
+                accessibilityLabel={t('editPost.swapVideo')}
+              >
                 <Feather name="video" size={20} color={colors.textMuted} />
               </Pressable>
-              <Pressable onPress={() => choose('audio')} hitSlop={8} accessibilityLabel="Cambiar por audio">
+              <Pressable
+                onPress={() => choose('audio')}
+                hitSlop={8}
+                accessibilityLabel={t('editPost.swapAudio')}
+              >
                 <Feather name="mic" size={20} color={colors.textMuted} />
               </Pressable>
             </View>
@@ -220,10 +229,14 @@ export function EditPostScreen() {
               ) : (
                 <View style={[styles.audioRow, { borderColor: colors.border }]}>
                   <Feather name="music" size={20} color={colors.text} />
-                  <Text style={{ color: colors.text }}>{media.name ?? 'Audio seleccionado'}</Text>
+                  <Text style={{ color: colors.text }}>{media.name ?? t('editPost.audioPicked')}</Text>
                 </View>
               )}
-              <Pressable onPress={() => setMedia(null)} style={styles.removeBtn} accessibilityLabel="Descartar cambio">
+              <Pressable
+                onPress={() => setMedia(null)}
+                style={styles.removeBtn}
+                accessibilityLabel={t('editPost.discardChange')}
+              >
                 <Feather name="x" size={16} color="#FFFFFF" />
               </Pressable>
             </View>
@@ -237,14 +250,14 @@ export function EditPostScreen() {
               <Pressable
                 onPress={() => setMedia('remove')}
                 style={styles.removeBtn}
-                accessibilityLabel="Quitar adjunto"
+                accessibilityLabel={t('editPost.removeAttachment')}
               >
                 <Feather name="trash-2" size={15} color="#FFFFFF" />
               </Pressable>
             </View>
           ) : media === 'remove' ? (
             <Text style={[styles.removedNote, { color: colors.textMuted }]}>
-              El adjunto se quitará al guardar.
+              {t('editPost.attachmentWillGo')}
             </Text>
           ) : null}
 
@@ -272,13 +285,19 @@ export function EditPostScreen() {
           ) : null}
 
           <Button
-            label={phase === 'compressing' ? 'Optimizando…' : phase === 'uploading' ? 'Subiendo…' : 'Guardar cambios'}
+            label={
+              phase === 'compressing'
+                ? t('editPost.optimizing')
+                : phase === 'uploading'
+                  ? t('editPost.uploading')
+                  : t('common.saveChanges')
+            }
             onPress={() => void save()}
             loading={saving}
             disabled={!text.trim()}
           />
         </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

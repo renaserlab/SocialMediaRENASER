@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -12,6 +14,7 @@ type BottomSheetProps = {
 
 export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   /**
    * En web el Modal marca el resto de la pagina como `aria-hidden`. Si el boton
@@ -32,7 +35,13 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.modalContainer}>
+      {/*
+        La hoja esta PEGADA al borde inferior, que es exactamente donde aparece
+        el teclado: sin esto, cualquier campo de dentro —escribir una resena, un
+        testimonio, el titulo de una leccion— quedaba tapado en cuanto se tocaba.
+        Se resuelve aqui, en la hoja compartida, y no en cada formulario.
+      */}
+      <SinTecladoDelante style={styles.modalContainer}>
         {/* Overlay backdrop */}
         <Pressable
           style={[styles.backdrop, { backgroundColor: colors.overlay }]}
@@ -48,17 +57,41 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
             {
               backgroundColor: colors.surface,
               borderColor: colors.border,
+              /*
+                La zona segura del aparato, no un numero fijo. Con
+                `spacing.xxl` a secas el ultimo boton de la hoja quedaba sobre
+                el indicador de inicio del iPhone.
+              */
+              paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.md,
             },
           ]}
         >
           {/* Handle bar */}
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
-          <View style={styles.content}>
+          {/*
+            LA HOJA SE DESPLAZA. Antes era un `View` dentro de un contenedor con
+            `maxHeight: '80%'`: cuando el contenido no cabia —el formulario de
+            una leccion son siete controles, uno de ellos multilinea— se
+            RECORTABA por abajo, y lo que se perdia era justo lo ultimo, que es
+            siempre el boton de guardar. No estaba tapado: es que no habia forma
+            de llegar a el.
+
+            `flexShrink` y no `flex`: sin contenido de sobra la hoja sigue
+            midiendo lo que mide su contenido —que es lo que la hace sentir
+            ligera— y solo cuando se pasa del tope empieza a encogerse y a
+            desplazarse.
+          */}
+          <ScrollView
+            style={styles.contentScroll}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             {children}
-          </View>
+          </ScrollView>
         </View>
-      </View>
+      </SinTecladoDelante>
     </Modal>
   );
 }
@@ -75,11 +108,12 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     borderTopWidth: 1,
-    paddingBottom: spacing.xxl,
+    // `paddingBottom` lo pone el componente: sale de la zona segura.
     paddingTop: spacing.sm,
     alignItems: 'stretch',
     maxHeight: '80%',
   },
+  contentScroll: { flexShrink: 1 },
   handle: {
     width: 36,
     height: 4,

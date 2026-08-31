@@ -1,3 +1,4 @@
+import { traduceEnElIdiomaActual } from '@/i18n';
 import { formatRelativeTime } from '@/mappers/postMapper';
 import { textoDeReacciones } from '@/lib/reacciones';
 
@@ -43,25 +44,36 @@ export type NotificationItem = {
 };
 
 export function toNotificationItem(dto: NotificationDto): NotificationItem {
-  const actor = dto.actor?.full_name ?? 'Alguien';
-  let title = 'Notificación';
+  /*
+    El texto se arma con `traduceEnElIdiomaActual` y no con `useTranslation`
+    porque esto no es un componente. Cada frase que lleva el nombre de alguien
+    va en UNA clave con hueco `{actor}`: partida en trozos no se puede recolocar
+    en un idioma que ordene las palabras de otra forma.
+  */
+  const t = traduceEnElIdiomaActual;
+  const actor = dto.actor?.full_name ?? t('notif.someone');
+  let title = t('notif.generic');
   let subtitle = actor;
   let icon: NotificationItem['icon'] = 'bell';
 
   switch (dto.type) {
     case 'follow':
-      title = 'Nuevo seguidor';
-      subtitle = `${actor} te empezó a seguir`;
+      title = t('notif.followTitle');
+      subtitle = t('notif.followBody', { actor });
       icon = 'bell';
       break;
     case 'like':
-      title = 'Nuevo me gusta';
-      subtitle = textoDeReacciones(actor, dto.group_count);
+      title = t('notif.likeTitle');
+      subtitle = textoDeReacciones(actor, dto.group_count, {
+        una: t('notif.likeOne'),
+        unaMas: t('notif.likeTwo'),
+        variasMas: t('notif.likeMany'),
+      });
       icon = 'award';
       break;
     case 'comment':
-      title = 'Nuevo comentario';
-      subtitle = `${actor} comentó tu publicación`;
+      title = t('notif.commentTitle');
+      subtitle = t('notif.commentBody', { actor });
       icon = 'message-square';
       break;
     /*
@@ -74,8 +86,8 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       resuelve `entityType === 'post'` en NotificationsScreen.
     */
     case 'post_mention':
-      title = 'Te etiquetaron';
-      subtitle = `${actor} te etiquetó en una publicación`;
+      title = t('notif.mentionTitle');
+      subtitle = t('notif.mentionBody', { actor });
       icon = 'at-sign';
       break;
     /*
@@ -84,33 +96,33 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       Antes todos caían al genérico y salían como «Notificación».
     */
     case 'session_booked':
-      title = 'Nueva solicitud de sesión';
-      subtitle = `${actor} quiere agendar contigo`;
+      title = t('notif.sessionBookedTitle');
+      subtitle = t('notif.sessionBookedBody', { actor });
       icon = 'calendar';
       break;
     case 'session_accepted':
-      title = 'Sesión confirmada';
-      subtitle = `${actor} aceptó tu solicitud`;
+      title = t('notif.sessionAcceptedTitle');
+      subtitle = t('notif.sessionAcceptedBody', { actor });
       icon = 'calendar';
       break;
     case 'session_rejected':
-      title = 'Solicitud rechazada';
-      subtitle = `${actor} no puede en esta ocasión`;
+      title = t('notif.sessionRejectedTitle');
+      subtitle = t('notif.sessionRejectedBody', { actor });
       icon = 'calendar';
       break;
     case 'session_cancelled':
-      title = 'Sesión cancelada';
-      subtitle = `${actor} canceló la sesión`;
+      title = t('notif.sessionCancelledTitle');
+      subtitle = t('notif.sessionCancelledBody', { actor });
       icon = 'calendar';
       break;
     case 'session_rescheduled':
-      title = 'Nueva fecha propuesta';
-      subtitle = `${actor} propone otra fecha`;
+      title = t('notif.sessionRescheduledTitle');
+      subtitle = t('notif.sessionRescheduledBody', { actor });
       icon = 'calendar';
       break;
     case 'session_completed':
-      title = 'Sesión realizada';
-      subtitle = `${actor} dio la sesión por hecha`;
+      title = t('notif.sessionCompletedTitle');
+      subtitle = t('notif.sessionCompletedBody', { actor });
       icon = 'calendar';
       break;
   }

@@ -16,10 +16,10 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
 import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
@@ -28,12 +28,19 @@ import { haptics } from '@/lib/haptics';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { palette, radius, spacing } from '@/theme/tokens';
 import type { PickedMedia } from '@/services/storage';
+import { MAX_HISTORIA_MS } from '@/lib/historias';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** La camara es una superficie oscura en ambos temas, como los Shorts. */
 const media = palette('dark');
 
-/** Tope de una historia; coincide con el CHECK de la migracion 0003. */
-const MAX_STORY_MS = 15_000;
+/*
+  El tope sale de `lib/historias`, no de una copia local. Estaba escrito a mano
+  aqui, en el carrete, en el modo historia y en el backend: cuatro numeros que
+  habia que cambiar a la vez, y bastaba con olvidar uno para que la camara
+  cortara a un tiempo y la subida rechazara a otro.
+*/
+const MAX_STORY_MS = MAX_HISTORIA_MS;
 
 /** A partir de aqui la pulsacion se considera larga y empieza a grabar. */
 const MANTENER_MS = 350;
@@ -122,6 +129,7 @@ export function StoryCaptureScreen({
   duracionMaximaMs = MAX_STORY_MS,
   pie,
 }: Props) {
+  const { t } = useTranslation();
   // El tope efectivo. Se usa en TODOS los sitios que antes miraban la
   // constante, para que el anillo de progreso, el corte de seguridad y el
   // limite de la camara no puedan decir cosas distintas.
@@ -138,17 +146,17 @@ export function StoryCaptureScreen({
     la barra y se marchaba a otra seccion.
 
     La cuadricula del carrete ya se apoyaba en esta misma medida; la camara se
-    habia quedado sin hacerlo. Se calcula desde `espacioParaLaBarra`, que es
-    quien sabe cuanto ocupa la barra, para que moverla no obligue a acordarse de
-    corregir numeros sueltos aqui.
+    habia quedado sin hacerlo. El dato lo publica el grupo de pestañas
+    (`useEspacioInferior`), que es quien sabe cuanto ocupa la barra, para que
+    moverla no obligue a acordarse de corregir numeros sueltos aqui.
   */
-  const insets = useSafeAreaInsets();
+  const espacioInferior = useEspacioInferior();
   /*
     De abajo arriba: pista, disparador, selector de modo y nivel de zoom, sin
     solaparse y ninguno por debajo de la barra. El calculo y su prueba estan en
     `lib/controlesDeCamara`.
   */
-  const alturas = alturasDeCamara(espacioParaLaBarra(insets.bottom));
+  const alturas = alturasDeCamara(espacioInferior);
 
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -253,7 +261,7 @@ export function StoryCaptureScreen({
         onCaptured({ uri: photo.uri, kind: 'image', mimeType: 'image/jpeg', name: null });
       }
     } catch (error) {
-      notify('No se pudo tomar la foto', describeError(error, 'Inténtalo de nuevo.'));
+      notify(t('camera.photoFailed'), describeError(error, t('common.tryAgain')));
     } finally {
       setBusy(false);
     }
@@ -267,8 +275,8 @@ export function StoryCaptureScreen({
       const asked = await requestMicPermission();
       if (!asked.granted) {
         notify(
-          'Falta el micrófono',
-          'Sin permiso de micrófono el vídeo se grabaría sin sonido. Actívalo en Ajustes del teléfono.',
+          t('camera.micMissing'),
+          t('camera.micMissingBody'),
         );
         return;
       }
@@ -331,7 +339,7 @@ export function StoryCaptureScreen({
         });
       }
     } catch (error) {
-      notify('No se pudo grabar', describeError(error, 'Inténtalo de nuevo.'));
+      notify(t('camera.recordFailed'), describeError(error, t('common.tryAgain')));
     } finally {
       clearTimeout(corte);
       didRecord.current = false;
@@ -429,24 +437,29 @@ export function StoryCaptureScreen({
       <View style={[styles.root, styles.center]}>
         <Feather name="camera-off" size={34} color={media.textMuted} />
         <Text variant="body" weight="700" color={media.text} style={styles.deniedTitle}>
-          Sin acceso a la cámara
+          {t('camera.noAccess')}
         </Text>
         <Text variant="secondary" color={media.textMuted} style={styles.deniedBody}>
           {permission.canAskAgain
-            ? 'Concede el permiso para tomar fotos y vídeos.'
-            : 'Actívalo en Ajustes del teléfono → Z → Cámara.'}
+            ? t('camera.grantPermission')
+            : t('camera.enableInSettings')}
         </Text>
         {permission.canAskAgain ? (
-          <Button label="Dar permiso" variant="secondary" onPress={() => void requestPermission()} style={styles.deniedCta} />
+          <Button
+            label={t('media.givePermission')}
+            variant="secondary"
+            onPress={() => void requestPermission()}
+            style={styles.deniedCta}
+          />
         ) : null}
         <Pressable onPress={onOpenGallery} hitSlop={10} style={styles.deniedLink}>
           <Text variant="secondary" weight="700" color={media.text}>
-            Elegir de la galería
+            {t('profile.pickFromGallery')}
           </Text>
         </Pressable>
         <Pressable onPress={onClose} hitSlop={10} style={styles.deniedLink}>
           <Text variant="secondary" color={media.textMuted}>
-            Cancelar
+            {t('common.cancel')}
           </Text>
         </Pressable>
       </View>
@@ -528,7 +541,7 @@ export function StoryCaptureScreen({
           onPress={onOpenGallery}
           style={styles.thumb}
           accessibilityRole="button"
-          accessibilityLabel="Elegir de la galería"
+          accessibilityLabel={t('profile.pickFromGallery')}
         >
           {lastPhotoUri ? (
             <ExpoImage source={{ uri: lastPhotoUri }} style={styles.thumbImage} contentFit="cover" />
@@ -556,7 +569,7 @@ export function StoryCaptureScreen({
         <View
           {...disparador.panHandlers}
           accessibilityRole="button"
-          accessibilityLabel="Tocar para foto, mantener para vídeo, deslizar arriba para acercar"
+          accessibilityLabel={t('camera.shutterA11y')}
           style={styles.shutterHit}
         >
           <View style={styles.shutterRing}>
@@ -632,10 +645,10 @@ export function StoryCaptureScreen({
           accessibilityState={{ disabled: recording }}
           accessibilityLabel={
             recording
-              ? 'No se puede cambiar de cámara mientras grabas'
+              ? t('camera.cannotFlipWhileRecording')
               : facing === 'back'
-                ? 'Cambiar a la cámara frontal'
-                : 'Cambiar a la cámara trasera'
+                ? t('camera.flipToFront')
+                : t('camera.flipToBack')
           }
         >
           <Feather name="refresh-cw" size={22} color={media.text} />
@@ -647,7 +660,7 @@ export function StoryCaptureScreen({
         color={media.textMuted}
         style={[styles.hint, { bottom: alturas.pista }]}
       >
-        Toca para una foto · Mantén para grabar · Desliza para acercar
+        {t('camera.hint')}
       </Text>
     </View>
   );

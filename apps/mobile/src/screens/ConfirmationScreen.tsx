@@ -8,8 +8,10 @@ import { Button } from '@/components/Button';
 import { useCourse } from '@/hooks/useCourse';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function ConfirmationScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   // El curso recien comprado. Antes se mostraba SIEMPRE el curso de demo,
@@ -24,13 +26,15 @@ export function ConfirmationScreen() {
         <View style={[styles.check, { borderColor: colors.text }]}>
           <Feather name="check" size={54} color={colors.text} />
         </View>
-        <Text style={[styles.title, { color: colors.text }]}>¡Pago exitoso!</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{t('confirm.paid')}</Text>
         <Text style={[styles.body, { color: colors.textMuted }]}>
-          Ya tienes acceso a{`\n`}{course?.title ?? 'tu nuevo curso'}
+          {t('confirm.access')}
+          {`\n`}
+          {course?.title ?? t('confirm.yourNewCourse')}
         </Text>
       </View>
       <Button
-        label="Ir al curso"
+        label={t('confirm.goToCourse')}
         // Antes iba a '/lesson/1', un id del prototipo: con datos reales el
         // usuario acababa en un error justo despues de pagar.
         onPress={() =>
@@ -43,8 +47,12 @@ export function ConfirmationScreen() {
           )
         }
       />
-      <Button label="Volver al inicio" variant="secondary" onPress={() => router.replace('/(tabs)/home')} />
-      <Text style={[styles.email, { color: colors.textMuted }]}>Te enviamos los detalles a tu email.</Text>
+      <Button
+        label={t('confirm.backHome')}
+        variant="secondary"
+        onPress={() => router.replace('/(tabs)/home')}
+      />
+      <Text style={[styles.email, { color: colors.textMuted }]}>{t('confirm.emailSent')}</Text>
     </AppScreen>
   );
 }

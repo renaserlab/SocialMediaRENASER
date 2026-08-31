@@ -116,7 +116,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                   </View>
                 ) : locked || !episode ? (
                   <Text variant="secondary" color={colors.textMuted}>
-                    {locked ? t('podcast.locked') : t('podcast.soon')}
+                    {locked ? t('podcast.locked') : t('common.comingSoon')}
                   </Text>
                 ) : null}
               </View>

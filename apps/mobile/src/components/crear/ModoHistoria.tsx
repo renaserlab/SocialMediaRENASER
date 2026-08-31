@@ -4,22 +4,37 @@ import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
+import { RecorteDeHistoria } from '@/components/crear/RecorteDeHistoria';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { usePublicacion, PublicacionCancelada } from '@/hooks/usePublicacion';
+import {
+  FOTO_MS,
+  MAX_HISTORIA_MS,
+  duracionMedida,
+  revisarDuracionDeHistoria,
+  type DecisionDeHistoria,
+  type Tramo,
+} from '@/lib/historias';
 import { toast } from '@/lib/toast';
+import { readVideoMetadata } from '@/services/mediaCompressor';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
-/** Tope de una historia; coincide con el CHECK de la migracion 0003. */
-export const MAX_HISTORIA_MS = 15_000;
-/** Lo que dura una foto en el visor. */
-const FOTO_MS = 5_000;
+/*
+  El tope de una historia y el tiempo de una foto viven en `lib/historias`, no
+  aqui. Estaban repetidos a mano en tres pantallas y en el backend, y con cinco
+  copias del mismo numero basta con cambiar cuatro para que la camara corte a un
+  tiempo y el control de subida rechace a otro.
+*/
+export { MAX_HISTORIA_MS } from '@/lib/historias';
 
 type Props = {
   /** Selector de modo, que viaja hasta dentro de la camara. */
@@ -30,61 +45,160 @@ type Props = {
   activo?: boolean;
 };
 
+/** Lo que se sabe del video elegido mientras se decide que hacer con el. */
+type Revision = DecisionDeHistoria | { estado: 'midiendo' };
+
 /**
- * Crear una historia: camara o carrete → revision → publicar.
+ * Crear una historia: camara o carrete → (recorte si hace falta) → revision →
+ * publicar.
  *
  * Es el UNICO flujo de historia que hay. La ruta `/stories/nueva` ya no es una
  * pantalla: redirige aqui. Con dos copias, cada arreglo del limite de duracion,
  * de los permisos o del reintento habria que hacerlo dos veces y una de las dos
  * se quedaria atras.
+ *
+ * EL VIDEO SE MIDE AL ELEGIRLO, no al publicar. Antes se medía dentro de
+ * `publicar` y bastaba para rechazar; ahora hay que decidir ANTES si se enseña
+ * el recortador, y para eso hay que saber cuanto dura antes de pintar nada. La
+ * medida es una sola —la de aqui— y de ella salen las dos decisiones.
+ *
+ * Y OJO CON EL ORDEN DE LO QUE VIENE DESPUES: el tramo se elige aqui, pero el
+ * corte lo hace el SERVIDOR con el video ya subido entero (ver
+ * `RecorteDeHistoria` y `apps/api/app/modules/stories/recorte.py`). Si ese
+ * recorte falla, no se publica nada: no hay ninguna rama que caiga a publicar
+ * el video largo.
  */
 export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
+  const { t } = useTranslation();
   const createStory = useAppStore((state) => state.createStory);
+  /*
+    El pie se apoya en la barra flotante, no en un numero.
+
+    Estaba en `bottom: 44` y la capsula de secciones ocupa entre 78 y 104 px
+    segun el aparato: el boton de publicar quedaba DEBAJO de ella siempre, y
+    como la barra se pinta encima y se queda el toque, pulsarlo cambiaba de
+    seccion. Ahora la medida sale del mismo sitio que la dibuja.
+  */
+  const espacioInferior = useEspacioInferior();
   const [elegido, setElegido] = useState<PickedMedia | null>(null);
+  const [revision, setRevision] = useState<Revision | null>(null);
+  const [tramo, setTramo] = useState<Tramo | null>(null);
   const envio = usePublicacion();
+
+  const empezarDeCero = useCallback(() => {
+    envio.limpiar();
+    setElegido(null);
+    setRevision(null);
+    setTramo(null);
+  }, [envio]);
+
+  const elegir = useCallback(
+    (medio: PickedMedia) => {
+      setElegido(medio);
+      setTramo(null);
+      if (medio.kind !== 'video') {
+        setRevision(null);
+        return;
+      }
+      setRevision({ estado: 'midiendo' });
+      /*
+        SE MIDE EL ARCHIVO, no se cree lo que diga quien lo eligio.
+
+        `elegido.durationMs` es lo que REPORTA el selector, y ese dato falta a
+        menudo. Cuando faltaba valia cero y la comparacion `0 > tope` daba
+        falso: un video de cinco minutos pasaba el control sin que nadie lo
+        mirara. Se lee ademas la duracion del propio archivo y manda la mayor de
+        las dos.
+
+        Y se hace ANTES de subir: no para ahorrar la subida —el recorte la exige
+        igual, ver `RecorteDeHistoria`— sino porque sin saber cuanto dura no se
+        puede ni pintar el recortador.
+      */
+      void (async () => {
+        const delArchivo = await readVideoMetadata(medio.uri).catch(() => null);
+        const medida = duracionMedida(
+          medio.durationMs,
+          delArchivo?.durationS ? delArchivo.durationS * 1000 : null,
+        );
+        setRevision(revisarDuracionDeHistoria(medida, t));
+      })();
+    },
+    [t],
+  );
 
   const publicar = useCallback(() => {
     if (!elegido) return;
-    const duracion = elegido.durationMs ?? 0;
 
     void envio.ejecutar(async ({ avance, cancelado }) => {
-      /*
-        El limite se comprueba ANTES de subir nada. Comprobarlo despues
-        significaria gastar la conexion de la persona para acabar rechazando el
-        video, y el backend lo rechaza igual (CHECK de la migracion 0003).
-      */
-      if (elegido.kind === 'video' && duracion > MAX_HISTORIA_MS) {
-        throw new Error(
-          `Las historias admiten hasta ${MAX_HISTORIA_MS / 1000} segundos. ` +
-            'Elige otro vídeo o recórtalo antes.',
-        );
+      let duracion: number | null = null;
+      if (elegido.kind === 'video') {
+        // Sin medida no se publica: es el caso «el modulo nativo no esta y el
+        // selector tampoco informa», y ahi no se puede ni comprobar el limite
+        // ni ofrecer un tramo. Se dice, y se ofrece la salida que si funciona
+        // (grabar con la camara de la app, que ya corta sola).
+        if (!revision || revision.estado === 'midiendo') return;
+        if (revision.estado === 'sin-medir') throw new Error(revision.mensaje);
+        if (revision.estado === 'demasiado-larga' && !tramo) {
+          // No deberia llegarse aqui —el recortador se pinta antes— pero si se
+          // llega, NO se publica. Nunca hay una rama que suba el video largo.
+          throw new Error(revision.mensaje);
+        }
+        duracion = tramo ? tramo.finMs - tramo.inicioMs : revision.durationMs;
       }
 
+      /*
+        SUBE EL VIDEO ENTERO, TAMBIEN CUANDO HAY RECORTE. Es EL compromiso de
+        esta funcion y no se disimula: en el telefono no hay con que cortar
+        (`react-native-compressor` solo recomprime archivos completos, y no hay
+        expo-av ni ffmpeg-kit), asi que sube todo y el servidor se queda con el
+        tramo. La alternativa era una dependencia nativa nueva y una compilacion
+        nueva; la otra alternativa, fingir un recorte que no existe.
+      */
       const subido = await uploadPostMedia(elegido, avance);
       // Se comprueba justo antes de crear la historia: si se cancelo mientras
       // subia, el archivo queda huerfano pero NO aparece ninguna historia.
       if (cancelado()) throw new PublicacionCancelada();
 
+      // Con tramo, `createStory` va por la API y el servidor recorta ANTES de
+      // crear la fila. Si ffmpeg falla, esto lanza y no se publica nada.
       await createStory(
         subido,
-        elegido.kind === 'video' ? Math.max(1000, duracion) : FOTO_MS,
+        elegido.kind === 'video' && duracion ? duracion : FOTO_MS,
+        tramo ?? undefined,
       );
       setElegido(null);
+      setRevision(null);
+      setTramo(null);
       // El aviso va DESPUES de salir: sobre una pantalla completa el toast
       // quedaria tapado.
       alSalir();
-      toast('Historia publicada');
+      toast(t('create.storyPublished'));
     });
-  }, [elegido, envio, createStory, alSalir]);
+  }, [elegido, revision, tramo, envio, createStory, alSalir, t]);
 
   if (!elegido) {
     return (
       <PasoDeCaptura
         duracionMaximaMs={MAX_HISTORIA_MS}
         pie={pie}
-        alElegir={setElegido}
+        alElegir={elegir}
         alCerrar={alSalir}
         activo={activo}
+      />
+    );
+  }
+
+  // Un video mas largo que el tope NO llega a la pantalla de publicar sin
+  // haber elegido tramo: se pinta el recortador y no hay forma de saltarselo
+  // salvo volviendo atras.
+  if (revision?.estado === 'demasiado-larga' && !tramo) {
+    return (
+      <RecorteDeHistoria
+        uri={elegido.uri}
+        duracionMs={revision.durationMs}
+        aviso={revision.mensaje}
+        alElegir={setTramo}
+        alVolver={empezarDeCero}
       />
     );
   }
@@ -94,6 +208,10 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
       {elegido.kind === 'video' ? (
         <VideoPlayer
           uri={elegido.uri}
+          // Con tramo elegido, la vista previa empieza donde empieza el tramo.
+          // No lo ACOTA —el corte es del servidor— pero al menos enseña la
+          // parte que se va a publicar en vez del principio del video.
+          startAtSeconds={tramo ? tramo.inicioMs / 1000 : undefined}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           nativeControls={false}
@@ -105,19 +223,16 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
       )}
 
       <Pressable
-        onPress={() => {
-          envio.limpiar();
-          setElegido(null);
-        }}
+        onPress={empezarDeCero}
         hitSlop={12}
         style={styles.volver}
         accessibilityRole="button"
-        accessibilityLabel="Elegir otra cosa"
+        accessibilityLabel={t('create.chooseSomethingElse')}
       >
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
-      <View style={styles.pie}>
+      <View style={[styles.pie, { bottom: espacioInferior }]}>
         <ProgresoDePublicacion
           fase={envio.fase}
           progreso={envio.progreso}
@@ -127,15 +242,25 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
           alCancelar={envio.cancelar}
         />
         <Button
-          label="Compartir en tu historia"
+          label={t('create.shareToStory')}
           variant="secondary"
           icon="send"
           onPress={publicar}
-          loading={envio.ocupado}
-          disabled={envio.ocupado}
+          loading={envio.ocupado || revision?.estado === 'midiendo'}
+          // Mientras se mide no se puede publicar: publicar antes de saber
+          // cuanto dura es justo el agujero por el que se colaba un video de
+          // cinco minutos.
+          disabled={envio.ocupado || revision?.estado === 'midiendo'}
         />
+        {tramo ? (
+          // El compromiso, otra vez, justo antes del boton: quien publica un
+          // tramo de un video largo sube el video largo.
+          <Text variant="caption" color={media.textMuted} style={styles.nota}>
+            {t('story.trimWholeUploadNotice')}
+          </Text>
+        ) : null}
         <Text variant="caption" color={media.textMuted} style={styles.nota}>
-          Se verá durante 24 horas.
+          {t('create.storyLasts24h')}
         </Text>
       </View>
     </View>
@@ -155,6 +280,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: media.overlay,
   },
-  pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, bottom: 44, gap: spacing.sm },
+  // `bottom` lo pone el componente: depende de cuanto ocupe la barra flotante.
+  pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm },
   nota: { textAlign: 'center' },
 });
