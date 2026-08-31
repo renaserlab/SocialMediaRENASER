@@ -432,12 +432,92 @@ export async function readLocalFile(uri: string): Promise<LocalFile> {
   }
   // El tamaño se obtiene sin cargar el archivo entero en memoria.
   const file = new File(uri);
+  const tamano = file.size ?? 0;
+  if (tamano > 0) {
+    return {
+      size: tamano,
+      directBody: () => file.arrayBuffer(),
+      // TUS lee el Blob por trozos; ahi el contenido si viaja bien en RN.
+      resumableBody: async () => (await fetch(uri)).blob(),
+    };
+  }
+
+  /*
+    Tamaño cero con una ruta `content://`: no es que el archivo este vacio.
+
+    `File` de expo-file-system solo sabe leer rutas `file://`. Varios Android
+    —depende del fabricante y de que selector abra el sistema— devuelven la foto
+    como `content://`, que es un identificador dentro del proveedor de
+    documentos, no una ruta en disco. Ahi no hay nada que medir y sale cero.
+
+    POR QUE SE COPIA Y NO SE USA EL BLOB. La tentacion es `fetch(uri).blob()`,
+    que si informa bien el tamaño. Pero en React Native ese Blob viaja VACIO
+    cuando supabase-js lo manda en el POST —es el fallo que dio origen a esta
+    funcion, y esta explicado en su cabecera—: subiria cero bytes diciendo que
+    son dos megas. Copiar deja un archivo de verdad, y a partir de ahi todo
+    funciona por el camino ya probado.
+
+    La copia va por la API antigua a proposito: es la unica que sabe leer del
+    proveedor de documentos de Android. Se importa aqui dentro para que no entre
+    en el paquete de quien nunca la necesita (web, y todo `file://`).
+  */
+  const copia = await copiarDesdeElProveedor(uri);
+  if (!copia) {
+    return { size: 0, directBody: async () => new ArrayBuffer(0), resumableBody: async () => new Blob([]) };
+  }
+  const copiado = new File(copia);
   return {
-    size: file.size ?? 0,
-    directBody: () => file.arrayBuffer(),
-    // TUS lee el Blob por trozos; ahi el contenido si viaja bien en RN.
-    resumableBody: async () => (await fetch(uri)).blob(),
+    size: copiado.size ?? 0,
+    directBody: () => copiado.arrayBuffer(),
+    resumableBody: async () => (await fetch(copia)).blob(),
   };
+}
+
+/** Carpeta propia dentro de la cache, para poder limpiarla sin tocar nada mas. */
+const CARPETA_DE_COPIAS = 'z-origen-content';
+
+/**
+ * Cuanto sobrevive una copia antes de que la borre la siguiente lectura.
+ *
+ * No se borra al terminar de subir porque `readLocalFile` no sabe cuando acaba
+ * quien la llama —son cinco sitios distintos— y obligarles a avisar seria mas
+ * facil de olvidar que de recordar. Diez minutos son de sobra para la subida
+ * mas lenta y lo bastante poco para que la cache no crezca.
+ */
+const VIDA_DE_LA_COPIA_MS = 10 * 60 * 1000;
+
+async function copiarDesdeElProveedor(uri: string): Promise<string | null> {
+  try {
+    const legacy = await import('expo-file-system/legacy');
+    const cache = legacy.cacheDirectory;
+    if (!cache) return null;
+
+    const carpeta = `${cache}${CARPETA_DE_COPIAS}/`;
+    const info = await legacy.getInfoAsync(carpeta);
+    if (!info.exists) {
+      await legacy.makeDirectoryAsync(carpeta, { intermediates: true });
+    } else {
+      // Barrido de lo viejo. Va antes de copiar y nunca despues de subir: si la
+      // aplicacion se cierra a mitad de una subida, la copia igual desaparece.
+      const ahora = Date.now();
+      for (const nombre of await legacy.readDirectoryAsync(carpeta)) {
+        const suyo = await legacy.getInfoAsync(`${carpeta}${nombre}`);
+        const nacio = suyo.exists ? (suyo.modificationTime ?? 0) * 1000 : 0;
+        if (ahora - nacio > VIDA_DE_LA_COPIA_MS) {
+          await legacy.deleteAsync(`${carpeta}${nombre}`, { idempotent: true });
+        }
+      }
+    }
+
+    const destino = `${carpeta}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await legacy.copyAsync({ from: uri, to: destino });
+    return destino;
+  } catch {
+    // Si el proveedor tampoco deja copiar, quien llama vera tamaño cero y dira
+    // la verdad. Callar aqui es correcto: el mensaje util se da arriba, con el
+    // contexto de que se estaba subiendo.
+    return null;
+  }
 }
 
 export type UploadPhase = 'compressing' | 'uploading';
@@ -706,17 +786,16 @@ export async function uploadProfileImage(
     /*
       Cero bytes casi nunca significa «la foto esta vacia».
 
-      `readLocalFile` usa `new File(uri)` de expo-file-system, que solo entiende
-      rutas `file://`. Cuando el selector de un Android devuelve un
-      `content://` —pasa en varios fabricantes— no hay nada que leer y el tamaño
-      sale cero. Decirlo asi ahorra buscar el problema en la foto, que esta
-      perfectamente.
+      Antes esto pasaba siempre que un Android devolvia la foto como
+      `content://`: no habia forma de leerla. Eso YA no ocurre —`readLocalFile`
+      la copia del proveedor de documentos antes de medirla—, asi que llegar
+      aqui con un `content://` significa que ni siquiera se pudo copiar, que es
+      otra cosa y merece otro mensaje.
     */
     throw new Error(
       uri.startsWith('content://')
-        ? 'Tu teléfono devolvió la foto en un formato que la aplicación no puede leer ' +
-          '(content://). Prueba a hacerla con la cámara de la app o a elegirla desde ' +
-          'la galería de Google Fotos.'
+        ? 'Tu teléfono no dejó leer esa foto desde la galería. Prueba a hacerla con ' +
+          'la cámara de la aplicación, o a elegirla desde Google Fotos.'
         : 'No pudimos leer la imagen seleccionada.',
     );
   }

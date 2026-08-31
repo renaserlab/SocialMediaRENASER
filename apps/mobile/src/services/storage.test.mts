@@ -170,3 +170,51 @@ test('una firma fallida no deja la ruta bloqueada para siempre', () => {
     'Las firmas en vuelo deben soltarse al terminar, tambien si fallan.',
   );
 });
+
+/*
+  Android y las rutas `content://`.
+
+  Varios Android devuelven la foto elegida como `content://`, que es un
+  identificador dentro del proveedor de documentos y no una ruta en disco.
+  `File` de expo-file-system solo entiende `file://`, asi que ahi medir daba
+  cero y la foto de perfil no se podia subir en esos telefonos.
+
+  Lo que se fija: que se COPIE antes de rendirse, y sobre todo COMO. La salida
+  facil —usar el Blob de `fetch`— informaria bien el tamano y subiria el archivo
+  vacio, que es justo el fallo que dio origen a este modulo.
+*/
+test('una ruta content:// se copia en vez de darse por vacia', () => {
+  assert.ok(
+    FUENTE.includes('copiarDesdeElProveedor'),
+    'Sin la copia, un content:// vuelve a medir cero y la subida se rinde.',
+  );
+  // La copia tiene que intentarse ANTES de devolver tamano cero.
+  const copia = FUENTE.indexOf('copiarDesdeElProveedor(uri)');
+  const rendirse = FUENTE.indexOf('size: 0');
+  assert.ok(copia > 0 && copia < rendirse, 'Se copia antes de rendirse.');
+});
+
+test('la copia usa la API antigua, que es la unica que lee del proveedor', () => {
+  assert.ok(
+    FUENTE.includes("import('expo-file-system/legacy')"),
+    'La API nueva no sabe leer content://; por eso la copia va por la antigua.',
+  );
+});
+
+test('el cuerpo de la subida NUNCA sale de un Blob cuando hubo que copiar', () => {
+  /*
+    La trampa: `fetch(uri).blob()` informa bien el tamano, asi que parece que
+    funciona, pero en React Native ese Blob viaja VACIO en el POST. Si alguien
+    "simplifica" la copia por un blob, esta prueba tiene que caerse.
+  */
+  const bloque = FUENTE.slice(
+    FUENTE.indexOf('const copiado = new File(copia)'),
+    FUENTE.indexOf('CARPETA_DE_COPIAS'),
+  );
+  assert.ok(bloque.includes('copiado.arrayBuffer()'), 'Los bytes salen del archivo copiado.');
+});
+
+test('las copias no se acumulan en la cache', () => {
+  assert.ok(FUENTE.includes('VIDA_DE_LA_COPIA_MS'), 'Hay caducidad para las copias.');
+  assert.ok(FUENTE.includes('deleteAsync'), 'Y alguien las borra de verdad.');
+});
