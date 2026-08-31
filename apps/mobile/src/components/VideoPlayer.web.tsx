@@ -191,7 +191,12 @@ export function VideoPlayer({
   return (
     <View style={[styles.wrap, style]}>
       {poster ? (
-        <ExpoImage source={poster} style={StyleSheet.absoluteFill} contentFit="cover" />
+        /* Mismo encuadre que el video: si no, al arrancar cambia de recorte. */
+        <ExpoImage
+          source={poster}
+          style={StyleSheet.absoluteFill}
+          contentFit={contentFit === 'fill' ? 'cover' : contentFit}
+        />
       ) : null}
       <video
         ref={ref}

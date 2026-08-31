@@ -138,15 +138,32 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
   };
 
   const download = async (item: LessonResourceFile) => {
-    if (!item.url) {
+    /*
+      La firma se pide AHORA, no al entrar en la leccion.
+
+      El bucket `course-media` es privado y sigue siendolo: lo que cambia es
+      CUANDO se pide el permiso de lectura. Firmar los veinte documentos al
+      abrir la pantalla gastaba conexion en el peor momento —mientras arranca el
+      video— y encima entregaba firmas que podian caducar antes de que alguien
+      pulsara.
+    */
+    let url = item.url;
+    if (!url) {
+      try {
+        url = (await CourseContentRepository.firmarRecurso(item.storagePath)) ?? undefined;
+      } catch {
+        url = undefined;
+      }
+    }
+    if (!url) {
       notify('No disponible', 'No se pudo preparar la descarga. Inténtalo de nuevo.');
       return;
     }
     try {
       // En web se abre en una pestaña (el navegador decide si ver o guardar);
       // en movil lo resuelve la aplicacion asociada al tipo de archivo.
-      if (Platform.OS === 'web') window.open(item.url, '_blank', 'noopener');
-      else await Linking.openURL(item.url);
+      if (Platform.OS === 'web') window.open(url, '_blank', 'noopener');
+      else await Linking.openURL(url);
     } catch {
       notify('No se pudo abrir', 'Inténtalo de nuevo.');
     }

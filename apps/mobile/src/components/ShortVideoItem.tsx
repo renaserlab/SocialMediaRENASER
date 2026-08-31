@@ -10,6 +10,7 @@ import { ALTO_DE_LA_BARRA_DE_PROGRESO } from '@/components/VideoScrubber';
 import { assets } from '@/data/assets';
 import { compartirPublicacion } from '@/lib/enlaces';
 import { haptics } from '@/lib/haptics';
+import { esVertical } from '@/lib/formaDelVideo';
 import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
 import { irAlPerfil } from '@/lib/irAlPerfil';
@@ -29,6 +30,17 @@ export type ReelItem = {
   uri: string;
   /** true si `uri` es una playlist HLS (sin cache de disco del reproductor). */
   isStream?: boolean;
+  /**
+   * Medidas del video, si se guardaron (migracion 0021).
+   *
+   * A pantalla completa NO sirven para deformar nada: sirven para decidir el
+   * ENCUADRE. Un vertical llena la pantalla; un apaisado, si se llenara, se
+   * quedaria en una franja central del propio video —se veria un tercio de la
+   * escena— asi que se ensena entero con su banda arriba y abajo, que es lo que
+   * hacen las aplicaciones de referencia.
+   */
+  width?: number;
+  height?: number;
   /** Poster del video: se pinta al instante mientras el reproductor prepara. */
   posterUrl?: string;
   /** Ruta del poster en Storage: clave de cache estable frente a refirmas. */
@@ -119,6 +131,21 @@ function ShortVideoItemBase({
   const router = useRouter();
 
   /*
+    Como se encuadra ESTE video en la pantalla.
+
+    Estaba fijo en `cover` para todos. Con un video vertical eso es lo correcto
+    —llena la pantalla, que es de lo que va el formato—, pero con uno apaisado
+    recorta los lados hasta dejar una franja central: se pierde la mitad de la
+    escena y no hay forma de recuperarla. Sabiendo la forma del video, cada uno
+    se encuadra como le corresponde, y sin medidas guardadas se mantiene el
+    `cover` de siempre.
+  */
+  const encuadre =
+    short.width && short.height && !esVertical(short.width, short.height)
+      ? ('contain' as const)
+      : ('cover' as const);
+
+  /*
     DE ABAJO A ARRIBA, cada cosa apoyada en la anterior. Antes eran dos numeros
     escritos a mano —`bottom: 140 + espacioInferior` y `bottom: 60 + ...`— que
     no median nada: dejaban 82 px muertos entre el nombre de quien publica y la
@@ -202,7 +229,7 @@ function ShortVideoItemBase({
           posterCacheKey={short.posterPath}
           cacheToDisk={!short.isStream}
           style={StyleSheet.absoluteFill}
-          contentFit="cover"
+          contentFit={encuadre}
           loop
           muted={muted}
           nativeControls={false}
@@ -236,7 +263,7 @@ function ShortVideoItemBase({
             <ExpoImage
               source={{ uri: short.posterUrl, cacheKey: short.posterPath }}
               style={StyleSheet.absoluteFill}
-              contentFit="cover"
+              contentFit={encuadre}
               cachePolicy="disk"
               recyclingKey={short.posterPath ?? short.posterUrl}
             />

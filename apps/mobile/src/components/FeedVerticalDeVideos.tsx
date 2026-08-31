@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { Feather } from '@expo/vector-icons';
@@ -23,7 +30,13 @@ const media = palette('dark');
 
 type Props = {
   feed: FeedDeVideos;
-  /** Alto de una pagina: una pantalla exacta, para que el ajuste sea limpio. */
+  /**
+   * Alto de una pagina, COMO ESTIMACION INICIAL.
+   *
+   * El valor bueno lo mide la propia lista (ver `alMedir`): quien la pinta no
+   * puede saberlo. Este solo sirve para el primer fotograma, antes de que haya
+   * medida, y para que no se vea un hueco.
+   */
   altura: number;
   /** El feed de la pestana que se esta viendo. Los demas no reproducen nada. */
   activo: boolean;
@@ -83,6 +96,39 @@ export function FeedVerticalDeVideos({
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
   const insets = useSafeAreaInsets();
+
+  /*
+    CADA PAGINA MIDE UNA PANTALLA. Pero ¿que pantalla?
+
+    EL FALLO. En Android los videos salian recortados al desplazar, y un poco
+    mas con cada deslizamiento. La causa es una discrepancia de medidas: el alto
+    de cada celda venia de `useWindowDimensions()` —la VENTANA del sistema— y el
+    ajuste de pagina (`pagingEnabled`) lo hace la lista con SU alto, que es el
+    de un contenedor `flex: 1` dentro del carrusel de secciones. Con
+    `edgeToEdgeEnabled` y sin configuracion de barra de navegacion, esos dos
+    numeros no tienen por que coincidir: la ventana incluye franjas del sistema
+    que el contenedor no tiene.
+
+    Bastan unos pocos pixeles de diferencia para que se note, porque el error se
+    ACUMULA: la pagina N queda desplazada N veces esa diferencia, y por eso el
+    recorte crece al bajar. No es un modelo concreto de telefono: es cualquiera
+    cuyo contenedor no mida exactamente lo que mide la ventana.
+
+    La correccion es preguntarselo a quien lo sabe. La lista mide su propio
+    recuadro y ESE es el alto de una pagina, en cualquier aparato, con
+    cualquier barra y despues de girar. La prop `altura` se queda como
+    estimacion para el primer fotograma.
+  */
+  const [altoMedido, setAltoMedido] = useState<number | null>(null);
+  const alMedir = useCallback((evento: LayoutChangeEvent) => {
+    const alto = Math.round(evento.nativeEvent.layout.height);
+    // Se ignoran las medidas absurdas del primer montaje y los cambios de un
+    // pixel: reescribir el alto redibuja todas las celdas montadas.
+    setAltoMedido((previo) =>
+      alto > 0 && (previo === null || Math.abs(previo - alto) > 1) ? alto : previo,
+    );
+  }, []);
+  const altoDePagina = altoMedido ?? altura;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
 
@@ -244,7 +290,7 @@ export function FeedVerticalDeVideos({
     ) : null;
 
   return (
-    <View style={styles.raiz}>
+    <View style={styles.raiz} onLayout={alMedir}>
       {aviso}
 
       {/*
@@ -280,7 +326,7 @@ export function FeedVerticalDeVideos({
             */
             active={activo && index === indiceActivo}
             preload={activo && Math.abs(index - indiceActivo) <= 1}
-            height={altura}
+            height={altoDePagina}
             muted={silenciado}
             onToggleMuted={alCambiarSilencio}
             onForcedMute={alForzarSilencio}
@@ -291,7 +337,7 @@ export function FeedVerticalDeVideos({
         pagingEnabled
         // El siguiente se prepara con una pantalla de antelacion: montarlo justo
         // al llegar deja un parpadeo en blanco que se percibe como un tiron.
-        drawDistance={altura}
+        drawDistance={altoDePagina}
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}

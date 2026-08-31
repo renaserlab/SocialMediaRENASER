@@ -281,3 +281,43 @@ async def test_todo_ffmpeg_sale_con_la_prioridad_rebajada(monkeypatch):
     assert codigo == 0
     assert visto["cmd"] == ["ANTEPUESTO", "ffmpeg", "-version"]
     assert visto["kwargs"].get("marca") == 1
+
+
+# ---------------------------------------------------------------------------
+# Un video vertical se guarda como vertical
+# ---------------------------------------------------------------------------
+
+
+def test_un_video_girado_se_mide_como_se_ve() -> None:
+    """El movil guarda el vertical como un cuadro apaisado mas una nota.
+
+    Grabar en vertical no gira los pixeles: el archivo lleva un cuadro de
+    1920x1080 y la instruccion «girar 90 grados» al reproducir. Guardar en la
+    base de datos el 1920x1080 es guardar que el video es apaisado, y con eso
+    la aplicacion dibuja una caja apaisada alrededor de un video vertical: las
+    franjas negras que se ven hoy en el muro.
+    """
+    girado = {"width": 1920, "height": 1080, "side_data_list": [{"rotation": -90}]}
+    assert mp.rotacion_del_stream(girado) == 270
+    assert mp.dimensiones_visibles(1920, 1080, 270) == (1080, 1920)
+
+
+def test_la_rotacion_tambien_puede_venir_como_etiqueta() -> None:
+    """Segun quien codifique, la nota viaja como `tags.rotate` y no como matriz."""
+    etiquetado = {"width": 1920, "height": 1080, "tags": {"rotate": "90"}}
+    assert mp.rotacion_del_stream(etiquetado) == 90
+    assert mp.dimensiones_visibles(1920, 1080, 90) == (1080, 1920)
+
+
+def test_un_video_apaisado_no_se_toca() -> None:
+    assert mp.rotacion_del_stream({"width": 1920, "height": 1080}) == 0
+    assert mp.dimensiones_visibles(1920, 1080, 0) == (1920, 1080)
+    # 180 grados es del reves, pero sigue siendo apaisado.
+    assert mp.dimensiones_visibles(1920, 1080, 180) == (1920, 1080)
+
+
+def test_una_rotacion_ilegible_no_rompe_el_procesado() -> None:
+    """Antes que inventarse una medida, se deja el video como estaba."""
+    assert mp.rotacion_del_stream({"side_data_list": [{"rotation": "no-es-un-numero"}]}) == 0
+    assert mp.rotacion_del_stream({"tags": {"rotate": None}}) == 0
+    assert mp.dimensiones_visibles(None, None, 90) == (None, None)

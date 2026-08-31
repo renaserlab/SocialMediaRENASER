@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -9,6 +10,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { LessonResources } from '@/components/LessonResources';
 import { ListRow } from '@/components/ListRow';
+import { Skeleton } from '@/components/Skeleton';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { useLesson } from '@/hooks/useLesson';
@@ -113,10 +115,36 @@ export function LessonScreen() {
   }, [mediaPath, hayVideo]);
 
   if (loading) {
+    /*
+      LA LECCION SE VE ANTES DE ESTAR CARGADA.
+
+      Aqui habia un `StateView state="loading"`: la pantalla entera era una
+      rueda girando hasta que llegaba la leccion. Con un video de curso —los
+      pesados— eso significa varios segundos delante de un fondo vacio, y no se
+      distingue de que la aplicacion se haya colgado.
+
+      Ahora se pinta ya la ESTRUCTURA que va a haber: el marco del reproductor
+      con su portada (una imagen del paquete, cero red) y el sitio del titulo y
+      la descripcion. Cuando llegan los datos, cada cosa aparece donde ya estaba
+      su hueco, sin que nada salte.
+    */
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-        <StateView state="loading" />
+        <View
+          style={[
+            styles.playerContainer,
+            { borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+          ]}
+        >
+          <ExpoImage source={assets.course} style={StyleSheet.absoluteFill} contentFit="cover" />
+        </View>
+        <View style={styles.details}>
+          <Skeleton width="70%" height={20} />
+          <Skeleton width="40%" height={13} />
+          <Skeleton width="100%" height={13} />
+          <Skeleton width="85%" height={13} />
+        </View>
       </View>
     );
   }

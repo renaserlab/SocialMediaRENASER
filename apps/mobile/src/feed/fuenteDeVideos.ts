@@ -120,6 +120,10 @@ export function aReel(post: Post): ReelItem | null {
     isStream: source.isStream,
     posterUrl: post.posterUrl,
     posterPath: post.posterPath,
+    // Las medidas viajan con el elemento: la celda las necesita para decidir
+    // si llena la pantalla o ensena el video entero (ver `ShortVideoItem`).
+    width: post.mediaWidth,
+    height: post.mediaHeight,
     createdAtIso: post.createdAtIso,
     likes: post.likes,
     comments: post.commentsCount ?? 0,

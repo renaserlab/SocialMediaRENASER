@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
@@ -198,6 +198,57 @@ export function VideoPlayer({
     descargaba lo suficiente para empezar.
   */
   const [firstFrame, setFirstFrame] = useState(false);
+
+  /*
+    APAGAR ANTES DE QUE SE LO LLEVEN. La unica pausa que llega a tiempo.
+
+    EL FALLO. Un video de Inicio seguia SONANDO al cambiar de seccion. No era
+    que nadie diera la orden de parar: era que la orden llegaba tarde siempre.
+
+    Como se para hoy un video del feed: la pantalla deja de estar activa, el
+    elemento deja de pintar `<VideoPlayer />` y React lo DESMONTA. Es decir, la
+    forma de callar el sonido era destruir el reproductor. Y destruir no es
+    parar:
+
+      1. `useVideoPlayer` suelta el reproductor nativo en la limpieza de un
+         `useEffect` suyo, declarado ANTES que cualquiera de los de aqui. Las
+         limpiezas pasivas corren en orden de declaracion, asi que al desmontar
+         se libera PRIMERO y solo despues corren las nuestras: el
+         `player.pause()` de `useFocusEffect` cae sobre un objeto ya liberado y
+         se lo traga `safely()`. Es la misma razon por la que existe `safely()`
+         —ver su comentario—: lo que alli se documento como «no reventar» era,
+         ademas, «no parar».
+      2. Con lo cual el silencio dependia entero de `release()`. Y en Android
+         `release()` no para nada de inmediato: expo-video hace
+         `GlobalScope.launch(Dispatchers.Main) { player.release() }`, o sea que
+         la parada de ExoPlayer queda encolada para un ciclo posterior del hilo
+         principal —justo el que esta ocupado montando la seccion nueva—. Ese
+         hueco es el audio que se oye encima de Explorar o de Perfil.
+
+    LA CORRECCION, en la capa que corresponde: decir «para» mientras el
+    reproductor todavia existe. `useLayoutEffect` y no `useEffect` es TODA la
+    diferencia: React ejecuta las limpiezas de layout en la fase de mutacion,
+    sincronamente, ANTES de las pasivas —y por tanto antes del `release()` de
+    expo-video—. Aqui el reproductor esta vivo y `pause()` de verdad pausa.
+
+    Va atado al CICLO DE VIDA DE ESTE REPRODUCTOR, no a un silencio global: se
+    dispara solo cuando este componente concreto desaparece o cuando cambia su
+    fuente. Los reels, los cursos y las historias no se enteran de nada, porque
+    sus reproductores no se estan desmontando.
+
+    Se silencia ademas de pausar por lo mismo que dice el punto 2: entre esta
+    llamada y la liberacion nativa hay un hueco de milisegundos en el que un
+    buffer ya entregado puede seguir saliendo por el altavoz. Pausar es la
+    orden; silenciar es la garantia de que ese hueco no se oye.
+  */
+  useLayoutEffect(() => {
+    return () => {
+      safely(() => {
+        player.pause();
+        player.muted = true;
+      });
+    };
+  }, [player]);
 
   // El silencio puede cambiarlo la persona en cualquier momento (boton de
   // sonido); el ajuste inicial del reproductor solo vale para el primer render.
@@ -451,7 +502,15 @@ export function VideoPlayer({
             <ExpoImage
               source={posterSource}
               style={StyleSheet.absoluteFill}
-              contentFit="cover"
+              /*
+                El MISMO encuadre que el video, no uno fijo.
+
+                Estaba clavado en `cover` mientras las otras dos capas de
+                portada obedecian la propiedad: en el muro, que pide `contain`,
+                la portada salia recortada y al arrancar el video daba un salto
+                —cambiaba de encuadre delante de quien mira—.
+              */
+              contentFit={contentFit === 'fill' ? 'cover' : contentFit}
               cachePolicy="disk"
               recyclingKey={posterCacheKey}
               transition={120}
