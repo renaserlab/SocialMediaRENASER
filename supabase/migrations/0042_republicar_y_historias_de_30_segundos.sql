@@ -2,10 +2,15 @@
 -- 0042 — Republicar (repost) y historias de hasta 30 segundos
 -- =============================================================================
 --
--- ESTA MIGRACIÓN NO SE HA APLICADO. Se deja preparada a propósito, igual que la
--- 0037, la 0038, la 0039 y la 0040: aplicar cambios de esquema contra la base
--- real es una decisión que se toma mirando, no un efecto secundario de arreglar
--- un fallo.
+-- ESTA MIGRACIÓN ESTÁ APLICADA en producción (confirmado por quien la ejecutó,
+-- 31 de agosto de 2026), y se ha vuelto a ejecutar sin consecuencias: todas sus
+-- sentencias son idempotentes —`if not exists`, `drop policy if exists` antes de
+-- crearla— y NINGUNA toca una sola fila. No hay `insert`, ni `update`, ni
+-- `delete`, ni `truncate`, ni `drop table`. Volver a pasarla es un no-op.
+--
+-- Al volver a ejecutarla, el `check` de la duración de las historias se quita y
+-- se pone otra vez, y al ponerlo Postgres revalida la tabla entera. Que no haya
+-- fallado demuestra que ninguna historia guardada se sale de los 1000–30000 ms.
 --
 -- Trae dos cosas que no tienen nada que ver entre sí. Van juntas porque el
 -- encargo asignó UN número a este bloque de trabajo, no porque estén
@@ -121,11 +126,10 @@ create policy post_reposts_delete_own on public.post_reposts for delete
 -- hay ninguna fila existente que deje de cumplirlo, así que no puede fallar por
 -- datos.
 --
--- MIENTRAS ESTO NO SE APLIQUE, la aplicación sigue funcionando: al insertar una
--- historia más larga que el tope viejo, la base la rechaza y el móvil reintenta
--- una vez guardando quince segundos (ver `StoryRepository.create`). Lo único
--- que se nota es que la barra del visor cuenta quince en vez de los que dure el
--- vídeo. En cuanto esto se aplique, ese reintento deja de ocurrir solo.
+-- YA APLICADO: el tope real son treinta segundos y el reintento de quince que
+-- llevaba `StoryRepository.create` como red de seguridad dejó de dispararse
+-- solo, sin tocar el móvil. Se mantiene por si algún despliegue viejo apunta a
+-- una base sin esta migración.
 --
 -- El nombre de la restricción es el que le pone Postgres a un `check` declarado
 -- en la columna: `<tabla>_<columna>_check`.

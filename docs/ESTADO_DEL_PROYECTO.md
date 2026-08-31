@@ -259,25 +259,29 @@ npm --workspace apps/mobile run start -- --web --port 8082   # http://localhost:
 5. **iOS**: requiere Apple Developer Program ($99/año) para dispositivos reales.
 6. **commerce** (pagos reales) — fuera del MVP.
 7. Opcional: upgrade a **Expo SDK 57** (para Expo Go) y badge de no-leídos en el Home.
-8. **Recortar vídeos de historia dentro de la app — PENDIENTE, y no está
-   simulado.** El límite de 30 s ya es real y se mide sobre el archivo
-   (`apps/mobile/src/lib/historias.ts`), pero **cortar** no se puede hacer con
-   lo que hay instalado: `react-native-compressor` 1.19.4 solo recomprime
-   archivos enteros —su contrato nativo no tiene `startTime`/`endTime`— y no hay
-   `expo-av`, ni `expo-video-thumbnails`, ni `ffmpeg-kit`. Dos caminos, los dos
-   con coste de alcance:
-   - **Dependencia nativa de recorte** (`AVAssetExportSession` en iOS,
-     `MediaMuxer` en Android, o un módulo Expo propio). Obliga a compilación
-     nueva: en Expo Go no cargaría, igual que ya le pasa al compresor.
-   - **Recortar en el servidor**, donde ffmpeg SÍ está (`apps/api/Dockerfile`).
-     Exige que la creación de historias pase por la API: hoy el móvil inserta
-     directo contra PostgREST (`StoryRepository`).
-   La mitad visual de un recortador tipo WhatsApp sí es viable sin nada nuevo:
-   `expo-video` trae `generateThumbnailsAsync(times[])` para la tira de
-   fotogramas y `currentTime`/`duration` para las asas.
-9. **Republicar (repost)**: la migración `0042` está escrita y **sin aplicar**.
-   Hasta que se aplique, `GET /reposts` responde vacío y republicar avisa de
-   que no está disponible (`recommendations/esquema.hay_republicaciones`).
-   Las republicaciones aún **no se mezclan en el muro** (`GET /posts`): se leen
-   por `GET /reposts`. Mezclarlas pide rehacer la paginación por cursor del
-   feed sobre dos orígenes, y eso es un cambio con su propio riesgo.
+8. **Recortar vídeos de historia — HECHO en el servidor** (`7b45067`). Se
+   eligió el segundo de los dos caminos que aquí se describían: ffmpeg ya
+   estaba en `apps/api/Dockerfile`, así que el recorte lo hace la API
+   (`app/modules/stories/recorte.py`) y no hizo falta ninguna dependencia
+   nativa ni una compilación nueva. El orden es subir → recortar → publicar,
+   con la fila escrita al final, para que un vídeo largo no llegue a estar
+   publicado ni un instante; si ffmpeg falla, se responde 503 y no queda
+   ninguna fila. El precio, dicho en pantalla antes de empezar: **hay que subir
+   el vídeo entero** antes de recortarlo, que no es lo que hace WhatsApp.
+   Queda por comprobar en un aparato real que un vertical recortado sale
+   derecho y que los tiempos coinciden con lo que se ve.
+9. **Republicar (repost) — HECHO y visible** (`aef9167`). La migración `0042`
+   está **aplicada** (confirmado por quien la ejecutó). El muro mezcla ahora
+   las dos corrientes en un solo orden, marcado por la fecha de la
+   REPUBLICACIÓN y no por la del original: compartir hoy algo de hace un mes
+   se ve hoy.
+
+   Hasta ese commit el problema no era que faltara mezclarlas: era que
+   `listReposts` **no lo llamaba nadie** en toda la aplicación, así que
+   republicar era una acción sin consecuencia visible para nadie.
+
+   La mezcla va detrás de `with_reposts`, apagado por defecto, porque el mismo
+   endpoint sirve la galería de un perfil, un círculo y el feed de vídeo, y en
+   ninguno de esos sitios una republicación significa lo mismo. Los filtros del
+   muro y los bloqueos se aplican a las dos corrientes; los bloqueos, por las
+   **dos** personas que hay detrás de una republicación.

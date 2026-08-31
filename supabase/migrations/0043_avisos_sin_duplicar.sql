@@ -2,9 +2,11 @@
 -- 0043 — Un aviso por acción lógica (`public.notifications`)
 -- =============================================================================
 --
--- ESTA MIGRACIÓN NO SE HA APLICADO. Se deja preparada a propósito: aplicar
--- cambios de esquema contra la base real es una decisión que se toma mirando,
--- no un efecto secundario de una tarea de producto.
+-- ESTA MIGRACIÓN ESTÁ APLICADA en producción (confirmado por quien la ejecutó,
+-- 31 de agosto de 2026), y se ha vuelto a ejecutar sin consecuencias: todas sus
+-- sentencias son idempotentes —`if not exists`, `drop policy if exists` antes de
+-- crearla— y NINGUNA toca una sola fila. No hay `insert`, ni `update`, ni
+-- `delete`, ni `truncate`, ni `drop table`. Volver a pasarla es un no-op.
 --
 -- ┌───────────────────────────────────────────────────────────────────────────┐
 -- │ EL CÓDIGO FUNCIONA SIN ESTA MIGRACIÓN. Sin ella, `add_notification`        │
