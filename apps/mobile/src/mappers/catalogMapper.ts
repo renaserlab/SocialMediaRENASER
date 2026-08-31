@@ -16,6 +16,11 @@ export type EventDto = {
   capacity: number | null;
   registrations_count: number;
   reserved_by_me: boolean;
+  /**
+   * `upcoming` | `past` | `undated`, resuelto por el servidor contra las
+   * fechas REALES. Opcional porque una API todavía sin desplegar no lo manda.
+   */
+  time_state?: string | null;
 };
 
 /**
@@ -45,6 +50,23 @@ function mapType(eventType: string): EventItem['type'] {
   return 'webinar';
 }
 
+/**
+ * Si el evento está por llegar, ya pasó o no tiene fecha.
+ *
+ * LO DECIDE EL SERVIDOR y aquí solo se acepta lo que dice. La alternativa era
+ * comparar aquí `dto.starts_at`, y eso repetiría en el móvil una regla que ya
+ * vive en `catalog/eventos.py` —con `ends_at`, con el límite en «ahora mismo»,
+ * con los dos campos nulos— para que un día las dos digan cosas distintas. Lo
+ * que NUNCA se puede hacer es mirar `date`, que es el texto ya formateado.
+ *
+ * Sin respuesta del servidor se responde `undated`, que es lo único cierto
+ * cuando no se sabe: es el valor que NO afirma ni futuro ni pasado.
+ */
+function mapTimeState(valor: string | null | undefined): EventItem['timeState'] {
+  if (valor === 'upcoming' || valor === 'past' || valor === 'undated') return valor;
+  return 'undated';
+}
+
 export function toEventItem(dto: EventDto): EventItem {
   return {
     id: dto.id,
@@ -58,5 +80,6 @@ export function toEventItem(dto: EventDto): EventItem {
     date: formatEventDate(dto.starts_at),
     location: dto.location ?? '',
     type: mapType(dto.event_type),
+    timeState: mapTimeState(dto.time_state),
   };
 }

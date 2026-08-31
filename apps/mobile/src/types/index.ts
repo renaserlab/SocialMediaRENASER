@@ -253,6 +253,19 @@ export type EventItem = {
   date: string;
   location: string;
   type: 'presencial' | 'webinar' | 'live';
+  /**
+   * Si el evento está por llegar, ya pasó, o no tiene fecha definida.
+   *
+   * Lo calcula el SERVIDOR con `starts_at` / `ends_at` (ver
+   * `catalog/eventos.py`). Nunca se deduce de `date`, que es el texto ya
+   * formateado para leerse: cambia con el idioma, no siempre lleva año y no
+   * sabe nada de la fecha de fin.
+   *
+   * Opcional porque el catálogo de demostración —`data/mockData.ts`— no tiene
+   * fechas reales, solo cadenas ya escritas. Ahí la respuesta honesta es «no
+   * se sabe», y por eso las pantallas no agrupan cuando no hay backend.
+   */
+  timeState?: 'upcoming' | 'past' | 'undated';
 };
 
 export type Course = {

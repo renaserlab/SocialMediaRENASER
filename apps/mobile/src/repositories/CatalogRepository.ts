@@ -9,6 +9,20 @@ export type EventsPage = {
 };
 
 /**
+ * Qué grupo de eventos se pide.
+ *
+ * - `upcoming`: los que todavía no han terminado Y tienen fecha.
+ * - `past`: los que ya terminaron. Se pueden consultar: son historia útil.
+ * - `undated`: los anunciados sin fecha («por confirmar»).
+ * - `all`: todos, ordenados por grupo —lo vigente primero—.
+ *
+ * QUIÉN CLASIFICA. El servidor, contra `starts_at` y `ends_at`. Aquí no se
+ * compara ninguna fecha: pedir el grupo es una consulta, no un filtro sobre lo
+ * que ya se descargó.
+ */
+export type GrupoDeEventos = 'upcoming' | 'past' | 'undated' | 'all';
+
+/**
  * Firma en lote las portadas del listado.
  *
  * Se suben al mismo bucket privado que el resto de medios, asi que hay que
@@ -26,8 +40,18 @@ async function attachCovers(items: EventItem[]): Promise<void> {
 }
 
 export const CatalogRepository = {
-  async listEvents(): Promise<EventsPage> {
-    const dtos = await apiRequest<EventDto[]>(`${API_V1}/catalog/events?limit=50`);
+  /**
+   * El catálogo de eventos.
+   *
+   * `cuando` va SIN valor por defecto en la llamada —se manda `all`— para que
+   * quien no dice nada siga recibiendo la lista entera, exactamente como antes.
+   * Quien quiera solo lo vigente lo pide, y entonces el filtrado corre en el
+   * servidor con paginación, no recortando en el teléfono lo ya descargado.
+   */
+  async listEvents(cuando: GrupoDeEventos = 'all'): Promise<EventsPage> {
+    const dtos = await apiRequest<EventDto[]>(
+      `${API_V1}/catalog/events?limit=50&when=${cuando}`,
+    );
     const items = dtos.map(toEventItem);
     await attachCovers(items);
     return {

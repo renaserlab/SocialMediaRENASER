@@ -151,6 +151,16 @@ class EventRead(BaseModel):
     capacity: int | None = None
     registrations_count: int = 0
     reserved_by_me: bool = False
+    #: `upcoming`, `past` o `undated`, resuelto contra `starts_at` / `ends_at`
+    #: en el momento de responder (ver `catalog/eventos.py`).
+    #:
+    #: Viaja aunque el cliente haya pedido un solo grupo: así la pantalla puede
+    #: decir «finalizado» sin recalcular nada, y sobre todo sin comparar el
+    #: texto de la fecha ya formateada, que es lo que no se puede hacer.
+    #:
+    #: `upcoming` por defecto SOLO para que el esquema tenga un valor de
+    #: respaldo; el router siempre lo escribe.
+    time_state: str = "upcoming"
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,6 +1,8 @@
 """Endpoints del catálogo: eventos (con reservas) y cursos (lista)."""
 
-from fastapi import APIRouter, Depends, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +13,7 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import cursos_v2, esquema
+from app.modules.catalog import cursos_v2, esquema, eventos
 from app.modules.catalog.models import Course, Event, EventRegistration
 from app.modules.catalog.schemas import (
     CoursePublishResult,
@@ -292,7 +294,9 @@ async def _guardar_temas(
         db.add(CourseTopic(course_id=course_id, topic_id=principal, source="manual"))
 
 
-def _to_event_read(event: Event, count: int, reserved: int) -> EventRead:
+def _to_event_read(
+    event: Event, count: int, reserved: int, momento: datetime | None = None
+) -> EventRead:
     return EventRead(
         id=event.id,
         organizer_id=event.organizer_id,
@@ -308,6 +312,10 @@ def _to_event_read(event: Event, count: int, reserved: int) -> EventRead:
         capacity=event.capacity,
         registrations_count=count or 0,
         reserved_by_me=(reserved or 0) > 0,
+        # Se calcula al responder, no al guardar: un evento pasa de próximo a
+        # anterior sin que nadie lo edite, y una columna guardada se quedaría
+        # mintiendo hasta que alguien la refrescara.
+        time_state=eventos.estado_de(event, momento or eventos.ahora()),
     )
 
 
@@ -322,11 +330,37 @@ async def _registrations_count(db: AsyncSession, event_id: str) -> int:
 
 @router.get("/events", response_model=list[EventRead])
 async def list_events(
+    when: str = Query(default=eventos.TODOS, pattern=eventos.CUANDO),
     page: Page = Depends(pagination_params),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[EventRead]:
+    """Los eventos publicados, separando los que están por llegar de los que ya
+    pasaron.
+
+    QUÉ ESTABA MAL. Este listado devolvía cualquier evento publicado ordenado
+    por `starts_at` ascendente, así que uno de agosto salía ANTES que uno de
+    octubre y las dos pantallas que lo consumen —Explorar y Eventos— lo
+    enseñaban bajo el título «Próximos eventos». No era un fallo de redacción:
+    el orden ponía primero, y con más presencia, justo lo que ya no se puede
+    reservar.
+
+    QUÉ SE DEVUELVE AHORA. `when` elige el grupo (`upcoming`, `past`,
+    `undated`) y cada evento llega con su `time_state`. El valor por omisión es
+    `all` PORQUE NO SE ESCONDE NADA: los eventos pasados siguen siendo
+    consultables, y las versiones ya instaladas de la aplicación —que no envían
+    `when`— siguen recibiendo la lista entera. Lo que cambia para ellas es el
+    ORDEN: lo vigente primero, lo anterior al final. Ese cambio solo puede
+    mejorar una pantalla que se titula «Próximos eventos».
+
+    Los eventos SIN FECHA no se cuelan en ninguno de los otros dos grupos. Ver
+    `catalog/eventos.py`.
+    """
     uid = current_user.id if current_user else None
+    # Un solo instante para toda la respuesta: filtrar, ordenar y etiquetar con
+    # tres relojes distintos puede dejar una fila filtrada como próxima y
+    # etiquetada como pasada si la petición cae justo en el segundo del cambio.
+    momento = eventos.ahora()
     count_sq = (
         select(func.count())
         .select_from(EventRegistration)
@@ -346,16 +380,18 @@ async def list_events(
         if uid
         else literal(0)
     )
+    consulta = select(Event, count_sq, reserved_sq).where(Event.status == "published")
+    grupo = eventos.condicion(when, momento)
+    if grupo is not None:
+        consulta = consulta.where(grupo)
     rows = (
         await db.execute(
-            select(Event, count_sq, reserved_sq)
-            .where(Event.status == "published")
-            .order_by(Event.starts_at.asc().nulls_last())
+            consulta.order_by(*eventos.orden(momento))
             .limit(page.limit)
             .offset(page.offset)
         )
     ).all()
-    return [_to_event_read(*row) for row in rows]
+    return [_to_event_read(*row, momento=momento) for row in rows]
 
 
 @router.post("/events/{event_id}/reserve", response_model=EventRead)
