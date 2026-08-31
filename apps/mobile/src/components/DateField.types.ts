@@ -4,7 +4,38 @@ export type DateFieldProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /**
+   * Primer día que se puede elegir. Sin valor, cualquiera.
+   *
+   * NO ES LA VALIDACIÓN, es la cortesía: quien decide si una fecha vale es el
+   * servidor, con SU reloj (ver `es_momento_futuro` en la agenda). Esto solo
+   * evita ofrecer días que se van a rechazar — un calendario que deja elegir
+   * el martes pasado y después dice que no es un calendario que se equivoca a
+   * propósito.
+   */
+  minDate?: Date;
 };
+
+/** Date -> aaaa-mm-dd, para el atributo `min` de `<input type="date">`. */
+export function toIsoDate(date: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
+/**
+ * HOY a las 00:00, en la zona horaria del teléfono.
+ *
+ * A MEDIANOCHE Y NO «AHORA MISMO», y la diferencia importa: con `new Date()` el
+ * calendario dejaría de ofrecer el día de hoy en cuanto pasara un minuto, y una
+ * sesión para esta tarde es lo más normal del mundo. El límite fino —que la
+ * HORA elegida tampoco haya pasado— es de quien componga fecha y hora, y la
+ * palabra definitiva la tiene el servidor.
+ */
+export function hoyANoche(): Date {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  return hoy;
+}
 
 /**
  * El formulario sigue hablando en dd/mm/aaaa y la validación no cambia: el

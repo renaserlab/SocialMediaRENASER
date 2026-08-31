@@ -16,7 +16,13 @@ import { fromDisplay, toDisplay, type DateFieldProps } from './DateField.types';
  * `DateField.web.tsx`. Ambas escriben el mismo dd/mm/aaaa, así que la
  * validación del formulario no cambia.
  */
-export function DateField({ label, value, onChange, placeholder = 'dd/mm/aaaa' }: DateFieldProps) {
+export function DateField({
+  label,
+  value,
+  onChange,
+  placeholder = 'dd/mm/aaaa',
+  minDate,
+}: DateFieldProps) {
   const { colors } = useAppTheme();
   const [open, setOpen] = useState(false);
 
@@ -44,6 +50,14 @@ export function DateField({ label, value, onChange, placeholder = 'dd/mm/aaaa' }
         <DateTimePicker
           value={current}
           mode="date"
+          /*
+            El calendario no ofrece los dias anteriores a `minDate`: salen
+            atenuados y no se pueden tocar. Es cortesia, no seguridad —quien
+            decide es el servidor con su reloj—, pero un selector que deja
+            elegir el martes pasado para despues decir que no vale se equivoca
+            a proposito.
+          */
+          minimumDate={minDate}
           // En Android el dialogo es del sistema y se cierra solo; en iOS el
           // selector va embebido, por eso se oculta al confirmar.
           display="default"

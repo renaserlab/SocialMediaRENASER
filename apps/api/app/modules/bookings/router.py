@@ -17,6 +17,7 @@ from app.modules.bookings.schemas import (
     BookingCreate,
     BookingRead,
     BookingUpdate,
+    es_momento_futuro,
     transicion_permitida,
 )
 from app.modules.notifications.push import encolar_push
@@ -43,6 +44,45 @@ TIPO_DE_AVISO: dict[str, str] = {
     "reschedule_requested": "session_rescheduled",
     "completed": "session_completed",
 }
+
+
+async def _nombre_del_actor(db: AsyncSession, uid: str) -> str | None:
+    """El nombre con el que aparece quien provoca un aviso de la agenda.
+
+    SALE DE `profiles`, NO DE `current_user`. Es la misma regla —y el mismo
+    helper, escrito igual— que en `content/router.py`: `AuthUser` es lo que trae
+    el JWT (id, correo, rol) y NO tiene `full_name`. Leerlo de ahi lanza un
+    AttributeError DESPUES del commit, o sea un 500 con la reserva ya guardada,
+    que ademas el navegador reporta como error de CORS porque Starlette no pone
+    cabeceras CORS en una excepcion sin capturar.
+
+    UNA consulta y un solo valor: no hace falta la fila entera del perfil, y
+    aqui no hay lote que resolver porque el actor de un aviso de agenda es
+    siempre una sola persona.
+
+    Devolver None es valido: `push.build_message` escribe «Alguien» y el aviso
+    sale igual. Un nombre generico es mejor que ningun aviso.
+    """
+    return await db.scalar(select(Profile.full_name).where(Profile.id == uid))
+
+
+def _exigir_momento_futuro(scheduled_at: datetime | None) -> None:
+    """Una sesion no se agenda para una fecha que ya paso.
+
+    LA HORA LA PONE EL SERVIDOR (`datetime.now(utc)`), no la peticion. El reloj
+    del telefono lo elige quien lo lleva: atrasarlo un dia seria todo lo que
+    hace falta para colar una fecha pasada si la comprobacion viviera alli. El
+    movil lo comprueba tambien, pero para no dejar escribir algo que se va a
+    rechazar — no es donde se decide.
+
+    Sin fecha no se valida nada: acordarla por chat es un caso legitimo y es lo
+    unico que habia antes de que existiera el selector.
+    """
+    if not es_momento_futuro(scheduled_at, datetime.now(tz.utc)):
+        raise ValidationAppError(
+            "Esa fecha ya pasó. Elige un momento futuro para la sesión.",
+            code="booking_date_in_past",
+        )
 
 
 def _resumen(perfil: Profile) -> ProfileSummary:
@@ -164,7 +204,15 @@ async def create_booking(
     """Pide una sesion a otra persona."""
     ensure_uuid(payload.provider_id, "Perfil no encontrado.")
     if payload.provider_id == current_user.id:
-        raise ValidationAppError("No puedes agendar una sesión contigo mismo.")
+        # AUTO-AGENDA: fuera. Una sesion son dos personas, y una fila donde
+        # quien pide y quien da son la misma cuenta no significa nada: se podria
+        # aceptar a si misma, completarse sola y acabar dando el sello de
+        # «interaccion verificada» a una resena que nadie ha vivido.
+        raise ValidationAppError(
+            "No puedes agendar una sesión contigo mismo.",
+            code="booking_self_not_allowed",
+        )
+    _exigir_momento_futuro(payload.scheduled_at)
 
     quien_da = await db.get(Profile, payload.provider_id)
     if quien_da is None:
@@ -223,7 +271,7 @@ async def create_booking(
     # cliente porque no habia backend que lo hiciera. Ahora si lo hay, y con
     # `entity_type='booking'` y el id dentro: por eso tocar el aviso abre la
     # AGENDA y no el perfil de quien lo mando, que es donde caian todos antes.
-    add_notification(
+    estrenado = await add_notification(
         db,
         user_id=payload.provider_id,
         actor_id=current_user.id,
@@ -245,12 +293,19 @@ async def create_booking(
     await db.commit()
     await db.refresh(reserva)
 
-    encolar_push(
-        background,
-        user_ids=[payload.provider_id],
-        notification_type="session_booked",
-        data={"type": "booking", "id": reserva.id},
-    )
+    if estrenado:
+        encolar_push(
+            background,
+            user_ids=[payload.provider_id],
+            notification_type="session_booked",
+            # SIN ESTO el aviso decia «Alguien quiere agendar contigo».
+            # `push.build_message` sustituye `{actor}` por «Alguien» cuando no
+            # le dan nombre, asi que faltaba justo lo que hace util el aviso:
+            # saber QUIEN pide la sesion sin abrir la aplicacion. El nombre sale
+            # de `profiles`, nunca del token (ver `_nombre_del_actor`).
+            actor_name=await _nombre_del_actor(db, current_user.id),
+            data={"type": "booking", "id": reserva.id},
+        )
     return await _cargar(db, reserva, current_user.id)
 
 
@@ -287,6 +342,16 @@ async def update_booking(
             "Esa acción ya no es posible sobre esta sesión."
         )
 
+    # Reprogramar tampoco vale hacia atras. Sin esto, la comprobacion de crear
+    # se saltaba en un paso: se pedia la sesion para manana y acto seguido se
+    # «reprogramaba» al mes pasado.
+    #
+    # Solo cuando la peticion trae fecha: aceptar o completar no la tocan, y
+    # exigirla ahi impediria dar por hecha una sesion que ya ocurrio, que es
+    # justamente lo que da el sello a una resena.
+    if payload.scheduled_at is not None:
+        _exigir_momento_futuro(payload.scheduled_at)
+
     reserva.status = payload.status
     if payload.status == "completed":
         reserva.completed_at = datetime.now(tz.utc)
@@ -317,7 +382,7 @@ async def update_booking(
     # sesión contigo», que dice justo lo contrario de lo que paso.
     otra_parte = reserva.requester_id if rol == "provider" else reserva.provider_id
     tipo = TIPO_DE_AVISO.get(reserva.status, "session_booked")
-    add_notification(
+    estrenado = await add_notification(
         db,
         user_id=otra_parte,
         actor_id=current_user.id,
@@ -331,10 +396,14 @@ async def update_booking(
 
     # El push tambien: sin el, quien pidio la sesion no se enteraba de que se la
     # habian aceptado hasta que volviera a abrir la aplicacion por su cuenta.
-    encolar_push(
-        background,
-        user_ids=[otra_parte],
-        notification_type=tipo,
-        data={"type": "booking", "id": reserva.id},
-    )
+    # Con el nombre de quien respondio: «Alguien aceptó tu solicitud» obliga a
+    # abrir la aplicacion para saber lo unico que hacia falta saber.
+    if estrenado:
+        encolar_push(
+            background,
+            user_ids=[otra_parte],
+            notification_type=tipo,
+            actor_name=await _nombre_del_actor(db, current_user.id),
+            data={"type": "booking", "id": reserva.id},
+        )
     return await _cargar(db, reserva, current_user.id)

@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { DateField } from '@/components/DateField';
+import { hoyANoche } from '@/components/DateField.types';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
@@ -51,13 +52,35 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    * se escribe; la base de datos necesita un instante. Convertirlo AQUÍ evita
    * que cada pantalla se invente su propio formato.
    */
-  const cuandoIso = (dia: string, hora: string): string | null => {
+  const cuando = (dia: string, hora: string): Date | null => {
     const [d, m, a] = dia.split('/').map((n) => Number(n));
     const [hh, mm] = hora.split(':').map((n) => Number(n));
     if (!d || !m || !a || Number.isNaN(hh) || Number.isNaN(mm)) return null;
     const fecha = new Date(a, m - 1, d, hh, mm);
-    return Number.isNaN(fecha.getTime()) ? null : fecha.toISOString();
+    return Number.isNaN(fecha.getTime()) ? null : fecha;
   };
+
+  const cuandoIso = (dia: string, hora: string): string | null =>
+    cuando(dia, hora)?.toISOString() ?? null;
+
+  /**
+   * El momento propuesto ya pasó.
+   *
+   * SE COMPARAN INSTANTES, NUNCA CADENAS: «02/09/2026» y «2026-09-02» son la
+   * misma fecha y dos textos distintos, y `'10:00' < '9:00'` es cierto como
+   * texto. `toISOString()` normaliza a UTC, así que la zona horaria del
+   * teléfono queda dentro del instante en vez de perderse por el camino.
+   *
+   * NO ES LA VALIDACIÓN DE VERDAD. Quien decide es el servidor con SU reloj
+   * (`booking_date_in_past`): el del teléfono lo elige quien lo lleva, y
+   * atrasarlo un día bastaría para colar una fecha pasada si esto fuera lo
+   * único. Lo que aporta aquí es no dejar rellenar un formulario entero para
+   * que lo rechacen al final.
+   */
+  const yaPaso = (() => {
+    const momento = cuando(date, time);
+    return momento !== null && momento.getTime() <= Date.now();
+  })();
 
   const reset = () => {
     setDate('');
@@ -130,6 +153,12 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       setError('Elige la fecha y la hora de la sesión.');
       return;
     }
+    if (yaPaso) {
+      // El servidor lo rechazaría igualmente; decirlo aquí ahorra el viaje y,
+      // sobre todo, explica qué hay que cambiar.
+      setError('Esa fecha ya pasó. Elige un momento futuro para la sesión.');
+      return;
+    }
 
     let autorizado = false;
     await requireAuth('para agendar una sesión', () => {
@@ -169,7 +198,14 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     }
   };
 
-  const listo = !!date && !!time;
+  /*
+    LISTO PARA CONFIRMAR: fecha, hora, y que el momento no haya pasado.
+
+    El boton se desactiva en vez de dejar pulsar y fallar, pero el mensaje
+    tambien se pinta: un boton apagado sin explicacion es lo que hace que
+    alguien lo toque cinco veces sin entender que le falta.
+  */
+  const listo = !!date && !!time && !yaPaso;
 
   return (
     <BottomSheet visible={visible} onClose={close}>
@@ -182,7 +218,17 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
 
       <View style={styles.when}>
         <View style={styles.half}>
-          <DateField label="Fecha" value={date} onChange={setDate} />
+          {/*
+            El calendario no ofrece dias anteriores a HOY. Es cortesia: quien
+            decide de verdad es el servidor con su reloj, pero ofrecer un dia
+            que se va a rechazar es equivocarse a proposito.
+
+            HOY A MEDIANOCHE y no «ahora mismo»: con la hora actual, el dia de
+            hoy dejaria de poder elegirse en cuanto pasara un minuto, y una
+            sesion para esta tarde es lo mas normal del mundo. Que la HORA
+            elegida tampoco haya pasado lo comprueba `yaPaso`.
+          */}
+          <DateField label="Fecha" value={date} onChange={setDate} minDate={hoyANoche()} />
         </View>
         <View style={styles.half}>
           <TimeField label="Hora" value={time} onChange={setTime} />
@@ -199,7 +245,14 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         style={{ color: colors.text, marginTop: spacing.md }}
       />
 
-      <InlineError message={error} />
+      {/*
+        El aviso de fecha pasada sale SIN esperar a pulsar: en cuanto la
+        combinacion de dia y hora queda en el pasado. Enterarse al confirmar,
+        con el formulario ya relleno, es la peor version de la misma noticia.
+      */}
+      <InlineError
+        message={error ?? (yaPaso ? 'Esa fecha ya pasó. Elige un momento futuro.' : null)}
+      />
 
       <View style={styles.actions}>
         <Button
