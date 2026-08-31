@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.content import hashtags, menciones
+from app.modules.content import hashtags, menciones, reposts
 from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import (
@@ -334,7 +334,7 @@ async def list_posts(
     media_map = await _load_media_map(db, ids)
     # Una consulta por cosa para el lote entero, no una por publicacion.
     temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
-    return [
+    salida = [
         _to_post_read(
             *row,
             media=media_map.get(row[0].id, []),
@@ -344,6 +344,12 @@ async def list_posts(
         )
         for row in rows
     ]
+    # Cuantas veces se republico cada una, y si fui yo. Se anota DESPUES en vez
+    # de meterlo en la consulta de arriba: esa esta ajustada al indice y
+    # paginada por cursor, y el dato vive en otra tabla que ademas puede no
+    # existir todavia (migracion 0042).
+    await reposts.anotar(db, salida, uid)
+    return salida
 
 
 @router.post("/posts", response_model=PostRead, status_code=status.HTTP_201_CREATED)
@@ -380,15 +386,22 @@ async def create_post(
     nuevas_menciones = await menciones.fijar(
         db, post.id, current_user.id, payload.mentioned_user_ids
     )
+    # Se avisa a quien de verdad ha estrenado aviso. `add_notification` devuelve
+    # False cuando ya habia uno igual —misma persona, misma publicacion— y en
+    # ese caso mandar el push haria sonar el telefono por algo que ya estaba en
+    # la bandeja.
+    avisados: list[str] = []
     for mencionado in nuevas_menciones:
-        add_notification(
+        if await add_notification(
             db,
             user_id=mencionado,
             actor_id=current_user.id,
             type="post_mention",
             entity_type="post",
             entity_id=post.id,
-        )
+        ):
+            avisados.append(mencionado)
+    nuevas_menciones = avisados
 
     await db.commit()
     await db.refresh(post)
@@ -600,15 +613,19 @@ async def update_post(
         nuevas_menciones = await menciones.fijar(
             db, post_id, current_user.id, payload.mentioned_user_ids
         )
+        # Igual que al crear: solo suena el telefono de quien estrena aviso.
+        avisados: list[str] = []
         for mencionado in nuevas_menciones:
-            add_notification(
+            if await add_notification(
                 db,
                 user_id=mencionado,
                 actor_id=current_user.id,
                 type="post_mention",
                 entity_type="post",
                 entity_id=post_id,
-            )
+            ):
+                avisados.append(mencionado)
+        nuevas_menciones = avisados
 
     # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
     # lista vacia equivale a quitarlo).
@@ -750,7 +767,11 @@ async def like_post(
     existing = await db.get(PostLike, {"post_id": post_id, "user_id": current_user.id})
     if existing is None:
         db.add(PostLike(post_id=post_id, user_id=current_user.id))
-        add_notification(
+        # Quitar y volver a poner el «me gusta» dejaba DOS filas en la bandeja:
+        # `post_likes` se borra al retirarlo, asi que este `if` volvia a decir
+        # que era la primera vez. Ahora el aviso es idempotente por (persona,
+        # publicacion) y solo se manda push si de verdad se ha estrenado.
+        estrenado = await add_notification(
             db,
             user_id=post.author_id,
             actor_id=current_user.id,
@@ -767,14 +788,15 @@ async def like_post(
         # porque aqui no hace falta la fila entera: solo el nombre. Y que sea
         # el mismo helper que en los avisos de mencion evita que este sitio
         # vuelva a divergir, que es justo como empezo el fallo.
-        actor = await _nombre_del_actor(db, current_user.id)
-        encolar_push(
-            background,
-            user_ids=[post.author_id],
-            notification_type="like",
-            actor_name=actor,
-            data={"type": "like", "postId": post_id},
-        )
+        if estrenado:
+            actor = await _nombre_del_actor(db, current_user.id)
+            encolar_push(
+                background,
+                user_ids=[post.author_id],
+                notification_type="like",
+                actor_name=actor,
+                data={"type": "like", "postId": post_id},
+            )
     return {"liked": True, "likes_count": await _likes_count(db, post_id)}
 
 
@@ -1060,7 +1082,10 @@ async def create_comment(
         body=payload.body,
     )
     db.add(comment)
-    add_notification(
+    # Un comentario NO se deduplica: dos comentarios de la misma persona en la
+    # misma publicacion son dos cosas distintas que han pasado. Ver
+    # `TIPOS_IDEMPOTENTES` en `notifications/service.py`.
+    await add_notification(
         db,
         user_id=post.author_id,
         actor_id=current_user.id,

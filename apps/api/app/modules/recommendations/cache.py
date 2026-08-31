@@ -85,6 +85,36 @@ def invalidar(user_id: str) -> None:
         _entradas.pop(clave, None)
 
 
+def invalidar_tipo(que: str) -> None:
+    """Ese tipo de ranking ya no vale PARA NADIE.
+
+    POR QUE HACE FALTA, ADEMAS DE `invalidar`. `invalidar` borra por PERSONA, y
+    sirve cuando cambia lo que le interesa a alguien: responde el cuestionario,
+    sigue a otra persona, dice que algo no le interesa.
+
+    Pero hay cambios que no son de una persona: son del CATALOGO. Cuando
+    alguien publica un curso, lo que cambia es lo que se le puede recomendar a
+    TODO EL MUNDO menos a su autor —a el no, sus cursos estan excluidos de sus
+    propias recomendaciones—. Invalidando solo al autor, el curso recien
+    publicado no podia recomendarse a nadie hasta que la entrada de cada cual
+    caducara sola: hasta un minuto entero de «lo he publicado y no aparece». Y
+    ese minuto es justo cuando el autor va a mirar si funciono.
+
+    ESTO NO ES «REFRESCAR MAS A MENUDO». No se acorta la vigencia ni se anade un
+    reintento en el cliente: se borra lo que ha dejado de ser cierto, en el
+    momento en que deja de serlo, que es lo unico que no miente.
+
+    LO QUE NO PUEDE HACER, dicho claro: la memoria es del PROCESO. Con varios
+    procesos —que es como corre esto— cada uno tiene la suya, y el que no
+    atendio la peticion de publicar sigue con su copia hasta que caduque. Por
+    eso `VIGENCIA_S` sigue siendo corta: es el techo del retraso, y esto lo
+    baja a cero en el proceso que si se entero. Cerrar eso del todo pediria un
+    almacen compartido, y ese es justo el proveedor que este proyecto no quiere.
+    """
+    for clave in [k for k in _entradas if k.endswith(f"|{que}")]:
+        _entradas.pop(clave, None)
+
+
 def vaciar() -> None:
     """Solo para los tests: que uno no herede el estado del anterior."""
     _entradas.clear()

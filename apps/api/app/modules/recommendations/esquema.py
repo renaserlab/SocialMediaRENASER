@@ -150,6 +150,27 @@ async def hay_resenas_de_perfil(db: AsyncSession) -> bool:
     return _cache["profile_reviews"]
 
 
+async def hay_curso_en_resena(db: AsyncSession) -> bool:
+    """Si existe `review_course` (migracion 0041).
+
+    Sin ella una resena no puede decir de que curso habla: se publica IGUAL, con
+    su texto y sus archivos, y `course_id` se ignora en silencio. Publicar una
+    opinion no puede fallar por un adorno.
+
+    Es la misma regla de las 0027 a 0033: desplegar codigo no puede exigir que
+    una migracion concreta ya este puesta. Con la 0041 se sabe mas; sin ella se
+    resena como hasta hoy.
+    """
+    if "review_course" not in _cache:
+        _cache["review_course"] = await _hay_tabla(db, "review_course")
+        if not _cache["review_course"]:
+            logger.warning(
+                "La migracion 0041 no esta aplicada: una resena no puede decir a "
+                "que curso se refiere y el selector no se ofrece."
+            )
+    return _cache["review_course"]
+
+
 async def hay_hashtags(db: AsyncSession) -> bool:
     """Si existen `hashtags` y `post_hashtags` (migracion 0031).
 
@@ -196,3 +217,22 @@ async def hay_menciones(db: AsyncSession) -> bool:
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior."""
     _cache.clear()
+
+
+async def hay_republicaciones(db: AsyncSession) -> bool:
+    """Si existe `post_reposts` (migracion 0042).
+
+    Sin ella no se puede republicar: las listas responden vacio y el boton de
+    republicar contesta que la funcion no esta disponible, en vez de reventar.
+    Las publicaciones se siguen leyendo, comentando y guardando igual que hoy.
+
+    Misma regla de las 0027 a 0030: desplegar codigo no puede exigir que una
+    migracion concreta ya este puesta.
+    """
+    if "post_reposts" not in _cache:
+        _cache["post_reposts"] = await _hay_tabla(db, "post_reposts")
+        if not _cache["post_reposts"]:
+            logger.warning(
+                "La migracion 0042 no esta aplicada: republicar no esta disponible."
+            )
+    return _cache["post_reposts"]

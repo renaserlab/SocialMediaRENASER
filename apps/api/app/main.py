@@ -18,6 +18,7 @@ from app.modules.bookings.router import router as bookings_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.communities.router import router as communities_router
 from app.modules.content.router import router as content_router
+from app.modules.content.reposts import router as reposts_router
 from app.modules.content.router_etiquetas import router as etiquetas_router
 from app.modules.identity.router import router as identity_router
 from app.modules.learning.router import router as learning_router
@@ -100,6 +101,10 @@ def create_app() -> FastAPI:
     # Se monta siempre: sin las migraciones 0031/0032 responde vacio, que es la
     # verdad, en vez de reventar.
     app.include_router(etiquetas_router, prefix=prefix)
+    # Republicar. Mismo modulo de contenido, fichero aparte por lo mismo que
+    # las etiquetas. Se monta siempre: sin la migracion 0042 las listas salen
+    # vacias y republicar avisa de que no esta disponible.
+    app.include_router(reposts_router, prefix=prefix)
     app.include_router(stories_router, prefix=prefix)
     app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)

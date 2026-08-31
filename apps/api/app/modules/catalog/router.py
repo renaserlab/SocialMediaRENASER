@@ -26,6 +26,7 @@ from app.modules.catalog.schemas import (
     EventUpdate,
 )
 from app.modules.learning.models import CourseLesson, CourseModule
+from app.modules.recommendations import cache as memoria_del_recomendador
 from app.modules.recommendations import temas_de_curso
 from app.modules.recommendations.models import CourseTopic
 from app.shared.database import get_db
@@ -600,6 +601,18 @@ async def publish_course(
 
     course.status = "published"
     await db.commit()
+    # El curso acaba de ENTRAR en el universo de candidatos del recomendador, y
+    # eso no es un cambio de esta persona: es un cambio del catalogo. La memoria
+    # corta de los rankings de cursos es POR QUIEN MIRA, asi que invalidar solo
+    # al autor —lo unico que se hacia, desde `temas_de_curso.fijar`— dejaba el
+    # curso sin poder recomendarse a NADIE MAS hasta que la entrada de cada cual
+    # caducara sola: hasta un minuto de «lo he publicado y no aparece», justo en
+    # el minuto en que el autor va a mirar si funciono.
+    #
+    # Se borra lo que ha dejado de ser cierto en el momento en que deja de
+    # serlo. No se acorta la vigencia ni se anade un refresco en el movil: eso
+    # taparia el sintoma y ademas costaria en todas las demas peticiones.
+    memoria_del_recomendador.invalidar_tipo("cursos")
     return CoursePublishResult(id=course.id, status="published", published=True)
 
 
@@ -799,6 +812,10 @@ async def unpublish_course(
     course.status = "hidden"
     await db.commit()
     await db.refresh(course)
+    # La otra mitad de lo mismo: retirarlo lo saca del universo de candidatos.
+    # Seguir recomendando durante un minuto algo que su autor acaba de esconder
+    # manda a la gente a una puerta cerrada.
+    memoria_del_recomendador.invalidar_tipo("cursos")
     return await _leer_curso(db, course)
 
 

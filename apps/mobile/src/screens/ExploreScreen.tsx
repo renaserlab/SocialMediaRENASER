@@ -1,12 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '@/components/AppHeader';
-import { Avatar } from '@/components/Avatar';
 import { CoachMark } from '@/components/CoachMark';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
@@ -20,6 +19,10 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { StoriesRow } from '@/components/StoriesRow';
+import {
+  FilaDeResultado,
+  filasDeResultados,
+} from '@/components/resultadosDeBusqueda';
 import { assets } from '@/data/assets';
 import { useTranslation } from '@/i18n/useTranslation';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
@@ -27,17 +30,29 @@ import { AuthRepository } from '@/repositories/AuthRepository';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
-import { ProfileRepository } from '@/repositories/ProfileRepository';
-import { resultadoAbierto } from '@/services/senales';
-import { profileImageUrl } from '@/services/storage';
+import { NotificationRepository } from '@/repositories/NotificationRepository';
 import { useAppStore } from '@/store/useAppStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import type { ProfileSummary } from '@/mappers/profileMapper';
 import type { Course, EventItem } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { pedirDestacados } from '@/services/cachePerfil';
+import { SearchRepository } from '@/repositories/SearchRepository';
+import {
+  ampliar,
+  anotarTecleo,
+  aplicar,
+  debeDecirSinResultados,
+  esBuscable,
+  estadoInicial,
+  estaOcupado,
+  ESPERA_DE_TECLEO_MS,
+  lanzar,
+  marcarFallo,
+  normalizarTermino,
+  type EstadoDeBusqueda,
+  type Grupo,
+} from '@/lib/busquedaProgresiva';
 
 /**
  * Explorar: buscar personas y descubrir todo lo que publica la comunidad.
@@ -61,7 +76,6 @@ export function ExploreScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
 
   const user = useAppStore((state) => state.user);
   const firstName = user?.fullName?.trim().split(' ')[0];
@@ -151,6 +165,34 @@ export function ExploreScreen() {
     (state) => !state.dismissedGuides.includes(DARREN_NOTICE_ID) && state.user?.isAdmin !== true,
   );
 
+  /*
+    EL PUNTO DE LA CAMPANA TAMBIEN SE ENCIENDE CON LA ACTIVIDAD REAL.
+
+    Hasta ahora solo lo encendia el aviso promocional de Darren, que es un texto
+    fijo de la propia aplicacion. O sea: alguien te empezaba a seguir, te
+    comentaba o te pedia una sesion, y dentro de la aplicacion no cambiaba nada
+    —el aviso existia en la bandeja, pero nada invitaba a abrirla—. El unico
+    aviso «dentro de la app» era el banner del push, que no llega en Expo Go, no
+    llega sin permiso del sistema y no llega si el aviso se creo mientras la
+    persona estaba mirando otra pantalla.
+
+    `unreadCount` ya existia en el repositorio y no lo llamaba nadie. Es UNA
+    consulta de conteo, no la bandeja entera.
+
+    Se relee AL VOLVER a esta pantalla porque abrir Notificaciones las marca
+    todas como leidas: sin eso, el punto seguiria encendido al volver.
+  */
+  const [avisosSinLeer, setAvisosSinLeer] = useState(0);
+  const contarAvisos = useCallback(() => {
+    if (!AuthRepository.enabled) return;
+    NotificationRepository.unreadCount()
+      .then(setAvisosSinLeer)
+      // Un contador que no se puede leer no es un error que mostrar: en el peor
+      // caso el punto no se enciende y la campana sigue estando donde estaba.
+      .catch(() => setAvisosSinLeer(0));
+  }, []);
+  useFocusEffect(contarAvisos);
+
   // Antes el indice se guardaba pero no se usaba: ambas pestañas mostraban el
   // mismo feed global. Ahora "Siguiendo" pide al backend solo lo de los
   // perfiles que sigue el usuario.
@@ -161,51 +203,107 @@ export function ExploreScreen() {
   };
 
   /* ---------------------------------------------------------- Busqueda ---- */
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ProfileSummary[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [busquedaFallida, setBusquedaFallida] = useState(false);
   /*
-    Contador que fuerza a repetir la busqueda al pulsar «reintentar».
-    Hace falta uno explicito: el termino no ha cambiado, asi que sin esto el
-    efecto no se volveria a ejecutar y el boton no haria nada.
-  */
-  const [reintentoBusqueda, setReintentoBusqueda] = useState(0);
+    ESTE BUSCADOR ENCUENTRA DE TODO, no solo personas. Es el arreglo de la queja
+    y conviene dejar escrito por que, porque el fallo no estaba donde parecia.
 
-  const term = query.trim();
-  const isSearching = term.length >= 2;
+    Alguien publico un curso, otra persona escribio palabras del tema y la
+    pantalla le contesto «Sin resultados — No encontramos personas con ese
+    nombre». No era que el curso no se encontrara: el backend lo devolvia
+    perfectamente. Es que este buscador preguntaba a `/profiles/search`, que
+    solo sabe de PERSONAS, y su estado vacio hablaba de nombres.
+
+    La busqueda global (`GET /api/v1/search`) ya existia, entera y probada, con
+    personas, etiquetas, publicaciones, CURSOS, eventos y deteccion de temas
+    —«muebles» encuentra carpinteria—. Vivia en `SearchScreen` y era
+    INALCANZABLE: el unico enlace a `/search` en toda la aplicacion estaba en
+    `app/dev.tsx`, la galeria interna de pantallas. Nadie de fuera la ha abierto
+    nunca.
+
+    Asi que este buscador —el que esta fijo arriba de Explorar, el que la gente
+    usa de verdad— pasa a preguntar a la busqueda global. No se «lleva» a nadie
+    a otra pantalla: se enseña donde ya estaba mirando.
+
+    LA CARRERA DE RESPUESTAS la resuelve `lib/busquedaProgresiva.ts` con un
+    sello por peticion, igual que en `SearchScreen`: la respuesta lenta de
+    «carp» no puede pisar a la de «carpinteria». Y COMO SE PINTA cada resultado
+    vive en `components/resultadosDeBusqueda.tsx`, compartido con esa pantalla,
+    para que no vuelva a haber dos buscadores que se separan.
+
+    NO SE EXIGE SESION: el endpoint busca en lo publico sin token, igual que el
+    muro se lee sin cuenta desde la 0018. Por eso ya no se mira
+    `supabaseEnabled` aqui; si la API no contesta, se dice que no se pudo
+    buscar y se ofrece reintentar, que es lo que habia antes para el mismo caso.
+  */
+  const [query, setQuery] = useState('');
+  const [estado, setEstado] = useState<EstadoDeBusqueda>(estadoInicial);
+
+  /*
+    El estado tambien en una referencia: lanzar una peticion necesita el sello
+    que sale de la misma transicion que actualiza el estado, y los actualizadores
+    de `useState` tienen que ser puros. Mismo motivo, y misma forma, que en
+    `SearchScreen`.
+  */
+  const refEstado = useRef(estado);
+  const cambiar = useCallback((paso: (previo: EstadoDeBusqueda) => EstadoDeBusqueda) => {
+    const siguiente = paso(refEstado.current);
+    if (siguiente === refEstado.current) return;
+    refEstado.current = siguiente;
+    setEstado(siguiente);
+  }, []);
+
+  /** Lanza la busqueda del texto que haya escrito ahora mismo. */
+  const buscar = useCallback(
+    (texto: string, signal?: AbortSignal) => {
+      const { estado: enVuelo, sello } = lanzar(refEstado.current, texto);
+      refEstado.current = enVuelo;
+      setEstado(enVuelo);
+      SearchRepository.buscar(texto, { signal })
+        .then((respuesta) => cambiar((previo) => aplicar(previo, sello, respuesta)))
+        .catch((error) => {
+          // Cancelar no es fallar: el aviso seria de una busqueda que ya nadie
+          // espera. Y «no hay resultados» cuando en realidad no se pudo
+          // preguntar hace creer que lo buscado no existe en la aplicacion.
+          if (signal?.aborted) return;
+          console.warn('[explorar] la busqueda fallo', error);
+          cambiar((previo) => marcarFallo(previo, sello));
+        });
+    },
+    [cambiar],
+  );
 
   useEffect(() => {
-    if (!isSearching || !supabaseEnabled) {
-      setResults([]);
-      return;
-    }
-    let active = true;
-    setSearching(true);
-    setBusquedaFallida(false);
-    const handle = setTimeout(() => {
-      ProfileRepository.search(term)
-        .then((data) => {
-          if (active) setResults(data);
-        })
-        .catch((error) => {
-          // «No encontramos a nadie» cuando en realidad no se pudo preguntar
-          // hace pensar que la persona buscada no esta en la aplicacion.
-          console.warn('[explorar] la busqueda de personas fallo', error);
-          if (active) {
-            setResults([]);
-            setBusquedaFallida(true);
-          }
-        })
-        .finally(() => {
-          if (active) setSearching(false);
-        });
-    }, 350);
+    cambiar((previo) => anotarTecleo(previo, query));
+    const texto = normalizarTermino(query);
+    if (!esBuscable(texto)) return;
+
+    const control = new AbortController();
+    const temporizador = setTimeout(() => buscar(texto, control.signal), ESPERA_DE_TECLEO_MS);
     return () => {
-      active = false;
-      clearTimeout(handle);
+      clearTimeout(temporizador);
+      control.abort();
     };
-  }, [term, isSearching, supabaseEnabled, reintentoBusqueda]);
+  }, [query, cambiar, buscar]);
+
+  /** Pide la pagina siguiente de UN grupo, sin tocar los demas. */
+  const verMas = useCallback(
+    (grupo: Grupo) => {
+      const paso = ampliar(refEstado.current, grupo);
+      if (!paso) return;
+      refEstado.current = paso.estado;
+      setEstado(paso.estado);
+      SearchRepository.buscar(paso.sello.termino, { grupo, salto: paso.sello.salto })
+        .then((respuesta) => cambiar((previo) => aplicar(previo, paso.sello, respuesta)))
+        .catch(() => cambiar((previo) => marcarFallo(previo, paso.sello)));
+    },
+    [cambiar],
+  );
+
+  const isSearching = esBuscable(estado.tecleado);
+  const filasDeBusqueda = useMemo(
+    () => filasDeResultados(estado.resultados, { ampliando: estado.ampliando, verMas }),
+    [estado.resultados, estado.ampliando, verMas],
+  );
 
   /* --------------------------------------------------------- Contenido ---- */
 
@@ -483,7 +581,10 @@ export function ExploreScreen() {
         rightIcon="bell"
         // Un aviso que nadie abre no sirve de nada: el punto marca que el de
         // "contenido de Darren gratis" sigue esperando dentro.
-        rightBadge={darrenNoticePending}
+        // El punto se enciende por lo que hay sin ver DETRAS: la actividad
+        // real sobre esta persona, o el aviso de contenido gratuito que
+        // sigue esperando dentro.
+        rightBadge={avisosSinLeer > 0 || darrenNoticePending}
         onRightPress={() => router.push('/notifications')}
       />
 
@@ -495,7 +596,13 @@ export function ExploreScreen() {
       <View style={[styles.container, styles.buscador]}>
         <View style={styles.searchWrapper}>
           <Input
-            placeholder="Buscar personas..."
+            /*
+              El texto de ayuda decia «Buscar personas...», y no era un detalle
+              de redaccion: describia exactamente lo que el buscador sabia hacer.
+              Quien queria un curso leia eso y buscaba igualmente, porque es el
+              unico buscador que hay.
+            */
+            placeholder="Personas, publicaciones, cursos o eventos..."
             placeholderTextColor={colors.textMuted}
             containerStyle={styles.searchContainer}
             value={query}
@@ -529,59 +636,61 @@ export function ExploreScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.container}>
+              {/*
+                TRES ESTADOS Y NO DOS, y la diferencia es justo la de la queja:
+
+                · «No pudimos buscar» cuando la peticion fallo. Decir «no hay
+                  resultados» cuando en realidad no se pudo preguntar hace creer
+                  que lo buscado no existe en la aplicacion.
+                · «Sin resultados» SOLO cuando ya hay una respuesta y viene
+                  vacia de los CINCO grupos —lo comprueba
+                  `debeDecirSinResultados`, que ademas espera a que no haya una
+                  busqueda pendiente para no parpadear entre letra y letra—. El
+                  texto ya no habla de nombres: aqui se busca de todo.
+                · Cargando mientras tanto.
+              */}
               <StateView
                 state={
-                  searching
-                    ? 'loading'
-                    : busquedaFallida
+                  estado.fallo
                     ? 'error'
-                    : results.length === 0
+                    : debeDecirSinResultados(estado)
                     ? 'empty'
+                    : filasDeBusqueda.length === 0
+                    ? 'loading'
                     : 'content'
                 }
+                icon="search"
                 title={
-                  !searching && busquedaFallida
+                  estado.fallo
                     ? 'No pudimos buscar'
-                    : !searching && results.length === 0
+                    : debeDecirSinResultados(estado)
                     ? 'Sin resultados'
                     : undefined
                 }
                 description={
-                  !searching && busquedaFallida
+                  estado.fallo
                     ? 'Revisa tu conexión e inténtalo de nuevo.'
-                    : !searching && results.length === 0
-                    ? 'No encontramos personas con ese nombre.'
+                    : debeDecirSinResultados(estado)
+                    ? `No encontramos nada para "${estado.termino}".`
                     : undefined
                 }
-                onRetry={busquedaFallida ? () => setReintentoBusqueda((n) => n + 1) : undefined}
+                onRetry={
+                  estado.fallo ? () => buscar(normalizarTermino(query)) : undefined
+                }
               >
-                {results.map((person) => (
-                  <ListRow
-                    key={person.id}
-                    title={person.fullName}
-                    subtitle={person.username}
-                    leftComponent={
-                      // Antes se pasaba siempre el avatar generico, asi que
-                      // quien tenia foto salia igualmente con la silueta por
-                      // defecto y no habia forma de reconocer a nadie.
-                      <Avatar
-                        size={40}
-                        image={profileImageUrl(person.avatarPath) ?? null}
-                        name={person.fullName}
-                      />
-                    }
-                    rightIcon="chevron-right"
-                    onPress={() => {
-                      /*
-                        Elegir un resultado dice QUE se buscaba de verdad. Se
-                        guarda a quien se abrio, NUNCA lo que se escribio: un
-                        termino de busqueda puede contener cualquier cosa y no
-                        hace falta para ordenar nada.
-                      */
-                      resultadoAbierto('profile', person.id);
-                      irAlPerfil(router, person.id);
-                    }}
-                  />
+                {/*
+                  Mientras llega la respuesta nueva se siguen viendo los
+                  resultados anteriores con este aviso encima: vaciar la lista en
+                  cada tecla convierte escribir en un parpadeo y esconde justo el
+                  resultado que a lo mejor ya estaba en pantalla.
+                */}
+                {estaOcupado(estado) && filasDeBusqueda.length > 0 ? (
+                  <Text style={[styles.buscandoAviso, { color: colors.textMuted }]}>
+                    Buscando…
+                  </Text>
+                ) : null}
+                {filasDeBusqueda.map((fila) => (
+                  <FilaDeResultado key={fila.key} fila={fila} />
                 ))}
               </StateView>
             </View>
@@ -606,6 +715,7 @@ const styles = StyleSheet.create({
   container: { paddingHorizontal: spacing.lg },
   buscador: { paddingTop: spacing.sm },
   avisoCarga: { paddingVertical: spacing.md },
+  buscandoAviso: { paddingVertical: spacing.sm, fontSize: 13 },
   searchWrapper: { position: 'relative', marginBottom: spacing.md },
   searchContainer: { paddingLeft: 30 },
   searchIcon: { position: 'absolute', left: spacing.md, top: 15 },

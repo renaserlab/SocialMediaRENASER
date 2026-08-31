@@ -115,6 +115,22 @@ class PostUpdate(BaseModel):
     mentioned_user_ids: list[str] | None = Field(default=None, max_length=10)
 
 
+class RepostRead(BaseModel):
+    """Quien republico una publicacion, y cuando.
+
+    Vive aqui y no en `content/reposts.py` porque `PostRead` la necesita, y ese
+    modulo importa este: al reves seria un ciclo de importacion.
+    """
+
+    id: str
+    #: QUIEN comparte. Nunca sustituye al autor original de `PostRead.author`.
+    author: AuthorSummary
+    comentario: str = ""
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class PostRead(BaseModel):
     id: str
     author: AuthorSummary
@@ -138,6 +154,17 @@ class PostRead(BaseModel):
     hashtags: list[str] = Field(default_factory=list)
     #: A quien etiqueta. Vacio sin la migracion 0032.
     mentions: list[AuthorSummary] = Field(default_factory=list)
+    #: Cuantas veces se ha republicado. Cero sin la migracion 0042.
+    reposts_count: int = 0
+    #: Si quien mira ya la republico. Sirve para que el boton diga «deshacer».
+    reposted_by_me: bool = False
+    #: QUIEN la esta compartiendo, cuando la publicacion llega por una
+    #: republicacion. `None` en una publicacion normal.
+    #:
+    #: Va APARTE de `author` a proposito, y nunca lo sustituye: `author` es y
+    #: sigue siendo el autor ORIGINAL. Si republicar cambiara el autor, seria
+    #: una forma comoda de apropiarse del trabajo ajeno.
+    repost: RepostRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

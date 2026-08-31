@@ -135,6 +135,29 @@ export type Post = {
   /** Contador de comentarios del backend (los comments se cargan bajo demanda). */
   commentsCount?: number;
   isOwn?: boolean;
+  /** Cuantas veces se ha republicado (migracion 0042). */
+  repostsCount?: number;
+  /** Si quien mira ya la republico: el boton dice «deshacer». */
+  repostedByMe?: boolean;
+  /**
+   * Quien esta COMPARTIENDO esta publicacion, si llega por una republicacion.
+   *
+   * Convive con `author`/`authorId`, que siguen siendo los del autor ORIGINAL.
+   * La tarjeta ensena los dos —«Beto republicó» encima, y debajo la
+   * publicacion de Ana tal cual— porque si republicar cambiara el autor seria
+   * una forma comoda de apropiarse del trabajo de otra persona.
+   *
+   * `undefined` en una publicacion normal.
+   */
+  repost?: {
+    id: string;
+    autor: string;
+    autorId?: string;
+    autorAvatarUrl?: string;
+    comentario: string;
+    /** Cuando se COMPARTIO, distinta de `createdAt`, que es cuando se publico. */
+    fecha: string;
+  };
 };
 
 /** Alguien etiquetado en una publicación: lo justo para pintarlo y abrirlo. */
@@ -179,6 +202,18 @@ export type Message = {
    */
   createdAtIso?: string;
   attachments?: MessageAttachment[];
+  /**
+   * Su autor lo borró PARA TODOS (borrado suave en el servidor).
+   *
+   * La burbuja se queda en su sitio y dice «Mensaje eliminado». No desaparece:
+   * si se esfumara sin dejar hueco, la conversación mentiría — quien está al
+   * otro lado leyó algo que ahora no está y no sabría que se ha borrado.
+   *
+   * El texto original NO llega hasta aquí: lo vacía el servidor. Esconderlo en
+   * la pantalla no serviría de nada, porque lo que sale del servidor lo puede
+   * leer cualquier cliente.
+   */
+  eliminado?: boolean;
   /** Lo que está pasando con este mensaje mientras se envía. */
   estado?: 'enviando' | 'error';
   /** Avance de la subida de sus archivos, de 0 a 1. */

@@ -411,3 +411,134 @@ export function debeDecirSinResultados(estado: EstadoDeBusqueda): boolean {
     totalDeResultados(estado) === 0
   );
 }
+
+
+/* ========================================================================== *
+ * DE UNOS RESULTADOS A LAS FILAS QUE SE PINTAN
+ *
+ * POR QUE ESTO VIVE AQUI Y NO EN UN COMPONENTE. Por el mismo motivo que el
+ * resto del fichero: el runner de Node no resuelve el alias `@/`, asi que todo
+ * lo que importe de `@/algo` deja de poder probarse sin montar React ni red.
+ * Construir las filas es una decision de producto —que grupos se ven, en que
+ * orden, cuando se ofrece «Ver mas»— y esas se prueban una a una. Pintarlas
+ * necesita React, y eso vive en `components/resultadosDeBusqueda.tsx`.
+ *
+ * Y POR QUE ESTAN COMPARTIDAS. Habia DOS buscadores en la aplicacion:
+ * `SearchScreen` (`/search`), que preguntaba a `GET /api/v1/search` y encontraba
+ * personas, etiquetas, publicaciones, CURSOS y eventos, y era INALCANZABLE —su
+ * unico enlace estaba en `app/dev.tsx`, la galeria interna de pantallas—; y el
+ * de Explorar, que es el que la gente usa y solo preguntaba por PERSONAS. Por
+ * eso alguien que buscaba un curso leia «No encontramos personas con ese
+ * nombre». Ahora los dos preguntan lo mismo y pintan con estas filas, para que
+ * no vuelvan a separarse.
+ * ========================================================================== */
+
+/** Una fila de la lista aplanada: cabeceras y resultados en la misma lista. */
+export type FilaDeBusqueda =
+  | { kind: 'section'; key: string; title: string; action?: string; onAction?: () => void }
+  | { kind: 'temas'; key: string; texto: string }
+  | { kind: 'person'; key: string; persona: PersonaDto }
+  | { kind: 'hashtag'; key: string; etiqueta: EtiquetaDto }
+  | { kind: 'post'; key: string; publicacion: PublicacionDto }
+  | { kind: 'course'; key: string; curso: CursoDto }
+  | { kind: 'event'; key: string; evento: EventoDto };
+
+/** El titulo de cada grupo, en el mismo sitio que el orden en que se pintan. */
+export const TITULOS: Record<Grupo, string> = {
+  people: 'Personas',
+  hashtags: 'Etiquetas',
+  posts: 'Publicaciones',
+  courses: 'Cursos',
+  events: 'Eventos',
+};
+
+/** El tipo de fila que le corresponde a cada grupo, y su prefijo de clave. */
+const FILA_DE: Record<Grupo, { kind: FilaDeBusqueda['kind']; prefijo: string }> = {
+  people: { kind: 'person', prefijo: 'p' },
+  hashtags: { kind: 'hashtag', prefijo: 'h' },
+  posts: { kind: 'post', prefijo: 'o' },
+  courses: { kind: 'course', prefijo: 'c' },
+  events: { kind: 'event', prefijo: 'e' },
+};
+
+type OpcionesDeFilas = {
+  /** El grupo que esta pidiendo su pagina siguiente, si alguno. */
+  ampliando?: Grupo | null;
+  /** Que hacer al pulsar «Ver mas». Sin esto no se ofrece. */
+  verMas?: (grupo: Grupo) => void;
+};
+
+/**
+ * Las filas a pintar para unos resultados, en el orden en que se pintan.
+ *
+ * EL ORDEN LO MANDA `GRUPOS`, que es la misma constante que documenta por que
+ * es ese: personas primero porque casi siempre se busca a alguien, y las
+ * etiquetas antes que las publicaciones sueltas porque una etiqueta es un atajo
+ * a muchas. Recorrerlo en vez de escribir cinco bloques iguales es lo que hace
+ * que anadir un grupo sea una linea, y no cinco sitios de los que se olvida uno.
+ *
+ * UN GRUPO VACIO NO PINTA NI SIQUIERA SU CABECERA. Eso es lo que permite que
+ * una busqueda que solo encuentra cursos se lea como «hay cursos» y no como
+ * «no hay personas», que es literalmente lo que la pantalla decia antes.
+ */
+export function filasDeResultados(
+  resultados: ResultadosDeBusqueda,
+  { ampliando = null, verMas }: OpcionesDeFilas = {},
+): FilaDeBusqueda[] {
+  const out: FilaDeBusqueda[] = [];
+
+  /*
+    Por que se dice en que temas se esta buscando: sin esta linea, encontrar un
+    curso de carpinteria escribiendo «muebles» parece un fallo. Un buscador que
+    acierta sin explicar por que no se lee como listo, se lee como averiado.
+  */
+  if (resultados.temas.length > 0) {
+    out.push({
+      kind: 'temas',
+      key: 'temas',
+      texto: `También buscamos en ${resultados.temas.map((t) => t.name).join(', ')}`,
+    });
+  }
+
+  for (const grupo of GRUPOS) {
+    const filas: readonly { id?: string; tag?: string }[] = resultados[grupo];
+    if (filas.length === 0) continue;
+
+    // «Ver mas» solo si el backend dijo que hay mas: lo calcula pidiendo un
+    // resultado de mas y mirando si llego, asi que es un hecho comprobado y no
+    // una suposicion del cliente.
+    const hayMas = resultados.siguiente[grupo] != null && verMas != null;
+    out.push({
+      kind: 'section',
+      key: `sec-${grupo}`,
+      title: TITULOS[grupo],
+      action: hayMas ? (ampliando === grupo ? 'Cargando…' : 'Ver más') : undefined,
+      // Mientras un grupo se amplia, ninguno acepta pulsaciones: dos paginas en
+      // vuelo a la vez se aplicarian en el orden en que vuelvan.
+      onAction: hayMas && ampliando === null ? () => verMas?.(grupo) : undefined,
+    });
+
+    const { kind, prefijo } = FILA_DE[grupo];
+    for (const fila of filas) {
+      out.push({ kind, key: `${prefijo}-${claveDe(grupo, fila)}`, ...datos(grupo, fila) } as FilaDeBusqueda);
+    }
+  }
+
+  return out;
+}
+
+/** El resultado bajo el nombre que espera su fila. */
+function datos(grupo: Grupo, fila: unknown): Record<string, unknown> {
+  switch (grupo) {
+    case 'people':
+      return { persona: fila };
+    case 'hashtags':
+      return { etiqueta: fila };
+    case 'posts':
+      return { publicacion: fila };
+    case 'courses':
+      return { curso: fila };
+    default:
+      return { evento: fila };
+  }
+}
