@@ -29,6 +29,7 @@ from app.core.exceptions import (
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import esquema
+from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
     Conversation,
@@ -53,6 +54,12 @@ from app.shared.pagination import Page, pagination_params
 from app.shared.permissions import is_admin
 
 router = APIRouter(prefix="/conversations", tags=["messaging"])
+
+# El CRM ligero de etiquetas privadas (`etiquetas.py`), montado ANTES que las
+# rutas de este fichero: FastAPI prueba en orden de declaracion, asi que el dia
+# que alguien anada un `GET /{conversation_id}` aqui, `/conversations/labels`
+# seguiria leyendose como lo que es y no como un id de conversacion.
+router.include_router(etiquetas_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
