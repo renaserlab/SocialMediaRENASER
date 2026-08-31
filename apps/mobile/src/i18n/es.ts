@@ -258,6 +258,8 @@ export const es = {
   'search.emptyBody': 'No encontramos nada para «{termino}».',
   'search.recent': 'Búsquedas recientes',
   'search.clearRecent': 'Borrar',
+  // Vaciar el campo de un toque. Android no trae la X propia de iOS.
+  'search.clear': 'Borrar la búsqueda',
   'search.groupPeople': 'Personas',
   'search.groupHashtags': 'Etiquetas',
   'search.groupPosts': 'Publicaciones',
@@ -289,9 +291,15 @@ export const es = {
   'common.loading': 'Cargando…',
 
   // Eventos
+  // La pantalla entera: enseña los tres grupos, no solo los próximos.
+  'events.title': 'Agenda de eventos',
   'events.upcoming': 'Próximos eventos',
+  // Anunciados sin fecha: ni futuros ni pasados.
+  'events.undated': 'Fecha por confirmar',
+  'events.past': 'Eventos anteriores',
   'events.emptyTitle': 'No hay eventos',
   'events.emptyBody': 'Vuelve pronto para ver próximos eventos.',
+  'event.finished': 'Finalizado',
   'event.reserved': 'Reserva confirmada',
   'event.reserve': 'Reservar',
   'event.viewAndReserve': 'Ver detalles y reservar',
@@ -637,6 +645,11 @@ export const es = {
   'section.noCourses': 'Aún no tienes cursos',
   'section.noCoursesBody': 'Los programas de Z están en el perfil de la comunidad.',
   'section.goToCourses': 'Ver cursos de Z',
+  // Perfil AJENO y vacio. En segunda persona («Aún no tienes cursos») le
+  // hablaban de si mismo a quien esta mirando el perfil de otra persona.
+  'section.someone': 'Esta persona',
+  'section.otherNoCourses': '{name} aún no tiene cursos publicados',
+  'section.otherNoEvents': '{name} aún no tiene eventos publicados',
   'section.noneOwnCourses': 'Todavía no has publicado ningún curso.',
   'section.noneOwnEvents': 'Todavía no has publicado ningún evento.',
 
@@ -1505,4 +1518,38 @@ export const es = {
   'story.trimFailed': 'No pudimos recortar el vídeo. No se ha publicado nada.',
 
   'audio.byAuthor': 'Audio de {autor}',
+
+  // Etiquetas de conversación — el CRM ligero de la bandeja (migración 0045).
+  // Son PRIVADAS: quien está al otro lado no ve nunca la etiqueta que le han
+  // puesto, y por eso `label.onlyYou` sale a la vista y no en una ayuda
+  // escondida: quien etiqueta a una persona tiene que saber que no se entera.
+  'label.manageShort': 'Etiquetas',
+  'label.createShort': 'Crear etiqueta',
+  'label.yours': 'Tus etiquetas',
+  'label.explain':
+    'Ordena tu bandeja como quieras. Solo las ves tú: la otra persona nunca sabe qué etiqueta le has puesto.',
+  'label.onlyYou': 'Solo las ves tú.',
+  'label.namePlaceholder': 'Nombre de la etiqueta',
+  'label.newName': 'Nuevo nombre',
+  'label.needName': 'Escribe un nombre para la etiqueta.',
+  'label.add': 'Añadir',
+  'label.created': 'Etiqueta creada',
+  'label.renamed': 'Etiqueta renombrada',
+  'label.deleted': 'Etiqueta eliminada',
+  'label.saveFailed': 'No pudimos guardar la etiqueta.',
+  'label.deleteFailed': 'No pudimos eliminar la etiqueta.',
+  'label.assignFailed': 'No pudimos cambiar la etiqueta.',
+  'label.deleteNamed': '¿Eliminar «{nombre}»?',
+  'label.deleteKeepsChats':
+    'Se quitará de {count} conversaciones. No se borra ninguna conversación ni ningún mensaje.',
+  'label.deleteUnused': 'No la estás usando en ninguna conversación.',
+  'label.none': 'Todavía no tienes etiquetas.',
+  'label.suggestions': 'Por ejemplo: Nuevo contacto, Seguimiento, Interesado, Alumno.',
+  'label.inThisChat': 'Etiquetas de esta conversación',
+  'label.chatsOne': '1 conversación',
+  'label.chatsMany': '{count} conversaciones',
+  'label.filterBy': 'Filtrar por {nombre}',
+  'label.renameNamed': 'Renombrar {nombre}',
+  'label.deleteNamedShort': 'Eliminar {nombre}',
+  'label.toggleNamed': 'Poner o quitar {nombre}',
 } as const;
