@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +12,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Avatar } from '@/components/Avatar';
 import { Text } from '@/components/Text';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
@@ -702,10 +701,7 @@ export function LiveScreen() {
   return (
     <View style={estilos.fondo}>
       <SafeAreaView style={estilos.seguro}>
-        <KeyboardAvoidingView
-          style={estilos.columna}
-          behavior={Platform.select({ ios: 'padding', android: undefined })}
-        >
+        <SinTecladoDelante style={estilos.columna}>
           {/* Cabecera */}
           <View style={estilos.cabecera}>
             <Pressable
@@ -878,7 +874,7 @@ export function LiveScreen() {
                 : 'El chat de esta emisión está cerrado.'}
             </Text>
           )}
-        </KeyboardAvoidingView>
+        </SinTecladoDelante>
       </SafeAreaView>
     </View>
   );

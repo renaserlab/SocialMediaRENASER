@@ -1,17 +1,18 @@
 import React, { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
 
 import { rutaTrasAutenticar } from '@/lib/postAuthRoute';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { ZLogo } from '@/components/ZLogo';
+import { useTranslation } from '@/i18n/useTranslation';
 import { mensajeDeAuth } from '@/lib/authErrors';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -20,8 +21,8 @@ import { useAppTheme } from '@/theme/useAppTheme';
 
 export function RegisterScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
   const register = useAppStore((state) => state.registerLocalUser);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signUpEmail = useAuthStore((state) => state.signUpEmail);
@@ -45,13 +46,13 @@ export function RegisterScreen() {
     const newErrors: { fullName?: string; email?: string; password?: string } = {};
 
     if (fullName.trim().length < 3) {
-      newErrors.fullName = 'El nombre debe tener al menos 3 caracteres';
+      newErrors.fullName = t('auth.errorName');
     }
     if (!email.includes('@')) {
-      newErrors.email = 'Introduce un correo electrónico válido';
+      newErrors.email = t('auth.errorEmail');
     }
     if (password.length < 6) {
-      newErrors.password = 'La contraseña debe tener al menos 6 caracteres';
+      newErrors.password = t('auth.errorPassword');
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -75,10 +76,7 @@ export function RegisterScreen() {
     try {
       const result = await signUpEmail({ fullName: cleanName, email: cleanEmail, password });
       if (result.needsEmailConfirmation) {
-        notify(
-          'Confirma tu correo',
-          'Te enviamos un enlace de verificación a tu email para activar la cuenta.',
-        );
+        notify(t('auth.confirmEmail'), t('auth.confirmEmailBody'));
         router.replace('/verification');
       } else {
         // Cuenta recien creada: le toca el cuestionario, salvo que la
@@ -90,9 +88,9 @@ export function RegisterScreen() {
       // pantalla, solo a la consola.
       const message = mensajeDeAuth(error, 'registro');
       if (/ya tiene una cuenta/i.test(message)) {
-        setErrors({ email: 'Ese correo ya tiene una cuenta' });
+        setErrors({ email: t('auth.errorEmailTaken') });
       } else {
-        notify('No se pudo crear la cuenta', message);
+        notify(t('auth.signUpFailed'), message);
       }
     } finally {
       creando.current = false;
@@ -103,7 +101,7 @@ export function RegisterScreen() {
   /** Con Google no hay "registro" aparte: el primer acceso crea la cuenta. */
   const continueWithGoogle = async () => {
     if (!supabaseEnabled) {
-      notify('Google no disponible', 'Conecta Supabase para crear tu cuenta con Google.');
+      notify(t('auth.googleUnavailable'), t('auth.googleUnavailableSignUp'));
       return;
     }
     setSocialBusy(true);
@@ -113,7 +111,7 @@ export function RegisterScreen() {
         router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
-      notify('No se pudo continuar con Google', mensajeDeAuth(error, 'registro'));
+      notify(t('auth.googleFailedSignUp'), mensajeDeAuth(error, 'registro'));
     } finally {
       setSocialBusy(false);
     }
@@ -122,12 +120,10 @@ export function RegisterScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
-        <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+      <SinTecladoDelante>
+        <AppScreen contentStyle={styles.screen}>
+          {/* Mismo criterio que en el acceso: centrado con flexbox, sin margen
+              superior fijo. Ver `styles.screen`. */}
           <View style={styles.container}>
             {/*
               La marca se pinta con su logo y en la MISMA linea. Antes llevaba
@@ -136,7 +132,7 @@ export function RegisterScreen() {
               del producto.
             */}
             <View style={styles.titleRow}>
-              <Text style={[styles.title, { color: colors.text }]}>Crea tu cuenta</Text>
+              <Text style={[styles.title, { color: colors.text }]}>{t('auth.signUpTitle')}</Text>
               <ZLogo size={34} />
             </View>
 
@@ -160,24 +156,24 @@ export function RegisterScreen() {
           */}
 
             <Input
-              label="Nombre completo"
+              label={t('auth.fullName')}
               value={fullName}
-              onChangeText={(t) => {
-                setFullName(t);
+              onChangeText={(texto) => {
+                setFullName(texto);
                 setErrors((e) => ({ ...e, fullName: undefined }));
               }}
-              placeholder="Juan Pérez"
+              placeholder={t('auth.fullNamePlaceholder')}
               error={errors.fullName}
             />
 
             <Input
-              label="Correo electrónico"
+              label={t('auth.email')}
               value={email}
-              onChangeText={(t) => {
-                setEmail(t);
+              onChangeText={(texto) => {
+                setEmail(texto);
                 setErrors((e) => ({ ...e, email: undefined }));
               }}
-              placeholder="ejemplo@correo.com"
+              placeholder={t('auth.emailPlaceholder')}
               keyboardType="email-address"
               autoCapitalize="none"
               error={errors.email}
@@ -185,20 +181,20 @@ export function RegisterScreen() {
 
             <View style={styles.passwordContainer}>
               <Input
-                label="Contraseña"
+                label={t('auth.password')}
                 value={password}
-                onChangeText={(t) => {
-                  setPassword(t);
+                onChangeText={(texto) => {
+                  setPassword(texto);
                   setErrors((e) => ({ ...e, password: undefined }));
                 }}
-                placeholder="Mínimo 6 caracteres"
+                placeholder={t('auth.passwordPlaceholderNew')}
                 secureTextEntry={hidden}
                 error={errors.password}
               />
               <Pressable
                 onPress={() => setHidden((v) => !v)}
                 style={styles.eyeButton}
-                accessibilityLabel={hidden ? 'Mostrar contraseña' : 'Ocultar contraseña'}
+                accessibilityLabel={hidden ? t('auth.showPassword') : t('auth.hidePassword')}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: !hidden }}
               >
@@ -206,26 +202,42 @@ export function RegisterScreen() {
               </Pressable>
             </View>
 
-            <Button label="Crear cuenta" onPress={submit} loading={submitting} style={{ marginTop: spacing.sm }} />
+            <Button
+              label={t('auth.signUp')}
+              onPress={submit}
+              loading={submitting}
+              style={{ marginTop: spacing.sm }}
+            />
 
-            <Text style={[styles.legal, { color: colors.textMuted }]}>
-              Al crear tu cuenta aceptas nuestros Términos y la Política de Privacidad.
-            </Text>
+            <Text style={[styles.legal, { color: colors.textMuted }]}>{t('auth.legal')}</Text>
 
             <Pressable onPress={() => router.replace('/login' as never)}>
               <Text style={[styles.login, { color: colors.text }]}>
-                ¿Ya tienes cuenta? <Text style={{ fontWeight: '900' }}>Iniciar sesión</Text>
+                {t('auth.haveAccount')}{' '}
+                <Text style={{ fontWeight: '900' }}>{t('auth.signIn')}</Text>
               </Text>
             </Pressable>
           </View>
         </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: spacing.xl, gap: spacing.md },
+  /*
+    Igual que en el acceso: el centrado vive en el contenedor del
+    desplazamiento (`flexGrow` + `justifyContent`), nunca en un hijo con
+    `flex: 1`, para que al crecer el contenido se desplace en vez de
+    comprimirse. Ver `LoginScreen`.
+  */
+  screen: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xl,
+  },
+  container: { gap: spacing.md },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
   titleRow: {
     flexDirection: 'row',

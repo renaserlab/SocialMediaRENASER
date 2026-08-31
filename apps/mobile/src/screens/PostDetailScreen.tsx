@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { ListRow } from '@/components/ListRow';
 import { PostCard } from '@/components/PostCard';
 import { StateView } from '@/components/StateView';
@@ -18,8 +18,6 @@ export function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
-
   const enFeed = useAppStore((state) => state.posts.find((p) => p.id === id));
   const currentUserId = useAppStore((state) => state.user?.id ?? null);
 
@@ -101,11 +99,7 @@ export function PostDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Publicación" onBack={goBack} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
@@ -120,7 +114,7 @@ export function PostDetailScreen() {
             onPress={() => router.push(`/comments/${post.id}` as never)}
           />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

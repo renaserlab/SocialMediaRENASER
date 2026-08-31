@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 
+import { idiomaEfectivo } from '@/lib/idioma';
 import { useAppStore } from '@/store/useAppStore';
 
 import { translate, type Language, type TranslationKey } from './index';
@@ -12,7 +13,10 @@ import { translate, type Language, type TranslationKey } from './index';
  * entre idiomas y concatenar produce frases rotas).
  */
 export function useTranslation() {
-  const language = useAppStore((state) => state.language);
+  // El idioma con el que se pinta se DERIVA de la eleccion: mientras no la hay
+  // se usa el de por defecto, sin escribirlo en ningun sitio donde pudiera
+  // confundirse despues con una respuesta (ver `@/lib/idioma`).
+  const language = useAppStore((state) => idiomaEfectivo(state.idiomaElegido));
 
   const t = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) => {

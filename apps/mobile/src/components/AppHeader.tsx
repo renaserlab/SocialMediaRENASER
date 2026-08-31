@@ -9,7 +9,7 @@ import { ZLogo } from '@/components/ZLogo';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-/** Alto del header sin contar el inset superior. Lo consume useKeyboardOffset. */
+/** Alto del header sin contar el inset superior. */
 export const APP_HEADER_HEIGHT = 48;
 
 type Props = {

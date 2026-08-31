@@ -1,14 +1,15 @@
 import React, { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
+import { useTranslation } from '@/i18n/useTranslation';
 import { mensajeDeAuth } from '@/lib/authErrors';
 import { postAuthRoute } from '@/lib/postAuthRoute';
 import { toast } from '@/lib/toast';
@@ -28,9 +29,8 @@ const MIN_LENGTH = 6;
  */
 export function ResetPasswordScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
-
   const updatePassword = useAuthStore((state) => state.updatePassword);
   const status = useAuthStore((state) => state.status);
   const passwordRecovery = useAuthStore((state) => state.passwordRecovery);
@@ -49,11 +49,11 @@ export function ResetPasswordScreen() {
   const submit = async () => {
     if (guardando.current) return;
     if (password.length < MIN_LENGTH) {
-      setError(`La contraseña debe tener al menos ${MIN_LENGTH} caracteres.`);
+      setError(t('auth.passwordTooShort', { min: MIN_LENGTH }));
       return;
     }
     if (password !== repeat) {
-      setError('Las dos contraseñas no coinciden.');
+      setError(t('auth.passwordsDiffer'));
       return;
     }
     guardando.current = true;
@@ -61,7 +61,7 @@ export function ResetPasswordScreen() {
     setError(null);
     try {
       await updatePassword(password);
-      toast('Contraseña actualizada');
+      toast(t('auth.passwordUpdated'));
       router.replace(postAuthRoute() as never);
     } catch (err) {
       // Mismo criterio que en el envio del correo: el motivo tecnico va a la
@@ -84,7 +84,7 @@ export function ResetPasswordScreen() {
         <StateView
           state="empty"
           icon="alert-triangle"
-          title="Enlace no válido o caducado"
+          title={t('auth.linkInvalid')}
           /*
             Se prefiere el motivo concreto cuando se conoce (caducado, ya
             usado): decirle a alguien «no es válido» sin mas le deja sin saber
@@ -92,12 +92,12 @@ export function ResetPasswordScreen() {
           */
           description={
             recoveryError ??
-            'Vuelve a pedir el correo de recuperación para crear tu contraseña.'
+            t('auth.linkInvalidBody')
           }
         />
         <View style={styles.footer}>
           <Button
-            label="Pedir un enlace nuevo"
+            label={t('auth.askNewLink')}
             onPress={() => {
               // Se limpia el motivo al salir: si no, el aviso del enlace viejo
               // seguiría puesto al volver de pedir uno nuevo.
@@ -113,39 +113,35 @@ export function ResetPasswordScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="" />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
         <AppScreen contentStyle={styles.screen}>
           <Text variant="title" weight="900" style={styles.title}>
-            Crea tu contraseña nueva
+            {t('auth.newPasswordTitle')}
           </Text>
           <Text variant="body" color={colors.textMuted} style={styles.subtitle}>
-            Se cerrará esta pantalla en cuanto la guardes.
+            {t('auth.newPasswordBody')}
           </Text>
 
           <Input
-            label="Contraseña nueva"
+            label={t('auth.newPassword')}
             value={password}
-            onChangeText={(t) => {
-              setPassword(t);
+            onChangeText={(texto) => {
+              setPassword(texto);
               setError(null);
             }}
-            placeholder={`Mínimo ${MIN_LENGTH} caracteres`}
+            placeholder={t('auth.newPasswordPlaceholder', { min: MIN_LENGTH })}
             secureTextEntry
             autoCapitalize="none"
             autoComplete="new-password"
           />
           <Input
-            label="Repite la contraseña"
+            label={t('auth.repeatPassword')}
             value={repeat}
-            onChangeText={(t) => {
-              setRepeat(t);
+            onChangeText={(texto) => {
+              setRepeat(texto);
               setError(null);
             }}
-            placeholder="Vuelve a escribirla"
+            placeholder={t('auth.repeatPasswordPlaceholder')}
             secureTextEntry
             autoCapitalize="none"
             autoComplete="new-password"
@@ -155,14 +151,14 @@ export function ResetPasswordScreen() {
           />
 
           <Button
-            label="Guardar contraseña"
+            label={t('auth.savePassword')}
             onPress={() => void submit()}
             loading={saving}
             disabled={!password || !repeat}
             style={styles.action}
           />
         </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

@@ -16,6 +16,11 @@ import { StoryRepository } from '@/repositories/StoryRepository';
 import { ApiError } from '@/services/api';
 import { uploadProfileImage, type PickedMedia, type UploadedMedia } from '@/services/storage';
 import { perfMark } from '@/lib/perf';
+import {
+  idiomaEfectivo,
+  migraIdiomaGuardado,
+  type IdiomaElegido,
+} from '@/lib/idioma';
 import { mezclarReacciones } from '@/lib/reacciones';
 import type { Language } from '@/i18n';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
@@ -156,11 +161,16 @@ type AppState = {
   dismissedGuides: string[];
   dismissGuide: (id: string) => void;
 
-  languageSelected: boolean;
-  /** Idioma de la interfaz. Se persiste con el resto de preferencias. */
-  language: Language;
-  setLanguage: (language: Language) => void;
-  setLanguageSelected: (value: boolean) => void;
+  /**
+   * LO QUE LA PERSONA ELIGIO. `null` = todavia no ha elegido.
+   *
+   * Es el UNICO dato de idioma que se guarda, y por eso «sin elegir» y «eligio
+   * español» dejan de ser indistinguibles (ver `@/lib/idioma`). El idioma con
+   * el que se pinta sale de aqui con `idiomaEfectivo`, no de otro campo.
+   */
+  idiomaElegido: IdiomaElegido;
+  /** Guarda la eleccion. A partir de aqui no se vuelve a preguntar. */
+  elegirIdioma: (language: Language) => void;
 
   setHydrated: (hydrated: boolean) => void;
   toggleTheme: () => void;
@@ -260,10 +270,8 @@ export const useAppStore = create<AppState>()(
             : { dismissedGuides: [...state.dismissedGuides, id] },
         ),
 
-      languageSelected: false,
-      language: 'es',
-      setLanguage: (language) => set({ language }),
-      setLanguageSelected: (value) => set({ languageSelected: value }),
+      idiomaElegido: null,
+      elegirIdioma: (language) => set({ idiomaElegido: language }),
 
       setHydrated: (hydrated) => set({ hydrated }),
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
@@ -761,8 +769,9 @@ export const useAppStore = create<AppState>()(
           reservedEventIds: [],
           conversations,
           dismissedGuides: [],
-          languageSelected: false,
-          language: 'es',
+          // Se vuelve a preguntar el idioma porque se esta empezando de cero,
+          // no porque el idioma «se rompa»: es un reinicio de datos de demo.
+          idiomaElegido: null,
         }),
     }),
     {
@@ -772,6 +781,25 @@ export const useAppStore = create<AppState>()(
       // perderia sus ajustes al actualizar.
       name: 'renaser-universo-v1',
       storage: createJSONStorage(() => AsyncStorage),
+      /*
+        VERSION 1: el idioma pasa de dos campos (`language` + `languageSelected`)
+        a uno solo (`idiomaElegido`, `null` = sin elegir).
+
+        La migracion existe para que a NADIE que ya hubiera elegido se le vuelva
+        a preguntar al actualizar: se lee lo guardado por la version anterior y
+        se traduce. La regla vive en `@/lib/idioma` y esta probada aparte
+        (`idioma.test.mts`).
+      */
+      version: 1,
+      migrate: (guardado, version) => {
+        const estado = { ...(guardado as Record<string, unknown> | null) };
+        if (version < 1) {
+          estado.idiomaElegido = migraIdiomaGuardado(estado);
+          delete estado.language;
+          delete estado.languageSelected;
+        }
+        return estado as Partial<AppState>;
+      },
       // Solo se persisten preferencias y estado ligero del usuario.
       // `posts` y `conversations` quedan FUERA a proposito: son colecciones sin
       // techo que se repueblan con loadFeed()/los repositorios, y persistirlas
@@ -782,8 +810,9 @@ export const useAppStore = create<AppState>()(
         user: state.user,
         onboardingComplete: state.onboardingComplete,
         dismissedGuides: state.dismissedGuides,
-        languageSelected: state.languageSelected,
-        language: state.language,
+        // La eleccion de idioma, y nada mas: el idioma «efectivo» se calcula,
+        // no se guarda, para que no pueda volver a confundirse con ella.
+        idiomaElegido: state.idiomaElegido,
         quizAnswers: state.quizAnswers,
         quizResult: state.quizResult,
         likedPostIds: state.likedPostIds,

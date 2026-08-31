@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { AppScreen } from '@/components/AppScreen';
 import { Card } from '@/components/Card';
 import { PostCard } from '@/components/PostCard';
@@ -27,7 +27,6 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function CircleScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // Círculo vía la capa de repositorio (mock hoy, backend mañana).
@@ -80,11 +79,7 @@ export function CircleScreen() {
         rightIcon="more-horizontal"
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.header}>
           <Image source={assets.circle} style={[styles.circleImage, { borderColor: colors.border }]} />
@@ -136,7 +131,7 @@ export function CircleScreen() {
           )}
         </View>
       </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

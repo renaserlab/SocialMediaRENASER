@@ -1,8 +1,8 @@
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
 import { DELETE_ACCOUNT_URL } from '@/config/legal';
@@ -15,17 +15,19 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
-/** Abre un documento legal en el navegador del sistema. */
-function openLegal(url: string): void {
-  Linking.openURL(url).catch(() => {
-    notify('No se pudo abrir', 'Inténtalo de nuevo o revisa tu conexión.');
-  });
-}
-
 export function SettingsScreen() {
   const { colors, mode } = useAppTheme();
   const { t, language } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  /** Abre un documento legal en el navegador del sistema. */
+  const openLegal = (url: string): void => {
+    Linking.openURL(url).catch(() => {
+      notify(t('settings.linkFailed'), t('settings.linkFailedBody'));
+    });
+  };
+
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const resetDemo = useAppStore((state) => state.resetDemo);
   const user = useAppStore((state) => state.user);
@@ -37,9 +39,9 @@ export function SettingsScreen() {
 
   const handleSignOut = async () => {
     const ok = await confirm({
-      title: 'Cerrar sesión',
-      message: '¿Seguro que quieres salir de tu cuenta?',
-      confirmLabel: 'Cerrar sesión',
+      title: t('settings.signOut'),
+      message: t('settings.signOutConfirm'),
+      confirmLabel: t('settings.signOut'),
       destructive: true,
     });
     if (!ok) return;
@@ -51,18 +53,16 @@ export function SettingsScreen() {
     // Doble confirmacion: es irreversible y se lleva todo el contenido. La
     // primera explica lo que pasa; la segunda es la ultima red antes de borrar.
     const ok = await confirm({
-      title: 'Eliminar cuenta',
-      message:
-        'Se borrarán tu cuenta y todo tu contenido (publicaciones, comentarios, ' +
-        'mensajes y audios) de forma permanente. Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar cuenta',
+      title: t('settings.deleteAccount'),
+      message: t('settings.deleteAccountConfirm'),
+      confirmLabel: t('settings.deleteAccount'),
       destructive: true,
     });
     if (!ok) return;
     const reallySure = await confirm({
-      title: '¿Seguro del todo?',
-      message: 'No hay vuelta atrás. Tu cuenta se eliminará ahora mismo.',
-      confirmLabel: 'Sí, eliminar',
+      title: t('settings.deleteAccountConfirm2Title'),
+      message: t('settings.deleteAccountConfirm2'),
+      confirmLabel: t('settings.deleteAccountYes'),
       destructive: true,
     });
     if (!reallySure) return;
@@ -70,10 +70,7 @@ export function SettingsScreen() {
       await deleteAccount();
       router.replace('/');
     } catch {
-      notify(
-        'No se pudo eliminar la cuenta',
-        'Inténtalo de nuevo en unos momentos. Tu cuenta sigue activa.',
-      );
+      notify(t('settings.deleteAccountFailed'), t('settings.deleteAccountFailedBody'));
     }
   };
 
@@ -87,16 +84,10 @@ export function SettingsScreen() {
   const testNotification = async () => {
     const granted = await requestNotificationPermission();
     if (!granted) {
-      notify(
-        'Permiso desactivado',
-        'Activa las notificaciones de Z en los ajustes del teléfono para recibir avisos.',
-      );
+      notify(t('settings.notificationsOff'), t('settings.notificationsOffBody'));
       return;
     }
-    await notifyLocally(
-      'Así se verá',
-      'Cuando alguien reaccione, comente o te siga, recibirás un aviso como este.',
-    );
+    await notifyLocally(t('settings.notificationSample'), t('settings.notificationSampleBody'));
   };
 
   const handleReset = async () => {
@@ -116,7 +107,15 @@ export function SettingsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title={t('settings.title')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-      <ScrollView contentContainerStyle={styles.list}>
+      {/*
+        El ultimo elemento de la lista —«Cerrar sesion»— tiene que quedar
+        ALCANZABLE en cualquier telefono. Sin este relleno, en los que tienen
+        gesto de inicio el ultimo renglon quedaba debajo de la barra del sistema
+        y no se podia pulsar. Sale del inset real del aparato, no de un numero.
+      */}
+      <ScrollView
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xl }]}
+      >
         <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.display')}</Text>
         <ListRow
           title={t('settings.darkMode')}
@@ -148,8 +147,8 @@ export function SettingsScreen() {
             cuenta: es la unica forma de volver a verlo.
           */
           <ListRow
-            title="Tus intereses"
-            subtitle="Qué quieres aprender y en qué puedes ayudar"
+            title={t('settings.interests')}
+            subtitle={t('settings.interestsBody')}
             leftIcon="compass"
             rightIcon="chevron-right"
             onPress={() => router.push('/onboarding?modo=editar' as never)}
@@ -164,34 +163,31 @@ export function SettingsScreen() {
         />
         {isLoggedIn ? (
           <ListRow
-            title="Cuentas bloqueadas"
-            subtitle="Revisa y desbloquea a quien quieras"
+            title={t('settings.blocked')}
+            subtitle={t('settings.blockedBody')}
             leftIcon="slash"
             rightIcon="chevron-right"
             onPress={() => router.push('/blocked' as never)}
           />
         ) : null}
         {isLoggedIn ? (
-          <>
-            <ListRow
-              title={t('settings.signOut')}
-              subtitle={t('settings.signOutBody')}
-              leftIcon="log-out"
-              destructive
-              onPress={handleSignOut}
-            />
-            <ListRow
-              title="Eliminar cuenta"
-              subtitle="Borra tu cuenta y todo tu contenido de forma permanente"
-              leftIcon="trash-2"
-              destructive
-              onPress={handleDeleteAccount}
-            />
-          </>
+          /*
+            Eliminar cuenta se queda AQUI, con lo demas de la cuenta. Lo que
+            baja al final es «Cerrar sesion»: son dos cosas distintas y hasta
+            ahora se leian como una sola, con la irreversible justo debajo de la
+            que se pulsa a diario.
+          */
+          <ListRow
+            title={t('settings.deleteAccount')}
+            subtitle={t('settings.deleteAccountBody')}
+            leftIcon="trash-2"
+            destructive
+            onPress={handleDeleteAccount}
+          />
         ) : (
           <ListRow
             title={t('settings.signIn')}
-            subtitle="Accede para publicar y comentar"
+            subtitle={t('settings.signInBody')}
             leftIcon="log-in"
             rightIcon="chevron-right"
             onPress={() => router.push('/login')}
@@ -211,26 +207,26 @@ export function SettingsScreen() {
           funciona, y porque la misma ruta es la URL de soporte publica que
           exigen tanto la ficha de App Store como la de Google Play.
         */}
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Ayuda</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.help')}</Text>
         <ListRow
-          title="Soporte y preguntas frecuentes"
-          subtitle="Resuelve dudas o escríbenos"
+          title={t('settings.support')}
+          subtitle={t('settings.supportBody')}
           leftIcon="life-buoy"
           rightIcon="chevron-right"
           onPress={() => router.push('/support' as never)}
         />
 
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Legal</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.legal')}</Text>
         <ListRow
-          title="Política de Privacidad"
-          subtitle="Qué datos recogemos y cómo los usamos"
+          title={t('settings.privacy')}
+          subtitle={t('settings.privacyBody')}
           leftIcon="shield"
           rightIcon="chevron-right"
           onPress={() => router.push('/privacy' as never)}
         />
         <ListRow
-          title="Términos y Condiciones"
-          subtitle="Normas de la comunidad y acuerdo de licencia"
+          title={t('settings.terms')}
+          subtitle={t('settings.termsBody')}
           leftIcon="file-text"
           rightIcon="chevron-right"
           onPress={() => router.push('/terms' as never)}
@@ -243,39 +239,79 @@ export function SettingsScreen() {
         */}
         {DELETE_ACCOUNT_URL ? (
           <ListRow
-            title="Cómo eliminar tu cuenta"
-            subtitle="Procedimiento y qué se borra"
+            title={t('settings.deleteAccountHow')}
+            subtitle={t('settings.deleteAccountHowBody')}
             leftIcon="help-circle"
             rightIcon="external-link"
             onPress={() => openLegal(DELETE_ACCOUNT_URL)}
           />
         ) : null}
 
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Notificaciones</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
+          {t('settings.notifications')}
+        </Text>
         <ListRow
-          title="Probar una notificación"
-          subtitle="Comprueba el sonido y el aviso en este teléfono"
+          title={t('settings.testNotification')}
+          subtitle={t('settings.testNotificationBody')}
           leftIcon="bell"
           rightIcon="chevron-right"
           onPress={() => void testNotification()}
         />
 
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{t('settings.system')}</Text>
-        <ListRow
-          title={t('settings.reset')}
-          subtitle={t('settings.resetBody')}
-          leftIcon="trash-2"
-          onPress={handleReset}
-        />
+        {/*
+          «Reiniciar aplicacion» restauraba los datos de DEMO y cerraba la
+          sesion. Es una herramienta de desarrollo, no un ajuste: a un usuario
+          real solo le puede pasar algo malo con ella. Se esconde igual que la
+          galeria de pantallas de `/dev`, con `__DEV__`, que en las builds de
+          produccion vale `false` y ademas permite al empaquetador quitar el
+          bloque entero.
+        */}
+        {__DEV__ ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
+              {t('settings.system')}
+            </Text>
+            <ListRow
+              title={t('settings.reset')}
+              subtitle={t('settings.resetBody')}
+              leftIcon="trash-2"
+              onPress={handleReset}
+            />
+          </>
+        ) : null}
+
+        {/*
+          CERRAR SESION, AL FINAL DEL TODO.
+
+          Estaba en mitad de la pantalla, con «Eliminar cuenta» pegada debajo y
+          cuatro secciones mas despues. Lo que se hace al terminar va al final:
+          asi se llega desplazando hasta abajo y no se roza la accion
+          irreversible por el camino. Va con el flujo del contenido —nada de
+          `position: absolute`—, asi que se comporta igual en cualquier alto de
+          pantalla.
+        */}
+        {isLoggedIn ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
+              {t('settings.session')}
+            </Text>
+            <ListRow
+              title={t('settings.signOut')}
+              subtitle={t('settings.signOutBody')}
+              leftIcon="log-out"
+              destructive
+              onPress={handleSignOut}
+            />
+          </>
+        ) : null}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  list: {
-    paddingBottom: spacing.lg,
-  },
+  // El relleno inferior lo pone el componente: depende de la zona segura.
+  list: {},
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',

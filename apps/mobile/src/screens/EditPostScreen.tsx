@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
@@ -10,7 +11,6 @@ import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { PostRepository } from '@/repositories/PostRepository';
 import {
   pickAudio,
@@ -37,7 +37,6 @@ type MediaChange = null | 'remove' | PickedMedia;
 export function EditPostScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const keyboardOffset = useKeyboardOffset();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const posts = useAppStore((state) => state.posts);
@@ -181,11 +180,7 @@ export function EditPostScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title="Editar publicación" back />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: 'height' })}
-        keyboardVerticalOffset={keyboardOffset}
-      >
+      <SinTecladoDelante>
         <AppScreen contentStyle={{ padding: spacing.lg, paddingBottom: 100 }}>
           <View style={[styles.editor, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <TextInput
@@ -278,7 +273,7 @@ export function EditPostScreen() {
             disabled={!text.trim()}
           />
         </AppScreen>
-      </KeyboardAvoidingView>
+      </SinTecladoDelante>
     </View>
   );
 }

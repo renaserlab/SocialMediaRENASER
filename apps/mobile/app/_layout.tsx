@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { Stack, type ErrorBoundaryProps } from 'expo-router';
@@ -48,6 +48,30 @@ export default function RootLayout() {
   useEffect(() => {
     void useAuthStore.getState().bootstrap();
   }, []);
+
+  /*
+    EL TEMA DE LA APLICACION MANDA TAMBIEN EN LAS PANTALLAS DEL SISTEMA.
+
+    Z tiene su propio interruptor claro/oscuro (`themeMode`), pero hay trozos de
+    interfaz que no dibuja React: el recortador de fotos que abre
+    `expo-image-picker` al subir una imagen —con sus opciones «Gira
+    horizontalmente» y «Gira verticalmente»—, los selectores de fecha y el
+    aspecto del teclado. Todo eso elige sus colores por la configuracion NATIVA
+    (en Android, los recursos `values` frente a `values-night`), que hasta ahora
+    seguia al telefono y no a la aplicacion. Resultado: con la app en claro y el
+    telefono en oscuro —o al reves— esos textos salian con el fondo cambiado.
+
+    `Appearance.setColorScheme` es justo la pieza que faltaba: fija el modo
+    nativo al que dice el tema de la aplicacion, asi que esas pantallas resuelven
+    el mismo juego de colores. No se pinta nada a mano ni se fija ningun blanco:
+    se le dice al sistema cual es el tema y el resto sale solo.
+
+    En web no existe (y no hace falta: alli no hay recortador nativo).
+  */
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    Appearance.setColorScheme?.(mode);
+  }, [mode]);
 
   // Atiende los enlaces del correo (recuperar contrasena) en movil. Va en la
   // raiz porque el enlace puede llegar con cualquier pantalla delante, o con la

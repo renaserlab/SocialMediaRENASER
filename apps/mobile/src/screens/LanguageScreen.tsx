@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { LANGUAGE_NAMES, type Language } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
+import { idiomaEfectivo } from '@/lib/idioma';
 import { useAppStore } from '@/store/useAppStore';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -18,19 +19,32 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function LanguageScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
-  const setLanguageSelected = useAppStore((state) => state.setLanguageSelected);
-  const setLanguage = useAppStore((state) => state.setLanguage);
-  const current = useAppStore((state) => state.language);
+  const elegirIdioma = useAppStore((state) => state.elegirIdioma);
+  const current = useAppStore((state) => idiomaEfectivo(state.idiomaElegido));
   const { t } = useTranslation();
-  // Arranca en el idioma guardado, no siempre en español.
+  // Arranca en el idioma con el que se esta pintando ahora: si ya hay eleccion,
+  // en ella; si no, en el de por defecto.
   const [selectedLang, setSelectedLang] = useState<Language>(current);
 
   const proceed = () => {
-    // Antes el idioma elegido solo vivia en este useState y se perdia al salir,
-    // por eso la app seguia en español.
-    setLanguage(selectedLang);
-    setLanguageSelected(true);
-    router.replace('/');
+    /*
+      Una sola escritura y persistida: `elegirIdioma` guarda LA ELECCION, que es
+      lo unico que decide si esta pantalla vuelve a salir sola. Antes hacian
+      falta dos (`setLanguage` + `setLanguageSelected`) y bastaba con perder la
+      segunda para que la pantalla reapareciera en cada arranque.
+    */
+    elegirIdioma(selectedLang);
+    /*
+      A donde se vuelve depende de POR QUE se llego:
+
+      - Entrando a mano desde Ajustes hay historial, y lo correcto es devolver a
+        Ajustes. Antes se hacia `replace('/')` siempre y se expulsaba al inicio
+        a quien solo venia a cambiar el idioma.
+      - En el arranque no hay historial: se vuelve a la raiz, que ya sabe a
+        donde tocaba ir (ver `rutaDeArranque`).
+    */
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
   };
 
   return (

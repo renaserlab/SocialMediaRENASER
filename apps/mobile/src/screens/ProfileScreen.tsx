@@ -103,7 +103,16 @@ export function ProfileScreen() {
    * enseñando la seccion anterior.
    */
   useEffect(() => {
-    const valid: ProfileSectionKind[] = ['eventos', 'cursos', 'podcast', 'testimonios'];
+    const valid: ProfileSectionKind[] = [
+      'eventos',
+      'cursos',
+      'podcast',
+      'testimonios',
+      // La galería NO está en los accesos circulares: se llega desde el menú
+      // del perfil. Vivía empotrada dentro de «Reseñas», que es donde no
+      // pertenece — ver la nota de `ProfileSection`.
+      'galeria',
+    ];
     setActiveSection(
       valid.includes(section as ProfileSectionKind) ? (section as ProfileSectionKind) : null,
     );
@@ -272,7 +281,7 @@ export function ProfileScreen() {
    * en ambos sentidos: no es un cambio que convenga disparar por un roce con el
    * dedo. Al terminar se recarga el perfil, cuyos contadores han cambiado.
    */
-  const toggleBlock = async () => {
+  const toggleBlock = async (desdeLaHoja = false) => {
     if (!isRealPublic || !id) return;
     let autorizado = false;
     await requireAuth('para bloquear a alguien', () => {
@@ -281,14 +290,32 @@ export function ProfileScreen() {
     if (!autorizado) return;
     haptics.light();
     if (!blocked) {
+      /*
+        LA PREGUNTA NO PUEDE SALIR ENCIMA DE LA HOJA.
+
+        Los `BottomSheet` son `Modal`, y en iOS no se presenta nada encima de un
+        Modal que sigue en pantalla: el diálogo no aparece Y `confirm()` no
+        resuelve nunca, así que la pantalla se queda congelada esperando una
+        respuesta que nadie puede dar. Cerrar la hoja no basta, porque tiene
+        animación de salida: hay que esperar a que termine.
+
+        Es la trampa que ya dejó muertos los botones de subir historia y cambiar
+        la foto de perfil, y este camino —menú «Opciones» → Bloquear— caía
+        exactamente en ella. Desde el botón de la ficha no hay hoja abierta, así
+        que no se espera nada.
+      */
+      if (desdeLaHoja) await afterSheetClose();
       const ok = await confirm({
         title: `Bloquear a ${publicProfile?.fullName ?? 'esta persona'}`,
         message:
           'Dejaréis de seguiros y no volverás a ver sus publicaciones. ' +
-          'Puedes deshacerlo cuando quieras desde Ajustes.',
+          'Puedes deshacerlo cuando quieras desde su perfil o desde Ajustes.',
         confirmLabel: 'Bloquear',
+        cancelLabel: 'Cancelar',
         destructive: true,
       });
+      // Cancelar NO deja nada a medias: se sale antes de tocar el estado y
+      // antes de llamar al servidor.
       if (!ok) return;
     }
     const estaba = blocked;
@@ -487,6 +514,22 @@ export function ProfileScreen() {
         avatar: 'avatar' as const,
       };
 
+  /**
+   * Perfil bloqueado por quien mira.
+   *
+   * NO ES «perfil inaccesible». La ficha sigue estando —foto, nombre, cifras—
+   * y con ella el botón «Desbloquear»: si el perfil dejara de ser alcanzable,
+   * quien se arrepiente de un bloqueo no tendría desde dónde deshacerlo, y la
+   * única salida sería la lista de Ajustes, que casi nadie encuentra.
+   *
+   * Lo que sí desaparece es el CONTENIDO: descripción, audio, lo que ofrece,
+   * las secciones y sus publicaciones. Es la mitad que faltaba: se ocultaban
+   * los botones de seguir y escribir, pero debajo seguía todo lo demás.
+   *
+   * Solo en perfil ajeno: `blocked` no significa nada en el propio.
+   */
+  const perfilBloqueado = isPublic && blocked;
+
   // Foto a mostrar: en tu perfil, la tuya (local o backend); en uno ajeno, la
   // del perfil cargado. Sin foto, el placeholder de siempre.
   const coverUri = isPublic ? publicProfile?.coverUrl : currentUser?.coverUrl;
@@ -589,12 +632,15 @@ export function ProfileScreen() {
             que mas dice de una persona en menos tiempo, y detras del texto casi
             nadie llegaria a el.
           */}
-          <AudioDePresentacion
-            rutaDelAudio={profileData.introAudioPath}
-            duracionS={profileData.introAudioDurationS}
-            esPropio={!isPublic}
-            nombre={profileData.fullName}
-          />
+          {/* Su audio también es contenido suyo: bloqueado, no se ofrece. */}
+          {perfilBloqueado ? null : (
+            <AudioDePresentacion
+              rutaDelAudio={profileData.introAudioPath}
+              duracionS={profileData.introAudioDurationS}
+              esPropio={!isPublic}
+              nombre={profileData.fullName}
+            />
+          )}
 
           <View style={styles.actionRow}>
               {isPublic ? (
@@ -604,7 +650,7 @@ export function ProfileScreen() {
                     label="Desbloquear"
                     variant="secondary"
                     loading={blockBusy}
-                    onPress={toggleBlock}
+                    onPress={() => void toggleBlock()}
                     style={styles.actionBtn}
                   />
                 ) : (
@@ -624,7 +670,7 @@ export function ProfileScreen() {
                       style={styles.actionBtn}
                     />
                     <Pressable
-                      onPress={toggleBlock}
+                      onPress={() => void toggleBlock()}
                       disabled={blockBusy}
                       hitSlop={8}
                       accessibilityRole="button"
@@ -645,6 +691,34 @@ export function ProfileScreen() {
               )}
           </View>
 
+          {/*
+            PERFIL BLOQUEADO: LO MINIMO PARA PODER DESHACERLO, Y NADA MAS.
+
+            La ficha (foto, nombre, cifras) y el botón «Desbloquear» siguen ahí
+            —si el perfil dejara de ser alcanzable no habría desde dónde
+            desbloquear, y quien se arrepiente de un bloqueo se quedaría sin
+            salida—, pero lo que el bloqueo esconde sigue escondido: su
+            descripción, su audio, lo que ofrece, sus secciones y sus
+            publicaciones.
+
+            Enseñarlo aquí no sería solo incoherente con la pantalla: el
+            servidor ya corta ese contenido en los dos sentidos, así que las
+            secciones volverían vacías y el perfil parecería el de alguien que
+            nunca ha publicado nada. Es mejor decir por qué no hay nada.
+          */}
+          {perfilBloqueado ? (
+            <View style={styles.bloqueado}>
+              <Feather name="slash" size={26} color={colors.textMuted} />
+              <Text style={[styles.bloqueadoTitulo, { color: colors.text }]}>
+                Has bloqueado a esta persona
+              </Text>
+              <Text style={[styles.bloqueadoTexto, { color: colors.textMuted }]}>
+                No verás sus publicaciones ni podrás escribirle, y ella tampoco a ti.
+                Puedes desbloquearla cuando quieras desde aquí o desde Ajustes.
+              </Text>
+            </View>
+          ) : (
+            <React.Fragment>
           {profileData.bio ? (
             <Text style={[styles.bio, { color: colors.text }]}>{profileData.bio}</Text>
           ) : null}
@@ -670,16 +744,27 @@ export function ProfileScreen() {
             <Shortcut
               icon="headphones"
               label={t('profile.podcast')}
+              active={activeSection === 'podcast'}
               onPress={() => setActiveSection((v) => (v === 'podcast' ? null : 'podcast'))}
             />
             <Shortcut
               icon="book"
               label={t('profile.courses')}
+              active={activeSection === 'cursos'}
               onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
             />
+            {/*
+              `star` y no `camera`. La cámara decía «fotos», que es lo que hacía
+              la galería que vivía dentro de esta sección — y era parte de por
+              qué se confundían: el icono prometía una cosa y el contenido era
+              otra. La estrella es lo que se reconoce como «valoraciones», y es
+              de Feather, que es la librería que ya usa toda la aplicación: no
+              se añade ninguna dependencia por un icono.
+            */}
             <Shortcut
-              icon="camera"
+              icon="star"
               label={t('profile.testimonials')}
+              active={activeSection === 'testimonios'}
               onPress={() => setActiveSection((v) => (v === 'testimonios' ? null : 'testimonios'))}
             />
             {/*
@@ -687,10 +772,19 @@ export function ProfileScreen() {
               que has pedido—; en el de otra persona, la solicitud. Antes solo
               existia lo segundo: se podia pedir una sesion pero no habia donde
               ver las que te pedian a ti.
+
+              NUNCA SE OFRECE AGENDAR EN EL PROPIO PERFIL: una sesión son dos
+              personas. El servidor lo rechaza además (`booking_self_not_allowed`);
+              esto solo evita ofrecer algo que iba a fallar.
+
+              «Activa» mientras la hoja de solicitud está abierta: es el único
+              estado que este acceso tiene: en el perfil propio navega fuera, y
+              de una pantalla a la que se va no se vuelve con un círculo marcado.
             */}
             <Shortcut
               icon="calendar"
               label={t('profile.bookSession')}
+              active={isPublic && bookingVisible}
               onPress={() =>
                 isPublic ? setBookingVisible(true) : router.push('/agenda' as never)
               }
@@ -700,8 +794,22 @@ export function ProfileScreen() {
           {activeSection ? (
             <ProfileSection
               kind={activeSection}
-              profileId={galleryOwnerId}
-              isOwner={!isPublic}
+              /*
+                EL DUEÑO DEL PERFIL, con su nombre dicho. Todo lo de dentro se
+                pide sobre él: sus cursos, sus episodios y —sobre todo— las
+                reseñas que ha recibido.
+              */
+              profileOwnerId={galleryOwnerId}
+              /*
+                IDENTIDAD, no permiso. `isOwnProfile` decide los textos en
+                primera persona y quién puede escribir una reseña; el permiso de
+                moderar lo resuelve `ProfileSection` por su cuenta. Usar uno por
+                el otro es lo que hacía que en el perfil de otra persona se
+                leyera «Aún no tienes reseñas».
+              */
+              isOwnProfile={!isPublic}
+              /* Para poder decir sobre quién se está escribiendo la reseña. */
+              profileOwnerName={profileData.fullName}
               ownerIsAdmin={
                 isRealPublic ? publicProfile?.isAdmin === true : currentUser?.isAdmin === true
               }
@@ -720,11 +828,22 @@ export function ProfileScreen() {
             }
           />
           )}
+            </React.Fragment>
+          )}
         </View>
       </AppScreen>
 
+      {/*
+        NUNCA CONSIGO MISMO. `bookingVisible` solo se enciende desde el acceso
+        de un perfil ajeno, pero la condición se escribe aquí también: esta hoja
+        se monta siempre y su `targetUser` cae en la persona conectada cuando el
+        perfil es el propio. Sin este `isPublic`, cualquier camino futuro que
+        encendiera el estado abriría una solicitud de sesión de alguien consigo
+        mismo — que el servidor rechaza (`booking_self_not_allowed`), pero
+        después de haber rellenado el formulario entero.
+      */}
       <BookSessionSheet
-        visible={bookingVisible}
+        visible={bookingVisible && isPublic}
         onClose={() => setBookingVisible(false)}
         targetUser={{
           id: galleryOwnerId ?? id ?? '',
@@ -742,6 +861,29 @@ export function ProfileScreen() {
             router.push('/saved' as never);
           }}
         />
+        {/*
+          LA GALERIA, EN SU SITIO.
+
+          Estaba empotrada dentro de «Reseñas» —«Su galería», «Añadir a la
+          galería» y un Todos / Fotos / Vídeos debajo de las opiniones de otras
+          personas—, que es lo que hacía creer que publicar ahí era opinar sobre
+          alguien. Es contenido real y con filas de gente real, así que no se
+          borra: se saca de donde no pertenecía y se le da su propia entrada.
+
+          Aquí y no en un quinto círculo: los accesos circulares son las cuatro
+          secciones del perfil (Podcast, Cursos, Reseñas, Agenda) y añadir una
+          quinta apretaría la fila para algo que no es de ese rango.
+        */}
+        {perfilBloqueado ? null : (
+          <ListRow
+            title={isPublic ? 'Su galería' : 'Mi galería'}
+            leftIcon="image"
+            onPress={() => {
+              setOptionsVisible(false);
+              setActiveSection('galeria');
+            }}
+          />
+        )}
         {!isPublic ? (
           <React.Fragment>
             <ListRow
@@ -762,17 +904,29 @@ export function ProfileScreen() {
             />
           </React.Fragment>
         ) : (
-          !blocked && (
-            <ListRow
-              title="Bloquear a esta persona"
-              leftIcon="slash"
-              destructive
-              onPress={() => {
-                setOptionsVisible(false);
-                void toggleBlock();
-              }}
-            />
-          )
+          /*
+            Bloquear o DESBLOQUEAR, según cómo esté.
+
+            Antes, estando bloqueado, este menú no ofrecía nada: la única salida
+            era el botón de arriba, y si algún día deja de estar ahí no queda
+            ninguna. Deshacer algo tiene que estar donde se hizo.
+
+            Desbloquear NO es destructivo y no pregunta: devuelve las cosas a
+            como estaban y se puede volver a bloquear en un toque. Bloquear sí
+            pregunta (ver `toggleBlock`), porque además deshace el seguimiento
+            en los dos sentidos y eso no se recupera solo.
+          */
+          <ListRow
+            title={blocked ? 'Desbloquear a esta persona' : 'Bloquear a esta persona'}
+            leftIcon={blocked ? 'user-check' : 'slash'}
+            destructive={!blocked}
+            onPress={() => {
+              setOptionsVisible(false);
+              // `true`: viene de una hoja, así que la pregunta tiene que esperar
+              // a que se cierre. Ver `toggleBlock`.
+              void toggleBlock(true);
+            }}
+          />
         )}
       </BottomSheet>
 
@@ -873,19 +1027,63 @@ function Stat({ label, value, onPress }: { label: string; value: number; onPress
   );
 }
 
-function Shortcut({ icon, label, onPress }: { icon: keyof typeof Feather.glyphMap; label: string; onPress: () => void }) {
+/**
+ * Uno de los accesos circulares del perfil (Podcast · Cursos · Reseñas · Agenda).
+ *
+ * QUE FALTABA: NO SE VEIA CUAL ESTABA ABIERTO. Los cuatro se pintaban iguales
+ * pasara lo que pasara, así que al tocar «Cursos» el contenido de abajo cambiaba
+ * y arriba no cambiaba nada: había que deducir en qué sección se estaba leyendo
+ * lo que había debajo. Y como tocar el mismo círculo lo CIERRA —vuelve a la
+ * galería de publicaciones—, tampoco se veía si el siguiente toque iba a abrir
+ * o a cerrar.
+ *
+ * COMO SE DICE, y no es solo color:
+ *
+ *   - el círculo se invierte (relleno `primary`, icono `onPrimary`),
+ *   - la etiqueta pasa a negrita,
+ *   - y `accessibilityState.selected` lo anuncia a los lectores de pantalla.
+ *
+ * Las tres a la vez porque la regla del sistema visual es que el color nunca
+ * puede ser el único portador de información: aquí además el sistema es blanco
+ * y negro estricto, así que «lo activo» tiene que leerse igual en escala de
+ * grises. Los tokens del tema hacen el resto: en claro el activo es negro sobre
+ * blanco y en oscuro blanco sobre negro, sin una sola condición escrita aquí y
+ * sin un hex suelto.
+ */
+function Shortcut({
+  icon,
+  label,
+  onPress,
+  active = false,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  onPress: () => void;
+  active?: boolean;
+}) {
   const { colors } = useAppTheme();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
       style={({ pressed }) => [styles.shortcutItem, { opacity: pressed ? 0.8 : 1 }]}
     >
-      <View style={[styles.shortcutIcon, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
-        <Feather name={icon} size={20} color={colors.text} />
+      <View
+        style={[
+          styles.shortcutIcon,
+          {
+            backgroundColor: active ? colors.primary : colors.surfaceAlt,
+            borderColor: active ? colors.primary : colors.border,
+          },
+        ]}
+      >
+        <Feather name={icon} size={20} color={active ? colors.onPrimary : colors.text} />
       </View>
-      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '500' }}>{label}</Text>
+      <Text style={{ color: colors.text, fontSize: 11, fontWeight: active ? '800' : '500' }}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -943,6 +1141,17 @@ const styles = StyleSheet.create({
   username: { fontSize: 13, marginTop: 2 },
   statBox: { alignItems: 'center', flex: 1 },
   bio: { fontSize: 13, lineHeight: 18, marginTop: spacing.sm, marginBottom: spacing.lg },
+  // Lo que se lee en lugar del contenido de un perfil bloqueado. Con ICONO y
+  // TEXTO, no con un hueco: una pantalla vacia se lee como «esta persona no ha
+  // publicado nada», que es justo lo que no ha pasado.
+  bloqueado: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxl,
+    paddingHorizontal: spacing.md,
+  },
+  bloqueadoTitulo: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
+  bloqueadoTexto: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
   audioBtn: { width: '100%', marginBottom: spacing.lg },
   shortcuts: { flexDirection: 'row', marginVertical: spacing.md, gap: spacing.sm },
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },

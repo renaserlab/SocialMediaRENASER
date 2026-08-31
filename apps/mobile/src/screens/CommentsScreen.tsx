@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { Avatar } from '@/components/Avatar';
 import { Input } from '@/components/Input';
@@ -204,10 +205,7 @@ export function CommentsScreen() {
           : 'content';
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1, backgroundColor: colors.background }}
-    >
+    <SinTecladoDelante style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
         title={estado.total > 0 ? `Comentarios · ${estado.total}` : 'Comentarios'}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
@@ -269,7 +267,7 @@ export function CommentsScreen() {
           />
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </SinTecladoDelante>
   );
 }
 

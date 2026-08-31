@@ -5,15 +5,19 @@ import { useAuthStore } from '@/store/useAuthStore';
 /**
  * Destino tras autenticarse.
  *
- * El orden dice lo que el producto considera importante, y por eso vive en una
- * sola funcion en vez de repetido en cada pantalla de acceso:
+ * Solo queda UNA parada posible antes del feed, y es la que el producto exige:
+ * el cuestionario de recomendacion, cuando esta persona todavia no ha pasado
+ * por el. Sin saber que busca, Z no puede recomendarle nada; por eso ese si se
+ * queda.
  *
- *   1. El cuestionario de recomendacion, si esta persona todavia no ha pasado
- *      por el. Sin saber que busca, Z no puede recomendarle nada.
- *   2. "Miembros RENASER", para que el feed no empiece vacio. La propia
- *      pantalla se salta sola si ya sigue a los destacados.
- *   3. El feed, en modo demo (sin backend no hay a quien seguir ni que
- *      preguntar).
+ * LO QUE SE QUITO Y POR QUE. Antes se pasaba por «Miembros RENASER»
+ * (`/members`) con la idea de que el feed no empezara vacio. En produccion esa
+ * pantalla ensena UN solo perfil, un boton «Ahora no» y media pantalla en
+ * blanco: no es un paso de alta, es un resto de cuando la app se demostraba con
+ * datos de ejemplo. Interrumpir el acceso para eso cuesta mas de lo que aporta,
+ * asi que se sale directamente al flujo normal. La ruta sigue existiendo —el
+ * fichero de `app/` NO se toca: en Expo Router la ruta ES el fichero— pero ya
+ * no forma parte del camino posterior al inicio de sesion.
  *
  * Quien llama debe haber resuelto antes el estado del cuestionario
  * (`usePreferenciasStore.cargarEstado`). Si no lo hizo, sale 'desconocido' y se
@@ -22,7 +26,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 export function postAuthRoute(): string {
   if (!useAuthStore.getState().supabaseEnabled) return '/(tabs)/home';
   if (usePreferenciasStore.getState().estado === 'pendiente') return '/onboarding';
-  return '/members';
+  return '/(tabs)/home';
 }
 
 /**
