@@ -1492,7 +1492,17 @@ export const es = {
   'story.cannotMeasure':
     'No pudimos comprobar cuánto dura este vídeo. Grábalo con la cámara de la app, que ya corta a los {tope} segundos.',
   'story.tooLong':
-    'Este vídeo dura {duracion} s y las historias admiten hasta {tope}. Todavía no podemos recortarlo aquí: elige un vídeo más corto, recórtalo en tu galería o grábalo con la cámara de la app.',
+    'Este vídeo dura {duracion} s y las historias admiten hasta {tope}. Elige el tramo que quieres publicar: lo recortamos al subirlo.',
+  'story.trimTitle': 'Elige el tramo',
+  'story.trimWholeUploadNotice':
+    'Se sube el vídeo entero y el recorte lo hace el servidor: puede tardar un poco más.',
+  'story.trimConfirm': 'Usar este tramo',
+  'story.trimStartHandle': 'Principio del tramo',
+  'story.trimEndHandle': 'Final del tramo',
+  'story.trimWindow': 'Mover el tramo entero',
+  'story.trimSelection': 'De {inicio} a {fin}',
+  'story.trimSeconds': '{segundos} s',
+  'story.trimFailed': 'No pudimos recortar el vídeo. No se ha publicado nada.',
 
   'audio.byAuthor': 'Audio de {autor}',
 } as const;

@@ -1400,7 +1400,17 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'story.cannotMeasure':
     'We could not check how long this video is. Record it with the app camera, which already cuts at {tope} seconds.',
   'story.tooLong':
-    'This video lasts {duracion} s and stories accept up to {tope}. We cannot trim it here yet: pick a shorter video, trim it in your gallery, or record it with the app camera.',
+    'This video lasts {duracion} s and stories accept up to {tope}. Pick the part you want to publish: we trim it while uploading.',
+  'story.trimTitle': 'Pick the part',
+  'story.trimWholeUploadNotice':
+    'The whole video is uploaded and the server does the trimming, so it may take a little longer.',
+  'story.trimConfirm': 'Use this part',
+  'story.trimStartHandle': 'Start of the selection',
+  'story.trimEndHandle': 'End of the selection',
+  'story.trimWindow': 'Move the whole selection',
+  'story.trimSelection': 'From {inicio} to {fin}',
+  'story.trimSeconds': '{segundos} s',
+  'story.trimFailed': 'We could not trim the video. Nothing was published.',
 
   'audio.byAuthor': 'Audio by {autor}',
 };

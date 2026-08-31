@@ -80,6 +80,8 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     // Formato puro: solo dos puntos y los huecos.
     'field.dateWithLabel',
     'field.timeWithLabel',
+    // Un numero y el simbolo del segundo, que se escribe igual en los tres.
+    'story.trimSeconds',
     'video.video',
     'gallery.videos',
     // «Mentor» y el separador se escriben igual en los tres idiomas.
@@ -138,6 +140,7 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'video.mute',
     'field.dateWithLabel',
     'field.timeWithLabel',
+    'story.trimSeconds',
     'course.viewProgram',
     'auth.reasonRepost',
     'auth.reasonComment',

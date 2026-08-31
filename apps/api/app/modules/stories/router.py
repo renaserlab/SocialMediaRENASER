@@ -6,6 +6,12 @@ vista salen SIEMPRE de current_user.id (JWT), nunca de un campo del cliente.
 Una historia caduca a las 24 h (`expires_at`, que fija la base). El listado
 filtra siempre por esa fecha, asi que no hace falta ningun proceso de limpieza
 para que dejen de mostrarse.
+
+EL RECORTE DE VIDEO PASA POR AQUI. Publicar una historia de video mas larga que
+el tope exige elegir un tramo, y ese tramo lo corta el SERVIDOR con ffmpeg
+(`stories/recorte.py`), porque en el telefono no hay con que. El movil solo usa
+este endpoint cuando hay recorte; el resto de historias sigue insertandose
+contra PostgREST (ver `StoryRepository`), que es lo que se venia haciendo.
 """
 
 from datetime import datetime, timezone
@@ -15,11 +21,12 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.content.schemas import AuthorSummary
 from app.modules.profiles.models import Profile
 from app.modules.stories.models import Story, StoryView
+from app.modules.stories.recorte import Tramo, preparar_video
 from app.modules.stories.schemas import StoryCreate, StoryGroupRead, StoryRead, StoryViewerRead
 from app.shared.database import get_db
 from app.shared.permissions import is_admin
@@ -139,11 +146,49 @@ async def create_story(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StoryRead:
+    """Publica una historia. Si el video es largo, lo RECORTA antes.
+
+    EL ORDEN ES SUBIR -> RECORTAR -> PUBLICAR, y la fila se escribe al final.
+    Mientras el recorte no exista, no hay historia; asi que no hay ningun
+    instante —ni uno— en el que un video de mas del tope este publicado sin
+    recortar. La justificacion completa de por que se elige este orden y no un
+    estado «oculto» esta en la cabecera de `stories/recorte.py`.
+
+    OJO CON EL ORDEN DE LAS LINEAS, no es casual: el trabajo de ffmpeg va ANTES
+    de tocar la base. `AsyncSession` no reserva conexion del pool hasta la
+    primera consulta, asi que codificando no se retiene ninguna. Meter aqui un
+    `db.get(...)` de mas volveria a lo que `process_media` describe como el
+    fallo a evitar: minutos de codificacion con una de las diez conexiones
+    ocupada sin hacer nada.
+    """
+    # EL ARCHIVO TIENE QUE SER SUYO. Sin esto, cualquiera podria pedir que el
+    # servidor leyera —con la `service_role`— un archivo de la carpeta de otra
+    # persona y publicarlo como historia propia. La politica de Storage ata cada
+    # objeto a la carpeta de su dueño; esta comprobacion dice lo mismo aqui,
+    # donde la `service_role` se salta la RLS.
+    if not payload.storage_path.startswith(f"{current_user.id}/"):
+        raise ForbiddenError("Solo puedes publicar archivos de tu propia carpeta.")
+
+    storage_path = payload.storage_path
+    duration_ms = payload.duration_ms
+
+    if payload.media_type == "video":
+        tramo = (
+            Tramo(payload.trim.start_ms, payload.trim.end_ms)
+            if payload.trim is not None
+            else None
+        )
+        storage_path, duration_ms = await preparar_video(
+            payload.storage_path, payload.duration_ms, tramo, current_user.id
+        )
+    elif payload.trim is not None:
+        raise ValidationAppError("Una imagen no se recorta en el tiempo.")
+
     story = Story(
         author_id=current_user.id,
-        storage_path=payload.storage_path,
+        storage_path=storage_path,
         media_type=payload.media_type,
-        duration_ms=payload.duration_ms,
+        duration_ms=duration_ms,
         caption=payload.caption,
     )
     db.add(story)

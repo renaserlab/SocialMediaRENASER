@@ -1404,7 +1404,17 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'story.cannotMeasure':
     'Não conseguimos verificar quanto dura este vídeo. Grave com a câmera do app, que já corta aos {tope} segundos.',
   'story.tooLong':
-    'Este vídeo dura {duracion} s e os stories aceitam até {tope}. Ainda não dá para cortar aqui: escolha um vídeo mais curto, corte na sua galeria ou grave com a câmera do app.',
+    'Este vídeo dura {duracion} s e os stories aceitam até {tope}. Escolha o trecho que quer publicar: cortamos ao enviar.',
+  'story.trimTitle': 'Escolha o trecho',
+  'story.trimWholeUploadNotice':
+    'O vídeo inteiro é enviado e o corte é feito no servidor: pode demorar um pouco mais.',
+  'story.trimConfirm': 'Usar este trecho',
+  'story.trimStartHandle': 'Início do trecho',
+  'story.trimEndHandle': 'Fim do trecho',
+  'story.trimWindow': 'Mover o trecho inteiro',
+  'story.trimSelection': 'De {inicio} até {fin}',
+  'story.trimSeconds': '{segundos} s',
+  'story.trimFailed': 'Não conseguimos cortar o vídeo. Nada foi publicado.',
 
   'audio.byAuthor': 'Áudio de {autor}',
 };

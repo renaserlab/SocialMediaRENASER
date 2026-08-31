@@ -22,6 +22,7 @@ import {
   type IdiomaElegido,
 } from '@/lib/idioma';
 import { mezclarReacciones } from '@/lib/reacciones';
+import type { Tramo } from '@/lib/historias';
 import type { Language } from '@/i18n';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
 
@@ -149,7 +150,8 @@ type AppState = {
   storyGroups: StoryGroup[];
   storiesStatus: 'idle' | 'loading' | 'error';
   loadStories: () => Promise<void>;
-  createStory: (media: UploadedMedia, durationMs?: number) => Promise<void>;
+  /** `tramo` solo cuando hay que recortar: entonces publica el SERVIDOR. */
+  createStory: (media: UploadedMedia, durationMs?: number, tramo?: Tramo) => Promise<void>;
   deleteStory: (storyId: string) => Promise<void>;
   markStoryViewed: (storyId: string) => void;
 
@@ -362,8 +364,8 @@ export const useAppStore = create<AppState>()(
           set({ storiesStatus: 'error' });
         }
       },
-      createStory: async (media, durationMs = 5000) => {
-        await StoryRepository.create(media, { durationMs });
+      createStory: async (media, durationMs = 5000, tramo) => {
+        await StoryRepository.create(media, { durationMs, tramo });
         await get().loadStories();
       },
       deleteStory: async (storyId) => {

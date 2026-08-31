@@ -8,21 +8,36 @@ import {
   type StoryViewRow,
 } from '@/mappers/storyMapper';
 import { supabase } from '@/services/supabase';
+import { apiRequest, API_V1 } from '@/services/api';
 import { profileImageUrl, signMediaUrls, type UploadedMedia } from '@/services/storage';
 import type { StoryGroup, StoryViewer } from '@/types';
-import { TOPE_GUARDADO_SIN_0042_MS } from '@/lib/historias';
+import {
+  MAX_HISTORIA_MS,
+  MIN_HISTORIA_MS,
+  TOPE_GUARDADO_SIN_0042_MS,
+  largoDelTramo,
+  type Tramo,
+} from '@/lib/historias';
 
 /**
- * Historias contra Supabase (PostgREST), sin pasar por la API FastAPI.
+ * Historias contra Supabase (PostgREST)... salvo cuando hay que RECORTAR.
  *
- * La API desplegada se construye desde otra rama, asi que las historias hablan
- * directamente con la base. Es seguro porque las politicas RLS de
- * 0003_stories.sql son las que mandan: solo puedes insertar historias con tu
- * propio author_id, solo borrar las tuyas, y las vistas solo las lee el autor
- * de la historia o el propio espectador.
+ * Leer y publicar una historia normal se hace directamente contra la base: las
+ * politicas RLS de 0003_stories.sql son las que mandan (solo puedes insertar
+ * historias con tu propio author_id, solo borrar las tuyas, y las vistas solo
+ * las lee el autor de la historia o el propio espectador).
  *
- * El modulo `apps/api/app/modules/stories` queda escrito para cuando se
- * quiera centralizar la logica en el backend.
+ * PUBLICAR UN TRAMO DE UN VIDEO LARGO NO PUEDE HACERSE ASI, y por un motivo que
+ * no es de estilo: PostgREST inserta una fila, no corta un video. La base solo
+ * puede comprobar el NUMERO que se le manda en `duration_ms`, y ese numero lo
+ * escribe el cliente. Quien puede mirar el archivo es el servidor, que tiene
+ * ffmpeg desde el 27/08/2026. Por eso el recorte pasa por `POST /stories`, que
+ * mide el archivo subido con ffprobe, corta el tramo y SOLO ENTONCES crea la
+ * fila (ver `apps/api/app/modules/stories/recorte.py`).
+ *
+ * La consecuencia buena de ese orden: no existe ningun instante en el que una
+ * historia con un video de cinco minutos este publicada esperando su recorte.
+ * O hay tramo, o no hay historia.
  */
 
 // Se nombra la FK explicitamente (`!stories_author_id_fkey`) porque hay dos
@@ -131,10 +146,52 @@ export const StoryRepository = {
 
   async create(
     media: UploadedMedia,
-    { durationMs = 5000, caption = '' }: { durationMs?: number; caption?: string } = {},
+    {
+      durationMs = 5000,
+      caption = '',
+      tramo,
+    }: { durationMs?: number; caption?: string; tramo?: Tramo } = {},
   ): Promise<void> {
     const uid = await currentUserId();
     if (!uid) throw new Error('Inicia sesión para publicar una historia.');
+
+    if (tramo) {
+      /*
+        CON RECORTE, POR LA API. Y sin respaldo contra PostgREST a proposito.
+
+        Si la API no responde, esto falla y no se publica NADA. La tentacion
+        seria caer a la insercion directa «para no perder la subida», y eso es
+        exactamente el fallo que se viene a impedir: publicaria el video entero
+        de cinco minutos con un `duration_ms` de treinta segundos, o sea un
+        video largo disfrazado de recortado. Mejor un error claro.
+
+        La espera es larga a proposito: el servidor tiene que leer el video,
+        pasarle ffmpeg y subir el derivado. Los veinte segundos de una peticion
+        normal se quedan cortos y cortarian un recorte que iba bien.
+
+        Y es MAYOR que el presupuesto del servidor (25 s de turno + 150 s de
+        recorte = 175 s, en `stories/recorte.py`). Al reves habria un hueco en
+        el que la persona ve un error y la historia aparece igual un minuto
+        despues. Quien mueva uno de los dos numeros tiene que mirar el otro.
+      */
+      await apiRequest<unknown>(`${API_V1}/stories`, {
+        method: 'POST',
+        timeoutMs: 180_000,
+        body: JSON.stringify({
+          storage_path: media.storagePath,
+          media_type: media.mediaType,
+          // El numero vive en `lib/historias`, no aqui: llego a estar copiado
+          // en cinco sitios y con cinco copias basta cambiar cuatro.
+          duration_ms: Math.max(
+            MIN_HISTORIA_MS,
+            Math.min(MAX_HISTORIA_MS, largoDelTramo(tramo)),
+          ),
+          caption,
+          trim: { start_ms: tramo.inicioMs, end_ms: tramo.finMs },
+        }),
+      });
+      return;
+    }
 
     // `expires_at` lo pone la base (now() + 24 h): no se envia desde el cliente.
     const insertar = (duracion: number) =>
