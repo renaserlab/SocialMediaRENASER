@@ -23,6 +23,16 @@ type Props = {
   courseId: string;
   /** Solo la administracion edita; el resto ve el temario. */
   canEdit: boolean;
+  /**
+   * Si el curso esta anunciado pero sin contenido disponible.
+   *
+   * LLEGA DESDE LA PANTALLA, que ya lo tiene del detalle del curso. Antes este
+   * componente lo pedia por su cuenta a Supabase mientras `CourseScreen` usaba
+   * el que devuelve la API: dos fuentes para el MISMO dato, una peticion de mas
+   * en cada visita, y la posibilidad real de que la etiqueta «Próximamente» de
+   * arriba y el bloque de aqui abajo dijeran cosas distintas.
+   */
+  comingSoon: boolean;
   /** Al tocar una leccion (para abrirla en el reproductor). */
   onOpenLesson?: (lessonId: string) => void;
   /** Avisa a la pantalla de que el temario cambio, para refrescar contadores. */
@@ -62,7 +72,13 @@ function formatDuration(seconds: number): string {
 const DURACION_MINIMA = 30;
 const DURACION_MAXIMA = 4 * 60 * 60;
 
-export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged }: Props) {
+export function CourseContentEditor({
+  courseId,
+  canEdit,
+  comingSoon,
+  onOpenLesson,
+  onChanged,
+}: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [modules, setModules] = useState<CourseModule[]>([]);
@@ -73,17 +89,10 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
   const [moduleError, setModuleError] = useState<string | null>(null);
   /** Modulo al que se le esta anadiendo una leccion. */
   const [lessonFor, setLessonFor] = useState<CourseModule | null>(null);
-  /** Curso anunciado pero sin contenido disponible. */
-  const [comingSoon, setComingSoon] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [content, soon] = await Promise.all([
-        CourseContentRepository.listContent(courseId),
-        CourseContentRepository.getComingSoon(courseId).catch(() => false),
-      ]);
-      setModules(content);
-      setComingSoon(soon);
+      setModules(await CourseContentRepository.listContent(courseId));
     } catch (error) {
       console.warn('[curso] no se pudo cargar el temario:', error);
       setModules([]);
@@ -109,12 +118,21 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
     void load();
   }, [load]);
 
+  /**
+   * Cambia el estado del contenido: «Próximamente» o publicado.
+   *
+   * Al terminar se avisa a la pantalla (`onChanged`) en vez de guardarlo aquí:
+   * el dato vive en el detalle del curso, y esa es también la etiqueta que se
+   * pinta arriba. Sin este aviso, tocar el interruptor cambiaba el bloque de
+   * abajo y dejaba la etiqueta de arriba diciendo lo contrario hasta que
+   * alguien volviera a entrar.
+   */
   const toggleComingSoon = async () => {
     const next = !comingSoon;
     try {
       await CourseContentRepository.setComingSoon(courseId, next);
-      setComingSoon(next);
       toast(next ? t('syllabus.markedSoon') : t('syllabus.published'));
+      onChanged?.();
     } catch (error) {
       notify(
         t('syllabus.changeFailed'),
@@ -208,22 +226,49 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
   return (
     <View>
       {canEdit ? (
+        /*
+          EL INTERRUPTOR DE «PRÓXIMAMENTE», Y POR QUÉ SE REESCRIBIÓ.
+
+          Este control decía, a la derecha, `live.hide` — «Ocultar» —, una
+          cadena del módulo de EMISIONES EN VIVO («¿Ocultar este mensaje?»).
+          Reutilizarla aquí convertía la fila en una trampa: un toque, sin
+          preguntar nada, sobre algo rotulado «Ocultar» dejaba el temario
+          entero invisible para todos los alumnos y el curso anunciado como
+          «Próximamente» aunque tuviera módulos y lecciones publicados. Quien lo
+          pulsara no tenía forma de saber que eso era lo que iba a pasar.
+
+          Ahora dice las dos cosas que hacen falta y en el orden en que se
+          necesitan: en qué estado está el contenido, y qué ocurre si se toca.
+          El icono de interruptor lo declara como lo que es —un conmutador— y
+          no como un enlace más.
+
+          `accessibilityState.checked` para que un lector de pantalla lo anuncie
+          como el interruptor que es, en vez de leer dos frases sueltas.
+        */
         <Pressable
           onPress={() => void toggleComingSoon()}
           style={({ pressed }) => [
             styles.stateRow,
             { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
           ]}
-          accessibilityRole="button"
+          accessibilityRole="switch"
+          accessibilityState={{ checked: comingSoon }}
           accessibilityLabel={comingSoon ? t('syllabus.publishContent') : t('syllabus.markSoon')}
         >
           <Feather name={comingSoon ? 'clock' : 'check-circle'} size={16} color={colors.text} />
-          <Text variant="secondary" weight="700" style={{ flex: 1 }}>
-            {comingSoon ? t('syllabus.stateSoon') : t('syllabus.statePublished')}
-          </Text>
-          <Text variant="secondary" color={colors.textMuted}>
-            {comingSoon ? t('common.publish') : t('live.hide')}
-          </Text>
+          <View style={styles.stateTexts}>
+            <Text variant="secondary" weight="700">
+              {comingSoon ? t('syllabus.stateSoon') : t('syllabus.statePublished')}
+            </Text>
+            <Text variant="caption" color={colors.textMuted}>
+              {comingSoon ? t('syllabus.publishContent') : t('syllabus.markSoon')}
+            </Text>
+          </View>
+          <Feather
+            name={comingSoon ? 'toggle-right' : 'toggle-left'}
+            size={22}
+            color={colors.textMuted}
+          />
         </Pressable>
       ) : null}
 
@@ -477,6 +522,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.lg,
   },
+  stateTexts: { flex: 1, gap: 2 },
   soon: {
     alignItems: 'center',
     gap: spacing.sm,

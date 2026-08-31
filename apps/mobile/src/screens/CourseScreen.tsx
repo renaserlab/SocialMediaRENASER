@@ -59,6 +59,24 @@ export function CourseScreen() {
   const borrador = course?.status === 'draft';
   const retirado = course?.status === 'hidden';
 
+  /*
+    «PRÓXIMAMENTE» TIENE QUE SIGNIFICAR ALGO.
+
+    `courses.coming_soon` (migración 0014) existe para anunciar un curso cuyo
+    contenido todavía no está disponible. El estado se guardaba y se pintaba,
+    pero NO GOBERNABA NADA: el temario seguía llegando entero desde el detalle
+    del curso, así que esta pantalla enseñaba a la vez «2 módulos · 1 lecciones
+    · Próximamente», el globo «Toca aquí: abre la primera lección del temario» y
+    un botón «Empezar curso» que abría esa lección — encima del recuadro que
+    acababa de decir que el contenido no estaba preparado. El curso anunciaba
+    contenido y negaba tenerlo en la misma pantalla.
+
+    A partir de aquí, para quien NO gestiona el curso, «Próximamente» apaga todo
+    lo que ofrece contenido. Quien lo gestiona sigue viéndolo todo: es
+    exactamente lo que está preparando.
+  */
+  const contenidoNoDisponible = !!course?.comingSoon && !canManage;
+
   /**
    * Se pregunta que hay a la venta solo cuando hace falta: curso de pago y sin
    * acceso todavia. Para un curso gratis, o para quien ya lo tiene, no hay
@@ -366,8 +384,19 @@ export function CourseScreen() {
             cursos, existieran o no.
           */}
           <View style={[styles.info, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Info icon="book" label={t('course.modules', { count: course.modules })} />
-            <Info icon="play-circle" label={t('course.lessons', { count: course.lessons })} />
+            {/*
+              LOS CONTADORES SOLO SI SE PUEDEN ABRIR. «2 módulos · 1 lecciones»
+              al lado de «Próximamente» es la contradicción de la captura
+              escrita en una sola línea: se anuncia contenido que la propia
+              pantalla dice que no está. Quien gestiona el curso sí los ve, que
+              es como sabe lo que lleva preparado.
+            */}
+            {contenidoNoDisponible ? null : (
+              <React.Fragment>
+                <Info icon="book" label={t('course.modules', { count: course.modules })} />
+                <Info icon="play-circle" label={t('course.lessons', { count: course.lessons })} />
+              </React.Fragment>
+            )}
             {course.comingSoon ? <Info icon="clock" label={t('common.comingSoon')} /> : null}
           </View>
 
@@ -380,7 +409,10 @@ export function CourseScreen() {
           <CoachMark
             id="curso-temario"
             arrow="down"
-            visible={!canManage && !!firstLessonId}
+            // Y NUNCA con el contenido sin publicar: «Toca aquí: abre la
+            // primera lección del temario» señalando a un recuadro que dice que
+            // el temario todavía no está es lo que hacía la captura.
+            visible={!canManage && !!firstLessonId && !contenidoNoDisponible}
             text={t('course.firstLessonHint')}
             onPress={() => firstLessonId && router.push(`/lesson/${firstLessonId}` as never)}
           />
@@ -389,6 +421,9 @@ export function CourseScreen() {
             <CourseContentEditor
               courseId={course.id}
               canEdit={canManage}
+              // Del detalle del curso, que es de donde sale todo lo demás de
+              // esta pantalla: una sola fuente para un solo dato.
+              comingSoon={!!course.comingSoon}
               onOpenLesson={(lessonId) => router.push(`/lesson/${lessonId}` as never)}
               // Los contadores de arriba ("X modulos, Y lecciones") vienen del
               // detalle del curso, que se pide una sola vez al montar. Sin esto
@@ -404,6 +439,19 @@ export function CourseScreen() {
               - de pago sin acceso -> «Comprar curso», y solo si de verdad se
                 puede comprar. Si no, no hay boton: hay la explicacion de
                 arriba.
+          */}
+          {/*
+            Y CON EL CONTENIDO SIN PUBLICAR, NINGUNA.
+
+            No es un botón desactivado: es que no hay nada que empezar todavía.
+            El recuadro «Próximamente» de justo encima ya dice por qué, así que
+            no queda un hueco sin explicación —que es lo único que convertiría
+            esto en un botón muerto—.
+
+            El bloque de COMPRA no entra aquí: `coming_soon` significa
+            «anunciado», y reservar plaza en algo anunciado es una decisión del
+            producto, no una incoherencia. Lo que no puede pasar es ofrecer
+            ABRIR un contenido que la pantalla acaba de decir que no está.
           */}
           {esDePago && !hasAccess ? (
             beta?.available ? (
@@ -423,7 +471,7 @@ export function CourseScreen() {
                 style={{ marginTop: spacing.xl }}
               />
             ) : null
-          ) : (
+          ) : contenidoNoDisponible ? null : (
             <Button
               label={
                 enrolling

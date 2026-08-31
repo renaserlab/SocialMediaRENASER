@@ -266,17 +266,16 @@ export const CourseContentRepository = {
     if (error) throw new Error(error.message);
   },
 
-  /** ¿El curso esta anunciado pero sin contenido disponible? */
-  async getComingSoon(courseId: string): Promise<boolean> {
-    const { data, error } = await client()
-      .from('courses')
-      .select('coming_soon')
-      .eq('id', courseId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    return (data?.coming_soon as boolean | null) ?? false;
-  },
-
+  /**
+   * Marca (o desmarca) el curso como anunciado sin contenido disponible.
+   *
+   * NO HAY LECTOR AQUÍ, y es a propósito. Lo había —`getComingSoon`, contra
+   * Supabase— mientras la ficha del curso leía el MISMO dato de la API. Dos
+   * fuentes para lo mismo son dos respuestas posibles: la etiqueta de arriba
+   * decía una cosa y el bloque del temario otra. Se lee del detalle del curso,
+   * que es de donde viene todo lo demás de esa pantalla; escribir sigue aquí
+   * porque el contenido del curso se escribe contra Supabase directamente.
+   */
   async setComingSoon(courseId: string, comingSoon: boolean): Promise<void> {
     const { error } = await client()
       .from('courses')

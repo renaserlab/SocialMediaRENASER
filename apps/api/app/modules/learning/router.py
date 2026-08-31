@@ -93,6 +93,27 @@ async def _tiene_acceso(db: AsyncSession, uid: str | None, course: Course) -> bo
     return await _is_enrolled(db, uid, course.id)
 
 
+async def _contenido_listo(db: AsyncSession, uid: str | None, course: Course) -> bool:
+    """Si el contenido de este curso se puede ENTREGAR: rutas de video y texto.
+
+    NO ES LO MISMO QUE TENER ACCESO, y confundirlo era el agujero. «Próximamente»
+    (`courses.coming_soon`) no es un permiso que le falte a alguien: es que el
+    contenido todavía no está hecho. Un curso GRATUITO da acceso a todo el mundo
+    —`_tiene_acceso` devuelve True en la primera línea—, así que un curso
+    anunciado y sin terminar repartía las rutas de sus vídeos a cualquiera que
+    pidiera su ficha, y `/lessons/<id>` entregaba el texto entero de una lección
+    escrita.
+
+    La pantalla ya no enlaza ahí desde que se arregló la ficha, pero un enlace
+    directo seguía funcionando: arreglar solo lo que se ve deja la puerta puesta.
+
+    Quien gestiona el curso sí lo recibe todo. Es como comprueba lo que sube.
+    """
+    if await _puede_gestionar(db, uid, course):
+        return True
+    return not course.coming_soon
+
+
 async def _puede_gestionar(db: AsyncSession, uid: str | None, course: Course) -> bool:
     if uid is None:
         return False
@@ -193,6 +214,9 @@ async def get_course_detail(
     )
 
     tiene_acceso = await _tiene_acceso(db, uid, course)
+    # Anunciado y aún sin contenido: el temario se sigue enseñando —es lo que
+    # vende el curso— pero no viaja ni una ruta ni un texto de lección.
+    listo = await _contenido_listo(db, uid, course)
 
     module_reads: list[ModuleRead] = []
     lessons_total = 0
@@ -218,7 +242,11 @@ async def get_course_detail(
                     sort_order=leccion.sort_order,
                     completed=hecha,
                     media_path=_media_visible(
-                        leccion.media_path, acceso=tiene_acceso, muestra=es_muestra
+                        leccion.media_path,
+                        acceso=listo and tiene_acceso,
+                        # Una lección de MUESTRA de un curso que aún no existe
+                        # tampoco se reproduce: no hay nada que mostrar.
+                        muestra=listo and es_muestra,
                     ),
                     has_media=bool(leccion.media_path),
                     progress_seconds=avance.progress_seconds if avance else 0,
@@ -623,6 +651,10 @@ async def get_lesson_detail(
         leccion.id, ("video", False)
     )
     tiene_acceso = await _tiene_acceso(db, uid, curso)
+    # ESTA ERA LA PUERTA DE ATRAS. La ficha del curso ya no ofrece «Empezar
+    # curso» cuando está anunciado, pero `/lesson/<id>` se abre por enlace
+    # directo y aquí no se miraba `coming_soon` en ningún momento.
+    listo = await _contenido_listo(db, uid, curso)
     return LessonDetailRead(
         id=leccion.id,
         title=leccion.title,
@@ -630,12 +662,17 @@ async def get_lesson_detail(
         sort_order=leccion.sort_order,
         completed=bool(avance and avance.completed),
         media_path=_media_visible(
-            leccion.media_path, acceso=tiene_acceso, muestra=es_muestra
+            leccion.media_path,
+            acceso=listo and tiene_acceso,
+            muestra=listo and es_muestra,
         ),
         has_media=bool(leccion.media_path),
         progress_seconds=avance.progress_seconds if avance else 0,
         body=_texto_visible(
-            leccion.body, kind=kind, acceso=tiene_acceso, muestra=es_muestra
+            leccion.body,
+            kind=kind,
+            acceso=listo and tiene_acceso,
+            muestra=listo and es_muestra,
         ),
         kind=kind,
         is_preview=es_muestra,
