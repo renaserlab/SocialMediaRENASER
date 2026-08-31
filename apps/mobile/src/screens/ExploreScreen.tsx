@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -10,7 +10,6 @@ import { CoachMark } from '@/components/CoachMark';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
 import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
-import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { MuroDePublicaciones } from '@/components/MuroDePublicaciones';
 import { PersonasParaTi } from '@/components/PersonasParaTi';
@@ -73,7 +72,7 @@ import {
  * contenido curado y no cambia cada minuto.
  */
 export function ExploreScreen() {
-  const { colors } = useAppTheme();
+  const { colors, mode } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -107,7 +106,20 @@ export function ExploreScreen() {
     if (!AuthRepository.enabled) return;
     const [cursos, eventos, circulos, destacados] = await Promise.allSettled([
       LearningRepository.listCourses(),
-      CatalogRepository.listEvents(),
+      /*
+        SOLO LOS VIGENTES, y lo decide el servidor.
+
+        Esta sección se titula «Próximos eventos» y enseña los dos primeros.
+        Como el listado venía ordenado por fecha ascendente SIN filtrar, los dos
+        primeros eran casi siempre los más antiguos: en la captura salían
+        «Alquimia para crear riqueza · Quito» y «ALQUIMIA · 19 ago. · Lima»,
+        uno de ellos ya celebrado, presentados como la próxima oportunidad.
+
+        Se pide el grupo al servidor en lugar de recortar aquí lo descargado:
+        con un recorte en el móvil, un catálogo con veinte eventos pasados y uno
+        futuro dejaría la sección vacía aunque el evento futuro exista.
+      */
+      CatalogRepository.listEvents('upcoming'),
       CommunityRepository.list(),
       pedirDestacados(),
     ]);
@@ -152,10 +164,15 @@ export function ExploreScreen() {
    * mira, asi que no aparece en su propia lista.
    */
   const catalogProfileId = isAdmin ? (user?.id ?? null) : adminId;
-  const openAdminSection = (section: ProfileSectionKind) => {
-    if (!catalogProfileId) return;
-    irAlPerfil(router, catalogProfileId, section);
-  };
+  // `useCallback` no es cosmético aquí: esta función entra en las dependencias
+  // de la cabecera memorizada, y recrearla en cada render la haría inútil.
+  const openAdminSection = useCallback(
+    (section: ProfileSectionKind) => {
+      if (!catalogProfileId) return;
+      irAlPerfil(router, catalogProfileId, section);
+    },
+    [router, catalogProfileId],
+  );
 
   /**
    * El aviso de contenido gratuito de Darren vive en Notificaciones. Aqui solo
@@ -198,10 +215,13 @@ export function ExploreScreen() {
   // mismo feed global. Ahora "Siguiendo" pide al backend solo lo de los
   // perfiles que sigue el usuario.
   const [feedTab, setFeedTab] = useState(0);
-  const changeTab = (index: number) => {
-    setFeedTab(index);
-    void loadFeed(index === 1 ? 'following' : 'all');
-  };
+  const changeTab = useCallback(
+    (index: number) => {
+      setFeedTab(index);
+      void loadFeed(index === 1 ? 'following' : 'all');
+    },
+    [loadFeed],
+  );
 
   /* ---------------------------------------------------------- Busqueda ---- */
   /*
@@ -237,6 +257,8 @@ export function ExploreScreen() {
     buscar y se ofrece reintentar, que es lo que habia antes para el mismo caso.
   */
   const [query, setQuery] = useState('');
+  /** Solo para pintar el foco del campo. No entra en la búsqueda. */
+  const [enfocado, setEnfocado] = useState(false);
   const [estado, setEstado] = useState<EstadoDeBusqueda>(estadoInicial);
 
   /*
@@ -314,7 +336,25 @@ export function ExploreScreen() {
 
   /* --------------------------------------------------------- Contenido ---- */
 
-  const cabecera = (
+  /*
+    LA CABECERA Y EL PIE SE MEMORIZAN, y es un problema medible, no una manía.
+
+    `query` cambia con CADA TECLA. Sin memorizar, cada pulsación reconstruía los
+    dos árboles enteros y volvía a renderizar `StoriesRow`, `SegmentedControl`,
+    `CursosParaTi` y `PersonasParaTi` —dos carruseles con sus listas— además de
+    la tarjeta del programa, la de eventos y la del círculo. Escribir
+    «carpinteria» son once reconstrucciones completas de una pantalla que
+    encima está TAPADA: los resultados se pintan encima del muro, así que nada
+    de eso se ve mientras se escribe.
+
+    Ninguna de esas piezas depende del texto buscado, así que con las
+    dependencias declaradas abajo escribir deja de tocarlas. Por eso `changeTab`
+    y `openAdminSection` llevan `useCallback`: una función recreada en cada
+    render dejaría estas listas siempre distintas y el `useMemo` no serviría de
+    nada.
+  */
+  const cabecera = useMemo(
+    () => (
     <View>
       {/* Historias reales del backend (subida + anillo visto/sin ver) */}
       <StoriesRow />
@@ -467,9 +507,24 @@ export function ExploreScreen() {
       */}
       <CursosParaTi />
     </View>
+    ),
+    [
+      t,
+      colors,
+      router,
+      user,
+      firstName,
+      feedTab,
+      changeTab,
+      featuredCircle,
+      catalogProfileId,
+      openAdminSection,
+      isAdmin,
+    ],
   );
 
-  const pie = (
+  const pie = useMemo(
+    () => (
     <View>
       {/*
         «Personas para ti» va ANTES del catalogo y fuera del padding lateral:
@@ -548,18 +603,33 @@ export function ExploreScreen() {
         onActionPress={() => router.push('/events')}
       />
       <View style={styles.list}>
-        {nextEvents.slice(0, 2).map((event, index) => (
-          <ListRow
-            key={event.id}
-            title={event.title}
-            subtitle={`${event.date} • ${event.location}`}
-            leftComponent={
-              <Image source={index === 0 ? assets.event : assets.speaker} style={styles.eventImage} />
-            }
-            rightIcon="chevron-right"
-            onPress={() => router.push('/events')}
-          />
-        ))}
+        {nextEvents.length === 0 ? (
+          /*
+            Sin eventos vigentes se dice, en lugar de dejar un hueco bajo el
+            título. El enlace «Ver calendario» de arriba sigue llevando a la
+            agenda, donde están los anteriores: no se pierde nada.
+          */
+          <Text style={[styles.listaVacia, { color: colors.textMuted }]}>
+            {catalogoFallido ? t('common.checkConnection') : t('events.emptyBody')}
+          </Text>
+        ) : (
+          nextEvents.slice(0, 2).map((event) => (
+            <ListRow
+              key={event.id}
+              title={event.title}
+              subtitle={`${event.date} • ${event.location}`}
+              leftComponent={
+                /* La portada real del evento; el asset local solo si no tiene. */
+                <Image
+                  source={event.coverUrl ? { uri: event.coverUrl } : assets.event}
+                  style={styles.eventImage}
+                />
+              }
+              rightIcon="chevron-right"
+              onPress={() => router.push('/events')}
+            />
+          ))
+        )}
       </View>
 
       <SectionTitle title={t('explore.communities')} />
@@ -589,6 +659,17 @@ export function ExploreScreen() {
       </Pressable>
       </View>
     </View>
+    ),
+    [
+      t,
+      colors,
+      router,
+      catalogoFallido,
+      cargarDestacados,
+      featuredCourse,
+      nextEvents,
+      featuredCircle,
+    ],
   );
 
   return (
@@ -611,8 +692,43 @@ export function ExploreScreen() {
         todo; ahora es el primer elemento de la pantalla y siempre esta ahi.
       */}
       <View style={[styles.container, styles.buscador]}>
-        <View style={styles.searchWrapper}>
-          <Input
+        {/*
+          EL CAMPO, POR DENTRO.
+
+          Antes era el `Input` genérico de los formularios —rectángulo de radio
+          pequeño y borde a todo su alrededor— con la lupa encima, colocada en
+          términos absolutos sobre un relleno izquierdo de 30 puntos. Se veía
+          como lo que era: un campo de formulario reutilizado, con el icono
+          pegado por fuera.
+
+          Se pinta aquí y no se cambia `Input`: ese componente lo comparten
+          todos los formularios de la aplicación y un campo de búsqueda no tiene
+          por qué arrastrarlos a su forma. La LÓGICA de búsqueda no se toca —el
+          mismo `query`, el mismo `setQuery`, el mismo antirrebote—: esto es
+          solo cómo se ve.
+
+          Cápsula rellena en lugar de caja con borde: el relleno la separa del
+          fondo sin dibujar una línea dura, y el foco se marca engrosando el
+          contraste del borde, no con color —el sistema es blanco y negro y
+          tiene que leerse igual en los dos temas—.
+        */}
+        <View
+          style={[
+            styles.campoDeBusqueda,
+            {
+              // En oscuro el gris de superficie (#111) se despega del negro;
+              // en claro el que se despega del blanco es `surfaceAlt` (#F7F7F7).
+              backgroundColor: mode === 'dark' ? colors.surface : colors.surfaceAlt,
+              borderColor: enfocado ? colors.text : colors.border,
+            },
+          ]}
+        >
+          <Feather
+            name="search"
+            size={17}
+            color={enfocado ? colors.text : colors.textMuted}
+          />
+          <TextInput
             /*
               El texto de ayuda decia «Buscar personas...», y no era un detalle
               de redaccion: describia exactamente lo que el buscador sabia hacer.
@@ -621,15 +737,33 @@ export function ExploreScreen() {
             */
             placeholder={t('search.placeholder')}
             placeholderTextColor={colors.textMuted}
-            containerStyle={styles.searchContainer}
+            style={[styles.textoDeBusqueda, { color: colors.text }]}
             value={query}
             onChangeText={setQuery}
+            onFocus={() => setEnfocado(true)}
+            onBlur={() => setEnfocado(false)}
             autoCapitalize="none"
             autoCorrect={false}
+            // El teclado dice «buscar» en vez de «intro»: la tecla ya no
+            // pretende dar un salto de línea en un campo de una sola línea.
+            returnKeyType="search"
+            accessibilityLabel={t('search.placeholder')}
           />
-          <View style={styles.searchIcon}>
-            <Feather name="search" size={18} color={colors.textMuted} />
-          </View>
+          {query.length > 0 ? (
+            /*
+              Borrar lo escrito de un toque. iOS tiene su propia X, pero Android
+              no: sin esto, en la mitad del parque hay que mantener el borrado
+              pulsado hasta vaciar la caja para volver a ver el muro.
+            */
+            <Pressable
+              onPress={() => setQuery('')}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t('search.clear')}
+            >
+              <Feather name="x" size={16} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -733,9 +867,28 @@ const styles = StyleSheet.create({
   buscador: { paddingTop: spacing.sm },
   avisoCarga: { paddingVertical: spacing.md },
   buscandoAviso: { paddingVertical: spacing.sm, fontSize: 13 },
-  searchWrapper: { position: 'relative', marginBottom: spacing.md },
-  searchContainer: { paddingLeft: 30 },
-  searchIcon: { position: 'absolute', left: spacing.md, top: 15 },
+  campoDeBusqueda: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    // Cápsula, no rectángulo: es la forma con la que se reconoce un buscador.
+    borderRadius: radius.pill,
+    // El borde no desaparece al enfocar, solo cambia de contraste: si el grosor
+    // cambiara, la cápsula daría un salto de un punto al tocarla.
+    borderWidth: 1,
+    paddingHorizontal: spacing.lg,
+    // 44 es el mínimo táctil del sistema, el mismo de los demás controles.
+    height: 44,
+    marginBottom: spacing.md,
+  },
+  textoDeBusqueda: {
+    flex: 1,
+    fontSize: 14,
+    // Sin relleno propio: la altura y el centrado los pone la cápsula. Android
+    // añade un relleno vertical por su cuenta que descuadra el texto.
+    padding: 0,
+  },
+  listaVacia: { fontSize: 13, lineHeight: 18, paddingVertical: spacing.sm },
   resultados: { ...StyleSheet.absoluteFillObject, zIndex: 5 },
   tabs: { marginBottom: spacing.lg },
   composer: {
