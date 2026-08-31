@@ -7,6 +7,8 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Input } from '@/components/Input';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
@@ -78,6 +80,8 @@ const VACIO: BorradorDeCurso = {
  */
 export function AsistenteDeCursoScreen() {
   const { colors } = useAppTheme();
+  /* Cuanto hay que dejar abajo para que el boton de publicar se pueda pulsar. */
+  const espacioInferior = useEspacioInferior();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -381,7 +385,20 @@ export function AsistenteDeCursoScreen() {
         </ScrollView>
       </SinCambioDeSeccion>
 
-      <AppScreen contentStyle={styles.contenido}>
+      {/*
+        El pie del asistente —«Publicar curso» y «Guardar y continuar»— es lo
+        ultimo del contenido desplazable, asi que al escribir en cualquier campo
+        el teclado se le ponia encima y no habia forma de llegar a el: aqui no
+        habia nada que apartara el contenido. Es el mismo motivo por el que los
+        botones de publicar quedaban tapados en los otros cinco flujos, solo que
+        el estorbo aqui es el teclado y alli la barra flotante.
+
+        `paddingBottom` sale de `useEspacioInferior`: fuera de las pestañas no
+        hay capsula, pero si zona segura, y el boton no puede quedar pegado al
+        indicador de inicio.
+      */}
+      <SinTecladoDelante>
+      <AppScreen contentStyle={[styles.contenido, { paddingBottom: espacioInferior + spacing.xxxl }]}>
         {reviewStatus !== 'draft' ? (
           <View style={[styles.aviso, { borderColor: colors.border }]}>
             <Feather name={aviso.icono} size={16} color={colors.text} />
@@ -666,6 +683,7 @@ export function AsistenteDeCursoScreen() {
           ) : null}
         </View>
       </AppScreen>
+      </SinTecladoDelante>
     </View>
   );
 }
@@ -682,7 +700,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     minHeight: 40,
   },
-  contenido: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  // `paddingBottom` lo completa la pantalla: depende de la zona segura.
+  contenido: { padding: spacing.lg },
   aviso: {
     flexDirection: 'row',
     alignItems: 'flex-start',

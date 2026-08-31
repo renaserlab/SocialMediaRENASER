@@ -264,10 +264,25 @@ export async function pickVideo(maxDurationSec = 180): Promise<PickedMedia | nul
     kind: 'video',
     mimeType: asset.mimeType,
     name: asset.fileName,
-    durationMs: asset.duration ?? null,
+    durationMs: duracionEnMs(asset.duration),
     width: asset.width ?? null,
     height: asset.height ?? null,
   };
+}
+
+/**
+ * La duracion del selector, siempre en MILISEGUNDOS.
+ *
+ * En movil `expo-image-picker` la da en milisegundos, pero su implementacion
+ * web la saca de `HTMLVideoElement.duration`, que esta en SEGUNDOS, y aqui se
+ * copiaba tal cual. Resultado: en el navegador un video de noventa segundos
+ * llegaba como `durationMs = 90` y cualquier limite en milisegundos lo dejaba
+ * pasar. No es una conversion «por si acaso»: es que las dos plataformas
+ * devuelven unidades distintas por el mismo campo.
+ */
+function duracionEnMs(duracion: number | null | undefined): number | null {
+  if (typeof duracion !== 'number' || !Number.isFinite(duracion) || duracion <= 0) return null;
+  return Platform.OS === 'web' ? Math.round(duracion * 1000) : duracion;
 }
 
 /** Abre el selector de archivos para elegir un audio. */
@@ -589,6 +604,14 @@ export async function uploadPostMedia(
 // --------------------------------------------------------------------------
 
 const AVATAR_BUCKET = 'avatars';
+/**
+ * Tope del bucket `avatars`, fijado en la migracion 0004.
+ *
+ * Se repite aqui a proposito para poder avisar ANTES de subir: el servidor
+ * responde 413 sin decir de que bucket habla, y el mensaje generico mandaba a
+ * cambiar el limite del bucket equivocado.
+ */
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 
 /**
  * Ancho que se pide para una foto de perfil, en pixeles.
@@ -660,9 +683,16 @@ export async function uploadProfileImage(
 
   // Una foto de perfil no necesita la resolucion original de la camara.
   let uri = media.uri;
+  /*
+    Si el compresor llego a correr. Importa mas de lo que parece: la
+    recompresion cambia el FORMATO del archivo, y con el, el tipo que hay que
+    declarar al subirlo.
+  */
+  let comprimida = false;
   if (compressionAvailable) {
     try {
       uri = await compressImage(media.uri);
+      comprimida = uri !== media.uri;
     } catch {
       uri = media.uri;
     }
@@ -672,12 +702,55 @@ export async function uploadProfileImage(
   const path = `${uid}/${kind}-${randomName(ext)}`;
 
   const local = await readLocalFile(uri);
-  if (local.size === 0) throw new Error('La imagen seleccionada está vacía.');
+  if (local.size === 0) {
+    /*
+      Cero bytes casi nunca significa «la foto esta vacia».
+
+      `readLocalFile` usa `new File(uri)` de expo-file-system, que solo entiende
+      rutas `file://`. Cuando el selector de un Android devuelve un
+      `content://` —pasa en varios fabricantes— no hay nada que leer y el tamaño
+      sale cero. Decirlo asi ahorra buscar el problema en la foto, que esta
+      perfectamente.
+    */
+    throw new Error(
+      uri.startsWith('content://')
+        ? 'Tu teléfono devolvió la foto en un formato que la aplicación no puede leer ' +
+          '(content://). Prueba a hacerla con la cámara de la app o a elegirla desde ' +
+          'la galería de Google Fotos.'
+        : 'No pudimos leer la imagen seleccionada.',
+    );
+  }
+  /*
+    El bucket `avatars` tiene un tope de 5 MB (migracion 0004) y hasta ahora
+    esta subida era la UNICA de las tres que no lo comprobaba: pasado el tope,
+    el servidor devolvia un 413 y el mensaje generico hablaba de otro bucket.
+    Una camara de 50 MP se lo salta sin esfuerzo cuando el compresor no esta
+    disponible (Expo Go) o falla en silencio.
+  */
+  if (local.size > MAX_AVATAR_BYTES) {
+    throw new Error(
+      `La foto pesa ${formatMb(local.size)} y el máximo para una foto de perfil son ` +
+        `${formatMb(MAX_AVATAR_BYTES)}. Recórtala o elige una más pequeña.`,
+    );
+  }
 
   const { error } = await supabase.storage
     .from(AVATAR_BUCKET)
     .upload(path, await local.directBody(), {
-      contentType: resolveContentType(media, ext),
+      /*
+        EL TIPO SE DECLARA SOBRE EL ARCHIVO QUE SE SUBE, no sobre el que se
+        eligio.
+
+        Aqui se pasaba `media` entero, asi que ganaba el `mimeType` del
+        selector. En un Android cuya galeria informa `image/heic`, el compresor
+        entrega JPEG y el objeto quedaba guardado con bytes JPEG y la etiqueta
+        `image/heic`: el bucket lo acepta (su lista permite `image/*`) pero el
+        transformador de imagenes de Supabase —por el que pasa toda foto de
+        perfil— no sabe que hacer con un archivo mal etiquetado, y el avatar
+        salia en blanco. Las otras dos subidas ya anulaban el tipo tras
+        comprimir; a esta se le habia pasado.
+      */
+      contentType: resolveContentType(comprimida ? { ...media, mimeType: null } : media, ext),
       upsert: false,
     });
   if (error) throw new Error(describeStorageError(error));

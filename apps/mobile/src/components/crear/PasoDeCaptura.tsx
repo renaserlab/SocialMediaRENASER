@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { AvisoDePermiso } from '@/components/AvisoDePermiso';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { consultarPermiso, pedirPermiso, type EstadoDePermiso } from '@/lib/permisos';
 import {
@@ -81,6 +81,15 @@ export function PasoDeCaptura({
 }: Props) {
   const enWeb = Platform.OS === 'web';
   const insets = useSafeAreaInsets();
+  /*
+    Cuanto ocupa la barra flotante, contando la zona segura DE ESTE aparato.
+
+    Antes era `espacioParaLaBarra(0)` escrito en la hoja de estilos, es decir,
+    la barra medida como si el telefono no tuviera indicador de inicio: se
+    reservaban 78 px donde hacian falta 104 y el selector volvia a asomar por
+    debajo de la capsula en cuanto habia muesca.
+  */
+  const espacioInferior = useEspacioInferior();
   const [paso, setPaso] = useState<'camara' | 'galeria'>(enWeb ? 'galeria' : 'camara');
   const [ultimaFoto, setUltimaFoto] = useState<string | null>(null);
   const [permisoCamara, setPermisoCamara] = useState<EstadoDePermiso | null>(null);
@@ -248,7 +257,7 @@ export function PasoDeCaptura({
             </Pressable>
           ) : null}
         </View>
-        {pie ? <View style={styles.pieWeb}>{pie}</View> : null}
+        {pie ? <View style={[styles.pieWeb, { paddingBottom: espacioInferior }]}>{pie}</View> : null}
       </View>
     );
   }
@@ -279,7 +288,7 @@ export function PasoDeCaptura({
           alPedir={pedirCamara}
           alternativa={{ etiqueta: 'Elegir del carrete', alPulsar: () => setPaso('galeria') }}
         />
-        {pie ? <View style={styles.pieWeb}>{pie}</View> : null}
+        {pie ? <View style={[styles.pieWeb, { paddingBottom: espacioInferior }]}>{pie}</View> : null}
       </View>
     );
   }
@@ -360,7 +369,8 @@ const styles = StyleSheet.create({
     y cortado que aparece junto a la barra en el documento. Se apoya en la misma
     medida que usa la barra para saber cuanto ocupa.
   */
-  pieWeb: { paddingBottom: espacioParaLaBarra(0) },
+  // `paddingBottom` lo pone el componente: sale de `useEspacioInferior`.
+  pieWeb: {},
   /*
     El selector mientras el permiso se resuelve.
 

@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { describeError } from '@/lib/describeError';
@@ -13,7 +15,6 @@ const media = palette('dark');
 
 type Props = {
   pie?: React.ReactNode;
-  espacioInferior: number;
   /** Salida util: lo mas parecido que SI se puede hacer hoy. */
   alGrabarReel: () => void;
 };
@@ -30,7 +31,8 @@ type Props = {
  * Con el encendido, el camino que se activa es el de abajo: se crea la emision
  * —sin `scheduled_for`, o sea que nace ya en directo— y se abre su sala.
  */
-export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
+export function ModoVivo({ pie, alGrabarReel }: Props) {
+  const espacioInferior = useEspacioInferior();
   if (!FEATURE_LIVE) {
     return (
       <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
@@ -62,7 +64,7 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
     );
   }
 
-  return <CrearEmision pie={pie} espacioInferior={espacioInferior} />;
+  return <CrearEmision pie={pie} />;
 }
 
 /**
@@ -73,7 +75,8 @@ export function ModoVivo({ pie, espacioInferior, alGrabarReel }: Props) {
  * `PATCH`, y programarla para mas tarde es otro flujo, no un campo mas en el
  * boton de «empezar ahora».
  */
-function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacioInferior: number }) {
+function CrearEmision({ pie }: { pie?: React.ReactNode }) {
+  const espacioInferior = useEspacioInferior();
   const router = useRouter();
   const [titulo, setTitulo] = useState('');
   const [creando, setCreando] = useState(false);
@@ -101,7 +104,9 @@ function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacio
   };
 
   return (
-    <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+    // El titulo se escribe aqui mismo: sin el patron compartido, en un telefono
+    // corto el teclado se comia el campo y el boton de empezar.
+    <SinTecladoDelante style={[styles.raiz, { paddingBottom: espacioInferior }]}>
       <View style={styles.centro}>
         <View style={[styles.icono, { borderColor: media.border }]}>
           <Feather name="radio" size={26} color={media.text} />
@@ -144,7 +149,7 @@ function CrearEmision({ pie, espacioInferior }: { pie?: React.ReactNode; espacio
       </View>
 
       {pie ? <View style={styles.pie}>{pie}</View> : null}
-    </View>
+    </SinTecladoDelante>
   );
 }
 

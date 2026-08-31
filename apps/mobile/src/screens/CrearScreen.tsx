@@ -3,10 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '@/components/AppHeader';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
 import { StateView } from '@/components/StateView';
 import { ModoHistoria } from '@/components/crear/ModoHistoria';
 import { ModoPublicacion } from '@/components/crear/ModoPublicacion';
@@ -52,7 +50,6 @@ const UMBRAL_VELOCIDAD = 450;
  */
 export function CrearScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
 
   /*
@@ -148,7 +145,6 @@ export function CrearScreen() {
     return pan;
   }, [arrastre, cambiarPorGesto, gestoDeSeccion]);
 
-  const espacioInferior = espacioParaLaBarra(insets.bottom);
   const salir = useCallback(() => router.navigate('/(tabs)/home'), [router]);
 
   const selector = <SelectorDeModo activo={modo} alCambiar={irA} arrastre={arrastre} />;
@@ -205,11 +201,7 @@ export function CrearScreen() {
         ) : modo === 'reel' ? (
           <ModoReel pie={selector} alSalir={salir} activo={enfocada} />
         ) : (
-          <ModoVivo
-            pie={selector}
-            espacioInferior={espacioInferior}
-            alGrabarReel={() => irA('reel')}
-          />
+          <ModoVivo pie={selector} alGrabarReel={() => irA('reel')} />
         )}
       </View>
     </GestureDetector>

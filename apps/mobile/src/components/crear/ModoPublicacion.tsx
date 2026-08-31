@@ -1,15 +1,16 @@
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Button } from '@/components/Button';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
-import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
 import { usePublicacion, PublicacionCancelada } from '@/hooks/usePublicacion';
 import { toast } from '@/lib/toast';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
@@ -54,7 +55,15 @@ type Props = {
  */
 export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
   const createPost = useAppStore((state) => state.createPost);
-  const keyboardOffset = useKeyboardOffset();
+  /*
+    El pie se apoya en la barra flotante, no en un numero.
+
+    Estaba en `bottom: 44` y la capsula de secciones ocupa entre 78 y 104 px
+    segun el aparato: el boton de publicar quedaba DEBAJO de ella siempre, y
+    como la barra se pinta encima y se queda el toque, pulsarlo cambiaba de
+    seccion. Ahora la medida sale del mismo sitio que la dibuja.
+  */
+  const espacioInferior = useEspacioInferior();
 
   const [elegido, setElegido] = useState<PickedMedia | null>(null);
   /** Camino secundario: publicar sin foto ni video. */
@@ -111,11 +120,7 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
 
   /* --------------------------------------------------- revisar y publicar --- */
   return (
-    <KeyboardAvoidingView
-      style={styles.raiz}
-      behavior={Platform.select({ ios: 'padding', android: 'height' })}
-      keyboardVerticalOffset={keyboardOffset}
-    >
+    <SinTecladoDelante style={styles.raiz}>
       {elegido ? (
         elegido.kind === 'video' ? (
           <VideoPlayer
@@ -146,7 +151,7 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
-      <View style={styles.pie}>
+      <View style={[styles.pie, { bottom: espacioInferior }]}>
         <View style={[styles.editor, { borderColor: media.border }]}>
           <TextInput
             value={texto}
@@ -190,7 +195,7 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
           disabled={envio.ocupado || (!elegido && texto.trim().length === 0)}
         />
       </View>
-    </KeyboardAvoidingView>
+    </SinTecladoDelante>
   );
 }
 
@@ -216,7 +221,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: media.overlay,
   },
-  pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, bottom: 44, gap: spacing.sm },
+  // `bottom` lo pone el componente: depende de cuanto ocupe la barra flotante.
+  pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm },
   editor: {
     borderWidth: 1,
     borderRadius: radius.lg,

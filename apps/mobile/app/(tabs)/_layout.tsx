@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { withLayoutContext } from 'expo-router';
 
 import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar';
+import { ProveedorDeEspacioInferior } from '@/components/espacioInferior';
 import { createSwipeTabNavigator, type PropsDeBarra } from '@/navigation/SwipeTabs';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
@@ -64,6 +65,18 @@ export default function TabsLayout() {
   */
 
   return (
+    /*
+      Cuanto ocupa la capsula flotante, publicado para todo lo que viva dentro
+      de las pestañas.
+
+      La barra se pinta ENCIMA de las secciones y ademas se queda el toque, asi
+      que cualquier control pegado al borde inferior —el boton de publicar, el
+      disparador de la camara— tiene que apartarse de ella. Antes cada pantalla
+      lo resolvia con un numero escrito a mano, y todos distintos: de ahi que el
+      boton de publicar quedara tapado en seis flujos a la vez. Ahora el dato
+      sale de un solo sitio y se pide con `useEspacioInferior()`.
+    */
+    <ProveedorDeEspacioInferior>
     <Secciones
       /*
         Barra propia: capsula flotante con acabado de vidrio. Ahora la pinta el
@@ -107,5 +120,6 @@ export default function TabsLayout() {
         visible al abrirlas.
       */}
     </Secciones>
+    </ProveedorDeEspacioInferior>
   );
 }

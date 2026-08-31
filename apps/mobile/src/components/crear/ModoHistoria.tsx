@@ -4,22 +4,33 @@ import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { usePublicacion, PublicacionCancelada } from '@/hooks/usePublicacion';
+import {
+  FOTO_MS,
+  MAX_HISTORIA_MS,
+  duracionMedida,
+  revisarDuracionDeHistoria,
+} from '@/lib/historias';
 import { toast } from '@/lib/toast';
+import { readVideoMetadata } from '@/services/mediaCompressor';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, spacing } from '@/theme/tokens';
 
 const media = palette('dark');
 
-/** Tope de una historia; coincide con el CHECK de la migracion 0003. */
-export const MAX_HISTORIA_MS = 15_000;
-/** Lo que dura una foto en el visor. */
-const FOTO_MS = 5_000;
+/*
+  El tope de una historia y el tiempo de una foto viven en `lib/historias`, no
+  aqui. Estaban repetidos a mano en tres pantallas y en el backend, y con cinco
+  copias del mismo numero basta con cambiar cuatro para que la camara corte a un
+  tiempo y el control de subida rechace a otro.
+*/
+export { MAX_HISTORIA_MS } from '@/lib/historias';
 
 type Props = {
   /** Selector de modo, que viaja hasta dentro de la camara. */
@@ -40,24 +51,43 @@ type Props = {
  */
 export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
   const createStory = useAppStore((state) => state.createStory);
+  /*
+    El pie se apoya en la barra flotante, no en un numero.
+
+    Estaba en `bottom: 44` y la capsula de secciones ocupa entre 78 y 104 px
+    segun el aparato: el boton de publicar quedaba DEBAJO de ella siempre, y
+    como la barra se pinta encima y se queda el toque, pulsarlo cambiaba de
+    seccion. Ahora la medida sale del mismo sitio que la dibuja.
+  */
+  const espacioInferior = useEspacioInferior();
   const [elegido, setElegido] = useState<PickedMedia | null>(null);
   const envio = usePublicacion();
 
   const publicar = useCallback(() => {
     if (!elegido) return;
-    const duracion = elegido.durationMs ?? 0;
 
     void envio.ejecutar(async ({ avance, cancelado }) => {
       /*
-        El limite se comprueba ANTES de subir nada. Comprobarlo despues
-        significaria gastar la conexion de la persona para acabar rechazando el
-        video, y el backend lo rechaza igual (CHECK de la migracion 0003).
+        SE MIDE EL ARCHIVO, no se cree lo que diga quien lo eligio.
+
+        Antes el limite se comprobaba contra `elegido.durationMs`, que es lo que
+        REPORTA el selector, y ese dato falta a menudo. Cuando faltaba valia
+        cero y la comparacion `0 > tope` daba falso: un video de cinco minutos
+        pasaba el control sin que nadie lo mirara. Aqui se lee ademas la
+        duracion del propio archivo y manda la mayor de las dos.
+
+        Y se hace ANTES de subir: comprobarlo despues seria gastar la conexion
+        de la persona para acabar rechazandola.
       */
-      if (elegido.kind === 'video' && duracion > MAX_HISTORIA_MS) {
-        throw new Error(
-          `Las historias admiten hasta ${MAX_HISTORIA_MS / 1000} segundos. ` +
-            'Elige otro vídeo o recórtalo antes.',
-        );
+      let duracion: number | null = elegido.durationMs ?? null;
+      if (elegido.kind === 'video') {
+        const delArchivo = await readVideoMetadata(elegido.uri).catch(() => null);
+        duracion = duracionMedida(elegido.durationMs, delArchivo?.durationS
+          ? delArchivo.durationS * 1000
+          : null);
+        const decision = revisarDuracionDeHistoria(duracion);
+        if (decision.estado !== 'cabe') throw new Error(decision.mensaje);
+        duracion = decision.durationMs;
       }
 
       const subido = await uploadPostMedia(elegido, avance);
@@ -67,7 +97,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
 
       await createStory(
         subido,
-        elegido.kind === 'video' ? Math.max(1000, duracion) : FOTO_MS,
+        elegido.kind === 'video' && duracion ? duracion : FOTO_MS,
       );
       setElegido(null);
       // El aviso va DESPUES de salir: sobre una pantalla completa el toast
@@ -117,7 +147,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
-      <View style={styles.pie}>
+      <View style={[styles.pie, { bottom: espacioInferior }]}>
         <ProgresoDePublicacion
           fase={envio.fase}
           progreso={envio.progreso}
@@ -155,6 +185,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: media.overlay,
   },
-  pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, bottom: 44, gap: spacing.sm },
+  // `bottom` lo pone el componente: depende de cuanto ocupe la barra flotante.
+  pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm },
   nota: { textAlign: 'center' },
 });
