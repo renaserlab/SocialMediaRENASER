@@ -16,10 +16,10 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
 import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
@@ -28,12 +28,18 @@ import { haptics } from '@/lib/haptics';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { palette, radius, spacing } from '@/theme/tokens';
 import type { PickedMedia } from '@/services/storage';
+import { MAX_HISTORIA_MS } from '@/lib/historias';
 
 /** La camara es una superficie oscura en ambos temas, como los Shorts. */
 const media = palette('dark');
 
-/** Tope de una historia; coincide con el CHECK de la migracion 0003. */
-const MAX_STORY_MS = 15_000;
+/*
+  El tope sale de `lib/historias`, no de una copia local. Estaba escrito a mano
+  aqui, en el carrete, en el modo historia y en el backend: cuatro numeros que
+  habia que cambiar a la vez, y bastaba con olvidar uno para que la camara
+  cortara a un tiempo y la subida rechazara a otro.
+*/
+const MAX_STORY_MS = MAX_HISTORIA_MS;
 
 /** A partir de aqui la pulsacion se considera larga y empieza a grabar. */
 const MANTENER_MS = 350;
@@ -138,17 +144,17 @@ export function StoryCaptureScreen({
     la barra y se marchaba a otra seccion.
 
     La cuadricula del carrete ya se apoyaba en esta misma medida; la camara se
-    habia quedado sin hacerlo. Se calcula desde `espacioParaLaBarra`, que es
-    quien sabe cuanto ocupa la barra, para que moverla no obligue a acordarse de
-    corregir numeros sueltos aqui.
+    habia quedado sin hacerlo. El dato lo publica el grupo de pestañas
+    (`useEspacioInferior`), que es quien sabe cuanto ocupa la barra, para que
+    moverla no obligue a acordarse de corregir numeros sueltos aqui.
   */
-  const insets = useSafeAreaInsets();
+  const espacioInferior = useEspacioInferior();
   /*
     De abajo arriba: pista, disparador, selector de modo y nivel de zoom, sin
     solaparse y ninguno por debajo de la barra. El calculo y su prueba estan en
     `lib/controlesDeCamara`.
   */
-  const alturas = alturasDeCamara(espacioParaLaBarra(insets.bottom));
+  const alturas = alturasDeCamara(espacioInferior);
 
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();

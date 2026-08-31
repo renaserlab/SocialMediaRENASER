@@ -346,6 +346,55 @@ export const PostRepository = {
     return res.likes_count;
   },
 
+  /**
+   * Republicar: volver a compartir la publicacion de otra persona.
+   *
+   * `postId` es SIEMPRE el de la publicacion ORIGINAL. Al pintar una tarjeta
+   * republicada, `post.id` ya es el del original —la republicacion no tiene id
+   * de publicacion propio—, asi que republicar lo que se ve republicado apunta
+   * al original sin que nadie tenga que acordarse.
+   *
+   * No sube ni copia ningun archivo: el medio sigue siendo el del original.
+   */
+  async repost(postId: string, comentario = ''): Promise<void> {
+    await apiRequest<unknown>(`${API_V1}/posts/${postId}/repost`, {
+      method: 'POST',
+      body: JSON.stringify({ comentario }),
+    });
+  },
+
+  /** Deshacer la republicacion propia. Idempotente. */
+  async unrepost(postId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/posts/${postId}/repost`, { method: 'DELETE' });
+  },
+
+  /**
+   * Lo que ha republicado un perfil, o la gente a la que se sigue.
+   *
+   * Devuelve PUBLICACIONES con su `repost` puesto: lo que se pinta es la
+   * publicacion original con una cabecera encima que dice quien la comparte.
+   */
+  async listReposts(
+    { authorId, feed = 'author', limit = 20, offset = 0 }: {
+      authorId?: string;
+      feed?: 'author' | 'following';
+      limit?: number;
+      offset?: number;
+    },
+    currentUserId?: string | null,
+  ): Promise<Post[]> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      feed,
+    });
+    if (authorId) params.set('author_id', authorId);
+    const dtos = await apiRequest<PostDto[]>(`${API_V1}/reposts?${params.toString()}`);
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    await attachMediaUrls(items, dtos);
+    return items;
+  },
+
   async save(postId: string): Promise<void> {
     await apiRequest<{ saved: boolean }>(`${API_V1}/posts/${postId}/save`, {
       method: 'POST',

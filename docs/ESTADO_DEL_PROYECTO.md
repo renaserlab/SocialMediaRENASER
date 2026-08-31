@@ -259,3 +259,25 @@ npm --workspace apps/mobile run start -- --web --port 8082   # http://localhost:
 5. **iOS**: requiere Apple Developer Program ($99/año) para dispositivos reales.
 6. **commerce** (pagos reales) — fuera del MVP.
 7. Opcional: upgrade a **Expo SDK 57** (para Expo Go) y badge de no-leídos en el Home.
+8. **Recortar vídeos de historia dentro de la app — PENDIENTE, y no está
+   simulado.** El límite de 30 s ya es real y se mide sobre el archivo
+   (`apps/mobile/src/lib/historias.ts`), pero **cortar** no se puede hacer con
+   lo que hay instalado: `react-native-compressor` 1.19.4 solo recomprime
+   archivos enteros —su contrato nativo no tiene `startTime`/`endTime`— y no hay
+   `expo-av`, ni `expo-video-thumbnails`, ni `ffmpeg-kit`. Dos caminos, los dos
+   con coste de alcance:
+   - **Dependencia nativa de recorte** (`AVAssetExportSession` en iOS,
+     `MediaMuxer` en Android, o un módulo Expo propio). Obliga a compilación
+     nueva: en Expo Go no cargaría, igual que ya le pasa al compresor.
+   - **Recortar en el servidor**, donde ffmpeg SÍ está (`apps/api/Dockerfile`).
+     Exige que la creación de historias pase por la API: hoy el móvil inserta
+     directo contra PostgREST (`StoryRepository`).
+   La mitad visual de un recortador tipo WhatsApp sí es viable sin nada nuevo:
+   `expo-video` trae `generateThumbnailsAsync(times[])` para la tira de
+   fotogramas y `currentTime`/`duration` para las asas.
+9. **Republicar (repost)**: la migración `0042` está escrita y **sin aplicar**.
+   Hasta que se aplique, `GET /reposts` responde vacío y republicar avisa de
+   que no está disponible (`recommendations/esquema.hay_republicaciones`).
+   Las republicaciones aún **no se mezclan en el muro** (`GET /posts`): se leen
+   por `GET /reposts`. Mezclarlas pide rehacer la paginación por cursor del
+   feed sobre dos orígenes, y eso es un cambio con su propio riesgo.

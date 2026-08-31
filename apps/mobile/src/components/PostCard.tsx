@@ -17,9 +17,11 @@ import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { compartirPublicacion } from '@/lib/enlaces';
 import { toast } from '@/lib/toast';
+import { relacionDeVideo } from '@/lib/formaDelVideo';
 import { haptics } from '@/lib/haptics';
 import { bestVideoSource } from '@/lib/videoSource';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
+import { PostRepository } from '@/repositories/PostRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -104,6 +106,49 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   }, [visible]);
   // HLS si el video esta transcodificado; MP4 optimizado/original si no.
   const videoSource = post.mediaType === 'video' ? bestVideoSource(post) : null;
+  /*
+    Con que proporcion se dibuja la caja del video. Sale de las medidas que
+    guarda `post_media` desde la migracion 0021; sin ellas, del 16:9 de siempre.
+  */
+  const relacionDelVideo = relacionDeVideo(post.mediaWidth, post.mediaHeight);
+
+  /*
+    Republicar, con respuesta inmediata.
+
+    El estado vive AQUI y no en el store porque republicar no cambia nada de lo
+    que el store ya guarda: la publicacion sigue siendo la misma y su autor
+    tambien. Lo que cambia es una fila en otra tabla. Se pinta al instante y se
+    deshace si el servidor dice que no, que es lo que evita que un toque parezca
+    perdido en una red lenta.
+  */
+  const [republicado, setRepublicado] = useState(post.repostedByMe ?? false);
+  const [repostsCount, setRepostsCount] = useState(post.repostsCount ?? 0);
+  const [republicando, setRepublicando] = useState(false);
+  const alternarRepost = async () => {
+    await requireAuth('para republicar', async () => {
+      if (republicando) return;
+      const siguiente = !republicado;
+      setRepublicando(true);
+      setRepublicado(siguiente);
+      setRepostsCount((n) => Math.max(0, n + (siguiente ? 1 : -1)));
+      haptics.light();
+      try {
+        /*
+          SIEMPRE el id de la publicacion ORIGINAL. `post.id` ya lo es incluso
+          en una tarjeta republicada, porque una republicacion no tiene id de
+          publicacion propio: por ahi no puede entrar una cadena.
+        */
+        if (siguiente) await PostRepository.repost(post.id);
+        else await PostRepository.unrepost(post.id);
+      } catch {
+        setRepublicado(!siguiente);
+        setRepostsCount((n) => Math.max(0, n + (siguiente ? -1 : 1)));
+        notify('No se pudo republicar', 'Inténtalo de nuevo.');
+      } finally {
+        setRepublicando(false);
+      }
+    });
+  };
 
   /*
     Muro con reproduccion automatica: la pantalla anfitriona dice quien manda
@@ -295,6 +340,34 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
 
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {/*
+        QUIEN LA COMPARTE VA ENCIMA; QUIEN LA ESCRIBIO SIGUE DEBAJO.
+
+        Republicar no cambia de quien es la publicacion: si esta linea
+        sustituyera la cabecera del autor, compartir seria una forma comoda de
+        apropiarse del trabajo ajeno. Por eso se anade una fila, no se
+        reemplaza ninguna, y las dos fechas conviven —cuando se compartio
+        aqui, cuando se publico abajo—.
+      */}
+      {post.repost ? (
+        <Pressable
+          style={styles.repostAviso}
+          onPress={() => irAlPerfil(router, post.repost?.autorId)}
+          disabled={!post.repost.autorId}
+          accessibilityRole="button"
+          accessibilityLabel={`Republicado por ${post.repost.autor}`}
+        >
+          <Feather name="repeat" size={13} color={colors.textMuted} />
+          <Text variant="caption" weight="700" color={colors.textMuted}>
+            {post.repost.autor} republicó · {post.repost.fecha}
+          </Text>
+        </Pressable>
+      ) : null}
+      {post.repost && post.repost.comentario ? (
+        <Text variant="body" style={styles.repostComentario}>
+          {post.repost.comentario}
+        </Text>
+      ) : null}
       <View style={styles.header}>
         <Pressable
           style={styles.headerInfo}
@@ -342,8 +415,18 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
       )}
       {post.mediaType === 'video' ? (
         /*
-          16:9 en vez de una caja fija: la mayoria de videos son apaisados y
-          con alto fijo quedaban con franjas negras arriba y abajo.
+          LA CAJA SALE DEL VIDEO, no al reves.
+
+          Estaba fija en 16:9, asi que un video grabado en vertical —la mayoria
+          de los que se suben desde un movil— se pintaba dentro de un rectangulo
+          apaisado y quedaba reducido a una columna estrecha con franjas negras
+          a los lados que ocupaban mas que el propio video. El dato para
+          acertar ya estaba guardado desde la migracion 0021 (`width`/`height`
+          de `post_media`); solo lo leian las fotos.
+
+          `relacionDeVideo` acota la proporcion para que un caso extremo no
+          ocupe tres pantallas, y sin medidas guardadas devuelve el 16:9 de
+          antes: una publicacion antigua se sigue viendo igual.
 
           El reproductor SOLO existe despues de pulsar play y mientras la
           publicacion esta en pantalla. Antes se montaba uno por cada video
@@ -353,7 +436,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           memoria de reproductores queda en cero hasta que alguien mira uno.
         */
         montarReproductor && videoSource ? (
-          <View style={styles.video}>
+          <View style={[styles.video, { aspectRatio: relacionDelVideo }]}>
             <VideoPlayer
               uri={videoSource.uri}
               poster={post.posterUrl ? { uri: post.posterUrl } : undefined}
@@ -427,7 +510,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           </View>
         ) : (
           <Pressable
-            style={styles.video}
+            style={[styles.video, { aspectRatio: relacionDelVideo }]}
             onPress={() => setVideoStarted(true)}
             disabled={autoFeed}
             accessibilityRole={autoFeed ? 'image' : 'button'}
@@ -530,6 +613,32 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         >
           <Feather name="message-square" size={18} color={colors.text} />
           <Text variant="secondary" weight="600" style={styles.count}>{commentCount}</Text>
+        </Pressable>
+        {/*
+          Republicar. Al lado de compartir porque es su pariente de dentro: uno
+          saca un enlace de la aplicacion y el otro lo comparte con quien te
+          sigue. El estado lo lleva el icono relleno mas el numero, no un color:
+          el sistema visual es blanco y negro.
+        */}
+        <Pressable
+          style={styles.action}
+          hitSlop={ACTION_HIT_SLOP}
+          onPress={() => void alternarRepost()}
+          disabled={republicando}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: republicado }}
+          accessibilityLabel={republicado ? 'Deshacer la republicación' : 'Republicar'}
+        >
+          <Feather
+            name="repeat"
+            size={19}
+            color={republicado ? colors.text : colors.textMuted}
+          />
+          {repostsCount > 0 ? (
+            <Text variant="secondary" weight="600" style={styles.count}>
+              {repostsCount}
+            </Text>
+          ) : null}
         </Pressable>
         <Pressable
           style={styles.action}
@@ -646,11 +755,20 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.lg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.lg },
+  repostAviso: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  repostComentario: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs },
   headerInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
   avatar: { width: 40, height: 40, borderRadius: 20 },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
   image: { width: '100%', height: 340 },
-  video: { width: '100%', aspectRatio: 16 / 9 },
+  // `aspectRatio` lo pone la tarjeta: sale de las medidas del video.
+  video: { width: '100%' },
   actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.lg },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   count: { marginLeft: 2 },

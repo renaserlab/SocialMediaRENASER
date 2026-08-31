@@ -6,18 +6,24 @@ import * as MediaLibrary from 'expo-media-library';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { pickImage, type PickedMedia } from '@/services/storage';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
+import { MAX_HISTORIA_MS } from '@/lib/historias';
 
 /** Superficie oscura, como el resto del flujo de captura. */
 const media = palette('dark');
 
-/** Tope de una historia; coincide con el CHECK de la migracion 0003. */
-const MAX_STORY_MS = 15_000;
+/*
+  El tope sale de `lib/historias`, no de una copia local. Estaba escrito a mano
+  aqui, en el carrete, en el modo historia y en el backend: cuatro numeros que
+  habia que cambiar a la vez, y bastaba con olvidar uno para que la camara
+  cortara a un tiempo y la subida rechazara a otro.
+*/
+const MAX_STORY_MS = MAX_HISTORIA_MS;
 
 const COLUMNS = 3;
 const GAP = 2;
@@ -65,6 +71,13 @@ export function StoryGalleryScreen({
   pie,
   alternativa,
 }: Props) {
+  /*
+    Cuanto ocupa la barra flotante EN ESTE aparato. Antes estaba escrito en la
+    hoja de estilos como `espacioParaLaBarra(0)`, o sea, midiendo la capsula sin
+    la zona segura: 26 px de menos en cualquier telefono con indicador de
+    inicio, justo los que dejaban el pie asomando por detras de la barra.
+  */
+  const espacioInferior = useEspacioInferior();
   const [permission, setPermission] = useState<MediaLibrary.PermissionResponse | null>(null);
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -293,7 +306,7 @@ export function StoryGalleryScreen({
         bajar cien fotos.
       */}
       {pie || alternativa ? (
-        <View style={styles.pie} pointerEvents="box-none">
+        <View style={[styles.pie, { bottom: espacioInferior }]} pointerEvents="box-none">
           {alternativa ? (
             <Pressable
               onPress={alternativa.alPulsar}
@@ -326,9 +339,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    // Apoyado en la misma medida que usa la barra flotante para saber cuanto
-    // ocupa: asi queda justo encima de ella y no por detras.
-    bottom: espacioParaLaBarra(0),
+    // `bottom` lo pone el componente: sale de `useEspacioInferior`, que ya
+    // cuenta la capsula flotante y la zona segura del aparato.
     gap: spacing.sm,
   },
   alternativa: {

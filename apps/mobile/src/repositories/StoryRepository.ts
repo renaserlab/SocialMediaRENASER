@@ -10,6 +10,7 @@ import {
 import { supabase } from '@/services/supabase';
 import { profileImageUrl, signMediaUrls, type UploadedMedia } from '@/services/storage';
 import type { StoryGroup, StoryViewer } from '@/types';
+import { TOPE_GUARDADO_SIN_0042_MS } from '@/lib/historias';
 
 /**
  * Historias contra Supabase (PostgREST), sin pasar por la API FastAPI.
@@ -136,14 +137,39 @@ export const StoryRepository = {
     if (!uid) throw new Error('Inicia sesión para publicar una historia.');
 
     // `expires_at` lo pone la base (now() + 24 h): no se envia desde el cliente.
-    const { error } = await client().from('stories').insert({
-      author_id: uid,
-      storage_path: media.storagePath,
-      media_type: media.mediaType,
-      duration_ms: durationMs,
-      caption,
-    });
-    if (error) throw new Error(error.message);
+    const insertar = (duracion: number) =>
+      client().from('stories').insert({
+        author_id: uid,
+        storage_path: media.storagePath,
+        media_type: media.mediaType,
+        duration_ms: duracion,
+        caption,
+      });
+
+    const { error } = await insertar(durationMs);
+    if (!error) return;
+
+    /*
+      MIENTRAS LA 0042 NO ESTE APLICADA, una historia de mas de quince segundos
+      la rechaza la propia base: la migracion 0003 dejo
+      `check (duration_ms between 1000 and 15000)` y el tope nuevo es de treinta.
+
+      Sin esto, subir la aplicacion antes que la migracion romperia justo lo que
+      se venia a arreglar: el video se sube entero y la historia falla al final
+      con un error de base de datos. Asi que se reintenta UNA vez con el tope
+      viejo. Lo unico que se pierde entre tanto es la barra de progreso del
+      visor, que contara quince segundos en vez de los que dure el video; el
+      video se ve igual y la historia se publica.
+
+      Este bloque sobra en cuanto la 0042 este aplicada: entonces el primer
+      intento no falla nunca y no llega a ejecutarse.
+    */
+    const esElTopeViejo =
+      durationMs > TOPE_GUARDADO_SIN_0042_MS && /duration_ms/.test(error.message ?? '');
+    if (!esElTopeViejo) throw new Error(error.message);
+
+    const segundoIntento = await insertar(TOPE_GUARDADO_SIN_0042_MS);
+    if (segundoIntento.error) throw new Error(segundoIntento.error.message);
   },
 
   async remove(storyId: string): Promise<void> {
