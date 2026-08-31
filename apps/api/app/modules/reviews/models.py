@@ -91,3 +91,46 @@ class ReviewMedia(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ReviewCourse(Base):
+    """De que curso habla una resena (migracion 0041). SIEMPRE opcional.
+
+    TABLA NUEVA Y NINGUNA COLUMNA NUEVA EN `profile_reviews`, a proposito y por
+    la misma razon que explican `MessageAttachment` (0033) y
+    `DirectConversationPair` (0039): `select(ProfileReview)` pide TODAS las
+    columnas mapeadas y `db.get` tambien, asi que anadir `course_id` al modelo
+    de arriba haria que los cinco sitios que leen resenas pidieran una columna
+    que la base real no tiene mientras la 0041 espera aprobacion. Cada listado
+    respondia 500, y un 500 sin cabeceras CORS se lee en el navegador como un
+    fallo de red: horas buscando en el sitio equivocado.
+
+    Es lo que ya avisa el comentario de cabecera de este fichero: CADA COLUMNA
+    DE AQUI EXISTE EN LA 0030, Y AL REVES.
+
+    `review_id` es la CLAVE PRIMARIA, no una columna mas: una resena habla como
+    mucho de un curso. Sin eso haria falta un indice unico aparte para impedir
+    que la misma resena acabara enlazada a tres cursos distintos.
+
+    «Opcional» se expresa como AUSENCIA DE FILA y no como una columna nullable,
+    que es mas estricto: no existe el estado intermedio «hay enlace, pero apunta
+    a nada».
+    """
+
+    __tablename__ = "review_course"
+
+    review_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profile_reviews.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    #: El curso. Si el curso desaparece se va el ENLACE, nunca la resena: el
+    #: texto sigue siendo la opinion de alguien.
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

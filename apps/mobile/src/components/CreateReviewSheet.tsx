@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -15,7 +15,9 @@ import {
   mensajeDeErrorDeResena,
   type Resena,
 } from '@/repositories/ReviewRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
 import { pickImage, pickVideo, uploadPostMedia, type PickedMedia } from '@/services/storage';
+import type { Course } from '@/types';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -43,6 +45,12 @@ type Props = {
   sobreId: string;
   /** Su nombre, solo para poder decir a quien se esta reseñando. */
   sobreNombre?: string;
+  /**
+   * Si esta instalacion admite decir DE QUE CURSO habla la reseña
+   * (migracion 0041). Sin ella el selector no se ofrece: pedir un dato que el
+   * servidor va a tirar sin decirlo es peor que no pedirlo.
+   */
+  cursosDisponibles?: boolean;
   /** Se llama tras publicar o editar, para recargar la lista. */
   onSaved?: () => void;
   /** Si llega, la hoja edita esa resena en vez de crear una nueva. */
@@ -54,6 +62,7 @@ export function CreateReviewSheet({
   onClose,
   sobreId,
   sobreNombre,
+  cursosDisponibles = false,
   onSaved,
   editando,
 }: Props) {
@@ -68,12 +77,43 @@ export function CreateReviewSheet({
   // ve en iOS. Ver `InlineError`.
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Los cursos de la persona resenada, para poder elegir uno.
+   *
+   * SE PIDEN AL CATALOGO PUBLICO Y SE FILTRAN POR AUTOR, que es lo mismo que
+   * hace la seccion «Cursos» de su perfil. Lo que se elija aqui NO es lo que
+   * decide nada: el servidor vuelve a comprobar que el curso existe y que es
+   * de esa persona (`review_course_not_from_user`). Esta lista solo evita
+   * ofrecer opciones que iban a ser rechazadas.
+   */
+  const [cursos, setCursos] = useState<Course[]>([]);
+  /** El curso elegido, o `null` si la reseña no habla de ninguno. */
+  const [cursoId, setCursoId] = useState<string | null>(editando?.cursoId ?? null);
+
+  useEffect(() => {
+    if (!visible || !cursosDisponibles) return;
+    let vivo = true;
+    LearningRepository.listCourses()
+      .then((lista) => {
+        if (vivo) setCursos(lista.filter((c) => c.authorId === sobreId));
+      })
+      .catch(() => {
+        // Sin catalogo se escribe la reseña IGUAL, sin curso. El texto es lo
+        // que aporta valor; el curso es contexto.
+        if (vivo) setCursos([]);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [visible, cursosDisponibles, sobreId]);
+
   const medioActual = editando?.medios?.[0];
 
   const reiniciar = () => {
     setTexto(editando?.texto ?? '');
     setMedia(null);
     setQuitarMedio(false);
+    setCursoId(editando?.cursoId ?? null);
     setError(null);
   };
 
@@ -126,10 +166,19 @@ export function CreateReviewSheet({
         ? []
         : undefined;
 
+      /*
+        El curso viaja SOLO si esta instalacion lo admite (migracion 0041).
+        Mandarlo cuando no se puede no romperia nada —el servidor lo ignora en
+        silencio— pero al EDITAR si importaria: la clave `cursoId` presente con
+        valor `null` significa «quitalo», y mandarla sin querer borraria el
+        enlace de una reseña que ya lo tenia.
+      */
+      const conCurso = cursosDisponibles ? { cursoId } : {};
+
       if (editando) {
-        await ReviewRepository.editar(editando.id, { texto: limpio, medios });
+        await ReviewRepository.editar(editando.id, { texto: limpio, medios, ...conCurso });
       } else {
-        await ReviewRepository.publicar(sobreId, { texto: limpio, medios });
+        await ReviewRepository.publicar(sobreId, { texto: limpio, medios, ...conCurso });
       }
       toast(editando_ ? 'Reseña actualizada' : 'Reseña publicada');
       reiniciar();
@@ -209,6 +258,38 @@ export function CreateReviewSheet({
         </View>
       ) : null}
 
+      {/*
+        DE QUE CURSO HABLA. Solo aparece si esta persona TIENE cursos y si esta
+        instalacion admite guardarlo: un selector vacio no ayuda a nadie, y uno
+        cuyo valor se va a tirar es peor todavia.
+
+        «Ninguno» es la PRIMERA opcion y la que viene marcada: la mayoria de las
+        reseñas no hablan de un curso, y ponerla al final haria pensar que hay
+        que elegir uno.
+      */}
+      {cursosDisponibles && cursos.length > 0 ? (
+        <View style={styles.cursos}>
+          <Text variant="secondary" color={colors.textMuted} style={styles.optional}>
+            ¿Habla de alguno de sus cursos? (opcional)
+          </Text>
+          <View style={styles.cursoFila}>
+            <OpcionDeCurso
+              etiqueta="Ninguno"
+              seleccionada={cursoId === null}
+              onPress={() => setCursoId(null)}
+            />
+            {cursos.map((curso) => (
+              <OpcionDeCurso
+                key={curso.id}
+                etiqueta={curso.title}
+                seleccionada={cursoId === curso.id}
+                onPress={() => setCursoId(curso.id)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
       {/* Adjuntar es OPCIONAL y se dice: sin este texto, dos botones grandes
           hacen pensar que hay que elegir uno para poder publicar. */}
       <Text variant="secondary" color={colors.textMuted} style={styles.optional}>
@@ -246,7 +327,72 @@ export function CreateReviewSheet({
   );
 }
 
+/**
+ * Una opción del selector de curso.
+ *
+ * LO ELEGIDO NO SE DISTINGUE SOLO POR EL COLOR: además del relleno lleva un
+ * icono de comprobación y el texto en negrita. Es la regla del sistema visual
+ * —blanco y negro estricto, y el color nunca como único portador de
+ * información—, y es lo que hace que se lea también en escala de grises, con
+ * poco contraste o para quien no distingue los tonos.
+ *
+ * Los colores salen del tema (`primary` / `onPrimary`), así que la píldora
+ * marcada es negra sobre blanco en claro y blanca sobre negro en oscuro sin
+ * ninguna condición aquí.
+ */
+function OpcionDeCurso({
+  etiqueta,
+  seleccionada,
+  onPress,
+}: {
+  etiqueta: string;
+  seleccionada: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useAppTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: seleccionada }}
+      accessibilityLabel={etiqueta}
+      style={({ pressed }) => [
+        styles.cursoChip,
+        {
+          borderColor: seleccionada ? colors.primary : colors.border,
+          backgroundColor: seleccionada ? colors.primary : 'transparent',
+          opacity: pressed ? 0.85 : 1,
+        },
+      ]}
+    >
+      {seleccionada ? <Feather name="check" size={12} color={colors.onPrimary} /> : null}
+      <Text
+        variant="secondary"
+        color={seleccionada ? colors.onPrimary : colors.text}
+        weight={seleccionada ? '700' : '400'}
+        numberOfLines={1}
+        style={styles.cursoChipTexto}
+      >
+        {etiqueta}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  cursos: { marginTop: spacing.md, gap: spacing.sm },
+  cursoFila: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  cursoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    maxWidth: '100%',
+  },
+  cursoChipTexto: { fontSize: 12, flexShrink: 1 },
   title: {
     fontSize: 13,
     fontWeight: '800',

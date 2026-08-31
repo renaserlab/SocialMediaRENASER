@@ -50,6 +50,16 @@ export type Resena = {
    * no puede saberlo y no debe intentar deducirlo.
    */
   verificadaPor: 'booking' | 'course' | null;
+  /**
+   * De qué curso habla, si habla de alguno (migración 0041). `null` es lo
+   * normal: la mayoría de las reseñas no van de un curso concreto.
+   */
+  cursoId: string | null;
+  /**
+   * Su título, ya resuelto por el servidor. Sin esto, pintar el rótulo de cada
+   * tarjeta costaría una petición por reseña.
+   */
+  cursoTitulo: string | null;
   creadaEnIso: string;
   /**
    * Si quien mira puede editarla o borrarla. Lo dice el servidor y lo vuelve a
@@ -79,6 +89,14 @@ type ResenaDto = {
   status: string;
   media: MedioDto[] | null;
   verified_source: 'booking' | 'course' | null;
+  /**
+   * Opcionales a proposito: mientras la migracion 0041 espere aprobacion el
+   * backend responde `null` en los dos, y una version anterior de la API ni
+   * siquiera manda los campos. Un mapeador que los diera por seguros dejaria
+   * la seccion entera en blanco por una funcion que todavia no esta.
+   */
+  course_id?: string | null;
+  course_title?: string | null;
   created_at: string;
   updated_at: string;
   can_manage: boolean;
@@ -88,6 +106,26 @@ type ResenaDto = {
 export type DatosDeResena = {
   texto: string;
   medios?: { storagePath: string; tipo: 'image' | 'video' }[];
+  /**
+   * De QUE CURSO habla, si habla de alguno (migración 0041).
+   *
+   * Tres valores con tres significados distintos, y la diferencia importa:
+   *   - un id  -> se enlaza a ese curso,
+   *   - `null` -> se QUITA el enlace que hubiera,
+   *   - ausente (`undefined`) -> no se toca lo que ya había.
+   *
+   * Sin distinguir los dos últimos no habría forma de deshacer un curso
+   * elegido por error: «no lo toques» y «quítalo» llegarían igual al servidor.
+   */
+  cursoId?: string | null;
+};
+
+/** Que partes del dominio de resenas estan montadas en ESTA instalacion. */
+export type DisponibilidadDeResenas = {
+  /** Si se puede escribir una resena (migracion 0030). */
+  hay: boolean;
+  /** Si ademas se puede decir de que curso habla (migracion 0041). */
+  conCurso: boolean;
 };
 
 function aResena(dto: ResenaDto): Resena {
@@ -105,6 +143,8 @@ function aResena(dto: ResenaDto): Resena {
       tipo: m.media_type,
     })),
     verificadaPor: dto.verified_source,
+    cursoId: dto.course_id ?? null,
+    cursoTitulo: dto.course_title ?? null,
     creadaEnIso: dto.created_at,
     puedeGestionar: dto.can_manage,
   };
@@ -146,6 +186,11 @@ function cuerpo(datos: DatosDeResena): Record<string, unknown> {
           })),
         }
       : {}),
+    // `'cursoId' in datos` y NO `datos.cursoId !== undefined`: mandar `null`
+    // explicito es como se QUITA el curso, y con la segunda forma ese `null`
+    // no llegaria nunca a viajar. El servidor mira lo mismo del otro lado
+    // (`model_fields_set`).
+    ...('cursoId' in datos ? { course_id: datos.cursoId ?? null } : {}),
   };
 }
 
@@ -161,14 +206,21 @@ export const ReviewRepository = {
    * quiza no funcione a ofrecerlo y dejar a alguien escribiendo un texto que se
    * va a perder.
    */
-  async disponibles(): Promise<boolean> {
+  async disponibles(): Promise<DisponibilidadDeResenas> {
     try {
-      const dto = await apiRequest<{ available: boolean }>(
-        `${API_V1}/reviews/availability`,
-      );
-      return dto.available === true;
+      const dto = await apiRequest<{
+        available: boolean;
+        courses_available?: boolean;
+      }>(`${API_V1}/reviews/availability`);
+      return {
+        hay: dto.available === true,
+        // `?? false` y no `=== true` a secas por la misma razon por la que el
+        // campo es opcional arriba: una API anterior a la 0041 no manda este
+        // campo, y darlo por hecho ensenaria un selector que no existe.
+        conCurso: dto.courses_available ?? false,
+      };
     } catch {
-      return false;
+      return { hay: false, conCurso: false };
     }
   },
 
