@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * CUANTO PUEDE DURAR UNA HISTORIA. Un solo numero y una sola decision.
  *
@@ -59,13 +61,48 @@ function segundos(ms: number): string {
   return Number.isInteger(s) ? String(s) : s.toFixed(1);
 }
 
+
+/**
+ * Cómo se traduce lo que sale de aquí.
+ *
+ * Lo pasa quien pinta. Este módulo NO puede importar el diccionario: se prueba
+ * con el runner de Node, que no resuelve el alias `@/`. Sin traductor se
+ * escribe en español, que es el idioma de referencia.
+ */
+export type Traductor = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave. Es el mismo texto que hay en `i18n/es.ts`, y que no
+ * se desvíen lo comprueba `i18n/diccionariosSincronizados.test.mts`.
+ */
+export const RESPALDOS_ES = {
+  'story.cannotMeasure':
+    'No pudimos comprobar cuánto dura este vídeo. Grábalo con la cámara de la app, que ya corta a los {tope} segundos.',
+  'story.tooLong':
+    'Este vídeo dura {duracion} s y las historias admiten hasta {tope}. Todavía no podemos recortarlo aquí: elige un vídeo más corto, recórtalo en tu galería o grábalo con la cámara de la app.',
+} as const;
+
+const enEspanol: Traductor = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? '';
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
+
 /**
  * ¿Se puede publicar este video como historia?
  *
  * `durationMs` es lo que se haya podido MEDIR: `null` o `0` significan que
  * nadie sabe cuanto dura, no que dure cero.
  */
-export function revisarDuracionDeHistoria(durationMs: number | null | undefined): DecisionDeHistoria {
+export function revisarDuracionDeHistoria(
+  durationMs: number | null | undefined,
+  traducir: Traductor = enEspanol,
+): DecisionDeHistoria {
   if (durationMs === null || durationMs === undefined || durationMs <= 0) {
     /*
       No se pudo medir. Ocurre cuando el modulo nativo de metadatos no esta
@@ -76,19 +113,17 @@ export function revisarDuracionDeHistoria(durationMs: number | null | undefined)
     */
     return {
       estado: 'sin-medir',
-      mensaje:
-        'No pudimos comprobar cuánto dura este vídeo. Grábalo con la cámara de la app, ' +
-        `que ya corta a los ${segundos(MAX_HISTORIA_MS)} segundos.`,
+      mensaje: traducir('story.cannotMeasure', { tope: segundos(MAX_HISTORIA_MS) }),
     };
   }
   if (durationMs > MAX_HISTORIA_MS) {
     return {
       estado: 'demasiado-larga',
       durationMs,
-      mensaje:
-        `Este vídeo dura ${segundos(durationMs)} s y las historias admiten hasta ` +
-        `${segundos(MAX_HISTORIA_MS)}. Todavía no podemos recortarlo aquí: elige un ` +
-        'vídeo más corto, recórtalo en tu galería o grábalo con la cámara de la app.',
+      mensaje: traducir('story.tooLong', {
+        duracion: segundos(durationMs),
+        tope: segundos(MAX_HISTORIA_MS),
+      }),
     };
   }
   return { estado: 'cabe', durationMs: Math.max(MIN_HISTORIA_MS, Math.round(durationMs)) };

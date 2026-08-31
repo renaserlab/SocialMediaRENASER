@@ -13,6 +13,7 @@ import { pickImage, type PickedMedia } from '@/services/storage';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
 import { MAX_HISTORIA_MS } from '@/lib/historias';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Superficie oscura, como el resto del flujo de captura. */
 const media = palette('dark');
@@ -71,6 +72,7 @@ export function StoryGalleryScreen({
   pie,
   alternativa,
 }: Props) {
+  const { t } = useTranslation();
   /*
     Cuanto ocupa la barra flotante EN ESTE aparato. Antes estaba escrito en la
     hoja de estilos como `espacioParaLaBarra(0)`, o sea, midiendo la capsula sin
@@ -132,7 +134,7 @@ export function StoryGalleryScreen({
       const foto = await pickImage({ aspect: [9, 16] });
       if (foto) onSelect(foto);
     } catch (error) {
-      notify('No se pudo abrir el selector', describeError(error, 'Inténtalo de nuevo.'));
+      notify(t('media.pickerFailedTitle'), describeError(error, t('common.tryAgain')));
     }
   };
 
@@ -161,16 +163,16 @@ export function StoryGalleryScreen({
       <View style={[styles.root, styles.center]}>
         <Feather name="image" size={34} color={media.textMuted} />
         <Text variant="body" weight="700" color={media.text} style={styles.deniedTitle}>
-          Sin acceso a tus fotos
+          {t('media.noPhotoAccess')}
         </Text>
         <Text variant="secondary" color={media.textMuted} style={styles.deniedBody}>
           {permission.canAskAgain
-            ? 'Concede el permiso para elegir una foto o un vídeo.'
-            : 'Actívalo en Ajustes del teléfono → Z → Fotos.'}
+            ? t('media.grantPhotoPermission')
+            : t('media.enablePhotosInSettings')}
         </Text>
         {permission.canAskAgain ? (
           <Button
-            label="Dar permiso"
+            label={t('media.givePermission')}
             variant="secondary"
             onPress={() => void (async () => {
               if (await ask()) await load();
@@ -193,7 +195,7 @@ export function StoryGalleryScreen({
           ocurre fuera de la aplicacion: solo se recibe lo que la persona elige.
         */}
         <Button
-          label="Elegir con el selector del teléfono"
+          label={t('media.useSystemPicker')}
           variant="secondary"
           icon="folder"
           onPress={() => void elegirConElSistema()}
@@ -212,13 +214,13 @@ export function StoryGalleryScreen({
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Cerrar">
+        <Pressable onPress={onClose} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel={t('common.close')}>
           <Feather name="x" size={24} color={media.text} />
         </Pressable>
         <Text variant="body" weight="800" color={media.text}>
-          Agregar a tu historia
+          {t('stories.addTitle')}
         </Text>
-        <Pressable onPress={onOpenCamera} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Abrir la cámara">
+        <Pressable onPress={onOpenCamera} hitSlop={12} style={styles.headerButton} accessibilityRole="button" accessibilityLabel={t('media.openCamera')}>
           <Feather name="camera" size={22} color={media.text} />
         </Pressable>
       </View>
@@ -236,7 +238,7 @@ export function StoryGalleryScreen({
         >
           <Feather name="info" size={15} color={media.text} />
           <Text variant="secondary" color={media.text} style={{ flex: 1 }}>
-            Solo ves las fotos que compartiste. Toca para elegir más.
+            {t('media.limitedAccess')}
           </Text>
         </Pressable>
       ) : null}
@@ -244,7 +246,7 @@ export function StoryGalleryScreen({
       {assets.length === 0 ? (
         <View style={[styles.center, { flex: 1 }]}>
           <Text variant="secondary" color={media.textMuted}>
-            No hay fotos ni vídeos en este teléfono.
+            {t('media.noMediaOnDevice')}
           </Text>
         </View>
       ) : (
@@ -264,7 +266,7 @@ export function StoryGalleryScreen({
                 onPress={() => choose(item)}
                 style={styles.tile}
                 accessibilityRole="button"
-                accessibilityLabel={esVideo ? 'Vídeo' : 'Foto'}
+                accessibilityLabel={esVideo ? t('video.video') : t('gallery.photo')}
               >
                 <ExpoImage
                   source={{ uri: item.uri }}

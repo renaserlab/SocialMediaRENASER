@@ -14,8 +14,10 @@ import { Text } from '@/components/Text';
 import {
   FilaDeResultado,
   filasDeResultados,
+  useTextosDeBusqueda,
   type FilaDeBusqueda,
 } from '@/components/resultadosDeBusqueda';
+import { useTranslation } from '@/i18n/useTranslation';
 import { SearchRepository } from '@/repositories/SearchRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -66,6 +68,7 @@ type SearchRow = FilaDeBusqueda | FilaDeReciente;
  */
 export function SearchScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
 
   const [query, setQuery] = useState('');
@@ -174,30 +177,41 @@ export function SearchScreen() {
   const buscando = esBuscable(estado.tecleado);
   const ocupado = estaOcupado(estado);
   const total = totalDeResultados(estado);
+  const textosDeBusqueda = useTextosDeBusqueda();
 
   const rows = useMemo<SearchRow[]>(() => {
     if (!buscando) {
       if (recents.length === 0) return [];
       return [
-        { kind: 'section', key: 'sec-recents', title: 'Búsquedas recientes', action: 'Borrar', onAction: clearRecents },
+        {
+          kind: 'section',
+          key: 'sec-recents',
+          title: t('search.recent'),
+          action: t('search.clearRecent'),
+          onAction: clearRecents,
+        },
         ...recents.map((value) => ({ kind: 'recent' as const, key: `r-${value}`, value })),
       ];
     }
-    return filasDeResultados(estado.resultados, { ampliando: estado.ampliando, verMas });
+    return filasDeResultados(estado.resultados, {
+      ampliando: estado.ampliando,
+      verMas,
+      textos: textosDeBusqueda,
+    });
     // `recents`/`clearRecents` solo afectan al modo sin búsqueda.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buscando, estado.resultados, estado.ampliando, recents, verMas]);
+  }, [buscando, estado.resultados, estado.ampliando, recents, verMas, textosDeBusqueda, t]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Buscar"
+        title={t('search.title')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/explore'))}
       />
 
       <View style={styles.searchWrapper}>
         <Input
-          placeholder="Personas, publicaciones, cursos o eventos..."
+          placeholder={t('search.placeholder')}
           placeholderTextColor={colors.textMuted}
           value={query}
           onChangeText={setQuery}
@@ -226,7 +240,7 @@ export function SearchScreen() {
         ListHeaderComponent={
           ocupado && total > 0 ? (
             <Text variant="secondary" color={colors.textMuted} style={styles.buscando}>
-              Buscando…
+              {t('search.searching')}
             </Text>
           ) : null
         }
@@ -235,22 +249,22 @@ export function SearchScreen() {
             <StateView
               state="empty"
               icon="search"
-              title="Busca en Z"
-              description="Encuentra personas, publicaciones, cursos y eventos."
+              title={t('search.startTitle')}
+              description={t('search.startBody')}
             />
           ) : estado.fallo ? (
             <StateView
               state="error"
-              title="No pudimos buscar"
-              description="Revisa tu conexión e inténtalo de nuevo."
+              title={t('search.failedTitle')}
+              description={t('common.checkConnection')}
               onRetry={reintentar}
             />
           ) : debeDecirSinResultados(estado) ? (
             <StateView
               state="empty"
               icon="search"
-              title="Sin resultados"
-              description={`No encontramos nada para "${estado.termino}".`}
+              title={t('search.emptyTitle')}
+              description={t('search.emptyBody', { termino: estado.termino })}
             />
           ) : (
             <StateView state="loading" />

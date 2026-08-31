@@ -7,12 +7,17 @@ import { ListRow } from '@/components/ListRow';
 import { SectionTitle } from '@/components/SectionTitle';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
+import { useTranslation } from '@/i18n/useTranslation';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { resultadoAbierto } from '@/services/senales';
 import { profileImageUrl } from '@/services/storage';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
-import { filasDeResultados, type FilaDeBusqueda } from '@/lib/busquedaProgresiva';
+import {
+  filasDeResultados,
+  type FilaDeBusqueda,
+  type TextosDeResultados,
+} from '@/lib/busquedaProgresiva';
 
 /*
   Se reexportan para que las pantallas importen «como se pinta un resultado» de
@@ -22,6 +27,32 @@ import { filasDeResultados, type FilaDeBusqueda } from '@/lib/busquedaProgresiva
 */
 export { filasDeResultados };
 export type { FilaDeBusqueda };
+
+/**
+ * Los rotulos de la lista de resultados, en el idioma activo.
+ *
+ * Viven aqui y no en `lib/busquedaProgresiva` porque alli no hay React y no se
+ * puede saber el idioma; las dos pantallas que buscan los piden a este hook y
+ * se los pasan a `filasDeResultados`, asi que las dos dicen lo mismo.
+ */
+export function useTextosDeBusqueda(): TextosDeResultados {
+  const { t } = useTranslation();
+  return React.useMemo(
+    () => ({
+      titulos: {
+        people: t('search.groupPeople'),
+        hashtags: t('search.groupHashtags'),
+        posts: t('search.groupPosts'),
+        courses: t('search.groupCourses'),
+        events: t('search.groupEvents'),
+      },
+      verMas: t('home.seeMore'),
+      cargando: t('common.loading'),
+      temas: (lista: string) => t('search.alsoSearchedIn', { temas: lista }),
+    }),
+    [t],
+  );
+}
 
 /**
  * COMO SE PINTA UN RESULTADO DE BUSQUEDA. Una sola vez, para las dos pantallas
@@ -81,6 +112,7 @@ type PropsDeFila = {
 export function FilaDeResultado({ fila, alAbrir }: PropsDeFila) {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const { t } = useTranslation();
 
   switch (fila.kind) {
     case 'section':
@@ -135,8 +167,8 @@ export function FilaDeResultado({ fila, alAbrir }: PropsDeFila) {
           // se escribe entero: «1 publicaciones» se lee mal.
           subtitle={
             fila.etiqueta.posts_count === 1
-              ? '1 publicación'
-              : `${fila.etiqueta.posts_count} publicaciones`
+              ? t('search.postsCountOne')
+              : t('search.postsCountMany', { count: fila.etiqueta.posts_count })
           }
           leftIcon="hash"
           rightIcon="chevron-right"
@@ -162,7 +194,7 @@ export function FilaDeResultado({ fila, alAbrir }: PropsDeFila) {
             { borderBottomColor: colors.border, opacity: pressed ? 0.75 : 1 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel={`Ver publicación de ${fila.publicacion.author_name}`}
+          accessibilityLabel={t('search.viewPostBy', { autor: fila.publicacion.author_name })}
         >
           <Text variant="secondary" weight="700">
             {fila.publicacion.author_name}
@@ -179,8 +211,8 @@ export function FilaDeResultado({ fila, alAbrir }: PropsDeFila) {
           title={fila.curso.title}
           subtitle={
             fila.curso.coming_soon
-              ? 'Próximamente'
-              : fila.curso.subtitle || fila.curso.author_name || 'Programa'
+              ? t('common.comingSoon')
+              : fila.curso.subtitle || fila.curso.author_name || t('search.program')
           }
           leftIcon="book"
           rightIcon="chevron-right"

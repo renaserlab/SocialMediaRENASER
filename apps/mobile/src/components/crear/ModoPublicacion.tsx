@@ -16,6 +16,7 @@ import { toast } from '@/lib/toast';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -54,6 +55,7 @@ type Props = {
  * menos haya texto O medio.
  */
 export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
+  const { t } = useTranslation();
   const createPost = useAppStore((state) => state.createPost);
   /*
     El pie se apoya en la barra flotante, no en un numero.
@@ -113,7 +115,7 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
           pantalla aparte: es una alternativa a elegir un medio, y ese es el
           momento en que la decision tiene sentido.
         */
-        alternativa={{ etiqueta: 'Escribir sin foto', alPulsar: () => setSoloTexto(true) }}
+        alternativa={{ etiqueta: t('create.writeWithoutPhoto'), alPulsar: () => setSoloTexto(true) }}
       />
     );
   }
@@ -146,7 +148,7 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
         hitSlop={12}
         style={styles.volver}
         accessibilityRole="button"
-        accessibilityLabel={elegido ? 'Elegir otra cosa' : 'Volver'}
+        accessibilityLabel={elegido ? t('create.chooseSomethingElse') : t('common.back')}
       >
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
@@ -156,13 +158,13 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
           <TextInput
             value={texto}
             onChangeText={setTexto}
-            placeholder={elegido ? 'Añade una descripción (opcional)' : '¿Qué quieres compartir?'}
+            placeholder={elegido ? t('create.addCaption') : t('create.whatToShare')}
             placeholderTextColor={media.textMuted}
             multiline
             maxLength={MAX_TEXTO}
             textAlignVertical="top"
             style={[styles.entrada, { color: media.text }]}
-            accessibilityLabel="Descripción de la publicación"
+            accessibilityLabel={t('create.postDescription')}
             autoFocus={!elegido}
           />
           <Text variant="caption" color={media.textMuted} style={styles.contador}>
@@ -186,7 +188,7 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
         />
 
         <Button
-          label="Publicar"
+          label={t('common.publish')}
           variant="secondary"
           icon="send"
           onPress={publicar}

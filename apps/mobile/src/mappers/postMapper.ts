@@ -1,3 +1,4 @@
+import { traduceEnElIdiomaActual } from '@/i18n';
 import { API_BASE_URL, API_V1 } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
 import type { Comment, Post } from '@/types';
@@ -101,7 +102,7 @@ export function formatRelativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
   const secs = Math.floor((Date.now() - then) / 1000);
-  if (secs < 60) return 'Ahora';
+  if (secs < 60) return traduceEnElIdiomaActual('time.now');
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);

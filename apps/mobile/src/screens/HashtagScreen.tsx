@@ -13,6 +13,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const POR_PAGINA = 20;
 
@@ -32,6 +33,7 @@ const POR_PAGINA = 20;
  * que distinguir.
  */
 export function HashtagScreen() {
+  const { t } = useTranslation();
   const { name } = useLocalSearchParams<{ name: string }>();
   const { colors } = useAppTheme();
   const currentUserId = useAppStore((state) => state.user?.id ?? null);
@@ -143,11 +145,11 @@ export function HashtagScreen() {
             : 'content'
         }
         icon="hash"
-        title={estado === 'error' ? 'No se pudo cargar' : 'Todavía no hay publicaciones'}
+        title={estado === 'error' ? t('hashtag.loadFailed') : t('hashtag.empty')}
         description={
           estado === 'error'
-            ? 'Vuelve a intentarlo en un momento.'
-            : `Sé la primera persona en publicar con #${titulo}.`
+            ? t('common.tryAgainSoon')
+            : t('hashtag.emptyBody', { etiqueta: titulo })
         }
         onRetry={() => setIntento((n) => n + 1)}
       >
@@ -162,7 +164,9 @@ export function HashtagScreen() {
               </Text>
               <Text variant="secondary" color={colors.textMuted}>
                 {/* El plural se escribe entero: «1 publicaciones» se lee mal. */}
-                {cuantas === 1 ? '1 publicación' : `${cuantas} publicaciones`}
+                {cuantas === 1
+                  ? t('search.postsCountOne')
+                  : t('search.postsCountMany', { count: cuantas })}
               </Text>
             </View>
           }

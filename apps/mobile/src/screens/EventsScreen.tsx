@@ -10,6 +10,7 @@ import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { assets } from '@/data/assets';
 import { events as mockEvents } from '@/data/mockData';
+import { useTranslation } from '@/i18n/useTranslation';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -19,6 +20,7 @@ import type { EventItem } from '@/types';
 
 export function EventsScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const demoReserved = useAppStore((state) => state.reservedEventIds);
@@ -64,7 +66,7 @@ export function EventsScreen() {
       else await CatalogRepository.reserve(id);
     } catch {
       setRemoteReserved((prev) => (was ? [...prev, id] : prev.filter((x) => x !== id)));
-      notify('No se pudo actualizar la reserva', 'Inténtalo de nuevo.');
+      notify(t('event.reservationFailed'), t('common.tryAgain'));
     }
   };
 
@@ -78,14 +80,17 @@ export function EventsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Próximos eventos" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title={t('events.upcoming')}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <StateView
             state={uiState}
             onRetry={load}
-            title={uiState === 'empty' ? 'No hay eventos' : undefined}
-            description={uiState === 'empty' ? 'Vuelve pronto para ver próximos eventos.' : undefined}
+            title={uiState === 'empty' ? t('events.emptyTitle') : undefined}
+            description={uiState === 'empty' ? t('events.emptyBody') : undefined}
           >
             {events.map((event, index) => {
               const isReserved = reservedIds.includes(event.id);
@@ -100,7 +105,7 @@ export function EventsScreen() {
                     <Text style={styles.mainDescription}>{event.description}</Text>
                     <Text style={styles.mainMeta}>{event.date}{`\n`}{event.location}</Text>
                     <Button
-                      label={isReserved ? 'Reserva confirmada' : 'Ver detalles y reservar'}
+                      label={isReserved ? t('event.reserved') : t('event.viewAndReserve')}
                       variant={isReserved ? 'secondary' : 'primary'}
                       onPress={() => toggle(event.id)}
                       style={{ marginTop: spacing.lg }}
@@ -121,7 +126,13 @@ export function EventsScreen() {
                   <Pressable
                     onPress={() => (event.type === 'live' ? router.push('/live/main') : toggle(event.id))}
                     style={[styles.reserve, { backgroundColor: colors.primary }]}
-                    accessibilityLabel={isReserved ? 'Reserva confirmada' : event.type === 'live' ? 'Ver transmisión' : 'Reservar'}
+                    accessibilityLabel={
+                      isReserved
+                        ? t('event.reserved')
+                        : event.type === 'live'
+                          ? t('event.watchBroadcast')
+                          : t('event.reserve')
+                    }
                     accessibilityRole="button"
                   >
                     <Feather

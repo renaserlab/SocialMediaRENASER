@@ -10,6 +10,7 @@ import { VideoScrubber } from '@/components/VideoScrubber';
 import { perfMark } from '@/lib/perf';
 import { palette } from '@/theme/tokens';
 import type { VideoPlayerProps } from './VideoPlayer.types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 // Las superficies de video son siempre oscuras → usamos la paleta dark como
 // contexto de "media" para que los overlays sean legibles en ambos temas.
@@ -145,6 +146,7 @@ export function VideoPlayer({
   onProgressSeconds,
   onEnded,
 }: VideoPlayerProps) {
+  const { t } = useTranslation();
   /*
     `useCaching` guarda el video en la cache de disco de expo-video: volver a
     un short ya visto no toca la red. Se activa por prop porque la cache no
@@ -451,7 +453,7 @@ export function VideoPlayer({
             style={StyleSheet.absoluteFill}
             onPress={toggle}
             accessibilityRole="button"
-            accessibilityLabel={playing ? 'Pausar video' : 'Reproducir video'}
+            accessibilityLabel={playing ? t('video.pause') : t('video.play')}
           >
             {/*
               El circulo solo aparece si de verdad aporta algo: cuando el video
@@ -496,7 +498,7 @@ export function VideoPlayer({
           style={styles.posterLayer}
           onPress={start}
           accessibilityRole="button"
-          accessibilityLabel="Reproducir video"
+          accessibilityLabel={t('video.play')}
         >
           {posterSource ? (
             <ExpoImage

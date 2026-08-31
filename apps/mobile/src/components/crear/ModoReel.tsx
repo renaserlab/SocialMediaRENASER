@@ -15,6 +15,7 @@ import { toast } from '@/lib/toast';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -46,6 +47,7 @@ type Props = {
  * backend, un segundo feed y dos sitios donde arreglar cada cosa.
  */
 export function ModoReel({ pie, alSalir, activo = true }: Props) {
+  const { t } = useTranslation();
   const createPost = useAppStore((state) => state.createPost);
   /*
     El pie se apoya en la barra flotante, no en un numero.
@@ -71,10 +73,9 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
       // Se comprueba antes de subir: gastar la conexion de alguien para acabar
       // rechazando el video es la peor forma de decirle que es muy largo.
       if (duracion > MAX_REEL_MS) {
-        throw new Error(
-          `Los reels admiten hasta ${MAX_REEL_MS / 60_000} minutos. ` +
-            'Elige otro vídeo o recórtalo antes.',
-        );
+        // Una sola clave con el numero dentro: partida en trozos no se puede
+        // recolocar en un idioma que ordene las palabras de otra forma.
+        throw new Error(t('create.reelTooLong', { minutos: MAX_REEL_MS / 60_000 }));
       }
 
       const subido = await uploadPostMedia(elegido, avance);
@@ -122,7 +123,7 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
         hitSlop={12}
         style={styles.volver}
         accessibilityRole="button"
-        accessibilityLabel="Elegir otro vídeo"
+        accessibilityLabel={t('create.chooseAnotherVideo')}
       >
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
@@ -132,13 +133,13 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
           <TextInput
             value={texto}
             onChangeText={setTexto}
-            placeholder="Cuenta de qué va (opcional)"
+            placeholder={t('create.reelCaption')}
             placeholderTextColor={media.textMuted}
             multiline
             maxLength={MAX_TEXTO}
             textAlignVertical="top"
             style={[styles.entrada, { color: media.text }]}
-            accessibilityLabel="Descripción del reel"
+            accessibilityLabel={t('create.reelDescription')}
           />
           <Text variant="caption" color={media.textMuted} style={styles.contador}>
             {texto.length}/{MAX_TEXTO}
@@ -161,7 +162,7 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
         />
 
         <Button
-          label="Publicar reel"
+          label={t('create.publishReel')}
           variant="secondary"
           icon="send"
           onPress={publicar}

@@ -23,6 +23,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Cuántos se piden de golpe. Ni tres ni mil: lo que cabe en dos pantallas. */
 const POR_PAGINA = 20;
@@ -57,6 +58,7 @@ const comentariosDeMuestra: ComentarioConAvatar[] = [
  *    el servidor y se pagina con cursor hacia atrás.
  */
 export function CommentsScreen() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
@@ -158,7 +160,7 @@ export function CommentsScreen() {
         // ahí y no se ha pintado ningún comentario que nadie llegó a publicar.
         autorizar: async () => {
           let autorizado = false;
-          await requireAuth('para comentar', () => {
+          await requireAuth('auth.reasonComment', () => {
             autorizado = true;
           });
           return autorizado;
@@ -169,18 +171,18 @@ export function CommentsScreen() {
             // comentario es local y se dice con un id local, no con uno falso.
             return {
               id: `local-${Date.now()}`,
-              author: currentUser?.fullName ?? 'Tú',
+              author: currentUser?.fullName ?? t('common.you'),
               text: texto,
-              createdAt: 'Ahora',
+              createdAt: t('time.now'),
             };
           }
           return PostRepository.addComment(id, texto);
         },
         optimista: (texto, idProvisional) => ({
           id: idProvisional,
-          author: currentUser?.fullName ?? 'Tú',
+          author: currentUser?.fullName ?? t('common.you'),
           text: texto,
-          createdAt: 'Ahora',
+          createdAt: t('time.now'),
         }),
       });
 
@@ -188,7 +190,7 @@ export function CommentsScreen() {
       setInputText(resultado.texto);
       sumarAlContadorDelMuro(resultado.delta);
       if (resultado.fallo === 'servidor') {
-        notify('No se pudo comentar', 'Revisa tu conexión e inténtalo de nuevo.');
+        notify(t('post.commentFailed'), t('common.checkConnection'));
       }
     } finally {
       setSending(false);
@@ -207,15 +209,19 @@ export function CommentsScreen() {
   return (
     <SinTecladoDelante style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title={estado.total > 0 ? `Comentarios · ${estado.total}` : 'Comentarios'}
+        title={
+          estado.total > 0
+            ? t('post.commentsWithCount', { count: estado.total })
+            : t('post.comments')
+        }
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
       <View style={styles.container}>
         <StateView
           state={uiState}
           onRetry={load}
-          title={uiState === 'empty' ? 'Sé el primero en comentar' : undefined}
-          description={uiState === 'empty' ? 'Aún no hay comentarios en esta publicación.' : undefined}
+          title={uiState === 'empty' ? t('post.beFirstToComment') : undefined}
+          description={uiState === 'empty' ? t('post.noCommentsYet') : undefined}
         >
           <FlatList
             data={estado.lista}
@@ -253,13 +259,13 @@ export function CommentsScreen() {
           ]}
         >
           <Input
-            placeholder="Escribe un comentario..."
+            placeholder={t('post.writeComment')}
             value={inputText}
             onChangeText={setInputText}
             containerStyle={styles.inputContainer}
           />
           <Button
-            label="Enviar"
+            label={t('common.send')}
             variant="ghost"
             onPress={sendComment}
             loading={sending}

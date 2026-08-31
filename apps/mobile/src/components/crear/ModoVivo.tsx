@@ -10,6 +10,7 @@ import { FEATURE_LIVE } from '@/config/features';
 import { describeError } from '@/lib/describeError';
 import { LiveRepository } from '@/repositories/LiveRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -32,6 +33,7 @@ type Props = {
  * —sin `scheduled_for`, o sea que nace ya en directo— y se abre su sala.
  */
 export function ModoVivo({ pie, alGrabarReel }: Props) {
+  const { t } = useTranslation();
   const espacioInferior = useEspacioInferior();
   if (!FEATURE_LIVE) {
     return (
@@ -41,11 +43,10 @@ export function ModoVivo({ pie, alGrabarReel }: Props) {
             <Feather name="radio" size={26} color={media.text} />
           </View>
           <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-            Emitir en vivo todavía no está disponible
+            {t('create.liveUnavailableTitle')}
           </Text>
           <Text variant="body" color={media.textMuted} style={styles.centrado}>
-            Estamos montando la infraestructura de directo. Preferimos no darte
-            un botón que no emita de verdad.
+            {t('create.liveUnavailableBody')}
           </Text>
 
           <Pressable
@@ -54,7 +55,7 @@ export function ModoVivo({ pie, alGrabarReel }: Props) {
             accessibilityRole="button"
           >
             <Text variant="body" weight="700" color={media.background}>
-              Grabar un reel
+              {t('create.recordReel')}
             </Text>
           </Pressable>
         </View>
@@ -76,6 +77,7 @@ export function ModoVivo({ pie, alGrabarReel }: Props) {
  * boton de «empezar ahora».
  */
 function CrearEmision({ pie }: { pie?: React.ReactNode }) {
+  const { t } = useTranslation();
   const espacioInferior = useEspacioInferior();
   const router = useRouter();
   const [titulo, setTitulo] = useState('');
@@ -97,7 +99,7 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
       // que acaba de crearla, porque volver ahi invitaria a crear otra.
       router.replace(`/live/${emision.id}` as never);
     } catch (fallo) {
-      setError(describeError(fallo, 'No se pudo abrir la emisión.'));
+      setError(describeError(fallo, t('create.liveOpenFailed')));
     } finally {
       setCreando(false);
     }
@@ -112,10 +114,10 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
           <Feather name="radio" size={26} color={media.text} />
         </View>
         <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-          Empezar una emisión
+          {t('create.liveStartTitle')}
         </Text>
         <Text variant="body" color={media.textMuted} style={styles.centrado}>
-          Ponle un título para que se sepa de qué vas a hablar.
+          {t('create.liveStartBody')}
         </Text>
 
         <TextInput
@@ -123,9 +125,9 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
           onChangeText={setTitulo}
           onSubmitEditing={() => void empezar()}
           returnKeyType="go"
-          placeholder="¿De qué va tu directo?"
+          placeholder={t('create.livePlaceholder')}
           placeholderTextColor={media.textMuted}
-          accessibilityLabel="Título de la emisión"
+          accessibilityLabel={t('create.liveTitleLabel')}
           style={[styles.campo, { borderColor: media.border, color: media.text }]}
         />
 
@@ -143,7 +145,7 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
           accessibilityState={{ disabled: !listo }}
         >
           <Text variant="body" weight="700" color={media.background}>
-            {creando ? 'Abriendo…' : 'Empezar ahora'}
+            {creando ? t('create.opening') : t('create.startNow')}
           </Text>
         </Pressable>
       </View>

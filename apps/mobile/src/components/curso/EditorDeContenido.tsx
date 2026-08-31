@@ -21,6 +21,7 @@ import {
 import { pickVideo, uploadCourseMedia, type UploadProgress } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /*
   CUÁNTO PUEDE DURAR UNA LECCIÓN. Un límite de cordura, no una regla
@@ -53,6 +54,7 @@ type Props = {
  * dónde abrirlos, no antes.
  */
 export function EditorDeContenido({ courseId, alCambiar }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [modulos, setModulos] = useState<CourseModule[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -75,7 +77,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
       setError(null);
       alCambiar?.(contenido);
     } catch (fallo) {
-      setError(fallo instanceof Error ? fallo.message : 'No se pudo cargar el temario.');
+      setError(fallo instanceof Error ? fallo.message : t('syllabus.loadFailed'));
     } finally {
       setCargando(false);
     }
@@ -101,7 +103,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
     try {
       await CourseContentRepository.reorderModules(ids);
     } catch {
-      notify('No se pudo reordenar', 'Inténtalo de nuevo.');
+      notify(t('syllabus.reorderFailed'), t('common.tryAgain'));
     }
     await cargar();
   };
@@ -113,45 +115,45 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
     try {
       await CourseContentRepository.reorderLessons(ids);
     } catch {
-      notify('No se pudo reordenar', 'Inténtalo de nuevo.');
+      notify(t('syllabus.reorderFailed'), t('common.tryAgain'));
     }
     await cargar();
   };
 
   const borrarModulo = async (modulo: CourseModule) => {
     const aceptado = await confirm({
-      title: 'Eliminar módulo',
+      title: t('syllabus.deleteModule'),
       message:
         modulo.lessons.length > 0
-          ? `Se eliminarán también sus ${modulo.lessons.length} lecciones. Esta acción no se puede deshacer.`
-          : 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+          ? t('syllabus.deleteModuleWithLessons', { count: modulo.lessons.length })
+          : t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!aceptado) return;
     try {
       await CourseContentRepository.removeModule(modulo.id);
-      toast('Módulo eliminado');
+      toast(t('syllabus.moduleDeleted'));
       await cargar();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
   const borrarLeccion = async (leccion: CourseLesson) => {
     const aceptado = await confirm({
-      title: 'Eliminar lección',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('lesson.deleteTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!aceptado) return;
     try {
       await CourseContentRepository.removeLesson(leccion.id);
-      toast('Lección eliminada');
+      toast(t('lesson.deleted'));
       await cargar();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
@@ -171,11 +173,10 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
         <View style={[styles.vacio, { borderColor: colors.border }]}>
           <Feather name="list" size={22} color={colors.textMuted} />
           <Text variant="body" weight="700">
-            Todavía no hay contenido
+            {t('syllabus.noContentYet')}
           </Text>
           <Text variant="secondary" color={colors.textMuted} style={styles.centrado}>
-            Un módulo es un bloque del curso; dentro van las lecciones. Empieza
-            por el primero.
+            {t('syllabus.noContentBody')}
           </Text>
         </View>
       ) : null}
@@ -191,7 +192,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
               disabled={indice === 0}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel={`Subir el módulo ${modulo.title}`}
+              accessibilityLabel={t('syllabus.moveModuleUp', { titulo: modulo.title })}
               style={{ opacity: indice === 0 ? 0.3 : 1 }}
             >
               <Feather name="chevron-up" size={18} color={colors.textMuted} />
@@ -201,7 +202,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
               disabled={indice === modulos.length - 1}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel={`Bajar el módulo ${modulo.title}`}
+              accessibilityLabel={t('syllabus.moveModuleDown', { titulo: modulo.title })}
               style={{ opacity: indice === modulos.length - 1 ? 0.3 : 1 }}
             >
               <Feather name="chevron-down" size={18} color={colors.textMuted} />
@@ -210,7 +211,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
               onPress={() => setModuloEnEdicion(modulo)}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel={`Editar el módulo ${modulo.title}`}
+              accessibilityLabel={t('syllabus.editModule', { titulo: modulo.title })}
             >
               <Feather name="edit-2" size={16} color={colors.textMuted} />
             </Pressable>
@@ -218,7 +219,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
               onPress={() => void borrarModulo(modulo)}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel={`Eliminar el módulo ${modulo.title}`}
+              accessibilityLabel={t('syllabus.deleteModuleNamed', { titulo: modulo.title })}
             >
               <Feather name="trash-2" size={16} color={colors.textMuted} />
             </Pressable>
@@ -232,7 +233,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
 
           {modulo.lessons.length === 0 ? (
             <Text variant="secondary" color={colors.textMuted} style={styles.descripcion}>
-              Sin lecciones todavía.
+              {t('syllabus.noLessons')}
             </Text>
           ) : (
             modulo.lessons.map((leccion, i) => (
@@ -248,9 +249,9 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
                   </Text>
                   <Text variant="caption" color={colors.textMuted}>
                     {[
-                      leccion.kind === 'text' ? 'Texto' : 'Vídeo',
+                      leccion.kind === 'text' ? t('syllabus.text') : t('syllabus.video'),
                       leccion.durationSeconds ? duracionLegible(leccion.durationSeconds) : null,
-                      leccion.isPreview ? 'Muestra gratuita' : null,
+                      leccion.isPreview ? t('syllabus.freeSample') : null,
                     ]
                       .filter(Boolean)
                       .join(' · ')}
@@ -261,7 +262,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
                   disabled={i === 0}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`Subir la lección ${leccion.title}`}
+                  accessibilityLabel={t('syllabus.moveLessonUp', { titulo: leccion.title })}
                   style={{ opacity: i === 0 ? 0.3 : 1 }}
                 >
                   <Feather name="chevron-up" size={16} color={colors.textMuted} />
@@ -271,7 +272,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
                   disabled={i === modulo.lessons.length - 1}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`Bajar la lección ${leccion.title}`}
+                  accessibilityLabel={t('syllabus.moveLessonDown', { titulo: leccion.title })}
                   style={{ opacity: i === modulo.lessons.length - 1 ? 0.3 : 1 }}
                 >
                   <Feather name="chevron-down" size={16} color={colors.textMuted} />
@@ -280,7 +281,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
                   onPress={() => setLeccionEnEdicion({ modulo, leccion })}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`Editar la lección ${leccion.title}`}
+                  accessibilityLabel={t('syllabus.editLesson', { titulo: leccion.title })}
                 >
                   <Feather name="edit-2" size={16} color={colors.textMuted} />
                 </Pressable>
@@ -288,7 +289,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
                   onPress={() => void borrarLeccion(leccion)}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`Eliminar la lección ${leccion.title}`}
+                  accessibilityLabel={t('syllabus.deleteLessonNamed', { titulo: leccion.title })}
                 >
                   <Feather name="trash-2" size={16} color={colors.textMuted} />
                 </Pressable>
@@ -297,7 +298,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
           )}
 
           <Button
-            label="Añadir lección"
+            label={t('syllabus.addLesson')}
             variant="secondary"
             icon="plus"
             onPress={() => setLeccionEnEdicion({ modulo, leccion: null })}
@@ -307,7 +308,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
       ))}
 
       <Button
-        label="Añadir módulo"
+        label={t('syllabus.addModule')}
         variant="secondary"
         icon="plus"
         onPress={() => setModuloEnEdicion('nuevo')}
@@ -355,6 +356,7 @@ function HojaDeModulo({
   alCerrar: () => void;
   alGuardar: () => void;
 }) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [titulo, setTitulo] = useState(modulo?.title ?? '');
   const [descripcion, setDescripcion] = useState(modulo?.description ?? '');
@@ -383,9 +385,9 @@ function HojaDeModulo({
       }
       alGuardar();
       alCerrar();
-      toast(modulo ? 'Módulo actualizado' : 'Módulo añadido');
+      toast(modulo ? t('syllabus.moduleUpdated') : t('syllabus.moduleAdded'));
     } catch (fallo) {
-      setError(fallo instanceof Error ? fallo.message : 'No se pudo guardar.');
+      setError(fallo instanceof Error ? fallo.message : t('editPost.saveFailed'));
     } finally {
       setGuardando(false);
     }
@@ -394,22 +396,22 @@ function HojaDeModulo({
   return (
     <BottomSheet visible onClose={alCerrar}>
       <Text style={styles.tituloDeHoja} color={colors.text}>
-        {modulo ? 'Editar módulo' : 'Nuevo módulo'}
+        {modulo ? t('syllabus.editModuleTitle') : t('syllabus.newModule')}
       </Text>
       <Input
-        label="Título del módulo"
+        label={t('syllabus.moduleTitle')}
         value={titulo}
         onChangeText={setTitulo}
-        placeholder="Fundamentos"
+        placeholder={t('syllabus.moduleTitleExample')}
         placeholderTextColor={colors.textMuted}
         style={{ color: colors.text }}
       />
       {admiteDescripcion ? (
         <Input
-          label="De qué va este bloque (opcional)"
+          label={t('syllabus.moduleAbout')}
           value={descripcion}
           onChangeText={setDescripcion}
-          placeholder="Qué se cubre aquí y por qué va antes que lo demás"
+          placeholder={t('syllabus.moduleAboutPlaceholder')}
           placeholderTextColor={colors.textMuted}
           multiline
           style={{ color: colors.text }}
@@ -417,7 +419,7 @@ function HojaDeModulo({
       ) : null}
       <InlineError message={error} />
       <Button
-        label={modulo ? 'Guardar cambios' : 'Crear módulo'}
+        label={modulo ? t('common.saveChanges') : t('syllabus.createModule')}
         onPress={() => void guardar()}
         loading={guardando}
         disabled={!titulo.trim()}
@@ -443,6 +445,7 @@ function HojaDeLeccion({
   alCerrar: () => void;
   alGuardar: () => void;
 }) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [titulo, setTitulo] = useState(leccion?.title ?? '');
   const [tipo, setTipo] = useState<LessonKind>(leccion?.kind ?? 'video');
@@ -463,7 +466,7 @@ function HojaDeLeccion({
       setDuracion(segundos);
       setError(null);
     } catch {
-      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
+      setError(t('resources.pickerFailed'));
     }
   };
 
@@ -471,8 +474,10 @@ function HojaDeLeccion({
     if (!titulo.trim()) return;
     if (tipo === 'video' && video && (duracion < DURACION_MINIMA || duracion > DURACION_MAXIMA)) {
       setError(
-        `El vídeo debe durar entre ${Math.round(DURACION_MINIMA / 60)} minuto(s) y ` +
-          `${Math.round(DURACION_MAXIMA / 3600)} horas.`,
+        t('syllabus.videoLength', {
+          minimo: Math.round(DURACION_MINIMA / 60),
+          maximo: Math.round(DURACION_MAXIMA / 3600),
+        }),
       );
       return;
     }
@@ -505,9 +510,9 @@ function HojaDeLeccion({
       }
       alGuardar();
       alCerrar();
-      toast(leccion ? 'Lección actualizada' : 'Lección añadida');
+      toast(leccion ? t('syllabus.lessonUpdated') : t('syllabus.lessonAdded'));
     } catch (fallo) {
-      setError(fallo instanceof Error ? fallo.message : 'No se pudo guardar.');
+      setError(fallo instanceof Error ? fallo.message : t('editPost.saveFailed'));
     } finally {
       setGuardando(false);
       setProgreso(null);
@@ -516,22 +521,24 @@ function HojaDeLeccion({
 
   const etiquetaDeProgreso =
     progreso?.phase === 'compressing'
-      ? `Comprimiendo ${Math.round(progreso.ratio * 100)}%`
+      ? t('syllabus.compressing', { porcentaje: Math.round(progreso.ratio * 100) })
       : progreso?.phase === 'uploading'
-      ? `Subiendo ${Math.round(progreso.ratio * 100)}%`
+      ? t('syllabus.uploading', { porcentaje: Math.round(progreso.ratio * 100) })
       : null;
 
   return (
     <BottomSheet visible onClose={alCerrar}>
       <Text style={styles.tituloDeHoja} color={colors.text}>
-        {leccion ? 'Editar lección' : `Nueva lección · ${modulo.title}`}
+        {leccion
+          ? t('syllabus.editLessonTitle')
+          : t('syllabus.newLesson', { modulo: modulo.title })}
       </Text>
 
       <Input
-        label="Título"
+        label={t('syllabus.titleField')}
         value={titulo}
         onChangeText={setTitulo}
-        placeholder="Cómo empezar"
+        placeholder={t('syllabus.titleExample')}
         placeholderTextColor={colors.textMuted}
         style={{ color: colors.text }}
       />
@@ -544,10 +551,10 @@ function HojaDeLeccion({
       {admiteTipoYMuestra ? (
         <View style={styles.bloque}>
           <Text variant="caption" weight="800" color={colors.textMuted} style={styles.etiqueta}>
-            TIPO DE LECCIÓN
+            {t('syllabus.lessonType')}
           </Text>
           <SegmentedControl
-            options={['Vídeo', 'Texto']}
+            options={[t('syllabus.video'), t('syllabus.text')]}
             selectedIndex={tipo === 'text' ? 1 : 0}
             onChange={(indice) => setTipo(indice === 1 ? 'text' : 'video')}
           />
@@ -559,7 +566,7 @@ function HojaDeLeccion({
           <Pressable
             onPress={() => void elegirVideo()}
             accessibilityRole="button"
-            accessibilityLabel="Elegir vídeo de la lección"
+            accessibilityLabel={t('syllabus.pickLessonVideo')}
             style={({ pressed }) => [
               styles.selector,
               { borderColor: colors.border, backgroundColor: colors.surfaceAlt, opacity: pressed ? 0.7 : 1 },
@@ -567,7 +574,8 @@ function HojaDeLeccion({
           >
             <Feather name="video" size={18} color={colors.text} />
             <Text variant="secondary" numberOfLines={1} style={styles.textoDeLeccion}>
-              {video?.name ?? (leccion?.mediaPath ? 'Cambiar el vídeo' : 'Elegir vídeo (opcional)')}
+              {video?.name ??
+                (leccion?.mediaPath ? t('syllabus.changeVideo') : t('syllabus.pickVideoOptional'))}
             </Text>
             {duracion > 0 ? (
               <Text variant="caption" color={colors.textMuted}>
@@ -576,10 +584,10 @@ function HojaDeLeccion({
             ) : null}
           </Pressable>
           <Input
-            label="Descripción (opcional)"
+            label={t('syllabus.descriptionOptional')}
             value={cuerpo}
             onChangeText={setCuerpo}
-            placeholder="Qué se ve en esta lección"
+            placeholder={t('syllabus.descriptionPlaceholder')}
             placeholderTextColor={colors.textMuted}
             multiline
             style={{ color: colors.text }}
@@ -587,10 +595,10 @@ function HojaDeLeccion({
         </>
       ) : (
         <Input
-          label="Texto de la lección"
+          label={t('syllabus.lessonText')}
           value={cuerpo}
           onChangeText={setCuerpo}
-          placeholder="Escribe aquí la lección"
+          placeholder={t('syllabus.lessonTextPlaceholder')}
           placeholderTextColor={colors.textMuted}
           multiline
           style={{ color: colors.text }}
@@ -602,7 +610,7 @@ function HojaDeLeccion({
           onPress={() => setMuestra(!muestra)}
           accessibilityRole="switch"
           accessibilityState={{ checked: muestra }}
-          accessibilityLabel="Muestra gratuita"
+          accessibilityLabel={t('syllabus.freeSample')}
           style={({ pressed }) => [
             styles.selector,
             { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
@@ -611,12 +619,10 @@ function HojaDeLeccion({
           <Feather name={muestra ? 'unlock' : 'lock'} size={18} color={colors.text} />
           <View style={styles.textoDeLeccion}>
             <Text variant="secondary" weight="700">
-              Muestra gratuita
+              {t('syllabus.freeSample')}
             </Text>
             <Text variant="caption" color={colors.textMuted}>
-              {muestra
-                ? 'Cualquiera puede verla sin comprar el curso.'
-                : 'Solo la ve quien tiene acceso al curso.'}
+              {muestra ? t('syllabus.freeSampleOn') : t('syllabus.freeSampleOff')}
             </Text>
           </View>
           <Feather name={muestra ? 'check-square' : 'square'} size={20} color={colors.text} />
@@ -632,7 +638,7 @@ function HojaDeLeccion({
       <InlineError message={error} />
 
       <Button
-        label={leccion ? 'Guardar cambios' : 'Guardar lección'}
+        label={leccion ? t('common.saveChanges') : t('syllabus.saveLesson')}
         onPress={() => void guardar()}
         loading={guardando}
         disabled={!titulo.trim()}

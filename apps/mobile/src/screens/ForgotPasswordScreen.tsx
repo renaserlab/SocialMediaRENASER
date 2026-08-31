@@ -68,7 +68,7 @@ export function ForgotPasswordScreen() {
         aplicacion se hubiera roto. El detalle tecnico entero queda en la
         consola; aqui solo se dice que ha pasado y que se puede hacer.
       */
-      setError(mensajeDeAuth(err, 'recuperacion'));
+      setError(mensajeDeAuth(err, 'recuperacion', t));
     } finally {
       enviando.current = false;
       setSending(false);

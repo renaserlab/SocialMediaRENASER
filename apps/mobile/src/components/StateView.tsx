@@ -3,6 +3,7 @@ import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
+import { useTranslation } from '@/i18n/useTranslation';
 import { Button } from './Button';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -42,6 +43,7 @@ export function StateView({
   style,
 }: StateViewProps) {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
 
   if (state === 'content') {
     return <React.Fragment>{children}</React.Fragment>;
@@ -53,7 +55,9 @@ export function StateView({
     }
     return (
       <View style={[styles.centerContainer, style]}>
-        <Text style={[styles.loadingText, { color: colors.textMuted }]}>Cargando...</Text>
+        <Text style={[styles.loadingText, { color: colors.textMuted }]}>
+          {t('common.loading')}
+        </Text>
       </View>
     );
   }
@@ -65,16 +69,16 @@ export function StateView({
 
   if (state === 'empty') {
     defaultIcon = 'inbox';
-    defaultTitle = 'No hay contenido disponible';
-    defaultDescription = 'Vuelve a revisar más tarde.';
+    defaultTitle = t('state.emptyTitle');
+    defaultDescription = t('state.emptyBody');
   } else if (state === 'error') {
     defaultIcon = 'alert-triangle';
-    defaultTitle = 'Ha ocurrido un error';
-    defaultDescription = 'No pudimos cargar la información. Inténtalo nuevamente.';
+    defaultTitle = t('state.errorTitle');
+    defaultDescription = t('state.errorBody');
   } else if (state === 'offline') {
     defaultIcon = 'wifi-off';
-    defaultTitle = 'Sin conexión a Internet';
-    defaultDescription = 'Comprueba tu red y vuelve a intentarlo.';
+    defaultTitle = t('state.offlineTitle');
+    defaultDescription = t('state.offlineBody');
   }
 
   const finalIcon = icon || defaultIcon;
@@ -99,7 +103,7 @@ export function StateView({
         />
       ) : state === 'error' && onRetry ? (
         <Button
-          label="Reintentar"
+          label={t('common.retry')}
           onPress={onRetry}
           variant="secondary"
           style={styles.retryButton}

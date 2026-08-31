@@ -17,6 +17,7 @@ import {
 import { pickVideo, uploadCourseMedia, type UploadProgress } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   courseId: string;
@@ -62,6 +63,7 @@ const DURACION_MINIMA = 30;
 const DURACION_MAXIMA = 4 * 60 * 60;
 
 export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [modules, setModules] = useState<CourseModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,9 +114,12 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
     try {
       await CourseContentRepository.setComingSoon(courseId, next);
       setComingSoon(next);
-      toast(next ? 'Marcado como próximamente' : 'Contenido publicado');
+      toast(next ? t('syllabus.markedSoon') : t('syllabus.published'));
     } catch (error) {
-      notify('No se pudo cambiar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+      notify(
+        t('syllabus.changeFailed'),
+        error instanceof Error ? error.message : t('common.tryAgain'),
+      );
     }
   };
 
@@ -126,49 +131,49 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
       await CourseContentRepository.createModule(courseId, title, modules.length);
       setModuleTitle('');
       setAddingModule(false);
-      toast('Módulo añadido');
+      toast(t('syllabus.moduleAdded'));
       await reloadAndNotify();
     } catch (error) {
       // La hoja sigue abierta al fallar: el aviso tiene que vivir dentro de
       // ella, porque en iOS un dialogo no se abre encima de un Modal.
-      setModuleError(error instanceof Error ? error.message : 'No se pudo añadir. Inténtalo de nuevo.');
+      setModuleError(error instanceof Error ? error.message : t('syllabus.addFailed'));
     }
   };
 
   const removeModule = async (module: CourseModule) => {
     const accepted = await confirm({
-      title: 'Eliminar módulo',
+      title: t('syllabus.deleteModule'),
       message:
         module.lessons.length > 0
-          ? `Se eliminarán también sus ${module.lessons.length} lecciones. Esta acción no se puede deshacer.`
-          : 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+          ? t('syllabus.deleteModuleWithLessons', { count: module.lessons.length })
+          : t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await CourseContentRepository.removeModule(module.id);
-      toast('Módulo eliminado');
+      toast(t('syllabus.moduleDeleted'));
       await reloadAndNotify();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
   const removeLesson = async (lessonId: string) => {
     const accepted = await confirm({
-      title: 'Eliminar lección',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('lesson.deleteTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await CourseContentRepository.removeLesson(lessonId);
-      toast('Lección eliminada');
+      toast(t('lesson.deleted'));
       await reloadAndNotify();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
@@ -191,10 +196,10 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
       <View style={[styles.soon, { borderColor: colors.border }]}>
         <Feather name="clock" size={22} color={colors.textMuted} />
         <Text variant="body" weight="700">
-          Próximamente
+          {t('common.comingSoon')}
         </Text>
         <Text variant="secondary" color={colors.textMuted} style={styles.soonBody}>
-          Estamos preparando el contenido de este programa. Te avisaremos cuando esté disponible.
+          {t('syllabus.soonBody')}
         </Text>
       </View>
     );
@@ -210,27 +215,25 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
             { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel={comingSoon ? 'Publicar el contenido' : 'Marcar como próximamente'}
+          accessibilityLabel={comingSoon ? t('syllabus.publishContent') : t('syllabus.markSoon')}
         >
           <Feather name={comingSoon ? 'clock' : 'check-circle'} size={16} color={colors.text} />
           <Text variant="secondary" weight="700" style={{ flex: 1 }}>
-            {comingSoon ? 'Próximamente — el alumno no ve el contenido' : 'Publicado — el contenido es visible'}
+            {comingSoon ? t('syllabus.stateSoon') : t('syllabus.statePublished')}
           </Text>
           <Text variant="secondary" color={colors.textMuted}>
-            {comingSoon ? 'Publicar' : 'Ocultar'}
+            {comingSoon ? t('common.publish') : t('live.hide')}
           </Text>
         </Pressable>
       ) : null}
 
       <Text variant="body" weight="900" style={styles.heading}>
-        Temario
+        {t('syllabus.title')}
       </Text>
 
       {modules.length === 0 ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
-          {canEdit
-            ? 'Este curso aún no tiene contenido. Empieza creando un módulo.'
-            : 'El temario se publicará pronto.'}
+          {canEdit ? t('syllabus.emptyEditable') : t('syllabus.emptyReader')}
         </Text>
       ) : null}
 
@@ -245,7 +248,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
                 onPress={() => void removeModule(module)}
                 hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel={`Eliminar módulo ${module.title}`}
+                accessibilityLabel={t('syllabus.deleteModuleNamed', { titulo: module.title })}
               >
                 <Feather name="trash-2" size={16} color={colors.textMuted} />
               </Pressable>
@@ -254,7 +257,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
 
           {module.lessons.length === 0 ? (
             <Text variant="secondary" color={colors.textMuted} style={styles.moduleEmpty}>
-              Sin lecciones todavía.
+              {t('syllabus.noLessons')}
             </Text>
           ) : (
             module.lessons.map((lesson) => (
@@ -262,7 +265,10 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
                 key={lesson.id}
                 title={lesson.title}
                 subtitle={
-                  [lesson.mediaPath ? 'Video' : 'Sin video', formatDuration(lesson.durationSeconds)]
+                  [
+                    lesson.mediaPath ? t('video.video') : t('syllabus.noVideo'),
+                    formatDuration(lesson.durationSeconds),
+                  ]
                     .filter(Boolean)
                     .join(' · ')
                 }
@@ -278,7 +284,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
 
           {canEdit ? (
             <Button
-              label="Añadir lección"
+              label={t('syllabus.addLesson')}
               variant="secondary"
               icon="plus"
               onPress={() => setLessonFor(module)}
@@ -290,7 +296,7 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
 
       {canEdit ? (
         <Button
-          label="Añadir módulo"
+          label={t('syllabus.addModule')}
           variant="secondary"
           icon="plus"
           onPress={() => setAddingModule(true)}
@@ -307,18 +313,18 @@ export function CourseContentEditor({ courseId, canEdit, onOpenLesson, onChanged
         }}
       >
         <Text style={styles.sheetTitle} color={colors.text}>
-          Nuevo módulo
+          {t('syllabus.newModule')}
         </Text>
         <Input
           value={moduleTitle}
           onChangeText={setModuleTitle}
-          placeholder="Título del módulo"
+          placeholder={t('syllabus.moduleTitle')}
           placeholderTextColor={colors.textMuted}
           style={{ color: colors.text }}
         />
         <InlineError message={moduleError} />
         <Button
-          label="Crear módulo"
+          label={t('syllabus.createModule')}
           onPress={() => void addModule()}
           disabled={!moduleTitle.trim()}
           style={styles.submit}
@@ -346,6 +352,7 @@ function AddLessonSheet({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [title, setTitle] = useState('');
   const [video, setVideo] = useState<Awaited<ReturnType<typeof pickVideo>>>(null);
@@ -362,13 +369,13 @@ function AddLessonSheet({
         setVideo(picked);
         const dur = picked.durationMs ? Math.round(picked.durationMs / 1000) : 0;
         if (dur > 0 && (dur < 900 || dur > 1200)) {
-          setError('La duración de la lección debe estar entre 15 y 20 minutos (15:00 a 20:00).');
+          setError(t('syllabus.lessonDuration'));
         } else {
           setError(null);
         }
       }
     } catch {
-      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
+      setError(t('resources.pickerFailed'));
     }
   };
 
@@ -377,8 +384,10 @@ function AddLessonSheet({
     const durationSeconds = video?.durationMs ? Math.round(video.durationMs / 1000) : 0;
     if (video && (durationSeconds < DURACION_MINIMA || durationSeconds > DURACION_MAXIMA)) {
       setError(
-        `El vídeo debe durar entre ${Math.round(DURACION_MINIMA / 60)} minuto(s) y ` +
-          `${Math.round(DURACION_MAXIMA / 3600)} horas.`,
+        t('syllabus.videoLength', {
+          minimo: Math.round(DURACION_MINIMA / 60),
+          maximo: Math.round(DURACION_MAXIMA / 3600),
+        }),
       );
       return;
     }
@@ -401,9 +410,9 @@ function AddLessonSheet({
       onCreated();
       // Cerrar antes del aviso: la hoja es un Modal y en iOS tapa el toast.
       onClose();
-      toast('Lección añadida');
+      toast(t('syllabus.lessonAdded'));
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'No se pudo guardar. Inténtalo de nuevo.');
+      setError(failure instanceof Error ? failure.message : t('highlights.saveFailed'));
     } finally {
       setSaving(false);
       setProgress(null);
@@ -412,27 +421,27 @@ function AddLessonSheet({
 
   const progressLabel =
     progress?.phase === 'compressing'
-      ? `Comprimiendo ${Math.round(progress.ratio * 100)}%`
+      ? t('syllabus.compressing', { porcentaje: Math.round(progress.ratio * 100) })
       : progress?.phase === 'uploading'
-      ? `Subiendo ${Math.round(progress.ratio * 100)}%`
+      ? t('syllabus.uploading', { porcentaje: Math.round(progress.ratio * 100) })
       : null;
 
   return (
     <BottomSheet visible onClose={onClose}>
       <Text style={styles.sheetTitle} color={colors.text}>
-        Nueva lección · {module.title}
+        {t('syllabus.newLesson', { modulo: module.title })}
       </Text>
       <Input
         value={title}
         onChangeText={setTitle}
-        placeholder="Título de la lección"
+        placeholder={t('syllabus.lessonTitle')}
         placeholderTextColor={colors.textMuted}
         style={{ color: colors.text }}
       />
 
       <ListRow
-        title={video ? video.name || 'Video seleccionado' : 'Elegir video'}
-        subtitle={video ? 'Toca para cambiarlo' : 'Opcional'}
+        title={video ? video.name || t('syllabus.videoPicked') : t('syllabus.pickVideo')}
+        subtitle={video ? t('syllabus.tapToChange') : t('syllabus.optional')}
         leftIcon="video"
         onPress={() => void choose()}
       />
@@ -446,7 +455,7 @@ function AddLessonSheet({
       <InlineError message={error} />
 
       <Button
-        label="Guardar lección"
+        label={t('syllabus.saveLesson')}
         onPress={() => void save()}
         loading={saving}
         disabled={!title.trim()}

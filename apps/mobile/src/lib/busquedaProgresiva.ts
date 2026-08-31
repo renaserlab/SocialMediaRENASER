@@ -461,11 +461,28 @@ const FILA_DE: Record<Grupo, { kind: FilaDeBusqueda['kind']; prefijo: string }> 
   events: { kind: 'event', prefijo: 'e' },
 };
 
+/**
+ * Los rotulos de la lista, ya en el idioma de quien mira.
+ *
+ * Se pasan desde fuera porque aqui no hay React y por tanto no se sabe que
+ * idioma esta activo. Lo que no se pase cae al español, que es el idioma de
+ * referencia de la aplicacion.
+ */
+export type TextosDeResultados = {
+  titulos?: Partial<Record<Grupo, string>>;
+  verMas?: string;
+  cargando?: string;
+  /** Recibe los temas ya unidos por comas y devuelve la frase entera. */
+  temas?: (lista: string) => string;
+};
+
 type OpcionesDeFilas = {
   /** El grupo que esta pidiendo su pagina siguiente, si alguno. */
   ampliando?: Grupo | null;
   /** Que hacer al pulsar «Ver mas». Sin esto no se ofrece. */
   verMas?: (grupo: Grupo) => void;
+  /** Rotulos traducidos. Sin esto se pinta en español. */
+  textos?: TextosDeResultados;
 };
 
 /**
@@ -483,7 +500,7 @@ type OpcionesDeFilas = {
  */
 export function filasDeResultados(
   resultados: ResultadosDeBusqueda,
-  { ampliando = null, verMas }: OpcionesDeFilas = {},
+  { ampliando = null, verMas, textos }: OpcionesDeFilas = {},
 ): FilaDeBusqueda[] {
   const out: FilaDeBusqueda[] = [];
 
@@ -493,10 +510,11 @@ export function filasDeResultados(
     acierta sin explicar por que no se lee como listo, se lee como averiado.
   */
   if (resultados.temas.length > 0) {
+    const lista = resultados.temas.map((t) => t.name).join(', ');
     out.push({
       kind: 'temas',
       key: 'temas',
-      texto: `También buscamos en ${resultados.temas.map((t) => t.name).join(', ')}`,
+      texto: textos?.temas ? textos.temas(lista) : `También buscamos en ${lista}`,
     });
   }
 
@@ -511,8 +529,12 @@ export function filasDeResultados(
     out.push({
       kind: 'section',
       key: `sec-${grupo}`,
-      title: TITULOS[grupo],
-      action: hayMas ? (ampliando === grupo ? 'Cargando…' : 'Ver más') : undefined,
+      title: textos?.titulos?.[grupo] ?? TITULOS[grupo],
+      action: hayMas
+        ? ampliando === grupo
+          ? (textos?.cargando ?? 'Cargando…')
+          : (textos?.verMas ?? 'Ver más')
+        : undefined,
       // Mientras un grupo se amplia, ninguno acepta pulsaciones: dos paginas en
       // vuelo a la vez se aplicarian en el orden en que vuelvan.
       onAction: hayMas && ampliando === null ? () => verMas?.(grupo) : undefined,

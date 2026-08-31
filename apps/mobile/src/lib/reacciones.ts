@@ -51,9 +51,35 @@ export function mezclarReacciones(
  * la notificación—. En los dos casos se cae al texto de siempre, que sigue
  * siendo correcto: hubo una reacción y la hizo esta persona.
  */
-export function textoDeReacciones(actor: string, total?: number | null): string {
+export type PlantillasDeReacciones = {
+  /** Una sola persona. Huecos: `{actor}`. */
+  una: string;
+  /** Dos personas. Huecos: `{actor}`. */
+  unaMas: string;
+  /** Tres o más. Huecos: `{actor}` y `{otros}`. */
+  variasMas: string;
+};
+
+/**
+ * El texto en español, que es el idioma de referencia.
+ *
+ * Las plantillas se pasan desde fuera porque aquí no hay React y no se sabe en
+ * qué idioma se está pintando; quien llama (el mapeador de avisos) las trae ya
+ * traducidas. Sin ellas se escribe en español, que es lo que hacía antes.
+ */
+const PLANTILLAS_ES: PlantillasDeReacciones = {
+  una: 'A {actor} le gustó tu publicación',
+  unaMas: '{actor} y 1 persona más reaccionaron a tu publicación',
+  variasMas: '{actor} y {otros} personas más reaccionaron a tu publicación',
+};
+
+export function textoDeReacciones(
+  actor: string,
+  total?: number | null,
+  plantillas: PlantillasDeReacciones = PLANTILLAS_ES,
+): string {
   const otros = (total ?? 0) - 1;
-  if (otros <= 0) return `A ${actor} le gustó tu publicación`;
-  if (otros === 1) return `${actor} y 1 persona más reaccionaron a tu publicación`;
-  return `${actor} y ${otros} personas más reaccionaron a tu publicación`;
+  const plantilla =
+    otros <= 0 ? plantillas.una : otros === 1 ? plantillas.unaMas : plantillas.variasMas;
+  return plantilla.replace('{actor}', actor).replace('{otros}', String(otros));
 }

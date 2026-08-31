@@ -7,8 +7,10 @@ import { PeopleList } from '@/components/PeopleList';
 import { useFollowList } from '@/hooks/useFollowList';
 import { useAppStore } from '@/store/useAppStore';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function FollowersScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   // La ruta es /followers/[id]; sin id se entienden los del propio usuario.
@@ -28,7 +30,7 @@ export function FollowersScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Seguidores"
+        title={t('profile.followers')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))}
       />
       <PeopleList
@@ -38,11 +40,9 @@ export function FollowersScreen() {
         onRetry={reload}
         onToggleFollow={toggleFollow}
         currentUserId={currentUserId}
-        emptyTitle={isOwn ? 'Aún no tienes seguidores' : 'Todavía no tiene seguidores'}
+        emptyTitle={isOwn ? t('follow.noFollowersOwn') : t('follow.noFollowersOther')}
         emptyDescription={
-          isOwn
-            ? 'Comparte tu primera publicación para empezar a conectar.'
-            : 'Cuando alguien lo siga, aparecerá aquí.'
+          isOwn ? t('follow.noFollowersOwnBody') : t('follow.noFollowersOtherBody')
         }
       />
     </View>

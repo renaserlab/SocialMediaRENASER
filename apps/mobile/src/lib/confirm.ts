@@ -1,5 +1,7 @@
 import { Alert, Platform } from 'react-native';
 
+import { traduceEnElIdiomaActual } from '@/i18n';
+
 type ConfirmOptions = {
   title: string;
   message?: string;
@@ -41,9 +43,13 @@ function fallbackConfirm(o: ConfirmOptions): Promise<boolean> {
   }
   return new Promise((resolve) => {
     Alert.alert(o.title, o.message, [
-      { text: o.cancelLabel ?? 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
       {
-        text: o.confirmLabel ?? 'Aceptar',
+        text: o.cancelLabel ?? traduceEnElIdiomaActual('common.cancel'),
+        style: 'cancel',
+        onPress: () => resolve(false),
+      },
+      {
+        text: o.confirmLabel ?? traduceEnElIdiomaActual('common.ok'),
         style: o.destructive ? 'destructive' : 'default',
         onPress: () => resolve(true),
       },
@@ -61,8 +67,8 @@ function fallbackConfirm(o: ConfirmOptions): Promise<boolean> {
 export function confirm({
   title,
   message,
-  confirmLabel = 'Aceptar',
-  cancelLabel = 'Cancelar',
+  confirmLabel = traduceEnElIdiomaActual('common.ok'),
+  cancelLabel = traduceEnElIdiomaActual('common.cancel'),
   destructive = false,
 }: ConfirmOptions): Promise<boolean> {
   if (present) {
@@ -79,7 +85,7 @@ export function notify(title: string, message?: string): void {
     present({
       title,
       message,
-      confirmLabel: 'Entendido',
+      confirmLabel: traduceEnElIdiomaActual('common.gotIt'),
       destructive: false,
       resolve: () => {},
     });

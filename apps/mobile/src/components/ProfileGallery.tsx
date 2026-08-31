@@ -13,6 +13,7 @@ import { miniaturaDePublicacion } from '@/lib/miniaturaDePublicacion';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   gallery: Post[];
@@ -45,6 +46,7 @@ const PRIMERAS_VISIBLES = GRID_COLUMNS * 4;
  * vacios). Ahora sale lo que ha publicado esa persona.
  */
 export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -100,7 +102,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
         <View style={styles.center}>
           <Feather name="camera" size={30} color={colors.textMuted} />
           <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-            {emptyHint ?? 'Aún no hay publicaciones.'}
+            {emptyHint ?? t('profile.noPosts')}
           </Text>
         </View>
       ) : (

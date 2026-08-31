@@ -76,7 +76,7 @@ export function LoginScreen() {
         «Failed to fetch»). Ahora se traduce siempre y el original queda en la
         consola.
       */
-      const message = mensajeDeAuth(error, 'acceso');
+      const message = mensajeDeAuth(error, 'acceso', t);
       // Las credenciales se corrigen en el propio formulario; el resto son
       // cosas que no dependen de lo escrito y merecen un aviso aparte.
       if (/incorrect/i.test(message)) {
@@ -103,7 +103,7 @@ export function LoginScreen() {
         router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
-      notify(t('auth.googleFailedSignIn'), mensajeDeAuth(error, 'acceso'));
+      notify(t('auth.googleFailedSignIn'), mensajeDeAuth(error, 'acceso', t));
     } finally {
       setSocialBusy(false);
     }

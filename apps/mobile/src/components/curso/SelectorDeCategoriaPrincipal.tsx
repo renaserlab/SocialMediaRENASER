@@ -7,6 +7,7 @@ import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { RecommendationRepository, type TopicDto } from '@/repositories/RecommendationRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   valor: string | null;
@@ -29,6 +30,7 @@ type Props = {
  * guardar lo suyo.
  */
 export function SelectorDeCategoriaPrincipal({ valor, alCambiar }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [temas, setTemas] = useState<TopicDto[]>([]);
 
@@ -51,10 +53,10 @@ export function SelectorDeCategoriaPrincipal({ valor, alCambiar }: Props) {
   return (
     <View style={styles.raiz}>
       <Text variant="caption" weight="800" color={colors.textMuted} style={styles.etiqueta}>
-        CATEGORÍA PRINCIPAL
+        {t('preview.mainCategory')}
       </Text>
       <Text variant="caption" color={colors.textMuted}>
-        Es donde se encuentra el curso. Elige una.
+        {t('preview.mainCategoryHint')}
       </Text>
       {/*
         Blindado frente al gesto de cambiar de sección: sin esto, arrastrar la

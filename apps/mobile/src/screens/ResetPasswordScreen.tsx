@@ -66,7 +66,7 @@ export function ResetPasswordScreen() {
     } catch (err) {
       // Mismo criterio que en el envio del correo: el motivo tecnico va a la
       // consola y a la pantalla solo sale algo que se pueda entender y usar.
-      setError(mensajeDeAuth(err, 'nueva-contrasena'));
+      setError(mensajeDeAuth(err, 'nueva-contrasena', t));
     } finally {
       guardando.current = false;
       setSaving(false);

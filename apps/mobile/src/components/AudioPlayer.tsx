@@ -8,6 +8,7 @@ import { Text } from '@/components/Text';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 function formatTime(seconds: number): string {
   const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
@@ -18,6 +19,7 @@ function formatTime(seconds: number): string {
 
 /** Reproductor compacto de audio para publicaciones del feed. */
 export function AudioPlayer({ uri, title }: { uri: string; title?: string }) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const player = useAudioPlayer({ uri });
   const status = useAudioPlayerStatus(player);
@@ -37,7 +39,7 @@ export function AudioPlayer({ uri, title }: { uri: string; title?: string }) {
     if (typeof player.setActiveForLockScreen !== 'function') return;
     player.setActiveForLockScreen(
       true,
-      { title: title ?? 'Audio', artist: 'RENASER' },
+      { title: title ?? t('audio.audio'), artist: 'RENASER' },
       { showSeekForward: true, showSeekBackward: true },
     );
     return () => {
@@ -61,7 +63,7 @@ export function AudioPlayer({ uri, title }: { uri: string; title?: string }) {
         onPress={toggle}
         style={[styles.button, { backgroundColor: colors.primary }]}
         accessibilityRole="button"
-        accessibilityLabel={playing ? 'Pausar audio' : 'Reproducir audio'}
+        accessibilityLabel={playing ? t('audio.pause') : t('audio.play')}
         hitSlop={8}
       >
         <Feather name={playing ? 'pause' : 'play'} size={20} color={colors.onPrimary} />
@@ -69,7 +71,7 @@ export function AudioPlayer({ uri, title }: { uri: string; title?: string }) {
 
       <View style={styles.info}>
         <Text variant="secondary" weight="600" numberOfLines={1}>
-          {title ?? 'Audio'}
+          {title ?? t('audio.audio')}
         </Text>
 
         <AudioScrubber

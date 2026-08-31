@@ -13,6 +13,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Lo que cabe en un par de pantallas. No se traen mil de golpe. */
 const POR_PAGINA = 20;
@@ -36,6 +37,7 @@ const POR_PAGINA = 20;
  * buscar la publicación otra vez. Desaparece al volver a entrar.
  */
 export function SavedScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -58,7 +60,7 @@ export function SavedScreen() {
       setFallo(null);
     } catch (error) {
       // Un fallo de red no puede convertirse en «no tienes nada guardado».
-      setFallo(error instanceof Error ? error.message : 'No se pudieron cargar tus guardados.');
+      setFallo(error instanceof Error ? error.message : t('saved.loadFailedBody'));
       setGuardadas([]);
       setHayMas(false);
     }
@@ -110,19 +112,15 @@ export function SavedScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Guardados"
+        title={t('profile.saved')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))}
       />
       <StateView
         state={estado}
         icon="bookmark"
         onRetry={cargar}
-        title={estado === 'error' ? 'No se pudieron cargar tus guardados' : 'Sin publicaciones guardadas'}
-        description={
-          estado === 'error'
-            ? fallo ?? undefined
-            : 'Toca el marcador en una publicación para guardarla aquí.'
-        }
+        title={estado === 'error' ? t('saved.loadFailed') : t('saved.empty')}
+        description={estado === 'error' ? (fallo ?? undefined) : t('saved.emptyBody')}
       >
         <FlashList
           data={guardadas ?? []}

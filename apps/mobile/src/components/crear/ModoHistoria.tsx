@@ -21,6 +21,7 @@ import { readVideoMetadata } from '@/services/mediaCompressor';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -50,6 +51,7 @@ type Props = {
  * se quedaria atras.
  */
 export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
+  const { t } = useTranslation();
   const createStory = useAppStore((state) => state.createStory);
   /*
     El pie se apoya en la barra flotante, no en un numero.
@@ -85,7 +87,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
         duracion = duracionMedida(elegido.durationMs, delArchivo?.durationS
           ? delArchivo.durationS * 1000
           : null);
-        const decision = revisarDuracionDeHistoria(duracion);
+        const decision = revisarDuracionDeHistoria(duracion, t);
         if (decision.estado !== 'cabe') throw new Error(decision.mensaje);
         duracion = decision.durationMs;
       }
@@ -103,7 +105,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
       // El aviso va DESPUES de salir: sobre una pantalla completa el toast
       // quedaria tapado.
       alSalir();
-      toast('Historia publicada');
+      toast(t('create.storyPublished'));
     });
   }, [elegido, envio, createStory, alSalir]);
 
@@ -142,7 +144,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
         hitSlop={12}
         style={styles.volver}
         accessibilityRole="button"
-        accessibilityLabel="Elegir otra cosa"
+        accessibilityLabel={t('create.chooseSomethingElse')}
       >
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
@@ -157,7 +159,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
           alCancelar={envio.cancelar}
         />
         <Button
-          label="Compartir en tu historia"
+          label={t('create.shareToStory')}
           variant="secondary"
           icon="send"
           onPress={publicar}
@@ -165,7 +167,7 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
           disabled={envio.ocupado}
         />
         <Text variant="caption" color={media.textMuted} style={styles.nota}>
-          Se verá durante 24 horas.
+          {t('create.storyLasts24h')}
         </Text>
       </View>
     </View>

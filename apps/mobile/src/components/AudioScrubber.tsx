@@ -4,6 +4,7 @@ import { LayoutChangeEvent, PanResponder, StyleSheet, View } from 'react-native'
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 function clamp(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -49,6 +50,7 @@ export function AudioScrubber({
   height = 4,
   knobBorderColor,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [trackWidth, setTrackWidth] = useState(0);
   const [scrubRatio, setScrubRatio] = useState<number | null>(null);
@@ -129,7 +131,7 @@ export function AudioScrubber({
       style={styles.touch}
       onLayout={(e: LayoutChangeEvent) => setTrackWidth(e.nativeEvent.layout.width)}
       accessibilityRole="adjustable"
-      accessibilityLabel="Posición del audio"
+      accessibilityLabel={t('audio.position')}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}
       {...panResponder.panHandlers}
     >

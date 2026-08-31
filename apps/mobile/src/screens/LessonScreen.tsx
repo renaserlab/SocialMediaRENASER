@@ -24,8 +24,10 @@ import { SAMPLE_VIDEO_URL } from '@/data/media';
 import { signCourseUrls } from '@/services/storage';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function LessonScreen() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
@@ -51,7 +53,7 @@ export function LessonScreen() {
   const { alAvanzar, alTerminar } = useProgresoDeLeccion(id, {
     habilitado: lesson?.hasAccess === true,
     alCompletar: (cursoCompleto) => {
-      toast(cursoCompleto ? '¡Curso completado!' : 'Lección completada');
+      toast(cursoCompleto ? t('lesson.courseCompleted') : t('lesson.completed'));
     },
   });
 
@@ -130,7 +132,7 @@ export function LessonScreen() {
     */
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader title={t('lesson.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <View
           style={[
             styles.playerContainer,
@@ -152,7 +154,7 @@ export function LessonScreen() {
   if (error || !lesson) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Lección del Curso" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader title={t('lesson.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
       </View>
     );
@@ -163,11 +165,14 @@ export function LessonScreen() {
     setSavingDescription(true);
     try {
       await CourseContentRepository.updateLesson(lesson.id, { body: descriptionDraft.trim() });
-      toast('Descripción guardada');
+      toast(t('lesson.descriptionSaved'));
       setEditingDescription(false);
       reload();
     } catch (error) {
-      notify('No se pudo guardar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+      notify(
+        t('common.saveFailed'),
+        error instanceof Error ? error.message : t('common.tryAgain'),
+      );
     } finally {
       setSavingDescription(false);
     }
@@ -176,26 +181,26 @@ export function LessonScreen() {
   /** Solo la administracion borra; la RLS lo impone de verdad. */
   const removeLesson = async () => {
     const accepted = await confirm({
-      title: 'Eliminar lección',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('lesson.deleteTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await CourseContentRepository.removeLesson(lesson.id);
-      toast('Lección eliminada');
+      toast(t('lesson.deleted'));
       if (router.canGoBack()) router.back();
       else router.replace('/');
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Lección del Curso"
+        title={t('lesson.headerTitle')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
         // Eliminar vive aqui y no en el temario: alli tocar la fila borraba la
         // leccion, de modo que no habia forma de abrirla para revisarla.
@@ -238,7 +243,7 @@ export function LessonScreen() {
               <>
                 <Feather name="lock" size={22} color={colors.textMuted} />
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: spacing.md }}>
-                  Contenido no disponible
+                  {t('lesson.locked')}
                 </Text>
                 <Text
                   style={{
@@ -249,12 +254,12 @@ export function LessonScreen() {
                     paddingHorizontal: spacing.xl,
                   }}
                 >
-                  Esta lección no está incluida en tu cuenta.
+                  {t('lesson.lockedBody')}
                 </Text>
               </>
             ) : (
               <Text style={{ color: colors.textMuted, fontSize: 13 }}>
-                Esta lección aún no tiene video.
+                {t('lesson.noVideo')}
               </Text>
             )}
           </View>
@@ -262,11 +267,11 @@ export function LessonScreen() {
 
         <View style={styles.details}>
           <Text style={[styles.title, { color: colors.text }]}>
-            Lección {lesson.order + 1}: {lesson.title}
+            {t('lesson.numbered', { numero: lesson.order + 1, titulo: lesson.title })}
           </Text>
           <Text style={[styles.duration, { color: colors.textMuted }]}>
-            Duración: {lesson.durationMin} min
-            {lesson.mentor ? ` • Mentor: ${lesson.mentor}` : ''}
+            {t('lesson.duration', { minutos: lesson.durationMin })}
+            {lesson.mentor ? t('lesson.mentorSuffix', { mentor: lesson.mentor }) : ''}
           </Text>
 
           {/* Descripcion de la leccion; solo la edita la administracion. */}
@@ -274,7 +279,9 @@ export function LessonScreen() {
             <>
               <View style={[styles.divider, { backgroundColor: colors.border }]} />
               <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>Descripción</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+                  {t('lesson.description')}
+                </Text>
                 {canManage ? (
                   <Pressable
                     onPress={() => {
@@ -283,14 +290,14 @@ export function LessonScreen() {
                     }}
                     hitSlop={10}
                     accessibilityRole="button"
-                    accessibilityLabel="Editar descripción"
+                    accessibilityLabel={t('lesson.editDescription')}
                   >
                     <Feather name="edit-2" size={16} color={colors.textMuted} />
                   </Pressable>
                 ) : null}
               </View>
               <Text style={[styles.bodyText, { color: lesson.summary ? colors.text : colors.textMuted, lineHeight: 22 }]}>
-                {lesson.summary || 'Sin descripción todavía.'}
+                {lesson.summary || t('lesson.noDescription')}
               </Text>
             </>
           ) : null}
@@ -301,11 +308,13 @@ export function LessonScreen() {
       </ScrollView>
 
       <BottomSheet visible={editingDescription} onClose={() => setEditingDescription(false)}>
-        <Text style={[styles.sheetTitle, { color: colors.text }]}>Descripción de la lección</Text>
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>
+          {t('lesson.descriptionSheet')}
+        </Text>
         <Input
           value={descriptionDraft}
           onChangeText={setDescriptionDraft}
-          placeholder="De qué trata esta lección…"
+          placeholder={t('lesson.descriptionPlaceholder')}
           placeholderTextColor={colors.textMuted}
           multiline
           numberOfLines={5}
@@ -313,7 +322,7 @@ export function LessonScreen() {
           style={{ color: colors.text, minHeight: 120 }}
         />
         <Button
-          label="Guardar"
+          label={t('common.save')}
           onPress={() => void saveDescription()}
           loading={savingDescription}
           style={{ marginTop: spacing.lg }}

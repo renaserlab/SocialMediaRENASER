@@ -7,6 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { VideoScrubber } from '@/components/VideoScrubber';
 import { palette } from '@/theme/tokens';
 import type { VideoPlayerProps } from './VideoPlayer.types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 // En web no se puede usar expo-video (modulo nativo), pero el navegador ya trae
 // un reproductor: montamos un <video> del DOM. Antes esto era un placeholder
@@ -34,6 +35,7 @@ export function VideoPlayer({
   hidePlayButton = false,
   onMutedChange,
 }: VideoPlayerProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(autoPlay);
   // Igual que en nativo: el circulo de play solo reaparece si la pausa la pidio
@@ -242,7 +244,7 @@ export function VideoPlayer({
             style={StyleSheet.absoluteFill}
             onPress={toggle}
             accessibilityRole="button"
-            accessibilityLabel={playing ? 'Pausar video' : 'Reproducir video'}
+            accessibilityLabel={playing ? t('video.pause') : t('video.play')}
           >
             {!playing && (!hidePlayButton || userPaused) ? (
               <View style={styles.centered} pointerEvents="none">

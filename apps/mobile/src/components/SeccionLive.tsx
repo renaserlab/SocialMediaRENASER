@@ -7,6 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { Avatar } from '@/components/Avatar';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
+import { useTranslation } from '@/i18n/useTranslation';
 import { LiveRepository, type Emision } from '@/repositories/LiveRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
 
@@ -35,6 +36,7 @@ type Props = {
 export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [emisiones, setEmisiones] = useState<Emision[] | null>(null);
   const [fallo, setFallo] = useState(false);
 
@@ -108,14 +110,14 @@ export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
         <Feather name={fallo ? 'wifi-off' : 'radio'} size={28} color={media.text} />
       </View>
       <Text variant="title" weight="800" color={media.text} style={estilos.centrado}>
-        {fallo ? 'No pudimos comprobarlo' : 'Todavía no hay transmisiones'}
+        {fallo ? t('live.checkFailedTitle') : t('live.emptyTitle')}
       </Text>
       <Text variant="body" color={media.textMuted} style={estilos.centrado}>
         {fallo
-          ? 'No conseguimos hablar con el servidor, así que no sabemos si hay alguien emitiendo. Revisa tu conexión.'
+          ? t('live.checkFailedBody')
           : /* Sin promesas de fecha: se cuenta lo que hay, que es que nadie
                está emitiendo ahora mismo. */
-            'Cuando alguien empiece un directo, aparecerá aquí. Mientras tanto, hay mucho que descubrir en Z.'}
+            t('live.emptyBody')}
       </Text>
       <Pressable
         onPress={alDescubrir}
@@ -123,7 +125,7 @@ export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
         accessibilityRole="button"
       >
         <Text variant="body" weight="700" color={media.text}>
-          Descubrir contenido
+          {t('live.discover')}
         </Text>
       </Pressable>
     </View>
@@ -138,21 +140,28 @@ export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
  * es mejor saberlo desde fuera que descubrirlo dentro.
  */
 function TarjetaDeEmision({ emision, alAbrir }: { emision: Emision; alAbrir: () => void }) {
+  const { t } = useTranslation();
   const enDirecto = emision.estado === 'live';
   const rotulo =
     emision.estado === 'live'
-      ? 'EN VIVO'
+      ? t('live.badgeLive')
       : emision.estado === 'scheduled'
-        ? 'PROGRAMADA'
+        ? t('live.badgeScheduled')
         : emision.estado === 'ended'
-          ? 'TERMINÓ'
-          : 'CANCELADA';
+          ? t('live.badgeEnded')
+          : t('live.badgeCancelled');
 
   return (
     <Pressable
       onPress={alAbrir}
       accessibilityRole="button"
-      accessibilityLabel={`Abrir la emisión ${emision.titulo}, de ${emision.anfitrionNombre}`}
+      /* Una sola clave con huecos: partida en trozos («Abrir la emisión» +
+         título + «de» + nombre) no se puede recomponer en un idioma que
+         ordene las palabras de otra forma. */
+      accessibilityLabel={t('live.openBroadcast', {
+        titulo: emision.titulo,
+        anfitrion: emision.anfitrionNombre,
+      })}
       style={[estilos.tarjeta, { borderColor: media.border }]}
     >
       <Avatar size={44} image={emision.anfitrionAvatarUrl} name={emision.anfitrionNombre} />
@@ -173,7 +182,7 @@ function TarjetaDeEmision({ emision, alAbrir }: { emision: Emision; alAbrir: () 
           </View>
           {!emision.reproduccionDisponible ? (
             <Text variant="caption" color={media.textMuted}>
-              Solo chat, sin vídeo
+              {t('live.chatOnly')}
             </Text>
           ) : null}
         </View>

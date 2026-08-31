@@ -8,6 +8,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 import { fromDisplay, toDisplay, type DateFieldProps } from './DateField.types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Campo de fecha con calendario (iOS / Android).
@@ -23,6 +24,7 @@ export function DateField({
   placeholder = 'dd/mm/aaaa',
   minDate,
 }: DateFieldProps) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [open, setOpen] = useState(false);
 
@@ -38,7 +40,11 @@ export function DateField({
         onPress={() => setOpen(true)}
         style={[styles.field, { borderColor: colors.border, backgroundColor: colors.background }]}
         accessibilityRole="button"
-        accessibilityLabel={label ? `${label}: ${value || 'sin fecha'}` : 'Elegir fecha'}
+        accessibilityLabel={
+          label
+            ? t('field.dateWithLabel', { etiqueta: label, valor: value || t('field.noDate') })
+            : t('field.pickDate')
+        }
       >
         <Text style={{ color: value ? colors.text : colors.textMuted, fontSize: 14 }}>
           {value || placeholder}

@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { StateView } from '@/components/StateView';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Invitación a crear cuenta en las pantallas que necesitan una.
@@ -24,6 +25,7 @@ export function SignedOutNotice({
   title: string;
   description: string;
 }) {
+  const { t } = useTranslation();
   const router = useRouter();
 
   return (
@@ -32,7 +34,7 @@ export function SignedOutNotice({
       icon={icon}
       title={title}
       description={description}
-      actionLabel="Crear cuenta"
+      actionLabel={t('auth.signUp')}
       onAction={() => router.push('/register' as never)}
     />
   );

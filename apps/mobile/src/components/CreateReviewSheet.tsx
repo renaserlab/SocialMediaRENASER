@@ -20,6 +20,7 @@ import { pickImage, pickVideo, uploadPostMedia, type PickedMedia } from '@/servi
 import type { Course } from '@/types';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Escribir una resena SOBRE otra persona.
@@ -66,6 +67,7 @@ export function CreateReviewSheet({
   onSaved,
   editando,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const editando_ = !!editando;
   const [texto, setTexto] = useState(editando?.texto ?? '');
@@ -131,7 +133,7 @@ export function CreateReviewSheet({
         setError(null);
       }
     } catch {
-      setError('No se pudo abrir el selector. Revisa los permisos e inténtalo de nuevo.');
+      setError(t('resources.pickerFailed'));
     }
   };
 
@@ -140,7 +142,7 @@ export function CreateReviewSheet({
     if (!limpio) {
       // La unica exigencia. En la hoja anterior el bloqueo era «elige una foto»,
       // que es justo lo contrario de lo que pide una resena.
-      setError('Escribe tu reseña: el texto es lo importante.');
+      setError(t('review.needText'));
       return;
     }
     setGuardando(true);
@@ -180,7 +182,7 @@ export function CreateReviewSheet({
       } else {
         await ReviewRepository.publicar(sobreId, { texto: limpio, medios, ...conCurso });
       }
-      toast(editando_ ? 'Reseña actualizada' : 'Reseña publicada');
+      toast(editando_ ? t('review.updated') : t('review.published'));
       reiniciar();
       onSaved?.();
       onClose();
@@ -199,19 +201,19 @@ export function CreateReviewSheet({
   return (
     <BottomSheet visible={visible} onClose={cerrar}>
       <Text style={styles.title} color={colors.text}>
-        {editando_ ? 'Editar tu reseña' : 'Escribir una reseña'}
+        {editando_ ? t('review.editOwn') : t('review.writeTitle')}
       </Text>
 
       {sobreNombre ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.about}>
-          {`Sobre ${sobreNombre}. Aparecerá en su perfil con tu nombre.`}
+          {t('review.about', { nombre: sobreNombre })}
         </Text>
       ) : null}
 
       <Input
         value={texto}
         onChangeText={setTexto}
-        placeholder="Cuenta tu experiencia con esta persona"
+        placeholder={t('review.placeholder')}
         placeholderTextColor={colors.textMuted}
         maxLength={2000}
         multiline
@@ -250,7 +252,7 @@ export function CreateReviewSheet({
             onPress={() => setQuitarMedio(true)}
             style={[styles.removeBtn, { backgroundColor: colors.text }]}
             accessibilityRole="button"
-            accessibilityLabel="Quitar el archivo actual"
+            accessibilityLabel={t('review.removeCurrentFile')}
             hitSlop={8}
           >
             <Feather name="trash-2" size={14} color={colors.background} />
@@ -270,11 +272,11 @@ export function CreateReviewSheet({
       {cursosDisponibles && cursos.length > 0 ? (
         <View style={styles.cursos}>
           <Text variant="secondary" color={colors.textMuted} style={styles.optional}>
-            ¿Habla de alguno de sus cursos? (opcional)
+            {t('review.aboutCourse')}
           </Text>
           <View style={styles.cursoFila}>
             <OpcionDeCurso
-              etiqueta="Ninguno"
+              etiqueta={t('review.none')}
               seleccionada={cursoId === null}
               onPress={() => setCursoId(null)}
             />
@@ -293,18 +295,18 @@ export function CreateReviewSheet({
       {/* Adjuntar es OPCIONAL y se dice: sin este texto, dos botones grandes
           hacen pensar que hay que elegir uno para poder publicar. */}
       <Text variant="secondary" color={colors.textMuted} style={styles.optional}>
-        Puedes añadir una foto o un vídeo (opcional)
+        {t('review.optionalMedia')}
       </Text>
       <View style={styles.pickRow}>
         <Button
-          label="Foto"
+          label={t('gallery.photo')}
           icon="image"
           variant="secondary"
           onPress={() => void elegir('image')}
           style={styles.pickBtn}
         />
         <Button
-          label="Vídeo"
+          label={t('video.video')}
           icon="video"
           variant="secondary"
           onPress={() => void elegir('video')}
@@ -315,7 +317,7 @@ export function CreateReviewSheet({
       <InlineError message={error} />
 
       <Button
-        label={editando_ ? 'Guardar cambios' : 'Publicar reseña'}
+        label={editando_ ? t('common.saveChanges') : t('review.publish')}
         onPress={() => void publicar()}
         loading={guardando}
         // Solo el texto. El archivo NUNCA bloquea el boton: era el fallo de la

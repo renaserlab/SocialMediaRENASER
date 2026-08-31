@@ -16,6 +16,7 @@ import { palette, spacing } from '@/theme/tokens';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { useAppStore } from '@/store/useAppStore';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Reel normalizado. Antes el componente consumia el tipo `Short` del demo, con
@@ -128,6 +129,7 @@ function ShortVideoItemBase({
   espacioInferior = 0,
   alDescartar,
 }: Props) {
+  const { t } = useTranslation();
   const router = useRouter();
 
   /*
@@ -191,7 +193,7 @@ function ShortVideoItemBase({
   const requireAuth = useRequireAuth();
 
   const toggleLike = () => {
-    void requireAuth('para reaccionar', () => {
+    void requireAuth('auth.reasonReact', () => {
       haptics.light();
       toggleLikePost(short.id);
     });
@@ -216,6 +218,7 @@ function ShortVideoItemBase({
       postId: short.id,
       autor: short.author,
       clase: 'video',
+      traducir: t,
     });
     Share.share({ message }).catch(() => {});
   };
@@ -298,13 +301,13 @@ function ShortVideoItemBase({
           onPress={() => router.push(`/comments/${short.id}` as never)}
           style={styles.sidebarItem}
           accessibilityRole="button"
-          accessibilityLabel="Comentarios"
+          accessibilityLabel={t('post.comments')}
         >
           <Feather name="message-square" size={28} color={media.text} />
           <Text style={[styles.sidebarLabel, { color: media.text }]}>{short.comments}</Text>
         </Pressable>
 
-        <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel="Compartir">
+        <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel={t('post.share')}>
           <Feather name="share-2" size={28} color={media.text} />
         </Pressable>
 
@@ -324,8 +327,8 @@ function ShortVideoItemBase({
             onPress={() => alDescartar(short.id)}
             style={styles.sidebarItem}
             accessibilityRole="button"
-            accessibilityLabel="No me interesa este video"
-            accessibilityHint="Deja de mostrarte esta publicación. No afecta a quien la publicó."
+            accessibilityLabel={t('feed.notInterested')}
+            accessibilityHint={t('feed.notInterestedHint')}
           >
             <Feather name="slash" size={22} color={media.textMuted} />
           </Pressable>
@@ -345,7 +348,7 @@ function ShortVideoItemBase({
           style={[styles.sidebarItem, styles.soundButton, { backgroundColor: media.overlay, borderColor: media.border }]}
           accessibilityRole="switch"
           accessibilityState={{ checked: !muted }}
-          accessibilityLabel={muted ? 'Activar el sonido' : 'Silenciar'}
+          accessibilityLabel={muted ? t('video.unmute') : t('video.mute')}
         >
           <Feather name={muted ? 'volume-x' : 'volume-2'} size={22} color={media.text} />
         </Pressable>

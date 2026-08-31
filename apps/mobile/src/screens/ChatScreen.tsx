@@ -19,6 +19,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
+import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
@@ -71,6 +72,7 @@ function pesoLegible(bytes?: number | null): string {
 
 export function ChatScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
@@ -141,7 +143,7 @@ export function ChatScreen() {
       // Sin esto un fallo de carga dejaba el chat vacio, como si no hubiera
       // mensajes, en vez de avisar de que no se pudieron cargar.
       .catch(() => {
-        if (montado) setLoadError('No se pudieron cargar los mensajes.');
+        if (montado) setLoadError(t('chat.loadFailed'));
       });
     MessageRepository.markRead(conversationId).catch(() => {});
 
@@ -217,7 +219,7 @@ export function ChatScreen() {
       .finally(() => setCargandoHistorial(false));
   }, [supabaseEnabled, params.id, currentUserId, cargandoHistorial, hayMasHistorial, aplicar]);
 
-  const headerName = params.name ?? demoConversation?.name ?? 'Conversación';
+  const headerName = params.name ?? demoConversation?.name ?? t('chat.conversation');
   const messages = supabaseEnabled ? remoteMessages : demoConversation?.messages ?? [];
 
   // -------------------------------------------------------------------------
@@ -256,10 +258,8 @@ export function ChatScreen() {
         anadir(Array.isArray(resultado) ? resultado : [resultado]);
       } catch (error) {
         notify(
-          'No se pudo abrir',
-          error instanceof PermisoDenegadoError
-            ? error.message
-            : 'No se pudo abrir el selector de archivos.',
+          t('common.couldNotOpen'),
+          error instanceof PermisoDenegadoError ? error.message : t('chat.pickerFailed'),
         );
       }
     },
@@ -335,12 +335,12 @@ export function ChatScreen() {
         const esFaltaDeMigracion =
           error instanceof ApiError && error.code === 'chat_attachments_not_available';
         notify(
-          esFaltaDeMigracion ? 'Archivos no disponibles todavía' : 'No se pudo enviar',
+          esFaltaDeMigracion ? t('chat.attachmentsOffTitle') : t('chat.sendFailed'),
           esFaltaDeMigracion
-            ? 'Por ahora solo se pueden mandar mensajes de texto por el chat.'
+            ? t('chat.attachmentsOffBody')
             : error instanceof Error
               ? error.message
-              : 'Revisa tu conexión e inténtalo de nuevo.',
+              : t('common.checkConnection'),
         );
       } finally {
         setEnviando(false);
@@ -443,12 +443,10 @@ export function ChatScreen() {
         return;
       }
       const ok = await confirm({
-        title: 'Eliminar mensaje',
-        message:
-          'Se eliminará para todos los participantes. Verán que aquí hubo un ' +
-          'mensaje y que lo eliminaste.',
-        confirmLabel: 'Eliminar',
-        cancelLabel: 'Cancelar',
+        title: t('chat.deleteTitle'),
+        message: t('chat.deleteBody'),
+        confirmLabel: t('common.delete'),
+        cancelLabel: t('common.cancel'),
         destructive: true,
       });
       if (!ok) return;
@@ -469,10 +467,10 @@ export function ChatScreen() {
         );
       } catch (fallo) {
         notify(
-          'No se pudo eliminar',
+          t('common.deleteFailed'),
           fallo instanceof ApiError && fallo.code === 'message_not_yours'
-            ? 'Solo puedes eliminar los mensajes que has escrito tú.'
-            : 'Inténtalo de nuevo en unos momentos.',
+            ? t('chat.deleteNotYours')
+            : t('common.tryAgainSoon'),
         );
       }
     },
@@ -514,7 +512,7 @@ export function ChatScreen() {
         key={adjunto.id}
         onPress={() => (adjunto.url ? setFotoAmpliada(adjunto) : undefined)}
         accessibilityRole="button"
-        accessibilityLabel={adjunto.kind === 'video' ? 'Ver vídeo' : 'Ver foto'}
+        accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
         style={[styles.medio, { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) }]}
       >
         {adjunto.url ? (
@@ -593,7 +591,7 @@ export function ChatScreen() {
                         fontStyle: 'italic',
                       }}
                     >
-                      Mensaje eliminado
+                      {t('chat.deletedMessage')}
                     </Text>
                   </View>
                 </View>
@@ -646,7 +644,7 @@ export function ChatScreen() {
                     accessibilityRole={mine && !item.estado ? 'button' : undefined}
                     accessibilityLabel={
                       mine && !item.estado
-                        ? 'Mantén pulsado para eliminar el mensaje'
+                        ? t('chat.holdToDelete')
                         : undefined
                     }
                   >
@@ -679,9 +677,9 @@ export function ChatScreen() {
                       }}
                     >
                       {item.estado === 'enviando'
-                        ? 'Enviando…'
+                        ? t('chat.sending')
                         : fallido
-                          ? 'No se envió'
+                          ? t('chat.notSent')
                           : item.createdAt}
                     </Text>
                   </Pressable>
@@ -692,19 +690,23 @@ export function ChatScreen() {
                     <Pressable
                       onPress={() => reintentar(item)}
                       accessibilityRole="button"
-                      accessibilityLabel="Reintentar el envío"
+                      accessibilityLabel={t('chat.retrySend')}
                       style={styles.accionFallo}
                     >
                       <Feather name="refresh-cw" size={13} color={colors.primary} />
-                      <Text style={{ color: colors.primary, fontSize: 11 }}>Reintentar</Text>
+                      <Text style={{ color: colors.primary, fontSize: 11 }}>
+                        {t('common.retry')}
+                      </Text>
                     </Pressable>
                     <Pressable
                       onPress={() => descartar(item)}
                       accessibilityRole="button"
-                      accessibilityLabel="Descartar el mensaje"
+                      accessibilityLabel={t('chat.discardMessage')}
                       style={styles.accionFallo}
                     >
-                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>Descartar</Text>
+                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                        {t('common.discard')}
+                      </Text>
                     </Pressable>
                   </View>
                 ) : null}
@@ -745,7 +747,9 @@ export function ChatScreen() {
                 <Pressable
                   onPress={() => quitarElegido(indice)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Quitar ${archivo.name ?? 'el archivo'}`}
+                  accessibilityLabel={t('chat.removeAttachment', {
+                    nombre: archivo.name ?? t('chat.theFile'),
+                  })}
                   style={[styles.previaQuitar, { backgroundColor: colors.background }]}
                 >
                   <Feather name="x" size={12} color={colors.text} />
@@ -783,7 +787,7 @@ export function ChatScreen() {
             value={text}
             onChangeText={setText}
             onSubmitEditing={submit}
-            placeholder="Mensaje"
+            placeholder={t('profile.message')}
             placeholderTextColor={colors.textMuted}
             returnKeyType="send"
             containerStyle={styles.inputContainer}
@@ -793,7 +797,7 @@ export function ChatScreen() {
             onPress={submit}
             disabled={(!text.trim() && elegidos.length === 0) || enviando}
             style={styles.sendButton}
-            accessibilityLabel="Enviar mensaje"
+            accessibilityLabel={t('chat.sendMessage')}
             accessibilityRole="button"
           >
             {enviando ? (
@@ -811,12 +815,20 @@ export function ChatScreen() {
 
       <BottomSheet visible={menuAbierto} onClose={() => setMenuAbierto(false)}>
         <ListRow
-          title="Fotos y vídeos"
+          title={t('chat.photosAndVideos')}
           leftIcon="image"
           onPress={() => void elegirCon(() => elegirFotosOVideos(MAX_ADJUNTOS - elegidos.length))}
         />
-        <ListRow title="Cámara" leftIcon="camera" onPress={() => void elegirCon(hacerFoto)} />
-        <ListRow title="Archivo" leftIcon="paperclip" onPress={() => void elegirCon(elegirArchivo)} />
+        <ListRow
+          title={t('chat.camera')}
+          leftIcon="camera"
+          onPress={() => void elegirCon(hacerFoto)}
+        />
+        <ListRow
+          title={t('chat.file')}
+          leftIcon="paperclip"
+          onPress={() => void elegirCon(elegirArchivo)}
+        />
       </BottomSheet>
 
       {fotoAmpliada?.url ? (

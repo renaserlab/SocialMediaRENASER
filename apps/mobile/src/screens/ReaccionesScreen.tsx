@@ -8,6 +8,7 @@ import { useListaDePersonas } from '@/hooks/useListaDePersonas';
 import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Quién reaccionó a una publicación.
@@ -20,6 +21,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * el mismo botón de seguir.
  */
 export function ReaccionesScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -37,7 +39,7 @@ export function ReaccionesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Reacciones"
+        title={t('post.reactions')}
         // Si se llega desde un aviso puede no haber a donde volver: en ese caso
         // se cae a la publicacion, que es el contexto de lo que se esta viendo.
         onBack={() =>
@@ -53,8 +55,8 @@ export function ReaccionesScreen() {
         onRetry={reload}
         onToggleFollow={toggleFollow}
         currentUserId={currentUserId}
-        emptyTitle="Todavía no hay reacciones"
-        emptyDescription="Cuando alguien reaccione, aparecerá aquí."
+        emptyTitle={t('post.noReactions')}
+        emptyDescription={t('post.noReactionsBody')}
       />
     </View>
   );

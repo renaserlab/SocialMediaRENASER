@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * Lectura de los enlaces de autenticacion que llegan por correo.
  *
@@ -87,14 +89,46 @@ export function esEnlaceDeRecuperacion(enlace: EnlaceAuth): boolean {
  * El texto original de Supabase («Email link is invalid or has expired») queda
  * para el log; al usuario se le dice que hacer, no que fallo.
  */
-export function mensajeDeEnlace(enlace: EnlaceAuth): string {
+
+/**
+ * Cómo se traduce lo que sale de aquí.
+ *
+ * Lo pasa quien pinta. Este módulo NO puede importar el diccionario: se prueba
+ * con el runner de Node, que no resuelve el alias `@/`. Sin traductor se
+ * escribe en español, que es el idioma de referencia.
+ */
+export type Traductor = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave. Es el mismo texto que hay en `i18n/es.ts`, y que no
+ * se desvíen lo comprueba `i18n/diccionariosSincronizados.test.mts`.
+ */
+export const RESPALDOS_ES = {
+  'authError.linkExpired': 'El enlace de recuperación ha caducado. Solicita uno nuevo.',
+  'authLink.alreadyUsed':
+    'Este enlace ya no es válido. Puede que se haya usado antes o que hayas pedido otro más reciente.',
+  'authLink.cannotOpen': 'No pudimos abrir el enlace de recuperación. Solicita uno nuevo.',
+} as const;
+
+const enEspanol: Traductor = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? '';
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
+
+export function mensajeDeEnlace(enlace: EnlaceAuth, traducir: Traductor = enEspanol): string {
   const codigo = enlace.errorCode ?? '';
 
   if (/otp_expired|expired/i.test(codigo)) {
-    return 'El enlace de recuperación ha caducado. Solicita uno nuevo.';
+    return traducir('authError.linkExpired');
   }
   if (/access_denied|invalid|used/i.test(codigo)) {
-    return 'Este enlace ya no es válido. Puede que se haya usado antes o que hayas pedido otro más reciente.';
+    return traducir('authLink.alreadyUsed');
   }
-  return 'No pudimos abrir el enlace de recuperación. Solicita uno nuevo.';
+  return traducir('authLink.cannotOpen');
 }

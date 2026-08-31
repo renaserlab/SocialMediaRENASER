@@ -20,6 +20,8 @@ import {
 import { usePreferenciasStore } from '@/store/usePreferenciasStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * El cuestionario con el que Z entiende que necesita cada persona.
@@ -46,46 +48,50 @@ const MIN_TEMAS = 1;
 
 type Paso = {
   clave: string;
-  titulo: string;
-  ayuda: string;
+  titulo: TranslationKey;
+  /** La clave de la ayuda; `temas` la compone con los topes. */
+  ayuda: TranslationKey;
   /** false = se puede continuar sin responder. */
   obligatorio: boolean;
 };
 
+// Titulo y ayuda se guardan como CLAVE: el texto se resuelve al pintar, que
+// es cuando se sabe en que idioma esta la aplicacion.
 const PASOS: Paso[] = [
   {
     clave: 'objetivos',
-    titulo: '¿Qué te gustaría encontrar en Z?',
-    ayuda: 'Puedes elegir varias.',
+    titulo: 'onboarding.goalsTitle',
+    ayuda: 'onboarding.chooseSeveral',
     obligatorio: false,
   },
   {
     clave: 'temas',
-    titulo: '¿En qué temas quieres crecer o aprender?',
-    ayuda: `Elige entre ${MIN_TEMAS} y ${MAX_TEMAS}.`,
+    titulo: 'onboarding.topicsTitle',
+    ayuda: 'onboarding.topicsHelp',
     obligatorio: true,
   },
   {
     clave: 'conexion',
-    titulo: '¿Qué tipo de conexión te sería más útil?',
-    ayuda: 'Esto decide a quién te presentamos primero.',
+    titulo: 'onboarding.connectionTitle',
+    ayuda: 'onboarding.connectionHelp',
     obligatorio: false,
   },
   {
     clave: 'formatos',
-    titulo: '¿Cómo prefieres aprender o conectar?',
-    ayuda: 'Puedes elegir varias.',
+    titulo: 'onboarding.formatsTitle',
+    ayuda: 'onboarding.chooseSeveral',
     obligatorio: false,
   },
   {
     clave: 'oferta',
-    titulo: '¿Tú también puedes ayudar a otras personas?',
-    ayuda: 'Opcional. Nadie tiene que ser experto para aportar algo.',
+    titulo: 'onboarding.offerTitle',
+    ayuda: 'onboarding.offerHelp',
     obligatorio: false,
   },
 ];
 
 export function OnboardingScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const { modo } = useLocalSearchParams<{ modo?: string }>();
@@ -196,7 +202,7 @@ export function OnboardingScreen() {
       setErrorAlGuardar(
         error instanceof Error
           ? error.message
-          : 'No pudimos guardar tus respuestas. Inténtalo de nuevo.',
+          : t('onboarding.saveFailed'),
       );
       setGuardando(false);
     }
@@ -228,12 +234,10 @@ export function OnboardingScreen() {
           <StateView
             state={carga === 'error' ? 'error' : 'loading'}
             icon="wifi-off"
-            title={carga === 'error' ? 'No pudimos cargar las preguntas' : undefined}
-            description={
-              carga === 'error' ? 'Revisa tu conexión e inténtalo de nuevo.' : undefined
-            }
+            title={carga === 'error' ? t('onboarding.loadFailed') : undefined}
+            description={carga === 'error' ? t('common.checkConnection') : undefined}
             onRetry={carga === 'error' ? cargar : undefined}
-            actionLabel={carga === 'error' ? 'Continuar sin responder' : undefined}
+            actionLabel={carga === 'error' ? t('onboarding.continueWithout') : undefined}
             onAction={carga === 'error' ? salir : undefined}
           />
         </View>
@@ -243,7 +247,7 @@ export function OnboardingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title={editando ? 'Tus preferencias' : 'Z'} onBack={atras} />
+      <AppHeader title={editando ? t('onboarding.yourPreferences') : 'Z'} onBack={atras} />
 
       {/* Progreso: cuantas preguntas quedan, sin tener que contarlas. */}
       <View style={styles.progreso}>
@@ -269,10 +273,13 @@ export function OnboardingScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text variant="title" weight="900" style={styles.titulo}>
-          {pasoActual.titulo}
+          {t(pasoActual.titulo)}
         </Text>
         <Text variant="body" color={colors.textMuted} style={styles.ayuda}>
-          {pasoActual.ayuda}
+          {/* Solo el paso de temas lleva los topes dentro de la frase. */}
+          {pasoActual.clave === 'temas'
+            ? t(pasoActual.ayuda, { min: MIN_TEMAS, max: MAX_TEMAS })
+            : t(pasoActual.ayuda)}
         </Text>
 
         {pasoActual.clave === 'objetivos' && (
@@ -341,7 +348,7 @@ export function OnboardingScreen() {
             {modosDeOferta.length > 0 ? (
               <View style={styles.grupo}>
                 <Text variant="body" weight="700" style={styles.subtitulo}>
-                  ¿En qué temas?
+                  {t('onboarding.whichTopics')}
                 </Text>
                 <View style={styles.chips}>
                   {(catalogo!.topics ?? []).map((tema) => (
@@ -361,8 +368,7 @@ export function OnboardingScreen() {
                   reputacion comprobable llegara de las sesiones y las resenas.
                 */}
                 <Text variant="secondary" color={colors.textMuted} style={styles.aviso}>
-                  Esto es lo que tú declaras. La experiencia verificada llegará de
-                  las sesiones que completes y de las reseñas de otras personas.
+                  {t('onboarding.selfDeclared')}
                 </Text>
               </View>
             ) : null}
@@ -373,7 +379,13 @@ export function OnboardingScreen() {
       <View style={[styles.pie, { borderTopColor: colors.border }]}>
         {errorAlGuardar ? <InlineError message={errorAlGuardar} /> : null}
         <Button
-          label={esUltimo ? (editando ? 'Guardar' : 'Empezar') : 'Continuar'}
+          label={
+            esUltimo
+              ? editando
+                ? t('common.save')
+                : t('onboarding.start')
+              : t('language.continue')
+          }
           onPress={() => (esUltimo ? void guardar(false) : setPaso(paso + 1))}
           disabled={!puedeContinuar}
           loading={guardando}
@@ -383,12 +395,12 @@ export function OnboardingScreen() {
             onPress={saltar}
             disabled={guardando}
             accessibilityRole="button"
-            accessibilityLabel="Saltar por ahora"
+            accessibilityLabel={t('onboarding.skip')}
             hitSlop={8}
             style={styles.saltar}
           >
             <Text variant="secondary" color={colors.textMuted}>
-              Saltar por ahora
+              {t('onboarding.skip')}
             </Text>
             <Feather name="chevron-right" size={14} color={colors.textMuted} />
           </Pressable>

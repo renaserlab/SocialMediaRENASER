@@ -14,6 +14,8 @@ import {
 } from '@/lib/asistenteDeCurso';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const NIVELES: Record<string, string> = {
   beginner: 'Inicial',
@@ -21,10 +23,12 @@ const NIVELES: Record<string, string> = {
   advanced: 'Avanzado',
 };
 
-const IDIOMAS: Record<string, string> = {
-  es: 'Español',
-  en: 'Inglés',
-  pt: 'Portugués',
+// El nombre del idioma se pinta en el idioma de la aplicación, no en el suyo:
+// es una etiqueta de la ficha, no un selector de idioma.
+const IDIOMAS: Record<string, TranslationKey> = {
+  es: 'lang.spanish',
+  en: 'lang.english',
+  pt: 'lang.portuguese',
 };
 
 type Props = {
@@ -55,6 +59,7 @@ export function VistaPreviaDeCurso({
   currency,
   precioEnCentavos,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const segundos = duracionTotal(modulos);
   const lecciones = totalDeLecciones(modulos);
@@ -68,7 +73,7 @@ export function VistaPreviaDeCurso({
           <View style={styles.sinPortada}>
             <Feather name="image" size={20} color={colors.textMuted} />
             <Text variant="caption" color={colors.textMuted}>
-              Sin portada
+              {t('preview.noCover')}
             </Text>
           </View>
         )}
@@ -76,7 +81,7 @@ export function VistaPreviaDeCurso({
 
       <View style={styles.cuerpo}>
         <Text variant="titleMedium" weight="900">
-          {borrador.title.trim() || 'Sin título todavía'}
+          {borrador.title.trim() || t('preview.noTitle')}
         </Text>
         {borrador.subtitle.trim() ? (
           <Text variant="secondary" color={colors.textMuted}>
@@ -87,14 +92,18 @@ export function VistaPreviaDeCurso({
         <View style={styles.etiquetas}>
           <Dato icono="tag" texto={etiquetaDePrecio(precioEnCentavos, currency)} />
           <Dato icono="clock" texto={duracionLegible(segundos)} />
-          <Dato icono="play-circle" texto={`${lecciones} lecciones`} />
-          <Dato icono="book" texto={`${modulos.length} módulos`} />
+          <Dato icono="play-circle" texto={t('course.lessons', { count: lecciones })} />
+          <Dato icono="book" texto={t('course.modules', { count: modulos.length })} />
           {borrador.level ? (
             <Dato icono="bar-chart-2" texto={NIVELES[borrador.level] ?? borrador.level} />
           ) : null}
           <Dato
             icono="globe"
-            texto={IDIOMAS[borrador.language] ?? borrador.language.toUpperCase()}
+            texto={
+              IDIOMAS[borrador.language]
+                ? t(IDIOMAS[borrador.language]!)
+                : borrador.language.toUpperCase()
+            }
           />
         </View>
 
@@ -104,14 +113,17 @@ export function VistaPreviaDeCurso({
           </Text>
         ) : (
           <Text variant="secondary" color={colors.textMuted} style={styles.parrafo}>
-            Todavía no has escrito la descripción. Es lo que lee quien decide si
-            empezarlo.
+            {t('preview.noDescription')}
           </Text>
         )}
 
-        <Lista titulo="Lo que aprenderás" icono="check" valores={borrador.highlights} />
-        <Lista titulo="Para quién es" icono="user" valores={borrador.targetAudience} />
-        <Lista titulo="Qué necesitas antes" icono="corner-down-right" valores={borrador.prerequisites} />
+        <Lista titulo={t('preview.whatYouLearn')} icono="check" valores={borrador.highlights} />
+        <Lista titulo={t('preview.whoFor')} icono="user" valores={borrador.targetAudience} />
+        <Lista
+          titulo={t('preview.prerequisites')}
+          icono="corner-down-right"
+          valores={borrador.prerequisites}
+        />
       </View>
     </View>
   );

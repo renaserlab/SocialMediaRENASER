@@ -11,8 +11,10 @@ import { useAppStore } from '@/store/useAppStore';
 import { motion, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { QuizArea } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function QuizScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const answers = useAppStore((state) => state.quizAnswers);
@@ -171,12 +173,12 @@ export function QuizScreen() {
 
       <View style={styles.footer}>
         <Button
-          label={isLast ? 'Ver mi resultado' : 'Siguiente'}
+          label={isLast ? t('quiz.seeResult') : t('quiz.next')}
           onPress={next}
           disabled={!selected}
         />
         <Text variant="secondary" color={colors.textMuted} style={styles.footerHint}>
-          {selected ? 'Puedes cambiar tu respuesta antes de continuar.' : 'Elige una opción para continuar.'}
+          {selected ? t('quiz.canChange') : t('quiz.pickOne')}
         </Text>
       </View>
     </View>

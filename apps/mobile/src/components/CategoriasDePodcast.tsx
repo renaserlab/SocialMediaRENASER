@@ -13,6 +13,7 @@ import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import type { CategoriaDePodcast } from '@/repositories/PodcastCategoryRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const MAX_NOMBRE = 40;
 
@@ -49,6 +50,7 @@ export function CategoriasDePodcast({
   renombrar,
   borrar,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [gestionando, setGestionando] = useState(false);
   const [nombre, setNombre] = useState('');
@@ -66,7 +68,7 @@ export function CategoriasDePodcast({
   const guardar = async () => {
     const limpio = nombre.trim();
     if (!limpio) {
-      setError('Ponle un nombre a la categoría.');
+      setError(t('category.needName'));
       return;
     }
     setOcupado(true);
@@ -74,17 +76,17 @@ export function CategoriasDePodcast({
     try {
       if (editando) {
         await renombrar(editando.id, limpio);
-        toast('Categoría renombrada');
+        toast(t('category.renamed'));
       } else {
         await crear(limpio);
-        toast('Categoría creada');
+        toast(t('category.created'));
       }
       setEditando(null);
       setNombre('');
     } catch (e) {
       // El backend rechaza los nombres repetidos con un motivo claro; se pinta
       // tal cual en vez de un «no se pudo» que no dice que arreglar.
-      setError(describeError(e, 'No se pudo guardar la categoría.'));
+      setError(describeError(e, t('category.saveFailed')));
     } finally {
       setOcupado(false);
     }
@@ -92,12 +94,12 @@ export function CategoriasDePodcast({
 
   const eliminar = async (categoria: CategoriaDePodcast) => {
     const seguro = await confirm({
-      title: `Borrar «${categoria.nombre}»`,
+      title: t('category.deleteNamed', { nombre: categoria.nombre }),
       message:
         categoria.episodios > 0
-          ? `Sus ${categoria.episodios} audio(s) NO se borran: se quedan sin categoría y seguirán apareciendo en «Todos».`
-          : 'Esta categoría está vacía.',
-      confirmLabel: 'Borrar',
+          ? t('category.deleteKeepsAudios', { count: categoria.episodios })
+          : t('category.empty'),
+      confirmLabel: t('category.delete'),
       destructive: true,
     });
     if (!seguro) return;
@@ -105,9 +107,9 @@ export function CategoriasDePodcast({
     try {
       await borrar(categoria.id);
       if (seleccionada === categoria.id) alSeleccionar(null);
-      toast('Categoría borrada');
+      toast(t('category.deleted'));
     } catch (e) {
-      setError(describeError(e, 'No se pudo borrar la categoría.'));
+      setError(describeError(e, t('category.deleteFailed')));
     } finally {
       setOcupado(false);
     }
@@ -125,7 +127,11 @@ export function CategoriasDePodcast({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.fila}
         >
-          <Chip label="Todos" selected={seleccionada === null} onPress={() => alSeleccionar(null)} />
+          <Chip
+            label={t('gallery.all')}
+            selected={seleccionada === null}
+            onPress={() => alSeleccionar(null)}
+          />
           {categorias.map((c) => (
             <Chip
               key={c.id}
@@ -139,11 +145,11 @@ export function CategoriasDePodcast({
               onPress={() => setGestionando(true)}
               style={[styles.gestionar, { borderColor: colors.border }]}
               accessibilityRole="button"
-              accessibilityLabel="Gestionar tus categorías"
+              accessibilityLabel={t('category.manage')}
             >
               <Feather name="plus" size={14} color={colors.text} />
               <Text variant="caption" weight="700" color={colors.text}>
-                {categorias.length === 0 ? 'Crear categoría' : 'Gestionar'}
+                {categorias.length === 0 ? t('category.createShort') : t('category.manageShort')}
               </Text>
             </Pressable>
           ) : null}
@@ -152,21 +158,21 @@ export function CategoriasDePodcast({
 
       <BottomSheet visible={gestionando} onClose={cerrar}>
         <Text variant="caption" weight="800" color={colors.text} style={styles.titulo}>
-          TUS CATEGORÍAS
+          {t('category.yours')}
         </Text>
         <Text variant="secondary" color={colors.textMuted} style={styles.explicacion}>
-          Agrupa tus audios como quieras: «Mis experiencias», «Carpintería», «Historias»…
+          {t('category.explain')}
         </Text>
 
         <View style={[styles.campo, { borderColor: colors.border, backgroundColor: colors.surface }]}>
           <TextInput
             value={nombre}
             onChangeText={setNombre}
-            placeholder={editando ? 'Nuevo nombre' : 'Nombre de la categoría'}
+            placeholder={editando ? t('category.newName') : t('category.namePlaceholder')}
             placeholderTextColor={colors.textMuted}
             maxLength={MAX_NOMBRE}
             style={[styles.entrada, { color: colors.text }]}
-            accessibilityLabel="Nombre de la categoría"
+            accessibilityLabel={t('category.namePlaceholder')}
             onSubmitEditing={() => void guardar()}
             returnKeyType="done"
           />
@@ -181,14 +187,14 @@ export function CategoriasDePodcast({
 
         <View style={styles.acciones}>
           <Button
-            label={editando ? 'Guardar' : 'Añadir'}
+            label={editando ? t('common.save') : t('category.addShort')}
             onPress={() => void guardar()}
             disabled={ocupado || !nombre.trim()}
             style={styles.accion}
           />
           {editando ? (
             <Button
-              label="Cancelar"
+              label={t('common.cancel')}
               variant="secondary"
               onPress={() => {
                 setEditando(null);
@@ -202,7 +208,7 @@ export function CategoriasDePodcast({
         <View style={styles.lista}>
           {categorias.length === 0 ? (
             <Text variant="secondary" color={colors.textMuted}>
-              Todavía no tienes ninguna. Los audios sin categoría aparecen en «Todos».
+              {t('category.none')}
             </Text>
           ) : (
             categorias.map((c) => (
@@ -212,7 +218,9 @@ export function CategoriasDePodcast({
                     {c.nombre}
                   </Text>
                   <Text variant="caption" color={colors.textMuted}>
-                    {c.episodios === 1 ? '1 audio' : `${c.episodios} audios`}
+                    {c.episodios === 1
+                      ? t('category.audiosOne')
+                      : t('category.audiosMany', { count: c.episodios })}
                   </Text>
                 </View>
                 <Pressable
@@ -224,7 +232,7 @@ export function CategoriasDePodcast({
                   hitSlop={8}
                   style={styles.iconoAccion}
                   accessibilityRole="button"
-                  accessibilityLabel={`Renombrar ${c.nombre}`}
+                  accessibilityLabel={t('category.renameNamed', { nombre: c.nombre })}
                 >
                   <Feather name="edit-2" size={16} color={colors.textMuted} />
                 </Pressable>
@@ -233,7 +241,7 @@ export function CategoriasDePodcast({
                   hitSlop={8}
                   style={styles.iconoAccion}
                   accessibilityRole="button"
-                  accessibilityLabel={`Borrar ${c.nombre}`}
+                  accessibilityLabel={t('category.deleteNamedShort', { nombre: c.nombre })}
                 >
                   <Feather name="trash-2" size={16} color={colors.textMuted} />
                 </Pressable>

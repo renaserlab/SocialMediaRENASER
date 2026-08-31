@@ -1,4 +1,5 @@
 import type { RecommendationReason } from '@/repositories/RecommendationRepository';
+import type { TraductorDeMotivos } from '@/lib/motivoDeRecomendacion';
 
 /**
  * De codigo de motivo de un CURSO a frase que se entiende.
@@ -32,11 +33,48 @@ import type { RecommendationReason } from '@/repositories/RecommendationReposito
  */
 export type NombresDeTema = Readonly<Record<string, string>>;
 
-function lista(temas: string[]): string {
+/**
+ * El español de cada clave.
+ *
+ * Es el mismo texto que hay en `i18n/es.ts`, y que no se desvíen lo comprueba
+ * `i18n/diccionariosSincronizados.test.mts`. Vive aquí y no se importa del
+ * diccionario por lo mismo que en `motivoDeRecomendacion`: este módulo se
+ * prueba con el runner de Node, que no resuelve el alias `@/`.
+ */
+export const RESPALDOS_ES = {
+  'courseReason.topicMatch': 'Porque quieres aprender {temas}',
+  'courseReason.topicMatchGeneric': 'Porque trata de algo que quieres aprender',
+  'courseReason.learningGoal': 'Encaja con lo que buscas: aprender',
+  'courseReason.preferredFormat': 'Prefieres aprender en formato curso',
+  'courseReason.creatorAffinity': 'De alguien cuyo contenido ya te interesa',
+  'courseReason.recentInterest': 'Por lo que has estado viendo últimamente',
+  'courseReason.newCourse': 'Se ha publicado hace poco',
+  'courseReason.worthALook': 'Todavía no lo ha visto mucha gente',
+  // Las mismas dos que en `motivoDeRecomendacion`: se repiten aquí porque no se
+  // puede importar de allí un valor sin romper la prueba de este módulo (el
+  // runner de Node no resuelve el alias `@/`). La prueba de diccionarios
+  // comprueba que las dos copias digan lo mismo que `i18n/es.ts`.
+  'reason.joinTwo': '{a} y {b}',
+  'reason.joinMany': '{lista} y {ultimo}',
+} as const;
+
+/** El respaldo en español. */
+const respaldo: TraductorDeMotivos = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? '';
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
+
+function lista(temas: string[], t: TraductorDeMotivos): string {
   if (temas.length === 0) return '';
   if (temas.length === 1) return temas[0]!;
-  if (temas.length === 2) return `${temas[0]} y ${temas[1]}`;
-  return `${temas.slice(0, -1).join(', ')} y ${temas[temas.length - 1]}`;
+  if (temas.length === 2) return t('reason.joinTwo', { a: temas[0]!, b: temas[1]! });
+  return t('reason.joinMany', {
+    lista: temas.slice(0, -1).join(', '),
+    ultimo: temas[temas.length - 1]!,
+  });
 }
 
 /**
@@ -57,32 +95,36 @@ function nombresDe(ids: string[] | undefined, nombres: NombresDeTema): string[] 
 export function frasePorMotivoDeCurso(
   motivo: RecommendationReason,
   nombres: NombresDeTema = {},
+  traducir: TraductorDeMotivos = respaldo,
 ): string {
-  const temas = lista(nombresDe(motivo.topics, nombres));
+  const t = traducir;
+  const temas = lista(nombresDe(motivo.topics, nombres), t);
   switch (motivo.code) {
     case 'COURSE_TOPIC_MATCH':
       // Con tema es mucho mas util, pero sin el sigue siendo cierto: el motivo
       // por el que aparece es que trata de algo que esta persona quiere
       // aprender, se pueda nombrar o no.
-      return temas ? `Porque quieres aprender ${temas}` : 'Porque trata de algo que quieres aprender';
+      return temas
+        ? t('courseReason.topicMatch', { temas })
+        : t('courseReason.topicMatchGeneric');
     case 'LEARNING_GOAL_MATCH':
-      return 'Encaja con lo que buscas: aprender';
+      return t('courseReason.learningGoal');
     case 'PREFERRED_COURSE_FORMAT':
-      return 'Prefieres aprender en formato curso';
+      return t('courseReason.preferredFormat');
     case 'CREATOR_AFFINITY':
       // «Cuyo contenido ya te interesa» y no «a quien sigues»: el motivo tambien
       // se dispara por consumo sin seguimiento, y afirmar lo segundo seria
       // falso la mitad de las veces.
-      return 'De alguien cuyo contenido ya te interesa';
+      return t('courseReason.creatorAffinity');
     case 'RECENT_INTEREST':
-      return 'Por lo que has estado viendo últimamente';
+      return t('courseReason.recentInterest');
     case 'NEW_COURSE':
-      return 'Se ha publicado hace poco';
+      return t('courseReason.newCourse');
     case 'WORTH_A_LOOK':
       // Sale por exploracion, sin nada a su favor todavia. Se dice en voz alta
       // en vez de disfrazarlo de coincidencia: presentar un descubrimiento como
       // si encajara con lo que alguien busca ensena a desconfiar del resto.
-      return 'Todavía no lo ha visto mucha gente';
+      return t('courseReason.worthALook');
     default:
       // Un codigo que esta version de la aplicacion no conoce no se inventa ni
       // se pinta en crudo: simplemente no se dice nada de el.
@@ -97,9 +139,10 @@ export function frasePorMotivoDeCurso(
 export function frasePrincipalDeCurso(
   motivos: RecommendationReason[],
   nombres: NombresDeTema = {},
+  traducir: TraductorDeMotivos = respaldo,
 ): string {
   for (const motivo of motivos) {
-    const frase = frasePorMotivoDeCurso(motivo, nombres);
+    const frase = frasePorMotivoDeCurso(motivo, nombres, traducir);
     if (frase) return frase;
   }
   return '';
@@ -109,8 +152,9 @@ export function frasePrincipalDeCurso(
 export function frasesDeMotivosDeCurso(
   motivos: RecommendationReason[],
   nombres: NombresDeTema = {},
+  traducir: TraductorDeMotivos = respaldo,
 ): string[] {
   return motivos
-    .map((motivo) => frasePorMotivoDeCurso(motivo, nombres))
+    .map((motivo) => frasePorMotivoDeCurso(motivo, nombres, traducir))
     .filter((frase) => frase.length > 0);
 }

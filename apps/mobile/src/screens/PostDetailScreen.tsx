@@ -13,8 +13,10 @@ import { useAppStore } from '@/store/useAppStore';
 import type { Post } from '@/types';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export function PostDetailScreen() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
@@ -73,23 +75,23 @@ export function PostDetailScreen() {
   if (!post) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Publicación" onBack={goBack} />
+        <AppHeader title={t('post.single')} onBack={goBack} />
         {estado === 'cargando' ? (
           <StateView state="loading" />
         ) : estado === 'error' ? (
           <StateView
             state="error"
             icon="wifi-off"
-            title="No pudimos cargar la publicación"
-            description="Revisa tu conexión e inténtalo de nuevo."
+            title={t('post.loadFailed')}
+            description={t('common.checkConnection')}
             onRetry={() => setIntento((n) => n + 1)}
           />
         ) : (
           <StateView
             state="empty"
             icon="file-text"
-            title="Publicación no disponible"
-            description="Es posible que se haya eliminado o que ya no sea pública."
+            title={t('post.unavailable')}
+            description={t('post.unavailableBody')}
           />
         )}
       </View>
@@ -98,7 +100,7 @@ export function PostDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Publicación" onBack={goBack} />
+      <AppHeader title={t('post.single')} onBack={goBack} />
       <SinTecladoDelante>
         <ScrollView
           contentContainerStyle={styles.content}
@@ -107,8 +109,10 @@ export function PostDetailScreen() {
         >
           <PostCard post={post} onRemoved={goBack} />
           <ListRow
-            title="Ver todos los comentarios"
-            subtitle={`${post.commentsCount ?? post.comments.length} comentarios`}
+            title={t('post.viewAllComments')}
+            subtitle={t('post.commentsCount', {
+              count: post.commentsCount ?? post.comments.length,
+            })}
             leftIcon="message-square"
             rightIcon="chevron-right"
             onPress={() => router.push(`/comments/${post.id}` as never)}

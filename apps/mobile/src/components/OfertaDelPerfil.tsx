@@ -14,6 +14,8 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * «Lo que puedo aportar»: el lado PUBLICO del perfil en el recomendador.
@@ -42,9 +44,9 @@ type Props = {
 
 type Etiqueta = {
   /** Como se lee en el perfil de otra persona. */
-  ajena: string;
+  ajena: TranslationKey;
   /** Como se lee en el propio. */
-  propia: string;
+  propia: TranslationKey;
   icono: keyof typeof Feather.glyphMap;
 };
 
@@ -57,12 +59,14 @@ type Etiqueta = {
  * la distincion dependiera del color, en escala de grises —o para quien no lo
  * distingue— las tres relaciones serian la misma.
  */
+// Claves, no textos: el rotulo se resuelve al pintar, que es cuando se sabe
+// en que idioma esta la aplicacion.
 const ETIQUETAS: Record<RelacionDeOferta, Etiqueta> = {
-  can_help: { ajena: 'Puede ayudar', propia: 'Puedo ayudar', icono: 'life-buoy' },
-  teach: { ajena: 'Enseña', propia: 'Enseño', icono: 'book-open' },
+  can_help: { ajena: 'offer.canHelp', propia: 'offer.canHelpOwn', icono: 'life-buoy' },
+  teach: { ajena: 'offer.teaches', propia: 'offer.teachesOwn', icono: 'book-open' },
   experienced: {
-    ajena: 'Experiencia declarada',
-    propia: 'Tengo experiencia',
+    ajena: 'offer.experienced',
+    propia: 'offer.experiencedOwn',
     icono: 'clock',
   },
 };
@@ -75,6 +79,7 @@ const ETIQUETAS: Record<RelacionDeOferta, Etiqueta> = {
 const ORDEN: RelacionDeOferta[] = ['can_help', 'teach', 'experienced'];
 
 export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -146,10 +151,10 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
       >
         <Feather name="compass" size={18} color={colors.textMuted} />
         <Text variant="secondary" color={colors.textMuted} style={styles.invitacionTexto}>
-          Cuéntanos en qué puedes ayudar a otras personas
+          {t('offer.invite')}
         </Text>
         <Button
-          label="Añadir temas"
+          label={t('offer.addTopics')}
           variant="secondary"
           onPress={() => router.push('/onboarding?modo=editar' as never)}
           style={styles.invitacionBoton}
@@ -160,7 +165,7 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
 
   return (
     <View>
-      <SectionTitle title={esPropio ? 'Lo que puedo aportar' : 'Lo que puede aportar'} />
+      <SectionTitle title={esPropio ? t('offer.titleOwn') : t('offer.titleOther')} />
       <View style={styles.lista}>
         {visibles.map((tema) => {
           const etiquetas = ORDEN.filter((relacion) => tema.relations.includes(relacion));
@@ -173,7 +178,7 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
               accessible
               accessibilityLabel={`${tema.name}. ${etiquetas
                 .map((relacion) =>
-                  esPropio ? ETIQUETAS[relacion].propia : ETIQUETAS[relacion].ajena,
+                  esPropio ? t(ETIQUETAS[relacion].propia) : t(ETIQUETAS[relacion].ajena),
                 )
                 .join('. ')}`}
             >
@@ -191,7 +196,7 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
                     >
                       <Feather name={etiqueta.icono} size={13} color={colors.textMuted} />
                       <Text variant="caption" weight="600" color={colors.textMuted}>
-                        {esPropio ? etiqueta.propia : etiqueta.ajena}
+                        {esPropio ? t(etiqueta.propia) : t(etiqueta.ajena)}
                       </Text>
                     </View>
                   );

@@ -31,6 +31,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { es } from '../i18n/es.ts';
+
 const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 function fuente(rel: string): string {
@@ -129,10 +131,17 @@ describe('las reseñas de un perfil ajeno', () => {
   });
 
   it('hablan en tercera persona cuando no es tu perfil', () => {
+    /*
+      El texto vive en el diccionario (`i18n/es.ts`) para que se lea tambien en
+      ingles y portugues; aqui se comprueban las dos mitades: que la seccion
+      pinta ESA clave y que la clave sigue hablando en tercera persona.
+    */
     assert.ok(
-      ramaDeResenas().includes('Este usuario aún no tiene reseñas publicadas'),
+      ramaDeResenas().includes("t('review.emptyOther')"),
       'Falta el texto en tercera persona para el perfil ajeno.',
     );
+    assert.ok(es['review.emptyOther'].startsWith('Este usuario'));
+    assert.ok(es['review.emptyOtherCanWrite'].startsWith('Este usuario'));
   });
 
   it('no tratan a Darren como un caso especial', () => {
@@ -198,10 +207,11 @@ describe('`isOwnProfile` y `canManage` son cosas distintas', () => {
   it('el texto vacio de reseñas depende de la IDENTIDAD', () => {
     const rama = ramaDeResenas();
     assert.ok(
-      /\{isOwnProfile\s*\n?\s*\? 'Todavía no te ha escrito nadie\.'/.test(rama),
+      /\{isOwnProfile\s*\n?\s*\? t\('review\.emptyOwn'\)/.test(rama),
       'El texto en primera persona tiene que colgar de `isOwnProfile`. Con ' +
         '`canManage`, un moderador lo leeria en el perfil de cualquiera.',
     );
+    assert.equal(es['review.emptyOwn'], 'Todavía no te ha escrito nadie.');
   });
 
   it('escribir una reseña se ofrece solo en el perfil ajeno', () => {
@@ -223,9 +233,10 @@ describe('`isOwnProfile` y `canManage` son cosas distintas', () => {
       SECCION.indexOf("if (kind === 'testimonios') {"),
     );
     assert.ok(
-      /\{isOwnProfile \? \(\s*\n\s*<Button\s*\n\s*label="Añadir a la galería"/.test(galeria),
+      /\{isOwnProfile \? \(\s*\n\s*<Button\s*\n\s*label=\{t\('gallery\.add'\)\}/.test(galeria),
       'Añadir a la galeria tiene que colgar de `isOwnProfile`.',
     );
+    assert.equal(es['gallery.add'], 'Añadir a la galería');
   });
 });
 
@@ -333,10 +344,12 @@ describe('de que curso habla una reseña', () => {
 describe('bloquear', () => {
   it('pregunta antes, con Cancelar y Bloquear', () => {
     assert.ok(
-      /confirmLabel: 'Bloquear',\s*\n\s*cancelLabel: 'Cancelar',/.test(PERFIL),
+      /confirmLabel: t\('post\.block'\),\s*\n\s*cancelLabel: t\('common\.cancel'\),/.test(PERFIL),
       'Bloquear deshace ademas el seguimiento en los dos sentidos: no puede ' +
         'dispararse por un roce con el dedo.',
     );
+    assert.equal(es['post.block'], 'Bloquear');
+    assert.equal(es['common.cancel'], 'Cancelar');
   });
 
   it('espera a que la hoja se cierre antes de preguntar', () => {
@@ -364,9 +377,11 @@ describe('bloquear', () => {
 
   it('deja desbloquear desde el propio perfil', () => {
     assert.ok(
-      PERFIL.includes("blocked ? 'Desbloquear a esta persona' : 'Bloquear a esta persona'"),
+      PERFIL.includes("blocked ? t('profile.unblockPerson') : t('profile.blockPerson')"),
       'Deshacer algo tiene que estar donde se hizo.',
     );
+    assert.equal(es['profile.unblockPerson'], 'Desbloquear a esta persona');
+    assert.equal(es['profile.blockPerson'], 'Bloquear a esta persona');
   });
 
   it('reutiliza el bloqueo que ya existe', () => {
@@ -387,10 +402,11 @@ describe('bloquear', () => {
       'Estando bloqueado hay que decir por que no hay nada, no dejar un hueco.',
     );
     assert.ok(
-      /label="Desbloquear"/.test(PERFIL),
+      /label=\{t\('blocked\.unblock'\)\}/.test(PERFIL),
       'Y el boton de desbloquear tiene que seguir alcanzable: si el perfil ' +
         'dejara de serlo, no habria desde donde deshacerlo.',
     );
+    assert.equal(es['blocked.unblock'], 'Desbloquear');
   });
 });
 
@@ -399,11 +415,18 @@ describe('bloquear', () => {
 // ---------------------------------------------------------------------------
 describe('eliminar un mensaje', () => {
   it('deja una lapida y no un hueco', () => {
+    /*
+      El texto ya no esta escrito a mano en la pantalla: vive en el diccionario
+      (`i18n/es.ts`) para que se lea tambien en ingles y portugues. Asi que se
+      comprueban las DOS mitades —que la pantalla lo pinta y que el texto
+      sigue existiendo—, que juntas son la misma garantia de antes.
+    */
     assert.ok(
-      CHAT.includes('Mensaje eliminado'),
+      CHAT.includes("t('chat.deletedMessage')"),
       'Si el mensaje desapareciera sin rastro, la conversacion mentiria: ' +
         'quien esta al otro lado leyo algo que ahora no esta.',
     );
+    assert.equal(es['chat.deletedMessage'], 'Mensaje eliminado');
     assert.ok(
       /if \(item\.eliminado\) \{/.test(CHAT),
       'La lapida se pinta distinta de una burbuja normal.',
@@ -422,9 +445,12 @@ describe('eliminar un mensaje', () => {
 
   it('pregunta antes, porque no se puede deshacer', () => {
     assert.ok(
-      /title: 'Eliminar mensaje',/.test(CHAT) && /confirmLabel: 'Eliminar',/.test(CHAT),
+      /title: t\('chat\.deleteTitle'\),/.test(CHAT) &&
+        /confirmLabel: t\('common\.delete'\),/.test(CHAT),
       'Lo borrado desaparece tambien del telefono de la otra persona.',
     );
+    assert.equal(es['chat.deleteTitle'], 'Eliminar mensaje');
+    assert.equal(es['common.delete'], 'Eliminar');
   });
 
   it('no anida un Pressable dentro de otro', () => {

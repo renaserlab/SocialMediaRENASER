@@ -22,6 +22,7 @@ import { signMediaUrls, uploadPostMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Tope del audio de presentacion.
@@ -60,6 +61,7 @@ type Props = {
  * base de datos ni una URL firmada (caducan). La firma se pide al reproducir.
  */
 export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const setUser = useAppStore((state) => state.setUser);
   useBackgroundAudio();
@@ -104,7 +106,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
     }
     const url = await asegurarUrl();
     if (!url) {
-      toast('No pudimos preparar el audio. Inténtalo de nuevo.');
+      toast(t('intro.prepareFailed'));
       return;
     }
     /*
@@ -150,8 +152,8 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
     if (!permiso.granted) {
       setAviso(
         permiso.canAskAgain === false
-          ? 'Z no tiene permiso para usar el micrófono y el teléfono ya no volverá a preguntar. Actívalo en los ajustes.'
-          : 'Necesitamos el micrófono para grabar tu presentación.',
+          ? t('intro.micBlocked')
+          : t('intro.micNeeded'),
       );
       return;
     }
@@ -159,7 +161,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       await grabadora.prepareToRecordAsync();
       grabadora.record();
     } catch (e) {
-      setAviso(describeError(e, 'No se pudo empezar a grabar.'));
+      setAviso(describeError(e, t('intro.startFailed')));
     }
   }, [grabadora]);
 
@@ -171,7 +173,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       await grabadora.stop();
       const uri = grabadora.uri;
       if (!uri) {
-        setAviso('La grabación se quedó vacía. Inténtalo de nuevo.');
+        setAviso(t('intro.emptyRecording'));
         return;
       }
       setGuardando(true);
@@ -187,9 +189,9 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
         introAudioDurationS: Math.max(1, Math.round(duracionMs / 1000)),
       });
       setUser(perfil);
-      toast('Presentación guardada');
+      toast(t('intro.saved'));
     } catch (e) {
-      setAviso(describeError(e, 'No se pudo guardar tu presentación.'));
+      setAviso(describeError(e, t('intro.saveFailed')));
     } finally {
       guardandoRef.current = false;
       setGuardando(false);
@@ -235,10 +237,9 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
 
   const borrar = useCallback(async () => {
     const seguro = await confirm({
-      title: 'Quitar tu presentación',
-      message:
-        '¿Seguro que quieres quitar tu audio de presentación? Podrás grabar otro cuando quieras.',
-      confirmLabel: 'Quitar',
+      title: t('intro.removeTitle'),
+      message: t('intro.removeBody'),
+      confirmLabel: t('intro.remove'),
       destructive: true,
     });
     if (!seguro) return;
@@ -247,9 +248,9 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       const perfil = await ProfileRepository.updateMyProfile({ introAudioPath: null });
       setUser(perfil);
       setUrlFirmada(null);
-      toast('Presentación quitada');
+      toast(t('intro.removed'));
     } catch (e) {
-      setAviso(describeError(e, 'No se pudo quitar tu presentación.'));
+      setAviso(describeError(e, t('intro.removeFailed')));
     } finally {
       setGuardando(false);
     }
@@ -281,12 +282,12 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
         accessibilityRole="button"
         accessibilityLabel={
           grabando
-            ? 'Parar de grabar'
+            ? t('intro.stopRecording')
             : tieneAudio
             ? sonando
-              ? 'Pausar la presentación'
-              : 'Escuchar la presentación'
-            : 'Grabar tu presentación'
+              ? t('intro.pause')
+              : t('intro.listen')
+            : t('intro.record')
         }
       >
         {guardando || firmando ? (
@@ -303,19 +304,21 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       <View style={styles.centro}>
         <Text variant="secondary" weight="700" color={colors.text}>
           {grabando
-            ? 'Grabando…'
+            ? t('intro.recording')
             : tieneAudio
             ? esPropio
-              ? 'Tu presentación'
-              : `Presentación de ${nombre?.split(' ')[0] ?? 'esta persona'}`
-            : 'Graba tu presentación'}
+              ? t('intro.yours')
+              : t('intro.ofNamed', {
+                  nombre: nombre?.split(' ')[0] ?? t('profile.thisPerson'),
+                })
+            : t('intro.record')}
         </Text>
         <Text variant="caption" color={colors.textMuted}>
           {grabando
-            ? `${duracion} · máximo ${MAX_INTRO_MS / 1000} s`
+            ? t('intro.recordingTime', { tiempo: duracion ?? '', maximo: MAX_INTRO_MS / 1000 })
             : tieneAudio
-            ? duracion ?? 'Toca para escuchar'
-            : 'Cuenta en un minuto quién eres y qué sabes hacer.'}
+            ? (duracion ?? t('intro.tapToListen'))
+            : t('intro.hint')}
         </Text>
       </View>
 
@@ -329,7 +332,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
             hitSlop={8}
             style={styles.accion}
             accessibilityRole="button"
-            accessibilityLabel="Grabar otra presentación"
+            accessibilityLabel={t('intro.recordAnother')}
           >
             <Feather name="refresh-cw" size={17} color={colors.textMuted} />
           </Pressable>
@@ -339,7 +342,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
             hitSlop={8}
             style={styles.accion}
             accessibilityRole="button"
-            accessibilityLabel="Quitar la presentación"
+            accessibilityLabel={t('intro.removeA11y')}
           >
             <Feather name="trash-2" size={17} color={colors.textMuted} />
           </Pressable>
@@ -351,7 +354,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
           onPress={abrirAjustes}
           style={styles.aviso}
           accessibilityRole="button"
-          accessibilityLabel="Abrir los ajustes del teléfono"
+          accessibilityLabel={t('intro.openSettings')}
         >
           <Text variant="caption" weight="700" color={colors.danger}>
             {aviso}

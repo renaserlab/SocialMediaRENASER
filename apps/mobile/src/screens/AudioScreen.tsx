@@ -20,6 +20,7 @@ import type { Post } from '@/types';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { pedirDestacados } from '@/services/cachePerfil';
+import { useTranslation } from '@/i18n/useTranslation';
 
 function formatTime(value: number) {
   const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -29,6 +30,7 @@ function formatTime(value: number) {
 }
 
 export function AudioScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -114,22 +116,26 @@ export function AudioScreen() {
       postId: audio?.id,
       autor: audio?.author,
       clase: 'audio',
+      traducir: t,
     });
     Share.share({ message }).catch(() => {});
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Esta es una invitación para ti" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title={t('audio.inviteTitle')}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-            {audio ? audio.body : 'Basado en el resultado de tu quiz'}
+            {audio ? audio.body : t('audio.basedOnQuiz')}
           </Text>
 
           {isAdmin ? (
             <Button
-              label={audio ? 'Cambiar audio privado' : 'Agregar audio privado'}
+              label={audio ? t('audio.changePrivate') : t('audio.addPrivate')}
               variant="secondary"
               icon="plus"
               onPress={() => setCreating(true)}
@@ -181,7 +187,7 @@ export function AudioScreen() {
               onPress={toggle}
               disabled={!hasAudio}
               style={[styles.play, { backgroundColor: colors.primary, opacity: hasAudio ? 1 : 0.4 }]}
-              accessibilityLabel={playing ? 'Pausar audio' : 'Reproducir audio'}
+              accessibilityLabel={playing ? t('audio.pause') : t('audio.play')}
               accessibilityRole="button"
               accessibilityState={{ disabled: !hasAudio }}
             >
@@ -191,7 +197,7 @@ export function AudioScreen() {
             <Pressable
               onPress={() => seekTo(currentTime + 15)}
               style={styles.smallControl}
-              accessibilityLabel="Adelantar 15 segundos"
+              accessibilityLabel={t('audio.forward15')}
               accessibilityRole="button"
             >
               <Feather name="rotate-cw" size={24} color={colors.text} />
@@ -200,19 +206,19 @@ export function AudioScreen() {
           </View>
 
           <View style={styles.actions}>
-            <AudioAction icon="share-2" label="Compartir" onPress={onShare} />
+            <AudioAction icon="share-2" label={t('post.share')} onPress={onShare} />
             <AudioAction
               icon="bookmark"
-              label={saved ? 'Guardado' : 'Guardar'}
+              label={saved ? t('audio.saved') : t('common.save')}
               active={saved}
               onPress={() => setSaved((v) => !v)}
             />
           </View>
 
           <View style={[styles.note, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.noteTitle, { color: colors.text }]}>Tu enfoque de esta semana</Text>
+            <Text style={[styles.noteTitle, { color: colors.text }]}>{t('audio.weekFocus')}</Text>
             <Text style={[styles.noteBody, { color: colors.textMuted }]}>
-              Elige una decisión que has estado postergando y conviértela en una acción de menos de 20 minutos.
+              {t('audio.weekFocusBody')}
             </Text>
           </View>
         </View>

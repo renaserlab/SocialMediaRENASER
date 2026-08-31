@@ -33,6 +33,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * «Personas para ti»: el corazon de Z, hecho pantalla.
@@ -79,6 +80,7 @@ const VISIBLE_MINIMA = ANCHO_TARJETA / 2;
 const CADA_CUANTO_MS = 200;
 
 export function PersonasParaTi() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
@@ -114,7 +116,7 @@ export function PersonasParaTi() {
 
   const seguir = async (persona: RecommendedPerson) => {
     let autorizado = false;
-    await requireAuth('para seguir a esta persona', () => {
+    await requireAuth('auth.reasonFollow', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -280,7 +282,7 @@ export function PersonasParaTi() {
 
   return (
     <View>
-      <SectionTitle title="Personas para ti" />
+      <SectionTitle title={t('reco.peopleForYou')} />
       {/*
         Se dice de donde sale la lista cuando todavia no hay con que
         personalizarla. Presentar un respaldo como si fuera una coincidencia
@@ -288,7 +290,7 @@ export function PersonasParaTi() {
       */}
       {datos?.strategy === 'cold_start' ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.nota}>
-          Cuéntanos qué buscas en Ajustes → Tus intereses y afinaremos esto.
+          {t('reco.coldStart')}
         </Text>
       ) : null}
 
@@ -325,7 +327,7 @@ export function PersonasParaTi() {
               </View>
             ))
           : (datos?.items ?? []).map((persona) => {
-              const motivo = frasePrincipal(persona.reasons);
+              const motivo = frasePrincipal(persona.reasons, t);
               return (
                 <View
                   key={persona.id}
@@ -362,7 +364,7 @@ export function PersonasParaTi() {
                   ) : null}
 
                   <Button
-                    label={persona.isFollowing ? 'Siguiendo' : 'Seguir'}
+                    label={persona.isFollowing ? t('profile.unfollow') : t('profile.follow')}
                     variant={persona.isFollowing ? 'secondary' : 'primary'}
                     loading={ocupado === persona.id}
                     onPress={() => void seguir(persona)}
@@ -373,12 +375,12 @@ export function PersonasParaTi() {
                     onPress={() => setDetalle(persona)}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel={`Por qué aparece ${persona.fullName}`}
+                    accessibilityLabel={t('reco.whyNamed', { nombre: persona.fullName })}
                     style={styles.porQue}
                   >
                     <Feather name="info" size={12} color={colors.textMuted} />
                     <Text variant="secondary" color={colors.textMuted}>
-                      Por qué aparece
+                      {t('reco.why')}
                     </Text>
                   </Pressable>
                 </View>
@@ -397,10 +399,10 @@ export function PersonasParaTi() {
         {detalle ? (
           <View style={styles.hoja}>
             <Text variant="title" weight="900">
-              Por qué te recomendamos a {detalle.fullName.split(' ')[0]}
+              {t('reco.whyWeRecommend', { nombre: detalle.fullName.split(' ')[0] ?? detalle.fullName })}
             </Text>
             <View style={styles.motivos}>
-              {frasesDeMotivos(detalle.reasons).map((frase) => (
+              {frasesDeMotivos(detalle.reasons, t).map((frase) => (
                 <View key={frase} style={styles.motivoFila}>
                   <Feather name="check" size={16} color={colors.text} />
                   <Text variant="body" style={styles.motivoTexto}>
@@ -410,7 +412,7 @@ export function PersonasParaTi() {
               ))}
             </View>
             <Button
-              label="Ver perfil"
+              label={t('members.viewProfile')}
               onPress={() => {
                 const persona = detalle;
                 setDetalle(null);
@@ -418,7 +420,7 @@ export function PersonasParaTi() {
               }}
             />
             <Button
-              label="No me interesa"
+              label={t('reco.notInterested')}
               variant="ghost"
               onPress={() => void noInteresa(detalle)}
             />

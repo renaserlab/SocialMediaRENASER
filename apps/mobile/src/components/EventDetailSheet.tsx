@@ -10,6 +10,7 @@ import { Text } from '@/components/Text';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { EventItem } from '@/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** A partir de esta longitud la descripción se recorta tras "Mostrar más". */
 const PREVIEW_CHARS = 180;
@@ -27,6 +28,7 @@ type Props = {
  * grupo, que es lo que la gente busca primero.
  */
 export function EventDetailSheet({ event, onClose }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const [expanded, setExpanded] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export function EventDetailSheet({ event, onClose }: Props) {
     } catch {
       // Dentro de la hoja: en iOS un dialogo no se abre encima de un Modal y
       // el aviso se quedaba invisible.
-      setLinkError('No se pudo abrir WhatsApp. Copia el enlace del evento e inténtalo de nuevo.');
+      setLinkError(t('event.whatsappFailedInline'));
     }
   };
 
@@ -78,11 +80,11 @@ export function EventDetailSheet({ event, onClose }: Props) {
               <Pressable
                 onPress={() => setExpanded((v) => !v)}
                 accessibilityRole="button"
-                accessibilityLabel={expanded ? 'Mostrar menos' : 'Mostrar más'}
+                accessibilityLabel={expanded ? t('common.showLess') : t('common.showMore')}
                 style={styles.more}
               >
                 <Text variant="secondary" weight="700">
-                  {expanded ? 'Mostrar menos' : 'Mostrar más'}
+                  {expanded ? t('common.showLess') : t('common.showMore')}
                 </Text>
                 <Feather
                   name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -97,7 +99,7 @@ export function EventDetailSheet({ event, onClose }: Props) {
         {event.whatsappUrl ? (
           <React.Fragment>
             <Button
-              label="Unirme al grupo de WhatsApp"
+              label={t('event.joinWhatsApp')}
               icon="message-circle"
               onPress={() => void openWhatsApp()}
               style={styles.cta}

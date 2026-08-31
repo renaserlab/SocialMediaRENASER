@@ -10,13 +10,16 @@ import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { QuizArea } from '@/types';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
-const resultCopy: Record<QuizArea, { headline: string; description: string }> = {
-  mentalidad: { headline: 'Tu principal límite no es la estrategia. Eres tú.', description: 'Tus pensamientos y patrones automáticos están saboteando tu siguiente nivel.' },
-  relaciones: { headline: 'Tu crecimiento necesita relaciones más conscientes.', description: 'Los límites, la comunicación y la forma de vincularte están marcando tu avance.' },
-  negocios: { headline: 'Tu esfuerzo necesita una estrategia que pueda escalar.', description: 'No necesitas trabajar más: necesitas foco, estructura y decisiones financieras más claras.' },
-  salud: { headline: 'Tu energía es la base de todo lo que quieres construir.', description: 'El siguiente nivel empieza por recuperar el equilibrio físico y emocional.' },
-  proposito: { headline: 'No estás perdido. Estás listo para una dirección más auténtica.', description: 'Tus metas necesitan alinearse con la vida que realmente deseas construir.' },
+// Claves, no textos: el resultado se lee en el idioma elegido.
+const resultCopy: Record<QuizArea, { headline: TranslationKey; description: TranslationKey }> = {
+  mentalidad: { headline: 'result.mindsetTitle', description: 'result.mindsetBody' },
+  relaciones: { headline: 'result.relationsTitle', description: 'result.relationsBody' },
+  negocios: { headline: 'result.businessTitle', description: 'result.businessBody' },
+  salud: { headline: 'result.healthTitle', description: 'result.healthBody' },
+  proposito: { headline: 'result.purposeTitle', description: 'result.purposeBody' },
 };
 
 // Imagen acorde a cada área de resultado.
@@ -29,6 +32,7 @@ const resultImage: Record<QuizArea, keyof typeof assets> = {
 };
 
 export function ResultScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const result = useAppStore((state) => state.quizResult) ?? 'mentalidad';
@@ -37,20 +41,25 @@ export function ResultScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Tu resultado" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title={t('result.title')}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.content}>
-          <Text style={[styles.title, { color: colors.text }]}>{copy.headline}</Text>
-          <Text style={[styles.description, { color: colors.textMuted }]}>{copy.description}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{t(copy.headline)}</Text>
+          <Text style={[styles.description, { color: colors.textMuted }]}>
+            {t(copy.description)}
+          </Text>
           <Image
             source={assets[resultImage[result]]}
             style={[styles.resultImage, { borderColor: colors.border }]}
           />
           <Text style={[styles.note, { color: colors.textMuted }]}>
-            Preparamos un audio privado con recomendaciones específicas para ti.
+            {t('result.audioNote')}
           </Text>
           <Button
-            label="Escuchar ahora"
+            label={t('result.listenNow')}
             icon="headphones"
             onPress={() => user ? router.push('/audio/private') : router.push('/register')}
             style={styles.btn}

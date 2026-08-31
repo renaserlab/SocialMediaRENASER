@@ -38,6 +38,8 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import type { Course, EventItem, Post, Testimonial, TestimonialFilter } from '@/types';
+import type { TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Secciones del perfil.
@@ -77,7 +79,12 @@ export type ProfileSectionKind =
 const ADMIN_SECTIONS: Partial<
   Record<
     ProfileSectionKind,
-    { icon: 'headphones' | 'calendar' | 'book' | 'camera'; title: string; body: string; action: string }
+    {
+      icon: 'headphones' | 'calendar' | 'book' | 'camera';
+      title: TranslationKey;
+      body: TranslationKey;
+      action: TranslationKey;
+    }
   >
 > = {
   // El nombre propio tampoco va escrito en el texto: quien administra la
@@ -85,21 +92,21 @@ const ADMIN_SECTIONS: Partial<
   // nombre fijo aqui es una promesa que el dia que cambie deja de cumplirse.
   podcast: {
     icon: 'headphones',
-    title: 'Aún no tienes podcast',
-    body: 'Los episodios de Z están en el perfil de la comunidad.',
-    action: 'Ir al podcast de Z',
+    title: 'section.noPodcast',
+    body: 'section.noPodcastBody',
+    action: 'section.goToPodcast',
   },
   eventos: {
     icon: 'calendar',
-    title: 'Aún no tienes eventos',
-    body: 'Los próximos encuentros de Z están en el perfil de la comunidad.',
-    action: 'Ver eventos de Z',
+    title: 'section.noEvents',
+    body: 'section.noEventsBody',
+    action: 'section.goToEvents',
   },
   cursos: {
     icon: 'book',
-    title: 'Aún no tienes cursos',
-    body: 'Los programas de Z están en el perfil de la comunidad.',
-    action: 'Ver cursos de Z',
+    title: 'section.noCourses',
+    body: 'section.noCoursesBody',
+    action: 'section.goToCourses',
   },
 };
 
@@ -176,6 +183,7 @@ export function ProfileSection({
   isOwnProfile = false,
   profileOwnerName,
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -518,35 +526,35 @@ export function ProfileSection({
    */
   const borrarResena = async (resena: Resena) => {
     const aceptado = await confirm({
-      title: 'Eliminar tu reseña',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('review.deleteOwnTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!aceptado) return;
     try {
       await ReviewRepository.borrar(resena.id);
-      toast('Reseña eliminada');
+      toast(t('review.deleted'));
       reload();
     } catch (fallo) {
-      notify('No se pudo eliminar', mensajeDeErrorDeResena(fallo));
+      notify(t('common.deleteFailed'), mensajeDeErrorDeResena(fallo));
     }
   };
 
   const removeTestimonial = async (id: string) => {
     const accepted = await confirm({
-      title: 'Eliminar reseña',
-      message: 'Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('review.deleteTitle'),
+      message: t('common.cannotBeUndone'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
     try {
       await TestimonialRepository.remove(id);
-      toast('Reseña eliminada');
+      toast(t('review.deleted'));
       reload();
     } catch {
-      notify('No se pudo eliminar', 'Inténtalo de nuevo.');
+      notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
 
@@ -574,13 +582,13 @@ export function ProfileSection({
       <View style={styles.center}>
         <Feather name={copy.icon} size={30} color={colors.textMuted} />
         <Text variant="body" weight="700" style={styles.centerText}>
-          {copy.title}
+          {t(copy.title)}
         </Text>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          {copy.body}
+          {t(copy.body)}
         </Text>
         <Button
-          label={copy.action}
+          label={t(copy.action)}
           variant="secondary"
           icon={copy.icon}
           onPress={() => void openAdminSection(kind)}
@@ -611,7 +619,7 @@ export function ProfileSection({
 
         {canAddAudio ? (
           <Button
-            label="Agregar audio"
+            label={t('home.addAudio')}
             variant="secondary"
             icon="plus"
             onPress={() => setCreating(true)}
@@ -655,7 +663,7 @@ export function ProfileSection({
     return (
       <View>
         <Text variant="body" weight="700" style={styles.galeriaTitulo}>
-          {isOwnProfile ? 'Tu galería' : 'Su galería'}
+          {isOwnProfile ? t('gallery.own') : t('gallery.other')}
         </Text>
 
         {/*
@@ -671,7 +679,7 @@ export function ProfileSection({
         */}
         {isOwnProfile ? (
           <Button
-            label="Añadir a la galería"
+            label={t('gallery.add')}
             variant="secondary"
             icon="plus"
             onPress={() => setCreating(true)}
@@ -679,7 +687,7 @@ export function ProfileSection({
         ) : null}
 
         <SegmentedControl
-          options={['Todos', 'Fotos', 'Videos']}
+          options={[t('gallery.all'), t('gallery.photos'), t('gallery.videos')]}
           selectedIndex={testimonialFilter}
           onChange={setTestimonialFilter}
           style={styles.testimonialFilters}
@@ -688,7 +696,7 @@ export function ProfileSection({
         {testimonials.length === 0 ? (
           <View style={styles.center}>
             <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-              Aún no hay nada en la galería.
+              {t('gallery.empty')}
             </Text>
           </View>
         ) : (
@@ -729,7 +737,9 @@ export function ProfileSection({
                         style={[styles.testimonialMedia, styles.videoEnReposo]}
                         accessibilityRole="button"
                         accessibilityLabel={
-                          item.caption ? `Reproducir: ${item.caption}` : 'Reproducir el video'
+                          item.caption
+                            ? t('gallery.playNamed', { titulo: item.caption })
+                            : t('gallery.playVideo')
                         }
                       >
                         <View style={styles.botonDeReproduccion}>
@@ -751,7 +761,9 @@ export function ProfileSection({
                       disabled={!item.mediaUrl}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        item.caption ? `Ver la imagen: ${item.caption}` : 'Ver la imagen completa'
+                        item.caption
+                          ? t('gallery.viewImageNamed', { titulo: item.caption })
+                          : t('gallery.viewImage')
                       }
                     >
                       <ExpoImage
@@ -783,7 +795,7 @@ export function ProfileSection({
                 </View>
                 <View style={styles.testimonialFooter}>
                   <Text variant="body" weight="600" style={{ flex: 1 }}>
-                    {item.caption || (item.mediaType === 'video' ? 'Video' : 'Foto')}
+                    {item.caption || (item.mediaType === 'video' ? t('video.video') : t('gallery.photo'))}
                   </Text>
                   {canManage ? (
                     <React.Fragment>
@@ -798,7 +810,7 @@ export function ProfileSection({
                         }
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Editar reseña"
+                        accessibilityLabel={t('review.edit')}
                       >
                         <Feather name="edit-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -806,7 +818,7 @@ export function ProfileSection({
                         onPress={() => void removeTestimonial(item.id)}
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Eliminar reseña"
+                        accessibilityLabel={t('review.deleteTitle')}
                       >
                         <Feather name="trash-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -858,7 +870,7 @@ export function ProfileSection({
         */}
         <View style={styles.resenasCabecera}>
           <Text variant="body" weight="700" style={{ flex: 1 }}>
-            Reseñas recibidas
+            {t('review.received')}
           </Text>
           {!isOwnProfile && resenasDisponibles ? (
             <Button
@@ -872,7 +884,7 @@ export function ProfileSection({
                 acabaria editando la opinion de otra persona creyendo que era
                 la suya.
               */
-              label={miResena ? 'Editar mi reseña' : 'Escribir reseña'}
+              label={miResena ? t('review.editMine') : t('review.write')}
               variant="secondary"
               icon="edit-2"
               onPress={() =>
@@ -905,10 +917,10 @@ export function ProfileSection({
                 moderador leia el texto del dueño en el perfil de cualquiera.
               */}
               {isOwnProfile
-                ? 'Todavía no te ha escrito nadie.'
+                ? t('review.emptyOwn')
                 : resenasDisponibles
-                ? 'Este usuario aún no tiene reseñas publicadas. Puedes ser la primera persona en escribir una.'
-                : 'Este usuario aún no tiene reseñas publicadas.'}
+                ? t('review.emptyOtherCanWrite')
+                : t('review.emptyOther')}
             </Text>
           </View>
         ) : (
@@ -926,7 +938,7 @@ export function ProfileSection({
                   />
                   <View style={{ flex: 1 }}>
                     <Text variant="body" weight="600">
-                      {resena.autorNombre || 'Alguien'}
+                      {resena.autorNombre || t('notif.someone')}
                     </Text>
                     {/*
                       El sello solo se pinta cuando el servidor manda su FUENTE.
@@ -939,8 +951,8 @@ export function ProfileSection({
                         <Feather name="check-circle" size={12} color={colors.textMuted} />
                         <Text variant="secondary" color={colors.textMuted} style={styles.sello}>
                           {resena.verificadaPor === 'booking'
-                            ? 'Tuvieron una sesión'
-                            : 'Compró su curso'}
+                            ? t('review.verifiedBooking')
+                            : t('review.verifiedCourse')}
                         </Text>
                       </View>
                     ) : null}
@@ -956,7 +968,7 @@ export function ProfileSection({
                         onPress={() => setEditandoResena(resena)}
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Editar mi reseña"
+                        accessibilityLabel={t('review.editMine')}
                       >
                         <Feather name="edit-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -964,7 +976,7 @@ export function ProfileSection({
                         onPress={() => void borrarResena(resena)}
                         hitSlop={10}
                         accessibilityRole="button"
-                        accessibilityLabel="Eliminar mi reseña"
+                        accessibilityLabel={t('review.deleteOwnTitle')}
                       >
                         <Feather name="trash-2" size={16} color={colors.textMuted} />
                       </Pressable>
@@ -1030,7 +1042,7 @@ export function ProfileSection({
                         onPress={() => setVideoAbierto(medio.id)}
                         style={[styles.resenaMedia, styles.videoEnReposo]}
                         accessibilityRole="button"
-                        accessibilityLabel="Reproducir el video de la reseña"
+                        accessibilityLabel={t('review.playVideo')}
                       >
                         <View style={styles.botonDeReproduccion}>
                           <Feather name="play" size={22} color="#FFFFFF" />
@@ -1042,7 +1054,7 @@ export function ProfileSection({
                       key={medio.id}
                       onPress={() => setViewerImage({ uri: medio.url!, caption: resena.texto })}
                       accessibilityRole="button"
-                      accessibilityLabel="Ver la imagen completa"
+                      accessibilityLabel={t('gallery.viewImage')}
                     >
                       <ExpoImage
                         source={{ uri: medio.url }}
@@ -1108,9 +1120,7 @@ export function ProfileSection({
     return (
       <View style={styles.center}>
         <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          {kind === 'eventos'
-            ? 'Aún no hay eventos publicados.'
-            : 'Aún no hay cursos publicados.'}
+          {kind === 'eventos' ? t('profile.noEvents') : t('profile.noCourses')}
         </Text>
       </View>
     );
@@ -1165,7 +1175,7 @@ export function ProfileSection({
       {/* Alta de un curso nuevo, debajo de los ya publicados. */}
       {kind === 'cursos' && canManage ? (
         <Button
-          label="Agregar curso"
+          label={t('home.addCourse')}
           variant="secondary"
           icon="plus"
           onPress={() => setCreating(true)}
@@ -1181,11 +1191,13 @@ export function ProfileSection({
         <View style={styles.catalogLink}>
           <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
             {items.length === 0
-              ? `Todavía no has publicado ${kind === 'cursos' ? 'ningún curso' : 'ningún evento'}.`
+              ? kind === 'cursos'
+                ? t('section.noneOwnCourses')
+                : t('section.noneOwnEvents')
               : ''}
           </Text>
           <Button
-            label={ADMIN_SECTIONS[kind]!.action}
+            label={t(ADMIN_SECTIONS[kind]!.action)}
             variant="secondary"
             icon={ADMIN_SECTIONS[kind]!.icon}
             onPress={() => void openAdminSection(kind)}

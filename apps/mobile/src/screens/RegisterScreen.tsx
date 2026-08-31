@@ -86,7 +86,7 @@ export function RegisterScreen() {
     } catch (error) {
       // Igual que en el acceso: el texto tecnico de Supabase no llega a la
       // pantalla, solo a la consola.
-      const message = mensajeDeAuth(error, 'registro');
+      const message = mensajeDeAuth(error, 'registro', t);
       if (/ya tiene una cuenta/i.test(message)) {
         setErrors({ email: t('auth.errorEmailTaken') });
       } else {
@@ -111,7 +111,7 @@ export function RegisterScreen() {
         router.replace((await rutaTrasAutenticar()) as never);
       }
     } catch (error) {
-      notify(t('auth.googleFailedSignUp'), mensajeDeAuth(error, 'registro'));
+      notify(t('auth.googleFailedSignUp'), mensajeDeAuth(error, 'registro', t));
     } finally {
       setSocialBusy(false);
     }

@@ -12,6 +12,7 @@ import { Text } from '@/components/Text';
 import { fuenteDeInicio, type PestanaDeInicio } from '@/feed/fuenteDeVideos';
 import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
 import { useFeedDeVideos } from '@/hooks/useFeedDeVideos';
+import { useTranslation } from '@/i18n/useTranslation';
 import { useSeccionActiva } from '@/navigation/foco';
 import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
@@ -44,6 +45,7 @@ export function InicioScreen() {
   const router = useRouter();
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   const usuario = useAppStore((state) => state.user);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
@@ -168,9 +170,9 @@ export function InicioScreen() {
           vacio={
             <Vacio
               icono="video-off"
-              titulo="Todavía no hay videos"
-              cuerpo="Cuando alguien publique un video, aparecerá aquí."
-              accion={{ etiqueta: 'Publicar el primero', alPulsar: irACrear }}
+              titulo={t('home.emptyVideosTitle')}
+              cuerpo={t('home.emptyVideosBody')}
+              accion={{ etiqueta: t('home.publishFirst'), alPulsar: irACrear }}
               espacioInferior={espacioInferior}
             />
           }
@@ -183,18 +185,24 @@ export function InicioScreen() {
           {sinSesion ? (
             <Vacio
               icono="user-plus"
-              titulo="Regístrate o inicia sesión"
-              cuerpo="Necesitamos saber quién eres para mostrarte el contenido de las personas que sigues."
-              accion={{ etiqueta: 'Crear cuenta', alPulsar: () => router.push('/register' as never) }}
-              secundaria={{ etiqueta: 'Iniciar sesión', alPulsar: () => router.push('/login' as never) }}
+              titulo={t('home.signInTitle')}
+              cuerpo={t('home.signInBody')}
+              accion={{
+                etiqueta: t('auth.signUp'),
+                alPulsar: () => router.push('/register' as never),
+              }}
+              secundaria={{
+                etiqueta: t('auth.signIn'),
+                alPulsar: () => router.push('/login' as never),
+              }}
               espacioInferior={espacioInferior}
             />
           ) : siguiendoVacio && !sigueAAlguien ? (
             <Vacio
               icono="users"
-              titulo="Sigue personas para ver su contenido"
-              cuerpo="Aquí aparecerá lo que publiquen las personas que sigas."
-              accion={{ etiqueta: 'Descubrir personas', alPulsar: irAExplorar }}
+              titulo={t('home.followPeopleTitle')}
+              cuerpo={t('home.followPeopleBody')}
+              accion={{ etiqueta: t('home.discoverPeople'), alPulsar: irAExplorar }}
               espacioInferior={espacioInferior}
             />
           ) : (
@@ -218,9 +226,9 @@ export function InicioScreen() {
                 vacio={
                   <Vacio
                     icono="users"
-                    titulo="Nada nuevo por ahora"
-                    cuerpo="Las personas que sigues no han publicado videos recientes."
-                    accion={{ etiqueta: 'Descubrir personas', alPulsar: irAExplorar }}
+                    titulo={t('home.nothingNewTitle')}
+                    cuerpo={t('home.nothingNewBody')}
+                    accion={{ etiqueta: t('home.discoverPeople'), alPulsar: irAExplorar }}
                     espacioInferior={espacioInferior}
                   />
                 }
@@ -232,7 +240,7 @@ export function InicioScreen() {
                 >
                   <Feather name="info" size={13} color={media.text} />
                   <Text variant="caption" weight="700" color={media.text}>
-                    Sugerencias: quien sigues no ha publicado nada nuevo
+                    {t('home.suggestionsNotice')}
                   </Text>
                 </View>
               ) : null}

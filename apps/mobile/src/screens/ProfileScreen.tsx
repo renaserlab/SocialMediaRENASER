@@ -228,12 +228,10 @@ export function ProfileScreen() {
     const temporizador = setTimeout(() => {
       void (async () => {
         const entrar = await confirm({
-          title: `Descubre el contenido de ${nombre}`,
-          message:
-            'Inicia sesión o crea tu cuenta para ver sus publicaciones, cursos y ' +
-            'episodios completos, y para escribirle.',
-          confirmLabel: 'Crear cuenta',
-          cancelLabel: 'Seguir mirando',
+          title: t('profile.discoverNamed', { nombre }),
+          message: t('profile.discoverBody'),
+          confirmLabel: t('auth.signUp'),
+          cancelLabel: t('profile.keepLooking'),
         });
         if (entrar) router.push('/register' as never);
       })();
@@ -245,7 +243,7 @@ export function ProfileScreen() {
     haptics.light();
     // Seguir queda registrado a nombre de alguien: primero la cuenta.
     let autorizado = false;
-    await requireAuth('para seguir a esta persona', () => {
+    await requireAuth('auth.reasonFollow', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -284,7 +282,7 @@ export function ProfileScreen() {
   const toggleBlock = async (desdeLaHoja = false) => {
     if (!isRealPublic || !id) return;
     let autorizado = false;
-    await requireAuth('para bloquear a alguien', () => {
+    await requireAuth('auth.reasonBlock', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -306,12 +304,12 @@ export function ProfileScreen() {
       */
       if (desdeLaHoja) await afterSheetClose();
       const ok = await confirm({
-        title: `Bloquear a ${publicProfile?.fullName ?? 'esta persona'}`,
-        message:
-          'Dejaréis de seguiros y no volverás a ver sus publicaciones. ' +
-          'Puedes deshacerlo cuando quieras desde su perfil o desde Ajustes.',
-        confirmLabel: 'Bloquear',
-        cancelLabel: 'Cancelar',
+        title: t('post.blockNamed', {
+          nombre: publicProfile?.fullName ?? t('profile.thisPerson'),
+        }),
+        message: t('profile.blockBody'),
+        confirmLabel: t('post.block'),
+        cancelLabel: t('common.cancel'),
         destructive: true,
       });
       // Cancelar NO deja nada a medias: se sale antes de tocar el estado y
@@ -330,8 +328,8 @@ export function ProfileScreen() {
     } catch {
       setBlocked(estaba);
       notify(
-        estaba ? 'No se pudo desbloquear' : 'No se pudo bloquear',
-        'Inténtalo de nuevo en unos momentos.',
+        estaba ? t('blocked.unblockFailed') : t('post.blockFailed'),
+        t('common.tryAgainSoon'),
       );
     } finally {
       setBlockBusy(false);
@@ -377,10 +375,10 @@ export function ProfileScreen() {
       setEditingPhoto(null);
       await afterSheetClose();
       notify(
-        error instanceof PermisoDenegadoError ? 'Falta un permiso' : 'No se pudo cambiar la foto',
-        error instanceof Error
-          ? error.message
-          : 'Revisa los permisos e inténtalo de nuevo.',
+        error instanceof PermisoDenegadoError
+          ? t('profile.permissionMissing')
+          : t('profile.photoChangeFailed'),
+        error instanceof Error ? error.message : t('profile.checkPermissions'),
       );
     }
   };
@@ -393,8 +391,8 @@ export function ProfileScreen() {
       await setProfileImage(kind, null);
     } catch (error) {
       notify(
-        'No se pudo quitar la foto',
-        error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+        t('profile.photoRemoveFailed'),
+        error instanceof Error ? error.message : t('common.tryAgain'),
       );
     }
   };
@@ -402,7 +400,7 @@ export function ProfileScreen() {
   const openChat = async () => {
     // Escribir abre una conversacion, y una conversacion tiene dos partes.
     let autorizado = false;
-    await requireAuth('para enviar un mensaje', () => {
+    await requireAuth('auth.reasonMessage', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -416,7 +414,7 @@ export function ProfileScreen() {
       const conv = await MessageRepository.getOrCreateDirect(id);
       router.push({ pathname: '/chat/[id]', params: { id: conv.id, name: profileData.fullName } } as never);
     } catch {
-      notify('No se pudo abrir el chat', 'Inténtalo de nuevo.');
+      notify(t('profile.chatFailed'), t('common.tryAgain'));
     } finally {
       setChatBusy(false);
     }
@@ -431,22 +429,32 @@ export function ProfileScreen() {
     const anonymous = authStatus === 'anonymous';
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="MI PERFIL" rightIcon="settings" onRightPress={() => router.push('/settings')} />
+        <AppHeader
+          title={t('profile.title')}
+          rightIcon="settings"
+          onRightPress={() => router.push('/settings')}
+        />
         <StateView
           state={state}
           onRetry={() => void refreshProfile()}
           icon={state === 'empty' && anonymous ? 'user' : undefined}
           title={
-            state === 'empty' ? (anonymous ? 'Entra a tu cuenta' : 'Perfil no disponible') : undefined
+            state === 'empty'
+              ? anonymous
+                ? t('profile.signInTitle')
+                : t('profile.unavailable')
+              : undefined
           }
           description={
             state === 'empty'
               ? anonymous
-                ? 'Inicia sesión para ver tu perfil, publicar y seguir a otras personas.'
-                : 'Estamos preparando tu perfil. Inténtalo de nuevo en un momento.'
+                ? t('profile.signInBody')
+                : t('profile.preparing')
               : undefined
           }
-          actionLabel={state === 'empty' ? (anonymous ? 'Iniciar sesión' : 'Reintentar') : undefined}
+          actionLabel={
+            state === 'empty' ? (anonymous ? t('auth.signIn') : t('common.retry')) : undefined
+          }
           onAction={
             state === 'empty'
               ? anonymous
@@ -476,7 +484,10 @@ export function ProfileScreen() {
   if (isRealPublic && publicState !== 'idle') {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="PERFIL" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader
+          title={t('profile.titlePublic')}
+          onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        />
         {publicState === 'error' ? (
           <StateView state="error" onRetry={() => loadPublic(true)} />
         ) : (
@@ -577,7 +588,7 @@ export function ProfileScreen() {
               onPress={isPublic ? undefined : () => openPhotoSheet('avatar')}
               disabled={isPublic}
               accessibilityRole={isPublic ? undefined : 'button'}
-              accessibilityLabel={isPublic ? undefined : 'Cambiar foto de perfil'}
+              accessibilityLabel={isPublic ? undefined : t('profile.changeAvatar')}
               style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
             >
               <Avatar size={104} image={avatarSource} />
@@ -615,16 +626,16 @@ export function ProfileScreen() {
           */}
           <View style={styles.metricas}>
             <Stat
-              label="Siguiendo"
+              label={t('profile.following')}
               value={profileData.following}
               onPress={() => router.push(`/following/${id ?? 'me'}` as never)}
             />
             <Stat
-              label="Seguidores"
+              label={t('profile.followers')}
               value={profileData.followers}
               onPress={() => router.push(`/followers/${id ?? 'me'}` as never)}
             />
-            <Stat label="Me gusta" value={profileData.likes} />
+            <Stat label={t('profile.likes')} value={profileData.likes} />
           </View>
 
           {/*
@@ -647,7 +658,7 @@ export function ProfileScreen() {
                 blocked ? (
                   // Bloqueado: no tiene sentido ofrecer seguir ni escribir.
                   <Button
-                    label="Desbloquear"
+                    label={t('blocked.unblock')}
                     variant="secondary"
                     loading={blockBusy}
                     onPress={() => void toggleBlock()}
@@ -656,14 +667,14 @@ export function ProfileScreen() {
                 ) : (
                   <React.Fragment>
                     <Button
-                      label={following ? 'Siguiendo' : 'Seguir'}
+                      label={following ? t('profile.unfollow') : t('profile.follow')}
                       variant={following ? 'secondary' : 'primary'}
                       loading={followBusy}
                       onPress={toggleFollow}
                       style={styles.actionBtn}
                     />
                     <Button
-                      label="Mensaje"
+                      label={t('profile.message')}
                       variant="secondary"
                       loading={chatBusy}
                       onPress={openChat}
@@ -674,7 +685,7 @@ export function ProfileScreen() {
                       disabled={blockBusy}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Bloquear a esta persona"
+                      accessibilityLabel={t('profile.blockPerson')}
                       style={[styles.blockBtn, { borderColor: colors.border }]}
                     >
                       <Feather name="slash" size={17} color={colors.textMuted} />
@@ -683,7 +694,7 @@ export function ProfileScreen() {
                 )
               ) : (
                 <Button
-                  label="Editar perfil"
+                  label={t('profile.editProfile')}
                   variant="secondary"
                   onPress={() => router.push('/edit-profile' as never)}
                   style={styles.actionBtn}
@@ -710,11 +721,10 @@ export function ProfileScreen() {
             <View style={styles.bloqueado}>
               <Feather name="slash" size={26} color={colors.textMuted} />
               <Text style={[styles.bloqueadoTitulo, { color: colors.text }]}>
-                Has bloqueado a esta persona
+                {t('profile.blockedTitle')}
               </Text>
               <Text style={[styles.bloqueadoTexto, { color: colors.textMuted }]}>
-                No verás sus publicaciones ni podrás escribirle, y ella tampoco a ti.
-                Puedes desbloquearla cuando quieras desde aquí o desde Ajustes.
+                {t('profile.blockedBody')}
               </Text>
             </View>
           ) : (
@@ -822,9 +832,7 @@ export function ProfileScreen() {
             loading={postsLoading}
             error={postsError}
             emptyHint={
-              isPublic
-                ? 'Este perfil aún no ha publicado nada.'
-                : 'Cuando publiques una foto o un video, aparecerá aquí.'
+              isPublic ? t('profile.emptyGalleryOther') : t('profile.emptyGalleryOwn')
             }
           />
           )}
@@ -876,7 +884,7 @@ export function ProfileScreen() {
         */}
         {perfilBloqueado ? null : (
           <ListRow
-            title={isPublic ? 'Su galería' : 'Mi galería'}
+            title={isPublic ? t('profile.galleryOther') : t('profile.galleryOwn')}
             leftIcon="image"
             onPress={() => {
               setOptionsVisible(false);
@@ -917,7 +925,7 @@ export function ProfileScreen() {
             en los dos sentidos y eso no se recupera solo.
           */
           <ListRow
-            title={blocked ? 'Desbloquear a esta persona' : 'Bloquear a esta persona'}
+            title={blocked ? t('profile.unblockPerson') : t('profile.blockPerson')}
             leftIcon={blocked ? 'user-check' : 'slash'}
             destructive={!blocked}
             onPress={() => {
@@ -932,16 +940,25 @@ export function ProfileScreen() {
 
       <BottomSheet visible={editingPhoto !== null} onClose={() => setEditingPhoto(null)}>
         <Text style={[styles.sheetTitle, { color: colors.text }]}>
-          {editingPhoto === 'cover' ? 'Foto de portada' : 'Foto de perfil'}
+          {editingPhoto === 'cover' ? t('profile.coverPhoto') : t('profile.avatarPhoto')}
         </Text>
         <ListRow
-          title="Elegir de la galería"
+          title={t('profile.pickFromGallery')}
           leftIcon="image"
           onPress={() => void applyPhoto('gallery')}
         />
-        <ListRow title="Tomar foto" leftIcon="camera" onPress={() => void applyPhoto('camera')} />
+        <ListRow
+          title={t('profile.takePhoto')}
+          leftIcon="camera"
+          onPress={() => void applyPhoto('camera')}
+        />
         {hasCustomPhoto && (
-          <ListRow title="Quitar foto actual" leftIcon="trash-2" destructive onPress={removePhoto} />
+          <ListRow
+            title={t('profile.removePhoto')}
+            leftIcon="trash-2"
+            destructive
+            onPress={removePhoto}
+          />
         )}
       </BottomSheet>
     </View>

@@ -24,6 +24,7 @@ import {
   type ContextoDeRecomendacion,
 } from '@/services/senales';
 import { palette, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 // Superficie a pantalla completa sobre video → contexto de media (oscuro).
 const media = palette('dark');
@@ -93,6 +94,7 @@ export function FeedVerticalDeVideos({
   superficie,
   versionDelAlgoritmo,
 }: Props) {
+  const { t } = useTranslation();
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
   const insets = useSafeAreaInsets();
@@ -245,7 +247,7 @@ export function FeedVerticalDeVideos({
       // No se ofrece deshacer: el toast de la aplicacion solo lleva mensaje e
       // icono, no accion. Por eso el texto dice lo que pasa, sin prometer una
       // vuelta atras que no existe.
-      toast('No volveremos a mostrártelo', 'eye-off');
+      toast(t('feed.hidden'), 'eye-off');
     },
     [quitarDelFeed],
   );
@@ -268,12 +270,12 @@ export function FeedVerticalDeVideos({
       <View style={styles.aviso}>
         <Feather name="wifi-off" size={32} color={media.text} />
         <Text variant="title" weight="800" color={media.text} style={styles.avisoTexto}>
-          No pudimos cargar el contenido
+          {t('common.loadFailed')}
         </Text>
         <Text variant="body" color={media.textMuted} style={styles.avisoTexto}>
           {/* Se dice el motivo real: si el telefono esta sin cobertura, saberlo
               evita leerlo como un fallo de la aplicacion. */}
-          {feed.error ?? 'Revisa tu conexión e inténtalo de nuevo.'}
+          {feed.error ?? t('common.checkConnection')}
         </Text>
         <Pressable
           onPress={feed.reintentar}
@@ -281,7 +283,7 @@ export function FeedVerticalDeVideos({
           accessibilityRole="button"
         >
           <Text variant="body" weight="700" color={media.text}>
-            Reintentar
+            {t('common.retry')}
           </Text>
         </Pressable>
       </View>
@@ -310,7 +312,7 @@ export function FeedVerticalDeVideos({
         >
           <Feather name="wifi-off" size={13} color={media.text} />
           <Text variant="caption" weight="700" color={media.text}>
-            Sin conexión · contenido guardado
+            {t('feed.offlineCached')}
           </Text>
         </View>
       ) : null}

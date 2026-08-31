@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * Enlaces publicos al contenido de Z, y el texto con el que se comparten.
  *
@@ -25,6 +27,41 @@
  * que permite probarla sin reimportar.
  */
 export const VARIABLE_DE_LA_WEB = 'EXPO_PUBLIC_WEB_URL';
+
+/**
+ * Cómo se traduce la frase que se comparte.
+ *
+ * Lo pasa quien pinta. Este módulo NO puede importar el diccionario: se prueba
+ * con el runner de Node, que no resuelve el alias `@/`. Sin traductor se
+ * escribe en español, que es el idioma de referencia.
+ */
+export type TraductorDeEnlaces = (
+  clave: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+/**
+ * El español de cada clave.
+ *
+ * Es el mismo texto que hay en `i18n/es.ts`, y que no se desvíen lo comprueba
+ * `i18n/diccionariosSincronizados.test.mts`.
+ */
+export const RESPALDOS_ES = {
+  'share.audio': 'Escucha este audio en Z',
+  'share.audioBy': 'Escucha este audio de {nombre} en Z',
+  'share.video': 'Mira este vídeo en Z',
+  'share.videoBy': 'Mira este vídeo de {nombre} en Z',
+  'share.post': 'Mira esta publicación en Z',
+  'share.postBy': 'Mira esta publicación de {nombre} en Z',
+} as const;
+
+const enEspanol: TraductorDeEnlaces = (clave, params) => {
+  let texto: string = RESPALDOS_ES[clave as keyof typeof RESPALDOS_ES] ?? '';
+  for (const [nombre, valor] of Object.entries(params ?? {})) {
+    texto = texto.replace(`{${nombre}}`, String(valor));
+  }
+  return texto;
+};
 
 /** Que se esta compartiendo. Cambia el verbo, no la ruta: todo es un post. */
 export type ClaseDeContenido = 'publicacion' | 'video' | 'audio';
@@ -80,12 +117,21 @@ export function enlaceDePublicacion(postId: string | null | undefined): string |
 export function textoParaCompartir(
   clase: ClaseDeContenido,
   autor?: string | null,
+  traducir: TraductorDeEnlaces = enEspanol,
 ): string {
   const nombre = autor?.trim();
-  const de = nombre ? ` de ${nombre}` : '';
-  if (clase === 'audio') return `Escucha este audio${de} en Z`;
-  if (clase === 'video') return `Mira este vídeo${de} en Z`;
-  return `Mira esta publicación${de} en Z`;
+  /*
+    Con nombre y sin nombre son DOS frases, no una con un trozo pegado: en
+    ingles el «de {nombre}» va en otro sitio, y armarla concatenando dejaria
+    la version traducida mal escrita.
+  */
+  if (clase === 'audio') {
+    return nombre ? traducir('share.audioBy', { nombre }) : traducir('share.audio');
+  }
+  if (clase === 'video') {
+    return nombre ? traducir('share.videoBy', { nombre }) : traducir('share.video');
+  }
+  return nombre ? traducir('share.postBy', { nombre }) : traducir('share.post');
 }
 
 /**
@@ -101,9 +147,11 @@ export function compartirPublicacion(opciones: {
   postId: string | null | undefined;
   autor?: string | null;
   clase?: ClaseDeContenido;
+  /** El idioma, que lo pone quien pinta. Sin él se escribe en español. */
+  traducir?: TraductorDeEnlaces;
 }): MensajeCompartido {
   const clase = opciones.clase ?? 'publicacion';
-  const texto = textoParaCompartir(clase, opciones.autor);
+  const texto = textoParaCompartir(clase, opciones.autor, opciones.traducir);
   const url = enlaceDePublicacion(opciones.postId);
   return { message: url ? `${texto}\n${url}` : texto, url };
 }

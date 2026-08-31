@@ -9,6 +9,7 @@ import { ListRow } from '@/components/ListRow';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
+import { useTranslation } from '@/i18n/useTranslation';
 import type { NotificationItem } from '@/mappers/notificationMapper';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
@@ -19,15 +20,20 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { pedirDestacados } from '@/services/cachePerfil';
 
-const demoNotifications: NotificationItem[] = [
-  { id: '1', title: 'Nueva publicación de Darren Hardy', subtitle: 'Hizo un nuevo post sobre disciplina.', icon: 'bell', time: 'Hace 10 m', read: false },
-  { id: '2', title: 'Mensaje nuevo en el Círculo', subtitle: 'Alguien comentó en el Círculo de Liderazgo.', icon: 'message-square', time: 'Hace 1 h', read: false },
-  { id: '3', title: 'Registro de Evento Confirmado', subtitle: 'Tienes una reserva activa para el live de mañana.', icon: 'award', time: 'Hace 3 h', read: true },
-];
-
 export function NotificationsScreen() {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
+  /*
+    Los avisos de la demo (sin servidor) se arman al pintar y no en una
+    constante del módulo: una constante se congelaría con el idioma que hubiera
+    al cargar el fichero, que es antes de que nadie haya elegido ninguno.
+  */
+  const demoNotifications: NotificationItem[] = [
+    { id: '1', title: t('notif.demo1Title'), subtitle: t('notif.demo1Body'), icon: 'bell', time: t('notif.demo1Time'), read: false },
+    { id: '2', title: t('notif.demo2Title'), subtitle: t('notif.demo2Body'), icon: 'message-square', time: t('notif.demo2Time'), read: false },
+    { id: '3', title: t('notif.demo3Title'), subtitle: t('notif.demo3Body'), icon: 'award', time: t('notif.demo3Time'), read: true },
+  ];
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
 
@@ -104,20 +110,23 @@ export function NotificationsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Notificaciones" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <AppHeader
+        title={t('settings.notifications')}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
       {supabaseEnabled && !signedIn ? (
         <SignedOutNotice
           icon="bell"
-          title="Aquí verás tu actividad"
-          description="Crea tu cuenta para saber quién te sigue, comenta o reacciona a lo tuyo."
+          title={t('notif.signedOutTitle')}
+          description={t('notif.signedOutBody')}
         />
       ) : (
       <StateView
         state={uiState}
         onRetry={load}
         icon="bell"
-        title={uiState === 'empty' ? 'Sin notificaciones' : undefined}
-        description={uiState === 'empty' ? 'Aquí verás la actividad sobre ti.' : undefined}
+        title={uiState === 'empty' ? t('notif.emptyTitle') : undefined}
+        description={uiState === 'empty' ? t('notif.emptyBody') : undefined}
       >
         <FlashList
           data={items}
@@ -135,16 +144,16 @@ export function NotificationsScreen() {
                   onPress={openDarren}
                   style={StyleSheet.absoluteFill}
                   accessibilityRole="button"
-                  accessibilityLabel="Ver contenido de Darren gratis"
+                  accessibilityLabel={t('notif.freeContentA11y')}
                 />
                 <View style={styles.noticeRow} pointerEvents="none">
                   <Feather name="gift" size={20} color={colors.onPrimary} />
                   <View style={styles.noticeCopy}>
                     <Text variant="body" weight="800" color={colors.onPrimary}>
-                      Ver contenido de Darren gratis aquí
+                      {t('notif.freeContentTitle')}
                     </Text>
                     <Text variant="secondary" color={colors.onPrimary} style={styles.noticeBody}>
-                      Entra a su perfil: cursos, testimonios y publicaciones.
+                      {t('notif.freeContentBody')}
                     </Text>
                   </View>
                 </View>
@@ -152,7 +161,7 @@ export function NotificationsScreen() {
                   onPress={() => dismissGuide(DARREN_NOTICE_ID)}
                   hitSlop={10}
                   accessibilityRole="button"
-                  accessibilityLabel="Descartar aviso"
+                  accessibilityLabel={t('notif.dismissNotice')}
                   style={styles.noticeClose}
                 >
                   <Feather name="x" size={15} color={colors.onPrimary} />

@@ -22,6 +22,7 @@ import { StoriesRow } from '@/components/StoriesRow';
 import {
   FilaDeResultado,
   filasDeResultados,
+  useTextosDeBusqueda,
 } from '@/components/resultadosDeBusqueda';
 import { assets } from '@/data/assets';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -300,9 +301,15 @@ export function ExploreScreen() {
   );
 
   const isSearching = esBuscable(estado.tecleado);
+  const textosDeBusqueda = useTextosDeBusqueda();
   const filasDeBusqueda = useMemo(
-    () => filasDeResultados(estado.resultados, { ampliando: estado.ampliando, verMas }),
-    [estado.resultados, estado.ampliando, verMas],
+    () =>
+      filasDeResultados(estado.resultados, {
+        ampliando: estado.ampliando,
+        verMas,
+        textos: textosDeBusqueda,
+      }),
+    [estado.resultados, estado.ampliando, verMas, textosDeBusqueda],
   );
 
   /* --------------------------------------------------------- Contenido ---- */
@@ -323,7 +330,7 @@ export function ExploreScreen() {
         <Pressable
           onPress={() => router.navigate('/(tabs)/create')}
           style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          accessibilityLabel="Crear nueva publicación"
+          accessibilityLabel={t('explore.newPost')}
           accessibilityRole="button"
         >
           {/* Tu foto real; el marcador solo mientras no haya perfil cargado. */}
@@ -351,7 +358,7 @@ export function ExploreScreen() {
           id="primera-publicacion"
           arrow="up"
           visible={!!user && user.posts === 0}
-          text="Comparte tu primera publicación con la comunidad."
+          text={t('explore.firstPostHint')}
           onPress={() => router.navigate('/(tabs)/create')}
         />
 
@@ -489,14 +496,14 @@ export function ExploreScreen() {
           <StateView
             state="error"
             icon="wifi-off"
-            title="No pudimos cargar el contenido"
-            description="Revisa tu conexión e inténtalo de nuevo."
+            title={t('common.loadFailed')}
+            description={t('common.checkConnection')}
             onRetry={() => void cargarDestacados()}
           />
         </View>
       ) : null}
 
-      <SectionTitle title="Tu siguiente paso" />
+      <SectionTitle title={t('explore.nextStep')} />
       {/*
         Guia hacia el contenido: sin ella la portada se lee como una imagen
         decorativa y no como algo en lo que se puede entrar. Solo aparece si hay
@@ -506,32 +513,40 @@ export function ExploreScreen() {
         id="explorar-programa"
         arrow="down"
         visible={!!featuredCourse}
-        text="Entra al programa recomendado y empieza por el primer módulo."
+        text={t('explore.programHint')}
         onPress={() => featuredCourse && router.push(`/course/${featuredCourse.id}` as never)}
       />
       <Pressable
         onPress={() => featuredCourse && router.push(`/course/${featuredCourse.id}` as never)}
         disabled={!featuredCourse}
         style={styles.heroCard}
-        accessibilityLabel={`Programa recomendado: ${featuredCourse?.title ?? ''}`}
+        accessibilityLabel={t('explore.recommendedProgramA11y', {
+          titulo: featuredCourse?.title ?? '',
+        })}
         accessibilityRole="button"
       >
         <Image source={assets.course} style={StyleSheet.absoluteFill} resizeMode="cover" />
         <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
         <View style={styles.heroContent}>
-          <Text style={styles.eyebrow}>PROGRAMA RECOMENDADO</Text>
-          <Text style={styles.heroTitle}>{featuredCourse?.title ?? 'Programas en camino'}</Text>
+          <Text style={styles.eyebrow}>{t('explore.recommendedProgram')}</Text>
+          <Text style={styles.heroTitle}>
+            {featuredCourse?.title ?? t('explore.programsComing')}
+          </Text>
           <Text style={styles.heroBody}>
             {featuredCourse
               ? featuredCourse.subtitle
               : catalogoFallido
-              ? 'No pudimos cargar el programa.'
-              : 'Muy pronto habrá contenido disponible.'}
+              ? t('explore.programLoadFailed')
+              : t('explore.contentSoon')}
           </Text>
         </View>
       </Pressable>
 
-      <SectionTitle title="Próximos eventos" action="Ver calendario" onActionPress={() => router.push('/events')} />
+      <SectionTitle
+        title={t('events.upcoming')}
+        action={t('explore.seeCalendar')}
+        onActionPress={() => router.push('/events')}
+      />
       <View style={styles.list}>
         {nextEvents.slice(0, 2).map((event, index) => (
           <ListRow
@@ -547,25 +562,27 @@ export function ExploreScreen() {
         ))}
       </View>
 
-      <SectionTitle title="Comunidades" />
+      <SectionTitle title={t('explore.communities')} />
       <Pressable
         onPress={() => featuredCircle && router.push(`/circle/${featuredCircle.id}` as never)}
         disabled={!featuredCircle}
         style={[styles.circle, { backgroundColor: colors.primary }]}
-        accessibilityLabel={`Círculo: ${featuredCircle?.name ?? ''}`}
+        accessibilityLabel={t('explore.circleA11y', { nombre: featuredCircle?.name ?? '' })}
         accessibilityRole="button"
       >
         <View style={{ flex: 1 }}>
-          <Text style={[styles.eyebrow, { color: colors.onPrimary }]}>CÍRCULO PRIVADO</Text>
+          <Text style={[styles.eyebrow, { color: colors.onPrimary }]}>
+            {t('explore.privateCircle')}
+          </Text>
           <Text style={[styles.circleTitle, { color: colors.onPrimary }]}>
-            {featuredCircle?.name ?? 'Círculos'}
+            {featuredCircle?.name ?? t('profile.circles')}
           </Text>
           <Text style={[styles.circleBody, { color: colors.onPrimary }]}>
             {featuredCircle
-              ? `Conecta, comparte y crece con ${featuredCircle.members} miembros.`
+              ? t('explore.circleMembers', { count: featuredCircle.members })
               : catalogoFallido
-              ? 'No pudimos cargar los círculos.'
-              : 'Muy pronto podrás unirte a un círculo.'}
+              ? t('explore.circlesLoadFailed')
+              : t('explore.circleSoon')}
           </Text>
         </View>
         <Feather name="users" size={48} color={colors.onPrimary} style={styles.circleIcon} />
@@ -577,7 +594,7 @@ export function ExploreScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="EXPLORAR"
+        title={t('explore.headerTitle')}
         rightIcon="bell"
         // Un aviso que nadie abre no sirve de nada: el punto marca que el de
         // "contenido de Darren gratis" sigue esperando dentro.
@@ -602,7 +619,7 @@ export function ExploreScreen() {
               Quien queria un curso leia eso y buscaba igualmente, porque es el
               unico buscador que hay.
             */
-            placeholder="Personas, publicaciones, cursos o eventos..."
+            placeholder={t('search.placeholder')}
             placeholderTextColor={colors.textMuted}
             containerStyle={styles.searchContainer}
             value={query}
@@ -662,16 +679,16 @@ export function ExploreScreen() {
                 icon="search"
                 title={
                   estado.fallo
-                    ? 'No pudimos buscar'
+                    ? t('search.failedTitle')
                     : debeDecirSinResultados(estado)
-                    ? 'Sin resultados'
+                    ? t('search.emptyTitle')
                     : undefined
                 }
                 description={
                   estado.fallo
-                    ? 'Revisa tu conexión e inténtalo de nuevo.'
+                    ? t('common.checkConnection')
                     : debeDecirSinResultados(estado)
-                    ? `No encontramos nada para "${estado.termino}".`
+                    ? t('search.emptyBody', { termino: estado.termino })
                     : undefined
                 }
                 onRetry={
@@ -686,7 +703,7 @@ export function ExploreScreen() {
                 */}
                 {estaOcupado(estado) && filasDeBusqueda.length > 0 ? (
                   <Text style={[styles.buscandoAviso, { color: colors.textMuted }]}>
-                    Buscando…
+                    {t('search.searching')}
                   </Text>
                 ) : null}
                 {filasDeBusqueda.map((fila) => (

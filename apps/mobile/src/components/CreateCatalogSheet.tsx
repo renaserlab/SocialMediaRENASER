@@ -26,6 +26,7 @@ import { pickAudio, pickImage, uploadPostMedia, type PickedMedia } from '@/servi
 import { PostRepository } from '@/repositories/PostRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export type CatalogKind = 'evento' | 'curso' | 'podcast' | 'privado';
 
@@ -91,6 +92,7 @@ function parseDateTime(day: string, time: string): Date | null {
  * `profiles.role`). Esta hoja solo se muestra a quien puede usarla.
  */
 export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing, onDeleted }: Props) {
+  const { t } = useTranslation();
   /*
     De quien seran las categorias que se ofrecen: de quien esta publicando. El
     backend crea el episodio a nombre de quien manda la peticion, asi que
@@ -198,23 +200,22 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const accepted = await confirm({
-      title: 'Eliminar curso',
-      message:
-        'Se eliminarán sus módulos, lecciones y recursos. Esta acción no se puede deshacer.',
-      confirmLabel: 'Eliminar',
+      title: t('catalog.deleteCourse'),
+      message: t('catalog.deleteCourseBody'),
+      confirmLabel: t('common.delete'),
       destructive: true,
     });
     if (!accepted) return;
 
     try {
       await CourseContentRepository.removeCourse(target.id);
-      toast('Curso eliminado');
+      toast(t('catalog.courseDeleted'));
       onDeleted?.();
       onCreated?.();
     } catch (error) {
       notify(
-        'No se pudo eliminar',
-        error instanceof Error ? error.message : 'Puede que tenga compras asociadas.',
+        t('common.deleteFailed'),
+        error instanceof Error ? error.message : t('catalog.maybeHasPurchases'),
       );
     }
   };
@@ -224,7 +225,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
       const picked = await pickAudio();
       if (picked) setAudio(picked);
     } catch {
-      setError('No se pudo abrir el selector de archivos.');
+      setError(t('chat.pickerFailed'));
     }
   };
 
@@ -234,17 +235,25 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
       const picked = await pickImage({ allowsEditing: false });
       if (picked) setCover(picked);
     } catch {
-      setError('No se pudo abrir la galería.');
+      setError(t('catalog.galleryFailed'));
     }
   };
 
   const submit = async () => {
     if (!title.trim()) {
-      setError(`Escribe el nombre del ${kind}.`);
+      // Una frase entera por tipo: «el nombre del» + la palabra suelta no se
+      // recoloca bien en un idioma que ordene las palabras de otra forma.
+      setError(
+        isPodcast
+          ? t('catalog.needNameAudio')
+          : isEvent
+            ? t('catalog.needNameEvent')
+            : t('catalog.needNameCourse'),
+      );
       return;
     }
     if (isPodcast && !audio) {
-      setError('Elige el archivo de audio del episodio.');
+      setError(t('catalog.needAudioFile'));
       return;
     }
     // La fecha es OPCIONAL: hay eventos que se anuncian antes de cerrarla.
@@ -254,7 +263,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     if (isEvent && (day.trim() || time.trim())) {
       startsAt = parseDateTime(day, time);
       if (!startsAt) {
-        setError('Para fijar la fecha necesito el día y la hora. Déjalos vacíos si aún no se sabe.');
+        setError(t('catalog.needDayAndTime'));
         return;
       }
     }
@@ -264,11 +273,11 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     if (isEvent && startsAt && (endDay.trim() || endTime.trim())) {
       endsAt = parseDateTime(endDay, endTime);
       if (!endsAt) {
-        setError('Revisa el día y la hora de fin (dd/mm/aaaa y hh:mm).');
+        setError(t('catalog.checkEndDate'));
         return;
       }
       if (startsAt && endsAt < startsAt) {
-        setError('El fin del evento no puede ser anterior a su inicio.');
+        setError(t('catalog.endBeforeStart'));
         return;
       }
     }
@@ -311,14 +320,14 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         // el mismo curso.
         let priceMinor = 0;
         if (dePago) {
-          const leido = aCentavos(price);
+          const leido = aCentavos(price, t);
           if (!leido.ok) {
             setError(leido.motivo);
             setSaving(false);
             return;
           }
           if (leido.centavos === 0) {
-            setError('Un curso de pago necesita un precio mayor que cero.');
+            setError(t('catalog.priceAboveZero'));
             setSaving(false);
             return;
           }
@@ -348,9 +357,9 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
       close();
       toast(
         editing
-          ? isEvent ? 'Evento actualizado' : 'Curso actualizado'
-          : isPodcast ? 'Episodio publicado'
-          : isEvent ? 'Evento publicado' : 'Borrador de curso creado',
+          ? isEvent ? t('catalog.eventUpdated') : t('catalog.courseUpdated')
+          : isPodcast ? t('catalog.episodePublished')
+          : isEvent ? t('catalog.eventPublished') : t('catalog.courseDraftCreated'),
       );
       /*
         UN CURSO RECIEN CREADO NO ESTA TERMINADO, y esta hoja no puede
@@ -363,7 +372,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
       */
       if (nuevoCurso) router.push(`/editar-curso/${nuevoCurso}` as never);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo publicar.');
+      setError(err instanceof Error ? err.message : t('create.publishFailed'));
     } finally {
       setSaving(false);
     }
@@ -373,10 +382,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.sheetTitle} color={colors.text}>
         {editing
-          ? isEvent ? 'Editar evento' : 'Editar curso'
-          : isPrivate ? 'Audio privado'
-          : isPodcast ? 'Nuevo episodio'
-          : isEvent ? 'Nuevo evento' : 'Nuevo curso'}
+          ? isEvent ? t('catalog.editEvent') : t('catalog.editCourse')
+          : isPrivate ? t('home.privateAudio')
+          : isPodcast ? t('catalog.newEpisode')
+          : isEvent ? t('catalog.newEvent') : t('catalog.newCourse')}
       </Text>
 
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.scroll}>
@@ -385,11 +394,11 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
             onPress={chooseAudio}
             style={[styles.audioPicker, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
             accessibilityRole="button"
-            accessibilityLabel="Elegir archivo de audio"
+            accessibilityLabel={t('catalog.pickAudioFile')}
           >
             <Feather name={audio ? 'music' : 'upload'} size={20} color={colors.text} />
             <Text variant="secondary" numberOfLines={1} color={audio ? colors.text : colors.textMuted}>
-              {audio?.name ?? 'Elegir archivo de audio'}
+              {audio?.name ?? t('catalog.pickAudioFile')}
             </Text>
           </Pressable>
         ) : (
@@ -397,7 +406,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           onPress={chooseCover}
           style={[styles.cover, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
           accessibilityRole="button"
-          accessibilityLabel="Elegir portada"
+          accessibilityLabel={t('catalog.pickCover')}
         >
           {cover ? (
             // `contain` para que la vista previa muestre la portada entera, sin
@@ -408,8 +417,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
               <Feather name="image" size={22} color={colors.textMuted} />
               <Text variant="secondary" color={colors.textMuted}>
                 {editing
-                  ? 'Cambiar portada (opcional)'
-                  : `Portada — se sube sin recortar (${isEvent ? 'banner 820x312' : 'imagen del curso'})`}
+                  ? t('catalog.changeCover')
+                  : isEvent
+                    ? t('catalog.coverHintEvent')
+                    : t('catalog.coverHintCourse')}
               </Text>
             </View>
           )}
@@ -417,17 +428,29 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         )}
 
         <Input
-          label={isPodcast ? 'Nombre del audio' : isEvent ? 'Nombre del evento' : 'Nombre del curso'}
+          label={
+            isPodcast
+              ? t('catalog.audioName')
+              : isEvent
+                ? t('catalog.eventName')
+                : t('catalog.courseName')
+          }
           value={title}
           onChangeText={setTitle}
-          placeholder={isPodcast ? 'Episodio 1: Claridad' : isEvent ? 'Encuentro RENASER' : 'Liderazgo consciente'}
+          placeholder={
+            isPodcast
+              ? t('catalog.audioNameExample')
+              : isEvent
+                ? t('catalog.eventNameExample')
+                : t('catalog.courseNameExample')
+          }
         />
         {!isPodcast ? (
         <Input
-          label="Descripción"
+          label={t('lesson.description')}
           value={description}
           onChangeText={setDescription}
-          placeholder="De qué trata"
+          placeholder={t('catalog.descriptionPlaceholder')}
           multiline
         />
         ) : null}
@@ -450,28 +473,28 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
 
         {isEvent ? (
           <>
-            <DateField label="Día (opcional)" value={day} onChange={setDay} />
+            <DateField label={t('catalog.day')} value={day} onChange={setDay} />
             <Input
-              label="Hora (opcional)"
+              label={t('catalog.time')}
               value={time}
               onChangeText={setTime}
               placeholder="hh:mm"
             />
             <Input
-              label="Lugar (opcional)"
+              label={t('catalog.place')}
               value={place}
               onChangeText={setPlace}
-              placeholder="Dirección, enlace o «por confirmar»"
+              placeholder={t('catalog.placePlaceholder')}
             />
-            <DateField label="Día de fin (opcional)" value={endDay} onChange={setEndDay} />
+            <DateField label={t('catalog.endDay')} value={endDay} onChange={setEndDay} />
             <Input
-              label="Hora de fin (opcional)"
+              label={t('catalog.endTime')}
               value={endTime}
               onChangeText={setEndTime}
               placeholder="hh:mm"
             />
             <Input
-              label="Grupo de WhatsApp (opcional)"
+              label={t('catalog.whatsappGroup')}
               value={whatsapp}
               onChangeText={setWhatsapp}
               placeholder="https://chat.whatsapp.com/..."
@@ -487,7 +510,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
               servidor todavia no puede guardarlos.
             */}
             <Text style={[styles.etiqueta, { color: colors.textMuted }]}>
-              ¿Sobre qué aprenderán en este curso?
+              {t('catalog.whatWillTheyLearn')}
             </Text>
             <SelectorDeTemas
               seleccionados={temas}
@@ -504,17 +527,17 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
               ninguna parte.
             */}
             <Text style={[styles.etiqueta, { color: colors.textMuted }]}>
-              Tipo de acceso
+              {t('catalog.accessType')}
             </Text>
             <SegmentedControl
-              options={['Gratuito', 'De pago']}
+              options={[t('catalog.free'), t('catalog.paid')]}
               selectedIndex={dePago ? 1 : 0}
               onChange={(indice) => setDePago(indice === 1)}
             />
             {dePago ? (
               <>
                 <Input
-                  label="Precio (PEN)"
+                  label={t('catalog.price')}
                   value={price}
                   onChangeText={setPrice}
                   placeholder="49.90"
@@ -522,8 +545,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
                 />
                 {!FEATURE_PURCHASES ? (
                   <Text style={[styles.aviso, { color: colors.textMuted }]}>
-                    El precio queda configurado. Las ventas todavía no están
-                    habilitadas, así que nadie podrá comprarlo aún.
+                    {t('catalog.salesDisabled')}
                   </Text>
                 ) : null}
               </>
@@ -546,7 +568,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
               router.push(`/editar-curso/${destino}` as never);
             }}
             accessibilityRole="button"
-            accessibilityLabel="Abrir el asistente del curso"
+            accessibilityLabel={t('catalog.openWizard')}
             style={({ pressed }) => [
               styles.asistente,
               { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
@@ -555,10 +577,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
             <Feather name="sliders" size={16} color={colors.text} />
             <View style={{ flex: 1 }}>
               <Text variant="secondary" weight="700">
-                Ficha completa y temario
+                {t('catalog.wizardTitle')}
               </Text>
               <Text variant="caption" color={colors.textMuted}>
-                Nivel, qué se aprende, contenido y enviar a revisión.
+                {t('catalog.wizardBody')}
               </Text>
             </View>
             <Feather name="chevron-right" size={16} color={colors.textMuted} />
@@ -570,10 +592,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         <Button
           label={
             editing
-              ? 'Guardar cambios'
-              : isPrivate ? 'Publicar audio privado'
-              : isPodcast ? 'Publicar episodio'
-              : isEvent ? 'Publicar evento' : 'Publicar curso'
+              ? t('common.saveChanges')
+              : isPrivate ? t('catalog.publishPrivateAudio')
+              : isPodcast ? t('catalog.publishEpisode')
+              : isEvent ? t('catalog.publishEvent') : t('catalog.publishCourse')
           }
           onPress={() => void submit()}
           loading={saving}
@@ -585,7 +607,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           <Pressable
             onPress={() => void deleteCourse()}
             accessibilityRole="button"
-            accessibilityLabel="Eliminar curso"
+            accessibilityLabel={t('catalog.deleteCourse')}
             style={({ pressed }) => [
               styles.delete,
               { borderColor: colors.danger, opacity: pressed ? 0.6 : 1 },
@@ -593,7 +615,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           >
             <Feather name="trash-2" size={16} color={colors.danger} />
             <Text variant="body" weight="700" color={colors.danger}>
-              Eliminar curso
+              {t('catalog.deleteCourse')}
             </Text>
           </Pressable>
         ) : null}

@@ -12,6 +12,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { StoryGroup } from '@/types';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const BUBBLE = 54;
 
@@ -22,6 +23,7 @@ const BUBBLE = 54;
  * has publicado nada; el anillo distingue lo que te falta por ver.
  */
 export function StoriesRow() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -94,7 +96,7 @@ export function StoriesRow() {
             <Pressable
               onPress={onOwnPress}
               accessibilityRole="button"
-              accessibilityLabel={own ? 'Ver tu historia' : 'Añadir a tu historia'}
+              accessibilityLabel={own ? t('stories.viewYours') : t('stories.addToYours')}
               style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}
             >
               <Ring seen={own?.seen ?? true} hasStory={!!own}>
@@ -123,7 +125,7 @@ export function StoriesRow() {
               onPress={onAddPress}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel="Añadir a tu historia"
+              accessibilityLabel={t('stories.addToYours')}
               style={({ pressed }) => [
                 styles.badge,
                 {
@@ -137,7 +139,7 @@ export function StoriesRow() {
             </Pressable>
           </View>
           <Text numberOfLines={1} style={styles.label} color={colors.text}>
-            Tu historia
+            {t('home.yourStory')}
           </Text>
         </View>
 

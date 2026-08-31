@@ -1,3 +1,4 @@
+import { traduceEnElIdiomaActual } from '@/i18n';
 import type { EventItem } from '@/types';
 
 export type EventDto = {
@@ -17,17 +18,23 @@ export type EventDto = {
   reserved_by_me: boolean;
 };
 
-const MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-
-/** Texto que ve el usuario cuando el evento aun no tiene fecha. */
-export const DATE_TBD = 'Fecha por confirmar';
+/**
+ * Texto que ve el usuario cuando el evento aun no tiene fecha.
+ *
+ * Es una FUNCION y no una constante porque el idioma se elige mientras la
+ * aplicacion corre: una constante se congelaria con el idioma que hubiera al
+ * cargar el modulo, que es antes de que nadie haya elegido nada.
+ */
+export function dateTbd(): string {
+  return traduceEnElIdiomaActual('event.dateTbd');
+}
 
 function formatEventDate(iso: string | null | undefined): string {
-  if (!iso) return DATE_TBD;
+  if (!iso) return dateTbd();
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return DATE_TBD;
+  if (Number.isNaN(d.getTime())) return dateTbd();
   const day = d.getDate();
-  const month = MONTHS[d.getMonth()] ?? '';
+  const month = traduceEnElIdiomaActual('date.monthsShortUpper').split(',')[d.getMonth()] ?? '';
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return `${day} ${month} ${d.getFullYear()} · ${time}`;
 }

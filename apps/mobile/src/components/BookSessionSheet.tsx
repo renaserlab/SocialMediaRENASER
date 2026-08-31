@@ -17,6 +17,7 @@ import { BookingRepository } from '@/repositories/BookingRepository';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   visible: boolean;
@@ -28,6 +29,7 @@ type Props = {
 };
 
 export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const requireAuth = useRequireAuth();
@@ -113,7 +115,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    */
   const handleOpenChat = async () => {
     let autorizado = false;
-    await requireAuth('para escribir a esta persona', () => {
+    await requireAuth('auth.reasonWrite', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -130,7 +132,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       } as never);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'No se pudo abrir el chat. Inténtalo de nuevo.',
+        err instanceof Error ? err.message : t('booking.chatFailed'),
       );
     } finally {
       setSending(false);
@@ -150,18 +152,18 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
    */
   const handleBook = async () => {
     if (!date || !time) {
-      setError('Elige la fecha y la hora de la sesión.');
+      setError(t('booking.pickDateTime'));
       return;
     }
     if (yaPaso) {
       // El servidor lo rechazaría igualmente; decirlo aquí ahorra el viaje y,
       // sobre todo, explica qué hay que cambiar.
-      setError('Esa fecha ya pasó. Elige un momento futuro para la sesión.');
+      setError(t('booking.pastDateLong'));
       return;
     }
 
     let autorizado = false;
-    await requireAuth('para agendar una sesión', () => {
+    await requireAuth('auth.reasonBook', () => {
       autorizado = true;
     });
     if (!autorizado) return;
@@ -173,7 +175,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         proveedorId: targetUser.id,
         // El tema es lo que la agenda enseña como titulo: sin nota se usa el
         // generico, que sigue siendo mas util que una fila sin asunto.
-        tema: note.trim() || 'Sesión 1:1',
+        tema: note.trim() || t('booking.defaultTopic'),
         nota: note.trim(),
         cuandoIso: cuandoIso(date, time),
       });
@@ -191,7 +193,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       close();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'No se pudo agendar la sesión. Inténtalo de nuevo.',
+        err instanceof Error ? err.message : t('booking.failed'),
       );
     } finally {
       setSaving(false);
@@ -210,10 +212,10 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   return (
     <BottomSheet visible={visible} onClose={close}>
       <Text style={styles.title} color={colors.text}>
-        Pedir una sesión 1:1
+        {t('booking.title')}
       </Text>
       <Text variant="secondary" color={colors.textMuted} style={styles.subtitle}>
-        Reserva un espacio personalizado con {targetUser.fullName}.
+        {t('booking.subtitle', { nombre: targetUser.fullName })}
       </Text>
 
       <View style={styles.when}>
@@ -228,17 +230,17 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
             sesion para esta tarde es lo mas normal del mundo. Que la HORA
             elegida tampoco haya pasado lo comprueba `yaPaso`.
           */}
-          <DateField label="Fecha" value={date} onChange={setDate} minDate={hoyANoche()} />
+          <DateField label={t('booking.date')} value={date} onChange={setDate} minDate={hoyANoche()} />
         </View>
         <View style={styles.half}>
-          <TimeField label="Hora" value={time} onChange={setTime} />
+          <TimeField label={t('booking.time')} value={time} onChange={setTime} />
         </View>
       </View>
 
       <Input
         value={note}
         onChangeText={setNote}
-        placeholder="Tema o consulta principal (opcional)"
+        placeholder={t('booking.topicPlaceholder')}
         placeholderTextColor={colors.textMuted}
         multiline
         numberOfLines={3}
@@ -251,12 +253,12 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         con el formulario ya relleno, es la peor version de la misma noticia.
       */}
       <InlineError
-        message={error ?? (yaPaso ? 'Esa fecha ya pasó. Elige un momento futuro.' : null)}
+        message={error ?? (yaPaso ? t('booking.pastDate') : null)}
       />
 
       <View style={styles.actions}>
         <Button
-          label="Enviar mensaje directo"
+          label={t('booking.directMessage')}
           icon="message-circle"
           variant="secondary"
           loading={sending}
@@ -264,7 +266,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
           style={styles.fullWidth}
         />
         <Button
-          label="Confirmar reserva"
+          label={t('booking.confirm')}
           icon="calendar"
           onPress={() => void handleBook()}
           loading={saving}

@@ -3,7 +3,13 @@ import { useCallback } from 'react';
 import { idiomaEfectivo } from '@/lib/idioma';
 import { useAppStore } from '@/store/useAppStore';
 
-import { translate, type Language, type TranslationKey } from './index';
+import {
+  aplicaParametros,
+  fijarIdiomaEnUso,
+  translate,
+  type Language,
+  type TranslationKey,
+} from './index';
 
 /**
  * Traducción para las vistas.
@@ -17,16 +23,15 @@ export function useTranslation() {
   // se usa el de por defecto, sin escribirlo en ningun sitio donde pudiera
   // confundirse despues con una respuesta (ver `@/lib/idioma`).
   const language = useAppStore((state) => idiomaEfectivo(state.idiomaElegido));
+  /*
+    Se anota el idioma para lo que no es un componente (los mapeadores; ver
+    `fijarIdiomaEnUso`). Es una asignación, no un estado: no provoca render.
+  */
+  fijarIdiomaEnUso(language);
 
   const t = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) => {
-      let text = translate(language, key);
-      if (params) {
-        for (const [name, value] of Object.entries(params)) {
-          text = text.replace(`{${name}}`, String(value));
-        }
-      }
-      return text;
+      return aplicaParametros(translate(language, key), params);
     },
     [language],
   );

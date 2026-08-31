@@ -11,6 +11,7 @@ import type { ProfileSummary } from '@/mappers/profileMapper';
 import { profileImageUrl } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /**
  * Personas bloqueadas, con la opción de revertirlo.
@@ -20,6 +21,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * de volver a encontrarla para desbloquearla.
  */
 export function BlockedUsersScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -46,9 +48,9 @@ export function BlockedUsersScreen() {
 
   const unblock = async (person: ProfileSummary) => {
     const ok = await confirm({
-      title: `Desbloquear a ${person.fullName}`,
-      message: 'Volverás a ver sus publicaciones. No se restaura el seguimiento.',
-      confirmLabel: 'Desbloquear',
+      title: t('blocked.unblockNamed', { nombre: person.fullName }),
+      message: t('blocked.unblockBody'),
+      confirmLabel: t('blocked.unblock'),
     });
     if (!ok) return;
     setBusyId(person.id);
@@ -59,7 +61,7 @@ export function BlockedUsersScreen() {
       await ProfileRepository.unblock(person.id);
     } catch {
       setPeople(previous);
-      notify('No se pudo desbloquear', 'Inténtalo de nuevo en unos momentos.');
+      notify(t('blocked.unblockFailed'), t('common.tryAgainSoon'));
     } finally {
       setBusyId(null);
     }
@@ -71,7 +73,7 @@ export function BlockedUsersScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Cuentas bloqueadas"
+        title={t('settings.blocked')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
       <ScrollView contentContainerStyle={styles.list}>
@@ -79,12 +81,8 @@ export function BlockedUsersScreen() {
           <StateView
             state={uiState}
             onRetry={load}
-            title={uiState === 'empty' ? 'No has bloqueado a nadie' : undefined}
-            description={
-              uiState === 'empty'
-                ? 'Cuando bloquees a alguien aparecerá aquí y podrás desbloquearlo.'
-                : undefined
-            }
+            title={uiState === 'empty' ? t('blocked.emptyTitle') : undefined}
+            description={uiState === 'empty' ? t('blocked.emptyBody') : undefined}
             icon="slash"
           />
         ) : (
@@ -110,7 +108,7 @@ export function BlockedUsersScreen() {
                 onPress={() => void unblock(person)}
                 disabled={busyId === person.id}
                 accessibilityRole="button"
-                accessibilityLabel={`Desbloquear a ${person.fullName}`}
+                accessibilityLabel={t('blocked.unblockNamed', { nombre: person.fullName })}
                 style={({ pressed }) => [
                   styles.action,
                   {
@@ -119,7 +117,9 @@ export function BlockedUsersScreen() {
                   },
                 ]}
               >
-                <Text style={[styles.actionText, { color: colors.text }]}>Desbloquear</Text>
+                <Text style={[styles.actionText, { color: colors.text }]}>
+                  {t('blocked.unblock')}
+                </Text>
               </Pressable>
             </View>
           ))

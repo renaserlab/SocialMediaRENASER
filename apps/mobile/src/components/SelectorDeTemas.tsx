@@ -7,6 +7,7 @@ import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { RecommendationRepository, type TopicDto } from '@/repositories/RecommendationRepository';
 import { palette, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Paleta fija de lo que se pinta ENCIMA del video, como en `ModoPublicacion`. */
 const sobreVideo = palette('dark');
@@ -76,6 +77,7 @@ export function SelectorDeTemas({
   maximo = MAXIMO_POR_DEFECTO,
   para = 'contenido',
 }: Props) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   // Si ya se pidio antes, se pinta en el primer fotograma y no hay parpadeo.
   const [temas, setTemas] = useState<TopicDto[]>(temasCacheados[para] ?? []);
@@ -136,7 +138,7 @@ export function SelectorDeTemas({
     <View style={styles.raiz}>
       <View style={styles.cabecera}>
         <Text variant="secondary" weight="700" color={superficie.text} accessibilityRole="header">
-          ¿De qué trata?
+          {t('topics.question')}
         </Text>
         {/*
           El aviso del tope ocupa el sitio de la ayuda en vez de añadirse debajo:

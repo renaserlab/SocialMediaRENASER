@@ -15,6 +15,7 @@ import {
 import { StoryGalleryScreen } from '@/screens/StoryGalleryScreen';
 import { pickImage, pickVideo, PermisoDenegadoError, type PickedMedia } from '@/services/storage';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -79,6 +80,7 @@ export function PasoDeCaptura({
   activo = true,
   alternativa,
 }: Props) {
+  const { t } = useTranslation();
   const enWeb = Platform.OS === 'web';
   const insets = useSafeAreaInsets();
   /*
@@ -202,7 +204,7 @@ export function PasoDeCaptura({
         setErrorWeb(
           e instanceof PermisoDenegadoError
             ? e.message
-            : 'No se pudo abrir el selector. Inténtalo de nuevo.',
+            : t('media.pickerFailed'),
         );
       }
     },
@@ -217,10 +219,10 @@ export function PasoDeCaptura({
             <Feather name={soloVideo ? 'video' : 'image'} size={26} color={media.text} />
           </View>
           <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-            {soloVideo ? 'Elige un vídeo' : 'Elige una foto o un vídeo'}
+            {soloVideo ? t('media.chooseVideo') : t('media.choosePhotoOrVideo')}
           </Text>
           <Text variant="body" color={media.textMuted} style={styles.centrado}>
-            Desde el navegador se usa el selector de archivos de tu equipo.
+            {t('media.webPickerNote')}
           </Text>
           {errorWeb ? (
             <Text variant="secondary" weight="700" color={media.danger} style={styles.centrado}>
@@ -234,7 +236,7 @@ export function PasoDeCaptura({
               accessibilityRole="button"
             >
               <Text variant="body" weight="700" color={media.background}>
-                Elegir vídeo
+                {t('media.pickVideo')}
               </Text>
             </Pressable>
             {!soloVideo ? (
@@ -244,7 +246,7 @@ export function PasoDeCaptura({
                 accessibilityRole="button"
               >
                 <Text variant="body" weight="700" color={media.text}>
-                  Elegir foto
+                  {t('media.pickPhoto')}
                 </Text>
               </Pressable>
             ) : null}
@@ -286,7 +288,10 @@ export function PasoDeCaptura({
           tipo="camara"
           estado={permisoCamara}
           alPedir={pedirCamara}
-          alternativa={{ etiqueta: 'Elegir del carrete', alPulsar: () => setPaso('galeria') }}
+          alternativa={{
+            etiqueta: t('media.pickFromGallery'),
+            alPulsar: () => setPaso('galeria'),
+          }}
         />
         {pie ? <View style={[styles.pieWeb, { paddingBottom: espacioInferior }]}>{pie}</View> : null}
       </View>

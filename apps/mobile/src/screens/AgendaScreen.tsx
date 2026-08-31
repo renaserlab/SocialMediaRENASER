@@ -20,25 +20,28 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
-/** Como se llama cada estado en pantalla. */
-const NOMBRE_DE_ESTADO: Record<EstadoDeSesion, string> = {
-  pending: 'Pendiente',
-  accepted: 'Confirmada',
-  rejected: 'Rechazada',
-  cancelled: 'Cancelada',
-  reschedule_requested: 'Nueva fecha propuesta',
-  completed: 'Realizada',
-  expired: 'Caducada',
+// Claves, no textos: el estado se lee en el idioma elegido.
+const NOMBRE_DE_ESTADO: Record<EstadoDeSesion, TranslationKey> = {
+  pending: 'agenda.statePending',
+  accepted: 'agenda.stateAccepted',
+  rejected: 'agenda.stateRejected',
+  cancelled: 'agenda.stateCancelled',
+  reschedule_requested: 'agenda.stateRescheduled',
+  completed: 'agenda.stateCompleted',
+  expired: 'agenda.stateExpired',
 };
 
 /** Estados que siguen vivos: se ensenan arriba, separados del historial. */
 const VIVOS: EstadoDeSesion[] = ['pending', 'accepted', 'reschedule_requested'];
 
 function fechaLegible(iso: string | null): string {
-  if (!iso) return 'Fecha por acordar';
+  const sinFecha = () => traduceEnElIdiomaActual('agenda.dateTbd');
+  if (!iso) return sinFecha();
   const fecha = new Date(iso);
-  if (Number.isNaN(fecha.getTime())) return 'Fecha por acordar';
+  if (Number.isNaN(fecha.getTime())) return sinFecha();
   return fecha.toLocaleString(undefined, {
     day: 'numeric',
     month: 'long',
@@ -59,6 +62,7 @@ function fechaLegible(iso: string | null): string {
  * obliga a averiguar en cada fila de que lado estas.
  */
 export function AgendaScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
@@ -91,7 +95,7 @@ export function AgendaScreen() {
       setEstado('listo');
     } catch (e) {
       console.warn('[agenda] no se pudo cargar', e);
-      setError(describeError(e, 'No pudimos cargar tu agenda.'));
+      setError(describeError(e, t('agenda.loadFailedBody')));
       setEstado('error');
     }
   }, [signedIn, supabaseEnabled]);
@@ -127,15 +131,15 @@ export function AgendaScreen() {
         );
         toast(
           nuevo === 'accepted'
-            ? 'Sesión confirmada'
+            ? t('notif.sessionAcceptedTitle')
             : nuevo === 'rejected'
-            ? 'Solicitud rechazada'
+            ? t('notif.sessionRejectedTitle')
             : nuevo === 'completed'
-            ? 'Marcada como realizada'
-            : 'Sesión cancelada',
+            ? t('agenda.markedDone')
+            : t('notif.sessionCancelledTitle'),
         );
       } catch (e) {
-        toast(describeError(e, 'No se pudo actualizar la sesión.'));
+        toast(describeError(e, t('agenda.updateFailed')));
       } finally {
         ocupadaRef.current = null;
         setOcupada(null);
@@ -162,13 +166,13 @@ export function AgendaScreen() {
   if (supabaseEnabled && !signedIn) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="AGENDA" onBack={() => router.back()} />
+        <AppHeader title={t('agenda.headerTitle')} onBack={() => router.back()} />
         <StateView
           state="empty"
           icon="calendar"
-          title="Inicia sesión para ver tu agenda"
-          description="Aquí verás las sesiones que te piden y las que has pedido tú."
-          actionLabel="Iniciar sesión"
+          title={t('agenda.signInTitle')}
+          description={t('agenda.signInBody')}
+          actionLabel={t('auth.signIn')}
           onAction={() => router.push('/login' as never)}
         />
       </View>
@@ -177,7 +181,7 @@ export function AgendaScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="AGENDA" onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))} />
+      <AppHeader title={t('agenda.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))} />
 
       <AppScreen
         contentStyle={{ paddingBottom: 140 }}
@@ -196,9 +200,9 @@ export function AgendaScreen() {
           <SegmentedControl
             options={[
               solicitudes.length > 0
-                ? `Solicitudes (${solicitudes.length})`
-                : 'Solicitudes de agenda',
-              'Agenda · sesiones',
+                ? t('agenda.requestsWithCount', { count: solicitudes.length })
+                : t('agenda.requests'),
+              t('agenda.sessions'),
             ]}
             selectedIndex={pestana}
             onChange={setPestana}
@@ -211,8 +215,8 @@ export function AgendaScreen() {
             <StateView
               state="error"
               icon="wifi-off"
-              title="No pudimos cargar tu agenda"
-              description={error ?? 'Revisa tu conexión e inténtalo de nuevo.'}
+              title={t('agenda.loadFailed')}
+              description={error ?? t('common.checkConnection')}
               onRetry={() => void cargar()}
             />
           ) : pestana === 0 ? (
@@ -220,8 +224,8 @@ export function AgendaScreen() {
               <StateView
                 state="empty"
                 icon="inbox"
-                title="No tienes solicitudes"
-                description="Cuando alguien quiera agendar una sesión contigo, aparecerá aquí."
+                title={t('agenda.noRequests')}
+                description={t('agenda.noRequestsBody')}
               />
             ) : (
               <View style={styles.lista}>
@@ -230,18 +234,18 @@ export function AgendaScreen() {
                     key={s.id}
                     sesion={s}
                     persona={s.quienPide}
-                    encabezado={`${s.quienPide.nombre} quiere agendar contigo`}
+                    encabezado={t('agenda.wantsToBook', { nombre: s.quienPide.nombre })}
                     ocupada={ocupada === s.id}
                     acciones={
                       <View style={styles.acciones}>
                         <Button
-                          label="Aceptar"
+                          label={t('agenda.accept')}
                           onPress={() => void responder(s, 'accepted')}
                           disabled={ocupada === s.id}
                           style={styles.accion}
                         />
                         <Button
-                          label="Rechazar"
+                          label={t('agenda.reject')}
                           variant="secondary"
                           onPress={() => void responder(s, 'rejected')}
                           disabled={ocupada === s.id}
@@ -266,16 +270,16 @@ export function AgendaScreen() {
             <StateView
               state="empty"
               icon="calendar"
-              title="Todavía no has agendado nada"
-              description="Entra en el perfil de alguien y pídele una sesión."
-              actionLabel="Descubrir personas"
+              title={t('agenda.emptyTitle')}
+              description={t('agenda.emptyBody')}
+              actionLabel={t('home.discoverPeople')}
               onAction={() => router.navigate('/(tabs)/explore')}
             />
           ) : (
             <View style={styles.lista}>
               {proximas.length > 0 ? (
                 <Text variant="caption" weight="800" color={colors.textMuted} style={styles.titulo}>
-                  PRÓXIMAS
+                  {t('agenda.upcoming')}
                 </Text>
               ) : null}
               {proximas.map((s) => {
@@ -287,22 +291,22 @@ export function AgendaScreen() {
                     persona={otra}
                     encabezado={
                       s.miRol === 'requester'
-                        ? `Le pediste una sesión a ${otra.nombre}`
-                        : `Sesión con ${otra.nombre}`
+                        ? t('agenda.youAsked', { nombre: otra.nombre })
+                        : t('agenda.sessionWith', { nombre: otra.nombre })
                     }
                     ocupada={ocupada === s.id}
                     acciones={
                       <View style={styles.acciones}>
                         {s.estado === 'accepted' ? (
                           <Button
-                            label="Ya la hicimos"
+                            label={t('agenda.weDidIt')}
                             onPress={() => void responder(s, 'completed')}
                             disabled={ocupada === s.id}
                             style={styles.accion}
                           />
                         ) : null}
                         <Button
-                          label="Cancelar"
+                          label={t('common.cancel')}
                           variant="secondary"
                           onPress={() => void responder(s, 'cancelled')}
                           disabled={ocupada === s.id}
@@ -325,7 +329,7 @@ export function AgendaScreen() {
 
               {historial.length > 0 ? (
                 <Text variant="caption" weight="800" color={colors.textMuted} style={styles.titulo}>
-                  HISTORIAL
+                  {t('agenda.history')}
                 </Text>
               ) : null}
               {historial.map((s) => {
@@ -335,7 +339,7 @@ export function AgendaScreen() {
                     key={s.id}
                     sesion={s}
                     persona={otra}
-                    encabezado={`Sesión con ${otra.nombre}`}
+                    encabezado={t('agenda.sessionWith', { nombre: otra.nombre })}
                     ocupada={false}
                   />
                 );
@@ -363,6 +367,7 @@ function Tarjeta({
   alAbrirChat?: () => void;
   ocupada: boolean;
 }) {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const vivo = VIVOS.includes(sesion.estado);
 
@@ -384,7 +389,7 @@ function Tarjeta({
             weight="700"
             color={vivo ? colors.primary : colors.textMuted}
           >
-            {NOMBRE_DE_ESTADO[sesion.estado]}
+            {t(NOMBRE_DE_ESTADO[sesion.estado])}
           </Text>
         </View>
         {alAbrirChat ? (
@@ -393,7 +398,7 @@ function Tarjeta({
             hitSlop={8}
             style={styles.chat}
             accessibilityRole="button"
-            accessibilityLabel="Abrir la conversación"
+            accessibilityLabel={t('agenda.openChat')}
           >
             <Feather name="message-square" size={18} color={colors.textMuted} />
           </Pressable>

@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { Text } from '@/components/Text';
 import type { FaseDePublicacion } from '@/hooks/usePublicacion';
 import { palette, radius, spacing } from '@/theme/tokens';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const media = palette('dark');
 
@@ -45,6 +46,7 @@ export function ProgresoDePublicacion({
   sobreOscuro = true,
   colores,
 }: Props) {
+  const { t } = useTranslation();
   const c = colores ?? {
     texto: media.text,
     suave: media.textMuted,
@@ -58,7 +60,7 @@ export function ProgresoDePublicacion({
         <Feather name="alert-triangle" size={18} color={c.peligro} />
         <View style={styles.contenido}>
           <Text variant="secondary" weight="700" color={c.peligro}>
-            {error ?? 'No se pudo publicar.'}
+            {error ?? t('create.publishFailed')}
           </Text>
           {puedeReintentar ? (
             <Pressable
@@ -67,7 +69,7 @@ export function ProgresoDePublicacion({
               accessibilityRole="button"
             >
               <Text variant="secondary" weight="700" color={c.texto}>
-                Reintentar
+                {t('common.retry')}
               </Text>
             </Pressable>
           ) : null}
@@ -113,7 +115,7 @@ export function ProgresoDePublicacion({
             accessibilityRole="button"
           >
             <Text variant="caption" weight="700" color={c.suave}>
-              Cancelar
+              {t('common.cancel')}
             </Text>
           </Pressable>
         ) : null}

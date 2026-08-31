@@ -16,6 +16,8 @@ import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { MyCourse, Post } from '@/types';
+import { traduceEnElIdiomaActual } from '@/i18n';
+import { useTranslation } from '@/i18n/useTranslation';
 
 /** Lo que cabe en un par de pantallas. No se traen todos de golpe. */
 const AUDIOS_POR_PAGINA = 20;
@@ -43,6 +45,7 @@ const AUDIOS_POR_PAGINA = 20;
  * reproducciones seran otra cosa, no esta pestaña.
  */
 export function LibraryScreen() {
+  const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
@@ -69,7 +72,7 @@ export function LibraryScreen() {
       setFallo(null);
     } catch (error) {
       // Sin biblioteca no se inventa una: se dice que no se pudo cargar.
-      setFallo(error instanceof Error ? error.message : 'No se pudo cargar tu biblioteca.');
+      setFallo(error instanceof Error ? error.message : t('library.loadFailed'));
       setCursos([]);
     }
   }, []);
@@ -101,7 +104,7 @@ export function LibraryScreen() {
       setFalloAudios(null);
     } catch (error) {
       // Un fallo de red no puede convertirse en «no tienes audios guardados».
-      setFalloAudios(error instanceof Error ? error.message : 'No se pudieron cargar tus audios.');
+      setFalloAudios(error instanceof Error ? error.message : t('library.audiosLoadFailed'));
       setAudios([]);
       setHayMasAudios(false);
     }
@@ -181,10 +184,10 @@ export function LibraryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="Mi Biblioteca" />
+      <AppHeader title={t('library.title')} />
       <View style={styles.header}>
         <SegmentedControl
-          options={['Mis Cursos', 'Mis Audios']}
+          options={[t('library.myCourses'), t('library.myAudios')]}
           selectedIndex={pestana}
           onChange={setPestana}
         />
@@ -196,26 +199,26 @@ export function LibraryScreen() {
         onRetry={pestana === 0 ? cargar : cargarAudios}
         title={
           pestana === 0
-            ? 'Todavía no tienes cursos'
+            ? t('library.noCourses')
             : estado === 'error'
-              ? 'No se pudieron cargar tus audios'
-              : 'Sin audios guardados'
+              ? t('library.audiosLoadFailedTitle')
+              : t('library.noAudios')
         }
         description={
           pestana === 0
-            ? fallo ?? 'Cuando empieces un curso aparecerá aquí con tu avance.'
+            ? (fallo ?? t('library.noCoursesBody'))
             : estado === 'error'
-              ? falloAudios ?? undefined
+              ? (falloAudios ?? undefined)
               : // El texto anterior prometia recoger lo escuchado. Nada lo
                 // registra, asi que dice lo unico que si es verdad: se guarda.
-                'Toca el marcador en un audio para guardarlo aquí.'
+                t('library.noAudiosBody')
         }
       >
         {pestana === 0 ? (
           <ScrollView contentContainerStyle={styles.list}>
-            <Grupo titulo="Continúa aprendiendo" cursos={enCurso} router={router} />
-            <Grupo titulo="Sin empezar" cursos={sinEmpezar} router={router} />
-            <Grupo titulo="Completados" cursos={terminados} router={router} />
+            <Grupo titulo={t('library.keepLearning')} cursos={enCurso} router={router} />
+            <Grupo titulo={t('library.notStarted')} cursos={sinEmpezar} router={router} />
+            <Grupo titulo={t('library.completed')} cursos={terminados} router={router} />
           </ScrollView>
         ) : (
           <FlashList
@@ -258,7 +261,8 @@ function Audio({
   onSonar: () => void;
   onAbrir: () => void;
 }) {
-  const fila = filaDeAudio(post);
+  const { t } = useTranslation();
+  const fila = filaDeAudio(post, t);
   return (
     <View>
       <ListRow
@@ -305,14 +309,27 @@ function Grupo({
   );
 }
 
-/** Lo que de verdad se sabe del avance, sin adornos. */
+/**
+ * Lo que de verdad se sabe del avance, sin adornos.
+ *
+ * Cada frase va en UNA clave con sus huecos: partida en trozos («Completado» +
+ * « · » + el numero + « lecciones») no se puede recolocar en un idioma que
+ * ordene las palabras de otra forma.
+ */
 function subtituloDe(curso: MyCourse): string {
-  if (curso.lessonsTotal === 0) return 'Sin contenido todavía';
-  if (curso.state === 'completed') return `Completado · ${curso.lessonsTotal} lecciones`;
-  if (curso.state === 'in_progress') {
-    return `${curso.progressPercent}% · ${curso.lessonsCompleted} de ${curso.lessonsTotal} lecciones`;
+  const t = traduceEnElIdiomaActual;
+  if (curso.lessonsTotal === 0) return t('library.noContentYet');
+  if (curso.state === 'completed') {
+    return t('library.completedWith', { total: curso.lessonsTotal });
   }
-  return `${curso.lessonsTotal} lecciones`;
+  if (curso.state === 'in_progress') {
+    return t('library.progress', {
+      porcentaje: curso.progressPercent,
+      hechas: curso.lessonsCompleted,
+      total: curso.lessonsTotal,
+    });
+  }
+  return t('course.lessons', { count: curso.lessonsTotal });
 }
 
 const styles = StyleSheet.create({
