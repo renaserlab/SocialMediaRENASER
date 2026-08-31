@@ -41,12 +41,15 @@ navegador reporta como error de CORS; ver `recommendations/esquema.py`).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
+from typing import NamedTuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import DateTime, ForeignKey, Text, Uuid, delete, func, select
+from sqlalchemy.sql import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, aliased, mapped_column
 
@@ -142,6 +145,122 @@ async def anotar(db: AsyncSession, posts: list[PostRead], uid: str | None) -> No
         post.reposted_by_me = post.id in mios
 
 
+class ClaveDeFeed(NamedTuple):
+    """Un elemento del muro, reducido a lo que hace falta para ORDENARLO.
+
+    La fecha y el id son los del acontecimiento que se ensena, no los del
+    contenido: para una publicacion son los suyos, y para una republicacion son
+    los de la REPUBLICACION. Compartir hoy algo de hace un mes tiene que
+    aparecer hoy; si se ordenara por la fecha del original, nadie lo veria.
+    """
+
+    orden_at: datetime
+    orden_id: str
+    post_id: str
+    #: Vacio cuando el elemento es la publicacion original.
+    repost_id: str
+
+
+async def claves_del_feed(
+    db: AsyncSession,
+    *,
+    uid: str | None,
+    feed: str,
+    author_id: str | None,
+    cuantas: int,
+    cursor_at: datetime | None,
+    cursor_id: str | None,
+    filtro_de_contenido: Callable[[Select], Select],
+) -> list[ClaveDeFeed]:
+    """Las republicaciones visibles, de la mas nueva a la mas vieja.
+
+    Devuelve CLAVES y no publicaciones: se piden mas de las que caben en una
+    pagina —hay que mezclarlas con las publicaciones originales antes de saber
+    cuales sobreviven— y traerse el contenido de todas para tirar la mitad
+    seria pagar dos veces. Se hidrata despues, solo lo que se queda.
+
+    `filtro_de_contenido` son los criterios que miran al post ORIGINAL
+    (`exclude_media`, `category`, el circulo...). Se recibe como funcion en vez
+    de repetirlos aqui porque tienen que ser LOS MISMOS que los de la otra
+    corriente: si el muro deja fuera los audios, la republicacion de un audio
+    tampoco puede colarse.
+
+    Sin la 0042 devuelve una lista vacia y el muro queda como esta hoy.
+    """
+    if cuantas <= 0 or not await esquema.hay_republicaciones(db):
+        return []
+    stmt = (
+        select(PostRepost.created_at, PostRepost.id, PostRepost.post_id)
+        .join(Post, Post.id == PostRepost.post_id)
+        .order_by(PostRepost.created_at.desc(), PostRepost.id.desc())
+        .limit(cuantas)
+    )
+    stmt = filtro_de_contenido(stmt)
+
+    if cursor_at is not None:
+        # El cursor se compara contra la fecha de la REPUBLICACION, que es la
+        # que ordena. Desempate por id, igual que en la otra corriente: sin un
+        # orden total el cursor se saltaria elementos o los repetiria.
+        if cursor_id:
+            stmt = stmt.where(
+                (PostRepost.created_at < cursor_at)
+                | ((PostRepost.created_at == cursor_at) & (PostRepost.id < cursor_id))
+            )
+        else:
+            stmt = stmt.where(PostRepost.created_at < cursor_at)
+
+    if feed == "following":
+        if not uid:
+            return []
+        # Se sigue a QUIEN REPUBLICA, no al autor original: republicar sirve
+        # justamente para traer al muro a alguien que no se sigue.
+        seguidos = select(Follow.following_id).where(Follow.follower_id == uid)
+        stmt = stmt.where(PostRepost.author_id.in_(seguidos))
+
+    if author_id:
+        stmt = stmt.where(PostRepost.author_id == author_id)
+
+    if uid:
+        # LAS DOS PERSONAS, otra vez. Ver la cabecera del modulo.
+        bloqueados = blocked_either_way(uid)
+        stmt = stmt.where(
+            PostRepost.author_id.not_in(bloqueados), Post.author_id.not_in(bloqueados)
+        )
+
+    filas = (await db.execute(stmt)).all()
+    return [
+        ClaveDeFeed(orden_at=creado, orden_id=repost_id, post_id=post_id, repost_id=repost_id)
+        for creado, repost_id, post_id in filas
+    ]
+
+
+async def detalles(db: AsyncSession, repost_ids: list[str]) -> dict[str, RepostRead]:
+    """La cabecera «fulano republico» de un lote: UNA consulta, no una por fila."""
+    if not repost_ids:
+        return {}
+    filas = (
+        await db.execute(
+            select(PostRepost, Profile)
+            .join(Profile, Profile.id == PostRepost.author_id)
+            .where(PostRepost.id.in_(repost_ids))
+        )
+    ).all()
+    return {
+        repost.id: RepostRead(
+            id=repost.id,
+            author=AuthorSummary(
+                id=quien.id,
+                full_name=quien.full_name,
+                username=quien.username,
+                avatar_path=quien.avatar_path,
+            ),
+            comentario=repost.comentario or "",
+            created_at=repost.created_at,
+        )
+        for repost, quien in filas
+    }
+
+
 @router.get("/reposts", response_model=list[PostRead])
 async def list_reposts(
     page: Page = Depends(pagination_params),
@@ -200,34 +319,26 @@ async def list_reposts(
     if not filas:
         return []
 
-    # Los medios, los temas y las etiquetas salen del post ORIGINAL. Se importa
-    # aqui dentro y no arriba porque el router de contenido importa este modulo:
-    # a nivel de fichero seria un ciclo.
-    from app.modules.content.router import (  # noqa: PLC0415
-        _author,
-        _etiquetas_del_lote,
-        _load_media_map,
-        _to_post_read,
+    # El contenido sale del post ORIGINAL. Se importa aqui dentro y no arriba
+    # porque el router de contenido importa este modulo: a nivel de fichero
+    # seria un ciclo.
+    from app.modules.content.router import _hidratar_publicaciones  # noqa: PLC0415
+
+    # Contadores REALES. Hasta que esto existio se pasaba `0, 0, 0, 0` a mano y
+    # una publicacion con cuarenta me gusta salia con cero en cuanto alguien la
+    # compartia; el corazon aparecia apagado aunque estuviera dado.
+    publicaciones = await _hidratar_publicaciones(
+        db, [fila[1].id for fila in filas], uid
     )
 
-    ids = [fila[1].id for fila in filas]
-    medios = await _load_media_map(db, ids)
-    temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
-
     salida: list[PostRead] = []
-    for repost, post, autor_original, quien_republica in filas:
-        lectura = _to_post_read(
-            post,
-            autor_original,
-            0,
-            0,
-            0,
-            0,
-            media=medios.get(post.id, []),
-            topic_ids=temas.get(post.id, []),
-            hashtags=etiquetas.get(post.id, []),
-            mentions=personas.get(post.id, []),
-        )
+    for repost, post, _autor_original, quien_republica in filas:
+        lectura = publicaciones.get(post.id)
+        if lectura is None:
+            continue
+        # Copia: la misma publicacion puede venir republicada por dos personas
+        # distintas, y cada una lleva su propia cabecera.
+        lectura = lectura.model_copy(deep=True)
         lectura.repost = RepostRead(
             id=repost.id,
             author=AuthorSummary(

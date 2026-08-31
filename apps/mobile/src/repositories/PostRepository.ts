@@ -9,6 +9,17 @@ export type FeedPage = {
   items: Post[];
   likedIds: string[];
   savedIds: string[];
+  /**
+   * Cuántas filas devolvió el servidor, ANTES de quitar repetidas.
+   *
+   * No es lo mismo que `items.length` desde que el muro mezcla republicaciones:
+   * si alguien comparte algo que ya está en la misma página, la publicación
+   * llega dos veces y aquí se queda una. El desplazamiento de la página
+   * siguiente y el «¿hay más?» tienen que contar lo que MANDÓ el servidor, o la
+   * página siguiente se solaparía con esta y el scroll se pararía antes de
+   * tiempo.
+   */
+  recibidos: number;
 };
 
 /** 'all' = pestaña "Para ti"; 'following' = pestaña "Siguiendo". */
@@ -85,11 +96,20 @@ export const PostRepository = {
       offset = 0,
       feed = 'all',
       withMediaUrls = true,
+      withReposts = false,
       timeoutMs,
     }: {
       limit?: number;
       offset?: number;
       feed?: FeedKind;
+      /**
+       * Mezclar en el muro lo que la gente republica.
+       *
+       * Lo pide el muro y nadie más: el mismo endpoint sirve la galería de un
+       * perfil, un círculo y el feed de vídeo, y en ninguno de esos sitios una
+       * republicación significa lo mismo.
+       */
+      withReposts?: boolean;
       /**
        * false = devolver los posts en cuanto llega el JSON, sin esperar a las
        * firmas de Storage. Quien llama pinta la metadata al momento y despues
@@ -104,15 +124,35 @@ export const PostRepository = {
     // Los audios se dejan fuera del muro: son episodios del podcast y tienen
     // su propia sección en el perfil del administrador.
     const dtos = await apiRequest<PostDto[]>(
-      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}&exclude_media=audio`,
+      `${API_V1}/posts?limit=${limit}&offset=${offset}&feed=${feed}&exclude_media=audio` +
+        (withReposts ? '&with_reposts=true' : ''),
       timeoutMs ? { timeoutMs } : undefined,
     );
-    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    /*
+      Una sola vez cada publicación.
+
+      La lista se dibuja con `keyExtractor={(item) => item.id}`: dos elementos
+      con el mismo id son dos celdas con la misma clave, y eso no es un detalle
+      estético sino una lista que se reordena mal al reciclar. Puede pasar desde
+      que el muro mezcla republicaciones: si alguien comparte algo reciente, la
+      publicación y su republicación caen en la misma página.
+
+      Se queda la PRIMERA, que en el orden del muro es la más nueva: la
+      republicación. Es la que explica por qué eso está ahí.
+    */
+    const vistos = new Set<string>();
+    const dtosUnicos = dtos.filter((dto) => {
+      if (vistos.has(dto.id)) return false;
+      vistos.add(dto.id);
+      return true;
+    });
+    const items = dtosUnicos.map((dto) => toPost(dto, currentUserId));
     if (withMediaUrls) await attachMediaUrls(items);
     return {
       items,
-      likedIds: dtos.filter((d) => d.liked_by_me).map((d) => d.id),
-      savedIds: dtos.filter((d) => d.saved_by_me).map((d) => d.id),
+      likedIds: dtosUnicos.filter((d) => d.liked_by_me).map((d) => d.id),
+      savedIds: dtosUnicos.filter((d) => d.saved_by_me).map((d) => d.id),
+      recibidos: dtos.length,
     };
   },
 

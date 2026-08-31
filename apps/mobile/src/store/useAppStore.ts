@@ -638,6 +638,9 @@ export const useAppStore = create<AppState>()(
               // Dos fases: primero el JSON (texto + metadata), despues las
               // firmas. El primer post no espera a Storage.
               withMediaUrls: false,
+              // El muro es el unico sitio donde una republicacion significa lo
+              // que significa: alguien comparte algo y por eso lo estas viendo.
+              withReposts: true,
             };
             let page: FeedPage;
             try {
@@ -657,8 +660,10 @@ export const useAppStore = create<AppState>()(
             set({
               posts: page.items,
               feedStatus: 'idle',
-              feedOffset: page.items.length,
-              feedHasMore: page.items.length === FEED_PAGE,
+              // Lo que MANDO el servidor, no lo que sobrevivio a quitar
+              // repetidas: el desplazamiento cuenta filas suyas, no nuestras.
+              feedOffset: page.recibidos,
+              feedHasMore: page.recibidos === FEED_PAGE,
             });
             /*
               Las reacciones se APLICAN, no se sustituyen.
@@ -707,17 +712,38 @@ export const useAppStore = create<AppState>()(
         try {
           const uid = get().user?.id ?? null;
           const page = await PostRepository.listFeed(
-            { limit: FEED_PAGE, offset: feedOffset, feed: get().feedKind },
+            {
+              limit: FEED_PAGE,
+              offset: feedOffset,
+              feed: get().feedKind,
+              withReposts: true,
+            },
             uid,
           );
-          set((state) => ({
-            posts: [...state.posts, ...page.items],
-            likedPostIds: Array.from(new Set([...state.likedPostIds, ...page.likedIds])),
-            savedPostIds: Array.from(new Set([...state.savedPostIds, ...page.savedIds])),
-            feedOffset: state.feedOffset + page.items.length,
-            feedHasMore: page.items.length === FEED_PAGE,
-            feedLoadingMore: false,
-          }));
+          set((state) => {
+            /*
+              Ni una publicacion dos veces en la lista.
+
+              `listFeed` ya quita las repetidas DENTRO de su pagina, pero no
+              puede saber lo que hay en pantalla de las anteriores: alguien
+              republica algo que ya se leyo hace tres paginas y vuelve a llegar.
+              Aqui si se sabe.
+
+              El «¿hay mas?» y el desplazamiento siguen contando `recibidos`, lo
+              que mando el servidor. Si contaran lo que sobrevive, quitar una
+              repetida pararia el scroll antes de tiempo.
+            */
+            const yaEstan = new Set(state.posts.map((post) => post.id));
+            const nuevas = page.items.filter((post) => !yaEstan.has(post.id));
+            return {
+              posts: [...state.posts, ...nuevas],
+              likedPostIds: Array.from(new Set([...state.likedPostIds, ...page.likedIds])),
+              savedPostIds: Array.from(new Set([...state.savedPostIds, ...page.savedIds])),
+              feedOffset: state.feedOffset + page.recibidos,
+              feedHasMore: page.recibidos === FEED_PAGE,
+              feedLoadingMore: false,
+            };
+          });
         } catch {
           set({ feedLoadingMore: false });
         }
