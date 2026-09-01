@@ -1,6 +1,12 @@
 -- ---------------------------------------------------------------------------
 -- 0044 — Responder una historia desde el visor, y notas de voz en el chat.
 --
+-- ESTA MIGRACIÓN ESTÁ APLICADA en producción (31 de agosto de 2026, confirmado
+-- por quien la ejecutó). Y como el bloque `do $$` del final comprueba contra
+-- `pg_constraint` que no quede ninguna restricción de `kind` que rechace los
+-- audios, que haya terminado sin error demuestra por sí solo que el `CHECK` se
+-- reemplazó por el bueno: era el único fallo que podía pasar en silencio.
+--
 -- DOS COSAS Y NADA MÁS. Una tabla nueva (`message_story_context`) y UNA
 -- restricción relajada (`message_attachments.kind` pasa a admitir `'audio'`).
 -- No se crean columnas en `messages`, no se borra nada, no se modifica ninguna

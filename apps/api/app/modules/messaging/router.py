@@ -156,8 +156,21 @@ def _patron_de_busqueda(texto: str) -> str:
     return f"%{limpio}%"
 
 
-def _condicion_de_busqueda(uid: str, texto: str) -> ColumnElement[bool]:
-    """Buscar una conversacion POR NOMBRE Y POR USUARIO, en el servidor.
+#: A partir de cuantas letras se mira TAMBIEN dentro de los mensajes.
+#:
+#: Tres, y no es un numero redondo elegido al azar: `pg_trgm` indexa grupos de
+#: TRES letras, asi que con una o dos el indice no puede ayudar y la busqueda
+#: dentro del texto volveria a ser el recorrido secuencial que la 0046 vino a
+#: evitar. Por debajo de ese umbral se busca por nombre y usuario, como siempre.
+#:
+#: Ademas es lo razonable de por si: «de» aparece en media aplicacion.
+MIN_LETRAS_PARA_BUSCAR_EN_MENSAJES = 3
+
+
+async def _condicion_de_busqueda(
+    db: AsyncSession, uid: str, texto: str
+) -> ColumnElement[bool]:
+    """Buscar una conversacion POR NOMBRE, POR USUARIO Y POR LO QUE SE DIJO.
 
     LO QUE ARREGLA. La barra filtraba `conv.name.includes(...)` sobre las veinte
     filas que ya estaban en memoria: buscar a la persona de la conversacion
@@ -173,13 +186,25 @@ def _condicion_de_busqueda(uid: str, texto: str) -> ColumnElement[bool]:
     fuera. Sin `aliased`, este `exists` se ataria a esa MISMA fila y acabaria
     preguntando si el nombre de quien busca contiene el texto: siempre falso.
 
-    POR QUE NO SE BUSCA DENTRO DE LOS MENSAJES, y es una decision, no un olvido.
-    Un `ILIKE` correlacionado contra `messages` —la tabla mas grande de la
-    aplicacion— no tiene ningun indice que lo sostenga: en PostgreSQL seria un
-    recorrido secuencial por cada conversacion de la pagina. Hace falta un indice
-    trigram (`pg_trgm`) y eso es esquema nuevo, o sea una migracion, y la 0046
-    esta reservada al coordinador. Queda pedido en el informe. Lo que NO se hace
-    mientras tanto es traerse los mensajes al telefono para buscar ahi.
+    DENTRO DE LOS MENSAJES, SOLO SI HAY INDICE. Un `ILIKE` contra `messages` —la
+    tabla mas grande de la aplicacion— sin nada que lo sostenga es un recorrido
+    secuencial en cada tecleo. Lo sostiene el indice trigram de la 0046, y
+    mientras esa migracion no este aplicada esta parte NO SE AÑADE: la busqueda
+    se queda exactamente como estaba, encontrando por nombre y por usuario. Ni un
+    resultado distinto, ni una consulta de mas.
+
+    Y NO ES UN `EXISTS` CORRELACIONADO, que es la forma en la que sale sola. Con
+    el correlacionado, PostgreSQL entra por `conversation_id` y despues compara
+    el texto fila a fila: el indice trigram no llega a usarse y el coste crece
+    con los mensajes de cada conversacion de la pagina. Con un `IN` sobre una
+    subconsulta independiente, el indice se recorre UNA vez para toda la
+    consulta. Sigue siendo la misma sentencia, asi que no cambia el numero de
+    consultas.
+
+    LOS BORRADOS NO CUENTAN. Un mensaje con lapida (`deleted_at`) conserva su
+    texto en la fila para que el historial pueda enseñar «mensaje eliminado» en
+    su sitio, pero encontrarlo al buscar seria devolverle a alguien justo lo que
+    decidio quitar.
     """
     patron = _patron_de_busqueda(texto)
     # `aliased` y no `ConversationMember` a secas: ver el parrafo de arriba.
@@ -200,7 +225,23 @@ def _condicion_de_busqueda(uid: str, texto: str) -> ColumnElement[bool]:
     )
     # En un grupo no hay «el otro»: el nombre lo pone el titulo, asi que se busca
     # tambien ahi o los grupos serian inencontrables.
-    return or_(coincide_el_otro, Conversation.title.ilike(patron, escape="\\"))
+    criterios = [coincide_el_otro, Conversation.title.ilike(patron, escape="\\")]
+
+    if len(texto.strip()) >= MIN_LETRAS_PARA_BUSCAR_EN_MENSAJES and (
+        await esquema.hay_busqueda_en_mensajes(db)
+    ):
+        # Subconsulta INDEPENDIENTE, no correlacionada: ver el docstring. No hace
+        # falta acotarla a las conversaciones de quien busca porque la consulta
+        # de fuera ya lo hace —esta unida a su propia fila de
+        # `conversation_members`—, asi que esto solo puede AÑADIR conversaciones
+        # que ya le pertenecen.
+        conversaciones_con_el_texto = select(Message.conversation_id).where(
+            Message.deleted_at.is_(None),
+            Message.body.ilike(patron, escape="\\"),
+        )
+        criterios.append(Conversation.id.in_(conversaciones_con_el_texto))
+
+    return or_(*criterios)
 
 
 def _condicion_no_leidos(uid: str) -> ColumnElement[bool]:
@@ -478,7 +519,7 @@ async def list_conversations(
     # bandeja sin que se vea por que.
     texto = (q or "").strip()
     if texto:
-        condiciones.append(_condicion_de_busqueda(current_user.id, texto))
+        condiciones.append(await _condicion_de_busqueda(db, current_user.id, texto))
 
     if filtro:
         condiciones.append(await _condicion_de_filtro(db, uid=current_user.id, filtro=filtro))

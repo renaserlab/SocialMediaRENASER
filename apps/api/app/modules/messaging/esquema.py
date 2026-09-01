@@ -196,6 +196,60 @@ async def hay_notas_de_voz(db: AsyncSession) -> bool:
     return await hay_respuestas_a_historias(db)
 
 
+#: Nombre del indice trigram que crea la 0046. Vive aqui, junto a quien lo
+#: pregunta, y no repartido por el codigo: si la migracion lo renombra, este es
+#: el unico sitio que hay que tocar.
+INDICE_DE_BUSQUEDA_EN_MENSAJES = "messages_body_trgm_idx"
+
+
+async def hay_busqueda_en_mensajes(db: AsyncSession) -> bool:
+    """Si existe el indice trigram sobre `messages.body` (migracion 0046).
+
+    SE PREGUNTA POR EL INDICE Y NO POR LA EXTENSION, y no es un capricho. La
+    consulta funciona sin `pg_trgm`: `ILIKE '%algo%'` es SQL corriente y
+    devolveria exactamente los mismos resultados. Lo que cambia es el COSTE —sin
+    indice es un recorrido secuencial de la tabla mas grande de la aplicacion, en
+    cada tecleo— asi que lo que hay que comprobar antes de encender la funcion no
+    es si se PUEDE hacer, sino si se puede hacer BARATO.
+
+    Es distinto del resto de comprobaciones de este fichero: las otras preguntan
+    «¿existe esto?» porque sin ello la consulta reventaria. Esta pregunta
+    «¿merece la pena?».
+
+    SIN LA 0046: la busqueda de la bandeja sigue encontrando por NOMBRE y por
+    USUARIO, que es lo que hace hoy y lo que se pidio como minimo. No hay error,
+    no hay consulta de mas y no cambia ni un resultado de los que ya salian.
+
+    El inspector de SQLAlchemy sabe de indices en PostgreSQL y en SQLite, asi
+    que esto funciona igual en los dos. Si por lo que sea no pudiera mirarlos, se
+    responde que no: quedarse con la busqueda de siempre es el lado seguro.
+    """
+    if "indice_busqueda_mensajes" not in _cache:
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            try:
+                indices = inspect(sync).get_indexes("messages")
+            except Exception:  # noqa: BLE001
+                # Reflejar indices puede fallar por permisos o por un tipo que el
+                # dialecto no entiende. Ninguno de los dos casos justifica tumbar
+                # la bandeja: se busca como hasta ahora.
+                return False
+            return any(
+                indice.get("name") == INDICE_DE_BUSQUEDA_EN_MENSAJES
+                for indice in indices
+            )
+
+        conexion = await db.connection()
+        _cache["indice_busqueda_mensajes"] = await conexion.run_sync(_mirar)
+        if not _cache["indice_busqueda_mensajes"]:
+            logger.info(
+                "La migracion 0046 no esta aplicada: la busqueda de la bandeja "
+                "encuentra por nombre y por usuario, no por el texto de los "
+                "mensajes."
+            )
+    return _cache["indice_busqueda_mensajes"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 
