@@ -402,6 +402,16 @@ export const es = {
   'chat.file': 'Archivo',
   'chat.viewPhoto': 'Ver foto',
   'chat.viewVideo': 'Ver vídeo',
+  'chat.holdForActions': 'Mantén pulsado para ver las acciones del mensaje',
+  'chat.holdToRecord': 'Mantén pulsado para grabar una nota de voz',
+  'chat.holdToRecordHint': 'Suelta para enviarla; desliza a la izquierda para cancelar',
+  'chat.slideToCancel': 'Desliza para cancelar',
+  'chat.releaseToCancel': 'Suelta para cancelar',
+  'chat.cancelRecording': 'Cancelar la grabación',
+  'chat.voiceNotesOffBody': 'Las notas de voz todavía no están disponibles. Puedes seguir escribiendo y mandando archivos con normalidad.',
+  'chat.storyReplyTo': 'Respuesta a la historia de {nombre}',
+  'chat.storyReplyHint': 'Su historia',
+  'chat.storyGone': 'Historia no disponible',
 
   // Crear
   'create.headerTitle': 'CREAR',
@@ -691,6 +701,8 @@ export const es = {
   'stories.whoViewed': 'Ver quién vio tu historia',
   'stories.viewsOne': '1 vista',
   'stories.viewsMany': '{count} vistas',
+  'stories.replyTo': 'Responder a {nombre}…',
+  'stories.replySent': 'Respuesta enviada a {nombre}',
   'stories.addTitle': 'Agregar a tu historia',
 
   // Fotos y cámara

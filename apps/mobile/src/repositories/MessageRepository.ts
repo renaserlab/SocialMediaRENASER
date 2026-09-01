@@ -6,6 +6,7 @@ import {
   toMessage,
 } from '@/mappers/messageMapper';
 import { firmarAdjuntos, type AdjuntoSubido } from '@/services/messageMedia';
+import { signMediaUrls } from '@/services/storage';
 import type { Conversation, Message } from '@/types';
 
 /**
@@ -58,7 +59,88 @@ async function conUrlsFirmadas(mensajes: Message[]): Promise<Message[]> {
   );
 }
 
+/**
+ * Pone la miniatura de la historia en los mensajes que responden a una.
+ *
+ * SE FIRMAN TODAS DE UNA VEZ, igual que los adjuntos y por lo mismo: cada firma
+ * es una petición, y un historial con diez respuestas a historias costaría diez.
+ *
+ * SOLO LAS QUE SIGUEN EXISTIENDO. Un contexto degradado —la historia caducó o
+ * su autor la borró— no trae ruta, así que no hay nada que firmar. Pedir una
+ * firma de una ruta vacía sería una petición garantizada a fallar por cada
+ * mensaje viejo del historial, que pasado un día son casi todos.
+ *
+ * Si la firma falla, el mensaje se devuelve igual: la cinta se ve sin foto y el
+ * texto se lee entero. Quedarse sin miniatura no puede dejar sin chat.
+ */
+async function conMiniaturasDeHistoria(mensajes: Message[]): Promise<Message[]> {
+  const rutas = mensajes
+    .map((m) => m.storyContext?.mediaPath)
+    .filter((ruta): ruta is string => !!ruta);
+  if (rutas.length === 0) return mensajes;
+
+  let firmas: Record<string, string> = {};
+  try {
+    firmas = await signMediaUrls(rutas);
+  } catch {
+    return mensajes;
+  }
+
+  return mensajes.map((mensaje) =>
+    mensaje.storyContext?.mediaPath
+      ? {
+          ...mensaje,
+          storyContext: {
+            ...mensaje.storyContext,
+            mediaUrl: firmas[mensaje.storyContext.mediaPath],
+          },
+        }
+      : mensaje,
+  );
+}
+
+/** Las dos cosas juntas, que es como las necesita toda pantalla de chat. */
+async function completar(mensajes: Message[]): Promise<Message[]> {
+  return conMiniaturasDeHistoria(await conUrlsFirmadas(mensajes));
+}
+
+/** Lo que el servidor dice que se puede hacer en esta instalación. */
+export type FuncionesDelChat = {
+  /** Se pueden mandar notas de voz (migración 0044 aplicada). */
+  notasDeVoz: boolean;
+  /** Se guarda la referencia a la historia respondida. */
+  respuestasAHistorias: boolean;
+};
+
 export const MessageRepository = {
+  /**
+   * Qué funciones del chat existen HOY en el servidor. NUNCA UN BOTON MUERTO.
+   *
+   * Se pregunta antes de pintar el micrófono. Sin esto, la única forma de saber
+   * si se puede mandar una nota de voz sería grabarla, subirla y recibir un 503:
+   * el botón parecería funcionar, alguien hablaría treinta segundos y lo
+   * perdería todo.
+   *
+   * UN FALLO DE RED TAMBIEN RESPONDE `false`, igual que en `ReviewRepository`:
+   * es preferible no ofrecer algo que quizá no funcione a ofrecerlo y perder lo
+   * que alguien acaba de grabar. Y lo mismo con una API antigua que no conozca
+   * la ruta: `?? false` y no `!== false`.
+   */
+  async funciones(): Promise<FuncionesDelChat> {
+    try {
+      const dto = await apiRequest<{
+        voice_notes?: boolean;
+        story_replies?: boolean;
+      }>(`${API_V1}/conversations/availability`);
+      return {
+        notasDeVoz: dto.voice_notes === true,
+        respuestasAHistorias: dto.story_replies === true,
+      };
+    } catch {
+      return { notasDeVoz: false, respuestasAHistorias: false };
+    }
+  },
+
   /**
    * Una página de la bandeja.
    *
@@ -123,7 +205,7 @@ export const MessageRepository = {
     const dtos = await apiRequest<MessageDto[]>(
       `${API_V1}/conversations/${conversationId}/messages?${params.toString()}`,
     );
-    return conUrlsFirmadas(dtos.map((d) => toMessage(d, currentUserId)));
+    return completar(dtos.map((d) => toMessage(d, currentUserId)));
   },
 
   /**
@@ -145,7 +227,7 @@ export const MessageRepository = {
     const dtos = await apiRequest<MessageDto[]>(
       `${API_V1}/conversations/${conversationId}/messages?${params.toString()}`,
     );
-    return conUrlsFirmadas(dtos.map((d) => toMessage(d, currentUserId)));
+    return completar(dtos.map((d) => toMessage(d, currentUserId)));
   },
 
   /**
@@ -154,18 +236,34 @@ export const MessageRepository = {
    * Los archivos ya están SUBIDOS cuando se llega aquí (ver `messageMedia.ts`):
    * aquí solo viajan sus rutas. Es lo que permite mandar un vídeo grande por
    * trozos reanudables sin que la API sostenga la conexión mientras tanto.
+   *
+   * `storyId` ES LO QUE CONVIERTE EL MENSAJE EN UNA RESPUESTA A UNA HISTORIA.
+   * Va como un campo aparte y NO pegado dentro de `body`: el cuerpo es lo que
+   * la persona escribió, y meter ahí un enlace haría imposible distinguir una
+   * respuesta de verdad de alguien que pegó una URL, además de dejar un enlace
+   * muerto en mitad de la frase en cuanto la historia caducara.
+   *
+   * De quién es la historia lo resuelve el SERVIDOR leyendo la fila; aquí solo
+   * viaja el identificador. Y que la historia ya no exista no tira el mensaje:
+   * se manda igual, sin contexto.
    */
   async sendMessage(
     conversationId: string,
     body: string,
     currentUserId?: string | null,
     attachments: AdjuntoSubido[] = [],
+    storyId?: string | null,
   ): Promise<Message> {
     const dto = await apiRequest<MessageDto>(
       `${API_V1}/conversations/${conversationId}/messages`,
-      { method: 'POST', body: JSON.stringify({ body, attachments }) },
+      {
+        method: 'POST',
+        body: JSON.stringify(
+          storyId ? { body, attachments, story_id: storyId } : { body, attachments },
+        ),
+      },
     );
-    const [mensaje] = await conUrlsFirmadas([toMessage(dto, currentUserId)]);
+    const [mensaje] = await completar([toMessage(dto, currentUserId)]);
     return mensaje ?? toMessage(dto, currentUserId);
   },
 
