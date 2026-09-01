@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   anadirPagina,
   enviarComentario,
+  esOptimista,
   estadoInicial,
   primeraPagina,
   type EstadoDeComentarios,
@@ -23,10 +24,45 @@ export type Respondiendo = { id: string; author: string } | null;
 
 /** Modo demostración, sin backend: no hay a quién preguntar. */
 const comentariosDeMuestra: ComentarioConAvatar[] = [
-  { id: '1', author: 'Sophia V.', text: 'Esto cambia completamente mi perspectiva.', createdAt: 'Hace 2 h' },
-  { id: '2', author: 'Daniel M.', text: '¡Excelente lección! Totalmente recomendado.', createdAt: 'Hace 5 h' },
-  { id: '3', author: 'Esteban R.', text: 'Aplicando esto desde hoy mismo.', createdAt: 'Hace 1 d' },
+  { id: '1', author: 'Sophia V.', text: 'Esto cambia completamente mi perspectiva.', createdAt: 'Hace 2 h', likesCount: 0, viewerReacted: false },
+  { id: '2', author: 'Daniel M.', text: '¡Excelente lección! Totalmente recomendado.', createdAt: 'Hace 5 h', likesCount: 0, viewerReacted: false },
+  { id: '3', author: 'Esteban R.', text: 'Aplicando esto desde hoy mismo.', createdAt: 'Hace 1 d', likesCount: 0, viewerReacted: false },
 ];
+
+/** Enciende o apaga el corazon de un comentario, y mueve su contador. */
+function conReaccion(
+  estado: EstadoDeComentarios<ComentarioConAvatar>,
+  comentarioId: string,
+  activo: boolean,
+): EstadoDeComentarios<ComentarioConAvatar> {
+  return {
+    ...estado,
+    lista: estado.lista.map((c) =>
+      c.id === comentarioId && c.viewerReacted !== activo
+        ? {
+            ...c,
+            viewerReacted: activo,
+            likesCount: Math.max(0, c.likesCount + (activo ? 1 : -1)),
+          }
+        : c,
+    ),
+  };
+}
+
+/** Deja el contador que dijo el servidor, sin tocar lo demas. */
+function conContador(
+  estado: EstadoDeComentarios<ComentarioConAvatar>,
+  comentarioId: string,
+  total: number,
+  activo: boolean,
+): EstadoDeComentarios<ComentarioConAvatar> {
+  return {
+    ...estado,
+    lista: estado.lista.map((c) =>
+      c.id === comentarioId ? { ...c, likesCount: total, viewerReacted: activo } : c,
+    ),
+  };
+}
 
 /**
  * Cargar, paginar y escribir comentarios de una publicación.
@@ -151,6 +187,8 @@ export function useComentarios(postId: string | undefined | null) {
               createdAt: t('time.now'),
               authorId: currentUser?.id,
               parentId: padre,
+              likesCount: 0,
+              viewerReacted: false,
             };
           }
           return PostRepository.addComment(postId, texto, padre);
@@ -162,6 +200,8 @@ export function useComentarios(postId: string | undefined | null) {
           createdAt: t('time.now'),
           authorId: currentUser?.id,
           parentId: padre,
+          likesCount: 0,
+          viewerReacted: false,
         }),
       });
 
@@ -189,6 +229,46 @@ export function useComentarios(postId: string | undefined | null) {
     t,
   ]);
 
+  /**
+   * El corazon de un comentario. Optimista, y con vuelta atras si el servidor
+   * dice que no: sin ella el corazon se queda encendido sobre algo que no se
+   * guardo, y solo se descubre al recargar.
+   *
+   * `esOptimista` fuera: un comentario que todavia no tiene id del servidor no
+   * se puede referenciar, y pulsarlo daria un 404.
+   */
+  const reaccionar = useCallback(
+    async (comentarioId: string) => {
+      if (!supabaseEnabled || esOptimista(comentarioId)) return;
+
+      let autorizado = false;
+      await requireAuth('auth.reasonComment', () => {
+        autorizado = true;
+      });
+      if (!autorizado) return;
+
+      let previo: ComentarioConAvatar | undefined;
+      setEstado((actual) => {
+        previo = actual.lista.find((c) => c.id === comentarioId);
+        if (!previo) return actual;
+        return conReaccion(actual, comentarioId, !previo.viewerReacted);
+      });
+      if (!previo) return;
+
+      const activar = !previo.viewerReacted;
+      try {
+        const { likesCount } = await PostRepository.reactToComment(comentarioId, activar);
+        // El contador de verdad, que puede no ser el que se pinto: mientras se
+        // enviaba pudo reaccionar alguien mas.
+        setEstado((actual) => conContador(actual, comentarioId, likesCount, activar));
+      } catch {
+        setEstado((actual) => conReaccion(actual, comentarioId, !activar));
+        notify(t('post.reactionFailed'), t('common.checkConnection'));
+      }
+    },
+    [requireAuth, supabaseEnabled, t],
+  );
+
   const uiState =
     status === 'loading'
       ? 'loading'
@@ -210,5 +290,6 @@ export function useComentarios(postId: string | undefined | null) {
     enviar,
     respondiendo,
     setRespondiendo,
+    reaccionar,
   } as const;
 }

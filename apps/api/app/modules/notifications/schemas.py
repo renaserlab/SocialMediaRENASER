@@ -13,6 +13,10 @@ class NotificationRead(BaseModel):
     actor: AuthorSummary | None = None
     entity_type: str | None = None
     entity_id: str | None = None
+    # Lo que el aviso necesita ademas de su entidad. Hoy solo lo usa
+    # `comment_like`, que guarda en `entity_id` el comentario —para no
+    # deduplicar de mas— y necesita la publicacion para saber a donde llevar.
+    payload: dict = {}
     read: bool = False
     created_at: datetime
 

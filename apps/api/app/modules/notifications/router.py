@@ -89,6 +89,7 @@ async def list_notifications(
                 ),
                 entity_type=notif.entity_type,
                 entity_id=notif.entity_id,
+                payload=notif.payload or {},
                 read=notif.read_at is not None,
                 created_at=notif.created_at,
                 group_count=conteos.get(notif.entity_id or "") if notif.type == "like" else None,

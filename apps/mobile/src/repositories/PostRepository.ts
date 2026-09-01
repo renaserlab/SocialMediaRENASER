@@ -42,7 +42,23 @@ export type ComentarioConAvatar = Comment & {
   authorId?: string;
   /** Null en un comentario raiz; el id del padre en una respuesta. */
   parentId?: string | null;
+  /** Reacciones al comentario. Cero sin la migracion 0048. */
+  likesCount: number;
+  /** Si TU reaccionaste. Viene en el propio comentario, no en una peticion aparte. */
+  viewerReacted: boolean;
 };
+
+/** Lo que anade el servidor a cada comentario, en un solo sitio. */
+function comentarioDesde(dto: CommentDto): ComentarioConAvatar {
+  return {
+    ...toComment(dto),
+    avatarUrl: profileImageUrl(dto.author.avatar_path),
+    authorId: dto.author.id,
+    parentId: dto.parent_id,
+    likesCount: dto.likes_count ?? 0,
+    viewerReacted: dto.viewer_reacted ?? false,
+  };
+}
 
 export type ComentariosPagina = {
   items: ComentarioConAvatar[];
@@ -490,12 +506,7 @@ export const PostRepository = {
     );
     const ultimo = dtos[dtos.length - 1];
     return {
-      items: dtos.map((dto) => ({
-        ...toComment(dto),
-        avatarUrl: profileImageUrl(dto.author.avatar_path),
-        authorId: dto.author.id,
-        parentId: dto.parent_id,
-      })),
+      items: dtos.map(comentarioDesde),
       siguiente:
         dtos.length < limit || !ultimo
           ? null
@@ -539,11 +550,23 @@ export const PostRepository = {
       // raiz obligaria al servidor a distinguir «sin padre» de «padre nulo».
       body: JSON.stringify(parentId ? { body, parent_id: parentId } : { body }),
     });
-    return {
-      ...toComment(dto),
-      avatarUrl: profileImageUrl(dto.author.avatar_path),
-      authorId: dto.author.id,
-      parentId: dto.parent_id,
-    };
+    return comentarioDesde(dto);
+  },
+
+  /**
+   * Reaccionar a un COMENTARIO, o dejar de hacerlo.
+   *
+   * Idempotente en el servidor: pulsar dos veces deja una sola fila. `user_id`
+   * no viaja: sale del token.
+   */
+  async reactToComment(
+    commentId: string,
+    reaccionar: boolean,
+  ): Promise<{ likesCount: number }> {
+    const respuesta = await apiRequest<{ reacted: boolean; likes_count: number }>(
+      `${API_V1}/comments/${commentId}/like`,
+      { method: reaccionar ? 'POST' : 'DELETE' },
+    );
+    return { likesCount: respuesta.likes_count };
   },
 };

@@ -196,6 +196,11 @@ class CommentRead(BaseModel):
     parent_id: str | None
     body: str
     created_at: datetime
+    # Reacciones al COMENTARIO (migracion 0048). Van en el DTO y no en una ruta
+    # aparte: una peticion por comentario serian veinte por pagina. Sin la
+    # migracion valen 0 y false, que es como se pintaba antes.
+    likes_count: int = 0
+    viewer_reacted: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

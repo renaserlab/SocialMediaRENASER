@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
@@ -12,6 +13,9 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type Comentarios = ReturnType<typeof useComentarios>;
+
+/** El corazón mide 13 px: sin esto no se acierta con el dedo. */
+const ZONA_TACTIL = { top: 10, bottom: 10, left: 10, right: 10 };
 
 /** Un comentario raíz con sus respuestas. */
 export type Hilo = { raiz: ComentarioConAvatar; respuestas: ComentarioConAvatar[] };
@@ -75,6 +79,7 @@ export function ContenidoDeComentarios({
     enviar,
     respondiendo,
     setRespondiendo,
+    reaccionar,
   } = comentarios;
 
   const hilos = useMemo(() => enHilos(estado.lista), [estado.lista]);
@@ -118,14 +123,42 @@ export function ContenidoDeComentarios({
             <Text style={[styles.hora, { color: colors.textMuted }]}>{item.createdAt}</Text>
           </View>
           <Text style={[styles.cuerpo, { color: colors.text }]}>{item.text}</Text>
-          <Pressable
-            onPress={() => setRespondiendo({ id: item.id, author: item.author })}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityRole="button"
-            accessibilityLabel={t('post.reply')}
-          >
-            <Text style={[styles.responder, { color: colors.textMuted }]}>{t('post.reply')}</Text>
-          </Pressable>
+          <View style={styles.acciones}>
+            <Pressable
+              onPress={() => void reaccionar(item.id)}
+              hitSlop={ZONA_TACTIL}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: item.viewerReacted }}
+              accessibilityLabel={
+                item.viewerReacted ? t('post.unlikeComment') : t('post.likeComment')
+              }
+              style={styles.reaccion}
+            >
+              <Feather
+                name="heart"
+                size={13}
+                color={item.viewerReacted ? colors.primary : colors.textMuted}
+              />
+              {item.likesCount > 0 ? (
+                <Text
+                  style={[
+                    styles.contador,
+                    { color: item.viewerReacted ? colors.primary : colors.textMuted },
+                  ]}
+                >
+                  {item.likesCount}
+                </Text>
+              ) : null}
+            </Pressable>
+            <Pressable
+              onPress={() => setRespondiendo({ id: item.id, author: item.author })}
+              hitSlop={ZONA_TACTIL}
+              accessibilityRole="button"
+              accessibilityLabel={t('post.reply')}
+            >
+              <Text style={[styles.responder, { color: colors.textMuted }]}>{t('post.reply')}</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     );
@@ -221,7 +254,10 @@ const styles = StyleSheet.create({
   autor: { fontSize: 13, fontWeight: '700' },
   hora: { fontSize: 10 },
   cuerpo: { fontSize: 13, lineHeight: 18 },
-  responder: { fontSize: 11, fontWeight: '700', marginTop: spacing.xs },
+  acciones: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, marginTop: spacing.xs },
+  reaccion: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  contador: { fontSize: 11, fontWeight: '700' },
+  responder: { fontSize: 11, fontWeight: '700' },
   respondiendo: {
     flexDirection: 'row',
     alignItems: 'center',

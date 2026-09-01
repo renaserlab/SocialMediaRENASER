@@ -35,6 +35,11 @@ BATCH_SIZE = 100
 TEMPLATES: dict[str, tuple[str, str]] = {
     "like": ("Nueva reacción", "A {actor} le gustó tu publicación."),
     "comment": ("Nuevo comentario", "{actor} comentó tu publicación."),
+    # Responder a un comentario tiene su propio texto: a quien le responden
+    # no le comentaron la publicación, y con el texto de arriba parecía que
+    # el aviso era de otra cosa.
+    "comment_reply": ("Nueva respuesta", "{actor} respondió a tu comentario."),
+    "comment_like": ("Nueva reacción", "A {actor} le gustó tu comentario."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
     "session_booked": ("Nueva solicitud de sesión", "{actor} quiere agendar contigo."),
     # Cada respuesta lleva su propio texto. Con un unico tipo para todo, a
@@ -55,6 +60,8 @@ TEMPLATES: dict[str, tuple[str, str]] = {
 CHANNELS: dict[str, str] = {
     "like": "interacciones",
     "comment": "interacciones",
+    "comment_reply": "interacciones",
+    "comment_like": "interacciones",
     "follow": "interacciones",
     "session_booked": "contenido",
     "session_accepted": "contenido",

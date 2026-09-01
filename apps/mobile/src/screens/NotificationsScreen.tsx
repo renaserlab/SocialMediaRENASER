@@ -192,6 +192,13 @@ export function NotificationsScreen() {
                     */
                   item.entityType === 'post' && item.entityId
                   ? router.push(`/post/${item.entityId}` as never)
+                  : /*
+                      Un corazon a un comentario: `entityId` es el COMENTARIO,
+                      asi que la publicacion viene en el payload. Sin esto el
+                      aviso llevaba al perfil de quien reacciono.
+                    */
+                  item.entityType === 'comment' && item.postId
+                  ? router.push(`/post/${item.postId}` as never)
                   : item.actorId
                   ? irAlPerfil(router, item.actorId)
                   : undefined

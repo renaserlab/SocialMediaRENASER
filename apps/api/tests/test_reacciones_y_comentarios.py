@@ -36,6 +36,8 @@ POSTS = "/api/v1/posts"
 
 ANA = "aaaaaaaa-0000-0000-0000-000000000001"
 BRUNO = "aaaaaaaa-0000-0000-0000-000000000002"
+# Una tercera para separar «autor de la publicacion» de «autor del comentario».
+CARLA = "aaaaaaaa-0000-0000-0000-000000000003"
 
 
 @pytest_asyncio.fixture
@@ -62,6 +64,7 @@ async def entorno():
     async with sesiones() as db:
         db.add(Profile(id=ANA, full_name="Ana", username="ana"))
         db.add(Profile(id=BRUNO, full_name="Bruno", username="bruno"))
+        db.add(Profile(id=CARLA, full_name="Carla", username="carla"))
         await db.commit()
 
     async def _db_override():
@@ -236,3 +239,166 @@ async def test_el_nombre_del_aviso_se_lee_al_avisar_y_no_es_una_foto_antigua(
     assert (await http.post(f"{POSTS}/{post_id}/like")).status_code == 200
 
     assert avisos[0]["actor_name"] == "Ana Torres"
+
+
+# --------------------------------------------------------------------------- #
+# Respuestas a comentarios
+# --------------------------------------------------------------------------- #
+#
+# `comments.parent_id` existia desde la 0001 y NADIE lo validaba: llegaba del
+# cliente y se guardaba tal cual. Con eso se podia colgar una respuesta de un
+# comentario de OTRA publicacion —dos hilos mezclados— o de un id que no
+# existe, que deja una fila que ninguna pantalla sabe pintar.
+
+
+async def _comentario(http: AsyncClient, post_id: str, texto: str, padre=None) -> dict:
+    cuerpo: dict = {"body": texto}
+    if padre is not None:
+        cuerpo["parent_id"] = padre
+    respuesta = await http.post(f"{POSTS}/{post_id}/comments", json=cuerpo)
+    assert respuesta.status_code == 201, respuesta.text
+    return respuesta.json()
+
+
+@pytest.mark.asyncio
+async def test_una_respuesta_se_guarda_colgada_de_su_comentario(entorno):
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+    raiz = await _comentario(http, post_id, "El primero")
+
+    respuesta = await _comentario(http, post_id, "Te respondo", padre=raiz["id"])
+
+    assert respuesta["parent_id"] == raiz["id"]
+
+
+@pytest.mark.asyncio
+async def test_un_comentario_normal_sigue_sin_padre(entorno):
+    """Lo de siempre no cambia: sin `parent_id`, la fila queda con null."""
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+
+    assert (await _comentario(http, post_id, "Suelto"))["parent_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_responder_a_un_comentario_que_no_existe_no_se_guarda(entorno):
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+
+    respuesta = await http.post(
+        f"{POSTS}/{post_id}/comments",
+        json={"body": "A la nada", "parent_id": "aaaaaaaa-0000-0000-0000-00000000dead"},
+    )
+
+    assert respuesta.status_code == 404, respuesta.text
+    assert (await http.get(f"{POSTS}/{post_id}/comments")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_responder_con_un_padre_que_no_es_un_uuid_no_revienta(entorno):
+    """Un `parent_id` con basura tiene que ser un 404, no un 500 de la base."""
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+
+    respuesta = await http.post(
+        f"{POSTS}/{post_id}/comments", json={"body": "Hola", "parent_id": "no-es-uuid"}
+    )
+
+    assert respuesta.status_code == 404, respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_no_se_puede_colgar_una_respuesta_de_otra_publicacion(entorno):
+    """El caso que mezclaba hilos: el padre existe, pero no vive aqui."""
+    http, _, identidad = entorno
+    una = await _publicacion_de_bruno(http, identidad)
+    otra = await _publicacion_de_bruno(http, identidad)
+    ajeno = await _comentario(http, otra, "En la otra")
+
+    respuesta = await http.post(
+        f"{POSTS}/{una}/comments", json={"body": "Colandome", "parent_id": ajeno["id"]}
+    )
+
+    assert respuesta.status_code == 404, respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_responder_a_una_respuesta_cuelga_del_mismo_raiz(entorno):
+    """UN SOLO NIVEL, y decidido en el servidor.
+
+    Si el limite viviera solo en la pantalla, cada superficie tendria que
+    repetirlo y la fila guardada seguiria pudiendo tener profundidad diez.
+    """
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+    raiz = await _comentario(http, post_id, "El primero")
+    primera = await _comentario(http, post_id, "Respondo", padre=raiz["id"])
+
+    segunda = await _comentario(http, post_id, "Y yo", padre=primera["id"])
+
+    assert segunda["parent_id"] == raiz["id"]
+
+
+@pytest.mark.asyncio
+async def test_responder_avisa_al_autor_del_comentario_y_al_de_la_publicacion(
+    entorno, avisos
+):
+    """Dos personas distintas, dos avisos distintos: cada una se entera de lo suyo."""
+    http, _, identidad = entorno
+    # Publica una tercera persona para que autor y comentarista no coincidan.
+    post_id = await _publicacion_de_bruno(http, identidad)
+    identidad["uid"] = CARLA
+    raiz = await _comentario(http, post_id, "Digo yo")
+    identidad["uid"] = ANA
+    avisos.clear()
+
+    await _comentario(http, post_id, "Te respondo", padre=raiz["id"])
+
+    por_tipo = {a["notification_type"]: a for a in avisos}
+    assert set(por_tipo) == {"comment", "comment_reply"}
+    assert por_tipo["comment"]["user_ids"] == [BRUNO]
+    assert por_tipo["comment_reply"]["user_ids"] == [CARLA]
+
+
+@pytest.mark.asyncio
+async def test_si_el_autor_comento_lo_suyo_solo_recibe_un_aviso(entorno, avisos):
+    """Un comentario no puede poner dos filas en la misma bandeja."""
+    http, _, identidad = entorno
+    post_id = await _publicacion_de_bruno(http, identidad)
+    identidad["uid"] = BRUNO
+    raiz = await _comentario(http, post_id, "Lo mio, comentado por mi")
+    identidad["uid"] = ANA
+    avisos.clear()
+
+    await _comentario(http, post_id, "Te respondo", padre=raiz["id"])
+
+    assert [a["notification_type"] for a in avisos] == ["comment_reply"]
+    assert avisos[0]["user_ids"] == [BRUNO]
+
+
+@pytest.mark.asyncio
+async def test_responderse_a_uno_mismo_no_se_avisa_a_uno_mismo(entorno, avisos):
+    http, _, _ = entorno
+    creada = await http.post(POSTS, json={"body": "Lo mio"})
+    post_id = creada.json()["id"]
+    raiz = await _comentario(http, post_id, "Me contesto solo")
+    avisos.clear()
+
+    await _comentario(http, post_id, "Efectivamente", padre=raiz["id"])
+
+    assert avisos == []
+
+
+@pytest.mark.asyncio
+async def test_comentar_lo_propio_tampoco_manda_push(entorno, avisos):
+    """`add_notification` ya se callaba, pero el push salia igual.
+
+    Se programaba sin mirar si el aviso llego a escribirse, asi que comentar tu
+    propia publicacion te hacia sonar el telefono a ti.
+    """
+    http, _, _ = entorno
+    creada = await http.post(POSTS, json={"body": "Lo mio"})
+
+    await _comentario(http, creada.json()["id"], "Y me comento")
+
+    assert avisos == []

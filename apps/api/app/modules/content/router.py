@@ -24,6 +24,7 @@ from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import (
     Comment,
+    CommentLike,
     PodcastCategory,
     Post,
     PostLike,
@@ -47,6 +48,7 @@ from app.modules.notifications.push import encolar_push
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.profiles.schemas import ProfileSummary
+from app.modules.recommendations import esquema as esquema_recomendaciones
 from app.modules.recommendations import temas_de_contenido
 from app.modules.social_graph.models import Follow
 from app.modules.social_graph.service import blocked_either_way
@@ -1185,7 +1187,13 @@ async def unsave_post(
 # --------------------------------------------------------------------------- #
 # Comentarios
 # --------------------------------------------------------------------------- #
-def _to_comment_read(comment: Comment, profile: Profile) -> CommentRead:
+def _to_comment_read(
+    comment: Comment,
+    profile: Profile,
+    *,
+    likes_count: int = 0,
+    viewer_reacted: bool = False,
+) -> CommentRead:
     return CommentRead(
         id=comment.id,
         post_id=comment.post_id,
@@ -1193,7 +1201,47 @@ def _to_comment_read(comment: Comment, profile: Profile) -> CommentRead:
         parent_id=comment.parent_id,
         body=comment.body,
         created_at=comment.created_at,
+        likes_count=likes_count,
+        viewer_reacted=viewer_reacted,
     )
+
+
+async def _reacciones_de_comentarios(
+    db: AsyncSession, ids: list[str], viewer_id: str | None
+) -> tuple[dict[str, int], set[str]]:
+    """Cuantas reacciones tiene cada comentario, y cuales reacciono quien mira.
+
+    DOS CONSULTAS PARA LA PAGINA ENTERA, no dos por comentario. Con veinte
+    comentarios por pagina, resolverlo fila a fila serian cuarenta viajes a la
+    base para pintar una lista.
+
+    Sin la migracion 0048 no hay tabla: se devuelve vacio y cada comentario sale
+    con 0 y sin corazon, que es exactamente como se pintaba antes de esto.
+    """
+    if not ids or not await esquema_recomendaciones.hay_reacciones_a_comentarios(db):
+        return {}, set()
+
+    filas = (
+        await db.execute(
+            select(CommentLike.comment_id, func.count())
+            .where(CommentLike.comment_id.in_(ids))
+            .group_by(CommentLike.comment_id)
+        )
+    ).all()
+    contadores = {comment_id: total for comment_id, total in filas}
+
+    if viewer_id is None:
+        return contadores, set()
+    mias = set(
+        (
+            await db.scalars(
+                select(CommentLike.comment_id).where(
+                    CommentLike.comment_id.in_(ids), CommentLike.user_id == viewer_id
+                )
+            )
+        ).all()
+    )
+    return contadores, mias
 
 
 @router.get("/posts/{post_id}/comments", response_model=list[CommentRead])
@@ -1203,6 +1251,9 @@ async def list_comments(
     # Cursor (keyset): "lo comentado ANTES de este punto", igual que en el feed.
     before_created_at: str | None = Query(default=None),
     before_id: str | None = Query(default=None),
+    # Opcional a proposito: leer no pide cuenta. Solo sirve para saber a cuales
+    # reacciono quien mira; sin sesion, ninguno sale marcado.
+    viewer: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[CommentRead]:
     """Comentarios de una publicacion, del mas reciente al mas antiguo.
@@ -1248,7 +1299,18 @@ async def list_comments(
     else:
         stmt = stmt.offset(page.offset)
     rows = (await db.execute(stmt)).all()
-    return [_to_comment_read(comment, profile) for comment, profile in rows]
+    contadores, mias = await _reacciones_de_comentarios(
+        db, [comment.id for comment, _ in rows], viewer.id if viewer else None
+    )
+    return [
+        _to_comment_read(
+            comment,
+            profile,
+            likes_count=contadores.get(comment.id, 0),
+            viewer_reacted=comment.id in mias,
+        )
+        for comment, profile in rows
+    ]
 
 
 @router.post(
@@ -1265,24 +1327,69 @@ async def create_comment(
 ) -> CommentRead:
     ensure_uuid(post_id, "Publicacion no encontrada.")
     post = await _get_active_post(db, post_id)
+
+    # ----------------------------------------------------------------------- #
+    # A que se responde
+    # ----------------------------------------------------------------------- #
+    #
+    # `parent_id` llegaba del cliente y se guardaba SIN mirar: se podia colgar
+    # una respuesta de un comentario de otra publicacion, o de un id que no
+    # existe. Lo primero mezcla hilos entre publicaciones; lo segundo deja una
+    # fila que ninguna pantalla sabe pintar.
+    parent_id: str | None = None
+    autor_del_padre: str | None = None
+    if payload.parent_id:
+        ensure_uuid(payload.parent_id, "Comentario no encontrado.")
+        padre = await db.get(Comment, payload.parent_id)
+        if padre is None or padre.post_id != post_id or padre.status != "published":
+            raise NotFoundError("Comentario no encontrado.")
+        # UN SOLO NIVEL. Responder a una respuesta cuelga del mismo raiz. Sin
+        # este tope, un hilo largo acaba sangrado hasta una columna de dos
+        # caracteres, y cada pantalla tendria que decidir su propio limite.
+        parent_id = padre.parent_id or padre.id
+        autor_del_padre = padre.author_id
+
     comment = Comment(
         post_id=post_id,
         author_id=current_user.id,
-        parent_id=payload.parent_id,
+        parent_id=parent_id,
         body=payload.body,
     )
     db.add(comment)
+
+    # ----------------------------------------------------------------------- #
+    # A quien se avisa
+    # ----------------------------------------------------------------------- #
+    #
     # Un comentario NO se deduplica: dos comentarios de la misma persona en la
     # misma publicacion son dos cosas distintas que han pasado. Ver
     # `TIPOS_IDEMPOTENTES` en `notifications/service.py`.
-    await add_notification(
-        db,
-        user_id=post.author_id,
-        actor_id=current_user.id,
-        type="comment",
-        entity_type="post",
-        entity_id=post_id,
-    )
+    #
+    # `add_notification` ya se calla si el actor es el destinatario, y devuelve
+    # si escribio algo. Se mira ese resultado: un aviso que no se escribio no
+    # puede hacer sonar un telefono.
+    avisado_al_padre = False
+    if autor_del_padre is not None:
+        avisado_al_padre = await add_notification(
+            db,
+            user_id=autor_del_padre,
+            actor_id=current_user.id,
+            type="comment_reply",
+            entity_type="post",
+            entity_id=post_id,
+        )
+    # Al autor de la publicacion, SALVO que sea el mismo al que ya se aviso por
+    # la respuesta: seria dos filas en la bandeja por un solo comentario.
+    avisado_al_autor = False
+    if post.author_id != autor_del_padre:
+        avisado_al_autor = await add_notification(
+            db,
+            user_id=post.author_id,
+            actor_id=current_user.id,
+            type="comment",
+            entity_type="post",
+            entity_id=post_id,
+        )
     await db.commit()
     # Despues del commit, por el mismo motivo que en el "me gusta".
     #
@@ -1293,18 +1400,136 @@ async def create_comment(
     # la respuesta. Usar el helper ademas seria una consulta de mas para traer
     # un dato que ya esta en la mano.
     autor = await db.get(Profile, current_user.id)
-    encolar_push(
-        background,
-        user_ids=[post.author_id],
-        notification_type="comment",
-        actor_name=autor.full_name if autor else None,
-        data={"type": "comment", "postId": post_id},
-    )
+    if avisado_al_autor:
+        encolar_push(
+            background,
+            user_ids=[post.author_id],
+            notification_type="comment",
+            actor_name=autor.full_name if autor else None,
+            data={"type": "comment", "postId": post_id},
+        )
+    if avisado_al_padre and autor_del_padre is not None:
+        encolar_push(
+            background,
+            user_ids=[autor_del_padre],
+            notification_type="comment_reply",
+            actor_name=autor.full_name if autor else None,
+            data={"type": "comment_reply", "postId": post_id},
+        )
     await db.refresh(comment)
 
     if autor is None:
         raise NotFoundError("Perfil del autor no encontrado.")
     return _to_comment_read(comment, autor)
+
+
+# --------------------------------------------------------------------------- #
+# Reaccionar a un comentario  (migracion 0048)
+# --------------------------------------------------------------------------- #
+#
+# V1: un solo tipo, «me gusta». No hay parametro de tipo porque hoy no hay nada
+# que distinguir; anadirlo luego es aditivo y no pierde ni una fila.
+#
+# SIN LA 0048 APLICADA la tabla no existe. No se responde 500 —que en el
+# navegador aparece como un error de CORS y manda a buscar donde no es— sino
+# 404: la accion no esta disponible en esta base, y el movil ya sabe que un 404
+# aqui significa «no insistas».
+
+
+async def _comentario_activo(db: AsyncSession, comment_id: str) -> Comment:
+    ensure_uuid(comment_id, "Comentario no encontrado.")
+    comment = await db.get(Comment, comment_id)
+    if comment is None or comment.status != "published":
+        raise NotFoundError("Comentario no encontrado.")
+    return comment
+
+
+async def _contar_reacciones(db: AsyncSession, comment_id: str) -> int:
+    total = await db.scalar(
+        select(func.count()).select_from(CommentLike).where(
+            CommentLike.comment_id == comment_id
+        )
+    )
+    return int(total or 0)
+
+
+@router.post("/comments/{comment_id}/like")
+async def like_comment(
+    comment_id: str,
+    background: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Reaccionar a un comentario. Idempotente: pulsar dos veces deja una fila.
+
+    `user_id` NUNCA llega del cliente: sale del token. Mandar el id de otro no
+    sirve de nada porque aqui no se lee, y la RLS de la 0048 lo rechazaria
+    igualmente.
+    """
+    if not await esquema_recomendaciones.hay_reacciones_a_comentarios(db):
+        raise NotFoundError("Comentario no encontrado.")
+    comment = await _comentario_activo(db, comment_id)
+
+    existente = await db.get(
+        CommentLike, {"comment_id": comment_id, "user_id": current_user.id}
+    )
+    if existente is None:
+        db.add(CommentLike(comment_id=comment_id, user_id=current_user.id))
+        # Idempotente por (persona, comentario), igual que el de la publicacion:
+        # quitar y volver a poner el corazon no puede dejar dos filas en la
+        # bandeja. `add_notification` ya se calla si el actor es el destinatario.
+        estrenado = await add_notification(
+            db,
+            user_id=comment.author_id,
+            actor_id=current_user.id,
+            type="comment_like",
+            # El comentario, NO la publicacion: la clave de deduplicacion se
+            # construye con `entity_id`, y con el id de la publicacion dos
+            # corazones a dos comentarios distintos del mismo hilo contarian
+            # como el mismo aviso y el segundo no se escribiria.
+            entity_type="comment",
+            entity_id=comment_id,
+            # A donde lleva al tocarlo. `entity_id` ya esta ocupado por la clave,
+            # asi que la publicacion viaja aqui.
+            payload={"postId": comment.post_id},
+        )
+        await db.commit()
+        # Push despues del commit: si la transaccion fallara, no puede haberse
+        # avisado de algo que no llego a ocurrir.
+        if estrenado:
+            actor = await _nombre_del_actor(db, current_user.id)
+            encolar_push(
+                background,
+                user_ids=[comment.author_id],
+                notification_type="comment_like",
+                actor_name=actor,
+                data={"type": "comment_like", "postId": comment.post_id},
+            )
+    return {
+        "reacted": True,
+        "likes_count": await _contar_reacciones(db, comment_id),
+    }
+
+
+@router.delete("/comments/{comment_id}/like")
+async def unlike_comment(
+    comment_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    if not await esquema_recomendaciones.hay_reacciones_a_comentarios(db):
+        raise NotFoundError("Comentario no encontrado.")
+    await db.execute(
+        delete(CommentLike).where(
+            CommentLike.comment_id == comment_id,
+            CommentLike.user_id == current_user.id,
+        )
+    )
+    await db.commit()
+    return {
+        "reacted": False,
+        "likes_count": await _contar_reacciones(db, comment_id),
+    }
 
 
 # --------------------------------------------------------------------------- #

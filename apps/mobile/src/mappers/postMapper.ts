@@ -85,6 +85,10 @@ export type CommentDto = {
   parent_id: string | null;
   body: string;
   created_at: string;
+  /* Vienen en el propio comentario para no pedir una vez por fila. Opcionales:
+     un servidor sin la 0048 no los manda. */
+  likes_count?: number;
+  viewer_reacted?: boolean;
 };
 
 function authorName(author: PostAuthorDto): string {

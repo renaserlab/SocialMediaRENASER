@@ -22,6 +22,12 @@ export type NotificationDto = {
    * «me gusta»; `null`/ausente en todo lo demás.
    */
   group_count?: number | null;
+  /**
+   * Lo que el aviso necesita ademas de su entidad. Hoy solo `comment_like`, que
+   * guarda el COMENTARIO en `entity_id` —para no deduplicar de mas— y trae aqui
+   * la publicacion, que es a donde lleva al tocarlo.
+   */
+  payload?: { postId?: string } | null;
 };
 
 export type NotificationItem = {
@@ -41,6 +47,8 @@ export type NotificationItem = {
    */
   entityType?: string | null;
   entityId?: string | null;
+  /** A que publicacion lleva, cuando `entityId` no es ella. */
+  postId?: string | null;
 };
 
 export function toNotificationItem(dto: NotificationDto): NotificationItem {
@@ -75,6 +83,27 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       title = t('notif.commentTitle');
       subtitle = t('notif.commentBody', { actor });
       icon = 'message-square';
+      break;
+    /*
+      Responder a un comentario. Tipo propio y no `comment`: a quien le
+      responden no le comentaron la publicacion, y con el texto de aquel el
+      aviso parecia ser de otra cosa. Mismo icono a proposito: las dos cosas
+      llevan al mismo sitio y son la misma familia.
+    */
+    case 'comment_reply':
+      title = t('notif.replyTitle');
+      subtitle = t('notif.replyBody', { actor });
+      icon = 'message-square';
+      break;
+    /*
+      Un corazon a un COMENTARIO tuyo. Icono de reaccion, como el «me gusta» de
+      una publicacion, porque es la misma accion sobre otra cosa; el texto es
+      el que dice sobre que.
+    */
+    case 'comment_like':
+      title = t('notif.commentLikeTitle');
+      subtitle = t('notif.commentLikeBody', { actor });
+      icon = 'award';
       break;
     /*
       Te etiquetaron (migración 0032). Icono propio: en una lista larga, lo
@@ -137,5 +166,6 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
     actorId: dto.actor?.id,
     entityType: dto.entity_type,
     entityId: dto.entity_id,
+    postId: dto.payload?.postId ?? null,
   };
 }
