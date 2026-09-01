@@ -36,7 +36,13 @@ export type ComentarioCursor = { createdAt: string; id: string };
  * tipo compartido arrastraría al mapper y a todo lo que lo usa, y esto es una
  * foto en una lista, no un refactor.
  */
-export type ComentarioConAvatar = Comment & { avatarUrl?: string };
+export type ComentarioConAvatar = Comment & {
+  avatarUrl?: string;
+  /** Para abrir su perfil por ID, no por nombre. */
+  authorId?: string;
+  /** Null en un comentario raiz; el id del padre en una respuesta. */
+  parentId?: string | null;
+};
 
 export type ComentariosPagina = {
   items: ComentarioConAvatar[];
@@ -487,6 +493,8 @@ export const PostRepository = {
       items: dtos.map((dto) => ({
         ...toComment(dto),
         avatarUrl: profileImageUrl(dto.author.avatar_path),
+        authorId: dto.author.id,
+        parentId: dto.parent_id,
       })),
       siguiente:
         dtos.length < limit || !ultimo
@@ -520,11 +528,22 @@ export const PostRepository = {
     return items;
   },
 
-  async addComment(postId: string, body: string): Promise<Comment> {
+  async addComment(
+    postId: string,
+    body: string,
+    parentId?: string | null,
+  ): Promise<ComentarioConAvatar> {
     const dto = await apiRequest<CommentDto>(`${API_V1}/posts/${postId}/comments`, {
       method: 'POST',
-      body: JSON.stringify({ body }),
+      // `parent_id` solo viaja cuando hay padre: mandar null en un comentario
+      // raiz obligaria al servidor a distinguir «sin padre» de «padre nulo».
+      body: JSON.stringify(parentId ? { body, parent_id: parentId } : { body }),
     });
-    return toComment(dto);
+    return {
+      ...toComment(dto),
+      avatarUrl: profileImageUrl(dto.author.avatar_path),
+      authorId: dto.author.id,
+      parentId: dto.parent_id,
+    };
   },
 };

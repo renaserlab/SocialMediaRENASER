@@ -99,6 +99,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'post.actionComment',
     'post.actionRepost',
     'post.viewSavedList',
+    // «Responder» es la misma palabra en los dos idiomas; «Respondendo a» y
+    // «Escreva uma resposta», que si cambian, no estan aqui.
+    'post.reply',
     // «Filtros» y «Todas» se escriben igual en los dos idiomas; el resto de los
     // filtros de la bandeja sí cambian («Não lidas», «Sem resposta»).
     'messages.filters',

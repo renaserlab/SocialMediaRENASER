@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useState } from 'react';
-import { Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, Share, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { PostImage } from '@/components/PostImage';
 import { BottomSheet } from '@/components/BottomSheet';
+import { CommentsSheet } from '@/components/CommentsSheet';
 import { ReaccionesSheet } from '@/components/ReaccionesSheet';
 import { AccionDePublicacion } from '@/components/AccionDePublicacion';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
@@ -32,12 +33,6 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { Post } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { useTranslation } from '@/i18n/useTranslation';
-
-/**
- * Los iconos de acción miden 18-20 px. Ampliamos el area tactil con hitSlop
- * (no con minHeight) para llegar a ~44 px sin alterar el layout de la fila.
- */
-const ACTION_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
 
 // Overlays sobre el video: contexto de media, siempre oscuro, en ambos temas.
 const mediaPalette = palette('dark');
@@ -92,8 +87,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
-  const [showComments, setShowComments] = useState(false);
-  const [comment, setComment] = useState('');
+  const [comentariosAbiertos, setComentariosAbiertos] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reaccionesAbiertas, setReaccionesAbiertas] = useState(false);
   /*
@@ -235,8 +229,6 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   const saved = useAppStore((state) => state.savedPostIds.includes(post.id));
   const toggleLike = useAppStore((state) => state.toggleLikePost);
   const toggleSave = useAppStore((state) => state.toggleSavePost);
-  const addComment = useAppStore((state) => state.addComment);
-  const loadCommentsFor = useAppStore((state) => state.loadCommentsFor);
   const deletePost = useAppStore((state) => state.deletePost);
   // Reaccionar, comentar y guardar quedan asociados a una cuenta: se pide al
   // usarlos, no al entrar en la aplicacion.
@@ -252,41 +244,6 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     post.isOwn === true || (!!currentUserId && !!post.authorId && post.authorId === currentUserId);
 
   const commentCount = post.commentsCount ?? post.comments.length;
-
-  const openComments = () => {
-    setShowComments((value) => {
-      const next = !value;
-      // Al abrir, carga los comentarios del backend si aún no están.
-      if (next && post.comments.length === 0 && commentCount > 0) {
-        void loadCommentsFor(post.id);
-      }
-      return next;
-    });
-  };
-
-  const submitComment = async () => {
-    const body = comment;
-    // Leer los comentarios es libre; escribirlos queda a nombre de alguien.
-    // Se comprueba antes de vaciar el campo, para no perder lo escrito si la
-    // persona decide no registrarse ahora.
-    let autorizado = false;
-    await requireAuth('auth.reasonComment', () => {
-      autorizado = true;
-    });
-    if (!autorizado) return;
-
-    setComment('');
-    setShowComments(true);
-    try {
-      await addComment(post.id, body);
-    } catch {
-      // `addComment` lanza si el POST falla. Antes se llamaba con `void`, asi
-      // que el fallo quedaba como rechazo sin capturar: el campo se vaciaba y
-      // el comentario no aparecia nunca, sin explicacion.
-      notify(t('post.commentFailed'), t('common.checkConnection'));
-      setComment(body);
-    }
-  };
 
   /**
    * Cierra la hoja y despues ejecuta la accion. El retardo deja que el Modal
@@ -664,7 +621,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           icono="message-square"
           etiqueta={t('post.actionComment')}
           contador={commentCount}
-          onPress={openComments}
+          onPress={() => setComentariosAbiertos(true)}
           accessibilityLabel={t('post.comments')}
         />
         <AccionDePublicacion
@@ -704,41 +661,20 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         />
       </View>
 
-      {showComments ? (
-        <View style={[styles.comments, { borderTopColor: colors.border }]}>
-          {post.comments.map((item) => (
-            <View key={item.id} style={{ marginBottom: spacing.sm }}>
-              <Text variant="secondary" weight="700">{item.author}</Text>
-              <Text variant="body" color={colors.textMuted}>{item.text}</Text>
-            </View>
-          ))}
-          <View style={styles.commentInputRow}>
-            <TextInput
-              value={comment}
-              onChangeText={setComment}
-              placeholder={t('post.addComment')}
-              placeholderTextColor={colors.textMuted}
-              style={[styles.commentInput, { color: colors.text, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
-              returnKeyType="send"
-              onSubmitEditing={() => void submitComment()}
-            />
-            <Pressable
-              onPress={() => void submitComment()}
-              disabled={!comment.trim()}
-              hitSlop={ACTION_HIT_SLOP}
-              accessibilityLabel={t('post.sendComment')}
-              accessibilityRole="button"
-            >
-              <Feather name="arrow-up-circle" size={30} color={comment.trim() ? colors.text : colors.border} />
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
       <ReaccionesSheet
         postId={post.id}
         visible={reaccionesAbiertas}
         onClose={() => setReaccionesAbiertas(false)}
+      />
+
+      {/*
+        Los comentarios ya no se despliegan dentro de la tarjeta: suben en una
+        hoja, igual que las reacciones, y la publicacion se queda detras.
+      */}
+      <CommentsSheet
+        postId={post.id}
+        visible={comentariosAbiertos}
+        onClose={() => setComentariosAbiertos(false)}
       />
 
       <BottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
@@ -850,9 +786,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  comments: { borderTopWidth: 1, padding: spacing.lg },
-  commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
-  commentInput: { flex: 1, height: 40, borderRadius: radius.pill, borderWidth: 1, paddingHorizontal: spacing.lg, fontSize: 13 },
 });
 
 /*
