@@ -16,7 +16,7 @@ contra PostgREST (ver `StoryRepository`), que es lo que se venia haciendo.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,8 @@ from app.modules.content.schemas import AuthorSummary
 from app.modules.profiles.models import Profile
 from app.modules.stories.models import Story, StoryView
 from app.modules.stories.recorte import Tramo, preparar_video
+from app.modules.social_graph.models import Follow
+from app.modules.social_graph.service import blocked_either_way
 from app.modules.stories.schemas import StoryCreate, StoryGroupRead, StoryRead, StoryViewerRead
 from app.shared.database import get_db
 from app.shared.permissions import is_admin
@@ -50,8 +52,18 @@ async def _get_story(db: AsyncSession, story_id: str) -> Story:
     return story
 
 
+#: Cuantos AUTORES como mucho. No cuantas historias: cortar por historias
+#: partiria el ultimo grupo por la mitad y el visor avanzaria hasta un tramo que
+#: no existe. Cincuenta esta muy por encima de lo que cabe en una fila; el tope
+#: no esta para recortar la pantalla sino para que la respuesta no crezca sin
+#: limite (medido: 534 KB con quinientos autores).
+MAX_AUTORES_CON_HISTORIA = 50
+
+
 @router.get("/stories", response_model=list[StoryGroupRead])
 async def list_stories(
+    feed: str = Query(default="all", pattern="^(all|following)$"),
+    limit: int = Query(default=MAX_AUTORES_CON_HISTORIA, ge=1, le=200),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[StoryGroupRead]:
@@ -60,16 +72,76 @@ async def list_stories(
     Orden: primero las que te faltan por ver y, dentro de cada grupo, de la mas
     antigua a la mas nueva (asi el visor avanza cronologicamente). Las propias
     van siempre delante, como en Instagram.
+
+    QUE HACIA ANTES, Y POR QUE ERA UN FALLO. La consulta era literalmente
+    «todas las historias vigentes», sin mirar quien las publico:
+
+        select(Story, Profile).join(...).where(Story.expires_at > now)
+
+    De ahi salian tres cosas, y la segunda es grave:
+
+    1. NO SE PODIA LIMITAR. Con mil personas publicando se traia las mil.
+    2. LAS HISTORIAS DE ALGUIEN A QUIEN BLOQUEASTE SE VEIAN. La API lee con
+       identidad de servicio, que SE SALTA LA RLS, asi que la politica de la
+       tabla no salva esto: el corte tiene que estar en la consulta, como en el
+       muro. Y va en los dos sentidos, igual que alli.
+    3. No sabia distinguir «de quien sigo», que es justo lo que necesita la
+       bandeja de mensajes.
+
+    `feed` es OPCIONAL y por omision sigue devolviendo todo: una version ya
+    instalada no cambia de comportamiento. Quien quiere solo a los suyos, lo
+    pide.
     """
     uid = current_user.id if current_user else None
     now = datetime.now(timezone.utc)
 
+    def _visibles(consulta):
+        """Los filtros de QUIEN publica. Los mismos en las dos consultas.
+
+        Estan en una funcion y no escritos dos veces porque son dos consultas
+        —primero que autores, despues sus historias— y un filtro que se aplique
+        solo a una de las dos deja pasar justo lo que se queria cortar.
+        """
+        consulta = consulta.where(Story.expires_at > now)
+        if uid:
+            # El corte en los dos sentidos: ni a quien bloqueaste, ni a quien te
+            # bloqueo a ti. Con uno solo bastaria con no bloquear de vuelta para
+            # seguir apareciendo.
+            consulta = consulta.where(Story.author_id.not_in(blocked_either_way(uid)))
+        if feed == "following" and uid:
+            # Las propias NO se filtran aqui: son tuyas y van siempre delante.
+            seguidos = select(Follow.following_id).where(Follow.follower_id == uid)
+            consulta = consulta.where(
+                Story.author_id.in_(seguidos) | (Story.author_id == uid)
+            )
+        return consulta
+
+    # PRIMERO QUE AUTORES, y solo despues sus historias. Al reves —traer todo y
+    # cortar en Python— el tope no ahorraria nada: el coste ya se habria pagado.
+    autores = (
+        await db.scalars(
+            _visibles(
+                select(Story.author_id)
+                .group_by(Story.author_id)
+                .order_by(func.max(Story.created_at).desc())
+                .limit(limit)
+            )
+        )
+    ).all()
+    if uid and uid not in autores:
+        # Las propias entran siempre, aunque el tope las hubiera dejado fuera:
+        # es la primera burbuja de la fila y sin ella no hay donde publicar.
+        autores = [*autores, uid]
+    if not autores:
+        return []
+
     stmt = (
         select(Story, Profile)
         .join(Profile, Profile.id == Story.author_id)
-        .where(Story.expires_at > now)
+        .where(Story.author_id.in_(autores))
         .order_by(Story.author_id, Story.created_at.asc())
     )
+    stmt = _visibles(stmt)
     rows = (await db.execute(stmt)).all()
     if not rows:
         return []

@@ -264,3 +264,69 @@ El componente `apps/mobile/src/components/StoriesRow.tsx` **ya existe** y el
 endpoint **ya agrupa por autor** (`StoryGroupRead`) y **ya sabe si la has
 visto** (`viewed_by_me`, `seen`). No se construye un segundo sistema de
 historias: se reutiliza este.
+
+---
+
+## 9. Segunda mitad de la ronda — estado y orden (actualizado)
+
+### Dónde estamos
+
+`main` está en `d0f99b5` y ya lleva la primera mitad: cursos, eventos, perfil,
+republicaciones en el muro y el CRM. `Edson` está en `d48fdda`.
+
+**Migraciones aplicadas en producción: hasta la 0043, y la 0045.** La 0044 no
+existe todavía; es de esta mitad.
+
+Verificación vigente: **1343** pruebas de backend, **519** de móvil, **0**
+errores de TypeScript, `expo-doctor` 18/18, la web exporta.
+
+### El orden cambia: C antes que B
+
+Estaba escrito al revés y era un error, por dos razones:
+
+1. **Dependencia real.** El filtro «Respuestas a historias» de la bandeja (B)
+   necesita `message_story_context`, que crea C. Sin ella, B tendría que
+   inventarse el contrato o dejar el filtro a medias.
+2. **El mismo fichero.** Los dos tocan `messaging/router.py`. Trabajan en el
+   mismo árbol, así que a la vez se pisan: el segundo en guardar borra al
+   primero.
+
+**C primero, B después.** No se solapan en el tiempo.
+
+### `GET /stories` lo arregla el coordinador, no B
+
+Se saca del reparto de B y lo hace el coordinador mientras C trabaja: es un
+fallo de seguridad —las historias de alguien a quien bloqueaste se ven— y no
+conviene que espere su turno. Ver el apartado 8.
+
+### Dos cosas que pidió el encargo, literales
+
+> «evita arruinar comportamientos internos»
+
+El chat ya tiene paginación de historial, Realtime, deduplicación, adjuntos
+privados, interfaz optimista, reintento y borrado con lápida. **El rediseño no
+justifica reescribir el motor del chat.** Se cambia la apariencia y se añade lo
+nuevo; lo que funciona se conserva. Si algo hay que tocar por dentro, se dice en
+el informe con el motivo.
+
+> «evita que posibles nuevas migraciones generen nuevos bugs»
+
+La 0044 tiene un punto delicado y uno solo: **cambiar el `CHECK` de
+`message_attachments.kind`**. Hoy es `('image','video','document')` y tiene que
+admitir `'audio'`. Reglas para que eso no muerda:
+
+1. Se hace `alter table ... drop constraint if exists` y después `add
+   constraint`. Al reponerlo, Postgres **revalida la tabla entera**: es seguro
+   porque los valores existentes son los tres de siempre, pero hay que saberlo.
+2. El nombre del `CHECK` no se inventa: se busca el que tiene puesto. Un `drop`
+   con el nombre equivocado no falla —lleva `if exists`— y deja el `CHECK` viejo
+   en su sitio, así que el `add` posterior sí falla, o peor, la restricción vieja
+   sigue rechazando los audios en silencio. **Comprobarlo con `pg_constraint`
+   antes de escribir la migración es parte del trabajo.**
+3. **El código NO puede escribir `'audio'` antes de que la migración esté
+   aplicada.** Sería una violación de restricción, o sea un 500, o sea un error
+   de CORS en el navegador. Hace falta la comprobación de esquema de siempre, y
+   mientras diga que no: la interfaz **no ofrece** grabar (nunca un botón
+   muerto), no guarda el audio como `document` para disimular.
+4. Nada de columnas nuevas en `messages`. El contexto de la historia va en su
+   tabla, por `message_id`.
