@@ -35,6 +35,17 @@ type Props = {
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  /**
+   * Esta lista la sirve el backend solo a quien tiene sesion.
+   *
+   * NO es un error, y pintarlo como tal era el fallo: salia un cuadro rojo con
+   * el mensaje tecnico del servidor y un boton de reintentar que no podia
+   * funcionar nunca. Quien no tiene cuenta necesita saber que le hace falta
+   * una, y como conseguirla.
+   */
+  necesitaCuenta?: boolean;
+  /** Para que. Se lee «Necesitas una cuenta {motivo}». */
+  motivoDeCuenta?: string;
   /** Sin este callback no se pinta el boton: seguir seria un adorno. */
   onToggleFollow?: (person: PersonRow) => void;
   /** Usuario actual, para no ofrecerle seguirse a si mismo. */
@@ -60,6 +71,8 @@ export function PeopleList({
   loading = false,
   error = null,
   onRetry,
+  necesitaCuenta = false,
+  motivoDeCuenta,
   onToggleFollow,
   currentUserId,
   onPersonPress,
@@ -73,6 +86,25 @@ export function PeopleList({
       <View style={styles.center}>
         <ActivityIndicator color={colors.textMuted} />
       </View>
+    );
+  }
+
+  /*
+    ANTES QUE `error`: si falta la cuenta, no hay nada que reintentar. El orden
+    importa porque una sesion caducada llega por los dos caminos a la vez.
+  */
+  if (necesitaCuenta) {
+    return (
+      <StateView
+        state="empty"
+        icon="user-plus"
+        title={t('auth.signUpTitle')}
+        description={t('auth.needAccount', {
+          motivo: motivoDeCuenta ?? t('auth.reasonSeePeople'),
+        })}
+        actionLabel={t('auth.signUp')}
+        onAction={() => router.push('/register' as never)}
+      />
     );
   }
 

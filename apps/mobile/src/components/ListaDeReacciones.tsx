@@ -44,7 +44,7 @@ export function ListaDeReacciones({
     lista vacía. Sin esto, abrir la hoja antes de tener el id lanzaría una
     petición que no sirve para nada.
   */
-  const { people, loading, error, reload, toggleFollow } = useListaDePersonas(
+  const { people, loading, error, necesitaCuenta, reload, toggleFollow } = useListaDePersonas(
     postId ? cargar : null,
   );
 
@@ -53,6 +53,8 @@ export function ListaDeReacciones({
       people={people}
       loading={loading}
       error={error}
+      necesitaCuenta={necesitaCuenta}
+      motivoDeCuenta={t('auth.reasonSeeReactions')}
       onRetry={reload}
       onToggleFollow={toggleFollow}
       currentUserId={currentUserId}

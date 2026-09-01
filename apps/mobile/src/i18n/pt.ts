@@ -494,6 +494,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'auth.reasonLike': 'para curtir',
   'auth.reasonSave': 'para salvar conteúdo',
   'auth.reasonReact': 'para reagir',
+  'auth.reasonSeeReactions': 'para ver quem reagiu',
+  'auth.reasonSeePeople': 'para ver esta lista de pessoas',
   'auth.reasonMessage': 'para enviar uma mensagem',
 
   'common.back': 'Voltar',

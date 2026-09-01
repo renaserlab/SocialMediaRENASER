@@ -533,6 +533,8 @@ export const es = {
   'auth.reasonLike': 'para dar me gusta',
   'auth.reasonSave': 'para guardar contenido',
   'auth.reasonReact': 'para reaccionar',
+  'auth.reasonSeeReactions': 'para ver quién reaccionó',
+  'auth.reasonSeePeople': 'para ver esta lista de personas',
   'auth.reasonMessage': 'para enviar un mensaje',
 
   'common.back': 'Volver',

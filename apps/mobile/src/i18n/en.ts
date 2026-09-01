@@ -491,6 +491,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'auth.reasonLike': 'to like posts',
   'auth.reasonSave': 'to save content',
   'auth.reasonReact': 'to react',
+  'auth.reasonSeeReactions': 'to see who reacted',
+  'auth.reasonSeePeople': 'to see this list of people',
   'auth.reasonMessage': 'to send a message',
 
   'common.back': 'Back',
