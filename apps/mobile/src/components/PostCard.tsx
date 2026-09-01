@@ -7,6 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { PostImage } from '@/components/PostImage';
 import { BottomSheet } from '@/components/BottomSheet';
+import { ReaccionesSheet } from '@/components/ReaccionesSheet';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
@@ -93,6 +94,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reaccionesAbiertas, setReaccionesAbiertas] = useState(false);
   /*
     El reproductor de video solo existe DESPUES de que la persona pulse play.
 
@@ -594,7 +596,19 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           </Pressable>
           <Pressable
             hitSlop={ACTION_HIT_SLOP}
-            onPress={() => router.push(`/reacciones/${post.id}` as never)}
+            /*
+              UNA HOJA, NO UNA PANTALLA. Antes esto hacia
+              `router.push('/reacciones/{id}')`: una pantalla completa que, por
+              no ser una seccion, se pinta ENCIMA del carrusel y se lleva por
+              delante la barra de navegacion. Para una lista de nombres es
+              demasiado — se pierde de vista la publicacion y volver cuesta un
+              gesto.
+
+              La ruta sigue existiendo: es la entrada directa desde un aviso
+              agrupado o un enlace, donde no hay ninguna publicacion detras
+              sobre la que levantar una hoja.
+            */
+            onPress={() => setReaccionesAbiertas(true)}
             // Sin reacciones no hay lista que abrir: el numero se queda quieto
             // en vez de llevar a una pantalla vacia.
             disabled={post.likes === 0}
@@ -690,6 +704,12 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           </View>
         </View>
       ) : null}
+
+      <ReaccionesSheet
+        postId={post.id}
+        visible={reaccionesAbiertas}
+        onClose={() => setReaccionesAbiertas(false)}
+      />
 
       <BottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
         {!isOwn && post.authorId ? (

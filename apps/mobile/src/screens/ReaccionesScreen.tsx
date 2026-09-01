@@ -1,40 +1,30 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
-import { PeopleList } from '@/components/PeopleList';
-import { useListaDePersonas } from '@/hooks/useListaDePersonas';
-import { PostRepository } from '@/repositories/PostRepository';
-import { useAppStore } from '@/store/useAppStore';
+import { ListaDeReacciones } from '@/components/ListaDeReacciones';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
 
 /**
- * Quién reaccionó a una publicación.
+ * Quién reaccionó a una publicación, como PANTALLA.
  *
- * Es a donde lleva la notificación agrupada: sin esta pantalla, «Edson y 99
- * personas más» no se puede abrir y el número no lleva a ninguna parte.
+ * SIGUE EXISTIENDO AUNQUE EL FEED YA NO LA USE. Desde una publicación se abre
+ * ahora una hoja (`ReaccionesSheet`), que no pierde el contexto. Pero esta
+ * pantalla es la ENTRADA DIRECTA: un aviso agrupado —«Edson y 99 personas
+ * más»— o un enlace no tienen ninguna publicación abierta detrás sobre la que
+ * levantar una hoja, y necesitan un sitio propio al que llegar.
  *
- * Reutiliza `PeopleList` —la misma lista de seguidores y seguidos— en vez de
- * inventarse otra: son las mismas filas, con la misma foto, el mismo nombre y
- * el mismo botón de seguir.
+ * El contenido es el mismo objeto en los dos casos (`ListaDeReacciones`): la
+ * misma consulta y el mismo estado. Aquí solo se añade el marco de pantalla
+ * —cabecera y forma de volver— que la hoja no necesita.
  */
 export function ReaccionesScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const currentUserId = useAppStore((state) => state.user?.id);
-
-  const cargar = useCallback(async () => {
-    if (!id) return [];
-    return PostRepository.listLikes(id);
-  }, [id]);
-
-  const { people, loading, error, reload, toggleFollow } = useListaDePersonas(
-    id ? cargar : null,
-  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -48,16 +38,7 @@ export function ReaccionesScreen() {
             : router.replace((id ? `/post/${id}` : '/(tabs)/home') as never)
         }
       />
-      <PeopleList
-        people={people}
-        loading={loading}
-        error={error}
-        onRetry={reload}
-        onToggleFollow={toggleFollow}
-        currentUserId={currentUserId}
-        emptyTitle={t('post.noReactions')}
-        emptyDescription={t('post.noReactionsBody')}
-      />
+      <ListaDeReacciones postId={id} />
     </View>
   );
 }

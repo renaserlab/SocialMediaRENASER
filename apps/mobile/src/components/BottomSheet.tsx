@@ -10,9 +10,26 @@ type BottomSheetProps = {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  /**
+   * Si la hoja pone su propio `ScrollView`. Por defecto si.
+   *
+   * Se apaga cuando dentro va una lista VIRTUALIZADA (`FlashList`,
+   * `FlatList`). Anidar una lista virtualizada en un `ScrollView` le quita la
+   * altura con la que decide que filas existen: se renderizan todas, se pierde
+   * el reciclado y React Native avisa por consola. Con `desplazable={false}` el
+   * hijo recibe el alto de la hoja y lleva el desplazamiento el mismo.
+   *
+   * Los formularios —que son casi todas las hojas— no tocan nada.
+   */
+  desplazable?: boolean;
 };
 
-export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
+export function BottomSheet({
+  visible,
+  onClose,
+  children,
+  desplazable = true,
+}: BottomSheetProps) {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
 
@@ -82,14 +99,18 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
             ligera— y solo cuando se pasa del tope empieza a encogerse y a
             desplazarse.
           */}
-          <ScrollView
-            style={styles.contentScroll}
-            contentContainerStyle={styles.content}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {children}
-          </ScrollView>
+          {desplazable ? (
+            <ScrollView
+              style={styles.contentScroll}
+              contentContainerStyle={styles.content}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {children}
+            </ScrollView>
+          ) : (
+            <View style={[styles.contentScroll, styles.content]}>{children}</View>
+          )}
         </View>
       </SinTecladoDelante>
     </Modal>
