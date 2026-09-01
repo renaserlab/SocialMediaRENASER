@@ -46,24 +46,27 @@ delante.
   publicación, sigue siendo **uno solo**.
 - Responderse a uno mismo **no** avisa a uno mismo.
 
-## 4. Reacciones a comentarios — la 0048 NO está aplicada
+## 4. Reacciones a comentarios — la 0048 **ya está aplicada**
 
-**Hoy, sin la migración:** el contador sale 0, el corazón se pinta pero al
-pulsarlo el servidor responde 404 y el corazón **vuelve solo** a su sitio con un
-aviso de error. ✔ La lista de comentarios se sigue leyendo sin fallar.
-
-Lo de abajo **solo se puede probar DESPUÉS de aplicar la 0048** (y de reiniciar
-la API, porque el sondeo del esquema se cachea por proceso):
+Aplicada el 1 de septiembre de 2026, y la API reiniciada después (hace falta:
+el sondeo del esquema se cachea por proceso). Comprobado en la base: tabla
+creada, RLS activada, tres políticas, dos índices; `post_likes` y `comments`
+sin tocar.
 
 - Pulsar el corazón → se enciende y el número sube **al momento**.
 - Pulsar otra vez → se apaga y baja.
-- Salir y volver → el estado persiste.
+- Salir de la app y volver → el estado persiste. Es lo único que distingue esto
+  de un efecto visual.
 - **Con el avión puesto:** vuelve solo a su sitio **y sale un error**.
 - Reaccionar a **tu propio** comentario no te avisa a ti.
-- Quitar y volver a poner **no** deja dos avisos.
+- Quitar y volver a poner **no** deja dos avisos en la bandeja.
 - Reaccionar a **dos comentarios del mismo hilo** → dos avisos, uno por autor.
+  (Era lo que fallaba si la clave de deduplicación fuera la publicación.)
+- El aviso «A *X* le gustó tu comentario» abre **la publicación**, no el perfil.
 - **Con 20 comentarios en pantalla:** abrir la lista tiene que ser **una**
-  petición, no veintiuna.
+  petición, no veintiuna. Mirarlo en las herramientas de red.
+- Desde **otra cuenta**: el contador sube para los dos, pero el corazón solo
+  sale encendido en la que reaccionó.
 
 ## 5. Lo que NO debe haberse roto
 

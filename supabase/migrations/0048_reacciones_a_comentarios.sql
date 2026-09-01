@@ -2,10 +2,17 @@
 -- 0048 — Reaccionar a un comentario («Me gusta»)
 -- =============================================================================
 --
--- ┌───────────────────────────────────────────────────────────────────────────┐
--- │  ESTA MIGRACIÓN ESTÁ PREPARADA Y **NO APLICADA**. El código funciona sin   │
--- │  ella: sin la tabla, el contador sale 0 y el corazón no aparece.           │
--- └───────────────────────────────────────────────────────────────────────────┘
+-- ESTA MIGRACIÓN ESTÁ **APLICADA** (1 de septiembre de 2026, confirmado por
+-- quien la ejecutó). Comprobado después: la tabla existe, tiene RLS activada,
+-- sus tres políticas y sus dos índices; `post_likes` y `comments` no cambiaron.
+-- La API se reinició acto seguido, que es lo que hacía falta (ver el final).
+--
+-- Es idempotente —`if not exists` en todo y `drop policy if exists` delante de
+-- cada política— y no toca ni una fila. Volver a pasarla es un no-op.
+--
+-- El código NO la exige: sin la tabla el contador sale 0, el corazón no
+-- persiste y la ruta responde 404 en vez de reventar. Eso sigue siendo cierto
+-- y es lo que permite una vuelta atrás sin borrar nada.
 --
 -- =============================================================================
 -- QUÉ AÑADE, Y POR QUÉ UNA TABLA NUEVA
