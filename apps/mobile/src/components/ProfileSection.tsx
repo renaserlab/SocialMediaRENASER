@@ -110,6 +110,31 @@ const ADMIN_SECTIONS: Partial<
   },
 };
 
+/**
+ * SOBRE QUE SECCIONES TIENE SENTIDO SALIR AL CATALOGO DE Z DESDE TU PROPIO PERFIL.
+ *
+ * `ADMIN_SECTIONS` describe el estado vacio de una seccion. Eso NO es lo mismo
+ * que tener un catalogo institucional al que remitir, y confundir las dos cosas
+ * ya costo un fallo en reseñas: en el perfil de Bruno se ofrecia «Ver reseñas de
+ * Z», que llevaba a las reseñas de otra persona.
+ *
+ * En CURSOS pasaba lo mismo, y por eso se separa aqui. Tu seccion de cursos
+ * habla de LOS TUYOS: ofrecerte ahi una salida al catalogo de otro perfil
+ * mezcla «todavia no has publicado nada» con «mira lo que publico Z». Son dos
+ * mensajes distintos y el segundo no pertenece a tu perfil — el catalogo de
+ * cursos ya se descubre desde Explorar, que es donde se busca contenido ajeno.
+ *
+ * Podcast y Eventos se quedan: ahi el contenido ES de Z, no tuyo, asi que la
+ * salida no compite con nada propio y sigue siendo la unica forma de llegar.
+ *
+ * Si algun dia un tercer sitio necesita esta distincion, se lee de aqui y no se
+ * vuelve a deducir de `ADMIN_SECTIONS`.
+ */
+const CATALOGO_DE_Z_DESDE_MI_PERFIL: ReadonlySet<ProfileSectionKind> = new Set([
+  'podcast',
+  'eventos',
+]);
+
 /** Orden de las pestañas de la galeria: Todos / Fotos / Videos. */
 const TESTIMONIAL_FILTERS: TestimonialFilter[] = ['all', 'image', 'video'];
 
@@ -1194,25 +1219,37 @@ export function ProfileSection({
       ) : null}
 
       {/*
-        Y al final, el catalogo de Z. Va DEBAJO de lo propio a proposito: en tu
-        perfil lo primero es lo tuyo, y esto es una salida hacia el resto, no el
-        contenido principal de la pantalla.
+        Al final, DOS cosas que antes iban juntas y no son la misma.
+
+        1. El estado vacio de lo TUYO: «todavia no has publicado ningun curso».
+           Habla de ti y aparece siempre que tu seccion este vacia.
+
+        2. La salida al catalogo de Z, que solo tiene sentido donde el contenido
+           es de Z y no tuyo (ver CATALOGO_DE_Z_DESDE_MI_PERFIL). En cursos
+           sobraba: tu seccion habla de los tuyos, y el catalogo se descubre
+           desde Explorar.
+
+        Va DEBAJO de lo propio a proposito: en tu perfil lo primero es lo tuyo.
       */}
-      {canManage && ADMIN_SECTIONS[kind] ? (
+      {canManage && (items.length === 0 || CATALOGO_DE_Z_DESDE_MI_PERFIL.has(kind)) ? (
         <View style={styles.catalogLink}>
-          <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-            {items.length === 0
-              ? kind === 'cursos'
+          {items.length === 0 ? (
+            <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
+              {kind === 'cursos'
                 ? t('section.noneOwnCourses')
-                : t('section.noneOwnEvents')
-              : ''}
-          </Text>
-          <Button
-            label={t(ADMIN_SECTIONS[kind]!.action)}
-            variant="secondary"
-            icon={ADMIN_SECTIONS[kind]!.icon}
-            onPress={() => void openAdminSection(kind)}
-          />
+                : kind === 'eventos'
+                  ? t('section.noneOwnEvents')
+                  : ''}
+            </Text>
+          ) : null}
+          {ADMIN_SECTIONS[kind] && CATALOGO_DE_Z_DESDE_MI_PERFIL.has(kind) ? (
+            <Button
+              label={t(ADMIN_SECTIONS[kind]!.action)}
+              variant="secondary"
+              icon={ADMIN_SECTIONS[kind]!.icon}
+              onPress={() => void openAdminSection(kind)}
+            />
+          ) : null}
         </View>
       ) : null}
 
