@@ -2,9 +2,14 @@
 -- 0046 — Buscar dentro del texto de los mensajes (índice trigram)
 -- =============================================================================
 --
--- ESTA MIGRACIÓN NO SE HA APLICADO todavía. Añade UNA extensión y UN índice.
--- No crea tablas, no añade columnas, no toca ni una fila y no cambia ninguna
--- restricción: es la migración menos invasiva de toda la serie.
+-- ESTA MIGRACIÓN ESTÁ APLICADA en producción (31 de agosto de 2026, confirmado
+-- por quien la ejecutó). Y como el bloque `do $$` del final aborta si el índice
+-- no quedó creado y válido, que haya terminado sin error demuestra por sí solo
+-- que está bien puesto: era el único fallo que podía pasar en silencio.
+--
+-- Añade UNA extensión y UN índice. No crea tablas, no añade columnas, no toca ni
+-- una fila y no cambia ninguna restricción: es la migración menos invasiva de
+-- toda la serie.
 --
 -- ┌───────────────────────────────────────────────────────────────────────────┐
 -- │ EL CÓDIGO FUNCIONA SIN ELLA, Y ADEMÁS SE NOTA POCO. La búsqueda de la     │
