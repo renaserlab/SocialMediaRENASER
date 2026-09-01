@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RecordingPresets, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
+import { RecordingPresets, useAudioRecorder } from 'expo-audio';
 
 import { permitirGrabar } from '@/hooks/useBackgroundAudio';
 import {
@@ -68,14 +68,10 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
     nota de un Android suene distinta a la de un iPhone.
   */
   const grabador = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  /*
-    200 ms: es lo que tarda el contador en verse fluido sin repintar de más.
-    Con el medio segundo que trae por defecto, el reloj de «0:03» daba saltos
-    perceptibles mientras alguien habla mirándolo.
-  */
-  const estado = useAudioRecorderState(grabador, 200);
 
   const [fase, setFase] = useState<EstadoDeGrabadora>('inactiva');
+  /** Milisegundos grabados. Se actualiza solo mientras el micrófono está abierto. */
+  const [milisegundos, setMilisegundos] = useState(0);
 
   /*
     Que se ha cancelado, en una referencia y no en el estado.
@@ -96,14 +92,46 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
   }, []);
 
   const grabando = fase === 'grabando';
-  const segundos = grabando ? (estado.durationMillis ?? 0) / 1000 : 0;
+  const segundos = grabando ? milisegundos / 1000 : 0;
+
+  /*
+    EL CONTADOR ES NUESTRO, Y SOLO EXISTE MIENTRAS SE GRABA.
+
+    Antes esto era `useAudioRecorderState(grabador, 200)`, de `expo-audio`, y ahí
+    estaba media causa de que salir del chat reventara la aplicación. Ese hook
+    monta un `setInterval` que llama a `recorder.getStatus()` —una llamada al
+    objeto NATIVO— **cada 200 ms, se esté grabando o no**. Es decir: cada chat
+    abierto tenía un sondeo permanente contra el micrófono sin motivo.
+
+    Ahora el intervalo solo existe cuando `fase === 'grabando'`, que es el 0,1 %
+    del tiempo. Cuando no se graba, este hook NO TOCA NADA NATIVO.
+
+    Los 200 ms se conservan: con el medio segundo que traía por defecto, el reloj
+    de «0:03» daba saltos perceptibles mientras alguien habla mirándolo.
+  */
+  useEffect(() => {
+    if (fase !== 'grabando') return;
+    const reloj = setInterval(() => {
+      try {
+        setMilisegundos((grabador.currentTime ?? 0) * 1000);
+      } catch {
+        /* El objeto nativo ya no está. Se deja el último valor leído. */
+      }
+    }, 200);
+    return () => clearInterval(reloj);
+  }, [fase, grabador]);
 
   /** Cierra el micrófono y devuelve la sesión de audio a reproducir. */
   const cerrar = useCallback(async () => {
     try {
       await grabador.stop();
     } catch {
-      /* Ya estaba parado. Parar dos veces no es un error. */
+      /*
+        Parar dos veces no es un error, y tampoco lo es parar algo que ya no
+        existe: si la pantalla se cerró mientras esto estaba a medias,
+        `expo-audio` ya liberó el objeto nativo y `stop()` lanza. En los dos
+        casos el micrófono acaba cerrado, que es lo único que importa aquí.
+      */
     }
     // Siempre, incluso si `stop` falló: dejar la sesión en modo grabación baja
     // el volumen de todo lo demás en iOS hasta que se cierre la aplicación.
@@ -175,10 +203,23 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
       return;
     }
     setFase('guardando');
-    const ms = grabador.currentTime ? grabador.currentTime * 1000 : estado.durationMillis ?? 0;
+    // Del nativo con red debajo: `soltar` es asíncrono y la pantalla puede
+    // cerrarse en mitad. Si el objeto ya no está, se usa lo último que contó
+    // nuestro reloj, que para decidir si la nota es demasiado corta vale igual.
+    let ms = milisegundos;
+    try {
+      if (grabador.currentTime) ms = grabador.currentTime * 1000;
+    } catch {
+      /* Liberado. Nos quedamos con lo contado. */
+    }
     await cerrar();
 
-    const uri = grabador.uri;
+    let uri: string | null = null;
+    try {
+      uri = grabador.uri;
+    } catch {
+      /* Liberado: no hay fichero que mandar y se avisa mas abajo. */
+    }
     const desenlace = decidirDesenlace({ ms, cancelada: cancelada.current });
     setFase('inactiva');
 
@@ -210,7 +251,7 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
       height: null,
       durationS: duracionEnSegundos(ms),
     });
-  }, [fase, grabador, estado.durationMillis, cerrar, alTerminar, alAvisar]);
+  }, [fase, grabador, milisegundos, cerrar, alTerminar, alAvisar]);
 
   /**
    * Tira la grabación. HAY QUE PODER ARREPENTIRSE ANTES DE MANDAR.
@@ -235,15 +276,46 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
   */
   useEffect(() => {
     if (fase !== 'grabando') return;
-    if (llegoAlTope(estado.durationMillis ?? 0)) void soltar();
-  }, [fase, estado.durationMillis, soltar]);
+    if (llegoAlTope(milisegundos)) void soltar();
+  }, [fase, milisegundos, soltar]);
 
-  /* Si la pantalla se cierra a media nota, el micrófono se cierra con ella. */
+  /*
+    AQUI ESTABA EL FALLO QUE CERRABA LA APLICACION AL SALIR DEL CHAT.
+
+    Esto decia `if (grabador.isRecording) void cerrar()`, y `isRecording` es una
+    propiedad del objeto NATIVO. El problema es CUANDO se leia.
+
+    `useAudioRecorder` se apoya en `useReleasingSharedObject`, cuya limpieza
+    llama a `release()` al desmontar. React ejecuta las limpiezas en el ORDEN EN
+    QUE SE DECLARARON los efectos, y `useAudioRecorder` es la primera linea de
+    este hook: para cuando corria esta limpieza —la ultima—, el objeto ya estaba
+    liberado. Leer cualquier cosa de el lanza «Cannot use shared object that was
+    already released», y como el puente pasa entonces el ID en vez del objeto, en
+    Android sale ademas «The 1st argument cannot be cast to type
+    expo.modules.audio.AudioRecorder (received class java.lang.Integer)».
+
+    Y saltaba SIEMPRE al salir del chat, se hubiera grabado o no: bastaba con
+    leer la propiedad.
+
+    LA REGLA, entonces: EN EL DESMONTAJE NO SE TOCA NADA NATIVO. Si hacia falta
+    saber si se estaba grabando, se guarda por nuestra cuenta —abajo— y no se le
+    pregunta a un objeto que quizas ya no existe.
+
+    Y NO HACE FALTA PARAR EL GRABADOR. `release()` cierra el microfono y libera
+    el recurso: eso ya lo hace `expo-audio`. Lo unico que queda por deshacer es
+    la SESION DE AUDIO, que no es del grabador sino del proceso entero, y que si
+    se queda en modo grabacion baja el volumen de toda la aplicacion en iOS.
+  */
+  const grabandoAhora = useRef(false);
+  useEffect(() => {
+    grabandoAhora.current = fase === 'grabando';
+  }, [fase]);
+
   useEffect(() => {
     return () => {
-      if (grabador.isRecording) void cerrar();
+      if (grabandoAhora.current) void permitirGrabar(false);
     };
-  }, [grabador, cerrar]);
+  }, []);
 
   return {
     fase,
