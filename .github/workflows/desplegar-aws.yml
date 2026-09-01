@@ -160,6 +160,31 @@ jobs:
             echo "url=$(leer UrlDeLaApi)"
           } >> "$GITHUB_OUTPUT"
 
+          # A DONDE SE LE PREGUNTA A LA API SI ESTA VIVA. No al balanceador.
+          #
+          # Cuando `EsSoloDesdeCloudFront` esta activo, el grupo de seguridad
+          # del balanceador solo admite la lista de prefijos de CloudFront: un
+          # runner de GitHub NO puede entrar y `curl` agota el tiempo. Eso es
+          # exactamente lo que tumbo los despliegues del 31 de agosto y del 1 de
+          # septiembre: imagen publicada, maquinas renovadas, prueba de humo
+          # imposible y vuelta atras. La API de produccion se quedo congelada en
+          # `sha-38f829c` mientras la web ya pedia rutas que esa version no
+          # tenia, y de ahi los 404 de `/conversations/labels`.
+          #
+          # CloudFront es ademas el punto de entrada DE VERDAD: es la URL que
+          # usa la aplicacion, asi que comprobarla prueba mas que el balanceador.
+          # Y no falsea nada, porque la distribucion lleva la politica
+          # administrada CachingDisabled y cada peticion baja al origen.
+          #
+          # Si no hay frente HTTPS, no hay CloudFront al que preguntar y el
+          # balanceador SI es la entrada real: entonces se usa esa.
+          FRENTE=$(leer UrlHttpsDeEmergencia)
+          case "$FRENTE" in
+            ''|None) FRENTE=$(leer UrlDeLaApi) ;;
+          esac
+          echo "url_de_humo=$FRENTE" >> "$GITHUB_OUTPUT"
+          echo "Se comprobara la salud en: $FRENTE"
+
       - name: Decidir que version se despliega
         id: destino
         env:
@@ -254,9 +279,9 @@ jobs:
             sleep 20
           done
 
-      - name: Prueba de humo contra el balanceador
+      - name: Prueba de humo contra la API publica
         env:
-          URL: ${{ steps.pila.outputs.url }}
+          URL: ${{ steps.pila.outputs.url_de_humo }}
         run: |
           set -euo pipefail
           # Se comprueba el CONTENIDO, no solo el codigo 200: un balanceador
