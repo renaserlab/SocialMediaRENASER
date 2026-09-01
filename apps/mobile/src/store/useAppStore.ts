@@ -22,6 +22,7 @@ import {
   type IdiomaElegido,
 } from '@/lib/idioma';
 import { mezclarReacciones } from '@/lib/reacciones';
+import { invalidar } from '@/lib/sincronizacion';
 import type { Tramo } from '@/lib/historias';
 import type { Language } from '@/i18n';
 import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from '@/types';
@@ -339,6 +340,20 @@ export const useAppStore = create<AppState>()(
             posts: [post, ...state.posts],
             user: state.user ? { ...state.user, posts: state.user.posts + 1 } : state.user,
           }));
+          /*
+            NIVEL A: la linea de arriba ya la mete en `posts`, que es lo que
+            pinta Explorar. Inmediato y con el id de verdad.
+
+            NIVEL B: pero Inicio y Perfil tienen SU PROPIA lista, y como una
+            seccion montada no se desmonta podian quedarse con la de antes toda
+            la sesion — de ahi el «tengo que salir y volver a entrar». Esto les
+            dice que su copia envejecio; cada una se refresca cuando se este
+            viendo.
+
+            Va DESPUES del `await`: avisar antes seria mandar a pedir datos por
+            algo que todavia puede fallar.
+          */
+          invalidar('publicaciones');
           return;
         }
 
@@ -378,7 +393,13 @@ export const useAppStore = create<AppState>()(
       },
       createStory: async (media, durationMs = 5000, tramo) => {
         await StoryRepository.create(media, { durationMs, tramo });
+        /*
+          NIVEL A: `loadStories` deja `storyGroups` al dia, que es de donde lee
+          la fila de historias. Quien mire ese estado ya lo ve.
+        */
         await get().loadStories();
+        // NIVEL B: y cualquier superficie con su propia copia de historias.
+        invalidar('historias');
       },
       deleteStory: async (storyId) => {
         // Se quita al instante y se recarga para recalcular anillos y orden.
@@ -592,6 +613,16 @@ export const useAppStore = create<AppState>()(
                 : post,
             ),
           }));
+          /*
+            NIVEL A: el comentario que devolvio el servidor —con su id real— ya
+            esta en `posts`. Se inserta ESE, no una copia inventada: cuando mas
+            adelante llegue el mismo por Realtime se reconocera por id y no se
+            duplicara.
+
+            NIVEL B: el contador de comentarios se ve tambien en el feed de
+            Inicio y en el perfil, que llevan su propia lista.
+          */
+          invalidar('comentarios');
           return;
         }
 

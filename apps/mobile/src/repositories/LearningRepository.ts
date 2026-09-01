@@ -11,6 +11,7 @@ import {
   toMyCourse,
 } from '@/mappers/learningMapper';
 import type { Course, Lesson, MyCourse } from '@/types';
+import { invalidar } from '@/lib/sincronizacion';
 
 /** Una leccion dentro del temario, con lo que hace falta para retomarla. */
 export type LessonSummary = {
@@ -190,6 +191,13 @@ export const LearningRepository = {
       method: 'POST',
       body: JSON.stringify(cuerpoDeCurso(datos)),
     });
+    /*
+      Un curso se ve en varios sitios a la vez: la seccion del perfil, el
+      catalogo de Explorar, «Cursos para ti» y la busqueda. La invalidacion va
+      aqui, en el repositorio, y no en la hoja que lo crea: asi cualquier camino
+      que cree un curso avisa, tambien el que se escriba mañana.
+    */
+    invalidar('cursos');
     return toCourseFromSummary(dto);
   },
 
@@ -199,6 +207,9 @@ export const LearningRepository = {
       method: 'PATCH',
       body: JSON.stringify(cuerpoDeCurso(cambios)),
     });
+    // Publicar un borrador es un PATCH de estado: para el catalogo es tan
+    // nuevo como uno recien creado.
+    invalidar('cursos');
     return toCourseFromSummary(dto);
   },
 
