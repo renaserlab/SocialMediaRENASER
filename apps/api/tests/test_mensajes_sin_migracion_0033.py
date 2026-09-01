@@ -193,7 +193,17 @@ async def test_la_comprobacion_de_esquema_se_hace_una_vez_por_proceso(base_sin_0
 
     assert (await http.get(f"{API}/{CHAT}/messages")).status_code == 200
     # Se ha averiguado, y se ha guardado.
-    assert esquema_mensajes._cache == {"message_attachments": False}
+    #
+    # SON DOS ENTRADAS Y NO UNA porque el historial mira dos cosas del esquema:
+    # si hay adjuntos (0033, que esta prueba ha quitado) y si hay contexto de
+    # historia (0044). Lo que esta prueba vigila no es CUANTAS se miran, sino que
+    # cada una se mire UNA sola vez por proceso: el bloque de abajo es el que lo
+    # comprueba de verdad. Aqui `message_story_context` sale a `True` porque esta
+    # base solo ha deshecho la 0033.
+    assert esquema_mensajes._cache == {
+        "message_attachments": False,
+        "message_story_context": True,
+    }
 
     # La segunda peticion ya no vuelve a preguntarle al catalogo.
     sentencias: list[str] = []

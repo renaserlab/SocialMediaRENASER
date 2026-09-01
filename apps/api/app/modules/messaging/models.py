@@ -165,8 +165,11 @@ class MessageAttachment(Base):
         index=True,
     )
     storage_path: Mapped[str] = mapped_column(Text)
-    #: image | video | document. Solo tres porque solo tres sabe pintar la
-    #: interfaz: un tipo que nadie sabe mostrar es una fila que miente.
+    #: image | video | document | audio. Solo los que la interfaz sabe pintar:
+    #: un tipo que nadie sabe mostrar es una fila que miente. `audio` lo anade
+    #: la 0044 (notas de voz) y NO se puede escribir antes de que esa migracion
+    #: este aplicada: el `CHECK` de la tabla lo rechazaria y eso es un 500. Quien
+    #: lo comprueba es `esquema.hay_notas_de_voz`.
     kind: Mapped[str] = mapped_column(String(20))
     mime_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: El nombre original. Para un documento es lo unico que lo identifica: la
@@ -177,6 +180,61 @@ class MessageAttachment(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MessageStoryContext(Base):
+    """A que historia respondia un mensaje (migracion 0044).
+
+    TABLA APARTE Y NINGUNA COLUMNA NUEVA EN `messages`, por lo mismo que explican
+    `MessageAttachment` y `DirectConversationPair`: un `select(Message)` de
+    SQLAlchemy pide TODAS las columnas mapeadas, y anadir una a la tabla mas
+    consultada de la aplicacion rompe produccion en cuanto el modelo se adelanta
+    a la migracion. Quien comprueba que esta tabla existe es
+    `esquema.hay_respuestas_a_historias`.
+
+    LA CLAVE PRIMARIA ES `message_id`, sin identificador propio: un mensaje
+    responde a UNA historia o a ninguna, asi que dos contextos contradictorios
+    para el mismo mensaje son imposibles por construccion en vez de por una
+    comprobacion que alguien puede olvidar.
+
+    POR QUE `story_id` ES ANULABLE, que es la decision que sostiene todo lo
+    demas. Una historia dura un dia; el mensaje que la responde dura para
+    siempre. Con `on delete set null` en la base, cuando la historia caduca o su
+    autor la borra, el mensaje se queda intacto y esta fila pierde solo el
+    puntero. La burbuja pinta entonces un contexto degradado —«Historia no
+    disponible»— en vez de desaparecer o reventar. Ese es el caso NORMAL, no la
+    excepcion: al dia siguiente lo son todas.
+
+    Y POR ESO `story_owner_id` NO ES ANULABLE. Es lo unico que sigue sabiendo de
+    quien era la historia cuando ya no existe. Sin el se podria decir
+    «respondiste a una historia», pero no «a la historia de Ana», que es lo que
+    hace que el mensaje se siga entendiendo meses despues.
+    """
+
+    __tablename__ = "message_story_context"
+
+    message_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    story_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        # `SET NULL` y no `CASCADE`: ver el docstring. Con `CASCADE`, borrar una
+        # historia se llevaria el contexto de todos los mensajes que la
+        # respondian y el chat perderia el hilo de la conversacion.
+        ForeignKey("stories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    story_owner_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

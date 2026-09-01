@@ -6,10 +6,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.content.schemas import AuthorSummary
 
-#: Los tipos de adjunto que la interfaz sabe pintar: una foto, un vídeo o un
-#: archivo que se descarga. Aceptar un cuarto tipo aquí sería guardar filas que
-#: ninguna pantalla puede mostrar.
-TIPOS_DE_ADJUNTO = ("image", "video", "document")
+#: Los tipos de adjunto que la interfaz sabe pintar: una foto, un vídeo, un
+#: archivo que se descarga o una nota de voz. Aceptar un tipo más aquí sería
+#: guardar filas que ninguna pantalla puede mostrar.
+#:
+#: `audio` LO AÑADE LA 0044, y por eso no basta con nombrarlo aquí: mientras esa
+#: migración no esté aplicada, el `CHECK` de `message_attachments.kind` sigue
+#: rechazándolo y escribirlo sería una violación de restricción, o sea un 500
+#: que en el navegador aparece disfrazado de error de CORS. El router lo corta
+#: antes con un 503 legible (ver `audio.exigir_esquema_de_audio`) y la interfaz
+#: ni siquiera ofrece grabar hasta que `GET /conversations/availability` dice
+#: que sí.
+TIPOS_DE_ADJUNTO = ("image", "video", "document", "audio")
 
 #: Cuántos archivos caben en un mensaje. Diez es holgado para mandar un puñado
 #: de fotos de una vez y evita que una sola petición encole cien subidas.
@@ -79,6 +87,38 @@ class AttachmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StoryContextRead(BaseModel):
+    """De qué historia era respuesta un mensaje. Siempre puede estar degradado.
+
+    NO ES UN ENLACE DENTRO DEL TEXTO, y esa es la diferencia que importa. El
+    cuerpo del mensaje es de quien lo escribe; meter ahí la URL de la historia
+    haría imposible distinguir una respuesta de verdad de alguien que pegó un
+    enlace, obligaría a la bandeja a buscar cadenas dentro de los mensajes de
+    todo el mundo para filtrar «Respuestas a historias», y dejaría un enlace
+    muerto en medio de la frase en cuanto la historia caducara.
+
+    `story_id` VIENE A NULO EN CUANTO LA HISTORIA DEJA DE EXISTIR, que es el
+    caso normal y no la excepción: una historia dura un día y el mensaje que la
+    responde dura para siempre. Entonces `available` es `false`, el medio y el
+    pie no vienen, y la burbuja escribe «Historia no disponible». Lo que NUNCA
+    se pierde es `story_owner`: sin él no se podría ni decir de quién era.
+    """
+
+    #: `None` cuando la historia ya no existe (caducada o borrada por su autor).
+    story_id: str | None = None
+    #: De quién era la historia. Se conserva aunque la historia desaparezca.
+    story_owner: AuthorSummary
+    #: `story_id is not None`. Se manda explícito para que la pantalla no tenga
+    #: que deducir de un nulo qué debe pintar.
+    available: bool = False
+    #: Solo mientras la historia exista. Se firma en el móvil, como los adjuntos.
+    media_path: str | None = None
+    media_type: str | None = None
+    caption: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MessageCreate(BaseModel):
     """Un mensaje: solo texto, solo archivo, o texto y archivo.
 
@@ -93,6 +133,16 @@ class MessageCreate(BaseModel):
     attachments: list[AttachmentCreate] = Field(
         default_factory=list, max_length=MAX_ADJUNTOS
     )
+    #: La historia que se está respondiendo, cuando el mensaje sale del visor.
+    #:
+    #: SOLO EL IDENTIFICADOR. De quién es la historia lo averigua el servidor
+    #: leyendo la fila; aceptarlo de la petición dejaría que cualquiera
+    #: atribuyera su mensaje a la historia de otra persona, y ese dato es
+    #: justamente el que sobrevive cuando la historia desaparece.
+    #:
+    #: Que la historia ya no exista NO invalida el mensaje: se manda igual, sin
+    #: contexto. Ver `historias.guardar_contexto`.
+    story_id: str | None = None
 
     @model_validator(mode="after")
     def _no_vacio(self) -> "MessageCreate":
@@ -122,4 +172,34 @@ class MessageRead(BaseModel):
     #: todos, y un cliente distinto del nuestro leería lo que le llegara.
     deleted_at: datetime | None = None
 
+    #: A qué historia respondía este mensaje, si respondía a alguna.
+    #:
+    #: `None` en la inmensa mayoría, y también mientras la 0044 espere
+    #: aprobación: sin la tabla no hay contexto que devolver. Un mensaje que SÍ
+    #: respondía a una historia ya borrada no llega aquí como `None`, sino con
+    #: `available: false` — la diferencia entre «esto no era una respuesta» y
+    #: «esto respondía a algo que ya no está» es justo lo que la burbuja tiene
+    #: que saber para escribir «Historia no disponible».
+    story_context: StoryContextRead | None = None
+
     model_config = ConfigDict(from_attributes=True)
+
+
+class MessagingAvailability(BaseModel):
+    """Qué funciones del chat existen en ESTA instalación.
+
+    POR QUÉ SE PREGUNTA EN VEZ DE PROBAR. Sin esto, la única forma de saber si
+    se puede mandar una nota de voz sería grabarla, subirla y recibir un 503:
+    el botón parecería funcionar, la persona hablaría treinta segundos y lo
+    perdería todo. Se pregunta antes y, mientras la respuesta sea `false`, la
+    interfaz no ofrece grabar. Nunca un botón muerto.
+
+    Mismo patrón que `GET /reviews/availability` para la 0030.
+    """
+
+    #: Se puede adjuntar `kind: audio` (migración 0044 aplicada).
+    voice_notes: bool = False
+    #: Se guarda la referencia a la historia respondida (misma migración).
+    #: Es también lo que decide si la bandeja ofrece el filtro
+    #: «Respuestas a historias».
+    story_replies: bool = False

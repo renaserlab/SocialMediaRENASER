@@ -28,7 +28,7 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import esquema
+from app.modules.messaging import audio, esquema, historias
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
@@ -45,6 +45,8 @@ from app.modules.messaging.schemas import (
     DirectConversationCreate,
     MessageCreate,
     MessageRead,
+    MessagingAvailability,
+    StoryContextRead,
 )
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -199,6 +201,42 @@ async def _leer_una(db: AsyncSession, conversation_id: str, uid: str) -> Convers
     if fila is None:
         raise NotFoundError("Conversación no encontrada.")
     return (await leer_conversaciones(db, [fila], uid))[0]
+
+
+@router.get("/availability", response_model=MessagingAvailability)
+async def messaging_availability(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessagingAvailability:
+    """Que funciones del chat existen en ESTA instalacion. NUNCA UN BOTON MUERTO.
+
+    POR QUE SE PREGUNTA EN VEZ DE PROBAR. Sin esto, la unica forma de saber si
+    se puede mandar una nota de voz seria grabarla, subirla y recibir un 503: el
+    boton pareceria funcionar, alguien hablaria treinta segundos y lo perderia
+    todo. Se pregunta antes de pintar el microfono y, mientras la respuesta sea
+    `false`, no se ofrece grabar.
+
+    Lo mismo vale para el filtro «Respuestas a historias» de la bandeja: sin la
+    0044 no hay nada que filtrar, y un filtro que siempre devuelve vacio es un
+    boton muerto.
+
+    SE DECLARA ANTES QUE LAS DEMAS RUTAS a proposito. FastAPI prueba en orden de
+    declaracion, asi que el dia que alguien añada un `GET /{conversation_id}`
+    aqui, `/availability` seguiria leyendose como lo que es y no como el id de
+    una conversacion. Es la misma precaucion que ya se tomo con el sub-router de
+    etiquetas.
+
+    LAS DOS SALEN DE LA MISMA MIGRACION y aun asi se mandan por separado: son
+    dos funciones distintas para quien las usa, y el dia que una se despliegue
+    sin la otra la aplicacion no tendra que adivinarlo. `current_user` esta
+    aunque no se use: esto describe el servidor, pero no tiene por que
+    contarselo a quien no ha iniciado sesion.
+    """
+    disponible = await esquema.hay_notas_de_voz(db)
+    return MessagingAvailability(
+        voice_notes=disponible,
+        story_replies=await esquema.hay_respuestas_a_historias(db),
+    )
 
 
 @router.get("", response_model=list[ConversationRead])
@@ -480,9 +518,18 @@ async def list_messages(
     # Los de un mensaje borrado NI SE PIDEN: no hay que enseñarlos, así que
     # tampoco hay que traerlos. Los ficheros del bucket se quedan donde están
     # (ver la nota de `borrar_mensaje`), pero su existencia no se cuenta.
-    adjuntos = await adjuntos_por_mensaje(
-        db, [fila[0] for fila in rows if fila[4] is None]
-    )
+    vivos = [fila[0] for fila in rows if fila[4] is None]
+    adjuntos = await adjuntos_por_mensaje(db, vivos)
+
+    # El contexto de historia de toda la página, también en UNA consulta y por
+    # el mismo motivo que los adjuntos: preguntarlo por burbuja convertiría
+    # abrir un chat en treinta viajes a la base. Sin la 0044 devuelve `{}` y
+    # cada mensaje sale con `story_context: null`, que es la verdad.
+    #
+    # Los de un mensaje borrado NI SE PIDEN, igual que sus adjuntos: una lápida
+    # no enseña a qué respondía. Decirlo sería filtrar parte de lo que su autor
+    # acaba de retirar.
+    contextos = await historias.contextos_por_mensaje(db, vivos)
 
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
@@ -500,6 +547,7 @@ async def list_messages(
             created_at=created_at,
             deleted_at=borrado_en,
             attachments=adjuntos.get(msg_id, []),
+            story_context=contextos.get(msg_id),
         )
         for (
             msg_id,
@@ -533,12 +581,31 @@ async def send_message(
     reanudables sin que la API sostenga la conexión— y esta petición solo
     registra las rutas, después de comprobar que apuntan a esta conversación y a
     la carpeta de quien las manda.
+
+    UNA NOTA DE VOZ ENTRA POR AQUI COMO CUALQUIER OTRO ADJUNTO, con
+    `kind: audio`. Lo único propio son sus reglas (`audio.py`): que la 0044 esté
+    aplicada —si no, 503 y no la violación de restricción que sería un 500— y
+    que traiga duración.
+
+    Y UNA RESPUESTA A UNA HISTORIA TAMBIEN ENTRA POR AQUI, con `story_id` en el
+    cuerpo. No hay un endpoint aparte a propósito: duplicar el envío obligaría a
+    mantener dos rutas que hacen exactamente lo mismo con los adjuntos, la
+    validación, el `updated_at` y Realtime, y esas dos rutas divergen —una
+    arregla un fallo y la otra no—. La conversación tampoco se crea aquí: el
+    móvil pasa antes por `POST /conversations/direct`, que ya es idempotente
+    gracias a la 0039.
     """
     ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
 
     if payload.attachments:
         await _exigir_esquema_de_adjuntos(db)
+        # El orden importa: primero si CABE guardar un audio (503 si la 0044 no
+        # está), después si el audio es válido (422). Al revés, quien mandara una
+        # nota de voz mal formada contra una base sin la migración recibiría un
+        # «arregla el dato» que no puede arreglar.
+        await audio.exigir_esquema_de_audio(db, payload.attachments)
+        audio.validar_audio(payload.attachments)
         _validar_rutas(payload.attachments, conversation_id, current_user.id)
     elif not payload.body.strip():
         # Sin la 0033 el esquema todavía exige al menos un carácter en `body`,
@@ -604,6 +671,25 @@ async def send_message(
             for adjunto_id, adjunto in zip(ids, payload.attachments, strict=True)
         ]
 
+    # El contexto de la historia, si el mensaje salió del visor.
+    #
+    # VA DESPUES DE INSERTAR EL MENSAJE porque su clave primaria es
+    # `message_id`: no hay a qué atarlo hasta que el mensaje existe. Y va DENTRO
+    # de la misma transacción que el `commit` de abajo, así que o se guardan los
+    # dos o no se guarda ninguno: un contexto huérfano apuntaría a un mensaje
+    # que nadie escribió.
+    #
+    # DEVUELVE `None` SIN LANZAR cuando la 0044 no está aplicada o cuando la
+    # historia ya no existe —entre abrir el visor y pulsar «enviar» pueden pasar
+    # minutos, y en ese hueco su autor ha podido borrarla—. En los dos casos el
+    # mensaje SE MANDA IGUAL, sin contexto: el texto es de quien lo escribió y
+    # quitárselo por una tabla que falta o una historia que caducó sería el peor
+    # de los desenlaces. Ver `historias.guardar_contexto`.
+    contexto: StoryContextRead | None = None
+    if payload.story_id:
+        ensure_uuid(payload.story_id, "Historia no encontrada.")
+        contexto = await historias.guardar_contexto(db, message_id, payload.story_id)
+
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id)
@@ -621,6 +707,7 @@ async def send_message(
         body=payload.body,
         created_at=created_at,
         attachments=adjuntos,
+        story_context=contexto,
     )
 
 
