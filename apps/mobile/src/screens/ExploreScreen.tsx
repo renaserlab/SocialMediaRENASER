@@ -105,7 +105,9 @@ export function ExploreScreen() {
   const cargarDestacados = useCallback(async () => {
     if (!AuthRepository.enabled) return;
     const [cursos, eventos, circulos, destacados] = await Promise.allSettled([
-      LearningRepository.listCourses(),
+      // UNO. Esta tarjeta enseña `cursos.value[0]` y nada más; traer el
+      // catálogo entero para quedarse con el primero es pagar por tirar.
+      LearningRepository.listCourses(1),
       /*
         SOLO LOS VIGENTES, y lo decide el servidor.
 
@@ -119,7 +121,9 @@ export function ExploreScreen() {
         con un recorte en el móvil, un catálogo con veinte eventos pasados y uno
         futuro dejaría la sección vacía aunque el evento futuro exista.
       */
-      CatalogRepository.listEvents('upcoming'),
+      // DOS, que son los que se pintan. Medido: con la agenda llena, pedir
+      // cincuenta cuesta 39 KB para rellenar dos filas.
+      CatalogRepository.listEvents('upcoming', 2),
       CommunityRepository.list(),
       pedirDestacados(),
     ]);
@@ -142,13 +146,26 @@ export function ExploreScreen() {
 
   useEffect(() => {
     /*
-      El catalogo es contenido SECUNDARIO de esta pantalla y se retrasa a
-      proposito: en el arranque compite con el muro por la misma conexion y por
-      un servidor recien despierto, y lo que la persona vino a ver son las
-      publicaciones. Medio segundo despues llega sin que nadie lo note.
+      SIN ESPERA. Aqui habia un `setTimeout` de 600 ms, y su motivo estaba bien
+      escrito: el catalogo es secundario y no debia competir con el muro «por la
+      misma conexion y por un servidor recien despierto».
+
+      La mitad de ese motivo ya no existe. No hay servidor recien despierto
+      desde que la API vive en AWS, y `/catalog/events` responde en 0,392 s
+      medidos contra produccion.
+
+      Lo que si quedaba era el precio: 600 ms de espera mas 0,392 s de peticion
+      es UN SEGUNDO largo en el que las tres tarjetas —programa, eventos y
+      circulo— enseñan texto de relleno («Muy pronto habra contenido
+      disponible») y despues cambian de golpe. Y eso no es un esqueleto que se
+      rellena: es contenido equivocado que se sustituye, que es justo lo que se
+      siente como una pantalla lenta aunque el servidor haya contestado rapido.
+
+      Las cuatro peticiones son pequeñas, van en paralelo entre si y comparten
+      conexion multiplexada con la del muro, que ademas pinta su primera fase
+      sin esperar a Storage.
     */
-    const timer = setTimeout(() => void cargarDestacados(), 600);
-    return () => clearTimeout(timer);
+    void cargarDestacados();
   }, [cargarDestacados]);
 
   /**
