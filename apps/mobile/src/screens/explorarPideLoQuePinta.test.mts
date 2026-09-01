@@ -90,3 +90,59 @@ test('sigue habiendo una sola llamada, y en paralelo', () => {
   assert.match(explorar, /await Promise\.allSettled\(\[/);
   assert.match(explorar, /setCatalogoFallido\(fallos\.length === 3\)/);
 });
+
+// ---------------------------------------------------------------------------
+// Los dos carruseles de recomendacion, sangrados igual
+// ---------------------------------------------------------------------------
+
+/*
+  EL FALLO. «Personas para ti» se leia pegado al borde izquierdo mientras el
+  resto de Explorar —«Tu siguiente paso», «Proximos eventos», «Comunidades»—
+  empezaba a 16. Se vio en una captura y era facil de confundir con un problema
+  de la pantalla; no lo era.
+
+  La causa estaba DENTRO del propio componente, y era incoherente consigo mismo:
+
+      <View>                                  <- sin margen
+        <SectionTitle ... />                  <- a 0
+        <Text style={styles.nota}>            <- nota: paddingHorizontal lg
+        <FlashList contentContainerStyle={fila}>  <- fila: paddingHorizontal lg
+
+  La nota y las tarjetas si lo llevaban; solo el titulo se quedo fuera. Su
+  hermano `CursosParaTi` ya lo hacia bien, envolviendo el titulo.
+
+  POR QUE EL MARGEN VA EN EL TITULO Y NO EN EL CONTENEDOR: el carrusel tiene que
+  poder llegar al borde de la pantalla al desplazarse. Con el padding en el
+  contenedor, las tarjetas se cortarian antes de llegar.
+*/
+
+test('los carruseles de recomendacion sangran su titulo', () => {
+  for (const componente of ['PersonasParaTi', 'CursosParaTi']) {
+    const codigo = readFileSync(join(SRC, `components/${componente}.tsx`), 'utf8');
+
+    // El titulo va envuelto, no suelto.
+    assert.match(
+      codigo,
+      /<View style=\{styles\.titulo\}>\s*<SectionTitle/,
+      `${componente}: el titulo tiene que ir dentro de un View con margen, o se ` +
+        'pega al borde mientras su propio contenido queda a 16',
+    );
+
+    // Y ese estilo existe y sangra de verdad.
+    assert.match(
+      codigo,
+      /titulo: \{ paddingHorizontal: spacing\.lg \}/,
+      `${componente}: falta el estilo del titulo`,
+    );
+
+    // El carrusel sigue pudiendo llegar al borde: el margen NO esta en el
+    // contenedor de fuera.
+    const fila = codigo.match(/fila: \{[^}]*\}/)?.[0] ?? '';
+    assert.match(
+      fila,
+      /paddingHorizontal: spacing\.lg/,
+      `${componente}: las tarjetas llevan su margen en el contenido, no en el ` +
+        'contenedor, para poder desplazarse hasta el borde',
+    );
+  }
+});

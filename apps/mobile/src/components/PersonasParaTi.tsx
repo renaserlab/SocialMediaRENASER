@@ -282,7 +282,20 @@ export function PersonasParaTi() {
 
   return (
     <View>
-      <SectionTitle title={t('reco.peopleForYou')} />
+      {/*
+        El titulo lleva su propio margen lateral, como el de «Cursos para ti».
+
+        Sin el se pegaba al borde izquierdo mientras la nota y las tarjetas —que
+        si lo llevan, ahi abajo en `nota` y `fila`— quedaban a 16: dentro del
+        mismo bloque, el encabezado a un lado y su contenido a otro.
+
+        El margen va AQUI y no en el `View` de fuera a proposito: el carrusel
+        tiene que poder llegar al borde de la pantalla al desplazarse, y con el
+        padding en el contenedor las tarjetas se cortarian antes de llegar.
+      */}
+      <View style={styles.titulo}>
+        <SectionTitle title={t('reco.peopleForYou')} />
+      </View>
       {/*
         Se dice de donde sale la lista cuando todavia no hay con que
         personalizarla. Presentar un respaldo como si fuera una coincidencia
@@ -432,6 +445,7 @@ export function PersonasParaTi() {
 }
 
 const styles = StyleSheet.create({
+  titulo: { paddingHorizontal: spacing.lg },
   nota: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   fila: { gap: spacing.md, paddingBottom: spacing.xl, paddingHorizontal: spacing.lg },
   tarjeta: {
