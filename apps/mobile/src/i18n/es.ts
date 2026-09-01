@@ -372,10 +372,19 @@ export const es = {
   'messages.signedOutTitle': 'Tus mensajes te esperan',
   'messages.signedOutBody':
     'Crea tu cuenta para escribir a otras personas y recibir sus respuestas.',
-  'messages.searchPlaceholder': 'Buscar mensajes...',
+  'messages.searchPlaceholder': 'Buscar por nombre o usuario',
+  'messages.searchClear': 'Borrar la búsqueda',
   'messages.emptyTitle': 'No hay conversaciones',
   'messages.emptyBody': 'Inicia un chat desde el perfil de alguien.',
+  'messages.noResultsTitle': 'Nada por aquí',
+  'messages.noResultsBody': 'Prueba con otro nombre o quita los filtros.',
   'messages.chatWith': 'Chat con {nombre}. {detalle}',
+  'messages.filters': 'Filtros',
+  'messages.filtersTitle': 'Filtrar conversaciones',
+  'messages.filterAll': 'Todas',
+  'messages.filterUnread': 'No leídos',
+  'messages.filterUnanswered': 'Sin responder',
+  'messages.filterStoryReplies': 'Respuestas a historias',
 
   // Chat
   'chat.conversation': 'Conversación',

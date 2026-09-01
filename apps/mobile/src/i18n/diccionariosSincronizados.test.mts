@@ -93,6 +93,10 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   ]),
   pt: new Set<string>([
     // Portugues y español escriben estas igual. Se comprueban una a una.
+    // «Filtros» y «Todas» se escriben igual en los dos idiomas; el resto de los
+    // filtros de la bandeja sí cambian («Não lidas», «Sem resposta»).
+    'messages.filters',
+    'messages.filterAll',
     'tabs.explore',
     'tabs.profile',
     'home.live',

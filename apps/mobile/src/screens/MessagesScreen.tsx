@@ -1,33 +1,83 @@
-import React, { useCallback, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
-import { Input } from '@/components/Input';
+import { BuscadorDeConversaciones } from '@/components/BuscadorDeConversaciones';
+import { ChipsDeEtiquetas } from '@/components/ChipsDeEtiquetas';
+import { FilaDeConversacion } from '@/components/FilaDeConversacion';
+import { FiltrosDeBandeja } from '@/components/FiltrosDeBandeja';
+import { GestorDeEtiquetas } from '@/components/GestorDeEtiquetas';
+import { HistoriasDeLaBandeja } from '@/components/HistoriasDeLaBandeja';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
-import { assets } from '@/data/assets';
 import { useTranslation } from '@/i18n/useTranslation';
+import {
+  CONSULTA_VACIA,
+  esVigente,
+  fusionarPaginas,
+  hayConsulta,
+  hayQueRecargar,
+  type ConsultaDeBandeja,
+  type FiltroDeBandeja,
+} from '@/lib/bandeja';
 import {
   CONVERSACIONES_POR_PAGINA,
   MessageRepository,
 } from '@/repositories/MessageRepository';
+import {
+  cargarEtiquetas,
+  type EstadoDeEtiquetas,
+} from '@/repositories/EtiquetasRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { radius, spacing } from '@/theme/tokens';
+import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Conversation } from '@/types';
 
+/**
+ * La bandeja de mensajes.
+ *
+ * -----------------------------------------------------------------------------
+ * LO QUE SE CONSERVA DE LA VERSIÓN ANTERIOR, Y POR QUÉ SE DICE
+ * -----------------------------------------------------------------------------
+ * Paginación por desplazamiento con fusión sin repetidos, refresco silencioso al
+ * volver al foco, estados de carga/vacío/error, tirar para recargar y lista
+ * virtualizada. Todo eso lleva funcionando en producción con gente dentro; el
+ * rediseño cambia cómo se ve y añade lo nuevo, no reescribe lo que ya servía.
+ *
+ * -----------------------------------------------------------------------------
+ * LAS CUATRO PETICIONES SALEN A LA VEZ. NINGUNA ESPERA A OTRA
+ * -----------------------------------------------------------------------------
+ * Conversaciones, historias, etiquetas y qué funciones hay disponibles se piden
+ * en el mismo instante, desde efectos que se disparan al montar. Está medido que
+ * cada salto de red encadenado cuesta ~0,42 s: cuatro peticiones en paralelo son
+ * un salto; encadenadas serían cuatro, o sea 1,7 s en los que no se puede pintar
+ * nada. Por eso `HistoriasDeLaBandeja` pide lo suyo por su cuenta en vez de
+ * recibirlo de aquí: así no hay forma de que acabe esperando a la bandeja.
+ *
+ * Y si alguna de las tres secundarias falla, la bandeja se abre igual: unas
+ * etiquetas que no cargan no pueden dejar a nadie sin sus mensajes.
+ *
+ * -----------------------------------------------------------------------------
+ * BUSCAR Y FILTRAR LOS RESUELVE EL SERVIDOR
+ * -----------------------------------------------------------------------------
+ * Antes esta pantalla hacía `conversations.filter(c => c.name.includes(texto))`
+ * en el cuerpo del render y además apagaba `onEndReached` mientras hubiera
+ * texto. Con doscientas conversaciones eso busca entre las veinte que hay en
+ * memoria y calla el resto. Ahora el texto, el filtro y la etiqueta viajan en la
+ * petición, y la paginación sigue funcionando sobre el resultado filtrado.
+ *
+ * -----------------------------------------------------------------------------
+ * FILTROS Y ETIQUETAS SON DOS EJES DISTINTOS
+ * -----------------------------------------------------------------------------
+ * «No leídos» y «No respondidos» son ESTADOS DERIVADOS: se calculan de los
+ * mensajes y cambian solos. Las etiquetas son CATEGORÍAS PERSISTENTES que pone
+ * una persona. Se combinan («no respondidos entre los que marqué como Alumnos»)
+ * pero no se mezclan: una etiqueta «no leído» que nadie vuelve a quitar miente a
+ * los dos días.
+ */
 export function MessagesScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -36,7 +86,7 @@ export function MessagesScreen() {
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
   const demoConversations = useAppStore((state) => state.conversations);
 
-  const [searchText, setSearchText] = useState('');
+  const [consulta, setConsulta] = useState<ConsultaDeBandeja>(CONSULTA_VACIA);
   const [remote, setRemote] = useState<Conversation[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
   const [refreshing, setRefreshing] = useState(false);
@@ -44,18 +94,50 @@ export function MessagesScreen() {
   const [hayMas, setHayMas] = useState(true);
   const [cargandoMas, setCargandoMas] = useState(false);
 
+  const [etiquetas, setEtiquetas] = useState<EstadoDeEtiquetas>({
+    disponible: false,
+    etiquetas: [],
+  });
+  /** Si el servidor guarda las respuestas a historias (migración 0044). */
+  const [respuestasAHistorias, setRespuestasAHistorias] = useState(false);
+  /**
+   * Para quién está abierto el gestor de etiquetas.
+   *
+   * `undefined` = cerrado · `null` = abierto en modo lista (desde los chips) ·
+   * un identificador = abierto sobre ESA conversación (pulsación larga).
+   */
+  const [gestorPara, setGestorPara] = useState<string | null | undefined>(undefined);
+
   /*
-    Lo que hay pintado, accesible desde los callbacks sin volver a crearlos.
+    Lo que hay pintado y lo que se está pidiendo, accesibles desde los callbacks
+    sin volver a crearlos.
 
     `onEndReached` se dispara mientras alguien baja; si dependiera del estado,
     cada carga cambiaria la funcion y la lista la volveria a montar en mitad del
-    desplazamiento.
+    desplazamiento. Y `load` tiene que poder leer la consulta vigente sin
+    depender de ella: si dependiera, cambiar de filtro recrearía el
+    `useFocusEffect` y dispararía una petición de más.
   */
   const conversacionesRef = useRef<Conversation[]>([]);
   conversacionesRef.current = remote;
+  const consultaRef = useRef<ConsultaDeBandeja>(consulta);
+  consultaRef.current = consulta;
+
+  /*
+    El sello de la última petición pedida, y cuándo se cargó por última vez.
+
+    EL SELLO EVITA QUE UNA RESPUESTA LENTA PISE A UNA MÁS NUEVA. Cambiar de
+    «No leídos» a «Todas» lanza dos peticiones y nada garantiza que vuelvan en
+    ese orden; si la primera llega la última, la pantalla enseña una lista
+    filtrada con el filtro ya quitado. No da error, no sale en los registros y no
+    se reproduce en una red buena. Es el mismo criterio que `busquedaProgresiva`
+    aplica en la pantalla de buscar.
+  */
+  const sello = useRef(0);
+  const ultimaCarga = useRef<number | null>(null);
 
   /**
-   * Trae la primera pagina.
+   * Trae la primera pagina de lo que se esté pidiendo ahora.
    *
    * `silencioso` es la diferencia entre volver a esta pantalla y verla parpadear
    * en blanco o no. Antes cada vuelta al foco ponia el estado en «cargando», y
@@ -72,14 +154,18 @@ export function MessagesScreen() {
         setStatus('idle');
         return Promise.resolve();
       }
+      const mio = ++sello.current;
       if (!silencioso || conversacionesRef.current.length === 0) setStatus('loading');
-      return MessageRepository.listConversations()
+      return MessageRepository.listConversations({ consulta: consultaRef.current })
         .then((data) => {
+          if (!esVigente(mio, sello.current)) return;
           setRemote(data);
           setHayMas(data.length >= CONVERSACIONES_POR_PAGINA);
           setStatus('idle');
+          ultimaCarga.current = Date.now();
         })
         .catch(() => {
+          if (!esVigente(mio, sello.current)) return;
           // Un refresco silencioso que falla NO borra lo que se esta leyendo:
           // sustituir una lista buena por una pantalla de error porque se cayo
           // la red un segundo es peor que no refrescar.
@@ -90,27 +176,43 @@ export function MessagesScreen() {
     [supabaseEnabled, signedIn],
   );
 
-  /** La pagina siguiente, al llegar al final de la lista. */
+  /**
+   * La pagina siguiente, al llegar al final de la lista.
+   *
+   * SE PAGINA TAMBIÉN BUSCANDO Y FILTRANDO. Antes `onEndReached` se apagaba
+   * mientras hubiera texto, y estaba bien razonado: filtrando en memoria, pedir
+   * más páginas daba la sensación de que la lista se completaba sola. Ahora
+   * quien recorta es el servidor, así que hay resultados de verdad por debajo y
+   * no poder bajar a por ellos sería el nuevo engaño.
+   */
   const cargarMas = useCallback(() => {
     if (!supabaseEnabled || !signedIn) return;
-    if (cargandoMas || !hayMas || status === 'loading') return;
+    if (cargandoMas || !hayMas || status !== 'idle') return;
+    // No se pide la página dos de una lista que todavía no tiene la uno. Con la
+    // lista vacía —sin resultados, o con la primera carga fallida— `FlashList`
+    // puede considerar que ya se ha llegado al final y disparar esto.
+    if (conversacionesRef.current.length === 0) return;
 
+    const mio = ++sello.current;
     setCargandoMas(true);
-    MessageRepository.listConversations({ offset: conversacionesRef.current.length })
+    MessageRepository.listConversations({
+      offset: conversacionesRef.current.length,
+      consulta: consultaRef.current,
+    })
       .then((mas) => {
+        // Si mientras bajaba se cambió el filtro, esta página ya no corresponde
+        // a lo que se está mirando: añadirla mezclaría dos listas distintas.
+        if (!esVigente(mio, sello.current)) return;
         if (mas.length === 0) {
           // Sin esto, cada rebote al final de la lista lanzaria otra peticion
           // para recibir siempre lo mismo.
           setHayMas(false);
           return;
         }
-        setRemote((previas) => {
-          // Por identificador y no concatenando a secas: entre una pagina y la
-          // siguiente puede entrar un mensaje que reordene la lista, y entonces
-          // una conversacion sale en las dos paginas.
-          const vistas = new Set(previas.map((c) => c.id));
-          return [...previas, ...mas.filter((c) => !vistas.has(c.id))];
-        });
+        // Por identificador y no concatenando a secas: entre una pagina y la
+        // siguiente puede entrar un mensaje que reordene la lista, y entonces
+        // una conversacion sale en las dos paginas.
+        setRemote((previas) => fusionarPaginas(previas, mas));
         setHayMas(mas.length >= CONVERSACIONES_POR_PAGINA);
       })
       .catch(() => {
@@ -119,27 +221,154 @@ export function MessagesScreen() {
       .finally(() => setCargandoMas(false));
   }, [supabaseEnabled, signedIn, cargandoMas, hayMas, status]);
 
+  /*
+    Las etiquetas y qué funciones hay, en paralelo con la bandeja.
+
+    Ninguna de las dos puede tumbar la pantalla: `cargarEtiquetas` no lanza
+    nunca —devuelve `disponible: false`— y `funciones()` responde `false` ante
+    cualquier fallo. Sin la 0045 no hay chips; sin la 0044 no se ofrece el filtro
+    de respuestas a historias. Nunca un botón muerto.
+  */
+  useEffect(() => {
+    if (!supabaseEnabled || !signedIn) return;
+    let vivo = true;
+    void cargarEtiquetas().then((estado) => {
+      if (vivo) setEtiquetas(estado);
+    });
+    void MessageRepository.funciones().then((funciones) => {
+      if (vivo) setRespuestasAHistorias(funciones.respuestasAHistorias);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [supabaseEnabled, signedIn]);
+
+  /*
+    Cambiar de búsqueda, de filtro o de etiqueta vuelve a pedir la primera
+    página. No es silencioso a propósito: aquí sí cambia la lista entera, y
+    dejar la anterior mientras llega la nueva haría creer que el filtro no ha
+    hecho nada.
+  */
+  const primerRender = useRef(true);
+  useEffect(() => {
+    if (primerRender.current) {
+      // Al montar ya carga el `useFocusEffect`; sin esta guarda serían dos
+      // peticiones idénticas en el arranque.
+      primerRender.current = false;
+      return;
+    }
+    ultimaCarga.current = null;
+    setHayMas(true);
+    void load();
+  }, [consulta, load]);
+
+  /*
+    Al volver a la pantalla, se refresca SOLO SI hace falta.
+
+    Antes se recargaba en cada foco, sin condición: salir a un chat y volver
+    costaba otra petición (~0,42 s) para recibir casi siempre lo mismo. Con la
+    validez de `lib/bandeja.ts` ese viaje de ida y vuelta ya no se paga, y una
+    ausencia larga sí se refresca.
+  */
   useFocusEffect(
     useCallback(() => {
+      if (!hayQueRecargar(ultimaCarga.current, Date.now())) return;
       void load(true);
     }, [load]),
   );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    // Tirar para recargar es una petición explícita: se salta la validez.
+    ultimaCarga.current = null;
     // Se espera de verdad: antes se apagaba el indicador en la misma vuelta,
     // asi que el gesto de estirar no llegaba a verse.
     void load(true).finally(() => setRefreshing(false));
   }, [load]);
 
-  const conversations = supabaseEnabled ? remote : demoConversations;
+  const alBuscar = useCallback((texto: string) => {
+    // Devolver el MISMO objeto cuando no cambia nada evita una recarga por una
+    // identidad nueva: el efecto de arriba compara por referencia.
+    setConsulta((previa) => (previa.texto === texto ? previa : { ...previa, texto }));
+  }, []);
 
-  const filteredConversations = conversations.filter((conv) =>
-    conv.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    conv.subtitle.toLowerCase().includes(searchText.toLowerCase())
+  const alFiltrar = useCallback((filtro: FiltroDeBandeja | null) => {
+    setConsulta((previa) => (previa.filtro === filtro ? previa : { ...previa, filtro }));
+  }, []);
+
+  const alEtiquetar = useCallback((etiqueta: string | null) => {
+    setConsulta((previa) =>
+      previa.etiqueta === etiqueta ? previa : { ...previa, etiqueta },
+    );
+  }, []);
+
+  /**
+   * Después de crear, renombrar, borrar o asignar una etiqueta.
+   *
+   * SI DESAPARECE LA ETIQUETA POR LA QUE SE ESTABA FILTRANDO, se quita el
+   * filtro. Sin esto la bandeja se quedaría vacía para siempre, filtrando por
+   * algo que ya no existe, y con el chip correspondiente tampoco en la fila: no
+   * habría manera de entender qué ha pasado ni de deshacerlo.
+   */
+  const trasCambiarEtiquetas = useCallback(async () => {
+    const nuevo = await cargarEtiquetas();
+    setEtiquetas(nuevo);
+    const filtrando = consultaRef.current.etiqueta;
+    if (filtrando && !nuevo.etiquetas.some((e) => e.id === filtrando)) {
+      // Cambiar la consulta ya dispara la recarga; pedirla también aquí serían
+      // dos peticiones para la misma lista.
+      setConsulta((previa) => ({ ...previa, etiqueta: null }));
+      return;
+    }
+    ultimaCarga.current = null;
+    await load(true);
+  }, [load]);
+
+  /** El servidor dice que la 0045 no está: se deja de ofrecer la función. */
+  const sinEtiquetas = useCallback(() => {
+    setEtiquetas({ disponible: false, etiquetas: [] });
+    setGestorPara(undefined);
+    setConsulta((previa) => (previa.etiqueta ? { ...previa, etiqueta: null } : previa));
+  }, []);
+
+  const abrirChat = useCallback(
+    (conversacion: Conversation) => {
+      router.push({
+        pathname: '/chat/[id]',
+        params: { id: conversacion.id, name: conversacion.name },
+      });
+    },
+    [router],
   );
 
-  const hasMessages = filteredConversations.length > 0;
+  const abrirGestorDe = useCallback((conversacion: Conversation) => {
+    setGestorPara(conversacion.id);
+  }, []);
+
+  const abrirGestorDeLaLista = useCallback(() => setGestorPara(null), []);
+  const cerrarGestor = useCallback(() => setGestorPara(undefined), []);
+
+  /*
+    La bandeja de DEMOSTRACIÓN (sin Supabase) se filtra aquí, y esta vez sí es
+    correcto: son unas pocas filas fijas, están todas en memoria y no hay
+    servidor al que preguntar ni paginación que romper. Es justo lo contrario del
+    caso real, donde filtrar lo ya descargado sólo ve la primera página.
+  */
+  const conversations = useMemo(() => {
+    if (supabaseEnabled) return remote;
+    if (!hayConsulta(consulta)) return demoConversations;
+    const texto = consulta.texto.toLowerCase();
+    return demoConversations.filter((conv) => {
+      const coincide =
+        !texto ||
+        conv.name.toLowerCase().includes(texto) ||
+        conv.subtitle.toLowerCase().includes(texto);
+      const pasaFiltro = consulta.filtro !== 'unread' || conv.unread > 0;
+      return coincide && pasaFiltro;
+    });
+  }, [supabaseEnabled, remote, demoConversations, consulta]);
+
+  const hasMessages = conversations.length > 0;
   const uiState = supabaseEnabled && status === 'loading'
     ? 'loading'
     : supabaseEnabled && status === 'error'
@@ -148,13 +377,150 @@ export function MessagesScreen() {
     ? 'content'
     : 'empty';
 
+  /*
+    `useMemo` para que `data` no cambie de identidad en cada render: sin esto,
+    `FlashList` da por hecho que la lista es otra y repinta las celdas visibles.
+    Medido: ~8 filas por pulsación en el buscador.
+  */
+  const datos = useMemo(
+    () => (uiState === 'content' ? conversations : []),
+    [uiState, conversations],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Conversation }) => (
+      <FilaDeConversacion
+        conversacion={item}
+        alAbrir={abrirChat}
+        // Sin la 0045 no hay etiquetas que poner: mantener pulsado no abre nada
+        // en vez de abrir una hoja que sólo puede decir que no está disponible.
+        alEtiquetar={etiquetas.disponible ? abrirGestorDe : undefined}
+      />
+    ),
+    [abrirChat, abrirGestorDe, etiquetas.disponible],
+  );
+
+  const keyExtractor = useCallback((item: Conversation) => item.id, []);
+
+  /*
+    La cabecera y el control de recarga, memorizados.
+
+    Eran elementos JSX en línea: se reconstruían enteros en cada render, y con
+    ellos el buscador. Ahora sólo cambian cuando cambia algo suyo de verdad.
+  */
+  const cabecera = useMemo(
+    () => (
+      <View style={styles.cabecera}>
+        {/*
+          Las historias, arriba del todo y por la API (una consulta, un salto),
+          no por el camino de Supabase directo (cuatro saltos, ~1,7 s).
+        */}
+        {supabaseEnabled && signedIn ? <HistoriasDeLaBandeja /> : null}
+
+        <View style={styles.controles}>
+          <BuscadorDeConversaciones alBuscar={alBuscar} />
+
+          <View style={styles.filaDeFiltros}>
+            <FiltrosDeBandeja
+              seleccionado={consulta.filtro}
+              alSeleccionar={alFiltrar}
+              respuestasAHistorias={respuestasAHistorias}
+            />
+            {/*
+              Los chips del CRM, a la derecha del botón de filtros y en su propia
+              fila desplazable. Desaparecen enteros sin la 0045.
+            */}
+            <View style={styles.chips}>
+              <ChipsDeEtiquetas
+                etiquetas={etiquetas.etiquetas}
+                seleccionada={consulta.etiqueta}
+                alSeleccionar={alEtiquetar}
+                disponible={etiquetas.disponible}
+                alGestionar={abrirGestorDeLaLista}
+              />
+            </View>
+          </View>
+        </View>
+      </View>
+    ),
+    [
+      supabaseEnabled,
+      signedIn,
+      alBuscar,
+      consulta.filtro,
+      consulta.etiqueta,
+      alFiltrar,
+      respuestasAHistorias,
+      etiquetas.etiquetas,
+      etiquetas.disponible,
+      alEtiquetar,
+      abrirGestorDeLaLista,
+    ],
+  );
+
+  const controlDeRecarga = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        tintColor={colors.text}
+        colors={[colors.text]}
+      />
+    ),
+    [refreshing, onRefresh, colors.text],
+  );
+
+  const pie = useMemo(
+    () =>
+      cargandoMas ? (
+        <View style={styles.cargandoMas}>
+          <ActivityIndicator size="small" color={colors.textMuted} />
+        </View>
+      ) : null,
+    [cargandoMas, colors.textMuted],
+  );
+
+  /*
+    Buscando o filtrando, el vacío significa otra cosa: no es «no tienes
+    conversaciones» sino «no hay ninguna así». Decir lo primero cuando pasa lo
+    segundo hace pensar que se han perdido los mensajes.
+  */
+  const buscando = hayConsulta(consulta);
+  const vacio = useMemo(
+    () => (
+      <StateView
+        state={uiState}
+        onRetry={() => void load()}
+        title={
+          uiState === 'empty'
+            ? buscando
+              ? t('messages.noResultsTitle')
+              : t('messages.emptyTitle')
+            : undefined
+        }
+        description={
+          uiState === 'empty'
+            ? buscando
+              ? t('messages.noResultsBody')
+              : t('messages.emptyBody')
+            : undefined
+        }
+        icon={buscando ? 'search' : 'message-square'}
+      />
+    ),
+    [uiState, buscando, t, load],
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader
-        title={t('messages.headerTitle')}
-        rightIcon={signedIn ? 'edit' : undefined}
-        onRightPress={() => {}}
-      />
+      {/*
+        Sin icono a la derecha: el lápiz de antes tenía `onRightPress={() => {}}`
+        y no hacía absolutamente nada. Un botón muerto es peor que no tenerlo —
+        se pulsa, no pasa nada, y quien lo pulsa cree que la aplicación falla. Un
+        chat nuevo se abre desde el perfil de la persona, que es donde está el
+        botón que sí funciona.
+      */}
+      <AppHeader title={t('messages.headerTitle')} />
       {supabaseEnabled && !signedIn ? (
         <SignedOutNotice
           icon="message-square"
@@ -162,98 +528,40 @@ export function MessagesScreen() {
           description={t('messages.signedOutBody')}
         />
       ) : (
-      <FlashList
-        data={uiState === 'content' ? filteredConversations : []}
-        keyExtractor={(item: Conversation) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.text]} />
-        }
-        ListHeaderComponent={
-          <View style={styles.searchWrapper}>
-            <Input
-              placeholder={t('messages.searchPlaceholder')}
-              value={searchText}
-              onChangeText={setSearchText}
-              placeholderTextColor={colors.textMuted}
-              // Deja hueco para la lupa: sin esto el texto arranca debajo de ella.
-              style={styles.searchInput}
-            />
-            <View style={styles.searchIcon} pointerEvents="none">
-              <Feather name="search" size={18} color={colors.textMuted} />
-            </View>
-          </View>
-        }
-        // La busqueda filtra lo que YA se ha traido, asi que paginar mientras
-        // se busca daria la sensacion de que la lista se completa sola. Solo se
-        // pide mas cuando se esta viendo la lista entera.
-        onEndReached={searchText ? undefined : cargarMas}
-        onEndReachedThreshold={0.6}
-        ListFooterComponent={
-          cargandoMas ? (
-            <View style={styles.cargandoMas}>
-              <ActivityIndicator size="small" color={colors.textMuted} />
-            </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          <StateView
-            state={uiState}
-            onRetry={() => void load()}
-            title={uiState === 'empty' ? t('messages.emptyTitle') : undefined}
-            description={uiState === 'empty' ? t('messages.emptyBody') : undefined}
-            icon="message-square"
+        <>
+          <FlashList
+            data={datos}
+            keyExtractor={keyExtractor}
+            contentContainerStyle={styles.listContent}
+            refreshControl={controlDeRecarga}
+            ListHeaderComponent={cabecera}
+            onEndReached={cargarMas}
+            onEndReachedThreshold={0.6}
+            ListFooterComponent={pie}
+            ListEmptyComponent={vacio}
+            renderItem={renderItem}
+            // Al tocar la lista se cierra el teclado, pero sin cancelar la
+            // pulsación: sin esto, el primer toque sobre una fila con el teclado
+            // abierto sólo lo cerraba y había que volver a tocar.
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
           />
-        }
-        renderItem={({ item: conversation }: { item: Conversation }) => (
-              <Pressable
-                onPress={() =>
-                  router.push({
-                    pathname: '/chat/[id]',
-                    params: { id: conversation.id, name: conversation.name },
-                  })
-                }
-                accessibilityRole="button"
-                accessibilityLabel={t('messages.chatWith', {
-                  nombre: conversation.name,
-                  detalle: conversation.subtitle,
-                })}
-                style={({ pressed }) => [
-                  styles.row,
-                  { borderBottomColor: colors.border, opacity: pressed ? 0.78 : 1 },
-                ]}
-              >
-                {/*
-                  La foto real de la otra persona. Antes se elegia una imagen
-                  de muestra segun la POSICION de la fila (la primera una, la
-                  segunda otra...), asi que no correspondia con nadie: quien
-                  tenia foto salia con la de otro.
-                */}
-                <Image
-                  source={conversation.avatarUrl ? { uri: conversation.avatarUrl } : assets.avatar}
-                  style={styles.avatar}
-                />
-                <View style={{ flex: 1 }}>
-                  <View style={styles.nameRow}>
-                    <Text style={[styles.name, { color: colors.text }]}>{conversation.name}</Text>
-                    <Text style={[styles.time, { color: colors.textMuted }]}>
-                      {conversation.time ?? conversation.messages.at(-1)?.createdAt}
-                    </Text>
-                  </View>
-                  <Text numberOfLines={1} style={[styles.subtitle, { color: colors.textMuted }]}>
-                    {conversation.subtitle}
-                  </Text>
-                </View>
-                {conversation.unread > 0 ? (
-                  <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-                    <Text style={{ color: colors.onPrimary, fontSize: 10, fontWeight: '700' }}>
-                      {conversation.unread}
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-        )}
-      />
+
+          {/*
+            El gestor se abre desde los chips (modo lista) o manteniendo pulsada
+            una conversación (poner y quitar en ESA). Es la misma hoja porque el
+            gesto natural cruza las dos cosas: «esta persona es alumna... espera,
+            no tengo esa etiqueta».
+          */}
+          <GestorDeEtiquetas
+            visible={gestorPara !== undefined}
+            onClose={cerrarGestor}
+            etiquetas={etiquetas.etiquetas}
+            conversationId={gestorPara ?? null}
+            alCambiar={trasCambiarEtiquetas}
+            alDejarDeEstarDisponible={sinEtiquetas}
+          />
+        </>
       )}
     </View>
   );
@@ -262,29 +570,13 @@ export function MessagesScreen() {
 const styles = StyleSheet.create({
   listContent: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
   cargandoMas: { paddingVertical: spacing.lg, alignItems: 'center' },
-  searchWrapper: {
-    position: 'relative',
-    marginBottom: spacing.md,
-  },
-  // El texto ya empieza en el margen del campo, donde tambien esta la lupa; se
-  // desplaza el ancho del icono (18) mas un respiro (8) para que no se pisen.
-  searchInput: {
-    paddingLeft: 18 + spacing.sm,
-  },
-  // top/bottom a 0 centra la lupa verticalmente sea cual sea el alto del campo,
-  // sin depender de un desplazamiento fijo que se descuadra si cambia la fuente.
-  searchIcon: {
-    position: 'absolute',
-    left: spacing.md,
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.lg, borderBottomWidth: 1 },
-  avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#DDD' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  name: { fontSize: 14, fontWeight: '800' },
-  time: { fontSize: 10 },
-  subtitle: { fontSize: 12, marginTop: 4 },
-  badge: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  // Las historias se pintan de borde a borde (tienen su propio relleno), así que
+  // se compensa el margen de la lista con un margen negativo. Es lo único que
+  // sobresale; el resto de la cabecera respeta el mismo margen que las filas.
+  cabecera: { marginHorizontal: -spacing.lg },
+  controles: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm },
+  filaDeFiltros: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // `flex: 1` y `minWidth: 0`: sin esto, una fila de etiquetas larga empuja el
+  // botón de filtros fuera de la pantalla en vez de desplazarse por dentro.
+  chips: { flex: 1, minWidth: 0 },
 });

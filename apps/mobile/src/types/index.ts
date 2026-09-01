@@ -268,6 +268,18 @@ export type Conversation = {
   avatarUrl?: string;
   /** Su id, para poder abrir su perfil desde la conversación. */
   otherId?: string;
+  /**
+   * Las etiquetas del CRM que TÚ le has puesto a esta conversación.
+   *
+   * SON PRIVADAS, y quien lo garantiza es el servidor: la lista llega ya
+   * recortada al dueño, así que la etiqueta que pone la otra persona no puede
+   * llegar hasta aquí ni por error. Esconderla en la pantalla no serviría de
+   * nada — lo que sale del servidor acaba viéndose en la respuesta cruda.
+   *
+   * Opcional a propósito: la bandeja de demostración (sin sesión) no tiene
+   * etiquetas, y una API anterior a la 0045 tampoco manda el campo.
+   */
+  labels?: { id: string; nombre: string }[];
 };
 
 export type EventItem = {

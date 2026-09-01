@@ -22,6 +22,15 @@ export type ConversationDto = {
   last_message_at: string | null;
   unread_count: number;
   updated_at: string;
+  /**
+   * Las etiquetas del CRM de QUIEN PREGUNTA (migración 0045).
+   *
+   * Opcional a propósito, como `attachments` en un mensaje y por lo mismo: una
+   * API anterior a este trabajo no manda el campo, y un mapeador que lo diera
+   * por seguro dejaría la bandeja entera en blanco por una función que todavía
+   * no está desplegada.
+   */
+  labels?: { id: string; nombre: string }[];
 };
 
 export type AttachmentDto = {
@@ -112,6 +121,9 @@ export function toConversation(dto: ConversationDto): Conversation {
     // modo que quien tenia foto salia con la de otra persona.
     avatarUrl: profileImageUrl(dto.other?.avatar_path) ?? undefined,
     otherId: dto.other?.id,
+    // `?? []` y no `dto.labels`: la fila pinta `labels.length` sin comprobar
+    // nada, y una API vieja que no mande el campo no puede reventar la bandeja.
+    labels: dto.labels ?? [],
   };
 }
 

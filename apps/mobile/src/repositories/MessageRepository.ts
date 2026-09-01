@@ -7,6 +7,11 @@ import {
 } from '@/mappers/messageMapper';
 import { firmarAdjuntos, type AdjuntoSubido } from '@/services/messageMedia';
 import { signMediaUrls } from '@/services/storage';
+import {
+  CONSULTA_VACIA,
+  parametrosDeBandeja,
+  type ConsultaDeBandeja,
+} from '@/lib/bandeja';
 import type { Conversation, Message } from '@/types';
 
 /**
@@ -155,12 +160,30 @@ export const MessageRepository = {
    *
    * En cuanto alguien escribe, la conversación aparece sola en la siguiente
    * carga. No hay nada que sincronizar desde el teléfono.
+   *
+   * BUSCAR Y FILTRAR VAN EN `consulta`, Y LOS RESUELVE EL SERVIDOR. Antes la
+   * pantalla filtraba `nombre.includes(texto)` sobre las veinte filas que ya
+   * tenía en memoria: buscar a la persona de la conversación número veinticinco
+   * no la encontraba, y encima se desactivaba la paginación mientras hubiera
+   * texto. Con doscientas conversaciones eso es mentirle a quien busca. Aquí van
+   * `q`, `filtro` y `label_id`, y la paginación sigue funcionando sobre el
+   * resultado filtrado porque `limit`/`offset` cuentan filas de verdad.
+   *
+   * Está medido que esto NO cuesta consultas de más en el servidor: la búsqueda
+   * y los filtros derivados entran en la consulta que ya se hacía, y las
+   * etiquetas de la página se resuelven con un `IN` sobre los identificadores.
    */
-  async listConversations(
-    { limit = CONVERSACIONES_POR_PAGINA, offset = 0 } = {},
-  ): Promise<Conversation[]> {
+  async listConversations({
+    limit = CONVERSACIONES_POR_PAGINA,
+    offset = 0,
+    consulta = CONSULTA_VACIA,
+  }: {
+    limit?: number;
+    offset?: number;
+    consulta?: ConsultaDeBandeja;
+  } = {}): Promise<Conversation[]> {
     const dtos = await apiRequest<ConversationDto[]>(
-      `${API_V1}/conversations?limit=${limit}&offset=${offset}`,
+      `${API_V1}/conversations?${parametrosDeBandeja(consulta, { limit, offset })}`,
     );
     return dtos.map(toConversation);
   },
