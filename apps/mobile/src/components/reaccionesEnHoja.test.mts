@@ -155,3 +155,48 @@ test('el cierre lo resuelve la hoja compartida', () => {
   assert.match(HOJA_BASE, /accessibilityLabel="Cerrar panel"/);
   assert.match(SHEET, /onClose=\{onClose\}/);
 });
+
+// ---------------------------------------------------------------------------
+// 5. Tocar a una persona cierra la hoja ANTES de navegar
+// ---------------------------------------------------------------------------
+
+/*
+  El fallo: la hoja se quedaba montada sobre el perfil al que acababa de llevar,
+  y ahi ya no habia forma de quitarla —ni tocando fuera—. `PeopleList` navegaba
+  sola, asi que el `visible` que vive en `PostCard` nunca se enteraba.
+*/
+
+test('PeopleList deja decidir a quien la monta', () => {
+  const lista = fuente('components/PeopleList.tsx');
+  assert.match(lista, /onPersonPress\?: \(person: PersonRow\) => void/);
+  // Con callback manda el dueño; sin el, sigue navegando como siempre.
+  assert.match(
+    lista,
+    /onPersonPress \? onPersonPress\(item\) : irAlPerfil\(router, item\.id\)/,
+  );
+});
+
+test('la hoja cierra y navega, y en ese orden', () => {
+  const hoja = fuente('components/ReaccionesSheet.tsx');
+  const cuerpo = hoja.slice(hoja.indexOf('const alTocarPersona'), hoja.indexOf('[onClose, router]'));
+  const iCierra = cuerpo.indexOf('onClose()');
+  const iNavega = cuerpo.indexOf('irAlPerfil(');
+  assert.ok(iCierra !== -1 && iNavega !== -1, 'falta cerrar o navegar');
+  assert.ok(iCierra < iNavega, 'cerrar tiene que ir antes de navegar');
+  assert.match(hoja, /onPersonPress=\{alTocarPersona\}/);
+});
+
+test('no se resuelve con un temporizador', () => {
+  const hoja = fuente('components/ReaccionesSheet.tsx').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(
+    !/setTimeout|afterSheetClose|closeThen/.test(hoja),
+    'navegar por debajo de un Modal que cierra no necesita espera: `afterSheetClose` ' +
+      'existe para PRESENTAR algo encima, que no es este caso',
+  );
+});
+
+test('la pantalla completa sigue navegando por su cuenta', () => {
+  // Sin hoja que cerrar, `ReaccionesScreen` no pasa callback y `PeopleList`
+  // mantiene el comportamiento de siempre.
+  assert.ok(!/onPersonPress/.test(PANTALLA));
+});

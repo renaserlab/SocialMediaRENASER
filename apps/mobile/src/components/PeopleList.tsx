@@ -39,6 +39,17 @@ type Props = {
   onToggleFollow?: (person: PersonRow) => void;
   /** Usuario actual, para no ofrecerle seguirse a si mismo. */
   currentUserId?: string | null;
+  /**
+   * Quien decide que pasa al tocar a una persona.
+   *
+   * Sin esto la lista navegaba sola, y dentro de una hoja eso dejaba el Modal
+   * montado encima del perfil al que acababa de llevar: ni se iba al tocar
+   * fuera ni habia forma de cerrarlo. Quien monta la hoja necesita cerrarla
+   * ANTES de navegar, y solo el sabe como.
+   *
+   * Sin callback se conserva el comportamiento de siempre (pantalla completa).
+   */
+  onPersonPress?: (person: PersonRow) => void;
 };
 
 /** Lista social reutilizable (seguidores, siguiendo, resultados). */
@@ -51,6 +62,7 @@ export function PeopleList({
   onRetry,
   onToggleFollow,
   currentUserId,
+  onPersonPress,
 }: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
@@ -81,7 +93,7 @@ export function PeopleList({
         <View style={[styles.row, { borderBottomColor: colors.border }]}>
           <Pressable
             style={styles.info}
-            onPress={() => irAlPerfil(router, item.id)}
+            onPress={() => (onPersonPress ? onPersonPress(item) : irAlPerfil(router, item.id))}
             accessibilityRole="button"
             accessibilityLabel={`Ver perfil de ${item.fullName}`}
           >

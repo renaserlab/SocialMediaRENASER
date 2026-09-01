@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { ListaDeReacciones } from '@/components/ListaDeReacciones';
 import { Text } from '@/components/Text';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 import { spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -39,6 +41,24 @@ export function ReaccionesSheet({
 }) {
   const { t } = useTranslation();
   const { height } = useWindowDimensions();
+  const router = useRouter();
+
+  /*
+    Cerrar ANTES de navegar. La lista navegaba sola y el Modal se quedaba
+    montado sobre el perfil al que acababa de llevar: no se iba al tocar fuera
+    ni habia forma de quitarlo.
+
+    Sin espera: `onClose` deja `visible` en falso en el mismo lote de React, y
+    navegar por debajo de un Modal que se cierra no tiene el problema de
+    presentar algo encima (que es para lo que existe `afterSheetClose`).
+  */
+  const alTocarPersona = useCallback(
+    (persona: { id: string }) => {
+      onClose();
+      irAlPerfil(router, persona.id);
+    },
+    [onClose, router],
+  );
 
   return (
     /*
@@ -60,7 +80,7 @@ export function ReaccionesSheet({
           este componente, y sin esta guarda abrir el feed dispararía una
           petición de reacciones por publicación visible.
         */}
-        {visible ? <ListaDeReacciones postId={postId} /> : null}
+        {visible ? <ListaDeReacciones postId={postId} onPersonPress={alTocarPersona} /> : null}
       </View>
     </BottomSheet>
   );

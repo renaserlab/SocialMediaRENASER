@@ -23,7 +23,14 @@ import { useTranslation } from '@/i18n/useTranslation';
  * significaria que un dia arreglar algo en una dejaria la otra rota, y que la
  * misma peticion se escribiria dos veces.
  */
-export function ListaDeReacciones({ postId }: { postId: string | null | undefined }) {
+export function ListaDeReacciones({
+  postId,
+  onPersonPress,
+}: {
+  postId: string | null | undefined;
+  /** Lo pasa la hoja para cerrarse antes de navegar. Sin el, navega la lista. */
+  onPersonPress?: (person: { id: string }) => void;
+}) {
   const { t } = useTranslation();
   const currentUserId = useAppStore((state) => state.user?.id);
 
@@ -51,6 +58,7 @@ export function ListaDeReacciones({ postId }: { postId: string | null | undefine
       currentUserId={currentUserId}
       emptyTitle={t('post.noReactions')}
       emptyDescription={t('post.noReactionsBody')}
+      onPersonPress={onPersonPress}
     />
   );
 }
