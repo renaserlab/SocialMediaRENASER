@@ -16,32 +16,76 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 const BUBBLE = 54;
 
+type Props = {
+  /**
+   * Los grupos a pintar. **Si se pasan, el componente NO PIDE NADA.**
+   *
+   * POR QUÉ EXISTE ESTA PUERTA. Hay dos caminos para traer historias y no
+   * cuestan lo mismo, y está medido: el del almacén (`StoryRepository.list()`,
+   * directo a Supabase) son **cuatro saltos de red encadenados, ~1,7 s**; el de
+   * la API (`GET /api/v1/stories?feed=following`) es **una consulta y un salto**.
+   * La bandeja de Mensajes usa el segundo y le entrega el resultado por aquí, en
+   * paralelo con su propia petición. Home y Explorar siguen con el almacén, que
+   * es lo que ya tenían.
+   *
+   * Lo que NO se hace es un segundo sistema de historias: las burbujas, el
+   * anillo, el `+` y el orden son estos, los de siempre. Lo único que cambia es
+   * de dónde salen los datos.
+   */
+  grupos?: StoryGroup[];
+  /** Solo se usa junto con `grupos`. Decide si se enseña el indicador. */
+  estado?: 'idle' | 'loading' | 'error';
+  /**
+   * Qué hacer al tocar una burbuja. Por omisión, abrir el visor.
+   *
+   * La bandeja lo sustituye porque el visor (`StoriesScreen`) lee los grupos del
+   * ALMACÉN, no de aquí: si se llega a Mensajes sin haber pasado por Inicio, el
+   * almacén está vacío y el visor diría «No hay historias que mostrar». Con esto
+   * la bandeja puede rellenarlo justo antes de navegar — y solo cuando alguien
+   * toca de verdad, no por pintar la fila.
+   */
+  alAbrir?: (authorId: string) => void;
+};
+
 /**
  * Fila de historias del inicio.
  *
  * Sigue el patron de Instagram: tu burbuja va primera, con un `+` cuando aun no
  * has publicado nada; el anillo distingue lo que te falta por ver.
  */
-export function StoriesRow() {
+export function StoriesRow({ grupos, estado, alAbrir }: Props = {}) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
 
-  const groups = useAppStore((state) => state.storyGroups);
-  const status = useAppStore((state) => state.storiesStatus);
+  const gruposDelAlmacen = useAppStore((state) => state.storyGroups);
+  const estadoDelAlmacen = useAppStore((state) => state.storiesStatus);
   const loadStories = useAppStore((state) => state.loadStories);
   const user = useAppStore((state) => state.user);
 
+  // `grupos !== undefined` y no `grupos?.length`: una fila legítimamente vacía
+  // —nadie a quien sigues ha publicado hoy— seguiría contando como «me lo dan
+  // de fuera», y volver al almacén en ese caso lanzaría la cascada que esto
+  // existe para evitar.
+  const alimentadoDesdeFuera = grupos !== undefined;
 
   useEffect(() => {
+    if (alimentadoDesdeFuera) return;
     void loadStories();
-  }, [loadStories]);
+  }, [alimentadoDesdeFuera, loadStories]);
+
+  const groups = alimentadoDesdeFuera ? grupos : gruposDelAlmacen;
+  const status = alimentadoDesdeFuera ? (estado ?? 'idle') : estadoDelAlmacen;
 
   const own = groups.find((group) => group.isOwn) ?? null;
   const others = groups.filter((group) => !group.isOwn);
 
   const openStory = (authorId: string) => {
     haptics.light();
+    if (alAbrir) {
+      alAbrir(authorId);
+      return;
+    }
     router.push(`/stories/${authorId}` as never);
   };
 
@@ -60,9 +104,8 @@ export function StoriesRow() {
   };
 
   const onOwnPress = () => {
-    haptics.light();
     if (own) {
-      router.push(`/stories/${own.authorId}` as never);
+      openStory(own.authorId);
       return;
     }
     nuevaHistoria();

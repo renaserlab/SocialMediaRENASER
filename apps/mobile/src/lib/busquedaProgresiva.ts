@@ -93,8 +93,21 @@ export type EventoDto = {
   id: string;
   title: string;
   starts_at: string | null;
+  ends_at: string | null;
   location: string | null;
   cover_path: string | null;
+  /**
+   * `upcoming` | `past` | `undated`, YA RESUELTO por el servidor.
+   *
+   * No se calcula aquí a propósito, por lo mismo que en el catálogo: hacerlo en
+   * el móvil obligaría a comparar el texto ya formateado —«19 ago.»—, que está
+   * pensado para leerse y no para compararse, no siempre lleva año y no sabe
+   * nada de `ends_at`.
+   *
+   * Con `?? 'undated'` para un servidor que todavía no lo mande: no afirmar
+   * nada es mejor que afirmar que algo está vigente.
+   */
+  time_state?: 'upcoming' | 'past' | 'undated';
 };
 
 /**

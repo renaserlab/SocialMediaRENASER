@@ -57,8 +57,15 @@ export const MAX_ADJUNTO_BYTES = Math.min(100 * 1024 * 1024, MAX_UPLOAD_BYTES);
 /** Cuántos archivos caben en un mensaje. El backend aplica el mismo tope. */
 export const MAX_ADJUNTOS = 10;
 
-/** Los tres tipos que la interfaz sabe pintar. */
-export type TipoDeAdjunto = 'image' | 'video' | 'document';
+/**
+ * Los tipos que la interfaz sabe pintar.
+ *
+ * `audio` son las notas de voz y lo añade la migración 0044. NO se manda como
+ * `document` para no tocar el `CHECK` de la tabla: la burbuja no sabría que eso
+ * se reproduce y la duración no significaría nada. Mientras la 0044 no esté
+ * aplicada, la interfaz ni siquiera ofrece grabar.
+ */
+export type TipoDeAdjunto = 'image' | 'video' | 'document' | 'audio';
 
 /** Un archivo elegido, todavía sin subir. */
 export type AdjuntoElegido = {
@@ -187,13 +194,21 @@ function extensionDe(adjunto: AdjuntoElegido): string {
   }
   const deLaRuta = adjunto.uri.split('?')[0]?.split('.').pop()?.toLowerCase();
   if (deLaRuta && deLaRuta.length <= 6 && /^[a-z0-9]+$/.test(deLaRuta)) return deLaRuta;
-  return adjunto.kind === 'image' ? 'jpg' : adjunto.kind === 'video' ? 'mp4' : 'bin';
+  if (adjunto.kind === 'image') return 'jpg';
+  if (adjunto.kind === 'video') return 'mp4';
+  // `m4a` y no `bin` para una nota de voz: sin extensión reconocible, algunos
+  // reproductores no saben qué decodificador abrir y la nota no suena.
+  if (adjunto.kind === 'audio') return 'm4a';
+  return 'bin';
 }
 
 function tipoDeContenido(adjunto: AdjuntoElegido, ext: string): string {
   if (adjunto.mimeType) return adjunto.mimeType;
   if (adjunto.kind === 'image') return `image/${ext === 'jpg' ? 'jpeg' : ext}`;
   if (adjunto.kind === 'video') return `video/${ext}`;
+  // El bucket `message-media` admite `audio/*` desde la 0033, así que esto pasa
+  // su lista de tipos permitidos. `application/octet-stream` NO pasaría.
+  if (adjunto.kind === 'audio') return ext === 'm4a' ? 'audio/mp4' : `audio/${ext}`;
   return 'application/octet-stream';
 }
 

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.catalog import cursos_v2
 from app.modules.catalog import esquema as esquema_de_catalogo
+from app.modules.catalog import eventos as eventos_catalogo
 from app.modules.catalog.models import Course, Event
 from app.modules.content import hashtags as etiquetas
 from app.modules.content.models import Post
@@ -616,13 +617,18 @@ async def eventos(
     )
     filas = list((await db.scalars(_pagina(stmt, limite, salto))).all())
     filas, siguiente = _recortar(filas, limite, salto)
+    # UNA sola lectura del reloj para todo el lote. Pidiendola dentro del bucle,
+    # dos eventos de la misma respuesta podrian juzgarse con relojes distintos.
+    momento = eventos_catalogo.ahora()
     return [
         EventHit(
             id=e.id,
             title=e.title,
             starts_at=e.starts_at,
+            ends_at=e.ends_at,
             location=e.location,
             cover_path=e.cover_path,
+            time_state=eventos_catalogo.estado_de(e, momento),
         )
         for e in filas
     ], siguiente

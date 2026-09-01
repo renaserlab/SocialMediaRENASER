@@ -264,3 +264,126 @@ El componente `apps/mobile/src/components/StoriesRow.tsx` **ya existe** y el
 endpoint **ya agrupa por autor** (`StoryGroupRead`) y **ya sabe si la has
 visto** (`viewed_by_me`, `seen`). No se construye un segundo sistema de
 historias: se reutiliza este.
+
+---
+
+## 9. Segunda mitad de la ronda — estado y orden (actualizado)
+
+### Dónde estamos
+
+`main` está en `d0f99b5` y ya lleva la primera mitad: cursos, eventos, perfil,
+republicaciones en el muro y el CRM. `Edson` está en `d48fdda`.
+
+**Migraciones aplicadas en producción: hasta la 0043, y la 0045.** La 0044 no
+existe todavía; es de esta mitad.
+
+Verificación vigente: **1343** pruebas de backend, **519** de móvil, **0**
+errores de TypeScript, `expo-doctor` 18/18, la web exporta.
+
+### El orden cambia: C antes que B
+
+Estaba escrito al revés y era un error, por dos razones:
+
+1. **Dependencia real.** El filtro «Respuestas a historias» de la bandeja (B)
+   necesita `message_story_context`, que crea C. Sin ella, B tendría que
+   inventarse el contrato o dejar el filtro a medias.
+2. **El mismo fichero.** Los dos tocan `messaging/router.py`. Trabajan en el
+   mismo árbol, así que a la vez se pisan: el segundo en guardar borra al
+   primero.
+
+**C primero, B después.** No se solapan en el tiempo.
+
+### `GET /stories` lo arregla el coordinador, no B
+
+Se saca del reparto de B y lo hace el coordinador mientras C trabaja: es un
+fallo de seguridad —las historias de alguien a quien bloqueaste se ven— y no
+conviene que espere su turno. Ver el apartado 8.
+
+### Dos cosas que pidió el encargo, literales
+
+> «evita arruinar comportamientos internos»
+
+El chat ya tiene paginación de historial, Realtime, deduplicación, adjuntos
+privados, interfaz optimista, reintento y borrado con lápida. **El rediseño no
+justifica reescribir el motor del chat.** Se cambia la apariencia y se añade lo
+nuevo; lo que funciona se conserva. Si algo hay que tocar por dentro, se dice en
+el informe con el motivo.
+
+> «evita que posibles nuevas migraciones generen nuevos bugs»
+
+La 0044 tiene un punto delicado y uno solo: **cambiar el `CHECK` de
+`message_attachments.kind`**. Hoy es `('image','video','document')` y tiene que
+admitir `'audio'`. Reglas para que eso no muerda:
+
+1. Se hace `alter table ... drop constraint if exists` y después `add
+   constraint`. Al reponerlo, Postgres **revalida la tabla entera**: es seguro
+   porque los valores existentes son los tres de siempre, pero hay que saberlo.
+2. El nombre del `CHECK` no se inventa: se busca el que tiene puesto. Un `drop`
+   con el nombre equivocado no falla —lleva `if exists`— y deja el `CHECK` viejo
+   en su sitio, así que el `add` posterior sí falla, o peor, la restricción vieja
+   sigue rechazando los audios en silencio. **Comprobarlo con `pg_constraint`
+   antes de escribir la migración es parte del trabajo.**
+3. **El código NO puede escribir `'audio'` antes de que la migración esté
+   aplicada.** Sería una violación de restricción, o sea un 500, o sea un error
+   de CORS en el navegador. Hace falta la comprobación de esquema de siempre, y
+   mientras diga que no: la interfaz **no ofrece** grabar (nunca un botón
+   muerto), no guarda el audio como `document` para disimular.
+4. Nada de columnas nuevas en `messages`. El contexto de la historia va en su
+   tabla, por `message_id`.
+
+---
+
+## 10. Lo que el agente B se encuentra ya hecho
+
+### `GET /api/v1/stories` — arreglado y con lo que la bandeja necesita
+
+Ya está en `a09c0e6`. La fila de historias de Mensajes **se pide por aquí**, no
+por `StoryRepository`: son 1 consulta y 1 salto de red, contra los **4 saltos
+seguidos (~1,7 s)** del camino de Supabase directo. Está medido.
+
+```
+GET /api/v1/stories?feed=following&limit=20
+```
+
+- `feed` — `all` (por omisión, lo de siempre) o `following`. En `following`
+  entran los seguidos **y las propias**: nadie se sigue a sí mismo y la primera
+  burbuja de la fila es la tuya.
+- `limit` — cuenta **AUTORES**, no historias. Por omisión 50, máximo 200.
+  Medido: sin tope, 500 autores son **534 KB**.
+- Los bloqueos ya se cortan en los dos sentidos. **No los repitas en el cliente.**
+- La respuesta ya viene agrupada por autor (`StoryGroupRead`), ya sabe si la has
+  visto (`viewed_by_me`, `seen`) y ya ordena: propias primero, después las que
+  faltan por ver.
+
+`apps/mobile/src/components/StoriesRow.tsx` **ya existe**. No construyas un
+segundo sistema de historias: reutilízalo.
+
+### Lo que dice la medición sobre la bandeja
+
+`docs/Z_MEDICION_MENSAJES_EXPLORE.md`, apartado 6, tiene doce recomendaciones
+con su número. Las que no son opinables:
+
+- **Conserva las 4 consultas.** Son cuatro con 3 conversaciones y con 80. Las
+  etiquetas del CRM se resuelven con **una** consulta más y un `IN` sobre los
+  ids de la página, igual que ya hacen `otros_participantes` y `no_leidos`. Una
+  consulta por conversación serían 24 con 20 filas.
+- **Bandeja e historias, en paralelo.** Nunca encadenadas: 1 salto (~0,42 s)
+  contra 2.
+- **Los filtros derivados, dentro de la consulta que ya se hace.** `no_leidos`
+  ya calcula el umbral y `ultimos_mensajes` ya sabe quién escribió el último:
+  son **+0 consultas**.
+- **Reutiliza `lib/busquedaProgresiva.ts`** para la búsqueda en servidor. Ya
+  está escrito y probado. Sin antirrebote, «martinez» son 8 peticiones.
+- **`useMemo` en la lista filtrada, `useCallback` en `renderItem`, `React.memo`
+  en la fila, y el buscador en su propio componente.** Hoy se repintan ~8 filas
+  **por cada tecla**.
+- **No bajes el tamaño de página.** 4 consultas con `limit=10` y con `limit=80`.
+
+### Lo que NO se toca sin medir antes
+
+Los carruseles «para ti» reservan alto, enseñan esqueleto y desaparecen si
+vienen vacíos. Parece un arreglo obvio y **no lo es**: si suelen traer
+contenido, el esqueleto está haciendo su trabajo —reserva el hueco para que al
+llegar no empuje la página—, y quitarlo cambiaría un salto por otro en sentido
+contrario. La medición **no pudo comprobar** si vienen vacíos en producción
+(esos endpoints exigen sesión y devuelven 401). Sin ese dato, no se toca.

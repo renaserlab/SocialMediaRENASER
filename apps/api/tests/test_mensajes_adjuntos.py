@@ -202,7 +202,15 @@ async def test_un_mensaje_sin_texto_y_sin_archivo_se_rechaza(entorno):
 
 @pytest.mark.asyncio
 async def test_los_tres_tipos_de_adjunto_y_ninguno_mas(entorno):
-    """Foto, video y documento: los tres que la interfaz sabe pintar."""
+    """Foto, video y documento: los que trajo la 0033.
+
+    LA 0044 AÑADIO UN CUARTO, `audio`, para las notas de voz. No se prueba aqui
+    porque tiene reglas propias —duracion obligatoria, tope de minutos, tipo
+    MIME— y sobre todo porque no se puede escribir mientras esa migracion no
+    este aplicada: eso vive en `test_notas_de_voz.py` y en
+    `test_mensajes_sin_migracion_0044.py`. Lo que sigue valiendo aqui es que un
+    tipo INVENTADO no entra.
+    """
     http, _, _ = entorno
     respuesta = await http.post(
         f"{API}/{CHAT}/messages",

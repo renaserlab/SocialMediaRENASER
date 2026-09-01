@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import esquema
+from app.modules.messaging.etiquetas import etiquetas_por_conversacion
 from app.modules.messaging.models import (
     ConversationMember,
     Message,
@@ -295,6 +296,14 @@ async def leer_conversaciones(
     trajo al listar—, de modo que esta funcion no vuelve a pedir la conversacion
     en si. Sirve igual para una sola (abrir un chat directo) que para la pagina
     entera, y en los dos casos gasta el mismo numero de consultas.
+
+    LAS ETIQUETAS DEL CRM SON UNA CONSULTA MAS, NO UNA POR FILA. Se piden con un
+    `IN` sobre los identificadores de la pagina, exactamente igual que los
+    perfiles y los no leidos, asi que el coste sigue sin crecer con la lista:
+    cinco consultas con tres conversaciones y cinco con ochenta. Resolverlas por
+    fila serian veinticuatro con veinte filas, que es el N+1 que este fichero
+    existe para impedir. Sin la 0045 son cuatro: `etiquetas_por_conversacion`
+    devuelve `{}` sin tocar la base.
     """
     if not filas:
         return []
@@ -303,6 +312,9 @@ async def leer_conversaciones(
     otros = await otros_participantes(db, ids, uid)
     ultimos = await ultimos_mensajes(db, ids)
     pendientes = await no_leidos(db, ids, uid)
+    # `uid` y no «los miembros»: lo que decide que la etiqueta de Ana no la vea
+    # Bruno es este dueño. Ver `etiquetas_por_conversacion`.
+    etiquetas = await etiquetas_por_conversacion(db, uid=uid, conversation_ids=ids)
 
     # Los ultimos mensajes que no llevan texto: solo de esos hay que averiguar
     # que archivo son. Si no hay ninguno —el caso normal— no se consulta nada.
@@ -335,6 +347,7 @@ async def leer_conversaciones(
                 last_message_at=ultimo.created_at if ultimo is not None else None,
                 unread_count=pendientes.get(fila.id, 0),
                 updated_at=fila.updated_at,
+                labels=etiquetas.get(fila.id, []),
             )
         )
     return salida

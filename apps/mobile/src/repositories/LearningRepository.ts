@@ -157,8 +157,16 @@ async function firmarPortadas(courses: Course[]): Promise<Course[]> {
  */
 export const LearningRepository = {
   /** El catalogo publico: SOLO cursos publicados. */
-  async listCourses(): Promise<Course[]> {
-    const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses`, {
+  /**
+   * El catálogo público.
+   *
+   * @param limite cuántos traer. Sin indicarlo NO se manda el parámetro y el
+   *   servidor decide, que es lo que pasaba antes: hay quien lo llama para
+   *   filtrar por autor en el cliente y necesita la lista entera.
+   */
+  async listCourses(limite?: number): Promise<Course[]> {
+    const consulta = limite ? `?limit=${limite}` : '';
+    const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses${consulta}`, {
       auth: false,
     });
     return firmarPortadas(dtos.map(toCourseFromSummary));

@@ -48,9 +48,15 @@ export const CatalogRepository = {
    * Quien quiera solo lo vigente lo pide, y entonces el filtrado corre en el
    * servidor con paginación, no recortando en el teléfono lo ya descargado.
    */
-  async listEvents(cuando: GrupoDeEventos = 'all'): Promise<EventsPage> {
+  /**
+   * @param limite cuántos traer. Por omisión 50, que es lo que pedía antes:
+   *   quien no lo indique no cambia de comportamiento. Explorar pinta DOS y
+   *   pide dos — medido, con la agenda llena el listado de 50 pesa 39 KB para
+   *   rellenar dos filas.
+   */
+  async listEvents(cuando: GrupoDeEventos = 'all', limite = 50): Promise<EventsPage> {
     const dtos = await apiRequest<EventDto[]>(
-      `${API_V1}/catalog/events?limit=50&when=${cuando}`,
+      `${API_V1}/catalog/events?limit=${limite}&when=${cuando}`,
     );
     const items = dtos.map(toEventItem);
     await attachCovers(items);

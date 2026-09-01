@@ -458,12 +458,62 @@ describe('eliminar un mensaje', () => {
   });
 
   it('solo se ofrece sobre los mensajes propios', () => {
+    /*
+      LA PULSACION LARGA YA NO BORRA DIRECTAMENTE: abre el menu de acciones, y
+      es desde ahi desde donde se borra. La garantia que vigila esta prueba no
+      ha cambiado —nadie puede borrar lo ajeno— pero ahora se sostiene en DOS
+      sitios, y se comprueban los dos:
+
+        1. El gesto no se ofrece siquiera sobre una burbuja ajena o pendiente.
+        2. Y si se llegara igual, `abrirAcciones` vuelve a comprobarlo antes de
+           abrir nada.
+
+      El servidor lo comprueba una tercera vez (`message_not_yours`): esto solo
+      evita ofrecer lo que no se puede hacer.
+    */
     assert.ok(
-      /onLongPress=\{\s*\n?\s*mine && !item\.estado \? \(\) => void eliminarMensaje\(item\) : undefined\s*\n?\s*\}/.test(
+      /onLongPress=\{\s*\n?\s*mine && !item\.estado \? \(\) => abrirAcciones\(item\) : undefined\s*\n?\s*\}/.test(
         CHAT,
       ),
-      'Nadie borra mensajes ajenos. El servidor lo vuelve a comprobar ' +
-        '(`message_not_yours`); esto solo evita ofrecerlo.',
+      'El gesto de pulsacion larga tiene que seguir cerrado a lo ajeno y a lo ' +
+        'que todavia se esta enviando.',
+    );
+    assert.ok(
+      /const abrirAcciones = useCallback\(\(mensaje: Message\) => \{\s*\n\s*if \(mensaje\.sender !== 'me' \|\| mensaje\.estado \|\| mensaje\.eliminado\) return;/.test(
+        CHAT,
+      ),
+      'El menu de acciones tiene que volver a comprobar de quien es el mensaje: ' +
+        'una guarda que solo vive en el JSX se pierde en cuanto alguien llama a ' +
+        'la funcion desde otro sitio.',
+    );
+    assert.ok(
+      /if \(!params\.id \|\| mensaje\.sender !== 'me' \|\| mensaje\.estado \|\| mensaje\.eliminado\) \{/.test(
+        CHAT,
+      ),
+      'Y el borrado en si conserva su propia guarda.',
+    );
+  });
+
+  it('el menu de acciones espera a que la hoja se cierre antes de preguntar', () => {
+    /*
+      Los `BottomSheet` son `Modal`, y en iOS no se puede presentar nada encima
+      de un Modal que sigue en pantalla: el dialogo de confirmacion lanzado
+      durante la animacion de cierre no aparece, Y NO DA ERROR. El boton parece
+      roto. Es el mismo fallo que ya se pago con el selector de fotos y la
+      subida de historias, y `afterSheetClose` existe justo para esto.
+    */
+    assert.ok(
+      CHAT.includes("from '@/lib/afterSheetClose'"),
+      'Falta `afterSheetClose`: borrar desde la hoja fallara en silencio en iOS.',
+    );
+    const desdeElMenu = CHAT.slice(
+      CHAT.indexOf('const eliminarDesdeElMenu'),
+      CHAT.indexOf('// Pintar'),
+    );
+    assert.ok(
+      desdeElMenu.indexOf('await afterSheetClose()') <
+        desdeElMenu.indexOf('await eliminarMensaje('),
+      'Hay que esperar al cierre ANTES de pedir la confirmacion, no despues.',
     );
   });
 

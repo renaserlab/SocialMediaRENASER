@@ -44,3 +44,43 @@ export function useBackgroundAudio(): void {
     void configureAudioMode();
   }, []);
 }
+
+/**
+ * Enciende y apaga el modo de GRABACION de la sesion de audio.
+ *
+ * POR QUE ESTA AQUI Y NO EN LA GRABADORA. Porque `setAudioModeAsync` cambia el
+ * audio de TODO el proceso, y este fichero es el unico sitio donde eso puede
+ * vivir: `components/audioDelReproductor.test.mts` lo comprueba y falla si
+ * aparece en cualquier otro. La razon es la de siempre —tocar la sesion global
+ * para arreglar una pantalla apaga tambien el podcast, el audio de presentacion
+ * de un perfil y la leccion de un curso—, y no deja de valer porque ahora lo
+ * que se quiera sea grabar.
+ *
+ * POR QUE SE ENCIENDE Y SE APAGA EN VEZ DE DEJARLO PUESTO. En iOS,
+ * `allowsRecording: true` cambia la categoria de la sesion a «reproducir y
+ * grabar», y con esa categoria el sistema BAJA el volumen de la reproduccion y
+ * puede sacarla por el auricular en vez de por el altavoz. Dejarlo encendido
+ * para siempre significa que, despues de mandar una sola nota de voz, todos los
+ * audios de la aplicacion suenan mas bajo hasta que se cierra. Se pide justo
+ * para grabar y se devuelve al soltar.
+ *
+ * En Android y en la web no hace falta —la grabacion no depende de esto— pero
+ * llamarlo no molesta, y una sola ruta para las dos plataformas es una rama
+ * menos donde equivocarse.
+ */
+export async function permitirGrabar(activo: boolean): Promise<void> {
+  // La sesion base primero: sin ella, `allowsRecording` se aplicaria sobre una
+  // configuracion a medias y en iOS se perderia `playsInSilentMode`, o sea que
+  // las notas de voz no se oirian con el interruptor de silencio puesto.
+  await configureAudioMode();
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    shouldPlayInBackground: true,
+    interruptionMode: 'doNotMix',
+    shouldRouteThroughEarpiece: false,
+    allowsRecording: activo,
+  }).catch(() => {
+    // En web no hay sesion que configurar. Que no impida grabar: el navegador
+    // gestiona el microfono por su cuenta con su propio permiso.
+  });
+}

@@ -273,7 +273,9 @@ describe('la agenda de eventos', () => {
   it('Explorar pide al servidor solo los vigentes', () => {
     assert.match(
       sinComentarios(EXPLORAR),
-      /CatalogRepository\.listEvents\('upcoming'\)/,
+      // El grupo lo decide el SERVIDOR. El segundo argumento —cuántos— es
+      // otra cosa y puede estar o no: lo añadió el recorte de peticiones.
+      /CatalogRepository\.listEvents\('upcoming'(,[^)]*)?\)/,
       'Recortar aquí lo ya descargado dejaría la sección vacía en cuanto ' +
         'hubiera veinte eventos pasados y uno futuro.',
     );

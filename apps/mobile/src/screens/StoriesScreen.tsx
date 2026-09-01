@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,10 +19,12 @@ import { runOnJS } from 'react-native-reanimated';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { ListRow } from '@/components/ListRow';
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
+import { MessageRepository } from '@/repositories/MessageRepository';
 import { StoryRepository } from '@/repositories/StoryRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
@@ -45,6 +56,10 @@ export function StoriesScreen() {
   const [paused, setPaused] = useState(false);
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewers, setViewers] = useState<StoryViewer[] | null>(null);
+
+  // Responder a la historia: el texto y si se está mandando.
+  const [respuesta, setRespuesta] = useState('');
+  const [enviandoRespuesta, setEnviandoRespuesta] = useState(false);
 
   const group = groups[authorIndex];
   const items = group?.items ?? [];
@@ -181,6 +196,63 @@ export function StoriesScreen() {
     }
   };
 
+  /*
+    Al cambiar de tramo o de autor se vacía lo escrito.
+
+    Sin esto, empezar a responder a la historia de Ana, pasar a la de Bruno y
+    pulsar enviar le mandaría a Bruno un texto pensado para Ana. Es el fallo que
+    parece imposible hasta que pasa: el visor avanza SOLO cuando se acaba el
+    tiempo del tramo, así que nadie tiene que tocar nada para que ocurra.
+  */
+  useEffect(() => {
+    setRespuesta('');
+  }, [item?.id, group?.authorId]);
+
+  /**
+   * Responde a la historia que se está viendo.
+   *
+   * EL CAMINO ES EL QUE YA EXISTE, y eso es deliberado: se pide la conversación
+   * directa con `getOrCreateDirect`, que es IDEMPOTENTE en el servidor desde la
+   * migración 0039 —la clave primaria de `direct_conversation_pairs` impide que
+   * dos peticiones a la vez creen dos chats con la misma persona—. Inventar aquí
+   * otro obtener-o-crear reabriría por otro sitio el fallo que esa migración
+   * cerró: la misma persona repetida en la bandeja.
+   *
+   * EL MENSAJE VIAJA CON `story_id`, NO CON UN ENLACE DENTRO DEL TEXTO. El
+   * cuerpo es lo que se escribió y nada más; a qué historia respondía es
+   * estructura aparte (`message_story_context`). Es lo que permite que el chat
+   * lo entienda, que la bandeja pueda filtrar «Respuestas a historias», y que el
+   * mensaje siga leyéndose cuando la historia caduque mañana.
+   *
+   * NO SE NAVEGA AL CHAT. Quien está viendo historias quiere seguir viéndolas;
+   * sacarle de aquí para enseñarle su propio mensaje es una interrupción que no
+   * ha pedido. Se confirma con un aviso corto y el visor continúa.
+   */
+  const responder = useCallback(async () => {
+    const texto = respuesta.trim();
+    if (!texto || !item || !group || enviandoRespuesta) return;
+
+    setEnviandoRespuesta(true);
+    try {
+      const conversacion = await MessageRepository.getOrCreateDirect(group.authorId);
+      await MessageRepository.sendMessage(
+        conversacion.id,
+        texto,
+        undefined,
+        [],
+        item.id,
+      );
+      setRespuesta('');
+      toast(t('stories.replySent', { nombre: group.author }));
+    } catch {
+      notify(t('chat.sendFailed'), t('common.checkConnection'));
+    } finally {
+      setEnviandoRespuesta(false);
+      // El tramo sigue donde estaba: se reanuda al cerrar el teclado.
+      setPaused(false);
+    }
+  }, [respuesta, item, group, enviandoRespuesta, t]);
+
   // Swipe: horizontal cambia de autor, hacia abajo cierra.
   const pan = Gesture.Pan().onEnd((e) => {
     if (e.translationY > 90) {
@@ -252,6 +324,17 @@ export function StoriesScreen() {
         </View>
       </GestureDetector>
 
+      {/*
+        EL TECLADO NO PUEDE TAPAR EL CAMPO DE RESPUESTA. Se usa el componente de
+        siempre (`KeyboardAvoidingView` con `padding` en iOS y `height` en
+        Android), no un margen a mano: en Android la aplicación es
+        `edgeToEdgeEnabled`, así que la ventana NO se reajusta sola al abrirse el
+        teclado y sin esto el campo queda literalmente debajo.
+
+        `pointerEvents="box-none"` para que las zonas de toque de debajo —avanzar
+        y retroceder tramo— sigan funcionando a través de él.
+      */}
+      <SinTecladoDelante style={StyleSheet.absoluteFill as never}>
       <SafeAreaView style={styles.safe} pointerEvents="box-none">
         {/* Barras de progreso, una por tramo */}
         <View style={styles.progressRow} pointerEvents="none">
@@ -329,8 +412,52 @@ export function StoriesScreen() {
                 : t('stories.viewsMany', { count: item.viewsCount })}
             </Text>
           </Pressable>
-        ) : null}
+        ) : (
+          /*
+            RESPONDER A LA HISTORIA. Solo en las ajenas: responderse a uno mismo
+            no significa nada, y el autor ya tiene ahí su lista de quién la vio.
+
+            AL ESCRIBIR SE PAUSA EL TRAMO, y no es un detalle: sin eso la historia
+            avanza sola mientras alguien teclea y el mensaje acaba mandándose
+            —o peor, vaciándose— sobre otra historia distinta.
+          */
+          <View style={[styles.replyRow, { borderColor: media.border }]}>
+            <TextInput
+              value={respuesta}
+              onChangeText={setRespuesta}
+              onFocus={() => setPaused(true)}
+              onBlur={() => setPaused(false)}
+              onSubmitEditing={() => void responder()}
+              placeholder={t('stories.replyTo', { nombre: group.author })}
+              placeholderTextColor={media.textMuted}
+              returnKeyType="send"
+              editable={!enviandoRespuesta}
+              style={[styles.replyInput, { color: media.text }]}
+              accessibilityLabel={t('stories.replyTo', { nombre: group.author })}
+            />
+            {/*
+              El botón solo aparece cuando hay algo que mandar. Un avión de papel
+              siempre visible y siempre inerte es un botón muerto.
+            */}
+            {respuesta.trim() ? (
+              <Pressable
+                onPress={() => void responder()}
+                disabled={enviandoRespuesta}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.sendMessage')}
+              >
+                {enviandoRespuesta ? (
+                  <ActivityIndicator size="small" color={media.text} />
+                ) : (
+                  <Feather name="send" size={20} color={media.text} />
+                )}
+              </Pressable>
+            ) : null}
+          </View>
+        )}
       </SafeAreaView>
+      </SinTecladoDelante>
 
       <BottomSheet
         visible={viewersOpen}
@@ -381,6 +508,19 @@ const styles = StyleSheet.create({
   caption: { fontSize: 15, lineHeight: 21, fontWeight: '600', marginBottom: spacing.lg },
   viewsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xxl },
   viewsText: { fontSize: 13, fontWeight: '700' },
+  replyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.xxl,
+  },
+  // `minHeight` y no `height`: en Android un campo sin altura mínima se queda
+  // de una línea aplastada cuando el sistema usa una fuente grande.
+  replyInput: { flex: 1, fontSize: 14, minHeight: 24, padding: 0 },
   sheetTitle: {
     fontSize: 13,
     fontWeight: '800',

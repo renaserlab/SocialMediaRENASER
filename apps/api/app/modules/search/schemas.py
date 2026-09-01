@@ -101,13 +101,35 @@ class CourseHit(BaseModel):
 
 
 class EventHit(BaseModel):
-    """Un evento publicado."""
+    """Un evento publicado.
+
+    `time_state` viaja YA RESUELTO desde el servidor —`upcoming`, `past` o
+    `undated`— por la misma razon que en el catalogo: decidirlo en el movil
+    obligaria a comparar el texto ya formateado, que esta pensado para leerse y
+    no para compararse.
+
+    Y hace falta aqui, no solo en el catalogo: el encargo pide que la busqueda
+    pueda encontrar un evento terminado —esconder lo historico no ayuda a
+    nadie— pero que lo diga claramente. Sin este campo, un evento del mes
+    pasado salia en los resultados exactamente igual que uno de la semana que
+    viene.
+
+    `ends_at` va tambien porque sin el no se puede decir la verdad: un congreso
+    de tres dias que empezo ayer y termina mañana esta ocurriendo. Con solo
+    `starts_at` la busqueda lo habria llamado terminado justo el dia que mas
+    importa.
+    """
 
     id: str
     title: str
     starts_at: datetime | None = None
+    ends_at: datetime | None = None
     location: str | None = None
     cover_path: str | None = None
+    #: `upcoming` | `past` | `undated`. Lo calcula `catalog.eventos`, que es la
+    #: MISMA funcion que usa el catalogo: dos reglas para lo mismo acabarian
+    #: contestando distinto.
+    time_state: str = "undated"
 
 
 class SearchResults(BaseModel):

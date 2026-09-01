@@ -174,7 +174,14 @@ export type MessageAttachment = {
   id: string;
   /** Ruta dentro del bucket privado `message-media`. Se firma para verla. */
   storagePath: string;
-  kind: 'image' | 'video' | 'document';
+  /**
+   * `audio` son las notas de voz, y llega con la migración 0044.
+   *
+   * NO se guarda como `document` para no tocar el `CHECK` de la tabla: la
+   * burbuja no sabría que eso se reproduce y `durationS` no significaría nada.
+   * Mientras la 0044 no esté aplicada, la interfaz ni siquiera ofrece grabar.
+   */
+  kind: 'image' | 'video' | 'document' | 'audio';
   mimeType?: string | null;
   /** El nombre original; para un documento es lo único que lo identifica. */
   fileName?: string | null;
@@ -218,6 +225,35 @@ export type Message = {
   estado?: 'enviando' | 'error';
   /** Avance de la subida de sus archivos, de 0 a 1. */
   progreso?: number;
+  /** A qué historia respondía, si respondía a alguna. */
+  storyContext?: MessageStoryContext;
+};
+
+/**
+ * El contexto de una respuesta a una historia.
+ *
+ * SIEMPRE PUEDE ESTAR DEGRADADO, y ese es el caso normal, no la excepción: una
+ * historia dura 24 horas y el mensaje que la responde dura para siempre, así
+ * que la inmensa mayoría de las respuestas que hay en un historial apuntan a
+ * algo que ya no existe. Cuando eso pasa, `disponible` es `false`, no hay medio
+ * que enseñar y la burbuja escribe «Historia no disponible».
+ *
+ * Lo que NUNCA se pierde es `autor`: sin él no se podría ni decir de quién era
+ * la historia, y el mensaje dejaría de entenderse.
+ */
+export type MessageStoryContext = {
+  /** `undefined` cuando la historia ya no existe. */
+  storyId?: string;
+  /** De quién era. Se conserva aunque la historia desaparezca. */
+  autor: { id: string; nombre: string; usuario?: string | null };
+  /** `false` = la historia caducó o su autor la borró. */
+  disponible: boolean;
+  /** Ruta del medio dentro del bucket de historias. Solo si sigue existiendo. */
+  mediaPath?: string;
+  mediaType?: 'image' | 'video';
+  /** URL firmada de la miniatura, cuando ya se ha pedido. Caduca. */
+  mediaUrl?: string;
+  caption?: string;
 };
 
 export type Conversation = {
@@ -232,6 +268,18 @@ export type Conversation = {
   avatarUrl?: string;
   /** Su id, para poder abrir su perfil desde la conversación. */
   otherId?: string;
+  /**
+   * Las etiquetas del CRM que TÚ le has puesto a esta conversación.
+   *
+   * SON PRIVADAS, y quien lo garantiza es el servidor: la lista llega ya
+   * recortada al dueño, así que la etiqueta que pone la otra persona no puede
+   * llegar hasta aquí ni por error. Esconderla en la pantalla no serviría de
+   * nada — lo que sale del servidor acaba viéndose en la respuesta cruda.
+   *
+   * Opcional a propósito: la bandeja de demostración (sin sesión) no tiene
+   * etiquetas, y una API anterior a la 0045 tampoco manda el campo.
+   */
+  labels?: { id: string; nombre: string }[];
 };
 
 export type EventItem = {

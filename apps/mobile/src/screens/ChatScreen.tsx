@@ -15,11 +15,16 @@ import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
+import { BotonDeNotaDeVoz } from '@/components/BotonDeNotaDeVoz';
 import { BottomSheet } from '@/components/BottomSheet';
+import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
+import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
+import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useTranslation } from '@/i18n/useTranslation';
+import { afterSheetClose } from '@/lib/afterSheetClose';
 import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
@@ -30,7 +35,11 @@ import {
   reconciliarEnvio,
 } from '@/lib/mensajesEnVivo';
 import { toMessageFromRow } from '@/mappers/messageMapper';
-import { MessageRepository, MENSAJES_POR_PAGINA } from '@/repositories/MessageRepository';
+import {
+  MessageRepository,
+  MENSAJES_POR_PAGINA,
+  type FuncionesDelChat,
+} from '@/repositories/MessageRepository';
 import { ApiError } from '@/services/api';
 import {
   elegirArchivo,
@@ -63,11 +72,44 @@ const ESTILO_ELIMINADO = {
   backgroundColor: 'transparent' as const,
 };
 
+/**
+ * Cuánto silencio hace falta para que un mensaje vuelva a llevar su hora.
+ *
+ * Dentro de una ráfaga —lo normal al escribir— repetir «14:32» en cada burbuja
+ * no informa de nada y llena la conversación de ruido. Pasados cinco minutos, en
+ * cambio, saber cuándo se dijo algo vuelve a importar.
+ */
+const MINUTOS_DE_RAFAGA = 5;
+
 function pesoLegible(bytes?: number | null): string {
   if (!bytes) return '';
   const mb = bytes / 1024 / 1024;
   if (mb >= 1) return `${mb.toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** El día de un mensaje, o `null` si todavía no ha llegado al servidor. */
+function diaDe(mensaje?: Message): string | null {
+  if (!mensaje?.createdAtIso) return null;
+  const fecha = new Date(mensaje.createdAtIso);
+  return Number.isNaN(fecha.getTime()) ? null : fecha.toDateString();
+}
+
+/**
+ * Si dos mensajes seguidos van en la misma ráfaga: mismo autor y poco tiempo.
+ *
+ * Es lo único que decide el agrupado visual. Se mira contra el mensaje ANTERIOR
+ * de la lista, no contra un estado acumulado, para que reordenar o insertar por
+ * Realtime no deje el agrupado desincronizado con lo que se ve.
+ */
+function mismaRafaga(actual: Message, anterior?: Message): boolean {
+  if (!anterior || anterior.sender !== actual.sender) return false;
+  if (anterior.eliminado || actual.eliminado) return false;
+  if (!anterior.createdAtIso || !actual.createdAtIso) return false;
+  const a = new Date(anterior.createdAtIso).getTime();
+  const b = new Date(actual.createdAtIso).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  return b - a < MINUTOS_DE_RAFAGA * 60 * 1000;
 }
 
 export function ChatScreen() {
@@ -103,6 +145,35 @@ export function ChatScreen() {
   // Historial: si queda algo más arriba y si se está trayendo ahora mismo.
   const [hayMasHistorial, setHayMasHistorial] = useState(true);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
+  // El mensaje cuyo menú de acciones está abierto.
+  const [accionesDe, setAccionesDe] = useState<Message | null>(null);
+
+  /*
+    LA UNICA NOTA DE VOZ QUE PUEDE TENER REPRODUCTOR MONTADO.
+
+    Es el identificador del adjunto que está sonando, o `null`. Vive AQUI, en la
+    pantalla, y no en cada burbuja, porque una burbuja no puede decidir no
+    montarse a sí misma: la guarda tiene que estar fuera. Es el mismo patrón que
+    `videoAbierto ===` en `ProfileSection`, y existe por la misma razón cara —un
+    reproductor nativo por celda agotaba la memoria de Android y cerraba la
+    aplicación, ver `components/cuadriculaSinReproductores.test.mts`—. Un chat es
+    todavía peor que una cuadrícula: el historial pagina, así que la lista crece
+    sin techo mientras alguien sube por la conversación.
+  */
+  const [audioSonando, setAudioSonando] = useState<string | null>(null);
+
+  /*
+    Que funciones ofrece el servidor. NUNCA UN BOTON MUERTO.
+
+    Mientras la migración 0044 no esté aplicada, `notasDeVoz` es `false` y el
+    micrófono NO se pinta. La alternativa —pintarlo y fallar al soltarlo— sería
+    dejar que alguien hable treinta segundos para después perderlo todo con un
+    503. Un fallo de red también responde `false`, por lo mismo.
+  */
+  const [funciones, setFunciones] = useState<FuncionesDelChat>({
+    notasDeVoz: false,
+    respuestasAHistorias: false,
+  });
 
   /*
     Lo último que se intentó enviar, para poder repetirlo.
@@ -160,9 +231,9 @@ export function ChatScreen() {
 
       /*
         Y después se completa. La fila cruda de `messages` no sabe nada de los
-        archivos que cuelgan de ella, así que se piden las novedades desde el
-        último mensaje conocido: UNA petición para toda la ráfaga, no una por
-        mensaje.
+        archivos que cuelgan de ella —ni de la historia a la que respondía—, así
+        que se piden las novedades desde el último mensaje conocido: UNA petición
+        para toda la ráfaga, no una por mensaje.
       */
       const desde = instanteMasReciente(
         // Sin contar la fila recién llegada: el instante tiene que ser ANTERIOR
@@ -197,6 +268,28 @@ export function ChatScreen() {
       unsubscribe();
     };
   }, [supabaseEnabled, params.id, currentUserId, aplicar]);
+
+  /*
+    Qué se puede hacer en esta instalación. Una sola pregunta al abrir el chat.
+
+    En modo demo no se pregunta: no hay servidor al que preguntar, y las notas de
+    voz necesitan uno para subirlas.
+  */
+  useEffect(() => {
+    if (!supabaseEnabled) return;
+    let montado = true;
+    MessageRepository.funciones()
+      .then((disponibles) => {
+        if (montado) setFunciones(disponibles);
+      })
+      .catch(() => {
+        // `funciones()` ya devuelve todo en `false` ante un fallo. Esto es por
+        // si alguna vez dejara de hacerlo: sin micrófono se sigue escribiendo.
+      });
+    return () => {
+      montado = false;
+    };
+  }, [supabaseEnabled]);
 
   /** Trae la página anterior del historial al llegar arriba del todo. */
   const cargarMasHistorial = useCallback(() => {
@@ -332,12 +425,23 @@ export function ChatScreen() {
         );
         ultimoEnvio.current = envio;
 
+        const codigo = error instanceof ApiError ? error.code : undefined;
         const esFaltaDeMigracion =
-          error instanceof ApiError && error.code === 'chat_attachments_not_available';
+          codigo === 'chat_attachments_not_available' ||
+          codigo === 'voice_notes_not_available';
         notify(
           esFaltaDeMigracion ? t('chat.attachmentsOffTitle') : t('chat.sendFailed'),
           esFaltaDeMigracion
-            ? t('chat.attachmentsOffBody')
+            ? /*
+                Se distinguen los dos porque no son lo mismo para quien mira: sin
+                la 0033 no se puede mandar NADA adjunto; sin la 0044 se pueden
+                mandar fotos y solo faltan las notas de voz. Decir «no se pueden
+                enviar archivos» cuando sí se pueden manda a buscar un problema
+                que no existe.
+              */
+              codigo === 'voice_notes_not_available'
+              ? t('chat.voiceNotesOffBody')
+              : t('chat.attachmentsOffBody')
             : error instanceof Error
               ? error.message
               : t('common.checkConnection'),
@@ -347,6 +451,54 @@ export function ChatScreen() {
       }
     },
     [params.id, currentUserId, aplicar],
+  );
+
+  /**
+   * Pinta la burbuja optimista y arranca el envío.
+   *
+   * Lo usan los dos caminos que mandan algo —el botón de enviar y el micrófono—
+   * para que la nota de voz reciba exactamente el mismo trato que el resto: la
+   * misma burbuja provisional, la misma barra de subida, la misma
+   * reconciliación y el mismo reintento si falla.
+   */
+  const mandar = useCallback(
+    async (envio: EnvioPendiente) => {
+      if (enviando) return;
+      setEnviando(true);
+
+      const idTemporal = nuevoIdTemporal();
+      aplicar(
+        fusionar(mensajesRef.current, [
+          {
+            id: idTemporal,
+            text: envio.texto,
+            sender: 'me' as const,
+            createdAt: '',
+            estado: 'enviando' as const,
+            progreso: envio.archivos.length ? 0 : undefined,
+            // Vista previa local mientras sube: la ruta local vale como `url`,
+            // así la burbuja enseña la foto —o deja oír la nota— desde el primer
+            // instante.
+            attachments: envio.archivos.map((archivo, i) => ({
+              id: `${idTemporal}-${i}`,
+              storagePath: '',
+              kind: archivo.kind,
+              fileName: archivo.name,
+              bytes: archivo.bytes,
+              width: archivo.width,
+              height: archivo.height,
+              // La duración tiene que viajar YA: sin ella la burbuja de una nota
+              // de voz recién grabada saldría marcando 0:00 hasta que el
+              // servidor la devolviera.
+              durationS: archivo.durationS,
+              url: archivo.uri,
+            })),
+          },
+        ]),
+      );
+      await enviar(envio, idTemporal);
+    },
+    [enviando, aplicar, enviar],
   );
 
   const submit = async () => {
@@ -363,34 +515,7 @@ export function ChatScreen() {
     const envio: EnvioPendiente = { texto: body, archivos: elegidos };
     setText('');
     setElegidos([]);
-    setEnviando(true);
-
-    const idTemporal = nuevoIdTemporal();
-    aplicar(
-      fusionar(mensajesRef.current, [
-        {
-          id: idTemporal,
-          text: body,
-          sender: 'me' as const,
-          createdAt: '',
-          estado: 'enviando' as const,
-          progreso: envio.archivos.length ? 0 : undefined,
-          // Vista previa local mientras sube: la ruta local vale como `url`,
-          // así la burbuja enseña la foto desde el primer instante.
-          attachments: envio.archivos.map((archivo, i) => ({
-            id: `${idTemporal}-${i}`,
-            storagePath: '',
-            kind: archivo.kind,
-            fileName: archivo.name,
-            bytes: archivo.bytes,
-            width: archivo.width,
-            height: archivo.height,
-            url: archivo.uri,
-          })),
-        },
-      ]),
-    );
-    await enviar(envio, idTemporal);
+    await mandar(envio);
   };
 
   const reintentar = useCallback(
@@ -418,16 +543,54 @@ export function ChatScreen() {
     [aplicar],
   );
 
+  // -------------------------------------------------------------------------
+  // Nota de voz
+  // -------------------------------------------------------------------------
+
+  /**
+   * Una nota terminada se manda SOLA, sin pasar por la tira de adjuntos.
+   *
+   * Es lo que espera cualquiera que venga de otro chat: se suelta y sale. Dejar
+   * la nota esperando en la previa obligaría a un segundo toque para algo que ya
+   * se ha decidido al levantar el dedo, y confundiría el gesto de cancelar
+   * —deslizar— con el de quitar un adjunto.
+   */
+  const grabadora = useGrabadoraDeVoz({
+    alTerminar: (nota) => {
+      void mandar({ texto: '', archivos: [nota] });
+    },
+    alAvisar: (aviso) => {
+      /*
+        UN PERMISO DENEGADO SE EXPLICA Y SE OFRECE LA SALIDA. Cuando el sistema
+        ya no va a volver a preguntar —en iOS basta con haber dicho que no una
+        vez— pedirlo otra vez no hace absolutamente nada, así que se lleva a la
+        persona a los ajustes con un botón. Sin esto, el micrófono es un botón
+        que no responde y nadie sabe por qué.
+      */
+      if (!aviso.accion) {
+        notify(aviso.titulo, aviso.cuerpo);
+        return;
+      }
+      void confirm({
+        title: aviso.titulo,
+        message: aviso.cuerpo,
+        confirmLabel: aviso.accion.texto,
+        cancelLabel: t('common.cancel'),
+      }).then((ok) => {
+        if (ok) aviso.accion?.alPulsar();
+      });
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // Menú de acciones y borrado
+  // -------------------------------------------------------------------------
+
   /**
    * Borra un mensaje PROPIO, para todo el mundo.
    *
    * PREGUNTA ANTES, porque no se puede deshacer: lo que se borra desaparece
    * también del teléfono de la otra persona, y ahí ya lo ha podido leer.
-   *
-   * El diálogo se lanza desde una pulsación larga sobre la burbuja, con NINGUNA
-   * hoja abierta: es lo que permite usar `confirm()` directamente aquí. Desde
-   * dentro de un `BottomSheet` haría falta cerrarla y esperar (`afterSheetClose`),
-   * porque en iOS un Modal sobre otro Modal ni se ve ni resuelve.
    *
    * QUIÉN PUEDE lo decide el servidor. Aquí ni se ofrece sobre un mensaje ajeno
    * —`sender !== 'me'`— ni sobre uno que todavía no ha llegado (no tiene id de
@@ -457,11 +620,14 @@ export function ChatScreen() {
           confirmado, y volver a pedir la página entera para cambiar una burbuja
           es un viaje que se nota. Si algo se descuadrara, la siguiente carga
           —o el siguiente mensaje que entre— trae la verdad del servidor.
+
+          El contexto de historia también se va: el servidor deja de mandarlo en
+          un mensaje borrado, y una lápida no enseña a qué respondía.
         */
         aplicar(
           mensajesRef.current.map((m) =>
             m.id === mensaje.id
-              ? { ...m, eliminado: true, text: '', attachments: [] }
+              ? { ...m, eliminado: true, text: '', attachments: [], storyContext: undefined }
               : m,
           ),
         );
@@ -477,12 +643,59 @@ export function ChatScreen() {
     [params.id, aplicar],
   );
 
+  /**
+   * Abre el menú de acciones de una burbuja, con pulsación larga.
+   *
+   * Solo sobre lo PROPIO y ya entregado, que es sobre lo único que hay algo que
+   * hacer. Un menú que se abre para enseñar que no hay opciones es peor que no
+   * abrirse.
+   */
+  const abrirAcciones = useCallback((mensaje: Message) => {
+    if (mensaje.sender !== 'me' || mensaje.estado || mensaje.eliminado) return;
+    setAccionesDe(mensaje);
+  }, []);
+
+  /**
+   * Borrar DESDE la hoja. El `afterSheetClose` no es opcional.
+   *
+   * Los `BottomSheet` son `Modal` de React Native y en iOS no se puede presentar
+   * nada encima de un Modal que sigue en pantalla; cerrarlo tarda su animación.
+   * Lanzar el diálogo de confirmación antes de que termine falla EN SILENCIO: no
+   * hay error, simplemente no aparece nada y el botón parece roto. Es el mismo
+   * fallo que ya se pagó con el selector de fotos y la subida de historias.
+   */
+  const eliminarDesdeElMenu = useCallback(async () => {
+    const mensaje = accionesDe;
+    setAccionesDe(null);
+    if (!mensaje) return;
+    await afterSheetClose();
+    await eliminarMensaje(mensaje);
+  }, [accionesDe, eliminarMensaje]);
+
   // -------------------------------------------------------------------------
   // Pintar
   // -------------------------------------------------------------------------
 
   const pintarAdjunto = (adjunto: MessageAttachment, mio: boolean) => {
     const colorTexto = mio ? colors.onPrimary : colors.text;
+
+    /*
+      LA NOTA DE VOZ NO MONTA REPRODUCTOR AQUI. Recibe si es la que está sonando
+      y un par de avisos; quien decide es la pantalla (`audioSonando`). Ver el
+      comentario de ese estado: la guarda tiene que vivir fuera de la burbuja.
+    */
+    if (adjunto.kind === 'audio') {
+      return (
+        <BurbujaDeNotaDeVoz
+          key={adjunto.id}
+          adjunto={adjunto}
+          mio={mio}
+          activo={audioSonando === adjunto.id}
+          alPulsar={() => setAudioSonando(adjunto.id)}
+          alTerminar={() => setAudioSonando(null)}
+        />
+      );
+    }
 
     if (adjunto.kind === 'document') {
       return (
@@ -529,6 +742,8 @@ export function ChatScreen() {
     );
   };
 
+  const hayQueEnviar = text.trim().length > 0 || elegidos.length > 0;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader title={headerName} rightIcon="video" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
@@ -557,9 +772,42 @@ export function ChatScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item }: { item: Message }) => {
+          renderItem={({ item, index }: { item: Message; index: number }) => {
             const mine = item.sender === 'me';
             const fallido = item.estado === 'error';
+            const anterior = messages[index - 1];
+
+            /*
+              LA SEPARACION POR DIAS. Se calcula contra el mensaje anterior de la
+              lista y no con un contador aparte, para que insertar por Realtime o
+              paginar hacia atrás no deje las cabeceras descolocadas.
+            */
+            const dia = diaDe(item);
+            const cambioDeDia = !!dia && dia !== diaDe(anterior);
+            const agrupado = mismaRafaga(item, anterior) && !cambioDeDia;
+
+            /*
+              LA HORA, DISCRETA. Dentro de una ráfaga no se repite: «14:32» en
+              cinco burbujas seguidas no informa de nada.
+
+              PERO SI EL MENSAJE NO LLEVA TEXTO, SE PINTA SIEMPRE. La franja de
+              la hora es lo que queda para mantener pulsado en un mensaje que
+              solo tiene una foto; sin ella, esas burbujas se quedarían sin
+              ninguna zona con la que abrir el menú de acciones.
+            */
+            const mostrarHora = !agrupado || !item.text || !!item.estado;
+
+            const cabecera = cambioDeDia ? (
+              <View style={styles.dia}>
+                <Text style={[styles.diaTexto, { color: colors.textMuted, backgroundColor: colors.surfaceAlt }]}>
+                  {new Date(item.createdAtIso as string).toLocaleDateString(undefined, {
+                    day: 'numeric',
+                    month: 'long',
+                  })}
+                </Text>
+              </View>
+            ) : null;
+
             /*
               LA LÁPIDA: la burbuja de un mensaje que su autor borró.
 
@@ -569,147 +817,171 @@ export function ChatScreen() {
               leería como si alguien hubiera escrito literalmente «Mensaje
               eliminado», que es la confusión clásica de este patrón.
 
-              Y no lleva ni texto ni adjuntos porque el servidor no los manda:
-              borrar para todos borra de verdad.
+              Y no lleva ni texto, ni adjuntos, ni contexto de historia, porque
+              el servidor no los manda: borrar para todos borra de verdad.
             */
             if (item.eliminado) {
               return (
+                <View>
+                  {cabecera}
+                  <View style={mine ? styles.filaMia : styles.filaSuya}>
+                    <View
+                      style={[
+                        styles.bubble,
+                        mine ? styles.mine : styles.theirs,
+                        ESTILO_ELIMINADO,
+                        { borderColor: colors.border },
+                      ]}
+                    >
+                      <Feather name="slash" size={12} color={colors.textMuted} />
+                      <Text
+                        style={{
+                          color: colors.textMuted,
+                          fontSize: 13,
+                          fontStyle: 'italic',
+                        }}
+                      >
+                        {t('chat.deletedMessage')}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            }
+
+            return (
+              <View>
+                {cabecera}
                 <View style={mine ? styles.filaMia : styles.filaSuya}>
                   <View
                     style={[
                       styles.bubble,
                       mine ? styles.mine : styles.theirs,
-                      ESTILO_ELIMINADO,
-                      { borderColor: colors.border },
+                      // Dentro de una ráfaga las burbujas se acercan y pierden
+                      // la esquina que apunta al lado: se leen como un bloque.
+                      agrupado && (mine ? styles.mineSeguida : styles.theirsSeguida),
+                      agrupado && styles.pegada,
+                      {
+                        backgroundColor: mine ? colors.primary : colors.surface,
+                        borderColor: fallido ? colors.danger : colors.border,
+                        opacity: item.estado === 'enviando' ? 0.75 : 1,
+                      },
                     ]}
                   >
-                    <Feather name="slash" size={12} color={colors.textMuted} />
-                    <Text
-                      style={{
-                        color: colors.textMuted,
-                        fontSize: 13,
-                        fontStyle: 'italic',
-                      }}
-                    >
-                      {t('chat.deletedMessage')}
-                    </Text>
-                  </View>
-                </View>
-              );
-            }
-            return (
-              <View style={mine ? styles.filaMia : styles.filaSuya}>
-                <View
-                  style={[
-                    styles.bubble,
-                    mine ? styles.mine : styles.theirs,
-                    {
-                      backgroundColor: mine ? colors.primary : colors.surface,
-                      borderColor: fallido ? colors.danger : colors.border,
-                      opacity: item.estado === 'enviando' ? 0.75 : 1,
-                    },
-                  ]}
-                >
-                  {item.attachments?.length ? (
-                    <View style={styles.adjuntos}>
-                      {item.attachments.map((adjunto) => pintarAdjunto(adjunto, mine))}
-                    </View>
-                  ) : null}
+                    {/*
+                      A QUE HISTORIA RESPONDIA, encima de todo lo demás: es el
+                      contexto que hace que se entienda lo que viene debajo.
 
-                  {/*
-                    PULSACIÓN LARGA PARA ELIMINAR, y solo sobre lo propio.
-
-                    Es el gesto que ya espera cualquiera que venga de otro chat.
-                    No hay botón visible: uno por burbuja ensuciaría la
-                    conversación entera para algo que casi nunca se usa.
-
-                    POR QUÉ ENVUELVE EL TEXTO Y LA HORA, Y NO LA BURBUJA ENTERA.
-                    Porque en web cada `Pressable` es un `<button>`, y los
-                    adjuntos YA son `Pressable` (se tocan para ver la foto). Un
-                    Pressable rodeando a otro genera HTML inválido y rompe la
-                    hidratación — es una trampa que este proyecto ya pagó. Aquí
-                    van como HERMANOS: los adjuntos arriba, esto debajo.
-
-                    La hora se pinta siempre, así que un mensaje que solo lleva
-                    una foto conserva su franja para mantener pulsado.
-
-                    `onLongPress` sin `onPress`: tocar la burbuja sigue sin hacer
-                    nada, como antes.
-                  */}
-                  <Pressable
-                    onLongPress={
-                      mine && !item.estado ? () => void eliminarMensaje(item) : undefined
-                    }
-                    delayLongPress={400}
-                    accessibilityRole={mine && !item.estado ? 'button' : undefined}
-                    accessibilityLabel={
-                      mine && !item.estado
-                        ? t('chat.holdToDelete')
-                        : undefined
-                    }
-                  >
-                    {item.text ? (
-                      <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 14, lineHeight: 20 }}>
-                        {item.text}
-                      </Text>
+                      Va como HERMANO del texto y de los adjuntos, nunca
+                      envolviéndolos, por lo mismo que se explica más abajo con
+                      el `Pressable`: anidar zonas pulsables genera HTML inválido
+                      en web.
+                    */}
+                    {item.storyContext ? (
+                      <RespuestaAHistoria contexto={item.storyContext} mio={mine} />
                     ) : null}
 
-                    {item.progreso !== undefined ? (
-                      <View style={[styles.barra, { backgroundColor: colors.border }]}>
-                        <View
-                          style={[
-                            styles.barraAvance,
-                            {
-                              backgroundColor: mine ? colors.onPrimary : colors.primary,
-                              width: `${Math.round(item.progreso * 100)}%`,
-                            },
-                          ]}
-                        />
+                    {item.attachments?.length ? (
+                      <View style={styles.adjuntos}>
+                        {item.attachments.map((adjunto) => pintarAdjunto(adjunto, mine))}
                       </View>
                     ) : null}
 
-                    <Text
-                      style={{
-                        color: mine ? colors.onPrimary : colors.textMuted,
-                        fontSize: 9,
-                        marginTop: 5,
-                        opacity: 0.75,
-                      }}
-                    >
-                      {item.estado === 'enviando'
-                        ? t('chat.sending')
-                        : fallido
-                          ? t('chat.notSent')
-                          : item.createdAt}
-                    </Text>
-                  </Pressable>
-                </View>
+                    {/*
+                      PULSACIÓN LARGA PARA EL MENÚ DE ACCIONES, y solo sobre lo
+                      propio.
 
-                {fallido ? (
-                  <View style={styles.accionesFallo}>
+                      Es el gesto que ya espera cualquiera que venga de otro
+                      chat. No hay botón visible: uno por burbuja ensuciaría la
+                      conversación entera para algo que casi nunca se usa.
+
+                      POR QUÉ ENVUELVE EL TEXTO Y LA HORA, Y NO LA BURBUJA
+                      ENTERA. Porque en web cada `Pressable` es un `<button>`, y
+                      los adjuntos YA son `Pressable` (se tocan para ver la foto,
+                      para oír la nota). Un Pressable rodeando a otro genera HTML
+                      inválido y rompe la hidratación — es una trampa que este
+                      proyecto ya pagó. Aquí van como HERMANOS: los adjuntos
+                      arriba, esto debajo.
+
+                      `onLongPress` sin `onPress`: tocar la burbuja sigue sin
+                      hacer nada, como antes.
+                    */}
                     <Pressable
-                      onPress={() => reintentar(item)}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('chat.retrySend')}
-                      style={styles.accionFallo}
+                      onLongPress={
+                        mine && !item.estado ? () => abrirAcciones(item) : undefined
+                      }
+                      delayLongPress={400}
+                      accessibilityRole={mine && !item.estado ? 'button' : undefined}
+                      accessibilityLabel={
+                        mine && !item.estado ? t('chat.holdForActions') : undefined
+                      }
                     >
-                      <Feather name="refresh-cw" size={13} color={colors.primary} />
-                      <Text style={{ color: colors.primary, fontSize: 11 }}>
-                        {t('common.retry')}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => descartar(item)}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('chat.discardMessage')}
-                      style={styles.accionFallo}
-                    >
-                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-                        {t('common.discard')}
-                      </Text>
+                      {item.text ? (
+                        <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 21 }}>
+                          {item.text}
+                        </Text>
+                      ) : null}
+
+                      {item.progreso !== undefined ? (
+                        <View style={[styles.barra, { backgroundColor: colors.border }]}>
+                          <View
+                            style={[
+                              styles.barraAvance,
+                              {
+                                backgroundColor: mine ? colors.onPrimary : colors.primary,
+                                width: `${Math.round(item.progreso * 100)}%`,
+                              },
+                            ]}
+                          />
+                        </View>
+                      ) : null}
+
+                      {mostrarHora ? (
+                        <Text
+                          style={{
+                            color: mine ? colors.onPrimary : colors.textMuted,
+                            fontSize: 9,
+                            marginTop: 5,
+                            opacity: 0.7,
+                            textAlign: mine ? 'right' : 'left',
+                          }}
+                        >
+                          {item.estado === 'enviando'
+                            ? t('chat.sending')
+                            : fallido
+                              ? t('chat.notSent')
+                              : item.createdAt}
+                        </Text>
+                      ) : null}
                     </Pressable>
                   </View>
-                ) : null}
+
+                  {fallido ? (
+                    <View style={styles.accionesFallo}>
+                      <Pressable
+                        onPress={() => reintentar(item)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('chat.retrySend')}
+                        style={styles.accionFallo}
+                      >
+                        <Feather name="refresh-cw" size={13} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: 11 }}>
+                          {t('common.retry')}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => descartar(item)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('chat.discardMessage')}
+                        style={styles.accionFallo}
+                      >
+                        <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                          {t('common.discard')}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
               </View>
             );
           }}
@@ -729,9 +1001,13 @@ export function ChatScreen() {
                 key={`${archivo.uri}-${indice}`}
                 style={[styles.previaItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
               >
-                {archivo.kind === 'document' ? (
+                {archivo.kind === 'document' || archivo.kind === 'audio' ? (
                   <View style={styles.previaDocumento}>
-                    <Feather name="file-text" size={20} color={colors.text} />
+                    <Feather
+                      name={archivo.kind === 'audio' ? 'mic' : 'file-text'}
+                      size={20}
+                      color={colors.text}
+                    />
                     <Text numberOfLines={2} style={{ color: colors.text, fontSize: 9, textAlign: 'center' }}>
                       {archivo.name ?? 'Archivo'}
                     </Text>
@@ -774,42 +1050,74 @@ export function ChatScreen() {
             accessibilityLabel="Adjuntar archivo"
             accessibilityRole="button"
             onPress={() => setMenuAbierto(true)}
-            disabled={!supabaseEnabled}
+            disabled={!supabaseEnabled || grabadora.grabando}
             style={styles.addButton}
           >
             <Feather
               name="plus"
               size={24}
-              color={supabaseEnabled ? colors.text : colors.border}
+              color={supabaseEnabled && !grabadora.grabando ? colors.text : colors.border}
             />
           </Pressable>
-          <Input
-            value={text}
-            onChangeText={setText}
-            onSubmitEditing={submit}
-            placeholder={t('profile.message')}
-            placeholderTextColor={colors.textMuted}
-            returnKeyType="send"
-            containerStyle={styles.inputContainer}
-            style={{ minHeight: 40 }}
-          />
-          <Pressable
-            onPress={submit}
-            disabled={(!text.trim() && elegidos.length === 0) || enviando}
-            style={styles.sendButton}
-            accessibilityLabel={t('chat.sendMessage')}
-            accessibilityRole="button"
-          >
-            {enviando ? (
-              <ActivityIndicator size="small" color={colors.text} />
-            ) : (
-              <Feather
-                name="send"
-                size={20}
-                color={text.trim() || elegidos.length ? colors.text : colors.border}
-              />
-            )}
-          </Pressable>
+
+          {/*
+            MIENTRAS SE GRABA, EL CAMPO DE TEXTO SE APARTA. Dejarlo daría dos
+            modos a la vez —hablando y escribiendo— y el aviso de grabación no
+            tendría dónde ponerse sin tapar lo que se escribe.
+          */}
+          {grabadora.grabando ? (
+            <View style={styles.inputContainer} />
+          ) : (
+            <Input
+              value={text}
+              onChangeText={setText}
+              onSubmitEditing={submit}
+              placeholder={t('profile.message')}
+              placeholderTextColor={colors.textMuted}
+              returnKeyType="send"
+              containerStyle={styles.inputContainer}
+              style={{ minHeight: 40 }}
+            />
+          )}
+
+          {/*
+            EL MICROFONO SOLO EXISTE SI EL SERVIDOR PUEDE GUARDAR LA NOTA.
+
+            Mientras la 0044 no esté aplicada, `funciones.notasDeVoz` es `false`
+            y aquí no se pinta nada: NUNCA UN BOTON MUERTO. Y cuando hay algo
+            escrito o adjuntado, el micrófono deja su sitio al avión de papel —
+            los dos a la vez obligarían a elegir entre dos botones que hacen lo
+            mismo desde el punto de vista de quien mira: mandar.
+          */}
+          {funciones.notasDeVoz && !hayQueEnviar && supabaseEnabled ? (
+            <BotonDeNotaDeVoz
+              grabando={grabadora.grabando}
+              segundos={grabadora.segundos}
+              avance={grabadora.avance}
+              empezar={() => void grabadora.empezar()}
+              soltar={() => void grabadora.soltar()}
+              cancelar={() => void grabadora.cancelar()}
+              deshabilitado={enviando}
+            />
+          ) : (
+            <Pressable
+              onPress={submit}
+              disabled={!hayQueEnviar || enviando}
+              style={styles.sendButton}
+              accessibilityLabel={t('chat.sendMessage')}
+              accessibilityRole="button"
+            >
+              {enviando ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <Feather
+                  name="send"
+                  size={20}
+                  color={hayQueEnviar ? colors.text : colors.border}
+                />
+              )}
+            </Pressable>
+          )}
         </View>
       </SinTecladoDelante>
 
@@ -831,6 +1139,16 @@ export function ChatScreen() {
         />
       </BottomSheet>
 
+      {/* El menú de acciones de una burbuja. */}
+      <BottomSheet visible={!!accionesDe} onClose={() => setAccionesDe(null)}>
+        <ListRow
+          title={t('common.delete')}
+          leftIcon="trash-2"
+          destructive
+          onPress={() => void eliminarDesdeElMenu()}
+        />
+      </BottomSheet>
+
       {fotoAmpliada?.url ? (
         <ImageViewer
           uri={fotoAmpliada.url}
@@ -846,11 +1164,27 @@ const styles = StyleSheet.create({
   // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
   messages: { padding: spacing.lg },
   cargandoHistorial: { paddingVertical: spacing.md, alignItems: 'center' },
+  dia: { alignItems: 'center', marginVertical: spacing.md },
+  diaTexto: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    overflow: 'hidden',
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+  },
   filaMia: { alignItems: 'flex-end' },
   filaSuya: { alignItems: 'flex-start' },
   bubble: { maxWidth: '82%', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, marginBottom: spacing.md },
   mine: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
   theirs: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
+  // Dentro de una ráfaga se recupera la esquina redonda y se juntan: el bloque
+  // se lee como una sola intervención en vez de como mensajes sueltos.
+  mineSeguida: { borderTopRightRadius: 6 },
+  theirsSeguida: { borderTopLeftRadius: 6 },
+  pegada: { marginBottom: 3 },
   adjuntos: { gap: spacing.sm, marginBottom: spacing.sm },
   medio: {
     width: 220,
@@ -919,7 +1253,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  inputBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: 1, padding: spacing.md, paddingBottom: spacing.lg },
+  // `position: relative` para que el aviso de grabación, que va posicionado
+  // sobre esta barra, se ancle aquí y no a la pantalla entera.
+  inputBar: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
+  },
   inputContainer: { flex: 1 },
   addButton: {
     width: 44,

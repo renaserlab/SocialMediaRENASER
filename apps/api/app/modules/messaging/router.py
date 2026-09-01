@@ -14,10 +14,11 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy import false, func, insert, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.exceptions import (
     ConflictError,
@@ -28,7 +29,8 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import esquema
+from app.modules.messaging import audio, esquema, historias
+from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
@@ -37,14 +39,18 @@ from app.modules.messaging.models import (
     DirectConversationPair,
     Message,
     MessageAttachment,
+    MessageStoryContext,
 )
 from app.modules.messaging.schemas import (
+    MAX_BUSQUEDA,
     AttachmentCreate,
     AttachmentRead,
     ConversationRead,
     DirectConversationCreate,
     MessageCreate,
     MessageRead,
+    MessagingAvailability,
+    StoryContextRead,
 )
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -94,6 +100,212 @@ _TIENE_ALGUN_MENSAJE = (
     )
     .exists()
 )
+
+#: «Quien escribio el ultimo mensaje vigente de esta conversacion».
+#:
+#: MISMO ORDEN QUE `ultimos_mensajes` (ver `lectura.py`), y eso no es una
+#: coincidencia que se pueda dejar suelta: si aqui se ordenara distinto, el
+#: filtro «No respondidos» escogeria una conversacion por un mensaje y la fila
+#: enseñaria otro. El desempate por `id` hace falta porque el `now()` de SQLite
+#: tiene resolucion de SEGUNDO y varios mensajes seguidos comparten marca.
+#:
+#: Es una subconsulta CORRELACIONADA: viaja dentro de la consulta del listado y
+#: NO añade ninguna consulta. Devuelve NULL cuando no hay mensajes vigentes, asi
+#: que cualquier comparacion con ella deja fuera esas conversaciones — que es lo
+#: correcto: una conversacion sin mensajes no esta «sin responder».
+_ULTIMO_REMITENTE = (
+    select(Message.sender_id)
+    .where(
+        Message.conversation_id == Conversation.id,
+        Message.deleted_at.is_(None),
+    )
+    .order_by(Message.created_at.desc(), Message.id.desc())
+    .limit(1)
+    .correlate(Conversation)
+    .scalar_subquery()
+)
+
+#: «Esta conversacion tiene algun mensaje que responde a una historia».
+#:
+#: El `join` contra `messages` no es adorno: sin el se contarian los contextos de
+#: mensajes YA BORRADOS, y la conversacion saldria en el filtro por una respuesta
+#: que ya no existe.
+#:
+#: SOLO SE USA SI LA 0044 ESTA APLICADA. Sin la tabla, tocarla seria un 500 —que
+#: ademas sale sin cabeceras CORS y en el navegador parece un fallo de red—, asi
+#: que el endpoint pregunta antes por `esquema.hay_respuestas_a_historias` y la
+#: interfaz ni siquiera ofrece el filtro. Nunca un boton muerto.
+_TIENE_RESPUESTA_A_HISTORIA = (
+    select(MessageStoryContext.message_id)
+    .join(Message, Message.id == MessageStoryContext.message_id)
+    .where(Message.conversation_id == Conversation.id, Message.deleted_at.is_(None))
+    .exists()
+)
+
+
+def _patron_de_busqueda(texto: str) -> str:
+    """El texto buscado, convertido en un patron de `LIKE` que no muerde.
+
+    `%` y `_` SON COMODINES EN SQL. Sin escaparlos, buscar «%» devolveria la
+    bandeja entera y buscar «a_a» encontraria «ana», «ala» y «aja»: quien busca
+    no sabe que ha escrito un comodin y la lista le miente sin avisar. La barra
+    invertida se escapa primero, porque si no la que se añade despues se
+    duplicaria.
+    """
+    limpio = texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{limpio}%"
+
+
+#: A partir de cuantas letras se mira TAMBIEN dentro de los mensajes.
+#:
+#: Tres, y no es un numero redondo elegido al azar: `pg_trgm` indexa grupos de
+#: TRES letras, asi que con una o dos el indice no puede ayudar y la busqueda
+#: dentro del texto volveria a ser el recorrido secuencial que la 0046 vino a
+#: evitar. Por debajo de ese umbral se busca por nombre y usuario, como siempre.
+#:
+#: Ademas es lo razonable de por si: «de» aparece en media aplicacion.
+MIN_LETRAS_PARA_BUSCAR_EN_MENSAJES = 3
+
+
+async def _condicion_de_busqueda(
+    db: AsyncSession, uid: str, texto: str
+) -> ColumnElement[bool]:
+    """Buscar una conversacion POR NOMBRE, POR USUARIO Y POR LO QUE SE DIJO.
+
+    LO QUE ARREGLA. La barra filtraba `conv.name.includes(...)` sobre las veinte
+    filas que ya estaban en memoria: buscar a la persona de la conversacion
+    numero veinticinco NO la encontraba, y encima se desactivaba la paginacion
+    mientras habia texto. Con doscientas conversaciones, buscar entre las veinte
+    que hay cargadas es mentirle a quien busca. Esto es una condicion mas en la
+    consulta que YA se hacia: **cero consultas extra**, y `limit`/`offset` siguen
+    contando las filas que de verdad quedan.
+
+    EL ALIAS NO ES OPCIONAL. El listado ya lleva un `join` contra
+    `ConversationMember` —el del que mira, para poder leer su `last_read_at`— y
+    SQLAlchemy correlaciona sola cualquier tabla que ya este en el `FROM` de
+    fuera. Sin `aliased`, este `exists` se ataria a esa MISMA fila y acabaria
+    preguntando si el nombre de quien busca contiene el texto: siempre falso.
+
+    DENTRO DE LOS MENSAJES, SOLO SI HAY INDICE. Un `ILIKE` contra `messages` —la
+    tabla mas grande de la aplicacion— sin nada que lo sostenga es un recorrido
+    secuencial en cada tecleo. Lo sostiene el indice trigram de la 0046, y
+    mientras esa migracion no este aplicada esta parte NO SE AÑADE: la busqueda
+    se queda exactamente como estaba, encontrando por nombre y por usuario. Ni un
+    resultado distinto, ni una consulta de mas.
+
+    Y NO ES UN `EXISTS` CORRELACIONADO, que es la forma en la que sale sola. Con
+    el correlacionado, PostgreSQL entra por `conversation_id` y despues compara
+    el texto fila a fila: el indice trigram no llega a usarse y el coste crece
+    con los mensajes de cada conversacion de la pagina. Con un `IN` sobre una
+    subconsulta independiente, el indice se recorre UNA vez para toda la
+    consulta. Sigue siendo la misma sentencia, asi que no cambia el numero de
+    consultas.
+
+    LOS BORRADOS NO CUENTAN. Un mensaje con lapida (`deleted_at`) conserva su
+    texto en la fila para que el historial pueda enseñar «mensaje eliminado» en
+    su sitio, pero encontrarlo al buscar seria devolverle a alguien justo lo que
+    decidio quitar.
+    """
+    patron = _patron_de_busqueda(texto)
+    # `aliased` y no `ConversationMember` a secas: ver el parrafo de arriba.
+    otro_miembro = aliased(ConversationMember)
+    coincide_el_otro = (
+        select(otro_miembro.conversation_id)
+        .join(Profile, Profile.id == otro_miembro.user_id)
+        .where(
+            otro_miembro.conversation_id == Conversation.id,
+            otro_miembro.user_id != uid,
+            or_(
+                Profile.full_name.ilike(patron, escape="\\"),
+                Profile.username.ilike(patron, escape="\\"),
+            ),
+        )
+        .correlate(Conversation)
+        .exists()
+    )
+    # En un grupo no hay «el otro»: el nombre lo pone el titulo, asi que se busca
+    # tambien ahi o los grupos serian inencontrables.
+    criterios = [coincide_el_otro, Conversation.title.ilike(patron, escape="\\")]
+
+    if len(texto.strip()) >= MIN_LETRAS_PARA_BUSCAR_EN_MENSAJES and (
+        await esquema.hay_busqueda_en_mensajes(db)
+    ):
+        # Subconsulta INDEPENDIENTE, no correlacionada: ver el docstring. No hace
+        # falta acotarla a las conversaciones de quien busca porque la consulta
+        # de fuera ya lo hace —esta unida a su propia fila de
+        # `conversation_members`—, asi que esto solo puede AÑADIR conversaciones
+        # que ya le pertenecen.
+        conversaciones_con_el_texto = select(Message.conversation_id).where(
+            Message.deleted_at.is_(None),
+            Message.body.ilike(patron, escape="\\"),
+        )
+        criterios.append(Conversation.id.in_(conversaciones_con_el_texto))
+
+    return or_(*criterios)
+
+
+def _condicion_no_leidos(uid: str) -> ColumnElement[bool]:
+    """«Hay mensajes de la otra persona posteriores a mi `last_read_at`».
+
+    CERO CONSULTAS EXTRA. Se apoya en el `ConversationMember` que el listado YA
+    tiene unido —el de quien mira— para leer su umbral, exactamente como hace
+    `no_leidos` en `lectura.py`. Aqui la correlacion automatica de SQLAlchemy SI
+    es la que se quiere, al reves que en la busqueda: esa fila es justo la que
+    hace falta.
+
+    `last_read_at` a nulo significa «nunca ha abierto esta conversacion», y
+    entonces cuenta todo lo que no haya escrito ella misma. El criterio es el
+    MISMO que el del contador de la fila: sin eso, una conversacion podria salir
+    en el filtro con el globo a cero, o al reves.
+    """
+    return (
+        select(Message.id)
+        .where(
+            Message.conversation_id == Conversation.id,
+            Message.sender_id != uid,
+            Message.deleted_at.is_(None),
+            or_(
+                ConversationMember.last_read_at.is_(None),
+                Message.created_at > ConversationMember.last_read_at,
+            ),
+        )
+        .correlate(Conversation, ConversationMember)
+        .exists()
+    )
+
+
+async def _condicion_de_filtro(
+    db: AsyncSession, *, uid: str, filtro: str
+) -> ColumnElement[bool]:
+    """El `WHERE` de cada filtro derivado de la bandeja.
+
+    LOS TRES VAN DENTRO DE LA CONSULTA QUE YA SE HACE, no sobre lo ya descargado:
+    filtrar en el telefono cuesta cero peticiones pero solo ve las veinte filas
+    de la primera pagina, que es el mismo engaño que tenia la busqueda. Asi
+    siguen funcionando `limit` y `offset`.
+
+    Coste: `unread` y `unanswered` son **+0 consultas** (subconsultas
+    correlacionadas); `story_replies` tambien, mas la comprobacion de esquema,
+    que se cachea por proceso.
+    """
+    if filtro == "unread":
+        return _condicion_no_leidos(uid)
+    if filtro == "unanswered":
+        # «El ultimo mensaje vigente lo mando la otra persona y yo no he escrito
+        # nada despues» es exactamente «el ultimo mensaje no es mio».
+        return _ULTIMO_REMITENTE != uid
+    if filtro == "story_replies":
+        if not await esquema.hay_respuestas_a_historias(db):
+            # Sin la 0044 no hay nada que filtrar. Se devuelve la lista VACIA y
+            # no un 503: la interfaz no ofrece el filtro (lo pregunta antes por
+            # `/availability`), asi que llegar aqui significa un cliente viejo o
+            # una URL escrita a mano, y para ese caso «no hay ninguna» es la
+            # verdad. Lo que no puede pasar es consultar una tabla que no existe.
+            return false()
+        return _TIENE_RESPUESTA_A_HISTORIA
+    # `filtro` viene validado por el patron de `Query`, asi que esto no deberia
+    # alcanzarse; sin filtro, no se filtra.
+    return true()
 
 
 def _clave_de_pareja(uno: str, otro: str) -> tuple[str, str]:
@@ -201,13 +413,72 @@ async def _leer_una(db: AsyncSession, conversation_id: str, uid: str) -> Convers
     return (await leer_conversaciones(db, [fila], uid))[0]
 
 
+@router.get("/availability", response_model=MessagingAvailability)
+async def messaging_availability(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessagingAvailability:
+    """Que funciones del chat existen en ESTA instalacion. NUNCA UN BOTON MUERTO.
+
+    POR QUE SE PREGUNTA EN VEZ DE PROBAR. Sin esto, la unica forma de saber si
+    se puede mandar una nota de voz seria grabarla, subirla y recibir un 503: el
+    boton pareceria funcionar, alguien hablaria treinta segundos y lo perderia
+    todo. Se pregunta antes de pintar el microfono y, mientras la respuesta sea
+    `false`, no se ofrece grabar.
+
+    Lo mismo vale para el filtro «Respuestas a historias» de la bandeja: sin la
+    0044 no hay nada que filtrar, y un filtro que siempre devuelve vacio es un
+    boton muerto.
+
+    SE DECLARA ANTES QUE LAS DEMAS RUTAS a proposito. FastAPI prueba en orden de
+    declaracion, asi que el dia que alguien añada un `GET /{conversation_id}`
+    aqui, `/availability` seguiria leyendose como lo que es y no como el id de
+    una conversacion. Es la misma precaucion que ya se tomo con el sub-router de
+    etiquetas.
+
+    LAS DOS SALEN DE LA MISMA MIGRACION y aun asi se mandan por separado: son
+    dos funciones distintas para quien las usa, y el dia que una se despliegue
+    sin la otra la aplicacion no tendra que adivinarlo. `current_user` esta
+    aunque no se use: esto describe el servidor, pero no tiene por que
+    contarselo a quien no ha iniciado sesion.
+    """
+    disponible = await esquema.hay_notas_de_voz(db)
+    return MessagingAvailability(
+        voice_notes=disponible,
+        story_replies=await esquema.hay_respuestas_a_historias(db),
+    )
+
+
 @router.get("", response_model=list[ConversationRead])
 async def list_conversations(
+    q: str | None = Query(default=None, max_length=MAX_BUSQUEDA),
+    filtro: str | None = Query(default=None, pattern="^(unread|unanswered|story_replies)$"),
+    label_id: str | None = Query(default=None, max_length=64),
     page: Page = Depends(pagination_params),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ConversationRead]:
     """Las conversaciones de quien pregunta, de la mas reciente a la mas antigua.
+
+    BUSCAR Y FILTRAR ES COSA DEL SERVIDOR, y los tres parametros nuevos existen
+    por eso. Antes la pantalla filtraba `nombre.includes(texto)` sobre las veinte
+    filas ya descargadas: con doscientas conversaciones eso encuentra lo que haya
+    tenido la suerte de caber en la primera pagina y calla el resto. Los tres
+    entran en la consulta que YA se hacia, asi que `limit` y `offset` siguen
+    contando filas de verdad.
+
+    - `q` — busca por nombre y por usuario de la otra persona (y por el titulo,
+      en los grupos). **+0 consultas.**
+    - `filtro` — `unread` | `unanswered` | `story_replies`. Son ESTADOS
+      DERIVADOS: se calculan de los mensajes y cambian solos. **+0 consultas.**
+    - `label_id` — una etiqueta del CRM, que es una CATEGORIA PERSISTENTE que
+      pone una persona. **+1 consulta** (comprobar que la etiqueta es suya), y
+      esa una no depende del tamaño de la pagina.
+
+    `filtro` y `label_id` son EJES DISTINTOS y se pueden combinar («no leidos
+    entre los que marque como Alumnos»). Lo que no se hace es guardar «no leido»
+    como una etiqueta manual: mezclar un estado derivado con una categoria que
+    nadie vuelve a desmarcar es lo que convierte un CRM en un cajon de sastre.
 
     PAGINADO. Antes se traian TODAS: quien acumulaba conversaciones pagaba la
     lista entera cada vez que abria la pestana, para ver diez filas. Ahora se
@@ -226,10 +497,43 @@ async def list_conversations(
     y con un titulo, asi que existe aunque nadie haya hablado todavia; un chat
     directo vacio solo dice que alguien miro un perfil.
 
-    El coste en consultas es CONSTANTE: cuatro, con tres conversaciones y con
-    ochenta. Ver `lectura.py`. El filtro no anade ninguna: es un `exists`
-    correlacionado dentro de la consulta que ya se hacia.
+    EL COSTE SIGUE SIENDO CONSTANTE, que es la garantia que costo ganarla y no
+    se puede perder aqui. Medido: cuatro consultas con tres conversaciones y
+    cuatro con ochenta. Con lo nuevo son **cinco** —la quinta son las etiquetas
+    de la pagina con un `IN`, ver `lectura.py`— y **seis** cuando ademas se
+    filtra por etiqueta. Ninguna de las dos depende de cuantas filas haya: siguen
+    siendo cinco y seis con tres conversaciones y con ochenta. Todo lo demas son
+    `exists` correlacionados dentro de la consulta que ya se hacia.
+
+    Y NO SE BAJA EL TAMAÑO DE PAGINA: esta medido que son cuatro consultas con
+    `limit=10` y con `limit=80`, asi que bajarlo no compra nada en el servidor y
+    solo obliga a paginar antes.
     """
+    condiciones = [
+        ConversationMember.user_id == current_user.id,
+        or_(Conversation.kind != "direct", _TIENE_ALGUN_MENSAJE),
+    ]
+
+    # `strip()` porque un espacio suelto no es una busqueda: sin esto, tocar la
+    # barra y borrar dejaria un `q=" "` que no encuentra a nadie y vacia la
+    # bandeja sin que se vea por que.
+    texto = (q or "").strip()
+    if texto:
+        condiciones.append(await _condicion_de_busqueda(db, current_user.id, texto))
+
+    if filtro:
+        condiciones.append(await _condicion_de_filtro(db, uid=current_user.id, filtro=filtro))
+
+    if label_id:
+        # Devuelve `false()` —ninguna conversacion— si la etiqueta no es de quien
+        # pregunta, si no existe, si el identificador no es un UUID o si la 0045
+        # no esta aplicada. Los cuatro responden lo mismo a proposito: poder
+        # distinguirlos permitiria averiguar que etiquetas existen probando
+        # identificadores, sin llegar a leer ninguna.
+        condiciones.append(
+            await condicion_de_etiqueta(db, uid=current_user.id, label_id=label_id)
+        )
+
     filas = (
         await db.execute(
             select(*_COLUMNAS_DE_CONVERSACION)
@@ -237,10 +541,7 @@ async def list_conversations(
                 ConversationMember,
                 ConversationMember.conversation_id == Conversation.id,
             )
-            .where(
-                ConversationMember.user_id == current_user.id,
-                or_(Conversation.kind != "direct", _TIENE_ALGUN_MENSAJE),
-            )
+            .where(*condiciones)
             # Desempate por id: `updated_at` puede repetirse (en SQLite tiene
             # resolucion de segundo) y sin un segundo criterio una misma fila
             # podria salir en dos paginas o en ninguna.
@@ -480,9 +781,18 @@ async def list_messages(
     # Los de un mensaje borrado NI SE PIDEN: no hay que enseñarlos, así que
     # tampoco hay que traerlos. Los ficheros del bucket se quedan donde están
     # (ver la nota de `borrar_mensaje`), pero su existencia no se cuenta.
-    adjuntos = await adjuntos_por_mensaje(
-        db, [fila[0] for fila in rows if fila[4] is None]
-    )
+    vivos = [fila[0] for fila in rows if fila[4] is None]
+    adjuntos = await adjuntos_por_mensaje(db, vivos)
+
+    # El contexto de historia de toda la página, también en UNA consulta y por
+    # el mismo motivo que los adjuntos: preguntarlo por burbuja convertiría
+    # abrir un chat en treinta viajes a la base. Sin la 0044 devuelve `{}` y
+    # cada mensaje sale con `story_context: null`, que es la verdad.
+    #
+    # Los de un mensaje borrado NI SE PIDEN, igual que sus adjuntos: una lápida
+    # no enseña a qué respondía. Decirlo sería filtrar parte de lo que su autor
+    # acaba de retirar.
+    contextos = await historias.contextos_por_mensaje(db, vivos)
 
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
@@ -500,6 +810,7 @@ async def list_messages(
             created_at=created_at,
             deleted_at=borrado_en,
             attachments=adjuntos.get(msg_id, []),
+            story_context=contextos.get(msg_id),
         )
         for (
             msg_id,
@@ -533,12 +844,31 @@ async def send_message(
     reanudables sin que la API sostenga la conexión— y esta petición solo
     registra las rutas, después de comprobar que apuntan a esta conversación y a
     la carpeta de quien las manda.
+
+    UNA NOTA DE VOZ ENTRA POR AQUI COMO CUALQUIER OTRO ADJUNTO, con
+    `kind: audio`. Lo único propio son sus reglas (`audio.py`): que la 0044 esté
+    aplicada —si no, 503 y no la violación de restricción que sería un 500— y
+    que traiga duración.
+
+    Y UNA RESPUESTA A UNA HISTORIA TAMBIEN ENTRA POR AQUI, con `story_id` en el
+    cuerpo. No hay un endpoint aparte a propósito: duplicar el envío obligaría a
+    mantener dos rutas que hacen exactamente lo mismo con los adjuntos, la
+    validación, el `updated_at` y Realtime, y esas dos rutas divergen —una
+    arregla un fallo y la otra no—. La conversación tampoco se crea aquí: el
+    móvil pasa antes por `POST /conversations/direct`, que ya es idempotente
+    gracias a la 0039.
     """
     ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
 
     if payload.attachments:
         await _exigir_esquema_de_adjuntos(db)
+        # El orden importa: primero si CABE guardar un audio (503 si la 0044 no
+        # está), después si el audio es válido (422). Al revés, quien mandara una
+        # nota de voz mal formada contra una base sin la migración recibiría un
+        # «arregla el dato» que no puede arreglar.
+        await audio.exigir_esquema_de_audio(db, payload.attachments)
+        audio.validar_audio(payload.attachments)
         _validar_rutas(payload.attachments, conversation_id, current_user.id)
     elif not payload.body.strip():
         # Sin la 0033 el esquema todavía exige al menos un carácter en `body`,
@@ -604,6 +934,25 @@ async def send_message(
             for adjunto_id, adjunto in zip(ids, payload.attachments, strict=True)
         ]
 
+    # El contexto de la historia, si el mensaje salió del visor.
+    #
+    # VA DESPUES DE INSERTAR EL MENSAJE porque su clave primaria es
+    # `message_id`: no hay a qué atarlo hasta que el mensaje existe. Y va DENTRO
+    # de la misma transacción que el `commit` de abajo, así que o se guardan los
+    # dos o no se guarda ninguno: un contexto huérfano apuntaría a un mensaje
+    # que nadie escribió.
+    #
+    # DEVUELVE `None` SIN LANZAR cuando la 0044 no está aplicada o cuando la
+    # historia ya no existe —entre abrir el visor y pulsar «enviar» pueden pasar
+    # minutos, y en ese hueco su autor ha podido borrarla—. En los dos casos el
+    # mensaje SE MANDA IGUAL, sin contexto: el texto es de quien lo escribió y
+    # quitárselo por una tabla que falta o una historia que caducó sería el peor
+    # de los desenlaces. Ver `historias.guardar_contexto`.
+    contexto: StoryContextRead | None = None
+    if payload.story_id:
+        ensure_uuid(payload.story_id, "Historia no encontrada.")
+        contexto = await historias.guardar_contexto(db, message_id, payload.story_id)
+
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id)
@@ -621,6 +970,7 @@ async def send_message(
         body=payload.body,
         created_at=created_at,
         attachments=adjuntos,
+        story_context=contexto,
     )
 
 
