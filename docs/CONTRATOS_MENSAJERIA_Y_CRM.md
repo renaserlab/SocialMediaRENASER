@@ -330,3 +330,60 @@ admitir `'audio'`. Reglas para que eso no muerda:
    muerto), no guarda el audio como `document` para disimular.
 4. Nada de columnas nuevas en `messages`. El contexto de la historia va en su
    tabla, por `message_id`.
+
+---
+
+## 10. Lo que el agente B se encuentra ya hecho
+
+### `GET /api/v1/stories` — arreglado y con lo que la bandeja necesita
+
+Ya está en `a09c0e6`. La fila de historias de Mensajes **se pide por aquí**, no
+por `StoryRepository`: son 1 consulta y 1 salto de red, contra los **4 saltos
+seguidos (~1,7 s)** del camino de Supabase directo. Está medido.
+
+```
+GET /api/v1/stories?feed=following&limit=20
+```
+
+- `feed` — `all` (por omisión, lo de siempre) o `following`. En `following`
+  entran los seguidos **y las propias**: nadie se sigue a sí mismo y la primera
+  burbuja de la fila es la tuya.
+- `limit` — cuenta **AUTORES**, no historias. Por omisión 50, máximo 200.
+  Medido: sin tope, 500 autores son **534 KB**.
+- Los bloqueos ya se cortan en los dos sentidos. **No los repitas en el cliente.**
+- La respuesta ya viene agrupada por autor (`StoryGroupRead`), ya sabe si la has
+  visto (`viewed_by_me`, `seen`) y ya ordena: propias primero, después las que
+  faltan por ver.
+
+`apps/mobile/src/components/StoriesRow.tsx` **ya existe**. No construyas un
+segundo sistema de historias: reutilízalo.
+
+### Lo que dice la medición sobre la bandeja
+
+`docs/Z_MEDICION_MENSAJES_EXPLORE.md`, apartado 6, tiene doce recomendaciones
+con su número. Las que no son opinables:
+
+- **Conserva las 4 consultas.** Son cuatro con 3 conversaciones y con 80. Las
+  etiquetas del CRM se resuelven con **una** consulta más y un `IN` sobre los
+  ids de la página, igual que ya hacen `otros_participantes` y `no_leidos`. Una
+  consulta por conversación serían 24 con 20 filas.
+- **Bandeja e historias, en paralelo.** Nunca encadenadas: 1 salto (~0,42 s)
+  contra 2.
+- **Los filtros derivados, dentro de la consulta que ya se hace.** `no_leidos`
+  ya calcula el umbral y `ultimos_mensajes` ya sabe quién escribió el último:
+  son **+0 consultas**.
+- **Reutiliza `lib/busquedaProgresiva.ts`** para la búsqueda en servidor. Ya
+  está escrito y probado. Sin antirrebote, «martinez» son 8 peticiones.
+- **`useMemo` en la lista filtrada, `useCallback` en `renderItem`, `React.memo`
+  en la fila, y el buscador en su propio componente.** Hoy se repintan ~8 filas
+  **por cada tecla**.
+- **No bajes el tamaño de página.** 4 consultas con `limit=10` y con `limit=80`.
+
+### Lo que NO se toca sin medir antes
+
+Los carruseles «para ti» reservan alto, enseñan esqueleto y desaparecen si
+vienen vacíos. Parece un arreglo obvio y **no lo es**: si suelen traer
+contenido, el esqueleto está haciendo su trabajo —reserva el hueco para que al
+llegar no empuje la página—, y quitarlo cambiaría un salto por otro en sentido
+contrario. La medición **no pudo comprobar** si vienen vacíos en producción
+(esos endpoints exigen sesión y devuelven 401). Sin ese dato, no se toca.
