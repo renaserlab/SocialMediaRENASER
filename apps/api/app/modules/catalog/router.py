@@ -408,6 +408,17 @@ async def reserve_event(
         EventRegistration, {"event_id": event_id, "user_id": current_user.id}
     )
     if existing is None:
+        # NO SE RESERVA ALGO QUE YA TERMINO. La interfaz dejo de ofrecerlo al
+        # separar los eventos por fecha, pero la interfaz no es la proteccion:
+        # una peticion directa —o un binario viejo, que sigue enseñando el boton
+        # porque no sabe distinguir— apuntaba a este endpoint y se apuntaba a un
+        # evento del mes pasado.
+        #
+        # Se comprueba SOLO al crear la reserva. Quien ya la tenia recibe la
+        # misma respuesta de siempre: el evento paso, pero su reserva existio y
+        # negarla ahora seria reescribir el pasado.
+        if eventos.estado_de(event, eventos.ahora()) == eventos.ANTERIOR:
+            raise ConflictError("Ese evento ya terminó.")
         if event.capacity is not None:
             count = await _registrations_count(db, event_id)
             if count >= event.capacity:

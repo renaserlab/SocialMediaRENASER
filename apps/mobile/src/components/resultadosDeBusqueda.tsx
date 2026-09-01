@@ -226,10 +226,25 @@ export function FilaDeResultado({ fila, alAbrir }: PropsDeFila) {
     case 'event': {
       const cuando = fechaCorta(fila.evento.starts_at);
       const donde = fila.evento.location ?? '';
+      /*
+        LO TERMINADO SE DICE.
+
+        El encargo pide que la busqueda pueda encontrar un evento pasado
+        —esconder lo historico no ayuda a nadie— pero que se note. Hasta ahora
+        un evento del mes pasado salia en los resultados exactamente igual que
+        uno de la semana que viene: mismo icono, mismo subtitulo, misma promesa.
+
+        Va DELANTE de la fecha y no detras: es lo primero que hay que saber
+        antes de leer cuando fue.
+      */
+      const terminado = fila.evento.time_state === 'past';
+      const subtitulo = [terminado ? t('event.finished') : '', cuando, donde]
+        .filter(Boolean)
+        .join(' · ');
       return (
         <ListRow
           title={fila.evento.title}
-          subtitle={[cuando, donde].filter(Boolean).join(' · ') || undefined}
+          subtitle={subtitulo || undefined}
           leftIcon="calendar"
           rightIcon="chevron-right"
           onPress={() => {
