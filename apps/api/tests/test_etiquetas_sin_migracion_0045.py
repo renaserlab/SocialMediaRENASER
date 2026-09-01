@@ -137,12 +137,46 @@ async def test_la_bandeja_funciona_exactamente_igual(base_sin_0045):
 @pytest.mark.asyncio
 async def test_el_listado_no_consulta_las_tablas_que_no_existen(base_sin_0045):
     """Si las consultara, el listado entero responderia 500 —disfrazado de error
-    de CORS— por una funcion que ni siquiera esta puesta."""
+    de CORS— por una funcion que ni siquiera esta puesta.
+
+    LA COMPROBACION CAMBIO CUANDO LA BANDEJA EMPEZO A DEVOLVER `labels` EN CADA
+    FILA. Antes bastaba con que la palabra «label» no apareciera en la respuesta;
+    ahora el campo esta SIEMPRE —es parte del contrato de `ConversationRead`— y
+    lo que hay que exigir es que venga VACIO sin la 0045. La diferencia importa:
+    el campo presente y vacio es la verdad («no hay etiquetas»), mientras que
+    consultar la tabla ausente para saberlo seria el 500 que este fichero
+    persigue. Quien lo garantiza es el retorno temprano de
+    `etiquetas_por_conversacion`, que ni toca la base.
+    """
     http, _ = base_sin_0045
     await http.post(f"{API}/{CHAT}/messages", json={"body": "hola"})
     respuesta = await http.get(API)
     assert respuesta.status_code == 200
-    assert "label" not in respuesta.text
+    filas = respuesta.json()
+    assert filas, "la bandeja tiene que seguir devolviendo la conversacion"
+    assert all(fila["labels"] == [] for fila in filas), (
+        "sin la 0045 no hay etiquetas: el campo tiene que venir vacio"
+    )
+
+
+@pytest.mark.asyncio
+async def test_filtrar_por_etiqueta_sin_la_0045_no_revienta_y_no_devuelve_nada(
+    base_sin_0045,
+):
+    """Un `label_id` en la URL sin la migracion puesta: lista vacia, nunca 500.
+
+    Puede llegar de un cliente viejo que guardo el filtro elegido, o de una URL
+    escrita a mano. La respuesta correcta es «no hay ninguna conversacion con esa
+    etiqueta», que ademas es cierta: sin la tabla no hay etiquetas. Lo que no
+    puede pasar es consultar `conversation_label_assignments` para averiguarlo.
+    """
+    http, _ = base_sin_0045
+    await http.post(f"{API}/{CHAT}/messages", json={"body": "hola"})
+    respuesta = await http.get(
+        API, params={"label_id": "11111111-1111-1111-1111-111111111111"}
+    )
+    assert respuesta.status_code == 200
+    assert respuesta.json() == []
 
 
 # --------------------------------------------------------------------------- #

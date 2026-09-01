@@ -1,10 +1,32 @@
 """Esquemas de mensajería."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.content.schemas import AuthorSummary
+from app.modules.messaging.etiquetas import EtiquetaBreve
+
+#: Los filtros de la bandeja. Son ESTADOS DERIVADOS: se calculan de los mensajes
+#: y cambian solos. No son etiquetas, y por eso viajan en un parámetro distinto
+#: (`filtro`) del de las etiquetas (`label_id`), que sí son categorías que pone
+#: una persona a mano. Se pueden combinar; no se mezclan.
+#:
+#: Mezclar los dos ejes —guardar «no leído» como una etiqueta manual— es lo que
+#: convierte un CRM en un cajón de sastre: nadie vuelve a desmarcarla a mano, así
+#: que a los dos días la etiqueta miente.
+#:
+#: SON EXACTAMENTE TRES. La bandeja de Instagram ofrece además «verificados» y
+#: «más de 10 000 seguidores»; aquí no se copian porque no responden a ninguna
+#: pregunta que se haga quien atiende su bandeja en esta aplicación.
+FILTROS_DE_BANDEJA = ("unread", "unanswered", "story_replies")
+
+FiltroDeBandeja = Literal["unread", "unanswered", "story_replies"]
+
+#: Cuánto texto se acepta buscando. Ochenta caracteres son más que cualquier
+#: nombre real; el tope está para que nadie mande un `LIKE` de diez kilobytes.
+MAX_BUSQUEDA = 80
 
 #: Los tipos de adjunto que la interfaz sabe pintar: una foto, un vídeo, un
 #: archivo que se descarga o una nota de voz. Aceptar un tipo más aquí sería
@@ -38,6 +60,24 @@ class ConversationRead(BaseModel):
     last_message_at: datetime | None = None
     unread_count: int = 0
     updated_at: datetime
+
+    #: Las etiquetas del CRM que QUIEN PREGUNTA le ha puesto a esta conversación.
+    #:
+    #: SON PRIVADAS Y ESO SE DECIDE AQUÍ, no en la pantalla. La etiqueta que Ana
+    #: le pone a su conversación con Bruno, Bruno no la ve jamás: el filtro por
+    #: dueño está en `etiquetas_por_conversacion`, así que esta lista sale ya
+    #: recortada y NO hay ningún camino por el que la del otro lado pueda
+    #: colarse. Esconderla en el móvil no serviría: lo que sale del servidor
+    #: acaba viéndose en la respuesta cruda, en otro cliente o en un registro.
+    #:
+    #: VIENEN DENTRO DE LA FILA y no en una petición aparte por conversación:
+    #: son UNA consulta más con un `IN` sobre los identificadores de la página
+    #: —el mismo patrón que `otros_participantes` y `no_leidos`— en vez de una
+    #: por fila, que con veinte filas serían veinticuatro consultas.
+    #:
+    #: Lista vacía mientras la 0045 espere aprobación, y eso es la verdad: sin
+    #: la tabla no hay etiquetas, no hay un error que contar.
+    labels: list[EtiquetaBreve] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
