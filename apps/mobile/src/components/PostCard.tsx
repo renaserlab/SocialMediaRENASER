@@ -8,6 +8,7 @@ import { AudioPlayer } from '@/components/AudioPlayer';
 import { PostImage } from '@/components/PostImage';
 import { BottomSheet } from '@/components/BottomSheet';
 import { ReaccionesSheet } from '@/components/ReaccionesSheet';
+import { AccionDePublicacion } from '@/components/AccionDePublicacion';
 import { DoubleTapLike } from '@/components/DoubleTapLike';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
@@ -17,7 +18,7 @@ import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { compartirPublicacion } from '@/lib/enlaces';
-import { toast } from '@/lib/toast';
+import { toast, toastConAccion } from '@/lib/toast';
 import { relacionDeVideo } from '@/lib/formaDelVideo';
 import { haptics } from '@/lib/haptics';
 import { bestVideoSource } from '@/lib/videoSource';
@@ -128,6 +129,41 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   const [republicado, setRepublicado] = useState(post.repostedByMe ?? false);
   const [repostsCount, setRepostsCount] = useState(post.repostsCount ?? 0);
   const [republicando, setRepublicando] = useState(false);
+  /*
+    GUARDAR, Y DECIRLO.
+
+    Antes esto era `toggleSave(post.id)` a secas: el icono cambiaba de gris a
+    negro —una diferencia que casi no se ve— y no pasaba nada mas. La unica
+    forma de saber si se habia guardado era ir al perfil y mirar la lista.
+
+    Ahora el estado del icono usa el color primario (en `AccionDePublicacion`)
+    y ademas se avisa, con una salida a la lista cuando se acaba de guardar.
+    Al quitar no se ofrece «Ver lista»: lo que se acaba de hacer es sacarlo de
+    ahi, mandar a esa pantalla seria llevar a ver una ausencia.
+
+    La peticion la sigue haciendo el store, UNA vez. Aqui solo se lee como
+    acabo: si el servidor la rechazo, el store ya deshizo el cambio y lo que
+    falta es decirlo en vez de dejar el icono volviendo solo a su sitio.
+  */
+  const alternarGuardado = async () => {
+    await requireAuth('auth.reasonSave', async () => {
+      const { guardada, ok } = await toggleSave(post.id);
+      if (!ok) {
+        notify(t('post.saveFailed'), t('common.tryAgain'));
+        return;
+      }
+      if (guardada) {
+        toastConAccion(
+          t('post.savedToast'),
+          { etiqueta: t('post.viewSavedList'), alPulsar: () => router.push('/saved' as never) },
+          'bookmark',
+        );
+      } else {
+        toast(t('post.unsavedToast'));
+      }
+    });
+  };
+
   const alternarRepost = async () => {
     await requireAuth('auth.reasonRepost', async () => {
       if (republicando) return;
@@ -144,6 +180,18 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         */
         if (siguiente) await PostRepository.repost(post.id);
         else await PostRepository.unrepost(post.id);
+        /*
+          El aviso va AQUI, no junto al cambio optimista: se dice «republicada»
+          cuando el servidor ya lo acepto. Anunciarlo antes seria prometer algo
+          que el `catch` de abajo puede estar a punto de deshacer.
+
+          Antes no habia ninguna señal: la unica forma de saber que habia
+          funcionado era recargar o salir y volver a entrar.
+        */
+        toast(
+          siguiente ? t('post.repostedToast') : t('post.unrepostedToast'),
+          siguiente ? 'repeat' : 'check-circle',
+        );
       } catch {
         setRepublicado(!siguiente);
         setRepostsCount((n) => Math.max(0, n + (siguiente ? -1 : 1)));
@@ -580,98 +628,80 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           aterrizar. El aspecto no cambia: siguen en la misma fila con el mismo
           espacio.
         */}
-        <View style={styles.action}>
-          <Pressable
-            hitSlop={ACTION_HIT_SLOP}
-            onPress={() =>
-              void requireAuth('auth.reasonLike', () => {
-                toggleLike(post.id);
-                haptics.light();
-              })
-            }
-            accessibilityLabel="Me gusta"
-            accessibilityRole="button"
-          >
-            <Feather name="heart" size={20} color={liked ? colors.danger : colors.text} />
-          </Pressable>
-          <Pressable
-            hitSlop={ACTION_HIT_SLOP}
-            /*
-              UNA HOJA, NO UNA PANTALLA. Antes esto hacia
-              `router.push('/reacciones/{id}')`: una pantalla completa que, por
-              no ser una seccion, se pinta ENCIMA del carrusel y se lleva por
-              delante la barra de navegacion. Para una lista de nombres es
-              demasiado — se pierde de vista la publicacion y volver cuesta un
-              gesto.
+        {/*
+          LA FILA CON NOMBRES DEBAJO.
 
-              La ruta sigue existiendo: es la entrada directa desde un aviso
-              agrupado o un enlace, donde no hay ninguna publicacion detras
-              sobre la que levantar una hoja.
-            */
-            onPress={() => setReaccionesAbiertas(true)}
-            // Sin reacciones no hay lista que abrir: el numero se queda quieto
-            // en vez de llevar a una pantalla vacia.
-            disabled={post.likes === 0}
-            accessibilityLabel={t('post.whoReacted')}
-            accessibilityRole="button"
-          >
-            <Text variant="secondary" weight="600" style={styles.count}>{post.likes}</Text>
-          </Pressable>
-        </View>
-        <Pressable
-          style={styles.action}
-          hitSlop={ACTION_HIT_SLOP}
+          El icono de republicar no se entiende solo: dos flechas en ciclo no
+          significan nada para quien no las ha visto antes. Se reporto asi
+          —«los usuarios no van a saber para que sirve exactamente ese boton»—
+          y la respuesta no es cambiar el icono sino escribir lo que hace.
+
+          Las cinco ocupan lo mismo y su nombre se recorta a una linea, asi que
+          en un telefono estrecho encogen a la vez en vez de montarse unas sobre
+          otras. El area pulsable la sostiene `AccionDePublicacion`.
+        */}
+        <AccionDePublicacion
+          icono="heart"
+          etiqueta={t('post.actionLike')}
+          contador={post.likes}
+          activo={liked}
+          colorActivo={colors.danger}
+          onPress={() =>
+            void requireAuth('auth.reasonLike', () => {
+              toggleLike(post.id);
+              haptics.light();
+            })
+          }
+          accessibilityLabel={t('post.actionLike')}
+          /*
+            El numero es un destino DISTINTO del corazon: abre quien reacciono.
+            Sin reacciones no hay lista, y entonces deja de ser pulsable solo.
+          */
+          alPulsarContador={() => setReaccionesAbiertas(true)}
+          etiquetaDelContador={t('post.whoReacted')}
+        />
+        <AccionDePublicacion
+          icono="message-square"
+          etiqueta={t('post.actionComment')}
+          contador={commentCount}
           onPress={openComments}
           accessibilityLabel={t('post.comments')}
-          accessibilityRole="button"
-        >
-          <Feather name="message-square" size={18} color={colors.text} />
-          <Text variant="secondary" weight="600" style={styles.count}>{commentCount}</Text>
-        </Pressable>
-        {/*
-          Republicar. Al lado de compartir porque es su pariente de dentro: uno
-          saca un enlace de la aplicacion y el otro lo comparte con quien te
-          sigue. El estado lo lleva el icono relleno mas el numero, no un color:
-          el sistema visual es blanco y negro.
-        */}
-        <Pressable
-          style={styles.action}
-          hitSlop={ACTION_HIT_SLOP}
+        />
+        <AccionDePublicacion
+          icono="repeat"
+          etiqueta={t('post.actionRepost')}
+          // Sin republicaciones no se enseña un cero: el nombre ya explica el boton.
+          contador={repostsCount > 0 ? repostsCount : undefined}
+          activo={republicado}
+          colorActivo={colors.primary}
           onPress={() => void alternarRepost()}
           disabled={republicando}
           accessibilityRole="switch"
           accessibilityState={{ checked: republicado }}
           accessibilityLabel={republicado ? t('post.undoRepost') : t('post.repost')}
-        >
-          <Feather
-            name="repeat"
-            size={19}
-            color={republicado ? colors.text : colors.textMuted}
-          />
-          {repostsCount > 0 ? (
-            <Text variant="secondary" weight="600" style={styles.count}>
-              {repostsCount}
-            </Text>
-          ) : null}
-        </Pressable>
-        <Pressable
-          style={styles.action}
-          hitSlop={ACTION_HIT_SLOP}
+        />
+        <AccionDePublicacion
+          icono="share-2"
+          etiqueta={t('post.actionShare')}
           onPress={sharePost}
-          accessibilityLabel="Compartir"
-          accessibilityRole="button"
-        >
-          <Feather name="share-2" size={19} color={colors.text} />
-        </Pressable>
-        <View style={{ flex: 1 }} />
-        <Pressable
-          onPress={() => void requireAuth('auth.reasonSave', () => toggleSave(post.id))}
-          hitSlop={ACTION_HIT_SLOP}
-          accessibilityLabel={t('common.save')}
-          accessibilityRole="button"
-        >
-          <Feather name="bookmark" size={19} color={saved ? colors.text : colors.textMuted} />
-        </Pressable>
+          accessibilityLabel={t('post.share')}
+        />
+        <AccionDePublicacion
+          icono="bookmark"
+          etiqueta={t('post.actionSave')}
+          /*
+            ESTADO CLARO, Y SIN AMARILLO FIJO. Antes la diferencia entre
+            guardada y no guardada era `text` contra `textMuted`: dos grises
+            que en un movil al sol no se distinguen. El color primario del tema
+            si, y funciona en claro y en oscuro porque sale del tema.
+          */
+          activo={saved}
+          colorActivo={colors.primary}
+          onPress={() => void alternarGuardado()}
+          accessibilityLabel={saved ? t('post.unsave') : t('common.save')}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: saved }}
+        />
       </View>
 
       {showComments ? (
@@ -789,9 +819,16 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: 340 },
   // `aspectRatio` lo pone la tarjeta: sale de las medidas del video.
   video: { width: '100%' },
-  actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.lg },
-  action: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  count: { marginLeft: 2 },
+  /*
+    El hueco baja de `lg` a `xs` porque ahora las cinco acciones se reparten el
+    ancho (`flex: 1` en `AccionDePublicacion`) y ademas llevan nombre debajo.
+    Con 16 puntos entre cada una, en una pantalla de 320 se comian 64 y a
+    «Republicar» no le quedaba sitio ni recortado.
+
+    `action` y `count` se fueron con la fila antigua: los estilos de cada boton
+    viven ahora en `AccionDePublicacion`, que es quien los usa.
+  */
+  actions: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.xs },
   playOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   // Arriba a la derecha: no estorba al contenido ni a la barra de avance.
   soundButton: {

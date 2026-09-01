@@ -199,7 +199,19 @@ type AppState = {
    * que Inicio y Explorar se pisen sin borrarse el estado.
    */
   aplicarLikesDelServidor: (idsDeLaTanda: string[], idsConMeGusta: string[], contadores?: Record<string, number>) => void;
-  toggleSavePost: (postId: string) => void;
+  /**
+   * Guarda o quita de guardados, y DICE COMO ACABO.
+   *
+   * Sigue siendo optimista —la lista cambia antes de que conteste el
+   * servidor— y sigue deshaciendo el cambio si la peticion falla. Lo que
+   * cambia es que ahora se puede saber: antes el rollback ocurria en
+   * silencio y quien habia pulsado se quedaba con un icono que volvia a su
+   * sitio sin explicacion.
+   *
+   * `guardada` es lo que se pidio; `ok` si el servidor lo acepto. La peticion
+   * se hace UNA vez, aqui: quien llama solo lee el resultado.
+   */
+  toggleSavePost: (postId: string) => Promise<{ guardada: boolean; ok: boolean }>;
   addComment: (postId: string, text: string) => Promise<void>;
   toggleReservation: (eventId: string) => void;
   sendMessage: (conversationId: string, text: string) => void;
@@ -535,23 +547,33 @@ export const useAppStore = create<AppState>()(
           likeCounts: contadores ? { ...state.likeCounts, ...contadores } : state.likeCounts,
         }));
       },
-      toggleSavePost: (postId) => {
+      toggleSavePost: async (postId) => {
         const wasSaved = get().savedPostIds.includes(postId);
+        const guardada = !wasSaved;
         set((state) => ({
           savedPostIds: wasSaved
             ? state.savedPostIds.filter((id) => id !== postId)
             : [...state.savedPostIds, postId],
         }));
 
-        if (!backendEnabled) return;
-        const op = wasSaved ? PostRepository.unsave(postId) : PostRepository.save(postId);
-        op.catch(() =>
+        // En modo demo no hay servidor al que preguntar: el cambio local ES el
+        // resultado, y decir que fallo seria mentir.
+        if (!backendEnabled) return { guardada, ok: true };
+
+        try {
+          await (wasSaved ? PostRepository.unsave(postId) : PostRepository.save(postId));
+          return { guardada, ok: true };
+        } catch {
+          // Se deshace exactamente igual que antes. Lo nuevo es avisar de que
+          // paso, para que quien llama pueda decirlo en vez de dejar el icono
+          // volviendo solo a su sitio.
           set((state) => ({
             savedPostIds: wasSaved
               ? [...state.savedPostIds, postId]
               : state.savedPostIds.filter((id) => id !== postId),
-          })),
-        );
+          }));
+          return { guardada, ok: false };
+        }
       },
       addComment: async (postId, text) => {
         const trimmed = text.trim();

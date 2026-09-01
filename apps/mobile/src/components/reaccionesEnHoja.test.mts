@@ -132,8 +132,20 @@ test('no se pide la lista mientras la hoja esta cerrada', () => {
 // ---------------------------------------------------------------------------
 
 test('el numero sigue anunciandose y sin lista no se abre', () => {
-  assert.match(POST_CARD, /accessibilityLabel=\{t\('post\.whoReacted'\)\}/);
-  assert.match(POST_CARD, /disabled=\{post\.likes === 0\}/);
+  /*
+    El marcado se movio a `AccionDePublicacion` al añadir los nombres bajo los
+    botones, pero las dos garantias siguen siendo las mismas: el numero se
+    anuncia como lo que hace, y sin reacciones no lleva a ninguna parte.
+  */
+  assert.match(POST_CARD, /etiquetaDelContador=\{t\('post\.whoReacted'\)\}/);
+
+  const accion = fuente('components/AccionDePublicacion.tsx');
+  assert.match(
+    accion,
+    /alPulsarContador && contador > 0/,
+    'con el contador a cero el numero no puede seguir siendo pulsable: abriria ' +
+      'una lista vacia',
+  );
 });
 
 test('el cierre lo resuelve la hoja compartida', () => {
