@@ -47,6 +47,7 @@ function sinComentarios(texto: string): string {
 const HOOK = sinComentarios(fuente('hooks/useListaDePersonas.ts'));
 const LISTA = sinComentarios(fuente('components/PeopleList.tsx'));
 const REACCIONES = sinComentarios(fuente('components/ListaDeReacciones.tsx'));
+const EXPLORAR = sinComentarios(fuente('screens/ExploreScreen.tsx'));
 
 // ---------------------------------------------------------------------------
 // 1. Las dos situaciones viajan separadas
@@ -123,3 +124,35 @@ test('ningun texto de la interfaz habla de cabeceras HTTP', () => {
     assert.doesNotMatch(archivo, /Authorization|Bearer|401|403/, `${nombre} filtra detalles HTTP`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 4. El mismo fallo en la campana de Explorar
+// ---------------------------------------------------------------------------
+
+test('el contador de avisos tampoco pregunta sin sesion', () => {
+  // Un visitante no tiene avisos que contar. Se preguntaba igual: el fallo se
+  // tragaba en el `catch` y el punto quedaba apagado —el resultado correcto—
+  // pero cada entrada en Explorar dejaba un error rojo en la consola,
+  // indistinguible de uno de verdad.
+  const contar = EXPLORAR.slice(
+    EXPLORAR.indexOf('const contarAvisos'),
+    EXPLORAR.indexOf('useFocusEffect(contarAvisos)'),
+  );
+  const guarda = contar.indexOf("estadoDeSesion !== 'authenticated'");
+  const peticion = contar.indexOf('NotificationRepository.unreadCount()');
+  assert.ok(guarda > 0, 'no se comprueba la sesion antes de contar');
+  assert.ok(peticion > guarda, 'se cuenta antes de comprobar si hay sesion');
+});
+
+test('sin sesion el punto de la campana queda apagado', () => {
+  const contar = EXPLORAR.slice(EXPLORAR.indexOf('const contarAvisos'));
+  assert.match(contar, /estadoDeSesion !== 'authenticated'\) \{\s*setAvisosSinLeer\(0\)/);
+});
+
+test('el contador se recalcula al iniciar o cerrar sesion', () => {
+  // Sin `estadoDeSesion` en las dependencias, quien acabara de entrar seguiria
+  // viendo la campana apagada hasta cambiar de pestaña.
+  const contar = EXPLORAR.slice(EXPLORAR.indexOf('const contarAvisos'));
+  assert.match(contar, /\}, \[estadoDeSesion\]\);/);
+});
+

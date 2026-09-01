@@ -27,6 +27,7 @@ import { assets } from '@/data/assets';
 import { useTranslation } from '@/i18n/useTranslation';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
 import { AuthRepository } from '@/repositories/AuthRepository';
+import { useAuthStore } from '@/store/useAuthStore';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -217,15 +218,27 @@ export function ExploreScreen() {
     Se relee AL VOLVER a esta pantalla porque abrir Notificaciones las marca
     todas como leidas: sin eso, el punto seguiria encendido al volver.
   */
+  const estadoDeSesion = useAuthStore((state) => state.status);
   const [avisosSinLeer, setAvisosSinLeer] = useState(0);
   const contarAvisos = useCallback(() => {
     if (!AuthRepository.enabled) return;
+    /*
+      SIN SESION NO SE PREGUNTA. Un visitante no tiene avisos que contar, asi
+      que el servidor solo puede responder 401. Se preguntaba igual: el fallo
+      se tragaba en el `catch` y el punto se quedaba apagado —el resultado
+      correcto— pero cada entrada en Explorar dejaba un error rojo en la consola
+      del navegador, indistinguible de uno de verdad.
+    */
+    if (estadoDeSesion !== 'authenticated') {
+      setAvisosSinLeer(0);
+      return;
+    }
     NotificationRepository.unreadCount()
       .then(setAvisosSinLeer)
       // Un contador que no se puede leer no es un error que mostrar: en el peor
       // caso el punto no se enciende y la campana sigue estando donde estaba.
       .catch(() => setAvisosSinLeer(0));
-  }, []);
+  }, [estadoDeSesion]);
   useFocusEffect(contarAvisos);
 
   // Antes el indice se guardaba pero no se usaba: ambas pestañas mostraban el
