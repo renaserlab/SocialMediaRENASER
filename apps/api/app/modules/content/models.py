@@ -141,6 +141,34 @@ class Comment(Base):
     )
 
 
+class CommentLike(Base):
+    """Un «me gusta» a un COMENTARIO (migracion 0048, sin aplicar).
+
+    Es `post_likes` con la clave apuntando a `comments`, y no una columna
+    `entity_type` en aquella: `post_likes.post_id` tiene foranea a `posts`, y
+    para que sirviera para las dos cosas habria que quitarla. La integridad la
+    lleva la base o no la lleva nadie.
+
+    La clave es `(comment_id, user_id)`: reaccionar dos veces es la misma fila.
+    """
+
+    __tablename__ = "comment_likes"
+
+    comment_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("comments.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Hashtag(Base):
     """Una etiqueta social, como entidad (migracion 0031).
 

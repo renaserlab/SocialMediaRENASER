@@ -64,6 +64,9 @@ TIPOS_IDEMPOTENTES: frozenset[str] = frozenset(
     {
         "follow",
         "like",
+        # Un corazon a un comentario, por (persona, comentario): quitarlo y
+        # volver a ponerlo no puede dejar dos filas en la bandeja.
+        "comment_like",
         "session_booked",
         "session_accepted",
         "session_rejected",

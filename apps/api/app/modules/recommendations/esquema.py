@@ -236,3 +236,24 @@ async def hay_republicaciones(db: AsyncSession) -> bool:
                 "La migracion 0042 no esta aplicada: republicar no esta disponible."
             )
     return _cache["post_reposts"]
+
+
+async def hay_reacciones_a_comentarios(db: AsyncSession) -> bool:
+    """Si existe `comment_likes` (migracion 0048).
+
+    Sin ella no se puede reaccionar a un comentario: no hay donde guardarlo. El
+    contador sale 0, `viewer_reacted` sale false y el corazon no se pinta —en
+    vez de pintarse y fallar al pulsarlo—.
+
+    Misma regla que las anteriores: desplegar codigo no puede exigir que una
+    migracion concreta ya este puesta.
+    """
+    if "comment_likes" not in _cache:
+        _cache["comment_likes"] = await _hay_tabla(db, "comment_likes")
+        if not _cache["comment_likes"]:
+            logger.warning(
+                "La migracion 0048 no esta aplicada: no se puede reaccionar a "
+                "los comentarios y los contadores responden 0."
+            )
+    return _cache["comment_likes"]
+
