@@ -221,3 +221,99 @@ function deduplicar<T extends ConId>(items: readonly T[]): T[] {
   }
   return salida;
 }
+
+
+// --------------------------------------------------------------------------- #
+// Hilos y reacciones
+// --------------------------------------------------------------------------- #
+//
+// Aqui y no en el componente: sin React se pueden probar, que es la unica forma
+// de sujetar el agrupado —donde estan los casos raros— y la vuelta atras de una
+// reaccion que el servidor rechaza.
+
+/** Lo minimo que necesita un comentario para agruparse y para reaccionarse. */
+export type ConHilo = ConId & { parentId?: string | null };
+export type ConReaccion = ConId & { likesCount: number; viewerReacted: boolean };
+
+/** Un comentario raiz con sus respuestas. */
+export type Hilo<T> = { raiz: T; respuestas: T[] };
+
+/** Cuantos padres se suben antes de rendirse. Solo protege de datos en ciclo. */
+const SALTOS_MAXIMOS = 16;
+
+/**
+ * Agrupa en hilos de UN SOLO NIVEL, conservando el orden de la lista.
+ *
+ * Responder a una respuesta cuelga del mismo raiz. Sin tope, un hilo largo
+ * acaba sangrado hasta una columna de dos caracteres de ancho.
+ *
+ * Un comentario cuyo padre NO esta en esta pagina se muestra como raiz: es lo
+ * que pasa al paginar hacia atras, y esconderlo seria perderlo.
+ */
+export function enHilos<T extends ConHilo>(lista: readonly T[]): Hilo<T>[] {
+  const porId = new Map(lista.map((c) => [c.id, c]));
+  const hilos = new Map<string, Hilo<T>>();
+
+  const raizDe = (comentario: T): string => {
+    let actual = comentario;
+    for (let i = 0; i < SALTOS_MAXIMOS && actual.parentId; i += 1) {
+      const padre = porId.get(actual.parentId);
+      if (!padre || padre.id === actual.id) break;
+      actual = padre;
+    }
+    return actual.id;
+  };
+
+  for (const comentario of lista) {
+    if (!comentario.parentId || !porId.has(comentario.parentId)) {
+      hilos.set(comentario.id, { raiz: comentario, respuestas: [] });
+    }
+  }
+  for (const comentario of lista) {
+    if (!comentario.parentId) continue;
+    const id = raizDe(comentario);
+    if (id === comentario.id) continue;
+    hilos.get(id)?.respuestas.push(comentario);
+  }
+  return [...hilos.values()];
+}
+
+/** Enciende o apaga el corazon de un comentario, y mueve su contador. */
+export function conReaccion<T extends ConReaccion>(
+  estado: EstadoDeComentarios<T>,
+  comentarioId: string,
+  activo: boolean,
+): EstadoDeComentarios<T> {
+  return {
+    ...estado,
+    lista: estado.lista.map((comentario) =>
+      comentario.id === comentarioId && comentario.viewerReacted !== activo
+        ? {
+            ...comentario,
+            viewerReacted: activo,
+            // Nunca por debajo de cero: si el contador venia desfasado, restar
+            // dejaria un «-1» en pantalla.
+            likesCount: Math.max(0, comentario.likesCount + (activo ? 1 : -1)),
+          }
+        : comentario,
+    ),
+  };
+}
+
+/** Deja el contador que dijo el servidor, que puede no ser el que se pinto. */
+export function conContador<T extends ConReaccion>(
+  estado: EstadoDeComentarios<T>,
+  comentarioId: string,
+  total: number,
+  activo: boolean,
+): EstadoDeComentarios<T> {
+  return {
+    ...estado,
+    lista: estado.lista.map((comentario) =>
+      comentario.id === comentarioId
+        ? { ...comentario, likesCount: total, viewerReacted: activo }
+        : comentario,
+    ),
+  };
+}
+

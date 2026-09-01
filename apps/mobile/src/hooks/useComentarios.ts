@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   anadirPagina,
   enviarComentario,
+  conContador,
+  conReaccion,
   esOptimista,
   estadoInicial,
   primeraPagina,
@@ -28,41 +30,6 @@ const comentariosDeMuestra: ComentarioConAvatar[] = [
   { id: '2', author: 'Daniel M.', text: '¡Excelente lección! Totalmente recomendado.', createdAt: 'Hace 5 h', likesCount: 0, viewerReacted: false },
   { id: '3', author: 'Esteban R.', text: 'Aplicando esto desde hoy mismo.', createdAt: 'Hace 1 d', likesCount: 0, viewerReacted: false },
 ];
-
-/** Enciende o apaga el corazon de un comentario, y mueve su contador. */
-function conReaccion(
-  estado: EstadoDeComentarios<ComentarioConAvatar>,
-  comentarioId: string,
-  activo: boolean,
-): EstadoDeComentarios<ComentarioConAvatar> {
-  return {
-    ...estado,
-    lista: estado.lista.map((c) =>
-      c.id === comentarioId && c.viewerReacted !== activo
-        ? {
-            ...c,
-            viewerReacted: activo,
-            likesCount: Math.max(0, c.likesCount + (activo ? 1 : -1)),
-          }
-        : c,
-    ),
-  };
-}
-
-/** Deja el contador que dijo el servidor, sin tocar lo demas. */
-function conContador(
-  estado: EstadoDeComentarios<ComentarioConAvatar>,
-  comentarioId: string,
-  total: number,
-  activo: boolean,
-): EstadoDeComentarios<ComentarioConAvatar> {
-  return {
-    ...estado,
-    lista: estado.lista.map((c) =>
-      c.id === comentarioId ? { ...c, likesCount: total, viewerReacted: activo } : c,
-    ),
-  };
-}
 
 /**
  * Cargar, paginar y escribir comentarios de una publicación.

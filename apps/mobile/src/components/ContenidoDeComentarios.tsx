@@ -6,6 +6,7 @@ import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
+import { enHilos } from '@/lib/comentarios';
 import type { useComentarios } from '@/hooks/useComentarios';
 import type { ComentarioConAvatar } from '@/repositories/PostRepository';
 import { spacing } from '@/theme/tokens';
@@ -16,43 +17,6 @@ type Comentarios = ReturnType<typeof useComentarios>;
 
 /** El corazón mide 13 px: sin esto no se acierta con el dedo. */
 const ZONA_TACTIL = { top: 10, bottom: 10, left: 10, right: 10 };
-
-/** Un comentario raíz con sus respuestas. */
-export type Hilo = { raiz: ComentarioConAvatar; respuestas: ComentarioConAvatar[] };
-
-/**
- * Agrupa en hilos de UN solo nivel.
- *
- * Responder a una respuesta cuelga del mismo raíz. Sin tope, un hilo largo
- * acaba en una columna de dos caracteres de ancho.
- */
-export function enHilos(lista: readonly ComentarioConAvatar[]): Hilo[] {
-  const porId = new Map(lista.map((c) => [c.id, c]));
-  const hilos = new Map<string, Hilo>();
-
-  /** Sube por los padres hasta el raíz, con tope por si vinieran en ciclo. */
-  const raizDe = (c: ComentarioConAvatar): string => {
-    let actual = c;
-    for (let i = 0; i < 16 && actual.parentId; i += 1) {
-      const padre = porId.get(actual.parentId);
-      if (!padre || padre.id === actual.id) break;
-      actual = padre;
-    }
-    return actual.id;
-  };
-
-  for (const c of lista) {
-    // Sin padre, o con un padre que no está en esta página: se muestra como raíz.
-    if (!c.parentId || !porId.has(c.parentId)) hilos.set(c.id, { raiz: c, respuestas: [] });
-  }
-  for (const c of lista) {
-    if (!c.parentId) continue;
-    const id = raizDe(c);
-    if (id === c.id) continue;
-    hilos.get(id)?.respuestas.push(c);
-  }
-  return [...hilos.values()];
-}
 
 export function ContenidoDeComentarios({
   comentarios,
