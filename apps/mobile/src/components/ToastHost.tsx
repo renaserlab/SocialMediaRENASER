@@ -35,6 +35,7 @@ export function ToastHost() {
       visible
       message={current.message}
       icon={current.icon}
+      accion={current.accion}
       onHide={() => setCurrent(null)}
     />
   );

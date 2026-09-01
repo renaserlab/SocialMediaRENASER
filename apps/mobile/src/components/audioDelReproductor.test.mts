@@ -195,3 +195,122 @@ test('salir de la aplicacion tambien cuenta como no estar mirando', () => {
       'la sesion de audio esta configurada para seguir sonando en segundo plano.',
   );
 });
+
+// ---------------------------------------------------------------------------
+// 8. El salto directo: Inicio -> Perfil (y Crear, y Mensajes)
+// ---------------------------------------------------------------------------
+
+/*
+  LA SEGUNDA MITAD DEL MISMO FALLO, y la que sobrevivio a la primera ronda.
+
+  Sintoma exacto del reporte: el audio de Inicio SI se cortaba al ir a
+  Explorar, pero NO al ir a Crear, ni a Mensajes, ni a Perfil.
+
+  La diferencia era la distancia entre pestanas. Con el orden
+
+      Inicio(0)  Explorar(1)  Crear(2)  Mensajes(3)  Perfil(4)
+
+  `SwipeTabs` congelaba todo lo que no fuera la actual ni una vecina:
+
+      <Freeze freeze={!esActual && !esVecina}>
+
+  Yendo a Explorar, Inicio queda a un paso: sigue siendo vecina, no se congela,
+  procesa el desenfoque y para el video. Yendo a Crear, Mensajes o Perfil queda
+  a dos, tres o cuatro: pasa de actual a CONGELADA en el mismo render.
+
+  Y una seccion congelada no se entera de nada. `react-freeze` suspende el
+  subarbol lanzando un thenable que no resuelve jamas:
+
+      const infiniteThenable = { then() {} };
+      if (freeze) throw infiniteThenable;
+
+  React descarta ese render y conserva lo ultimo commiteado, asi que el
+  `useIsFocused()` recien puesto a `false` nunca commitea dentro de Inicio:
+  `useSeccionActiva()` se queda en `true` y el reproductor sigue sonando.
+
+  El arreglo NO es quitar el Freeze —eso devolveria el trabajo de repintar
+  veinte tarjetas al hilo que anima el arrastre— sino retrasarlo un commit: una
+  seccion solo se congela cuando ya se ha pintado una vez sabiendo que no es la
+  actual.
+*/
+
+const SWIPE_TABS = fuente('navigation/SwipeTabs.tsx');
+
+test('congelar exige una tercera condicion, no solo actual/vecina', () => {
+  const freeze = SWIPE_TABS.match(/<Freeze\s+freeze=\{([^}]*)\}/);
+  assert.ok(freeze, 'no se encontro el <Freeze> del carrusel');
+  const condicion = freeze[1];
+
+  assert.ok(
+    /congelables/.test(condicion),
+    'el Freeze vuelve a decidir solo por distancia. Con `!esActual && !esVecina` ' +
+      'a secas, Inicio se congela en el mismo render en que deja de verse y su ' +
+      `audio sigue sonando en Crear, Mensajes y Perfil.\nCondicion: ${condicion}`,
+  );
+});
+
+test('lo congelable se calcula DESPUES del commit, no durante el render', () => {
+  /*
+    Es la clave de que funcione: en el render del cambio la seccion que se
+    abandona sigue viva —se entera y para el video— y se congela en el
+    siguiente. Si esto se calculara durante el render volveria el fallo.
+  */
+  const indiceEstado = SWIPE_TABS.indexOf('const [congelables, setCongelables]');
+  assert.notEqual(indiceEstado, -1, 'falta el estado `congelables`');
+
+  const trozo = SWIPE_TABS.slice(indiceEstado, indiceEstado + 900);
+  assert.match(
+    trozo,
+    /useEffect\(/,
+    '`congelables` tiene que actualizarse dentro de un useEffect: los efectos ' +
+      'corren despues del commit, y ahi esta la garantia de que la seccion que ' +
+      'se abandona llego a pintarse una vez sabiendo que ya no es la actual.',
+  );
+  assert.ok(
+    /setCongelables\(/.test(trozo),
+    'el efecto no actualiza `congelables`',
+  );
+});
+
+test('el retraso del congelado no se apoya en ningun temporizador', () => {
+  /*
+    Un `setTimeout` daria el mismo resultado en un movil rapido y fallaria en
+    uno lento, que es justo donde el audio de mas se nota. La garantia tiene que
+    venir del orden render -> commit -> efecto, no del reloj.
+  */
+  const indice = SWIPE_TABS.indexOf('const [congelables, setCongelables]');
+  const efecto = SWIPE_TABS.slice(indice, SWIPE_TABS.indexOf('}, [paginas', indice));
+  assert.ok(
+    !/setTimeout|setInterval|requestAnimationFrame/.test(efecto),
+    'el calculo de `congelables` usa un temporizador. Tiene que bastar con que ' +
+      'el efecto corra despues del commit.',
+  );
+});
+
+test('la seccion que se abandona no se congela por distancia', () => {
+  /*
+    La comprobacion de la aritmetica del fallo, escrita como tabla para que se
+    lea el caso concreto del reporte. `congelables` se calcula sobre las
+    posiciones YA commiteadas, asi que en el render del salto todavia no
+    contiene a Inicio.
+  */
+  const congelable = (posicion: number, actual: number) => Math.abs(posicion - actual) > 1;
+
+  // Con el criterio VIEJO, estos tres congelaban Inicio en el acto:
+  assert.equal(congelable(0, 2), true, 'Inicio -> Crear');
+  assert.equal(congelable(0, 3), true, 'Inicio -> Mensajes');
+  assert.equal(congelable(0, 4), true, 'Inicio -> Perfil');
+  // Y este no, que es por lo que Explorar era el unico que funcionaba:
+  assert.equal(congelable(0, 1), false, 'Inicio -> Explorar');
+
+  // El arreglo no cambia esa aritmetica: cambia CUANDO se aplica. Por eso la
+  // prueba de verdad es que el Freeze consulte `congelables`, arriba.
+  assert.match(SWIPE_TABS, /congelables\.has\(ruta\.key\)/);
+});
+
+test('sigue habiendo congelacion: no se arreglo quitando react-freeze', () => {
+  // Quitar el Freeze haria desaparecer el sintoma y devolveria el trabajo de
+  // repintar el muro entero al hilo que anima el arrastre.
+  assert.match(SWIPE_TABS, /import \{ Freeze \} from 'react-freeze'/);
+  assert.match(SWIPE_TABS, /<Freeze/);
+});

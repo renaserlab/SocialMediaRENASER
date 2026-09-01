@@ -238,6 +238,57 @@ function VistaDeSecciones({ state, descriptors, navigation, barra }: PropsDeVist
   }, [enSeccion, paginas, posicionActual, marcarMontadas]);
 
   /*
+    QUE SECCIONES PUEDEN CONGELARSE YA. Nunca la que acaba de dejar de verse.
+
+    EL FALLO QUE ARREGLA. El audio de Inicio seguia sonando al ir a Crear, a
+    Mensajes o a Perfil, pero NO al ir a Explorar. La diferencia era la
+    distancia: Explorar esta a un paso de Inicio, asi que Inicio seguia siendo
+    vecina y no se congelaba; los otros tres estan a dos, tres y cuatro, y ahi
+    Inicio pasaba de actual a congelada EN EL MISMO RENDER.
+
+    Y una seccion congelada no se entera de nada. `react-freeze` suspende el
+    subarbol lanzando un thenable que no resuelve nunca:
+
+        const infiniteThenable = { then() {} };
+        if (freeze) throw infiniteThenable;
+
+    React descarta ese render y conserva lo ultimo commiteado. El
+    `useIsFocused()` que acababa de pasar a `false` no llegaba a commitear
+    dentro de Inicio, `useSeccionActiva()` se quedaba en `true` y el reproductor
+    seguia con el audio puesto. No era un fallo del reproductor: era que nadie
+    le llego a decir que ya no se le estaba mirando.
+
+    LA REGLA. Una seccion solo puede congelarse cuando YA se ha pintado una vez
+    sabiendo que no es la actual. Este efecto corre despues del commit, asi que
+    en el render del cambio Inicio todavia esta viva —procesa el desenfoque y
+    para el video— y se congela en el siguiente. Un render de mas en la que se
+    abandona, que es exactamente lo que ya pasaba con las vecinas.
+
+    NO es un temporizador ni una espera: React garantiza que los efectos corren
+    despues del commit. La optimizacion se conserva entera, solo llega un
+    commit mas tarde.
+  */
+  const [congelables, setCongelables] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    const lejanas = paginas
+      .filter(
+        (ruta, posicion) =>
+          !!ruta &&
+          montadas.has(ruta.key) &&
+          !(enSeccion && Math.abs(posicion - posicionActual) <= 1),
+      )
+      .map((ruta) => ruta!.key);
+    setCongelables((previas) => {
+      // Mismo contenido, mismo objeto: no se re-renderiza el carrusel en balde.
+      if (previas.size === lejanas.length && lejanas.every((clave) => previas.has(clave))) {
+        return previas;
+      }
+      return new Set(lejanas);
+    });
+  }, [paginas, posicionActual, enSeccion, montadas]);
+
+  /*
     QUIEN COLOCA QUE.
 
     La pagina en la que estamos la decide REACT: cada seccion se coloca en
@@ -428,8 +479,15 @@ function VistaDeSecciones({ state, descriptors, navigation, barra }: PropsDeVist
                     que aparecer ya dibujadas en cuanto el dedo se mueva, y
                     descongelarlas en ese instante costaria un repintado justo
                     cuando menos sobra.
+
+                    La tercera condicion, `congelables`, es la que impide
+                    congelar la seccion que ACABA de dejar de verse antes de que
+                    se entere: sin ella el audio de Inicio seguia sonando en
+                    Crear, Mensajes y Perfil. Se explica donde se calcula.
                   */}
-                  <Freeze freeze={!esActual && !esVecina}>{descriptors[ruta.key]?.render()}</Freeze>
+                  <Freeze freeze={!esActual && !esVecina && congelables.has(ruta.key)}>
+                    {descriptors[ruta.key]?.render()}
+                  </Freeze>
                 </View>
               );
             })}

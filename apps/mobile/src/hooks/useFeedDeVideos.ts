@@ -5,6 +5,7 @@ import {
   leerInstantaneaDeVideos,
 } from '@/feed/cacheDeVideos';
 import { perfMark } from '@/lib/perf';
+import { useRefrescoAlEnfocar } from '@/hooks/useRefrescoAlEnfocar';
 import { VIDEOS_POR_PAGINA, type CursorDeVideos, type FuenteDeVideos } from '@/feed/fuenteDeVideos';
 import type { ReelItem } from '@/components/ShortVideoItem';
 
@@ -249,6 +250,21 @@ export function useFeedDeVideos(
       enVuelo.current = false;
     }
   }, [items.length, conCache]);
+
+  /*
+    SI SE PUBLICA ALGO, ESTA LISTA DEJA DE ESTAR AL DIA.
+
+    Inicio tiene su propia lista de videos: `createPost` insertaba en
+    `useAppStore.posts` —lo que pinta Explorar— y aqui no llegaba nada. Como la
+    seccion no se desmonta al cambiar de pestaña, el video recien publicado no
+    aparecia hasta cerrar y abrir la aplicacion.
+
+    No se refresca en el acto: se refresca cuando Inicio se esta viendo. Pedir
+    esta lista mientras la persona esta en Mensajes gasta datos para pintar algo
+    que nadie mira. Y si no ha cambiado nada, no pide NADA: cambiar de pestaña
+    veinte veces son cero peticiones.
+  */
+  useRefrescoAlEnfocar('publicaciones', refrescar);
 
   const reintentar = useCallback(() => setIntento((n) => n + 1), []);
 

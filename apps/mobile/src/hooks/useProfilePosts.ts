@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { galeriaEnCache, pedirGaleria } from '@/services/cachePerfil';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import type { Post } from '@/types';
+import { useRefrescoAlEnfocar } from '@/hooks/useRefrescoAlEnfocar';
 
 function repartir(posts: Post[]) {
   return {
@@ -90,5 +91,14 @@ export function useProfilePosts(userId?: string | null) {
     void load();
   }, [load, userId]);
 
-  return { gallery, audios, loading, error, reload: () => load({ refrescar: true }) };
+  const recargar = useCallback(() => load({ refrescar: true }), [load]);
+
+  /*
+    La galeria del perfil tambien tiene lista propia. Publicar dejaba el perfil
+    con la de antes hasta salir y volver a entrar, que es justo lo que se
+    reporto. Solo se pide cuando el perfil se esta viendo y algo cambio.
+  */
+  useRefrescoAlEnfocar('publicaciones', recargar);
+
+  return { gallery, audios, loading, error, reload: recargar };
 }

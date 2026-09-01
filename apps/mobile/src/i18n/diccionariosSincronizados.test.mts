@@ -93,6 +93,12 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   ]),
   pt: new Set<string>([
     // Portugues y español escriben estas igual. Se comprueban una a una.
+    // Los nombres bajo los botones de una publicacion: «Comentar» y
+    // «Republicar» son la misma palabra en los dos idiomas —«Curtir» y
+    // «Compartilhar», que si cambian, no estan aqui— y «Ver lista» tambien.
+    'post.actionComment',
+    'post.actionRepost',
+    'post.viewSavedList',
     // «Filtros» y «Todas» se escriben igual en los dos idiomas; el resto de los
     // filtros de la bandeja sí cambian («Não lidas», «Sem resposta»).
     'messages.filters',

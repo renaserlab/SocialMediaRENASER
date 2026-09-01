@@ -98,12 +98,76 @@ test('el aviso de perfil ajeno no ofrece «Ver cursos de Z»', () => {
   );
 });
 
-test('el acceso al catálogo de Z sigue existiendo en el perfil propio', () => {
-  // Se quitó del perfil AJENO, no de la aplicación: en el tuyo es una salida
-  // razonable hacia el resto, y va debajo de lo tuyo.
+/*
+  LA MISMA MEZCLA, AHORA EN CURSOS.
+
+  Con reseñas se corrigio el perfil AJENO. En cursos el problema quedaba en el
+  PROPIO: debajo de «+ Agregar curso» aparecia «Ver cursos de Z», que lleva al
+  perfil del administrador. En tu propia seccion de cursos eso mezcla dos
+  mensajes que no son el mismo:
+
+      «todavia no has publicado ningun curso»   habla de ti
+      «mira los cursos de Z»                    habla de otra persona
+
+  El estado vacio se queda. La salida al catalogo se va: los cursos ajenos se
+  descubren desde Explorar, que es la superficie hecha para eso.
+
+  Podcast y Eventos conservan la salida porque ahi el contenido ES de Z y no
+  tuyo, asi que no compite con nada propio.
+*/
+
+test('mi perfil → cursos NO ofrece «Ver cursos de Z»', () => {
   const seccion = fuente('components/ProfileSection.tsx');
-  assert.match(seccion, /canManage && ADMIN_SECTIONS\[kind\]/);
+
+  // La lista es explicita, no se deduce de ADMIN_SECTIONS.
+  const lista = seccion.match(
+    /const CATALOGO_DE_Z_DESDE_MI_PERFIL[^=]*=\s*new Set\(\[([^\]]*)\]/,
+  );
+  assert.ok(lista, 'falta CATALOGO_DE_Z_DESDE_MI_PERFIL');
+  assert.ok(
+    !/'cursos'/.test(lista[1]),
+    `cursos no debe ofrecer salida al catalogo desde el perfil propio. Lista: ${lista[1]}`,
+  );
+});
+
+test('el boton del catalogo consulta esa lista, no solo ADMIN_SECTIONS', () => {
+  const seccion = fuente('components/ProfileSection.tsx');
+  // Sin esta condicion el boton vuelve a salir en cursos.
+  assert.match(
+    seccion,
+    /ADMIN_SECTIONS\[kind\] && CATALOGO_DE_Z_DESDE_MI_PERFIL\.has\(kind\)/,
+    'el boton tiene que exigir ademas que la seccion tenga catalogo de Z',
+  );
+});
+
+test('podcast y eventos conservan su salida al catalogo', () => {
+  const seccion = fuente('components/ProfileSection.tsx');
+  const lista = seccion.match(
+    /const CATALOGO_DE_Z_DESDE_MI_PERFIL[^=]*=\s*new Set\(\[([^\]]*)\]/,
+  );
+  assert.ok(lista);
+  assert.match(lista[1], /'podcast'/, 'podcast tenia un caso legitimo');
+  assert.match(lista[1], /'eventos'/, 'eventos tenia un caso legitimo');
+  // Y el boton sigue existiendo en el codigo, no se borro la funcion entera.
   assert.match(seccion, /ADMIN_SECTIONS\[kind\]!\.action/);
+  assert.match(seccion, /openAdminSection\(kind\)/);
+});
+
+test('el estado vacio de mis cursos sobrevive a quitar el boton', () => {
+  /*
+    Lo que se quito es la salida al catalogo, no el aviso. Si al separarlos se
+    hubiera perdido el texto, la seccion vacia quedaria muda.
+  */
+  const seccion = fuente('components/ProfileSection.tsx');
+  assert.match(seccion, /section\.noneOwnCourses/);
+  // Y se pinta cuando NO hay nada tuyo, independientemente del catalogo.
+  assert.match(seccion, /items\.length === 0 \|\| CATALOGO_DE_Z_DESDE_MI_PERFIL\.has\(kind\)/);
+});
+
+test('«+ Agregar curso» sigue en pie', () => {
+  const seccion = fuente('components/ProfileSection.tsx');
+  assert.match(seccion, /setCreating\(true\)/, 'el alta de curso no puede haberse perdido');
+  assert.match(seccion, /icon="plus"/);
 });
 
 // ---------------------------------------------------------------------------
