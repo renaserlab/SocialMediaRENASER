@@ -65,6 +65,12 @@ export type PostDto = {
   reposts_count?: number;
   reposted_by_me?: boolean;
   /**
+   * Cuanta gente la guardo. Solo el numero: el backend NO manda quien, y por
+   * eso aqui tampoco hay nada que mapear mas alla del contador.
+   * Opcional: un backend anterior no lo manda y se pinta cero.
+   */
+  saves_count?: number;
+  /**
    * QUIEN la esta compartiendo, cuando llega por una republicacion.
    *
    * `author` sigue siendo el autor ORIGINAL: son dos personas distintas y la
@@ -160,6 +166,7 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     likedByMe: dto.liked_by_me ?? undefined,
     repostsCount: dto.reposts_count ?? 0,
     repostedByMe: dto.reposted_by_me ?? false,
+    savesCount: dto.saves_count ?? 0,
     /*
       Quien comparte, APARTE de quien escribio. Nunca se sobreescribe `author`
       con esto: republicar no cambia de quien es lo publicado.

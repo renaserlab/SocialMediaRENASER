@@ -302,7 +302,7 @@ async def _hidratar_publicaciones(
     presentes = [fila[0].id for fila in filas]
     medios = await _load_media_map(db, presentes)
     temas, etiquetas, personas = await _etiquetas_del_lote(db, presentes)
-    return {
+    lecturas = {
         fila[0].id: _to_post_read(
             *fila,
             media=medios.get(fila[0].id, []),
@@ -312,6 +312,43 @@ async def _hidratar_publicaciones(
         )
         for fila in filas
     }
+    # Aqui dentro y no en quien llama: asi lo tienen las dos listas que pasan
+    # por esta funcion (el muro con republicaciones y la pestana de
+    # republicaciones de un perfil) sin repetir la consulta en cada una.
+    await anotar_guardados(db, list(lecturas.values()))
+    return lecturas
+
+
+async def anotar_guardados(db: AsyncSession, posts: list[PostRead]) -> None:
+    """Rellena `saves_count` de un lote entero: UNA consulta agrupada.
+
+    Igual que `reposts.anotar`, y por el mismo motivo: el dato vive en otra
+    tabla (`saved_posts`) y las consultas del feed estan ajustadas al indice y
+    paginadas por cursor. Se anota DESPUES, sobre la lista ya armada, con un
+    solo `GROUP BY` para toda la pagina — nunca una consulta por publicacion.
+
+    NO HACE FALTA MIGRACION: `saved_posts` existe desde el principio (es la
+    tabla de guardar/quitar de guardados). Lo unico que faltaba era contarla.
+
+    Solo el NUMERO. Quien guardo no sale de aqui ni tiene endpoint propio:
+    guardar es apartar algo para uno mismo, no un gesto publico como reaccionar.
+    """
+    if not posts:
+        return
+    # `dict.fromkeys` y no `set`: la misma publicacion puede venir dos veces en
+    # el muro (el original y la republicacion de alguien) y cada copia recibe
+    # su valor abajo, pero preguntar dos veces por ella no tendria sentido.
+    ids = list(dict.fromkeys(post.id for post in posts))
+    filas = (
+        await db.execute(
+            select(SavedPost.post_id, func.count())
+            .where(SavedPost.post_id.in_(ids))
+            .group_by(SavedPost.post_id)
+        )
+    ).all()
+    cuenta = {post_id: total for post_id, total in filas}
+    for post in posts:
+        post.saves_count = cuenta.get(post.id, 0)
 
 
 async def _likes_count(db: AsyncSession, post_id: str) -> int:
@@ -463,6 +500,7 @@ async def list_posts(
         # paginada por cursor, y el dato vive en otra tabla que ademas puede no
         # existir todavia (migracion 0042).
         await reposts.anotar(db, salida, uid)
+        await anotar_guardados(db, salida)
         return salida
 
     # ----------------------------------------------------------------- #
@@ -689,13 +727,17 @@ async def _load_single_post(
         raise NotFoundError("Publicacion no encontrada.")
     media_map = await _load_media_map(db, [row[0].id])
     temas, etiquetas, personas = await _etiquetas_del_lote(db, [row[0].id])
-    return _to_post_read(
+    lectura = _to_post_read(
         *row,
         media=media_map.get(row[0].id, []),
         topic_ids=temas.get(row[0].id, []),
         hashtags=etiquetas.get(row[0].id, []),
         mentions=personas.get(row[0].id, []),
     )
+    # El detalle ensena la misma fila de acciones que el muro: sin esto, abrir
+    # una publicacion desde el muro haria desaparecer el numero de guardados.
+    await anotar_guardados(db, [lectura])
+    return lectura
 
 
 async def leer_posts_por_id(
@@ -735,7 +777,9 @@ async def leer_posts_por_id(
         )
         for fila in filas
     }
-    return [por_id[pid] for pid in post_ids if pid in por_id]
+    salida = [por_id[pid] for pid in post_ids if pid in por_id]
+    await anotar_guardados(db, salida)
+    return salida
 
 
 @router.get("/posts/{post_id}", response_model=PostRead)
@@ -1143,7 +1187,7 @@ async def list_saved_posts(
     ids = [row[0].id for row in rows]
     media_map = await _load_media_map(db, ids)
     temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
-    return [
+    salida = [
         _to_post_read(
             *row,
             media=media_map.get(row[0].id, []),
@@ -1153,6 +1197,10 @@ async def list_saved_posts(
         )
         for row in rows
     ]
+    # El numero TOTAL de veces que se guardo cada una, no «cuantas he guardado
+    # yo»: en esta lista lo segundo seria siempre uno.
+    await anotar_guardados(db, salida)
+    return salida
 
 
 @router.post("/posts/{post_id}/save")

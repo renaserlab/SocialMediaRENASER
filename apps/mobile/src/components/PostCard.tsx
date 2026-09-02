@@ -37,6 +37,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 // Overlays sobre el video: contexto de media, siempre oscuro, en ambos temas.
 const mediaPalette = palette('dark');
 
+
 type Props = {
   post: Post;
   /**
@@ -227,6 +228,13 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     : videoStarted && visible !== false;
   const liked = useAppStore((state) => state.likedPostIds.includes(post.id));
   const saved = useAppStore((state) => state.savedPostIds.includes(post.id));
+  /*
+    CUANTA GENTE LA GUARDO. Un numero y nada mas: el backend cuenta y NO dice
+    quien, porque guardar algo es privado. Manda el store en cuanto se ha
+    tocado aqui (ahi vive el +1/-1 optimista y su vuelta atras); si no, lo que
+    trajo la publicacion.
+  */
+  const savesCount = useAppStore((state) => state.saveCounts[post.id] ?? post.savesCount ?? 0);
   const toggleLike = useAppStore((state) => state.toggleLikePost);
   const toggleSave = useAppStore((state) => state.toggleSavePost);
   const deletePost = useAppStore((state) => state.deletePost);
@@ -362,11 +370,11 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           onPress={() => irAlPerfil(router, post.repost?.autorId)}
           disabled={!post.repost.autorId}
           accessibilityRole="button"
-          accessibilityLabel={`Republicado por ${post.repost.autor}`}
+          accessibilityLabel={t('post.viewProfileOf', { nombre: post.repost.autor })}
         >
           <Feather name="repeat" size={13} color={colors.textMuted} />
           <Text variant="caption" weight="700" color={colors.textMuted}>
-            {post.repost.autor} republicó · {post.repost.fecha}
+            {t('post.repostedLine', { nombre: post.repost.autor })} · {post.repost.fecha}
           </Text>
         </Pressable>
       ) : null}
@@ -381,7 +389,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           onPress={() => irAlPerfil(router, post.authorId)}
           disabled={!post.authorId}
           accessibilityRole="button"
-          accessibilityLabel={`Ver perfil de ${post.author}`}
+          accessibilityLabel={t('post.viewProfileOf', { nombre: post.author })}
         >
           <ExpoImage
             source={post.authorAvatarUrl ? { uri: post.authorAvatarUrl } : assets.avatar}
@@ -555,7 +563,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           </Pressable>
         )
       ) : post.mediaType === 'audio' && post.mediaUrl ? (
-        <AudioPlayer uri={post.mediaUrl} title={`Audio de ${post.author}`} />
+        <AudioPlayer uri={post.mediaUrl} title={t('post.audioBy', { nombre: post.author })} />
       ) : post.mediaUrl || post.imageKey ? (
         <DoubleTapLike
           onDoubleTap={() =>
@@ -645,13 +653,16 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         />
         <AccionDePublicacion
           icono="bookmark"
-          etiqueta={t('post.actionSave')}
           /*
-            ESTADO CLARO, Y SIN AMARILLO FIJO. Antes la diferencia entre
-            guardada y no guardada era `text` contra `textMuted`: dos grises
-            que en un movil al sol no se distinguen. El color primario del tema
-            si, y funciona en claro y en oscuro porque sale del tema.
+            RELLENO al guardar, CONTORNO al quitar: cambia la forma, no solo el
+            tono (ver `AccionDePublicacion`). Se reporto que «aparece la
+            notificacion pero el icono no se pinta».
           */
+          iconoRelleno="bookmark"
+          etiqueta={t('post.actionSave')}
+          // Sin guardados no se enseña un cero, igual que en republicar.
+          contador={savesCount > 0 ? savesCount : undefined}
+          // El color acompaña; el que dice el estado es el dibujo.
           activo={saved}
           colorActivo={colors.primary}
           onPress={() => void alternarGuardado()}

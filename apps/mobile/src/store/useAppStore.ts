@@ -117,6 +117,17 @@ type AppState = {
    * en disco solo serviría para enseñar un número viejo al abrir.
    */
   likeCounts: Record<string, number>;
+  /**
+   * Cuánta gente ha guardado cada publicación, por el mismo motivo que
+   * `likeCounts`: es el número que se pinta junto al marcador y tiene que
+   * valer lo mismo en el muro, en el detalle y en el feed de vídeo.
+   *
+   * Solo un CONTADOR. Nunca quién: el servidor no lo dice y aquí no se
+   * guarda, porque guardar algo es privado.
+   *
+   * NO se persiste: es una foto del servidor, no una preferencia.
+   */
+  saveCounts: Record<string, number>;
   reservedEventIds: string[];
   conversations: Conversation[];
 
@@ -261,6 +272,7 @@ export const useAppStore = create<AppState>()(
       likedPostIds: [],
       savedPostIds: [],
       likeCounts: {},
+      saveCounts: {},
       reservedEventIds: [],
       conversations: backendEnabled ? [] : conversations,
 
@@ -301,7 +313,11 @@ export const useAppStore = create<AppState>()(
         quitando un me gusta que nunca dio—.
       */
       setUser: (user) =>
-        set(user ? { user } : { user: null, likedPostIds: [], savedPostIds: [], likeCounts: {} }),
+        set(
+          user
+            ? { user }
+            : { user: null, likedPostIds: [], savedPostIds: [], likeCounts: {}, saveCounts: {} },
+        ),
       setPosts: (posts) => set({ posts }),
       setConversations: (conversations) => set({ conversations }),
       registerLocalUser: ({ fullName, email }) =>
@@ -569,12 +585,31 @@ export const useAppStore = create<AppState>()(
         }));
       },
       toggleSavePost: async (postId) => {
-        const wasSaved = get().savedPostIds.includes(postId);
+        const estado = get();
+        const wasSaved = estado.savedPostIds.includes(postId);
         const guardada = !wasSaved;
+        /*
+          EL CONTADOR, EN EL MISMO CAMINO QUE EL ESTADO.
+
+          Sale de `wasSaved`, igual que `guardada`: guardar dos veces seguidas
+          no puede sumar dos porque la segunda vez ya estaba en la lista y lo
+          que toca entonces es restar. Y nunca baja de cero.
+
+          El valor de partida es el del muro cuando lo hay (`posts`), y si no
+          el que trajo la publicacion; se recuerda para poder DESHACERLO tal
+          cual si el servidor rechaza.
+        */
+        const enElMuro = estado.posts.find((post) => post.id === postId);
+        const contadorActual = estado.saveCounts[postId] ?? enElMuro?.savesCount ?? 0;
+        const contadorOptimista = Math.max(0, contadorActual + (guardada ? 1 : -1));
         set((state) => ({
           savedPostIds: wasSaved
             ? state.savedPostIds.filter((id) => id !== postId)
             : [...state.savedPostIds, postId],
+          saveCounts: { ...state.saveCounts, [postId]: contadorOptimista },
+          posts: state.posts.map((post) =>
+            post.id === postId ? { ...post, savesCount: contadorOptimista } : post,
+          ),
         }));
 
         // En modo demo no hay servidor al que preguntar: el cambio local ES el
@@ -592,6 +627,13 @@ export const useAppStore = create<AppState>()(
             savedPostIds: wasSaved
               ? [...state.savedPostIds, postId]
               : state.savedPostIds.filter((id) => id !== postId),
+            // El contador vuelve al valor exacto de antes, no a «uno menos»:
+            // restar a ciegas dejaria un numero inventado si entre medias
+            // llego uno nuevo del servidor.
+            saveCounts: { ...state.saveCounts, [postId]: contadorActual },
+            posts: state.posts.map((post) =>
+              post.id === postId ? { ...post, savesCount: contadorActual } : post,
+            ),
           }));
           return { guardada, ok: false };
         }
@@ -847,6 +889,8 @@ export const useAppStore = create<AppState>()(
           posts: initialPosts,
           likedPostIds: [],
           savedPostIds: [],
+          likeCounts: {},
+          saveCounts: {},
           reservedEventIds: [],
           conversations,
           dismissedGuides: [],

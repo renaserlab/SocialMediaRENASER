@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
 import { spacing } from '@/theme/tokens';
@@ -33,6 +33,21 @@ const AREA_PULSABLE = { top: 10, bottom: 10, left: 6, right: 6 };
 
 type Props = {
   icono: keyof typeof Feather.glyphMap;
+  /**
+   * La variante RELLENA del icono, para el estado encendido.
+   *
+   * POR QUE OTRA FAMILIA. El estado no puede vivir solo en el color: se
+   * reportó que «aparece la notificación de que se guardó pero el icono no se
+   * pinta», y dos tonos del mismo dibujo no se distinguen en un móvil al sol
+   * —ni los distingue quien no separa bien los colores—. Feather solo dibuja
+   * contornos: su `bookmark` no tiene versión rellena. `MaterialCommunityIcons`
+   * sí, y viene en el MISMO paquete (`@expo/vector-icons`) que ya se usa, así
+   * que no añade ninguna dependencia.
+   *
+   * Sin esta propiedad el botón se comporta como siempre: mismo dibujo,
+   * distinto color.
+   */
+  iconoRelleno?: keyof typeof MaterialCommunityIcons.glyphMap;
   /** El nombre que se lee debajo. Traducido por quien llama. */
   etiqueta: string;
   /** Se omite cuando no hay nada que contar (compartir, guardar). */
@@ -63,6 +78,7 @@ type Props = {
 
 export function AccionDePublicacion({
   icono,
+  iconoRelleno,
   etiqueta,
   contador,
   activo = false,
@@ -89,7 +105,15 @@ export function AccionDePublicacion({
           accessibilityRole={accessibilityRole}
           accessibilityState={accessibilityState}
         >
-          <Feather name={icono} size={19} color={colorDelIcono} />
+          {/*
+            Encendido y con variante rellena: cambia la FORMA, no solo el
+            tono. Es lo que hace que se vea que quedo guardada.
+          */}
+          {activo && iconoRelleno ? (
+            <MaterialCommunityIcons name={iconoRelleno} size={20} color={colorDelIcono} />
+          ) : (
+            <Feather name={icono} size={19} color={colorDelIcono} />
+          )}
         </Pressable>
 
         {/*

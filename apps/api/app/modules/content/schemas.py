@@ -144,6 +144,12 @@ class PostRead(BaseModel):
     comments_count: int = 0
     liked_by_me: bool = False
     saved_by_me: bool = False
+    #: CUANTAS personas la han guardado. Solo el numero: quien guardo no se
+    #: expone en ninguna parte, ni aqui ni en una ruta aparte. Guardar es un
+    #: gesto privado —se aparta algo para uno mismo— y publicar la lista seria
+    #: delatar algo que nadie eligio contar. `saved_by_me` sigue siendo la
+    #: unica pista sobre una persona concreta, y esa persona es quien pregunta.
+    saves_count: int = 0
     #: De que trata. Vacio en el contenido anterior a la 0027 y en el que nadie
     #: etiqueto: para ese, el recomendador cae a los temas del autor.
     topic_ids: list[str] = Field(default_factory=list)

@@ -137,6 +137,11 @@ export type Post = {
   isOwn?: boolean;
   /** Cuantas veces se ha republicado (migracion 0042). */
   repostsCount?: number;
+  /**
+   * Cuanta gente la ha guardado. Es un NUMERO, nunca una lista: el backend
+   * cuenta y no dice quien, porque guardar es privado.
+   */
+  savesCount?: number;
   /** Si quien mira ya la republico: el boton dice «deshacer». */
   repostedByMe?: boolean;
   /**
