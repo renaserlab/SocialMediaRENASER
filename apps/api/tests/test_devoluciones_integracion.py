@@ -360,9 +360,10 @@ async def test_el_camino_completo_hasta_procesando(entorno):
         f"{ADMIN}/refund-requests/{solicitud['id']}/approve", json={"notes": "vale"}
     )
     assert aprobada.status_code == 200, aprobada.text
-    # Con los reembolsos APAGADOS, el proveedor falla en cerrado y el
-    # expediente lo dice en vez de quedarse colgado en «procesando».
-    assert aprobada.json()["status"] in ("failed", "refund_processing")
+    # Con los reembolsos APAGADOS no se llama a nadie, asi que el expediente NO
+    # puede decir que fallo: nunca se intento. Se queda en `approved` esperando
+    # a que se habilite la ejecucion externa.
+    assert aprobada.json()["status"] == "approved"
     # Y NADIE ha perdido el acceso: aprobar no retira nada.
     async with sesiones() as db:
         activos = await db.scalar(

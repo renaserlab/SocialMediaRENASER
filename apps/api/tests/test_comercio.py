@@ -788,42 +788,58 @@ async def test_una_leccion_que_no_existe_no_da_acceso(sesiones):
 # --------------------------------------------------------------------------- #
 # Nadie se concede acceso a si mismo
 # --------------------------------------------------------------------------- #
-def test_el_comercio_no_expone_ningun_endpoint():
+#: LO UNICO que puede tener rutas en el comercio: la vista de SOLO LECTURA del
+#: propietario sobre sus ventas. Cualquier otro fichero con rutas es una puerta
+#: nueva, y la puerta que se olvida es la que abren.
+_ROUTER_PERMITIDO = "router.py"
+
+
+def _carpeta_del_comercio():
+    import pathlib
+
+    import app.modules.commerce as paquete
+
+    return pathlib.Path(paquete.__file__).parent
+
+
+def test_el_comercio_solo_expone_la_vista_del_propietario():
     """Conceder y revocar NO tienen ruta HTTP en este modulo.
 
     La unica forma de conceder un derecho es que el backend lo haga tras
     verificar un aviso servidor a servidor. Un endpoint —aunque estuviera
-    protegido— es una puerta mas que vigilar, y la que se olvida es la que
-    abren. La otra mitad de esta regla vive en la RLS de la 0035, que no da
-    ninguna politica de escritura a `authenticated`.
+    protegido— es una puerta mas que vigilar. La otra mitad de esta regla vive
+    en la RLS de la 0035, que no da ninguna politica de escritura a
+    `authenticated`.
+
+    LA EXCEPCION, Y POR QUE LO ES: `router.py` publica lo que el propietario ya
+    tiene derecho a saber —cuanto ha vendido— y no escribe NADA.
     """
-    import pathlib
-
-    import app.modules.commerce as paquete
-
-    carpeta = pathlib.Path(paquete.__file__).parent
-    routers = [f.name for f in carpeta.glob("*.py") if "router" in f.name]
-    assert routers == [], f"El comercio no debe exponer rutas: {routers}"
+    carpeta = _carpeta_del_comercio()
+    routers = sorted(f.name for f in carpeta.glob("*.py") if "router" in f.name)
+    assert routers == [_ROUTER_PERMITIDO], f"Rutas inesperadas en comercio: {routers}"
 
 
-def test_el_comercio_no_declara_ningun_apirouter():
-    """Ni con otro nombre de fichero.
+def test_el_comercio_no_declara_ningun_apirouter_de_escritura():
+    """Ni con otro nombre de fichero, ni con un verbo que escriba.
 
-    Un `APIRouter` aqui dentro seria una ruta que concede o revoca acceso, y la
-    puerta que se olvida es la que abren. Todo lo del comercio se llama desde el
-    modulo de pagos, que es quien ya verifica los avisos.
+    Se comprueban las dos cosas: que solo un fichero declara `APIRouter`, y que
+    ese fichero es de LECTURA. Un `POST` aqui dentro seria una ruta capaz de
+    conceder o revocar acceso; conceder se sigue llamando solo desde el modulo
+    de pagos, que es quien verifica los avisos.
     """
-    import pathlib
-
-    import app.modules.commerce as paquete
-
-    carpeta = pathlib.Path(paquete.__file__).parent
-    con_router = [
+    carpeta = _carpeta_del_comercio()
+    con_router = sorted(
         f.name
         for f in carpeta.glob("*.py")
         if "APIRouter" in f.read_text(encoding="utf-8")
-    ]
-    assert con_router == [], f"El comercio no debe exponer rutas: {con_router}"
+    )
+    assert con_router == [_ROUTER_PERMITIDO], f"Rutas inesperadas: {con_router}"
+
+    texto = (carpeta / _ROUTER_PERMITIDO).read_text(encoding="utf-8")
+    for verbo in ("@router.post", "@router.put", "@router.patch", "@router.delete"):
+        assert verbo not in texto, f"El comercio no puede escribir por HTTP: {verbo}"
+    for prohibido in ("conceder", "revocar", "marcar_orden", "registrar_transaccion"):
+        assert prohibido not in texto, f"El comercio no puede llamar a '{prohibido}'"
 
 
 @pytest.mark.asyncio

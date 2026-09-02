@@ -18,6 +18,7 @@ sus ventas.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
@@ -462,10 +463,11 @@ async def ejecutar_reembolso(
     3. La transicion a `refund_processing` es un UPDATE condicional, asi que dos
        administradores simultaneos solo consiguen una ejecucion.
 
-    APAGADO POR DEFECTO. Con `STRIPE_REFUNDS_ENABLED` en falso, el proveedor es
-    el que falla en cerrado: la solicitud queda en `failed` con el motivo a la
-    vista y NADIE pierde el acceso. Eso es lo que permite recorrer el circuito
-    entero en staging sin cuenta de Stripe.
+    APAGADO POR DEFECTO. Con `STRIPE_REFUNDS_ENABLED` en falso NO SE LLAMA A
+    NADIE y la solicitud se queda en `approved`, no en `failed`: nunca se
+    intento, asi que declararla fallida seria mentir sobre lo que paso. El
+    evento lo dice y NADIE pierde el acceso. Eso es lo que permite recorrer el
+    circuito entero en staging sin cuenta de Stripe.
 
     NO RETIRA EL ACCESO. Ni aunque la pasarela conteste «hecho». El acceso se
     retira con el webhook confirmado y conciliado; esta respuesta solo dice si
@@ -482,6 +484,31 @@ async def ejecutar_reembolso(
             "[devoluciones] la solicitud %s ya tiene reembolso %s; no se repite",
             solicitud.id,
             solicitud.external_refund_id,
+        )
+        return
+
+    if not get_settings().stripe_refunds_enabled:
+        # NO SE INTENTO NADA, asi que no se puede decir que fallo. Dejarla en
+        # `failed` era mentir: invitaba a reintentar un fallo que no existio y
+        # ocultaba el unico problema real, que es que falta encender la
+        # ejecucion externa. Queda en `approved`, sin tocar el acceso.
+        await devoluciones._anotar(
+            db,
+            solicitud,
+            desde=solicitud.status,
+            hasta=solicitud.status,
+            rol="system",
+            actor_id=actor_id,
+            reason=(
+                "ejecucion externa PENDIENTE de habilitacion: los reembolsos por "
+                "pasarela estan desactivados o sin configurar. No se pidio nada."
+            ),
+            metadata={"provider_execution": "disabled"},
+        )
+        await db.commit()
+        logger.info(
+            "[devoluciones] solicitud %s aprobada sin ejecutar: pasarela apagada",
+            solicitud.id,
         )
         return
 
@@ -665,6 +692,181 @@ async def reintentar(
     await db.flush()
     await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
     return await _a_lectura_admin(db, solicitud, con_historial=True)
+
+
+# --------------------------------------------------------------------------- #
+# Conciliacion con la pasarela
+# --------------------------------------------------------------------------- #
+#
+# PARA QUE EXISTE. Un reembolso pedido y aceptado se queda en
+# `refund_processing` esperando el webhook. Si ese webhook se pierde —firma
+# rotada, despliegue a mitad, la pasarela reintentando contra una URL vieja— el
+# expediente se queda ahi para siempre: el dinero volvio y la persona sigue
+# teniendo el curso, o al reves nadie sabe que paso. Conciliar es PREGUNTARLE a
+# la pasarela, que es la unica que sabe la verdad.
+#
+# NO SE INVENTA NADA. Solo un 'succeeded' cierra, y cierra por el MISMO camino
+# que el webhook (`reembolso.aplicar`), que ya concilia orden, entorno e importe
+# y ya es idempotente. Un 'pending' no toca el acceso.
+
+
+async def _conciliar_con_pasarela(
+    db: AsyncSession, solicitud: RefundRequest, *, actor_id: str | None
+) -> str:
+    """Pregunta el estado real y actua. Devuelve lo que contesto la pasarela."""
+    from app.modules.payments.reembolsos import proveedor_de_reembolsos
+    from app.modules.refunds import reembolso
+
+    referencia = solicitud.external_refund_id or ""
+    resultado = await proveedor_de_reembolsos().get_refund_status(referencia)
+
+    if resultado.status == "succeeded":
+        orden = await db.get(Order, solicitud.order_id)
+        if orden is None:
+            raise ValidationAppError(
+                "La compra de esta solicitud ya no existe.",
+                code="refund_order_missing",
+            )
+        try:
+            # UNA transaccion: o se aplica todo o no se aplica nada. `aplicar`
+            # devuelve False si ya estaba, asi que conciliar dos veces no
+            # revoca dos veces ni notifica dos veces.
+            aplicado = await reembolso.aplicar(
+                db,
+                orden=orden,
+                external_transaction_id=referencia,
+                amount_minor=solicitud.amount_minor,
+                currency=solicitud.currency,
+                environment=orden.environment,
+                solicitud=solicitud,
+                motivo="conciliado con la pasarela",
+            )
+        except reembolso.NoConciliado as error:
+            await db.rollback()
+            solicitud = await _cualquiera(db, solicitud.id)
+            await devoluciones._anotar(
+                db,
+                solicitud,
+                desde=solicitud.status,
+                hasta=solicitud.status,
+                rol="system",
+                actor_id=actor_id,
+                reason="la conciliacion no cuadra con la orden",
+                notes=str(error)[:500],
+                metadata={"provider_status": "succeeded"},
+            )
+            await db.commit()
+            raise ValidationAppError(str(error), code="refund_not_reconciled")
+
+        await devoluciones._anotar(
+            db,
+            solicitud,
+            desde=solicitud.status,
+            hasta=solicitud.status,
+            rol="system",
+            actor_id=actor_id,
+            reason="conciliacion con la pasarela",
+            external_reference=referencia,
+            # Identificadores y codigos. Nunca el cuerpo de la respuesta.
+            metadata={"provider_status": "succeeded", "applied": aplicado},
+        )
+        await db.commit()
+        return resultado.status
+
+    if resultado.status == "failed":
+        # `_marcar_fallo` ya distingue: transiciona si estaba en proceso y solo
+        # anota si no. NO revoca acceso en ningun caso.
+        await _marcar_fallo(
+            db,
+            solicitud,
+            codigo=resultado.failure_code or "provider_failed",
+            mensaje=(resultado.failure_message or "La pasarela no pudo devolver.")[:500],
+        )
+        return resultado.status
+
+    # 'pending' y cualquier respuesta que no entendamos: NO se toca el estado y
+    # NO se toca el acceso. Se deja constancia y se vuelve a preguntar luego.
+    await devoluciones._anotar(
+        db,
+        solicitud,
+        desde=solicitud.status,
+        hasta=solicitud.status,
+        rol="system",
+        actor_id=actor_id,
+        reason=f"conciliacion: la pasarela sigue diciendo '{resultado.status}'",
+        external_reference=referencia or None,
+        metadata={"provider_status": resultado.status},
+    )
+    await db.commit()
+    return resultado.status
+
+
+@admin_router.post(
+    "/refund-requests/{request_id}/reconcile", response_model=AdminRefundRead
+)
+async def conciliar_solicitud(
+    request_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminRefundRead:
+    """Preguntarle a la pasarela como acabo de verdad este reembolso."""
+    await _exigir_gestor(db, current_user)
+    await _exigir_disponible(db)
+    solicitud = await _cualquiera(db, request_id)
+    if not (solicitud.external_refund_id or "").strip():
+        # Sin referencia no hay nada que preguntar. Se dice claro en vez de
+        # consultar con una cadena vacia y tomar el «no encontrado» por un fallo
+        # de la pasarela.
+        raise ValidationAppError(
+            "Esta solicitud no tiene un reembolso en la pasarela que conciliar.",
+            code="refund_no_external_reference",
+        )
+    await _conciliar_con_pasarela(db, solicitud, actor_id=current_user.id)
+    solicitud = await _cualquiera(db, request_id)
+    return await _a_lectura_admin(db, solicitud, con_historial=True)
+
+
+async def reconciliar_estancadas(
+    db: AsyncSession, *, horas: int = 24, limite: int = 50
+) -> int:
+    """Las que llevan demasiado en `refund_processing`. Idempotente.
+
+    SIN COLA NI INFRAESTRUCTURA NUEVA: una consulta acotada que se puede
+    disparar desde una tarea o desde un comando. Llamarla dos veces seguidas no
+    hace nada la segunda, porque `reembolso.aplicar` ya devuelve False cuando
+    estaba aplicado.
+
+    Un fallo en una NO puede tumbar las demas: se registra, se deshace lo suyo y
+    se sigue con la siguiente.
+    """
+    if not await esquema.hay_devoluciones(db):
+        return 0
+
+    corte = devoluciones.ahora() - timedelta(hours=horas)
+    filas = list(
+        await db.scalars(
+            select(RefundRequest)
+            .where(
+                RefundRequest.status == estados.REFUND_PROCESSING,
+                RefundRequest.external_refund_id.is_not(None),
+                RefundRequest.updated_at < corte,
+            )
+            .order_by(RefundRequest.updated_at)
+            .limit(limite)
+        )
+    )
+
+    conciliadas = 0
+    for solicitud in filas:
+        try:
+            await _conciliar_con_pasarela(db, solicitud, actor_id=None)
+            conciliadas += 1
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[devoluciones] no se pudo conciliar la solicitud %s", solicitud.id
+            )
+            await db.rollback()
+    return conciliadas
 
 
 @admin_router.post("/refund-requests/{request_id}/cancel", response_model=AdminRefundRead)

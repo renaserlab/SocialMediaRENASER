@@ -643,9 +643,13 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
     rechaza con error es una firma inválida: eso sí hay que verlo.
     """
     ajustes = get_settings()
-    if not ajustes.stripe_payments_enabled:
-        raise ServiceUnavailableError("El cobro por tarjeta no está activado.")
-
+    # LA BANDERA DE COMPRAS NO PUEDE BLOQUEAR LAS DEVOLUCIONES. Apagar
+    # `stripe_payments_enabled` significa «no se venden cosas nuevas», no «el
+    # dinero que ya cobramos se queda aqui». Si el corte se hiciera arriba, un
+    # `charge.refunded` de una compra anterior se rechazaria con un 503, Stripe
+    # reintentaria en bucle y el acceso no se retiraria nunca. La comprobacion
+    # baja hasta despues de verificar la firma, que es cuando se sabe si el
+    # aviso es una compra o una devolucion.
     proveedor = get_provider("stripe")
     if proveedor is None:  # pragma: no cover
         raise NotFoundError("Pasarela desconocida.")
@@ -658,6 +662,11 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
         # probando a falsificarla.
         logger.warning("[pagos] aviso de Stripe rechazado", exc_info=True)
         raise ValidationAppError("Aviso no válido.")
+
+    if not ajustes.stripe_payments_enabled and evento.status not in _ESTADOS_DE_DEVOLUCION:
+        # Firma valida, pero es un aviso de COMPRA y las compras estan
+        # apagadas. Sigue bloqueado, igual que antes.
+        raise ServiceUnavailableError("El cobro por tarjeta no está activado.")
 
     if not await esquema_comercio.hay_comercio(db):
         logger.error("[pagos] llega un aviso de Stripe sin la migración 0035 aplicada")
@@ -717,6 +726,10 @@ _DEVOLUCIONES_SIN_EFECTO = {
     "refund_parcial": "el reembolso es PARCIAL: no retira el acceso",
     "refund_fallido": "el reembolso fallo",
 }
+
+#: Todo lo que es un aviso de DEVOLUCION, con efecto o sin el. Es lo que sigue
+#: entrando con las compras nuevas deshabilitadas.
+_ESTADOS_DE_DEVOLUCION = frozenset(_DEVOLUCIONES_SIN_EFECTO) | {"refunded"}
 
 
 async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
