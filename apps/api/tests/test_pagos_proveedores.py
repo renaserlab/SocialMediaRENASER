@@ -480,9 +480,40 @@ def test_los_eventos_que_no_conceden(tipo):
 
 
 @pytest.mark.parametrize("tipo", ["charge.refunded", "refund.created", "refund.updated"])
-def test_los_eventos_de_devolucion(tipo):
-    """Los tres, porque cuál llega depende del método de pago."""
+def test_los_eventos_de_devolucion_se_reconocen(tipo):
+    """Los tres, porque cuál llega depende del método de pago.
+
+    ESTA PRUEBA CAMBIÓ, y decía lo contrario. Afirmaba que los tres eventos se
+    traducen a `refunded` a secas, que es justo el fallo: `refund.created`
+    significa «se ha creado una solicitud de reembolso», no «el dinero ha
+    vuelto». Un aviso sin `status` y sin importe no puede declarar devuelta una
+    compra —podría estar en trámite, haber fallado o ser parcial—, así que sale
+    como «en trámite» y no retira nada.
+
+    Lo que sí se sigue exigiendo, y es lo que esta prueba protege: que los tres
+    se RECONOZCAN. Si dejaran de estar en `EVENTOS`, un reembolso real se
+    ignoraría en silencio.
+    """
     evento = traducir_evento(_evento(tipo, {"payment_intent": "pi_1"}))
+    assert evento.status != "ignorado"
+    assert evento.status.startswith("refund")
+    # Sin confirmacion explicita NO se retira acceso.
+    assert evento.status != "refunded"
+
+
+def test_un_reembolso_confirmado_y_total_si_declara_devolucion():
+    """La otra mitad: cuando de verdad volvio el dinero, se dice."""
+    evento = traducir_evento(
+        _evento(
+            "refund.updated",
+            {
+                "payment_intent": "pi_1",
+                "status": "succeeded",
+                "amount": 19900,
+                "charge": {"id": "ch_1", "amount": 19900},
+            },
+        )
+    )
     assert evento.status == "refunded"
 
 

@@ -75,10 +75,22 @@ EVENTOS: dict[str, str] = {
     "checkout.session.async_payment_succeeded": "paid",
     "checkout.session.async_payment_failed": "failed",
     "checkout.session.expired": "cancelled",
-    "charge.refunded": "refunded",
-    "refund.created": "refunded",
-    "refund.updated": "refunded",
+    # LOS TRES DE DEVOLUCION NO SE TRADUCEN AQUI. El estado real depende del
+    # CONTENIDO del evento, no de su nombre, y eso lo resuelve `_estado_de_
+    # devolucion` mas abajo. Se listan para que `EVENTOS` siga siendo la lista
+    # de «lo que nos incumbe»; el valor es provisional.
+    "charge.refunded": "refund_pendiente",
+    "refund.created": "refund_pendiente",
+    "refund.updated": "refund_pendiente",
+    "refund.failed": "refund_pendiente",
+    "charge.refund.updated": "refund_pendiente",
 }
+
+#: Lo que Stripe llama a un reembolso que SI se completo.
+REFUND_COMPLETADO = "succeeded"
+#: Y lo que llama a los que no.
+REFUND_PENDIENTE = frozenset({"pending", "requires_action"})
+REFUND_FALLIDO = frozenset({"failed", "canceled"})
 
 
 class StripeConfigError(RuntimeError):
@@ -282,6 +294,14 @@ def traducir_evento(evento: dict[str, Any]) -> PaymentEvent:
     if tipo == "checkout.session.completed" and objeto.get("payment_status") != "paid":
         estado = "pendiente"
 
+    # UN AVISO DE DEVOLUCION NO ES UNA DEVOLUCION. Aqui estaba el fallo: los
+    # tres eventos de reembolso se traducian a 'refunded' por su NOMBRE, asi
+    # que un reembolso pendiente, uno fallido y uno PARCIAL retiraban el acceso
+    # igual que uno completo. Quien pedia devolver 1 de 199 perdia el curso
+    # entero, y quien tenia un reembolso en tramite lo perdia antes de cobrar.
+    if estado == "refund_pendiente":
+        estado = _estado_de_devolucion(tipo, objeto)
+
     referencia = _referencia_de_cobro(objeto)
     interno = _identificador_interno(objeto)
 
@@ -296,6 +316,61 @@ def traducir_evento(evento: dict[str, Any]) -> PaymentEvent:
         environment="production" if evento.get("livemode") else "sandbox",
         payload=evento,
     )
+
+
+def _estado_de_devolucion(tipo: str, objeto: dict[str, Any]) -> str:
+    """Que significa DE VERDAD este aviso de devolucion.
+
+    Devuelve 'refunded' SOLO si el reembolso esta completado Y es total. Todo
+    lo demas es 'refund_procesando', 'refund_fallido' o 'refund_parcial', y
+    ninguno de los tres retira el acceso.
+
+    LAS DOS FORMAS DEL EVENTO. `refund.*` trae el objeto reembolso, con su
+    `status` y su `amount`. `charge.refunded` trae el COBRO, sin `status` de
+    reembolso pero con `amount_refunded` y `amount`, que es lo que permite
+    saber si se devolvio todo o una parte.
+    """
+    if tipo.startswith("refund.") or tipo == "charge.refund.updated":
+        situacion = str(objeto.get("status") or "").lower()
+        if situacion in REFUND_FALLIDO:
+            return "refund_fallido"
+        if situacion != REFUND_COMPLETADO:
+            # Incluye 'pending', 'requires_action' y cualquier estado que
+            # Stripe añada mañana. Lo desconocido NO concede ni retira nada.
+            return "refund_procesando"
+        # Completado. Falta saber si fue total, y para eso hace falta el cobro.
+        devuelto = objeto.get("amount")
+        cobrado = _importe_del_cobro(objeto)
+        if isinstance(devuelto, int) and cobrado and devuelto < cobrado:
+            return "refund_parcial"
+        return "refunded"
+
+    # `charge.refunded`: el objeto es el cobro.
+    if not objeto.get("refunded", False):
+        # Stripe lo marca `true` cuando el cobro quedo devuelto POR COMPLETO.
+        devuelto = objeto.get("amount_refunded")
+        cobrado = objeto.get("amount")
+        if isinstance(devuelto, int) and isinstance(cobrado, int) and devuelto < cobrado:
+            return "refund_parcial"
+        return "refund_procesando"
+    return "refunded"
+
+
+def _importe_del_cobro(objeto: dict[str, Any]) -> int:
+    """El importe del cobro al que apunta un objeto reembolso.
+
+    Stripe puede mandar `charge` como identificador o como objeto expandido.
+    Sin el importe original no se puede saber si un reembolso fue total, y en
+    la duda NO se revoca: es preferible un acceso de mas que quitarle el curso
+    a quien no lo devolvio entero.
+    """
+    cobro = objeto.get("charge")
+    if isinstance(cobro, dict):
+        valor = cobro.get("amount")
+        if isinstance(valor, int):
+            return valor
+    valor = objeto.get("charge_amount")
+    return valor if isinstance(valor, int) else 0
 
 
 def _identificador_interno(objeto: dict[str, Any]) -> str:

@@ -42,15 +42,23 @@ PRECIO = 19900
 
 
 @pytest_asyncio.fixture
-async def sesiones(monkeypatch):
-    """Una base con un curso de pago de Bruno y una compra pagada de Ana."""
+async def sesiones():
+    """Una base con un curso de pago de Bruno y una compra pagada de Ana.
+
+    LA GARANTÍA SE ENCIENDE MUTANDO EL AJUSTE, NO LIMPIANDO EL CACHÉ.
+    `get_settings()` está cacheado y devuelve el MISMO objeto para toda la
+    sesión; el `conftest.py` se apoya en eso para apagar de una vez las salidas
+    al almacenamiento real. Un `cache_clear()` aquí tira ese apagado al suelo y
+    las pruebas siguientes empiezan a intentar salir a producción —que es
+    exactamente lo que pasó la primera vez que se escribió esta fixture, y el
+    fallo aparecía en pruebas de recomendaciones que no tienen nada que ver—.
+    """
     esquema.olvidar()
-    # La garantía nace apagada. Las pruebas la encienden a mano, que es
-    # exactamente lo que habrá que hacer en staging.
     from app.core.config import get_settings
 
-    get_settings.cache_clear()
-    monkeypatch.setenv("FEATURE_COURSE_REFUNDS", "true")
+    ajustes = get_settings()
+    anterior = ajustes.feature_course_refunds
+    ajustes.feature_course_refunds = True
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
@@ -90,7 +98,7 @@ async def sesiones(monkeypatch):
 
     yield fabrica
     await engine.dispose()
-    get_settings.cache_clear()
+    ajustes.feature_course_refunds = anterior
 
 
 # --------------------------------------------------------------------------- #
@@ -271,18 +279,20 @@ async def test_la_hora_que_manda_es_la_del_servidor(sesiones):
 
 
 @pytest.mark.asyncio
-async def test_con_el_interruptor_apagado_no_hay_garantia(sesiones, monkeypatch):
+async def test_con_el_interruptor_apagado_no_hay_garantia(sesiones):
     """Todo lo que mueve dinero nace apagado, y apagado no miente: dice que no."""
     from app.core.config import get_settings
 
-    get_settings.cache_clear()
-    monkeypatch.setenv("FEATURE_COURSE_REFUNDS", "false")
-    async with sesiones() as db:
-        estado = await service.estado_de_garantia(db, user_id=ANA, course_id=CURSO)
+    ajustes = get_settings()
+    ajustes.feature_course_refunds = False
+    try:
+        async with sesiones() as db:
+            estado = await service.estado_de_garantia(db, user_id=ANA, course_id=CURSO)
+    finally:
+        ajustes.feature_course_refunds = True
 
     assert estado.elegible is False
     assert estado.motivo == service.DESACTIVADO
-    get_settings.cache_clear()
 
 
 # --------------------------------------------------------------------------- #

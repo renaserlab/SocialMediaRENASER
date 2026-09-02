@@ -694,8 +694,32 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+#: Avisos de devolucion que NO retiran acceso. Se anotan y se dejan estar.
+#:
+#: Antes los tres se traducian a 'refunded' por su NOMBRE, asi que un reembolso
+#: pendiente, uno fallido y uno PARCIAL quitaban el curso igual que uno
+#: completo. Quien devolvia 1 de 199 perdia el curso entero.
+_DEVOLUCIONES_SIN_EFECTO = {
+    "refund_procesando": "el reembolso sigue en tramite",
+    "refund_parcial": "el reembolso es PARCIAL: no retira el acceso",
+    "refund_fallido": "el reembolso fallo",
+}
+
+
 async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
     entorno = evento.environment
+
+    if evento.status in _DEVOLUCIONES_SIN_EFECTO:
+        # Se registra el avance del expediente, si lo hay, pero NO se toca el
+        # acceso: retirarlo antes de que el dinero vuelva deja a la persona sin
+        # las dos cosas.
+        await _anotar_avance_de_devolucion(db, evento)
+        logger.info(
+            "[pagos] aviso de devolucion sin efecto sobre el acceso (%s): %s",
+            _DEVOLUCIONES_SIN_EFECTO[evento.status],
+            evento.provider_transaction_id,
+        )
+        return
 
     if evento.status == "refunded":
         pedido = await service.pedido_por_transaccion(
@@ -710,16 +734,7 @@ async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
                 evento.provider_transaction_id,
             )
             return
-        await service.revocar(
-            db,
-            user_id=pedido.user_id,
-            producto=await service.producto_de_pedido(db, pedido),
-            external_transaction_id=f"{evento.provider_transaction_id}:refund",
-            amount_minor=evento.amount_minor,
-            currency=evento.currency or pedido.currency,
-            motivo="devolución confirmada por Stripe",
-        )
-        await comercio_service.marcar_orden(db, order_id=pedido.id, status="refunded")
+        await _aplicar_reembolso_total(db, pedido, evento)
         return
 
     if evento.status != "paid":
@@ -759,6 +774,128 @@ async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
         external_transaction_id=evento.provider_transaction_id,
         canal="web",
         order_id=pedido.id,
+    )
+
+
+async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
+    """Un reembolso TOTAL y confirmado: la unica cosa que retira acceso.
+
+    Se delega en `refunds.reembolso.aplicar`, que hace las diez cosas en la
+    MISMA transaccion. Aqui solo se resuelve la orden y el expediente.
+
+    SI LA 0049 NO ESTA APLICADA se cae al camino de siempre —revocar y marcar
+    la orden—, que es exactamente lo que hacia antes. Desplegar este codigo no
+    exige tener la migracion puesta.
+    """
+    from app.modules.commerce.models import Order
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    orden = await db.get(Order, pedido.id)
+    if orden is None:
+        logger.error("[pagos] la devolucion apunta a un pedido inexistente")
+        return
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        await service.revocar(
+            db,
+            user_id=pedido.user_id,
+            producto=await service.producto_de_pedido(db, pedido),
+            external_transaction_id=f"{evento.provider_transaction_id}:refund",
+            amount_minor=evento.amount_minor,
+            currency=evento.currency or pedido.currency,
+            motivo="devolución confirmada por Stripe",
+        )
+        await comercio_service.marcar_orden(db, order_id=pedido.id, status="refunded")
+        return
+
+    from app.modules.refunds import reembolso, service as devoluciones
+
+    solicitud = await devoluciones.solicitud_viva(
+        db, user_id=orden.user_id, course_id=await _curso_de(db, orden)
+    )
+    try:
+        await reembolso.aplicar(
+            db,
+            orden=orden,
+            external_transaction_id=f"{evento.provider_transaction_id}:refund",
+            amount_minor=evento.amount_minor,
+            currency=evento.currency or orden.currency,
+            environment=evento.environment,
+            solicitud=solicitud,
+            motivo="reembolso confirmado por Stripe",
+        )
+    except reembolso.NoConciliado as error:
+        # NO se toca nada. Un aviso que no cuadra con la orden es justo el que
+        # no hay que aplicar: en la duda, el acceso se queda.
+        logger.error(
+            "[pagos] devolucion sin conciliar sobre la orden %s: %s", orden.id, error
+        )
+
+
+async def _curso_de(db: AsyncSession, orden) -> str:
+    from app.modules.commerce.models import CommerceProduct
+
+    producto = await db.get(CommerceProduct, orden.commerce_product_id)
+    return producto.course_id if producto and producto.course_id else ""
+
+
+async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
+    """Deja constancia de un reembolso en tramite, parcial o fallido.
+
+    No cambia el acceso. Lo unico que puede mover es el expediente: un fallo de
+    la pasarela pasa la solicitud a `failed`, que es lo que habilita el
+    reintento en la bandeja de administracion.
+    """
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return
+
+    from app.modules.commerce.models import Order
+    from app.modules.refunds import estados, service as devoluciones
+
+    pedido = await service.pedido_por_transaccion(
+        db,
+        provider="stripe",
+        environment=evento.environment,
+        external_transaction_id=evento.provider_transaction_id,
+    )
+    if pedido is None:
+        return
+    orden = await db.get(Order, pedido.id)
+    if orden is None:
+        return
+    solicitud = await devoluciones.solicitud_viva(
+        db, user_id=orden.user_id, course_id=await _curso_de(db, orden)
+    )
+    if solicitud is None:
+        return
+
+    if evento.status == "refund_fallido" and solicitud.status == estados.REFUND_PROCESSING:
+        await devoluciones.transicionar(
+            db,
+            solicitud,
+            hasta=estados.FAILED,
+            rol="system",
+            actor_id=None,
+            reason="la pasarela no pudo completar el reembolso",
+            external_reference=evento.provider_transaction_id,
+            metadata={"event_type": evento.event_type},
+        )
+        return
+
+    # Parcial o en tramite: solo se anota, sin mover el estado. Un reembolso
+    # parcial NO resuelve el expediente; lo tiene que mirar una persona.
+    await devoluciones._anotar(
+        db,
+        solicitud,
+        desde=solicitud.status,
+        hasta=solicitud.status,
+        rol="system",
+        actor_id=None,
+        reason=evento.status,
+        external_reference=evento.provider_transaction_id,
+        metadata={"event_type": evento.event_type},
     )
 
 

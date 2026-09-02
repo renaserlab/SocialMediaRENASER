@@ -428,7 +428,27 @@ def _sesion_pagada(
     }
 
 
-def _devolucion(*, intento: str = "pi_1", importe: int, event_id: str = "evt_ref") -> dict:
+def _devolucion(
+    *,
+    intento: str = "pi_1",
+    importe: int,
+    cobrado: int | None = None,
+    event_id: str = "evt_ref",
+) -> dict:
+    """Un `charge.refunded` como lo manda Stripe DE VERDAD.
+
+    ESTE DOBLE CAMBIO. Antes solo llevaba `amount_refunded`, y con eso no se
+    puede saber si el reembolso fue total o parcial: falta el importe original.
+    Mientras los eventos de devolucion se traducian por su NOMBRE daba igual
+    —cualquiera revocaba—, pero esa era justamente la traduccion equivocada:
+    devolver 1 de 199 quitaba el curso entero.
+
+    Ahora se mandan los tres campos que trae el evento real: `amount` (lo que
+    se cobro), `amount_refunded` (lo que se devuelve) y `refunded` (si el cobro
+    quedo devuelto DEL TODO). `cobrado` por defecto es el importe devuelto, o
+    sea una devolucion total.
+    """
+    total = cobrado if cobrado is not None else importe
     return {
         "id": event_id,
         "type": "charge.refunded",
@@ -437,7 +457,9 @@ def _devolucion(*, intento: str = "pi_1", importe: int, event_id: str = "evt_ref
             "object": {
                 "id": "ch_1",
                 "payment_intent": intento,
+                "amount": total,
                 "amount_refunded": importe,
+                "refunded": importe >= total,
                 "currency": "pen",
             }
         },
@@ -885,6 +907,63 @@ async def test_un_reembolso_quita_el_acceso_de_verdad(entorno):
     historial = (await entorno.http.get(f"{PAGOS}/history")).json()
     assert historial[0]["status"] == "refunded"
     assert historial[0]["has_access"] is False
+
+
+@pytest.mark.asyncio
+async def test_un_reembolso_PARCIAL_no_quita_el_acceso(entorno):
+    """Devolver 1 de 199 no puede costar el curso entero.
+
+    Es el reverso de la prueba de arriba y protege el fallo que tenia la
+    traduccion de eventos: los tres avisos de devolucion se leian por su NOMBRE,
+    asi que un reembolso parcial —una compensacion por una leccion que fallaba,
+    por ejemplo— retiraba el acceso completo. La persona se quedaba sin el curso
+    y con 198 sin devolver.
+    """
+    await _comprar_por_stripe(entorno)
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+    evento = _devolucion(importe=100, cobrado=PRECIO_A, event_id="evt_parcial")
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+
+    # El acceso SIGUE puesto y el derecho sigue activo.
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+    assert await _cuantos(
+        entorno.sesiones, Entitlement, Entitlement.status == "active"
+    ) == 1
+
+
+@pytest.mark.asyncio
+async def test_un_reembolso_en_tramite_tampoco_quita_el_acceso(entorno):
+    """`refund.created` significa «se ha pedido», no «ha vuelto el dinero».
+
+    Retirar el acceso aqui deja a la persona sin curso Y sin reembolso durante
+    todo el tramite, que puede durar dias.
+    """
+    await _comprar_por_stripe(entorno)
+
+    evento = {
+        "id": "evt_tramite",
+        "type": "refund.created",
+        "livemode": False,
+        "data": {
+            "object": {
+                "id": "re_1",
+                "payment_intent": "pi_1",
+                "status": "pending",
+                "amount": PRECIO_A,
+                "currency": "pen",
+            }
+        },
+    }
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
 
 
 # =========================================================================== #
