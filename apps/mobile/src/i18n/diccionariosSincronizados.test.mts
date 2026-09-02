@@ -93,11 +93,22 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   ]),
   pt: new Set<string>([
     // Portugues y español escriben estas igual. Se comprueban una a una.
-    // Los nombres bajo los botones de una publicacion: «Comentar» y
-    // «Republicar» son la misma palabra en los dos idiomas —«Curtir» y
-    // «Compartilhar», que si cambian, no estan aqui— y «Ver lista» tambien.
+    // Los nombres bajo los botones de una publicacion: «Comentar» es la misma
+    // palabra en los dos idiomas —«Curtir» y «Compartilhar», que si cambian, no
+    // estan aqui— y «Ver lista» tambien.
+    //
+    // `post.actionRepost` YA NO ESTA: el español paso a «Repostear» y el
+    // portugues conserva «Republicar», que es su forma correcta. Al dejar de
+    // coincidir, la excepcion sobraba.
+    // Devoluciones: «Cancelada» y «Retirada» se escriben igual en los dos
+    // idiomas, igual que ya pasaba con `agenda.stateCancelled`.
+    'compras.estado.cancelled',
+    'devolucion.estado.cancelled',
+    // «Publicado», «Reel publicado» y «Usar esta foto» tambien coinciden.
+    'create.postPublished',
+    'create.reelPublished',
+    'profile.usePhoto',
     'post.actionComment',
-    'post.actionRepost',
     'post.viewSavedList',
     // «Responder» es la misma palabra en los dos idiomas; «Respondendo a» y
     // «Escreva uma resposta», que si cambian, no estan aqui.
@@ -155,11 +166,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'field.timeWithLabel',
     'story.trimSeconds',
     'course.viewProgram',
-    'auth.reasonRepost',
     'auth.reasonComment',
     'common.discard',
     'post.block',
-    'post.repost',
     'blocked.unblock',
     'members.viewProfile',
     'common.send',
