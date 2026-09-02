@@ -2,12 +2,27 @@
 -- 0049 — Garantía de 7 días, devoluciones y liquidación al propietario
 -- =============================================================================
 --
--- ┌───────────────────────────────────────────────────────────────────────────┐
--- │  ESTA MIGRACIÓN ESTÁ PREPARADA Y **NO APLICADA**. Todo lo que crea nace    │
--- │  detrás de interruptores apagados: sin ella, la aplicación sigue exacta-   │
--- │  mente igual que hoy (`esquema.hay_devoluciones()` responde que no y los   │
--- │  endpoints financieros contestan «no disponible» en vez de reventar).      │
--- └───────────────────────────────────────────────────────────────────────────┘
+-- ESTA MIGRACIÓN ESTÁ **APLICADA** (2 de septiembre de 2026, confirmado por
+-- quien la ejecutó). Comprobado después, contra la base real:
+--
+--   * las siete tablas existen y las siete tienen RLS activada;
+--   * hay SIETE políticas y las siete son de SELECT — ninguna de escritura;
+--   * están los siete índices únicos, incluidos los tres parciales;
+--   * las siete tablas están vacías y `lesson_progress`, `orders`,
+--     `entitlements` y `course_enrollments` no cambiaron.
+--
+-- La API se reinició acto seguido, que es lo que hacía falta (ver el final).
+--
+-- APLICARLA NO ENCIENDE NADA. `FEATURE_COURSE_REFUNDS`,
+-- `STRIPE_REFUNDS_ENABLED`, `STRIPE_CONNECT_ENABLED` y
+-- `CREATOR_TRANSFERS_ENABLED` siguen apagados, y `PLATFORM_FEE_BPS` sigue sin
+-- decidirse. Con la migración puesta y los interruptores apagados, la
+-- aplicación se comporta exactamente como antes.
+--
+-- Es aditiva e idempotente: volver a pasarla no hace nada. Y el código sigue
+-- funcionando SIN ella —`esquema.hay_devoluciones()` responde que no y los
+-- endpoints contestan «no disponible» en vez de reventar—, que es lo que hace
+-- posible la vuelta atrás.
 --
 -- =============================================================================
 -- QUÉ PROBLEMA RESUELVE

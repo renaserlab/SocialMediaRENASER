@@ -45,6 +45,20 @@ VIVOS: Final[frozenset[str]] = frozenset({
     REQUESTED, UNDER_REVIEW, APPROVED, REFUND_PROCESSING, FAILED,
 })
 
+#: Lo MISMO que `VIVOS`, en el orden fijo con el que se declara el índice
+#: parcial de la 0049 — y como TEXTO SQL, no como conjunto.
+#:
+#: POR QUÉ HACE FALTA LAS DOS FORMAS. SQLite (y PostgreSQL) solo aceptan un
+#: `ON CONFLICT ... WHERE` si coincide con el `WHERE` del índice. Un
+#: `frozenset` no tiene orden, así que generarlo desde `VIVOS` produce la lista
+#: barajada y la base contesta «ON CONFLICT clause does not match any UNIQUE
+#: constraint». Con el texto en una constante, el índice y la inserción salen
+#: siempre del mismo sitio y no pueden divergir.
+SQL_VIVOS: Final = (
+    "status in ('requested', 'under_review', 'approved', "
+    "'refund_processing', 'failed')"
+)
+
 #: Estados finales. De aquí no se sale.
 FINALES: Final[frozenset[str]] = frozenset({REFUNDED, REJECTED, CANCELLED})
 

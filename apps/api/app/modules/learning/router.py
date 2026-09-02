@@ -919,6 +919,20 @@ async def list_course_students(
         consulta = consulta.where(
             Profile.full_name.ilike(patron) | Profile.username.ilike(patron)
         )
+
+    # TODOS LOS FILTROS ANTES DE PAGINAR. Filtrar despues del `limit` es un
+    # fallo que no se ve con pocos alumnos: se piden veinte, la base devuelve
+    # veinte y el filtro deja seis, asi que la pagina sale con seis y la
+    # siguiente se salta catorce personas que si cumplian. Con cien alumnos y
+    # el filtro «sin empezar», la lista pierde la mayoria sin decirlo.
+    #
+    # Progreso y acceso viven en otras tablas, asi que el filtro se traduce a
+    # subconsultas correlacionadas y NO a un recorte en Python.
+    if estado in {"not_started", "in_progress", "completed"}:
+        consulta = consulta.where(_condicion_de_progreso(course_id, estado))
+    elif estado == "revoked":
+        consulta = consulta.where(_condicion_de_acceso_retirado(course_id))
+
     filas = (
         await db.execute(
             consulta.order_by(
@@ -966,11 +980,79 @@ async def list_course_students(
             )
         )
 
-    if estado in {"not_started", "in_progress", "completed"}:
-        alumnos = [a for a in alumnos if a.state == estado]
-    elif estado == "revoked":
-        alumnos = [a for a in alumnos if a.access_state == "revoked"]
     return alumnos
+
+
+def _lecciones_completadas(course_id: str):
+    """Cuantas lleva completadas cada alumno, como subconsulta correlacionada."""
+    from app.modules.commerce.models import CourseEnrollment
+
+    return (
+        select(func.count())
+        .select_from(LessonProgress)
+        .join(CourseLesson, CourseLesson.id == LessonProgress.lesson_id)
+        .join(CourseModule, CourseModule.id == CourseLesson.module_id)
+        .where(
+            CourseModule.course_id == course_id,
+            LessonProgress.user_id == CourseEnrollment.user_id,
+            LessonProgress.completed.is_(True),
+        )
+        .scalar_subquery()
+    )
+
+
+def _total_de_lecciones(course_id: str):
+    return (
+        select(func.count())
+        .select_from(CourseLesson)
+        .join(CourseModule, CourseModule.id == CourseLesson.module_id)
+        .where(CourseModule.course_id == course_id)
+        .scalar_subquery()
+    )
+
+
+def _condicion_de_progreso(course_id: str, estado: str):
+    """El filtro de progreso, en SQL.
+
+    `completed` exige que el curso TENGA lecciones: sin esa guarda, un curso
+    vacio daria 0 >= 0 y saldrian todos los alumnos como si lo hubieran
+    terminado, cuando en realidad no hay nada que terminar.
+    """
+    hechas = _lecciones_completadas(course_id)
+    total = _total_de_lecciones(course_id)
+    if estado == "not_started":
+        return hechas == 0
+    if estado == "in_progress":
+        return (hechas > 0) & (hechas < total)
+    return (total > 0) & (hechas >= total)
+
+
+def _condicion_de_acceso_retirado(course_id: str):
+    """Quien tuvo acceso y ya no lo tiene.
+
+    Se pide que exista un derecho NO activo y que no exista ninguno activo: con
+    solo lo primero, alguien que devolvio y recompro saldria como retirado
+    porque conserva la fila vieja revocada.
+    """
+    from app.modules.commerce.models import CommerceProduct, CourseEnrollment, Entitlement
+
+    def _derechos(situacion_activa: bool):
+        consulta = (
+            select(Entitlement.id)
+            .join(
+                CommerceProduct,
+                CommerceProduct.id == Entitlement.commerce_product_id,
+            )
+            .where(
+                CommerceProduct.course_id == course_id,
+                Entitlement.user_id == CourseEnrollment.user_id,
+            )
+        )
+        if situacion_activa:
+            return consulta.where(Entitlement.status == "active")
+        return consulta.where(Entitlement.status != "active")
+
+    return _derechos(False).exists() & ~_derechos(True).exists()
 
 
 async def _cuantas_lecciones(db: AsyncSession, course_id: str) -> int:
@@ -1038,6 +1120,31 @@ async def _acceso_por_alumno(
     return resultado
 
 
+async def _quien_compro(
+    db: AsyncSession, course_id: str, ids: list[str]
+) -> set[str]:
+    """Quien tiene una orden PAGADA o REEMBOLSADA de este curso.
+
+    Es lo que distingue una venta de una matricula gratuita. Sin ello, quien
+    compro y nunca pidio una devolucion salia sin estado comercial, o sea
+    indistinguible de quien entro con un curso gratis.
+    """
+    if not await esquema_comercio.hay_comercio(db):
+        return set()
+    from app.modules.commerce.models import CommerceProduct, Order
+
+    filas = await db.scalars(
+        select(Order.user_id)
+        .join(CommerceProduct, CommerceProduct.id == Order.commerce_product_id)
+        .where(
+            CommerceProduct.course_id == course_id,
+            Order.user_id.in_(ids),
+            Order.status.in_(("paid", "refunded")),
+        )
+    )
+    return set(filas)
+
+
 async def _estado_comercial(
     db: AsyncSession, course_id: str, ids: list[str]
 ) -> dict[str, str]:
@@ -1050,9 +1157,15 @@ async def _estado_comercial(
     """
     from app.modules.refunds import esquema as esquema_devoluciones
 
+    # SE EMPIEZA POR QUIEN COMPRO. Una venta sin incidencias es `sold`; sin
+    # esta base, quien compro y nunca pidio nada salia como `none`, o sea igual
+    # que quien entro con un curso gratuito.
+    compradores = await _quien_compro(db, course_id, ids)
+    resultado: dict[str, str] = {uid: "sold" for uid in compradores}
+
     if not await esquema_devoluciones.hay_devoluciones(db):
-        return {}
-    from app.modules.refunds.estados import FINALES, REFUNDED, VIVOS
+        return resultado
+    from app.modules.refunds.estados import REFUNDED, VIVOS
     from app.modules.refunds.models import RefundRequest
 
     filas = (
@@ -1063,12 +1176,12 @@ async def _estado_comercial(
             )
         )
     ).all()
-    resultado: dict[str, str] = {}
+    # `refunded` manda sobre todo lo demas, y `under_review` sobre `sold`: si
+    # alguien tiene un expediente cerrado y otro abierto, lo que el propietario
+    # necesita saber es que hay dinero en revision.
     for uid, situacion in filas:
         if situacion == REFUNDED:
             resultado[uid] = "refunded"
         elif situacion in VIVOS and resultado.get(uid) != "refunded":
             resultado[uid] = "under_review"
-        elif uid not in resultado and situacion in FINALES:
-            resultado[uid] = "sold"
     return resultado

@@ -442,7 +442,171 @@ async def aprobar(
     )
     await db.commit()
     await _avisar_estado(db, solicitud, "approved")
+
+    # Aprobar autoriza; ejecutar es otra cosa y va detras de su propia bandera.
+    await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
     return await _a_lectura_admin(db, solicitud, con_historial=True)
+
+
+async def ejecutar_reembolso(
+    db: AsyncSession, solicitud: RefundRequest, *, actor_id: str | None
+) -> None:
+    """Pedirle a la pasarela que devuelva el dinero.
+
+    IDEMPOTENTE EN TRES CAPAS, porque pagar dos veces no se puede deshacer:
+
+    1. Si la solicitud ya tiene `external_refund_id`, no se vuelve a pedir: ya
+       hay un reembolso vivo ahi fuera.
+    2. La clave que se manda se deriva de la SOLICITUD, no del intento, asi que
+       tres reintentos son la misma operacion para la pasarela.
+    3. La transicion a `refund_processing` es un UPDATE condicional, asi que dos
+       administradores simultaneos solo consiguen una ejecucion.
+
+    APAGADO POR DEFECTO. Con `STRIPE_REFUNDS_ENABLED` en falso, el proveedor es
+    el que falla en cerrado: la solicitud queda en `failed` con el motivo a la
+    vista y NADIE pierde el acceso. Eso es lo que permite recorrer el circuito
+    entero en staging sin cuenta de Stripe.
+
+    NO RETIRA EL ACCESO. Ni aunque la pasarela conteste «hecho». El acceso se
+    retira con el webhook confirmado y conciliado; esta respuesta solo dice si
+    la peticion se acepto.
+    """
+    from app.modules.payments.reembolsos import (
+        RefundRequestToProvider,
+        clave_de_idempotencia,
+        proveedor_de_reembolsos,
+    )
+
+    if solicitud.external_refund_id:
+        logger.info(
+            "[devoluciones] la solicitud %s ya tiene reembolso %s; no se repite",
+            solicitud.id,
+            solicitud.external_refund_id,
+        )
+        return
+
+    transaccion = await _transaccion_de_la_orden(db, solicitud.order_id)
+    if not transaccion:
+        await _marcar_fallo(
+            db,
+            solicitud,
+            codigo="no_transaction",
+            mensaje="No se encontro el cobro original que devolver.",
+        )
+        return
+
+    try:
+        await devoluciones.transicionar(
+            db,
+            solicitud,
+            hasta=estados.REFUND_PROCESSING,
+            rol="admin",
+            actor_id=actor_id,
+            reason="reembolso pedido a la pasarela",
+        )
+        await db.commit()
+    except estados.TransicionInvalida:
+        # Otro lo esta ejecutando ya. Que gane el primero.
+        return
+
+    proveedor = proveedor_de_reembolsos()
+    resultado = await proveedor.create_full_refund(
+        RefundRequestToProvider(
+            external_transaction_id=transaccion,
+            amount_minor=solicitud.amount_minor,
+            currency=solicitud.currency,
+            idempotency_key=clave_de_idempotencia(solicitud.id),
+            metadata={"refundRequestId": solicitud.id, "orderId": solicitud.order_id},
+        )
+    )
+
+    if resultado.external_refund_id:
+        solicitud.external_refund_id = resultado.external_refund_id
+        await db.flush()
+
+    if resultado.status == "failed":
+        await _marcar_fallo(
+            db,
+            solicitud,
+            codigo=resultado.failure_code or "provider_failed",
+            mensaje=resultado.failure_message or "La pasarela no pudo devolver.",
+        )
+        return
+
+    if resultado.status not in {"succeeded", "pending"}:
+        # Una respuesta que no entendemos NO se da por buena.
+        await _marcar_fallo(
+            db,
+            solicitud,
+            codigo="unknown_status",
+            mensaje=f"Respuesta no reconocida: {resultado.status!r}.",
+        )
+        return
+
+    # `succeeded` incluido: se queda en `refund_processing` a la espera del
+    # webhook. La respuesta sincrona no se concilia con la orden ni con el
+    # entorno; el webhook si, y es el que retira el acceso.
+    await devoluciones._anotar(
+        db,
+        solicitud,
+        desde=solicitud.status,
+        hasta=solicitud.status,
+        rol="system",
+        actor_id=None,
+        reason=f"la pasarela respondio '{resultado.status}'",
+        external_reference=resultado.external_refund_id or None,
+        metadata={"provider_status": resultado.status},
+    )
+    await db.commit()
+
+
+async def _transaccion_de_la_orden(db: AsyncSession, order_id: str) -> str:
+    """El identificador del COBRO original, que es lo que se devuelve."""
+    from app.modules.commerce.models import PaymentTransaction
+
+    referencia = await db.scalar(
+        select(PaymentTransaction.external_transaction_id)
+        .where(
+            PaymentTransaction.order_id == order_id,
+            PaymentTransaction.kind == "purchase",
+        )
+        .order_by(PaymentTransaction.created_at.desc())
+        .limit(1)
+    )
+    return referencia or ""
+
+
+async def _marcar_fallo(
+    db: AsyncSession, solicitud: RefundRequest, *, codigo: str, mensaje: str
+) -> None:
+    """Deja el expediente en `failed`, que es lo que habilita el reintento."""
+    try:
+        if solicitud.status == estados.REFUND_PROCESSING:
+            await devoluciones.transicionar(
+                db,
+                solicitud,
+                hasta=estados.FAILED,
+                rol="system",
+                actor_id=None,
+                reason=codigo,
+                notes=mensaje,
+            )
+        else:
+            await devoluciones._anotar(
+                db,
+                solicitud,
+                desde=solicitud.status,
+                hasta=solicitud.status,
+                rol="system",
+                actor_id=None,
+                reason=codigo,
+                notes=mensaje,
+            )
+        await db.commit()
+    except estados.TransicionInvalida:
+        logger.warning(
+            "[devoluciones] no se pudo marcar el fallo de %s", solicitud.id
+        )
 
 
 @admin_router.post("/refund-requests/{request_id}/reject", response_model=AdminRefundRead)
@@ -481,10 +645,26 @@ async def reintentar(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AdminRefundRead:
-    """Volver a intentar un reembolso que la pasarela no pudo completar."""
-    return await _mover(
-        db, request_id, current_user, hasta=estados.REFUND_PROCESSING, notes=None
-    )
+    """Volver a intentar un reembolso que la pasarela no pudo completar.
+
+    Reintentar EJECUTA otra vez, no solo cambia el estado. Y no paga dos veces:
+    la clave de idempotencia sale de la solicitud, asi que la pasarela reconoce
+    la misma operacion.
+    """
+    await _exigir_gestor(db, current_user)
+    await _exigir_disponible(db)
+    solicitud = await _cualquiera(db, request_id)
+    if solicitud.status != estados.FAILED:
+        raise ValidationAppError(
+            "Solo se puede reintentar una solicitud que fallo.",
+            code="refund_invalid_transition",
+        )
+    # Se limpia la referencia anterior: fallo, asi que no hay reembolso vivo
+    # que respetar, y sin esto la guarda de idempotencia bloquearia el reintento.
+    solicitud.external_refund_id = None
+    await db.flush()
+    await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
+    return await _a_lectura_admin(db, solicitud, con_historial=True)
 
 
 @admin_router.post("/refund-requests/{request_id}/cancel", response_model=AdminRefundRead)
@@ -581,8 +761,7 @@ async def _progreso(db: AsyncSession, solicitud: RefundRequest) -> int:
     plazo, haya visto una lección o todas. Se enseña porque ayuda a decidir en
     los casos raros, no porque decida.
     """
-    from app.modules.catalog.models import CourseLesson, CourseModule
-    from app.modules.learning.models import LessonProgress
+    from app.modules.learning.models import CourseLesson, CourseModule, LessonProgress
     from sqlalchemy import func
 
     total = await db.scalar(

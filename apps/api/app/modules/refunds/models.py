@@ -34,6 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.modules.refunds.estados import SQL_VIVOS
 from app.shared.database import Base
 
 
@@ -178,18 +179,16 @@ class RefundRequest(Base):
         CheckConstraint("amount_minor >= 0", name="refund_requests_amount"),
         # UNA SOLICITUD VIVA POR ORDEN. Parcial: rechazadas y canceladas puede
         # haber varias —es historial—; abiertas sobre el mismo dinero, una.
+        #
+        # El `WHERE` sale de `estados.SQL_VIVOS` y no se escribe aquí a mano:
+        # tiene que coincidir LETRA POR LETRA con el de la inserción, o la base
+        # rechaza el `ON CONFLICT` con un error que no menciona el motivo real.
         Index(
             "refund_requests_viva_por_orden",
             "order_id",
             unique=True,
-            postgresql_where=text(
-                "status in ('requested', 'under_review', 'approved', "
-                "'refund_processing', 'failed')"
-            ),
-            sqlite_where=text(
-                "status in ('requested', 'under_review', 'approved', "
-                "'refund_processing', 'failed')"
-            ),
+            postgresql_where=text(SQL_VIVOS),
+            sqlite_where=text(SQL_VIVOS),
         ),
         # UN REEMBOLSO CON ÉXITO POR (usuario, curso), PARA SIEMPRE. Es la
         # política de una sola devolución, y va aquí porque un `if` se salta

@@ -142,7 +142,7 @@ class Comment(Base):
 
 
 class CommentLike(Base):
-    """Un «me gusta» a un COMENTARIO (migracion 0048, sin aplicar).
+    """Un «me gusta» a un COMENTARIO (migracion 0048, aplicada).
 
     Es `post_likes` con la clave apuntando a `comments`, y no una columna
     `entity_type` en aquella: `post_likes.post_id` tiene foranea a `posts`, y

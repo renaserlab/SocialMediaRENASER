@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -146,7 +146,53 @@ async def asegurar_ventana(
     await db.flush()
     # Se relee SIEMPRE: la fila puede ser la nuestra o la de quien llego antes.
     # Cual de las dos sea da igual; lo que importa es que las dos vean la misma.
-    return await _ventana(db, user_id=user_id, course_id=course_id)
+    ventana = await _ventana(db, user_id=user_id, course_id=course_id)
+    # EL SALDO DEL PROPIETARIO VENCE CON ESTA GARANTIA, NO CON LA COMPRA.
+    # Al cobrar se retuvo el plazo completo desde la venta, que es el peor caso
+    # porque todavia no se sabia cuando iba a entrar. Ahora ya se sabe: quien
+    # compra el lunes y entra el viernes corre sus 168 horas desde el viernes,
+    # y pagarle al propietario el lunes siguiente seria pagarle con la garantia
+    # todavia abierta.
+    if ventana is not None:
+        await _sincronizar_vencimiento_del_saldo(db, ventana)
+    return ventana
+
+
+async def _sincronizar_vencimiento_del_saldo(
+    db: AsyncSession, ventana: CourseRefundWindow
+) -> None:
+    """Mueve `available_at` del saldo al vencimiento REAL de la garantia.
+
+    Solo toca saldos `pending`: uno congelado esta en manos de una solicitud, y
+    uno ya elegible o transferido no se puede retrasar sin descuadrar lo que ya
+    se conto como pagable.
+
+    Nunca revienta la entrega de la leccion: si la liquidacion no esta
+    disponible, no hay nada que sincronizar y se sigue.
+    """
+    if ventana.order_id is None:
+        return
+    try:
+        from app.modules.commerce.models import OwnerSaleBalance
+        from app.modules.refunds import esquema
+
+        if not await esquema.hay_liquidaciones(db):
+            return
+        await db.execute(
+            update(OwnerSaleBalance)
+            .where(
+                OwnerSaleBalance.order_id == ventana.order_id,
+                OwnerSaleBalance.status == "pending",
+            )
+            .values(available_at=ventana.expires_at, updated_at=ahora())
+        )
+        await db.flush()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "[devoluciones] no se pudo sincronizar el vencimiento del saldo de "
+            "la orden %s",
+            ventana.order_id,
+        )
 
 
 async def _ventana(
@@ -354,7 +400,8 @@ async def crear_solicitud(
         )
         .on_conflict_do_nothing(
             index_elements=["order_id"],
-            index_where=RefundRequest.status.in_(tuple(estados.VIVOS)),
+            # Texto literal y compartido con el indice: ver `estados.SQL_VIVOS`.
+            index_where=text(estados.SQL_VIVOS),
         )
     )
     await db.flush()
@@ -413,8 +460,35 @@ async def transicionar(
     desde = solicitud.status
     estados.exigir(desde, hasta, rol=rol)
 
+    # LA COMPROBACION DE ARRIBA NO BASTA, Y ESTE ES EL CASO QUE LO DEMUESTRA:
+    # dos administradores abren la misma solicitud, los dos ven `under_review`
+    # y los dos pulsan «aprobar». Los dos pasan `estados.exigir` —porque cada
+    # uno lee su propia copia en memoria— y los dos escriben. Resultado: dos
+    # reembolsos del mismo dinero.
+    #
+    # Se cierra con un UPDATE CONDICIONAL: la base cambia la fila solo si su
+    # estado sigue siendo el que leimos. Es una comparacion y una escritura en
+    # la MISMA sentencia, asi que no hay hueco entre las dos por el que se
+    # cuele nadie. El segundo administrador afecta a cero filas y se entera.
+    momento = ahora()
+    resultado = await db.execute(
+        update(RefundRequest)
+        .where(RefundRequest.id == solicitud.id, RefundRequest.status == desde)
+        .values(status=hasta, updated_at=momento)
+    )
+    if resultado.rowcount == 0:
+        # Alguien la movio entre que la leimos y ahora. Se relee para decir a
+        # que estado, que es mas util que «no se pudo».
+        await db.refresh(solicitud)
+        raise estados.TransicionInvalida(
+            solicitud.status,
+            hasta,
+            "Otra persona movio esta solicitud mientras la revisabas: ahora "
+            f"esta en '{solicitud.status}'.",
+        )
+
     solicitud.status = hasta
-    solicitud.updated_at = ahora()
+    solicitud.updated_at = momento
     if hasta == estados.UNDER_REVIEW:
         solicitud.reviewer_id = actor_id
         solicitud.reviewed_at = ahora()

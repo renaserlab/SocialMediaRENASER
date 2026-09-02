@@ -576,12 +576,25 @@ async def stripe_checkout(
         # No se cobra dos veces a quien ya tiene acceso.
         raise ConflictError("Ya tienes acceso a este curso.")
 
+    # RECOMPRA SIN GARANTIA: hay que haberlo aceptado ANTES de cobrar.
+    #
+    # Quien ya uso su garantia en este curso puede volver a comprarlo, pero esa
+    # compra no admite otra devolucion. Enseñarselo despues de cobrar seria
+    # cobrarle sin haberle dicho lo que compra. El aviso lo sirve
+    # `/payments/courses/{id}/repurchase-notice` y la aceptacion se guarda con
+    # la huella del texto exacto que se mostro.
+    await _exigir_aceptacion_de_recompra(db, user_id=current_user.id, course_id=cid)
+
     # El importe lo pone el comercio leyendo el curso: `crear_orden` NI SIQUIERA
     # acepta un parámetro de importe, así que no hay forma de que llegue uno del
     # cliente ni por descuido ni por un parámetro que alguien añada mañana.
     pedido = await service.crear_pedido_pendiente(
         db, user_id=current_user.id, producto=producto, canal="web"
     )
+    # La aceptacion se ato a la orden que acaba de nacer: sin esto quedaria
+    # suelta y no se podria responder «que acepto exactamente quien compro
+    # ESTA orden».
+    await _atar_aceptacion(db, user_id=current_user.id, course_id=cid, order_id=pedido.id)
     # El comercio hace `flush`, nunca `commit`: el commit es de quien llama.
     await db.commit()
 
@@ -903,6 +916,59 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
     )
 
 
+async def _exigir_aceptacion_de_recompra(
+    db: AsyncSession, *, user_id: str, course_id: str
+) -> None:
+    """409 si va a recomprar sin haber aceptado que no habra garantia.
+
+    NO ES UNA CASILLA COSMETICA. Es la unica forma de que despues se pueda
+    demostrar que se le dijo: la aceptacion guarda la version y la huella del
+    texto que se mostro, asi que cambiar la redaccion no reescribe lo que
+    firmaron los de antes.
+
+    Si las devoluciones estan apagadas o la 0049 no esta, no hay garantia que
+    haber usado y no se exige nada: el cobro sigue funcionando exactamente como
+    antes de esta funcionalidad.
+    """
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return
+    if not get_settings().feature_course_refunds:
+        return
+
+    from app.modules.refunds import service as devoluciones
+
+    usada = await devoluciones.ya_devolvio(db, user_id=user_id, course_id=course_id)
+    if usada is None:
+        # Primera compra, o una recompra sin devolucion previa: con garantia.
+        return
+    if await devoluciones.tiene_aceptacion(
+        db, user_id=user_id, course_id=course_id
+    ):
+        return
+    raise ConflictError(
+        "Ya usaste la garantía de este curso. Tienes que aceptar que esta "
+        "nueva compra no admite otra devolución.",
+        code="refund_acceptance_required",
+    )
+
+
+async def _atar_aceptacion(
+    db: AsyncSession, *, user_id: str, course_id: str, order_id: str
+) -> None:
+    """Enlaza la aceptacion suelta con la orden recien creada."""
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return
+    from app.modules.refunds import service as devoluciones
+
+    await devoluciones.enlazar_aceptacion(
+        db, user_id=user_id, course_id=course_id, order_id=order_id
+    )
+
+
 def _es_nueva(concesion) -> bool:
     """Si la concesion escribio algo o ya estaba.
 
@@ -983,13 +1049,19 @@ async def _avisar_compra_al_propietario(db: AsyncSession, orden) -> None:
     curso = await db.get(Course, producto.course_id)
     if curso is None:
         return
+    # LA ENTIDAD ES LA ORDEN, NO EL CURSO. `course_purchase` es idempotente por
+    # (destinatario, tipo, actor, entidad); con el curso como entidad, la
+    # SEGUNDA compra del mismo curso por la misma persona —una recompra despues
+    # de devolver— se tomaria por un reintento del webhook y el propietario no
+    # se enteraria de una venta real. Con la orden, cada venta avisa una vez y
+    # solo una.
     await add_notification(
         db,
         user_id=curso.author_id,
         actor_id=orden.user_id,
         type="course_purchase",
-        entity_type="course",
-        entity_id=curso.id,
+        entity_type="order",
+        entity_id=orden.id,
         payload={"orderId": orden.id, "courseId": curso.id},
     )
     await db.commit()
