@@ -58,6 +58,20 @@ type Props = {
  * se enseñan en el gestor, que es donde sirven para decidir. Aquí sólo
  * engordarían la fila y harían que cupieran tres etiquetas en vez de cinco: una
  * barra de filtros que hay que recorrer entera deja de ser un índice.
+ *
+ * -----------------------------------------------------------------------------
+ * LA PRIMERA VEZ SE EXPLICA; DESPUÉS NO
+ * -----------------------------------------------------------------------------
+ * Sin ninguna etiqueta creada, esta fila es un botón «Crear etiqueta» suelto y
+ * nada dice qué es eso, a qué se le pone ni quién lo ve. Eran las tres
+ * preguntas que frenaban la función: quien no sabe que son privadas o no la usa
+ * —por no etiquetar a una persona delante de ella— o la usa creyendo que es
+ * compartido. Por eso `label.explain` sale AQUÍ, a la vista, y no sólo dentro
+ * del gestor que hay que abrir para leerlo.
+ *
+ * Y DESAPARECE EN CUANTO HAY UNA. Un cartel permanente encima de la bandeja
+ * roba la altura de la primera conversación todos los días para explicar algo
+ * que ya se entendió el primero.
  */
 export function ChipsDeEtiquetas({
   etiquetas,
@@ -119,6 +133,9 @@ export function ChipsDeEtiquetas({
               accessibilityLabel={
                 etiquetas.length === 0 ? t('label.createShort') : t('label.manageShort')
               }
+              // Lo que un icono no puede decir: qué son y quién las ve. Con
+              // lector de pantalla el botón era sólo «Etiquetas».
+              accessibilityHint={t('label.explain')}
             >
               <Feather name="plus" size={14} color={colors.text} />
               <Text variant="caption" weight="700" color={colors.text}>
@@ -130,6 +147,16 @@ export function ChipsDeEtiquetas({
           ) : null}
         </ScrollView>
       </SinCambioDeSeccion>
+
+      {/*
+        Sólo mientras no hay ninguna: ver la cabecera. Va FUERA del ScrollView
+        horizontal para que se lea entera sin arrastrar nada.
+      */}
+      {etiquetas.length === 0 && alGestionar ? (
+        <Text variant="caption" color={colors.textMuted} style={styles.explicacion}>
+          {t('label.explain')}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -141,6 +168,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     alignItems: 'center',
   },
+  explicacion: { paddingBottom: spacing.sm, lineHeight: 15 },
   gestionar: {
     flexDirection: 'row',
     alignItems: 'center',

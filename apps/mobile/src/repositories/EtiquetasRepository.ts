@@ -33,6 +33,22 @@ import { apiRequest, API_V1, ApiError } from '@/services/api';
  * El backend responde `[]` al listar y 503 `conversation_labels_not_available`
  * al escribir. `cargarEtiquetas` traduce eso a `disponible: false` y la interfaz
  * NO OFRECE la función —ni chips, ni botón— en vez de dejar un botón muerto.
+ *
+ * -----------------------------------------------------------------------------
+ * QUÉ SE HA COMPROBADO CONTRA EL ESQUEMA DE VERDAD
+ * -----------------------------------------------------------------------------
+ * Las siete llamadas de abajo son EXACTAMENTE las siete rutas que declara
+ * `apps/api/app/modules/messaging/etiquetas.py`, y los campos que se leen
+ * (`id`, `nombre`, `conversaciones`) son los de sus `EtiquetaBreve` /
+ * `EtiquetaRead`. Nada de esto es nuevo ni ha hecho falta cambiarlo: la
+ * asignación es idempotente por la clave primaria compuesta de la 0045 (de ahí
+ * el `PUT`), retirarla dos veces tampoco es un error, y el filtro por etiqueta
+ * viaja como `label_id` en la consulta del listado (`lib/bandeja.ts`), que es
+ * donde tiene que estar para que la paginación siga contando filas de verdad.
+ * Lo único que se ha tocado en esta ronda es el DESCUBRIMIENTO de la función,
+ * en `ChipsDeEtiquetas`. Y NO existen etiquetas de mensajes sueltos: una
+ * etiqueta se pone a la conversación entera, que es lo que guarda
+ * `conversation_label_assignments`.
  */
 
 /** Una etiqueta con cuántas conversaciones lleva (las de quien pregunta). */

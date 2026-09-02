@@ -14,8 +14,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
-import { AppHeader } from '@/components/AppHeader';
 import { BotonDeNotaDeVoz } from '@/components/BotonDeNotaDeVoz';
+import { CabeceraDeChat } from '@/components/CabeceraDeChat';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { ImageViewer } from '@/components/ImageViewer';
@@ -548,17 +548,93 @@ export function ChatScreen() {
   // -------------------------------------------------------------------------
 
   /**
-   * Una nota terminada se manda SOLA, sin pasar por la tira de adjuntos.
+   * Sube UNA nota de voz y crea su mensaje. Devuelve si el servidor lo confirmó.
    *
-   * Es lo que espera cualquiera que venga de otro chat: se suelta y sale. Dejar
-   * la nota esperando en la previa obligaría a un segundo toque para algo que ya
-   * se ha decidido al levantar el dedo, y confundiría el gesto de cancelar
-   * —deslizar— con el de quitar un adjunto.
+   * NO PASA POR `mandar`, y la diferencia es lo que evita que el mensaje entre
+   * dos veces. `mandar` deja la burbuja fallida en la conversación con su propio
+   * «reintentar», y una nota de voz ya tiene el suyo en la barra del redactor
+   * —que además conserva el audio—. Dos botones de reintentar sobre el mismo
+   * envío son dos subidas y dos mensajes.
+   *
+   * Así que aquí la burbuja optimista se pone igual —se ve al instante, con su
+   * barra de subida— pero SI FALLA SE RETIRA: el único sitio donde queda algo
+   * pendiente es la barra de voz, con la grabación intacta. Y si sale bien,
+   * `reconciliarEnvio` sustituye la provisional por la del servidor, así que el
+   * mensaje queda EXACTAMENTE UNA VEZ aunque Realtime entregue la fila antes de
+   * que responda el POST (de eso se encarga `fusionar`, ver `mensajesEnVivo`).
    */
-  const grabadora = useGrabadoraDeVoz({
-    alTerminar: (nota) => {
-      void mandar({ texto: '', archivos: [nota] });
+  const enviarNotaDeVoz = useCallback(
+    async (nota: AdjuntoElegido, avisarProgreso: (ratio: number) => void) => {
+      const conversationId = params.id;
+      if (!conversationId) return false;
+
+      const idTemporal = nuevoIdTemporal();
+      aplicar(
+        fusionar(mensajesRef.current, [
+          {
+            id: idTemporal,
+            text: '',
+            sender: 'me' as const,
+            createdAt: '',
+            estado: 'enviando' as const,
+            progreso: 0,
+            attachments: [
+              {
+                id: `${idTemporal}-0`,
+                storagePath: '',
+                kind: 'audio' as const,
+                fileName: nota.name,
+                bytes: nota.bytes,
+                width: null,
+                height: null,
+                // La duración tiene que viajar YA: sin ella la burbuja de una
+                // nota recién grabada saldría marcando 0:00.
+                durationS: nota.durationS,
+                url: nota.uri,
+              },
+            ],
+          },
+        ]),
+      );
+
+      try {
+        const subido = await subirAdjunto(conversationId, nota, ({ ratio }) => {
+          avisarProgreso(ratio);
+          aplicar(
+            mensajesRef.current.map((m) =>
+              m.id === idTemporal ? { ...m, progreso: ratio } : m,
+            ),
+          );
+        });
+        const guardado = await MessageRepository.sendMessage(
+          conversationId,
+          '',
+          currentUserId,
+          [subido],
+        );
+        aplicar(reconciliarEnvio(mensajesRef.current, idTemporal, guardado));
+        return true;
+      } catch (error) {
+        aplicar(descartarEnvio(mensajesRef.current, idTemporal));
+        const codigo = error instanceof ApiError ? error.code : undefined;
+        notify(
+          codigo === 'voice_notes_not_available'
+            ? t('chat.attachmentsOffTitle')
+            : t('chat.sendFailed'),
+          codigo === 'voice_notes_not_available'
+            ? t('chat.voiceNotesOffBody')
+            : error instanceof Error
+              ? error.message
+              : t('common.checkConnection'),
+        );
+        return false;
+      }
     },
+    [params.id, currentUserId, aplicar, t],
+  );
+
+  const grabadora = useGrabadoraDeVoz({
+    alEnviar: enviarNotaDeVoz,
     alAvisar: (aviso) => {
       /*
         UN PERMISO DENEGADO SE EXPLICA Y SE OFRECE LA SALIDA. Cuando el sistema
@@ -742,11 +818,33 @@ export function ChatScreen() {
     );
   };
 
-  const hayQueEnviar = text.trim().length > 0 || elegidos.length > 0;
+  /*
+    Mientras hay una nota de voz en marcha NUNCA hay «algo que enviar» por la
+    vía del texto: si no, empezar a grabar con un adjunto ya elegido cambiaría
+    el micrófono por el avión de papel y la barra de voz se quedaría sin su
+    botón, con la grabación viva y sin forma de mandarla ni de tirarla.
+  */
+  const hayQueEnviar =
+    !grabadora.ocupada && (text.trim().length > 0 || elegidos.length > 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title={headerName} rightIcon="video" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      {/*
+        LA CÁMARA DE VIDEOLLAMADA YA NO ESTÁ. Era `rightIcon="video"` sin
+        `onRightPress`: un icono que no abría nada porque no hay videollamadas
+        en esta aplicación. En su lugar la cabecera enseña con QUIÉN se habla y
+        lleva a su perfil. (La cámara del selector de adjuntos —la del botón
+        «+», que sí hace una foto y la manda— sigue exactamente donde estaba.)
+      */}
+      <CabeceraDeChat
+        conversationId={params.id}
+        currentUserId={currentUserId}
+        nombreDeRespaldo={headerName}
+        avatarDeRespaldo={demoConversation?.avatarUrl}
+        idDeRespaldo={demoConversation?.otherId}
+        resolverEnElServidor={supabaseEnabled && !!params.id}
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
       {loadError ? (
         <Text style={{ color: colors.danger, textAlign: 'center', padding: spacing.sm, fontSize: 12 }}>
           {loadError}
@@ -1050,22 +1148,22 @@ export function ChatScreen() {
             accessibilityLabel="Adjuntar archivo"
             accessibilityRole="button"
             onPress={() => setMenuAbierto(true)}
-            disabled={!supabaseEnabled || grabadora.grabando}
+            disabled={!supabaseEnabled || grabadora.ocupada}
             style={styles.addButton}
           >
             <Feather
               name="plus"
               size={24}
-              color={supabaseEnabled && !grabadora.grabando ? colors.text : colors.border}
+              color={supabaseEnabled && !grabadora.ocupada ? colors.text : colors.border}
             />
           </Pressable>
 
           {/*
-            MIENTRAS SE GRABA, EL CAMPO DE TEXTO SE APARTA. Dejarlo daría dos
-            modos a la vez —hablando y escribiendo— y el aviso de grabación no
-            tendría dónde ponerse sin tapar lo que se escribe.
+            MIENTRAS HAY UNA NOTA DE VOZ EN MARCHA, EL CAMPO DE TEXTO SE APARTA.
+            Dejarlo daría dos modos a la vez —hablando y escribiendo— y la barra
+            de la grabadora no tendría dónde ponerse sin tapar lo que se escribe.
           */}
-          {grabadora.grabando ? (
+          {grabadora.ocupada ? (
             <View style={styles.inputContainer} />
           ) : (
             <Input
@@ -1091,12 +1189,16 @@ export function ChatScreen() {
           */}
           {funciones.notasDeVoz && !hayQueEnviar && supabaseEnabled ? (
             <BotonDeNotaDeVoz
-              grabando={grabadora.grabando}
+              fase={grabadora.fase}
               segundos={grabadora.segundos}
               avance={grabadora.avance}
+              progreso={grabadora.progreso}
+              uri={grabadora.nota?.uri ?? null}
               empezar={() => void grabadora.empezar()}
-              soltar={() => void grabadora.soltar()}
+              detener={() => void grabadora.detener()}
               cancelar={() => void grabadora.cancelar()}
+              eliminar={() => grabadora.eliminar()}
+              enviar={() => void grabadora.enviar()}
               deshabilitado={enviando}
             />
           ) : (

@@ -1,149 +1,115 @@
-import React, { useCallback, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { useTranslation } from '@/i18n/useTranslation';
-import { formatearDuracion, MS_PARA_EMPEZAR } from '@/lib/notaDeVoz';
+import type { FaseDeNotaDeVoz } from '@/hooks/useGrabadoraDeVoz';
+import { formatearDuracion } from '@/lib/notaDeVoz';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
- * El micrófono del redactor: MANTENER PULSADO para grabar, soltar para enviar.
+ * El redactor de una nota de voz: pulsar, hablar, escuchar y enviar.
  *
- * POR QUE UN GESTO Y NO UN BOTON DE ENCENDER/APAGAR. Es el gesto que ya conoce
- * cualquiera que venga de otro chat, y sobre todo hace imposible el fallo que
- * más molesta de la alternativa: dejarse una grabación abierta sin darse cuenta.
- * Mientras el dedo está encima está grabando; al levantarlo, se acabó.
+ * =============================================================================
+ * POR QUÉ YA NO ES «MANTENER PULSADO»
+ * =============================================================================
+ * Antes esto era un `Gesture.LongPress` que grababa mientras el dedo estuviera
+ * encima y ENVIABA AL SOLTAR. Se ha quitado entero, y no por gusto:
  *
- * UN TOQUE SIMPLE NO GRABA, y esto es un requisito, no un efecto secundario. El
- * gesto es `LongPress` con `minDuration` (ver `lib/notaDeVoz.ts`): rozar el
- * micrófono al ir a escribir no abre nada. Y si alguien lo toca sin mantener, se
- * le dice qué hacer en vez de dejarle pensando que el botón está roto.
+ *  - EL ENVÍO NO PUEDE DEPENDER DE UN EVENTO DE GESTO. El envío colgaba de
+ *    `onFinalize`, que se dispara también cuando el gesto FALLA o lo CANCELA el
+ *    sistema — y el diálogo de permiso del micrófono lo cancela siempre la
+ *    primera vez. Con la grabadora todavía arrancando, ese `soltar` no hacía
+ *    nada y la nota no se enviaba nunca. Está contado con detalle en la cabecera
+ *    de `hooks/useGrabadoraDeVoz.ts`.
+ *  - NO SE PODÍA ESCUCHAR ANTES DE MANDAR. Al levantar el dedo la nota ya
+ *    volaba: ni oírla, ni rehacerla.
+ *  - Y NO SE VEÍA QUÉ HACER. Un micrófono que sólo responde a un gesto sin
+ *    pistas es una función que existe únicamente para quien ya la conocía.
  *
- * SE PUEDE CANCELAR ANTES DE ENVIAR, de dos maneras, porque arrepentirse a
- * mitad de una nota es lo más normal del mundo:
+ * Ahora cada paso es un botón con su nombre: micrófono → Detener → (escuchar)
+ * → Enviar. Se ve qué hacer sin que nadie lo explique, y arrepentirse es
+ * siempre un toque en una papelera visible.
  *
- *  - Deslizando el dedo hacia la izquierda sin levantarlo, que es el gesto
- *    aprendido; al pasar del umbral el aviso cambia y avisa de que al soltar se
- *    tira.
- *  - Pulsando la papelera que aparece mientras se graba, para quien no conozca
- *    el gesto. Un gesto sin alternativa visible es una función que solo existe
- *    para quien ya la conocía.
- *
- * `maxDistance` MUY ALTO A PROPOSITO. Por defecto, `LongPress` se cancela en
- * cuanto el dedo se mueve unos píxeles — que es exactamente lo que hay que hacer
- * para cancelar deslizando. Sin esto, deslizar cortaba la grabación por la vía
- * del gesto abortado: la nota se enviaba igual y el deslizamiento no servía de
- * nada.
+ * ESTE COMPONENTE NO DECIDE NADA. Recibe la fase de la máquina de estados y
+ * pinta lo que toca; quien manda es `useGrabadoraDeVoz`. Es lo que permite que
+ * un fallo de envío no borre la grabación: el estado no vive aquí.
  */
 
-/** Cuánto hay que deslizar a la izquierda para que soltar signifique cancelar. */
-const DESLIZAR_PARA_CANCELAR = 70;
-
 type Props = {
-  grabando: boolean;
-  /** Segundos que lleva grabando. */
+  fase: FaseDeNotaDeVoz;
+  /** Segundos: los que lleva grabando, o los que dura la nota terminada. */
   segundos: number;
   /** De 0 a 1 sobre el máximo: la barra que avisa de que se acaba el tiempo. */
   avance: number;
+  /** De 0 a 1 mientras se sube. */
+  progreso: number;
+  /** El fichero grabado, para poder escucharlo antes de mandarlo. */
+  uri: string | null;
   empezar: () => void;
-  soltar: () => void;
+  detener: () => void;
   cancelar: () => void;
+  eliminar: () => void;
+  enviar: () => void;
   /** Sin la migración 0044 esto no se pinta siquiera. Ver `ChatScreen`. */
   deshabilitado?: boolean;
 };
 
 export function BotonDeNotaDeVoz({
-  grabando,
+  fase,
   segundos,
   avance,
+  progreso,
+  uri,
   empezar,
-  soltar,
+  detener,
   cancelar,
+  eliminar,
+  enviar,
   deshabilitado = false,
 }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
 
-  /*
-    Cuánto se ha deslizado, en una REFERENCIA y no en el estado.
+  /** Si la previa está sonando. Sólo entonces existe un reproductor. */
+  const [sonando, setSonando] = useState(false);
 
-    Lo lee `alSoltar`, que corre en el mismo tic que el final del gesto. Con
-    estado de React, el valor leído sería el del render anterior —o sea, antes
-    del último deslizamiento— y soltar tras deslizar mandaría la nota igual.
-  */
-  const desplazamiento = useRef(0);
-  const [vaACancelar, setVaACancelar] = React.useState(false);
+  // Cambiar de nota —o mandarla— apaga el reproductor: dejarlo montado sobre un
+  // fichero que ya no está en pantalla es un reproductor nativo de más.
+  useEffect(() => {
+    if (fase !== 'lista' && fase !== 'fallida') setSonando(false);
+  }, [fase]);
 
-  const mover = useCallback((x: number) => {
-    desplazamiento.current = x;
-    setVaACancelar(x < -DESLIZAR_PARA_CANCELAR);
-  }, []);
-
-  const alEmpezar = useCallback(() => {
-    desplazamiento.current = 0;
-    setVaACancelar(false);
-    empezar();
-  }, [empezar]);
-
-  const alSoltar = useCallback(() => {
-    const cancelaba = desplazamiento.current < -DESLIZAR_PARA_CANCELAR;
-    desplazamiento.current = 0;
-    setVaACancelar(false);
-    if (cancelaba) cancelar();
-    else soltar();
-  }, [soltar, cancelar]);
-
-  const mantener = Gesture.LongPress()
-    .minDuration(MS_PARA_EMPEZAR)
-    // Ver la nota de la cabecera: sin esto, deslizar para cancelar aborta el
-    // gesto y la cancelación no llega nunca a ocurrir.
-    .maxDistance(10_000)
-    .shouldCancelWhenOutside(false)
-    .enabled(!deshabilitado)
-    .onStart(() => runOnJS(alEmpezar)())
-    .onFinalize(() => runOnJS(alSoltar)());
-
-  const arrastrar = Gesture.Pan()
-    .enabled(!deshabilitado)
-    .onUpdate((e) => runOnJS(mover)(e.translationX))
-    .onFinalize(() => runOnJS(mover)(0));
-
-  const gesto = Gesture.Simultaneous(mantener, arrastrar);
+  const enPrevia = fase === 'lista' || fase === 'fallida';
+  const preparando = fase === 'permiso' || fase === 'guardando';
 
   return (
     <>
       {/*
-        LO QUE SE VE MIENTRAS SE GRABA, y tiene que verse: sin un indicador
-        claro, una grabación en curso es indistinguible de un botón atascado.
-        Ocupa la fila entera del redactor para que no haya duda de en qué modo
-        está la pantalla.
+        LA BARRA DE ESTADO, encima del redactor y ocupando su ancho.
+
+        Sin un indicador claro, una grabación en curso es indistinguible de un
+        botón atascado. Y en la previa es donde se escucha, se tira y se lee por
+        qué no salió: todo lo que hay que decidir, en el mismo sitio.
       */}
-      {grabando ? (
+      {fase === 'grabando' ? (
         <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.punto, { backgroundColor: colors.danger }]} />
           <Text style={[styles.reloj, { color: colors.text }]}>
             {formatearDuracion(segundos)}
           </Text>
-
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pista,
-              { color: vaACancelar ? colors.danger : colors.textMuted },
-            ]}
-          >
-            {vaACancelar ? t('chat.releaseToCancel') : t('chat.slideToCancel')}
+          <Text numberOfLines={1} style={[styles.pista, { color: colors.textMuted }]}>
+            {t('chat.recording')}
           </Text>
 
-          {/* Alternativa visible al gesto, para quien no lo conozca. */}
           <Pressable
             onPress={cancelar}
             accessibilityRole="button"
-            accessibilityLabel={t('chat.cancelRecording')}
+            accessibilityLabel={t('chat.discardRecording')}
             hitSlop={10}
+            style={styles.accion}
           >
             <Feather name="trash-2" size={18} color={colors.danger} />
           </Pressable>
@@ -162,33 +128,182 @@ export function BotonDeNotaDeVoz({
         </View>
       ) : null}
 
-      <GestureDetector gesture={gesto}>
-        <View
+      {enPrevia ? (
+        <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {sonando && uri ? (
+            <NotaSonando uri={uri} duracion={segundos} color={colors.text} alTerminar={() => setSonando(false)} />
+          ) : (
+            <Pressable
+              onPress={() => setSonando(true)}
+              disabled={!uri}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.playRecording')}
+              hitSlop={8}
+              style={[styles.play, { borderColor: colors.text }]}
+            >
+              <Feather name="play" size={14} color={colors.text} />
+            </Pressable>
+          )}
+
+          <Text style={[styles.reloj, { color: colors.text }]}>
+            {formatearDuracion(segundos)}
+          </Text>
+
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.pista,
+              { color: fase === 'fallida' ? colors.danger : colors.textMuted },
+            ]}
+          >
+            {fase === 'fallida' ? t('chat.recordingFailed') : t('chat.recordingReady')}
+          </Text>
+
+          <Pressable
+            onPress={eliminar}
+            accessibilityRole="button"
+            accessibilityLabel={t('chat.deleteRecording')}
+            hitSlop={10}
+            style={styles.accion}
+          >
+            <Feather name="trash-2" size={18} color={colors.danger} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {fase === 'enviando' ? (
+        <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <ActivityIndicator size="small" color={colors.textMuted} />
+          <Text numberOfLines={1} style={[styles.pista, { color: colors.textMuted }]}>
+            {t('chat.recordingSending')}
+          </Text>
+          <View style={[styles.barra, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.barraAvance,
+                {
+                  backgroundColor: colors.primary,
+                  width: `${Math.round(Math.min(1, progreso) * 100)}%`,
+                },
+              ]}
+            />
+          </View>
+        </View>
+      ) : null}
+
+      {/*
+        EL BOTÓN DE LA FILA, que cambia de trabajo según la fase. Es siempre el
+        siguiente paso y sólo uno: grabar → detener → enviar. Dos botones a la
+        vez obligarían a elegir entre cosas que desde fuera son «mandar».
+      */}
+      {fase === 'grabando' ? (
+        <Pressable
+          onPress={detener}
           accessibilityRole="button"
-          accessibilityLabel={t('chat.holdToRecord')}
-          accessibilityHint={t('chat.holdToRecordHint')}
-          style={[
-            styles.boton,
-            grabando && {
-              backgroundColor: vaACancelar ? colors.danger : colors.primary,
-              transform: [{ scale: 1.15 }],
-            },
-          ]}
+          accessibilityLabel={t('chat.stopRecording')}
+          style={[styles.boton, { backgroundColor: colors.danger }]}
+        >
+          <Feather name="square" size={18} color={colors.onPrimary} />
+        </Pressable>
+      ) : enPrevia ? (
+        <Pressable
+          onPress={enviar}
+          accessibilityRole="button"
+          accessibilityLabel={
+            fase === 'fallida' ? t('common.retry') : t('chat.sendRecording')
+          }
+          style={[styles.boton, { backgroundColor: colors.primary }]}
         >
           <Feather
-            name={vaACancelar ? 'trash-2' : 'mic'}
-            size={22}
-            color={
-              deshabilitado
-                ? colors.border
-                : grabando
-                  ? colors.onPrimary
-                  : colors.text
-            }
+            name={fase === 'fallida' ? 'refresh-cw' : 'send'}
+            size={20}
+            color={colors.onPrimary}
           />
+        </Pressable>
+      ) : preparando || fase === 'enviando' ? (
+        <View style={styles.boton}>
+          <ActivityIndicator size="small" color={colors.textMuted} />
         </View>
-      </GestureDetector>
+      ) : (
+        <Pressable
+          onPress={empezar}
+          disabled={deshabilitado}
+          accessibilityRole="button"
+          accessibilityLabel={t('chat.recordVoice')}
+          accessibilityHint={t('chat.recordVoiceHint')}
+          style={styles.boton}
+        >
+          <Feather name="mic" size={22} color={deshabilitado ? colors.border : colors.text} />
+        </Pressable>
+      )}
     </>
+  );
+}
+
+/**
+ * El único sitio de la previa donde vive un reproductor, y sólo mientras suena.
+ *
+ * Misma regla que `BurbujaDeNotaDeVoz` y por el mismo motivo: un reproductor
+ * nativo reserva memoria por delante aunque no esté reproduciendo, así que no
+ * se monta ninguno hasta que alguien pulsa play. La limpieza va en la fase de
+ * LAYOUT porque `expo-audio` libera el objeto nativo en la suya, declarada
+ * antes: un `pause()` en un efecto pasivo caería sobre un objeto ya muerto.
+ */
+function NotaSonando({
+  uri,
+  duracion,
+  color,
+  alTerminar,
+}: {
+  uri: string;
+  duracion: number;
+  color: string;
+  alTerminar: () => void;
+}) {
+  const reproductor = useAudioPlayer({ uri });
+  const estado = useAudioPlayerStatus(reproductor);
+  const { t } = useTranslation();
+
+  useLayoutEffect(() => {
+    return () => {
+      try {
+        reproductor.muted = true;
+        reproductor.pause();
+      } catch {
+        /* Ya se liberó. Parar dos veces no es un error. */
+      }
+    };
+  }, [reproductor]);
+
+  useEffect(() => {
+    reproductor.play();
+  }, [reproductor]);
+
+  useEffect(() => {
+    if (estado?.didJustFinish) alTerminar();
+  }, [estado?.didJustFinish, alTerminar]);
+
+  const total = estado?.duration || duracion;
+  const actual = estado?.currentTime ?? 0;
+
+  return (
+    <Pressable
+      onPress={alTerminar}
+      accessibilityRole="button"
+      accessibilityLabel={t('chat.pauseRecording')}
+      hitSlop={8}
+      style={[styles.play, { borderColor: color }]}
+    >
+      <Feather name="pause" size={14} color={color} />
+      {total > 0 ? (
+        <View
+          style={[
+            styles.playAvance,
+            { backgroundColor: color, width: `${Math.round(Math.min(1, actual / total) * 100)}%` },
+          ]}
+        />
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -217,6 +332,17 @@ const styles = StyleSheet.create({
   punto: { width: 9, height: 9, borderRadius: 5 },
   reloj: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
   pista: { flex: 1, fontSize: 11 },
+  accion: { minWidth: 28, alignItems: 'center' },
+  play: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  playAvance: { position: 'absolute', bottom: 0, left: 0, height: 2, opacity: 0.8 },
   barra: {
     position: 'absolute',
     left: spacing.md,

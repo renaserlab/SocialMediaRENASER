@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { RecordingPresets, useAudioRecorder } from 'expo-audio';
 
 import { permitirGrabar } from '@/hooks/useBackgroundAudio';
@@ -14,33 +15,74 @@ import type { AdjuntoElegido } from '@/services/messageMedia';
 /**
  * Grabar una nota de voz con el micrófono, sin que la pantalla sepa de audio.
  *
- * SE REUTILIZA `expo-audio`, que la aplicación ya trae para reproducir. No se
- * añade ninguna librería de grabación: la que hay hace exactamente esto y una
- * segunda sería otra dependencia nativa que mantener, otra compilación que
- * romper y otro sitio donde el permiso de micrófono se pide distinto.
+ * =============================================================================
+ * POR QUÉ ESTO YA NO ES «MANTENER PULSADO», Y POR QUÉ LA NOTA NO SE ENVIABA
+ * =============================================================================
+ * Antes el micrófono era un `Gesture.LongPress`: empezaba al mantener y ENVIABA
+ * AL SOLTAR. El envío colgaba entero de un evento del gesto, y esa era la
+ * causa del fallo, no un síntoma:
  *
- * Y SE REUTILIZA `lib/permisos.ts`, que a su vez se apoya en
- * `lib/estadoDePermiso.ts` —el módulo con pruebas que distingue los cinco
- * estados de un permiso—. Eso es lo que permite que un «no» se explique en vez
- * de dejar un botón mudo: si el sistema ya no va a preguntar más, se lleva a la
- * persona a los ajustes en lugar de pedirlo otra vez y no hacer nada.
+ *   `soltar()` empezaba con `if (fase !== 'grabando') return;`
  *
- * LAS REGLAS DE QUÉ HACER CON LO GRABADO NO ESTÁN AQUÍ, están en
- * `lib/notaDeVoz.ts`, que es código puro y tiene pruebas. Aquí solo queda lo
- * que necesita un teléfono de verdad: pedir permiso, arrancar el micrófono y
- * escribir el fichero.
+ * y entre el momento en que el gesto se activaba (250 ms) y el momento en que
+ * `fase` valía `'grabando'` había CUATRO llamadas nativas encadenadas y
+ * esperadas: `consultarPermiso`, el diálogo del sistema si tocaba,
+ * `permitirGrabar(true)` (que por dentro configura la sesión de audio dos
+ * veces) y `prepareToRecordAsync`. Si el dedo se levantaba dentro de esa
+ * ventana —y la
+ * PRIMERA VEZ se levanta siempre, porque el diálogo de permiso del sistema roba
+ * el toque y cancela el gesto, lo que dispara `onFinalize` en el acto— pasaba
+ * lo siguiente:
+ *
+ *   1. `soltar()` salía por esa primera línea sin grabar, sin enviar y sin
+ *      decir nada;
+ *   2. `empezar()` terminaba después y ponía `fase = 'grabando'`: el micrófono
+ *      quedaba ABIERTO con el aviso rojo en pantalla y ningún dedo encima;
+ *   3. a partir de ahí `empezar()` ya no volvía a entrar
+ *      (`if (fase !== 'inactiva') return;`), así que el micrófono se quedaba
+ *      muerto para el resto de la vida de la pantalla.
+ *
+ * La única salida era la papelera, que descarta. De ahí «no se puede enviar la
+ * nota de voz».
+ *
+ * =============================================================================
+ * LA MÁQUINA DE ESTADOS, EXPLÍCITA
+ * =============================================================================
+ *
+ *   inactiva ──pulsar──▶ permiso ──▶ grabando ──detener──▶ guardando ──▶ lista
+ *      ▲                    │            │                                 │
+ *      │                    ▼            ▼                              enviar
+ *      │  (permiso denegado / cancelar / demasiado corta)                   │
+ *      │                                                                    ▼
+ *      ├──────────────── eliminar ◀── fallida ◀──(no)── enviando ──(sí)──▶ éxito
+ *
+ * NADA SE ENVÍA SOLO. Enviar es un toque aparte, sobre una nota que ya se ha
+ * podido escuchar. Eso es lo que rompe la dependencia entre «terminar de
+ * hablar» y «mandar», que era el origen del fallo: si el envío falla, la
+ * grabación SIGUE AQUÍ y se puede reintentar sin volver a hablar.
+ *
+ * SE REUTILIZA `expo-audio`, que la aplicación ya trae para reproducir, y
+ * `lib/permisos.ts` para los cinco estados reales de un permiso. LAS REGLAS DE
+ * QUÉ HACER CON LO GRABADO siguen en `lib/notaDeVoz.ts`, que es código puro y
+ * tiene pruebas.
  */
 
-/** En qué punto está la grabación. */
-export type EstadoDeGrabadora =
-  /** Parada. */
+/** En qué punto está la nota de voz. */
+export type FaseDeNotaDeVoz =
+  /** No hay nada en marcha. El micrófono espera un toque. */
   | 'inactiva'
   /** Esperando la respuesta del sistema al permiso. */
   | 'permiso'
   /** El micrófono está abierto. */
   | 'grabando'
-  /** Soltó y se está cerrando el fichero. */
-  | 'guardando';
+  /** Se pulsó detener y se está cerrando el fichero. */
+  | 'guardando'
+  /** Hay una nota grabada: se puede escuchar, eliminar o enviar. */
+  | 'lista'
+  /** Subiendo y guardando. No se admite ninguna acción. */
+  | 'enviando'
+  /** El envío falló. LA GRABACIÓN SIGUE AQUÍ, con su botón de reintentar. */
+  | 'fallida';
 
 export type AvisoDeGrabadora = {
   titulo: string;
@@ -50,38 +92,68 @@ export type AvisoDeGrabadora = {
 };
 
 type Opciones = {
-  /** La nota está lista para mandarse. */
-  alTerminar: (nota: AdjuntoElegido) => void;
+  /**
+   * Sube la nota y crea el mensaje. Devuelve si el SERVIDOR lo confirmó.
+   *
+   * Es la frontera entera entre esta máquina y el chat, y devuelve un booleano
+   * a propósito: sin él, un fallo de red dejaría la nota como enviada y quien
+   * habló se quedaría sin saberlo. `true` es lo único que suelta la grabación.
+   */
+  alEnviar: (
+    nota: AdjuntoElegido,
+    avisarProgreso: (ratio: number) => void,
+  ) => Promise<boolean>;
   /** Algo que hay que contarle a quien está mirando. */
   alAvisar: (aviso: AvisoDeGrabadora) => void;
 };
 
-export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
+/**
+ * Extensiones de audio que sabemos nombrar. Es la validación de FORMATO: lo que
+ * viaja al backend es la extensión y el tipo de contenido, y el bucket
+ * `message-media` sólo admite `audio/*` (ver `services/messageMedia.ts`).
+ */
+const EXTENSIONES_DE_AUDIO = ['m4a', 'mp4', 'aac', 'caf', 'wav', '3gp', 'webm'];
+
+/** Cómo se llama y qué tipo tiene el fichero que ha escrito el grabador. */
+function describirFichero(uri: string): { nombre: string; tipo: string } {
+  const bruta = uri.split('?')[0]?.split('.').pop()?.toLowerCase() ?? '';
+  // Sin extensión reconocible se usa la del preset `HIGH_QUALITY`, que es lo
+  // que de verdad escribe en las dos plataformas. `bin` haría que ningún
+  // reproductor supiera qué decodificador abrir.
+  const ext = EXTENSIONES_DE_AUDIO.includes(bruta) ? bruta : 'm4a';
+  const tipo = ext === 'm4a' || ext === 'mp4' ? 'audio/mp4' : `audio/${ext}`;
+  return { nombre: `nota-de-voz.${ext}`, tipo };
+}
+
+export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   /*
     `HIGH_QUALITY` y no `LOW_QUALITY`, aunque una nota de voz no necesite calidad
     de estudio. El motivo no es la calidad sino el FORMATO: el preset bajo cambia
     Android a `.3gp` con AMR de banda estrecha —un contenedor distinto y una voz
     claramente peor— mientras que el alto da `.m4a` con AAC en las dos
     plataformas. Un solo formato es un solo camino que probar, una sola extensión
-    que mandar al backend y un solo decodificador al otro lado. Lo que se ahorra
-    con el preset bajo son unos cientos de kilobytes; lo que cuesta es que la
-    nota de un Android suene distinta a la de un iPhone.
+    que mandar al backend y un solo decodificador al otro lado.
   */
   const grabador = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
-  const [fase, setFase] = useState<EstadoDeGrabadora>('inactiva');
+  const [fase, setFase] = useState<FaseDeNotaDeVoz>('inactiva');
   /** Milisegundos grabados. Se actualiza solo mientras el micrófono está abierto. */
   const [milisegundos, setMilisegundos] = useState(0);
+  /** La nota terminada, desde que se detiene hasta que se envía o se elimina. */
+  const [nota, setNota] = useState<AdjuntoElegido | null>(null);
+  /** De 0 a 1 mientras se sube. */
+  const [progreso, setProgreso] = useState(0);
 
   /*
-    Que se ha cancelado, en una referencia y no en el estado.
+    Que hay que abandonar lo que se está preparando, en una referencia.
 
-    Tiene que poder leerse DENTRO de `soltar()`, que es asíncrono: si viviera en
-    el estado, el valor que leería sería el del render en el que se creó la
-    función, o sea el de antes de cancelar, y la nota se mandaría igual. Es el
-    fallo clásico de mezclar estado de React con una secuencia asíncrona.
+    Tiene que poder leerse DENTRO de `empezar()`, que es asíncrono y espera a
+    cuatro llamadas nativas seguidas: si viviera en el estado, el valor que
+    leería sería el del render en el que se creó la función —o sea, el de antes
+    de cancelar— y el micrófono se abriría igual, sin nadie delante. Es
+    exactamente el fallo que dejaba la grabadora colgada.
   */
-  const cancelada = useRef(false);
+  const abandonar = useRef(false);
   /* Para no dejar el micrófono abierto si la pantalla se cierra a media nota. */
   const montado = useRef(true);
   useEffect(() => {
@@ -92,7 +164,9 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
   }, []);
 
   const grabando = fase === 'grabando';
-  const segundos = grabando ? milisegundos / 1000 : 0;
+  /** Hay algo en marcha: el redactor cede su sitio a la barra de voz. */
+  const ocupada = fase !== 'inactiva';
+  const segundos = grabando ? milisegundos / 1000 : nota?.durationS ?? 0;
 
   /*
     EL CONTADOR ES NUESTRO, Y SOLO EXISTE MIENTRAS SE GRABA.
@@ -139,15 +213,24 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
   }, [grabador]);
 
   /**
-   * Empieza a grabar. Lo dispara MANTENER PULSADO, nunca un toque.
+   * Empieza a grabar. LO DISPARA UN TOQUE, no mantener pulsado.
    *
    * El permiso se pide AQUÍ y no al abrir el chat: pedirlo sin contexto es lo
    * que hace que se rechace, y en iOS un rechazo no tiene vuelta atrás dentro
    * de la aplicación.
+   *
+   * LAS DOS COMPROBACIONES DE `abandonar` NO SON DEFENSIVAS, SON EL ARREGLO.
+   * Entre este toque y el micrófono abierto hay cuatro llamadas nativas
+   * esperadas, y en ese hueco caben perfectamente un «cancelar», un salir de la
+   * pantalla o un paso a segundo plano. Sin ellas, el micrófono se abría
+   * DESPUÉS de que nadie lo estuviera esperando y ya no se podía cerrar.
    */
   const empezar = useCallback(async () => {
     if (fase !== 'inactiva') return;
-    cancelada.current = false;
+    abandonar.current = false;
+    setMilisegundos(0);
+    setProgreso(0);
+    setNota(null);
     setFase('permiso');
 
     const permiso = await pedirPermiso('microfono');
@@ -170,18 +253,24 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
       return;
     }
 
+    if (abandonar.current || !montado.current) {
+      // Se canceló —o se salió de la pantalla— mientras el sistema preguntaba.
+      // No se abre nada.
+      setFase('inactiva');
+      return;
+    }
+
     try {
       // La sesión de audio, ANTES de preparar: en iOS `prepareToRecordAsync`
       // falla si la categoría no admite grabar.
       await permitirGrabar(true);
       await grabador.prepareToRecordAsync();
-      grabador.record();
-      if (!montado.current) {
-        // La pantalla se cerró mientras se pedía el permiso. No se deja el
-        // micrófono abierto detrás.
+      if (abandonar.current || !montado.current) {
         await cerrar();
+        setFase('inactiva');
         return;
       }
+      grabador.record();
       setFase('grabando');
     } catch {
       await permitirGrabar(false);
@@ -195,79 +284,162 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
     }
   }, [fase, grabador, alAvisar, cerrar]);
 
-  /** Suelta el dedo: para, y decide si se manda o se tira. */
-  const soltar = useCallback(async () => {
-    if (fase !== 'grabando') {
-      // Soltar sin haber llegado a grabar —un toque, o un permiso denegado— no
-      // hace nada. Es lo que impide que un roce mande una nota vacía.
-      return;
-    }
-    setFase('guardando');
-    // Del nativo con red debajo: `soltar` es asíncrono y la pantalla puede
-    // cerrarse en mitad. Si el objeto ya no está, se usa lo último que contó
-    // nuestro reloj, que para decidir si la nota es demasiado corta vale igual.
-    let ms = milisegundos;
-    try {
-      if (grabador.currentTime) ms = grabador.currentTime * 1000;
-    } catch {
-      /* Liberado. Nos quedamos con lo contado. */
-    }
-    await cerrar();
+  /**
+   * Cierra el micrófono y decide qué queda: una nota en la previa, o nada.
+   *
+   * `decidirDesenlace` es la misma función pura de siempre (`lib/notaDeVoz.ts`,
+   * con pruebas): cancelar gana sobre todo lo demás, y una grabación por debajo
+   * del mínimo se tira Y SE EXPLICA, porque quien la hizo no sabe por qué no ha
+   * pasado nada.
+   */
+  const parar = useCallback(
+    async (cancelada: boolean) => {
+      setFase('guardando');
+      // Del nativo con red debajo: esto es asíncrono y la pantalla puede
+      // cerrarse en mitad. Si el objeto ya no está, se usa lo último que contó
+      // nuestro reloj, que para decidir la duración vale igual.
+      let ms = milisegundos;
+      try {
+        if (grabador.currentTime) ms = grabador.currentTime * 1000;
+      } catch {
+        /* Liberado. Nos quedamos con lo contado. */
+      }
+      await cerrar();
 
-    let uri: string | null = null;
-    try {
-      uri = grabador.uri;
-    } catch {
-      /* Liberado: no hay fichero que mandar y se avisa mas abajo. */
-    }
-    const desenlace = decidirDesenlace({ ms, cancelada: cancelada.current });
-    setFase('inactiva');
+      let uri: string | null = null;
+      try {
+        uri = grabador.uri;
+      } catch {
+        /* Liberado: no hay fichero que mandar y se avisa más abajo. */
+      }
 
-    if (desenlace === 'descartar') return;
-    if (desenlace === 'demasiado-corta') {
-      alAvisar({
-        titulo: 'Muy corta',
-        cuerpo: 'Mantén pulsado el micrófono mientras hablas y suelta al terminar.',
+      const desenlace = decidirDesenlace({ ms, cancelada });
+      setMilisegundos(0);
+
+      if (desenlace === 'descartar') {
+        setNota(null);
+        setFase('inactiva');
+        return;
+      }
+      if (desenlace === 'demasiado-corta') {
+        setNota(null);
+        setFase('inactiva');
+        alAvisar({
+          titulo: 'Muy corta',
+          // Ya NO dice «mantén pulsado»: la interacción es pulsar, hablar y
+          // pulsar «Detener». Un texto que explica un gesto que ya no existe
+          // deja a quien lo lee peor que sin texto.
+          cuerpo: 'Pulsa el micrófono, habla y pulsa «Detener» cuando acabes.',
+        });
+        return;
+      }
+      if (!uri) {
+        setNota(null);
+        setFase('inactiva');
+        alAvisar({
+          titulo: 'No se pudo guardar',
+          cuerpo: 'La grabación no llegó a escribirse. Inténtalo otra vez.',
+        });
+        return;
+      }
+
+      const { nombre, tipo } = describirFichero(uri);
+      setNota({
+        uri,
+        kind: 'audio',
+        // El nombre no se enseña —una nota de voz se identifica por su duración,
+        // no por su fichero— pero la extensión decide el tipo con el que se sube.
+        name: nombre,
+        mimeType: tipo,
+        // EL TAMAÑO LO MIDE `subirAdjunto` leyendo el fichero de verdad, y ahí
+        // se rechaza lo vacío y lo que pase de `MAX_ADJUNTO_BYTES`. Informarlo
+        // aquí sería adivinarlo.
+        bytes: null,
+        width: null,
+        height: null,
+        // Nunca por encima del tope: el backend aplica el mismo, y pasarse por
+        // una décima tiraría la subida entera después de hacerla.
+        durationS: duracionEnSegundos(Math.min(ms, MAX_DURACION_S * 1000)),
       });
-      return;
-    }
-    if (!uri) {
-      alAvisar({
-        titulo: 'No se pudo guardar',
-        cuerpo: 'La grabación no llegó a escribirse. Inténtalo otra vez.',
-      });
-      return;
-    }
+      setFase('lista');
+    },
+    [milisegundos, grabador, cerrar, alAvisar],
+  );
 
-    alTerminar({
-      uri,
-      kind: 'audio',
-      // El nombre no se enseña —una nota de voz se identifica por su duración,
-      // no por su fichero— pero la extensión decide el tipo con el que se sube.
-      name: 'nota-de-voz.m4a',
-      mimeType: 'audio/mp4',
-      bytes: null,
-      width: null,
-      height: null,
-      durationS: duracionEnSegundos(ms),
-    });
-  }, [fase, grabador, milisegundos, cerrar, alTerminar, alAvisar]);
+  /** Deja de grabar Y CONSERVA lo grabado: pasa a la previa. */
+  const detener = useCallback(async () => {
+    if (fase !== 'grabando') return;
+    await parar(false);
+  }, [fase, parar]);
 
   /**
    * Tira la grabación. HAY QUE PODER ARREPENTIRSE ANTES DE MANDAR.
    *
-   * Marca primero y para después: `soltar()` lee la marca, así que el orden es
-   * lo que decide si la nota se manda. Al revés, cancelar justo al soltar
-   * mandaría la nota igual.
+   * Vale también mientras se pide el permiso: ahí todavía no hay micrófono
+   * abierto que cerrar, sólo una secuencia en vuelo a la que hay que decirle
+   * que ya no la espera nadie.
    */
   const cancelar = useCallback(async () => {
+    if (fase === 'permiso') {
+      abandonar.current = true;
+      return;
+    }
     if (fase !== 'grabando') return;
-    cancelada.current = true;
-    await soltar();
-  }, [fase, soltar]);
+    abandonar.current = true;
+    await parar(true);
+  }, [fase, parar]);
+
+  /** Tira la nota que estaba en la previa —o la que falló al enviarse—. */
+  const eliminar = useCallback(() => {
+    if (fase !== 'lista' && fase !== 'fallida') return;
+    setNota(null);
+    setProgreso(0);
+    setMilisegundos(0);
+    setFase('inactiva');
+  }, [fase]);
+
+  /**
+   * Sube la nota y crea el mensaje. Es también el «reintentar» de un fallo.
+   *
+   * SOLO SE ENTRA DESDE `lista` O `fallida`, y esa guarda es lo que garantiza
+   * que el mensaje se inserta EXACTAMENTE UNA VEZ: mientras vale `'enviando'`,
+   * volver a pulsar no hace nada, así que no hay forma de lanzar dos subidas de
+   * la misma grabación. (La otra mitad del problema —que el mensaje llegue a la
+   * vez por la respuesta del POST y por Realtime— la resuelve `fusionar` en
+   * `lib/mensajesEnVivo.ts`.)
+   *
+   * UN FALLO NO BORRA NADA. Se vuelve a `'fallida'` con la nota intacta: lo
+   * que cuesta rehacer es haberla dicho, no pulsar enviar.
+   */
+  const enviar = useCallback(async () => {
+    if (fase !== 'lista' && fase !== 'fallida') return;
+    const pendiente = nota;
+    if (!pendiente) return;
+
+    setProgreso(0);
+    setFase('enviando');
+
+    let confirmado = false;
+    try {
+      confirmado = await alEnviar(pendiente, (ratio) => {
+        if (montado.current) setProgreso(Math.min(1, Math.max(0, ratio)));
+      });
+    } catch {
+      confirmado = false;
+    }
+
+    if (!montado.current) return;
+    if (confirmado) {
+      setNota(null);
+      setProgreso(0);
+      setFase('inactiva');
+    } else {
+      setFase('fallida');
+    }
+  }, [fase, nota, alEnviar]);
 
   /*
-    Al llegar al tope se PARA SOLA y se manda lo grabado.
+    Al llegar al tope se PARA SOLA y queda en la previa.
 
     Es mejor que dejar grabar y rechazarlo después: quien está hablando ve que
     se ha detenido y decide si lo manda, en vez de descubrir al soltar que ha
@@ -276,8 +448,35 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
   */
   useEffect(() => {
     if (fase !== 'grabando') return;
-    if (llegoAlTope(milisegundos)) void soltar();
-  }, [fase, milisegundos, soltar]);
+    if (llegoAlTope(milisegundos)) void detener();
+  }, [fase, milisegundos, detener]);
+
+  /*
+    LA APLICACION SE VA A SEGUNDO PLANO: SE CIERRA EL MICROFONO Y SE CONSERVA
+    LO DICHO.
+
+    Android puede matar la grabación sin avisar y en iOS una llamada interrumpe
+    la sesión de audio; en los dos casos seguir «grabando» en pantalla sería
+    mentir. Se para y la nota pasa a la previa: perder lo que alguien acaba de
+    decir por atender una llamada es el peor momento posible para perderlo.
+
+    Va por referencia y no por dependencia: `detener` cambia de identidad en
+    cada tic del reloj (200 ms), y suscribirse y desuscribirse de `AppState`
+    cinco veces por segundo mientras se graba es justo el sondeo que este hook
+    se quitó de encima.
+  */
+  const alIrseAlFondo = useRef<() => void>(() => {});
+  alIrseAlFondo.current = () => {
+    if (fase === 'permiso') abandonar.current = true;
+    if (fase === 'grabando') void detener();
+  };
+  useEffect(() => {
+    if (fase !== 'grabando' && fase !== 'permiso') return;
+    const suscripcion = AppState.addEventListener('change', (estado) => {
+      if (estado !== 'active') alIrseAlFondo.current();
+    });
+    return () => suscripcion.remove();
+  }, [fase]);
 
   /*
     AQUI ESTABA EL FALLO QUE CERRABA LA APLICACION AL SALIR DEL CHAT.
@@ -313,6 +512,9 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
 
   useEffect(() => {
     return () => {
+      // Que una secuencia de arranque en vuelo no abra el microfono detras de
+      // una pantalla que ya no existe.
+      abandonar.current = true;
       if (grabandoAhora.current) void permitirGrabar(false);
     };
   }, []);
@@ -320,12 +522,19 @@ export function useGrabadoraDeVoz({ alTerminar, alAvisar }: Opciones) {
   return {
     fase,
     grabando,
-    /** Segundos grabados hasta ahora. Para el reloj. */
+    ocupada,
+    /** Segundos: los grabados mientras se graba, los de la nota después. */
     segundos,
     /** De 0 a 1 sobre el máximo. Para la barra que avisa de que se acaba. */
-    avance: Math.min(1, segundos / MAX_DURACION_S),
+    avance: Math.min(1, (grabando ? milisegundos / 1000 : 0) / MAX_DURACION_S),
+    /** La nota terminada, mientras existe. */
+    nota,
+    /** De 0 a 1 mientras se sube. */
+    progreso,
     empezar,
-    soltar,
+    detener,
     cancelar,
+    eliminar,
+    enviar,
   };
 }

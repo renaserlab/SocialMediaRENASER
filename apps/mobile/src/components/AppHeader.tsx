@@ -21,6 +21,16 @@ type Props = {
   onRightPress?: () => void;
   /** Punto sobre el icono derecho: hay algo sin ver detras de el. */
   rightBadge?: boolean;
+  /**
+   * Contenido propio para la zona CENTRAL, en lugar del titulo de texto.
+   *
+   * OPCIONAL Y SIN EFECTO SI NO SE PASA: quien no lo use sigue viendo
+   * exactamente lo de siempre —el logo cuando el titulo es «Z», el texto
+   * centrado en el resto—, que es lo que hacen las demas pantallas. Existe
+   * porque una conversacion necesita ensenar a la persona con la que se habla
+   * (foto y nombre, pulsables) y eso no cabe en una cadena de texto.
+   */
+  center?: React.ReactNode;
 };
 
 export function AppHeader({
@@ -30,6 +40,7 @@ export function AppHeader({
   rightIcon,
   onRightPress,
   rightBadge = false,
+  center,
 }: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
@@ -67,7 +78,9 @@ export function AppHeader({
       {/* La marca se pinta con su logo; el resto de pantallas llevan su
           nombre escrito. Asi Inicio muestra la Z con textura en vez de una
           letra suelta, sin tener que cambiar cada llamada al header. */}
-      {title === 'Z' ? (
+      {center ? (
+        <View style={styles.center}>{center}</View>
+      ) : title === 'Z' ? (
         <View style={styles.brand}>
           <ZLogo size={30} />
         </View>
@@ -107,6 +120,9 @@ const styles = StyleSheet.create({
   },
   side: { width: 44 },
   brand: { flex: 1, alignItems: 'center' },
+  // `minWidth: 0` para que lo que se meta aqui se recorte en vez de empujar a
+  // los botones de los lados fuera de la pantalla.
+  center: { flex: 1, minWidth: 0, justifyContent: 'center' },
   title: {
     flex: 1,
     textAlign: 'center',
