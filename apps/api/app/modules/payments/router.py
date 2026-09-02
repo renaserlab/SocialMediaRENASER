@@ -767,7 +767,7 @@ async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
         )
         return
 
-    await service.conceder(
+    concesion = await service.conceder(
         db,
         user_id=pedido.user_id,
         producto=await service.producto_de_pedido(db, pedido),
@@ -775,6 +775,10 @@ async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
         canal="web",
         order_id=pedido.id,
     )
+    # Solo con el pago CONFIRMADO: ni por una orden pendiente, ni porque el
+    # navegador volviera de Stripe. Y `concesion` dice si de verdad se estreno:
+    # un webhook repetido no vuelve a avisar ni a deber el dinero dos veces.
+    await _al_confirmar_la_compra(db, pedido, estrenada=_es_nueva(concesion))
 
 
 async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
@@ -897,6 +901,98 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
         external_reference=evento.provider_transaction_id,
         metadata={"event_type": evento.event_type},
     )
+
+
+def _es_nueva(concesion) -> bool:
+    """Si la concesion escribio algo o ya estaba.
+
+    `ResultadoDeConcesion` puede llamar distinto al campo segun la version; se
+    consulta con tolerancia para no atar este aviso a su forma interna.
+    """
+    for nombre in ("creado", "creada", "nuevo", "nueva", "estrenado"):
+        valor = getattr(concesion, nombre, None)
+        if isinstance(valor, bool):
+            return valor
+    return True
+
+
+async def _al_confirmar_la_compra(db: AsyncSession, pedido, *, estrenada: bool) -> None:
+    """Lo que pasa cuando el dinero entra de verdad: saldo y aviso.
+
+    NO PUEDE TUMBAR LA COMPRA. Si algo de esto falla, quien pago ya tiene su
+    acceso —se concedio antes— y lo que queda por hacer se puede reconstruir.
+    Perder la compra por no haber podido mandar un aviso seria absurdo.
+    """
+    from app.modules.commerce.models import Order
+
+    try:
+        orden = await db.get(Order, pedido.id)
+        if orden is None:
+            return
+        await _crear_saldo_del_propietario(db, orden)
+        if estrenada:
+            await _avisar_compra_al_propietario(db, orden)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "[pagos] la compra %s se concedio pero fallo el saldo o el aviso",
+            pedido.id,
+        )
+
+
+async def _crear_saldo_del_propietario(db: AsyncSession, orden) -> None:
+    """La fotografia de la venta, retenida hasta que venza la garantia.
+
+    `available_at` sale de la garantia del COMPRADOR: mientras pueda pedir
+    devolucion, ese dinero no es del propietario. Si las devoluciones estan
+    apagadas no hay nada que esperar y el saldo nace disponible ya.
+    """
+    from datetime import timedelta
+
+    from app.modules.commerce import liquidacion
+    from app.modules.refunds import esquema as esquema_devoluciones
+    from app.modules.refunds.models import HORAS_DE_GARANTIA
+    from app.modules.refunds.service import ahora
+
+    if not await esquema_devoluciones.hay_liquidaciones(db):
+        return
+    ajustes = get_settings()
+    disponible = None
+    if ajustes.feature_course_refunds:
+        # Todavia no ha entrado al curso, asi que la garantia no ha empezado.
+        # Se retiene el plazo completo desde la compra: es el peor caso, y
+        # `liberar_vencidos` lo recalculara cuando la ventana exista.
+        disponible = ahora() + timedelta(hours=HORAS_DE_GARANTIA)
+    await liquidacion.registrar_saldo(db, orden=orden, disponible_desde=disponible)
+    await db.commit()
+
+
+async def _avisar_compra_al_propietario(db: AsyncSession, orden) -> None:
+    """«Alguien compro tu curso». UNA por transaccion.
+
+    `add_notification` es idempotente por (destinatario, tipo, actor, entidad)
+    para los tipos que lo declaran, asi que un webhook repetido no duplica.
+    Y se calla solo si el comprador es el propio autor.
+    """
+    from app.modules.commerce.models import CommerceProduct
+    from app.modules.catalog.models import Course
+    from app.modules.notifications.service import add_notification
+
+    producto = await db.get(CommerceProduct, orden.commerce_product_id)
+    if producto is None or producto.course_id is None:
+        return
+    curso = await db.get(Course, producto.course_id)
+    if curso is None:
+        return
+    await add_notification(
+        db,
+        user_id=curso.author_id,
+        actor_id=orden.user_id,
+        type="course_purchase",
+        entity_type="course",
+        entity_id=curso.id,
+        payload={"orderId": orden.id, "courseId": curso.id},
+    )
+    await db.commit()
 
 
 @router.get("/history", response_model=list[PurchaseHistoryRead])

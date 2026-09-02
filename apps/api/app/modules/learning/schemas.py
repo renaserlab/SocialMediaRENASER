@@ -1,5 +1,7 @@
 """Esquemas de aprendizaje."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -159,3 +161,32 @@ class MyCourseRead(BaseModel):
     next_lesson_id: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CourseStudentRead(BaseModel):
+    """Un estudiante, como lo ve el PROPIETARIO del curso.
+
+    LO QUE NO SALE POR AQUI, y no sale por diseño: tarjeta, cuenta bancaria,
+    identificadores de la pasarela, el motivo privado de una devolución, las
+    notas internas de revisión y cualquier cosa de OTROS cursos. El propietario
+    ve a quien compró el suyo y su avance, no un expediente de la persona.
+    """
+
+    id: str
+    full_name: str = ""
+    username: str | None = None
+    avatar_path: str | None = None
+    enrolled_at: datetime | None = None
+    #: Por qué está en la lista: compra, curso gratuito, autor, administración.
+    source: str = ""
+    lessons_total: int = 0
+    lessons_completed: int = 0
+    progress_percent: int = 0
+    #: `not_started` | `in_progress` | `completed`.
+    state: str = "not_started"
+    #: `active` | `revoked` | `none`. Quien devolvió sigue en la lista con el
+    #: acceso retirado: borrarlo sería perder que compró.
+    access_state: str = "none"
+    #: Estado COMERCIAL, el único que el propietario necesita: si la venta
+    #: sigue en pie, si está en revisión o si se devolvió. Sin el motivo.
+    commercial_state: str = "none"

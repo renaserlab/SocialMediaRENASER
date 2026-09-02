@@ -11,7 +11,7 @@ Las dos tienen que decir lo mismo. `tests/test_muro_de_pago.py` las compara.
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,7 @@ from app.modules.learning.models import (
 )
 from app.modules.learning.schemas import (
     CourseDetailRead,
+    CourseStudentRead,
     LessonDetailRead,
     LessonProgressInput,
     LessonProgressRead,
@@ -38,10 +39,12 @@ from app.modules.learning.schemas import (
     ModuleRead,
     MyCourseRead,
 )
+from app.modules.profiles.models import Profile
 from app.modules.recommendations import temas_de_curso
 from app.modules.recommendations.signals import registrar_senal
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
+from app.shared.pagination import Page, pagination_params
 from app.shared.permissions import is_admin
 
 router = APIRouter(prefix="/learning", tags=["learning"])
@@ -868,3 +871,204 @@ async def complete_lesson(
         segundos=leccion.duration_seconds,
         declarado=True,
     )
+
+
+@router.get("/courses/{course_id}/students", response_model=list[CourseStudentRead])
+async def list_course_students(
+    course_id: str,
+    page: Page = Depends(pagination_params),
+    buscar: str | None = Query(default=None, alias="q"),
+    estado: str | None = Query(default=None, alias="state"),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseStudentRead]:
+    """Quien esta matriculado en este curso.
+
+    SOLO EL AUTOR Y LA ADMINISTRACION. No «cualquiera con sesion»: la lista
+    dice quien compro que, y eso no es publico. Un usuario ajeno recibe 403,
+    no una lista vacia —una lista vacia le diria que el curso no tiene alumnos,
+    que tambien es informacion—.
+
+    QUIEN DEVOLVIO SIGUE EN LA LISTA, con el acceso retirado. Sacarlo seria
+    perder que compro, y el propietario necesita ver sus devoluciones tanto
+    como sus ventas.
+
+    ORDEN ESTABLE por fecha de matricula y despues por id: sin el segundo
+    criterio, dos matriculas del mismo instante pueden salir en orden distinto
+    en cada pagina y una de ellas se repetiria o se saltaria al paginar.
+    """
+    ensure_uuid(course_id, "Curso no encontrado.")
+    curso = await db.get(Course, course_id)
+    if curso is None:
+        raise NotFoundError("Curso no encontrado.")
+    if not await _puede_gestionar(db, current_user.id, curso):
+        raise ForbiddenError("No puedes ver los estudiantes de este curso.")
+
+    if not await esquema_comercio.hay_matriculas(db):
+        return []
+
+    from app.modules.commerce.models import CourseEnrollment
+
+    consulta = (
+        select(CourseEnrollment, Profile)
+        .join(Profile, Profile.id == CourseEnrollment.user_id)
+        .where(CourseEnrollment.course_id == course_id)
+    )
+    if buscar:
+        patron = f"%{buscar.strip()}%"
+        consulta = consulta.where(
+            Profile.full_name.ilike(patron) | Profile.username.ilike(patron)
+        )
+    filas = (
+        await db.execute(
+            consulta.order_by(
+                CourseEnrollment.created_at.desc(), CourseEnrollment.user_id
+            )
+            .offset(page.offset)
+            .limit(page.limit)
+        )
+    ).all()
+    if not filas:
+        return []
+
+    total_lecciones = await _cuantas_lecciones(db, course_id)
+    ids = [matricula.user_id for matricula, _ in filas]
+    hechas = await _completadas_por_alumno(db, course_id, ids)
+    accesos = await _acceso_por_alumno(db, course_id, ids)
+    comercial = await _estado_comercial(db, course_id, ids)
+
+    alumnos: list[CourseStudentRead] = []
+    for matricula, perfil in filas:
+        completadas = hechas.get(matricula.user_id, 0)
+        porcentaje = (
+            int(completadas * 100 / total_lecciones) if total_lecciones else 0
+        )
+        alumnos.append(
+            CourseStudentRead(
+                id=perfil.id,
+                full_name=perfil.full_name or "",
+                username=perfil.username,
+                avatar_path=perfil.avatar_path,
+                enrolled_at=matricula.created_at,
+                source=matricula.source,
+                lessons_total=total_lecciones,
+                lessons_completed=completadas,
+                progress_percent=porcentaje,
+                state=(
+                    "completed"
+                    if total_lecciones and completadas >= total_lecciones
+                    else "in_progress"
+                    if completadas
+                    else "not_started"
+                ),
+                access_state=accesos.get(matricula.user_id, "none"),
+                commercial_state=comercial.get(matricula.user_id, "none"),
+            )
+        )
+
+    if estado in {"not_started", "in_progress", "completed"}:
+        alumnos = [a for a in alumnos if a.state == estado]
+    elif estado == "revoked":
+        alumnos = [a for a in alumnos if a.access_state == "revoked"]
+    return alumnos
+
+
+async def _cuantas_lecciones(db: AsyncSession, course_id: str) -> int:
+    total = await db.scalar(
+        select(func.count())
+        .select_from(CourseLesson)
+        .join(CourseModule, CourseModule.id == CourseLesson.module_id)
+        .where(CourseModule.course_id == course_id)
+    )
+    return int(total or 0)
+
+
+async def _completadas_por_alumno(
+    db: AsyncSession, course_id: str, ids: list[str]
+) -> dict[str, int]:
+    """UNA consulta agrupada, no una por alumno.
+
+    Con veinte alumnos por pagina, resolverlo fila a fila serian veinte viajes
+    a la base para pintar una lista.
+    """
+    filas = (
+        await db.execute(
+            select(LessonProgress.user_id, func.count())
+            .join(CourseLesson, CourseLesson.id == LessonProgress.lesson_id)
+            .join(CourseModule, CourseModule.id == CourseLesson.module_id)
+            .where(
+                CourseModule.course_id == course_id,
+                LessonProgress.user_id.in_(ids),
+                LessonProgress.completed.is_(True),
+            )
+            .group_by(LessonProgress.user_id)
+        )
+    ).all()
+    return {uid: int(cuantas) for uid, cuantas in filas}
+
+
+async def _acceso_por_alumno(
+    db: AsyncSession, course_id: str, ids: list[str]
+) -> dict[str, str]:
+    """Si cada uno conserva el acceso. Tambien en una sola consulta."""
+    if not await esquema_comercio.hay_comercio(db):
+        return {}
+    from app.modules.commerce.models import CommerceProduct, Entitlement
+
+    filas = (
+        await db.execute(
+            select(Entitlement.user_id, Entitlement.status)
+            .join(
+                CommerceProduct,
+                CommerceProduct.id == Entitlement.commerce_product_id,
+            )
+            .where(
+                CommerceProduct.course_id == course_id,
+                Entitlement.user_id.in_(ids),
+            )
+        )
+    ).all()
+    # Si alguien tiene varias filas —compro, devolvio y recompro— manda la
+    # activa: es la que decide si hoy entra.
+    resultado: dict[str, str] = {}
+    for uid, situacion in filas:
+        if resultado.get(uid) == "active":
+            continue
+        resultado[uid] = "active" if situacion == "active" else "revoked"
+    return resultado
+
+
+async def _estado_comercial(
+    db: AsyncSession, course_id: str, ids: list[str]
+) -> dict[str, str]:
+    """El estado de la venta, SIN el motivo privado de nadie.
+
+    Cuatro valores y ninguno cuenta por que: `sold`, `under_review`,
+    `refunded`, `none`. El propietario necesita saber que una venta esta en
+    revision para no contar con ese dinero; no necesita saber que le parecio
+    el curso a quien la pidio.
+    """
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return {}
+    from app.modules.refunds.estados import FINALES, REFUNDED, VIVOS
+    from app.modules.refunds.models import RefundRequest
+
+    filas = (
+        await db.execute(
+            select(RefundRequest.user_id, RefundRequest.status).where(
+                RefundRequest.course_id == course_id,
+                RefundRequest.user_id.in_(ids),
+            )
+        )
+    ).all()
+    resultado: dict[str, str] = {}
+    for uid, situacion in filas:
+        if situacion == REFUNDED:
+            resultado[uid] = "refunded"
+        elif situacion in VIVOS and resultado.get(uid) != "refunded":
+            resultado[uid] = "under_review"
+        elif uid not in resultado and situacion in FINALES:
+            resultado[uid] = "sold"
+    return resultado

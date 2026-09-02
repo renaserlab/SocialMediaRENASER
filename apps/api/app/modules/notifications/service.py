@@ -67,6 +67,10 @@ TIPOS_IDEMPOTENTES: frozenset[str] = frozenset(
         # Un corazon a un comentario, por (persona, comentario): quitarlo y
         # volver a ponerlo no puede dejar dos filas en la bandeja.
         "comment_like",
+        # Una compra, por (autor, comprador, curso). El webhook de la
+        # pasarela se REINTENTA: sin esto, tres reintentos son tres avisos
+        # de la misma venta y tres veces que suena el telefono.
+        "course_purchase",
         "session_booked",
         "session_accepted",
         "session_rejected",

@@ -40,6 +40,15 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     # el aviso era de otra cosa.
     "comment_reply": ("Nueva respuesta", "{actor} respondió a tu comentario."),
     "comment_like": ("Nueva reacción", "A {actor} le gustó tu comentario."),
+    # Venta de un curso. El texto dice QUE paso: quien lo lee en la pantalla
+    # de bloqueo tiene que poder decidir si abre la aplicacion sin abrirla.
+    "course_purchase": ("Nueva compra de tu curso", "{actor} compró tu curso."),
+    # Devoluciones. Moderadas: una al recibir y una por resolucion. Un aviso
+    # por cada actualizacion tecnica convierte la bandeja en ruido.
+    "refund_requested": ("Solicitud recibida", "Estamos revisando tu solicitud de devolución."),
+    "refund_approved": ("Solicitud aprobada", "Tu devolución se está procesando."),
+    "refund_rejected": ("Solicitud rechazada", "Revisa el motivo en tus compras."),
+    "refund_refunded": ("Devolución completada", "El importe vuelve a tu método de pago."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
     "session_booked": ("Nueva solicitud de sesión", "{actor} quiere agendar contigo."),
     # Cada respuesta lleva su propio texto. Con un unico tipo para todo, a
@@ -62,6 +71,11 @@ CHANNELS: dict[str, str] = {
     "comment": "interacciones",
     "comment_reply": "interacciones",
     "comment_like": "interacciones",
+    "course_purchase": "contenido",
+    "refund_requested": "contenido",
+    "refund_approved": "contenido",
+    "refund_rejected": "contenido",
+    "refund_refunded": "contenido",
     "follow": "interacciones",
     "session_booked": "contenido",
     "session_accepted": "contenido",
