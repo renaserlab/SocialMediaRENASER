@@ -27,6 +27,8 @@ from app.modules.messaging.router import router as messaging_router
 from app.modules.moderation.router import router as moderation_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.payments.router import router as payments_router
+from app.modules.refunds.router import admin_router as refunds_admin_router
+from app.modules.refunds.router import router as refunds_router
 from app.modules.profiles.router import router as profiles_router
 from app.modules.recommendations.router import router as recommendations_router
 from app.modules.reviews.router import router as reviews_router
@@ -124,6 +126,8 @@ def create_app() -> FastAPI:
     # Portal de pagos. Se monta siempre para poder probarlo y documentarlo,
     # pero responde 503 mientras `payments_enabled` este en false.
     app.include_router(payments_router, prefix=prefix)
+    app.include_router(refunds_router, prefix=prefix)
+    app.include_router(refunds_admin_router, prefix=prefix)
 
     return app
 

@@ -9,6 +9,8 @@ mas las comprobaciones de escritura, que si tienen que estar en el servidor.
 Las dos tienen que decir lo mismo. `tests/test_muro_de_pago.py` las compara.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +45,8 @@ from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import is_admin
 
 router = APIRouter(prefix="/learning", tags=["learning"])
+
+logger = logging.getLogger("renaser.learning")
 
 
 async def _is_enrolled(db: AsyncSession, uid: str, course_id: str) -> bool:
@@ -619,6 +623,45 @@ async def _leccion_con_curso(
     return fila  # type: ignore[return-value]
 
 
+async def _arrancar_garantia(db: AsyncSession, uid: str, course_id: str) -> None:
+    """Pone en marcha las 168 horas la PRIMERA vez que se entrega contenido.
+
+    SOLO PARA QUIEN COMPRO. Un curso gratuito, un acceso de autor, uno de
+    administracion o un regalo de la beta no tienen nada que devolver, asi que
+    no arrancan ninguna garantia: `_orden_reembolsable` devuelve None y aqui no
+    se escribe nada.
+
+    NUNCA REVIENTA LA ENTREGA. Si la 0049 no esta aplicada, o si algo falla al
+    escribir, quien pago tiene que ver su leccion igual. Una garantia que no
+    arranco es un problema que se puede arreglar despues; una leccion que no se
+    entrega es la compra rota.
+    """
+    try:
+        from app.modules.refunds import esquema as esquema_devoluciones
+
+        if not await esquema_devoluciones.hay_devoluciones(db):
+            return
+        if not get_settings().feature_course_refunds:
+            return
+
+        from app.modules.refunds import service as devoluciones
+
+        orden = await devoluciones._orden_reembolsable(
+            db, user_id=uid, course_id=course_id
+        )
+        if orden is None:
+            return
+        await devoluciones.asegurar_ventana(
+            db, user_id=uid, course_id=course_id, order_id=orden.id
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "[devoluciones] no se pudo arrancar la garantia del curso %s", course_id
+        )
+        await db.rollback()
+
+
 @router.get("/lessons/{lesson_id}", response_model=LessonDetailRead)
 async def get_lesson_detail(
     lesson_id: str,
@@ -655,6 +698,14 @@ async def get_lesson_detail(
     # curso» cuando está anunciado, pero `/lesson/<id>` se abre por enlace
     # directo y aquí no se miraba `coming_soon` en ningún momento.
     listo = await _contenido_listo(db, uid, curso)
+
+    # AQUI ARRANCA LA GARANTIA DE DEVOLUCION, y solo aqui: en el instante en
+    # que el servidor decide ENTREGAR contenido protegido. No al pagar, no al
+    # abrir la ficha, no al ver una muestra.
+    entregando_protegido = bool(uid) and listo and tiene_acceso and not es_muestra
+    if entregando_protegido:
+        await _arrancar_garantia(db, uid, curso.id)
+
     return LessonDetailRead(
         id=leccion.id,
         title=leccion.title,
