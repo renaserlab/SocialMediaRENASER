@@ -8,6 +8,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
+import { ScrimDeMedio, SOMBRA_DE_TEXTO } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -101,6 +102,12 @@ export function SelectorDeModo({ activo, alCambiar, arrastre }: Props) {
 
   return (
     <View style={styles.host} pointerEvents="box-none" onLayout={alMedir}>
+      {/*
+        Estas etiquetas van sobre la camara EN VIVO: el fondo cambia cada
+        fotograma, asi que ningun color fijo las hace legibles siempre. El velo
+        pone un suelo constante debajo.
+      */}
+      <ScrimDeMedio borde="abajo" alto={64} style={styles.velo} />
       <Animated.View style={[styles.fila, estilo]}>
         {MODOS.map(({ id, clave }) => {
           const etiqueta = t(clave);
@@ -118,6 +125,7 @@ export function SelectorDeModo({ activo, alCambiar, arrastre }: Props) {
                 numberOfLines={1}
                 style={[
                   styles.etiqueta,
+                  SOMBRA_DE_TEXTO,
                   { color: seleccionado ? media.text : media.textMuted },
                   seleccionado ? styles.activa : null,
                 ]}
@@ -146,6 +154,8 @@ const styles = StyleSheet.create({
     punto medio —entre Historia y Reel— y desde ahi ningun desplazamiento podia
     dejar bien Publicacion ni Vivo.
   */
+  // Cubre el alto del selector sin empujar nada: va detras de la fila.
+  velo: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   fila: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
   hueco: { width: ANCHO, alignItems: 'center', justifyContent: 'center', minHeight: 40 },
   etiqueta: {

@@ -2,17 +2,28 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { sobreMedio } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
 import type { FaseDePublicacion } from '@/hooks/usePublicacion';
-import { palette, radius, spacing } from '@/theme/tokens';
+import type { TranslationKey } from '@/i18n';
+import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
-const media = palette('dark');
+const media = sobreMedio;
 
-const TEXTO: Partial<Record<FaseDePublicacion, string>> = {
-  comprimiendo: 'Optimizando…',
-  subiendo: 'Subiendo…',
-  publicando: 'Publicando…',
+// Estaba escrito en español dentro del componente: quien tuviera la aplicación
+// en inglés o portugués leía «Subiendo…» igual.
+const CLAVE: Partial<Record<FaseDePublicacion, TranslationKey>> = {
+  comprimiendo: 'editPost.optimizing',
+  subiendo: 'editPost.uploading',
+  publicando: 'common.loading',
+};
+
+// El estado no se cuenta SOLO con color: icono + texto + porcentaje + barra.
+const ICONO: Partial<Record<FaseDePublicacion, keyof typeof Feather.glyphMap>> = {
+  comprimiendo: 'minimize-2',
+  subiendo: 'upload-cloud',
+  publicando: 'send',
 };
 
 type Props = {
@@ -24,7 +35,7 @@ type Props = {
   alCancelar: () => void;
   /** Paleta clara para el editor de texto; oscura sobre la camara. */
   sobreOscuro?: boolean;
-  colores?: { texto: string; suave: string; borde: string; peligro: string };
+  colores?: { texto: string; suave: string; borde: string; peligro: string; fondo?: string };
 };
 
 /**
@@ -50,13 +61,22 @@ export function ProgresoDePublicacion({
   const c = colores ?? {
     texto: media.text,
     suave: media.textMuted,
-    borde: media.border,
+    // `border` del tema oscuro es casi negro y sobre una foto no se ve: el
+    // borde de esta caja tiene que separarla del MEDIO, no de un fondo.
+    borde: media.glassBorder,
     peligro: media.danger,
   };
 
+  /*
+    EL FONDO ES EL ARREGLO. La caja no tenia ninguno: era un borde de 1 px y
+    letras sueltas encima del video, y por eso «Subiendo… / Cancelar» resultaba
+    ilegible sobre cualquier imagen clara. Ahora se apoya en una superficie.
+  */
+  const fondo = c.fondo ?? (sobreOscuro ? media.overlay : 'transparent');
+
   if (fase === 'error') {
     return (
-      <View style={[styles.caja, { borderColor: c.peligro }]}>
+      <View style={[styles.caja, { borderColor: c.peligro, backgroundColor: fondo }]}>
         <Feather name="alert-triangle" size={18} color={c.peligro} />
         <View style={styles.contenido}>
           <Text variant="secondary" weight="700" color={c.peligro}>
@@ -65,8 +85,9 @@ export function ProgresoDePublicacion({
           {puedeReintentar ? (
             <Pressable
               onPress={alReintentar}
-              style={[styles.boton, { borderColor: c.borde }]}
+              style={[styles.boton, { borderColor: c.suave }]}
               accessibilityRole="button"
+              accessibilityLabel={t('common.retry')}
             >
               <Text variant="secondary" weight="700" color={c.texto}>
                 {t('common.retry')}
@@ -81,20 +102,29 @@ export function ProgresoDePublicacion({
   const enMarcha = fase === 'comprimiendo' || fase === 'subiendo' || fase === 'publicando';
   if (!enMarcha) return null;
 
+  const clave = CLAVE[fase];
+  const icono = ICONO[fase];
+  const porcentaje = Math.round(progreso * 100);
+
   return (
-    <View style={[styles.caja, { borderColor: c.borde }]}>
+    <View style={[styles.caja, { borderColor: c.borde, backgroundColor: fondo }]}>
+      {icono ? <Feather name={icono} size={18} color={c.texto} /> : null}
       <View style={styles.contenido}>
         <View style={styles.fila}>
-          <Text variant="secondary" weight="600" color={c.suave}>
-            {TEXTO[fase]}
+          {/*
+            El estado va en el color de texto PRINCIPAL, no en el apagado: sobre
+            un medio, un gris medio es lo primero que se pierde.
+          */}
+          <Text variant="secondary" weight="700" color={c.texto}>
+            {clave ? t(clave) : ''}
           </Text>
           {fase !== 'publicando' ? (
-            <Text variant="secondary" weight="600" color={c.suave}>
-              {Math.round(progreso * 100)}%
+            <Text variant="secondary" weight="700" color={c.texto}>
+              {porcentaje}%
             </Text>
           ) : null}
         </View>
-        <View style={[styles.pista, { backgroundColor: sobreOscuro ? '#FFFFFF22' : c.borde }]}>
+        <View style={[styles.pista, { backgroundColor: sobreOscuro ? media.glassBorder : c.borde }]}>
           <View
             style={[
               styles.relleno,
@@ -106,15 +136,20 @@ export function ProgresoDePublicacion({
           Cancelar solo mientras hay algo que cancelar. Durante «Publicando» ya
           se ha soltado la peticion al servidor y ofrecer una salida que no
           existe seria peor que no ofrecerla.
+
+          Con borde y 44 px de alto: era una palabra suelta de 11 px sobre el
+          video, imposible de ver y de acertar.
         */}
         {fase !== 'publicando' ? (
           <Pressable
             onPress={alCancelar}
             hitSlop={8}
-            style={styles.cancelar}
+            style={[styles.boton, styles.cancelar, { borderColor: c.suave }]}
             accessibilityRole="button"
+            accessibilityLabel={t('common.cancel')}
           >
-            <Text variant="caption" weight="700" color={c.suave}>
+            <Feather name="x" size={14} color={c.texto} />
+            <Text variant="secondary" weight="700" color={c.texto}>
               {t('common.cancel')}
             </Text>
           </Pressable>
@@ -140,12 +175,16 @@ const styles = StyleSheet.create({
   relleno: { height: '100%', borderRadius: radius.pill },
   boton: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     borderWidth: 1,
     borderRadius: radius.pill,
     paddingVertical: 6,
     paddingHorizontal: spacing.md,
-    minHeight: 36,
+    // 44 px es el minimo tactil. Cancelar tenia 32 y ninguna forma visible.
+    minHeight: 44,
     justifyContent: 'center',
   },
-  cancelar: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  cancelar: { marginTop: spacing.xs },
 });

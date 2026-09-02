@@ -4,6 +4,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { ScrimDeMedio, SuperficieSobreMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
@@ -23,10 +24,10 @@ import { toast } from '@/lib/toast';
 import { readVideoMetadata } from '@/services/mediaCompressor';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
-import { palette, spacing } from '@/theme/tokens';
+import { spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
-const media = palette('dark');
+const media = sobreMedio;
 
 /*
   El tope de una historia y el tiempo de una foto viven en `lib/historias`, no
@@ -232,6 +233,13 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
+      {/*
+        LA FRANJA DEL PIE SE APAGA. Es lo que hacia falta para que se lea lo que
+        va escrito encima: la foto elegida puede ser blanca, y sobre blanco no
+        hay color de letra que valga.
+      */}
+      <ScrimDeMedio alto={360} />
+
       <View style={[styles.pie, { bottom: espacioInferior }]}>
         <ProgresoDePublicacion
           fase={envio.fase}
@@ -255,13 +263,24 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
         {tramo ? (
           // El compromiso, otra vez, justo antes del boton: quien publica un
           // tramo de un video largo sube el video largo.
-          <Text variant="caption" color={media.textMuted} style={styles.nota}>
-            {t('story.trimWholeUploadNotice')}
-          </Text>
+          <SuperficieSobreMedio>
+            <Text variant="caption" color={media.text} style={styles.nota}>
+              {t('story.trimWholeUploadNotice')}
+            </Text>
+          </SuperficieSobreMedio>
         ) : null}
-        <Text variant="caption" color={media.textMuted} style={styles.nota}>
-          {t('create.storyLasts24h')}
-        </Text>
+        {/*
+          «Se verá durante 24 horas»: EL TEXTO DEL INFORME. Iba en gris apagado
+          directamente sobre la imagen. Ahora lleva superficie propia, el color
+          de texto principal y un reloj, para que la duracion tampoco dependa de
+          leer la frase entera.
+        */}
+        <SuperficieSobreMedio forma="pildora">
+          <Feather name="clock" size={13} color={media.text} />
+          <Text variant="caption" weight="600" color={media.text} style={styles.nota}>
+            {t('create.storyLasts24h')}
+          </Text>
+        </SuperficieSobreMedio>
       </View>
     </View>
   );
@@ -278,7 +297,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    // Velo + borde: la flecha tambien va sobre la foto, y sin fondo propio
+    // desaparecia en cuanto la esquina de la imagen era clara.
     backgroundColor: media.overlay,
+    borderWidth: 1,
+    borderColor: media.glassBorder,
   },
   // `bottom` lo pone el componente: depende de cuanto ocupe la barra flotante.
   pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm },

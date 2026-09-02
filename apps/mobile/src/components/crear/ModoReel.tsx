@@ -4,6 +4,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Button } from '@/components/Button';
+import { ScrimDeMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
@@ -14,10 +15,10 @@ import { usePublicacion, PublicacionCancelada } from '@/hooks/usePublicacion';
 import { toast } from '@/lib/toast';
 import { uploadPostMedia, type PickedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
-import { palette, radius, spacing } from '@/theme/tokens';
+import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
-const media = palette('dark');
+const media = sobreMedio;
 
 /**
  * Tope de un reel.
@@ -86,7 +87,7 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
       setTexto('');
       setTemas([]);
       alSalir();
-      toast('Reel publicado');
+      toast(t('create.reelPublished'));
     });
   }, [elegido, texto, temas, envio, createPost, alSalir]);
 
@@ -128,8 +129,14 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
+      {/*
+        LA FRANJA DEL PIE SE APAGA. El editor, los temas, el aviso de subida y
+        el boton van todos encima del medio, que puede ser claro.
+      */}
+      <ScrimDeMedio alto={420} />
+
       <View style={[styles.pie, { bottom: espacioInferior }]}>
-        <View style={[styles.editor, { borderColor: media.border }]}>
+        <View style={[styles.editor, { borderColor: media.glassBorder }]}>
           <TextInput
             value={texto}
             onChangeText={setTexto}
@@ -185,7 +192,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    // Velo + borde: la flecha va sobre el medio y sin fondo propio se pierde
+    // en cuanto la esquina es clara.
     backgroundColor: media.overlay,
+    borderWidth: 1,
+    borderColor: media.glassBorder,
   },
   // `bottom` lo pone el componente: depende de cuanto ocupe la barra flotante.
   pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm },

@@ -3,6 +3,7 @@ import { LayoutChangeEvent, PanResponder, Pressable, StyleSheet, View } from 're
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { ScrimDeMedio, SuperficieSobreMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
@@ -17,12 +18,12 @@ import {
   type Tramo,
 } from '@/lib/historias';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
-import { palette, radius, spacing } from '@/theme/tokens';
+import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
 // Va siempre sobre un video a pantalla completa: el contexto es oscuro en los
 // dos temas, igual que en `ModoHistoria`.
-const media = palette('dark');
+const media = sobreMedio;
 
 /** Ancho del tirador. Se usa tambien para dejarle sitio dentro de la barra. */
 const TIRADOR = 20;
@@ -182,13 +183,23 @@ export function RecorteDeHistoria({ uri, duracionMs, aviso, alElegir, alVolver }
         <Feather name="arrow-left" size={24} color={media.text} />
       </Pressable>
 
+      {/*
+        LA FRANJA DEL PIE SE APAGA. Todo lo de abajo —titulo, aviso, cifras y
+        boton— va escrito sobre un fotograma que puede ser de cualquier color.
+      */}
+      <ScrimDeMedio alto={420} />
+
       <View style={[styles.pie, { bottom: espacioInferior }]}>
-        <Text variant="titleMedium" color={media.text}>
-          {t('story.trimTitle')}
-        </Text>
-        <Text variant="caption" color={media.textMuted}>
-          {aviso}
-        </Text>
+        <SuperficieSobreMedio>
+          <Text variant="titleMedium" color={media.text}>
+            {t('story.trimTitle')}
+          </Text>
+          {/* El aviso explica POR QUE aparece esta pantalla: si no se lee, la
+              pantalla no se entiende. Va en el color de texto principal. */}
+          <Text variant="caption" color={media.text}>
+            {aviso}
+          </Text>
+        </SuperficieSobreMedio>
 
         {/*
           ARRASTRAR AQUI RECORTA, NO CAMBIA DE SECCION.
@@ -242,24 +253,26 @@ export function RecorteDeHistoria({ uri, duracionMs, aviso, alElegir, alVolver }
           </View>
         </SinCambioDeSeccion>
 
-        <View style={styles.cifras}>
-          <Text variant="caption" color={media.textMuted}>
-            {t('story.trimSelection', {
-              inicio: reloj(tramo.inicioMs),
-              fin: reloj(tramo.finMs),
-            })}
-          </Text>
-          <Text variant="caption" color={media.text}>
-            {t('story.trimSeconds', {
-              segundos: Number.isInteger(segundos) ? segundos : segundos.toFixed(1),
-            })}
-          </Text>
-        </View>
+        <SuperficieSobreMedio>
+          <View style={styles.cifras}>
+            <Text variant="caption" weight="600" color={media.text}>
+              {t('story.trimSelection', {
+                inicio: reloj(tramo.inicioMs),
+                fin: reloj(tramo.finMs),
+              })}
+            </Text>
+            <Text variant="caption" weight="700" color={media.text}>
+              {t('story.trimSeconds', {
+                segundos: Number.isInteger(segundos) ? segundos : segundos.toFixed(1),
+              })}
+            </Text>
+          </View>
 
-        {/* EL COMPROMISO, dicho a quien lo paga. */}
-        <Text variant="caption" color={media.textMuted} style={styles.nota}>
-          {t('story.trimWholeUploadNotice')}
-        </Text>
+          {/* EL COMPROMISO, dicho a quien lo paga. */}
+          <Text variant="caption" color={media.text} style={styles.nota}>
+            {t('story.trimWholeUploadNotice')}
+          </Text>
+        </SuperficieSobreMedio>
 
         <Button
           label={t('story.trimConfirm')}
@@ -284,7 +297,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    // Velo + borde: la flecha va sobre el video y sin fondo propio se pierde
+    // en cuanto el fotograma es claro.
     backgroundColor: media.overlay,
+    borderWidth: 1,
+    borderColor: media.glassBorder,
   },
   // `bottom` lo pone el componente: depende de cuanto ocupe la barra flotante.
   pie: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm },
@@ -300,7 +317,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    // El mismo velo que el resto de la aplicacion, por token y no a mano.
+    backgroundColor: media.overlay,
   },
   ventana: {
     position: 'absolute',

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { AvisoDePermiso } from '@/components/AvisoDePermiso';
+import { sobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { consultarPermiso, pedirPermiso, type EstadoDePermiso } from '@/lib/permisos';
@@ -14,10 +15,12 @@ import {
 } from '@/screens/StoryCaptureScreen';
 import { StoryGalleryScreen } from '@/screens/StoryGalleryScreen';
 import { pickImage, pickVideo, PermisoDenegadoError, type PickedMedia } from '@/services/storage';
-import { palette, radius, spacing } from '@/theme/tokens';
+import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
-const media = palette('dark');
+// Un unico origen para «lo que va encima de un medio»: la camara y el carrete
+// son contexto oscuro en los dos temas, igual que el resto del flujo de crear.
+const media = sobreMedio;
 
 type Props = {
   /** Reel: solo video. Historia y publicacion: foto o video. */
