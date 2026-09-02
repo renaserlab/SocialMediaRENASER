@@ -388,3 +388,214 @@ class CourseEnrollment(Base):
         ),
         Index("course_enrollments_curso_idx", "course_id"),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Liquidacion al propietario del curso  (migracion 0049)
+# --------------------------------------------------------------------------- #
+#
+# EL SALDO NO SE CALCULA AL PAGAR, SE FOTOGRAFIA AL VENDER. Si el neto se
+# resolviera al transferir —precio actual x comision actual, propietario
+# actual—, cambiar cualquiera de las tres cosas reescribiria el pasado: una
+# venta de hace tres meses pasaria a deberle dinero a otra persona.
+
+
+class OwnerPayoutAccount(Base):
+    """Donde cobra quien vende.
+
+    Se guarda el identificador EXTERNO de la cuenta conectada. Ni un numero de
+    tarjeta ni una cuenta bancaria pasan por aqui: de eso se encarga el
+    proveedor, que para eso existe.
+    """
+
+    __tablename__ = "owner_payout_accounts"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(
+        String(32), default="stripe", server_default="stripe"
+    )
+    environment: Mapped[str] = mapped_column(
+        String(16), default="production", server_default="production"
+    )
+    external_account_id: Mapped[str] = mapped_column(Text)
+    onboarding_status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
+    charges_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    payouts_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("provider in ('stripe')", name="owner_payout_accounts_provider"),
+        CheckConstraint(
+            "environment in ('sandbox', 'production')",
+            name="owner_payout_accounts_environment",
+        ),
+        CheckConstraint(
+            "onboarding_status in ('pending', 'incomplete', 'active', "
+            "'restricted', 'disabled')",
+            name="owner_payout_accounts_onboarding",
+        ),
+        # Con dos cuentas del mismo propietario en el mismo entorno no se
+        # sabria a cual transferir.
+        UniqueConstraint(
+            "owner_id", "provider", "environment", name="owner_payout_accounts_unica"
+        ),
+        UniqueConstraint(
+            "provider", "environment", "external_account_id",
+            name="owner_payout_accounts_externa_unica",
+        ),
+    )
+
+
+class OwnerSaleBalance(Base):
+    """La fotografia inmutable de una venta. Se escribe al confirmar el pago."""
+
+    __tablename__ = "owner_sale_balances"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("orders.id", ondelete="RESTRICT")
+    )
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="RESTRICT"), index=True
+    )
+    owner_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT"), index=True
+    )
+    #: La cuenta que aplicaba EN ESE MOMENTO. Nula si el propietario todavia no
+    #: habia terminado su alta: el saldo se acumula igual y se paga despues.
+    payout_account_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("owner_payout_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    gross_amount_minor: Mapped[int] = mapped_column(Integer)
+    platform_fee_minor: Mapped[int] = mapped_column(Integer)
+    provider_fee_minor: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    net_amount_minor: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    #: Que reglas de comision se aplicaron. Cambiarlas no reescribe lo anterior.
+    fee_rules_version: Mapped[str] = mapped_column(String(32))
+
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
+    #: Cuando deja de estar retenido: cuando vence la garantia del comprador.
+    available_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    frozen_by_request_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending', 'frozen', 'eligible', 'transferring', "
+            "'transferred', 'cancelled', 'failed')",
+            name="owner_sale_balances_status",
+        ),
+        CheckConstraint(
+            "gross_amount_minor >= 0 and platform_fee_minor >= 0 "
+            "and provider_fee_minor >= 0 and net_amount_minor >= 0",
+            name="owner_sale_balances_importes",
+        ),
+        # Que el neto cuadre lo comprueba la base, no una prueba.
+        CheckConstraint(
+            "net_amount_minor = gross_amount_minor - platform_fee_minor "
+            "- provider_fee_minor",
+            name="owner_sale_balances_cuadra",
+        ),
+        # UN SALDO POR ORDEN. Un webhook repetido no puede deberle el dinero
+        # dos veces al propietario.
+        UniqueConstraint("order_id", name="owner_sale_balances_orden_unica"),
+    )
+
+
+class OwnerTransfer(Base):
+    """Un intento de pagarle a quien vende."""
+
+    __tablename__ = "owner_transfers"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    balance_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("owner_sale_balances.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT"), index=True
+    )
+    payout_account_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("owner_payout_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    amount_minor: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    provider: Mapped[str] = mapped_column(
+        String(32), default="stripe", server_default="stripe"
+    )
+    environment: Mapped[str] = mapped_column(
+        String(16), default="production", server_default="production"
+    )
+    external_transfer_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: La clave que se le manda al proveedor para que un reintento no pague dos
+    #: veces. La generamos nosotros y es estable por saldo.
+    idempotency_key: Mapped[str] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(
+        String(16), default="processing", server_default="processing"
+    )
+    failure_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('processing', 'completed', 'failed', 'cancelled')",
+            name="owner_transfers_status",
+        ),
+        CheckConstraint("amount_minor >= 0", name="owner_transfers_amount"),
+        # UNA TRANSFERENCIA VIVA POR SALDO. Parcial porque un fallo se puede
+        # reintentar y los intentos fallidos son historial.
+        Index(
+            "owner_transfers_viva_por_saldo",
+            "balance_id",
+            unique=True,
+            postgresql_where=text("status in ('processing', 'completed')"),
+            sqlite_where=text("status in ('processing', 'completed')"),
+        ),
+        UniqueConstraint(
+            "provider", "environment", "idempotency_key",
+            name="owner_transfers_idempotencia",
+        ),
+    )

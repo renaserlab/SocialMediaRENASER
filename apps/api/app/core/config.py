@@ -90,6 +90,40 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_api_base: str = "https://api.stripe.com"
 
+    # --- Devoluciones y liquidacion al propietario (migracion 0049) ---
+    #: Garantia de 7 dias y solicitudes de devolucion. APAGADO por defecto.
+    #:
+    #: Apagarlo NO borra historial ni revoca accesos: solo deja de arrancar
+    #: garantias nuevas y de aceptar solicitudes. Lo ya concedido sigue.
+    feature_course_refunds: bool = False
+    #: Ejecutar el reembolso CONTRA LA PASARELA. Separado del anterior a
+    #: proposito: con el primero encendido y este apagado, todo el circuito
+    #: interno —solicitud, revision, aprobacion— se puede probar de punta a
+    #: punta sin que salga un euro de ninguna cuenta.
+    stripe_refunds_enabled: bool = False
+    #: Cuentas conectadas de los propietarios. APAGADO.
+    stripe_connect_enabled: bool = False
+    #: Transferir de verdad a los propietarios. APAGADO, y ademas exige que la
+    #: comision este configurada: sin ella no hay neto que transferir.
+    creator_transfers_enabled: bool = False
+
+    #: Comision de la plataforma, en PUNTOS BASICOS (100 = 1 %).
+    #:
+    #: `-1` significa SIN CONFIGURAR, y es el valor de fabrica. No es cero: con
+    #: cero, olvidarse de ponerla haria que Z se quedara con nada y transfiriera
+    #: el bruto, y ese error no lo delata ninguna prueba porque el resultado
+    #: cuadra. Con `-1` las transferencias quedan bloqueadas hasta que alguien
+    #: decida el numero, que es una decision de negocio y no de despliegue.
+    platform_fee_bps: int = -1
+    #: Version de las reglas de comision. Se guarda en cada venta para que
+    #: cambiarlas no reescriba lo ya liquidado.
+    fee_rules_version: str = "v1"
+
+    @property
+    def comision_configurada(self) -> bool:
+        """Si hay comision valida. Sin ella no se transfiere nada."""
+        return 0 <= self.platform_fee_bps <= 10_000
+
     # --- Beta gratuita ---
     #: Durante la BETA, un curso de pago se puede conceder GRATIS a quien lo
     #: pide. APAGADO por defecto.
