@@ -139,10 +139,18 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                 </View>
               ) : playable ? (
                 <Pressable
+                  /*
+                    UNA sola pulsacion. Elegir un episodio cambia el unico
+                    `playingId`, asi que React desmonta el reproductor anterior
+                    y monta este; el audio arranca solo (`autoPlay`) en cuanto
+                    la fuente carga, sin pedir un segundo toque dentro.
+                  */
                   onPress={() => setPlayingId(isPlaying ? null : episode!.id)}
                   hitSlop={10}
                   accessibilityRole="button"
-                  accessibilityLabel={`${isPlaying ? 'Cerrar' : 'Reproducir'} ${episode!.body}`}
+                  accessibilityLabel={`${
+                    isPlaying ? t('common.close') : t('audio.play')
+                  } · ${episode!.body}`}
                   style={[styles.action, styles.play, { backgroundColor: colors.primary }]}
                 >
                   <Feather
@@ -159,7 +167,19 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
             </View>
 
             {isPlaying ? (
-              <AudioPlayer uri={episode!.mediaUrl!} title={episode!.body} />
+              /*
+                EN LINEA, debajo del episodio: no es una bandeja inferior ni
+                otra pantalla. La `key` ata el reproductor a SU episodio, de
+                modo que saltar de uno a otro lo desmonta y lo vuelve a montar
+                en vez de reaprovecharlo con la fuente cambiada a medias.
+              */
+              <AudioPlayer
+                key={episode!.id}
+                uri={episode!.mediaUrl!}
+                title={episode!.body}
+                variante="lista"
+                autoPlay
+              />
             ) : null}
           </View>
         );

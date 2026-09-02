@@ -6,15 +6,17 @@ import {
   useAudioPlayer,
   useAudioPlayerStatus,
   useAudioRecorder,
-  useAudioRecorderState,
 } from 'expo-audio';
 import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
-import { useBackgroundAudio } from '@/hooks/useBackgroundAudio';
+import { permitirGrabar, useBackgroundAudio } from '@/hooks/useBackgroundAudio';
+import {
+  useReproduccionDiferida,
+  useSilencioAlDesmontar,
+} from '@/hooks/useReproductorUnico';
 import { confirm } from '@/lib/confirm';
-import { describeError } from '@/lib/describeError';
 import { abrirAjustes } from '@/lib/permisos';
 import { toast } from '@/lib/toast';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
@@ -33,6 +35,19 @@ import { useTranslation } from '@/i18n/useTranslation';
  * quien lo oye con datos moviles.
  */
 export const MAX_INTRO_MS = 60_000;
+
+/**
+ * Cada cuanto se lee el reloj del microfono mientras se graba.
+ *
+ * El sondeo es NUESTRO y solo existe en la fase «grabando». Antes esto era
+ * `useAudioRecorderState`, que monta un `setInterval` contra el objeto nativo
+ * se este grabando o no: cada perfil visitado dejaba un sondeo permanente
+ * contra el microfono. Es la misma leccion que ya aprendio `useGrabadoraDeVoz`.
+ */
+const RELOJ_MS = 250;
+
+/** En que punto esta la grabacion. */
+type Fase = 'inactiva' | 'preparando' | 'grabando' | 'guardando';
 
 function reloj(segundos: number): string {
   const s = Number.isFinite(segundos) ? Math.max(0, Math.floor(segundos)) : 0;
@@ -65,6 +80,8 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
   const { colors } = useAppTheme();
   const setUser = useAppStore((state) => state.setUser);
   useBackgroundAudio();
+
+  const [aviso, setAviso] = useState<string | null>(null);
 
   /* ------------------------------------------------------------ escuchar - */
   const [urlFirmada, setUrlFirmada] = useState<string | null>(null);
@@ -99,84 +116,194 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
   const estado = useAudioPlayerStatus(reproductor);
   const sonando = estado?.playing ?? false;
 
+  /*
+    AQUI ESTABA EL FALLO DE «LA PRIMERA VEZ NO SUENA».
+
+    Mientras no hay firma, `useAudioPlayer` recibe `null` y crea un reproductor
+    nativo SIN FUENTE. La antigua `alternarReproduccion` pedia la URL, la
+    guardaba en el estado y llamaba a `reproductor.play()` acto seguido — pero
+    ese `reproductor` es el del render actual, el de la fuente `null`: el objeto
+    con la fuente buena no existe hasta el render siguiente. `play()` sobre uno
+    sin fuente no suena y tampoco lanza, asi que no habia ni error que ver. Al
+    segundo toque ya existia el bueno, y de ahi «a la segunda o a la tercera».
+
+    La reproduccion se APUNTA y se dispara cuando la fuente y el reproductor
+    estan los dos listos. `isLoaded` es la senal: antes de eso, aunque el objeto
+    ya tenga URL, el motor todavia no ha abierto el archivo.
+  */
+  const listo = !!urlFirmada && (estado?.isLoaded ?? false);
+  const { pendiente, pedir, cancelar } = useReproduccionDiferida(reproductor, listo, () =>
+    toast(t('intro.prepareFailed')),
+  );
+
+  // Callar mientras el objeto nativo sigue vivo. Corre tambien al cambiar de
+  // perfil, que es cuando el reproductor se sustituye por otro.
+  useSilencioAlDesmontar(reproductor);
+
   const alternarReproduccion = useCallback(async () => {
     if (sonando) {
       reproductor.pause();
       return;
     }
-    const url = await asegurarUrl();
-    if (!url) {
-      toast(t('intro.prepareFailed'));
+    // Segundo toque mientras se espera la firma: se cancela, no se encola otra
+    // reproduccion. Es lo que evita la carrera del doble toque.
+    if (pendiente) {
+      cancelar();
       return;
     }
     /*
       Al terminar, el reproductor se queda al final. Sin rebobinar, el segundo
       toque no suena y parece que se haya roto.
     */
-    if ((estado?.currentTime ?? 0) >= (estado?.duration ?? 0) - 0.2) {
-      reproductor.seekTo(0);
+    const total = estado?.duration ?? 0;
+    if (total > 0 && (estado?.currentTime ?? 0) >= total - 0.2) {
+      void reproductor.seekTo(0);
     }
-    reproductor.play();
-  }, [sonando, reproductor, asegurarUrl, estado]);
+    // La intencion se apunta ANTES de pedir la firma: si ya hay fuente suena en
+    // el acto, y si no, en cuanto llegue.
+    pedir();
+    try {
+      const url = await asegurarUrl();
+      if (!url) {
+        cancelar();
+        toast(t('intro.prepareFailed'));
+      }
+    } catch (e) {
+      // El motivo tecnico al registro; a quien mira, un texto traducido.
+      console.warn('[intro] no se pudo firmar el audio', e);
+      cancelar();
+      toast(t('intro.prepareFailed'));
+    }
+  }, [sonando, pendiente, reproductor, estado, pedir, cancelar, asegurarUrl, t]);
 
   /* -------------------------------------------------------------- grabar - */
   const grabadora = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const estadoGrabadora = useAudioRecorderState(grabadora, 250);
-  const grabando = estadoGrabadora?.isRecording ?? false;
-  const msGrabados = estadoGrabadora?.durationMillis ?? 0;
 
-  const [guardando, setGuardando] = useState(false);
-  const [aviso, setAviso] = useState<string | null>(null);
+  const [fase, setFase] = useState<Fase>('inactiva');
+  const [msGrabados, setMsGrabados] = useState(0);
+  const [borrando, setBorrando] = useState(false);
+  const grabando = fase === 'grabando';
+  const ocupado = fase === 'guardando' || borrando;
+
   /*
-    Cerrojo del guardado.
+    Cerrojo del ciclo de vida de la grabadora.
 
     Va en una referencia y no en el estado por el mismo motivo que en
     `usePublicacion`: se consulta y se escribe dentro del mismo manejador, y con
     estado la segunda llamada leeria el valor viejo y pasaria igual.
 
-    Hace falta de verdad: el corte automatico al llegar al minuto se dispara
-    desde un efecto que se reejecuta cada 250 ms (`useAudioRecorderState`), y
-    `grabando` no pasa a `false` hasta el sondeo siguiente. Sin cerrojo, el
-    mismo audio se subia dos veces y el perfil se guardaba dos veces.
-  */
-  const guardandoRef = useRef(false);
+    Es LA PIEZA que arregla «AudioRecorder has already been prepared». Dos
+    toques seguidos en «Grabar» entraban los dos en `empezar()` —el estado de la
+    grabadora se sondeaba cada 250 ms, asi que el segundo toque todavia veia
+    «no se esta grabando»— y llamaban dos veces a `prepareToRecordAsync()` sobre
+    la misma grabadora ya preparada. Eso es exactamente lo que lanza ese error.
 
-  const empezar = useCallback(async () => {
-    setAviso(null);
-    /*
-      El microfono se pide AQUI, al tocar «Grabar», y no al abrir el perfil:
-      un permiso pedido sin contexto se rechaza, y en iOS el rechazo no tiene
-      vuelta atras dentro de la aplicacion.
-    */
-    const permiso = await requestRecordingPermissionsAsync();
-    if (!permiso.granted) {
-      setAviso(
-        permiso.canAskAgain === false
-          ? t('intro.micBlocked')
-          : t('intro.micNeeded'),
-      );
-      return;
-    }
+    Tambien cierra la carrera entre el corte automatico al llegar al minuto y un
+    toque manual en «parar»: sin el, el mismo audio se subia dos veces.
+  */
+  const enCurso = useRef(false);
+  /** Si la grabadora tiene una preparacion viva que haya que deshacer. */
+  const preparada = useRef(false);
+
+  /*
+    EL CONTADOR ES NUESTRO Y SOLO CORRE MIENTRAS SE GRABA. Ver `RELOJ_MS`.
+  */
+  useEffect(() => {
+    if (fase !== 'grabando') return;
+    const tic = setInterval(() => {
+      try {
+        setMsGrabados((grabadora.currentTime ?? 0) * 1000);
+      } catch {
+        // El objeto nativo ya no esta. Se deja el ultimo valor leido.
+      }
+    }, RELOJ_MS);
+    return () => clearInterval(tic);
+  }, [fase, grabadora]);
+
+  /**
+   * Deshace la preparacion de la grabadora.
+   *
+   * `stop()` es la unica via: no hay un «unprepare». Parar algo que ya estaba
+   * parado no es un error, y la bandera se baja ANTES de esperar para que un
+   * fallo aqui no deje a la grabadora marcada como preparada para siempre.
+   */
+  const soltarGrabadora = useCallback(async () => {
+    if (!preparada.current) return;
+    preparada.current = false;
     try {
-      await grabadora.prepareToRecordAsync();
-      grabadora.record();
+      await grabadora.stop();
     } catch (e) {
-      setAviso(describeError(e, t('intro.startFailed')));
+      console.warn('[intro] la grabadora ya estaba parada', e);
     }
   }, [grabadora]);
 
+  const empezar = useCallback(async () => {
+    // Pulsaciones rapidas: la segunda no vuelve a preparar nada.
+    if (enCurso.current) return;
+    enCurso.current = true;
+    setAviso(null);
+    setFase('preparando');
+    try {
+      /*
+        El microfono se pide AQUI, al tocar «Grabar», y no al abrir el perfil:
+        un permiso pedido sin contexto se rechaza, y en iOS el rechazo no tiene
+        vuelta atras dentro de la aplicacion.
+      */
+      const permiso = await requestRecordingPermissionsAsync();
+      if (!permiso.granted) {
+        setAviso(permiso.canAskAgain === false ? t('intro.micBlocked') : t('intro.micNeeded'));
+        setFase('inactiva');
+        return;
+      }
+
+      // Grabar con el altavoz sonando se graba a si mismo.
+      cancelar();
+      try {
+        reproductor.pause();
+      } catch {
+        // Ya liberado; no hay nada que parar.
+      }
+
+      // La sesion de audio ANTES de preparar: en iOS `prepareToRecordAsync`
+      // falla si la categoria de la sesion no admite grabar.
+      await permitirGrabar(true);
+      // Si quedo preparada de un intento anterior —reemplazar, o un fallo a
+      // medias— se deshace antes: prepararla dos veces es el error 10.8.
+      await soltarGrabadora();
+
+      await grabadora.prepareToRecordAsync();
+      preparada.current = true;
+      grabadora.record();
+      setMsGrabados(0);
+      setFase('grabando');
+    } catch (e) {
+      // El error nativo al registro; a quien mira, un texto traducido.
+      console.warn('[intro] no se pudo empezar a grabar', e);
+      preparada.current = false;
+      await permitirGrabar(false);
+      setAviso(t('intro.startFailed'));
+      setFase('inactiva');
+    } finally {
+      enCurso.current = false;
+    }
+  }, [grabadora, reproductor, cancelar, soltarGrabadora, t]);
+
   const parar = useCallback(async () => {
-    if (guardandoRef.current) return;
-    guardandoRef.current = true;
+    if (enCurso.current) return;
+    enCurso.current = true;
+    setFase('guardando');
     try {
       const duracionMs = Math.min(msGrabados, MAX_INTRO_MS);
+      preparada.current = false;
       await grabadora.stop();
       const uri = grabadora.uri;
+      // La sesion vuelve a modo reproduccion en cuanto se suelta el microfono,
+      // pase lo que pase con el archivo.
+      await permitirGrabar(false);
       if (!uri) {
         setAviso(t('intro.emptyRecording'));
         return;
       }
-      setGuardando(true);
       const subido = await uploadPostMedia({
         uri,
         kind: 'audio',
@@ -191,12 +318,13 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       setUser(perfil);
       toast(t('intro.saved'));
     } catch (e) {
-      setAviso(describeError(e, t('intro.saveFailed')));
+      console.warn('[intro] no se pudo guardar la presentacion', e);
+      setAviso(t('intro.saveFailed'));
     } finally {
-      guardandoRef.current = false;
-      setGuardando(false);
+      enCurso.current = false;
+      setFase('inactiva');
     }
-  }, [grabadora, msGrabados, setUser]);
+  }, [grabadora, msGrabados, setUser, t]);
 
   /*
     Corte automatico al llegar al minuto. Sin el, la grabacion sigue y despues
@@ -210,6 +338,28 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
   }, [grabando, msGrabados, parar]);
 
   /*
+    AL DESMONTAR NO SE TOCA NADA NATIVO.
+
+    `useAudioRecorder` se apoya en `useReleasingSharedObject`, cuya limpieza
+    libera el objeto al desmontar, y esa limpieza corre ANTES que esta (se
+    declaro antes). Preguntarle cualquier cosa a la grabadora aqui es lo que
+    cerraba la aplicacion al salir de un chat; la leccion esta escrita en
+    `hooks/grabadoraNoTocaLoLiberado.test.mts` y vale igual aqui.
+
+    `release()` ya cierra el microfono. Lo unico que queda por deshacer es la
+    SESION DE AUDIO, que es del proceso: si se queda en modo grabacion, en iOS
+    todo el sonido de la aplicacion suena mas bajo hasta que se cierre.
+  */
+  const grabandoAhora = useRef(false);
+  grabandoAhora.current = fase === 'grabando' || fase === 'preparando';
+  useEffect(
+    () => () => {
+      if (grabandoAhora.current) void permitirGrabar(false);
+    },
+    [],
+  );
+
+  /*
     Al salir del perfil, se calla.
 
     Las secciones del carrusel NO se desmontan (ver SwipeTabs): sin esto,
@@ -220,16 +370,21 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
     `useCallback` sin dependencias a proposito: solo hace falta la accion de
     salir, no reengancharla cada vez que cambia el estado del reproductor.
   */
-  const reproductorRef = useRef(reproductor);
-  reproductorRef.current = reproductor;
+  const alSalir = useRef<() => void>(() => {});
+  alSalir.current = () => {
+    // Tambien se cancela una reproduccion pendiente: si no, la firma llegaria
+    // con el perfil ya cerrado y el audio arrancaria solo.
+    cancelar();
+    try {
+      reproductor.pause();
+    } catch {
+      // El reproductor puede haberse liberado ya; no hay nada que parar.
+    }
+  };
   useFocusEffect(
     useCallback(
       () => () => {
-        try {
-          reproductorRef.current?.pause();
-        } catch {
-          // El reproductor puede haberse liberado ya; no hay nada que parar.
-        }
+        alSalir.current();
       },
       [],
     ),
@@ -243,18 +398,20 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       destructive: true,
     });
     if (!seguro) return;
-    setGuardando(true);
+    setBorrando(true);
     try {
       const perfil = await ProfileRepository.updateMyProfile({ introAudioPath: null });
       setUser(perfil);
+      cancelar();
       setUrlFirmada(null);
       toast(t('intro.removed'));
     } catch (e) {
-      setAviso(describeError(e, t('intro.removeFailed')));
+      console.warn('[intro] no se pudo quitar la presentacion', e);
+      setAviso(t('intro.removeFailed'));
     } finally {
-      setGuardando(false);
+      setBorrando(false);
     }
-  }, [setUser]);
+  }, [setUser, cancelar, t]);
 
   const duracion = useMemo(() => {
     if (grabando) return reloj(msGrabados / 1000);
@@ -264,6 +421,9 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
   }, [grabando, msGrabados, estado?.duration, duracionS]);
 
   const tieneAudio = !!rutaDelAudio;
+  // La rueda cubre las tres esperas: firmar, esperar a que la fuente cargue y
+  // preparar el microfono. Sin ella, la primera pulsacion no daba ninguna senal.
+  const cargando = ocupado || firmando || pendiente || fase === 'preparando';
 
   // Perfil ajeno sin audio: no se pinta nada. Un hueco que dice «esta persona
   // no grabo nada» no aporta y ensucia la parte alta del perfil.
@@ -277,20 +437,20 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
           else if (tieneAudio) void alternarReproduccion();
           else void empezar();
         }}
-        disabled={guardando || firmando}
+        disabled={ocupado}
         style={[styles.boton, { backgroundColor: grabando ? colors.danger : colors.text }]}
         accessibilityRole="button"
         accessibilityLabel={
           grabando
             ? t('intro.stopRecording')
             : tieneAudio
-            ? sonando
+            ? sonando || pendiente
               ? t('intro.pause')
               : t('intro.listen')
             : t('intro.record')
         }
       >
-        {guardando || firmando ? (
+        {cargando ? (
           <ActivityIndicator color={colors.background} />
         ) : (
           <Feather
@@ -316,6 +476,8 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
         <Text variant="caption" color={colors.textMuted}>
           {grabando
             ? t('intro.recordingTime', { tiempo: duracion ?? '', maximo: MAX_INTRO_MS / 1000 })
+            : firmando || pendiente
+            ? t('common.loading')
             : tieneAudio
             ? (duracion ?? t('intro.tapToListen'))
             : t('intro.hint')}
@@ -328,7 +490,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
         <View style={styles.acciones}>
           <Pressable
             onPress={() => void empezar()}
-            disabled={guardando}
+            disabled={cargando}
             hitSlop={8}
             style={styles.accion}
             accessibilityRole="button"
@@ -338,7 +500,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
           </Pressable>
           <Pressable
             onPress={() => void borrar()}
-            disabled={guardando}
+            disabled={cargando}
             hitSlop={8}
             style={styles.accion}
             accessibilityRole="button"

@@ -176,7 +176,7 @@ export function AudioScreen() {
             <Pressable
               onPress={() => seekTo(currentTime - 15)}
               style={styles.smallControl}
-              accessibilityLabel="Retroceder 15 segundos"
+              accessibilityLabel={t('audio.back15')}
               accessibilityRole="button"
             >
               <Feather name="rotate-ccw" size={24} color={colors.text} />
