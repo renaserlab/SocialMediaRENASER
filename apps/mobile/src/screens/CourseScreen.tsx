@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -10,9 +10,11 @@ import { CoachMark } from '@/components/CoachMark';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { CourseHighlights } from '@/components/CourseHighlights';
 import { StateView } from '@/components/StateView';
+import { TarjetaDeGarantia } from '@/components/TarjetaDeGarantia';
 import { esMovil, explicar, ofertaPara, comprarEnTienda, restaurarCompras } from '@/services/compras';
 import type { OfertaDeCompra } from '@/services/compras';
-import { CommerceRepository } from '@/repositories/PaymentRepository';
+import { CommerceRepository, DevolucionesRepository } from '@/repositories/PaymentRepository';
+import type { AvisoDeRecompra } from '@/repositories/PaymentRepository';
 import { confirm, notify } from '@/lib/confirm';
 import * as WebBrowser from 'expo-web-browser';
 import { etiquetaDePrecio } from '@/lib/dinero';
@@ -27,6 +29,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 export function CourseScreen() {
   const { t } = useTranslation();
+  // Claves todavia fuera del diccionario (ver `hooks/useGarantia.ts`).
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -54,6 +57,23 @@ export function CourseScreen() {
    */
   const [beta, setBeta] = useState<AccesoDeBeta | null>(null);
   const [pidiendoBeta, setPidiendoBeta] = useState(false);
+  /**
+   * RECOMPRA SIN GARANTIA.
+   *
+   * Quien ya uso la garantia de este curso vuelve a poder comprarlo, pero
+   * tiene que saber ANTES de pagar que esta compra no admite otra devolucion.
+   * El texto y la fecha vienen del SERVIDOR: escritos aqui cambiarian con cada
+   * despliegue y las aceptaciones antiguas apuntarian a una redaccion que ya
+   * no existe, con lo que «lo acepto» no significaria nada.
+   *
+   * `null` mientras se averigua, igual que la oferta: no se pinta ningun boton
+   * de compra hasta saber si hay una puerta delante.
+   */
+  const [avisoDeRecompra, setAvisoDeRecompra] = useState<AvisoDeRecompra | null>(null);
+  const [aceptaLaRecompra, setAceptaLaRecompra] = useState(false);
+  const [aceptando, setAceptando] = useState(false);
+  /** Cerrojo sincrono: dos toques rapidos no pueden abrir dos pagos. */
+  const aceptandoRef = useRef(false);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
@@ -118,6 +138,64 @@ export function CourseScreen() {
       vigente = false;
     };
   }, [course, esDePago, hasAccess]);
+
+  /**
+   * Y si esta compra necesita aceptar antes que no tendra garantia. Se
+   * pregunta en las mismas condiciones —de pago y sin acceso— porque en
+   * cualquier otro caso no hay recompra que avisar.
+   */
+  React.useEffect(() => {
+    let vigente = true;
+    if (!course || !esDePago || hasAccess) {
+      setAvisoDeRecompra(null);
+      setAceptaLaRecompra(false);
+      return;
+    }
+    DevolucionesRepository.avisoDeRecompra(course.id)
+      // Que falle preguntando no puede romper la ficha del curso. Sin respuesta
+      // no hay aviso: la compra normal sigue su camino y el servidor la
+      // rechazaria si de verdad hiciera falta aceptar.
+      .catch(() => null)
+      .then((resultado) => {
+        if (vigente) setAvisoDeRecompra(resultado);
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [course, esDePago, hasAccess]);
+
+  /**
+   * Aceptar la recompra sin garantia y seguir al pago, en ese orden.
+   *
+   * UNA SOLA ORDEN. La aceptacion se guarda primero y el checkout se abre
+   * DESPUES, una vez: no se lanza un pago «por si acaso» ni se repite si la
+   * aceptacion falla. El cerrojo sincrono existe porque `aceptando` no esta
+   * puesto hasta el siguiente render, y entre el primer toque y ese render
+   * caben mas toques.
+   */
+  const aceptarYComprar = async () => {
+    if (!course || aceptandoRef.current) return;
+    // La casilla es obligatoria: sin marcar, no se acepta ni se cobra nada.
+    if (!aceptaLaRecompra) return;
+    aceptandoRef.current = true;
+    setAceptando(true);
+    try {
+      await DevolucionesRepository.aceptarRecompra(course.id);
+      // Aceptado y guardado: la puerta desaparece y se pasa al pago.
+      setAvisoDeRecompra((previo) =>
+        previo ? { ...previo, requiereAceptacion: false } : previo,
+      );
+      await comprar();
+    } catch (e) {
+      notify(
+        t('recompra.falloTitulo'),
+        e instanceof Error ? e.message : t('common.tryAgain'),
+      );
+    } finally {
+      aceptandoRef.current = false;
+      setAceptando(false);
+    }
+  };
 
   /**
    * Pedir el acceso gratuito de la Beta. NO ES UNA COMPRA y no se le dice a
@@ -463,13 +541,65 @@ export function CourseScreen() {
                 style={{ marginTop: spacing.xl }}
               />
             ) : oferta?.sePuedeComprar ? (
-              <Button
-                label={comprando ? t('course.processing') : t('course.buy')}
-                disabled={comprando}
-                loading={comprando}
-                onPress={() => void comprar()}
-                style={{ marginTop: spacing.xl }}
-              />
+              /*
+                LA PUERTA DE LA RECOMPRA VA DELANTE DEL PAGO.
+
+                Si el servidor dice que hace falta aceptar, el boton de comprar
+                NO existe todavia: en su lugar esta el aviso, con la fecha de la
+                devolucion anterior y una casilla que hay que marcar. Dejar los
+                dos a la vez —o el aviso al lado de un boton que ya cobra— seria
+                cobrar antes de que nadie haya aceptado nada.
+              */
+              avisoDeRecompra?.requiereAceptacion ? (
+                <View
+                  style={[styles.recompra, { borderColor: colors.border }]}
+                  accessibilityRole="alert"
+                >
+                  {/* El texto es EL DEL SERVIDOR, tal cual: es lo que se firma. */}
+                  <Text style={[styles.recompraTexto, { color: colors.text }]}>
+                    {avisoDeRecompra.aviso}
+                  </Text>
+                  <Pressable
+                    onPress={() => setAceptaLaRecompra((v) => !v)}
+                    disabled={aceptando || comprando}
+                    accessible
+                    focusable
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={avisoDeRecompra.etiquetaDeCasilla}
+                    accessibilityState={{ checked: aceptaLaRecompra }}
+                    style={styles.casilla}
+                  >
+                    <Feather
+                      name={aceptaLaRecompra ? 'check-square' : 'square'}
+                      size={20}
+                      color={aceptaLaRecompra ? colors.primary : colors.textMuted}
+                    />
+                    <Text style={[styles.casillaTexto, { color: colors.text }]}>
+                      {avisoDeRecompra.etiquetaDeCasilla}
+                    </Text>
+                  </Pressable>
+                  <Button
+                    label={
+                      aceptando || comprando ? t('course.processing') : t('course.buy')
+                    }
+                    // Sin marcar la casilla no se continua. Y apagado mientras
+                    // se envia: es la mitad visible de la proteccion contra dos
+                    // ordenes.
+                    disabled={!aceptaLaRecompra || aceptando || comprando}
+                    loading={aceptando || comprando}
+                    onPress={() => void aceptarYComprar()}
+                    style={{ marginTop: spacing.md }}
+                  />
+                </View>
+              ) : (
+                <Button
+                  label={comprando ? t('course.processing') : t('course.buy')}
+                  disabled={comprando}
+                  loading={comprando}
+                  onPress={() => void comprar()}
+                  style={{ marginTop: spacing.xl }}
+                />
+              )
             ) : null
           ) : contenidoNoDisponible ? null : (
             <Button
@@ -488,6 +618,19 @@ export function CourseScreen() {
               style={{ marginTop: spacing.xl }}
             />
           )}
+
+          {/*
+            LA GARANTIA DE DEVOLUCION, para quien compro este curso.
+
+            Se pinta solo cuando hay compra de pago con acceso; quien lo
+            gestiona no compro nada, y para un curso gratis o para quien llego
+            por la beta no hay garantia que contar. La propia tarjeta se calla
+            si el servidor dice que no hay compra detras, asi que ninguno de
+            esos casos deja un recuadro vacio.
+          */}
+          {esDePago && hasAccess && !canManage ? (
+            <TarjetaDeGarantia courseId={course.id} hayCompraPagada />
+          ) : null}
 
           {/*
             Restaurar compras. Obligatorio en movil y visible cuando hace
@@ -581,6 +724,22 @@ const styles = StyleSheet.create({
   },
   accesoTexto: { fontSize: 13, fontWeight: '800' },
   notaDeAcceso: { fontSize: 12, lineHeight: 17, marginTop: spacing.sm },
+  // La puerta de la recompra sin garantia.
+  recompra: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginTop: spacing.xl,
+    gap: spacing.sm,
+  },
+  recompraTexto: { fontSize: 13, lineHeight: 19 },
+  casilla: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  casillaTexto: { fontSize: 13, lineHeight: 19, flex: 1 },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

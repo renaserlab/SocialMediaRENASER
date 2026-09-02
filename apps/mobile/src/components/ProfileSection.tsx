@@ -397,6 +397,16 @@ export function ProfileSection({
    */
   const canManage = isOwnProfile || isAdmin;
 
+  /**
+   * Si ESTE curso es de quien mira. Es lo que abre «Gestionar curso».
+   *
+   * No vale `canManage`: es cierto tambien para la moderacion, y entonces
+   * cualquier administrador veria la gestion de los cursos de los demas
+   * colgando de su perfil. Aqui la pregunta es de propiedad, no de permiso.
+   */
+  const esAutorDe = (curso: Course): boolean =>
+    curso.authorId ? curso.authorId === miId : isOwnProfile;
+
   useEffect(() => {
     if (!AuthRepository.enabled) {
       setLoading(false);
@@ -1189,23 +1199,52 @@ export function ProfileSection({
         : courses.map((course) => (
             // La fila abre el curso (temario y contenido); el lapiz edita sus
             // datos sin salir del perfil. Van como hermanos, no anidados.
-            <CourseCard
-              key={course.id}
-              course={course}
-              onPress={() => router.push(`/course/${course.id}` as never)}
-              onEdit={
-                canManage
-                  ? () =>
-                      setEditing({
-                        id: course.id,
-                        title: course.title,
-                        description: course.description,
-                        priceMinor: course.priceMinor,
-                        topicIds: course.topicIds,
-                      })
-                  : undefined
-              }
-            />
+            <View key={course.id}>
+              <CourseCard
+                course={course}
+                onPress={() => router.push(`/course/${course.id}` as never)}
+                onEdit={
+                  canManage
+                    ? () =>
+                        setEditing({
+                          id: course.id,
+                          title: course.title,
+                          description: course.description,
+                          priceMinor: course.priceMinor,
+                          topicIds: course.topicIds,
+                        })
+                    : undefined
+                }
+              />
+              {/*
+                GESTIONAR EL CURSO: quien esta dentro, lo cobrado y lo devuelto.
+
+                SOLO PARA SU AUTOR, y no para `canManage`: ese permiso es cierto
+                tambien para la moderacion, y la gestion de un curso —sus
+                alumnos, su balance— es de quien lo publica, no de quien modera.
+                Cuando el listado no trae `authorId` se cae en `isOwnProfile`,
+                que es de donde salen estos cursos (`listMine`).
+
+                Va FUERA de la tarjeta y no dentro: en web cada Pressable es un
+                <button>, y la tarjeta ya tiene el suyo cubriendola entera.
+
+                Esconderlo no es el permiso: la pantalla de destino vuelve a
+                preguntarle al servidor y dice que no si no es suyo.
+              */}
+              {esAutorDe(course) ? (
+                <Pressable
+                  onPress={() => router.push(`/gestionar-curso/${course.id}` as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(CLAVE_GESTIONAR)}
+                  style={styles.gestionar}
+                >
+                  <Feather name="sliders" size={14} color={colors.text} />
+                  <Text variant="secondary" weight="700" color={colors.text}>
+                    {t(CLAVE_GESTIONAR)}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           ))}
 
       {/* Alta de un curso nuevo, debajo de los ya publicados. */}
@@ -1278,7 +1317,25 @@ export function ProfileSection({
   );
 }
 
+/**
+ * La clave de «Gestionar curso», que todavia no esta en el diccionario.
+ *
+ * `t` tipa contra `i18n/es.ts` —lo correcto— y las claves de gestion llegan en
+ * este mismo cambio por otro camino: el diccionario no se toca desde aqui. En
+ * cuanto este, este alias se borra y la llamada queda igual.
+ */
+const CLAVE_GESTIONAR = 'section.manageCourse' as TranslationKey;
+
 const styles = StyleSheet.create({
+  // «Gestionar curso», debajo de la tarjeta y solo para su autor.
+  gestionar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
   centerAction: { marginTop: spacing.md },

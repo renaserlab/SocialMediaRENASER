@@ -287,3 +287,259 @@ export const CommerceRepository = {
     }));
   },
 };
+
+
+// ---------------------------------------------------------------------------
+// Devoluciones: la garantia de 7 dias (migracion 0049)
+// ---------------------------------------------------------------------------
+
+/**
+ * Devoluciones de curso.
+ *
+ * REGLA DE ESTE FICHERO: el cliente NO manda importe, ni moneda, ni curso, ni
+ * elegibilidad, ni fechas. Solo QUE ORDEN y POR QUE. Todo lo demas lo resuelve
+ * el servidor desde la orden, y lo revalida aunque la pantalla ya haya pintado
+ * el boton.
+ *
+ * Y NO SE CALCULA NINGUN PLAZO AQUI. El reloj del telefono lo elige quien lo
+ * lleva: atrasarlo una semana bastaria para «seguir en plazo» si la cuenta
+ * atras naciera de `Date.now()`. Por eso la respuesta trae `server_time`, y de
+ * ahi sale el desfase con el que se corrige la hora local (ver
+ * `hooks/useGarantia.ts`).
+ */
+
+/** Los cuatro motivos del enum del backend. No hay texto libre como motivo. */
+export type MotivoDeDevolucion =
+  | 'not_as_expected'
+  | 'content_quality'
+  | 'technical_problem'
+  | 'other';
+
+/** Estados del expediente. Los define `refunds/estados.py`. */
+export type EstadoDeSolicitud =
+  | 'requested'
+  | 'under_review'
+  | 'approved'
+  | 'refund_processing'
+  | 'refunded'
+  | 'rejected'
+  | 'failed'
+  | 'cancelled';
+
+/** Por que NO se puede pedir. `null` cuando si se puede. */
+export type MotivoSinGarantia =
+  | 'no_purchase'
+  | 'not_started'
+  | 'expired'
+  | 'already_refunded'
+  | 'request_active'
+  | 'disabled';
+
+/** El estado de la garantia de un curso, resuelto en el servidor. */
+export type EstadoDeGarantia = {
+  /** Hora del SERVIDOR al responder. Es la autoridad de la cuenta atras. */
+  serverTime: string;
+  elegible: boolean;
+  motivo: MotivoSinGarantia | null;
+  primerAccesoEn: string | null;
+  venceEn: string | null;
+  segundosRestantes: number;
+  garantiaUsada: boolean;
+  garantiaUsadaEn: string | null;
+  solicitudActivaId: string | null;
+  solicitudActivaEstado: EstadoDeSolicitud | null;
+  /** La orden sobre la que se pide. La elige el SERVIDOR, nunca la pantalla. */
+  orderId: string | null;
+  amountMinor: number;
+  currency: string;
+};
+
+/** Una solicitud, como la ve quien la pidio. */
+export type SolicitudDeDevolucion = {
+  id: string;
+  orderId: string;
+  courseId: string;
+  courseTitle: string;
+  status: EstadoDeSolicitud;
+  reason: string;
+  explanation: string | null;
+  amountMinor: number;
+  currency: string;
+  requestedAt: string;
+  resolvedAt: string | null;
+  /** El motivo del rechazo. Las notas internas no salen nunca por aqui. */
+  reviewNotes: string | null;
+};
+
+/** Lo que hay que ensenar antes de dejar recomprar un curso ya devuelto. */
+export type AvisoDeRecompra = {
+  requiereAceptacion: boolean;
+  versionDePolitica: string;
+  /** El texto viene del SERVIDOR: es lo que hay que poder demostrar despues. */
+  aviso: string;
+  etiquetaDeCasilla: string;
+  garantiaUsadaEn: string | null;
+};
+
+type ElegibilidadDto = {
+  server_time: string;
+  eligible: boolean;
+  reason_code: string | null;
+  first_accessed_at: string | null;
+  expires_at: string | null;
+  seconds_remaining: number;
+  refund_used: boolean;
+  refund_used_at: string | null;
+  active_request_id: string | null;
+  active_request_status: string | null;
+  order_id: string | null;
+  amount_minor: number;
+  currency: string;
+};
+
+type SolicitudDto = {
+  id: string;
+  order_id: string;
+  course_id: string;
+  course_title: string;
+  status: string;
+  reason: string;
+  explanation: string | null;
+  amount_minor: number;
+  currency: string;
+  requested_at: string;
+  resolved_at: string | null;
+  review_notes: string | null;
+};
+
+type AvisoDto = {
+  requires_acceptance: boolean;
+  policy_version: string;
+  notice: string;
+  checkbox_label: string;
+  refund_used_at: string | null;
+};
+
+function aSolicitud(dto: SolicitudDto): SolicitudDeDevolucion {
+  return {
+    id: dto.id,
+    orderId: dto.order_id,
+    courseId: dto.course_id,
+    courseTitle: dto.course_title ?? '',
+    status: dto.status as EstadoDeSolicitud,
+    reason: dto.reason,
+    explanation: dto.explanation,
+    amountMinor: dto.amount_minor,
+    currency: dto.currency,
+    requestedAt: dto.requested_at,
+    resolvedAt: dto.resolved_at,
+    reviewNotes: dto.review_notes,
+  };
+}
+
+export const DevolucionesRepository = {
+  /**
+   * El estado de la garantia de un curso.
+   *
+   * Responde SIEMPRE, tambien con la funcion apagada o sin la 0049: en ese caso
+   * `elegible` es false con motivo `disabled`, y no un error. La ficha del
+   * curso tiene que poder pintarse igual.
+   */
+  async garantia(courseId: string): Promise<EstadoDeGarantia> {
+    const dto = await apiRequest<ElegibilidadDto>(
+      `${API_V1}/payments/courses/${courseId}/refund-eligibility`,
+    );
+    return {
+      serverTime: dto.server_time,
+      elegible: dto.eligible,
+      motivo: (dto.reason_code as MotivoSinGarantia | null) ?? null,
+      primerAccesoEn: dto.first_accessed_at,
+      venceEn: dto.expires_at,
+      segundosRestantes: dto.seconds_remaining ?? 0,
+      garantiaUsada: dto.refund_used ?? false,
+      garantiaUsadaEn: dto.refund_used_at,
+      solicitudActivaId: dto.active_request_id,
+      solicitudActivaEstado: (dto.active_request_status as EstadoDeSolicitud | null) ?? null,
+      orderId: dto.order_id,
+      amountMinor: dto.amount_minor ?? 0,
+      currency: dto.currency ?? '',
+    };
+  },
+
+  /**
+   * Pedir la devolucion de una orden.
+   *
+   * `orderId` sale de `garantia()`, o sea del SERVIDOR. No hay ningun camino
+   * por el que la pantalla lo elija: dejar escribir el pedido seria dejar
+   * pedir la devolucion del pedido de otro.
+   */
+  async crearSolicitud(datos: {
+    orderId: string;
+    reason: MotivoDeDevolucion;
+    explanation?: string;
+  }): Promise<SolicitudDeDevolucion> {
+    const dto = await apiRequest<SolicitudDto>(`${API_V1}/payments/refund-requests`, {
+      method: 'POST',
+      body: JSON.stringify({
+        order_id: datos.orderId,
+        reason: datos.reason,
+        // Cadena vacia y «sin explicacion» son la misma cosa: no se manda.
+        explanation: datos.explanation?.trim() ? datos.explanation.trim() : null,
+      }),
+    });
+    return aSolicitud(dto);
+  },
+
+  /** Las mias, de la mas reciente a la mas antigua. Vacia si no hay 0049. */
+  async misSolicitudes(): Promise<SolicitudDeDevolucion[]> {
+    const dtos = await apiRequest<SolicitudDto[]>(
+      `${API_V1}/payments/refund-requests/mine`,
+    );
+    return dtos.map(aSolicitud);
+  },
+
+  /** Una solicitud concreta, si es mia. */
+  async solicitud(requestId: string): Promise<SolicitudDeDevolucion> {
+    const dto = await apiRequest<SolicitudDto>(
+      `${API_V1}/payments/refund-requests/${requestId}`,
+    );
+    return aSolicitud(dto);
+  },
+
+  /** Retirarla. NO consume la garantia: quien se arrepiente conserva su plazo. */
+  async cancelarSolicitud(requestId: string): Promise<SolicitudDeDevolucion> {
+    const dto = await apiRequest<SolicitudDto>(
+      `${API_V1}/payments/refund-requests/${requestId}/cancel`,
+      { method: 'POST' },
+    );
+    return aSolicitud(dto);
+  },
+
+  /**
+   * Que hay que ensenar antes de dejar comprar otra vez un curso ya devuelto.
+   *
+   * El TEXTO viaja desde el servidor a proposito. Escrito en la aplicacion
+   * cambiaria con cada despliegue, y entonces «lo acepto» no significaria nada
+   * porque no se sabria el que.
+   */
+  async avisoDeRecompra(courseId: string): Promise<AvisoDeRecompra> {
+    const dto = await apiRequest<AvisoDto>(
+      `${API_V1}/payments/courses/${courseId}/repurchase-notice`,
+    );
+    return {
+      requiereAceptacion: dto.requires_acceptance,
+      versionDePolitica: dto.policy_version ?? '',
+      aviso: dto.notice ?? '',
+      etiquetaDeCasilla: dto.checkbox_label ?? '',
+      garantiaUsadaEn: dto.refund_used_at,
+    };
+  },
+
+  /** Guarda la aceptacion. Sin ella el servidor no deja seguir al pago. */
+  async aceptarRecompra(courseId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/payments/repurchase-acceptance`, {
+      method: 'POST',
+      body: JSON.stringify({ course_id: courseId, accepted: true }),
+    });
+  },
+};

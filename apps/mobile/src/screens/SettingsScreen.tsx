@@ -18,6 +18,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 export function SettingsScreen() {
   const { colors, mode } = useAppTheme();
   const { t, language } = useTranslation();
+  // Claves todavia fuera del diccionario (ver `hooks/useGarantia.ts`).
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -152,6 +153,22 @@ export function SettingsScreen() {
             leftIcon="compass"
             rightIcon="chevron-right"
             onPress={() => router.push('/onboarding?modo=editar' as never)}
+          />
+        ) : null}
+        {isLoggedIn ? (
+          /*
+            COMPRAS Y DEVOLUCIONES. Es el expediente comercial de la cuenta, y
+            tiene que estar donde se busca: en Ajustes, con lo demas de la
+            cuenta. Sigue ahi aunque el acceso a un curso se haya retirado —una
+            compra devuelta sigue siendo una compra— y aunque se reinstale la
+            aplicacion, porque todo sale del servidor.
+          */
+          <ListRow
+            title={t('settings.purchases')}
+            subtitle={t('settings.purchasesBody')}
+            leftIcon="shopping-bag"
+            rightIcon="chevron-right"
+            onPress={() => router.push('/compras' as never)}
           />
         ) : null}
         <ListRow
