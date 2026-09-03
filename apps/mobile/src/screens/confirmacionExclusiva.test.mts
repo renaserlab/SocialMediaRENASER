@@ -164,8 +164,18 @@ test('cancelar devuelve al selector de foto, no al perfil a secas', () => {
 });
 
 test('el boton fisico Atras cancela en vez de salir del perfil', () => {
-  assert.match(CONFIRMAR, /BackHandler\.addEventListener\('hardwareBackPress'/);
+  /*
+    SE ANUNCIA COMO CAPA, ya no registra su propio `BackHandler`. Con un oyente
+    por su cuenta, quien se quedaba el Atras lo decidia el orden de montaje;
+    ahora hay una sola respuesta a «¿hay algo abierto?» y un solo sitio donde
+    cerrarlo, y esa decision esta probada de verdad en `navigation/atras.ts`.
+  */
+  assert.match(CONFIRMAR, /registrarCapaAbierta\(\(\) => \{/);
   assert.match(CONFIRMAR, /if \(!ocupado\) alCancelar\(\);/);
+  assert.ok(
+    !CONFIRMAR.includes('BackHandler'),
+    'ConfirmarRecorte volvio a competir por la tecla Atras con un oyente propio.',
+  );
 });
 
 // ---------------------------------------------------------------------------

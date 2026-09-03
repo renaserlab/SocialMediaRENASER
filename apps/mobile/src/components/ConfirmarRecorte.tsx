@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
 import { ScrimDeMedio, SuperficieSobreMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
+import { registrarCapaAbierta } from '@/navigation/capasAbiertas';
 import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -75,16 +76,24 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
   const huecoArriba = altoCabecera ?? insets.top + ALTO_CABECERA_MINIMO;
   const huecoAbajo = altoPie ?? insets.bottom + ALTO_PIE_MINIMO;
 
-  // Atras fisico = cancelar, no salir del perfil. Mientras sube se traga el
-  // evento: irse a medias dejaria la subida sin pantalla a la que volver.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const suscripcion = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!ocupado) alCancelar();
-      return true;
-    });
-    return () => suscripcion.remove();
-  }, [alCancelar, ocupado]);
+  /*
+    Atras fisico = cancelar, no salir del perfil. Mientras sube se traga el
+    evento: irse a medias dejaria la subida sin pantalla a la que volver.
+
+    SE ANUNCIA COMO CAPA en vez de registrar un `BackHandler` propio. Con un
+    oyente por su cuenta, quien se quedaba el Atras lo decidia el ORDEN DE
+    MONTAJE; ahora hay una sola respuesta a «¿hay algo abierto?» y un solo sitio
+    donde cerrarlo (ver `navigation/capasAbiertas.ts`). El registro es
+    multiplataforma: no hace falta preguntar por Android porque quien consulta
+    la pila solo se instala ahi.
+  */
+  useEffect(
+    () =>
+      registrarCapaAbierta(() => {
+        if (!ocupado) alCancelar();
+      }),
+    [alCancelar, ocupado],
+  );
 
   return (
     <View style={styles.raiz}>

@@ -1,78 +1,87 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { useNavigationContainerRef } from 'expo-router';
 
 import { useTranslation } from '@/i18n/useTranslation';
 import { toast } from '@/lib/toast';
+import { instalarAtras } from '@/navigation/atras';
+import { cerrarCapaSuperior, hayCapaAbierta } from '@/navigation/capasAbiertas';
 
 /**
- * Cuanto tiempo cuenta la primera pulsacion.
+ * Conecta el boton fisico Atras de Android con la aplicacion.
  *
- * Dos segundos es lo que usan las aplicaciones grandes: suficiente para leer el
- * aviso y volver a pulsar, y corto como para que una pulsacion olvidada de hace
- * un rato no cierre la aplicacion por sorpresa.
- */
-const MARGEN_MS = 2000;
-
-/**
- * El boton fisico Atras deja de cerrar la aplicacion de golpe.
+ * AQUI NO HAY NINGUNA REGLA, y esa es la gracia. Que hacer con cada pulsacion
+ * lo decide `decidirAtras`, y la maquina que lleva la cuenta de la doble
+ * pulsacion es `instalarAtras`; las dos viven en `navigation/atras.ts` y son
+ * funciones puras que las pruebas ejecutan de verdad sin telefono. Este fichero solo
+ * traduce: `BackHandler` por «suscribir», `Date.now` por «ahora», la
+ * navegacion por «¿puedo volver?».
  *
- * Problema que resuelve: en Android, pulsar Atras cerraba la aplicacion aunque
- * la persona acabara de recorrer media aplicacion. Ahora Atras hace lo unico
- * razonable —volver a donde estabas— y solo cuando de verdad no queda nada
- * detras avisa antes de cerrar.
+ * QUE FALLABA. La version anterior tenia la logica metida en este `useEffect`,
+ * de modo que la unica forma de comprobarla era pulsar Atras en un telefono.
+ * Con eso encima se colaron dos cosas:
  *
- * QUIEN DECIDE QUE HAY DETRAS: la propia navegacion, no una lista paralela.
+ *  1. Durante el arranque —el layout raiz devuelve `null` hasta que hidrata—
+ *     no hay navegacion montada, `canGoBack()` es falso y el manejador
+ *     devolvia `false`: una pulsacion despistada mientras cargaba CERRABA la
+ *     aplicacion, sin aviso y sin haber navegado a ningun sitio. Ahora ese
+ *     caso cae en «avisar», igual que la raiz: sigue pudiendose salir con dos
+ *     pulsaciones, pero nunca con una.
+ *  2. El comentario decia que este oyente se registra despues que el de
+ *     expo-router y que por eso podia devolver `false` para delegar el
+ *     retroceso. Es al reves (esta explicado en `navigation/atras.ts`). Ya no
+ *     depende del orden: cuando toca volver, se vuelve.
  *
- * `canGoBack()` del contenedor pregunta a la pantalla que tiene el foco y sube
- * por sus padres: si hay una pantalla apilada encima (un ajuste, una
- * publicacion, un perfil ajeno) o queda historial de pestañas, responde que si.
- * Es EXACTAMENTE lo mismo que consulta React Navigation en su propio manejador
- * del boton Atras, asi que las dos respuestas no pueden discrepar. Por eso aqui
- * no hay ningun `historial = [...]` propio que mantener al dia: seria una
- * segunda verdad, y se desincronizaria a la primera navegacion inesperada.
- *
- * COMO CONVIVEN LOS DOS MANEJADORES: Android los llama del ultimo registrado al
- * primero, y el primero que devuelve `true` se queda el evento. Este se registra
- * despues que el de React Navigation, asi que se le pregunta antes; devolver
- * `false` es decir "yo no me lo quedo", y entonces corre el de React Navigation
- * y retrocede con normalidad. Solo devolvemos `true` en el unico caso en que
- * queremos cortar: la primera pulsacion en la raiz.
- *
- * Solo Android: en iOS no hay boton Atras y en el navegador el retroceso lo
- * lleva el propio historial del navegador, que no debe tocarse.
+ * Solo Android: en iOS no hay boton Atras, y en el navegador el retroceso lo
+ * lleva el historial del propio navegador, que no debe tocarse.
  */
 export function useSalidaConDoblePulsacion(): void {
   const navegacion = useNavigationContainerRef();
   const { t } = useTranslation();
 
+  /*
+    El texto se lee EN EL MOMENTO de la pulsacion, no al instalar.
+
+    Antes `t` estaba en las dependencias del efecto, asi que cambiar de idioma
+    desinstalaba y reinstalaba el oyente. Reinstalar mueve el oyente al final
+    de la lista de Android —cambiando en silencio quien se queda el evento— y
+    tira por el camino cualquier confirmacion a medias. Con la referencia, el
+    idioma cambia y la instalacion sigue siendo la misma.
+  */
+  const traducir = useRef(t);
+  traducir.current = t;
+
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
-    let esperandoConfirmacion = false;
-    let temporizador: ReturnType<typeof setTimeout> | undefined;
+    return instalarAtras({
+      suscribir: (manejador) => {
+        const suscripcion = BackHandler.addEventListener('hardwareBackPress', manejador);
+        return () => suscripcion.remove();
+      },
+      ahora: () => Date.now(),
+      programar: (fn, ms) => {
+        const id = setTimeout(fn, ms);
+        return () => clearTimeout(id);
+      },
+      hayCapaAbierta,
+      cerrarCapa: () => {
+        cerrarCapaSuperior();
+      },
+      /*
+        QUIEN SABE SI HAY DONDE VOLVER: la propia navegacion, nunca una lista
+        nuestra. `canGoBack()` del contenedor pregunta a la pantalla enfocada y
+        sube por sus padres, asi que cubre igual el historial entre pestanas
+        (`backBehavior="history"`) que la pila de detalles de encima. Es la
+        misma pregunta que se hace expo-router en su propio manejador, de modo
+        que las dos respuestas no pueden discrepar.
 
-    const suscripcion = BackHandler.addEventListener('hardwareBackPress', () => {
-      // Todavia arrancando: mejor no interferir con el comportamiento normal.
-      if (!navegacion.isReady()) return false;
-
-      // Queda a donde volver: que lo resuelva la navegacion, como siempre.
-      if (navegacion.canGoBack()) return false;
-
-      // Segunda pulsacion dentro del margen: se deja salir.
-      if (esperandoConfirmacion) return false;
-
-      esperandoConfirmacion = true;
-      toast(t('app.pressAgainToExit'), 'log-out');
-      temporizador = setTimeout(() => {
-        esperandoConfirmacion = false;
-      }, MARGEN_MS);
-      return true;
+        `isReady()` primero: antes de que el contenedor exista, `canGoBack()`
+        no solo responde `false` sino que ademas avisa por consola.
+      */
+      puedeVolver: () => navegacion.isReady() && navegacion.canGoBack(),
+      volver: () => navegacion.goBack(),
+      avisar: () => toast(traducir.current('app.pressAgainToExit'), 'log-out'),
     });
-
-    return () => {
-      suscripcion.remove();
-      if (temporizador) clearTimeout(temporizador);
-    };
-  }, [navegacion, t]);
+  }, [navegacion]);
 }
