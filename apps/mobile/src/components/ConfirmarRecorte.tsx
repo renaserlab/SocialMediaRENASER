@@ -1,5 +1,5 @@
-import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -15,32 +15,19 @@ const media = sobreMedio;
 /**
  * CONFIRMAR EL ENCUADRE de la foto de perfil o de la portada.
  *
- * ===========================================================================
- * QUE ARREGLA Y QUE NO.
+ * La pantalla de recorte que sale al elegir la foto NO ES NUESTRA: es el editor
+ * del SISTEMA OPERATIVO (`expo-image-picker` con `allowsEditing`). Sus iconos y
+ * su tijera los dibuja iOS o Android, no se pueden tematizar desde aqui y NO se
+ * han tocado. Esto es el paso siguiente: ver el resultado en el marco real
+ * —1:1 el avatar, 16:9 la portada— y poder volver atras en un toque.
  *
- * La pantalla de la que habla el informe —«los botones superiores para
- * personalización no son fácilmente visibles… tampoco se puede observar bien el
- * símbolo de cortar»— NO ES NUESTRA. Es el editor del SISTEMA OPERATIVO, el que
- * abre `expo-image-picker` con `allowsEditing: true` (ver `services/storage.ts`
- * y la llamada de `ProfileScreen.applyPhoto`). Sus iconos, su tijera y su barra
- * superior los dibuja iOS o Android con su propio tema: desde la aplicacion no
- * se pueden recolorear, mover ni etiquetar. Cualquier promesa de haberlos
- * arreglado seria falsa.
- *
- * Lo que si esta en nuestra mano es el paso SIGUIENTE: enseñar el resultado
- * dentro del marco real —cuadrado para el avatar, 16:9 para la portada— con
- * acciones que se lean sobre CUALQUIER foto, y dejar volver atras sin salir del
- * flujo. Asi, cuando el editor nativo se entienda mal (o cuando iOS imponga su
- * recorte cuadrado a una portada apaisada, que es un caso real documentado en
- * `PickImageOptions`), el error se ve AQUI y se corrige en un toque.
- *
- * AQUI NO SE RECORTAN PIXELES. No hay `expo-image-manipulator` ni ninguna otra
- * libreria de imagen en el proyecto, y no se añade: seria una dependencia
- * nativa nueva y una compilacion nueva por un recuadro. Se sube el archivo tal
- * cual y se encuadra con `contentFit="cover"`, que es EXACTAMENTE como se
- * pintan despues el avatar y la portada. Lo que se ve aqui es lo que se vera.
- * ===========================================================================
+ * AQUI NO SE RECORTAN PIXELES: se sube el archivo tal cual y se encuadra con
+ * `contentFit="cover"`, igual que despues lo pintan el avatar y la portada.
  */
+
+/** Lo que ocupan cabecera y pie: el marco no debe quedar debajo de ellos. */
+const ALTO_CABECERA = 60;
+const ALTO_PIE = 132;
 
 type Forma = 'avatar' | 'portada';
 
@@ -63,15 +50,26 @@ type Props = {
 };
 
 /**
- * Se pinta A PANTALLA COMPLETA sobre lo que haya: quien la usa la monta cuando
- * hay foto que confirmar y la desmonta al terminar. No trae `Modal` propio a
- * proposito —en iOS presentar una pantalla nativa encima de otra que se esta
- * cerrando es justo lo que rompio el selector una vez (ver `applyPhoto`)—.
+ * ES LA PANTALLA ENTERA, no una capa encima. Quien la usa la devuelve en lugar
+ * de su contenido (`ProfileScreen`), asi que no hay hermanos que puedan pintarse
+ * despues y quedarse los toques. Sin `Modal` propio: apilar uno sobre la hoja
+ * que se acaba de cerrar es lo que rompio el selector una vez (ver `applyPhoto`).
  */
 export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado = false }: Props) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const titulo = forma === 'avatar' ? t('profile.avatarPhoto') : t('profile.coverPhoto');
+
+  // Atras fisico = cancelar, no salir del perfil. Mientras sube se traga el
+  // evento: irse a medias dejaria la subida sin pantalla a la que volver.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const suscripcion = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!ocupado) alCancelar();
+      return true;
+    });
+    return () => suscripcion.remove();
+  }, [alCancelar, ocupado]);
 
   return (
     <View style={styles.raiz}>
@@ -84,10 +82,12 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
       <View style={[styles.cabecera, { paddingTop: insets.top + spacing.sm }]}>
         <Pressable
           onPress={alCancelar}
+          disabled={ocupado}
           hitSlop={12}
-          style={styles.redondo}
+          style={[styles.redondo, ocupado ? styles.apagado : null]}
           accessibilityRole="button"
           accessibilityLabel={t('common.back')}
+          accessibilityState={{ disabled: ocupado }}
         >
           <Feather name="arrow-left" size={22} color={media.text} />
         </Pressable>
@@ -106,7 +106,13 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
         recortara»: se ve el recorte. `cover` es el mismo ajuste con el que se
         pintan el avatar y la portada en el perfil.
       */}
-      <View style={styles.centro}>
+      <View
+        style={[
+          styles.centro,
+          // Hueco para la cabecera y el pie, que van flotando sobre la foto.
+          { paddingTop: insets.top + ALTO_CABECERA, paddingBottom: insets.bottom + ALTO_PIE },
+        ]}
+      >
         <View
           style={[
             styles.marco,
@@ -137,9 +143,10 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
         <Pressable
           onPress={alCancelar}
           disabled={ocupado}
-          style={styles.otra}
+          style={[styles.otra, ocupado ? styles.apagado : null]}
           accessibilityRole="button"
           accessibilityLabel={t('create.chooseSomethingElse')}
+          accessibilityState={{ disabled: ocupado }}
         >
           <Feather name="image" size={14} color={media.text} />
           <Text variant="secondary" weight="700" color={media.text}>
@@ -152,7 +159,10 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
 }
 
 const styles = StyleSheet.create({
-  raiz: { ...StyleSheet.absoluteFillObject, backgroundColor: media.background },
+  // `flex: 1`, no `absoluteFill`: es la raiz de la pantalla, no una capa que
+  // depende de que nadie se pinte despues.
+  raiz: { flex: 1, backgroundColor: media.background },
+  apagado: { opacity: 0.5 },
   cabecera: {
     position: 'absolute',
     top: 0,

@@ -391,25 +391,22 @@ export function ProfileScreen() {
     setEditingPhoto(kind);
   };
 
-  /** Recorte cuadrado para el avatar y panorámico para la portada. */
   /*
-    LO ELEGIDO ESPERA CONFIRMACION ANTES DE SUBIRSE.
-
-    La pantalla de recorte que sale al elegir la foto es la NATIVA del sistema
-    —`ImagePicker` con `allowsEditing`— y sus controles no se pueden tematizar
-    desde aqui: ese es el defecto que se reporto («no se ven los botones
-    superiores ni el simbolo de cortar»). Lo que si esta en nuestras manos es
-    lo que pasa DESPUES: una confirmacion propia, con las acciones legibles
-    sobre cualquier imagen, donde se ve como va a quedar antes de subir nada.
+    LO ELEGIDO ESPERA CONFIRMACION ANTES DE SUBIRSE. El recorte lo hace el
+    editor NATIVO del sistema —`ImagePicker` con `allowsEditing`, no tematizable
+    desde aqui—; esto es solo la confirmacion propia del paso siguiente.
   */
   const [porConfirmar, setPorConfirmar] = useState<
     { kind: 'avatar' | 'cover'; media: PickedMedia } | null
   >(null);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const subiendoRef = React.useRef(false);
 
   const confirmarFoto = async () => {
-    // Doble pulsacion: `subiendoFoto` corta la segunda antes de subir dos veces.
-    if (!porConfirmar || subiendoFoto) return;
+    // Cerrojo sincrono: `subiendoFoto` no esta puesto hasta el siguiente
+    // render, y dos toques rapidos caben de sobra en ese hueco.
+    if (subiendoRef.current || !porConfirmar) return;
+    subiendoRef.current = true;
     setSubiendoFoto(true);
     try {
       await setProfileImage(porConfirmar.kind, porConfirmar.media);
@@ -422,6 +419,7 @@ export function ProfileScreen() {
         error instanceof Error ? error.message : t('profile.checkPermissions'),
       );
     } finally {
+      subiendoRef.current = false;
       setSubiendoFoto(false);
     }
   };
@@ -501,6 +499,30 @@ export function ProfileScreen() {
       setChatBusy(false);
     }
   };
+
+  /*
+    CONFIRMAR LA FOTO ES UNA PANTALLA EXCLUSIVA.
+
+    Devolucion temprana, no una capa encima: montada como hermana dentro del
+    perfil, cualquier vista pintada DESPUES podia quedar por delante y quedarse
+    los toques. Va aqui, despues de TODOS los hooks, para no alterar su orden.
+  */
+  if (porConfirmar) {
+    return (
+      <ConfirmarRecorte
+        uri={porConfirmar.media.uri}
+        forma={porConfirmar.kind === 'avatar' ? 'avatar' : 'portada'}
+        ocupado={subiendoFoto}
+        alConfirmar={() => void confirmarFoto()}
+        alCancelar={() => {
+          if (subiendoFoto) return;
+          setPorConfirmar(null);
+          // Vuelve al selector de foto, que es de donde se venia.
+          setEditingPhoto(porConfirmar.kind);
+        }}
+      />
+    );
+  }
 
   // Perfil propio con backend real: carga/error mientras llega el perfil.
   if (!id && supabaseEnabled && !currentUser) {
@@ -635,20 +657,6 @@ export function ProfileScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/*
-        Mientras hay foto por confirmar es la unica pantalla, asi que va lo
-        primero. Sin `Modal` propio: apilar uno sobre la hoja que se acaba de
-        cerrar es el problema que ya documenta `applyPhoto`.
-      */}
-      {porConfirmar ? (
-        <ConfirmarRecorte
-          uri={porConfirmar.media.uri}
-          forma={porConfirmar.kind === 'avatar' ? 'avatar' : 'portada'}
-          ocupado={subiendoFoto}
-          alConfirmar={() => void confirmarFoto()}
-          alCancelar={() => setPorConfirmar(null)}
-        />
-      ) : null}
       <AppHeader
         title={isPublic ? t('profile.titlePublic') : t('profile.title')}
         rightIcon="more-vertical"
