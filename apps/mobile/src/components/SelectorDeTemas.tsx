@@ -1,16 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
 
+import { SuperficieSobreMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { Chip } from '@/components/Chip';
 import { Text } from '@/components/Text';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { RecommendationRepository, type TopicDto } from '@/repositories/RecommendationRepository';
-import { palette, spacing } from '@/theme/tokens';
+import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
-
-/** Paleta fija de lo que se pinta ENCIMA del video, como en `ModoPublicacion`. */
-const sobreVideo = palette('dark');
 
 const MAXIMO_POR_DEFECTO = 3;
 
@@ -57,6 +55,33 @@ type Props = {
    */
   para?: 'contenido' | 'curso';
 };
+
+/**
+ * SOBRE UN MEDIO, EL TEXTO SUELTO NO SE LEE. Y no es cuestión de elegir mejor el
+ * color: la foto puede ser blanca, negra o mitad y mitad, así que cualquier
+ * color acaba invisible sobre la mitad que se le parece. Es exactamente lo que
+ * denunció el cliente: «Elige hasta 3 temas» y los nombres de grupo
+ * —«TECNOLOGÍA», «DINERO»— eran fantasmas sobre una pared blanca.
+ *
+ * Lo que sí lo arregla es poner algo DETRÁS, que es lo que ya hacen el aviso de
+ * las 24 horas y la caja de progreso. Las píldoras de tema no lo necesitaban
+ * porque son opacas por su cuenta; estos dos textos, sí.
+ *
+ * Con la variante clara no se envuelve nada: ahí el fondo es la pantalla y el
+ * color sale del tema, que ya distingue claro de oscuro.
+ *
+ * VIVE FUERA del componente: definirlo dentro le daba identidad nueva en cada
+ * render y React desmontaba y volvía a montar el rótulo cada vez que se elegía
+ * un tema.
+ */
+function Rotulo({ sobre, children }: { sobre: boolean; children: React.ReactNode }) {
+  if (!sobre) return <>{children}</>;
+  return (
+    <SuperficieSobreMedio forma="pildora" style={styles.rotulo}>
+      {children}
+    </SuperficieSobreMedio>
+  );
+}
 
 /**
  * De que trata lo que se publica: hasta `maximo` temas de la taxonomia comun.
@@ -112,7 +137,8 @@ export function SelectorDeTemas({
   // justo cuando alguien va a pulsarlo.
   if (temas.length === 0) return null;
 
-  const superficie = variante === 'sobreMedia' ? sobreVideo : colors;
+  const esSobreMedia = variante === 'sobreMedia';
+  const superficie = esSobreMedia ? sobreMedio : colors;
   const alTope = seleccionados.length >= maximo;
 
   const alternar = (id: string) => {
@@ -132,23 +158,25 @@ export function SelectorDeTemas({
     borde sutil del tema claro desaparece sobre una imagen clara.
   */
   const estiloDeChip = (): ViewStyle | undefined =>
-    variante === 'sobreMedia' ? { borderColor: sobreVideo.textMuted } : undefined;
+    variante === 'sobreMedia' ? { borderColor: sobreMedio.textMuted } : undefined;
 
   return (
     <View style={styles.raiz}>
       <View style={styles.cabecera}>
-        <Text variant="secondary" weight="700" color={superficie.text} accessibilityRole="header">
-          {t('topics.question')}
-        </Text>
-        {/*
-          El aviso del tope ocupa el sitio de la ayuda en vez de añadirse debajo:
-          así la fila no cambia de alto al elegir el último tema.
-        */}
-        <Text variant="caption" color={superficie.textMuted}>
-          {alTope
-            ? `Máximo ${maximo}. Quita uno para elegir otro.`
-            : `Elige hasta ${maximo} temas`}
-        </Text>
+        <Rotulo sobre={esSobreMedia}>
+          <Text variant="secondary" weight="700" color={superficie.text} accessibilityRole="header">
+            {t('topics.question')}
+          </Text>
+          {/*
+            El aviso del tope ocupa el sitio de la ayuda en vez de añadirse
+            debajo: así la fila no cambia de alto al elegir el último tema.
+          */}
+          <Text variant="caption" color={superficie.textMuted}>
+            {alTope
+              ? `Máximo ${maximo}. Quita uno para elegir otro.`
+              : `Elige hasta ${maximo} temas`}
+          </Text>
+        </Rotulo>
       </View>
 
       {/*
@@ -175,14 +203,22 @@ export function SelectorDeTemas({
           */}
           {grupos.map((grupo) => (
             <View key={grupo.nombre} style={styles.grupo}>
-              <Text
-                variant="caption"
-                weight="800"
-                color={superficie.textMuted}
-                style={styles.nombreDeGrupo}
-              >
-                {grupo.nombre.toUpperCase()}
-              </Text>
+              <Rotulo sobre={esSobreMedia}>
+                <Text
+                  variant="caption"
+                  weight="800"
+                  /*
+                    `text` y no `textMuted`: es la etiqueta que separa un grupo
+                    del siguiente, va en mayúsculas pequeñas y compite con unas
+                    píldoras blancas al lado. Apagada se pierde incluso con la
+                    superficie detrás.
+                  */
+                  color={esSobreMedia ? superficie.text : superficie.textMuted}
+                  style={styles.nombreDeGrupo}
+                >
+                  {grupo.nombre.toUpperCase()}
+                </Text>
+              </Rotulo>
               {grupo.temas.map((tema) => {
                 const elegido = seleccionados.includes(tema.id);
                 // Al llegar al tope los demás se atenúan en vez de desaparecer:
@@ -213,4 +249,15 @@ const styles = StyleSheet.create({
   fila: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, paddingVertical: spacing.xs },
   grupo: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   nombreDeGrupo: { letterSpacing: 1 },
+  /*
+    Más apretada que la píldora por defecto: estos rótulos comparten fila con
+    los chips y una cápsula alta los desalinearía. `flexWrap` se conserva porque
+    la cabecera lleva dos textos que en pantallas estrechas pasan a dos líneas.
+  */
+  rotulo: {
+    alignSelf: 'flex-start',
+    flexWrap: 'wrap',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
 });

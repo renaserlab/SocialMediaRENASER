@@ -24,6 +24,24 @@ function limitar(proporcion: number): number {
 }
 
 /**
+ * El encuadre con el que se va a publicar una foto, o `null` si aún no se
+ * conocen sus medidas.
+ *
+ * EXISTE PARA QUE LA VISTA PREVIA NO MIENTA. Al elegir la foto, Crear la
+ * pintaba a pantalla completa con `cover`: se recortaban los lados y quien
+ * publicaba veía una composición que el muro no iba a reproducir. Como el
+ * recorte de verdad lo decide ESTA regla, la previa tiene que consumir la misma
+ * función y no una copia con los mismos números, que es como acaban divergiendo.
+ */
+export function encuadreDePublicacion(
+  width?: number | null,
+  height?: number | null,
+): number | null {
+  if (!width || !height) return null;
+  return limitar(width / height);
+}
+
+/**
  * Foto de una publicación, encuadrada respetando su forma.
  *
  * Antes se pintaban todas dentro de una caja de 340 px de alto y se recortaba

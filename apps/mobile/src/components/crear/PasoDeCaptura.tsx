@@ -48,6 +48,11 @@ type Props = {
    * medio, y este es el momento en que esa decision tiene sentido.
    */
   alternativa?: { etiqueta: string; alPulsar: () => void };
+  /**
+   * Encuadre que pide el selector del sistema. Historia y Reel son verticales;
+   * una publicacion no, y forzarle 9:16 le recortaba la foto sin avisar.
+   */
+  recorte?: [number, number] | 'ninguno';
 };
 
 /**
@@ -82,6 +87,7 @@ export function PasoDeCaptura({
   alCerrar,
   activo = true,
   alternativa,
+  recorte = [9, 16],
 }: Props) {
   const { t } = useTranslation();
   const enWeb = Platform.OS === 'web';
@@ -201,7 +207,12 @@ export function PasoDeCaptura({
     async (tipo: 'imagen' | 'video') => {
       try {
         setErrorWeb(null);
-        const elegido = tipo === 'video' ? await pickVideo() : await pickImage();
+        const elegido =
+          tipo === 'video'
+            ? await pickVideo()
+            : await pickImage(
+                recorte === 'ninguno' ? { allowsEditing: false } : { aspect: recorte },
+              );
         if (elegido) alElegir(elegido);
       } catch (e) {
         setErrorWeb(
@@ -211,7 +222,7 @@ export function PasoDeCaptura({
         );
       }
     },
-    [alElegir],
+    [alElegir, recorte],
   );
 
   if (enWeb) {
@@ -277,6 +288,7 @@ export function PasoDeCaptura({
         soloVideo={soloVideo}
         pie={pie}
         alternativa={alternativa}
+        recorte={recorte}
       />
     );
   }

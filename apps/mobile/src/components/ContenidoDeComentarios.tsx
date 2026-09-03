@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { enHilos } from '@/lib/comentarios';
+import { useHaceFaltaCuenta, useRequireAuth } from '@/hooks/useRequireAuth';
 import type { useComentarios } from '@/hooks/useComentarios';
 import type { ComentarioConAvatar } from '@/repositories/PostRepository';
 import { spacing } from '@/theme/tokens';
@@ -31,6 +32,21 @@ export function ContenidoDeComentarios({
 }) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
+  /*
+    COMENTAR QUEDA ASOCIADO A ALGUIEN, asi que necesita cuenta —igual que
+    reaccionar, guardar o repostear, que ya la pedian—. LEER no: el muro entero
+    se puede recorrer sin registrarse y esa es una decision del producto, no un
+    descuido; lo que estaba mal era dejar ESCRIBIR.
+
+    Sin esto, quien no habia entrado podia redactar el comentario entero y
+    recibir al pulsar «Enviar» un 401 crudo del servidor: se perdia lo escrito y
+    ademas no se le decia lo unico util, que le hace falta una cuenta.
+
+    Se pide en las TRES escrituras —comentar, responder y reaccionar a un
+    comentario—, no solo en el boton de enviar.
+  */
+  const requireAuth = useRequireAuth();
+  const haceFaltaCuenta = useHaceFaltaCuenta();
   const {
     estado,
     uiState,
@@ -47,6 +63,8 @@ export function ContenidoDeComentarios({
   } = comentarios;
 
   const hilos = useMemo(() => enHilos(estado.lista), [estado.lista]);
+
+  const pedirCuenta = () => void requireAuth('auth.reasonComment', () => {});
 
   const fila = (item: ComentarioConAvatar, esRespuesta: boolean) => {
     const puedeAbrirPerfil = Boolean(item.authorId && onPersonPress);
@@ -89,7 +107,7 @@ export function ContenidoDeComentarios({
           <Text style={[styles.cuerpo, { color: colors.text }]}>{item.text}</Text>
           <View style={styles.acciones}>
             <Pressable
-              onPress={() => void reaccionar(item.id)}
+              onPress={() => void requireAuth('auth.reasonReact', () => reaccionar(item.id))}
               hitSlop={ZONA_TACTIL}
               accessibilityRole="switch"
               accessibilityState={{ checked: item.viewerReacted }}
@@ -115,7 +133,11 @@ export function ContenidoDeComentarios({
               ) : null}
             </Pressable>
             <Pressable
-              onPress={() => setRespondiendo({ id: item.id, author: item.author })}
+              onPress={() =>
+                void requireAuth('auth.reasonComment', () =>
+                  setRespondiendo({ id: item.id, author: item.author }),
+                )
+              }
               hitSlop={ZONA_TACTIL}
               accessibilityRole="button"
               accessibilityLabel={t('post.reply')}
@@ -188,14 +210,30 @@ export function ContenidoDeComentarios({
           value={inputText}
           onChangeText={setInputText}
           containerStyle={styles.campo}
+          // Sin cuenta el teclado no llega a abrirse: el aviso sale al tocar.
+          editable={!haceFaltaCuenta}
         />
         <Button
           label={t('common.send')}
           variant="ghost"
-          onPress={() => void enviar()}
+          onPress={() => void requireAuth('auth.reasonComment', enviar)}
           loading={sending}
           disabled={!inputText.trim()}
         />
+        {/*
+          Una capa por encima de la barra entera, y no un campo desactivado a
+          secas: desactivado, tocar el campo no haria NADA y pareceria que la
+          aplicacion se ha colgado. Asi el primer toque ya explica que hace
+          falta una cuenta. Va absoluta, de modo que no altera la fila.
+        */}
+        {haceFaltaCuenta ? (
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={pedirCuenta}
+            accessibilityRole="button"
+            accessibilityLabel={t('post.writeComment')}
+          />
+        ) : null}
       </View>
     </View>
   );

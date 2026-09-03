@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { ScrimDeMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
+import { encuadreDePublicacion } from '@/components/PostImage';
 import { ProgresoDePublicacion } from '@/components/crear/ProgresoDePublicacion';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
 import { Text } from '@/components/Text';
@@ -107,6 +108,12 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
     return (
       <PasoDeCaptura
         duracionMaximaMs={MAX_PUBLICACION_MS}
+        /*
+          UNA PUBLICACION NO SE RECORTA. El muro la encuadra respetando su forma
+          (ver `PostImage`), asi que pedirle a la persona un recorte 9:16 de
+          historia era exigirle que sacrificara los lados para nada.
+        */
+        recorte="ninguno"
         pie={pie}
         alElegir={setElegido}
         alCerrar={alSalir}
@@ -122,6 +129,23 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
   }
 
   /* --------------------------------------------------- revisar y publicar --- */
+  /*
+    LA PREVIA TIENE QUE ENSENAR LO QUE SE VA A PUBLICAR, y no lo hacia.
+
+    Se pintaba `cover` a pantalla completa: sobre una pantalla de movil eso
+    recorta los lados de casi cualquier foto, asi que quien publicaba componia
+    una imagen que el muro luego no reproducia —el muro la ensena entera salvo
+    que sea extremadamente alargada—. De ahi la pregunta del cliente: «al
+    publicar ya no aparece un recortador de fotos, ¿no?». No lo hay, y por eso
+    justamente la previa no podia comportarse como si lo hubiera.
+
+    Ahora se encuadra con la MISMA funcion que decide el recorte del muro, asi
+    que lo que se ve aqui es lo que sale alli. Sin medidas —la camara del
+    aparato no siempre las informa— se cae a `contain`, que ensena la foto
+    entera: equivocarse ensenando de mas es recuperable; de menos, no.
+  */
+  const encuadre = elegido?.kind === 'image' ? encuadreDePublicacion(elegido.width, elegido.height) : null;
+
   return (
     <SinTecladoDelante style={styles.raiz}>
       {elegido ? (
@@ -129,17 +153,27 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
           <VideoPlayer
             uri={elegido.uri}
             style={StyleSheet.absoluteFill}
-            contentFit="cover"
+            // `contain`, igual que en la tarjeta del muro: un video vertical
+            // recortado por los lados no se parece a lo que se va a publicar.
+            contentFit="contain"
             nativeControls={false}
             autoPlay
             loop
             muted
           />
+        ) : encuadre ? (
+          <View style={styles.marco}>
+            <ExpoImage
+              source={{ uri: elegido.uri }}
+              style={{ width: '100%', aspectRatio: encuadre }}
+              contentFit="cover"
+            />
+          </View>
         ) : (
           <ExpoImage
             source={{ uri: elegido.uri }}
             style={StyleSheet.absoluteFill}
-            contentFit="cover"
+            contentFit="contain"
           />
         )
       ) : null}
@@ -219,6 +253,8 @@ const MAX_PUBLICACION_MS = 180_000;
 
 const styles = StyleSheet.create({
   raiz: { flex: 1, backgroundColor: media.background },
+  // El encuadre real, centrado: lo que queda fuera no se publica.
+  marco: { ...StyleSheet.absoluteFillObject, justifyContent: 'center' },
   volver: {
     position: 'absolute',
     top: 54,

@@ -51,6 +51,20 @@ type Props = {
   pie?: React.ReactNode;
   /** Salida secundaria junto al carrete (por ejemplo, «Escribir sin foto»). */
   alternativa?: { etiqueta: string; alPulsar: () => void };
+  /**
+   * Qué encuadre pide el selector DEL SISTEMA, que es la salida de emergencia
+   * cuando la cuadrícula no puede leer el carrete.
+   *
+   * Estaba fijo en 9:16 —la forma de una historia— para todo el mundo, así que
+   * quien llegaba por ahí a crear una PUBLICACIÓN se encontraba el recortador
+   * del teléfono exigiéndole una foto vertical de historia. Y por la puerta
+   * normal, la cuadrícula, no había recorte ninguno: dos comportamientos
+   * distintos para la misma acción según qué permiso tuviera el aparato.
+   *
+   * `'ninguno'` desactiva el recorte del sistema y deja la foto entera, que es
+   * lo que hace la cuadrícula y lo que el muro sabe encuadrar.
+   */
+  recorte?: [number, number] | 'ninguno';
 };
 
 /**
@@ -71,6 +85,7 @@ export function StoryGalleryScreen({
   soloVideo = false,
   pie,
   alternativa,
+  recorte = [9, 16],
 }: Props) {
   const { t } = useTranslation();
   /*
@@ -131,7 +146,11 @@ export function StoryGalleryScreen({
    */
   const elegirConElSistema = async () => {
     try {
-      const foto = await pickImage({ aspect: [9, 16] });
+      const foto = await pickImage(
+        // El mismo trato que por la puerta normal: si aquí no se recorta,
+        // tampoco puede recortar la salida de emergencia.
+        recorte === 'ninguno' ? { allowsEditing: false } : { aspect: recorte },
+      );
       if (foto) onSelect(foto);
     } catch (error) {
       notify(t('media.pickerFailedTitle'), describeError(error, t('common.tryAgain')));
@@ -147,6 +166,14 @@ export function StoryGalleryScreen({
       name: asset.filename,
       // La duracion llega en SEGUNDOS; el resto de la app trabaja en ms.
       durationMs: esVideo ? Math.round(asset.duration * 1000) : null,
+      /*
+        LAS MEDIDAS VIAJAN. `MediaLibrary` las trae y aqui se tiraban, asi que
+        `PickedMedia.width/height` —que existen justo «para la proporcion del
+        hueco»— llegaban vacias a todo lo que va despues: la vista previa no
+        podia saber como iba a quedar la foto y la pintaba a pantalla completa.
+      */
+      width: asset.width ?? null,
+      height: asset.height ?? null,
     });
   };
 

@@ -43,6 +43,7 @@ const TODOS = [
   'components/ConfirmarRecorte.tsx',
   'components/crear/ProgresoDePublicacion.tsx',
   'components/crear/PasoDeCaptura.tsx',
+  'components/SelectorDeTemas.tsx',
 ];
 
 /** Cuantos caracteres se miran hacia atras buscando la capa que protege. */
@@ -104,6 +105,66 @@ test('el aviso de «Subiendo / Cancelar» tiene fondo propio', () => {
   assert.ok(
     /const fondo =/.test(progreso) && progreso.includes('media.overlay'),
     'El fondo de la caja de progreso debe salir del token overlay.',
+  );
+});
+
+test('«Elige hasta 3 temas» y los nombres de grupo no van desnudos', () => {
+  /*
+    Segunda vuelta del mismo fallo, y esta la vio el cliente en preproduccion:
+    «se siguen teniendo mensajes invisibles al momento de mostrar informacion al
+    querer realizar una publicacion». Eran la ayuda del selector de temas y los
+    nombres de grupo —TECNOLOGIA, DINERO, OTROS—, escritos en gris apagado
+    directamente sobre la foto. Sobre una pared blanca desaparecian del todo.
+
+    Vale para publicar Y para reels: los dos montan este mismo selector con la
+    variante `sobreMedia`.
+  */
+  const selector = fuente('components/SelectorDeTemas.tsx');
+  assert.ok(
+    selector.includes("from '@/components/CapaDeContraste'"),
+    'El selector de temas escribe sobre un medio: la capa sale del componente comun.',
+  );
+  assert.match(
+    selector,
+    /function Rotulo\(\{ sobre, children \}[\s\S]{0,200}<SuperficieSobreMedio/,
+    'El rotulo sobre un medio debe apoyarse en una superficie opaca.',
+  );
+  // Los dos textos del informe, DENTRO de un rotulo. Se mira el contenido del
+  // bloque y no la distancia: un comentario largo no puede tumbar la prueba.
+  const rotulos = [...selector.matchAll(/<Rotulo sobre=\{esSobreMedia\}>([\s\S]*?)<\/Rotulo>/g)].map(
+    (m) => m[1],
+  );
+  assert.equal(rotulos.length, 2, 'Deben ser dos rotulos: la cabecera y el nombre de grupo.');
+  for (const marca of ['Elige hasta ${maximo} temas', 'grupo.nombre.toUpperCase()']) {
+    assert.ok(
+      rotulos.some((bloque) => bloque.includes(marca)),
+      `«${marca}» vuelve a ir suelto encima de la imagen.`,
+    );
+  }
+  // Y el nombre del grupo deja de ir en el gris que primero se pierde.
+  assert.match(selector, /color=\{esSobreMedia \? superficie\.text : superficie\.textMuted\}/);
+});
+
+test('con la variante clara no se envuelve nada', () => {
+  /*
+    Sobre una pantalla normal el fondo ya es opaco y el color sale del tema, que
+    distingue claro de oscuro. Meter ahi una capsula oscura seria el mismo
+    fallo del otro lado: un parche de modo oscuro dentro del modo claro.
+  */
+  const selector = fuente('components/SelectorDeTemas.tsx');
+  assert.match(selector, /if \(!sobre\) return <>\{children\}<\/>;/);
+});
+
+test('el rotulo no se remonta en cada eleccion de tema', () => {
+  /*
+    Definido DENTRO del componente tenia identidad nueva en cada render, asi que
+    React desmontaba y volvia a montar el subarbol cada vez que se elegia un
+    tema. Fuera, la identidad es estable.
+  */
+  const selector = fuente('components/SelectorDeTemas.tsx');
+  assert.ok(
+    selector.indexOf('function Rotulo(') < selector.indexOf('export function SelectorDeTemas('),
+    'Rotulo volvio a declararse dentro del componente.',
   );
 });
 

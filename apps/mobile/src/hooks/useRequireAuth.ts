@@ -24,6 +24,22 @@ import { useAuthStore } from '@/store/useAuthStore';
  * Si hay sesión, la acción se ejecuta sin más. Si no, se ofrece entrar y, al
  * aceptar, se lleva a la pantalla de acceso.
  */
+/**
+ * Si esta persona tendría que crear cuenta para escribir algo.
+ *
+ * Sale del MISMO sitio que `useRequireAuth` a propósito. La regla tiene una
+ * excepción —en modo demo, sin backend, no hay sesión que exigir— y escribirla
+ * dos veces es cómo una pantalla acaba bloqueando lo que la otra permite.
+ *
+ * Sirve para APAGAR un control antes de que lo toquen, no para sustituir a
+ * `useRequireAuth`: quien pulse igual tiene que seguir encontrándose el aviso.
+ */
+export function useHaceFaltaCuenta(): boolean {
+  const status = useAuthStore((state) => state.status);
+  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  return supabaseEnabled && status !== 'authenticated';
+}
+
 export function useRequireAuth() {
   const router = useRouter();
   const status = useAuthStore((state) => state.status);
