@@ -1080,7 +1080,24 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
     if solicitud is None:
         return
 
-    if evento.status == "refund_fallido" and solicitud.status == estados.REFUND_PROCESSING:
+    # ¿HABLA ESTE AVISO DEL REEMBOLSO QUE TENEMOS EN CURSO? Un mismo cobro puede
+    # acumular varios: un parcial antiguo que fallo, mas el total que esta en
+    # marcha. Sin comparar identificadores, el `refund.failed` del parcial
+    # mataba el expediente del total —que seguia vivo— y lo dejaba en `failed`
+    # con un motivo TERMINAL. A partir de ahi el expediente miente, y el boton
+    # de reintentar suelta la referencia viva y pide un SEGUNDO reembolso.
+    referencia_viva = (solicitud.external_refund_id or "").strip()
+    del_mismo = (
+        not evento.refund_id
+        or not referencia_viva
+        or evento.refund_id == referencia_viva
+    )
+
+    if (
+        evento.status == "refund_fallido"
+        and del_mismo
+        and solicitud.status == estados.REFUND_PROCESSING
+    ):
         await devoluciones.transicionar(
             db,
             solicitud,
@@ -1102,8 +1119,9 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
         )
         return
 
-    # Parcial o en tramite: solo se anota, sin mover el estado. Un reembolso
-    # parcial NO resuelve el expediente; lo tiene que mirar una persona.
+    # Parcial, en tramite, o un fallo de OTRO reembolso del mismo cobro: solo se
+    # anota, sin mover el estado. Un reembolso parcial NO resuelve el
+    # expediente; lo tiene que mirar una persona.
     await devoluciones._anotar(
         db,
         solicitud,

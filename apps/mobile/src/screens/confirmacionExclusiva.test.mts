@@ -170,8 +170,15 @@ test('el boton fisico Atras cancela en vez de salir del perfil', () => {
     ahora hay una sola respuesta a «¿hay algo abierto?» y un solo sitio donde
     cerrarlo, y esa decision esta probada de verdad en `navigation/atras.ts`.
   */
-  assert.match(CONFIRMAR, /registrarCapaAbierta\(\(\) => \{/);
+  assert.match(CONFIRMAR, /registrarCapaAbierta\(\(\) => cerrar\.current\(\)\)/);
   assert.match(CONFIRMAR, /if \(!ocupado\) alCancelar\(\);/);
+  /*
+    Y se registra UNA vez. `alCancelar` llega como flecha en linea, asi que su
+    identidad cambia en cada render: con el en las dependencias, el registro se
+    desmontaba y se volvia a montar constantemente. El registro es una PILA, y
+    eso subiria esta capa a la cima cada vez que se repinta la de abajo.
+  */
+  assert.match(CONFIRMAR, /useEffect\(\(\) => registrarCapaAbierta\([\s\S]{0,40}\), \[\]\)/);
   assert.ok(
     !CONFIRMAR.includes('BackHandler'),
     'ConfirmarRecorte volvio a competir por la tecla Atras con un oyente propio.',

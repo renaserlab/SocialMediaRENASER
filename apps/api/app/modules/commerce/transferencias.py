@@ -181,6 +181,10 @@ FALLOS_TERMINALES = frozenset({
     "balance_insufficient",
     "provider_not_configured",
     "transfers_not_allowed",
+    #: La transferencia se deshizo: el creador no tiene ese dinero y no hay
+    #: nada que esperar. Sin esto el saldo se quedaba en `transferring` para
+    #: siempre, que es un estado desde el que `puede_transferirse` dice que no.
+    "transfer_reversed",
 })
 
 

@@ -292,3 +292,123 @@ def test_el_codigo_externo_se_sanea_para_auditarlo():
 def test_la_tabla_de_recuperacion(situacion, esperado):
     """Un estado que no entendemos NO retira acceso y NO crea otro reembolso."""
     assert reembolsos.recuperacion(situacion) == esperado
+
+
+# --------------------------------------------------------------------------- #
+# Lo que encontró la revisión independiente
+# --------------------------------------------------------------------------- #
+
+
+def test_un_motivo_en_prosa_no_cuela_por_el_saneado():
+    """LA HEURÍSTICA VOLVÍA POR LA PUERTA DE ATRÁS.
+
+    `sanear_codigo` convierte los espacios en `_`, así que clasificar sobre su
+    resultado haría que «card declined» se leyera como `card_declined` y
+    contara como concluyente. Sanear es para GUARDAR; clasificar es otra cosa,
+    y se hace sobre el código tal cual.
+    """
+    assert reembolsos.sanear_codigo("card declined") == "card_declined"
+    assert reembolsos.es_terminal("card declined") is False
+    assert reembolsos.es_terminal("card_declined") is True
+
+
+def test_un_reembolso_cancelado_es_concluyente():
+    """`canceled` es un estado real de `Refund`. Tratarlo como desconocido
+    dejaba el expediente en `refund_processing` sin salida automática."""
+    assert reembolsos.es_terminal("refund_canceled") is True
+    assert reembolsos.recuperacion("failed", "refund_canceled") == reembolsos.CLAVE_NUEVA
+
+
+@pytest.mark.asyncio
+async def test_el_doble_informa_importe_y_moneda():
+    """Sin ellos la conciliación no puede cerrar nada —`exigir_moneda(None)`
+    levanta— y el camino feliz quedaba sin poder probarse ni en staging."""
+    doble = reembolsos.DobleDeterminista()
+    peticion = reembolsos.RefundRequestToProvider(
+        external_transaction_id="pi_1",
+        amount_minor=19900,
+        currency="PEN",
+        idempotency_key="zrefund_1",
+    )
+    resultado = await doble.create_full_refund(peticion)
+    assert resultado.status == "succeeded"
+    assert resultado.amount_minor == 19900
+    assert resultado.currency == "PEN"
+    # Y el pendiente también, que es el que va a conciliación.
+    pendiente = await doble.create_full_refund(
+        reembolsos.RefundRequestToProvider(
+            external_transaction_id="pi_2",
+            amount_minor=19901,
+            currency="PEN",
+            idempotency_key="zrefund_2",
+        )
+    )
+    assert pendiente.status == "pending"
+    assert pendiente.amount_minor == 19901
+    assert pendiente.currency == "PEN"
+
+
+def test_un_total_devuelto_en_dos_tramos_sigue_identificando_su_reembolso():
+    """EXIGIR UN SOLO REEMBOLSO ERA UNA REGRESIÓN.
+
+    Devolver 19 900 en dos operaciones desde el panel de Stripe es legítimo y
+    frecuente. Ahí llega `charge.refunded` con `refunded: true` y DOS entradas
+    en `refunds.data`. Con la regla de «solo si hay uno» no salía identificador,
+    el aviso no conciliaba, y los `refund.updated` de cada tramo tampoco servían
+    porque su importe es parcial: la persona cobraba los 19 900 y conservaba el
+    curso, para siempre.
+    """
+    from app.modules.payments import providers  # noqa: F401
+    from app.modules.payments.stripe_provider import traducir_evento
+
+    evento = {
+        "id": "evt_1",
+        "type": "charge.refunded",
+        "livemode": False,
+        "data": {
+            "object": {
+                "id": "ch_1",
+                "payment_intent": "pi_1",
+                "amount": 19900,
+                "amount_refunded": 19900,
+                "refunded": True,
+                "currency": "pen",
+                "refunds": {
+                    "object": "list",
+                    "data": [
+                        {"id": "re_segundo", "amount": 14900},
+                        {"id": "re_primero", "amount": 5000},
+                    ],
+                },
+            }
+        },
+    }
+    traducido = traducir_evento(evento)
+    assert traducido.status == "refunded"
+    # El más reciente: Stripe ordena la lista de nuevo a viejo, y es el que
+    # acaba de completar la devolución.
+    assert traducido.refund_id == "re_segundo"
+
+
+def test_sin_ningun_identificador_valido_sigue_sin_conciliar():
+    """La otra mitad de la regla: si no hay ni un `re_...`, no se retira nada."""
+    from app.modules.payments import providers  # noqa: F401
+    from app.modules.payments.stripe_provider import traducir_evento
+
+    evento = {
+        "id": "evt_1",
+        "type": "charge.refunded",
+        "livemode": False,
+        "data": {
+            "object": {
+                "id": "ch_1",
+                "payment_intent": "pi_1",
+                "amount": 19900,
+                "amount_refunded": 19900,
+                "refunded": True,
+                "currency": "pen",
+                "refunds": {"object": "list", "data": [{"amount": 19900}]},
+            }
+        },
+    }
+    assert traducir_evento(evento).refund_id == ""

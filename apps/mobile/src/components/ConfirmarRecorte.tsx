@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image as ExpoImage } from 'expo-image';
@@ -87,13 +87,19 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
     multiplataforma: no hace falta preguntar por Android porque quien consulta
     la pila solo se instala ahi.
   */
-  useEffect(
-    () =>
-      registrarCapaAbierta(() => {
-        if (!ocupado) alCancelar();
-      }),
-    [alCancelar, ocupado],
-  );
+  const cerrar = useRef<() => void>(() => {});
+  cerrar.current = () => {
+    if (!ocupado) alCancelar();
+  };
+  /*
+    SE REGISTRA UNA VEZ, con una referencia al cierre. `alCancelar` llega como
+    flecha en linea desde quien la monta, asi que su identidad cambia en cada
+    render: con el en las dependencias, el efecto se desmontaba y se volvia a
+    montar constantemente. Hoy daria igual porque solo hay una capa, pero el
+    registro es una PILA: un render de la capa de abajo la subiria a la cima y
+    Atras cerraria la equivocada.
+  */
+  useEffect(() => registrarCapaAbierta(() => cerrar.current()), []);
 
   return (
     <View style={styles.raiz}>

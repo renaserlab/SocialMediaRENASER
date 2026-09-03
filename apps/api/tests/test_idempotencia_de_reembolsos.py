@@ -632,3 +632,64 @@ async def test_desde_un_estado_no_ejecutable_se_dice_claro(entorno, monkeypatch)
     respuesta = await _reintentar(http, solicitud)
     assert respuesta.status_code == 422, respuesta.text
     assert "refund_invalid_transition" in respuesta.text
+
+
+# --------------------------------------------------------------------------- #
+# Un aviso de fallo que NO habla del reembolso en curso
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_un_refund_failed_de_OTRO_reembolso_no_mata_el_expediente(
+    entorno, monkeypatch
+):
+    """UN COBRO PUEDE ACUMULAR VARIOS REEMBOLSOS.
+
+    Un parcial antiguo que fallo, mas el total que esta en marcha. Sin comparar
+    identificadores, el `refund.failed` del parcial mandaba el expediente del
+    total a `failed` con un motivo TERMINAL. A partir de ahi el expediente
+    miente, y «reintentar» suelta la referencia viva y pide un SEGUNDO
+    reembolso: los dos liquidan.
+    """
+    from app.modules.payments import providers as modulo
+
+    http, identidad, sesiones = entorno
+    _usar(monkeypatch, _PasarelaConMemoria("ok"))
+    solicitud = await _pedir_y_aprobar(http, identidad, sesiones)
+
+    # El expediente esta en marcha con SU referencia.
+    async with sesiones() as db:
+        fila = await db.get(RefundRequest, solicitud)
+        fila.status = "refund_processing"
+        fila.external_refund_id = "re_del_total"
+        await db.commit()
+
+    anterior = modulo.PROVIDERS.get("stripe")
+    modulo.PROVIDERS["stripe"] = _StripeDeMentira()
+    try:
+        cuerpo = json.dumps(
+            {
+                "intento": "pi_1",
+                "estado": "refund_fallido",
+                "importe": 100,
+                "event_id": "evt_parcial_fallido",
+                # El de OTRO reembolso del mismo cobro.
+                "reembolso": "re_del_parcial",
+            }
+        ).encode()
+        aviso = await http.post(
+            f"{PAGOS}/webhook/stripe",
+            content=cuerpo,
+            headers={"content-type": "application/json"},
+        )
+        assert aviso.status_code == 204, aviso.text
+    finally:
+        if anterior is not None:
+            modulo.PROVIDERS["stripe"] = anterior
+        else:  # pragma: no cover
+            modulo.PROVIDERS.pop("stripe", None)
+
+    # El expediente NO se movio y conserva su referencia.
+    fila = await _solicitud(sesiones, solicitud)
+    assert fila.status == "refund_processing"
+    assert fila.external_refund_id == "re_del_total"

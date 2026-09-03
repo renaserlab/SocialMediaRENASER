@@ -260,6 +260,34 @@ async def congelar_por_disputa(db: AsyncSession, *, order_id: str) -> bool:
     return resultado.rowcount > 0
 
 
+async def descongelar_disputa(db: AsyncSession, *, order_id: str) -> bool:
+    """Suelta una retención por disputa cuando la disputa se GANA.
+
+    Existe porque `descongelar` no puede hacerlo, y es deliberado: aquella exige
+    que la retención venga de una solicitud (`frozen_by_request_id` no nulo)
+    justamente para que resolver una devolución no suelte por accidente un
+    dinero que el banco está reclamando. Sin esta función no había ninguna
+    manera de sacar el saldo de `frozen`, y el creador no cobraba nunca esa
+    venta.
+
+    SE LLAMA A MANO, no desde un webhook. Ganar una disputa es un hecho que
+    alguien comprueba en el panel de Stripe; automatizarlo con
+    `charge.dispute.closed` exigiría distinguir el desenlace, y ese aviso
+    también llega cuando se pierde.
+    """
+    resultado = await db.execute(
+        update(OwnerSaleBalance)
+        .where(
+            OwnerSaleBalance.order_id == order_id,
+            OwnerSaleBalance.status == "frozen",
+            OwnerSaleBalance.frozen_by_request_id.is_(None),
+        )
+        .values(status="pending", updated_at=datetime.now(timezone.utc))
+    )
+    await db.flush()
+    return resultado.rowcount > 0
+
+
 async def cancelar(db: AsyncSession, *, order_id: str) -> bool:
     """El reembolso se completó: no hay nada que pagarle al propietario.
 
@@ -321,11 +349,6 @@ async def liberar_vencidos(db: AsyncSession, *, limite: int = 200) -> int:
 # --------------------------------------------------------------------------- #
 # Transferencias
 # --------------------------------------------------------------------------- #
-
-
-def clave_de_idempotencia(balance_id: str) -> str:
-    """Estable por saldo: un reintento reutiliza la misma y no paga dos veces."""
-    return f"ztransfer_{balance_id}"
 
 
 async def puede_transferirse(db: AsyncSession, saldo: OwnerSaleBalance) -> str | None:
@@ -402,41 +425,6 @@ async def puede_transferirse(db: AsyncSession, saldo: OwnerSaleBalance) -> str |
         # La cuenta conectada tiene que ser la DEL PROPIETARIO de esta venta.
         return "payout_account_mismatch"
     return None
-
-
-async def abrir_transferencia(
-    db: AsyncSession, saldo: OwnerSaleBalance
-) -> OwnerTransfer | None:
-    """Crea el intento de pago. No habla con nadie: eso lo hace el adaptador.
-
-    UNA VIVA POR SALDO, y lo impide `owner_transfers_viva_por_saldo`. Si ya hay
-    una en marcha se devuelve esa: reintentar no puede abrir una segunda.
-    """
-    clave = clave_de_idempotencia(saldo.id)
-    ajustes = get_settings()
-    await db.execute(
-        _insert(db)(OwnerTransfer.__table__)
-        .values(
-            balance_id=saldo.id,
-            owner_id=saldo.owner_id,
-            payout_account_id=saldo.payout_account_id,
-            amount_minor=saldo.net_amount_minor,
-            currency=saldo.currency,
-            provider="stripe",
-            environment="production" if not ajustes.stripe_api_base.endswith("test") else "sandbox",
-            idempotency_key=clave,
-            status="processing",
-            attempts=1,
-        )
-        .on_conflict_do_nothing(index_elements=["balance_id"])
-    )
-    await db.flush()
-    saldo.status = "transferring"
-    saldo.updated_at = datetime.now(timezone.utc)
-    await db.flush()
-    return await db.scalar(
-        select(OwnerTransfer).where(OwnerTransfer.balance_id == saldo.id)
-    )
 
 
 async def _fallos_terminales_de(db: AsyncSession, balance_id: str) -> int:

@@ -508,3 +508,62 @@ async def test_un_aviso_de_devolucion_se_procesa_con_las_compras_apagadas(
             modulo_de_pasarelas.PROVIDERS["stripe"] = anterior
         else:  # pragma: no cover
             modulo_de_pasarelas.PROVIDERS.pop("stripe", None)
+
+
+# --------------------------------------------------------------------------- #
+# 6. Reintentar no puede tirar una referencia VIVA
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_reintentar_no_descarta_un_reembolso_que_sigue_vivo(entorno, monkeypatch):
+    """LA VIA DE DOBLE REEMBOLSO QUE ENCONTRO LA REVISION INDEPENDIENTE.
+
+    El expediente puede llegar a `failed` por un aviso que NO habla del
+    reembolso en curso —un parcial antiguo del mismo cobro—. Si «reintentar»
+    mira solo ese estado, suelta una referencia que sigue viva, pide otro
+    reembolso con clave NUEVA, y los dos liquidan.
+
+    La condicion correcta es lo que contesta la pasarela AHORA: si dice que ese
+    reembolso sigue pendiente, la referencia no se toca y no se pide nada.
+    """
+    http, _, sesiones = entorno
+    pasarela = _usar(monkeypatch, _PasarelaDeMentira("pending"))
+    solicitud = await _sembrar_solicitud(sesiones, estado="failed", referencia="re_1")
+
+    respuesta = await http.post(f"{ADMIN}/refund-requests/{solicitud}/retry")
+    assert respuesta.status_code == 200, respuesta.text
+
+    # Se pregunto por el reembolso, y NADA MAS: ni se solto la referencia ni se
+    # pidio uno nuevo.
+    assert pasarela.consultas == ["re_1"]
+    async with sesiones() as db:
+        fila = await db.get(RefundRequest, solicitud)
+        assert fila.external_refund_id == "re_1"
+    assert await _contar(sesiones, Order, Order.status == "refunded") == 0
+    assert await _contat_accesos(sesiones) == 1
+
+
+async def _contat_accesos(sesiones) -> int:
+    return await _contar(sesiones, Entitlement, Entitlement.status == "active")
+
+
+@pytest.mark.asyncio
+async def test_reintentar_SI_suelta_una_referencia_que_la_pasarela_mato(
+    entorno, monkeypatch
+):
+    """La otra mitad: cuando la pasarela confirma AHORA que ese reembolso murio,
+    la referencia se suelta y se pide uno nuevo. Sin esto el expediente se
+    quedaba sin ninguna accion util."""
+    http, _, sesiones = entorno
+    _usar(monkeypatch, _PasarelaDeMentira("failed", codigo="card_declined"))
+    solicitud = await _sembrar_solicitud(sesiones, estado="failed", referencia="re_1")
+
+    respuesta = await http.post(f"{ADMIN}/refund-requests/{solicitud}/retry")
+    assert respuesta.status_code == 200, respuesta.text
+    # Con la pasarela de reembolsos apagada, la reejecucion falla en cerrado y
+    # no crea nada; lo que importa aqui es que la referencia muerta se solto.
+    async with sesiones() as db:
+        fila = await db.get(RefundRequest, solicitud)
+        assert not (fila.external_refund_id or "")
+    assert await _contar(sesiones, Order, Order.status == "refunded") == 0

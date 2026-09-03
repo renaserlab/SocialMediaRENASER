@@ -703,6 +703,16 @@ de ellos:
 3. **No se retira el acceso** y **no se consume la garantía**. Abrir una disputa
    no es haberla perdido: quitar el curso al abrirse castigaría a quien puede
    acabar ganándola, y esa decisión no es de un webhook.
+
+> **Por qué hace falta una función aparte para soltarla.** `descongelar` exige
+> que la retención venga de una solicitud (`frozen_by_request_id` no nulo), y es
+> deliberado: así resolver una devolución cualquiera no suelta por accidente un
+> dinero que el banco está reclamando. Pero `congelar_por_disputa` deja ese
+> campo **nulo**, así que ninguna otra función del módulo podía sacar el saldo
+> de `frozen`: el creador no cobraba esa venta nunca. De ahí
+> `descongelar_disputa`, que se llama **a mano** —ganar una disputa es un hecho
+> que alguien comprueba en el panel, y `charge.dispute.closed` también llega
+> cuando se pierde—.
 4. Se registra el aviso completo en `payment_events` y se emite una alerta de
    nivel `error` en `renaser.payments`.
 
@@ -710,7 +720,7 @@ de ellos:
 
 | Desenlace | Qué hay que hacer, a mano |
 |---|---|
-| **Se gana** | Stripe devuelve el dinero. El saldo se descongela con `descongelar(order_id, refund_request_id=None)`. El acceso nunca se tocó, así que no hay nada que restaurar. |
+| **Se gana** | Stripe devuelve el dinero. El saldo se suelta con `descongelar_disputa(order_id)`. El acceso nunca se tocó, así que no hay nada que restaurar. |
 | **Se pierde** | El dinero ya salió por fuera. Hay que cancelar el saldo (`cancelar`) y decidir **explícitamente** si se retira el acceso: no lo hace ningún automatismo, porque un contracargo perdido no siempre es un fraude. |
 | **Se pierde con el saldo ya transferido** | Queda para conciliación manual, igual que un reembolso tardío. Recuperar dinero ya pagado a un tercero es una decisión de negocio, no de un webhook a las tres de la mañana. |
 
@@ -803,9 +813,13 @@ La política que manda es la de Z, la de la sección 1.
 
 ## 19. Protección y retención de datos
 
-- **Nunca se registran** secretos, tokens, cuerpos de webhook completos,
-  correos, `payment_intent` enteros ni datos de tarjeta. Los metadatos de
-  `refund_request_events` son códigos e identificadores.
+- **En los logs nunca se escriben** secretos, tokens, cuerpos de webhook
+  completos, correos ni datos de tarjeta.
+- **En la auditoría sí se guardan identificadores**, y tiene que ser así: el
+  `payment_intent` queda en los metadatos de `refund_request_events` porque es
+  lo que permite atar un aviso con su compra meses después. Es una referencia
+  nuestra, no un dato de pago: no sirve para cobrar nada. Lo que no entra ahí es
+  el cuerpo del aviso.
 - **La explicación del alumno es privada.** El propietario del curso no la ve
   nunca; solo administración.
 - **`review_notes` solo lleva lo que se le dirige al alumno**: la justificación

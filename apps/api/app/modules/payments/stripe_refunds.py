@@ -183,6 +183,18 @@ def _traducir(cuerpo: dict) -> RefundResult:
             amount_minor=devuelto,
             currency=moneda,
         )
+    if situacion == "canceled":
+        # Concluyente: el reembolso no va a ocurrir. Se traduce a `failed` con
+        # un codigo terminal para que el reintento arranque con clave nueva en
+        # vez de repetir para siempre una operacion que ya se anulo.
+        return RefundResult(
+            status="failed",
+            external_refund_id=referencia,
+            failure_code="refund_canceled",
+            failure_message="La pasarela canceló el reembolso.",
+            amount_minor=devuelto,
+            currency=moneda,
+        )
     if situacion in ESTADOS_CONOCIDOS:
         return RefundResult(
             status=situacion,

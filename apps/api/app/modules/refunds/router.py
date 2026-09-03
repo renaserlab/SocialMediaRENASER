@@ -821,17 +821,23 @@ async def reintentar(
             code="refund_invalid_transition",
         )
     if (solicitud.external_refund_id or "").strip():
-        await _conciliar_con_pasarela(db, solicitud, actor_id=current_user.id)
+        # LO QUE CONTESTA LA PASARELA AHORA, no el estado que arrastre el
+        # expediente. Antes esta rama solo miraba `status == failed`, y ese
+        # estado pudo escribirlo un aviso de OTRO reembolso del mismo cobro: se
+        # soltaba una referencia VIVA y se pedia un segundo reembolso con clave
+        # nueva. Los dos liquidaban.
+        #
+        # Se suelta la referencia solo si la pasarela acaba de confirmar, en
+        # esta misma consulta, que ese reembolso murio.
+        dice_la_pasarela = await _conciliar_con_pasarela(
+            db, solicitud, actor_id=current_user.id
+        )
         solicitud = await _cualquiera(db, request_id)
-        # La pasarela confirmo que ESE reembolso murio. Es el caso normal de un
-        # reembolso aceptado que despues falla: sin esto el expediente se
-        # quedaba sin ninguna accion util —conciliar repetia `failed` para
-        # siempre— y el boton de reintentar afirmaba pedir algo que no pedia.
-        # Se suelta la referencia muerta y se pide uno nuevo, con clave nueva
-        # porque el fallo confirmado ya cuenta como terminal.
-        if solicitud.status == estados.FAILED and (
-            solicitud.external_refund_id or ""
-        ).strip():
+        if (
+            dice_la_pasarela == "failed"
+            and solicitud.status == estados.FAILED
+            and (solicitud.external_refund_id or "").strip()
+        ):
             solicitud.external_refund_id = None
             await db.commit()
             await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
@@ -1162,41 +1168,44 @@ async def _progreso(db: AsyncSession, solicitud: RefundRequest) -> int:
 async def _avisar_solicitud_recibida(db: AsyncSession, solicitud: RefundRequest) -> None:
     from app.modules.notifications.service import add_notification
 
+    # SAVEPOINT, no `rollback`. La sesion no caduca en el commit
+    # (`expire_on_commit=False`) pero un `rollback` no anidado SI caduca la
+    # identity map entera, y quien llama sigue leyendo la solicitud justo
+    # despues: en async eso revienta con `MissingGreenlet` y devuelve un 500
+    # sobre una solicitud que YA se creo. El savepoint deshace solo el aviso.
     try:
-        await add_notification(
-            db,
-            user_id=solicitud.user_id,
-            actor_id=None,
-            type="refund_requested",
-            entity_type="course",
-            entity_id=solicitud.course_id,
-            payload={"requestId": solicitud.id},
-        )
+        async with db.begin_nested():
+            await add_notification(
+                db,
+                user_id=solicitud.user_id,
+                actor_id=None,
+                type="refund_requested",
+                entity_type="course",
+                entity_id=solicitud.course_id,
+                payload={"requestId": solicitud.id},
+            )
         await db.commit()
     except Exception:  # noqa: BLE001
         # Un aviso que no sale NO puede tumbar una solicitud ya guardada.
-        # ROLLBACK ANTES DE SEGUIR. En PostgreSQL una sentencia fallida ABORTA
-        # la transaccion entera: sin esto, lo que viene despues —leer el curso
-        # para la respuesta, o ejecutar el reembolso al aprobar— reventaba con
-        # «current transaction is aborted», y el sintoma aparecia lejos de aqui.
-        await db.rollback()
         logger.exception("[devoluciones] no se pudo avisar de la solicitud")
 
 
 async def _avisar_estado(db: AsyncSession, solicitud: RefundRequest, tipo: str) -> None:
     from app.modules.notifications.service import add_notification
 
+    # Savepoint, por lo mismo que arriba: `aprobar` ejecuta el reembolso justo
+    # despues de avisar, y un `rollback` aqui le dejaria la solicitud caducada.
     try:
-        await add_notification(
-            db,
-            user_id=solicitud.user_id,
-            actor_id=None,
-            type=f"refund_{tipo}",
-            entity_type="course",
-            entity_id=solicitud.course_id,
-            payload={"requestId": solicitud.id},
-        )
+        async with db.begin_nested():
+            await add_notification(
+                db,
+                user_id=solicitud.user_id,
+                actor_id=None,
+                type=f"refund_{tipo}",
+                entity_type="course",
+                entity_id=solicitud.course_id,
+                payload={"requestId": solicitud.id},
+            )
         await db.commit()
     except Exception:  # noqa: BLE001
-        await db.rollback()
         logger.exception("[devoluciones] no se pudo avisar del estado %s", tipo)

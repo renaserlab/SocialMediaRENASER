@@ -384,11 +384,23 @@ def _identificador_del_reembolso(tipo: str, objeto: dict[str, Any]) -> str:
 
     reembolsos = objeto.get("refunds")
     datos = reembolsos.get("data") if isinstance(reembolsos, dict) else None
-    if isinstance(datos, list) and len(datos) == 1:
-        # UNO SOLO. Con varios reembolsos parciales no hay «el» reembolso de
-        # este cobro, y elegir el primero sería elegir al azar.
-        primero = datos[0]
-        valor = primero.get("id") if isinstance(primero, dict) else None
+    if not isinstance(datos, list):
+        return ""
+
+    # EL MAS RECIENTE, y no «solo si hay uno». Stripe ordena la lista de nuevo a
+    # viejo, asi que el primero es el que acaba de completar la devolucion.
+    #
+    # Exigir un unico elemento parecia lo prudente y era una regresion: devolver
+    # 19 900 en dos tramos desde el panel es legitimo, y ahi Stripe manda
+    # `refunded: true` con DOS entradas. Sin identificador el aviso no
+    # conciliaba, y los `refund.updated` de cada tramo tampoco servian —su
+    # importe es parcial—: la persona cobraba los 19 900 y conservaba el curso.
+    #
+    # Aqui solo se llega con el cobro devuelto POR COMPLETO (lo comprueba antes
+    # `_estado_de_devolucion`), asi que el conjunto suma el total. La lista
+    # entera queda en `payment_events` para poder auditarla.
+    for entrada in datos:
+        valor = entrada.get("id") if isinstance(entrada, dict) else None
         if isinstance(valor, str) and valor.startswith("re_"):
             return valor
     return ""

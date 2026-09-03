@@ -134,10 +134,16 @@ class DobleDeterminista(RefundProvider):
         if peticion.idempotency_key in self.vistas:
             return self.vistas[peticion.idempotency_key]
 
+        # IMPORTE Y MONEDA, como la pasarela de verdad. Sin ellos la
+        # conciliacion no puede cerrar nada —`exigir_moneda(None)` levanta— y el
+        # camino feliz quedaba sin poder probarse ni en staging.
         final = peticion.amount_minor % 100
         if final == 1:
             resultado = RefundResult(
-                status="pending", external_refund_id=_referencia(peticion)
+                status="pending",
+                external_refund_id=_referencia(peticion),
+                amount_minor=peticion.amount_minor,
+                currency=peticion.currency,
             )
         elif final == 2:
             resultado = RefundResult(
@@ -149,7 +155,10 @@ class DobleDeterminista(RefundProvider):
             resultado = RefundResult(status="lo_que_sea", external_refund_id="")
         else:
             resultado = RefundResult(
-                status="succeeded", external_refund_id=_referencia(peticion)
+                status="succeeded",
+                external_refund_id=_referencia(peticion),
+                amount_minor=peticion.amount_minor,
+                currency=peticion.currency,
             )
         self.vistas[peticion.idempotency_key] = resultado
         return resultado
@@ -193,6 +202,10 @@ FALLOS_TERMINALES = frozenset({
     #: Nuestros, y concluyentes: no hay nada que reintentar.
     "provider_not_configured",
     "no_transaction",
+    #: `canceled` es un estado REAL de `Refund` y es concluyente. Sin traducirlo,
+    #: un reembolso cancelado caia en «estado desconocido», se trataba como
+    #: ambiguo, y el expediente se quedaba en `refund_processing` sin salida.
+    "refund_canceled",
 })
 
 
@@ -222,7 +235,13 @@ def es_terminal(failure_code: object) -> bool:
     EN LA DUDA, AMBIGUO. Equivocarse hacia «ambiguo» cuesta un reintento que no
     hace nada; hacia «terminal», un cobro duplicado.
     """
-    return sanear_codigo(failure_code) in FALLOS_TERMINALES
+    # SE COMPARA EL CODIGO TAL CUAL, no el saneado. `sanear_codigo` convierte
+    # los espacios en `_`, asi que clasificar sobre el resultado colaria «card
+    # declined» como `card_declined` y reintroduciria por la puerta de atras la
+    # heuristica de prosa que este modulo acaba de quitar. Sanear es para
+    # GUARDAR; clasificar es otra cosa.
+    codigo = failure_code if isinstance(failure_code, str) else ""
+    return codigo.strip().lower() in FALLOS_TERMINALES
 
 
 #: Qué hacer con lo que contesta la pasarela. Es la tabla de la documentación,
