@@ -160,13 +160,44 @@ def _referencia(peticion: RefundRequestToProvider) -> str:
     return f"re_doble_{huella}"
 
 
-def clave_de_idempotencia(refund_request_id: str) -> str:
-    """Derivada de la SOLICITUD, no del intento.
+#: Códigos de fallo que NO son terminales: la petición pudo llegar igualmente.
+#: Reintentar uno de estos tiene que ir con LA MISMA clave, para que la pasarela
+#: reconozca la operación en vez de crear una segunda.
+FALLOS_AMBIGUOS = frozenset({"network_timeout", "http_502", "http_503", "http_504"})
 
-    Es lo que hace que reintentar no pague dos veces: los tres intentos mandan
-    la misma clave y la pasarela reconoce que es la misma operación.
+
+def es_terminal(failure_code: str) -> bool:
+    """Si el proveedor dijo que NO, de forma concluyente.
+
+    Un rechazo de tarjeta es terminal; un tiempo de espera agotado no lo es —la
+    petición pudo llegar y el reembolso existir ahí fuera—.
     """
-    return f"zrefund_{refund_request_id}"
+    return bool(failure_code) and failure_code not in FALLOS_AMBIGUOS
+
+
+def clave_de_idempotencia(refund_request_id: str, intento: int = 0) -> str:
+    """Derivada de la SOLICITUD y del número de fallos TERMINALES anteriores.
+
+    POR QUÉ NO PUEDE SER SIEMPRE LA MISMA. Con una clave fija, el primer «no»
+    de la pasarela queda grabado: reintentar reenvía la misma clave y Stripe
+    devuelve LA MISMA respuesta fallida, para siempre. El botón de reintentar
+    no serviría de nada nunca más.
+
+    Y POR QUÉ NO PUEDE CAMBIAR EN CADA INTENTO. Un tiempo de espera agotado no
+    significa que no se haya hecho. Mandar una clave nueva después de un
+    timeout es exactamente cómo se paga dos veces.
+
+    Así que cambia solo cuando el proveedor ha dicho que no de forma
+    concluyente. El número sale de los eventos ya guardados —no de un contador
+    en memoria—, así que sobrevive a reinicios y es el mismo para todos los
+    procesos.
+
+    El intento 0 conserva la clave antigua para no romper las solicitudes que
+    ya estén en vuelo con ella.
+    """
+    if intento <= 0:
+        return f"zrefund_{refund_request_id}"
+    return f"zrefund_{refund_request_id}_r{intento}"
 
 
 #: Estados que la pasarela puede devolver y que sabemos interpretar. Cualquier

@@ -157,8 +157,22 @@ async def ventas_del_curso(
     ).all()
 
     ventas: list[OwnerSaleRead] = []
+    # UNA consulta para todos los perfiles de la pagina, no una por venta.
+    # `db.get` dentro del bucle eran veinte viajes a la base para pintar veinte
+    # filas, y crecia con el tamaño de pagina.
+    ids = {user_id for _, user_id in filas if user_id}
+    perfiles = (
+        {
+            p.id: p
+            for p in await db.scalars(
+                select(Profile).where(Profile.id.in_(ids))
+            )
+        }
+        if ids
+        else {}
+    )
     for saldo, user_id in filas:
-        perfil = await db.get(Profile, user_id) if user_id else None
+        perfil = perfiles.get(user_id) if user_id else None
         ventas.append(
             OwnerSaleRead(
                 id=saldo.id,

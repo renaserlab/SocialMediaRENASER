@@ -21,7 +21,7 @@ import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -542,7 +542,9 @@ async def ejecutar_reembolso(
             external_transaction_id=transaccion,
             amount_minor=solicitud.amount_minor,
             currency=solicitud.currency,
-            idempotency_key=clave_de_idempotencia(solicitud.id),
+            idempotency_key=clave_de_idempotencia(
+                solicitud.id, await _fallos_terminales(db, solicitud.id)
+            ),
             metadata={"refundRequestId": solicitud.id, "orderId": solicitud.order_id},
         )
     )
@@ -603,10 +605,38 @@ async def _transaccion_de_la_orden(db: AsyncSession, order_id: str) -> str:
     return referencia or ""
 
 
+async def _fallos_terminales(db: AsyncSession, refund_request_id: str) -> int:
+    """Cuantas veces dijo la pasarela que NO, de forma concluyente.
+
+    Sale de los EVENTOS ya guardados y no de un contador en memoria: asi
+    sobrevive a un reinicio y vale igual para todos los procesos. Es lo que
+    decide si el reintento manda una clave nueva o repite la anterior.
+    """
+    from app.modules.refunds.models import RefundRequestEvent
+
+    total = await db.scalar(
+        select(func.count())
+        .select_from(RefundRequestEvent)
+        .where(
+            RefundRequestEvent.refund_request_id == refund_request_id,
+            RefundRequestEvent.to_status == estados.FAILED,
+        )
+    )
+    return int(total or 0)
+
+
 async def _marcar_fallo(
     db: AsyncSession, solicitud: RefundRequest, *, codigo: str, mensaje: str
 ) -> None:
-    """Deja el expediente en `failed`, que es lo que habilita el reintento."""
+    """Deja el expediente en `failed`, que es lo que habilita el reintento.
+
+    Solo un fallo TERMINAL cuenta para cambiar la clave de idempotencia: un
+    tiempo de espera agotado no significa que no se haya hecho, y reintentarlo
+    con clave nueva es exactamente como se paga dos veces.
+    """
+    from app.modules.payments.reembolsos import es_terminal
+
+    terminal = es_terminal(codigo)
     try:
         if solicitud.status == estados.REFUND_PROCESSING:
             await devoluciones.transicionar(
@@ -617,6 +647,7 @@ async def _marcar_fallo(
                 actor_id=None,
                 reason=codigo,
                 notes=mensaje,
+                metadata={"terminal": terminal},
             )
         else:
             await devoluciones._anotar(
