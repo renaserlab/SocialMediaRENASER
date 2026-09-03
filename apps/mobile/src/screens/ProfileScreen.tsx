@@ -27,7 +27,13 @@ import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import { guardarPerfil, pedirPerfil, perfilEnCache } from '@/services/cachePerfil';
-import { PermisoDenegadoError, pickImage, takePhoto } from '@/services/storage';
+import { ConfirmarRecorte } from '@/components/ConfirmarRecorte';
+import {
+  PermisoDenegadoError,
+  pickImage,
+  takePhoto,
+  type PickedMedia,
+} from '@/services/storage';
 import { useTranslation } from '@/i18n/useTranslation';
 import { GRID_COLUMNS, GRID_GAP, gridItemSize } from '@/lib/gridLayout';
 import { useAppStore } from '@/store/useAppStore';
@@ -386,6 +392,40 @@ export function ProfileScreen() {
   };
 
   /** Recorte cuadrado para el avatar y panorámico para la portada. */
+  /*
+    LO ELEGIDO ESPERA CONFIRMACION ANTES DE SUBIRSE.
+
+    La pantalla de recorte que sale al elegir la foto es la NATIVA del sistema
+    —`ImagePicker` con `allowsEditing`— y sus controles no se pueden tematizar
+    desde aqui: ese es el defecto que se reporto («no se ven los botones
+    superiores ni el simbolo de cortar»). Lo que si esta en nuestras manos es
+    lo que pasa DESPUES: una confirmacion propia, con las acciones legibles
+    sobre cualquier imagen, donde se ve como va a quedar antes de subir nada.
+  */
+  const [porConfirmar, setPorConfirmar] = useState<
+    { kind: 'avatar' | 'cover'; media: PickedMedia } | null
+  >(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+
+  const confirmarFoto = async () => {
+    // Doble pulsacion: `subiendoFoto` corta la segunda antes de subir dos veces.
+    if (!porConfirmar || subiendoFoto) return;
+    setSubiendoFoto(true);
+    try {
+      await setProfileImage(porConfirmar.kind, porConfirmar.media);
+      setPorConfirmar(null);
+    } catch (error) {
+      setPorConfirmar(null);
+      await afterSheetClose();
+      notify(
+        t('profile.photoChangeFailed'),
+        error instanceof Error ? error.message : t('profile.checkPermissions'),
+      );
+    } finally {
+      setSubiendoFoto(false);
+    }
+  };
+
   const applyPhoto = async (source: 'gallery' | 'camera') => {
     const kind = editingPhoto;
     if (!kind) return;
@@ -406,7 +446,11 @@ export function ProfileScreen() {
       const picked = source === 'gallery' ? await pickImage({ aspect }) : await takePhoto({ aspect });
       setEditingPhoto(null);
       if (!picked) return;
-      await setProfileImage(kind, picked);
+      // Se espera a que la hoja termine de cerrarse: presentar la confirmacion
+      // sobre un Modal que se esta cerrando es el mismo problema que ya
+      // documenta el bloque de arriba.
+      await afterSheetClose();
+      setPorConfirmar({ kind, media: picked });
     } catch (error) {
       // Si fallo antes de cerrar, la hoja sigue en pantalla: hay que cerrarla y
       // esperar, o el aviso quedaria invisible bajo ella (Modal sobre Modal).
@@ -591,6 +635,20 @@ export function ProfileScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/*
+        Mientras hay foto por confirmar es la unica pantalla, asi que va lo
+        primero. Sin `Modal` propio: apilar uno sobre la hoja que se acaba de
+        cerrar es el problema que ya documenta `applyPhoto`.
+      */}
+      {porConfirmar ? (
+        <ConfirmarRecorte
+          uri={porConfirmar.media.uri}
+          forma={porConfirmar.kind === 'avatar' ? 'avatar' : 'portada'}
+          ocupado={subiendoFoto}
+          alConfirmar={() => void confirmarFoto()}
+          alCancelar={() => setPorConfirmar(null)}
+        />
+      ) : null}
       <AppHeader
         title={isPublic ? t('profile.titlePublic') : t('profile.title')}
         rightIcon="more-vertical"
