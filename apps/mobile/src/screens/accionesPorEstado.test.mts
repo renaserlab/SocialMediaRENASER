@@ -265,15 +265,40 @@ test('un 403 se dice con sus palabras, distintas del fallo de carga', () => {
 
 test('un conflicto de estado no se confunde con un fallo cualquiera', () => {
   /*
-    409 o 422 es «el expediente ya no esta en ese estado» —otro administrador,
-    o un webhook que llego entre medias—. Reintentar no arregla nada: hay que
-    releer, y por eso se relee.
+    Un 409, o uno de los codigos de la lista cerrada, es «el expediente ya no
+    esta en ese estado» —otro administrador, o un webhook que llego entre
+    medias—. Reintentar no arregla nada: hay que releer, y por eso se relee.
   */
   assert.match(BANDEJA, /function esConflictoDeEstado\(error: unknown\): boolean/);
-  assert.match(BANDEJA, /error\.status === 409 \|\| error\.status === 422/);
+  assert.match(BANDEJA, /error\.status === 409 \|\| CONFLICTOS_DE_ESTADO\.has\(error\.code\)/);
   assert.match(BANDEJA, /t\('devolucionesAdmin\.conflicto'\)/);
   const ejecutar = BANDEJA.slice(BANDEJA.indexOf('const ejecutar'));
   assert.match(ejecutar, /if \(conflicto\) \{[\s\S]{0,160}OwnerRepository\.solicitud\(solicitud\.id\)/);
+});
+
+test('un 422 que NO es un desfase de pantalla no se disfraza de conflicto', () => {
+  /*
+    El backend contesta 422 a cosas muy distintas. Tratarlas todas como «otra
+    persona lo movio» tapaba dos que importan:
+
+      · `refund_not_reconciled` — la pasarela dice haber devuelto un importe
+        que no cuadra con la orden. Es una alarma contable.
+      · `refund_reason_required` — falta el motivo del rechazo, y lo escribe
+        quien esta mirando la pantalla; recargar no lo arregla.
+
+    Asi que la lista es CERRADA y esos dos no estan en ella.
+  */
+  const lista = BANDEJA.slice(
+    BANDEJA.indexOf('const CONFLICTOS_DE_ESTADO'),
+    BANDEJA.indexOf('function esConflictoDeEstado'),
+  );
+  assert.ok(lista.includes("'refund_invalid_transition'"));
+  for (const ajeno of ['refund_not_reconciled', 'refund_reason_required']) {
+    assert.ok(!lista.includes(ajeno), `${ajeno} no puede contarse como conflicto de estado`);
+  }
+  // Y ya no se juzga por el codigo de respuesta a secas.
+  assert.ok(!/error\.status === 422/.test(BANDEJA));
+  assert.ok(!/error\.code\.startsWith\('refund_'\)/.test(BANDEJA));
 });
 
 test('los tres desenlaces son tres mensajes distintos', () => {

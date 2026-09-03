@@ -96,16 +96,30 @@ const AVISOS: Partial<Record<AccionDeDevolucion, string>> = {
 };
 
 /**
- * Un 409/422 del expediente no es «no pudimos»: es «el estado ya no es ese».
+ * Los códigos que significan «el expediente ya no está en ese estado»: otro
+ * administrador llegó antes, o un webhook entró entre medias. Ahí reintentar no
+ * arregla nada y recargar sí, y por eso llevan mensaje propio.
  *
- * Pasa de verdad —dos administradores a la vez, o un webhook que llegó entre
- * medias— y merece un mensaje propio: reintentar no arregla nada, recargar sí.
+ * ES UNA LISTA CERRADA, Y NO «cualquier 422». El backend usa ese mismo código
+ * de respuesta para cosas que NO son un desfase de pantalla y que quedaban
+ * tapadas bajo «alguien lo movió»:
+ *
+ *   · `refund_not_reconciled` — la pasarela dice haber devuelto un importe que
+ *     no cuadra con la orden. Es una alarma contable y hay que leerla entera.
+ *   · `refund_reason_required` — falta escribir el motivo del rechazo. Lo
+ *     arregla quien está mirando la pantalla, no una recarga.
  */
+const CONFLICTOS_DE_ESTADO = new Set([
+  'refund_invalid_transition',
+  'refund_already_refunded',
+  'refund_no_external_reference',
+  'refund_acceptance_not_needed',
+]);
+
 function esConflictoDeEstado(error: unknown): boolean {
-  return (
-    error instanceof ApiError &&
-    (error.status === 409 || error.status === 422 || error.code.startsWith('refund_'))
-  );
+  if (!(error instanceof ApiError)) return false;
+  // El 409 sí lo es por definición; el 422 depende de QUÉ falló.
+  return error.status === 409 || CONFLICTOS_DE_ESTADO.has(error.code);
 }
 
 function fechaLegible(iso: string | null): string {

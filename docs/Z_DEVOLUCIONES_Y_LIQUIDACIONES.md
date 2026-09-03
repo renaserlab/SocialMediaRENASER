@@ -154,6 +154,37 @@ parcial como la inserción, para que no puedan divergir.
 Todos los permisos se verifican **en el backend**. Ocultar un botón no es un
 permiso.
 
+### Qué nota lee el alumno, y cuál no
+
+`review_notes` viaja en la respuesta del alumno, así que **solo puede contener
+lo que se le dirige a él**: la justificación de una decisión humana. El campo se
+escribe únicamente cuando administración **aprueba** o **rechaza**.
+
+Cualquier otra nota —la de un `cancel`, el motivo técnico con el que la pasarela
+rechazó el cargo— se guarda **solo en el historial**, que no sale del ámbito de
+administración.
+
+> Esta fila de la tabla de arriba era una intención, no una garantía. La nota se
+> escribía en **cualquier** transición, así que el mensaje de error de Stripe
+> acababa en la pantalla del alumno presentado como si lo hubiera escrito la
+> persona que revisó su caso. No se ha perdido rastro: se ha perdido la
+> publicación.
+
+### Un 422 no es siempre «llegaste tarde»
+
+La bandeja distinguía «el expediente ya no está en ese estado» por el **código
+de respuesta**, y ahí el backend mete cosas muy distintas. Dos quedaban tapadas
+bajo «otra persona lo movió, recarga»:
+
+| Código | Qué es de verdad |
+|---|---|
+| `refund_not_reconciled` | La pasarela dice haber devuelto un importe que **no cuadra con la orden**. Es una alarma contable y hay que leerla entera. |
+| `refund_reason_required` | Falta escribir el motivo del rechazo. Lo arregla quien está mirando la pantalla; recargar, no. |
+
+Ahora la lista de conflictos es **cerrada** (`refund_invalid_transition`,
+`refund_already_refunded`, `refund_no_external_reference`,
+`refund_acceptance_not_needed`) y todo lo demás se muestra con su mensaje.
+
 `_exigir_gestor` está en una sola función para que mañana pueda ser un permiso
 propio (`refund_manager`) sin tocar ningún endpoint.
 

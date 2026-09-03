@@ -446,6 +446,12 @@ async def _curso_de_la_orden(db: AsyncSession, orden: Order) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
+#: Las unicas decisiones cuya nota se le ENSENA a quien pidio la devolucion.
+#: `review_notes` viaja en la respuesta del alumno, asi que solo puede contener
+#: lo que se le DIRIGE a el: la justificacion de una decision humana.
+NOTAS_PARA_EL_ALUMNO = frozenset({estados.APPROVED, estados.REJECTED})
+
+
 async def transicionar(
     db: AsyncSession,
     solicitud: RefundRequest,
@@ -503,7 +509,15 @@ async def transicionar(
         solicitud.reviewed_at = ahora()
     if hasta in estados.FINALES:
         solicitud.resolved_at = ahora()
-    if notes:
+    # SOLO LA NOTA QUE SE LE DIRIGE AL ALUMNO. Antes se escribia en CUALQUIER
+    # transicion, y como `review_notes` viaja en la respuesta del alumno eso
+    # significaba dos cosas malas: las notas internas de un `cancel` se leian
+    # desde la app, y el mensaje con el que la pasarela rechazo el cargo
+    # aparecia presentado como si fuera la nota del revisor.
+    #
+    # No se pierde nada: `_anotar` guarda igual la nota en el historial, que
+    # solo ve administracion.
+    if notes and rol == "admin" and hasta in NOTAS_PARA_EL_ALUMNO:
         solicitud.review_notes = notes
     if external_reference:
         solicitud.external_refund_id = external_reference

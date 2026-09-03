@@ -129,8 +129,31 @@ test('la pantalla completa respeta las zonas seguras', () => {
   assert.match(CONFIRMAR, /insets\.top/);
   assert.match(CONFIRMAR, /insets\.bottom/);
   // El marco tampoco puede quedar debajo de la cabecera o del pie flotantes.
-  assert.match(CONFIRMAR, /paddingTop: insets\.top \+ ALTO_CABECERA/);
-  assert.match(CONFIRMAR, /paddingBottom: insets\.bottom \+ ALTO_PIE/);
+  assert.match(CONFIRMAR, /paddingTop: huecoArriba, paddingBottom: huecoAbajo/);
+});
+
+test('el hueco del marco se MIDE, no se supone', () => {
+  /*
+    Cabecera y pie flotan sobre la foto y crecen con el tamano de letra del
+    sistema. Con las alturas fijas que habia, la letra grande de accesibilidad
+    subia el boton de guardar por encima del marco y tapaba justo lo que hay
+    que mirar antes de decidir. Las constantes solo valen para el primer
+    fotograma, hasta que hay medida.
+  */
+  assert.match(CONFIRMAR, /const \[altoCabecera, setAltoCabecera\] = useState<number \| null>\(null\)/);
+  assert.match(CONFIRMAR, /const \[altoPie, setAltoPie\] = useState<number \| null>\(null\)/);
+  assert.match(CONFIRMAR, /huecoArriba = altoCabecera \?\? insets\.top \+ ALTO_CABECERA_MINIMO/);
+  assert.match(CONFIRMAR, /huecoAbajo = altoPie \?\? insets\.bottom \+ ALTO_PIE_MINIMO/);
+  // Dos `onLayout`, uno por bloque flotante.
+  assert.equal((CONFIRMAR.match(/onLayout=\{\(evento\)/g) ?? []).length, 2);
+  // Y no se reescribe el estado con el mismo valor: seria un bucle de medidas.
+  assert.equal(
+    (CONFIRMAR.match(/\(previo\) => \(previo === alto \? previo : alto\)/g) ?? []).length,
+    2,
+  );
+  // El degradado de contraste cubre lo que ocupen los controles, no 160 fijos.
+  assert.match(CONFIRMAR, /alto=\{Math\.max\(160, huecoArriba \+ 40\)\}/);
+  assert.match(CONFIRMAR, /alto=\{Math\.max\(240, huecoAbajo \+ 40\)\}/);
 });
 
 test('cancelar devuelve al selector de foto, no al perfil a secas', () => {

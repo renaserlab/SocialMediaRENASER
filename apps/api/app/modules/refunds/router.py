@@ -681,6 +681,11 @@ async def _marcar_fallo(
     from app.modules.payments.reembolsos import es_terminal
 
     terminal = es_terminal(codigo)
+    # ACOTADOS ANTES DE GUARDARLOS. Vienen de la pasarela, asi que su longitud
+    # no la decidimos nosotros: sin recortar, un mensaje largo entra entero en
+    # una columna de texto y se pinta entero en la pantalla de administracion.
+    codigo = (codigo or "")[:64]
+    mensaje = (mensaje or "")[:300]
     try:
         if terminal and solicitud.status == estados.REFUND_PROCESSING:
             await devoluciones.transicionar(

@@ -96,7 +96,18 @@ class StripeRefundProvider(RefundProvider):
                 failure_message="La pasarela rechazó la devolución.",
             )
 
-        return _traducir(respuesta.json())
+        datos = _cuerpo(respuesta)
+        if datos is None:
+            # PENDIENTE, no fallido. La peticion salio con su clave de
+            # idempotencia, asi que el reembolso PUEDE existir; darlo por
+            # fallido invitaria a un reintento con clave nueva.
+            logger.error("[pagos] la respuesta del reembolso no es legible")
+            return RefundResult(
+                status="pending",
+                failure_code="unreadable_response",
+                failure_message="Respuesta ilegible; puede haberse creado igual.",
+            )
+        return _traducir(datos)
 
     async def get_refund_status(self, external_refund_id: str) -> RefundResult:
         from app.core.config import get_settings
@@ -121,7 +132,26 @@ class StripeRefundProvider(RefundProvider):
             return RefundResult(
                 status="failed", failure_code=f"http_{respuesta.status_code}"
             )
-        return _traducir(respuesta.json())
+        datos = _cuerpo(respuesta)
+        if datos is None:
+            # Consultar y no entender la respuesta no dice nada del reembolso.
+            return RefundResult(status="pending", failure_code="unreadable_response")
+        return _traducir(datos)
+
+
+def _cuerpo(respuesta) -> dict | None:
+    """El JSON de la respuesta, o `None` si no hay forma de leerlo.
+
+    Un 200 que no trae JSON casi siempre es un intermediario contestando en
+    lugar de Stripe. Antes esto reventaba con la excepcion del parser en mitad
+    de la ejecucion de un reembolso, y quien llama recibia un 500 sin saber si
+    el dinero se movio.
+    """
+    try:
+        datos = respuesta.json()
+    except Exception:  # el parser de httpx no promete un tipo concreto
+        return None
+    return datos if isinstance(datos, dict) else None
 
 
 def _traducir(cuerpo: dict) -> RefundResult:
@@ -151,7 +181,8 @@ def _traducir(cuerpo: dict) -> RefundResult:
         return RefundResult(
             status=situacion,
             external_refund_id=referencia,
-            failure_code=str(cuerpo.get("failure_reason") or ""),
+            # Acotado: lo escribe la pasarela y acaba en una columna nuestra.
+            failure_code=str(cuerpo.get("failure_reason") or "")[:64],
         )
     return RefundResult(
         status="failed",

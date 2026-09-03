@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image as ExpoImage } from 'expo-image';
@@ -25,9 +25,17 @@ const media = sobreMedio;
  * `contentFit="cover"`, igual que despues lo pintan el avatar y la portada.
  */
 
-/** Lo que ocupan cabecera y pie: el marco no debe quedar debajo de ellos. */
-const ALTO_CABECERA = 60;
-const ALTO_PIE = 132;
+/**
+ * Lo que se supone que ocupan cabecera y pie MIENTRAS no se han medido, o sea
+ * durante el primer fotograma. Despues manda la medida real.
+ *
+ * Eran las alturas definitivas, y eso era el fallo: cabecera y pie flotan sobre
+ * la foto y CRECEN con el tamano de letra del sistema. Con la letra grande de
+ * accesibilidad el boton de guardar se subia por encima del marco y tapaba
+ * justo lo que hay que mirar antes de decidir.
+ */
+const ALTO_CABECERA_MINIMO = 60;
+const ALTO_PIE_MINIMO = 132;
 
 type Forma = 'avatar' | 'portada';
 
@@ -60,6 +68,13 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
   const insets = useSafeAreaInsets();
   const titulo = forma === 'avatar' ? t('profile.avatarPhoto') : t('profile.coverPhoto');
 
+  // MEDIDOS, no supuestos. Incluyen ya sus propios rellenos de zona segura, asi
+  // que el hueco del marco es la altura tal cual, sin volver a sumar `insets`.
+  const [altoCabecera, setAltoCabecera] = useState<number | null>(null);
+  const [altoPie, setAltoPie] = useState<number | null>(null);
+  const huecoArriba = altoCabecera ?? insets.top + ALTO_CABECERA_MINIMO;
+  const huecoAbajo = altoPie ?? insets.bottom + ALTO_PIE_MINIMO;
+
   // Atras fisico = cancelar, no salir del perfil. Mientras sube se traga el
   // evento: irse a medias dejaria la subida sin pantalla a la que volver.
   useEffect(() => {
@@ -77,9 +92,16 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
         LA CABECERA TAMBIEN SE APAGA. Es el fallo que se esta corrigiendo: unos
         controles arriba, sin fondo, encima de una imagen que puede ser blanca.
       */}
-      <ScrimDeMedio borde="arriba" alto={160} />
+      {/* El degradado cubre lo que ocupen los controles, no una altura fija. */}
+      <ScrimDeMedio borde="arriba" alto={Math.max(160, huecoArriba + 40)} />
 
-      <View style={[styles.cabecera, { paddingTop: insets.top + spacing.sm }]}>
+      <View
+        style={[styles.cabecera, { paddingTop: insets.top + spacing.sm }]}
+        onLayout={(evento) => {
+          const alto = Math.ceil(evento.nativeEvent.layout.height);
+          setAltoCabecera((previo) => (previo === alto ? previo : alto));
+        }}
+      >
         <Pressable
           onPress={alCancelar}
           disabled={ocupado}
@@ -110,7 +132,7 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
         style={[
           styles.centro,
           // Hueco para la cabecera y el pie, que van flotando sobre la foto.
-          { paddingTop: insets.top + ALTO_CABECERA, paddingBottom: insets.bottom + ALTO_PIE },
+          { paddingTop: huecoArriba, paddingBottom: huecoAbajo },
         ]}
       >
         <View
@@ -129,9 +151,15 @@ export function ConfirmarRecorte({ uri, forma, alConfirmar, alCancelar, ocupado 
         </View>
       </View>
 
-      <ScrimDeMedio alto={240} />
+      <ScrimDeMedio alto={Math.max(240, huecoAbajo + 40)} />
 
-      <View style={[styles.pie, { paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.md }]}>
+      <View
+        style={[styles.pie, { paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.md }]}
+        onLayout={(evento) => {
+          const alto = Math.ceil(evento.nativeEvent.layout.height);
+          setAltoPie((previo) => (previo === alto ? previo : alto));
+        }}
+      >
         <Button
           label={t('common.save')}
           variant="secondary"

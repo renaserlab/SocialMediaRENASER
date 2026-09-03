@@ -35,3 +35,7 @@ legal/publicar/
 respaldo_videos/
 .vercel
 .env*
+
+# Volcado de la consola de arranque de una instancia EC2. Es un artefacto de
+# diagnostico, no del proyecto: sin esta linea un `git add -A` se lo lleva.
+ec2-arranque.txt

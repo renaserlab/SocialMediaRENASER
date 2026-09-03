@@ -15,6 +15,7 @@ LO QUE ESTAS PRUEBAS PROTEGEN, y por qué cada una existe:
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 import pytest_asyncio
@@ -482,6 +483,61 @@ async def test_el_historial_de_estados_solo_lo_ve_administracion(entorno):
     detalle = (await http.get(f"{ADMIN}/refund-requests/{solicitud['id']}")).json()
     assert len(detalle["history"]) >= 1
     assert detalle["history"][0]["to_status"] == "requested"
+
+
+@pytest.mark.asyncio
+async def test_la_nota_de_una_DECISION_si_llega_al_alumno(entorno):
+    """Un rechazo sin motivo legible es indefendible ante quien lo recibe."""
+    http, identidad, sesiones = entorno
+    await _arrancar_garantia(sesiones)
+    solicitud = (await _pedir(http)).json()
+    identidad["uid"] = JEFA
+    await http.post(f"{ADMIN}/refund-requests/{solicitud['id']}/take")
+    await http.post(
+        f"{ADMIN}/refund-requests/{solicitud['id']}/reject",
+        json={"notes": "El curso se entregó completo."},
+    )
+
+    identidad["uid"] = ANA
+    mio = (await http.get(f"{PAGOS}/refund-requests/{solicitud['id']}")).json()
+    assert mio["review_notes"] == "El curso se entregó completo."
+
+
+@pytest.mark.asyncio
+async def test_las_notas_INTERNAS_no_se_le_ensenan_al_alumno(entorno):
+    """`review_notes` viaja en la respuesta del alumno, así que no vale todo.
+
+    ANTES SE ESCRIBÍA EN CUALQUIER TRANSICIÓN. Cerrar un expediente muerto con
+    una nota interna —«duplicada de la de septiembre, la lleva legal»— la
+    publicaba tal cual en la pantalla de quien pidió la devolución. Y por el
+    mismo camino se colaba el motivo técnico con el que la pasarela rechazó el
+    cargo, presentado como si fuera la nota de la persona que lo revisó.
+
+    La nota SIGUE guardándose en el historial, que solo ve administración: no
+    se pierde el rastro, se pierde la publicación.
+    """
+    http, identidad, sesiones = entorno
+    await _arrancar_garantia(sesiones)
+    solicitud = (await _pedir(http)).json()
+    identidad["uid"] = JEFA
+    await http.post(f"{ADMIN}/refund-requests/{solicitud['id']}/take")
+    interna = "Duplicada de la de septiembre; la lleva legal."
+    cerrada = await http.post(
+        f"{ADMIN}/refund-requests/{solicitud['id']}/cancel", json={"notes": interna}
+    )
+    assert cerrada.status_code == 200, cerrada.text
+    assert cerrada.json()["status"] == "cancelled"
+
+    # Administración la sigue teniendo, en el historial.
+    detalle = (await http.get(f"{ADMIN}/refund-requests/{solicitud['id']}")).json()
+    assert any(evento["notes"] == interna for evento in detalle["history"])
+
+    # El alumno ve el estado, y no la nota.
+    identidad["uid"] = ANA
+    mio = (await http.get(f"{PAGOS}/refund-requests/{solicitud['id']}")).json()
+    assert mio["status"] == "cancelled"
+    assert mio["review_notes"] is None
+    assert interna not in json.dumps(mio)
 
 
 # --------------------------------------------------------------------------- #
