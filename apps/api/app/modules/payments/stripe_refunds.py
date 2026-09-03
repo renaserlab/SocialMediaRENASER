@@ -163,19 +163,25 @@ def _traducir(cuerpo: dict) -> RefundResult:
     """
     situacion = str(cuerpo.get("status") or "").lower()
     bruto = cuerpo.get("amount")
-    devuelto = bruto if isinstance(bruto, int) else None
+    devuelto = bruto if isinstance(bruto, int) and not isinstance(bruto, bool) else None
+    # Stripe la manda en minúsculas; el resto de la aplicación trabaja en
+    # mayúsculas. Se normaliza aquí para que nadie compare 'pen' con 'PEN'.
+    cruda = cuerpo.get("currency")
+    moneda = str(cruda).upper() if isinstance(cruda, str) and cruda else None
     referencia = str(cuerpo.get("id") or "")
     if situacion == "succeeded":
         return RefundResult(
             status="succeeded",
             external_refund_id=referencia,
             amount_minor=devuelto,
+            currency=moneda,
         )
     if situacion in {"pending", "requires_action"}:
         return RefundResult(
             status="pending",
             external_refund_id=referencia,
             amount_minor=devuelto,
+            currency=moneda,
         )
     if situacion in ESTADOS_CONOCIDOS:
         return RefundResult(

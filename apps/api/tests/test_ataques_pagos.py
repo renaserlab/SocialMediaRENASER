@@ -434,6 +434,7 @@ def _devolucion(
     importe: int,
     cobrado: int | None = None,
     event_id: str = "evt_ref",
+    reembolso: str | None = "re_1",
 ) -> dict:
     """Un `charge.refunded` como lo manda Stripe DE VERDAD.
 
@@ -447,22 +448,30 @@ def _devolucion(
     se cobro), `amount_refunded` (lo que se devuelve) y `refunded` (si el cobro
     quedo devuelto DEL TODO). `cobrado` por defecto es el importe devuelto, o
     sea una devolucion total.
+
+    Y LA LISTA `refunds`, que es de donde sale el `re_...`. El objeto Charge la
+    trae por defecto, y sin ella el aviso no identifica ningun reembolso: lo
+    unico que hay es el cobro. `reembolso=None` reproduce ese caso a proposito.
     """
     total = cobrado if cobrado is not None else importe
+    cobro: dict = {
+        "id": "ch_1",
+        "payment_intent": intento,
+        "amount": total,
+        "amount_refunded": importe,
+        "refunded": importe >= total,
+        "currency": "pen",
+    }
+    if reembolso is not None:
+        cobro["refunds"] = {
+            "object": "list",
+            "data": [{"id": reembolso, "amount": importe, "currency": "pen"}],
+        }
     return {
         "id": event_id,
         "type": "charge.refunded",
         "livemode": False,
-        "data": {
-            "object": {
-                "id": "ch_1",
-                "payment_intent": intento,
-                "amount": total,
-                "amount_refunded": importe,
-                "refunded": importe >= total,
-                "currency": "pen",
-            }
-        },
+        "data": {"object": cobro},
     }
 
 
@@ -474,8 +483,21 @@ async def _avisar(http, evento: dict, *, firma: str | None = None, cuerpo=None):
     return await http.post(f"{PAGOS}/webhook/stripe", content=crudo, headers=cabeceras)
 
 
-async def _comprar_por_stripe(entorno, *, curso=CURSO_A, importe=PRECIO_A):
-    """El camino legitimo entero: checkout, aviso firmado y derecho concedido."""
+async def _comprar_por_stripe(
+    entorno,
+    *,
+    curso=CURSO_A,
+    importe=PRECIO_A,
+    intento: str = "pi_1",
+    event_id: str = "evt_1",
+):
+    """El camino legitimo entero: checkout, aviso firmado y derecho concedido.
+
+    `intento` y `event_id` se pueden cambiar para encadenar DOS compras en la
+    misma prueba: dos cobros distintos no pueden compartir `payment_intent`, y
+    dos avisos no pueden compartir identificador o el segundo se descarta por
+    repetido.
+    """
     await _dar_de_alta(
         entorno.sesiones, curso=curso, provider="stripe", external="price_" + curso[-1]
     )
@@ -484,7 +506,9 @@ async def _comprar_por_stripe(entorno, *, curso=CURSO_A, importe=PRECIO_A):
     )
     assert respuesta.status_code == 200, respuesta.text
     pedido = respuesta.json()["purchase_id"]
-    evento = _sesion_pagada(order_id=pedido, importe=importe)
+    evento = _sesion_pagada(
+        order_id=pedido, importe=importe, intento=intento, event_id=event_id
+    )
     crudo = json.dumps(evento).encode("utf-8")
     aviso = await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
     assert aviso.status_code == 204, aviso.text
@@ -907,6 +931,107 @@ async def test_un_reembolso_quita_el_acceso_de_verdad(entorno):
     historial = (await entorno.http.get(f"{PAGOS}/history")).json()
     assert historial[0]["status"] == "refunded"
     assert historial[0]["has_access"] is False
+
+
+@pytest.mark.asyncio
+async def test_un_charge_refunded_SIN_identificador_de_reembolso_no_revoca(entorno):
+    """El aviso trae el cobro pero no el reembolso: no hay qué conciliar.
+
+    ANTES SE COMPONIA UNO: `f"{payment_intent}:refund"`. Ese identificador no
+    existe en Stripe, asi que no se podia consultar para verificarlo, no se
+    podia auditar, y como salia del cobro tampoco servia para detectar que el
+    mismo reembolso se estaba aplicando a dos ordenes distintas.
+
+    Sin `re_...` el caso queda SIN CONCILIAR: el acceso se conserva y hace falta
+    una revision —o el `refund.updated` que llegara despues con su
+    identificador—. Un acceso de mas se corrige; quitarle el curso a quien no
+    cobro, no.
+    """
+    await _comprar_por_stripe(entorno)
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+    evento = _devolucion(importe=PRECIO_A, reembolso=None)
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+
+    # Ni acceso retirado, ni orden reembolsada, ni garantia consumida.
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+    assert await _cuantos(entorno.sesiones, Entitlement, Entitlement.status == "active") == 1
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_sin_importe_no_revoca(entorno):
+    """La coalescencia que habia aqui convertia la ausencia en el total."""
+    await _comprar_por_stripe(entorno)
+    evento = _devolucion(importe=PRECIO_A)
+    # Se le quita el importe al cobro, como si Stripe no lo informara.
+    evento["data"]["object"]["amount"] = None
+    evento["data"]["object"]["amount_refunded"] = None
+    evento["data"]["object"]["refunds"]["data"][0]["amount"] = None
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_en_otra_moneda_no_revoca(entorno):
+    """El mismo numero en otra divisa no es el mismo dinero."""
+    await _comprar_por_stripe(entorno)
+    evento = _devolucion(importe=PRECIO_A)
+    evento["data"]["object"]["currency"] = "usd"
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_de_produccion_no_toca_una_compra_de_pruebas(entorno):
+    """Sin esto, un reembolso del entorno real retira un acceso de sandbox."""
+    await _comprar_por_stripe(entorno)
+    evento = _devolucion(importe=PRECIO_A)
+    evento["livemode"] = True
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+
+@pytest.mark.asyncio
+async def test_el_mismo_reembolso_no_puede_cerrar_dos_compras(entorno):
+    """Un `re_...` real, reenviado apuntando a OTRA compra.
+
+    El UNIQUE de `payment_transactions` impide duplicar la fila, no apuntarla a
+    otra orden: sin la comprobacion, un unico reembolso retiraba dos accesos.
+    """
+    await _comprar_por_stripe(entorno)
+    evento = _devolucion(importe=PRECIO_A, reembolso="re_compartido")
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is False
+
+    # OTRA compra, con su propio cobro, y el MISMO identificador de reembolso.
+    await _comprar_por_stripe(
+        entorno, curso=CURSO_B, importe=PRECIO_B, intento="pi_2", event_id="evt_2"
+    )
+    assert (await _acceso(entorno.http, CURSO_B))["has_access"] is True
+    otro = _devolucion(
+        importe=PRECIO_B, intento="pi_2", event_id="evt_ref_2", reembolso="re_compartido"
+    )
+    crudo = json.dumps(otro).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, otro, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+    # La segunda compra NO se cierra con el reembolso de la primera.
+    assert (await _acceso(entorno.http, CURSO_B))["has_access"] is True
 
 
 @pytest.mark.asyncio

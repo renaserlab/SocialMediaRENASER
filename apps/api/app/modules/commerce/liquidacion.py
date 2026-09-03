@@ -199,21 +199,59 @@ async def congelar(
     return resultado.rowcount > 0
 
 
-async def descongelar(db: AsyncSession, *, order_id: str) -> bool:
+async def descongelar(
+    db: AsyncSession, *, order_id: str, refund_request_id: str | None = None
+) -> bool:
     """Devuelve el saldo a la cola cuando la solicitud se rechaza o se retira.
 
     Vuelve a `pending` y NO a `eligible`: si la garantía todavía no había
     vencido, sigue sin haber vencido. El trabajo que libera vencidos ya lo
     recogerá cuando toque.
+
+    NUNCA LEVANTA UNA RETENCIÓN POR DISPUTA. Esas se marcan sin solicitud
+    (`frozen_by_request_id` nulo), así que resolver una devolución no puede
+    soltar por accidente un dinero que el banco está reclamando. Con
+    `refund_request_id` se exige además que sea ESA solicitud la que lo
+    congeló.
+    """
+    condiciones = [
+        OwnerSaleBalance.order_id == order_id,
+        OwnerSaleBalance.status == "frozen",
+    ]
+    if refund_request_id is not None:
+        condiciones.append(OwnerSaleBalance.frozen_by_request_id == refund_request_id)
+    else:
+        condiciones.append(OwnerSaleBalance.frozen_by_request_id.is_not(None))
+    resultado = await db.execute(
+        update(OwnerSaleBalance).where(*condiciones)
+        .values(
+            status="pending",
+            frozen_by_request_id=None,
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    await db.flush()
+    return resultado.rowcount > 0
+
+
+async def congelar_por_disputa(db: AsyncSession, *, order_id: str) -> bool:
+    """Retiene el saldo mientras el banco reclama el cobro.
+
+    SIN SOLICITUD ASOCIADA, y eso es lo que la distingue: `frozen_by_request_id`
+    queda nulo, así que ninguna resolución de devolución la levanta. Sale de ahí
+    a mano, cuando se sepa cómo acabó la disputa.
+
+    Solo desde `pending` o `eligible`: si el dinero ya salió, esto no lo
+    devuelve —ver `docs/`, sección de disputas—.
     """
     resultado = await db.execute(
         update(OwnerSaleBalance)
         .where(
             OwnerSaleBalance.order_id == order_id,
-            OwnerSaleBalance.status == "frozen",
+            OwnerSaleBalance.status.in_(("pending", "eligible")),
         )
         .values(
-            status="pending",
+            status="frozen",
             frozen_by_request_id=None,
             updated_at=datetime.now(timezone.utc),
         )

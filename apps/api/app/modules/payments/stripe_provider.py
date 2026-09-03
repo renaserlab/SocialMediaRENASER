@@ -84,6 +84,15 @@ EVENTOS: dict[str, str] = {
     "refund.updated": "refund_pendiente",
     "refund.failed": "refund_pendiente",
     "charge.refund.updated": "refund_pendiente",
+    # UNA DISPUTA NO ES UNA DEVOLUCION. La abre el banco del titular, no la
+    # persona, y el dinero se retira sin pasar por nuestro circuito. No estaban
+    # aqui, y eso tenia dos consecuencias malas: con las compras apagadas el
+    # aviso salia con 503 y Stripe reintentaba en bucle hasta deshabilitar el
+    # endpoint —dejando de entregar tambien las compras y devoluciones
+    # legitimas—; y con las compras encendidas se descartaba en silencio.
+    "charge.dispute.created": "disputa_abierta",
+    "charge.dispute.funds_withdrawn": "disputa_fondos_retirados",
+    "charge.dispute.closed": "disputa_cerrada",
 }
 
 #: Lo que Stripe llama a un reembolso que SI se completo.
@@ -306,6 +315,7 @@ def traducir_evento(evento: dict[str, Any]) -> PaymentEvent:
     interno = _identificador_interno(objeto)
 
     return PaymentEvent(
+        refund_id=_identificador_del_reembolso(tipo, objeto),
         purchase_id=interno,
         provider_transaction_id=referencia,
         status=estado,
@@ -354,6 +364,34 @@ def _estado_de_devolucion(tipo: str, objeto: dict[str, Any]) -> str:
             return "refund_parcial"
         return "refund_procesando"
     return "refunded"
+
+
+def _identificador_del_reembolso(tipo: str, objeto: dict[str, Any]) -> str:
+    """El `re_...` de este aviso, o cadena vacía si el aviso no lo trae.
+
+    DOS FORMAS. En `refund.*` el objeto ES el reembolso, así que su `id` sirve.
+    En `charge.refunded` el objeto es el COBRO: el reembolso solo aparece si
+    Stripe expande la lista `refunds`, y muchas veces no lo hace.
+
+    Cuando no viene se devuelve vacío, y eso deja el caso SIN CONCILIAR: se
+    conserva el acceso y hace falta una revisión —o el `refund.updated` que
+    llegará después con su identificador—. Inventarlo a partir del cobro es lo
+    que hacía el código anterior, y ese identificador no existe en Stripe.
+    """
+    if tipo.startswith("refund.") or tipo == "charge.refund.updated":
+        valor = objeto.get("id")
+        return valor if isinstance(valor, str) and valor.startswith("re_") else ""
+
+    reembolsos = objeto.get("refunds")
+    datos = reembolsos.get("data") if isinstance(reembolsos, dict) else None
+    if isinstance(datos, list) and len(datos) == 1:
+        # UNO SOLO. Con varios reembolsos parciales no hay «el» reembolso de
+        # este cobro, y elegir el primero sería elegir al azar.
+        primero = datos[0]
+        valor = primero.get("id") if isinstance(primero, dict) else None
+        if isinstance(valor, str) and valor.startswith("re_"):
+            return valor
+    return ""
 
 
 def _importe_del_cobro(objeto: dict[str, Any]) -> int:

@@ -65,7 +65,17 @@ class _PasarelaDeMentira:
 
     async def get_refund_status(self, external_refund_id: str) -> RefundResult:
         self.consultas.append(external_refund_id)
-        return RefundResult(status=self.estado, external_refund_id=external_refund_id)
+        # IMPORTE Y MONEDA, como la pasarela de verdad. Sin ellos la
+        # conciliacion ya no cierra nada: comparar la orden consigo misma era
+        # justo el agujero que se cerro.
+        return RefundResult(
+            status=self.estado,
+            external_refund_id=external_refund_id,
+            failure_code=getattr(self, "codigo", ""),
+            failure_message=getattr(self, "mensaje", ""),
+            amount_minor=PRECIO,
+            currency="PEN",
+        )
 
 
 def _usar(monkeypatch, pasarela: _PasarelaDeMentira) -> _PasarelaDeMentira:
@@ -385,6 +395,10 @@ async def test_los_webhooks_siguen_procesandose(entorno):
                 amount_minor=datos["importe"],
                 currency="PEN",
                 event_id=datos["event_id"],
+                # EL `re_...` REAL. La doble no lo mandaba, y sin el un aviso
+                # de devolucion ya no retira acceso: `pi_...` identifica el
+                # COBRO, no el reembolso, y Stripe si manda el suyo.
+                refund_id=datos.get("reembolso", "re_de_prueba_1"),
                 event_type="charge.refunded",
                 environment="sandbox",
                 payload=datos,

@@ -27,48 +27,54 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.modules.commerce import liquidacion
 from app.modules.commerce import service as comercio_service
-from app.modules.commerce.models import CommerceProduct, Order
-from app.modules.refunds import estados, service
+from app.modules.commerce.models import CommerceProduct, Order, PaymentTransaction
+from app.modules.refunds import estados, service, validacion
 from app.modules.refunds.models import RefundRequest
+from app.modules.refunds.validacion import (  # noqa: F401  (compatibilidad)
+    CompraOriginal,
+    NoConciliado,
+    ReembolsoConfirmado,
+)
 
 logger = logging.getLogger("renaser.refunds")
 
 
-class NoConciliado(Exception):
-    """El aviso no cuadra con la orden. No se toca nada."""
+def _compra(orden: Order) -> CompraOriginal:
+    return CompraOriginal(
+        id=orden.id,
+        amount_minor=orden.amount_minor,
+        currency=orden.currency,
+        environment=orden.environment,
+        provider=orden.provider,
+    )
 
 
-def conciliar(
-    *,
-    orden: Order,
-    solicitud: RefundRequest | None,
-    amount_minor: int,
-    environment: str,
+async def _referencia_libre(
+    db: AsyncSession, *, referencia: str, orden: Order
 ) -> None:
-    """Comprueba que este reembolso es el de esta orden. Lanza si no.
+    """Que ese reembolso no esté ya contado como el de OTRA orden.
 
-    TRES COMPROBACIONES, y ninguna sobra:
-
-    1. **Entorno.** Un reembolso de sandbox no toca producción, y al revés. Sin
-       esto, una prueba retira un acceso real.
-    2. **Importe.** Total o nada. Devolver 1 de 199 no puede quitar el curso.
-    3. **La solicitud es de esta orden.** Un expediente apuntando a otra compra
-       revocaría el acceso equivocado.
+    Sin esto, reenviar el mismo `re_...` cambiando la orden de destino retiraba
+    un segundo acceso con un único reembolso real. El UNIQUE de
+    `payment_transactions` impide duplicar la fila, no apuntarla a otra compra.
     """
-    if environment != orden.environment:
-        raise NoConciliado(
-            f"El aviso viene de '{environment}' y la orden es de "
-            f"'{orden.environment}'."
+    ajena = await db.scalar(
+        select(PaymentTransaction.order_id).where(
+            PaymentTransaction.provider == orden.provider,
+            PaymentTransaction.environment == orden.environment,
+            PaymentTransaction.external_transaction_id == referencia,
+            PaymentTransaction.order_id.is_not(None),
+            PaymentTransaction.order_id != orden.id,
         )
-    if amount_minor and amount_minor != orden.amount_minor:
+    )
+    if ajena is not None:
         raise NoConciliado(
-            f"Reembolso de {amount_minor} sobre una orden de {orden.amount_minor}: "
-            "no es total."
+            f"El reembolso {referencia} ya está registrado en otra orden."
         )
-    if solicitud is not None and solicitud.order_id != orden.id:
-        raise NoConciliado("La solicitud no pertenece a esta orden.")
 
 
 async def aplicar(
@@ -92,12 +98,17 @@ async def aplicar(
     commit se coló entre medias— es exactamente el estado imposible que hay que
     evitar.
     """
-    conciliar(
-        orden=orden,
-        solicitud=solicitud,
-        amount_minor=amount_minor,
-        environment=environment,
+    referencia = validacion.exigir_conciliado(
+        compra=_compra(orden),
+        confirmado=ReembolsoConfirmado(
+            external_refund_id=external_transaction_id,
+            amount_minor=amount_minor,
+            currency=currency,
+            environment=environment,
+            provider=orden.provider,
+        ),
     )
+    await _referencia_libre(db, referencia=referencia, orden=orden)
 
     if orden.status == "refunded":
         logger.info("[devoluciones] la orden %s ya estaba reembolsada", orden.id)
@@ -108,16 +119,30 @@ async def aplicar(
         raise NoConciliado(f"La orden {orden.id} no resuelve ningún curso.")
     course_id = producto.course_id
 
+    # El expediente tiene que ser el de ESTA compra. Se comprueba aquí y no en
+    # `validacion` porque hasta este punto no se conoce el curso de la orden.
+    if solicitud is not None:
+        validacion.exigir_expediente_de_la_compra(
+            solicitud_order_id=solicitud.order_id,
+            solicitud_user_id=solicitud.user_id,
+            solicitud_course_id=solicitud.course_id,
+            orden_id=orden.id,
+            orden_user_id=orden.user_id,
+            curso_de_la_orden=course_id,
+        )
+
     # 1. La transacción de reembolso. Es OTRA fila, no un update de la compra:
     #    machacar la compra borraría que ocurrió.
     _, nueva = await comercio_service.registrar_transaccion(
         db,
         provider=orden.provider,
         environment=environment,
-        external_transaction_id=external_transaction_id,
+        external_transaction_id=referencia,
         kind="refund",
-        amount_minor=amount_minor or orden.amount_minor,
-        currency=currency or orden.currency,
+        # Ya validados: enteros, positivos y exactamente los de la orden. No
+        # hay coalescencia posible porque no hay nada ausente que sustituir.
+        amount_minor=amount_minor,
+        currency=currency,
         order_id=orden.id,
     )
     if not nueva:
@@ -163,7 +188,7 @@ async def aplicar(
             rol="system",
             actor_id=None,
             reason=motivo,
-            external_reference=external_transaction_id,
+            external_reference=referencia,
             metadata={
                 "amount_minor": amount_minor,
                 "currency": currency,

@@ -124,6 +124,12 @@ async def asegurar_ventana(
     """
     existente = await _ventana(db, user_id=user_id, course_id=course_id)
     if existente is not None:
+        # LA VENTANA NO SE REINICIA, PERO EL SALDO DE ESTA COMPRA HAY QUE
+        # FECHARLO. Se volvia aqui sin sincronizar nada, y en una RECOMPRA eso
+        # dejaba `available_at` nulo para siempre: el dinero del propietario
+        # retenido sin fin y sin nada que lo desbloquease, porque la segunda
+        # compra —por politica— ya no tiene garantia que esperar.
+        await _fechar_saldo(db, ventana=existente, order_id=order_id)
         return existente
 
     inicio = ahora()
@@ -154,24 +160,43 @@ async def asegurar_ventana(
     # y pagarle al propietario el lunes siguiente seria pagarle con la garantia
     # todavia abierta.
     if ventana is not None:
-        await _sincronizar_vencimiento_del_saldo(db, ventana)
+        await _fechar_saldo(db, ventana=ventana, order_id=order_id)
     return ventana
 
 
-async def _sincronizar_vencimiento_del_saldo(
-    db: AsyncSession, ventana: CourseRefundWindow
+async def _fechar_saldo(
+    db: AsyncSession,
+    *,
+    ventana: CourseRefundWindow,
+    order_id: str | None = None,
 ) -> None:
-    """Mueve `available_at` del saldo al vencimiento REAL de la garantia.
+    """Pone `available_at` del saldo de ESTA compra donde le toca.
 
     Solo toca saldos `pending`: uno congelado esta en manos de una solicitud, y
     uno ya elegible o transferido no se puede retrasar sin descuadrar lo que ya
     se conto como pagable.
 
+    DOS CASOS, y el segundo es el que faltaba:
+
+    1. La compra de la ventana: vence cuando venza la garantia. Al cobrar se
+       retuvo el plazo completo desde la venta, que es el peor caso porque
+       todavia no se sabia cuando iba a entrar. Quien compra el lunes y entra el
+       viernes corre sus 168 horas desde el viernes.
+    2. Una RECOMPRA, con la garantia de la primera ya consumida: por politica no
+       hay segunda garantia, asi que no hay nada que esperar y el saldo queda
+       pagable de inmediato. Sin esto se quedaba nulo para siempre.
+
     Nunca revienta la entrega de la leccion: si la liquidacion no esta
     disponible, no hay nada que sincronizar y se sigue.
     """
-    if ventana.order_id is None:
+    objetivo = order_id or ventana.order_id
+    if objetivo is None:
         return
+    if objetivo == ventana.order_id or ventana.refund_used_at is None:
+        vencimiento = ventana.expires_at
+    else:
+        # Recompra sobre una garantia ya usada: pagable ya.
+        vencimiento = ahora()
     from app.modules.commerce.models import OwnerSaleBalance
     from app.modules.refunds import esquema
 
@@ -191,16 +216,16 @@ async def _sincronizar_vencimiento_del_saldo(
             await db.execute(
                 update(OwnerSaleBalance)
                 .where(
-                    OwnerSaleBalance.order_id == ventana.order_id,
+                    OwnerSaleBalance.order_id == objetivo,
                     OwnerSaleBalance.status == "pending",
                 )
-                .values(available_at=ventana.expires_at, updated_at=ahora())
+                .values(available_at=vencimiento, updated_at=ahora())
             )
     except Exception:  # noqa: BLE001
         logger.exception(
             "[devoluciones] no se pudo sincronizar el vencimiento del saldo de "
             "la orden %s; la garantia SI quedo registrada",
-            ventana.order_id,
+            objetivo,
         )
 
 

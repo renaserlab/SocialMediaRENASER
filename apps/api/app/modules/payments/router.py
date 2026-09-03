@@ -732,13 +732,30 @@ _DEVOLUCIONES_SIN_EFECTO = {
     "refund_fallido": "el reembolso fallo",
 }
 
-#: Todo lo que es un aviso de DEVOLUCION, con efecto o sin el. Es lo que sigue
-#: entrando con las compras nuevas deshabilitadas.
-_ESTADOS_DE_DEVOLUCION = frozenset(_DEVOLUCIONES_SIN_EFECTO) | {"refunded"}
+#: Una disputa la abre el BANCO del titular, no la persona, y el dinero se
+#: retira fuera de nuestro circuito. Nunca retira acceso por si sola: abrir una
+#: disputa no es haber perdido nada todavia, y decidirlo automaticamente dejaria
+#: sin curso a quien podria ganarla.
+_ESTADOS_DE_DISPUTA = frozenset({
+    "disputa_abierta",
+    "disputa_fondos_retirados",
+    "disputa_cerrada",
+})
+
+#: Todo lo que es un aviso de DEVOLUCION o de DISPUTA, con efecto o sin el. Es
+#: lo que sigue entrando con las compras nuevas deshabilitadas: apagar la venta
+#: no puede dejar de atender el dinero ya cobrado.
+_ESTADOS_DE_DEVOLUCION = (
+    frozenset(_DEVOLUCIONES_SIN_EFECTO) | {"refunded"} | _ESTADOS_DE_DISPUTA
+)
 
 
 async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
     entorno = evento.environment
+
+    if evento.status in _ESTADOS_DE_DISPUTA:
+        await _atender_disputa(db, evento)
+        return
 
     if evento.status in _DEVOLUCIONES_SIN_EFECTO:
         # Se registra el avance del expediente, si lo hay, pero NO se toca el
@@ -786,15 +803,27 @@ async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
     if pedido.provider != "stripe" or pedido.environment != entorno:
         logger.error("[pagos] el pedido %s no es de Stripe en este entorno", pedido.id)
         return
-    if evento.amount_minor and evento.amount_minor != pedido.amount_minor:
+    if evento.amount_minor != pedido.amount_minor:
         # El importe que se cobró NO es el que se congeló al abrir el pedido.
         # No se concede: es exactamente la forma de comprar un curso de 300
         # por 1 si alguien pudiera manipular la sesión.
+        #
+        # SIN el `and` que habia aqui. Con el, un aviso SIN importe —o con
+        # cero— se saltaba la comprobacion entera y concedia el acceso: la
+        # ausencia de dato no puede valer como coincidencia.
         logger.error(
             "[pagos] importe distinto en el pedido %s: esperado %s, cobrado %s",
             pedido.id,
             pedido.amount_minor,
             evento.amount_minor,
+        )
+        return
+    if (evento.currency or "").strip().upper() != (pedido.currency or "").strip().upper():
+        logger.error(
+            "[pagos] moneda distinta en el pedido %s: esperada %s, cobrada %s",
+            pedido.id,
+            pedido.currency,
+            evento.currency,
         )
         return
 
@@ -810,6 +839,65 @@ async def _aplicar_evento_stripe(db: AsyncSession, evento) -> None:
     # navegador volviera de Stripe. Y `concesion` dice si de verdad se estreno:
     # un webhook repetido no vuelve a avisar ni a deber el dinero dos veces.
     await _al_confirmar_la_compra(db, pedido, estrenada=_es_nueva(concesion))
+
+
+async def _atender_disputa(db: AsyncSession, evento) -> None:
+    """Un contracargo: se retiene el saldo y se deja rastro. NADA MAS.
+
+    LAS TRES COSAS QUE **NO** HACE, y las tres a proposito:
+
+    1. **No retira el acceso.** Abrir una disputa no es haberla perdido. Quitar
+       el curso al abrirse castigaria a quien puede acabar ganandola, y la
+       decision no es de un webhook.
+    2. **No consume la garantia.** No es una devolucion voluntaria: quien sufre
+       un cargo fraudulento no ha usado su derecho a devolver nada.
+    3. **No cancela el saldo.** Solo lo retiene. Cancelarlo daria por perdida
+       una disputa que aun no se ha resuelto.
+
+    LO QUE SI HACE es congelar el dinero del propietario mientras dure, para que
+    no se le pague algo que el banco esta reclamando. La retencion se marca SIN
+    solicitud asociada, asi que resolver una devolucion no la levanta por
+    accidente. Como se sale de ahi al ganar o perder esta en `docs/`.
+    """
+    pedido = await service.pedido_por_transaccion(
+        db,
+        provider="stripe",
+        environment=evento.environment,
+        external_transaction_id=evento.provider_transaction_id,
+    )
+    if pedido is None:
+        logger.error(
+            "[pagos] disputa (%s) sin compra apuntada: %s",
+            evento.status,
+            evento.event_type,
+        )
+        return
+
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    from app.modules.commerce import liquidacion
+
+    retenido = False
+    if await esquema_devoluciones.hay_devoluciones(db):
+        # Savepoint: que no se pueda tumbar el aviso entero por esto.
+        try:
+            async with db.begin_nested():
+                retenido = await liquidacion.congelar_por_disputa(
+                    db, order_id=pedido.id
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("[pagos] no se pudo retener el saldo de la disputa")
+
+    # ALERTA, en el nivel que se vigila. El cuerpo del aviso ya queda guardado
+    # en `payment_events`; aqui van solo codigos e identificadores.
+    logger.error(
+        "[pagos] DISPUTA %s sobre la orden %s. Saldo retenido: %s. El acceso NO "
+        "se ha tocado y la garantia NO se ha consumido: requiere revision.",
+        evento.status,
+        pedido.id,
+        retenido,
+    )
+    await db.commit()
 
 
 async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
@@ -831,13 +919,42 @@ async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
         return
 
     if not await esquema_devoluciones.hay_devoluciones(db):
+        # SIN LA 0049 se retira acceso por el camino antiguo, pero con las
+        # MISMAS puertas: un aviso sin importe, sin moneda o sin un `re_...`
+        # real tampoco puede quitarle el curso a nadie aqui.
+        from app.modules.refunds import validacion
+
+        try:
+            referencia = validacion.exigir_conciliado(
+                compra=validacion.CompraOriginal(
+                    id=orden.id,
+                    amount_minor=orden.amount_minor,
+                    currency=orden.currency,
+                    environment=orden.environment,
+                    provider=orden.provider,
+                ),
+                confirmado=validacion.ReembolsoConfirmado(
+                    external_refund_id=evento.refund_id,
+                    amount_minor=evento.amount_minor,
+                    currency=evento.currency,
+                    environment=evento.environment,
+                    provider=orden.provider,
+                ),
+            )
+        except validacion.NoConciliado as error:
+            logger.error(
+                "[pagos] devolucion sin conciliar sobre el pedido %s: %s",
+                pedido.id,
+                error,
+            )
+            return
         await service.revocar(
             db,
             user_id=pedido.user_id,
             producto=await service.producto_de_pedido(db, pedido),
-            external_transaction_id=f"{evento.provider_transaction_id}:refund",
+            external_transaction_id=referencia,
             amount_minor=evento.amount_minor,
-            currency=evento.currency or pedido.currency,
+            currency=evento.currency,
             motivo="devolución confirmada por Stripe",
         )
         await comercio_service.marcar_orden(db, order_id=pedido.id, status="refunded")
@@ -848,23 +965,80 @@ async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
     solicitud = await devoluciones.solicitud_viva(
         db, user_id=orden.user_id, course_id=await _curso_de(db, orden)
     )
+    # Los identificadores, ANTES: si la validacion falla, deshacer el savepoint
+    # caduca los objetos y leerles un atributo dispara una carga perezosa que en
+    # async revienta con `MissingGreenlet`.
+    orden_id = orden.id
+    solicitud_id = solicitud.id if solicitud is not None else None
+
+    # SAVEPOINT. Un aviso que no cuadra no puede llevarse por delante la
+    # transaccion del webhook: en ella vive la fila de `payment_events` que
+    # impide procesar dos veces el mismo aviso. Con un `rollback` a secas esa
+    # fila desaparecia y el anti-replay dejaba de existir.
     try:
-        await reembolso.aplicar(
-            db,
-            orden=orden,
-            external_transaction_id=f"{evento.provider_transaction_id}:refund",
-            amount_minor=evento.amount_minor,
-            currency=evento.currency or orden.currency,
-            environment=evento.environment,
-            solicitud=solicitud,
-            motivo="reembolso confirmado por Stripe",
-        )
+        async with db.begin_nested():
+            await reembolso.aplicar(
+                db,
+                orden=orden,
+                # EL IDENTIFICADOR REAL DEL REEMBOLSO. Antes se componia uno
+                # sintetico con el cobro (`pi_x:refund`): no existe en Stripe,
+                # no se puede consultar ni auditar, y no permitia detectar que
+                # el mismo reembolso se aplicara a dos ordenes distintas.
+                external_transaction_id=evento.refund_id,
+                # SIN COALESCENCIA. Lo que no venga en el aviso no se sustituye
+                # por lo que esperabamos: queda sin conciliar y el acceso no se
+                # toca.
+                amount_minor=evento.amount_minor,
+                currency=evento.currency,
+                environment=evento.environment,
+                solicitud=solicitud,
+                motivo="reembolso confirmado por Stripe",
+            )
     except reembolso.NoConciliado as error:
         # NO se toca nada. Un aviso que no cuadra con la orden es justo el que
-        # no hay que aplicar: en la duda, el acceso se queda.
+        # no hay que aplicar: en la duda, el acceso se queda. Y se deja rastro
+        # DURABLE, no solo en el registro: alguien tiene que mirarlo.
         logger.error(
-            "[pagos] devolucion sin conciliar sobre la orden %s: %s", orden.id, error
+            "[pagos] devolucion sin conciliar sobre la orden %s: %s", orden_id, error
         )
+        await _anotar_sin_conciliar(db, orden_id, solicitud_id, str(error)[:300])
+
+
+async def _anotar_sin_conciliar(
+    db: AsyncSession, orden_id: str, solicitud_id: str | None, motivo: str
+) -> None:
+    """Deja constancia DURABLE de un aviso que no cuadra, para que se revise.
+
+    Solo identificadores y texto ya recortado: nunca el cuerpo del aviso.
+
+    Va despues del rollback —la transaccion anterior quedo abortada al levantar
+    la validacion— y por eso recibe cadenas y no objetos: los de antes quedaron
+    caducados.
+    """
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundRequest
+
+    if solicitud_id is None:
+        return
+    try:
+        solicitud = await db.get(RefundRequest, solicitud_id)
+        if solicitud is None:
+            return
+        await devoluciones._anotar(
+            db,
+            solicitud,
+            desde=solicitud.status,
+            hasta=solicitud.status,
+            rol="system",
+            actor_id=None,
+            reason="aviso de devolucion sin conciliar",
+            notes=motivo,
+            metadata={"order_id": orden_id, "requiere_revision": True},
+        )
+        await db.commit()
+    except Exception:  # pragma: no cover - la anotacion no puede romper el aviso
+        await db.rollback()
+        logger.exception("[pagos] no se pudo anotar la devolucion sin conciliar")
 
 
 async def _curso_de(db: AsyncSession, orden) -> str:
@@ -1021,13 +1195,25 @@ async def _al_confirmar_la_compra(db: AsyncSession, pedido, *, estrenada: bool) 
     """
     from app.modules.commerce.models import Order
 
+    # SAVEPOINT, y no un `try` a secas. El derecho ya se concedio en ESTA misma
+    # transaccion y todavia no hay `commit`. En PostgreSQL una sentencia que
+    # falla ABORTA la transaccion entera, asi que sin aislar esto pasaba lo
+    # siguiente: fallaba el aviso al propietario, el `except` se lo tragaba, y
+    # el `marcar_evento_procesado` de mas arriba reventaba con «current
+    # transaction is aborted». El `except` exterior hacia `rollback` y se
+    # llevaba por delante LA CONCESION. El comprador pagaba, se quedaba sin
+    # curso, y como el aviso ya constaba visto Stripe no reintentaba.
+    #
+    # Con `begin_nested` el fallo deshace solo el saldo y el aviso; el derecho
+    # concedido sigue en pie y el `commit` de fuera lo escribe.
     try:
-        orden = await db.get(Order, pedido.id)
-        if orden is None:
-            return
-        await _crear_saldo_del_propietario(db, orden)
-        if estrenada:
-            await _avisar_compra_al_propietario(db, orden)
+        async with db.begin_nested():
+            orden = await db.get(Order, pedido.id)
+            if orden is None:
+                return
+            await _crear_saldo_del_propietario(db, orden)
+            if estrenada:
+                await _avisar_compra_al_propietario(db, orden)
     except Exception:  # noqa: BLE001
         logger.exception(
             "[pagos] la compra %s se concedio pero fallo el saldo o el aviso",

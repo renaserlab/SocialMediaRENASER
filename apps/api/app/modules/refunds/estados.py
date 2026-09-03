@@ -64,13 +64,29 @@ FINALES: Final[frozenset[str]] = frozenset({REFUNDED, REJECTED, CANCELLED})
 
 #: Lo que se puede hacer desde cada estado. Es la tabla completa: lo que no
 #: está aquí, no se puede.
+#: UN REEMBOLSO CONFIRMADO POR LA PASARELA ES UN HECHO, NO UNA DECISION, y
+#: por eso `REFUNDED` sale de casi todos los estados vivos.
+#:
+#: Faltaba desde `requested`, `under_review` y `approved`, y eso perdia
+#: reembolsos REALES: con la ejecucion automatica apagada —el estado de
+#: fabrica— administracion aprueba y devuelve el dinero a mano desde el panel
+#: de Stripe; el expediente se queda en `approved`; llega el webhook; `aplicar`
+#: revoca el acceso, cierra la orden, consume la garantia y cancela el saldo...
+#: y revienta en su ULTIMO paso al no existir la arista. El `except` de fuera
+#: deshacia las cuatro cosas, el evento quedaba marcado, y Stripe no reintentaba
+#: mas. Resultado: la persona con su dinero Y el curso, y el saldo del creador
+#: vivo y pagable.
+#:
+#: La salvaguarda no es prohibir la arista: es QUIEN la recorre. `ACTORES`
+#: reserva `REFUNDED` al rol `system`, o sea a un webhook verificado. Ni un
+#: administrador puede declararlo a mano.
 TRANSICIONES: Final[dict[str, frozenset[str]]] = {
-    REQUESTED: frozenset({UNDER_REVIEW, CANCELLED}),
-    UNDER_REVIEW: frozenset({APPROVED, REJECTED, CANCELLED}),
+    REQUESTED: frozenset({UNDER_REVIEW, CANCELLED, REFUNDED}),
+    UNDER_REVIEW: frozenset({APPROVED, REJECTED, CANCELLED, REFUNDED}),
     # `CANCELLED` ademas de ejecutar: sin esa salida, un expediente
     # aprobado por error con la pasarela apagada se queda ahi para
     # siempre, y el saldo del propietario congelado sin fin.
-    APPROVED: frozenset({REFUND_PROCESSING, CANCELLED}),
+    APPROVED: frozenset({REFUND_PROCESSING, CANCELLED, REFUNDED}),
     REFUND_PROCESSING: frozenset({REFUNDED, FAILED}),
     # Un fallo de la pasarela se reintenta, o se abandona. Lo que NO hace es
     # saltar a «reembolsado»: eso sería dar por bueno lo que falló.

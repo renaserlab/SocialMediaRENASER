@@ -317,9 +317,6 @@ def test_el_camino_feliz_completo():
     [
         # Aprobar sin revisar: se salta a quien tenía que mirarlo.
         (estados.REQUESTED, estados.APPROVED),
-        # Reembolsar sin aprobar: dinero fuera sin que nadie lo autorizara.
-        (estados.UNDER_REVIEW, estados.REFUNDED),
-        (estados.APPROVED, estados.REFUNDED),
         # Resucitar un expediente cerrado.
         (estados.REFUNDED, estados.REFUND_PROCESSING),
         (estados.REJECTED, estados.APPROVED),
@@ -332,6 +329,33 @@ def test_los_saltos_prohibidos_no_existen(desde, hasta):
     assert not estados.puede(desde, hasta)
     with pytest.raises(estados.TransicionInvalida):
         estados.exigir(desde, hasta, rol="admin")
+
+
+def test_un_reembolso_CONFIRMADO_puede_cerrar_cualquier_expediente_vivo():
+    """ESTA PRUEBA CAMBIO DE SIGNO, y conviene entender por qué.
+
+    Antes prohibía `under_review → refunded` y `approved → refunded` con el
+    argumento de que sería «dinero fuera sin que nadie lo autorizara». El
+    argumento estaba bien; la defensa, en el sitio equivocado.
+
+    Lo que faltaba es que ESAS TRANSICIONES NO LAS PIDE UN HUMANO. Las recorre
+    el sistema cuando la pasarela confirma que el dinero ya volvió, y eso pasa
+    de verdad: con la ejecución automática apagada —el estado de fábrica—
+    administración aprueba y devuelve el dinero a mano desde el panel de Stripe.
+    Cuando llegaba el webhook, `aplicar` revocaba el acceso, cerraba la orden,
+    consumía la garantía y cancelaba el saldo... y reventaba en su ÚLTIMO paso
+    porque la arista no existía. El error deshacía las cuatro cosas y el aviso
+    quedaba marcado como visto: la persona se quedaba con su dinero Y con el
+    curso, y el saldo del creador vivo y pagable.
+
+    La salvaguarda de verdad es QUIÉN la recorre, y esa sigue en pie: sólo
+    `system`, o sea un webhook verificado. Es lo que comprueba esta prueba.
+    """
+    for desde in (estados.REQUESTED, estados.UNDER_REVIEW, estados.APPROVED):
+        assert estados.puede(desde, estados.REFUNDED), desde
+        assert estados.puede_actor("system", estados.REFUNDED)
+        for rol in ("admin", "user"):
+            assert not estados.puede_actor(rol, estados.REFUNDED), rol
 
 
 def test_un_webhook_tardio_SI_puede_cerrar_un_expediente_fallido():

@@ -92,6 +92,14 @@ class PaymentEvent:
     environment: str = "sandbox"
     #: El cuerpo verificado, para dejarlo en `payment_events.payload`.
     payload: Mapping[str, object] = field(default_factory=dict)
+    #: El identificador REAL del reembolso (`re_...`), solo en avisos de
+    #: devolución. Vacío en todo lo demás.
+    #:
+    #: Existe porque `provider_transaction_id` es el COBRO, y con él se
+    #: componía un identificador sintético (`pi_x:refund`) que no se puede
+    #: consultar contra Stripe ni cruzar entre órdenes. Sin un `re_...` real,
+    #: un reembolso no puede retirar acceso.
+    refund_id: str = ""
 
 
 #: Nombres que admite `purchases.provider` (esquema ANTIGUO, migración inicial).

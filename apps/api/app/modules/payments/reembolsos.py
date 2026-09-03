@@ -58,6 +58,9 @@ class RefundResult:
     #: informa. Sin esto, comprobar que el reembolso fue TOTAL no se puede: se
     #: acababa comparando la orden consigo misma.
     amount_minor: int | None = None
+    #: Y en qué moneda lo dice. Comparar importes sin moneda no significa nada:
+    #: 19 900 soles y 19 900 dólares son el mismo número y distinto dinero.
+    currency: str | None = None
 
 
 class RefundProvider(ABC):
@@ -164,49 +167,90 @@ def _referencia(peticion: RefundRequestToProvider) -> str:
     return f"re_doble_{huella}"
 
 
-#: Lo ÚNICO que se considera terminal: el emisor decidió que no.
+#: Motivos por los que el emisor dijo que NO, de forma concluyente.
 #:
-#: Es una lista blanca a propósito. La versión anterior hacía lo contrario
-#: —«ambiguo si es 5xx, terminal todo lo demás»— y eso daba por concluyente
-#: cualquier 4xx, incluidos los que significan justo que la operación SÍ está
-#: ocurriendo: un 409 es «hay otra petición en curso con esa misma clave», y un
-#: 400 con `idempotency_error` es «esa clave ya se usó, y su reembolso existe».
-#: Tomarlos por terminales cambia la clave en el reintento y crea un SEGUNDO
-#: reembolso.
+#: Los seis primeros son los valores REALES de `Refund.failure_reason` en
+#: Stripe. Los siguientes son códigos de expedientes anteriores que siguen
+#: vivos, y los dos últimos son nuestros y también concluyentes.
 #:
-#: Un código HTTP describe el TRANSPORTE, no la decisión de quien cobra. Por eso
-#: ningún `http_*` entra aquí.
+#: `unknown` NO está aquí, y es deliberado: es lo que Stripe pone cuando ni él
+#: sabe qué pasó. Tratarlo como concluyente cambiaría la clave de idempotencia
+#: en el reintento y crearía un SEGUNDO reembolso.
 FALLOS_TERMINALES = frozenset({
+    "lost_or_stolen_card",
+    "expired_or_canceled_card",
+    "charge_for_pending_refund_disputed",
+    "insufficient_funds",
+    "declined",
+    "merchant_request",
+    #: De expedientes anteriores a los códigos reales.
     "card_declined",
     "charge_already_refunded",
     "charge_disputed",
-    "insufficient_funds",
     "expired_or_canceled_authorization",
     "charge_not_refundable",
+    "provider_refund_failed",
     #: Nuestros, y concluyentes: no hay nada que reintentar.
     "provider_not_configured",
     "no_transaction",
 })
 
 
-def es_terminal(failure_code: str) -> bool:
+def sanear_codigo(failure_code: object) -> str:
+    """El código externo, acotado y sin sorpresas, para poder auditarlo.
+
+    Lo escribe la pasarela, así que ni su longitud ni sus caracteres los
+    decidimos nosotros. Se guarda saneado —minúsculas, sin espacios, 64
+    caracteres— y la decisión de recuperación NO se toma leyendo su forma sino
+    comparándolo con una lista explícita.
+    """
+    texto = failure_code if isinstance(failure_code, str) else ""
+    limpio = "".join(c if (c.isalnum() or c in "_-.") else "_" for c in texto.strip().lower())
+    return limpio[:64]
+
+
+def es_terminal(failure_code: object) -> bool:
     """Si el emisor dijo que no, de forma concluyente.
 
-    ES LA ÚNICA CLASIFICACIÓN: una segunda lista acabaría divergiendo, y
-    divergir aquí es pagar dos veces el mismo reembolso.
+    LISTA EXPLÍCITA Y NADA MÁS. Antes había además dos heurísticas: cualquier
+    código que empezara por `provider_refund_failed` y —peor— cualquiera que
+    contuviera un espacio, o sea cualquier motivo escrito en prosa. Un mensaje
+    de un tiempo de espera agotado contiene espacios, así que un timeout podía
+    acabar contando como concluyente, y eso cambia la clave de idempotencia:
+    es exactamente cómo se paga dos veces.
 
-    EN LA DUDA, AMBIGUO. Lo desconocido no cuenta como terminal, así que el
-    reintento repite la misma clave y la pasarela reconoce la operación en vez
-    de crear otra. Equivocarse hacia «ambiguo» cuesta un reintento que no hace
-    nada; hacia «terminal», un cobro duplicado.
+    EN LA DUDA, AMBIGUO. Equivocarse hacia «ambiguo» cuesta un reintento que no
+    hace nada; hacia «terminal», un cobro duplicado.
     """
-    codigo = (failure_code or "").strip().lower()
-    if not codigo:
-        return False
-    if codigo in FALLOS_TERMINALES:
-        return True
-    # Motivos en prosa de eventos anteriores a los códigos.
-    return codigo.startswith("provider_refund_failed") or " " in codigo
+    return sanear_codigo(failure_code) in FALLOS_TERMINALES
+
+
+#: Qué hacer con lo que contesta la pasarela. Es la tabla de la documentación,
+#: escrita una sola vez y probada aparte.
+APLICAR = "aplicar"
+CONCILIAR = "conciliar"
+CLAVE_NUEVA = "reintentar_con_clave_nueva"
+MISMA_CLAVE = "reintentar_misma_clave"
+NO_TOCAR = "no_tocar"
+
+
+def recuperacion(status: object, failure_code: object = "") -> str:
+    """De la respuesta de la pasarela a la acción, sin interpretaciones.
+
+    - `succeeded`: aplicar, y solo tras conciliar importe, moneda y orden.
+    - `pending`: conciliar más tarde; no se toca el acceso.
+    - `failed` concluyente: se puede volver a intentar con clave NUEVA.
+    - `failed` ambiguo: mismo intento, MISMA clave.
+    - cualquier otra cosa: no se toca nada y no se crea otro reembolso.
+    """
+    situacion = status.strip().lower() if isinstance(status, str) else ""
+    if situacion == "succeeded":
+        return APLICAR
+    if situacion == "pending":
+        return CONCILIAR
+    if situacion == "failed":
+        return CLAVE_NUEVA if es_terminal(failure_code) else MISMA_CLAVE
+    return NO_TOCAR
 
 
 def clave_de_idempotencia(refund_request_id: str, intento: int = 0) -> str:

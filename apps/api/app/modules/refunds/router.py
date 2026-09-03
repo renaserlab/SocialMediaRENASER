@@ -36,7 +36,7 @@ from app.modules.catalog.models import Course
 from app.modules.commerce import liquidacion
 from app.modules.commerce.models import Order
 from app.modules.profiles.models import Profile
-from app.modules.refunds import esquema, estados, politica
+from app.modules.refunds import esquema, estados, politica, validacion
 from app.modules.refunds import service as devoluciones
 from app.modules.refunds.models import RefundRequest
 from app.modules.refunds.schemas import (
@@ -230,6 +230,14 @@ async def retirar_solicitud(
     """
     await _exigir_esquema(db)
     solicitud = await _mia(db, request_id, current_user.id)
+    if solicitud.status not in RETIRABLES:
+        # UNA VEZ APROBADA YA NO ES SUYA. Administracion pudo devolver el dinero
+        # a mano antes de que llegue el webhook; retirarla ahi descongelaba el
+        # saldo del propietario y lo dejaba pagable con el reembolso en marcha.
+        raise ValidationAppError(
+            "Esta solicitud ya está resuelta y no se puede retirar.",
+            code="refund_not_withdrawable",
+        )
     try:
         await devoluciones.transicionar(
             db,
@@ -242,9 +250,17 @@ async def retirar_solicitud(
     except estados.TransicionInvalida as error:
         raise ValidationAppError(str(error), code="refund_invalid_transition")
     # El propietario recupera su saldo pendiente.
-    await liquidacion.descongelar(db, order_id=solicitud.order_id)
+    await liquidacion.descongelar(
+        db, order_id=solicitud.order_id, refund_request_id=solicitud.id
+    )
     await db.commit()
     return await _a_lectura(db, solicitud)
+
+
+#: Desde donde puede retirarla QUIEN LA PIDIO. Administracion puede cerrar
+#: expedientes muertos desde mas sitios; el alumno, solo mientras nadie haya
+#: decidido nada todavia.
+RETIRABLES = frozenset({estados.REQUESTED, estados.UNDER_REVIEW})
 
 
 async def _mia(db: AsyncSession, request_id: str, user_id: str) -> RefundRequest:
@@ -376,11 +392,17 @@ async def listar_solicitudes(
             raise ValidationAppError("Estado no válido.", code="refund_bad_status")
         consulta = consulta.where(RefundRequest.status == estado_filtro)
     if buscar:
+        # CAST A TEXTO. Las tres columnas son `uuid` en PostgreSQL y no existe
+        # el operador `uuid ~~* text`: la bandeja daba 500 en cuanto alguien
+        # escribia algo en el buscador. En SQLite pasaba porque ahi los UUID se
+        # guardan como texto, asi que las pruebas no lo veian.
+        from sqlalchemy import String, cast
+
         patron = f"%{buscar.strip()}%"
         consulta = consulta.where(
-            RefundRequest.order_id.ilike(patron)
-            | RefundRequest.user_id.ilike(patron)
-            | RefundRequest.course_id.ilike(patron)
+            cast(RefundRequest.order_id, String).ilike(patron)
+            | cast(RefundRequest.user_id, String).ilike(patron)
+            | cast(RefundRequest.course_id, String).ilike(patron)
         )
     filas = await db.scalars(
         consulta.order_by(RefundRequest.requested_at).offset(page.offset).limit(page.limit)
@@ -548,8 +570,24 @@ async def ejecutar_reembolso(
         )
     )
 
+    # SOLO SI ES UN `re_...` DE VERDAD. Guardar cualquier cadena que devuelva
+    # la pasarela es como el expediente acabo con un `payment_intent` dentro:
+    # conciliar preguntaba por un identificador inexistente, para siempre.
+    referencia_valida = ""
     if resultado.external_refund_id:
-        solicitud.external_refund_id = resultado.external_refund_id
+        try:
+            referencia_valida = validacion.exigir_referencia(
+                resultado.external_refund_id
+            )
+        except validacion.NoConciliado as error:
+            logger.error(
+                "[devoluciones] la pasarela devolvio una referencia que no es un "
+                "reembolso en la solicitud %s: %s",
+                solicitud.id,
+                error,
+            )
+    if referencia_valida:
+        solicitud.external_refund_id = referencia_valida
         await db.flush()
 
     if resultado.status == "failed":
@@ -598,7 +636,7 @@ async def ejecutar_reembolso(
         rol="system",
         actor_id=None,
         reason=f"la pasarela respondio '{resultado.status}'",
-        external_reference=resultado.external_refund_id or None,
+        external_reference=referencia_valida or None,
         metadata={"provider_status": resultado.status},
     )
     await db.commit()
@@ -678,13 +716,13 @@ async def _marcar_fallo(
     crearse, asi que tiene que poder cerrarlo el webhook, que desde `failed` ya
     no podria. El reintento desde ahi repite la MISMA clave.
     """
-    from app.modules.payments.reembolsos import es_terminal
+    from app.modules.payments.reembolsos import es_terminal, sanear_codigo
 
+    # SANEADO ANTES DE CLASIFICAR Y DE GUARDAR, y en ese orden: la decision se
+    # toma sobre el mismo valor que queda escrito en el historial. Lo escribe
+    # la pasarela, asi que ni su forma ni su longitud las decidimos nosotros.
+    codigo = sanear_codigo(codigo)
     terminal = es_terminal(codigo)
-    # ACOTADOS ANTES DE GUARDARLOS. Vienen de la pasarela, asi que su longitud
-    # no la decidimos nosotros: sin recortar, un mensaje largo entra entero en
-    # una columna de texto y se pinta entero en la pantalla de administracion.
-    codigo = (codigo or "")[:64]
     mensaje = (mensaje or "")[:300]
     try:
         if terminal and solicitud.status == estados.REFUND_PROCESSING:
@@ -741,7 +779,9 @@ async def rechazar(
         db, solicitud, estados.REJECTED, current_user, notes=payload.notes
     )
     # El propietario recupera su saldo: no hubo devolución.
-    await liquidacion.descongelar(db, order_id=solicitud.order_id)
+    await liquidacion.descongelar(
+        db, order_id=solicitud.order_id, refund_request_id=solicitud.id
+    )
     await db.commit()
     await _avisar_estado(db, solicitud, "rejected")
     return await _a_lectura_admin(db, solicitud, con_historial=True)
@@ -752,6 +792,11 @@ async def rechazar(
 #: quedo sin respuesta). El tercero es el que antes no tenia salida: `retry`
 #: solo aceptaba `failed` y `reconcile` exige identificador externo.
 EJECUTABLES = frozenset({estados.FAILED, estados.APPROVED, estados.REFUND_PROCESSING})
+
+#: Y desde donde tiene sentido PREGUNTARLE a la pasarela como acabo. Es lo
+#: mismo mas `refunded`, que es inofensivo: `aplicar` devuelve False si ya
+#: estaba aplicado, asi que conciliar dos veces no revoca ni notifica dos veces.
+CONCILIABLES = EJECUTABLES | {estados.REFUNDED}
 
 
 @admin_router.post("/refund-requests/{request_id}/retry", response_model=AdminRefundRead)
@@ -837,12 +882,14 @@ async def _conciliar_con_pasarela(
                 db,
                 orden=orden,
                 external_transaction_id=referencia,
-                # El importe DEL PROVEEDOR, no el esperado. Antes se pasaba
-                # `solicitud.amount_minor`, derivado de la orden: comparar eso
-                # con la orden es comparar la orden consigo misma, y la
-                # comprobacion de «reembolso TOTAL» no miraba nada.
-                amount_minor=resultado.amount_minor or solicitud.amount_minor,
-                currency=solicitud.currency,
+                # LO QUE DICE EL PROVEEDOR, tal cual. Antes se caia a
+                # `solicitud.amount_minor` y a `solicitud.currency`, los dos
+                # derivados de la orden: comparar eso con la orden es comparar
+                # la orden consigo misma, y la comprobacion de «reembolso
+                # TOTAL» no miraba nada. Si el proveedor no lo informa, el caso
+                # se queda sin conciliar y el acceso no se toca.
+                amount_minor=resultado.amount_minor,
+                currency=resultado.currency,
                 environment=orden.environment,
                 solicitud=solicitud,
                 motivo="conciliado con la pasarela",
@@ -919,6 +966,14 @@ async def conciliar_solicitud(
     await _exigir_gestor(db, current_user)
     await _exigir_esquema(db)
     solicitud = await _cualquiera(db, request_id)
+    if solicitud.status not in CONCILIABLES:
+        # Un expediente ya cerrado —retirado, rechazado, reembolsado— no se
+        # concilia: si la pasarela dijera «succeeded», `aplicar` intentaria una
+        # transicion que no existe y el boton daria 500 para siempre.
+        raise ValidationAppError(
+            "Esta solicitud ya está cerrada: no hay nada que conciliar.",
+            code="refund_not_reconcilable",
+        )
     if not (solicitud.external_refund_id or "").strip():
         # Sin referencia no hay nada que preguntar. Se dice claro en vez de
         # consultar con una cadena vacia y tomar el «no encontrado» por un fallo
@@ -1002,7 +1057,9 @@ async def _mover(
     solicitud = await _cualquiera(db, request_id)
     await _transicion(db, solicitud, hasta, current_user, notes=notes)
     if hasta == estados.CANCELLED:
-        await liquidacion.descongelar(db, order_id=solicitud.order_id)
+        await liquidacion.descongelar(
+            db, order_id=solicitud.order_id, refund_request_id=solicitud.id
+        )
     await db.commit()
     return await _a_lectura_admin(db, solicitud, con_historial=True)
 
@@ -1118,6 +1175,11 @@ async def _avisar_solicitud_recibida(db: AsyncSession, solicitud: RefundRequest)
         await db.commit()
     except Exception:  # noqa: BLE001
         # Un aviso que no sale NO puede tumbar una solicitud ya guardada.
+        # ROLLBACK ANTES DE SEGUIR. En PostgreSQL una sentencia fallida ABORTA
+        # la transaccion entera: sin esto, lo que viene despues —leer el curso
+        # para la respuesta, o ejecutar el reembolso al aprobar— reventaba con
+        # «current transaction is aborted», y el sintoma aparecia lejos de aqui.
+        await db.rollback()
         logger.exception("[devoluciones] no se pudo avisar de la solicitud")
 
 
@@ -1136,4 +1198,5 @@ async def _avisar_estado(db: AsyncSession, solicitud: RefundRequest, tipo: str) 
         )
         await db.commit()
     except Exception:  # noqa: BLE001
+        await db.rollback()
         logger.exception("[devoluciones] no se pudo avisar del estado %s", tipo)

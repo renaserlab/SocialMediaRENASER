@@ -236,7 +236,7 @@ async def test_cuando_la_garantia_vence_el_saldo_si_se_libera(sesiones):
         await db.commit()
     async with sesiones() as db:
         ventana = await db.scalar(select(CourseRefundWindow))
-        await devoluciones._sincronizar_vencimiento_del_saldo(db, ventana)
+        await devoluciones._fechar_saldo(db, ventana=ventana)
         await db.commit()
 
     async with sesiones() as db:

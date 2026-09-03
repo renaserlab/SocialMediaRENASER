@@ -482,6 +482,10 @@ class _StripeDeMentira:
             amount_minor=datos["importe"],
             currency="PEN",
             event_id=datos["event_id"],
+            # EL `re_...` REAL. La doble no lo mandaba, y sin el un aviso
+            # de devolucion ya no retira acceso: `pi_...` identifica el
+            # COBRO, no el reembolso, y Stripe si manda el suyo.
+            refund_id=datos.get("reembolso", "re_de_prueba_1"),
             event_type="charge.refunded",
             environment="sandbox",
             payload=datos,
