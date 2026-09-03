@@ -701,6 +701,11 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
         # Se deja constancia ANTES de propagar: si se pierde el registro del
         # fallo, nadie sabrá que hubo un cobro que no llegó a conceder nada.
         logger.exception("[pagos] no se pudo aplicar el aviso %s", evento.event_id)
+        # ROLLBACK PRIMERO. Si lo que falló fue una sentencia SQL, en PostgreSQL
+        # la transacción queda abortada y este mismo `marcar_evento_procesado`
+        # fallaría también —perdiendo justo el registro que este bloque existe
+        # para garantizar—.
+        await db.rollback()
         await comercio_service.marcar_evento_procesado(
             db, event_id=_fila.id, error=str(error)[:500]
         )
@@ -911,8 +916,15 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
             # El motivo es un CODIGO porque `_fallos_terminales` lo clasifica
             # con `es_terminal`: un aviso de reembolso fallido es concluyente.
             reason="provider_refund_failed",
-            external_reference=evento.provider_transaction_id,
-            metadata={"event_type": evento.event_type, "terminal": True},
+            # SIN `external_reference`: `provider_transaction_id` es el cobro
+            # (`pi_...`), no el reembolso. Escribirlo en `external_refund_id`
+            # dejaba el expediente sin salida —conciliar preguntaria por un id
+            # que la pasarela no reconoce— y bloqueaba la reejecucion.
+            metadata={
+                "event_type": evento.event_type,
+                "terminal": True,
+                "payment_intent": evento.provider_transaction_id,
+            },
         )
         return
 
@@ -926,8 +938,11 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
         rol="system",
         actor_id=None,
         reason=evento.status,
-        external_reference=evento.provider_transaction_id,
-        metadata={"event_type": evento.event_type},
+        # Mismo motivo: el cobro va en los metadatos, no en la referencia.
+        metadata={
+            "event_type": evento.event_type,
+            "payment_intent": evento.provider_transaction_id,
+        },
     )
 
 

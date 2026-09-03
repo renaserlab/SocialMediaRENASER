@@ -68,6 +68,58 @@ const CONTRATO: Record<string, string[]> = {
   cancelled: [],
 };
 
+/**
+ * Las transiciones que el BACKEND permite de verdad, leidas de `estados.py`.
+ *
+ * Sin esto, `CONTRATO` seria una copia de la tabla del frontend comparada
+ * consigo misma: una tautologia que no puede detectar ninguna divergencia. Lo
+ * que hace util a esta prueba es cruzar los dos lados.
+ */
+function transicionesDelBackend(): Record<string, string[]> {
+  const fuente = readFileSync(
+    join(SRC, '..', '..', 'api', 'app', 'modules', 'refunds', 'estados.py'),
+    'utf8',
+  );
+  const bloque = fuente.slice(
+    fuente.indexOf('TRANSICIONES:'),
+    fuente.indexOf('#: Quién puede provocar'),
+  );
+  const tabla: Record<string, string[]> = {};
+  for (const [, estado, destinos] of bloque.matchAll(
+    /^\s{4}([A-Z_]+):\s*frozenset\(\{([^}]*)\}\)/gm,
+  )) {
+    tabla[estado.toLowerCase()] = [...destinos.matchAll(/([A-Z_]+)/g)]
+      .map((m) => m[1].toLowerCase())
+      .filter((x) => x !== 'frozenset');
+  }
+  return tabla;
+}
+
+const BACKEND = transicionesDelBackend();
+
+/** Los estados desde los que el backend admite ejecutar el reembolso. */
+const EJECUTABLES: string[] = (() => {
+  const fuente = readFileSync(
+    join(SRC, '..', '..', 'api', 'app', 'modules', 'refunds', 'router.py'),
+    'utf8',
+  );
+  const linea = /EJECUTABLES = frozenset\(\{([^}]*)\}\)/.exec(fuente);
+  return linea
+    ? [...linea[1].matchAll(/estados\.([A-Z_]+)/g)].map((m) => m[1].toLowerCase())
+    : [];
+})();
+
+/** Que transicion provoca cada accion de la interfaz. */
+const DESTINO_DE_LA_ACCION: Record<string, string> = {
+  take: 'under_review',
+  approve: 'approved',
+  reject: 'rejected',
+  cancel: 'cancelled',
+  execute: 'refund_processing',
+  retry: 'refund_processing',
+  reconcile: 'refunded',
+};
+
 // ---------------------------------------------------------------------------
 // 1. La tabla, estado por estado
 // ---------------------------------------------------------------------------
@@ -81,6 +133,37 @@ for (const [estado, esperadas] of Object.entries(CONTRATO)) {
     );
   });
 }
+
+test('ninguna accion de la interfaz provoca una transicion prohibida', () => {
+  // El cruce de verdad: cada boton que se pinta tiene que corresponder a una
+  // arista que la maquina de estados del backend permite. Un boton que el
+  // servidor va a rechazar seguro es un boton muerto.
+  for (const [estado, acciones] of Object.entries(CONTRATO)) {
+    const permitidas = BACKEND[estado] ?? [];
+    for (const accion of acciones) {
+      // `reconcile` no es una transicion: pregunta y deja que el resultado
+      // decida. Se excluye a proposito.
+      if (accion === 'reconcile') continue;
+      const destino = DESTINO_DE_LA_ACCION[accion];
+      if (destino === estado) {
+        // REEJECUCION, no transicion: el expediente se queda donde esta y se
+        // vuelve a pedir a la pasarela. Lo que hay que comprobar entonces no es
+        // una arista sino que el backend admita ejecutar desde ese estado.
+        assert.ok(
+          EJECUTABLES.includes(estado),
+          `la interfaz reejecuta «${accion}» en «${estado}», pero el backend ` +
+            `no lo tiene en EJECUTABLES`,
+        );
+        continue;
+      }
+      assert.ok(
+        permitidas.includes(destino),
+        `la interfaz ofrece «${accion}» en «${estado}», pero estados.py no ` +
+          `permite ${estado} -> ${destino}`,
+      );
+    }
+  }
+});
 
 test('la tabla cubre los ocho estados y ninguno mas', () => {
   assert.deepEqual(Object.keys(TABLA).sort(), Object.keys(CONTRATO).sort());

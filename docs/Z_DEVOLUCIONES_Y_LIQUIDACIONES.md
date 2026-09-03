@@ -305,8 +305,19 @@ Lo decide `es_terminal()` en `payments/reembolsos.py`, y **solo ahí**.
 
 | | Códigos | Estado en que queda | Clave del reintento |
 |---|---|---|---|
-| **Ambiguo** | `network_timeout`, cualquier `http_5xx`, `no_refund_reference`, `unknown_status` | `refund_processing` | **la misma** |
-| **Terminal** | `card_declined` y el resto | `failed` | **nueva** (`_r1`, `_r2`…) |
+| **Terminal** | lista blanca: `card_declined`, `charge_already_refunded`, `charge_disputed`, `insufficient_funds`, `expired_or_canceled_authorization`, `charge_not_refundable`, `provider_not_configured`, `no_transaction` | `failed` | **nueva** (`_r1`, `_r2`…) |
+| **Ambiguo** | **todo lo demás**, incluido cualquier `http_*` | `refund_processing` | **la misma** |
+
+**Terminal es una lista blanca, no «lo que no sea 5xx».** La primera versión
+clasificaba al revés y daba por concluyente cualquier `4xx` — incluidos los que
+significan justo que la operación *sí* está ocurriendo: un `409` es «hay otra
+petición en curso con esa clave» y un `400` con `idempotency_error` es «esa
+clave ya se usó y su reembolso existe». Tomarlos por terminales cambiaba la
+clave en el reintento y creaba un **segundo reembolso**.
+
+Un código HTTP describe el **transporte**, no la decisión de quien cobra. En la
+duda, ambiguo: equivocarse hacia ahí cuesta un reintento que no hace nada;
+hacia «terminal», un cobro duplicado.
 
 Un fallo ambiguo **no** manda el expediente a `failed`: se anota y la solicitud
 se queda en `refund_processing`, reintentable.
@@ -340,6 +351,14 @@ tres sitios, y los tres tienen acción:
 | `failed` | reintentar (clave nueva) · cancelar |
 | `refund_processing` **con** identificador | conciliar |
 | `refund_processing` **sin** identificador | reintentar (misma clave) |
+| `failed` **con** identificador | conciliar; si la pasarela confirma que ese reembolso murió, se suelta la referencia y se pide uno nuevo |
+
+**Reejecutar desde `refund_processing` está serializado.** La transición a ese
+estado es un `UPDATE` condicional, pero cuando ya se está *en* él esa transición
+no corre, así que un reintento simultáneo de dos administradores no tendría
+ninguna barrera: la clave de idempotencia sería la única defensa. Un segundo
+`UPDATE` condicional —sobre estado, referencia nula y `updated_at`— deja pasar a
+uno solo.
 
 `retry` acepta `failed`, `approved` y `refund_processing`, y **no borra**
 `external_refund_id`: si hay referencia, delega en la conciliación en vez de
@@ -434,6 +453,13 @@ guardianes distintos y no se mezclan:
 - `_exigir_esquema` — ¿está la 0049?
 - `_exigir_solicitudes_nuevas` — ¿se admiten solicitudes nuevas? Solo lo usa
   crear una.
+
+**La garantía SÍ arranca aunque la bandera esté apagada.** Es deliberado: si se
+apaga después de una compra, el primer acceso tiene que escribir la ventana
+igualmente. Sin ella, el saldo del propietario se queda con `available_at` nulo
+y **no se libera nunca** — dinero de un tercero retenido sin fin por un
+interruptor. La bandera cierra la entrada de solicitudes, no las obligaciones ya
+contraídas.
 
 | | Con la bandera apagada |
 |---|:--:|

@@ -643,9 +643,11 @@ async def _arrancar_garantia(db: AsyncSession, uid: str, course_id: str) -> None
 
     if not await esquema_devoluciones.hay_devoluciones(db):
         return
-    if not get_settings().feature_course_refunds:
-        return
-
+    # LA BANDERA NO SE MIRA AQUI, y es deliberado. Cierra la ENTRADA de
+    # solicitudes nuevas, no las obligaciones ya contraidas. Si se apagara
+    # despues de una compra, el primer acceso no escribiria la ventana, el saldo
+    # del propietario se quedaria con `available_at` nulo y no se liberaria
+    # NUNCA: dinero de un tercero retenido sin fin por un interruptor.
     from app.modules.refunds import service as devoluciones
 
     orden = await devoluciones._orden_reembolsable(

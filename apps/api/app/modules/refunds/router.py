@@ -528,8 +528,12 @@ async def ejecutar_reembolso(
         except estados.TransicionInvalida:
             # Otro lo esta ejecutando ya. Que gane el primero.
             return
-    # Si ya estaba en `refund_processing` y sin referencia, un intento anterior
-    # se quedo sin respuesta: se repite CON LA MISMA CLAVE.
+    elif not await _tomar_el_turno(db, solicitud):
+        # Ya estaba en `refund_processing`: la transicion de arriba no corre, y
+        # sin esto no quedaria NINGUNA serializacion. N administradores pulsando
+        # «Reintentar» a la vez lanzarian N peticiones en paralelo y la unica
+        # defensa seria la clave de idempotencia.
+        return
 
     proveedor = proveedor_de_reembolsos()
     resultado = await proveedor.create_full_refund(
@@ -614,6 +618,30 @@ async def _transaccion_de_la_orden(db: AsyncSession, order_id: str) -> str:
         .limit(1)
     )
     return referencia or ""
+
+
+async def _tomar_el_turno(db: AsyncSession, solicitud: RefundRequest) -> bool:
+    """Serializa el reintento desde `refund_processing`. UPDATE condicional.
+
+    Estampa `updated_at` solo si la fila sigue en `refund_processing` y sin
+    referencia. Dos peticiones simultaneas: la primera afecta a una fila y la
+    segunda a cero, asi que solo una llega a la pasarela. Sin esto, la clave de
+    idempotencia seria la unica defensa contra el doble cobro.
+    """
+    from sqlalchemy import update
+
+    resultado = await db.execute(
+        update(RefundRequest)
+        .where(
+            RefundRequest.id == solicitud.id,
+            RefundRequest.status == estados.REFUND_PROCESSING,
+            RefundRequest.external_refund_id.is_(None),
+            RefundRequest.updated_at == solicitud.updated_at,
+        )
+        .values(updated_at=devoluciones.ahora())
+    )
+    await db.commit()
+    return resultado.rowcount > 0
 
 
 async def _fallos_terminales(db: AsyncSession, refund_request_id: str) -> int:
@@ -745,6 +773,19 @@ async def reintentar(
     if (solicitud.external_refund_id or "").strip():
         await _conciliar_con_pasarela(db, solicitud, actor_id=current_user.id)
         solicitud = await _cualquiera(db, request_id)
+        # La pasarela confirmo que ESE reembolso murio. Es el caso normal de un
+        # reembolso aceptado que despues falla: sin esto el expediente se
+        # quedaba sin ninguna accion util —conciliar repetia `failed` para
+        # siempre— y el boton de reintentar afirmaba pedir algo que no pedia.
+        # Se suelta la referencia muerta y se pide uno nuevo, con clave nueva
+        # porque el fallo confirmado ya cuenta como terminal.
+        if solicitud.status == estados.FAILED and (
+            solicitud.external_refund_id or ""
+        ).strip():
+            solicitud.external_refund_id = None
+            await db.commit()
+            await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
+            solicitud = await _cualquiera(db, request_id)
     else:
         await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
     return await _a_lectura_admin(db, solicitud, con_historial=True)
@@ -791,7 +832,11 @@ async def _conciliar_con_pasarela(
                 db,
                 orden=orden,
                 external_transaction_id=referencia,
-                amount_minor=solicitud.amount_minor,
+                # El importe DEL PROVEEDOR, no el esperado. Antes se pasaba
+                # `solicitud.amount_minor`, derivado de la orden: comparar eso
+                # con la orden es comparar la orden consigo misma, y la
+                # comprobacion de «reembolso TOTAL» no miraba nada.
+                amount_minor=resultado.amount_minor or solicitud.amount_minor,
                 currency=solicitud.currency,
                 environment=orden.environment,
                 solicitud=solicitud,

@@ -132,11 +132,21 @@ def _traducir(cuerpo: dict) -> RefundResult:
     más grave, que aquí sería dar por devuelto un dinero que no se movió.
     """
     situacion = str(cuerpo.get("status") or "").lower()
+    bruto = cuerpo.get("amount")
+    devuelto = bruto if isinstance(bruto, int) else None
     referencia = str(cuerpo.get("id") or "")
     if situacion == "succeeded":
-        return RefundResult(status="succeeded", external_refund_id=referencia)
+        return RefundResult(
+            status="succeeded",
+            external_refund_id=referencia,
+            amount_minor=devuelto,
+        )
     if situacion in {"pending", "requires_action"}:
-        return RefundResult(status="pending", external_refund_id=referencia)
+        return RefundResult(
+            status="pending",
+            external_refund_id=referencia,
+            amount_minor=devuelto,
+        )
     if situacion in ESTADOS_CONOCIDOS:
         return RefundResult(
             status=situacion,

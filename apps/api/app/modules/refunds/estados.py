@@ -67,11 +67,18 @@ FINALES: Final[frozenset[str]] = frozenset({REFUNDED, REJECTED, CANCELLED})
 TRANSICIONES: Final[dict[str, frozenset[str]]] = {
     REQUESTED: frozenset({UNDER_REVIEW, CANCELLED}),
     UNDER_REVIEW: frozenset({APPROVED, REJECTED, CANCELLED}),
-    APPROVED: frozenset({REFUND_PROCESSING}),
+    # `CANCELLED` ademas de ejecutar: sin esa salida, un expediente
+    # aprobado por error con la pasarela apagada se queda ahi para
+    # siempre, y el saldo del propietario congelado sin fin.
+    APPROVED: frozenset({REFUND_PROCESSING, CANCELLED}),
     REFUND_PROCESSING: frozenset({REFUNDED, FAILED}),
     # Un fallo de la pasarela se reintenta, o se abandona. Lo que NO hace es
     # saltar a «reembolsado»: eso sería dar por bueno lo que falló.
-    FAILED: frozenset({REFUND_PROCESSING, CANCELLED}),
+    # `REFUNDED` tambien: un webhook tardio puede confirmar que el dinero
+    # SI volvio despues de que un intento se diera por fallido. Sin esa
+    # arista, `aplicar` reventaba en su ultimo paso con los efectos ya
+    # escritos: acceso retirado y expediente en `failed` para siempre.
+    FAILED: frozenset({REFUND_PROCESSING, REFUNDED, CANCELLED}),
     REFUNDED: frozenset(),
     REJECTED: frozenset(),
     CANCELLED: frozenset(),

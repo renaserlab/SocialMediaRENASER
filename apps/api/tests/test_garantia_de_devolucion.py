@@ -324,15 +324,38 @@ def test_el_camino_feliz_completo():
         (estados.REFUNDED, estados.REFUND_PROCESSING),
         (estados.REJECTED, estados.APPROVED),
         (estados.CANCELLED, estados.UNDER_REVIEW),
-        # Dar por bueno lo que falló, sin volver a intentarlo.
-        (estados.FAILED, estados.REFUNDED),
     ],
 )
+
+
 def test_los_saltos_prohibidos_no_existen(desde, hasta):
     assert not estados.puede(desde, hasta)
     with pytest.raises(estados.TransicionInvalida):
         estados.exigir(desde, hasta, rol="admin")
 
+
+def test_un_webhook_tardio_SI_puede_cerrar_un_expediente_fallido():
+    """`FAILED -> REFUNDED` estaba prohibido, y hubo que permitirlo.
+
+    ESTA PRUEBA CAMBIO DE SIGNO, y conviene explicar por qué. Antes afirmaba
+    que dar por reembolsado algo que había fallado era un salto inválido, y
+    suena razonable: no se da por bueno lo que falló.
+
+    Pero el caso real es otro. Un reembolso se pide, la respuesta se pierde y el
+    expediente acaba en `failed`; después llega el webhook bueno —el dinero SÍ
+    volvió—. `reembolso.aplicar` ya había escrito sus siete primeros pasos
+    (transacción, orden reembolsada, derecho revocado, garantía consumida,
+    saldo cancelado) y reventaba en el octavo con `TransicionInvalida`. El
+    resultado: acceso retirado, dinero devuelto, y el expediente en `failed`
+    para siempre. Peor que el salto que se quería impedir.
+
+    La salvaguarda no es prohibir la arista: es QUIÉN puede recorrerla. Solo el
+    sistema, y solo con un webhook verificado.
+    """
+    assert estados.puede(estados.FAILED, estados.REFUNDED)
+    assert estados.puede_actor("system", estados.REFUNDED)
+    assert not estados.puede_actor("admin", estados.REFUNDED)
+    assert not estados.puede_actor("user", estados.REFUNDED)
 
 def test_repetir_el_mismo_estado_tampoco(sesiones=None):
     """La doble aprobación: dos administradores pulsando a la vez."""
