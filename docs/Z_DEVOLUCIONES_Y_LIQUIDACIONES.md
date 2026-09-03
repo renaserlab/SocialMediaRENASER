@@ -336,8 +336,8 @@ Lo decide `es_terminal()` en `payments/reembolsos.py`, y **solo ahí**.
 
 | | Códigos | Estado en que queda | Clave del reintento |
 |---|---|---|---|
-| **Terminal** | lista blanca: `card_declined`, `charge_already_refunded`, `charge_disputed`, `insufficient_funds`, `expired_or_canceled_authorization`, `charge_not_refundable`, `provider_not_configured`, `no_transaction` | `failed` | **nueva** (`_r1`, `_r2`…) |
-| **Ambiguo** | **todo lo demás**, incluido cualquier `http_*` | `refund_processing` | **la misma** |
+| **Terminal** | lista blanca. Los seis motivos REALES de `Refund.failure_reason` en Stripe (`lost_or_stolen_card`, `expired_or_canceled_card`, `charge_for_pending_refund_disputed`, `insufficient_funds`, `declined`, `merchant_request`), los de expedientes anteriores (`card_declined`, `charge_already_refunded`, `charge_disputed`, `expired_or_canceled_authorization`, `charge_not_refundable`, `provider_refund_failed`) y los nuestros (`provider_not_configured`, `no_transaction`) | `failed` | **nueva** (`_r1`, `_r2`…) |
+| **Ambiguo** | **todo lo demás**: cualquier `http_*`, `network_timeout`, `unreadable_response`, `unknown_status`, y `unknown` —lo que Stripe pone cuando ni él sabe qué pasó— | `refund_processing` | **la misma** |
 
 **Terminal es una lista blanca, no «lo que no sea 5xx».** La primera versión
 clasificaba al revés y daba por concluyente cualquier `4xx` — incluidos los que
@@ -350,13 +350,33 @@ Un código HTTP describe el **transporte**, no la decisión de quien cobra. En l
 duda, ambiguo: equivocarse hacia ahí cuesta un reintento que no hace nada;
 hacia «terminal», un cobro duplicado.
 
+**Y ninguna heurística.** Hubo dos, y las dos se han quitado. La segunda era la
+peligrosa: daba por concluyente cualquier código que **contuviera un espacio**,
+o sea cualquier motivo escrito en prosa. El mensaje de un tiempo de espera
+agotado lleva espacios, así que un timeout podía acabar clasificado como
+terminal, cambiar la clave y duplicar el reembolso. Ahora la clasificación es
+una comparación contra la lista y nada más. El código externo se guarda
+**saneado** (minúsculas, sin espacios, 64 caracteres) para poder auditarlo, pero
+la decisión no se toma leyendo su forma.
+
+La tabla completa de qué hacer con cada respuesta vive en
+`reembolsos.recuperacion()`, que se prueba aparte:
+
+| Respuesta | Acción |
+|---|---|
+| `succeeded` | aplicar, y solo tras conciliar importe, moneda y orden |
+| `pending` | conciliar más tarde; no se toca el acceso |
+| `failed` concluyente | se puede reintentar con clave **nueva** |
+| `failed` ambiguo | mismo intento, **misma** clave |
+| cualquier otra cosa | no se toca nada y no se crea otro reembolso |
+
 Un fallo ambiguo **no** manda el expediente a `failed`: se anota y la solicitud
 se queda en `refund_processing`, reintentable.
 
-**Por qué ese estado y no `failed`.** `FAILED → REFUNDED` está prohibido en la
-máquina de estados. Si un timeout dejara el expediente en `failed` y el
-reembolso sí existía, el webhook posterior de Stripe fallaría con
-`TransicionInvalida`, Stripe reintentaría en bucle y nadie retiraría el acceso.
+**Por qué ese estado y no `failed`.** Es donde el webhook puede cerrarlo sin
+sobresaltos. `FAILED → REFUNDED` sí existe hoy —un aviso tardío puede confirmar
+que el dinero volvió después de darse un intento por fallido—, pero mientras la
+respuesta sea ambigua el expediente no ha fallado: sigue en marcha.
 
 Una respuesta aceptada pero **sin identificador externo** se trata como fallo
 ambiguo. Antes se daba por buena, y ahí nacía el callejón sin salida.
@@ -495,7 +515,7 @@ contraídas.
 | | Con la bandera apagada |
 |---|:--:|
 | Crear una solicitud nueva | ❌ rechazo controlado |
-| Arrancar una garantía nueva | ❌ |
+| **Arrancar la ventana de garantía en el primer acceso** | ✅ **sí, siempre** |
 | El alumno ve su historial y sus solicitudes | ✅ |
 | El alumno retira una solicitud viva | ✅ |
 | Administración lista, abre y resuelve | ✅ |
@@ -506,6 +526,32 @@ contraídas.
 Lo último importa: apagar la bandera **no** puede dejar recomprar sin el aviso a
 quien ya gastó su garantía. Por eso el guardián de la aceptación de recompra no
 mira la bandera.
+
+> **Esta tabla decía lo contrario dos párrafos más arriba.** Ponía «Arrancar una
+> garantía nueva: ❌» justo debajo del texto que explica por qué eso no puede
+> ser. La fila estaba mal y el texto bien; queda corregida aquí para que no haya
+> dos respuestas a la misma pregunta.
+
+### La regla, sin ambigüedad
+
+Apagar `FEATURE_COURSE_REFUNDS` significa **«no se admiten solicitudes
+nuevas»**, y nada más. En concreto:
+
+1. **Impide solicitudes nuevas.** `POST /payments/refund-requests` responde con
+   un rechazo controlado, no con un error.
+2. **No abandona las anteriores.** Una solicitud ya abierta se revisa, se
+   aprueba, se rechaza, se ejecuta y se concilia igual.
+3. **No impide webhooks, conciliación ni resolución.** El dinero ya cobrado se
+   sigue atendiendo: apagar la venta no es dejar de responder por lo vendido.
+4. **La ventana de garantía se registra igual.** Si existe una compra sujeta a
+   garantía, su primer acceso escribe la ventana. Sin ella, el saldo del
+   propietario se queda con `available_at` nulo y **no se libera nunca**: dinero
+   de un tercero retenido sin fin por un interruptor.
+5. **Una bandera no borra una obligación adquirida.** Es la frase que resume las
+   cuatro anteriores, y la que decide cualquier caso que no esté en esta lista.
+
+Y su reverso, que también hay que decir: apagar la bandera **no** convierte una
+compra vieja en irreversible. Lo que se prometió al vender se sigue debiendo.
 
 Si de verdad falta la **migración**, eso sí responde de forma controlada: es
 otra cosa y tiene su propio guardián.
@@ -616,12 +662,164 @@ completos ni datos de pago.
 
 ---
 
-## 16. Limitaciones conocidas
+## 16. Reembolso, disputa y contracargo: tres cosas distintas
+
+Se confunden con facilidad y se resuelven de forma opuesta, así que conviene
+tenerlas separadas por escrito.
+
+| | **Reembolso** | **Disputa (contracargo)** |
+|---|---|---|
+| Quién lo inicia | la persona, con el botón | su **banco**, a petición suya |
+| Por dónde entra | nuestro circuito, revisado por una persona | fuera: Stripe nos avisa cuando ya ocurrió |
+| Consume la garantía | sí | **no** |
+| Retira el acceso | sí, al confirmarse total | **no automáticamente** |
+| Efecto en el saldo | lo **cancela** | lo **retiene** |
+| Se puede negociar | no aplica | sí: hay que aportar pruebas a Stripe |
+
+**Contracargo** es el nombre bancario de lo que Stripe llama *dispute*. Aquí se
+usan como sinónimos.
+
+### Qué hace Z cuando llega una disputa
+
+Los tres eventos que se atienden son `charge.dispute.created`,
+`charge.dispute.funds_withdrawn` y `charge.dispute.closed`. Al llegar cualquiera
+de ellos:
+
+1. Se localiza la orden por el cobro.
+2. Se **retiene** el saldo del propietario si todavía no ha salido. La retención
+   se marca **sin solicitud asociada** (`frozen_by_request_id` nulo), y por eso
+   resolver una devolución cualquiera no la levanta por accidente.
+3. **No se retira el acceso** y **no se consume la garantía**. Abrir una disputa
+   no es haberla perdido: quitar el curso al abrirse castigaría a quien puede
+   acabar ganándola, y esa decisión no es de un webhook.
+4. Se registra el aviso completo en `payment_events` y se emite una alerta de
+   nivel `error` en `renaser.payments`.
+
+### Cómo se resuelve
+
+| Desenlace | Qué hay que hacer, a mano |
+|---|---|
+| **Se gana** | Stripe devuelve el dinero. El saldo se descongela con `descongelar(order_id, refund_request_id=None)`. El acceso nunca se tocó, así que no hay nada que restaurar. |
+| **Se pierde** | El dinero ya salió por fuera. Hay que cancelar el saldo (`cancelar`) y decidir **explícitamente** si se retira el acceso: no lo hace ningún automatismo, porque un contracargo perdido no siempre es un fraude. |
+| **Se pierde con el saldo ya transferido** | Queda para conciliación manual, igual que un reembolso tardío. Recuperar dinero ya pagado a un tercero es una decisión de negocio, no de un webhook a las tres de la mañana. |
+
+**Lo que NO se ha construido, a propósito**: no hay panel de disputas, ni envío
+automático de pruebas a Stripe, ni control de plazos. Con el volumen actual
+—cero compras reales— sería un subsistema entero para un caso que aún no existe.
+
+---
+
+## 17. Transferencias a creadores: qué hay y qué falta
+
+Está **entera la arquitectura y apagada la ejecución**. Nada de esto mueve un
+céntimo hasta que la empresa decida cuatro cosas.
+
+**Lo que existe y está probado** (`commerce/transferencias.py`,
+`commerce/stripe_transfers.py`, `commerce/liquidacion.py`):
+
+- Contrato `TransferProvider` con dos operaciones: crear y consultar.
+- Adaptador real de Stripe Connect, que falla en cerrado sin credenciales.
+- Doble determinista para pruebas y staging, que recuerda las claves vistas.
+- Clave de idempotencia **estable por saldo**, que solo cambia tras un fallo
+  concluyente. Misma regla que en los reembolsos y por el mismo motivo.
+- Ejecución exclusiva con **UPDATE condicional**: dos procesos no pagan dos veces.
+- Persistencia del identificador real (`tr_...`), validado antes de guardarlo.
+- Estados: `processing` → `completed` / `failed` en `owner_transfers`, y
+  `eligible` → `transferring` → `transferred` en el saldo.
+- Conciliación con la pasarela para lo que se quedó en marcha.
+- Reintentos seguros: un fallo ambiguo repite clave; uno concluyente la cambia.
+
+> **Nota de vocabulario.** La 0049 fija los estados de `owner_transfers` en
+> `processing | completed | failed | cancelled`. El proveedor dice `succeeded`;
+> la traducción a `completed` ocurre en un solo sitio (`liquidacion._asentar`)
+> para no arrastrar dos vocabularios sueltos. **No hace falta migración nueva.**
+
+**Las puertas que hay que pasar para que salga dinero**, todas comprobadas en el
+backend y ninguna en el cliente:
+
+| Puerta | Código del motivo |
+|---|---|
+| Bandera de transferencias encendida | `transfers_disabled` |
+| Connect encendido | `connect_disabled` |
+| Comisión configurada (`≥ 0`) | `fee_not_configured` |
+| El saldo está `eligible` | `not_eligible` |
+| Hay algo que pagar | `nothing_to_transfer` |
+| La garantía ya empezó | `guarantee_not_started` |
+| La garantía ya venció | `guarantee_open` |
+| No hay ninguna solicitud viva | `refund_request_open` |
+| La orden sigue pagada | `order_not_payable` |
+| La cuenta conectada admite pagos | `payout_account_not_ready` |
+| El onboarding está terminado | `onboarding_incomplete` |
+| La cuenta es la **del propietario de esa venta** | `payout_account_mismatch` |
+
+**Lo que falta, y no es ingeniería:**
+
+1. Cuenta de Stripe de la empresa, verificada.
+2. Stripe Connect habilitado y el tipo de cuenta elegido (Express o Custom).
+3. El onboarding de cada creador, con su cuenta conectada.
+4. **`PLATFORM_FEE_BPS`.** Sin ese número no se crea ningún saldo y no se
+   transfiere a nadie. `-1` no es «cero por ciento»: es «nadie lo ha decidido».
+
+**Lo que queda por conectar cuando eso llegue**: no hay tarea programada ni
+endpoint que llame a `liberar_vencidos`, `ejecutar_transferencia` ni
+`conciliar_transferencia`. Están probadas y sin llamante. Tampoco hay un panel
+de administración que enseñe los saldos por estado y antigüedad, que es lo que
+haría visible la señal «`pending` con `available_at` nulo» de la sección 15.
+
+---
+
+## 18. De dónde salen estos principios
+
+La arquitectura se inspira en cómo funciona la **garantía de operaciones de
+Alibaba**: el dinero del vendedor no es suyo hasta que la operación se considera
+cerrada, una reclamación abierta lo retiene, la plataforma media, y todo
+movimiento deja rastro.
+
+Es una referencia de **principios**, y conviene decir lo que no es:
+
+- **No es una dependencia.** No hay integración, ni acuerdo, ni servicio de por
+  medio.
+- **No es su política.** Las reglas de un producto físico —plazos de envío,
+  inspección, devolución de mercancía— no aplican a un curso digital y no se han
+  copiado.
+- **No es su nombre.** «Trade Assurance» y «escrow» no aparecen en ninguna
+  pantalla, ni deben: son términos ajenos, y el segundo tiene además un
+  significado legal concreto que Z no está afirmando cumplir.
+
+La política que manda es la de Z, la de la sección 1.
+
+---
+
+## 19. Protección y retención de datos
+
+- **Nunca se registran** secretos, tokens, cuerpos de webhook completos,
+  correos, `payment_intent` enteros ni datos de tarjeta. Los metadatos de
+  `refund_request_events` son códigos e identificadores.
+- **La explicación del alumno es privada.** El propietario del curso no la ve
+  nunca; solo administración.
+- **`review_notes` solo lleva lo que se le dirige al alumno**: la justificación
+  de aprobar o rechazar. Todo lo demás vive en el historial (sección 3).
+- **Los importes van en unidad menor y en enteros.** No hay `float` en ninguna
+  parte del circuito.
+- **Ningún valor financiero sale del cliente.** Importe y moneda se leen de la
+  orden; el precio del checkout se construye en el servidor.
+- **Retención**: los registros financieros y de auditoría no deberían
+  desaparecer al borrar un perfil o un curso. El plazo concreto es una decisión
+  legal, no técnica, y **sigue pendiente**: no se ha inventado ninguno.
+
+---
+
+## 20. Limitaciones conocidas
 
 - **Solo web.** Comprar y devolver por la web. La preparación de RevenueCat,
   Apple y Google sigue intacta y no se ha tocado.
 - **Sin transferencias reales** hasta que Connect esté habilitado y la comisión
-  decidida.
+  decidida. La arquitectura está entera y probada (sección 17); lo que falta son
+  las cuatro decisiones de la empresa y enganchar las funciones a una tarea.
+- **Sin panel de saldos.** Las señales de la sección 15 no tienen todavía una
+  pantalla donde verse: hoy solo existe el resumen por curso, para su autor.
+- **Disputas al mínimo**: se reconocen, retienen el saldo y avisan. No hay panel
+  ni envío de pruebas (sección 16).
 - **Reembolso parcial**: se detecta, se audita y **no** revoca acceso, pero no
   se resuelve solo. Lo tiene que mirar una persona.
 - **Saldo ya transferido cuando llega el reembolso**: queda para conciliación
