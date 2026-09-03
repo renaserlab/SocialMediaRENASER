@@ -908,9 +908,11 @@ async def _anotar_avance_de_devolucion(db: AsyncSession, evento) -> None:
             hasta=estados.FAILED,
             rol="system",
             actor_id=None,
-            reason="la pasarela no pudo completar el reembolso",
+            # El motivo es un CODIGO porque `_fallos_terminales` lo clasifica
+            # con `es_terminal`: un aviso de reembolso fallido es concluyente.
+            reason="provider_refund_failed",
             external_reference=evento.provider_transaction_id,
-            metadata={"event_type": evento.event_type},
+            metadata={"event_type": evento.event_type, "terminal": True},
         )
         return
 
@@ -939,15 +941,15 @@ async def _exigir_aceptacion_de_recompra(
     texto que se mostro, asi que cambiar la redaccion no reescribe lo que
     firmaron los de antes.
 
-    Si las devoluciones estan apagadas o la 0049 no esta, no hay garantia que
-    haber usado y no se exige nada: el cobro sigue funcionando exactamente como
-    antes de esta funcionalidad.
+    NO MIRA LA BANDERA, solo la 0049. Quien ya gasto su garantia la gasto: si
+    apagar `FEATURE_COURSE_REFUNDS` levantara esta exigencia, esa persona
+    recompraria sin que nadie le dijera que esta compra tampoco admite otra
+    devolucion. Sin la migracion no hay garantias que haber usado y no se exige
+    nada, que es como funcionaba antes de esta funcionalidad.
     """
     from app.modules.refunds import esquema as esquema_devoluciones
 
     if not await esquema_devoluciones.hay_devoluciones(db):
-        return
-    if not get_settings().feature_course_refunds:
         return
 
     from app.modules.refunds import service as devoluciones

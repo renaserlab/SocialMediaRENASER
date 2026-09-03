@@ -60,21 +60,26 @@ router = APIRouter(prefix="/payments", tags=["devoluciones"])
 admin_router = APIRouter(prefix="/admin", tags=["devoluciones-admin"])
 
 
-async def _exigir_disponible(db: AsyncSession) -> None:
-    """503 si la 0049 no está aplicada o la función está apagada. Nunca un 500.
+async def _exigir_esquema(db: AsyncSession) -> None:
+    """503 —nunca un 500— si la 0049 no está aplicada. NO mira la bandera.
 
-    Un 500 sale sin cabeceras CORS y el navegador lo reporta como fallo de red,
-    que manda a buscar el problema al sitio equivocado. Es la lección de la
-    0027, escrita en `recommendations/esquema.py`.
+    Es lo que exigen las operaciones sobre expedientes que YA existen. Apagar la
+    recepción de solicitudes nuevas no puede dejar sin resolver las abiertas: el
+    dinero ya está retenido y alguien tiene que poder decidir.
     """
-    if not get_settings().feature_course_refunds:
-        raise ServiceUnavailableError(
-            "Las devoluciones no están disponibles.", code="refunds_disabled"
-        )
     if not await esquema.hay_devoluciones(db):
         raise ServiceUnavailableError(
             "Las devoluciones no están disponibles en esta base de datos.",
             code="refunds_not_available",
+        )
+
+
+async def _exigir_solicitudes_nuevas(db: AsyncSession) -> None:
+    """Además del esquema, que la bandera admita solicitudes NUEVAS."""
+    await _exigir_esquema(db)
+    if not get_settings().feature_course_refunds:
+        raise ServiceUnavailableError(
+            "Las devoluciones no están disponibles.", code="refunds_disabled"
         )
 
 
@@ -156,7 +161,7 @@ async def crear_solicitud(
     la orden, el plazo, la devolución anterior y la solicitud activa, con la
     hora del servidor.
     """
-    await _exigir_disponible(db)
+    await _exigir_solicitudes_nuevas(db)
     ensure_uuid(payload.order_id, "Compra no encontrada.")
     try:
         solicitud = await devoluciones.crear_solicitud(
@@ -208,7 +213,7 @@ async def mi_solicitud(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RefundRequestRead:
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _mia(db, request_id, current_user.id)
     return await _a_lectura(db, solicitud)
 
@@ -223,7 +228,7 @@ async def retirar_solicitud(
 
     Quien se arrepiente sigue teniendo sus 168 horas, si aún le quedan.
     """
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _mia(db, request_id, current_user.id)
     try:
         await devoluciones.transicionar(
@@ -304,7 +309,7 @@ async def aceptar_recompra(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Guarda la aceptación, con la huella del texto exacto que se mostró."""
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     ensure_uuid(payload.course_id, "Curso no encontrado.")
     if not payload.accepted:
         raise ValidationAppError(
@@ -390,7 +395,7 @@ async def detalle_de_solicitud(
     db: AsyncSession = Depends(get_db),
 ) -> AdminRefundRead:
     await _exigir_gestor(db, current_user)
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _cualquiera(db, request_id)
     return await _a_lectura_admin(db, solicitud, con_historial=True)
 
@@ -426,7 +431,7 @@ async def aprobar(
     pasarela; el acceso se retira cuando el dinero vuelve, y no antes.
     """
     await _exigir_gestor(db, current_user)
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _cualquiera(db, request_id)
 
     ya = await devoluciones.ya_devolvio(
@@ -452,26 +457,15 @@ async def aprobar(
 async def ejecutar_reembolso(
     db: AsyncSession, solicitud: RefundRequest, *, actor_id: str | None
 ) -> None:
-    """Pedirle a la pasarela que devuelva el dinero.
+    """Pedirle a la pasarela que devuelva el dinero. NO retira acceso.
 
-    IDEMPOTENTE EN TRES CAPAS, porque pagar dos veces no se puede deshacer:
+    Tres capas de idempotencia: no se pide nada si ya hay `external_refund_id`;
+    la clave solo cambia tras un fallo TERMINAL; y la transicion a
+    `refund_processing` es un UPDATE condicional, asi que dos administradores
+    simultaneos solo consiguen una ejecucion.
 
-    1. Si la solicitud ya tiene `external_refund_id`, no se vuelve a pedir: ya
-       hay un reembolso vivo ahi fuera.
-    2. La clave que se manda se deriva de la SOLICITUD, no del intento, asi que
-       tres reintentos son la misma operacion para la pasarela.
-    3. La transicion a `refund_processing` es un UPDATE condicional, asi que dos
-       administradores simultaneos solo consiguen una ejecucion.
-
-    APAGADO POR DEFECTO. Con `STRIPE_REFUNDS_ENABLED` en falso NO SE LLAMA A
-    NADIE y la solicitud se queda en `approved`, no en `failed`: nunca se
-    intento, asi que declararla fallida seria mentir sobre lo que paso. El
-    evento lo dice y NADIE pierde el acceso. Eso es lo que permite recorrer el
-    circuito entero en staging sin cuenta de Stripe.
-
-    NO RETIRA EL ACCESO. Ni aunque la pasarela conteste «hecho». El acceso se
-    retira con el webhook confirmado y conciliado; esta respuesta solo dice si
-    la peticion se acepto.
+    Con `STRIPE_REFUNDS_ENABLED` apagado no se llama a nadie y la solicitud se
+    queda como estaba: nunca se intento, asi que declararla fallida seria mentir.
     """
     from app.modules.payments.reembolsos import (
         RefundRequestToProvider,
@@ -488,10 +482,8 @@ async def ejecutar_reembolso(
         return
 
     if not get_settings().stripe_refunds_enabled:
-        # NO SE INTENTO NADA, asi que no se puede decir que fallo. Dejarla en
-        # `failed` era mentir: invitaba a reintentar un fallo que no existio y
-        # ocultaba el unico problema real, que es que falta encender la
-        # ejecucion externa. Queda en `approved`, sin tocar el acceso.
+        # NO SE INTENTO NADA: se anota y se deja el estado como esta. Marcarla
+        # `failed` invitaria a reintentar un fallo que no existio.
         await devoluciones._anotar(
             db,
             solicitud,
@@ -522,19 +514,22 @@ async def ejecutar_reembolso(
         )
         return
 
-    try:
-        await devoluciones.transicionar(
-            db,
-            solicitud,
-            hasta=estados.REFUND_PROCESSING,
-            rol="admin",
-            actor_id=actor_id,
-            reason="reembolso pedido a la pasarela",
-        )
-        await db.commit()
-    except estados.TransicionInvalida:
-        # Otro lo esta ejecutando ya. Que gane el primero.
-        return
+    if solicitud.status != estados.REFUND_PROCESSING:
+        try:
+            await devoluciones.transicionar(
+                db,
+                solicitud,
+                hasta=estados.REFUND_PROCESSING,
+                rol="admin",
+                actor_id=actor_id,
+                reason="reembolso pedido a la pasarela",
+            )
+            await db.commit()
+        except estados.TransicionInvalida:
+            # Otro lo esta ejecutando ya. Que gane el primero.
+            return
+    # Si ya estaba en `refund_processing` y sin referencia, un intento anterior
+    # se quedo sin respuesta: se repite CON LA MISMA CLAVE.
 
     proveedor = proveedor_de_reembolsos()
     resultado = await proveedor.create_full_refund(
@@ -563,12 +558,28 @@ async def ejecutar_reembolso(
         return
 
     if resultado.status not in {"succeeded", "pending"}:
-        # Una respuesta que no entendemos NO se da por buena.
+        # Ni por buena ni por descartada: `unknown_status` es ambiguo, asi que
+        # el reintento repite clave en vez de arriesgar un segundo reembolso.
         await _marcar_fallo(
             db,
             solicitud,
             codigo="unknown_status",
             mensaje=f"Respuesta no reconocida: {resultado.status!r}.",
+        )
+        return
+
+    if not (solicitud.external_refund_id or "").strip():
+        # Aceptado PERO sin identificador: es lo que deja un tiempo de espera
+        # agotado. Sin referencia no hay nada que conciliar, asi que se registra
+        # como fallo ambiguo y queda el reintento con la misma clave.
+        await _marcar_fallo(
+            db,
+            solicitud,
+            codigo=resultado.failure_code or "no_refund_reference",
+            mensaje=(
+                resultado.failure_message
+                or "La pasarela acepto sin devolver identificador."
+            ),
         )
         return
 
@@ -606,39 +617,44 @@ async def _transaccion_de_la_orden(db: AsyncSession, order_id: str) -> str:
 
 
 async def _fallos_terminales(db: AsyncSession, refund_request_id: str) -> int:
-    """Cuantas veces dijo la pasarela que NO, de forma concluyente.
+    """Cuantas veces dijo la pasarela que NO, de forma CONCLUYENTE.
 
-    Sale de los EVENTOS ya guardados y no de un contador en memoria: asi
-    sobrevive a un reinicio y vale igual para todos los procesos. Es lo que
-    decide si el reintento manda una clave nueva o repite la anterior.
+    Contar TODOS los `failed` era el fallo: un 502 o un timeout subia el numero
+    y el siguiente intento mandaba una clave NUEVA, que es como se paga dos
+    veces el mismo reembolso.
+
+    Se clasifica el `reason` en Python con `es_terminal` —la unica funcion que
+    decide esto— en vez de consultar dentro del `jsonb`/`JSON`: eso no es
+    portable a SQLite y los eventos antiguos no llevan el metadato. Y sale de lo
+    PERSISTIDO, asi que sobrevive a un reinicio.
     """
+    from app.modules.payments.reembolsos import es_terminal
     from app.modules.refunds.models import RefundRequestEvent
 
-    total = await db.scalar(
-        select(func.count())
-        .select_from(RefundRequestEvent)
-        .where(
+    motivos = await db.scalars(
+        select(RefundRequestEvent.reason).where(
             RefundRequestEvent.refund_request_id == refund_request_id,
             RefundRequestEvent.to_status == estados.FAILED,
         )
     )
-    return int(total or 0)
+    return sum(1 for motivo in motivos if es_terminal(motivo or ""))
 
 
 async def _marcar_fallo(
     db: AsyncSession, solicitud: RefundRequest, *, codigo: str, mensaje: str
 ) -> None:
-    """Deja el expediente en `failed`, que es lo que habilita el reintento.
+    """Registra el fallo. SOLO uno TERMINAL mueve el expediente a `failed`.
 
-    Solo un fallo TERMINAL cuenta para cambiar la clave de idempotencia: un
-    tiempo de espera agotado no significa que no se haya hecho, y reintentarlo
-    con clave nueva es exactamente como se paga dos veces.
+    Un fallo AMBIGUO —timeout, 5xx, respuesta sin identificador— deja la
+    solicitud en `refund_processing`, y eso es deliberado: el reembolso pudo
+    crearse, asi que tiene que poder cerrarlo el webhook, que desde `failed` ya
+    no podria. El reintento desde ahi repite la MISMA clave.
     """
     from app.modules.payments.reembolsos import es_terminal
 
     terminal = es_terminal(codigo)
     try:
-        if solicitud.status == estados.REFUND_PROCESSING:
+        if terminal and solicitud.status == estados.REFUND_PROCESSING:
             await devoluciones.transicionar(
                 db,
                 solicitud,
@@ -647,7 +663,7 @@ async def _marcar_fallo(
                 actor_id=None,
                 reason=codigo,
                 notes=mensaje,
-                metadata={"terminal": terminal},
+                metadata={"terminal": True},
             )
         else:
             await devoluciones._anotar(
@@ -659,6 +675,7 @@ async def _marcar_fallo(
                 actor_id=None,
                 reason=codigo,
                 notes=mensaje,
+                metadata={"terminal": terminal},
             )
         await db.commit()
     except estados.TransicionInvalida:
@@ -681,7 +698,7 @@ async def rechazar(
     plazo, puede volver a pedirlo.
     """
     await _exigir_gestor(db, current_user)
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     if not (payload.notes or "").strip():
         raise ValidationAppError(
             "Hay que explicar por qué se rechaza.", code="refund_reason_required"
@@ -697,31 +714,39 @@ async def rechazar(
     return await _a_lectura_admin(db, solicitud, con_historial=True)
 
 
+#: Desde donde se puede ejecutar: `failed` (la pasarela dijo que no), `approved`
+#: (se aprobo con la pasarela apagada) y `refund_processing` (un intento se
+#: quedo sin respuesta). El tercero es el que antes no tenia salida: `retry`
+#: solo aceptaba `failed` y `reconcile` exige identificador externo.
+EJECUTABLES = frozenset({estados.FAILED, estados.APPROVED, estados.REFUND_PROCESSING})
+
+
 @admin_router.post("/refund-requests/{request_id}/retry", response_model=AdminRefundRead)
 async def reintentar(
     request_id: str,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AdminRefundRead:
-    """Volver a intentar un reembolso que la pasarela no pudo completar.
+    """Ejecutar —o volver a ejecutar— el reembolso en la pasarela.
 
-    Reintentar EJECUTA otra vez, no solo cambia el estado. Y no paga dos veces:
-    la clave de idempotencia sale de la solicitud, asi que la pasarela reconoce
-    la misma operacion.
+    NUNCA CREA UN SEGUNDO REEMBOLSO. Si ya hay `external_refund_id` no se pide
+    nada: se le pregunta a la pasarela como acabo el que ya existe. Y si no lo
+    hay, la clave de idempotencia solo cambia tras un fallo TERMINAL, asi que
+    reintentar un timeout recupera la misma operacion en vez de duplicarla.
     """
     await _exigir_gestor(db, current_user)
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _cualquiera(db, request_id)
-    if solicitud.status != estados.FAILED:
+    if solicitud.status not in EJECUTABLES:
         raise ValidationAppError(
-            "Solo se puede reintentar una solicitud que fallo.",
+            "Esta solicitud no se puede ejecutar en su estado actual.",
             code="refund_invalid_transition",
         )
-    # Se limpia la referencia anterior: fallo, asi que no hay reembolso vivo
-    # que respetar, y sin esto la guarda de idempotencia bloquearia el reintento.
-    solicitud.external_refund_id = None
-    await db.flush()
-    await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
+    if (solicitud.external_refund_id or "").strip():
+        await _conciliar_con_pasarela(db, solicitud, actor_id=current_user.id)
+        solicitud = await _cualquiera(db, request_id)
+    else:
+        await ejecutar_reembolso(db, solicitud, actor_id=current_user.id)
     return await _a_lectura_admin(db, solicitud, con_historial=True)
 
 
@@ -842,7 +867,7 @@ async def conciliar_solicitud(
 ) -> AdminRefundRead:
     """Preguntarle a la pasarela como acabo de verdad este reembolso."""
     await _exigir_gestor(db, current_user)
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _cualquiera(db, request_id)
     if not (solicitud.external_refund_id or "").strip():
         # Sin referencia no hay nada que preguntar. Se dice claro en vez de
@@ -923,7 +948,7 @@ async def _mover(
     notes: str | None,
 ) -> AdminRefundRead:
     await _exigir_gestor(db, current_user)
-    await _exigir_disponible(db)
+    await _exigir_esquema(db)
     solicitud = await _cualquiera(db, request_id)
     await _transicion(db, solicitud, hasta, current_user, notes=notes)
     if hasta == estados.CANCELLED:
@@ -995,7 +1020,6 @@ async def _progreso(db: AsyncSession, solicitud: RefundRequest) -> int:
     los casos raros, no porque decida.
     """
     from app.modules.learning.models import CourseLesson, CourseModule, LessonProgress
-    from sqlalchemy import func
 
     total = await db.scalar(
         select(func.count())

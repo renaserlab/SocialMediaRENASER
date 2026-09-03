@@ -161,18 +161,35 @@ def _referencia(peticion: RefundRequestToProvider) -> str:
 
 
 #: Códigos de fallo que NO son terminales: la petición pudo llegar igualmente.
-#: Reintentar uno de estos tiene que ir con LA MISMA clave, para que la pasarela
-#: reconozca la operación en vez de crear una segunda.
-FALLOS_AMBIGUOS = frozenset({"network_timeout", "http_502", "http_503", "http_504"})
+#: Reintentar uno de estos va con LA MISMA clave, para que la pasarela reconozca
+#: la operación en vez de crear una segunda.
+FALLOS_AMBIGUOS = frozenset({
+    "network_timeout",
+    "http_502",
+    "http_503",
+    "http_504",
+    #: Aceptado pero sin identificador: no se sabe si quedó creado.
+    "no_refund_reference",
+    #: Contestó algo que no entendemos. No se da por bueno ni por descartado.
+    "unknown_status",
+})
 
 
 def es_terminal(failure_code: str) -> bool:
     """Si el proveedor dijo que NO, de forma concluyente.
 
+    ES LA ÚNICA CLASIFICACIÓN. Quien necesite distinguir terminal de ambiguo
+    llama aquí: una segunda lista acabaría divergiendo de esta, y divergir en
+    este punto concreto es pagar dos veces el mismo reembolso.
+
     Un rechazo de tarjeta es terminal; un tiempo de espera agotado no lo es —la
-    petición pudo llegar y el reembolso existir ahí fuera—.
+    petición pudo llegar y el reembolso existir ahí fuera—. Cualquier 5xx entra
+    en lo segundo aunque no esté en la lista de arriba.
     """
-    return bool(failure_code) and failure_code not in FALLOS_AMBIGUOS
+    codigo = (failure_code or "").strip().lower()
+    if not codigo or codigo in FALLOS_AMBIGUOS:
+        return False
+    return not codigo.startswith("http_5")
 
 
 def clave_de_idempotencia(refund_request_id: str, intento: int = 0) -> str:
