@@ -199,6 +199,14 @@ export type SolicitudAdmin = {
   requestedAt: string | null;
   amountMinor: number;
   currency: string;
+  /**
+   * El identificador del reembolso EN LA PASARELA, si ya se creó.
+   *
+   * Decide qué se puede hacer en `refund_processing`: con referencia hay algo
+   * que conciliar y reintentar duplicaría el reembolso; sin ella no hay nada
+   * que preguntar y lo que toca es volver a ejecutarlo.
+   */
+  externalReference: string | null;
 };
 
 /** Un paso del expediente: qué estado, cuándo y quién. */
@@ -227,6 +235,8 @@ type SolicitudDto = {
   amount_minor?: number | null;
   currency?: string | null;
   reason?: string | null;
+  external_refund_id?: string | null;
+  external_reference?: string | null;
   history?: Array<{
     id?: string | null;
     status?: string | null;
@@ -249,7 +259,13 @@ function aSolicitud(dto: SolicitudDto): SolicitudAdmin {
     requestedAt: dto.requested_at ?? dto.created_at ?? null,
     amountMinor: numero(dto.amount_minor),
     currency: dto.currency ?? 'PEN',
+    externalReference: textoONulo(dto.external_refund_id ?? dto.external_reference),
   };
+}
+
+/** Una cadena vacía no es una referencia: se normaliza a `null`. */
+function textoONulo(valor: unknown): string | null {
+  return typeof valor === 'string' && valor.trim() !== '' ? valor.trim() : null;
 }
 
 function aDetalle(dto: SolicitudDto): DetalleDeSolicitud {
@@ -266,21 +282,43 @@ function aDetalle(dto: SolicitudDto): DetalleDeSolicitud {
   };
 }
 
-/** Las acciones de la bandeja. El nombre es el del endpoint. */
+/**
+ * Las acciones de la bandeja, en el vocabulario de la PANTALLA.
+ *
+ * `execute` (pedir el reembolso desde `approved`) y `retry` (repetirlo tras un
+ * fallo) son la misma operación en el servidor y hoy comparten endpoint; se
+ * distinguen aquí porque el aviso y la etiqueta que lee un administrador no son
+ * los mismos. Si el backend les da rutas distintas, solo cambia la tabla
+ * `ENDPOINT_DE_ACCION`.
+ */
 export type AccionDeDevolucion =
   | 'take'
   | 'approve'
   | 'reject'
   | 'cancel'
+  | 'execute'
   | 'retry'
   | 'reconcile';
 
 /** Las que mueven dinero: piden aviso antes de ejecutarse. */
 export const ACCIONES_FINANCIERAS: readonly AccionDeDevolucion[] = [
   'approve',
+  'execute',
   'retry',
   'reconcile',
 ];
+
+/** Qué ruta llama cada acción. El único sitio donde vive el nombre real. */
+const ENDPOINT_DE_ACCION: Record<AccionDeDevolucion, string> = {
+  take: 'take',
+  approve: 'approve',
+  reject: 'reject',
+  cancel: 'cancel',
+  // El backend mantiene `/retry` sirviendo también para `approved`.
+  execute: 'retry',
+  retry: 'retry',
+  reconcile: 'reconcile',
+};
 
 function queryDe(params: Record<string, string | number | null | undefined>): string {
   const partes: string[] = [];
@@ -393,7 +431,7 @@ export const OwnerRepository = {
   ): Promise<DetalleDeSolicitud> {
     const texto = (notes ?? '').trim();
     const dto = await apiRequest<SolicitudDto>(
-      `${API_V1}/admin/refund-requests/${id}/${accion}`,
+      `${API_V1}/admin/refund-requests/${id}/${ENDPOINT_DE_ACCION[accion]}`,
       { method: 'POST', body: JSON.stringify({ notes: texto }) },
     );
     // Algunas acciones devuelven la solicitud entera y otras solo confirman:

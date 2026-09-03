@@ -12,6 +12,7 @@ import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
 import { deCentavos } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
+import { ApiError } from '@/services/api';
 import {
   ACCIONES_FINANCIERAS,
   ESTADOS_DE_SOLICITUD,
@@ -32,8 +33,8 @@ import { esProhibido, useTextosDeGestion } from '@/screens/GestionDeCursoScreen'
  * TRES REGLAS, y las tres nacen de que aquí se mueve dinero de otra persona:
  *
  *  1. ANTES DE CADA ACCIÓN FINANCIERA SE AVISA de lo que va a pasar, con
- *     palabras y no con un «¿Seguro?». Aprobar devuelve el importe y retira el
- *     acceso; reintentar vuelve a pedírselo a la pasarela.
+ *     palabras y no con un «¿Seguro?». Aprobar autoriza; ejecutar es lo que
+ *     pide el dinero a la pasarela, y reintentar vuelve a pedírselo.
  *
  *  2. NO SE PUEDE PULSAR DOS VECES. El cerrojo es una `ref` —no el estado, que
  *     no está puesto hasta el siguiente render— y mientras se envía TODOS los
@@ -51,26 +52,61 @@ import { esProhibido, useTextosDeGestion } from '@/screens/GestionDeCursoScreen'
 
 const POR_PAGINA = 20;
 
-/** Qué se puede hacer desde cada estado. El servidor vuelve a decidirlo. */
+/**
+ * Qué se puede hacer desde cada estado, según lo que el servidor acepta. El
+ * servidor vuelve a decidirlo: esconder un botón NO es un permiso.
+ *
+ * `requested` no ofrece aprobar ni rechazar: hay que tomarla primero, y esa era
+ * la fila que producía botones muertos. `refund_processing` se afina en
+ * `accionesDisponibles`, porque ahí depende de la referencia de la pasarela.
+ */
 const ACCIONES_POR_ESTADO: Record<EstadoDeSolicitudAdmin, readonly AccionDeDevolucion[]> = {
-  requested: ['take', 'approve', 'reject', 'cancel'],
+  requested: ['take', 'cancel'],
   under_review: ['approve', 'reject', 'cancel'],
-  approved: ['retry', 'reconcile'],
-  refund_processing: ['retry', 'reconcile'],
-  refunded: ['reconcile'],
+  approved: ['execute', 'cancel'],
+  refund_processing: ['retry'],
+  refunded: [],
   rejected: [],
-  failed: ['retry', 'reconcile', 'cancel'],
+  failed: ['retry', 'cancel'],
   cancelled: [],
 };
+
+/**
+ * Lo mismo, ya resuelto para una solicitud concreta.
+ *
+ * En `refund_processing` CON referencia externa el reembolso ya está pedido:
+ * reintentarlo sería pedir otro, así que solo cabe conciliar. Sin referencia no
+ * hay nada que preguntarle a la pasarela y lo que toca es volver a ejecutarlo.
+ */
+function accionesDisponibles(solicitud: SolicitudAdmin): readonly AccionDeDevolucion[] {
+  if (solicitud.status === 'refund_processing') {
+    return solicitud.externalReference ? ['reconcile'] : ['retry'];
+  }
+  return ACCIONES_POR_ESTADO[solicitud.status];
+}
 
 /** El aviso de cada acción. Sin entrada no hay confirmación que enseñar. */
 const AVISOS: Partial<Record<AccionDeDevolucion, string>> = {
   approve: 'devolucionesAdmin.avisoAprobar',
   reject: 'devolucionesAdmin.avisoRechazar',
   cancel: 'devolucionesAdmin.avisoCancelar',
+  execute: 'devolucionesAdmin.avisoEjecutar',
   retry: 'devolucionesAdmin.avisoReintentar',
   reconcile: 'devolucionesAdmin.avisoReconciliar',
 };
+
+/**
+ * Un 409/422 del expediente no es «no pudimos»: es «el estado ya no es ese».
+ *
+ * Pasa de verdad —dos administradores a la vez, o un webhook que llegó entre
+ * medias— y merece un mensaje propio: reintentar no arregla nada, recargar sí.
+ */
+function esConflictoDeEstado(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 409 || error.status === 422 || error.code.startsWith('refund_'))
+  );
+}
 
 function fechaLegible(iso: string | null): string {
   if (!iso) return '';
@@ -371,17 +407,35 @@ function Detalle({
       setNotas('');
       toast(t('devolucionesAdmin.hecho'));
     } catch (e) {
+      /*
+        Tres desenlaces distintos, tres mensajes distintos. Un 403 es «tu cuenta
+        no puede»; un 409/422, «el expediente ya no está en ese estado» —y
+        entonces se relee, porque la pantalla es la que va desfasada—; lo demás
+        es un fallo de verdad.
+      */
+      const conflicto = esConflictoDeEstado(e);
       notify(
-        esProhibido(e) ? t('devolucionesAdmin.sinPermiso') : t('devolucionesAdmin.fallo'),
+        esProhibido(e)
+          ? t('devolucionesAdmin.sinPermiso')
+          : conflicto
+            ? t('devolucionesAdmin.conflicto')
+            : t('devolucionesAdmin.fallo'),
         e instanceof Error ? e.message : t('common.tryAgain'),
       );
+      if (conflicto) {
+        try {
+          onCambio(await OwnerRepository.solicitud(solicitud.id));
+        } catch {
+          // Si tampoco se puede releer, se queda lo que hay: ya se avisó.
+        }
+      }
     } finally {
       enviandoRef.current = false;
       setEnviando(null);
     }
   };
 
-  const disponibles = ACCIONES_POR_ESTADO[solicitud.status];
+  const disponibles = accionesDisponibles(solicitud);
   const ocupado = enviando !== null;
 
   return (
@@ -483,6 +537,7 @@ const ETIQUETA_DE_ACCION: Record<AccionDeDevolucion, string> = {
   approve: 'aprobar',
   reject: 'rechazar',
   cancel: 'cancelar',
+  execute: 'ejecutar',
   retry: 'reintentar',
   reconcile: 'reconciliar',
 };
