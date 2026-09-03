@@ -1670,7 +1670,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'devolucionesAdmin.reintentar': 'Retry',
   'devolucionesAdmin.reconciliar': 'Reconcile',
   'devolucionesAdmin.avisoTitulo': 'This moves money',
-  'devolucionesAdmin.avisoAprobar': 'The amount will be returned to the requester and their course access removed. This can\'t be undone.',
+  'devolucionesAdmin.avisoAprobar': 'The refund will be authorised. The money is requested in the next step and access is removed when it comes back.',
   'devolucionesAdmin.avisoRechazar': 'The refund will be rejected and the requester will see the reason.',
   'devolucionesAdmin.avisoCancelar': 'The request will be closed without refunding anything.',
   'devolucionesAdmin.avisoReintentar': 'The refund will be sent to the payment provider again. Check first that it hasn\'t already been paid.',
@@ -1683,4 +1683,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'devolucionesAdmin.vacioTitulo': 'No requests',
   'devolucionesAdmin.vacioCuerpo': 'When someone requests a refund it will show up here.',
   'devolucionesAdmin.cargarMas': 'Load more',
+  'devolucionesAdmin.ejecutar': 'Issue refund',
+  'devolucionesAdmin.avisoEjecutar': 'The refund will be requested from the payment provider. Check first that it hasn\'t already been paid.',
+  'devolucionesAdmin.conflicto': 'This request is no longer in that state',
 };

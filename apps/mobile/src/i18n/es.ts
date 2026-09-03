@@ -1770,7 +1770,7 @@ export const es = {
   'devolucionesAdmin.reintentar': 'Reintentar',
   'devolucionesAdmin.reconciliar': 'Reconciliar',
   'devolucionesAdmin.avisoTitulo': 'Esto mueve dinero',
-  'devolucionesAdmin.avisoAprobar': 'Se devolverá el importe a quien lo pidió y se le retirará el acceso al curso. No se puede deshacer.',
+  'devolucionesAdmin.avisoAprobar': 'Se autorizará la devolución. El dinero se pide en el paso siguiente y el acceso se retira cuando vuelve.',
   'devolucionesAdmin.avisoRechazar': 'Se rechazará la devolución y quien la pidió verá el motivo.',
   'devolucionesAdmin.avisoCancelar': 'Se cerrará la solicitud sin devolver nada.',
   'devolucionesAdmin.avisoReintentar': 'Se volverá a pedir la devolución a la pasarela. Comprueba antes que no se haya pagado ya.',
@@ -1783,4 +1783,7 @@ export const es = {
   'devolucionesAdmin.vacioTitulo': 'No hay solicitudes',
   'devolucionesAdmin.vacioCuerpo': 'Cuando alguien pida una devolución aparecerá aquí.',
   'devolucionesAdmin.cargarMas': 'Cargar más',
+  'devolucionesAdmin.ejecutar': 'Ejecutar reembolso',
+  'devolucionesAdmin.avisoEjecutar': 'Se le pedirá el reembolso a la pasarela. Comprueba antes que no se haya pagado ya.',
+  'devolucionesAdmin.conflicto': 'El expediente ya no está en ese estado',
 } as const;

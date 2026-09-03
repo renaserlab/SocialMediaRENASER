@@ -263,7 +263,7 @@ En tres capas, porque pagar dos veces no se puede deshacer.
 |---|---|
 | **API** | una solicitud viva por orden; la segunda pulsación devuelve **la misma** solicitud, no un error |
 | **Base** | índices únicos parciales; `on conflict do nothing`, nunca capturar el error |
-| **Proveedor** | clave de idempotencia derivada de la **solicitud**, no del intento |
+| **Proveedor** | clave derivada de la solicitud **y del número de fallos terminales** |
 
 **Por qué `on conflict do nothing` y no capturar `IntegrityError`.** Capturarlo
 obliga a un `rollback`, y un rollback a media petición tira **todo lo demás** de
@@ -275,21 +275,75 @@ los dos escriben. La transición es un **`UPDATE` condicional** —comparar y
 escribir en la misma sentencia—, así que el segundo afecta a cero filas y se
 entera de a qué estado la movieron.
 
+### La clave de idempotencia
+
+    intento 0        zrefund_{solicitud}
+    tras 1 terminal  zrefund_{solicitud}_r1
+    tras 2           zrefund_{solicitud}_r2
+
+**Por qué no puede ser siempre la misma.** El primer «no» de la pasarela queda
+grabado contra esa clave: reintentar reenvía la misma y Stripe devuelve *la
+misma respuesta fallida*, para siempre. El botón de reintentar no serviría nunca.
+
+**Por qué no puede cambiar en cada intento.** Un tiempo de espera agotado no
+significa que no se haya hecho. Clave nueva tras un timeout es exactamente cómo
+se paga dos veces.
+
+**De dónde sale el número.** De los eventos `failed` ya persistidos, clasificando
+su `reason` con `es_terminal()` —la única función que decide esto—. Así
+sobrevive a reinicios, vale igual para todos los procesos, y funciona en
+PostgreSQL y en el SQLite de las pruebas sin consultar dentro de un `jsonb`. Los
+eventos antiguos sin el metadato se clasifican igual por su motivo.
+
 ---
 
 ## 7. Reintentos
 
+### Terminal o ambiguo
+
+Lo decide `es_terminal()` en `payments/reembolsos.py`, y **solo ahí**.
+
+| | Códigos | Estado en que queda | Clave del reintento |
+|---|---|---|---|
+| **Ambiguo** | `network_timeout`, cualquier `http_5xx`, `no_refund_reference`, `unknown_status` | `refund_processing` | **la misma** |
+| **Terminal** | `card_declined` y el resto | `failed` | **nueva** (`_r1`, `_r2`…) |
+
+Un fallo ambiguo **no** manda el expediente a `failed`: se anota y la solicitud
+se queda en `refund_processing`, reintentable.
+
+**Por qué ese estado y no `failed`.** `FAILED → REFUNDED` está prohibido en la
+máquina de estados. Si un timeout dejara el expediente en `failed` y el
+reembolso sí existía, el webhook posterior de Stripe fallaría con
+`TransicionInvalida`, Stripe reintentaría en bucle y nadie retiraría el acceso.
+
+Una respuesta aceptada pero **sin identificador externo** se trata como fallo
+ambiguo. Antes se daba por buena, y ahí nacía el callejón sin salida.
+
 | Situación | Comportamiento |
 |---|---|
 | Doble pulsación | un solo reembolso |
-| Timeout o respuesta ambigua | **no** se crea otro: se consulta o se repite con la **misma** clave |
-| Fallo terminal confirmado | se permite un intento nuevo, con clave nueva |
+| Timeout o 5xx | no se crea otro; se reanuda con la **misma** clave |
+| Aceptado sin identificador | se trata como ambiguo, reintentable |
+| Fallo terminal confirmado | intento nuevo, con clave nueva |
+| Ya hay `external_refund_id` | **nunca** se crea otro: se concilia |
 | Éxito | se impide cualquier intento nuevo |
 | Dos administradores a la vez | un solo efecto externo |
 
-Un timeout **no** significa que no se haya hecho: la petición pudo llegar. Por
-eso se trata como «pendiente» y no como «fallido», y por eso la clave de
-idempotencia importa tanto.
+### Ninguna combinación se queda sin salida
+
+Al volver de `ejecutar_reembolso`, la solicitud solo puede estar en uno de estos
+tres sitios, y los tres tienen acción:
+
+| Estado y datos | Qué se puede hacer |
+|---|---|
+| `approved` (bandera de pasarela apagada) | ejecutar cuando se encienda |
+| `failed` | reintentar (clave nueva) · cancelar |
+| `refund_processing` **con** identificador | conciliar |
+| `refund_processing` **sin** identificador | reintentar (misma clave) |
+
+`retry` acepta `failed`, `approved` y `refund_processing`, y **no borra**
+`external_refund_id`: si hay referencia, delega en la conciliación en vez de
+pedir un segundo reembolso.
 
 ---
 
@@ -371,6 +425,33 @@ con la primera encendida y la segunda apagada, **el circuito interno entero
 
 Deshabilitar **nuevas compras** no impide **confirmar devoluciones ya en curso**:
 son cosas distintas y sus guardianes están separados.
+
+### Con `FEATURE_COURSE_REFUNDS` apagada
+
+La bandera cierra **la entrada**, no las obligaciones ya contraídas. Hay dos
+guardianes distintos y no se mezclan:
+
+- `_exigir_esquema` — ¿está la 0049?
+- `_exigir_solicitudes_nuevas` — ¿se admiten solicitudes nuevas? Solo lo usa
+  crear una.
+
+| | Con la bandera apagada |
+|---|:--:|
+| Crear una solicitud nueva | ❌ rechazo controlado |
+| Arrancar una garantía nueva | ❌ |
+| El alumno ve su historial y sus solicitudes | ✅ |
+| El alumno retira una solicitud viva | ✅ |
+| Administración lista, abre y resuelve | ✅ |
+| Administración reintenta y concilia | ✅ |
+| Los webhooks se procesan | ✅ |
+| El aviso de recompra sin segunda garantía | ✅ sigue exigiéndose |
+
+Lo último importa: apagar la bandera **no** puede dejar recomprar sin el aviso a
+quien ya gastó su garantía. Por eso el guardián de la aceptación de recompra no
+mira la bandera.
+
+Si de verdad falta la **migración**, eso sí responde de forma controlada: es
+otra cosa y tiene su propio guardián.
 
 ---
 

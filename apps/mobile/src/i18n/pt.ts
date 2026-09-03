@@ -1674,7 +1674,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'devolucionesAdmin.reintentar': 'Tentar de novo',
   'devolucionesAdmin.reconciliar': 'Conciliar',
   'devolucionesAdmin.avisoTitulo': 'Isto movimenta dinheiro',
-  'devolucionesAdmin.avisoAprobar': 'O valor será devolvido a quem o pediu e o acesso ao curso será retirado. Não é possível desfazer.',
+  'devolucionesAdmin.avisoAprobar': 'A devolução será autorizada. O dinheiro é pedido no passo seguinte e o acesso é retirado quando volta.',
   'devolucionesAdmin.avisoRechazar': 'O reembolso será recusado e quem o pediu verá o motivo.',
   'devolucionesAdmin.avisoCancelar': 'O pedido será fechado sem devolver nada.',
   'devolucionesAdmin.avisoReintentar': 'O reembolso será enviado novamente ao fornecedor de pagamento. Verifique antes se já não foi pago.',
@@ -1687,4 +1687,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'devolucionesAdmin.vacioTitulo': 'Não há pedidos',
   'devolucionesAdmin.vacioCuerpo': 'Quando alguém pedir um reembolso, aparecerá aqui.',
   'devolucionesAdmin.cargarMas': 'Carregar mais',
+  'devolucionesAdmin.ejecutar': 'Executar reembolso',
+  'devolucionesAdmin.avisoEjecutar': 'O reembolso será pedido ao fornecedor de pagamento. Verifique antes se já não foi pago.',
+  'devolucionesAdmin.conflicto': 'Este pedido já não está nesse estado',
 };
