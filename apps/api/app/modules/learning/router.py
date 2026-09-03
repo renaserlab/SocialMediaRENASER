@@ -639,30 +639,35 @@ async def _arrancar_garantia(db: AsyncSession, uid: str, course_id: str) -> None
     arranco es un problema que se puede arreglar despues; una leccion que no se
     entrega es la compra rota.
     """
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return
+    if not get_settings().feature_course_refunds:
+        return
+
+    from app.modules.refunds import service as devoluciones
+
+    orden = await devoluciones._orden_reembolsable(
+        db, user_id=uid, course_id=course_id
+    )
+    if orden is None:
+        return
+
+    # SAVEPOINT. Un fallo al escribir la garantia no puede dejar la transaccion
+    # abortada: en PostgreSQL eso haria fallar todo lo que venga despues con un
+    # error que no menciona la causa. Con `begin_nested` se deshace solo esto.
     try:
-        from app.modules.refunds import esquema as esquema_devoluciones
-
-        if not await esquema_devoluciones.hay_devoluciones(db):
-            return
-        if not get_settings().feature_course_refunds:
-            return
-
-        from app.modules.refunds import service as devoluciones
-
-        orden = await devoluciones._orden_reembolsable(
-            db, user_id=uid, course_id=course_id
-        )
-        if orden is None:
-            return
-        await devoluciones.asegurar_ventana(
-            db, user_id=uid, course_id=course_id, order_id=orden.id
-        )
-        await db.commit()
+        async with db.begin_nested():
+            await devoluciones.asegurar_ventana(
+                db, user_id=uid, course_id=course_id, order_id=orden.id
+            )
     except Exception:  # noqa: BLE001
         logger.exception(
             "[devoluciones] no se pudo arrancar la garantia del curso %s", course_id
         )
-        await db.rollback()
+        return
+    await db.commit()
 
 
 @router.get("/lessons/{lesson_id}", response_model=LessonDetailRead)

@@ -1021,27 +1021,39 @@ async def _al_confirmar_la_compra(db: AsyncSession, pedido, *, estrenada: bool) 
 async def _crear_saldo_del_propietario(db: AsyncSession, orden) -> None:
     """La fotografia de la venta, retenida hasta que venza la garantia.
 
-    `available_at` sale de la garantia del COMPRADOR: mientras pueda pedir
-    devolucion, ese dinero no es del propietario. Si las devoluciones estan
-    apagadas no hay nada que esperar y el saldo nace disponible ya.
-    """
-    from datetime import timedelta
+    `available_at` NACE NULO cuando hay garantia, y eso es lo importante.
 
+    EL CASO QUE OBLIGA A ELLO. Alguien compra y NO entra al curso en ocho dias.
+    Si el saldo naciera con «disponible dentro de 168 horas desde la compra»,
+    el trabajo de liberacion lo daria por vencido al septimo dia y el
+    propietario cobraria. Al noveno la persona entra, y ES ENTONCES cuando
+    empieza su garantia: el dinero ya estaba pagado con la garantia abierta.
+
+    Con `NULL` no hay nada que vencer: `liberar_vencidos` exige
+    `available_at is not null`, asi que el saldo se queda quieto. La fecha
+    REAL la escribe `asegurar_ventana` en el primer acceso protegido, cuando
+    por fin se sabe cuando termina el plazo.
+
+    CONSECUENCIA ACEPTADA: una compra que nadie llega a abrir nunca deja de
+    estar pendiente. Es deliberado —no se puede liberar un plazo que no ha
+    empezado— y se vigila con la señal de «pendientes sin fecha» de
+    `docs/Z_DEVOLUCIONES_Y_LIQUIDACIONES.md`.
+
+    SIN GARANTIA SI HAY FECHA. Con las devoluciones apagadas no hay plazo que
+    esperar, asi que el saldo nace disponible desde ya. Antes se quedaba en
+    `NULL` tambien en ese caso, o sea bloqueado para siempre: justo lo
+    contrario de lo que tocaba.
+    """
     from app.modules.commerce import liquidacion
     from app.modules.refunds import esquema as esquema_devoluciones
-    from app.modules.refunds.models import HORAS_DE_GARANTIA
     from app.modules.refunds.service import ahora
 
     if not await esquema_devoluciones.hay_liquidaciones(db):
         return
-    ajustes = get_settings()
-    disponible = None
-    if ajustes.feature_course_refunds:
-        # Todavia no ha entrado al curso, asi que la garantia no ha empezado.
-        # Se retiene el plazo completo desde la compra: es el peor caso, y
-        # `liberar_vencidos` lo recalculara cuando la ventana exista.
-        disponible = ahora() + timedelta(hours=HORAS_DE_GARANTIA)
-    await liquidacion.registrar_saldo(db, orden=orden, disponible_desde=disponible)
+    con_garantia = get_settings().feature_course_refunds
+    await liquidacion.registrar_saldo(
+        db, orden=orden, disponible_desde=None if con_garantia else ahora()
+    )
     await db.commit()
 
 

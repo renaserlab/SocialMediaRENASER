@@ -172,25 +172,34 @@ async def _sincronizar_vencimiento_del_saldo(
     """
     if ventana.order_id is None:
         return
-    try:
-        from app.modules.commerce.models import OwnerSaleBalance
-        from app.modules.refunds import esquema
+    from app.modules.commerce.models import OwnerSaleBalance
+    from app.modules.refunds import esquema
 
-        if not await esquema.hay_liquidaciones(db):
-            return
-        await db.execute(
-            update(OwnerSaleBalance)
-            .where(
-                OwnerSaleBalance.order_id == ventana.order_id,
-                OwnerSaleBalance.status == "pending",
+    if not await esquema.hay_liquidaciones(db):
+        return
+
+    # SAVEPOINT, no un `try` a secas. En PostgreSQL una sentencia que falla
+    # ABORTA la transaccion entera: a partir de ahi todo lo demas revienta con
+    # «current transaction is aborted». Capturar el error y seguir dejaria la
+    # entrega de la leccion escribiendo sobre una transaccion muerta, y el
+    # sintoma aparece lejos de aqui.
+    #
+    # Con `begin_nested` el fallo deshace SOLO esto y la transaccion de fuera
+    # sigue viva y utilizable.
+    try:
+        async with db.begin_nested():
+            await db.execute(
+                update(OwnerSaleBalance)
+                .where(
+                    OwnerSaleBalance.order_id == ventana.order_id,
+                    OwnerSaleBalance.status == "pending",
+                )
+                .values(available_at=ventana.expires_at, updated_at=ahora())
             )
-            .values(available_at=ventana.expires_at, updated_at=ahora())
-        )
-        await db.flush()
     except Exception:  # noqa: BLE001
         logger.exception(
             "[devoluciones] no se pudo sincronizar el vencimiento del saldo de "
-            "la orden %s",
+            "la orden %s; la garantia SI quedo registrada",
             ventana.order_id,
         )
 
@@ -601,7 +610,24 @@ async def registrar_aceptacion(
     order_id: str | None,
     fecha_legible: str,
 ) -> RefundPolicyAcceptance:
-    """Guarda que aceptó comprar sin garantía, con la huella del texto exacto."""
+    """Guarda que aceptó comprar sin garantía, con la huella del texto exacto.
+
+    Un doble clic devuelve la que ya había en vez de crear otra: la casilla no
+    mueve dinero, pero dos filas idénticas ensucian la auditoría y luego hay
+    que decidir cuál vale.
+    """
+    ya = await db.scalar(
+        select(RefundPolicyAcceptance)
+        .where(
+            RefundPolicyAcceptance.user_id == user_id,
+            RefundPolicyAcceptance.course_id == course_id,
+            RefundPolicyAcceptance.order_id.is_(None),
+            RefundPolicyAcceptance.policy_version == politica.VERSION_ACTUAL,
+        )
+        .limit(1)
+    )
+    if ya is not None:
+        return ya
     aceptacion = RefundPolicyAcceptance(
         user_id=user_id,
         course_id=course_id,
@@ -643,12 +669,26 @@ async def enlazar_aceptacion(
     `order_id` nulo. Enlazarla después es lo que permite responder «qué aceptó
     exactamente quien compró ESTA orden».
     """
-    await db.execute(
-        update(RefundPolicyAcceptance)
+    # UNA, LA MÁS RECIENTE. Antes esto era un UPDATE sin límite sobre todas las
+    # sueltas, así que dos aceptaciones —un doble clic, o una compra abandonada
+    # y otra retomada— acababan las DOS apuntando a la misma orden. Entonces
+    # «qué aceptó exactamente quien compró esta orden» tenía dos respuestas, y
+    # una aceptación vieja quedaba consumida por una compra que no era la suya.
+    suelta = await db.scalar(
+        select(RefundPolicyAcceptance.id)
         .where(
             RefundPolicyAcceptance.user_id == user_id,
             RefundPolicyAcceptance.course_id == course_id,
             RefundPolicyAcceptance.order_id.is_(None),
         )
+        .order_by(RefundPolicyAcceptance.accepted_at.desc())
+        .limit(1)
+    )
+    if suelta is None:
+        return
+    await db.execute(
+        update(RefundPolicyAcceptance)
+        .where(RefundPolicyAcceptance.id == suelta)
         .values(order_id=order_id)
     )
+    await db.flush()
