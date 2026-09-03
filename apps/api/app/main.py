@@ -20,6 +20,7 @@ from app.modules.communities.router import router as communities_router
 from app.modules.content.router import router as content_router
 from app.modules.content.reposts import router as reposts_router
 from app.modules.content.router_etiquetas import router as etiquetas_router
+from app.modules.commerce.router import admin_router as commerce_admin_router
 from app.modules.commerce.router import router as commerce_router
 from app.modules.identity.router import router as identity_router
 from app.modules.learning.router import router as learning_router
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(refunds_admin_router, prefix=prefix)
     # La vista comercial del propietario. Sin la 0049 responde ceros.
     app.include_router(commerce_router, prefix=prefix)
+    app.include_router(commerce_admin_router, prefix=prefix)
 
     return app
 

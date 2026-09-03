@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.core.security import AuthUser
 from app.modules.commerce import liquidacion
 from app.modules.commerce.models import (
     CommerceProduct,
@@ -474,3 +475,80 @@ async def test_conciliar_sin_referencia_no_concluye_nada(sesiones, monkeypatch):
         await db.commit()
         intento = await db.scalar(select(OwnerTransfer))
         assert await liquidacion.conciliar_transferencia(db, intento) == "sin_referencia"
+
+
+# --------------------------------------------------------------------------- #
+# 6. El dinero retenido, visible
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_la_salud_de_los_saldos_saca_a_la_luz_lo_retenido(sesiones):
+    """La señal que la documentación prometía vigilar y no tenía dónde verse.
+
+    `pending` con `available_at` nulo son compras que nadie llegó a abrir: la
+    garantía no ha arrancado, así que el saldo no tiene cuándo liberarse. Cien
+    ventas así acumulan dinero parado hasta que alguien reclama.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import get_current_user
+    from app.main import app
+    from app.shared.database import get_db
+
+    OTRA_ORDEN = "00000000-0000-0000-0000-0000000000a2"
+    async with sesiones() as db:
+        # Un saldo por orden: la 0049 lo impone, asi que hace falta otra venta.
+        producto = await db.scalar(select(CommerceProduct))
+        db.add(
+            Order(
+                id=OTRA_ORDEN, user_id=ANA, commerce_product_id=producto.id,
+                provider="stripe", channel="web", environment="sandbox",
+                amount_minor=PRECIO, currency="PEN", status="paid",
+            )
+        )
+        await db.flush()
+        # Sin fecha de vencimiento: es el que tiene que destacar.
+        db.add(
+            OwnerSaleBalance(
+                order_id=OTRA_ORDEN, course_id=CURSO, owner_id=BRUNO,
+                payout_account_id=None, gross_amount_minor=PRECIO,
+                platform_fee_minor=PRECIO - NETO, provider_fee_minor=0,
+                net_amount_minor=NETO, currency="PEN", fee_rules_version="v1",
+                status="pending", available_at=None,
+            )
+        )
+        await db.commit()
+
+    identidad = {"uid": BRUNO}
+
+    async def _sesion():
+        async with sesiones() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = _sesion
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=identidad["uid"], email="x@y.z"
+    )
+    try:
+        transporte = ASGITransport(app=app)
+        async with AsyncClient(transport=transporte, base_url="http://t") as http:
+            # Quien no es administracion no lo ve. Se comprueba en el SERVIDOR.
+            ajeno = await http.get("/api/v1/admin/owner-balances/health")
+            assert ajeno.status_code == 403, ajeno.text
+
+            async with sesiones() as db:
+                perfil = await db.get(Profile, BRUNO)
+                perfil.role = "admin"
+                await db.commit()
+
+            respuesta = await http.get("/api/v1/admin/owner-balances/health")
+            assert respuesta.status_code == 200, respuesta.text
+            cuerpo = respuesta.json()
+            assert cuerpo["sin_fecha"] == 1
+            assert cuerpo["por_estado"]["eligible"]["count"] == 1
+            assert cuerpo["por_estado"]["eligible"]["net_amount_minor"] == NETO
+            # Las siete claves siempre presentes, aunque valgan cero.
+            assert cuerpo["por_estado"]["transferred"]["count"] == 0
+    finally:
+        app.dependency_overrides.clear()

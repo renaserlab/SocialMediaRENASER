@@ -660,6 +660,17 @@ Todos los logs del módulo van a `renaser.refunds`, `renaser.payments` y
 `renaser.commerce`. **Nunca se registran** secretos, tokens, cuerpos de webhook
 completos ni datos de pago.
 
+### Dónde se miran las dos primeras señales
+
+`GET /api/v1/admin/owner-balances/health?dias=30`, solo para administración y
+comprobado en el servidor. Devuelve el dinero por estado, cuántos saldos están
+`pending` **sin fecha de vencimiento** —compras que nadie llegó a abrir, así que
+la garantía no ha arrancado y el dinero no tiene cuándo liberarse—, cuántos de
+esos llevan más de `dias`, y cuántos congelados no se mueven desde hace más de
+`dias`. Sin la 0049 responde ceros, no un 500.
+
+Las demás señales siguen siendo consultas a mano sobre los logs.
+
 ---
 
 ## 16. Reembolso, disputa y contracargo: tres cosas distintas
@@ -816,8 +827,9 @@ La política que manda es la de Z, la de la sección 1.
 - **Sin transferencias reales** hasta que Connect esté habilitado y la comisión
   decidida. La arquitectura está entera y probada (sección 17); lo que falta son
   las cuatro decisiones de la empresa y enganchar las funciones a una tarea.
-- **Sin panel de saldos.** Las señales de la sección 15 no tienen todavía una
-  pantalla donde verse: hoy solo existe el resumen por curso, para su autor.
+- **Sin panel de saldos.** Hay una consulta de administración
+  (`/admin/owner-balances/health`) pero no una pantalla: se mira con una
+  petición, no desde la aplicación.
 - **Disputas al mínimo**: se reconocen, retienen el saldo y avisan. No hay panel
   ni envío de pruebas (sección 16).
 - **Reembolso parcial**: se detecta, se audita y **no** revoca acceso, pero no

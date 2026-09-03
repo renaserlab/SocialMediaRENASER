@@ -29,6 +29,7 @@ from app.modules.commerce.schemas import (
     ESTADOS_DE_SALDO,
     Comprador,
     OwnerCourseSummary,
+    BalancesRetenidos,
     OwnerSaleRead,
     SaldoPorEstado,
 )
@@ -199,3 +200,96 @@ async def ventas_del_curso(
             )
         )
     return ventas
+
+
+# --------------------------------------------------------------------------- #
+# Administración: el dinero retenido, visible
+# --------------------------------------------------------------------------- #
+#
+# POR QUE EXISTE. La documentacion prometia vigilar «saldos `pending` con
+# `available_at` nulo y mas de 30 dias» —compras que nadie llego a abrir, con el
+# dinero del propietario retenido sin fecha— y esa señal no tenia donde verse:
+# lo unico que habia era el resumen POR CURSO y solo para su autor. Cien ventas
+# asi acumulan dinero parado hasta que alguien reclama.
+#
+# No es un panel de tesoreria: es la consulta minima que convierte una promesa
+# de la documentacion en algo que se puede mirar.
+
+admin_router = APIRouter(prefix="/admin", tags=["comercio-administracion"])
+
+
+async def _exigir_admin(db: AsyncSession, current_user: AuthUser) -> None:
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo administración puede ver los saldos.")
+
+
+@admin_router.get("/owner-balances/health", response_model=BalancesRetenidos)
+async def salud_de_los_saldos(
+    dias: int = 30,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BalancesRetenidos:
+    """Cuánto dinero hay retenido, en qué estado y desde cuándo.
+
+    Devuelve ceros —no un 500— si la 0049 no está aplicada, igual que el resto
+    del módulo: desplegar este endpoint no puede exigir la migración.
+    """
+    await _exigir_admin(db, current_user)
+    vacio = BalancesRetenidos(
+        por_estado=_saldos_en_cero(),
+        sin_fecha=0,
+        sin_fecha_antiguos=0,
+        congelados_antiguos=0,
+        dias=dias,
+    )
+    if not await esquema_devoluciones.hay_liquidaciones(db):
+        return vacio
+
+    from datetime import datetime, timedelta, timezone
+
+    corte = datetime.now(timezone.utc) - timedelta(days=max(dias, 0))
+
+    filas = await db.execute(
+        select(
+            OwnerSaleBalance.status,
+            func.count(OwnerSaleBalance.id),
+            func.coalesce(func.sum(OwnerSaleBalance.net_amount_minor), 0),
+        ).group_by(OwnerSaleBalance.status)
+    )
+    por_estado = _saldos_en_cero()
+    for estado, cuantos, importe in filas:
+        if estado in por_estado:
+            por_estado[estado] = SaldoPorEstado(
+                count=int(cuantos), net_amount_minor=int(importe)
+            )
+
+    # LA SEÑAL QUE IMPORTA: `pending` sin fecha de vencimiento. Significa que la
+    # persona compró y no ha entrado nunca, así que la garantía no ha arrancado
+    # y el dinero no tiene cuándo liberarse.
+    sin_fecha = await db.scalar(
+        select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.status == "pending",
+            OwnerSaleBalance.available_at.is_(None),
+        )
+    )
+    sin_fecha_antiguos = await db.scalar(
+        select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.status == "pending",
+            OwnerSaleBalance.available_at.is_(None),
+            OwnerSaleBalance.created_at <= corte,
+        )
+    )
+    # Y los congelados que nadie resuelve: expedientes abiertos, o una disputa.
+    congelados = await db.scalar(
+        select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.status == "frozen",
+            OwnerSaleBalance.updated_at <= corte,
+        )
+    )
+    return BalancesRetenidos(
+        por_estado=por_estado,
+        sin_fecha=int(sin_fecha or 0),
+        sin_fecha_antiguos=int(sin_fecha_antiguos or 0),
+        congelados_antiguos=int(congelados or 0),
+        dias=dias,
+    )

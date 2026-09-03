@@ -38,6 +38,25 @@ class SaldoPorEstado(BaseModel):
     net_amount_minor: int = 0
 
 
+class BalancesRetenidos(BaseModel):
+    """Cuanto dinero de creadores hay parado, y cuanto lleva parado.
+
+    Es la consulta que hace visible la señal que la documentacion prometia
+    vigilar: `pending` sin fecha de vencimiento son compras que nadie llego a
+    abrir, asi que la garantia no ha arrancado y el saldo no tiene cuando
+    liberarse.
+    """
+
+    por_estado: dict[str, SaldoPorEstado]
+    #: `pending` con `available_at` nulo: sin fecha para liberarse.
+    sin_fecha: int = 0
+    #: Los mismos, con mas de `dias` desde la venta.
+    sin_fecha_antiguos: int = 0
+    #: Congelados sin moverse en mas de `dias`: expedientes o disputas sin cerrar.
+    congelados_antiguos: int = 0
+    dias: int = 30
+
+
 class OwnerCourseSummary(BaseModel):
     """El resumen comercial de un curso, para su autor."""
 

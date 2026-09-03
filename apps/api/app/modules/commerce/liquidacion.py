@@ -572,8 +572,10 @@ async def _asentar(
     from app.modules.commerce.transferencias import es_terminal, exigir_referencia
 
     momento = datetime.now(timezone.utc)
-    intento.failure_code = (resultado.failure_code or None)
-    intento.failure_message = (resultado.failure_message or None)[:500] if resultado.failure_message else None
+    # Acotados antes de guardarlos: los escribe la pasarela, asi que ni su
+    # longitud ni sus caracteres los decidimos nosotros.
+    intento.failure_code = (resultado.failure_code or "")[:64] or None
+    intento.failure_message = (resultado.failure_message or "")[:500] or None
 
     referencia = ""
     if resultado.external_transfer_id:
