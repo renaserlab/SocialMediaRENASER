@@ -8,6 +8,7 @@ import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { describeError } from '@/lib/describeError';
+import { hayProveedorDeVideo } from '@/live/salaDeVideo';
 import { LiveRepository } from '@/repositories/LiveRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -119,6 +120,21 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
         <Text variant="body" color={media.textMuted} style={styles.centrado}>
           {t('create.liveStartBody')}
         </Text>
+
+        {/*
+          SE DICE ANTES DE ABRIR LA SALA, no dentro. Con la bandera encendida y
+          sin SDK de video instalado —que es como esta hoy— la emision es real
+          pero solo tiene chat y reacciones. Quien pulsa «empezar» creyendo que
+          va a salir en imagen y se encuentra una sala muda ya ha anunciado su
+          directo: enterarse un segundo antes es la diferencia entre elegir y
+          descubrir. El aviso desaparece solo el dia que se registre la sala de
+          verdad (`live/salaDeVideo.ts`).
+        */}
+        {hayProveedorDeVideo() ? null : (
+          <Text variant="caption" weight="700" color={media.textMuted} style={styles.centrado}>
+            {t('live.noProvider')}
+          </Text>
+        )}
 
         <TextInput
           value={titulo}

@@ -1,4 +1,13 @@
-import { apiRequest, API_V1 } from '@/services/api';
+import {
+  clasificarFalloDeCredencial,
+  type FalloDeCredencial,
+} from '@/live/maquinaDeDirecto';
+import {
+  hayVideoEnLaCredencial,
+  leerCredencial,
+  type CredencialDeVideo,
+} from '@/live/salaDeVideo';
+import { ApiError, apiRequest, API_V1 } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
 
 /**
@@ -330,22 +339,82 @@ export const LiveRepository = {
   },
 
   /**
-   * Pide al servidor la credencial de reproduccion.
+   * Pide al servidor la credencial de video, ya leida y comprobada.
    *
-   * HOY RESPONDE SIEMPRE 503 `live_provider_not_configured`, porque no hay
-   * proveedor de directo contratado: es un bloqueo de negocio, como la pasarela
-   * de pago. Esta expuesta —y sin usar todavia por la pantalla— porque es el
-   * endpoint que dara la reproduccion cuando lo haya; llamarla ahora solo
-   * serviria para pintar el mismo aviso que ya se deduce de
-   * `reproduccionDisponible`, con una peticion de por medio.
+   * YA NO DEVUELVE `Record<string, unknown>`. El contrato del backend esta
+   * cerrado —`provider`, `token`, `url`, `expires_in`, `can_publish`, `role`,
+   * `room_id`— asi que se lee y se valida aqui, una vez, en lugar de que cada
+   * pantalla adivine los campos. `leerCredencial` vive en `live/salaDeVideo.ts`
+   * junto al tipo, que es lo que consume el SDK.
    *
-   * La forma de la respuesta la fijara el proveedor, asi que no se inventa un
-   * tipo: se devuelve tal cual y se mapeara el dia que se sepa que trae.
+   * LANZA `FalloDeCredencial`, NO un `ApiError`. Es la mitad importante: la
+   * pantalla no tiene por que saber que un 503 con
+   * `live_provider_not_configured` y otro con `live_provider_missing` son la
+   * misma cosa para quien mira, ni que un 429 se reintenta y un 403 no.
+   * Comparar codigos HTTP en la interfaz es como se rompe en silencio el dia
+   * que el backend renombra uno.
+   *
+   * Un 200 con `provider: "none"` NO es un error —es la respuesta normal con
+   * la bandera de directo apagada— y por eso vuelve como credencial valida sin
+   * video, no como excepcion. Quien decide que se pinta es
+   * `live/maquinaDeDirecto.ts`, y a los dos casos les toca el mismo cartel.
    */
-  async solicitarCredencial(emisionId: string): Promise<Record<string, unknown>> {
-    return apiRequest<Record<string, unknown>>(
-      `${API_V1}/live/sessions/${emisionId}/credential`,
-      { method: 'POST' },
-    );
+  async solicitarCredencial(emisionId: string): Promise<CredencialDeVideo> {
+    let bruto: unknown;
+    try {
+      bruto = await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/credential`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      throw fallo(error);
+    }
+
+    const credencial = leerCredencial(bruto);
+    if (!credencial) {
+      /*
+        Un 200 con un cuerpo que no es una credencial. Es `desconocido` y no
+        `sin_proveedor` a proposito: «no hay proveedor» es una respuesta que el
+        servidor da a sabiendas, y esto es un contrato roto —un despliegue a
+        medias, un proxy que devuelve HTML—, que si vale la pena reintentar.
+      */
+      throw { clase: 'desconocido' } satisfies FalloDeCredencial;
+    }
+    return credencial;
   },
+
+  /** Atajo: `true` si esta credencial da video de verdad. */
+  hayVideo: hayVideoEnLaCredencial,
 };
+
+/**
+ * Traduce lo que sea que haya salido de la red a un fallo del dominio.
+ *
+ * Se exporta porque la maquina de estados lo recibe como
+ * `entorno.clasificarFallo`: asi la pantalla no tiene que capturar el error,
+ * mirarlo y volver a lanzarlo.
+ */
+export function fallo(error: unknown): FalloDeCredencial {
+  if (error instanceof ApiError) {
+    /*
+      `Retry-After` no llega hoy en el cuerpo uniforme del backend, pero si
+      llegara en `details` esta leido: obedecer al servidor cuando dice cuanto
+      esperar es lo unico que saca de un 429 a la primera.
+    */
+    const detalles = error.details as { retry_after?: unknown } | null | undefined;
+    const segundos = detalles && typeof detalles.retry_after === 'number'
+      ? detalles.retry_after
+      : null;
+    return clasificarFalloDeCredencial({
+      status: error.status,
+      code: error.code,
+      esperaSugeridaMs: segundos === null ? null : segundos * 1000,
+    });
+  }
+  // Un fallo ya clasificado (el de arriba, o `SalaNoDisponible`) pasa tal cual.
+  if (typeof error === 'object' && error !== null && 'clase' in error) {
+    return error as FalloDeCredencial;
+  }
+  // Un `AbortError` del limite de espera de `apiRequest`, o cualquier otra
+  // cosa que no llego a hablar con el servidor: es red, y la red se reintenta.
+  return clasificarFalloDeCredencial({ status: 0 });
+}

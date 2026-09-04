@@ -16,10 +16,18 @@ import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Avatar } from '@/components/Avatar';
 import { Text } from '@/components/Text';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
+import { useSesionDeDirecto } from '@/hooks/useSesionDeDirecto';
 import { confirm } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
 import { haptics } from '@/lib/haptics';
+import { abrirAjustes } from '@/lib/permisos';
 import { esperaRestanteMs, puedeEnviarMensaje, registrarEnvio } from '@/lib/ritmoDeChat';
+import {
+  cartelDelEstado,
+  pideAccionDeLaPersona,
+  type EstadoDeDirecto,
+  type VistaDeDirecto,
+} from '@/live/maquinaDeDirecto';
 import {
   LiveRepository,
   REACCIONES,
@@ -47,12 +55,26 @@ import { useTranslation } from '@/i18n/useTranslation';
 /**
  * La pantalla de una emision en vivo.
  *
- * LO QUE NO HACE, Y ES LO IMPORTANTE: no pinta un reproductor. La respuesta del
- * servidor trae `playback_available` y hoy es SIEMPRE `false`, porque no hay
- * proveedor de directo contratado (bloqueo de negocio, como la pasarela de
- * pago). Asi que la pantalla lo dice con todas las letras —todavia no hay
+ * LO QUE NO HACE, Y ES LO IMPORTANTE: no pinta un reproductor, porque todavia
+ * no hay SDK de video instalado. Lo que SI hay desde ahora es todo lo que
+ * rodea al video, y esta escrito de forma que enchufar el SDK sea un cambio
+ * pequeño y en un solo sitio:
+ *
+ *   - `live/salaDeVideo.ts` fija el contrato de la sala y trae una
+ *     implementacion FALSA que rechaza `unirse` con «no hay proveedor». El dia
+ *     que se apruebe el paquete se escribe la segunda implementacion y se
+ *     registra con una linea.
+ *   - `live/maquinaDeDirecto.ts` decide, sin React delante, cual de los catorce
+ *     estados se pinta —conectando, reconectando, permiso denegado, proveedor
+ *     no configurado, error recuperable, error definitivo…— y cuando se puede
+ *     reintentar. Se prueba con `node --test`.
+ *   - `hooks/useSesionDeDirecto.ts` es el cable entre las dos cosas y React.
+ *
+ * Esta pantalla, por tanto, ya no adivina nada sobre el video: pinta
+ * `vista.estado`. Con la bandera apagada ese estado es
+ * `proveedor_no_configurado` y se dice con todas las letras —todavia no hay
  * video, el chat si funciona— en vez de dejar girando un indicador de carga
- * contra una URL que nadie va a servir. Un spinner eterno miente igual que un
+ * contra una sala que nadie va a servir. Un spinner eterno miente igual que un
  * video de ejemplo, solo que mas despacio.
  *
  * Lo que si es real y funciona hoy: la sala, el chat en tiempo real y las
@@ -140,9 +162,14 @@ function mensajeDeError(error: unknown, respaldo: string): string {
       // es culpa de quien mira, y conviene que no parezca que la app se rompio.
       return t('live.notAvailable');
     }
-    if (error.code === 'live_provider_not_configured') {
+    if (
+      error.code === 'live_provider_not_configured' ||
+      error.code === 'live_provider_missing'
+    ) {
       return t('live.noProvider');
     }
+    if (error.code === 'live_not_joinable') return t('live.notJoinable');
+    if (error.code === 'live_credential_rate_limited') return t('live.rateLimited');
   }
   return describeError(error, respaldo);
 }
@@ -169,78 +196,35 @@ function fechaYHora(iso: string | null): string {
 /* ------------------------------------------------------------- El video ---- */
 
 /**
- * El hueco del video, que hoy nunca es un video.
+ * El hueco del video, que hoy sigue sin ser un video.
  *
- * Tiene un estado por cada situacion real y ninguno es un indicador de carga:
- * o hay algo que contar, o se cuenta por que no lo hay.
+ * YA NO DECIDE NADA. Antes esta funcion tenia su propia escalera de `if` sobre
+ * el estado de la emision y sobre `reproduccionDisponible`, y esa escalera era
+ * imposible de comprobar sin abrir la aplicacion. Ahora el estado lo decide
+ * `live/maquinaDeDirecto.ts` —catorce estados, probados uno a uno— y aqui solo
+ * se pinta el cartel que le corresponde.
+ *
+ * Lo unico que se añade a lo que dice la maquina son los DATOS que ella no
+ * puede conocer sin importar medio proyecto: la fecha a la que esta programada
+ * y la hora a la que termino. El cartel generico sigue estando debajo por si no
+ * hay fecha.
  */
-function PanelDeVideo({ emision }: { emision: Emision }) {
+function PanelDeVideo({ emision, estado }: { emision: Emision; estado: EstadoDeDirecto }) {
   const { t } = useTranslation();
-  if (emision.estado === 'scheduled') {
-    return (
-      <AvisoDeVideo
-        icono="clock"
-        titulo={t('live.notStartedTitle')}
-        detalle={
-          emision.programadaParaIso
-            ? t('live.scheduledFor', { fecha: fechaYHora(emision.programadaParaIso) })
-            : t('live.notStartedBody')
-        }
-      />
-    );
+  const cartel = cartelDelEstado(estado, emision.puedeGestionar);
+
+  let detalle = t(cartel.cuerpo as TranslationKey);
+  if (estado === 'programado' && emision.programadaParaIso) {
+    detalle = t('live.scheduledFor', { fecha: fechaYHora(emision.programadaParaIso) });
+  } else if (estado === 'terminado' && emision.terminoEnIso) {
+    detalle = t('live.endedAt', { hora: hora(emision.terminoEnIso) });
   }
 
-  if (emision.estado === 'cancelled') {
-    return (
-      <AvisoDeVideo
-        icono="slash"
-        titulo={t('live.cancelledTitle')}
-        detalle={t('live.cancelledBody')}
-      />
-    );
-  }
-
-  if (emision.estado === 'ended') {
-    return (
-      <AvisoDeVideo
-        icono="check-circle"
-        titulo={t('live.endedTitle')}
-        detalle={
-          emision.terminoEnIso
-            ? t('live.endedAt', { hora: hora(emision.terminoEnIso) })
-            : t('live.endedBody')
-        }
-      />
-    );
-  }
-
-  /*
-    Emision EN DIRECTO y sin video, que es el caso de hoy y por tiempo
-    indefinido. Se dice tal cual: no hay imagen, pero lo que si funciona —el
-    chat y las reacciones— esta justo debajo y se puede usar ya.
-  */
-  if (!emision.reproduccionDisponible) {
-    return (
-      <AvisoDeVideo
-        icono="video-off"
-        titulo={t('live.noVideoTitle')}
-        detalle={t('live.noVideoBody')}
-      />
-    );
-  }
-
-  /*
-    El servidor dice que hay video. No puede pasar hoy —`playback_available`
-    llega siempre en false— y no se pinta un reproductor a ciegas: la URL de
-    reproduccion la dara `POST /sessions/{id}/credential`, con la forma que fije
-    el proveedor que se contrate, y no se puede escribir contra un contrato que
-    todavia no existe. Antes que inventarselo, se dice lo que hay.
-  */
   return (
     <AvisoDeVideo
-      icono="alert-circle"
-      titulo={t('live.needsUpdateTitle')}
-      detalle={t('live.needsUpdateBody')}
+      icono={cartel.icono as keyof typeof Feather.glyphMap}
+      titulo={t(cartel.titulo as TranslationKey)}
+      detalle={detalle}
     />
   );
 }
@@ -264,6 +248,110 @@ function AvisoDeVideo({
         {detalle}
       </Text>
     </View>
+  );
+}
+
+/**
+ * Los controles de quien emite: microfono, camara, girar y empezar.
+ *
+ * SOLO SE PINTAN SI EL SERVIDOR AUTORIZO A PUBLICAR (`can_publish` de la
+ * credencial). No basta con `can_manage`: gestionar una emision —terminarla,
+ * moderar el chat— y emitir video son dos permisos distintos, y quien decide el
+ * segundo es el proveedor, no la pantalla. Hoy `can_publish` no llega nunca en
+ * true, asi que esta fila no aparece: un boton de microfono sobre una sala que
+ * no existe es exactamente el tipo de maqueta que este modulo no hace.
+ *
+ * `ocupado` deshabilita los cuatro a la vez. Es el freno de la doble pulsacion,
+ * y lo lleva la maquina: aqui solo se obedece.
+ */
+function ControlesDeAnfitrion({
+  vista,
+  enDirecto,
+  alAlternarCamara,
+  alAlternarMicrofono,
+  alCambiarCamara,
+  alEmpezar,
+}: {
+  vista: VistaDeDirecto;
+  enDirecto: boolean;
+  alAlternarCamara: () => void;
+  alAlternarMicrofono: () => void;
+  alCambiarCamara: () => void;
+  alEmpezar: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!vista.puedePublicar) return null;
+
+  return (
+    <View style={estilos.filaDeControles}>
+      <BotonDeControl
+        icono={vista.microfono ? 'mic' : 'mic-off'}
+        etiqueta={vista.microfono ? t('live.micOff') : t('live.micOn')}
+        activo={vista.microfono}
+        desactivado={vista.ocupado}
+        alPulsar={alAlternarMicrofono}
+      />
+      <BotonDeControl
+        icono={vista.camara ? 'video' : 'video-off'}
+        etiqueta={vista.camara ? t('live.cameraOff') : t('live.cameraOn')}
+        activo={vista.camara}
+        desactivado={vista.ocupado}
+        alPulsar={alAlternarCamara}
+      />
+      <BotonDeControl
+        icono="refresh-cw"
+        etiqueta={t('live.flipCamera')}
+        activo={false}
+        desactivado={vista.ocupado || !vista.camara}
+        alPulsar={alCambiarCamara}
+      />
+      {enDirecto ? null : (
+        <Pressable
+          onPress={alEmpezar}
+          disabled={vista.ocupado}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: vista.ocupado }}
+          style={[
+            estilos.botonDeTexto,
+            { borderColor: media.border, opacity: vista.ocupado ? 0.45 : 1 },
+          ]}
+        >
+          <Text variant="secondary" weight="700" color={media.text}>
+            {t('live.goLive')}
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function BotonDeControl({
+  icono,
+  etiqueta,
+  activo,
+  desactivado,
+  alPulsar,
+}: {
+  icono: keyof typeof Feather.glyphMap;
+  etiqueta: string;
+  activo: boolean;
+  desactivado: boolean;
+  alPulsar: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={alPulsar}
+      disabled={desactivado}
+      accessibilityRole="button"
+      accessibilityLabel={etiqueta}
+      accessibilityState={{ disabled: desactivado, selected: activo }}
+      style={[
+        estilos.botonRedondo,
+        { borderColor: media.border, borderWidth: 1, opacity: desactivado ? 0.45 : 1 },
+      ]}
+    >
+      <Feather name={icono} size={18} color={media.text} />
+    </Pressable>
   );
 }
 
@@ -607,35 +695,51 @@ export function LiveScreen() {
 
   /* -------------------------------------------------------- Moderacion ---- */
 
-  const terminar = useCallback(async () => {
-    const seguro = await confirm({
-      title: t('live.endConfirmTitle'),
-      message: t('live.endConfirmBody'),
-      confirmLabel: t('live.end'),
-      destructive: true,
-    });
-    if (!seguro) return;
-    try {
-      const datos = await LiveRepository.terminar(emisionId);
-      setEmision(datos);
-      // Se apunta tambien aqui: el UPDATE de Realtime va a llegar con este
-      // mismo estado, y sin esto lo leeria como un cambio y volveria a pedir
-      // una ficha que ya tenemos.
-      estadoAnterior.current = datos.estado;
-    } catch (error) {
-      setAviso(mensajeDeError(error, t('live.endFailed')));
-    }
-  }, [emisionId]);
+  /**
+   * Empezar y terminar, tal y como los ve la maquina.
+   *
+   * La CONFIRMACION y el freno de la doble pulsacion ya no estan aqui: los pone
+   * `live/maquinaDeDirecto.ts`, que es donde se pueden probar. Antes, dos
+   * toques rapidos en «Terminar emision» abrian dos dialogos y el segundo
+   * mandaba un `POST /end` sobre una emision ya cerrada.
+   *
+   * El error se cuenta AQUI y no se vuelve a lanzar: este sitio sabe traducir
+   * un `ApiError` del directo a algo legible («vas demasiado rapido», «el chat
+   * esta cerrado») y la maquina, que no puede importar el diccionario, solo
+   * tiene un texto generico de respaldo. Dejarlo subir pintaria el generico
+   * encima del bueno.
+   */
+  const alCambiarLaFicha = useCallback(
+    async (accion: 'empezar' | 'terminar') => {
+      try {
+        const datos =
+          accion === 'empezar'
+            ? await LiveRepository.empezar(emisionId)
+            : await LiveRepository.terminar(emisionId);
+        setEmision(datos);
+        // Se apunta tambien aqui: el UPDATE de Realtime va a llegar con este
+        // mismo estado, y sin esto lo leeria como un cambio y volveria a pedir
+        // una ficha que ya tenemos.
+        estadoAnterior.current = datos.estado;
+      } catch (error) {
+        setAviso(
+          mensajeDeError(error, accion === 'empezar' ? t('live.startFailed') : t('live.endFailed')),
+        );
+      }
+    },
+    [emisionId, t],
+  );
 
-  const empezar = useCallback(async () => {
-    try {
-      const datos = await LiveRepository.empezar(emisionId);
-      setEmision(datos);
-      estadoAnterior.current = datos.estado;
-    } catch (error) {
-      setAviso(mensajeDeError(error, t('live.startFailed')));
-    }
-  }, [emisionId]);
+  const { vista, sesion } = useSesionDeDirecto({
+    emisionId,
+    estadoDeSesion: emision?.estado ?? null,
+    esAnfitrion: puedeGestionar,
+    alCambiarLaFicha,
+    avisar: setAviso,
+  });
+
+  const terminar = useCallback(() => void sesion.terminar(), [sesion]);
+  const empezar = useCallback(() => void sesion.empezar(), [sesion]);
 
   const ocultar = useCallback(
     async (mensaje: MensajeDeEmision) => {
@@ -662,7 +766,22 @@ export function LiveScreen() {
 
   /* ------------------------------------------------------------ Pintado --- */
 
-  const salir = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  /**
+   * Salir de la sala.
+   *
+   * Siendo ANFITRION de una emision en directo pregunta antes: salir de la
+   * pantalla no termina la emision —para eso esta «Terminar emision»— y quien
+   * se marcha sin saberlo deja a la gente dentro de una sala sin nadie. Quien
+   * solo mira se va sin preguntas: un dialogo por cerrar un video es ruido.
+   * Quien decide cual de los dos casos es esta en la maquina.
+   */
+  const salir = useCallback(() => {
+    void sesion.intentarSalir().then((puede) => {
+      if (!puede) return;
+      if (router.canGoBack()) router.back();
+      else router.replace('/');
+    });
+  }, [sesion, router]);
 
   if (errorDeCarga) {
     return (
@@ -735,15 +854,64 @@ export function LiveScreen() {
           </View>
 
           {/* Video (o la verdad sobre por que no lo hay) */}
-          <PanelDeVideo emision={emision} />
+          <PanelDeVideo emision={emision} estado={vista.estado} />
+
+          {/*
+            La salida del estado, cuando la hay. Un cartel que solo explica el
+            problema deja a quien lo lee sin nada que hacer: el permiso denegado
+            lleva a los ajustes del telefono —unico sitio donde se arregla— y el
+            error definitivo ofrece volver a intentarlo, que es lo que ya no
+            ocurre solo. El error RECUPERABLE no pinta boton a proposito: se
+            esta reintentando en este momento, y un boton ahi solo consigue
+            reintentos encimados.
+          */}
+          {pideAccionDeLaPersona(vista.estado) ? (
+            <View style={estilos.filaDeGestion}>
+              <Pressable
+                onPress={abrirAjustes}
+                accessibilityRole="button"
+                style={[estilos.botonDeTexto, { borderColor: media.border }]}
+              >
+                <Text variant="secondary" weight="700" color={media.text}>
+                  {t('live.openSettings')}
+                </Text>
+              </Pressable>
+            </View>
+          ) : vista.estado === 'error_definitivo' ? (
+            <View style={estilos.filaDeGestion}>
+              <Pressable
+                onPress={() => sesion.reintentar()}
+                accessibilityRole="button"
+                style={[estilos.botonDeTexto, { borderColor: media.border }]}
+              >
+                <Text variant="secondary" weight="700" color={media.text}>
+                  {t('live.retry')}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <ControlesDeAnfitrion
+            vista={vista}
+            enDirecto={emision.estado === 'live'}
+            alAlternarCamara={() => void sesion.alternarCamara()}
+            alAlternarMicrofono={() => void sesion.alternarMicrofono()}
+            alCambiarCamara={() => void sesion.cambiarCamara()}
+            alEmpezar={empezar}
+          />
 
           {puedeGestionar && (emision.estado === 'live' || emision.estado === 'scheduled') ? (
             <View style={estilos.filaDeGestion}>
               {emision.estado === 'scheduled' ? (
                 <Pressable
                   onPress={empezar}
+                  disabled={vista.ocupado}
                   accessibilityRole="button"
-                  style={[estilos.botonDeTexto, { borderColor: media.border }]}
+                  accessibilityState={{ disabled: vista.ocupado }}
+                  style={[
+                    estilos.botonDeTexto,
+                    { borderColor: media.border, opacity: vista.ocupado ? 0.45 : 1 },
+                  ]}
                 >
                   <Text variant="secondary" weight="700" color={media.text}>
                     {t('create.startNow')}
@@ -752,8 +920,13 @@ export function LiveScreen() {
               ) : (
                 <Pressable
                   onPress={terminar}
+                  disabled={vista.ocupado}
                   accessibilityRole="button"
-                  style={[estilos.botonDeTexto, { borderColor: media.danger }]}
+                  accessibilityState={{ disabled: vista.ocupado }}
+                  style={[
+                    estilos.botonDeTexto,
+                    { borderColor: media.danger, opacity: vista.ocupado ? 0.45 : 1 },
+                  ]}
                 >
                   <Text variant="secondary" weight="700" color={media.danger}>
                     {t('live.endBroadcast')}
@@ -956,6 +1129,13 @@ const estilos = StyleSheet.create({
     gap: spacing.sm,
   },
   filaDeGestion: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.sm },
+  filaDeControles: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
   botonDeTexto: {
     borderWidth: 1,
     borderRadius: radius.pill,
