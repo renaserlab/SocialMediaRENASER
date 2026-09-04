@@ -490,7 +490,11 @@ export type EntornoDeDirecto = {
    * gestiona puede terminar la emision y moderar el chat; publicar es otra
    * autorizacion y la da el proveedor de video.
    */
-  esAnfitrion: boolean;
+  /**
+   * Si quien mira es quien emite. FUNCION y no valor: se consulta en el momento
+   * de usarlo, para que cambiarlo no obligue a reconstruir la maquina.
+   */
+  esAnfitrion: () => boolean;
   /**
    * La bandera de directo de la aplicacion (`FEATURE_LIVE`).
    *
@@ -594,6 +598,14 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
   let ocupado = false;
   let arrancada = false;
   let destruida = false;
+  /**
+   * Hay una conexion en vuelo.
+   *
+   * Es lo que impide entrar dos veces en la misma sala: `arrancar` tenia su
+   * propio guardian pero `reintentar` no, y dos toques seguidos dejaban una
+   * conexion huerfana con la camara encendida.
+   */
+  let conectando = false;
   /** Estamos dentro de la sala del SDK: sin esto, `destruir` saldria de nada. */
   let dentroDeLaSala = false;
   let cancelarReintento: (() => void) | null = null;
@@ -691,13 +703,36 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
     conexion = 'conectando';
     publicar();
 
+    conectando = true;
+    try {
+      await entrarEnLaSala();
+    } finally {
+      conectando = false;
+    }
+  };
+
+  /**
+   * ¿Sigue teniendo sentido conectarse?
+   *
+   * SE PREGUNTA DESPUES DE CADA ESPERA. Entre pedir la credencial y entrar en la
+   * sala pasan segundos, y en ese hueco la emision puede terminar —el anfitrion
+   * la cierra, o llega el aviso por Realtime—. Sin esto se seguia adelante:
+   * se pedian los permisos y se entraba en la sala de una emision TERMINADA, y
+   * la camara se quedaba encendida detras de una pantalla que decia «terminado»
+   * hasta que alguien desmontara el componente.
+   */
+  const yaNoProcede = (): boolean => destruida || sesion !== 'live';
+
+  const entrarEnLaSala = async (): Promise<void> => {
     let leida: CredencialLeida;
     try {
       leida = await entorno.pedirCredencial();
     } catch (error) {
+      if (yaNoProcede()) return;
       tratarFallo(error);
       return;
     }
+    if (yaNoProcede()) return;
     if (destruida) return;
 
     puedePublicar = leida.puedePublicar;
@@ -721,7 +756,7 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       publicar();
 
       const camaraOk = await entorno.pedirPermiso('camara');
-      if (destruida) return;
+      if (yaNoProcede()) return;
       permisoCamara = camaraOk ? 'concedido' : 'denegado';
       if (!camaraOk) {
         // Se para aqui: sin camara no hay emision, y pedir el microfono
@@ -733,7 +768,7 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       }
 
       const microfonoOk = await entorno.pedirPermiso('microfono');
-      if (destruida) return;
+      if (yaNoProcede()) return;
       permisoMicrofono = microfonoOk ? 'concedido' : 'denegado';
       if (!microfonoOk) {
         conexion = 'sinIniciar';
@@ -742,16 +777,18 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       }
     }
 
+    if (yaNoProcede()) return;
     try {
       await entorno.unirseALaSala(leida.opaca, leida.puedePublicar);
     } catch (error) {
-      if (destruida) return;
+      if (yaNoProcede()) return;
       tratarFallo(error);
       return;
     }
-    if (destruida) {
-      // La pantalla se fue mientras se entraba: se sale inmediatamente, o la
-      // camara se queda encendida detras de una pantalla que ya no existe.
+    if (yaNoProcede()) {
+      // La pantalla se fue, o la emision termino, mientras se entraba: se sale
+      // inmediatamente, o la camara se queda encendida detras de una pantalla
+      // que ya no existe o que dice «terminado».
       void entorno.salirDeLaSala();
       return;
     }
@@ -908,7 +945,13 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
         cerrar una pestaña— y a quien gestiona una emision que aun no ha
         empezado, tampoco: no hay nada que interrumpir.
       */
-      if (!entorno.esAnfitrion || sesion !== 'live') return true;
+      // SE LEE AL VUELO, no se captura al construir. `esAnfitrion` sale de
+      // `can_manage`, que el servidor recalcula en cada lectura de la ficha: si
+      // estuviera en las dependencias del `useMemo`, un refresco que lo
+      // devolviera distinto —una ventana de renovacion de token, por ejemplo—
+      // destruiria la maquina y la sala a mitad de emision, y al anfitrion se
+      // le cortaria la camara en su propio directo.
+      if (!entorno.esAnfitrion() || sesion !== 'live') return true;
       return entorno.confirmarSalida();
     },
 
@@ -935,6 +978,15 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
 
     reintentar() {
       if (destruida) return;
+      /*
+        SIN ESTO SE ENTRABA DOS VECES EN LA SALA. Era el unico gesto publico que
+        no comprobaba si ya habia una conexion en vuelo: dos toques dentro del
+        mismo fotograma —antes de que React repinte y esconda el boton— pedian
+        dos credenciales, encadenaban cuatro dialogos de permiso y llamaban dos
+        veces a `unirse`. Al desmontar solo se salia una vez, asi que la segunda
+        conexion quedaba huerfana con la camara encendida.
+      */
+      if (conectando) return;
       /*
         A MANO SI SE PUEDE INSISTIR, y el contador vuelve a cero.
 

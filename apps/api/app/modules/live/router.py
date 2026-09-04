@@ -21,10 +21,11 @@ un puñado de escrituras por segundo, no un chaparron.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import json
 import logging
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import func, insert, or_, select, update
@@ -291,6 +292,91 @@ async def crear(
     return (await _leer(db, [sesion], current_user.id))[0]
 
 
+async def _caducar_si_toca(db: AsyncSession, sesion: LiveSession) -> bool:
+    """Cierra una emision que lleva emitiendo mas de lo permitido.
+
+    POR QUE HACE FALTA. El movil del anfitrion se queda sin bateria en mitad de
+    una emision. El proveedor manda `session.failure`, que a proposito NO cierra
+    nada —puede estar reconectando—, y nadie pulsa «terminar». La emision se
+    queda `live` para siempre y la sala del proveedor, habilitada y facturando.
+
+    SE COMPRUEBA AL MIRARLA, no con una tarea programada. El proyecto no tiene
+    ninguna, y montar un planificador entero por esto seria pagar una
+    infraestructura por un problema que se resuelve aqui: cualquiera que abra la
+    ficha o pida credencial la cierra. Una emision que nadie mira nunca no
+    cuesta nada tenerla abierta en nuestra base; lo que cuesta es la sala, y esa
+    se cierra en cuanto alguien pasa.
+    """
+    ajustes = get_settings()
+    tope = ajustes.live_max_duration_minutes
+    if tope <= 0 or sesion.status != "live" or sesion.started_at is None:
+        return False
+
+    empezo = sesion.started_at
+    if empezo.tzinfo is None:
+        empezo = empezo.replace(tzinfo=timezone.utc)
+    if _ahora() - empezo < timedelta(minutes=tope):
+        return False
+
+    logger.warning(
+        "[live] la emision %s supero el tope de %s minutos; se cierra",
+        sesion.id,
+        tope,
+    )
+    proveedor = providers.obtener_proveedor(sesion.provider)
+    if proveedor is not None and sesion.provider_room_id:
+        try:
+            await proveedor.cerrar_sala(room_id=sesion.provider_room_id)
+        except Exception:  # pragma: no cover - limpieza, no logica
+            pass
+    return await _mover_estado(db, sesion, desde="live", hasta="ended", ended=True)
+
+
+async def _emisiones_vivas(db: AsyncSession) -> int:
+    return int(
+        await db.scalar(
+            select(func.count(LiveSession.id)).where(LiveSession.status == "live")
+        )
+        or 0
+    )
+
+
+async def _mover_estado(
+    db: AsyncSession,
+    sesion: LiveSession,
+    *,
+    desde: str,
+    hasta: str,
+    started: bool = False,
+    ended: bool = False,
+) -> bool:
+    """Cambia el estado SOLO si sigue siendo el que leimos. Hace commit.
+
+    UPDATE CONDICIONAL, y no leer-modificar-escribir. Antes los tres cambios que
+    dispara el cliente —empezar, terminar, cancelar— asignaban el atributo y
+    comiteaban, asi que dos peticiones simultaneas se pisaban: el anfitrion pulsa
+    «empezar» y administracion «cancelar» en el mismo instante, los dos leen
+    `scheduled`, empezar abre la sala en el proveedor y escribe `live`, cancelar
+    escribe `cancelled` encima. La fila queda cancelada CON sala abierta, y
+    cancelar no cierra ninguna: una sala facturando que ya no aparece para nadie.
+
+    Comparar y escribir en la MISMA sentencia no deja hueco por el que colarse.
+    """
+    valores: dict[str, object] = {"status": hasta, "updated_at": _ahora()}
+    if started:
+        valores["started_at"] = _ahora()
+    if ended:
+        valores["ended_at"] = _ahora()
+    resultado = await db.execute(
+        update(LiveSession)
+        .where(LiveSession.id == sesion.id, LiveSession.status == desde)
+        .values(**valores)
+    )
+    await db.commit()
+    await db.refresh(sesion)
+    return resultado.rowcount > 0
+
+
 async def _abrir_sala(sesion: LiveSession) -> None:
     """Pide la sala al proveedor, si lo hay.
 
@@ -309,6 +395,25 @@ async def _abrir_sala(sesion: LiveSession) -> None:
         sesion.provider_room_id = sala.room_id
     except NotImplementedError:
         # No hay proveedor de verdad. Es el estado normal hoy.
+        return
+    except providers.ErrorDeProveedor as error:
+        # LO QUE EL DOCSTRING PROMETE Y NO CUMPLIA. Solo se recogia
+        # `NotImplementedError`, asi que un 429 de cuota o un tiempo de espera
+        # agotado subian hasta `crear` y devolvian un 500: la emision no llegaba
+        # a existir, ni siquiera con chat.
+        #
+        # Y en el caso peor —el proveedor SI creo la sala pero no nos llego la
+        # respuesta— el rollback dejaba una sala huerfana con el nombre de una
+        # emision que ya no existe, que nadie volveria a consultar ni cerrar. Es
+        # la unica forma de que quede una sala facturando sin dueño.
+        #
+        # La sala se recupera sola en el siguiente intento: `abrir_sala` es
+        # idempotente por nombre, asi que empezar de nuevo la encuentra.
+        logger.error(
+            "[live] no se pudo abrir la sala de %s (%s); la emision sigue sin video",
+            sesion.id,
+            error.codigo,
+        )
         return
 
 
@@ -367,11 +472,33 @@ async def empezar(
             code="live_already_finished",
         )
 
-    sesion.status = "live"
-    sesion.started_at = _ahora()
+    # EL TECHO DE EMISIONES SIMULTANEAS. Cada sala viva cuesta minutos de
+    # proveedor, asi que un fallo o un abuso no puede traducirse en una factura.
+    # Se cuenta despues de caducar las que se pasaron de tiempo: una emision
+    # abandonada no puede bloquear a las demas para siempre.
+    ajustes = get_settings()
+    if ajustes.live_max_concurrent > 0:
+        vivas = await db.scalars(
+            select(LiveSession).where(LiveSession.status == "live")
+        )
+        for otra in vivas.all():
+            await _caducar_si_toca(db, otra)
+        if await _emisiones_vivas(db) >= ajustes.live_max_concurrent:
+            raise ConflictError(
+                "Hay demasiadas transmisiones en directo ahora mismo. "
+                "Inténtalo en unos minutos.",
+                code="live_too_many_concurrent",
+            )
+
+    # LA SALA PRIMERO. Si se abriera despues del cambio de estado, una emision
+    # podria quedar `live` sin sala y con el proveedor no notandolo.
     await _abrir_sala(sesion)
-    await db.commit()
-    await db.refresh(sesion)
+    if not await _mover_estado(
+        db, sesion, desde="scheduled", hasta="live", started=True
+    ):
+        raise ConflictError(
+            "Esta transmisión ya cambió de estado.", code="live_state_changed"
+        )
     return (await _leer(db, [sesion], current_user.id))[0]
 
 
@@ -394,6 +521,14 @@ async def terminar(
         raise ForbiddenError("No puedes terminar esta transmisión.")
     if sesion.status == "ended":
         return (await _leer(db, [sesion], current_user.id))[0]
+    if sesion.status != "live":
+        # SOLO SE TERMINA LO QUE ESTABA EMITIENDO. Antes se aceptaba desde
+        # cualquier estado, asi que una emision CANCELADA —«esto no llego a
+        # ocurrir»— se podia marcar como terminada desde una pestaña vieja y
+        # reaparecia en el listado publico como un directo que nunca existio.
+        raise ConflictError(
+            "Esta transmisión no está en directo.", code="live_not_live"
+        )
 
     proveedor = providers.obtener_proveedor(sesion.provider)
     if proveedor is not None and sesion.provider_room_id:
@@ -404,10 +539,13 @@ async def terminar(
             # y no puede impedir que la emision conste como terminada.
             pass
 
-    sesion.status = "ended"
-    sesion.ended_at = _ahora()
-    await db.commit()
-    await db.refresh(sesion)
+    if not await _mover_estado(db, sesion, desde="live", hasta="ended", ended=True):
+        # Otro la movio entre que la leimos y ahora: administracion cancelando a
+        # la vez, o el aviso del proveedor. Gana quien llego antes.
+        await db.refresh(sesion)
+        raise ConflictError(
+            "Esta transmisión ya cambió de estado.", code="live_state_changed"
+        )
     return (await _leer(db, [sesion], current_user.id))[0]
 
 
@@ -432,9 +570,10 @@ async def cancelar(
             "Solo se puede cancelar una transmisión que aún no ha empezado.",
             code="live_not_cancellable",
         )
-    sesion.status = "cancelled"
-    await db.commit()
-    await db.refresh(sesion)
+    if not await _mover_estado(db, sesion, desde="scheduled", hasta="cancelled"):
+        raise ConflictError(
+            "Esta transmisión ya cambió de estado.", code="live_state_changed"
+        )
     return (await _leer(db, [sesion], current_user.id))[0]
 
 
@@ -739,6 +878,10 @@ async def credencial(
 
     sesion = await _sesion_visible(db, session_id, current_user.id)
 
+    # Si se paso de tiempo, se cierra ANTES de repartir nada: pedir credencial
+    # es el momento en que mas gente pasa por aqui.
+    await _caducar_si_toca(db, sesion)
+
     # UNA EMISION CERRADA NO REPARTE PERMISOS. Ni de emitir ni de ver: la sala
     # del proveedor ya no existe y el token solo serviria para que el SDK diera
     # vueltas contra una puerta cerrada.
@@ -758,8 +901,15 @@ async def credencial(
             code="live_provider_missing",
         )
 
-    # EL ROL LO DECIDE EL SERVIDOR. No llega en la peticion, no se deduce en la
-    # pantalla y no se hereda de ser administracion: hay que preguntarlo.
+    # EL ROL LO DECIDE EL SERVIDOR. No llega en la peticion y no se deduce en la
+    # pantalla: se resuelve aqui, con lo que el servidor sabe de quien pregunta.
+    #
+    # ADMINISTRACION ENTRA COMO MODERADORA EN CUALQUIER SALA, y por tanto puede
+    # publicar. Es coherente con el resto del modulo —`_puede_gestionar` ya deja
+    # a administracion esconder mensajes y cerrar cualquier emision— pero hay
+    # que decirlo: hoy no existe un permiso de moderacion de directos separado
+    # del rol general. El dia que lo haya, se cambia el argumento de aqui y
+    # `roles.resolver` no se entera.
     rol = roles.resolver(
         user_id=current_user.id,
         host_id=sesion.host_id,
@@ -827,16 +977,23 @@ async def credencial(
 _VISTOS: dict[str, None] = {}
 _MAXIMO_VISTOS = 2048
 
+#: Lo mas grande que puede ser un aviso. Los de 100ms son unos pocos kilobytes;
+#: 256 KB deja margen de sobra y no permite que alguien sin sesion nos haga
+#: reservar memoria a voluntad.
+MAXIMO_DEL_AVISO = 256 * 1024
+
 
 def _evento_ya_visto(event_id: str) -> bool:
+    """Solo CONSULTA. Apuntar es otra cosa y va despues de aplicar."""
+    return bool(event_id) and event_id in _VISTOS
+
+
+def _apuntar_evento(event_id: str) -> None:
     if not event_id:
-        return False
-    if event_id in _VISTOS:
-        return True
+        return
     if len(_VISTOS) >= _MAXIMO_VISTOS:
         _VISTOS.pop(next(iter(_VISTOS)), None)
     _VISTOS[event_id] = None
-    return False
 
 
 @router.post("/webhook/100ms", status_code=status.HTTP_204_NO_CONTENT)
@@ -849,7 +1006,19 @@ async def webhook_100ms(
     # EL CUERPO CRUDO PRIMERO, y sin tocarlo. Aunque hoy la comprobacion sea de
     # cabecera, el orden importa: el dia que haya firma, parsear antes de
     # verificar es exactamente como se cuela un cuerpo modificado.
+    # EL TAMAÑO PRIMERO. Es el unico POST del modulo alcanzable sin sesion, y
+    # sin esto `request.body()` bufferiza en memoria lo que le manden —medio
+    # giga— antes de llegar a rechazarlo por autorizacion.
+    declarado = request.headers.get("content-length")
+    if declarado and declarado.isdigit() and int(declarado) > MAXIMO_DEL_AVISO:
+        logger.warning("[live] aviso de 100ms descartado por tamaño")
+        raise ForbiddenError("Aviso no válido.")
+
     crudo = await request.body()
+    if len(crudo) > MAXIMO_DEL_AVISO:
+        # Sin `Content-Length` fiable: se corta igual al leerlo.
+        logger.warning("[live] aviso de 100ms descartado por tamaño")
+        raise ForbiddenError("Aviso no válido.")
     try:
         webhooks.verificar(
             cabeceras=dict(request.headers), secreto=settings.hms_webhook_secret
@@ -882,7 +1051,12 @@ async def webhook_100ms(
         logger.info("[live] aviso repetido %s; no se repite el efecto", evento.event_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    # SE APLICA Y DESPUES SE APUNTA. Al reves, un fallo al aplicarlo —la base
+    # saturada en un pico— dejaba el aviso marcado como visto: el reintento del
+    # proveedor se descartaba por repetido y el efecto se perdia para siempre.
+    # La emision se quedaba «en directo» con la sala abierta y facturando.
     await _aplicar_evento_de_directo(db, evento)
+    _apuntar_evento(evento.event_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -895,6 +1069,18 @@ async def _aplicar_evento_de_directo(db: AsyncSession, evento) -> None:
     """
     if not evento.session_id:
         logger.warning("[live] aviso %s sin emision atribuible", evento.tipo)
+        return
+
+    # SE VALIDA EL FORMATO ANTES DE TOCAR LA BASE. `session_id` sale del cuerpo
+    # del aviso y la columna es `uuid`: una sala creada a mano desde el panel
+    # —el paso 3 del plan de activacion— llega con un nombre cualquiera, y en
+    # PostgreSQL eso es un error de tipo que acaba en 404 en vez del 204 que
+    # este endpoint debe dar para que el proveedor no reintente en bucle. En
+    # SQLite no se reproduce, asi que las pruebas no lo verian.
+    try:
+        UUID(evento.session_id)
+    except (ValueError, AttributeError, TypeError):
+        logger.warning("[live] aviso %s con una sala que no es nuestra", evento.tipo)
         return
 
     sesion = await db.get(LiveSession, evento.session_id)

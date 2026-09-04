@@ -11,6 +11,9 @@ tercero falla los lunes por motivos que no son nuestros.
 
 from __future__ import annotations
 
+import json
+
+import jwt
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -316,17 +319,45 @@ async def test_el_limite_es_por_persona_y_emision(entorno):
 
 @pytest.mark.asyncio
 async def test_la_credencial_no_filtra_nada_de_la_cuenta(entorno):
+    """Con el proveedor DE VERDAD, que es el que firma.
+
+    ANTES ESTA PRUEBA ESTABA MEDIO MUERTA: el proveedor era el doble, que
+    devuelve `token="token_de_ana"`, y `CONFIG` no estaba conectado a los
+    ajustes de la aplicación. Buscar el secreto en la respuesta era comparar dos
+    literales que no se habían tocado; habría pasado igual aunque el adaptador
+    real filtrara la cuenta entera.
+
+    Ahora se registra `Proveedor100ms` con un secreto reconocible y se mira lo
+    que sale por el endpoint.
+    """
     http, sesiones, _identidad, _doble = entorno
     sesion_id = await _emision(http)
     await _con_sala(sesiones, sesion_id)
 
-    cuerpo = (await http.post(f"{LIVE}/sessions/{sesion_id}/credential")).text
-    for prohibido in (CONFIG.app_secret, CONFIG.access_key, CONFIG.template_id, SECRETO):
-        assert prohibido not in cuerpo
-    # Y solo los campos del contrato, ni uno mas.
-    assert set((await http.post(f"{LIVE}/sessions/{sesion_id}/credential")).json()) == {
-        "provider", "token", "url", "expires_in", "can_publish", "role", "room_id",
-    }
+    from app.modules.live.proveedor_100ms import Proveedor100ms
+
+    anterior = providers.PROVEEDORES["100ms"]
+    providers.PROVEEDORES["100ms"] = Proveedor100ms(CONFIG, ttl_credencial=600)
+    try:
+        respuesta = await http.post(f"{LIVE}/sessions/{sesion_id}/credential")
+        assert respuesta.status_code == 200, respuesta.text
+        cuerpo = respuesta.text
+        for prohibido in (CONFIG.app_secret, CONFIG.template_id, SECRETO):
+            assert prohibido not in cuerpo, f"se filtro {prohibido}"
+
+        # Y solo los campos del contrato, ni uno mas.
+        datos = respuesta.json()
+        assert set(datos) == {
+            "provider", "token", "url", "expires_in", "can_publish", "role", "room_id",
+        }
+        # El token es REAL: va firmado con el secreto y lleva el rol que decidio
+        # el servidor, no el que pidiera nadie.
+        reclamos = jwt.decode(datos["token"], CONFIG.app_secret, algorithms=["HS256"])
+        assert reclamos["role"] == "host"
+        assert reclamos["user_id"] == ANA
+        assert CONFIG.app_secret not in json.dumps(reclamos)
+    finally:
+        providers.PROVEEDORES["100ms"] = anterior
 
 
 # --------------------------------------------------------------------------- #

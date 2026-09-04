@@ -389,17 +389,36 @@ async def test_una_respuesta_ilegible_no_se_da_por_buena():
     assert fallo.value.codigo == "unreadable_response"
 
 
-def test_el_secreto_no_viaja_en_la_credencial():
-    """Lo mínimo para conectarse, y nada más."""
-    from app.modules.live.providers import Credencial
+@pytest.mark.asyncio
+async def test_el_secreto_no_viaja_en_la_credencial_QUE_FIRMA_EL_PROVEEDOR():
+    """La credencial de VERDAD, la que sale del adaptador.
 
-    credencial = Credencial(
-        token="t", url="", expira_en=60, puede_emitir=False, rol="viewer", room_id="r"
+    ANTES ESTA PRUEBA ERA UNA TAUTOLOGIA: construía a mano un `Credencial(token="t")`
+    y comprobaba que el secreto no estaba dentro. Comparaba dos constantes que
+    nadie había tocado, así que habría pasado igual aunque `Proveedor100ms`
+    metiera el secreto en el token.
+
+    Ahora se pide de verdad y se mira lo que sale.
+    """
+    proveedor, _ = _proveedor([])
+    credencial = await proveedor.credencial(
+        room_id="room_1", user_id="ana", puede_emitir=True, rol="host"
     )
     serializado = json.dumps(credencial.__dict__)
-    assert CONFIG.app_secret not in serializado
-    assert CONFIG.access_key not in serializado
-    assert CONFIG.template_id not in serializado
+    for prohibido in (CONFIG.app_secret, CONFIG.access_key, CONFIG.template_id):
+        assert prohibido not in serializado
+
+    # Y DENTRO DEL TOKEN tampoco: va firmado CON el secreto, no lo lleva.
+    reclamos = jwt.decode(credencial.token, CONFIG.app_secret, algorithms=["HS256"])
+    for prohibido in (CONFIG.app_secret, CONFIG.template_id):
+        assert prohibido not in json.dumps(reclamos)
+    # La clave de acceso SI viaja: 100ms la necesita para saber de qué cuenta es
+    # el token, y es pública. El secreto es lo que no puede salir.
+    assert reclamos["access_key"] == CONFIG.access_key
+
+    # Y el token no se puede falsificar sin el secreto.
+    with pytest.raises(jwt.InvalidSignatureError):
+        jwt.decode(credencial.token, "otro_secreto", algorithms=["HS256"])
 
 
 # --------------------------------------------------------------------------- #

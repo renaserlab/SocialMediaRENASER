@@ -67,7 +67,15 @@ def verificar(*, cabeceras: dict[str, str], secreto: str) -> None:
     candidatos = [recibido]
     if recibido.lower().startswith("bearer "):
         candidatos.append(recibido[7:].strip())
+
+    # EN BYTES, no en texto. `compare_digest` con `str` LANZA `TypeError` si
+    # alguno lleva un caracter no ASCII, y ese error no lo recoge nadie: se
+    # escapaba como 500. Cualquiera sin sesion podia provocarlo mandando una
+    # cabecera con una eñe, y al reves era peor —un secreto escrito con tilde en
+    # el panel hacia que TODOS los avisos dieran 500 y ninguna emision se
+    # cerrara nunca, sin que nada lo dijera—.
+    esperado_bytes = esperado.encode("utf-8")
     for candidato in candidatos:
-        if hmac.compare_digest(candidato, esperado):
+        if hmac.compare_digest(candidato.encode("utf-8"), esperado_bytes):
             return
     raise WebhookInvalido("La autorización del aviso no cuadra.")

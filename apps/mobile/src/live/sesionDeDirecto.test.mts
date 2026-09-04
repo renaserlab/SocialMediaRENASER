@@ -59,6 +59,8 @@ type Opciones = {
   /** Por defecto se usa la politica DE VERDAD. */
   esperaAntesDeReintentar?: (intentos: number, clase: string) => number | null;
   unirse?: () => Promise<void>;
+  /** Se ejecuta al pedir cada permiso: sirve para cambiar la sesion a mitad. */
+  alPedirPermiso?: (tipo: string) => void;
 };
 
 function crearBanco(opciones: Opciones = {}) {
@@ -86,7 +88,7 @@ function crearBanco(opciones: Opciones = {}) {
   let esperaPedida: number | null = null;
 
   const entorno: EntornoDeDirecto = {
-    esAnfitrion: opciones.esAnfitrion ?? false,
+    esAnfitrion: () => opciones.esAnfitrion ?? false,
     banderaEncendida: opciones.banderaEncendida ?? true,
     estadoInicialDeSesion: opciones.sesion === undefined ? 'live' : opciones.sesion,
 
@@ -101,6 +103,7 @@ function crearBanco(opciones: Opciones = {}) {
         : { clase: 'desconocido' },
     pedirPermiso: async (tipo) => {
       registro.permisos.push(tipo);
+      opciones.alPedirPermiso?.(tipo);
       return concede[tipo] ?? true;
     },
 
@@ -829,3 +832,120 @@ function crearBancoConDialogoLento() {
     ultimaVista: () => registro.vistas[registro.vistas.length - 1]!,
   };
 }
+
+// ---------------------------------------------------------------------------
+// LO QUE ENCONTRO LA REVISION INDEPENDIENTE
+// ---------------------------------------------------------------------------
+
+describe('LA EMISION PUEDE TERMINAR MIENTRAS SE CONECTA', () => {
+  /*
+    EL FALLO. Tras cada espera se comprobaba `destruida`, pero nunca si la
+    emision seguia viva. Entre pedir la credencial y entrar en la sala pasan
+    segundos, y en ese hueco el anfitrion puede cerrarla —o llegar el aviso por
+    Realtime—. La maquina seguia adelante: pedia los permisos y entraba en la
+    sala de una emision TERMINADA, y la camara se quedaba encendida detras de
+    una pantalla que decia «terminado».
+  */
+
+  it('si termina mientras la credencial esta en vuelo, no se pide un permiso', async () => {
+    let contestar: (() => void) | null = null;
+    const banco = crearBanco({
+      esAnfitrion: true,
+      credencial: () =>
+        new Promise((resolver) => {
+          contestar = () =>
+            resolver({ puedePublicar: true, hayVideo: true, opaca: CREDENCIAL_CON_VIDEO });
+        }),
+    });
+
+    banco.sesion.arrancar();
+    await respirar();
+    // La emision termina ANTES de que conteste el servidor.
+    banco.sesion.cambiaLaSesion('ended');
+    contestar!();
+    await respirar();
+
+    assert.deepEqual(banco.registro.permisos, [], 'pidio permisos para una emision terminada');
+    assert.equal(banco.registro.uniones.length, 0, 'entro en la sala de una emision terminada');
+    assert.equal(banco.ultimaVista().estado, 'terminado');
+  });
+
+  it('si termina entre los dos permisos, no se entra en la sala', async () => {
+    let banco: ReturnType<typeof crearBanco>;
+    banco = crearBanco({
+      esAnfitrion: true,
+      credencial: async () => ({
+        puedePublicar: true,
+        hayVideo: true,
+        opaca: CREDENCIAL_CON_VIDEO,
+      }),
+      // Se cierra justo despues de conceder la camara.
+      alPedirPermiso: (tipo) => {
+        if (tipo === 'camara') banco.sesion.cambiaLaSesion('ended');
+      },
+    });
+
+    banco.sesion.arrancar();
+    await respirar();
+
+    assert.deepEqual(banco.registro.permisos, ['camara'], 'siguio pidiendo el microfono');
+    assert.equal(banco.registro.uniones.length, 0);
+  });
+
+  it('si termina mientras se entra en la sala, se sale de ella', async () => {
+    let entrar: (() => void) | null = null;
+    const banco = crearBanco({
+      esAnfitrion: true,
+      credencial: async () => ({
+        puedePublicar: true,
+        hayVideo: true,
+        opaca: CREDENCIAL_CON_VIDEO,
+      }),
+      unirse: () =>
+        new Promise((resolver) => {
+          entrar = () => resolver();
+        }),
+    });
+
+    banco.sesion.arrancar();
+    await respirar();
+    banco.sesion.cambiaLaSesion('ended');
+    entrar!();
+    await respirar();
+
+    // Se entro —la peticion ya habia salido— pero se sale inmediatamente: la
+    // camara no puede quedarse encendida detras de una pantalla «terminado».
+    assert.ok(banco.registro.salidas >= 1, 'se quedo dentro de la sala');
+  });
+});
+
+describe('DOS TOQUES EN REINTENTAR NO ENTRAN DOS VECES', () => {
+  it('el segundo se descarta mientras el primero esta en vuelo', async () => {
+    /*
+      `reintentar` era el UNICO gesto publico sin freno. Dos toques dentro del
+      mismo fotograma —antes de que React repinte y esconda el boton— pedian dos
+      credenciales, encadenaban cuatro dialogos de permiso y llamaban dos veces
+      a `unirse`. Al desmontar solo se salia una vez: la segunda conexion
+      quedaba huerfana con la camara encendida.
+    */
+    let contestar: Array<() => void> = [];
+    const banco = crearBanco({
+      esAnfitrion: true,
+      credencial: () =>
+        new Promise((resolver) => {
+          contestar.push(() =>
+            resolver({ puedePublicar: true, hayVideo: true, opaca: CREDENCIAL_CON_VIDEO }),
+          );
+        }),
+    });
+
+    banco.sesion.reintentar();
+    banco.sesion.reintentar();
+    await respirar();
+
+    assert.equal(banco.registro.credenciales, 1, 'pidio dos credenciales');
+    for (const soltar of contestar) soltar();
+    await respirar();
+    assert.equal(banco.registro.uniones.length, 1, 'entro dos veces en la sala');
+  });
+});

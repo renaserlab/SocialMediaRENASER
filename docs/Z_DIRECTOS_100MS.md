@@ -65,7 +65,7 @@ irreductiblemente suyos.
 |---|---|
 | `core/config.py` | Las variables de entorno tienen que llamarse de alguna forma |
 | `providers.py` (el registro) | Alguien tiene que saber qué proveedores existen |
-| `router.py` (la ruta del webhook) | La URL se da de alta en el panel de 100ms |
+| `router.py` (la ruta del webhook, y a qué proveedor pertenece un aviso) | La URL se da de alta en el panel de 100ms |
 | `webhooks.py` | Cómo se autentica un aviso lo decide el proveedor |
 
 Todo lo demás —salas, credenciales, roles, errores, eventos— pasa por el
@@ -137,8 +137,16 @@ Detalles que importan:
 
 - **Ser propietario manda sobre ser administración.** Quien emite es el anfitrión
   de lo suyo, no un moderador de su propia sala.
-- Administración **no** entra como moderadora por serlo en Z: hay que pedirlo
-  explícitamente, lo que obliga a comprobar el permiso arriba.
+- **Administración entra como moderadora en CUALQUIER sala**, y por tanto puede
+  publicar en ella. Es coherente con el resto del módulo —`_puede_gestionar` ya
+  le deja esconder mensajes y cerrar cualquier emisión— pero conviene decirlo
+  claro: **hoy no existe un permiso de moderación de directos separado del rol
+  general de administración**. El día que lo haya, se cambia el argumento en el
+  router y `roles.resolver` no se entera.
+- **`invitado` está implementado y hoy no lo usa nadie.** `resolver` acepta una
+  lista de invitados, pero el router no se la pasa: no hay pantalla para
+  designarlos. Se deja porque el contrato lo pide y falla hacia `espectador`,
+  que es el lado seguro.
 - Un rol desconocido cae a **espectador**, nunca al revés. Equivocarse hacia
   «espectador» cuesta que alguien no hable; hacia «anfitrión», que cualquiera
   publique en la sala de otro.
@@ -159,7 +167,7 @@ scheduled ──▶ live ──▶ ended
 | Concepto del encargo | En Z |
 |---|---|
 | `scheduled` | `scheduled` |
-| `ready` (sala preparada) | `scheduled` **con** `provider_room_id` |
+| `ready` (sala preparada) | **no existe.** La sala se abre al empezar, no al programar: preparar salas para emisiones que quizá no ocurran es pagar por nada |
 | `live` | `live` |
 | `ended` | `ended` |
 | `cancelled` | `cancelled` |
@@ -168,16 +176,34 @@ scheduled ──▶ live ──▶ ended
 **Por qué no hay `failed`.** Un fallo del proveedor puede ser pasajero y el
 anfitrión puede estar reconectando; marcar la emisión como fallida le quitaría la
 sala debajo. Se deja constancia en el registro y lo resuelve el propio anfitrión
-al terminar, o la conciliación. Añadir el estado exigiría una migración y todavía
-no hay ningún caso que lo pida.
+al terminar, o **la caducidad por duración** (abajo). Añadir el estado exigiría
+una migración y todavía no hay ningún caso que lo pida.
+
+### Cómo se cierra una emisión abandonada
+
+El móvil del anfitrión se queda sin batería. El proveedor manda `session.failure`,
+que a propósito no cierra nada, y nadie pulsa «terminar». Sin más, la emisión se
+quedaría `live` para siempre y la sala del proveedor abierta y facturando.
+
+Lo cierra `LIVE_MAX_DURATION_MINUTES`, y **se comprueba al mirarla**, no con una
+tarea programada: cualquiera que pida credencial —o cualquiera que intente
+empezar otra emisión— cierra de paso las que se pasaron de tiempo. El proyecto no
+tiene planificador, y montar uno por esto sería pagar una infraestructura entera
+por un problema que se resuelve así. Lo que cuesta dinero es la sala, y la sala
+se cierra en cuanto alguien pasa por ahí.
 
 ### Concurrencia
 
 Todo cambio de estado por aviso va con **UPDATE condicional**, así que:
 
+Los tres cambios de estado que dispara el cliente —empezar, terminar, cancelar—
+van con `UPDATE ... WHERE status = <el que leímos>` y se comprueba `rowcount`.
+Quien llega tarde recibe `live_state_changed` y no pisa nada.
+
 | Caso | Qué pasa |
 |---|---|
 | Dos inicios a la vez | Uno gana; el otro afecta a cero filas |
+| Empezar y cancelar a la vez | Uno gana. Antes se pisaban y la fila quedaba `cancelled` **con la sala abierta** |
 | Aviso repetido | Cero filas la segunda vez |
 | Aviso tardío sobre una emisión ya terminada | No la reabre |
 | Cierre sobre una emisión programada | **No** la termina |
@@ -219,6 +245,7 @@ Errores posibles:
 
 | Código | Cuándo |
 |---|---|
+| `live_not_available` | La 0029 no está aplicada |
 | `live_credential_rate_limited` | Demasiadas peticiones seguidas |
 | `live_not_joinable` | La emisión está `ended` o `cancelled` |
 | `live_provider_not_configured` | Bandera apagada o configuración incompleta |
@@ -226,6 +253,10 @@ Errores posibles:
 | `live_provider_unavailable` | El proveedor no responde o contesta algo ilegible |
 | `live_room_missing` | La sala ya no existe |
 | `live_provider_busy` | El proveedor devolvió 429 |
+| `live_provider_error` | Cualquier otro fallo del proveedor |
+| `live_not_live` | Se intentó terminar algo que no estaba emitiendo |
+| `live_state_changed` | Otro cambió el estado entre que se leyó y se escribió |
+| `live_too_many_concurrent` | Se alcanzó el techo de emisiones simultáneas |
 
 ---
 
@@ -326,8 +357,8 @@ eso el adaptador consulta antes de reintentar, en vez de crear otra.
 
 | Palanca | Variable |
 |---|---|
-| Emisiones simultáneas | `LIVE_MAX_CONCURRENT` |
-| Duración máxima | `LIVE_MAX_DURATION_MINUTES` |
+| Emisiones simultáneas | `LIVE_MAX_CONCURRENT` — se comprueba al empezar |
+| Duración máxima | `LIVE_MAX_DURATION_MINUTES` — cierra al mirarla (§5) |
 | Duración de la credencial | `LIVE_CREDENTIAL_TTL_SECONDS` |
 | Quién publica | La plantilla + `roles.py` |
 | Calidad inicial | La plantilla de 100ms |

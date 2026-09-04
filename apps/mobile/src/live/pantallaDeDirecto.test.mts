@@ -126,10 +126,26 @@ describe('el repositorio no devuelve codigos HTTP a la interfaz', () => {
   });
 });
 
-describe('EL SDK NATIVO SIGUE SIN INSTALARSE', () => {
-  /** Los paquetes que no pueden entrar sin que el cliente lo apruebe. */
+describe('EL SDK NATIVO ESTA AISLADO EN UN SOLO FICHERO', () => {
+  /*
+    ESTA PRUEBA CAMBIO DE SIGNO, y era su trabajo.
+
+    Mientras el SDK estaba pendiente de aprobacion, custodiaba que NO apareciera:
+    instalarlo obliga a una compilacion nativa nueva, deja de funcionar Expo Go y
+    cambia lo que produce una build de EAS, asi que colarlo sin permiso rompia el
+    trabajo de todo el equipo. Salto en cuanto se instalo, que es justo la señal
+    que se buscaba.
+
+    Ya autorizado, lo que hay que custodiar es lo contrario y es mas valioso: que
+    el SDK viva en UN solo fichero. Ese es el invariante que permite cambiar de
+    proveedor sin reescribir la logica de negocio, y el que se pierde en silencio
+    el dia que alguien importe `HMSView` directamente en una pantalla.
+  */
+
+  const PAQUETE = '@100mslive/react-native-hms';
+
+  /** Otros proveedores. Estos siguen prohibidos: no se ha aprobado ninguno. */
   const PROHIBIDOS = [
-    '@100mslive/react-native-hms',
     'livekit-client',
     '@livekit/react-native',
     'react-native-webrtc',
@@ -137,52 +153,96 @@ describe('EL SDK NATIVO SIGUE SIN INSTALARSE', () => {
     'react-native-agora',
   ];
 
-  it('no aparece en `package.json`', () => {
-    /*
-      Instalar el paquete obliga a una compilacion nativa nueva y tiene coste
-      recurrente. Que aparezca sin aprobacion no es un detalle: rompe la build
-      de EAS de todo el equipo.
-    */
-    const paquete = JSON.parse(readFileSync(join(MOVIL, 'package.json'), 'utf8')) as {
+  const paquete = () =>
+    JSON.parse(readFileSync(join(MOVIL, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
+
+  it('esta instalado y con version fija', () => {
+    // Fija y no con rango: una actualizacion menor de un modulo nativo puede
+    // exigir otra compilacion, y eso no puede pasar sin que nadie lo decida.
+    const version = paquete().dependencies?.[PAQUETE];
+    assert.equal(typeof version, 'string');
+    assert.match(String(version), /^\d+\.\d+\.\d+$/);
+  });
+
+  it('ningun otro proveedor se ha colado', () => {
     const instalados = new Set([
-      ...Object.keys(paquete.dependencies ?? {}),
-      ...Object.keys(paquete.devDependencies ?? {}),
+      ...Object.keys(paquete().dependencies ?? {}),
+      ...Object.keys(paquete().devDependencies ?? {}),
     ]);
     const colados = PROHIBIDOS.filter((nombre) => instalados.has(nombre));
     assert.deepEqual(colados, [], `dependencias sin aprobar: ${colados.join(', ')}`);
   });
 
-  it('y la sala que se sirve hoy es la falsa', () => {
-    // El registro esta vacio: `crearSalaDeVideo()` devuelve la implementacion
-    // que rechaza `unirse` con «no hay proveedor». Cuando el SDK entre, esta
-    // prueba tendra que cambiar a proposito, que es justo la señal que se busca.
-    const SALA = sinComentarios(fuente('live/salaDeVideo.ts'));
-    assert.match(SALA, /let fabrica: FabricaDeSala \| null = null;/);
-    assert.match(SALA, /return fabrica \? fabrica\(\) : crearSalaFalsa\(\);/);
-  });
-
-  it('ningun fichero de `src` importa uno de esos paquetes', () => {
+  it('SOLO `salaDeVideo100ms.ts` lo importa', () => {
+    /*
+      Es el invariante entero de esta integracion. Si una pantalla importara el
+      SDK, cambiar de proveedor dejaria de ser escribir un fichero y pasaria a
+      ser buscar por todo `src`.
+    */
     for (const rel of [
       'live/salaDeVideo.ts',
       'live/maquinaDeDirecto.ts',
       'live/reintentos.ts',
+      'live/registro100ms.ts',
+      'live/registro100ms.native.ts',
       'hooks/useSesionDeDirecto.ts',
       'screens/LiveScreen.tsx',
       'components/crear/ModoVivo.tsx',
     ]) {
-      // Sin comentarios: `salaDeVideo.ts` NOMBRA el paquete en su cabecera para
-      // explicar como se enchufara el dia que se apruebe. Documentarlo no es
-      // importarlo, y confundir las dos cosas haria imposible dejar escrito el
-      // camino.
+      // Sin comentarios: varios ficheros NOMBRAN el paquete en su cabecera para
+      // explicar donde vive. Documentarlo no es importarlo.
       const texto = sinComentarios(fuente(rel));
-      for (const nombre of PROHIBIDOS) {
-        const importa = new RegExp(`from\\s*['"]${nombre.replace(/[/@]/g, '\\$&')}`).test(texto);
+      for (const nombre of [PAQUETE, ...PROHIBIDOS]) {
+        const importa = new RegExp(`from\s*['"]${nombre.replace(/[/@]/g, '\$&')}`).test(texto);
         assert.equal(importa, false, `${rel} importa ${nombre}`);
       }
     }
+    // Y el que si lo importa, lo importa.
+    assert.match(
+      sinComentarios(fuente('live/salaDeVideo100ms.ts')),
+      new RegExp(`from '${PAQUETE.replace(/[/@]/g, '\$&')}'`),
+    );
+  });
+
+  it('se carga TARDE y SOLO en un aparato', () => {
+    /*
+      LA SEPARACION ES POR EXTENSION, y no por un `if`. Se intento con
+      `Platform.OS === 'web'` alrededor de un `require`, y no basta: Metro
+      resuelve las rutas de forma ESTATICA y no elimina codigo por una condicion
+      que solo se conoce al ejecutar, asi que el modulo nativo entraba igual en
+      el paquete de web y `expo export --platform web` fallaba entero.
+
+      El fichero sin sufijo es el del navegador —y el que resuelve TypeScript—;
+      el `.native.ts` es el unico que toca el SDK.
+    */
+    const web = sinComentarios(fuente('live/registro100ms.ts'));
+    assert.ok(
+      !/salaDeVideo100ms/.test(web),
+      'el registro de web nombra el adaptador nativo: eso lo mete en el paquete',
+    );
+    assert.match(web, /export function asegurarProveedorDeVideo\(\): void/);
+
+    const nativo = sinComentarios(fuente('live/registro100ms.native.ts'));
+    assert.match(nativo, /require\('@\/live\/salaDeVideo100ms'\)/);
+    assert.ok(
+      !/^import .*salaDeVideo100ms/m.test(nativo),
+      'el adaptador se importa desde arriba en vez de cargarse tarde',
+    );
+    // Idempotente, y si no se puede cargar no se levanta: se sirve la falsa.
+    assert.match(nativo, /if \(hayProveedorDeVideo\(\)\) return;/);
+    assert.match(nativo, /\} catch \{/);
+  });
+
+  it('el registro sigue siendo el unico camino', () => {
+    // `crearSalaDeVideo()` no conoce a nadie: sirve lo que le hayan registrado
+    // y, si no hay nada, la falsa. Eso es lo que hace que las pruebas y el
+    // navegador se comporten como si el SDK no existiera.
+    const SALA = sinComentarios(fuente('live/salaDeVideo.ts'));
+    assert.match(SALA, /let fabrica: FabricaDeSala \| null = null;/);
+    assert.match(SALA, /return fabrica \? fabrica\(\) : crearSalaFalsa\(\);/);
   });
 });
 

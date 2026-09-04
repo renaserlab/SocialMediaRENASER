@@ -4,6 +4,7 @@ import { FEATURE_LIVE } from '@/config/features';
 import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
 import { confirm } from '@/lib/confirm';
 import { pedirPermiso } from '@/lib/permisos';
+import { asegurarProveedorDeVideo } from '@/live/registro100ms';
 import {
   crearSesionDeDirecto,
   vistaInicialDeDirecto,
@@ -69,8 +70,8 @@ export function useSesionDeDirecto({
     y se le cuenta a la maquina con `cambiaLaSesion`, que sabe soltar la sala
     cuando la emision termina.
   */
-  const ultimas = useRef({ alCambiarLaFicha, avisar, estadoDeSesion });
-  ultimas.current = { alCambiarLaFicha, avisar, estadoDeSesion };
+  const ultimas = useRef({ alCambiarLaFicha, avisar, estadoDeSesion, esAnfitrion });
+  ultimas.current = { alCambiarLaFicha, avisar, estadoDeSesion, esAnfitrion };
 
   /**
    * La sala y la maquina nacen JUNTAS y mueren juntas.
@@ -81,10 +82,14 @@ export function useSesionDeDirecto({
    * existe, y nadie la destruiria.
    */
   const motor = useMemo(() => {
+    // El SDK se enchufa AQUI, la primera vez que alguien abre una transmision,
+    // y no al arrancar la aplicacion: cargar un modulo nativo cuesta memoria y
+    // arranque, y la mayoria de las sesiones de Z no ven un directo.
+    asegurarProveedorDeVideo();
     const sala: SalaDeVideo = crearSalaDeVideo();
 
     const maquina = crearSesionDeDirecto({
-      esAnfitrion,
+      esAnfitrion: () => ultimas.current.esAnfitrion,
       banderaEncendida: FEATURE_LIVE,
       estadoInicialDeSesion: ultimas.current.estadoDeSesion,
 
@@ -145,7 +150,12 @@ export function useSesionDeDirecto({
     });
 
     return { sala, maquina };
-  }, [emisionId, esAnfitrion]);
+    // SOLO `emisionId`. `esAnfitrion` sale de `can_manage`, que llega en la
+    // ficha y puede cambiar entre lecturas; tenerlo aqui destruia la maquina
+    // —y con ella la sala— a mitad de conexion, que es la forma mas rapida de
+    // dejar dos salas vivas y la camara encendida. Se lee por referencia.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emisionId]);
 
   /* Los eventos de la sala, traducidos a llamadas de la maquina. */
   useEffect(() => {
