@@ -30,6 +30,19 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
+#: Cuantas credenciales de sala puede pedir una persona en su ventana.
+#:
+#: PORQUE FIRMAR CUESTA Y ENTRAR NO DEBERIA REPETIRSE. Una reconexion legitima
+#: pide una credencial nueva, y eso hay que dejarlo pasar: perder la cobertura
+#: en el metro y volver es normal. Lo que no es normal es pedir veinte en un
+#: minuto, que es lo que hace un bucle o alguien probando.
+#:
+#: Diez en cinco minutos deja sitio a varias reconexiones seguidas y corta el
+#: bucle. La ventana es larga a proposito: una corta se rellena sola y no
+#: protege de nada.
+CREDENCIALES_POR_VENTANA = 10
+VENTANA_DE_CREDENCIALES = timedelta(minutes=5)
+
 #: Cuantos mensajes puede mandar una persona en la ventana.
 #:
 #: Doce en treinta segundos es mas rapido de lo que nadie escribe conversando
@@ -96,11 +109,13 @@ class VentanaDeslizante:
 
 chat = VentanaDeslizante(MENSAJES_POR_VENTANA, VENTANA_DE_CHAT)
 reacciones = VentanaDeslizante(ENVIOS_POR_VENTANA, VENTANA_DE_REACCIONES)
+credenciales = VentanaDeslizante(CREDENCIALES_POR_VENTANA, VENTANA_DE_CREDENCIALES)
 
 
 def vaciar() -> None:
     chat.vaciar()
     reacciones.vaciar()
+    credenciales.vaciar()
 
 
 def acotar_envio(counts: dict[str, int]) -> dict[str, int]:

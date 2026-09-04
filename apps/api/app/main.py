@@ -57,6 +57,14 @@ async def lifespan(_: FastAPI):
 
         await create_all_dev()
         logger.info("Modo desarrollo con SQLite: tablas ORM creadas (create_all_dev).")
+
+    # El proveedor de directo se registra AL ARRANCAR, no en cada peticion:
+    # firmar tokens es barato pero construir el cliente en caliente escondia
+    # los fallos de configuracion hasta que alguien intentaba emitir.
+    from app.modules.live import providers as proveedores_de_directo
+
+    elegido = proveedores_de_directo.registrar_desde_configuracion()
+    logger.info("Proveedor de directo: %s", elegido)
     yield
 
 

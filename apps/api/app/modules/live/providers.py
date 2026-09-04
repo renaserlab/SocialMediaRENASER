@@ -1,9 +1,9 @@
 """Abstracción del proveedor de directo.
 
-Todavía no hay proveedor elegido (LiveKit, Mux, Cloudflare Stream, Amazon IVS,
-Agora...), así que el resto del módulo no habla con ninguno en concreto: habla
-con esta interfaz. El día que se decida, se escribe una clase que la implemente
-y se registra en `PROVEEDORES`; nada más del código de directos cambia.
+**Primera fase: 100ms.** La arquitectura es neutral respecto al proveedor: el
+resto del módulo no habla con ninguno en concreto, habla con esta interfaz. Amazon
+IVS queda como alternativa futura y NO está implementada. Ver
+`docs/Z_DIRECTOS_100MS.md`.
 
 Es la MISMA forma que `payments/providers.py`, y a propósito. Las dos son la
 misma situación —una pieza que cuesta dinero y que solo puede elegir el dueño
@@ -45,13 +45,47 @@ class Credencial:
 
     #: El token que consume el SDK del proveedor.
     token: str
-    #: A dónde conectarse. Cada proveedor tiene la suya y puede cambiar.
+    #: A dónde conectarse. Cada proveedor tiene la suya y puede cambiar. Vacía
+    #: en los que llevan la sala dentro del token, como 100ms.
     url: str
     #: Segundos que dura. Corta a propósito: un permiso eterno es una llave
     #: que se puede compartir por mensaje y seguir funcionando mañana.
     expira_en: int
     #: Si permite EMITIR o solo VER. Nunca se deduce en el cliente.
     puede_emitir: bool
+    #: El rol RESUELTO POR EL SERVIDOR, con el nombre que tiene en el proveedor.
+    #: Viaja al cliente para que la pantalla sepa qué controles pintar, no para
+    #: que lo decida: lo que manda es lo que va firmado dentro del token.
+    rol: str = ""
+    #: Identificador público de la sala. Sirve para correlacionar registros; no
+    #: es un secreto y no basta para entrar.
+    room_id: str = ""
+
+
+@dataclass(frozen=True)
+class EstadoDeSala:
+    """Lo que el proveedor dice de una sala. Para conciliar, no para confiar."""
+
+    existe: bool
+    activa: bool
+
+
+@dataclass(frozen=True)
+class EventoDeProveedor:
+    """Un aviso del proveedor, ya traducido a vocabulario de Z."""
+
+    #: Identificador del AVISO, no de la sala. Es la clave contra repeticiones.
+    event_id: str
+    #: El nombre tal cual lo manda el proveedor, para poder investigar después.
+    tipo: str
+    #: Qué significa para nosotros. Ver `EVENTOS` en el adaptador.
+    significado: str
+    room_id: str
+    #: Nuestro identificador de emisión, que es como se vuelve del aviso a la
+    #: fila. Puede llegar vacío: entonces el aviso no se puede atribuir.
+    session_id: str
+    external_session_id: str = ""
+    ocurrido_en: str = ""
 
 
 class ProveedorDeDirecto(ABC):
@@ -76,9 +110,31 @@ class ProveedorDeDirecto(ABC):
 
     @abstractmethod
     async def credencial(
-        self, *, room_id: str, user_id: str, puede_emitir: bool
+        self, *, room_id: str, user_id: str, puede_emitir: bool, rol: str = ""
     ) -> Credencial:
-        """Emite un permiso temporal para esa persona en esa sala."""
+        """Emite un permiso temporal para esa persona en esa sala.
+
+        `rol` llega YA RESUELTO por el servidor. Un proveedor no decide
+        permisos: los aplica.
+        """
+
+    async def estado_de_sala(self, *, room_id: str) -> EstadoDeSala:
+        """Qué dice el proveedor de esta sala.
+
+        NO es abstracto: un proveedor que no sepa contestarlo sigue siendo
+        usable, solo que su estado no se puede conciliar. Por defecto se admite
+        que existe y está activa, que es lo que hacía el módulo antes de que
+        esto existiera.
+        """
+        return EstadoDeSala(existe=True, activa=True)
+
+    def interpretar_evento(self, cuerpo: dict) -> EventoDeProveedor | None:
+        """De un aviso del proveedor a algo que el dominio entiende.
+
+        `None` para lo que no nos incumbe, que es la mayoría. Por defecto, nada:
+        un proveedor sin webhooks no puede mover ninguna emisión.
+        """
+        return None
 
 
 class ProveedorNoConfigurado(ProveedorDeDirecto):
@@ -108,18 +164,56 @@ class ProveedorNoConfigurado(ProveedorDeDirecto):
         return None
 
     async def credencial(
-        self, *, room_id: str, user_id: str, puede_emitir: bool
+        self, *, room_id: str, user_id: str, puede_emitir: bool, rol: str = ""
     ) -> Credencial:
         raise NotImplementedError(
             "No hay proveedor de directo configurado; no se pueden emitir "
             "credenciales de sala."
         )
 
+    async def estado_de_sala(self, *, room_id: str) -> EstadoDeSala:
+        # No hay sala que consultar. Se dice, en vez de fingir que la hay.
+        return EstadoDeSala(existe=False, activa=False)
 
-#: Proveedores disponibles, por nombre. Al implementar uno real se añade aquí.
+
+#: Proveedores disponibles, por nombre.
+#:
+#: El real se registra AL ARRANCAR y solo si la configuración está completa (ver
+#: `registrar_desde_configuracion`). Que la bandera esté encendida no basta: con
+#: la clave puesta y la plantilla sin poner, crear una sala falla a mitad de
+#: camino y deja una emisión sin sala.
 PROVEEDORES: dict[str, ProveedorDeDirecto] = {
     "none": ProveedorNoConfigurado(),
 }
+
+
+def registrar_desde_configuracion() -> str:
+    """Deja registrado el proveedor real si se puede, y dice cuál quedó.
+
+    Falla en cerrado y en silencio: sin configuración completa no se registra
+    nada y el módulo sigue funcionando sin imagen, que es su estado de fábrica.
+    """
+    from app.core.config import get_settings
+
+    ajustes = get_settings()
+    PROVEEDORES.pop("100ms", None)
+    if not ajustes.live_configurado:
+        return "none"
+
+    from app.modules.live.hms_client import Configuracion100ms
+    from app.modules.live.proveedor_100ms import Proveedor100ms
+
+    PROVEEDORES["100ms"] = Proveedor100ms(
+        Configuracion100ms(
+            access_key=ajustes.hms_app_access_key,
+            app_secret=ajustes.hms_app_secret,
+            template_id=ajustes.hms_template_id,
+            api_base=ajustes.hms_api_base,
+            region=ajustes.hms_region,
+        ),
+        ttl_credencial=ajustes.live_credential_ttl_seconds,
+    )
+    return "100ms"
 
 
 def obtener_proveedor(nombre: str) -> ProveedorDeDirecto | None:

@@ -23,7 +23,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, status
+import json
+import logging
+
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +38,9 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.live import limites, providers
+from app.modules.live import limites, providers, roles, webhooks
+from app.modules.live.hms_client import ErrorDe100ms
+from app.modules.live.proveedor_100ms import traducir_error
 from app.modules.live.models import LiveMessage, LiveReactionTotal, LiveSession
 from app.modules.live.schemas import (
     REACCIONES,
@@ -54,6 +59,8 @@ from app.modules.social_graph.models import UserBlock
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import is_admin
+
+logger = logging.getLogger("renaser.live")
 
 router = APIRouter(prefix="/live", tags=["live"])
 
@@ -722,7 +729,23 @@ async def credencial(
     emitir en la sala de otra persona.
     """
     await _exigir_esquema(db)
+
+    # EL LIMITE VA ANTES DE MIRAR NADA. Firmar cuesta y consultar tambien, y lo
+    # que se protege es justo el bucle que pide credenciales sin parar. Una
+    # reconexion legitima cabe de sobra dentro de la ventana.
+    if not limites.credenciales.permitido(f"{current_user.id}|{session_id}"):
+        raise ConflictError(
+            "Demasiadas peticiones seguidas. Espera unos segundos.",
+            code="live_credential_rate_limited",
+        )
+
     sesion = await _sesion_visible(db, session_id, current_user.id)
+
+    # UNA EMISION CERRADA NO REPARTE PERMISOS. Ni de emitir ni de ver: la sala
+    # del proveedor ya no existe y el token solo serviria para que el SDK diera
+    # vueltas contra una puerta cerrada.
+    if sesion.status in ("ended", "cancelled"):
+        raise ConflictError("Esta transmisión ya terminó.", code="live_not_joinable")
 
     if not providers.hay_proveedor_real() or not sesion.provider_room_id:
         raise ServiceUnavailableError(
@@ -737,14 +760,175 @@ async def credencial(
             code="live_provider_missing",
         )
 
-    credencial = await proveedor.credencial(
-        room_id=sesion.provider_room_id,
+    # EL ROL LO DECIDE EL SERVIDOR. No llega en la peticion, no se deduce en la
+    # pantalla y no se hereda de ser administracion: hay que preguntarlo.
+    rol = roles.resolver(
         user_id=current_user.id,
-        puede_emitir=sesion.host_id == current_user.id,
+        host_id=sesion.host_id,
+        es_admin=await is_admin(db, current_user.id),
+    )
+    try:
+        credencial = await proveedor.credencial(
+            room_id=sesion.provider_room_id,
+            user_id=current_user.id,
+            puede_emitir=roles.puede_publicar(rol),
+            rol=roles.nombre_en_el_proveedor(rol),
+        )
+    except NotImplementedError:
+        raise ServiceUnavailableError(
+            "Todavía no hay proveedor de vídeo configurado.",
+            code="live_provider_not_configured",
+        ) from None
+    except ErrorDe100ms as error:
+        codigo, mensaje = traducir_error(error)
+        raise ServiceUnavailableError(mensaje, code=codigo) from None
+
+    logger.info(
+        "[live] credencial emitida sesion=%s usuario=%s rol=%s",
+        sesion.id,
+        current_user.id,
+        rol.value,
     )
     return LiveCredential(
+        provider=proveedor.nombre,
         token=credencial.token,
         url=credencial.url,
         expires_in=credencial.expira_en,
         can_publish=credencial.puede_emitir,
+        role=credencial.rol,
+        room_id=credencial.room_id,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Avisos del proveedor
+# --------------------------------------------------------------------------- #
+#
+# QUE PUEDE Y QUE NO PUEDE HACER UN AVISO. Puede CONFIRMAR lo que Z ya sabia:
+# que una sala se cerro, que una sesion fallo. No puede crear una emision, ni
+# cambiarle el dueño, ni marcar como viva una que nadie inicio desde aqui. 100ms
+# sirve el video; quien manda sobre el producto es Z.
+#
+# SE RESPONDE 204 CASI SIEMPRE, a proposito. Un error hace que el proveedor
+# reintente en bucle, y hay avisos que nunca van a cuadrar —una sala de otro
+# entorno, una emision borrada— y reintentarlos no arregla nada. Lo unico que se
+# rechaza es una autorizacion que no cuadra: eso si hay que verlo.
+
+#: Avisos ya procesados, para no repetir efectos.
+#:
+#: EN MEMORIA, con la misma limitacion que el limitador de ritmo y por el mismo
+#: motivo: con dos trabajadores, cada uno lleva su lista. Es aceptable porque la
+#: proteccion de verdad NO es esta lista sino que el efecto sea idempotente —el
+#: UPDATE es condicional, asi que aplicarlo dos veces no cambia nada la
+#: segunda—. Esta lista solo evita el trabajo repetido y el ruido en el registro.
+#:
+#: Un deduplicado persistente exigiria una tabla nueva, o sea una migracion, y
+#: eso esta pendiente de autorizacion (ver `docs/Z_DIRECTOS_100MS.md`).
+_VISTOS: dict[str, None] = {}
+_MAXIMO_VISTOS = 2048
+
+
+def _evento_ya_visto(event_id: str) -> bool:
+    if not event_id:
+        return False
+    if event_id in _VISTOS:
+        return True
+    if len(_VISTOS) >= _MAXIMO_VISTOS:
+        _VISTOS.pop(next(iter(_VISTOS)), None)
+    _VISTOS[event_id] = None
+    return False
+
+
+@router.post("/webhook/100ms", status_code=status.HTTP_204_NO_CONTENT)
+async def webhook_100ms(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Recibe los avisos de 100ms."""
+    # EL CUERPO CRUDO PRIMERO, y sin tocarlo. Aunque hoy la comprobacion sea de
+    # cabecera, el orden importa: el dia que haya firma, parsear antes de
+    # verificar es exactamente como se cuela un cuerpo modificado.
+    crudo = await request.body()
+    try:
+        webhooks.verificar(
+            cabeceras=dict(request.headers), secreto=settings.hms_webhook_secret
+        )
+    except webhooks.WebhookInvalido:
+        # No se detalla el motivo: ayudaria a quien este probando a acertar.
+        logger.warning("[live] aviso de 100ms rechazado")
+        raise ForbiddenError("Aviso no válido.") from None
+
+    try:
+        cuerpo = json.loads(crudo or b"{}")
+    except ValueError:
+        logger.warning("[live] aviso de 100ms con cuerpo ilegible")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not isinstance(cuerpo, dict):
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    proveedor = providers.obtener_proveedor("100ms")
+    if proveedor is None:
+        # Llega un aviso y el proveedor no esta registrado: la configuracion
+        # cambio bajo los pies. Se anota y se acepta para que no reintente.
+        logger.error("[live] aviso de 100ms sin el proveedor registrado")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    evento = proveedor.interpretar_evento(cuerpo)
+    if evento is None:
+        # No nos incumbe. Ignorar no es fallar.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if _evento_ya_visto(evento.event_id):
+        logger.info("[live] aviso repetido %s; no se repite el efecto", evento.event_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await _aplicar_evento_de_directo(db, evento)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _aplicar_evento_de_directo(db: AsyncSession, evento) -> None:
+    """El efecto, y solo sobre una emision que ya existe.
+
+    TODO CON UPDATE CONDICIONAL. Un aviso tardio, uno desordenado o uno repetido
+    afectan a cero filas y no cambian nada: la idempotencia esta en la sentencia,
+    no en haber recordado que ya lo vimos.
+    """
+    if not evento.session_id:
+        logger.warning("[live] aviso %s sin emision atribuible", evento.tipo)
+        return
+
+    sesion = await db.get(LiveSession, evento.session_id)
+    if sesion is None or sesion.provider != "100ms":
+        # De otro entorno, de otra cuenta, o de una emision borrada.
+        logger.warning("[live] aviso %s de una emision desconocida", evento.tipo)
+        return
+
+    if evento.significado in ("sesion_cerrada", "sala_cerrada"):
+        # SOLO desde `live`. Una emision programada que nunca empezo no se
+        # termina porque el proveedor cierre una sala vacia.
+        resultado = await db.execute(
+            update(LiveSession)
+            .where(LiveSession.id == sesion.id, LiveSession.status == "live")
+            .values(status="ended", ended_at=_ahora(), updated_at=_ahora())
+        )
+        await db.commit()
+        if resultado.rowcount:
+            logger.info("[live] emision %s cerrada por aviso del proveedor", sesion.id)
+        return
+
+    if evento.significado == "fallo":
+        # NO se cierra la emision. Un fallo del proveedor puede ser pasajero y
+        # el anfitrion puede estar reconectando; cerrarla le quitaria la sala
+        # debajo. Se deja constancia y lo resuelve la conciliacion o el propio
+        # anfitrion al terminar.
+        logger.error(
+            "[live] el proveedor informa de un fallo en la emision %s (%s)",
+            sesion.id,
+            evento.tipo,
+        )
+        return
+
+    # `sesion_abierta`, `participante_entro` y `participante_salio` se registran
+    # y no mueven nada: quien decide que una emision esta viva es quien pulso
+    # «empezar» en Z, no el proveedor.
+    logger.info("[live] aviso %s en la emision %s", evento.tipo, sesion.id)

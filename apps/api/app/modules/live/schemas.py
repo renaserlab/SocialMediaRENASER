@@ -132,9 +132,22 @@ class ReactionTotals(BaseModel):
 
 
 class LiveCredential(BaseModel):
-    """Permiso temporal para entrar en la sala del proveedor."""
+    """Permiso temporal para entrar en la sala del proveedor.
 
+    LO MINIMO PARA CONECTARSE, y nada mas. Aqui no viaja la clave de la cuenta,
+    ni la plantilla, ni la configuracion, ni quien mas esta dentro.
+    """
+
+    #: Con cual de los proveedores hay que conectarse. La pantalla lo necesita
+    #: para saber que SDK usar; no es un secreto.
+    provider: str = "none"
     token: str
+    #: Vacia en los proveedores que llevan la sala dentro del token.
     url: str
     expires_in: int
     can_publish: bool
+    #: El rol RESUELTO POR EL SERVIDOR. Viaja para que la pantalla sepa que
+    #: controles pintar; lo que manda es lo que va firmado dentro del token.
+    role: str = ""
+    #: Identificador publico de la sala, para correlacionar registros.
+    room_id: str = ""

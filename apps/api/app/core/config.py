@@ -119,6 +119,59 @@ class Settings(BaseSettings):
     #: cambiarlas no reescriba lo ya liquidado.
     fee_rules_version: str = "v1"
 
+    # ----------------------------------------------------------------- #
+    # Transmisiones en vivo
+    # ----------------------------------------------------------------- #
+
+    #: Interruptor general de los directos CON VIDEO. Apagado, el modulo entero
+    #: sigue funcionando —sala, chat, reacciones, moderacion— y lo unico que no
+    #: hay es imagen: es exactamente el estado en el que lleva viviendo el
+    #: modulo desde que se escribio.
+    feature_live: bool = False
+
+    #: Quien sirve el video. `none` es el marcador de posicion que falla en
+    #: cerrado; `100ms` es el primer proveedor real.
+    live_provider: str = "none"
+
+    #: Credenciales de 100ms. SOLO BACKEND: la clave secreta firma los tokens de
+    #: sala, asi que meterla en la aplicacion seria repartir la llave con la que
+    #: cualquiera se declara anfitrion de la emision de otro.
+    hms_app_access_key: str = ""
+    hms_app_secret: str = ""
+    #: La plantilla decide roles, calidad y grabacion. Sin ella no se puede
+    #: crear una sala, y suponerla seria crear salas con permisos por defecto.
+    hms_template_id: str = ""
+    #: Lo que se compara con la cabecera de autorizacion de los webhooks.
+    hms_webhook_secret: str = ""
+    hms_region: str = ""
+    hms_api_base: str = "https://api.100ms.live/v2"
+
+    #: Cuanto dura la credencial de sala. Corta a proposito: un permiso eterno
+    #: es una llave que se reenvia por mensaje y sigue abriendo mañana.
+    live_credential_ttl_seconds: int = 3600
+
+    #: Techo de emisiones simultaneas. Existe para que un fallo o un abuso no se
+    #: traduzca en una factura: cada sala viva cuesta minutos de proveedor.
+    live_max_concurrent: int = 3
+    #: Duracion maxima de una emision. Pasada, se puede cerrar por conciliacion.
+    live_max_duration_minutes: int = 180
+
+    @property
+    def live_configurado(self) -> bool:
+        """Si hay con que hablarle al proveedor de verdad.
+
+        Se comprueba entero y no por partes: con la clave puesta y la plantilla
+        sin poner, crear una sala falla a mitad de camino y deja una emision sin
+        sala. Es preferible no empezar.
+        """
+        if not self.feature_live or self.live_provider != "100ms":
+            return False
+        return bool(
+            (self.hms_app_access_key or "").strip()
+            and (self.hms_app_secret or "").strip()
+            and (self.hms_template_id or "").strip()
+        )
+
     @property
     def comision_configurada(self) -> bool:
         """Si hay comision valida. Sin ella no se transfiere nada."""
