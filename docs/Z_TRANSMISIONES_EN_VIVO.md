@@ -1,5 +1,18 @@
 # Transmisiones en vivo — estado técnico
 
+> **⚠ ESTE DOCUMENTO ES EL ESTUDIO PREVIO, NO LA DECISIÓN.**
+>
+> Se comparaban proveedores antes de elegir. **Ya se eligió: 100ms.** La
+> implementación, la configuración, los roles, los estados y el plan de
+> activación están en **`Z_DIRECTOS_100MS.md`**, que es el documento que
+> manda.
+>
+> Lo de aquí abajo se conserva porque el razonamiento de coste y latencia
+> sigue siendo útil para revisar la decisión más adelante. **Las cifras son
+> del momento del estudio y envejecen**: no se usen como precios vigentes.
+>
+> Amazon IVS aparece como alternativa y **no está implementada**.
+
 Rama: `Edson`.
 
 **Estado.** La **sala**, el **chat en vivo** y las **reacciones** están

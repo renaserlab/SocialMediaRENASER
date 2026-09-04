@@ -39,7 +39,7 @@ memoria: eso es una maqueta y el documento prohíbe presentarla como un directo.
 
 Para encenderlo hace falta, por este orden:
 
-1. Proveedor de directo (LiveKit, Mux, Cloudflare Stream…) con cuenta, claves y
+1. Proveedor de directo: **decidido, 100ms** (ver `Z_DIRECTOS_100MS.md`). Falta cuenta, claves y
    coste asumido.
 2. Entidad `live_sessions` (emisor, estado, inicio/fin, grabación) con RLS.
 3. Emisión de tokens de publicación/visionado desde el backend.
