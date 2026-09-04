@@ -39,8 +39,6 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.live import limites, providers, roles, webhooks
-from app.modules.live.hms_client import ErrorDe100ms
-from app.modules.live.proveedor_100ms import traducir_error
 from app.modules.live.models import LiveMessage, LiveReactionTotal, LiveSession
 from app.modules.live.schemas import (
     REACCIONES,
@@ -779,8 +777,10 @@ async def credencial(
             "Todavía no hay proveedor de vídeo configurado.",
             code="live_provider_not_configured",
         ) from None
-    except ErrorDe100ms as error:
-        codigo, mensaje = traducir_error(error)
+    except providers.ErrorDeProveedor as error:
+        # El error se recoge por el tipo del CONTRATO y lo traduce el propio
+        # proveedor: asi el router no sabe cual es ni que codigos usa.
+        codigo, mensaje = proveedor.traducir_error(error)
         raise ServiceUnavailableError(mensaje, code=codigo) from None
 
     logger.info(

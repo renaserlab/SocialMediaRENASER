@@ -181,6 +181,10 @@ class Proveedor100ms(ProveedorDeDirecto):
 
     # --------------------------------------------------------- webhooks -- #
 
+    def traducir_error(self, error) -> tuple[str, str]:
+        """Del fallo de 100ms a un código nuestro. Ver `traducir_error` abajo."""
+        return traducir_error(error)
+
     def interpretar_evento(self, cuerpo: dict) -> EventoDeProveedor | None:
         """De un aviso de 100ms a algo que el dominio entiende.
 

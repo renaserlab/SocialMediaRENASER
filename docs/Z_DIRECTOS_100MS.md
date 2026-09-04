@@ -52,9 +52,25 @@ LiveScreen / ModoVivo
       API de 100ms
 ```
 
-**Nada fuera del adaptador nombra a 100ms.** Ni los routers, ni los modelos, ni
-las pantallas, ni los stores. Es lo que permite cambiar de proveedor sin tocar
-permisos, estados, endpoints ni navegación.
+**Ninguna regla de negocio conoce a 100ms.** Los permisos, los estados, el chat,
+la moderación y la navegación no lo nombran ni importan nada suyo. El router
+recoge los fallos por el tipo del **contrato** (`ErrorDeProveedor`) y deja que el
+propio proveedor los traduzca, así que no sabe ni cuál es ni qué códigos usa.
+
+Dicho con precisión, porque una afirmación absoluta aquí sería falsa: el nombre
+`100ms` aparece **a propósito** en cuatro sitios, y los cuatro son
+irreductiblemente suyos.
+
+| Dónde | Por qué es inevitable |
+|---|---|
+| `core/config.py` | Las variables de entorno tienen que llamarse de alguna forma |
+| `providers.py` (el registro) | Alguien tiene que saber qué proveedores existen |
+| `router.py` (la ruta del webhook) | La URL se da de alta en el panel de 100ms |
+| `webhooks.py` | Cómo se autentica un aviso lo decide el proveedor |
+
+Todo lo demás —salas, credenciales, roles, errores, eventos— pasa por el
+contrato. Es lo que permite cambiar de proveedor sin tocar permisos, estados,
+endpoints públicos ni navegación.
 
 ### Ficheros
 
@@ -65,7 +81,7 @@ permisos, estados, endpoints ni navegación.
 | `live/hms_client.py` | HTTP y firma de tokens. Sin una sola regla de negocio. |
 | `live/roles.py` | La traducción de roles, en un solo sitio. |
 | `live/webhooks.py` | Comprobar que un aviso es suyo. |
-| `live/router.py` | Los endpoints. No conoce ningún proveedor por su nombre. |
+| `live/router.py` | Los endpoints. Solo nombra a 100ms en la ruta del webhook. |
 
 ---
 

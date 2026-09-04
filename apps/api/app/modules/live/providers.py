@@ -30,6 +30,24 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 
+class ErrorDeProveedor(RuntimeError):
+    """Algo salió mal hablando con el proveedor, sea cual sea.
+
+    VIVE EN EL CONTRATO Y NO EN EL ADAPTADOR para que el router pueda recogerlo
+    sin importar de quién es. Si tuviera que atrapar `ErrorDe100ms`, el router
+    sabría que existe 100ms, y eso es justo lo que este fichero evita.
+
+    `codigo` sirve para decidir si se reintenta; `estado` lleva el código HTTP
+    cuando lo hubo. El mensaje NUNCA sale al cliente tal cual: lo traduce
+    `ProveedorDeDirecto.traducir_error`.
+    """
+
+    def __init__(self, mensaje: str, *, codigo: str, estado: int | None = None) -> None:
+        super().__init__(mensaje)
+        self.codigo = codigo
+        self.estado = estado
+
+
 @dataclass(frozen=True)
 class SalaCreada:
     """Lo que devuelve el proveedor al abrir una sala."""
@@ -135,6 +153,18 @@ class ProveedorDeDirecto(ABC):
         un proveedor sin webhooks no puede mover ninguna emisión.
         """
         return None
+
+    def traducir_error(self, error: ErrorDeProveedor) -> tuple[str, str]:
+        """De un fallo suyo a `(codigo_interno, mensaje_para_la_persona)`.
+
+        NO SE FILTRA NADA DEL PROVEEDOR: ni el cuerpo, ni el nombre de la
+        plantilla, ni el identificador de la cuenta. Quien mira la pantalla no
+        puede hacer nada con eso, y quien esté probando la seguridad sí.
+
+        El valor por defecto es el más discreto: un proveedor que no traduzca
+        sus errores no puede filtrarlos por descuido.
+        """
+        return "live_provider_error", "No se pudo preparar el vídeo."
 
 
 class ProveedorNoConfigurado(ProveedorDeDirecto):

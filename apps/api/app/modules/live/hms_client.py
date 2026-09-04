@@ -30,6 +30,8 @@ from dataclasses import dataclass
 import httpx
 import jwt
 
+from app.modules.live.providers import ErrorDeProveedor
+
 logger = logging.getLogger("renaser.live")
 
 #: Cuánto se espera a la API antes de darla por no disponible.
@@ -40,18 +42,12 @@ ESPERA_MAXIMA = 15.0
 TTL_MANAGEMENT = 300
 
 
-class ErrorDe100ms(RuntimeError):
-    """Algo salió mal hablando con el proveedor.
+class ErrorDe100ms(ErrorDeProveedor):
+    """Algo salió mal hablando con 100ms.
 
-    Lleva `codigo` para poder decidir si se reintenta, y `estado` con el código
-    HTTP cuando lo hubo. El mensaje NUNCA sale al cliente tal cual: lo traduce
-    el adaptador.
+    Hereda del error del CONTRATO para que quien lo recoja no tenga que saber de
+    qué proveedor viene. Lo que lo distingue es de dónde sale, no cómo se trata.
     """
-
-    def __init__(self, mensaje: str, *, codigo: str, estado: int | None = None) -> None:
-        super().__init__(mensaje)
-        self.codigo = codigo
-        self.estado = estado
 
 
 @dataclass(frozen=True)
