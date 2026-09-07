@@ -494,7 +494,7 @@ async def list_my_courses(
             .offset(page.offset)
         )
     )
-    return await _leer_cursos(db, cursos)
+    return await _leer_cursos(db, cursos, con_revision=True)
 
 
 async def _requisitos_que_faltan(db: AsyncSession, course: Course) -> list[str]:
@@ -790,7 +790,9 @@ async def review_queue(
     cursos = list(await db.scalars(select(Course).where(Course.id.in_(ids))))
     # El orden lo decide la cola (quien lleva mas esperando), no la base.
     por_id = {c.id: c for c in cursos}
-    return await _leer_cursos(db, [por_id[i] for i in ids if i in por_id])
+    return await _leer_cursos(
+        db, [por_id[i] for i in ids if i in por_id], con_revision=True
+    )
 
 
 @router.post("/courses/{course_id}/review", response_model=CourseRead)
@@ -867,15 +869,31 @@ async def unpublish_course(
 
 
 async def _leer_curso(db: AsyncSession, course: Course) -> CourseRead:
-    return (await _leer_cursos(db, [course]))[0]
+    # Todos los que llegan aqui son del autor o de administracion: crear,
+    # editar, revisar y retirar. Por eso si va el expediente.
+    return (await _leer_cursos(db, [course], con_revision=True))[0]
 
 
-async def _leer_cursos(db: AsyncSession, cursos: list[Course]) -> list[CourseRead]:
+async def _leer_cursos(
+    db: AsyncSession, cursos: list[Course], *, con_revision: bool = False
+) -> list[CourseRead]:
     """Los cursos con sus temas y su ficha, en UNA consulta de cada cosa.
 
     Una por curso convertiria el catalogo en veinte viajes para pintar unas
     etiquetas. Con la ficha de la 0034 el riesgo es el mismo, asi que se lee en
     lote igual que los temas.
+
+    `con_revision` DECIDE SI SE MANDA EL EXPEDIENTE DE REVISION, y viene apagado
+    a proposito. `rejection_reason` lo escribe administracion en texto libre
+    —«contenido copiado de X, el autor no acredita...»— y estaba saliendo en
+    `GET /catalog/courses`, que no pide sesion: bastaba con que un curso
+    publicado se reenviara a revision y se rechazara para que cualquiera leyera
+    el motivo. Las fechas de envio y revision van con el porque describen la
+    misma gestion interna.
+
+    El detalle de `learning` ya lo trataba asi; esto solo pone de acuerdo al
+    listado con el. Apagado por defecto para que anadir un endpoint nuevo no
+    vuelva a abrirlo por descuido: quien lo necesite lo pide.
     """
     ids = [c.id for c in cursos]
     temas = await temas_de_curso.leer(db, ids)
@@ -895,8 +913,9 @@ async def _leer_cursos(db: AsyncSession, cursos: list[Course]) -> list[CourseRea
         leido.target_audience = ficha.target_audience
         leido.prerequisites = ficha.prerequisites
         leido.review_status = ficha.review_status
-        leido.submitted_at = ficha.submitted_at
-        leido.reviewed_at = ficha.reviewed_at
-        leido.rejection_reason = ficha.rejection_reason
+        if con_revision:
+            leido.submitted_at = ficha.submitted_at
+            leido.reviewed_at = ficha.reviewed_at
+            leido.rejection_reason = ficha.rejection_reason
         salida.append(leido)
     return salida

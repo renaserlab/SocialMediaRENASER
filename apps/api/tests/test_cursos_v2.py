@@ -662,6 +662,43 @@ async def test_el_motivo_del_rechazo_no_es_para_todo_el_mundo(entorno):
 
 
 @pytest.mark.asyncio
+async def test_el_catalogo_publico_no_reparte_el_expediente_de_revision(entorno):
+    """`GET /catalog/courses` no pide sesion. No puede llevar notas internas.
+
+    EL CAMINO QUE LO ABRIA. Un curso PUBLICADO se puede reenviar a revision y
+    ser rechazado sin salir del catalogo; el listado copiaba `rejection_reason`
+    —texto libre que escribe administracion— tal cual, junto con las fechas de
+    envio y revision. El detalle de `learning` ya lo tapaba; el listado no.
+    """
+    http, sesiones, identidad = entorno
+    curso = await _aprobado(http, sesiones, identidad, price_minor=0)
+    await http.post(f"{CATALOGO}/courses/{curso['id']}/publish")
+    # Se reenvia y se rechaza estando ya publicado.
+    await http.post(f"{CATALOGO}/courses/{curso['id']}/submit")
+    identidad["uid"] = ADMIN
+    await http.post(
+        f"{CATALOGO}/courses/{curso['id']}/review",
+        json={"decision": "reject", "reason": "El autor no acredita el caso."},
+    )
+
+    identidad["uid"] = None  # sin sesion, como cualquiera
+    publico = (await http.get(f"{CATALOGO}/courses")).json()
+    fila = next(c for c in publico if c["id"] == curso["id"])
+    assert fila["rejection_reason"] is None
+    assert fila["submitted_at"] is None
+    assert fila["reviewed_at"] is None
+
+    # A su autor SI le llega, que es quien tiene que corregirlo.
+    identidad["uid"] = ANA
+    mio = next(
+        c
+        for c in (await http.get(f"{CATALOGO}/courses/mine")).json()
+        if c["id"] == curso["id"]
+    )
+    assert mio["rejection_reason"] == "El autor no acredita el caso."
+
+
+@pytest.mark.asyncio
 async def test_la_cola_de_revision_es_solo_de_administracion(entorno):
     http, sesiones, identidad = entorno
     curso = await _listo_para_revision(http, sesiones)

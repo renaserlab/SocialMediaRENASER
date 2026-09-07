@@ -47,6 +47,7 @@ LEARNING = "/api/v1/learning"
 ANA = "aaaaaaaa-0000-0000-0000-000000000001"
 BRUNO = "aaaaaaaa-0000-0000-0000-000000000002"  # autor del curso
 JEFA = "aaaaaaaa-0000-0000-0000-000000000003"  # administración
+MODERA = "aaaaaaaa-0000-0000-0000-00000000000d"  # solo modera contenido
 CARLA = "aaaaaaaa-0000-0000-0000-000000000004"
 CURSO = "cccccccc-0000-0000-0000-000000000001"
 ORDEN = "00000000-0000-0000-0000-0000000000a1"
@@ -322,6 +323,38 @@ async def test_el_creador_del_curso_NO_puede_aprobar(entorno):
             f"{ADMIN}/refund-requests/{solicitud['id']}/{ruta}", json={"notes": "x"}
         )
         assert respuesta.status_code == 403, f"{ruta}: {respuesta.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_quien_solo_modera_contenido_no_mueve_dinero(entorno):
+    """`moderator` oculta publicaciones. No aprueba reembolsos.
+
+    LOS DOS PERMISOS SE PARECEN Y NO SON EL MISMO. La comprobación usaba
+    `is_admin`, y ese conjunto incluye `moderator`: el rol pensado para resolver
+    un reporte podía entrar en la bandeja, leer el motivo privado de cualquier
+    alumno y lanzar un reembolso real contra la pasarela. Ahora el dinero exige
+    `FINANCE_ROLES`, que es más estrecho.
+    """
+    http, identidad, sesiones = entorno
+    await _arrancar_garantia(sesiones)
+    solicitud = (await _pedir(http)).json()
+
+    async with sesiones() as db:
+        db.add(Profile(id=MODERA, full_name="Modera", username="modera", role="moderator"))
+        await db.commit()
+
+    identidad["uid"] = MODERA
+    assert (await http.get(f"{ADMIN}/refund-requests")).status_code == 403
+    assert (
+        await http.get(f"{ADMIN}/refund-requests/{solicitud['id']}")
+    ).status_code == 403
+    for ruta in ("take", "approve", "reject", "retry", "cancel"):
+        respuesta = await http.post(
+            f"{ADMIN}/refund-requests/{solicitud['id']}/{ruta}", json={"notes": "x"}
+        )
+        assert respuesta.status_code == 403, f"{ruta}: {respuesta.status_code}"
+    # Y tampoco la tesorería: los saldos retenidos son dinero, no moderación.
+    assert (await http.get(f"{ADMIN}/owner-balances/health")).status_code == 403
 
 
 @pytest.mark.asyncio

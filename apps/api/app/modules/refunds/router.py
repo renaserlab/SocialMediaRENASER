@@ -52,7 +52,7 @@ from app.modules.refunds.schemas import (
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin
+from app.shared.permissions import puede_mover_dinero
 
 logger = logging.getLogger("renaser.refunds")
 
@@ -362,14 +362,17 @@ async def aceptar_recompra(
 async def _exigir_gestor(db: AsyncSession, current_user: AuthUser) -> None:
     """Quién puede gestionar devoluciones.
 
-    Hoy: el rol de administración que ya existe. Mañana puede ser un permiso
-    propio (`refund_manager`) y solo cambia esta función.
+    `puede_mover_dinero` y NO `is_admin`. Parecen lo mismo y no lo son:
+    `is_admin` incluye el rol `moderator`, que existe para ocultar una
+    publicación o resolver un reporte. Con él, esa misma cuenta podía aprobar y
+    ejecutar un reembolso real contra la pasarela y leer el motivo privado de
+    cualquier alumno. Moderar contenido no es administrar dinero.
 
     LO QUE NUNCA SERÁ: el autor del curso. Aprobar la devolución de lo que uno
     vende es juez y parte, y además le daría acceso al motivo privado de quien
     la pide.
     """
-    if not await is_admin(db, current_user.id):
+    if not await puede_mover_dinero(db, current_user.id):
         raise ForbiddenError("No puedes gestionar devoluciones.")
 
 

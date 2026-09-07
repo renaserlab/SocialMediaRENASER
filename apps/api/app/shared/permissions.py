@@ -18,8 +18,19 @@ from app.core.security import AuthUser, get_current_user
 from app.modules.profiles.models import Profile
 from app.shared.database import get_db
 
-#: Roles con permisos de gestion.
+#: Roles con permisos de gestion: moderar contenido, ver colas, retirar cosas.
 ADMIN_ROLES = {"admin", "moderator"}
+
+#: Roles que pueden MOVER DINERO: aprobar y ejecutar devoluciones, liberar
+#: saldos retenidos y transferir a los propietarios.
+#:
+#: ES UN CONJUNTO APARTE, Y MAS ESTRECHO. `moderator` existe para ocultar una
+#: publicacion o resolver un reporte; con `ADMIN_ROLES` esa misma cuenta podia
+#: llamar a `POST /admin/refund-requests/{id}/approve` y lanzar un reembolso
+#: real contra la pasarela, ademas de leer el motivo privado y el historial de
+#: cualquier alumno. Moderar contenido y devolver dinero son dos trabajos
+#: distintos y no tienen por que caer en la misma persona.
+FINANCE_ROLES = {"admin"}
 
 
 async def get_role(db: AsyncSession, user_id: str) -> str:
@@ -28,6 +39,15 @@ async def get_role(db: AsyncSession, user_id: str) -> str:
 
 async def is_admin(db: AsyncSession, user_id: str) -> bool:
     return await get_role(db, user_id) in ADMIN_ROLES
+
+
+async def puede_mover_dinero(db: AsyncSession, user_id: str) -> bool:
+    """Si esta cuenta puede tocar devoluciones, saldos y transferencias.
+
+    Separada de `is_admin` para que cambiar quien administra el dinero sea
+    cambiar un conjunto, y no repasar cada endpoint buscando cual se olvido.
+    """
+    return await get_role(db, user_id) in FINANCE_ROLES
 
 
 async def require_admin(

@@ -38,7 +38,7 @@ from app.modules.refunds import esquema as esquema_devoluciones
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin
+from app.shared.permissions import is_admin, puede_mover_dinero
 
 router = APIRouter(prefix="/commerce", tags=["comercio-propietario"])
 
@@ -219,7 +219,13 @@ admin_router = APIRouter(prefix="/admin", tags=["comercio-administracion"])
 
 
 async def _exigir_admin(db: AsyncSession, current_user: AuthUser) -> None:
-    if not await is_admin(db, current_user.id):
+    """Los saldos son dinero, así que valen los mismos permisos que el dinero.
+
+    `puede_mover_dinero` y no `is_admin`: este endpoint dice cuánto hay
+    retenido, cuánto congelado y desde cuándo. Es información de tesorería, no
+    de moderación, y `is_admin` incluía al rol `moderator`.
+    """
+    if not await puede_mover_dinero(db, current_user.id):
         raise ForbiddenError("Solo administración puede ver los saldos.")
 
 
