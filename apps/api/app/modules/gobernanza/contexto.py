@@ -25,10 +25,13 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import re
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass
+
+logger = logging.getLogger("renaser.contexto")
 
 #: El identificador de la petición en curso. Se rellena en el middleware y lo
 #: lee quien audita, sin tener que pasarlo por veinte firmas de función.
@@ -84,27 +87,77 @@ def familia_del_agente(agente: str | None) -> str | None:
     bajo = agente.lower()
     for aguja, nombre in _FAMILIAS:
         if aguja in bajo:
-            version = re.search(rf"{aguja}/(\d+)", bajo)
+            if aguja == "safari":
+                # EN SAFARI EL NÚMERO NO VA DETRÁS DEL NOMBRE. `Safari/605.1.15`
+                # es la compilación de WebKit, no la versión del navegador: esa
+                # está en `Version/17.0`. Guardar «Safari 605» sería apuntar un
+                # dato que parece una versión y no lo es, en una tabla que
+                # alguien va a leer para investigar algo.
+                version = re.search(r"version/(\d{1,4})", bajo)
+            else:
+                version = re.search(rf"{aguja}/(\d{{1,4}})", bajo)
             return f"{nombre} {version.group(1)}" if version else nombre
     return "otro"
 
 
-def _primera_ip(cabecera: str | None, respaldo: str | None) -> str | None:
-    """La IP de quien pide, o `None`.
+#: Lo unico que se acepta como identificador de peticion venido de fuera.
+#: Letras, digitos, punto, guion y guion bajo: cubre un uuid, un ULID y lo que
+#: generan los proxys habituales, y deja fuera espacios, saltos de linea,
+#: caracteres de control y cualquier cosa que no sea latin-1.
+_ADMISIBLE = re.compile(r"\A[A-Za-z0-9._-]{1,64}\Z")
 
-    `X-Forwarded-For` es una lista y la primera entrada es la del cliente… si
-    quien la escribió es de fiar. **Cualquiera puede mandar esa cabecera**, así
-    que solo se usa cuando la configuración declara que hay un proxy delante;
-    si no, se usa la del socket. Confiar en ella siempre sería dejar que quien
-    quiera elija qué IP se le apunta.
+
+def identificador_admisible(valor: str | None) -> str | None:
+    """El identificador entrante si es presentable, o `None`.
+
+    Se rechaza entero en vez de limpiarlo. Un valor saneado a medias sigue
+    siendo texto elegido por quien pide, y este dato viaja a la tabla de
+    auditoria, a cada linea de registro y de vuelta en una cabecera de
+    respuesta: los tres sitios donde una cadena con caracteres de control deja
+    de poder leerse con confianza.
+    """
+    if not valor:
+        return None
+    return valor if _ADMISIBLE.match(valor) else None
+
+
+def _ip_del_cliente(cabecera: str | None, respaldo: str | None) -> str | None:
+    """La IP de quien pide, o `None`. NO es la primera de la cadena.
+
+    `X-Forwarded-For` es una lista, y **cualquiera puede mandarla**: solo se mira
+    cuando la configuración declara que hay un proxy delante.
+
+    SE TOMA LA ÚLTIMA ENTRADA, NO LA PRIMERA, y esto es lo que hace que la
+    cabecera valga para algo. Un proxy no reemplaza el valor: AÑADE al final la
+    dirección desde la que le llegó la conexión. Si el cliente manda
+    `X-Forwarded-For: 9.9.9.9`, lo que llega es `9.9.9.9, <la de verdad>`.
+    Leyendo la primera se guardaba exactamente el texto que eligió quien pide, y
+    con ello se podía falsificar el origen de un consentimiento o incriminar a
+    otro prefijo de red. La última la escribió nuestro proxy.
+
+    Y SE VALIDA QUE SEA UNA IP antes de devolverla: si no lo es, no vale ni para
+    agrupar, y hashear texto arbitrario del cliente solo llena una columna.
     """
     from app.core.config import get_settings
 
     if cabecera and getattr(get_settings(), "trust_proxy_headers", False):
-        primera = cabecera.split(",")[0].strip()
-        if primera:
-            return primera
-    return (respaldo or "").strip() or None
+        partes = [p.strip() for p in cabecera.split(",") if p.strip()]
+        if partes:
+            ultima = partes[-1]
+            try:
+                ipaddress.ip_address(ultima)
+                return ultima
+            except ValueError:
+                # Cabecera malformada: se ignora entera y se usa el socket.
+                pass
+    directa = (respaldo or "").strip()
+    if not directa:
+        return None
+    try:
+        ipaddress.ip_address(directa)
+    except ValueError:
+        return None
+    return directa
 
 
 def _prefijo(ip: str) -> str | None:
@@ -119,15 +172,38 @@ def _prefijo(ip: str) -> str | None:
     return str(red)
 
 
+#: Longitud mínima de la sal. Por debajo, se trata como si no hubiera.
+#:
+#: NO ES UN NÚMERO DE ADORNO. El espacio entero de IPv4 son 2^32 direcciones: se
+#: recorre en minutos. Lo único que impide reconstruir una IP a partir de su
+#: huella es no conocer la sal, así que una sal de cuatro caracteres se adivina
+#: junto con la dirección y la protección desaparece sin que nadie se entere.
+LARGO_MINIMO_DE_SAL = 32
+
+
 def _huella(ip: str) -> str | None:
+    import hmac
+
     from app.core.config import get_settings
 
     sal = (getattr(get_settings(), "ip_hash_salt", "") or "").strip()
-    if not sal:
-        # Sin sal, el hash de una IPv4 se revierte por fuerza bruta en segundos.
-        # Escribirlo daría una sensación de protección que no existe.
+    if len(sal) < LARGO_MINIMO_DE_SAL:
+        # Sin sal —o con una demasiado corta— el hash se revierte por fuerza
+        # bruta. Se devuelve `None` y no un hash: escribirlo daría una sensación
+        # de protección que no existe, y eso es peor que no tener nada, porque
+        # nadie vuelve a mirarlo.
+        if sal:
+            logger.warning(
+                "[contexto] IP_HASH_SALT tiene %d caracteres y hacen falta %d: "
+                "no se guarda ninguna huella de IP",
+                len(sal),
+                LARGO_MINIMO_DE_SAL,
+            )
         return None
-    return hashlib.sha256(f"{sal}|{ip}".encode("utf-8")).hexdigest()
+    # HMAC y no `sha256(sal + ip)`: con la concatenación simple, conocer el
+    # hash de una entrada permite extender el mensaje. Aquí no es explotable,
+    # pero HMAC es la construcción correcta y no cuesta nada.
+    return hmac.new(sal.encode("utf-8"), ip.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def leer_origen(peticion) -> OrigenDeLaPeticion:
@@ -139,7 +215,7 @@ def leer_origen(peticion) -> OrigenDeLaPeticion:
     """
     cabeceras = getattr(peticion, "headers", {}) or {}
     cliente = getattr(peticion, "client", None)
-    ip = _primera_ip(
+    ip = _ip_del_cliente(
         cabeceras.get("x-forwarded-for"), getattr(cliente, "host", None)
     )
     return OrigenDeLaPeticion(

@@ -96,12 +96,21 @@ def create_app() -> FastAPI:
     # reporta un fallo pueda decir cual fue el suyo.
     @app.middleware("http")
     async def _con_identificador(request, call_next):  # noqa: ANN001, ANN202
-        from app.modules.gobernanza.contexto import fijar_request_id, nuevo_request_id
+        from app.modules.gobernanza.contexto import (
+            fijar_request_id,
+            identificador_admisible,
+            nuevo_request_id,
+        )
 
         entrante = (request.headers.get("x-request-id") or "").strip()
-        # Se acota lo que viene de fuera: es una cabecera que manda cualquiera y
-        # acaba en una columna y en cada linea de registro.
-        identificador = entrante[:64] if entrante else nuevo_request_id()
+        # SE VALIDA CON UNA LISTA BLANCA, NO SE RECORTA. Recortar a 64 dejaba
+        # pasar el contenido entero: esta cabecera la manda cualquiera y acaba
+        # en una columna de auditoria, en cada linea de registro y —lo peor— de
+        # vuelta en una cabecera de respuesta. Un valor con caracteres de
+        # control ensucia el registro de forma que ya no se puede leer con
+        # confianza, y uno fuera de latin-1 revienta al escribir la respuesta.
+        # Lo que no encaje se descarta entero y se genera uno propio.
+        identificador = identificador_admisible(entrante) or nuevo_request_id()
         testigo = fijar_request_id(identificador)
         try:
             respuesta = await call_next(request)
