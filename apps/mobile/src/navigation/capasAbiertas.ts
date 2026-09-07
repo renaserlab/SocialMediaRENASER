@@ -48,6 +48,33 @@ export function registrarCapaAbierta(cerrar: Cerrar): () => void {
   };
 }
 
+/**
+ * Anuncia que ESTA PANTALLA se queda el Atras, y devuelve como retirarlo.
+ *
+ * NO ES UNA CAPA, y por eso tiene su propio nombre aunque comparta la pila.
+ * Una capa tapa la pantalla; esto es una pantalla que necesita despedirse antes
+ * de irse: el asistente de curso tiene que preguntar si se guarda lo escrito, y
+ * el detalle de la bandeja de administracion tiene que volver a la lista en vez
+ * de salir de la pantalla entera.
+ *
+ * EL FALLO QUE CIERRA. Las dos resolvian su salida con el boton Atras de la
+ * cabecera y nada mas. La tecla FISICA de Android no pasaba por ahi: llamaba a
+ * `volver()` directamente, y el asistente perdia lo escrito en el paso actual
+ * sin preguntar nada.
+ *
+ * COMPARTE LA PILA A PROPOSITO. La pregunta que responde el Atras es una sola
+ * —«¿hay alguien que se quede este evento?»— y tener dos registros obligaria a
+ * decidir cual manda cuando los dos contestan que si. Con una pila, manda el
+ * ultimo que se monto, que es lo que la persona esta mirando.
+ *
+ * QUIEN SE REGISTRA AQUI DEBE NAVEGAR EL MISMO. El `salir` que se pasa se
+ * encarga de volver; la maquina de `atras.ts` se limita a llamarlo y a dar el
+ * evento por atendido.
+ */
+export function registrarSalidaPropia(salir: Cerrar): () => void {
+  return registrarCapaAbierta(salir);
+}
+
 /** ¿Tiene el Atras algo que cerrar antes de tocar la navegacion? */
 export function hayCapaAbierta(): boolean {
   return capas.length > 0;

@@ -183,3 +183,32 @@ test('un 403 se distingue de un fallo de carga', () => {
     assert.match(pantalla[1], /gestion\.sinPermiso/, `${pantalla[0]} no lo explica`);
   }
 });
+
+test('el Atras fisico del asistente pasa por su despedida, no por goBack', () => {
+  /*
+    EL FALLO. La pregunta «¿guardo antes de salir?» colgaba solo del boton
+    Atras de la cabecera. La tecla del telefono no pasa por ahi: la atendia la
+    maquina de `navigation/atras.ts`, que veia una ruta anterior y volvia sin
+    mas. Lo escrito en el paso actual se perdia sin avisar, y salir con Atras
+    es la forma mas comun de salir de una pantalla en Android.
+  */
+  assert.match(ASISTENTE, /registrarSalidaPropia/);
+  assert.match(ASISTENTE, /ultimoSalir\.current = salir;/);
+  // Se registra UNA vez, no en cada render: el registro es una pila y volver a
+  // montarlo lo subiria a la cima constantemente.
+  assert.match(ASISTENTE, /useEffect\(\(\) => registrarSalidaPropia\([\s\S]{0,80}?\), \[\]\)/);
+});
+
+test('el asistente no escribe dos veces por dos toques seguidos', () => {
+  /*
+    `guardando` es estado de React: no esta puesto hasta el siguiente render, y
+    entre el primer toque y ese render caben mas toques. Cada uno volvia a
+    subir la portada y a guardar el curso; en «publicar» eran dos peticiones de
+    publicacion sobre el mismo curso.
+  */
+  assert.match(ASISTENTE, /const ocupadoRef = useRef\(false\);/);
+  assert.match(ASISTENTE, /if \(ocupadoRef\.current\) return;\s*ocupadoRef\.current = true;/);
+  // Y los tres puntos de entrada pasan por el cerrojo.
+  assert.match(ASISTENTE, /enSerie\(accion === 'publicar' \? publicar : enviarARevision\)/);
+  assert.match(ASISTENTE, /enSerie\(\(\) =>\s*siguiente\.id === 'revisar'/);
+});

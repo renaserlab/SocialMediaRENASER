@@ -147,3 +147,11 @@ test('la lista se pagina y se filtra por estado contra el servidor', () => {
   assert.match(BANDEJA, /status: estado/);
   assert.match(BANDEJA, /onEndReached/);
 });
+
+test('el Atras fisico cierra el expediente abierto, no la bandeja entera', () => {
+  // El detalle no es otra pantalla: es esta cambiando lo que pinta. Sin
+  // registrarlo, Atras veia una ruta anterior y sacaba de la seccion a quien
+  // estaba leyendo un expediente.
+  assert.match(BANDEJA, /registrarSalidaPropia/);
+  assert.match(BANDEJA, /if \(!abierta\) return;\s*return registrarSalidaPropia\(\(\) => setAbierta\(null\)\);/);
+});

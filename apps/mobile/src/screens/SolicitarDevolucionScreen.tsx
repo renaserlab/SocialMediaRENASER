@@ -61,6 +61,11 @@ export function SolicitarDevolucionScreen() {
    * Cerrojo SÍNCRONO. `enviando` se aplica en el siguiente render; entre el
    * primer toque y ese render caben más toques, y cada uno abriría su propio
    * expediente.
+   *
+   * SE CIERRA ANTES DEL DIÁLOGO, no después. Con el cierre detrás del
+   * `await confirm(...)` el cerrojo no protege nada: los dos toques encuentran
+   * la referencia todavía en `false`, los dos abren su diálogo y aceptar los
+   * dos abre dos expedientes. Si la persona cancela, se vuelve a abrir.
    */
   const enviandoRef = useRef(false);
 
@@ -77,6 +82,7 @@ export function SolicitarDevolucionScreen() {
     const orderId = estado?.orderId;
     if (!orderId) return;
 
+    enviandoRef.current = true;
     const aceptado = await confirm({
       title: t('devolucion.confirmarTitulo'),
       message: t('devolucion.confirmarCuerpo', {
@@ -84,9 +90,11 @@ export function SolicitarDevolucionScreen() {
       }),
       confirmLabel: t('common.send'),
     });
-    if (!aceptado) return;
+    if (!aceptado) {
+      enviandoRef.current = false;
+      return;
+    }
 
-    enviandoRef.current = true;
     setEnviando(true);
     setFallo(null);
     try {

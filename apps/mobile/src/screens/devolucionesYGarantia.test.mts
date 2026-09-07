@@ -43,6 +43,7 @@ const TARJETA = fuente('components/TarjetaDeGarantia.tsx');
 const FORMULARIO = fuente('screens/SolicitarDevolucionScreen.tsx');
 const HISTORIAL = fuente('screens/ComprasYDevolucionesScreen.tsx');
 const CURSO = fuente('screens/CourseScreen.tsx');
+const ADMIN = fuente('screens/AdminDevolucionesScreen.tsx');
 const AJUSTES = fuente('screens/SettingsScreen.tsx');
 const REPOSITORIO = fuente('repositories/PaymentRepository.ts');
 
@@ -257,6 +258,37 @@ describe('la solicitud de devolución', () => {
       ),
       'Y el botón se apaga mientras se envía: es la mitad visible.',
     );
+  });
+
+  it('echa el cerrojo ANTES de abrir el diálogo de confirmación', () => {
+    /*
+      EL CERROJO DETRÁS DEL DIÁLOGO NO PROTEGE NADA. La comprobación estaba al
+      entrar, pero la referencia no se ponía a `true` hasta DESPUÉS del
+      `await confirm(...)`: dos toques rápidos la encuentran los dos en
+      `false`, los dos abren su diálogo, y aceptar los dos abre dos
+      expedientes sobre la misma compra. Justo lo que el cerrojo existe para
+      impedir.
+
+      Y si la persona cancela hay que soltarlo, o el botón se queda muerto
+      hasta salir de la pantalla.
+    */
+    for (const [fichero, nombre, ref] of [
+      [FORMULARIO, 'la solicitud', 'enviandoRef'],
+      [HISTORIAL, 'la retirada', 'retirandoRef'],
+      [ADMIN, 'las acciones de administración', 'enviandoRef'],
+    ] as const) {
+      const cerrojo = fichero.indexOf(`${ref}.current = true;`);
+      const dialogo = fichero.indexOf('await confirm({');
+      assert.ok(cerrojo !== -1 && dialogo !== -1, `Faltan cerrojo o diálogo en ${nombre}.`);
+      assert.ok(
+        cerrojo < dialogo,
+        `En ${nombre} el cerrojo se echa antes de abrir el diálogo.`,
+      );
+      assert.ok(
+        fichero.includes(`${ref}.current = false;`),
+        `En ${nombre} hay que soltar el cerrojo si se cancela.`,
+      );
+    }
   });
 
   it('resume las consecuencias y confirma antes de enviar', () => {

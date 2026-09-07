@@ -10,6 +10,7 @@ import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
+import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { deCentavos } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
 import { ApiError } from '@/services/api';
@@ -153,6 +154,17 @@ export function AdminDevolucionesScreen() {
   const [abierta, setAbierta] = useState<DetalleDeSolicitud | null>(null);
   const [abriendo, setAbriendo] = useState(false);
   const masRef = useRef(false);
+  /*
+    EL DETALLE SE CIERRA CON EL ATRAS FISICO, no solo con su enlace «Volver».
+
+    No es una pantalla aparte: es esta misma cambiando lo que pinta. Sin esto,
+    la tecla Atras de Android veia una ruta anterior, salia de la bandeja
+    entera y quien estaba mirando un expediente acababa fuera de la seccion.
+  */
+  useEffect(() => {
+    if (!abierta) return;
+    return registrarSalidaPropia(() => setAbierta(null));
+  }, [abierta]);
 
   useEffect(() => {
     const temporizador = setTimeout(() => setBusqueda(texto.trim()), 350);
@@ -392,13 +404,17 @@ function Detalle({
 
   const ejecutar = async (accion: AccionDeDevolucion): Promise<void> => {
     // Cerrojo síncrono: `enviando` no está puesto hasta el siguiente render, y
-    // dos toques rápidos caben de sobra en ese hueco.
+    // dos toques rápidos caben de sobra en ese hueco. Se cierra ANTES de abrir
+    // el diálogo, porque cerrarlo después deja pasar los dos toques: los dos
+    // encuentran la referencia abierta y aceptar los dos avisos ejecuta la
+    // acción financiera dos veces.
     if (enviandoRef.current) return;
     const motivo = notas.trim();
     if (accion === 'reject' && motivo === '') {
       notify(t('devolucionesAdmin.notasFaltan'));
       return;
     }
+    enviandoRef.current = true;
     const aviso = AVISOS[accion];
     if (aviso) {
       const aceptado = await confirm({
@@ -409,9 +425,11 @@ function Detalle({
         confirmLabel: t(`devolucionesAdmin.${ETIQUETA_DE_ACCION[accion]}`),
         destructive: accion === 'reject' || accion === 'cancel',
       });
-      if (!aceptado) return;
+      if (!aceptado) {
+        enviandoRef.current = false;
+        return;
+      }
     }
-    enviandoRef.current = true;
     setEnviando(accion);
     try {
       await OwnerRepository.accion(solicitud.id, accion, motivo || undefined);

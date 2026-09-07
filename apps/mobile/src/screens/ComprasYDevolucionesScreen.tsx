@@ -128,14 +128,19 @@ export function ComprasYDevolucionesScreen() {
 
   const retirar = async (solicitud: SolicitudDeDevolucion): Promise<void> => {
     // Cerrojo síncrono: `retirando` no está puesto hasta el siguiente render.
+    // Se cierra ANTES del diálogo: detrás no protege nada, porque los dos
+    // toques lo encuentran abierto y acaban abriendo dos diálogos.
     if (retirandoRef.current) return;
+    retirandoRef.current = true;
     const aceptado = await confirm({
       title: t('compras.retirarTitulo'),
       message: t('compras.retirarCuerpo'),
       confirmLabel: t('compras.retirar'),
     });
-    if (!aceptado) return;
-    retirandoRef.current = true;
+    if (!aceptado) {
+      retirandoRef.current = false;
+      return;
+    }
     setRetirando(solicitud.id);
     try {
       await DevolucionesRepository.cancelarSolicitud(solicitud.id);

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -35,6 +35,7 @@ import {
 import { confirm, notify } from '@/lib/confirm';
 import { aCentavos, aTextoEditable } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
+import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { LearningRepository, type RequisitosDeCurso } from '@/repositories/LearningRepository';
 import { pickImage, signMediaUrls, uploadPostMedia, type PickedMedia } from '@/services/storage';
@@ -175,6 +176,32 @@ export function AsistenteDeCursoScreen() {
   };
 
   /**
+   * Cerrojo SÍNCRONO de las acciones que escriben. `guardando` es estado, y el
+   * estado no está puesto hasta el siguiente render: entre el primer toque y
+   * ese render caben más toques, y cada uno subía otra vez la portada y volvía
+   * a guardar el curso. En «publicar» el resultado era pedir dos publicaciones
+   * del mismo curso.
+   *
+   * Envuelve solo los puntos de entrada que salen de un botón. `guardar` queda
+   * fuera a propósito: la llaman desde dentro `publicar`, `irARevisar`,
+   * `enviarARevision` y `salir`, y si tomara el cerrojo se bloquearía a sí
+   * misma.
+   */
+  const ocupadoRef = useRef(false);
+  /** El `salir` del render actual, para que el Atras fisico use el vigente. */
+  const ultimoSalir = useRef<() => Promise<void>>(async () => {});
+
+  const enSerie = async (accion: () => Promise<unknown>): Promise<void> => {
+    if (ocupadoRef.current) return;
+    ocupadoRef.current = true;
+    try {
+      await accion();
+    } finally {
+      ocupadoRef.current = false;
+    }
+  };
+
+  /**
    * Guarda lo escrito en el curso. Devuelve si salió bien.
    *
    * Se manda TODO el borrador y no solo el paso actual: el servidor distingue
@@ -311,6 +338,22 @@ export function AsistenteDeCursoScreen() {
     }
     volver();
   };
+
+  /*
+    EL ATRAS FISICO DE ANDROID TAMBIEN PASA POR `salir()`.
+
+    Hasta ahora la pregunta de «¿guardo antes de salir?» colgaba solo del boton
+    Atras de la cabecera. La tecla del telefono no pasa por ahi: la atendia la
+    maquina de `navigation/atras.ts`, que veia una ruta anterior y volvia sin
+    mas, y lo escrito en el paso actual se perdia sin avisar. Es la forma mas
+    comun de salir de una pantalla en Android.
+
+    `salir` se redefine en cada render —cierra sobre el borrador—, asi que se
+    guarda en una referencia y el registro se hace UNA vez: el registro es una
+    pila, y volver a montarlo en cada render lo subiria a la cima constantemente.
+  */
+  ultimoSalir.current = salir;
+  useEffect(() => registrarSalidaPropia(() => void ultimoSalir.current()), []);
 
   if (cargando) {
     return (
@@ -670,7 +713,9 @@ export function AsistenteDeCursoScreen() {
               <Button
                 label={accion === 'publicar' ? t('course.publish') : t('wizard.sendForReview')}
                 loading={guardando}
-                onPress={() => void (accion === 'publicar' ? publicar() : enviarARevision())}
+                onPress={() =>
+                  void enSerie(accion === 'publicar' ? publicar : enviarARevision)
+                }
                 style={styles.mitad}
               />
             )
@@ -679,11 +724,13 @@ export function AsistenteDeCursoScreen() {
               label={t('wizard.saveAndContinue')}
               loading={guardando}
               onPress={() =>
-                void (siguiente.id === 'revisar'
-                  ? irARevisar()
-                  : guardar().then((bien) => {
-                      if (bien) setPaso(siguiente.id);
-                    }))
+                void enSerie(() =>
+                  siguiente.id === 'revisar'
+                    ? irARevisar()
+                    : guardar().then((bien) => {
+                        if (bien) setPaso(siguiente.id);
+                      }),
+                )
               }
               style={styles.mitad}
             />
