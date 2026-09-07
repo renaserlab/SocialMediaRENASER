@@ -369,6 +369,7 @@ async def aceptar_recompra(
     # la 0050. Bloquear una compra por eso sería una regresión.
     # ------------------------------------------------------------------ #
     origen = leer_origen(request)
+    consentimiento = None
     try:
         async with db.begin_nested():
             consentimiento = await consentimientos.registrar(
@@ -386,6 +387,26 @@ async def aceptar_recompra(
                 scope_id=payload.course_id,
                 origen=origen,
             )
+    except Exception:  # noqa: BLE001
+        # CUALQUIER fallo, no solo la politica sin sembrar. Capturar unicamente
+        # `PoliticaAusente` dejaba pasar el resto —un CHECK incumplido, la 0050
+        # a medias— y esos SI tumbaban la peticion entera: la aceptacion legal,
+        # que ya estaba volcada, se perdia con el `rollback` de la dependencia y
+        # la compra quedaba bloqueada. Lo accesorio no puede tumbar lo principal.
+        logger.warning(
+            "[devoluciones] la aceptacion se guardo en refund_policy_acceptances "
+            "pero no se pudo registrar el consentimiento compartido",
+            exc_info=True,
+        )
+
+    # SAVEPOINT APARTE PARA LA ANOTACION, y esta separacion es el motivo de que
+    # haya dos bloques y no uno. Compartiendo savepoint, un fallo al anotar
+    # —una tabla de auditoria a medias, un `payload` que no pasa el filtro—
+    # deshacia tambien el `consent_record` que ya se habia creado bien: se
+    # perdia la prueba del consentimiento por no poder escribir su nota. El
+    # consentimiento es el dato con valor legal; la nota es el rastro.
+    try:
+        async with db.begin_nested():
             await auditoria.anotar(
                 db,
                 action="consent.accepted",
@@ -401,14 +422,9 @@ async def aceptar_recompra(
                 origen=origen,
             )
     except Exception:  # noqa: BLE001
-        # CUALQUIER fallo, no solo la politica sin sembrar. Capturar unicamente
-        # `PoliticaAusente` dejaba pasar el resto —un CHECK incumplido, la 0050
-        # a medias— y esos SI tumbaban la peticion entera: la aceptacion legal,
-        # que ya estaba volcada, se perdia con el `rollback` de la dependencia y
-        # la compra quedaba bloqueada. Lo accesorio no puede tumbar lo principal.
         logger.warning(
-            "[devoluciones] la aceptacion se guardo en refund_policy_acceptances "
-            "pero no se pudo registrar el consentimiento compartido",
+            "[devoluciones] la aceptacion quedo guardada pero no se pudo anotar "
+            "en la auditoria",
             exc_info=True,
         )
     await db.commit()
