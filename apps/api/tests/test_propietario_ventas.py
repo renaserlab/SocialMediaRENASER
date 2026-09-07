@@ -36,6 +36,7 @@ ANA = "aaaaaaaa-0000-0000-0000-000000000001"  # compradora
 BRUNO = "aaaaaaaa-0000-0000-0000-000000000002"  # autor del curso
 JEFA = "aaaaaaaa-0000-0000-0000-000000000003"  # administracion
 CARLA = "aaaaaaaa-0000-0000-0000-000000000004"  # ajena
+MODERA = "aaaaaaaa-0000-0000-0000-000000000005"  # modera contenido, no dinero
 CURSO = "cccccccc-0000-0000-0000-000000000001"
 OTRO_CURSO = "cccccccc-0000-0000-0000-000000000002"
 ORDEN_A = "00000000-0000-0000-0000-0000000000a1"
@@ -58,6 +59,11 @@ async def entorno():
         db.add(Profile(id=BRUNO, full_name="Bruno", username="bruno"))
         db.add(Profile(id=JEFA, full_name="Jefa", username="jefa", role="admin"))
         db.add(Profile(id=CARLA, full_name="Carla", username="carla"))
+        db.add(
+            Profile(
+                id=MODERA, full_name="Modera", username="modera", role="moderator"
+            )
+        )
         db.add(
             Course(
                 id=CURSO,
@@ -211,6 +217,21 @@ async def test_la_administracion_lo_ve_todo(entorno):
     respuesta = await http.get(f"{COMERCIO}/courses/{CURSO}/summary")
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json()["paid_students"] == 1
+
+
+@pytest.mark.asyncio
+async def test_quien_solo_modera_no_ve_la_caja_de_nadie(entorno):
+    """MODERAR CONTENIDO Y MIRAR EL DINERO DE OTRO SON DOS PERMISOS DISTINTOS.
+
+    Aqui lo eran solo en el nombre: el guardia usaba `is_admin`, que incluye a
+    `moderator`, asi que la cuenta creada para ocultar una publicacion o
+    resolver un reporte veia importes brutos, comision de plataforma, neto del
+    autor y el listado de ventas de CUALQUIER curso.
+    """
+    http, identidad, _ = entorno
+    identidad["uid"] = MODERA
+    assert (await http.get(f"{COMERCIO}/courses/{CURSO}/summary")).status_code == 403
+    assert (await http.get(f"{COMERCIO}/courses/{CURSO}/sales")).status_code == 403
 
 
 @pytest.mark.asyncio
