@@ -5,6 +5,8 @@ no coincide con el código, el que se equivoca es el documento.
 
 - Estado general de Cursos: [`Z_REQUISITOS_Y_DECISIONES.md`](Z_REQUISITOS_Y_DECISIONES.md)
 - El dinero, en detalle: [`Z_DEVOLUCIONES_Y_LIQUIDACIONES.md`](Z_DEVOLUCIONES_Y_LIQUIDACIONES.md)
+- **Qué se encontró al verificar la 0050 ya aplicada, con sus diferencias y lo
+  que quedó pendiente: [`Z_VERIFICACION_0050.md`](Z_VERIFICACION_0050.md)**
 
 ---
 
@@ -341,11 +343,15 @@ sin la 0050 aplicada.
 
 ### No hecho, y no se declara aprobado
 
-- **Las migraciones no se han ejecutado contra PostgreSQL en esta máquina.**
-  Docker está instalado pero el demonio no corre. La prueba y el trabajo de CI
-  quedan preparados; lo que no se ha visto es la 0050 aplicándose de verdad.
-- **Las políticas RLS y los disparadores de la 0050 no se han ejercido.** SQLite
-  no tiene ni RLS ni disparadores de PostgreSQL. Lo que se comprueba en la suite
+- **Las migraciones no se han ejecutado en secuencia contra un PostgreSQL
+  desechable.** Docker está instalado pero el demonio no corre. La prueba, el
+  trabajo de CI y el prólogo que suple lo que Supabase da por hecho quedan
+  preparados; lo que no se ha visto es la secuencia entera corriendo sobre una
+  base limpia.
+- **Las políticas RLS y los disparadores de la 0050 no se han ejercido**, aunque
+  sí se han **leído** en la base donde alguien aplicó la 0050 a mano: están, y
+  uno de ellos resultó no proteger `origin` —corregido en la 0051—. Ver
+  [`Z_VERIFICACION_0050.md`](Z_VERIFICACION_0050.md). Lo que la suite comprueba
   es que están escritos y que ningún código de la aplicación actualiza ni borra
   esas tablas.
 - **La carrera real de dos publicaciones simultáneas no se ha ejecutado.**
