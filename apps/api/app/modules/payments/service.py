@@ -219,12 +219,21 @@ async def orden_pagada_de(
 
     La más reciente en pie: quien devolvió una vez y volvió a comprar tiene dos
     pedidos, y el que se cierra es el que sigue `paid`.
+
+    SE FILTRA POR PASARELA Y POR ENTORNO, y no sobra ninguno de los dos. Un
+    mismo `CommerceProduct` se vende por varias vías —Stripe en la web, Google
+    y Apple en el móvil— y en dos entornos. Sin estos filtros, una devolución
+    de Play Store podía encontrar el pedido de una compra por tarjeta que nadie
+    devolvió, marcarlo `refunded` y anular su saldo: se le quitaba al
+    propietario dinero de una venta que seguía en pie.
     """
     return await db.scalar(
         select(Order)
         .where(
             Order.user_id == user_id,
             Order.commerce_product_id == producto.commerce_product_id,
+            Order.provider == producto.provider,
+            Order.environment == producto.environment,
             Order.status == "paid",
         )
         .order_by(Order.created_at.desc())
@@ -242,11 +251,19 @@ async def marcar_pedido_devuelto(db: AsyncSession, *, order_id: str) -> None:
     `liquidacion.cancelar` es idempotente y no hace nada si no hay saldo —hoy
     las compras por tienda no generan ninguno—; se llama igual para que el día
     que lo generen esto no haya que recordarlo.
+
+    PERO SOLO CON LA 0049 APLICADA. `cancelar` consulta `owner_sale_balances`, y
+    sin esa tabla la sentencia falla; como la sincronización de la tienda no
+    confirma hasta el final del bucle, ese fallo se llevaría por delante las
+    concesiones y revocaciones del resto de compras de la misma pasada. Es el
+    mismo guardián que usa el resto del módulo.
     """
     from app.modules.commerce import liquidacion
+    from app.modules.refunds import esquema as esquema_devoluciones
 
     await comercio.marcar_orden(db, order_id=order_id, status="refunded")
-    await liquidacion.cancelar(db, order_id=order_id)
+    if await esquema_devoluciones.hay_liquidaciones(db):
+        await liquidacion.cancelar(db, order_id=order_id)
 
 
 async def revocar(

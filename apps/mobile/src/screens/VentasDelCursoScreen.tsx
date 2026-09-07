@@ -106,8 +106,13 @@ export function VentasDelCursoScreen() {
     void cargar();
   }, [cargar]);
 
-  const cargarMas = useCallback(async () => {
+  const cargarMas = useCallback(async (reintentoManual = false) => {
+    // `falloAlPaginar` corta el reintento AUTOMATICO. Al no apagar ya `hayMas`,
+    // repintar el pie cambia el alto del contenido y `onEndReached` vuelve a
+    // dispararse: con el servidor caido eso es un bucle de peticiones sin
+    // freno. Se reintenta solo cuando la persona toca el aviso.
     if (masRef.current || !hayMas || cargando || !courseId) return;
+    if (falloAlPaginar && !reintentoManual) return;
     masRef.current = true;
     setCargandoMas(true);
     try {
@@ -126,7 +131,7 @@ export function VentasDelCursoScreen() {
       masRef.current = false;
       setCargandoMas(false);
     }
-  }, [cargando, courseId, hayMas, ventas.length]);
+  }, [cargando, courseId, falloAlPaginar, hayMas, ventas.length]);
 
   const cabecera = (
     <AppHeader
@@ -245,7 +250,7 @@ export function VentasDelCursoScreen() {
             <ActivityIndicator style={styles.pie} color={colors.textMuted} />
           ) : falloAlPaginar ? (
             <Pressable
-              onPress={() => void cargarMas()}
+              onPress={() => void cargarMas(true)}
               accessibilityRole="button"
               accessibilityLabel={t('common.retry')}
               style={styles.pie}

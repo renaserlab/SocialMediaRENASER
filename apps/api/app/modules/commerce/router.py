@@ -338,6 +338,16 @@ async def liquidar(
 
     `solo_liberar` deja la primera mitad y se salta los pagos: sirve para poner
     al dia los estados sin tocar la pasarela.
+
+    LIMITE CONOCIDO. Los elegibles se toman por fecha de vencimiento y acotados
+    por `limite`; los que no pasan `puede_transferirse` se cuentan como omitidos
+    pero siguen siendo los primeros de la cola en la siguiente pasada. Con
+    `limite` saldos permanentemente bloqueados —una cuenta de cobro sin
+    completar, por ejemplo— los de detras no llegarian a pagarse nunca. Se
+    detecta mirando `omitidos`: un motivo repetido y estable en cada pasada es
+    justo eso, y se resuelve subiendo `limite` o arreglando esas cuentas. No se
+    pagina aqui porque hoy el volumen no lo justifica y un `offset` sobre una
+    lista que cambia mientras se recorre trae sus propios problemas.
     """
     await _exigir_admin(db, current_user)
     resultado = ResultadoDeLiquidacion()
@@ -351,30 +361,44 @@ async def liquidar(
     if solo_liberar:
         return resultado
 
-    # Se relee despues de commit: los que acaban de pasar a `eligible` entran en
-    # esta misma pasada, que es lo que uno espera al pulsar una sola vez.
-    elegibles = list(
+    # SOLO LOS IDENTIFICADORES, no los objetos.
+    #
+    # El bucle hace `commit` y, cuando algo falla, `rollback`. Las dos cosas
+    # caducan TODOS los objetos del ORM cargados en la sesion, no solo el de la
+    # vuelta que fallo: guardando la lista de saldos, la vuelta siguiente leia
+    # `saldo.status` de un objeto expirado y disparaba una recarga perezosa que
+    # en asincrono revienta con `MissingGreenlet`. Un fallo en el primero se
+    # llevaba por delante a todos los demas, que es justo lo que el `try` de
+    # abajo dice evitar.
+    #
+    # Con los identificadores se recarga en cada vuelta y el estado es el real,
+    # no el que se leyo hace veinte transferencias.
+    identificadores = list(
         await db.scalars(
-            select(OwnerSaleBalance)
+            select(OwnerSaleBalance.id)
             .where(OwnerSaleBalance.status == "eligible")
             .order_by(OwnerSaleBalance.available_at)
             .limit(limite)
         )
     )
     omitidos: dict[str, int] = {}
-    for saldo in elegibles:
+    for balance_id in identificadores:
+        saldo = await db.get(OwnerSaleBalance, balance_id)
+        if saldo is None:
+            continue
         motivo = await liquidacion.puede_transferirse(db, saldo)
         if motivo is not None:
             omitidos[motivo] = omitidos.get(motivo, 0) + 1
             continue
         try:
             intento = await liquidacion.ejecutar_transferencia(db, saldo)
+            estado_del_intento = intento.status if intento is not None else None
             await db.commit()
         except Exception:  # noqa: BLE001
             # UNO QUE FALLA NO SE LLEVA A LOS DEMAS. Se deshace lo suyo y se
             # sigue: el saldo se queda como estaba y entra en la proxima pasada.
             logger.exception(
-                "[liquidacion] fallo al transferir el saldo %s", saldo.id
+                "[liquidacion] fallo al transferir el saldo %s", balance_id
             )
             await db.rollback()
             resultado.fallidos += 1
@@ -384,7 +408,9 @@ async def liquidar(
             omitidos["taken"] = omitidos.get("taken", 0) + 1
             continue
         resultado.transferencias_intentadas += 1
-        if intento.status == "completed":
+        # `estado_del_intento` se leyo ANTES del commit: despues, el objeto esta
+        # caducado y leerle el estado seria otra recarga perezosa.
+        if estado_del_intento == "completed":
             resultado.transferencias_completadas += 1
     resultado.omitidos = omitidos
     return resultado

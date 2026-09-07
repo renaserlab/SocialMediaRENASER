@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -172,10 +172,18 @@ export function AdminDevolucionesScreen() {
     la tecla Atras de Android veia una ruta anterior, salia de la bandeja
     entera y quien estaba mirando un expediente acababa fuera de la seccion.
   */
-  useEffect(() => {
-    if (!abierta) return;
-    return registrarSalidaPropia(() => setAbierta(null));
-  }, [abierta]);
+  //
+  // AL FOCO Y NO AL MONTAJE: esta pantalla sigue montada al cambiar de seccion,
+  // y con el registro puesto el Atras de la seccion nueva cerraba un expediente
+  // que nadie estaba mirando. Para quien lo pulsaba, Atras no hacia nada.
+  const abiertaRef = useRef<DetalleDeSolicitud | null>(null);
+  abiertaRef.current = abierta;
+  useFocusEffect(
+    useCallback(() => {
+      if (!abiertaRef.current) return;
+      return registrarSalidaPropia(() => setAbierta(null));
+    }, [abierta]),
+  );
 
   useEffect(() => {
     const temporizador = setTimeout(() => setBusqueda(texto.trim()), 350);
@@ -212,8 +220,11 @@ export function AdminDevolucionesScreen() {
     void cargar();
   }, [cargar]);
 
-  const cargarMas = useCallback(async () => {
+  const cargarMas = useCallback(async (reintentoManual = false) => {
+    // `falloAlPaginar` corta el reintento AUTOMATICO: ver el comentario del
+    // estado. Se reintenta solo cuando la persona toca el aviso del pie.
     if (masRef.current || !hayMas || cargando) return;
+    if (falloAlPaginar && !reintentoManual) return;
     masRef.current = true;
     setCargandoMas(true);
     try {
@@ -237,7 +248,7 @@ export function AdminDevolucionesScreen() {
       masRef.current = false;
       setCargandoMas(false);
     }
-  }, [busqueda, cargando, estado, hayMas, solicitudes.length]);
+  }, [busqueda, cargando, estado, falloAlPaginar, hayMas, solicitudes.length]);
 
   const abrir = useCallback(
     async (id: string) => {
@@ -396,7 +407,7 @@ export function AdminDevolucionesScreen() {
             <ActivityIndicator style={styles.pie} color={colors.textMuted} />
           ) : falloAlPaginar ? (
             <Pressable
-              onPress={() => void cargarMas()}
+              onPress={() => void cargarMas(true)}
               accessibilityRole="button"
               accessibilityLabel={t('common.retry')}
               style={styles.pie}

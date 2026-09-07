@@ -152,6 +152,9 @@ test('el Atras fisico cierra el expediente abierto, no la bandeja entera', () =>
   // El detalle no es otra pantalla: es esta cambiando lo que pinta. Sin
   // registrarlo, Atras veia una ruta anterior y sacaba de la seccion a quien
   // estaba leyendo un expediente.
-  assert.match(BANDEJA, /registrarSalidaPropia/);
-  assert.match(BANDEJA, /if \(!abierta\) return;\s*return registrarSalidaPropia\(\(\) => setAbierta\(null\)\);/);
+  assert.match(BANDEJA, /registrarSalidaPropia\(\(\) => setAbierta\(null\)\)/);
+  // Al FOCO: la pantalla sigue montada al cambiar de seccion, y con el
+  // registro puesto el Atras de la seccion nueva cerraba un expediente que
+  // nadie miraba. Para quien lo pulsaba, Atras no hacia nada.
+  assert.match(BANDEJA, /useFocusEffect\(/);
 });

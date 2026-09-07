@@ -194,9 +194,14 @@ test('el Atras fisico del asistente pasa por su despedida, no por goBack', () =>
   */
   assert.match(ASISTENTE, /registrarSalidaPropia/);
   assert.match(ASISTENTE, /ultimoSalir\.current = salir;/);
-  // Se registra UNA vez, no en cada render: el registro es una pila y volver a
-  // montarlo lo subiria a la cima constantemente.
-  assert.match(ASISTENTE, /useEffect\(\(\) => registrarSalidaPropia\([\s\S]{0,80}?\), \[\]\)/);
+  // AL FOCO Y NO AL MONTAJE: una pantalla de pila sigue montada cuando se
+  // navega por encima, y el registro es una pila que no sabe quien tiene el
+  // foco. Atado al montaje, el Atras de otra pantalla ejecutaba la despedida
+  // de este asistente.
+  assert.match(ASISTENTE, /useFocusEffect\(/);
+  // Y la salida pasa por el mismo cerrojo que los botones: es la funcion mas
+  // facil de disparar dos veces, porque ahora la llama la tecla Atras.
+  assert.match(ASISTENTE, /const salir = \(\) =>\s*enSerie\(/);
 });
 
 test('el asistente no escribe dos veces por dos toques seguidos', () => {

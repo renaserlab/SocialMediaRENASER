@@ -36,6 +36,7 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.modules.bookings.models import Booking
 from app.modules.catalog.models import Course
 from app.modules.commerce import esquema as esquema_comercio
@@ -110,6 +111,8 @@ async def fuente_de_verificacion(
     if not await esquema_comercio.hay_comercio(db):
         return None
 
+    #    Y SE FILTRA POR ENTORNO, como en todo el comercio: una compra de
+    #    pruebas en `sandbox` no puede dar un sello que se publica de verdad.
     orden = await db.scalar(
         select(Order.id)
         .join(CommerceProduct, CommerceProduct.id == Order.commerce_product_id)
@@ -117,6 +120,7 @@ async def fuente_de_verificacion(
         .where(
             Order.user_id == reviewer_id,
             Order.status == "paid",
+            Order.environment == get_settings().payments_environment,
             Course.author_id == reviewed_user_id,
         )
         .limit(1)

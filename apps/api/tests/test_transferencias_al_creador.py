@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -670,14 +670,18 @@ async def test_con_las_banderas_apagadas_se_libera_pero_no_se_paga(sesiones):
 
 
 @pytest.mark.asyncio
-async def test_liberar_no_descongela_una_disputa(sesiones):
-    """Un contracargo congela el saldo. La liberación no puede deshacerlo.
+async def test_liberar_no_descongela_una_disputa(sesiones, monkeypatch):
+    """Un contracargo congela el saldo. La liberacion no puede deshacerlo.
 
-    LA CARRERA. `liberar_vencidos` leía los identificadores con
-    `status = 'pending'` y luego escribía filtrando solo por `id`. Entre las dos
+    LA CARRERA, Y HAY QUE PROVOCARLA DE VERDAD. `liberar_vencidos` lee los
+    identificadores con `status = 'pending'` y despues escribe. Entre las dos
     sentencias cabe `charge.dispute.created`, que pone el saldo en `frozen` sin
-    solicitud asociada; el UPDATE lo devolvía a `eligible` y el pago quedaba
-    autorizado sobre dinero que el banco está reclamando.
+    solicitud asociada; filtrando el UPDATE solo por `id`, lo devolvia a
+    `eligible` y autorizaba un pago sobre dinero que el banco esta reclamando.
+
+    CONGELARLO ANTES DE LLAMAR NO PRUEBA NADA: el propio SELECT lo descartaria
+    y la funcion saldria por `if not ids`. Hay que colarse ENTRE las dos, y por
+    eso se envuelve el `flush` que va justo despues de la lectura.
     """
     async with sesiones() as db:
         saldo = await db.scalar(select(OwnerSaleBalance))
@@ -687,22 +691,96 @@ async def test_liberar_no_descongela_una_disputa(sesiones):
         identificador = saldo.id
 
     async with sesiones() as db:
-        # Se simula la carrera de la forma más directa: el saldo cambia a
-        # `frozen` DESPUÉS de que la consulta de candidatos lo haya visto.
-        ids = list(
-            await db.scalars(
-                select(OwnerSaleBalance.id).where(OwnerSaleBalance.status == "pending")
-            )
-        )
-        assert ids == [identificador]
-        congelado = await db.get(OwnerSaleBalance, identificador)
-        congelado.status = "frozen"
-        congelado.frozen_by_request_id = None
-        await db.commit()
+        original = db.execute
+        llamadas = {"n": 0}
 
+        async def _colarse(sentencia, *args, **kwargs):
+            resultado = await original(sentencia, *args, **kwargs)
+            # La PRIMERA sentencia de `liberar_vencidos` es el SELECT de
+            # candidatos. Justo despues, y antes del UPDATE, entra la disputa.
+            llamadas["n"] += 1
+            if llamadas["n"] == 1:
+                await original(
+                    update(OwnerSaleBalance)
+                    .where(OwnerSaleBalance.id == identificador)
+                    .values(status="frozen", frozen_by_request_id=None)
+                )
+            return resultado
+
+        monkeypatch.setattr(db, "execute", _colarse)
         movidos = await liquidacion.liberar_vencidos(db)
+        monkeypatch.undo()
         await db.commit()
 
+    # El UPDATE no encontro ninguna fila `pending`: no movio nada y lo dice.
     assert movidos == 0
     async with sesiones() as db:
         assert (await db.scalar(select(OwnerSaleBalance))).status == "frozen"
+
+
+@pytest.mark.asyncio
+async def test_un_saldo_que_falla_no_se_lleva_por_delante_a_los_demas(
+    sesiones, monkeypatch
+):
+    """El `rollback` de una vuelta caduca los objetos de todas las demas.
+
+    `Session.rollback()` expira TODO el mapa de identidad, no solo lo de la
+    vuelta que fallo. Recorriendo una lista de objetos ya cargados, la vuelta
+    siguiente leia `saldo.status` de uno caducado y disparaba una recarga
+    perezosa: `MissingGreenlet` sin capturar, un 500, y los saldos restantes
+    sin pagar. Justo lo contrario de lo que el `try` del bucle promete.
+    """
+    OTRA_ORDEN = "00000000-0000-0000-0000-0000000000a3"
+    async with sesiones() as db:
+        producto = await db.scalar(select(CommerceProduct))
+        cuenta = await db.scalar(select(OwnerPayoutAccount))
+        db.add(
+            Order(
+                id=OTRA_ORDEN, user_id=ANA, commerce_product_id=producto.id,
+                provider="stripe", channel="web", environment="sandbox",
+                amount_minor=PRECIO, currency="PEN", status="paid",
+            )
+        )
+        await db.flush()
+        db.add(
+            OwnerSaleBalance(
+                order_id=OTRA_ORDEN, course_id=CURSO, owner_id=BRUNO,
+                payout_account_id=cuenta.id, gross_amount_minor=PRECIO,
+                platform_fee_minor=PRECIO - NETO, provider_fee_minor=0,
+                net_amount_minor=NETO, currency="PEN", fee_rules_version="v1",
+                status="eligible", available_at=_antes(1),
+            )
+        )
+        await db.commit()
+
+    class _FallaLaPrimera(DobleDeterminista):
+        """Revienta con el primer saldo y paga el segundo."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.veces = 0
+
+        async def create_transfer(self, peticion):
+            self.veces += 1
+            if self.veces == 1:
+                raise RuntimeError("la pasarela se cayo")
+            return await super().create_transfer(peticion)
+
+    _usar(monkeypatch, _FallaLaPrimera())
+
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        respuesta = await http.post("/api/v1/admin/owner-balances/settle")
+        assert respuesta.status_code == 200, respuesta.text
+        cuerpo = respuesta.json()
+    finally:
+        await cerrar()
+
+    # Uno cae, el otro cobra. Antes caian los dos con un 500.
+    assert cuerpo["fallidos"] == 1
+    assert cuerpo["transferencias_completadas"] == 1
+    async with sesiones() as db:
+        estados = sorted(
+            s.status for s in await db.scalars(select(OwnerSaleBalance))
+        )
+        assert estados == ["eligible", "transferred"], estados

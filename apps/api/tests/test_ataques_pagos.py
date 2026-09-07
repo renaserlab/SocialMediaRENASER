@@ -1638,3 +1638,117 @@ async def test_una_devolucion_de_la_tienda_cierra_tambien_el_pedido(entorno):
     historial = (await entorno.http.get(f"{PAGOS}/history")).json()
     assert [c["status"] for c in historial] == ["refunded"]
     assert historial[0]["has_access"] is False
+
+
+@pytest.mark.asyncio
+async def test_una_disputa_se_atiende_sin_romper_el_aviso(entorno):
+    """Un contracargo: se retiene el saldo, no se toca el acceso, y responde 204.
+
+    NO HABIA NI UNA PRUEBA DE ESTA RUTA, y eso la dejo indefensa: cualquier
+    cambio en el manejo transaccional del webhook podia romperla sin que la
+    suite dijera nada. Es exactamente lo que paso al envolver la aplicacion del
+    aviso en un SAVEPOINT: `_atender_disputa` terminaba con un `commit`, y un
+    `commit` dentro de un savepoint no lo confirma, lo CIERRA; al salir del
+    bloque la transaccion ya no existia y el endpoint devolvia 500.
+
+    Lo que se comprueba, entonces, es lo que la disputa promete:
+
+      1. Responde 204: Stripe no reintenta ni acaba deshabilitando el endpoint.
+      2. El acceso NO se retira: abrir una disputa no es haberla perdido.
+      3. El aviso queda marcado como procesado y SIN error.
+    """
+    await _comprar_por_stripe(entorno)
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+    disputa = {
+        "id": "evt_disputa_1",
+        "type": "charge.dispute.created",
+        "livemode": False,
+        "data": {"object": {"id": "dp_1", "charge": "ch_1", "payment_intent": "pi_1"}},
+    }
+    crudo = json.dumps(disputa).encode("utf-8")
+    respuesta = await _avisar(entorno.http, disputa, firma=_firmar(crudo), cuerpo=crudo)
+    assert respuesta.status_code == 204, respuesta.text
+
+    # El acceso sigue en pie: la disputa se retiene, no se resuelve sola.
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+    async with entorno.sesiones() as db:
+        aviso = await db.scalar(
+            select(PaymentEvent).where(PaymentEvent.external_event_id == "evt_disputa_1")
+        )
+        assert aviso is not None
+        assert aviso.processed_at is not None
+        assert aviso.error is None, f"la disputa se anoto como fallida: {aviso.error}"
+        # Y el saldo del propietario queda RETENIDO: es lo unico que la disputa
+        # hace de verdad, y lo que obliga a pasar por el `commit` que rompia.
+        from app.modules.commerce.models import OwnerSaleBalance
+
+        # Sin comision configurada no se crea saldo —falla en cerrado—, asi que
+        # aqui no hay ninguno que congelar. Lo que importa es que la ruta se
+        # recorre entera y sale bien.
+        assert await db.scalar(select(OwnerSaleBalance)) is None
+
+
+@pytest.mark.asyncio
+async def test_si_falla_anotar_el_descuadre_el_registro_del_aviso_sobrevive(
+    entorno, monkeypatch
+):
+    """Un `rollback` dentro de un savepoint sube a la raiz y borra lo de fuera.
+
+    EL CAMINO. Llega un `charge.refunded` cuyo importe no cuadra con la orden.
+    No se aplica —en la duda no se retira el acceso— y se deja constancia
+    durable de que hay un descuadre. Si ESA anotacion falla, el manejador hacia
+    `db.rollback()`, que no se queda en el savepoint: sube hasta la raiz y se
+    lleva la fila de `payment_events`, o sea el registro anti-repeticion que
+    todo ese bloque existe para conservar.
+
+    Y NO LANZA NADA. La peticion responde con normalidad, asi que el reenvio de
+    Stripe se toma por un aviso nuevo y se vuelve a procesar entero.
+    """
+    await _comprar_por_stripe(entorno)
+
+    # Hace falta una solicitud VIVA: sin ella no hay expediente que anotar y el
+    # camino que se quiere probar ni siquiera se recorre.
+    from app.modules.refunds.models import RefundRequest
+
+    async with entorno.sesiones() as db:
+        orden = await db.scalar(select(Order))
+        db.add(
+            RefundRequest(
+                order_id=orden.id,
+                user_id=ANA,
+                course_id=CURSO_A,
+                status="approved",
+                reason="not_as_expected",
+                amount_minor=orden.amount_minor,
+                currency=orden.currency,
+            )
+        )
+        await db.commit()
+
+    async def _reventar(*_args, **_kwargs):
+        raise RuntimeError("la anotacion no se pudo escribir")
+
+    from app.modules.refunds import service as devoluciones
+
+    monkeypatch.setattr(devoluciones, "_anotar", _reventar)
+
+    # Reembolso TOTAL del cobro, pero por un importe que NO es el de la orden:
+    # 1,00 frente a 199,00. `reembolso.aplicar` levanta `NoConciliado` y es
+    # entonces cuando se intenta dejar constancia del descuadre.
+    evento = _devolucion(
+        importe=100, cobrado=100, intento="pi_1", event_id="evt_descuadre",
+        reembolso="re_descuadre",
+    )
+    crudo = json.dumps(evento).encode("utf-8")
+    respuesta = await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    assert respuesta.status_code == 204, respuesta.text
+
+    async with entorno.sesiones() as db:
+        aviso = await db.scalar(
+            select(PaymentEvent).where(PaymentEvent.external_event_id == "evt_descuadre")
+        )
+        assert aviso is not None, "el rollback se llevo el registro anti-repeticion"
+        assert aviso.processed_at is not None
+    # Y el acceso sigue: un aviso que no cuadra no retira nada.
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True

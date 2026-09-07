@@ -731,6 +731,43 @@ async def test_un_pedido_sin_pagar_del_comercio_nuevo_no_da_sello(entorno):
 
 
 @pytest.mark.asyncio
+async def test_una_orden_de_OTRO_entorno_no_da_sello(entorno):
+    """Una compra de otro entorno no acredita nada aqui.
+
+    Todo el comercio separa `sandbox` de `production`, y el sello no puede ser
+    la excepcion: una orden sembrada por QA en el entorno equivocado daria un
+    «compra verificada» que se publica de verdad.
+    """
+    from app.modules.commerce.models import CommerceProduct, Order
+
+    http, sesiones, identidad = entorno
+    curso = "cccccccc-0000-0000-0000-000000000001"
+    async with sesiones() as db:
+        db.add(Course(id=curso, author_id=BRUNO, title="Curso de Bruno"))
+        await db.flush()
+        producto = CommerceProduct(kind="course_lifetime", course_id=curso, active=True)
+        db.add(producto)
+        await db.flush()
+        db.add(
+            Order(
+                user_id=ANA,
+                commerce_product_id=producto.id,
+                provider="stripe",
+                channel="web",
+                # Las pruebas corren en `sandbox`; esta es del otro lado.
+                environment="production",
+                amount_minor=19900,
+                currency="PEN",
+                status="paid",
+            )
+        )
+        await db.commit()
+
+    identidad["uid"] = ANA
+    assert (await publicar(http, BRUNO)).json()["verified_source"] is None
+
+
+@pytest.mark.asyncio
 async def test_el_curso_de_otra_persona_no_da_sello(entorno):
     """Comprarle un curso a Carla no dice nada sobre Bruno."""
     http, sesiones, identidad = entorno

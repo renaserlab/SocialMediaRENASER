@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -323,21 +323,28 @@ export function AsistenteDeCursoScreen() {
     }
   };
 
-  /** Salir sin perder lo escrito: se pregunta y se guarda si se quiere. */
-  const salir = async () => {
-    const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
-    if (guardando) return;
-    const aceptado = await confirm({
-      title: t('wizard.saveBeforeLeaving'),
-      message: t('wizard.saveBeforeLeavingBody'),
-      confirmLabel: t('wizard.saveAndLeave'),
-      cancelLabel: t('wizard.leaveWithoutSaving'),
+  /**
+   * Salir sin perder lo escrito: se pregunta y se guarda si se quiere.
+   *
+   * VA POR `enSerie` COMO LAS DEMAS. `guardando` es estado y no esta puesto
+   * hasta el siguiente render, y esta es justo la funcion que ahora dispara la
+   * tecla Atras: dos pulsaciones rapidas apilaban dos dialogos y, aceptando los
+   * dos, subian la portada dos veces y guardaban el curso dos veces.
+   */
+  const salir = () =>
+    enSerie(async () => {
+      const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
+      const aceptado = await confirm({
+        title: t('wizard.saveBeforeLeaving'),
+        message: t('wizard.saveBeforeLeavingBody'),
+        confirmLabel: t('wizard.saveAndLeave'),
+        cancelLabel: t('wizard.leaveWithoutSaving'),
+      });
+      if (aceptado) {
+        if (!(await guardar(true))) return;
+      }
+      volver();
     });
-    if (aceptado) {
-      if (!(await guardar(true))) return;
-    }
-    volver();
-  };
 
   /*
     EL ATRAS FISICO DE ANDROID TAMBIEN PASA POR `salir()`.
@@ -353,7 +360,14 @@ export function AsistenteDeCursoScreen() {
     pila, y volver a montarlo en cada render lo subiria a la cima constantemente.
   */
   ultimoSalir.current = salir;
-  useEffect(() => registrarSalidaPropia(() => void ultimoSalir.current()), []);
+  useFocusEffect(
+    // AL FOCO Y NO AL MONTAJE. Una pantalla de pila sigue MONTADA cuando se
+    // navega por encima de ella, y el registro es una pila que no sabe quien
+    // tiene el foco: `cerrarCapaSuperior` llama al ultimo registrado, se este
+    // mirando o no. Atado al montaje, el Atras de otra pantalla acababa
+    // ejecutando la despedida de este asistente, que ni siquiera se ve.
+    useCallback(() => registrarSalidaPropia(() => void ultimoSalir.current()), []),
+  );
 
   if (cargando) {
     return (

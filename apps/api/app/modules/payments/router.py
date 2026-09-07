@@ -911,7 +911,10 @@ async def _atender_disputa(db: AsyncSession, evento) -> None:
         pedido.id,
         retenido,
     )
-    await db.commit()
+    # SIN `commit`. Esto corre dentro del SAVEPOINT que abre el webhook, y un
+    # `commit` no confirma el savepoint: sube hasta la raiz, la confirma entera
+    # y deja sin efecto el aislamiento. Escribe el `commit` unico del final.
+    await db.flush()
 
 
 async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
@@ -1025,9 +1028,17 @@ async def _anotar_sin_conciliar(
 
     Solo identificadores y texto ya recortado: nunca el cuerpo del aviso.
 
-    Va despues del rollback —la transaccion anterior quedo abortada al levantar
-    la validacion— y por eso recibe cadenas y no objetos: los de antes quedaron
-    caducados.
+    RECIBE CADENAS Y NO OBJETOS porque llega justo despues de deshacer un
+    savepoint, y eso caduca los objetos del ORM: leerles un atributo dispararia
+    una recarga perezosa que en asincrono revienta con `MissingGreenlet`.
+
+    Y NO HACE `commit` NI `rollback`, que es lo que antes se le escapaba. Los
+    dos suben hasta la raiz: el `commit` confirmaba la transaccion del webhook a
+    medias, y el `rollback` del manejador de error se llevaba por delante la
+    fila de `payment_events` —el registro anti-repeticion que todo este bloque
+    existe para conservar—. Y lo hacia EN SILENCIO: no lanza nada, asi que la
+    peticion respondia con normalidad y el reenvio de Stripe se procesaba como
+    si fuera nuevo. Un savepoint propio deshace solo esta anotacion.
     """
     from app.modules.refunds import service as devoluciones
     from app.modules.refunds.models import RefundRequest
@@ -1035,23 +1046,23 @@ async def _anotar_sin_conciliar(
     if solicitud_id is None:
         return
     try:
-        solicitud = await db.get(RefundRequest, solicitud_id)
-        if solicitud is None:
-            return
-        await devoluciones._anotar(
-            db,
-            solicitud,
-            desde=solicitud.status,
-            hasta=solicitud.status,
-            rol="system",
-            actor_id=None,
-            reason="aviso de devolucion sin conciliar",
-            notes=motivo,
-            metadata={"order_id": orden_id, "requiere_revision": True},
-        )
-        await db.commit()
+        async with db.begin_nested():
+            solicitud = await db.get(RefundRequest, solicitud_id)
+            if solicitud is None:
+                return
+            await devoluciones._anotar(
+                db,
+                solicitud,
+                desde=solicitud.status,
+                hasta=solicitud.status,
+                rol="system",
+                actor_id=None,
+                reason="aviso de devolucion sin conciliar",
+                notes=motivo,
+                metadata={"order_id": orden_id, "requiere_revision": True},
+            )
     except Exception:  # pragma: no cover - la anotacion no puede romper el aviso
-        await db.rollback()
+        # El savepoint ya deshizo lo suyo al salir. No se deshace nada mas.
         logger.exception("[pagos] no se pudo anotar la devolucion sin conciliar")
 
 
