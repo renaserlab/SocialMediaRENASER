@@ -176,6 +176,54 @@ async def test_sembrar_dos_veces_no_duplica(sesiones) -> None:
 
 
 @pytest.mark.asyncio
+async def test_sembrar_deja_una_sola_nota_de_auditoria(http, sesiones) -> None:
+    """Publicar una politica se audita; volver a pulsar el boton, no.
+
+    Publicar es el acto que mas falta hace auditar de los que pasan por el
+    endpoint: fija el texto contra el que se comparara cada aceptacion
+    posterior. Pero la siembra es idempotente, y anotar en cada llamada llenaria
+    la tabla de publicaciones que no ocurrieron. Una tabla que cuenta actos
+    inexistentes deja de servir como prueba de los que si ocurrieron.
+    """
+    cliente, identidad = http
+    identidad["uid"] = JEFA
+
+    primera = await cliente.post(f"{API}/admin/policies/seed-refund-repurchase")
+    assert primera.status_code == 200, primera.text
+    segunda = await cliente.post(f"{API}/admin/policies/seed-refund-repurchase")
+    assert segunda.status_code == 200, segunda.text
+    assert segunda.json()["version"] == primera.json()["version"]
+
+    async with sesiones() as db:
+        notas = list(
+            await db.scalars(
+                select(AuditEvent).where(AuditEvent.action == "policy.published")
+            )
+        )
+    assert len(notas) == 1, "la segunda llamada no publico nada y no debe anotar"
+    assert notas[0].actor_id == JEFA
+    assert notas[0].entity_type == "policy_version"
+
+
+@pytest.mark.asyncio
+async def test_quien_solo_modera_no_puede_publicar_una_politica(http, sesiones) -> None:
+    """Moderar contenido y fijar el texto que alguien va a firmar no son lo
+    mismo. `puede_mover_dinero` deja fuera a `moderator`, que `is_admin` incluye.
+    """
+    cliente, identidad = http
+    moderadora = "aaaaaaaa-0000-0000-0000-0000000000ff"
+    async with sesiones() as db:
+        db.add(Profile(id=moderadora, username="modera", role="moderator"))
+        await db.commit()
+    identidad["uid"] = moderadora
+
+    respuesta = await cliente.post(f"{API}/admin/policies/seed-refund-repurchase")
+    assert respuesta.status_code == 403, respuesta.text
+    async with sesiones() as db:
+        assert await politicas.vigente(db, policy_type=politicas.RECOMPRA) is None
+
+
+@pytest.mark.asyncio
 async def test_el_cliente_pide_el_tipo_y_recibe_la_vigente(http, sesiones) -> None:
     cliente, _ = http
     async with sesiones() as db:

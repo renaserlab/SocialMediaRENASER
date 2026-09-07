@@ -152,6 +152,27 @@ async def publicar(
     return nueva
 
 
+async def recompra_ya_sembrada(db: AsyncSession) -> PolicyVersion | None:
+    """La fila de la politica de recompra vigente en el codigo, si ya esta.
+
+    Existe aparte para que quien siembra pueda saber SI SEMBRO ALGO. La siembra
+    es idempotente y devuelve la misma fila las dos veces, asi que sin esta
+    consulta previa no habia forma de distinguir «publique la politica» de «ya
+    estaba», y la anotacion de auditoria diria que se publico una politica cada
+    vez que alguien pulsa el boton.
+    """
+    from app.modules.refunds import politica as recompra
+
+    return await db.scalar(
+        select(PolicyVersion).where(
+            PolicyVersion.policy_type == RECOMPRA,
+            PolicyVersion.version == recompra.VERSION_ACTUAL,
+            PolicyVersion.jurisdiction == "PE",
+            PolicyVersion.locale == "es",
+        )
+    )
+
+
 async def sembrar_recompra(db: AsyncSession) -> PolicyVersion | None:
     """Mete en la base la política de recompra que hoy vive en el código.
 
@@ -171,14 +192,7 @@ async def sembrar_recompra(db: AsyncSession) -> PolicyVersion | None:
 
     if not await esquema.hay_gobernanza(db):
         return None
-    ya = await db.scalar(
-        select(PolicyVersion).where(
-            PolicyVersion.policy_type == RECOMPRA,
-            PolicyVersion.version == recompra.VERSION_ACTUAL,
-            PolicyVersion.jurisdiction == "PE",
-            PolicyVersion.locale == "es",
-        )
-    )
+    ya = await recompra_ya_sembrada(db)
     if ya is not None:
         return ya
     return await publicar(

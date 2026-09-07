@@ -15,13 +15,14 @@ transferencia ni sobre qué orden.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.security import AuthUser, get_current_user
-from app.modules.gobernanza import esquema, politicas
+from app.modules.gobernanza import auditoria, esquema, politicas
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.gobernanza.models import AuditEvent, ConsentRecord
 from app.modules.gobernanza.schemas import (
     ConsentimientoPropio,
@@ -131,6 +132,7 @@ async def eventos_de_auditoria(
 
 @admin_router.post("/policies/seed-refund-repurchase", response_model=PoliticaVigente)
 async def sembrar_politica_de_recompra(
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PoliticaVigente:
@@ -149,11 +151,36 @@ async def sembrar_politica_de_recompra(
     """
     if not await puede_mover_dinero(db, current_user.id):
         raise ForbiddenError("No puedes publicar políticas.")
+    # SE MIRA ANTES SI YA ESTABA. La siembra es idempotente y devuelve la misma
+    # fila las dos veces; sin esta comprobacion, la auditoria registraria una
+    # publicacion de politica cada vez que alguien pulsa el boton, y una tabla
+    # que cuenta publicaciones que no ocurrieron deja de servir como prueba.
+    estaba = await politicas.recompra_ya_sembrada(db) is not None
     politica = await politicas.sembrar_recompra(db)
     if politica is None:
         raise NotFoundError(
             "La migración 0050 todavía no está aplicada.",
             code="governance_not_available",
+        )
+    if not estaba:
+        # PUBLICAR UNA POLITICA ES EL ACTO QUE MAS FALTA HACE AUDITAR de todos
+        # los que pasan por aqui: fija el texto contra el que se comparara cada
+        # aceptacion posterior. Sin esta nota, la primera version aparecia en la
+        # base sin decir quien la puso ni cuando.
+        await auditoria.anotar(
+            db,
+            action="policy.published",
+            entity_type="policy_version",
+            entity_id=politica.id,
+            actor_id=current_user.id,
+            actor_role="admin",
+            reason="siembra de la politica de recompra",
+            payload={
+                "policy_type": politica.policy_type,
+                "version": politica.version,
+                "body_sha256": politica.body_sha256,
+            },
+            origen=leer_origen(request),
         )
     await db.commit()
     return PoliticaVigente.model_validate(politica)
