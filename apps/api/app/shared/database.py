@@ -42,13 +42,23 @@ settings = get_settings()
 #     siguen estando muy por debajo del limite del plan de Supabase, que es lo
 #     que de verdad hay que no agotar: si el pool crece sin techo, quien se
 #     queda sin conexiones es la base, no la API.
+# EL AJUSTE DEL POOL ES SOLO PARA POSTGRESQL. SQLite no usa un pool con tamano
+# —en memoria es `StaticPool`, en fichero `NullPool`— y pasarle `pool_size` o
+# `max_overflow` levanta un `TypeError` al construir el motor. O sea: el valor
+# POR DEFECTO de `database_url` es SQLite y con el la aplicacion no arrancaba,
+# aunque toda la configuracion y `create_all_dev()` prometen que ese modo existe.
+# Nadie se dio cuenta porque en la maquina de desarrollo hay un `.env` que
+# apunta a Postgres y en produccion tambien.
+_opciones_del_pool: dict[str, object] = (
+    {}
+    if settings.uses_sqlite
+    else {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 5, "max_overflow": 5}
+)
+
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_pre_ping=True,
-    pool_recycle=1800,
-    pool_size=5,
-    max_overflow=5,
+    **_opciones_del_pool,
 )
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
