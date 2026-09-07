@@ -49,6 +49,7 @@ apps/api/app/
     commerce                           orden, derecho, saldo, transferencia
     payments                           Stripe, RevenueCat, webhooks
     refunds                            garantía, solicitud, expediente, reembolso
+    gobernanza                         políticas versionadas, consentimientos, auditoría
     reviews, moderation                reputación
     recommendations, search            descubrimiento
     bookings                           reservas de eventos y citas
@@ -85,7 +86,7 @@ borradores, nunca el historial de compras ni el acceso a un curso: allí no hay
 forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
-aplicados a mano. La última es la **0049**. Las pruebas no las ejecutan:
+aplicados a mano. La última es la **0050**. Las pruebas no las ejecutan:
 construyen el esquema desde los modelos de SQLAlchemy, así que **una migración
 sin aplicar no la detecta ninguna prueba**. Se comprueba mirando la base.
 
@@ -103,6 +104,12 @@ En corto:
    política de INSERT, UPDATE o DELETE en RLS.
 5. **Moderar contenido no es mover dinero.** `ADMIN_ROLES` incluye
    `moderator`; `FINANCE_ROLES` no.
+6. **Lo que se compró no cambia.** Publicar congela una versión inmutable del
+   curso, y la orden apunta a ella.
+7. **Lo que se acepta y lo que mueve dinero deja rastro**, en la misma
+   transacción que la operación.
+8. **Las pruebas no pueden tocar la base real.** El conftest fija
+   `DATABASE_URL` a SQLite en memoria antes de importar nada de `app`.
 
 ## Banderas
 
@@ -117,6 +124,8 @@ Todas nacen apagadas y se encienden por entorno.
 | `creator_transfers_enabled` | Transferir de verdad al propietario. |
 | `platform_fee_bps` | La comisión. `-1` significa **sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
+| `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
+| `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |
 
 ## Estado de la seguridad
 
@@ -124,7 +133,11 @@ Hecho: autenticación real con renovación, RLS por tabla, moderación y bloqueo
 verificación de compras de Apple y Google, contenido premium protegido con URL
 firmada, y auditoría del expediente de devoluciones.
 
-Pendiente, y es real: no hay tabla de auditoría general —solo la de
-devoluciones—, no hay envío de correo transaccional, y la observabilidad se
-limita a `/health` y a los registros. Ver
-[`Z_REQUISITOS_Y_DECISIONES.md`](Z_REQUISITOS_Y_DECISIONES.md).
+Desde la 0050 hay auditoría compartida, políticas versionadas y consentimientos
+con contexto de origen normalizado, más un identificador de petición en cada
+línea de registro.
+
+Pendiente, y es real: no hay envío de correo transaccional, no hay métricas ni
+trazas ni alertas, y no hay términos de compra aprobados. Ver
+[`Z_REQUISITOS_Y_DECISIONES.md`](Z_REQUISITOS_Y_DECISIONES.md) y
+[`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md`](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md).

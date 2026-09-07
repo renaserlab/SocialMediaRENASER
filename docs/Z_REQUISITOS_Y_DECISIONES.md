@@ -64,7 +64,9 @@ guarda en la fila y no se calcula al leer.
 - La ventana es única por `(usuario, curso)` de por vida: recomprar no la
   reinicia.
 
-Falta registrar IP y agente de usuario junto a la aceptación (ver R25).
+La IP y el agente de usuario ya se registran, normalizados y nunca en claro,
+desde la 0050 (`consent_records`). `refund_policy_acceptances` sigue siendo la
+autoridad del circuito: lo nuevo se guarda **además**, no en su lugar.
 
 ### D4 · Dinero real  ·  **bloqueado por la empresa**
 
@@ -92,8 +94,8 @@ de compra reales.
 |---|---|---|---|---|
 | R01 | Crear y editar curso | Hecho | `catalog/router.py` | La oferta (precio, garantía) no está separada del contenido |
 | R02 | Revisión y publicación | Parcial | `catalog/router.py` (`submit`, `review-queue`, `review`, `publish`) | Sin puntuación de 100 puntos, sin acta, sin estados PAUSADO / RETIRADO / ARCHIVADO |
-| R03 | Versiones del curso | **Ausente** | — | No existe `course_versions`. Editar un curso reescribe lo que ya se compró |
-| R04 | Versiones de la oferta | Parcial | `orders` congela importe y moneda | No congela la versión, la promesa ni la política de garantía |
+| R03 | Versiones del curso | Hecho | `catalog/versiones.py`, migración 0050 | Snapshot inmutable al publicar; una sola vigente por índice. Ver [`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md`](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md) |
+| R04 | Versiones de la oferta | Hecho | `orders` (0050) | Congela versión, importe, moneda y horas de garantía. `terms_version` sigue nula: no hay términos aprobados (D4/D5) |
 | R05 | Precio y moneda | Hecho | `catalog/models.py` | Enteros en unidad menor e ISO-3, nunca coma flotante |
 | R06 | Compra | Hecho | `payments/router.py` | Tres vías: Stripe web, tienda nativa, beta gratuita. Todas tras bandera |
 | R07 | Webhook de pago | Hecho | `payments/router.py` | Firma verificada, anti-repetición por índice único, importe y moneda comprobados |
@@ -114,20 +116,32 @@ de compra reales.
 | R22 | Notificaciones | Parcial | `notifications/` | **Solo dentro de la aplicación. No hay envío de correo en todo el backend** |
 | R23 | Mensajería creador–alumno | Parcial | `messaging/` | Hay chat, no hay vínculo curso↔conversación ni soporte con SLA |
 | R24 | Reseñas verificadas de curso | Parcial | `reviews/` | Son reseñas **de persona** con el curso como enlace. Ver §3 |
-| R25 | Términos y consentimientos | Parcial | `refunds/politica.py` | Solo la aceptación de recompra. No hay `ConsentRecord` de los Términos ni `terms_version_id` en la orden |
+| R25 | Términos y consentimientos | Parcial | `gobernanza/`, migración 0050 | `policy_versions` y `consent_records` existen, con IP y agente normalizados. **Bloqueado** para los Términos de compra: no hay texto aprobado (D4/D5) |
 | R26 | Certificados | **Ausente** | — | Nada. Decidir si entran en el alcance |
 | R27 | Accesibilidad | Parcial | — | Etiquetas y áreas de toque revisadas en las ocho pantallas de curso. Sin subtítulos ni transcripción |
 | R28 | i18n es/en/pt | Hecho | `src/i18n/` | Diccionarios sincronizados por prueba automática |
-| R29 | Monitoreo | Parcial | `main.py`, `core/logging.py` | Solo `/health`, registros y el endpoint de salud de saldos. Sin métricas, trazas ni alertas |
+| R29 | Monitoreo | Parcial | `main.py`, `core/logging.py`, `gobernanza/` | Ahora hay auditoría consultable e identificador de petición en cada línea de registro. Sin métricas, trazas ni alertas |
 | R30 | Rollback por bandera | Hecho | `core/config.py` | Siete banderas independientes; la comisión en `-1` bloquea por sí sola |
 
-### Las tres ausencias que más pesan
+### Cerrado en la ronda del versionado
 
-**R03 · Versionado del curso.** Es la que rompe el criterio A02 del blueprint
-(«la orden muestra la misma versión, garantía y precio aceptados»). Hoy el autor
-puede cambiar el título, el precio y el temario de un curso con compras vivas, y
-la orden solo conserva el importe. Antes de encender cobros reales hace falta
-`course_versions` + `orders.course_version_id`.
+**R03 y R04 ya no son ausencias.** Publicar congela una fotografía inmutable del
+contenido y la orden guarda qué versión se compró y con qué promesa de garantía.
+Las órdenes históricas se quedan sin versión **a propósito**: el temario nunca
+guardó una marca temporal, así que no hay forma de saber qué se vendió, y
+rellenarlo sería inventarlo. El detalle está en
+[`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md`](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md).
+
+**R25 sigue parcial, y el bloqueo no es técnico.** La infraestructura de
+políticas versionadas y consentimientos existe y funciona; lo que no hay es
+texto de Términos de compra aprobado, porque falta decidir D4 y D5. No se ha
+escrito uno provisional.
+
+**Nuevo: existe auditoría compartida.** Publicar y retirar un curso, aprobar y
+rechazar devoluciones, liberar saldos y lanzar transferencias dejan rastro
+consultable, en la misma transacción que la operación.
+
+### Las ausencias que siguen pesando
 
 **R25 · Consentimiento de los Términos.** El criterio A10 pide un registro con
 versión, fecha, IP y huella. Existe la maquinaria —texto versionado en el
@@ -243,9 +257,12 @@ credenciales y las banderas están apagadas.
 
 En orden, y ninguno es opcional:
 
-1. **Aplicar la 0049** donde toque. Hoy no está en la base de desarrollo local
-   (`renaser_dev.db` no tiene sus siete tablas), y **ninguna prueba lo detecta**
-   porque las pruebas construyen el esquema desde los modelos.
+1. **Aplicar la 0049 y la 0050** donde toque. Que la 0049 no esté en la base de
+   desarrollo local no dice nada sobre la de producción: son bases distintas y
+   no se ha comprobado ninguna externa. Lo que sí ha cambiado es que ahora
+   existe una validación real de migraciones —ver
+   [`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md` §8](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md).
+   Tras aplicar la 0050 hay que **sembrar la política de recompra** una vez.
 2. Decidir **D4** entero, y en particular `PLATFORM_FEE_BPS`.
 3. Cerrar **R03** (versionado de la oferta) y **R25** (consentimiento de los
    Términos). Sin lo primero, la orden no es inmutable; sin lo segundo, no hay
