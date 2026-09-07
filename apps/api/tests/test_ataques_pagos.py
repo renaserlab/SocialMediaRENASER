@@ -1532,3 +1532,46 @@ def test_el_rol_de_la_aplicacion_nunca_se_lee_del_token():
         "Se decide un permiso con el `role` del token, que siempre vale "
         "'authenticated'. Usa `await is_admin(db, user_id)`:\n" + "\n".join(culpables)
     )
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_que_falla_al_aplicarse_conserva_su_registro(entorno, monkeypatch):
+    """Si aplicar el aviso revienta, la fila del aviso TIENE que sobrevivir.
+
+    EL FALLO QUE ESTO CAZA. La fila de `payment_events` se escribe en la misma
+    transaccion que aplica el aviso, y todavia sin confirmar. El manejador de
+    error hacia `rollback` antes de anotar el fallo —para que en PostgreSQL la
+    transaccion no quedara abortada— y con ese rollback se llevaba por delante
+    la propia fila: el `UPDATE` posterior no encontraba nada que marcar y el
+    registro anti-repeticion desaparecia. Ademas leia `_fila.id` DESPUES del
+    rollback, sobre un objeto ya caducado, que en asincrono lanza
+    `MissingGreenlet` y enmascaraba el error de verdad.
+
+    Ahora lo que se deshace es un SAVEPOINT: solo se cae lo que se intento
+    aplicar, y queda constancia de que ese cobro llego y no concedio nada.
+    """
+    await _dar_de_alta(
+        entorno.sesiones, curso=CURSO_A, provider="stripe", external="price_a"
+    )
+    pedido = (
+        await entorno.http.post(f"{PAGOS}/stripe/checkout", json={"course_id": CURSO_A})
+    ).json()["purchase_id"]
+
+    async def _reventar(*_args, **_kwargs):
+        raise RuntimeError("el saldo del propietario no se pudo escribir")
+
+    monkeypatch.setattr(router_de_pagos, "_al_confirmar_la_compra", _reventar)
+
+    evento = _sesion_pagada(order_id=pedido, importe=PRECIO_A)
+    crudo = json.dumps(evento).encode("utf-8")
+    with pytest.raises(RuntimeError):
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+
+    async with entorno.sesiones() as db:
+        aviso = await db.scalar(select(PaymentEvent))
+        # La fila sigue ahi: es lo que impide que un reenvio del mismo aviso se
+        # tome por nuevo, y lo unico que deja saber que hubo un cobro.
+        assert aviso is not None
+        assert aviso.external_event_id == evento["id"]
+        assert aviso.processed_at is not None
+        assert "no se pudo escribir" in (aviso.error or "")

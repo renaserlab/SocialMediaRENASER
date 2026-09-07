@@ -694,25 +694,39 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
         await db.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    # EL IDENTIFICADOR, EN UNA VARIABLE, ANTES DE TOCAR NADA. `_fila` es un
+    # objeto del ORM: en cuanto la transacción se deshace queda caducado, y
+    # leerle un atributo dispara una recarga perezosa que en asíncrono revienta
+    # con `MissingGreenlet`. Una cadena no caduca.
+    id_del_aviso = _fila.id
+
     try:
-        await _aplicar_evento_stripe(db, evento)
+        # SAVEPOINT, NO `rollback`. Antes esto se aplicaba suelto y el manejador
+        # de error deshacía la transacción entera; el problema es que la fila de
+        # `payment_events` se escribió en ESA misma transacción y todavía no
+        # estaba confirmada, así que el `rollback` se llevaba por delante justo
+        # el registro anti-repetición que el bloque de abajo existe para
+        # garantizar. Y el `UPDATE` posterior no encontraba ninguna fila que
+        # marcar.
+        #
+        # Con el savepoint, un fallo deshace SOLO lo que intentó aplicarse: la
+        # fila del aviso sigue en pie, la transacción de fuera sigue utilizable
+        # —que es lo que en PostgreSQL no ocurre tras una sentencia fallida sin
+        # aislar— y el error queda anotado y confirmado.
+        async with db.begin_nested():
+            await _aplicar_evento_stripe(db, evento)
     except Exception as error:
         # El aviso queda marcado con su error para poder reprocesarlo a mano.
         # Se deja constancia ANTES de propagar: si se pierde el registro del
         # fallo, nadie sabrá que hubo un cobro que no llegó a conceder nada.
         logger.exception("[pagos] no se pudo aplicar el aviso %s", evento.event_id)
-        # ROLLBACK PRIMERO. Si lo que falló fue una sentencia SQL, en PostgreSQL
-        # la transacción queda abortada y este mismo `marcar_evento_procesado`
-        # fallaría también —perdiendo justo el registro que este bloque existe
-        # para garantizar—.
-        await db.rollback()
         await comercio_service.marcar_evento_procesado(
-            db, event_id=_fila.id, error=str(error)[:500]
+            db, event_id=id_del_aviso, error=str(error)[:500]
         )
         await db.commit()
         raise
 
-    await comercio_service.marcar_evento_procesado(db, event_id=_fila.id)
+    await comercio_service.marcar_evento_procesado(db, event_id=id_del_aviso)
     # Nadie hace `commit` dentro del comercio: solo `flush`. Se hace aquí, una
     # vez, cuando la operación entera ha salido bien. Al revés, un webhook que
     # concede el derecho y luego falla al marcar la orden dejaría las dos cosas
@@ -1275,7 +1289,14 @@ async def _crear_saldo_del_propietario(db: AsyncSession, orden) -> None:
     await liquidacion.registrar_saldo(
         db, orden=orden, disponible_desde=None if con_garantia else ahora()
     )
-    await db.commit()
+    # SIN `commit` AQUI, y es lo que hace que el savepoint de arriba sirva de
+    # algo. Un `commit` dentro de un SAVEPOINT no lo deshace: lo CIERRA, y de
+    # paso escribe la transaccion entera del webhook. Con el puesto, el
+    # aislamiento que `_al_confirmar_la_compra` promete era mentira —el saldo ya
+    # estaba escrito cuando fallaba el aviso— y el `rollback` del manejador de
+    # error de mas arriba ya no deshacia la concesion que dice deshacer.
+    # Escribe el `commit` unico del final del webhook.
+    await db.flush()
 
 
 async def _avisar_compra_al_propietario(db: AsyncSession, orden) -> None:
@@ -1310,7 +1331,9 @@ async def _avisar_compra_al_propietario(db: AsyncSession, orden) -> None:
         entity_id=orden.id,
         payload={"orderId": orden.id, "courseId": curso.id},
     )
-    await db.commit()
+    # Tampoco aqui: mismo motivo que en `_crear_saldo_del_propietario`. El
+    # comercio solo hace `flush`; el `commit` es uno y esta al final del webhook.
+    await db.flush()
 
 
 @router.get("/history", response_model=list[PurchaseHistoryRead])

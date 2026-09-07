@@ -871,6 +871,12 @@ async def _conciliar_con_pasarela(
     from app.modules.refunds import reembolso
 
     referencia = solicitud.external_refund_id or ""
+    # EL IDENTIFICADOR, EN UNA CADENA, ANTES DE QUE PUEDA HABER UN `rollback`.
+    # `solicitud` es un objeto del ORM y una transaccion deshecha lo caduca: a
+    # partir de ahi leerle un atributo dispara una recarga perezosa que en
+    # asincrono lanza `MissingGreenlet` y tapa el error de verdad. Es el mismo
+    # fallo que ya se corrigio en `_aplicar_reembolso_total`.
+    id_de_la_solicitud = solicitud.id
     resultado = await proveedor_de_reembolsos().get_refund_status(referencia)
 
     if resultado.status == "succeeded":
@@ -902,7 +908,7 @@ async def _conciliar_con_pasarela(
             )
         except reembolso.NoConciliado as error:
             await db.rollback()
-            solicitud = await _cualquiera(db, solicitud.id)
+            solicitud = await _cualquiera(db, id_de_la_solicitud)
             await devoluciones._anotar(
                 db,
                 solicitud,
