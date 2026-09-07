@@ -118,10 +118,21 @@ Tres fugas, todas del mismo tipo:
 3. `refund_requests` (viene de la 0049) entregaba al alumno el identificador del
    reembolso en la pasarela y el uuid de quien revisó su expediente.
 
-**Corregido en la migración `0052`**, con `revoke` a nivel de columna —lo que
-sobra son columnas, no filas: quitar la fila dejaría a la persona sin ver su
-propio consentimiento— y una función `puede_mover_dinero()` en SQL, equivalente a
-`FINANCE_ROLES`. `is_admin()` no se toca: la usan veinte políticas de moderación.
+**Corregido en la migración `0052`**, por columnas —lo que sobra son columnas,
+no filas: quitar la fila dejaría a la persona sin ver su propio consentimiento—
+y con una función `puede_mover_dinero()` en SQL, equivalente a `FINANCE_ROLES`.
+`is_admin()` no se toca: la usan veinte políticas de moderación.
+
+**Un detalle de la 0052 que conviene no perder.** La primera versión de esa
+migración usaba `revoke select (columna) ... from anon, authenticated` y **no
+habría servido de nada**: en PostgreSQL los permisos sobre una columna son la
+*suma* de los de columna y los de tabla, y Supabase concede `select` sobre la
+tabla entera a `anon` y `authenticated` por defecto. La concesión de tabla habría
+seguido en pie y las columnas se leerían igual. La versión que queda retira la
+concesión de tabla y vuelve a conceder la lista explícita de columnas visibles,
+calculada del catálogo para que no envejezca. Efecto secundario buscado: una
+columna que se añada en el futuro no queda concedida hasta que alguien lo
+decida.
 
 El mismo reparto se corrigió en la API, donde el resumen de ventas de un curso
 ajeno se abría con `is_admin()`: moderar contenido y mirar la caja de otra
@@ -190,7 +201,7 @@ Orden correcto: `0050` → `0051` → `0052` → código.
 
 ## 9. Cómo se deshace
 
-* **0052:** `grant select` de las columnas revocadas, restaurar
+* **0052:** `grant select` sobre las tres tablas completas, restaurar
   `audit_events_read` con `is_admin()` y `drop function puede_mover_dinero()`.
   Está escrito al principio del fichero. No toca ni una fila.
 * **0051:** volver a la definición de la 0050, que es la misma sin las tres
@@ -211,3 +222,10 @@ Orden correcto: `0050` → `0051` → `0052` → código.
 * Una prueba del móvil sobre la versión adquirida era tautológica: comprobaba la
   condición, no la rama `else`, así que pasaba igual con el defecto que decía
   impedir. Corregida, y comprobada inyectando ese defecto.
+* La primera versión de la 0052 cerraba las columnas con `revoke` de columna
+  sobre una concesión de tabla, que en PostgreSQL no quita nada. Se detectó antes
+  de aplicarla, comprobando de dónde salen las concesiones de `anon` y
+  `authenticated`: no las da ninguna migración de este repositorio, las da
+  Supabase por defecto y son de tabla. **Esta es la clase de fallo que se ve
+  verde en cualquier prueba**: la migración se aplica sin error y no protege
+  nada.
