@@ -413,6 +413,26 @@ async def liquidar(
         try:
             intento = await liquidacion.ejecutar_transferencia(db, saldo)
             estado_del_intento = intento.status if intento is not None else None
+            if intento is not None:
+                # ANTES DEL `commit`, Y NO DESPUES. La propiedad que se busca es
+                # «no existe movimiento sin su registro»: con la anotacion
+                # despues, una caida entre los dos `commit` dejaba el dinero
+                # fuera y `audit_events` vacio, que es exactamente el caso
+                # indefendible.
+                await auditoria.anotar(
+                    db,
+                    action="transfer.executed",
+                    entity_type="owner_sale_balance",
+                    entity_id=balance_id,
+                    actor_id=current_user.id,
+                    actor_role="admin",
+                    # `ok` solo cuando la pasarela lo dio por completado. Un
+                    # intento en curso no es un pago hecho.
+                    outcome="ok" if estado_del_intento == "completed" else "error",
+                    new_state=estado_del_intento,
+                    payload={"transfer_id": intento.id},
+                    origen=leer_origen(request),
+                )
             await db.commit()
         except Exception:  # noqa: BLE001
             # UNO QUE FALLA NO SE LLEVA A LOS DEMAS. Se deshace lo suyo y se
@@ -428,22 +448,6 @@ async def liquidar(
             omitidos["taken"] = omitidos.get("taken", 0) + 1
             continue
         resultado.transferencias_intentadas += 1
-        await auditoria.anotar(
-            db,
-            action="transfer.executed",
-            entity_type="owner_sale_balance",
-            entity_id=balance_id,
-            actor_id=current_user.id,
-            actor_role="admin",
-            # `ok` solo cuando la pasarela lo dio por completado. Un intento en
-            # curso no es un pago hecho, y un rastro que no lo distingue no
-            # sirve para investigar nada.
-            outcome="ok" if estado_del_intento == "completed" else "error",
-            new_state=estado_del_intento,
-            payload={"transfer_id": intento.id},
-            origen=leer_origen(request),
-        )
-        await db.commit()
         # `estado_del_intento` se leyo ANTES del commit: despues, el objeto esta
         # caducado y leerle el estado seria otra recarga perezosa.
         if estado_del_intento == "completed":

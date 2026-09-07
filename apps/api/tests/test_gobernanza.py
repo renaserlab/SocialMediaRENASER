@@ -514,24 +514,83 @@ async def test_la_auditoria_no_expone_el_origen_ni_a_administracion(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.asyncio
-async def test_sin_la_0050_nada_revienta(sesiones) -> None:
-    """Las migraciones se aplican A MANO: el codigo va por delante o por detras.
+#: Lo que la 0050 anade y que, por tanto, NO existe antes de aplicarla.
+SIN_LA_0050 = ("course_versions", "policy_versions", "consent_records", "audit_events")
+COLUMNAS_DE_LA_0050 = (
+    "course_version_id",
+    "guarantee_hours",
+    "guarantee_policy",
+    "terms_version",
+    "offer_hash",
+    "snapshot_origin",
+)
 
-    Sin las tablas, auditar no escribe y devuelve `None`, registrar tampoco, y
-    la politica vigente es `None`. Lo que NO puede pasar es un 500.
+
+async def _base_sin_la_0050():
+    """Un esquema como el de PRODUCCION antes de pegar la 0050.
+
+    NO BASTA CON OMITIR LAS TABLAS NUEVAS. Lo que de verdad rompe un despliegue
+    adelantado son las COLUMNAS que la 0050 añade a `orders` y `entitlements`:
+    los modelos las mapean sin ninguna guarda, asi que cualquier
+    `select(Order)` las pide y la base contesta que no existen. Una prueba que
+    solo quitara las tablas se quedaria verde mientras el comercio entero se
+    cae, que es exactamente el fallo que hay que poder ver.
     """
+    import sqlalchemy as sa
+
     from app.shared.database import Base as _Base
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    sin_0050 = [
-        t
-        for nombre, t in _Base.metadata.tables.items()
-        if nombre not in {"policy_versions", "consent_records", "audit_events"}
-    ]
+    antiguo = sa.MetaData()
+    for nombre, tabla in _Base.metadata.tables.items():
+        if nombre in SIN_LA_0050:
+            continue
+        columnas = [
+            c._copy()
+            for c in tabla.columns
+            if not (
+                nombre in ("orders", "entitlements") and c.name in COLUMNAS_DE_LA_0050
+            )
+        ]
+        sa.Table(nombre, antiguo, *columnas)
     async with engine.begin() as conn:
-        await conn.run_sync(_Base.metadata.create_all, tables=sin_0050)
-    hacer = async_sessionmaker(engine, expire_on_commit=False)
+        await conn.run_sync(antiguo.create_all)
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.mark.asyncio
+async def test_sin_la_0050_el_comercio_SE_CAE_y_hay_que_saberlo(sesiones) -> None:
+    """LA 0050 SE APLICA ANTES QUE EL CODIGO. No al reves.
+
+    Esta prueba no comprueba que algo funcione: comprueba que NO funciona, y lo
+    fija por escrito. Los modelos mapean seis columnas nuevas en `orders` y una
+    en `entitlements` sin guarda de esquema —a diferencia de `cursos_v2`, que
+    lee la 0034 por un `MetaData` aparte—, asi que desplegar el codigo con la
+    migracion pendiente NO degrada nada: tumba el checkout, el webhook de pago y
+    el historial de compras.
+
+    Si alguien decide arreglarlo de verdad, esta prueba fallara y habra que
+    reescribirla. Mientras tanto, es lo que evita que la promesa contraria se
+    cuele en un comentario.
+    """
+    from app.modules.commerce.models import Order
+
+    hacer = await _base_sin_la_0050()
+    async with hacer() as db:
+        with pytest.raises(Exception) as fallo:
+            await db.execute(select(Order).limit(1))
+        assert "course_version_id" in str(fallo.value)
+
+
+@pytest.mark.asyncio
+async def test_sin_la_0050_la_gobernanza_si_degrada_con_educacion(sesiones) -> None:
+    """Lo que SI aguanta: politicas, consentimientos y auditoria.
+
+    Estos modulos preguntan por su esquema antes de tocarlo, igual que
+    `refunds` y `catalog` con las suyas. Sin las tablas devuelven `None` y la
+    aplicacion sigue: lo que NO puede pasar es un 500.
+    """
+    hacer = await _base_sin_la_0050()
     esquema.olvidar()
     try:
         async with hacer() as db:

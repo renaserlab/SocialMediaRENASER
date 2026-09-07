@@ -7,9 +7,28 @@
 -- había dónde guardar qué texto legal se le enseñó, ni quién movió el dinero.
 --
 -- ES ADITIVA. No borra ni reescribe nada: crea tablas nuevas y añade columnas
--- ANULABLES (o con valor por defecto) a `orders` y `entitlements`. Una API sin
--- actualizar sigue funcionando exactamente igual, que es lo que permite
--- desplegarla antes que el código.
+-- ANULABLES (o con valor por defecto) a `orders` y `entitlements`. Una API SIN
+-- ACTUALIZAR sigue funcionando exactamente igual.
+--
+-- *** ESTA MIGRACIÓN SE APLICA ANTES DE DESPLEGAR EL CÓDIGO. ***
+--
+-- Y NO al revés. El orden importa y no es una recomendación:
+--
+--   base con 0050 + código viejo  →  funciona. Las columnas nuevas están y
+--                                    nadie las lee.
+--   base sin 0050 + código nuevo  →  **SE CAE EL COMERCIO ENTERO**. Los modelos
+--                                    de `Order` y `Entitlement` mapean las seis
+--                                    columnas nuevas sin ninguna guarda, así que
+--                                    cualquier `select(Order)` las pide y la
+--                                    base contesta que no existen: checkout,
+--                                    webhook de pago e historial de compras,
+--                                    todos con 500.
+--
+-- Los módulos que SÍ aguantan un despliegue adelantado son los de tablas
+-- nuevas —versiones, políticas, consentimientos y auditoría—, porque preguntan
+-- por su esquema antes de tocarlo. Las columnas de `orders` no tienen esa
+-- protección, y dársela exigiría leerlas por un `MetaData` aparte como hace
+-- `cursos_v2` con la 0034. No se ha hecho, y por eso se dice aquí.
 --
 -- LO QUE NO HACE, Y ES DELIBERADO:
 --
@@ -437,10 +456,18 @@ begin
     raise exception 'Una version de curso no se borra: es lo que alguien compro'
       using errcode = 'restrict_violation';
   end if;
+  -- `origin` ESTA EN LA LISTA, y es la que menos se ve venir: es lo que
+  -- distingue una version publicada de verdad de una reconstruida por el
+  -- backfill. Un `update … set origin='publish'` convertiria una fotografia del
+  -- estado actual en una prueba de lo que se vendio, que es exactamente la
+  -- mentira que el backfill se cuida de no contar.
   if new.snapshot is distinct from old.snapshot
      or new.content_hash is distinct from old.content_hash
      or new.version is distinct from old.version
-     or new.course_id is distinct from old.course_id then
+     or new.course_id is distinct from old.course_id
+     or new.origin is distinct from old.origin
+     or new.published_at is distinct from old.published_at
+     or new.published_by is distinct from old.published_by then
     raise exception 'Una version de curso es inmutable: publica otra'
       using errcode = 'restrict_violation';
   end if;
@@ -511,7 +538,20 @@ select
   c.id,
   1,
   'published',
-  encode(digest(c.id::text || coalesce(c.title, '') || coalesce(c.description, ''), 'sha256'), 'hex'),
+  -- UNA HUELLA CENTINELA, Y NO EL SHA DEL CONTENIDO.
+  --
+  -- La huella que compara el codigo es la del snapshot CANONICO completo, y
+  -- reproducirla en SQL es imposible de mantener: cualquier cambio en el
+  -- documento las separaria en silencio. Si aqui se escribiera una huella
+  -- distinta pero con aspecto de huella, la primera republicacion crearia
+  -- SIEMPRE una version 2 identica a esta, y el historial contaria un cambio
+  -- que no ocurrio.
+  --
+  -- Con este centinela el codigo sabe que no hay nada que comparar y reutiliza
+  -- la fila en vez de superarla. Se usa `sha256` del nucleo de PostgreSQL y no
+  -- `digest()` de pgcrypto: en Supabase las extensiones viven en el esquema
+  -- `extensions` y `digest` sin cualificar no se resuelve.
+  'backfill:' || encode(sha256(convert_to(c.id::text, 'utf8')), 'hex'),
   jsonb_build_object(
     'title', c.title,
     'description', c.description,

@@ -204,6 +204,13 @@ class Order(Base):
     # ------------------------------------------------------------------ #
     # LA OFERTA, CONGELADA (0050)
     #
+    # *** ESTAS COLUMNAS NO TIENEN GUARDA DE ESQUEMA. ***
+    #
+    # A diferencia de `cursos_v2`, que lee las columnas de la 0034 por un
+    # `MetaData` aparte, aqui estan en el modelo: cualquier `select(Order)` las
+    # pide. Desplegar este codigo con la 0050 SIN APLICAR tumba el checkout, el
+    # webhook de pago y el historial de compras. La 0050 va PRIMERO.
+    #
     # La orden ya era el snapshot del dinero —importe y moneda desde la 0035—;
     # esto completa lo que faltaba: QUE se compro y con QUE promesa. En columnas
     # y no en una tabla aparte porque la relacion es uno a uno, y una fila mas

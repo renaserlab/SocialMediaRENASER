@@ -400,10 +400,16 @@ async def aceptar_recompra(
                 },
                 origen=origen,
             )
-    except politicas_compartidas.PoliticaAusente:
+    except Exception:  # noqa: BLE001
+        # CUALQUIER fallo, no solo la politica sin sembrar. Capturar unicamente
+        # `PoliticaAusente` dejaba pasar el resto —un CHECK incumplido, la 0050
+        # a medias— y esos SI tumbaban la peticion entera: la aceptacion legal,
+        # que ya estaba volcada, se perdia con el `rollback` de la dependencia y
+        # la compra quedaba bloqueada. Lo accesorio no puede tumbar lo principal.
         logger.warning(
-            "[devoluciones] aceptacion sin politica sembrada: se guardo en "
-            "refund_policy_acceptances pero no en consent_records"
+            "[devoluciones] la aceptacion se guardo en refund_policy_acceptances "
+            "pero no se pudo registrar el consentimiento compartido",
+            exc_info=True,
         )
     await db.commit()
 
@@ -1191,18 +1197,37 @@ async def _transicion(
         # Y SE AUDITA EL INTENTO RECHAZADO. Un rastro que solo apunta lo que
         # salió bien no sirve para investigar: «alguien intentó aprobar dos
         # veces» es exactamente lo que se quiere poder ver después.
-        await auditoria.anotar(
-            db,
-            action=f"refund.{hasta}",
-            entity_type="refund_request",
-            entity_id=solicitud.id,
-            actor_id=current_user.id,
-            actor_role="admin",
-            outcome="denied",
-            previous_state=desde,
-            new_state=hasta,
-            reason=str(error)[:300],
-        )
+        # EL INTENTO RECHAZADO SE CONFIRMA APARTE, y hay que confirmarlo.
+        #
+        # `anotar` solo hace `flush`, y justo despues se lanza la excepcion:
+        # quien cierra la sesion es la dependencia, sin `commit`, asi que la fila
+        # `denied` se deshacia SIEMPRE. Era justo el caso que este bloque dice
+        # cubrir —dos personas aprobando a la vez— y no dejaba ni una fila.
+        #
+        # Y es MEJOR ESFUERZO a proposito: la transicion no se aplico, asi que no
+        # hay nada que proteger con ella, y convertir un 409 legitimo en un 500
+        # porque no se pudo escribir el rastro seria cambiar un problema pequeño
+        # por uno grande. Si falla, queda en el registro.
+        try:
+            await auditoria.anotar(
+                db,
+                action=f"refund.{hasta}",
+                entity_type="refund_request",
+                entity_id=solicitud.id,
+                actor_id=current_user.id,
+                actor_role="admin",
+                outcome="denied",
+                previous_state=desde,
+                new_state=hasta,
+                reason=str(error)[:300],
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "[devoluciones] no se pudo anotar el intento rechazado sobre %s",
+                solicitud.id,
+                exc_info=True,
+            )
         raise ValidationAppError(str(error), code="refund_invalid_transition")
 
     # EL EXPEDIENTE YA LO ANOTA `_anotar` en `refund_request_events`, que es su

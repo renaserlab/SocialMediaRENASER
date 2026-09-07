@@ -55,24 +55,46 @@ PROHIBIDO = frozenset(
 )
 
 
-def _limpio(datos: dict[str, Any] | None) -> dict[str, Any]:
-    """Solo identificadores y códigos.
+def _limpio(datos: dict[str, Any] | None, _profundidad: int = 0) -> dict[str, Any]:
+    """Solo identificadores y códigos, y RECURSIVAMENTE.
 
-    Se filtra por nombre de clave y se recorta el largo: un `payload` es para
-    poder reconstruir qué pasó, no para archivar la petición. Guardar el cuerpo
-    de un aviso de pasarela aquí sería copiar datos de tarjeta a una tabla que
-    lee administración.
+    Un `payload` es para poder reconstruir qué pasó, no para archivar la
+    petición. Guardar el cuerpo de un aviso de pasarela aquí sería copiar datos
+    de tarjeta a una tabla que lee administración.
+
+    FILTRAR SOLO EL PRIMER NIVEL NO SIRVE DE NADA. Comparando únicamente las
+    claves de arriba, un `{"contexto": {"ip": "…", "authorization": "…"}}` pasa
+    entero: el diccionario anidado no se llama como ninguna clave prohibida. Y
+    `payload` SÍ sale por `GET /admin/audit-events`, así que era una fuga real.
+    Ahora se baja hasta el fondo.
+
+    LA PROFUNDIDAD SE ACOTA porque un documento hondo es, por definición, algo
+    que no es un identificador ni un código.
     """
     if not datos:
         return {}
+    if _profundidad >= 3:
+        return {}
     salida: dict[str, Any] = {}
     for clave, valor in datos.items():
-        if clave.lower() in PROHIBIDO:
+        if str(clave).lower() in PROHIBIDO:
+            continue
+        if isinstance(valor, dict):
+            limpio = _limpio(valor, _profundidad + 1)
+            if limpio:
+                salida[clave] = limpio
+            continue
+        if isinstance(valor, (list, tuple, set)):
+            # Solo escalares dentro de una lista: una lista de documentos es
+            # justo lo que no cabe aquí.
+            salida[clave] = [
+                v[:300] if isinstance(v, str) else v
+                for v in list(valor)[:20]
+                if isinstance(v, (str, int, float, bool)) or v is None
+            ]
             continue
         if isinstance(valor, str) and len(valor) > 300:
             valor = valor[:300]
-        if isinstance(valor, (dict, list)) and len(str(valor)) > 1000:
-            continue
         salida[clave] = valor
     return salida
 

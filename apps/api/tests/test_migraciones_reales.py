@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -73,6 +73,17 @@ def exigir_url_desechable(url: str, configurada: str) -> None:
     # comprobacion acaba en la consola de alguien y a veces en un informe.
     limpia = f"{urlsplit(url).scheme}://{anfitrion}/{urlsplit(url).path.lstrip('/')}"
 
+    # LOS PARAMETROS DE CONEXION EN LA QUERY MANDAN SOBRE EL ANFITRION DEL URI.
+    # libpq acepta `?host=…`, `?hostaddr=…` y `?service=…`, y tienen precedencia:
+    # `postgresql://…@localhost/db?host=db.abc.supabase.co` pasaria todas las
+    # comprobaciones de anfitrion y conectaria con Supabase. Se rechazan de raiz.
+    consulta = parse_qs(urlsplit(url).query)
+    peligrosos = {"host", "hostaddr", "service"} & set(consulta)
+    if peligrosos:
+        raise BaseNoDesechable(
+            f"la URL trae parametros de conexion que mandan sobre el anfitrion: "
+            f"{sorted(peligrosos)}"
+        )
     if url.strip() == (configurada or "").strip():
         raise BaseNoDesechable("MIGRACIONES_DATABASE_URL es la misma que DATABASE_URL")
     for prohibido in ("supabase", "pooler", "amazonaws", "rds."):
@@ -100,6 +111,9 @@ def _exigir_url_desechable(url: str) -> None:
         "postgresql://u:p@db.abcdefgh.supabase.co:5432/postgres",
         "postgresql://u:p@midb.cluster-x.us-east-1.rds.amazonaws.com:5432/prod",
         "postgresql://u:p@10.0.0.7:5432/loquesea",
+        # Y el rodeo: anfitrion inofensivo en el URI, el de verdad en la query.
+        "postgresql://postgres:x@localhost:5432/db?host=db.abc.supabase.co",
+        "postgresql://postgres:x@localhost:5432/db?service=produccion",
     ],
 )
 def test_el_guardia_rechaza_las_bases_que_no_son_desechables(url: str) -> None:
@@ -198,8 +212,12 @@ def test_todas_las_migraciones_aplican_en_orden(aplicadas) -> None:
 def test_la_ultima_migracion_es_la_que_dice_la_documentacion(aplicadas) -> None:
     """Si alguien anade una 0050, esta prueba se entera y obliga a actualizar
     la documentacion y los modelos en el mismo cambio."""
-    assert aplicadas[-1].startswith("0049_") or aplicadas[-1].startswith("0050_"), (
-        f"la ultima migracion es {aplicadas[-1]}: actualiza la documentacion"
+    # La ULTIMA concreta, no «una de estas dos». Aceptar las dos hacia que la
+    # prueba no se enterase de una 0051, que es justo cuando hay que actualizar
+    # los modelos y la documentacion en el mismo cambio.
+    assert aplicadas[-1].startswith("0050_"), (
+        f"la ultima migracion es {aplicadas[-1]}: actualiza los modelos, "
+        "la documentacion y esta prueba en el mismo cambio"
     )
 
 
@@ -213,6 +231,11 @@ def test_estan_las_siete_tablas_del_dinero(conexion, aplicadas) -> None:
         "owner_payout_accounts",
         "owner_sale_balances",
         "owner_transfers",
+        # Las de la 0050.
+        "course_versions",
+        "policy_versions",
+        "consent_records",
+        "audit_events",
     }
     hay = set(
         _lista(
@@ -267,7 +290,9 @@ def test_la_rls_esta_activa_en_las_tablas_del_dinero(conexion, aplicadas) -> Non
         where n.nspname = 'public' and c.relkind = 'r'
           and c.relname in ('course_refund_windows','refund_requests',
                             'refund_request_events','refund_policy_acceptances',
-                            'owner_payout_accounts','owner_sale_balances','owner_transfers')
+                            'owner_payout_accounts','owner_sale_balances','owner_transfers',
+                            'course_versions','policy_versions','consent_records',
+                            'audit_events')
           and c.relrowsecurity = false
         """,
     )
@@ -289,7 +314,9 @@ def test_ninguna_politica_permite_escribir_dinero(conexion, aplicadas) -> None:
         select tablename || ':' || policyname || ':' || cmd from pg_policies
         where schemaname = 'public'
           and tablename like any (array['refund%','owner%','orders','entitlements',
-                                        'payment_%','commerce_%','provider_%'])
+                                        'payment_%','commerce_%','provider_%',
+                                        'course_versions','policy_versions',
+                                        'consent_records','audit_events'])
           and cmd <> 'SELECT'
         """,
     )
@@ -301,7 +328,9 @@ def test_los_modelos_no_declaran_columnas_que_la_base_no_tiene(conexion, aplicad
     """El contrato al revés que la prueba estática: allí se comprueba que el
     modelo no ignore una columna del SQL; aquí, que no se invente ninguna."""
     from app.shared.database import Base
+    from app.modules.catalog import models as _catalog  # noqa: F401
     from app.modules.commerce import models as _commerce  # noqa: F401
+    from app.modules.gobernanza import models as _gobernanza  # noqa: F401
     from app.modules.refunds import models as _refunds  # noqa: F401
 
     reales: dict[str, set[str]] = {}
@@ -322,6 +351,12 @@ def test_los_modelos_no_declaran_columnas_que_la_base_no_tiene(conexion, aplicad
         "owner_payout_accounts",
         "owner_sale_balances",
         "owner_transfers",
+        "course_versions",
+        "policy_versions",
+        "consent_records",
+        "audit_events",
+        "orders",
+        "entitlements",
     ):
         modelo = Base.metadata.tables.get(nombre)
         if modelo is None or nombre not in reales:
@@ -345,3 +380,93 @@ def test_aplicar_dos_veces_no_rompe_nada(conexion, aplicadas) -> None:
                 cur.execute(ruta.read_text(encoding="utf-8"))
         except Exception as error:  # noqa: BLE001
             pytest.fail(f"la migracion {nombre} no es idempotente:\n{error}")
+
+
+@SIN_POSTGRES
+def test_los_indices_que_sostienen_la_0050_existen(conexion, aplicadas) -> None:
+    """Las invariantes de la 0050 son indices PARCIALES, y SQLite no las prueba.
+
+    Cada uno impide una cosa concreta que un `if` en Python no impide: dos
+    versiones vigentes del mismo curso, dos politicas vigentes del mismo tipo,
+    dos aceptaciones consumidas por la misma orden y dos aceptaciones pendientes
+    creadas por un doble toque.
+    """
+    definiciones = dict(
+        zip(
+            _lista(conexion, "select indexname from pg_indexes where schemaname='public'"),
+            _lista(conexion, "select indexdef from pg_indexes where schemaname='public'"),
+        )
+    )
+    for nombre in (
+        "course_versions_vigente_unica",
+        "policy_versions_vigente_unica",
+        "consent_records_consumo_unico",
+        "consent_records_pendiente_unico",
+    ):
+        assert nombre in definiciones, f"falta el indice {nombre}"
+        definicion = definiciones[nombre].lower()
+        assert "unique" in definicion, f"{nombre} no es unico"
+        assert "where" in definicion, f"{nombre} no es parcial"
+
+
+@SIN_POSTGRES
+def test_los_disparadores_de_inmutabilidad_existen(conexion, aplicadas) -> None:
+    """Lo que impide reescribir una prueba legal, y que SQLite no ejecuta.
+
+    La RLS no basta: la API entra con la clave de servicio y se la salta. Sin
+    estos disparadores, un `UPDATE` desde el backend reescribiria el texto que
+    alguien firmo o el rastro de quien movio el dinero.
+    """
+    puestos = set(
+        _lista(conexion, "select tgname from pg_trigger where not tgisinternal")
+    )
+    for nombre in (
+        "audit_events_solo_anadir",
+        "consent_records_inmutable",
+        "consent_records_no_se_borra",
+        "policy_versions_inmutable",
+        "policy_versions_no_se_borra",
+        "course_versions_inmutable",
+    ):
+        assert nombre in puestos, f"falta el disparador {nombre}"
+
+
+@SIN_POSTGRES
+def test_una_version_publicada_no_se_puede_reescribir(conexion, aplicadas) -> None:
+    """El disparador, EJERCIDO.
+
+    Comprobar que existe no basta: lo que importa es que rechace las tres cosas
+    que dice rechazar. La tercera —disfrazar un backfill de publicacion real— es
+    la menos evidente y la que convertiria una reconstruccion en una prueba
+    falsa de lo que se vendio.
+    """
+    import psycopg
+
+    with conexion.cursor() as cur:
+        cur.execute(
+            "insert into public.profiles (id, username, full_name) "
+            "values (gen_random_uuid(), 'p_0050', 'Prueba') returning id"
+        )
+        autor = cur.fetchone()[0]
+        cur.execute(
+            "insert into public.courses (author_id, title, description) "
+            "values (%s, 'Curso', 'x') returning id",
+            (autor,),
+        )
+        curso = cur.fetchone()[0]
+        cur.execute(
+            "insert into public.course_versions "
+            "(course_id, version, status, content_hash, snapshot) "
+            "values (%s, 1, 'published', 'h', '{}'::jsonb) returning id",
+            (curso,),
+        )
+        version = cur.fetchone()[0]
+
+    prohibidas = [
+        ("reescribir el contenido", "update public.course_versions set snapshot = %s::jsonb where id = %s", ('{"a":1}', version)),
+        ("borrarla", "delete from public.course_versions where id = %s", (version,)),
+        ("disfrazarla de backfill", "update public.course_versions set origin = 'backfill' where id = %s", (version,)),
+    ]
+    for que, sentencia, argumentos in prohibidas:
+        with pytest.raises(psycopg.errors.RaiseException), conexion.cursor() as cur:
+            cur.execute(sentencia, argumentos)

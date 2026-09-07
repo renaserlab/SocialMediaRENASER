@@ -101,7 +101,27 @@ que la duración deje de ser única.
 | Cursos rechazados | Rechazar no despublica; la versión vigente no se retira. |
 | Cursos con devoluciones | Sin cambio: nada del circuito de reembolsos mira el temario. |
 | Cursos con alumnos activos | Sin cambio: el acceso lo decide el producto, no la versión. |
-| **Código desplegado antes que la 0050** | Todo funciona como antes. `esquema.hay_versiones_de_curso` y `hay_gobernanza` responden que no, y versionar, auditar y registrar consentimientos devuelven `None`. |
+| **Código desplegado antes que la 0050** | **Se cae el comercio.** Ver el aviso de abajo. |
+
+### El orden de despliegue no es opcional
+
+**La 0050 se aplica ANTES de desplegar el código.**
+
+| | |
+|---|---|
+| Base con 0050 + código viejo | Funciona. Las columnas están y nadie las lee. |
+| Base sin 0050 + código nuevo | **Checkout, webhook de pago e historial de compras responden 500.** |
+
+El motivo: `Order` y `Entitlement` mapean las columnas nuevas **sin guarda de
+esquema**, así que cualquier `select(Order)` las pide. Los módulos de versiones,
+políticas, consentimientos y auditoría sí aguantan un despliegue adelantado
+—preguntan por su esquema antes de tocarlo—, pero eso no salva al comercio.
+
+Dárselo exigiría leer esas columnas por un `MetaData` aparte, como hace
+`cursos_v2` con la 0034. No se ha hecho: se ha preferido decirlo aquí, en la
+cabecera de la migración y en el propio modelo, y fijarlo con una prueba
+(`test_sin_la_0050_el_comercio_SE_CAE_y_hay_que_saberlo`) que se rompería si
+alguien lo arregla de verdad.
 
 ### El backfill, y lo que no afirma
 

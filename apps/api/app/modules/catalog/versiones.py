@@ -36,6 +36,9 @@ from app.modules.learning.models import CourseLesson, CourseModule
 
 logger = logging.getLogger("renaser.catalog")
 
+#: Lo que escribe el backfill de la 0050 en `content_hash`. Ver `asegurar_version`.
+CENTINELA_DE_BACKFILL = "backfill:"
+
 
 def _canonico(snapshot: dict[str, Any]) -> str:
     """El documento en una forma estable, para poder compararlo.
@@ -145,9 +148,10 @@ async def asegurar_version(
     NO HACE `commit`: lo hace quien llama, para que la versión y el cambio de
     estado del curso vivan o mueran juntos.
 
-    Devuelve `None` si la 0050 no está aplicada. Publicar sigue funcionando como
-    antes: las migraciones se aplican a mano y el código va por delante o por
-    detrás según el día.
+    Devuelve `None` si la 0050 no está aplicada, y publicar sigue funcionando
+    como antes. Ojo con lo que eso NO significa: el módulo de versiones aguanta
+    un despliegue adelantado, pero las columnas que la 0050 añade a `orders` no,
+    porque están en el modelo sin guarda. La migración va antes que el código.
     """
     if not await esquema_gobernanza.hay_versiones_de_curso(db):
         return None
@@ -167,6 +171,22 @@ async def asegurar_version(
         .limit(1)
     )
 
+    # UNA VERSION RECONSTRUIDA NO TIENE HUELLA COMPARABLE. El backfill de la
+    # 0050 no puede calcular la huella canonica —tendria que reproducir en SQL la
+    # forma exacta del documento, y las dos se separarian al primer cambio—, asi
+    # que escribe un centinela. Tratarlo como una huella normal haria que la
+    # primera republicacion creara SIEMPRE una version 2 identica: el historial
+    # contaria un cambio que no ocurrio.
+    #
+    # Se reutiliza la fila y se le pone la huella de verdad, sin cambiar su
+    # numero ni su contenido: sigue siendo la version 1 reconstruida.
+    if ultima is not None and str(ultima.content_hash or "").startswith(CENTINELA_DE_BACKFILL):
+        if ultima.status != "published":
+            ultima.status = "published"
+        ultima.content_hash = firma
+        await db.flush()
+        return ultima
+
     if ultima is not None and ultima.content_hash == firma:
         # El mismo contenido. Si estaba retirada, vuelve a ser la vigente.
         if ultima.status != "published":
@@ -176,9 +196,6 @@ async def asegurar_version(
 
     siguiente = (ultima.version + 1) if ultima is not None else 1
     actual = await vigente(db, curso.id)
-    if actual is not None:
-        actual.status = "superseded"
-        await db.flush()
 
     nueva = CourseVersion(
         course_id=curso.id,
@@ -189,20 +206,33 @@ async def asegurar_version(
         published_by=publicada_por,
         origin="publish",
     )
-    db.add(nueva)
     try:
-        # SAVEPOINT porque la carrera es real: `publish_course` lee, valida y
-        # escribe sin bloqueo. Dos publicaciones simultáneas chocan en
-        # `course_versions_vigente_unica`, y quien pierde tiene que enterarse
-        # aquí en vez de abortar la transacción entera.
+        # TODO DENTRO DEL SAVEPOINT: retirar la anterior Y añadir la nueva.
+        #
+        # Es el mismo error que `consentimientos.py` documenta y que aquí estaba
+        # cometido: con el `add` fuera, el objeto pertenece a la transacción
+        # exterior y deshacer el savepoint no lo saca. Y con el paso a
+        # `superseded` fuera, una publicación rival que gane la carrera dejaba la
+        # anterior retirada y ninguna vigente —el curso publicado sin versión—,
+        # que es peor que el problema que se quería evitar.
         async with db.begin_nested():
+            if actual is not None:
+                actual.status = "superseded"
+            db.add(nueva)
             await db.flush()
     except IntegrityError:
+        # Otra publicación llegó antes. La suya es la buena.
+        ganadora = await vigente(db, curso.id)
+        if ganadora is None:
+            # No hay vigente y tampoco pudimos crearla: el curso quedaría
+            # publicado sin versión. Es un fallo, no un final feliz, y quien
+            # llama tiene que enterarse en vez de confirmar ese estado.
+            raise
         logger.info(
             "[catalog] otra publicacion del curso %s llego antes; se usa la suya",
             curso.id,
         )
-        return await vigente(db, curso.id)
+        return ganadora
     return nueva
 
 

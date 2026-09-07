@@ -205,6 +205,8 @@ async def conceder(
         # que haya suscripción, no para usarla hoy.
         expires_at=None,
         matricular_tambien=True,
+        # Para que el derecho apunte a la MISMA version que la orden.
+        order_id=order_id,
     )
     return ResultadoDeConcesion(course_id=producto.course_id, nuevo=es_nuevo)
 

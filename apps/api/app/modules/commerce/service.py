@@ -558,6 +558,7 @@ async def conceder_entitlement(
     transaction_id: str | None = None,
     expires_at: datetime | None = None,
     matricular_tambien: bool = True,
+    order_id: str | None = None,
 ) -> tuple[Entitlement, bool]:
     """Concede el acceso. Devuelve `(derecho, es_nuevo)`.
 
@@ -616,11 +617,24 @@ async def conceder_entitlement(
     # Solo al concederlo por primera vez: reescribirlo en un reintento
     # cambiaría, a posteriori, qué versión abrió un acceso que ya existía.
     if es_nuevo and producto is not None and producto.course_id is not None:
-        from app.modules.catalog import versiones
+        version_id: str | None = None
+        if order_id is not None:
+            # LA DE LA ORDEN, QUE ES LA QUE SE COMPRO. Volver a preguntar por la
+            # vigente era un fallo real: entre abrir el pedido y confirmarse el
+            # pago el autor puede haber republicado, y entonces la orden decia v3
+            # y el derecho v4. A «¿que compro esta persona?» habia dos respuestas
+            # distintas, y ninguna forma de saber cual valia.
+            orden = await db.get(Order, order_id)
+            version_id = orden.course_version_id if orden is not None else None
+        else:
+            # Sin orden —la beta— no hay nada congelado, asi que lo unico que se
+            # puede decir es que version estaba publicada al concederlo.
+            from app.modules.catalog import versiones
 
-        version = await versiones.vigente(db, producto.course_id)
-        if version is not None:
-            derecho.course_version_id = version.id
+            vigente = await versiones.vigente(db, producto.course_id)
+            version_id = vigente.id if vigente is not None else None
+        if version_id is not None:
+            derecho.course_version_id = version_id
             await db.flush()
 
     if matricular_tambien:

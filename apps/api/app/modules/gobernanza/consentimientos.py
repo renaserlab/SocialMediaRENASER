@@ -89,13 +89,15 @@ async def registrar(
             db.add(fila)
             await db.flush()
     except IntegrityError:
-        # Doble toque. La que ya está es la buena.
+        # Doble toque. La que ya está es la buena, y tiene que ser la de ESTA
+        # versión de política: ver `pendiente`.
         return await pendiente(
             db,
             subject_id=subject_id,
             policy_type=policy_type,
             scope_kind=scope_kind,
             scope_id=scope_id,
+            policy_version_id=politica.id,
         )
     return fila
 
@@ -107,8 +109,17 @@ async def pendiente(
     policy_type: str,
     scope_kind: str = "global",
     scope_id: str | None = None,
+    policy_version_id: str | None = None,
 ) -> ConsentRecord | None:
-    """La aceptación de esta persona que todavía no se ha usado."""
+    """La aceptación de esta persona que todavía no se ha usado.
+
+    `policy_version_id` NO ES OPCIONAL EN LA PRÁCTICA cuando importa. El índice
+    único que impide el doble toque incluye la versión, así que una persona
+    puede tener pendientes dos aceptaciones del mismo tipo si entre medias se
+    publicó una redacción nueva. Sin filtrar por versión, esta consulta podía
+    devolver la firmada contra el texto ANTERIOR y sellarla como prueba de algo
+    que se le enseñó distinto.
+    """
     if not await esquema.hay_gobernanza(db):
         return None
     consulta = select(ConsentRecord).where(
@@ -122,6 +133,8 @@ async def pendiente(
         if scope_id is not None
         else consulta.where(ConsentRecord.scope_id.is_(None))
     )
+    if policy_version_id is not None:
+        consulta = consulta.where(ConsentRecord.policy_version_id == policy_version_id)
     return await db.scalar(consulta.order_by(ConsentRecord.accepted_at.desc()).limit(1))
 
 
