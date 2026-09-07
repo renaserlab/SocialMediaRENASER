@@ -191,6 +191,28 @@ Cada uno con su causa raíz, porque el defecto sin la causa vuelve.
 | Una página que falla dejaba la lista truncada con aspecto de completa | El `catch` apagaba `hayMas` |
 | Si fallaba la consulta de recompra se ofrecía comprar sin la advertencia | `null` significaba a la vez «no hace falta» y «no se pudo averiguar» |
 
+### Lo que encontró la revisión independiente
+
+Una segunda pasada sobre estos mismos cambios. **Dos de los defectos los había
+introducido yo en esta ronda**; el resto ya estaban.
+
+| Defecto | Causa raíz |
+|---|---|
+| El `rollback` de una anotación fallida borraba el registro anti-repetición, **en silencio** | `commit` y `rollback` suben hasta la raíz aunque se llamen dentro de un savepoint. No lanzan nada, así que la petición respondía con normalidad y el reenvío de Stripe se procesaba como nuevo |
+| La ruta de disputa por webhook cerraba el savepoint del aviso | Terminaba con `commit`, que no confirma un savepoint sino que lo cierra. **No tenía ni una prueba** |
+| Una devolución por tienda podía anular el saldo de una compra por tarjeta | `orden_pagada_de` no filtraba por pasarela ni por entorno, y un mismo producto se vende por varias vías |
+| Sin la 0049, un `native/sync` perdía las concesiones de toda la pasada | Se consultaba `owner_sale_balances` sin el guardián de esquema que usa el resto del módulo |
+| Un saldo que falla se llevaba por delante a los demás | El bucle recorría objetos del ORM y hacía `rollback` dentro: eso caduca **todo** el mapa de identidad, y la vuelta siguiente reventaba con `MissingGreenlet` |
+| Una compra de pruebas daba un sello de «compra verificada» real | Faltaba filtrar por entorno, cosa que hace todo el resto del comercio |
+| Bucle de peticiones contra un servidor caído | El pie de error cambia el alto del contenido, y eso vuelve a disparar `onEndReached` |
+| El Atrás de una sección ejecutaba la despedida de otra pantalla | El interceptor se ataba al montaje, y estas pantallas siguen montadas al cambiar de sección |
+| Dos pulsaciones de Atrás apilaban dos diálogos en el asistente | `salir()` era la única acción de escritura fuera del cerrojo, y es justo la que dispara la tecla |
+| Una prueba tautológica y once frágiles | La de la disputa congelaba el saldo *antes* de llamar, así que el `SELECT` ya lo descartaba y la condición nueva no se ejercitaba. Las de navegación miraban el texto del `.tsx`: se rompían al reformatear y pasaban aunque el registro no estuviera conectado |
+
+Las tres correcciones de más peso se verificaron **revirtiéndolas**: la prueba
+correspondiente falla sin el cambio y pasa con él. Sin esa comprobación, una
+prueba nueva solo demuestra que el código actual hace lo que hace.
+
 ---
 
 ## 5. QA que no se ha hecho
