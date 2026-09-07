@@ -1002,6 +1002,35 @@ async def conciliar_solicitud(
     return await _a_lectura_admin(db, solicitud, con_historial=True)
 
 
+@admin_router.post("/refund-requests/reconcile-stale")
+async def conciliar_las_estancadas(
+    horas: int = Query(default=24, ge=1, le=720),
+    limite: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """Preguntarle a la pasarela por TODOS los expedientes que llevan colgados.
+
+    POR QUE HACIA FALTA. `reconciliar_estancadas` estaba escrita y probada, y no
+    la llamaba nadie: ni un endpoint, ni una tarea. La conciliacion existia solo
+    de una en una, expediente a expediente, y justo el caso que motiva todo esto
+    —el webhook que se pierde y deja el reembolso en `refund_processing` para
+    siempre— es el que nadie va a ir a buscar a mano.
+
+    IDEMPOTENTE Y ACOTADO. `reembolso.aplicar` devuelve False si ya estaba
+    aplicado, asi que llamarlo dos veces seguidas no revoca dos veces ni avisa
+    dos veces; `horas` y `limite` acotan cuanto abarca cada pasada.
+
+    A MANO Y NO POR TEMPORIZADOR, por lo mismo que la liquidacion: la API corre
+    en varias replicas y un planificador dentro del proceso son tantas pasadas
+    como replicas. Cuando se decida colgarlo de un cron externo, este es el
+    endpoint.
+    """
+    await _exigir_gestor(db, current_user)
+    await _exigir_esquema(db)
+    return {"conciliadas": await reconciliar_estancadas(db, horas=horas, limite=limite)}
+
+
 async def reconciliar_estancadas(
     db: AsyncSession, *, horas: int = 24, limite: int = 50
 ) -> int:

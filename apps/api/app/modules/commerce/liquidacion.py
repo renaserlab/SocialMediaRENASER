@@ -337,13 +337,25 @@ async def liberar_vencidos(db: AsyncSession, *, limite: int = 200) -> int:
     )
     if not ids:
         return 0
-    await db.execute(
+    # LA CONDICIÓN DE ESTADO SE REPITE EN EL UPDATE, y no sobra por estar ya en
+    # el SELECT. Entre leer y escribir cabe cualquier cosa: el caso concreto es
+    # que llegue `charge.dispute.created` y ponga el saldo en `frozen` sin que
+    # exista ninguna solicitud de devolución. Filtrando solo por `id`, este
+    # UPDATE lo devolvía a `eligible` y borraba la congelación de una disputa
+    # abierta, que es justo el dinero que el banco está reclamando.
+    #
+    # Comparar y escribir en la misma sentencia hace que ese saldo se quede
+    # fuera y el recuento devuelto sea el de los que de verdad se movieron.
+    resultado = await db.execute(
         update(OwnerSaleBalance)
-        .where(OwnerSaleBalance.id.in_(ids))
+        .where(
+            OwnerSaleBalance.id.in_(ids),
+            OwnerSaleBalance.status == "pending",
+        )
         .values(status="eligible", updated_at=ahora)
     )
     await db.flush()
-    return len(ids)
+    return resultado.rowcount
 
 
 # --------------------------------------------------------------------------- #

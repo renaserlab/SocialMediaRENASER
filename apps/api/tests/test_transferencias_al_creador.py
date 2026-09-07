@@ -552,3 +552,157 @@ async def test_la_salud_de_los_saldos_saca_a_la_luz_lo_retenido(sesiones):
             assert cuerpo["por_estado"]["transferred"]["count"] == 0
     finally:
         app.dependency_overrides.clear()
+
+
+async def _como_admin(sesiones):
+    """Cliente HTTP autenticado como administración. Devuelve (http, cerrar)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import get_current_user
+    from app.main import app
+    from app.shared.database import get_db
+
+    async with sesiones() as db:
+        perfil = await db.get(Profile, BRUNO)
+        perfil.role = "admin"
+        await db.commit()
+
+    async def _sesion():
+        async with sesiones() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = _sesion
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=BRUNO, email="x@y.z"
+    )
+    http = AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+    async def _cerrar() -> None:
+        await http.aclose()
+        app.dependency_overrides.clear()
+
+    return http, _cerrar
+
+
+@pytest.mark.asyncio
+async def test_la_liquidacion_tiene_por_fin_quien_la_dispare(sesiones, monkeypatch):
+    """El saldo vencido llega a `eligible` y se paga. Antes no lo hacía nadie.
+
+    EL AGUJERO QUE ESTO CIERRA. `liberar_vencidos` y `ejecutar_transferencia`
+    estaban escritas, documentadas y probadas, y no las llamaba ni un endpoint
+    ni una tarea. Un saldo `pending` con la fecha ya pasada se quedaba ahí para
+    siempre, así que `puede_transferirse` contestaba `not_eligible` eternamente
+    y el dinero del propietario no salía aunque las banderas estuvieran puestas.
+    """
+    _usar(monkeypatch, DobleDeterminista())
+    async with sesiones() as db:
+        # El saldo de la fixture ya está `eligible`; se retrocede a `pending`
+        # con la fecha vencida para que la pasada tenga que hacer las dos cosas.
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        saldo.status = "pending"
+        saldo.available_at = _antes(2)
+        await db.commit()
+
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        respuesta = await http.post("/api/v1/admin/owner-balances/settle")
+        assert respuesta.status_code == 200, respuesta.text
+        cuerpo = respuesta.json()
+        assert cuerpo["liberados"] == 1
+        assert cuerpo["transferencias_intentadas"] == 1
+        assert cuerpo["transferencias_completadas"] == 1
+        assert cuerpo["fallidos"] == 0
+    finally:
+        await cerrar()
+
+    async with sesiones() as db:
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        assert saldo.status == "transferred"
+        intento = await db.scalar(select(OwnerTransfer))
+        assert intento is not None and intento.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_liquidar_dos_veces_no_paga_dos_veces(sesiones, monkeypatch):
+    """Idempotente: la segunda pasada no encuentra nada que hacer."""
+    _usar(monkeypatch, DobleDeterminista())
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        primera = (await http.post("/api/v1/admin/owner-balances/settle")).json()
+        segunda = (await http.post("/api/v1/admin/owner-balances/settle")).json()
+    finally:
+        await cerrar()
+
+    assert primera["transferencias_intentadas"] == 1
+    assert segunda["transferencias_intentadas"] == 0
+    async with sesiones() as db:
+        assert len(list(await db.scalars(select(OwnerTransfer)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_con_las_banderas_apagadas_se_libera_pero_no_se_paga(sesiones):
+    """Liberar es contabilidad interna; transferir es dinero saliendo.
+
+    Con `creator_transfers_enabled` apagada, el saldo tiene que poder llegar a
+    `eligible` —eso solo mueve un estado— y ninguna transferencia debe
+    intentarse. El motivo sale en `omitidos`, que es lo que explica el cero.
+    """
+    ajustes = get_settings()
+    ajustes.creator_transfers_enabled = False
+    async with sesiones() as db:
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        saldo.status = "pending"
+        saldo.available_at = _antes(2)
+        await db.commit()
+
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        cuerpo = (await http.post("/api/v1/admin/owner-balances/settle")).json()
+    finally:
+        await cerrar()
+
+    assert cuerpo["liberados"] == 1
+    assert cuerpo["transferencias_intentadas"] == 0
+    assert cuerpo["omitidos"] == {"transfers_disabled": 1}
+    async with sesiones() as db:
+        assert (await db.scalar(select(OwnerSaleBalance))).status == "eligible"
+        assert await db.scalar(select(OwnerTransfer)) is None
+
+
+@pytest.mark.asyncio
+async def test_liberar_no_descongela_una_disputa(sesiones):
+    """Un contracargo congela el saldo. La liberación no puede deshacerlo.
+
+    LA CARRERA. `liberar_vencidos` leía los identificadores con
+    `status = 'pending'` y luego escribía filtrando solo por `id`. Entre las dos
+    sentencias cabe `charge.dispute.created`, que pone el saldo en `frozen` sin
+    solicitud asociada; el UPDATE lo devolvía a `eligible` y el pago quedaba
+    autorizado sobre dinero que el banco está reclamando.
+    """
+    async with sesiones() as db:
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        saldo.status = "pending"
+        saldo.available_at = _antes(2)
+        await db.commit()
+        identificador = saldo.id
+
+    async with sesiones() as db:
+        # Se simula la carrera de la forma más directa: el saldo cambia a
+        # `frozen` DESPUÉS de que la consulta de candidatos lo haya visto.
+        ids = list(
+            await db.scalars(
+                select(OwnerSaleBalance.id).where(OwnerSaleBalance.status == "pending")
+            )
+        )
+        assert ids == [identificador]
+        congelado = await db.get(OwnerSaleBalance, identificador)
+        congelado.status = "frozen"
+        congelado.frozen_by_request_id = None
+        await db.commit()
+
+        movidos = await liquidacion.liberar_vencidos(db)
+        await db.commit()
+
+    assert movidos == 0
+    async with sesiones() as db:
+        assert (await db.scalar(select(OwnerSaleBalance))).status == "frozen"

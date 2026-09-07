@@ -17,7 +17,9 @@ equivocado. Misma leccion que en `recommendations/esquema.py`.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,12 +27,14 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.security import AuthUser, get_current_user
 from app.modules.catalog.models import Course
 from app.modules.commerce.models import CommerceProduct, Order, OwnerSaleBalance
+from app.modules.commerce import liquidacion
 from app.modules.commerce.schemas import (
     ESTADOS_DE_SALDO,
     Comprador,
     OwnerCourseSummary,
     BalancesRetenidos,
     OwnerSaleRead,
+    ResultadoDeLiquidacion,
     SaldoPorEstado,
 )
 from app.modules.profiles.models import Profile
@@ -39,6 +43,8 @@ from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 from app.shared.permissions import is_admin, puede_mover_dinero
+
+logger = logging.getLogger("renaser.commerce")
 
 router = APIRouter(prefix="/commerce", tags=["comercio-propietario"])
 
@@ -299,3 +305,86 @@ async def salud_de_los_saldos(
         congelados_antiguos=int(congelados or 0),
         dias=dias,
     )
+
+
+@admin_router.post("/owner-balances/settle", response_model=ResultadoDeLiquidacion)
+async def liquidar(
+    limite: int = Query(default=100, ge=1, le=500),
+    solo_liberar: bool = Query(default=False),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResultadoDeLiquidacion:
+    """Mueve los saldos vencidos y paga a los propietarios que toque.
+
+    POR QUE EXISTE ESTE ENDPOINT. `liberar_vencidos` y `ejecutar_transferencia`
+    estaban escritas, documentadas y probadas, y NADIE LAS LLAMABA: ni un
+    endpoint, ni una tarea, ni el arranque. El resultado es que ningun saldo
+    salia nunca de `pending`, asi que `puede_transferirse` contestaba siempre
+    `not_eligible` y el dinero del propietario se quedaba retenido para siempre
+    por mucho que se encendieran las banderas. Solo se veia en el endpoint de
+    salud, que mira pero no toca.
+
+    SE DISPARA A MANO, y no desde un planificador dentro de la API. La aplicacion
+    corre en varias replicas y un temporizador en el proceso significa tantas
+    pasadas simultaneas como replicas haya; ademas, pagar dinero cuando nadie
+    esta mirando es exactamente lo que no conviene mientras la funcion es nueva.
+    Es idempotente y acotado, asi que llamarlo dos veces seguidas no duplica
+    nada y se puede colgar de un cron externo cuando se decida.
+
+    NO ENCIENDE NADA. Con las banderas apagadas la parte de liberacion sigue
+    funcionando —es contabilidad interna, no dinero saliendo— y todas las
+    transferencias se cuentan como omitidas con el motivo `transfers_disabled`,
+    que es lo que hace util llamarlo tambien en pruebas.
+
+    `solo_liberar` deja la primera mitad y se salta los pagos: sirve para poner
+    al dia los estados sin tocar la pasarela.
+    """
+    await _exigir_admin(db, current_user)
+    resultado = ResultadoDeLiquidacion()
+    if not await esquema_devoluciones.hay_liquidaciones(db):
+        # Sin la 0049 no hay nada que liquidar. Ceros, no un 500: el endpoint se
+        # puede desplegar antes que la migracion.
+        return resultado
+
+    resultado.liberados = await liquidacion.liberar_vencidos(db, limite=limite)
+    await db.commit()
+    if solo_liberar:
+        return resultado
+
+    # Se relee despues de commit: los que acaban de pasar a `eligible` entran en
+    # esta misma pasada, que es lo que uno espera al pulsar una sola vez.
+    elegibles = list(
+        await db.scalars(
+            select(OwnerSaleBalance)
+            .where(OwnerSaleBalance.status == "eligible")
+            .order_by(OwnerSaleBalance.available_at)
+            .limit(limite)
+        )
+    )
+    omitidos: dict[str, int] = {}
+    for saldo in elegibles:
+        motivo = await liquidacion.puede_transferirse(db, saldo)
+        if motivo is not None:
+            omitidos[motivo] = omitidos.get(motivo, 0) + 1
+            continue
+        try:
+            intento = await liquidacion.ejecutar_transferencia(db, saldo)
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            # UNO QUE FALLA NO SE LLEVA A LOS DEMAS. Se deshace lo suyo y se
+            # sigue: el saldo se queda como estaba y entra en la proxima pasada.
+            logger.exception(
+                "[liquidacion] fallo al transferir el saldo %s", saldo.id
+            )
+            await db.rollback()
+            resultado.fallidos += 1
+            continue
+        if intento is None:
+            # Se lo llevo otro proceso entre la comprobacion y el turno.
+            omitidos["taken"] = omitidos.get("taken", 0) + 1
+            continue
+        resultado.transferencias_intentadas += 1
+        if intento.status == "completed":
+            resultado.transferencias_completadas += 1
+    resultado.omitidos = omitidos
+    return resultado
