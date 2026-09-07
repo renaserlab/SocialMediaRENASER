@@ -224,6 +224,17 @@ export function ComprasYDevolucionesScreen() {
                   </Text>
                   <Etiqueta texto={t(`compras.estado.${compra.status}` as TranslationKey)} />
                   {/*
+                    QUE VERSION SE COMPRO. Solo cuando consta: en las compras
+                    anteriores al versionado no hay forma de saber que contenido
+                    se vendio, y escribir «versión 1» seria inventarlo. Callarse
+                    es la respuesta honesta, y por eso no hay rama `else`.
+                  */}
+                  {compra.courseVersion !== null ? (
+                    <Text style={[styles.nota, { color: colors.textMuted }]}>
+                      {t('compras.versionAdquirida', { version: compra.courseVersion })}
+                    </Text>
+                  ) : null}
+                  {/*
                     El aviso de acceso retirado va DENTRO de la fila, no en
                     lugar de ella: la compra sigue existiendo y lo que ha
                     cambiado es otra cosa.

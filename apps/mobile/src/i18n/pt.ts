@@ -1606,6 +1606,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'compras.seccionCompras': 'Suas compras',
   'compras.seccionSolicitudes': 'Suas solicitações de reembolso',
   'compras.sinAcceso': 'Você já não tem acesso a este curso. O registro da compra permanece.',
+  'compras.versionAdquirida': 'Versão {version} do curso',
   'compras.vacioTitulo': 'Você ainda não comprou nada',
   'compras.vacioCuerpo': 'Aqui você verá suas compras e o estado dos seus reembolsos.',
   'compras.cursoDesconocido': 'Curso indisponível',

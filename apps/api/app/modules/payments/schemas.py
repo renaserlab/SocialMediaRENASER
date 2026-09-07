@@ -126,6 +126,15 @@ class PurchaseHistoryRead(BaseModel):
     provider: str
     channel: str
     purchased_at: datetime | None = None
+    #: QUE VERSION DEL CURSO SE COMPRO, si se sabe (0050).
+    #:
+    #: `None` en todo lo anterior a esa migracion, y eso NO es un hueco que
+    #: haya que rellenar: el temario no guarda marca temporal, asi que no hay
+    #: forma de saber que contenido se vendio. La pantalla tiene que saber
+    #: distinguir «version 2» de «no consta».
+    course_version: int | None = None
+    #: La promesa de garantia que se enseño, en horas. Hoy 168 para todos.
+    guarantee_hours: int | None = None
     #: Si HOY se puede ver el curso. Va aparte del estado del pedido porque no
     #: siempre coinciden: un pedido devuelto sigue existiendo con su fecha, y
     #: lo que cambia es que el acceso ya no está.

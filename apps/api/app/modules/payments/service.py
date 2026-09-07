@@ -40,6 +40,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.commerce import service as comercio
+from app.modules.catalog.models import CourseVersion
 from app.modules.commerce.models import (
     CommerceProduct,
     Entitlement,
@@ -432,6 +433,8 @@ async def historial(db: AsyncSession, user_id: str) -> list[dict]:
             Order.created_at,
             Order.paid_at,
             Entitlement.status,
+            CourseVersion.version,
+            Order.guarantee_hours,
         )
         .join(CommerceProduct, CommerceProduct.id == Order.commerce_product_id)
         .outerjoin(
@@ -440,6 +443,9 @@ async def historial(db: AsyncSession, user_id: str) -> list[dict]:
             & (Entitlement.commerce_product_id == Order.commerce_product_id)
             & (Entitlement.status == "active"),
         )
+        # `outerjoin` y no `join`: las ordenes anteriores a la 0050 no tienen
+        # version, y un `join` a secas las borraria del historial entero.
+        .outerjoin(CourseVersion, CourseVersion.id == Order.course_version_id)
         .where(Order.user_id == user_id)
         .order_by(Order.created_at.desc())
     )
@@ -455,6 +461,8 @@ async def historial(db: AsyncSession, user_id: str) -> list[dict]:
             "channel": f[6],
             "purchased_at": f[8] or f[7],
             "has_access": f[9] == "active",
+            "course_version": f[10],
+            "guarantee_hours": f[11],
         }
         for f in filas
         if f[1] is not None

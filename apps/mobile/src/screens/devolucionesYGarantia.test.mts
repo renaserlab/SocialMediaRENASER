@@ -594,3 +594,25 @@ describe('el repositorio de devoluciones', () => {
     }
   });
 });
+
+describe('la versión adquirida', () => {
+  it('solo se enseña cuando consta, y nunca se inventa', () => {
+    /*
+      EL RIESGO REAL. Las compras anteriores al versionado no tienen versión, y
+      no la tienen por un motivo: el temario nunca guardó una marca temporal, así
+      que no hay forma de saber qué contenido se vendió. Escribir «versión 1»
+      para que la fila no quede coja sería inventar una prueba.
+
+      Por eso la condición es `!== null` y NO hay rama `else`: callarse es la
+      respuesta honesta.
+    */
+    assert.ok(
+      HISTORIAL.includes('compra.courseVersion !== null ? ('),
+      'La versión se pinta solo cuando el servidor la manda.',
+    );
+    assert.ok(
+      !/courseVersion\s*\?\?\s*1/.test(HISTORIAL),
+      'No se puede rellenar una versión ausente con un número.',
+    );
+  });
+});

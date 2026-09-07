@@ -1702,6 +1702,7 @@ export const es = {
   'compras.seccionCompras': 'Tus compras',
   'compras.seccionSolicitudes': 'Tus solicitudes de devolución',
   'compras.sinAcceso': 'Ya no tienes acceso a este curso. El registro de la compra se conserva.',
+  'compras.versionAdquirida': 'Versión {version} del curso',
   'compras.vacioTitulo': 'Todavía no has comprado nada',
   'compras.vacioCuerpo': 'Aquí verás tus compras y el estado de tus devoluciones.',
   'compras.cursoDesconocido': 'Curso no disponible',

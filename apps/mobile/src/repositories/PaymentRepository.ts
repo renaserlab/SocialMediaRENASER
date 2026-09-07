@@ -175,6 +175,16 @@ export type CompraDelHistorial = {
   purchasedAt: string | null;
   /** Si HOY se puede ver el curso. Va aparte del estado del pedido. */
   hasAccess: boolean;
+  /**
+   * Qué versión del curso se compró, o `null` si no consta.
+   *
+   * `null` NO es un hueco que rellenar: en las compras anteriores al versionado
+   * no hay forma de saber qué contenido se vendió, y decir «versión 1» sería
+   * inventarlo. La pantalla tiene que saber callarse.
+   */
+  courseVersion: number | null;
+  /** La promesa de garantía que se enseñó, en horas. */
+  guaranteeHours: number | null;
 };
 
 type ProductoDto = {
@@ -205,6 +215,8 @@ type HistorialDto = {
   channel: string;
   purchased_at: string | null;
   has_access: boolean;
+  course_version: number | null;
+  guarantee_hours: number | null;
 };
 
 export const CommerceRepository = {
@@ -284,6 +296,10 @@ export const CommerceRepository = {
       channel: dto.channel,
       purchasedAt: dto.purchased_at,
       hasAccess: dto.has_access,
+      // `?? null` y no `?? 1`: un backend sin la 0050 no manda el campo, y
+      // rellenarlo con un número sería afirmar una versión que nadie sabe.
+      courseVersion: dto.course_version ?? null,
+      guaranteeHours: dto.guarantee_hours ?? null,
     }));
   },
 };
