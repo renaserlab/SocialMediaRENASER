@@ -8,6 +8,7 @@ import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
+import { StateView } from '@/components/StateView';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import {
@@ -83,6 +84,15 @@ export function CourseContentEditor({
   const { colors } = useAppTheme();
   const [modules, setModules] = useState<CourseModule[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * No se pudo leer el temario.
+   *
+   * ES DISTINTO DE «no tiene modulos». El `catch` dejaba la lista vacia y la
+   * ficha decia «este curso todavia no tiene contenido», que es una afirmacion
+   * sobre el curso: un fallo de red se leia como una carencia, y quien miraba
+   * podia decidir no comprarlo por eso. Sin reintento, ademas.
+   */
+  const [falloAlCargar, setFalloAlCargar] = useState(false);
 
   const [moduleTitle, setModuleTitle] = useState('');
   const [addingModule, setAddingModule] = useState(false);
@@ -93,9 +103,11 @@ export function CourseContentEditor({
   const load = useCallback(async () => {
     try {
       setModules(await CourseContentRepository.listContent(courseId));
+      setFalloAlCargar(false);
     } catch (error) {
       console.warn('[curso] no se pudo cargar el temario:', error);
       setModules([]);
+      setFalloAlCargar(true);
     } finally {
       setLoading(false);
     }
@@ -276,7 +288,13 @@ export function CourseContentEditor({
         {t('syllabus.title')}
       </Text>
 
-      {modules.length === 0 ? (
+      {falloAlCargar ? (
+        <StateView
+          state="error"
+          description={t('syllabus.loadFailed')}
+          onRetry={() => void load()}
+        />
+      ) : modules.length === 0 ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
           {canEdit ? t('syllabus.emptyEditable') : t('syllabus.emptyReader')}
         </Text>

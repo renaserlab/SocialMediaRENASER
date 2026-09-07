@@ -288,6 +288,7 @@ export const es = {
   'common.delete': 'Eliminar',
   'common.publish': 'Publicar',
   'common.retry': 'Reintentar',
+  'common.loadMoreFailed': 'No pudimos cargar más. Toca para reintentar.',
   'common.loading': 'Cargando…',
 
   // Eventos
@@ -791,6 +792,10 @@ export const es = {
     'Estamos activando tu acceso. Si no aparece en un momento, usa «Restaurar compras».',
   'course.purchased': 'Curso comprado',
   'course.purchasesRestored': 'Compras restauradas',
+  'course.headerTitle': 'Programa',
+  'course.restorePurchases': 'Restaurar compras',
+  'course.notFound': 'Curso no encontrado.',
+  'course.loadFailed': 'No se pudo cargar el curso.',
   'course.restoreFailed': 'No se pudieron restaurar',
   'course.almost': 'Casi',
   'course.checkingPurchases': 'Estamos comprobando tus compras. Inténtalo de nuevo en un momento.',
@@ -956,6 +961,7 @@ export const es = {
   'highlights.title': 'Lo que vas a desarrollar',
   'highlights.edit': 'Editar lo que vas a desarrollar',
   'highlights.empty': 'Añade los puntos que se llevará quien haga el curso.',
+  'highlights.loadFailed': 'No pudimos cargar los puntos destacados.',
   'highlights.addAnother': 'Añadir otro punto…',
   'highlights.point': 'Punto',
   'highlights.blankToDelete': 'Deja un punto en blanco para eliminarlo.',
@@ -1714,6 +1720,8 @@ export const es = {
   'compras.estado.cancelled': 'Cancelada',
   'compras.estado.refunded': 'Devuelta',
   'recompra.falloTitulo': 'No pudimos guardar tu aceptación',
+  'recompra.noSePudoComprobar':
+    'No pudimos comprobar las condiciones de esta compra. Inténtalo de nuevo.',
   'settings.purchases': 'Compras y devoluciones',
   'settings.purchasesBody': 'Tu historial y el estado de tus devoluciones',
   'chat.openProfile': 'Ver el perfil de {nombre}',
@@ -1819,6 +1827,7 @@ export const es = {
   'devolucionesAdmin.vacioTitulo': 'No hay solicitudes',
   'devolucionesAdmin.vacioCuerpo': 'Cuando alguien pida una devolución aparecerá aquí.',
   'devolucionesAdmin.cargarMas': 'Cargar más',
+  'devolucionesAdmin.sinTitulo': 'Solicitud sin título de curso',
   'devolucionesAdmin.ejecutar': 'Ejecutar reembolso',
   'devolucionesAdmin.avisoEjecutar': 'Se le pedirá el reembolso a la pasarela. Comprueba antes que no se haya pagado ya.',
   'devolucionesAdmin.conflicto': 'El expediente ya no está en ese estado',

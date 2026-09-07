@@ -71,6 +71,19 @@ export function CourseScreen() {
    */
   const [avisoDeRecompra, setAvisoDeRecompra] = useState<AvisoDeRecompra | null>(null);
   const [aceptaLaRecompra, setAceptaLaRecompra] = useState(false);
+  /**
+   * No se pudo preguntar si esta compra necesita aceptacion.
+   *
+   * ES UN TERCER ESTADO, y hace falta: `avisoDeRecompra === null` significaba a
+   * la vez «no hace falta aceptar nada» y «no se ha podido averiguar». El
+   * `catch` devolvia `null` y la ficha caia en el boton de comprar de siempre,
+   * sin casilla y sin aviso, justo en el caso en el que no sabemos si hace
+   * falta. El servidor sigue rechazando la compra —la proteccion de verdad esta
+   * ahi—, pero la persona se llevaba un error sin explicacion despues de pulsar.
+   */
+  const [falloDelAviso, setFalloDelAviso] = useState(false);
+  /** Sube al reintentar: es lo que vuelve a lanzar la consulta. */
+  const [intentoDelAviso, setIntentoDelAviso] = useState(0);
   const [aceptando, setAceptando] = useState(false);
   /** Cerrojo sincrono: dos toques rapidos no pueden abrir dos pagos. */
   const aceptandoRef = useRef(false);
@@ -149,20 +162,28 @@ export function CourseScreen() {
     if (!course || !esDePago || hasAccess) {
       setAvisoDeRecompra(null);
       setAceptaLaRecompra(false);
+      setFalloDelAviso(false);
       return;
     }
     DevolucionesRepository.avisoDeRecompra(course.id)
-      // Que falle preguntando no puede romper la ficha del curso. Sin respuesta
-      // no hay aviso: la compra normal sigue su camino y el servidor la
-      // rechazaria si de verdad hiciera falta aceptar.
-      .catch(() => null)
       .then((resultado) => {
-        if (vigente) setAvisoDeRecompra(resultado);
+        if (!vigente) return;
+        setAvisoDeRecompra(resultado);
+        setFalloDelAviso(false);
+      })
+      // Que falle preguntando no rompe la ficha del curso, pero SI bloquea la
+      // compra: sin respuesta no se sabe si esta persona tiene que aceptar
+      // antes que su recompra no llevara garantia, y ofrecerle el boton normal
+      // seria enviarla a un rechazo del servidor sin decirle por que.
+      .catch(() => {
+        if (!vigente) return;
+        setAvisoDeRecompra(null);
+        setFalloDelAviso(true);
       });
     return () => {
       vigente = false;
     };
-  }, [course, esDePago, hasAccess]);
+  }, [course, esDePago, hasAccess, intentoDelAviso]);
 
   /**
    * Aceptar la recompra sin garantia y seguir al pago, en ese orden.
@@ -353,7 +374,7 @@ export function CourseScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader title={t('course.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="loading" />
       </View>
     );
@@ -362,7 +383,7 @@ export function CourseScreen() {
   if (error || !course) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader title={t('course.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
       </View>
     );
@@ -371,7 +392,7 @@ export function CourseScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Programa"
+        title={t('course.headerTitle')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
         /*
           Editar abre el ASISTENTE, no una hoja.
@@ -385,8 +406,18 @@ export function CourseScreen() {
         onRightPress={canManage ? () => router.push(`/editar-curso/${course?.id}` as never) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        {/* Portada real del curso; el asset local solo mientras no tenga. */}
+        {/*
+          Portada real del curso; el asset local solo mientras no tenga.
+
+          DECORATIVA. El titulo del curso va justo debajo, en texto, asi que
+          etiquetar la imagen con el mismo titulo lo haria sonar dos veces al
+          lector de pantalla. Sin marcar, en cambio, se anunciaba como una
+          imagen sin nombre: ruido en medio de la ficha.
+        */}
         <Image
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
           source={course.coverUrl ? { uri: course.coverUrl } : assets.course}
           style={[styles.hero, { borderColor: colors.border }]}
         />
@@ -550,7 +581,20 @@ export function CourseScreen() {
                 dos a la vez —o el aviso al lado de un boton que ya cobra— seria
                 cobrar antes de que nadie haya aceptado nada.
               */
-              avisoDeRecompra?.requiereAceptacion ? (
+              falloDelAviso ? (
+                /*
+                  NO SE PUDO PREGUNTAR SI HACE FALTA ACEPTAR, asi que no se
+                  ofrece comprar. Antes se caia al boton normal y la persona
+                  descubria el problema despues de pulsar, con un error del
+                  servidor que no explica nada. Aqui se dice y se ofrece
+                  reintentar.
+                */
+                <StateView
+                  state="error"
+                  description={t('recompra.noSePudoComprobar')}
+                  onRetry={() => setIntentoDelAviso((n) => n + 1)}
+                />
+              ) : avisoDeRecompra?.requiereAceptacion ? (
                 <View
                   style={[styles.recompra, { borderColor: colors.border }]}
                   accessibilityRole="alert"
@@ -643,11 +687,11 @@ export function CourseScreen() {
               disabled={comprando}
               style={styles.retirar}
               accessibilityRole="button"
-              accessibilityLabel="Restaurar compras"
+              accessibilityLabel={t('course.restorePurchases')}
             >
               <Feather name="refresh-cw" size={14} color={colors.textMuted} />
               <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: '700' }}>
-                Restaurar compras
+                {t('course.restorePurchases')}
               </Text>
             </Pressable>
           ) : null}
@@ -738,6 +782,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.md,
     paddingVertical: spacing.sm,
+    // 44 pt es el minimo que se puede pulsar con fiabilidad; con el relleno
+    // solo se quedaba por debajo.
+    minHeight: 44,
   },
   casillaTexto: { fontSize: 13, lineHeight: 19, flex: 1 },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },

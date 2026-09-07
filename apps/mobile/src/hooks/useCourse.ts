@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { useTranslation } from '@/i18n/useTranslation';
+
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { fetchCourseById, resolveCourseId } from '@/services/repositories/courses';
@@ -12,6 +14,9 @@ import type { Course } from '@/types';
  * del backend o del modo demo.
  */
 export function useCourse(id?: string) {
+  // Los mensajes de error salen del diccionario: se pintan tal cual en la
+  // ficha del curso, asi que en castellano no cambiaban de idioma nunca.
+  const { t } = useTranslation();
   const [course, setCourse] = useState<Course | null>(null);
   /** Lecciones en orden; permite abrir la primera real desde "Comenzar". */
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
@@ -32,7 +37,7 @@ export function useCourse(id?: string) {
 
   const load = useCallback(async () => {
     if (!id) {
-      setError('Curso no encontrado.');
+      setError(t('course.notFound'));
       setLoading(false);
       return;
     }
@@ -49,7 +54,7 @@ export function useCourse(id?: string) {
         setProgressPercent(detail.progressPercent);
       } else {
         const data = await fetchCourseById(id);
-        if (!data) setError('Curso no encontrado.');
+        if (!data) setError(t('course.notFound'));
         setCourse(data);
         setLessons([]);
         setCanManage(false);
@@ -57,7 +62,7 @@ export function useCourse(id?: string) {
         setProgressPercent(0);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cargar el curso.');
+      setError(err instanceof Error ? err.message : t('course.loadFailed'));
     } finally {
       setLoading(false);
     }

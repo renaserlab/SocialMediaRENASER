@@ -63,10 +63,24 @@ export function VentasDelCursoScreen() {
   const [error, setError] = useState<string | null>(null);
   const [prohibido, setProhibido] = useState(false);
   const masRef = useRef(false);
+  /**
+   * La ULTIMA pagina pedida no llego.
+   *
+   * Antes esto apagaba `hayMas` y no se decia nada: la lista quedaba truncada
+   * con el mismo aspecto que una lista completa, asi que se leia como «ya no
+   * hay mas» cuando lo que habia era un fallo de red. En una bandeja de
+   * expedientes o en un listado de ventas eso es dar por vistas cosas que no se
+   * han visto. Ahora se avisa en el pie y se puede reintentar la misma pagina.
+   */
+  const [falloAlPaginar, setFalloAlPaginar] = useState(false);
+
 
   const cargar = useCallback(async () => {
     if (!courseId) return;
     setCargando(true);
+    // Recargar de cero borra el fallo de la pagina anterior: se vuelve a
+    // empezar y ese error ya no describe nada.
+    setFalloAlPaginar(false);
     setError(null);
     setProhibido(false);
     try {
@@ -103,8 +117,11 @@ export function VentasDelCursoScreen() {
         return [...previas, ...pagina.filter((v) => !vistas.has(v.id))];
       });
       setHayMas(pagina.length === POR_PAGINA);
+      setFalloAlPaginar(false);
     } catch {
-      setHayMas(false);
+      // La lista no se cierra: `hayMas` se queda como estaba para que el
+      // reintento vuelva a pedir la misma pagina.
+      setFalloAlPaginar(true);
     } finally {
       masRef.current = false;
       setCargandoMas(false);
@@ -226,6 +243,17 @@ export function VentasDelCursoScreen() {
         ListFooterComponent={
           cargandoMas ? (
             <ActivityIndicator style={styles.pie} color={colors.textMuted} />
+          ) : falloAlPaginar ? (
+            <Pressable
+              onPress={() => void cargarMas()}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.retry')}
+              style={styles.pie}
+            >
+              <Text style={[styles.cargarMas, { color: colors.danger }]}>
+                {t('common.loadMoreFailed')}
+              </Text>
+            </Pressable>
           ) : hayMas ? (
             <Pressable
               onPress={() => void cargarMas()}

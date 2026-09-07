@@ -92,6 +92,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // «Programa» y «Restaurar compras» se escriben igual en los dos idiomas.
+    'course.headerTitle',
+    'course.restorePurchases',
     // Portugues y español escriben estas igual. Se comprueban una a una.
     // Los nombres bajo los botones de una publicacion: «Comentar» es la misma
     // palabra en los dos idiomas —«Curtir» y «Compartilhar», que si cambian, no

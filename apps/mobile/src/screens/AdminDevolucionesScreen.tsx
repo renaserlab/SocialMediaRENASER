@@ -154,6 +154,17 @@ export function AdminDevolucionesScreen() {
   const [abierta, setAbierta] = useState<DetalleDeSolicitud | null>(null);
   const [abriendo, setAbriendo] = useState(false);
   const masRef = useRef(false);
+  /**
+   * La ULTIMA pagina pedida no llego.
+   *
+   * Antes esto apagaba `hayMas` y no se decia nada: la lista quedaba truncada
+   * con el mismo aspecto que una lista completa, asi que se leia como «ya no
+   * hay mas» cuando lo que habia era un fallo de red. En una bandeja de
+   * expedientes o en un listado de ventas eso es dar por vistas cosas que no se
+   * han visto. Ahora se avisa en el pie y se puede reintentar la misma pagina.
+   */
+  const [falloAlPaginar, setFalloAlPaginar] = useState(false);
+
   /*
     EL DETALLE SE CIERRA CON EL ATRAS FISICO, no solo con su enlace «Volver».
 
@@ -173,6 +184,9 @@ export function AdminDevolucionesScreen() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
+    // Recargar de cero borra el fallo de la pagina anterior: se vuelve a
+    // empezar y ese error ya no describe nada.
+    setFalloAlPaginar(false);
     setError(null);
     setProhibido(false);
     try {
@@ -214,8 +228,11 @@ export function AdminDevolucionesScreen() {
         return [...previas, ...pagina.filter((s) => !vistas.has(s.id))];
       });
       setHayMas(pagina.length === POR_PAGINA);
+      setFalloAlPaginar(false);
     } catch {
-      setHayMas(false);
+      // La lista no se cierra: `hayMas` se queda como estaba para que el
+      // reintento vuelva a pedir la misma pagina.
+      setFalloAlPaginar(true);
     } finally {
       masRef.current = false;
       setCargandoMas(false);
@@ -288,8 +305,14 @@ export function AdminDevolucionesScreen() {
         autoCorrect={false}
         returnKeyType="search"
       />
-      <View style={styles.chips}>
+      {/*
+        ELECCION UNICA: `radio` y no `checkbox`, y la barra entera es un
+        `radiogroup`. Elegir un filtro apaga el anterior, y anunciarlos como
+        casillas hacia creer que se podian acumular.
+      */}
+      <View style={styles.chips} accessibilityRole="radiogroup">
         <Chip
+          rol="radio"
           label={t('devolucionesAdmin.todas')}
           selected={estado === null}
           onPress={() => setEstado(null)}
@@ -297,6 +320,7 @@ export function AdminDevolucionesScreen() {
         {ESTADOS_DE_SOLICITUD.map((valor) => (
           <Chip
             key={valor}
+            rol="radio"
             label={t(`devolucionesAdmin.estado.${valor}`)}
             selected={estado === valor}
             onPress={() => setEstado(valor)}
@@ -322,7 +346,10 @@ export function AdminDevolucionesScreen() {
             onPress={() => void abrir(item.id)}
             disabled={abriendo}
             accessibilityRole="button"
-            accessibilityLabel={item.courseTitle || item.id}
+            // NUNCA el identificador interno: es lo que el resto de la
+            // aplicacion evita enseñar, y leido en voz alta por un lector de
+            // pantalla no dice absolutamente nada.
+            accessibilityLabel={item.courseTitle || t('devolucionesAdmin.sinTitulo')}
             accessibilityState={{ disabled: abriendo }}
             style={[
               styles.fila,
@@ -367,6 +394,17 @@ export function AdminDevolucionesScreen() {
         ListFooterComponent={
           cargandoMas ? (
             <ActivityIndicator style={styles.pie} color={colors.textMuted} />
+          ) : falloAlPaginar ? (
+            <Pressable
+              onPress={() => void cargarMas()}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.retry')}
+              style={styles.pie}
+            >
+              <Text style={[styles.cargarMas, { color: colors.danger }]}>
+                {t('common.loadMoreFailed')}
+              </Text>
+            </Pressable>
           ) : hayMas ? (
             <Pressable
               onPress={() => void cargarMas()}
@@ -621,7 +659,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   accionTexto: { fontSize: 13, fontWeight: '700' },
-  volver: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  // `minHeight` porque con el relleno solo el area pulsable se quedaba en 32.
+  volver: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    minHeight: 44,
+  },
   volverTexto: { fontSize: 13, fontWeight: '700' },
   pie: { paddingVertical: spacing.lg, alignItems: 'center' },
   cargarMas: { fontSize: 13, fontWeight: '700' },

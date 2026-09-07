@@ -67,7 +67,7 @@ export function AppHeader({
           <Pressable
             onPress={handleBack}
             hitSlop={12}
-            accessibilityLabel="Volver"
+            accessibilityLabel={t('common.back')}
             accessibilityRole="button"
             style={styles.backButton}
           >

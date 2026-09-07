@@ -212,3 +212,34 @@ test('el asistente no escribe dos veces por dos toques seguidos', () => {
   assert.match(ASISTENTE, /enSerie\(accion === 'publicar' \? publicar : enviarARevision\)/);
   assert.match(ASISTENTE, /enSerie\(\(\) =>\s*siguiente\.id === 'revisar'/);
 });
+
+test('una pagina que no llega se dice y se puede reintentar', () => {
+  /*
+    EL FALLO. El `catch` de «cargar mas» apagaba `hayMas` y no decia nada: la
+    lista quedaba truncada con el mismo aspecto que una lista completa, asi que
+    un fallo de red se leia como «ya no hay mas». En un listado de ventas o de
+    alumnos eso es dar por vistas cosas que no se han visto.
+  */
+  for (const [fichero, nombre] of [
+    [ESTUDIANTES, 'alumnos'],
+    [VENTAS, 'ventas'],
+  ] as const) {
+    assert.match(fichero, /const \[falloAlPaginar, setFalloAlPaginar\] = useState\(false\);/);
+    assert.match(fichero, /setFalloAlPaginar\(true\);/, `${nombre}: falta marcar el fallo`);
+    assert.match(fichero, /common\.loadMoreFailed/, `${nombre}: falta el aviso en el pie`);
+    // Y la lista NO se cierra: `hayMas` se queda como estaba para que el
+    // reintento vuelva a pedir la misma pagina.
+    assert.doesNotMatch(
+      fichero.slice(fichero.indexOf('const cargarMas')),
+      /catch \{[\s\S]{0,200}?setHayMas\(false\)/,
+      `${nombre}: el catch de paginacion no debe apagar hayMas`,
+    );
+  }
+});
+
+test('los filtros de eleccion unica se anuncian como botones de opcion', () => {
+  // Elegir uno apaga el anterior; anunciarlos como casillas hacia creer que se
+  // podian acumular.
+  assert.match(ESTUDIANTES, /accessibilityRole="radiogroup"/);
+  assert.match(ESTUDIANTES, /rol="radio"/);
+});
