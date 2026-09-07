@@ -35,7 +35,10 @@ DEL_DINERO = (
 
 #: Migraciones que NO crean tablas: corrigen algo de una anterior. El contrato
 #: SQL-modelos no aplica, pero la secuencia y las reglas de proyecto si.
-SOLO_CORRIGEN = ("0051_endurecer_la_inmutabilidad_de_versiones.sql",)
+SOLO_CORRIGEN = (
+    "0051_endurecer_la_inmutabilidad_de_versiones.sql",
+    "0052_cerrar_lectura_directa_de_datos_sensibles.sql",
+)
 
 
 def _ficheros() -> list[Path]:
@@ -203,6 +206,91 @@ def _tablas_del_orm() -> dict[str, object]:
     from app.modules.refunds import models as _refunds  # noqa: F401
 
     return dict(Base.metadata.tables)
+
+
+#: Tablas donde `is_admin()` NO puede ser quien decide la lectura. `is_admin()`
+#: es `role in ('moderator', 'admin')`, y `moderator` es la cuenta creada para
+#: ocultar una publicacion o resolver un reporte.
+DE_LECTURA_RESTRINGIDA = (
+    "audit_events",
+    "consent_records",
+    "course_refund_windows",
+    "refund_requests",
+    "refund_request_events",
+    "refund_policy_acceptances",
+    "owner_payout_accounts",
+    "owner_sale_balances",
+    "owner_transfers",
+)
+
+
+def _politicas_finales() -> dict[str, tuple[str, str]]:
+    """La ULTIMA definicion de cada politica, que es la que queda en la base.
+
+    Las migraciones se aplican en orden y cada una puede redefinir politicas de
+    las anteriores con `drop policy if exists` + `create policy`. Mirar una sola
+    migracion no dice como termina la base: hay que recorrerlas todas.
+    """
+    finales: dict[str, tuple[str, str]] = {}
+    for ruta in _ficheros():
+        sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
+        for bloque in re.finditer(
+            r"create\s+policy\s+([a-z_0-9]+)\s+on\s+public\.([a-z_0-9]+)(.*?);",
+            sql,
+            flags=re.S | re.I,
+        ):
+            finales[bloque.group(1)] = (bloque.group(2), bloque.group(3))
+    return finales
+
+
+def test_moderar_no_da_acceso_a_las_tablas_de_dinero_por_la_rls() -> None:
+    """LA RLS ES EL OTRO CAMINO, y durante un tiempo dijo lo contrario que la API.
+
+    El movil habla con PostgREST usando la clave anonima, asi que quien decide
+    que filas se leen es la politica, no el esquema de salida de FastAPI. La API
+    separaba moderar de mover dinero con `puede_mover_dinero`; nueve politicas
+    seguian con `is_admin()`. Con su propio JWT, una cuenta que solo modera
+    llegaba al motivo privado que escribio cada alumno al pedir su devolucion y
+    a los saldos de cada autor.
+
+    Esta prueba mira COMO TERMINA la base tras aplicar todas las migraciones en
+    orden, no lo que dice una suelta.
+    """
+    abiertas = [
+        f"{tabla}.{politica}"
+        for politica, (tabla, cuerpo) in _politicas_finales().items()
+        if tabla in DE_LECTURA_RESTRINGIDA and "is_admin" in cuerpo
+    ]
+    assert not abiertas, (
+        "politicas de tablas de dinero que siguen decidiendo con is_admin(), "
+        f"que incluye a moderator: {sorted(abiertas)}"
+    )
+
+
+def test_una_migracion_correctora_no_crea_tablas_y_dice_como_deshacerse(
+    migraciones,
+) -> None:
+    """Las dos reglas de una migracion que corrige a otra ya aplicada.
+
+    NO CREA TABLAS. Si creara una, no seria una correccion: seria un cambio de
+    modelo disfrazado, y el contrato entre el SQL y el ORM dejaria de estar
+    cubierto por las pruebas de arriba, que solo miran las de `DEL_DINERO`.
+
+    Y DICE COMO DESHACERSE. Estas migraciones se aplican a mano, de una en una,
+    sobre una base donde ya hay datos. Quien las pega en el editor tiene que
+    poder leer, en el mismo fichero, que hace falta para volver atras: buscarlo
+    despues, con algo a medio aplicar, es justo el peor momento.
+    """
+    sin_comentarios = {ruta.name: sql for _, ruta, sql in migraciones}
+    for nombre in SOLO_CORRIGEN:
+        assert nombre in sin_comentarios, f"{nombre} ya no existe: actualiza la lista"
+        assert not re.search(r"create\s+table", sin_comentarios[nombre], flags=re.I), (
+            f"{nombre} crea una tabla: entonces no es solo una correccion"
+        )
+        # El rollback se lee del fichero ENTERO: va en comentarios, y la fixture
+        # los quita para poder analizar el SQL.
+        entero = (MIGRACIONES / nombre).read_text(encoding="utf-8")
+        assert "rollback" in entero.lower(), f"{nombre} no explica como deshacerse"
 
 
 def test_las_tablas_del_dinero_existen_en_los_modelos(migraciones) -> None:

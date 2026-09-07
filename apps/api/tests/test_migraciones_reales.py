@@ -212,10 +212,15 @@ def test_todas_las_migraciones_aplican_en_orden(aplicadas) -> None:
 def test_la_ultima_migracion_es_la_que_dice_la_documentacion(aplicadas) -> None:
     """Si alguien anade una 0050, esta prueba se entera y obliga a actualizar
     la documentacion y los modelos en el mismo cambio."""
-    # La ULTIMA concreta, no «una de estas dos». Aceptar las dos hacia que la
-    # prueba no se enterase de una 0051, que es justo cuando hay que actualizar
-    # los modelos y la documentacion en el mismo cambio.
-    assert aplicadas[-1].startswith("0051_"), (
+    # La ULTIMA concreta, no «una de estas dos». Aceptar varias hacia que la
+    # prueba no se enterase de una migracion nueva, que es justo cuando hay que
+    # actualizar los modelos y la documentacion en el mismo cambio.
+    #
+    # ESTA LINEA SE ACTUALIZA CON CADA MIGRACION. Se quedo en 0051 mientras el
+    # cambio ya traia la 0052: en verde aqui, porque el modulo entero se salta
+    # sin PostgreSQL, y en rojo la primera vez que CI tuviera uno, que es
+    # exactamente cuando se ejercitan por primera vez la 0051 y la 0052.
+    assert aplicadas[-1].startswith("0052_"), (
         f"la ultima migracion es {aplicadas[-1]}: actualiza los modelos, "
         "la documentacion y esta prueba en el mismo cambio"
     )

@@ -693,6 +693,117 @@ async def test_tras_usar_la_garantia_se_exige_aceptar(entorno):
     assert despues["requires_acceptance"] is False
 
 
+async def politicas_de_gobernanza(db) -> None:
+    from app.modules.gobernanza import politicas
+
+    await politicas.sembrar_recompra(db)
+    await db.commit()
+
+
+async def _lista_para_recomprar(sesiones) -> None:
+    """Garantia usada: la siguiente compra exige aceptar la condicion."""
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import CourseRefundWindow
+
+    await _arrancar_garantia(sesiones)
+    async with sesiones() as db:
+        ventana = await db.scalar(select(CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_si_falla_la_anotacion_la_aceptacion_y_el_consentimiento_siguen(
+    entorno, monkeypatch
+):
+    """LOS DOS SAVEPOINTS SEPARADOS SON EL MOTIVO DE ESTA PRUEBA.
+
+    Compartiendo uno, un fallo al anotar en la auditoria deshacia tambien el
+    `consent_record` que ya se habia creado bien: se perdia la prueba del
+    consentimiento por no poder escribir su nota. El consentimiento es el dato
+    con valor legal; la nota es el rastro.
+    """
+    from app.modules.gobernanza import auditoria
+    from app.modules.gobernanza.models import ConsentRecord
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)
+    async with sesiones() as db:
+        await politicas_de_gobernanza(db)
+
+    async def _revienta(*_a, **_k):
+        raise RuntimeError("la auditoria se cayo")
+
+    monkeypatch.setattr(auditoria, "anotar", _revienta)
+
+    respuesta = await http.post(
+        f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
+    )
+    assert respuesta.status_code == 204, respuesta.text
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(RefundPolicyAcceptance)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 1
+
+
+@pytest.mark.asyncio
+async def test_si_falla_el_consentimiento_la_aceptacion_sigue_y_se_anota(
+    entorno, monkeypatch
+):
+    """LO ACCESORIO NO PUEDE TUMBAR LO PRINCIPAL.
+
+    `refund_policy_acceptances` es la que consulta el checkout para dejar
+    comprar. Si se perdiera por un fallo al escribir la trazabilidad anadida,
+    la compra quedaria bloqueada por un problema que no es de quien compra.
+    """
+    from app.modules.gobernanza import consentimientos
+    from app.modules.gobernanza.models import AuditEvent, ConsentRecord
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)
+    async with sesiones() as db:
+        await politicas_de_gobernanza(db)
+
+    async def _revienta(*_a, **_k):
+        raise RuntimeError("el consentimiento se cayo")
+
+    monkeypatch.setattr(consentimientos, "registrar", _revienta)
+
+    respuesta = await http.post(
+        f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
+    )
+    assert respuesta.status_code == 204, respuesta.text
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(RefundPolicyAcceptance)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 0
+        # La nota se escribe igual, con `consent_id` vacio: dice lo que paso.
+        notas = list(await db.scalars(select(AuditEvent)))
+        assert len(notas) == 1 and notas[0].action == "consent.accepted"
+
+
+@pytest.mark.asyncio
+async def test_sin_la_politica_sembrada_la_recompra_no_se_bloquea(entorno):
+    """El caso normal hasta que alguien llame al endpoint de siembra.
+
+    Bloquear una compra porque una tabla de trazabilidad esta vacia seria una
+    regresion causada por lo accesorio.
+    """
+    from app.modules.gobernanza.models import ConsentRecord
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)  # SIN sembrar ninguna politica
+
+    respuesta = await http.post(
+        f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
+    )
+    assert respuesta.status_code == 204, respuesta.text
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(RefundPolicyAcceptance)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 0
+
+
 @pytest.mark.asyncio
 async def test_no_se_puede_aceptar_sin_marcar_la_casilla(entorno):
     http, _, sesiones = entorno
