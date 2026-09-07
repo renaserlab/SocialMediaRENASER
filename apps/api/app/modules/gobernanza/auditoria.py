@@ -24,6 +24,7 @@ dinero?» era una línea de registro que nadie conserva.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,25 +35,60 @@ from app.modules.gobernanza.models import AuditEvent
 
 logger = logging.getLogger("renaser.auditoria")
 
-#: Lo que NUNCA entra en `payload`, aunque alguien lo pase por descuido. No es
-#: una lista de buenas intenciones: se filtra de verdad, abajo.
-PROHIBIDO = frozenset(
-    {
-        "authorization",
-        "cookie",
-        "headers",
-        "body",
-        "payload_completo",
-        "raw",
-        "token",
-        "secret",
-        "password",
-        "signature",
-        "ip",
-        "user_agent",
-        "email",
-    }
+#: Trozos de nombre que descartan una clave. SE BUSCAN COMO SUBCADENA, no por
+#: igualdad.
+#:
+#: LA IGUALDAD EXACTA NO SERVIA DE NADA, y era lo que habia: `ip` no casa con
+#: `client_ip`, `ip_address` ni `remote_addr`; `token` no casa con
+#: `access_token` ni `api_key`; `email` no casa con `user_email` ni `correo`.
+#: Cualquiera de esos nombres —los que escribe cualquiera sin pensar— pasaba
+#: entero a una tabla que se sirve por API.
+FRAGMENTOS_PROHIBIDOS = (
+    "authorization",
+    "auth_",
+    "cookie",
+    "header",
+    "body",
+    "raw",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "clave",
+    "signature",
+    "firma",
+    "api_key",
+    "apikey",
+    "ip",
+    "addr",
+    "agent",
+    "mail",
+    "correo",
+    "telefono",
+    "phone",
+    "dni",
+    "direccion",
+    "address",
+    "tarjeta",
+    "card",
 )
+
+#: Y ADEMAS SE MIRA EL VALOR, porque filtrar solo por el nombre deja pasar
+#: `{"nota": "1.2.3.4 / juan@ejemplo.com"}`. No es un detector perfecto ni
+#: pretende serlo: descarta lo que inequivocamente no debe estar ahi.
+_IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
+_CORREO = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
+
+
+def _clave_prohibida(clave: object) -> bool:
+    nombre = str(clave).lower()
+    return any(trozo in nombre for trozo in FRAGMENTOS_PROHIBIDOS)
+
+
+def _valor_sospechoso(valor: object) -> bool:
+    if not isinstance(valor, str):
+        return False
+    return bool(_IPV4.search(valor) or _CORREO.search(valor))
 
 
 def _limpio(datos: dict[str, Any] | None, _profundidad: int = 0) -> dict[str, Any]:
@@ -77,7 +113,9 @@ def _limpio(datos: dict[str, Any] | None, _profundidad: int = 0) -> dict[str, An
         return {}
     salida: dict[str, Any] = {}
     for clave, valor in datos.items():
-        if str(clave).lower() in PROHIBIDO:
+        if _clave_prohibida(clave):
+            continue
+        if _valor_sospechoso(valor):
             continue
         if isinstance(valor, dict):
             limpio = _limpio(valor, _profundidad + 1)
@@ -90,7 +128,8 @@ def _limpio(datos: dict[str, Any] | None, _profundidad: int = 0) -> dict[str, An
             salida[clave] = [
                 v[:300] if isinstance(v, str) else v
                 for v in list(valor)[:20]
-                if isinstance(v, (str, int, float, bool)) or v is None
+                if (isinstance(v, (str, int, float, bool)) or v is None)
+                and not _valor_sospechoso(v)
             ]
             continue
         if isinstance(valor, str) and len(valor) > 300:
