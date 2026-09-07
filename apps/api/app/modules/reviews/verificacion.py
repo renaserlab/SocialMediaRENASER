@@ -38,6 +38,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.bookings.models import Booking
 from app.modules.catalog.models import Course
+from app.modules.commerce import esquema as esquema_comercio
+from app.modules.commerce.models import CommerceProduct, Order
 from app.modules.learning.models import Purchase
 
 
@@ -92,4 +94,31 @@ async def fuente_de_verificacion(
     if compra is not None:
         return "course"
 
-    return None
+    # 3. Lo mismo, pero en el COMERCIO NUEVO (0035).
+    #
+    #    `purchases` es la tabla heredada y ya no la escribe nadie: ni Stripe ni
+    #    RevenueCat pasan por ahi, sus compras viven en `orders`. Mirando solo
+    #    la vieja pasaba algo absurdo: quien compro un curso por la web y luego
+    #    opinaba sobre su autor salia SIN sello, mientras que una compra antigua
+    #    de la tabla heredada si lo llevaba. El mismo hecho, contado de dos
+    #    maneras segun cuando ocurrio.
+    #
+    #    LA ORDEN Y NO EL DERECHO. Un `entitlement` tambien se concede por una
+    #    beca, un regalo o la beta, y esos no son una compra: poner el sello ahi
+    #    seria justo la clase de sello que no se puede justificar despues. La
+    #    orden `paid` si es dinero que se cobro.
+    if not await esquema_comercio.hay_comercio(db):
+        return None
+
+    orden = await db.scalar(
+        select(Order.id)
+        .join(CommerceProduct, CommerceProduct.id == Order.commerce_product_id)
+        .join(Course, Course.id == CommerceProduct.course_id)
+        .where(
+            Order.user_id == reviewer_id,
+            Order.status == "paid",
+            Course.author_id == reviewed_user_id,
+        )
+        .limit(1)
+    )
+    return "course" if orden is not None else None

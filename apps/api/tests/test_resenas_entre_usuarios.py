@@ -658,6 +658,79 @@ async def test_una_compra_pendiente_no_da_sello(entorno):
 
 
 @pytest.mark.asyncio
+async def test_una_compra_del_comercio_NUEVO_tambien_da_el_sello(entorno):
+    """`purchases` es la tabla heredada; Stripe y RevenueCat escriben en `orders`.
+
+    EL DESAJUSTE QUE ESTO CIERRA. La comprobacion miraba solo la tabla vieja, y
+    ya no la escribe nadie: quien compraba un curso por la web y despues opinaba
+    sobre su autor salia SIN sello, mientras que una compra antigua de la tabla
+    heredada si lo llevaba. El mismo hecho, contado de dos maneras segun cuando
+    hubiera ocurrido.
+    """
+    from app.modules.commerce.models import CommerceProduct, Order
+
+    http, sesiones, identidad = entorno
+    curso = "cccccccc-0000-0000-0000-000000000001"
+    async with sesiones() as db:
+        db.add(Course(id=curso, author_id=BRUNO, title="Curso de Bruno"))
+        await db.flush()
+        producto = CommerceProduct(kind="course_lifetime", course_id=curso, active=True)
+        db.add(producto)
+        await db.flush()
+        db.add(
+            Order(
+                user_id=ANA,
+                commerce_product_id=producto.id,
+                provider="stripe",
+                channel="web",
+                environment="sandbox",
+                amount_minor=19900,
+                currency="PEN",
+                status="paid",
+            )
+        )
+        await db.commit()
+
+    identidad["uid"] = ANA
+    assert (await publicar(http, BRUNO)).json()["verified_source"] == "course"
+
+
+@pytest.mark.asyncio
+async def test_un_pedido_sin_pagar_del_comercio_nuevo_no_da_sello(entorno):
+    """Abrir el checkout y no pagar no es una compra.
+
+    Y un DERECHO tampoco basta: se mira la orden `paid` y no `entitlements`,
+    porque un derecho se concede tambien por una beca, un regalo o la beta.
+    """
+    from app.modules.commerce.models import CommerceProduct, Order
+
+    http, sesiones, identidad = entorno
+    curso = "cccccccc-0000-0000-0000-000000000001"
+    async with sesiones() as db:
+        db.add(Course(id=curso, author_id=BRUNO, title="Curso de Bruno"))
+        await db.flush()
+        producto = CommerceProduct(kind="course_lifetime", course_id=curso, active=True)
+        db.add(producto)
+        await db.flush()
+        db.add(
+            Order(
+                user_id=ANA,
+                commerce_product_id=producto.id,
+                provider="stripe",
+                channel="web",
+                environment="sandbox",
+                amount_minor=19900,
+                currency="PEN",
+                status="pending",
+            )
+        )
+        await db.commit()
+
+    identidad["uid"] = ANA
+    assert (await publicar(http, BRUNO)).json()["verified_source"] is None
+
+
+@pytest.mark.asyncio
 async def test_el_curso_de_otra_persona_no_da_sello(entorno):
     """Comprarle un curso a Carla no dice nada sobre Bruno."""
     http, sesiones, identidad = entorno
