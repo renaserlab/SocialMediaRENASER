@@ -134,6 +134,15 @@ calculada del catálogo para que no envejezca. Efecto secundario buscado: una
 columna que se añada en el futuro no queda concedida hasta que alguien lo
 decida.
 
+**Qué riesgo tiene ese cambio para la aplicación: ninguno hoy.** Se comprobó qué
+tablas lee el móvil directamente por PostgREST —`courses`, `course_modules`,
+`course_lessons`, `course_lesson_resources`, `lessons`, `stories`,
+`story_views`, `testimonials`, `device_tokens`— y **ninguna de las tres que toca
+la 0052 está en esa lista**. Todo lo que la aplicación sabe de consentimientos,
+auditoría y devoluciones lo pide a la API, que entra con otro rol y decide con
+sus propios esquemas de salida. La 0052 cierra una puerta que hoy no usa nadie;
+lo que impide es que se use mañana sin darse cuenta.
+
 El mismo reparto se corrigió en la API, donde el resumen de ventas de un curso
 ajeno se abría con `is_admin()`: moderar contenido y mirar la caja de otra
 persona son dos permisos distintos.
