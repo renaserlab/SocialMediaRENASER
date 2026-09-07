@@ -21,6 +21,13 @@
 -- `published_at` y `published_by` entran con ella por lo mismo: son la firma de
 -- la publicación, y una firma que se puede reescribir no firma nada.
 --
+-- SOBRE UNA BASE NUEVA ESTA MIGRACIÓN NO CAMBIA NADA, y conviene saberlo para
+-- no leerla como si sostuviera algo. El fichero 0050 de este repositorio YA
+-- lleva las tres comparaciones —se añadieron antes de esta fase—, así que quien
+-- monte una base desde cero aplicando las migraciones en orden ya tiene la
+-- función correcta y la 0051 se limita a reescribirla igual. Existe por la base
+-- donde alguien aplicó a mano una revisión anterior de la 0050: allí sí falta.
+--
 -- ES IDEMPOTENTE Y NO TOCA NI UNA FILA. `create or replace function` sustituye
 -- el cuerpo; los disparadores ya existentes pasan a usar el nuevo sin
 -- recrearlos. Aplicarla dos veces no hace nada la segunda.

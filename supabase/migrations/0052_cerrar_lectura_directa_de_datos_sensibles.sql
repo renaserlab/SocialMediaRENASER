@@ -6,13 +6,22 @@
 -- lo que decide de verdad quién lee qué es la RLS y los permisos, no el esquema
 -- de salida de FastAPI.
 --
--- 1. `audit_events_read` usaba `public.is_admin()`, que es
---    `role in ('moderator', 'admin')`. Es decir: la cuenta pensada para ocultar
---    una publicación podía hacer `select * from audit_events` y leer quién movió
---    cada euro, con su huella de IP, su prefijo de red y su navegador. La API lo
---    impide con `puede_mover_dinero`; PostgREST no, porque la política decía
---    otra cosa. La separación entre moderar y tesorería existía en un sitio y no
---    en el otro.
+-- 1. NUEVE políticas de tablas de dinero usaban `public.is_admin()`, que es
+--    `role in ('moderator', 'admin')`. La API separa moderar de mover dinero
+--    desde hace tiempo —`puede_mover_dinero`—, pero la RLS no, y **la RLS es la
+--    que decide por PostgREST**. Con su propio JWT y la clave anónima, una
+--    cuenta que solo modera podía pedir directamente:
+--
+--      GET /rest/v1/refund_requests?select=explanation,review_notes
+--      GET /rest/v1/owner_sale_balances?select=*
+--
+--    y leer el motivo privado que escribió cada alumno para pedir su devolución
+--    —la columna que la 0049 marca «PRIVADO»—, las notas internas de revisión,
+--    y los saldos brutos y netos de cada autor. Y por `audit_events`, quién
+--    movió cada euro con su huella de IP y su prefijo de red.
+--
+--    La separación existía en un sitio y no en el otro; se arregla en el que
+--    faltaba.
 --
 -- 2. `consent_records_read` deja a cada persona ver su fila —correcto— pero con
 --    TODAS sus columnas, incluidas `ip_hash`, `ip_prefix` y
@@ -53,9 +62,9 @@
 --   grant select on public.consent_records to anon, authenticated;
 --   grant select on public.audit_events   to anon, authenticated;
 --   grant select on public.refund_requests to anon, authenticated;
---   drop policy if exists audit_events_read on public.audit_events;
---   create policy audit_events_read on public.audit_events
---     for select using (public.is_admin());
+--   -- y volver a crear las nueve políticas con `public.is_admin()` en lugar
+--   -- de `public.puede_mover_dinero()`, con el mismo texto que traen la 0049
+--   -- y la 0050.
 --   drop function if exists public.puede_mover_dinero();
 
 -- ========================================================================= --
@@ -87,6 +96,58 @@ $$;
 drop policy if exists audit_events_read on public.audit_events;
 create policy audit_events_read on public.audit_events
   for select using (public.puede_mover_dinero());
+
+-- ========================================================================= --
+-- 2 bis. El mismo reparto en el resto de las tablas de dinero
+-- ========================================================================= --
+--
+-- Vienen de la 0049 y de la 0050, las dos ya aplicadas. Se redefinen aquí, que
+-- es lo que toca con una migración que ya corrió: el `using` es lo único que
+-- cambia, `is_admin()` pasa a `puede_mover_dinero()`. Cada persona sigue viendo
+-- lo suyo exactamente igual.
+--
+-- SI ALGUNA DE ESTAS TABLAS NO EXISTIERA, ESTA MIGRACIÓN DEBE PARARSE AQUÍ, y
+-- por eso van como SQL suelto y no dentro de un bucle que las saltaría: que
+-- falte una significa que la base no tiene la 0049 aplicada, y entonces nada de
+-- lo que dice este fichero se sostiene. Fallar es la respuesta correcta.
+--
+-- LO QUE **NO** SE TOCA, y es una decisión, no un olvido: `course_versions_read`
+-- y `policy_versions_read` de la 0050 siguen con `is_admin()`. Ahí `is_admin()`
+-- es lo correcto: son contenido y textos, y ver un borrador sin publicar es
+-- parte de moderar. Lo que no es parte de moderar es la caja.
+
+drop policy if exists course_refund_windows_read on public.course_refund_windows;
+create policy course_refund_windows_read on public.course_refund_windows
+  for select using (user_id = auth.uid() or public.puede_mover_dinero());
+
+drop policy if exists refund_requests_read on public.refund_requests;
+create policy refund_requests_read on public.refund_requests
+  for select using (user_id = auth.uid() or public.puede_mover_dinero());
+
+drop policy if exists refund_request_events_read on public.refund_request_events;
+create policy refund_request_events_read on public.refund_request_events
+  for select using (public.puede_mover_dinero());
+
+drop policy if exists refund_policy_acceptances_read
+  on public.refund_policy_acceptances;
+create policy refund_policy_acceptances_read on public.refund_policy_acceptances
+  for select using (user_id = auth.uid() or public.puede_mover_dinero());
+
+drop policy if exists owner_payout_accounts_read on public.owner_payout_accounts;
+create policy owner_payout_accounts_read on public.owner_payout_accounts
+  for select using (owner_id = auth.uid() or public.puede_mover_dinero());
+
+drop policy if exists owner_sale_balances_read on public.owner_sale_balances;
+create policy owner_sale_balances_read on public.owner_sale_balances
+  for select using (owner_id = auth.uid() or public.puede_mover_dinero());
+
+drop policy if exists owner_transfers_read on public.owner_transfers;
+create policy owner_transfers_read on public.owner_transfers
+  for select using (owner_id = auth.uid() or public.puede_mover_dinero());
+
+drop policy if exists consent_records_read on public.consent_records;
+create policy consent_records_read on public.consent_records
+  for select using (subject_id = auth.uid() or public.puede_mover_dinero());
 
 -- ========================================================================= --
 -- 3. Las columnas que no se sirven por PostgREST a ningún cliente
@@ -158,11 +219,29 @@ end $$;
 do $$
 declare
   faltan text := '';
+  pendiente record;
 begin
   if not exists (
     select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname = 'puede_mover_dinero'
   ) then faltan := faltan || 'funcion:puede_mover_dinero '; end if;
+
+  -- NINGUNA politica de las tablas de dinero puede seguir con `is_admin()`.
+  -- Se comprueba la lista entera y se nombra la que falte: comprobar solo una
+  -- fue exactamente el error que dejo las otras ocho abiertas.
+  for pendiente in
+    select tablename || '.' || policyname as etiqueta
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in (
+        'audit_events', 'consent_records', 'course_refund_windows',
+        'refund_requests', 'refund_request_events', 'refund_policy_acceptances',
+        'owner_payout_accounts', 'owner_sale_balances', 'owner_transfers'
+      )
+      and qual like '%is_admin%'
+  loop
+    faltan := faltan || 'politica_con_is_admin:' || pendiente.etiqueta || ' ';
+  end loop;
 
   if not exists (
     select 1 from pg_policies
