@@ -1575,3 +1575,66 @@ async def test_un_aviso_que_falla_al_aplicarse_conserva_su_registro(entorno, mon
         assert aviso.external_event_id == evento["id"]
         assert aviso.processed_at is not None
         assert "no se pudo escribir" in (aviso.error or "")
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_de_la_tienda_cierra_tambien_el_pedido(entorno):
+    """Play Store devuelve. El acceso se va Y el pedido queda como devuelto.
+
+    LA INCOHERENCIA QUE ESTO CIERRA. Una compra por tienda tambien abre su
+    `orders` y la deja en 'paid'. La devolucion revocaba el derecho y la compra
+    heredada, pero no tocaba el pedido, y la pantalla de compras etiqueta cada
+    linea con el estado del PEDIDO: la misma persona veia «Pagado» sobre un
+    curso al que ya no podia entrar. Por Stripe si salia «Devuelto», asi que el
+    mismo hecho se contaba de dos maneras segun donde se hubiera comprado.
+
+    Y el apunte del reembolso llevaba importe cero. Ahora lleva el del pedido,
+    que es el unico importe que el servidor conoce: lo que cobro la tienda es
+    un precio local que RevenueCat no nos reporta.
+    """
+    await _dar_de_alta(
+        entorno.sesiones, curso=CURSO_A, provider="google", external=EN_LA_TIENDA_A
+    )
+    compra = {
+        "object": "purchase",
+        "id": "purch_devuelta",
+        "customer_id": ANA,
+        "product_id": EN_REVENUECAT_A,
+        "purchased_at": 1658399423658,
+        "status": "owned",
+        "environment": "sandbox",
+        "store": "play_store",
+        "store_purchase_identifier": "GPA.devuelta",
+        "ownership": "purchased",
+    }
+    entorno.compras_de_revenuecat[ANA] = [compra]
+    concedido = await entorno.http.post(
+        f"{PAGOS}/native/sync", json={"platform": "android"}
+    )
+    assert concedido.json()["granted"] == [CURSO_A]
+
+    async with entorno.sesiones() as db:
+        pedido = await db.scalar(select(Order))
+        assert pedido.status == "paid"
+        importe_del_pedido = pedido.amount_minor
+
+    # La tienda la marca devuelta y se vuelve a sincronizar.
+    entorno.compras_de_revenuecat[ANA] = [{**compra, "status": "refunded"}]
+    devuelto = await entorno.http.post(
+        f"{PAGOS}/native/sync", json={"platform": "android"}
+    )
+    assert devuelto.json()["revoked"] == [CURSO_A]
+
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is False
+    async with entorno.sesiones() as db:
+        assert (await db.scalar(select(Order))).status == "refunded"
+        apunte = await db.scalar(
+            select(PaymentTransaction).where(PaymentTransaction.kind == "refund")
+        )
+        assert apunte is not None
+        assert apunte.amount_minor == importe_del_pedido
+
+    # Y la pantalla de compras lo cuenta como devuelto, no como pagado.
+    historial = (await entorno.http.get(f"{PAGOS}/history")).json()
+    assert [c["status"] for c in historial] == ["refunded"]
+    assert historial[0]["has_access"] is False

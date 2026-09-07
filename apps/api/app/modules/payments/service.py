@@ -208,6 +208,47 @@ async def conceder(
     return ResultadoDeConcesion(course_id=producto.course_id, nuevo=es_nuevo)
 
 
+async def orden_pagada_de(
+    db: AsyncSession, *, user_id: str, producto: ProductoComercial
+) -> Order | None:
+    """La compra viva de esta persona sobre este producto, o nada.
+
+    Hace falta cuando la devolución llega por la TIENDA. Stripe avisa sobre un
+    pedido concreto y quien atiende el aviso ya lo tiene en la mano; Google y
+    Apple avisan sobre una transacción suya, y el pedido hay que encontrarlo.
+
+    La más reciente en pie: quien devolvió una vez y volvió a comprar tiene dos
+    pedidos, y el que se cierra es el que sigue `paid`.
+    """
+    return await db.scalar(
+        select(Order)
+        .where(
+            Order.user_id == user_id,
+            Order.commerce_product_id == producto.commerce_product_id,
+            Order.status == "paid",
+        )
+        .order_by(Order.created_at.desc())
+        .limit(1)
+    )
+
+
+async def marcar_pedido_devuelto(db: AsyncSession, *, order_id: str) -> None:
+    """Cierra el pedido y suelta el saldo que hubiera retenido por esa venta.
+
+    Las dos cosas juntas porque son la misma consecuencia: la venta se deshizo.
+    Es lo que el camino de Stripe ya hacía por su cuenta, y lo que al de la
+    tienda le faltaba.
+
+    `liquidacion.cancelar` es idempotente y no hace nada si no hay saldo —hoy
+    las compras por tienda no generan ninguno—; se llama igual para que el día
+    que lo generen esto no haya que recordarlo.
+    """
+    from app.modules.commerce import liquidacion
+
+    await comercio.marcar_orden(db, order_id=order_id, status="refunded")
+    await liquidacion.cancelar(db, order_id=order_id)
+
+
 async def revocar(
     db: AsyncSession,
     *,

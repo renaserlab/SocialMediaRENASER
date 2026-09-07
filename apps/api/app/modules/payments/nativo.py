@@ -116,6 +116,13 @@ async def _aplicar(
         return
 
     if compra.devuelta:
+        # EL PEDIDO, ANTES DE REVOCAR. Una compra por tienda tambien abre su
+        # `orders` y la deja en 'paid'; sin cerrarla, la devolucion quedaba a
+        # medias: el acceso desaparecia pero el historial seguia diciendo
+        # «pagado», porque la pantalla etiqueta cada linea con el estado del
+        # PEDIDO. La misma compra devuelta por Stripe si aparecia como devuelta,
+        # asi que el mismo hecho se contaba de dos maneras segun la tienda.
+        pedido = await service.orden_pagada_de(db, user_id=user_id, producto=producto)
         quitado = await service.revocar(
             db,
             user_id=user_id,
@@ -124,8 +131,17 @@ async def _aplicar(
             # machacar la fila borraria que la compra existio, y hace falta
             # para cuadrar cuentas y para saber por que se revoco un acceso.
             external_transaction_id=f"{compra.external_transaction_id}:refund",
+            # EL IMPORTE DEL PEDIDO, no cero. RevenueCat no nos dice cuanto
+            # cobro la tienda —el precio es local y lo fija Google o Apple—,
+            # pero apuntar el reembolso a cero convertia la contabilidad en una
+            # lista de devoluciones sin importe. El del pedido es el que el
+            # servidor congelo al crearlo, y es el unico que conocemos.
+            amount_minor=pedido.amount_minor if pedido else 0,
+            currency=pedido.currency if pedido else "PEN",
             motivo="devolucion confirmada por RevenueCat",
         )
+        if pedido is not None:
+            await service.marcar_pedido_devuelto(db, order_id=pedido.id)
         if quitado and producto.course_id not in resultado.revocados:
             resultado.revocados.append(producto.course_id)
         return
