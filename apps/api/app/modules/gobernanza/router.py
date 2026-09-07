@@ -178,7 +178,12 @@ async def sembrar_politica_de_recompra(
             payload={
                 "policy_type": politica.policy_type,
                 "version": politica.version,
-                "body_sha256": politica.body_sha256,
+                # `policy_hash` Y NO `body_sha256`: el filtro de la nota descarta
+                # cualquier clave con el trozo `body`, y hace bien —una nota no
+                # archiva cuerpos—. Este campo es la huella del texto, no el
+                # texto, y `policy_hash` es ademas el nombre que ya usa
+                # `consent_records` para lo mismo.
+                "policy_hash": politica.body_sha256,
             },
             origen=leer_origen(request),
         )

@@ -77,11 +77,48 @@ def test_lo_que_si_debe_pasar_pasa() -> None:
         "amount_cents": 4900,
         "currency": "PEN",
         "policy_type": "refund_repurchase",
+        "policy_hash": "9f2c",
         "status": "paid",
         "activo": True,
         "nada": None,
     }
     assert _limpio(dentro) == dentro
+
+
+def test_una_palabra_larga_no_se_borra_por_llevar_un_trozo_corto_dentro() -> None:
+    """EL FALSO POSITIVO TAMBIEN ES UN FALLO, y de los que no dan la cara.
+
+    Buscando `ip` como subcadena se borraban `description`, `subscription_id`,
+    `recipient_id`, `zip` y `participants`; con `card`, `discard` y `wildcard`;
+    con `raw`, `drawer`; con `firma`, `confirmado`. La fila de auditoria se
+    escribia igual, sin el identificador que la hacia util, y nadie se enteraba
+    hasta intentar reconstruir que paso.
+
+    Por eso los trozos cortos se comparan como SEGMENTO COMPLETO del nombre.
+    """
+    dentro = {
+        "description": "curso de cocina",
+        "subscription_id": "sub_1",
+        "recipient_id": "u_1",
+        "zip": "28001",
+        "participants": 3,
+        "discard": False,
+        "wildcard": "*",
+        "drawer": "abierto",
+        "confirmado": True,
+        "clip_id": "c1",
+        "equipment": "camara",
+    }
+    assert _limpio(dentro) == dentro
+
+
+@pytest.mark.parametrize(
+    "clave",
+    ["ip", "client_ip", "ip_hash", "remote_addr", "card", "card_last4", "raw_body"],
+)
+def test_un_trozo_corto_sigue_descartando_cuando_es_el_nombre(clave) -> None:
+    """Lo de arriba no puede haber abierto la puerta que este filtro cierra."""
+    assert _limpio({clave: "lo que sea", "order_id": "abc"}) == {"order_id": "abc"}
 
 
 # --------------------------------------------------------------------------- #
@@ -117,6 +154,19 @@ def test_cuatro_grupos_de_digitos_se_descartan_aunque_sean_una_version() -> None
     correcta en una tabla que existe para no guardar datos personales.
     """
     assert _limpio({"sdk": "sdk-4.5.6.7-beta", "id": "x"}) == {"id": "x"}
+
+
+def test_una_ipv6_dentro_de_un_texto_no_pasa() -> None:
+    """El sistema maneja IPv6 a proposito —`_prefijo` hace /48—, asi que dejarla
+    pasar aqui era una puerta abierta con la de al lado cerrada."""
+    assert _limpio({"nota": "vino de 2001:db8::1", "id": "x"}) == {"id": "x"}
+    assert _limpio({"nota": "2001:0db8:1234:5678:0000:0000:0000:0001"}) == {}
+
+
+def test_una_hora_y_un_hash_no_se_confunden_con_una_ipv6() -> None:
+    """Se le pregunta a `ipaddress`, no a una expresion regular aproximada."""
+    dentro = {"nota": "empezo a las 12:34:56", "sha": "abc123def456"}
+    assert _limpio(dentro) == dentro
 
 
 def test_un_correo_dentro_de_una_lista_no_pasa() -> None:

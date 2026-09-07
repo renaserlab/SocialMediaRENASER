@@ -203,6 +203,11 @@ async def test_sembrar_deja_una_sola_nota_de_auditoria(http, sesiones) -> None:
     assert len(notas) == 1, "la segunda llamada no publico nada y no debe anotar"
     assert notas[0].actor_id == JEFA
     assert notas[0].entity_type == "policy_version"
+    # LA HUELLA DEL TEXTO TIENE QUE SOBREVIVIR AL FILTRO. Es el unico campo que
+    # dice QUE texto se publico; sin el, la nota solo dice que alguien publico
+    # algo. El filtro llego a comerselo en silencio por llamarse `body_sha256`.
+    assert notas[0].payload["policy_hash"], "la nota no dice que texto se fijo"
+    assert notas[0].payload["version"] == primera.json()["version"]
 
 
 @pytest.mark.asyncio

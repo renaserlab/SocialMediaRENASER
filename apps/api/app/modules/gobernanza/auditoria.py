@@ -23,6 +23,7 @@ dinero?» era una línea de registro que nadie conserva.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from typing import Any
@@ -35,60 +36,94 @@ from app.modules.gobernanza.models import AuditEvent
 
 logger = logging.getLogger("renaser.auditoria")
 
-#: Trozos de nombre que descartan una clave. SE BUSCAN COMO SUBCADENA, no por
-#: igualdad.
+#: Trozos de nombre que descartan una clave. SE BUSCAN COMO SUBCADENA.
 #:
-#: LA IGUALDAD EXACTA NO SERVIA DE NADA, y era lo que habia: `ip` no casa con
-#: `client_ip`, `ip_address` ni `remote_addr`; `token` no casa con
-#: `access_token` ni `api_key`; `email` no casa con `user_email` ni `correo`.
-#: Cualquiera de esos nombres —los que escribe cualquiera sin pensar— pasaba
-#: entero a una tabla que se sirve por API.
+#: LA IGUALDAD EXACTA NO SERVIA DE NADA, y era lo que habia: `token` no casa con
+#: `access_token` ni con `api_key`; `email` no casa con `user_email` ni con
+#: `correo`. Cualquiera de esos nombres —los que escribe cualquiera sin pensar—
+#: pasaba entero a una tabla que se sirve por API.
+#:
+#: AQUI SOLO VAN LOS LARGOS, los que no aparecen dentro de otra palabra por
+#: casualidad.
 FRAGMENTOS_PROHIBIDOS = (
     "authorization",
     "auth_",
     "cookie",
     "header",
-    "body",
-    "raw",
     "token",
     "secret",
     "password",
     "passwd",
     "clave",
     "signature",
-    "firma",
     "api_key",
     "apikey",
-    "ip",
-    "addr",
-    "agent",
-    "mail",
     "correo",
     "telefono",
-    "phone",
-    "dni",
     "direccion",
     "address",
     "tarjeta",
-    "card",
+    "mail",
+    "agent",
 )
+
+#: Y estos, SOLO COMO TROZO COMPLETO del nombre, separado por `_`, `.` o `-`.
+#:
+#: POR QUE NO PUEDEN IR ARRIBA. Son cortos y aparecen dentro de palabras que no
+#: tienen nada que ver: buscando `ip` como subcadena se borraban `description`,
+#: `subscription_id`, `recipient_id`, `zip` y `participants`; con `card`,
+#: `discard` y `wildcard`; con `raw`, `drawer`; con `firma`, `confirmado`.
+#:
+#: Y ESO NO ES UN FALLO INOFENSIVO POR SER CERRADO. La nota de auditoria pierde
+#: en silencio el identificador que la hacia util, la fila se escribe igual y
+#: nadie se entera hasta que alguien intenta reconstruir que paso con ella.
+SEGMENTOS_PROHIBIDOS = frozenset(
+    {"ip", "ips", "body", "raw", "card", "phone", "dni", "firma", "addr"}
+)
+
+_SEPARADORES = re.compile(r"[_.\-]+")
 
 #: Y ADEMAS SE MIRA EL VALOR, porque filtrar solo por el nombre deja pasar
 #: `{"nota": "1.2.3.4 / juan@ejemplo.com"}`. No es un detector perfecto ni
 #: pretende serlo: descarta lo que inequivocamente no debe estar ahi.
 _IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
 _CORREO = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
+#: Candidato a IPv6: solo digitos hexadecimales y dos puntos. Lo que decide
+#: de verdad es `ipaddress`, no este patron.
+_POSIBLE_IPV6 = re.compile(r"[0-9A-Fa-f:]{3,}")
 
 
 def _clave_prohibida(clave: object) -> bool:
     nombre = str(clave).lower()
-    return any(trozo in nombre for trozo in FRAGMENTOS_PROHIBIDOS)
+    if any(trozo in nombre for trozo in FRAGMENTOS_PROHIBIDOS):
+        return True
+    return any(t in SEGMENTOS_PROHIBIDOS for t in _SEPARADORES.split(nombre))
+
+
+def _hay_ipv6(texto: str) -> bool:
+    """Una IPv6 dentro de un texto cualquiera.
+
+    NO SE HACE CON UNA EXPRESION REGULAR. Una que reconozca IPv6 de verdad
+    —abreviada, con ceros omitidos, con IPv4 al final— es ilegible y falla por
+    los bordes; una sencilla marca `12:34:56` como si fuera una direccion. Se
+    saca lo que TIENE FORMA de candidato y se le pregunta a `ipaddress`, que es
+    quien lo sabe.
+    """
+    for trozo in _POSIBLE_IPV6.findall(texto):
+        if trozo.count(":") < 2:
+            continue
+        try:
+            if ipaddress.ip_address(trozo).version == 6:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _valor_sospechoso(valor: object) -> bool:
     if not isinstance(valor, str):
         return False
-    return bool(_IPV4.search(valor) or _CORREO.search(valor))
+    return bool(_IPV4.search(valor) or _CORREO.search(valor)) or _hay_ipv6(valor)
 
 
 def _limpio(datos: dict[str, Any] | None, _profundidad: int = 0) -> dict[str, Any]:
