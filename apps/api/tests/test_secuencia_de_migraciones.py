@@ -27,7 +27,11 @@ MIGRACIONES = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 
 #: Migraciones que introdujeron las tablas cuyo contrato se vigila aqui. No es
 #: todo el esquema a proposito: son las que mueven dinero y acceso.
-DEL_DINERO = ("0035_comercio.sql", "0049_garantia_devoluciones_y_liquidaciones.sql")
+DEL_DINERO = (
+    "0035_comercio.sql",
+    "0049_garantia_devoluciones_y_liquidaciones.sql",
+    "0050_versiones_politicas_y_auditoria.sql",
+)
 
 
 def _ficheros() -> list[Path]:
@@ -189,6 +193,7 @@ def _tablas_del_orm() -> dict[str, object]:
     # Importar por su efecto: cada modulo registra sus tablas en `Base.metadata`.
     from app.modules.catalog import models as _catalog  # noqa: F401
     from app.modules.commerce import models as _commerce  # noqa: F401
+    from app.modules.gobernanza import models as _gobernanza  # noqa: F401
     from app.modules.learning import models as _learning  # noqa: F401
     from app.modules.profiles import models as _profiles  # noqa: F401
     from app.modules.refunds import models as _refunds  # noqa: F401

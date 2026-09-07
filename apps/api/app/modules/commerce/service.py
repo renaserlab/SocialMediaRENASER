@@ -339,6 +339,12 @@ async def crear_orden(
         raise NotFoundError("Curso no encontrado.")
     amount_minor, currency = int(precio[0] or 0), precio[1] or "PEN"
 
+    # LA VERSIÓN VIGENTE DEL CURSO, congelada en la orden (0050). Con la
+    # migración sin aplicar es `None` y la orden nace como las de antes.
+    from app.modules.catalog import versiones
+
+    version = await versiones.vigente(db, producto.course_id)
+
     if reutilizar_pendiente:
         orden = await db.scalar(
             select(Order).where(
@@ -355,6 +361,11 @@ async def crear_orden(
             # checkout, lo que se cobra es lo que se le enseña ahora.
             orden.amount_minor = amount_minor
             orden.currency = currency
+            # Y la version tambien: el pedido pendiente es una intencion, no una
+            # compra. Lo que se congela de verdad es lo que hay cuando se paga.
+            if version is not None:
+                orden.course_version_id = version.id
+                orden.snapshot_origin = "live"
             await db.flush()
             return orden
 
@@ -367,6 +378,11 @@ async def crear_orden(
         status="pending",
         amount_minor=amount_minor,
         currency=currency,
+        course_version_id=version.id if version is not None else None,
+        # `live` solo cuando de verdad hay version detras. Sin ella, lo honesto
+        # es que la orden diga que no se sabe que se vendio, que es lo que
+        # significa `legacy`.
+        snapshot_origin="live" if version is not None else "legacy",
     )
     db.add(orden)
     await db.flush()
@@ -588,8 +604,26 @@ async def conceder_entitlement(
             "No se pudo conceder el acceso.", code="commerce_not_available"
         )
 
+    producto = await db.get(CommerceProduct, commerce_product_id)
+
+    # QUE VERSIÓN ABRE ESTE DERECHO (0050).
+    #
+    # Se anota AQUÍ y no solo en la orden porque el derecho es el único punto
+    # común a las tres vías de acceso: compra por web, compra por tienda y beta.
+    # La beta no crea orden ninguna, así que un snapshot que viviera solo en
+    # `orders` la dejaría fuera y no habría forma de decir qué se regaló.
+    #
+    # Solo al concederlo por primera vez: reescribirlo en un reintento
+    # cambiaría, a posteriori, qué versión abrió un acceso que ya existía.
+    if es_nuevo and producto is not None and producto.course_id is not None:
+        from app.modules.catalog import versiones
+
+        version = await versiones.vigente(db, producto.course_id)
+        if version is not None:
+            derecho.course_version_id = version.id
+            await db.flush()
+
     if matricular_tambien:
-        producto = await db.get(CommerceProduct, commerce_product_id)
         if producto is not None and producto.course_id is not None:
             await matricular(
                 db, user_id=user_id, course_id=producto.course_id, source="entitlement"

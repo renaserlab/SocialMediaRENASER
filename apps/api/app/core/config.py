@@ -177,6 +177,25 @@ class Settings(BaseSettings):
         """Si hay comision valida. Sin ella no se transfiere nada."""
         return 0 <= self.platform_fee_bps <= 10_000
 
+    # ----------------------------------------------------------------- #
+    # Contexto de las peticiones (0050)
+    # ----------------------------------------------------------------- #
+
+    #: Sal para la huella de la IP que se guarda con un consentimiento.
+    #:
+    #: VACIA POR DEFECTO, Y ESO APAGA LA HUELLA. Sin sal, el hash de una IPv4 se
+    #: revierte por fuerza bruta en segundos: el espacio entero son 2^32 valores.
+    #: Escribirlo igualmente daria una sensacion de proteccion que no existe, asi
+    #: que sin sal se guarda `NULL` y se dice. Es un secreto: solo backend.
+    ip_hash_salt: str = ""
+
+    #: Si hay un proxy DE CONFIANZA delante que escriba `X-Forwarded-For`.
+    #:
+    #: APAGADO POR DEFECTO porque esa cabecera la puede mandar cualquiera: con
+    #: esto encendido sin un proxy que la reescriba, quien pide elige que IP se
+    #: le apunta. Se enciende cuando se sabe que hay un balanceador delante.
+    trust_proxy_headers: bool = False
+
     # --- Beta gratuita ---
     #: Durante la BETA, un curso de pago se puede conceder GRATIS a quien lo
     #: pide. APAGADO por defecto.

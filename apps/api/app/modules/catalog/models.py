@@ -9,15 +9,18 @@ from uuid import uuid4
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     Uuid,
     func,
+    text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
@@ -27,6 +30,9 @@ from app.shared.enums import content_status
 #: `recommendations/models.py`. Sin la variante, los tests no podrian ni crear
 #: las tablas.
 _LISTA_DE_TEXTO = ARRAY(Text).with_variant(JSON, "sqlite")
+
+#: `jsonb` en PostgreSQL, JSON en SQLite. Mismo motivo que la lista de arriba.
+_DOCUMENTO = JSONB().with_variant(JSON, "sqlite")
 
 
 def _uuid() -> str:
@@ -120,4 +126,86 @@ class Course(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CourseVersion(Base):
+    """La fotografía inmutable de lo que un curso ofrecía al publicarse.
+
+    POR QUÉ EXISTE. Hasta la 0050, editar un curso reescribía lo que alguien ya
+    había comprado: la orden congelaba el importe y la moneda y nada más, así
+    que no había forma de responder «¿qué compró exactamente esta persona?».
+    El criterio A02 del blueprint —«la orden muestra la misma versión, garantía
+    y precio aceptados»— no se podía cumplir.
+
+    UN SOLO DOCUMENTO Y NO VEINTE COLUMNAS. El contenido comercialmente
+    relevante vive repartido en tres sitios: `courses`, las columnas que añadió
+    la 0034 y el temario. Y el temario NO TIENE NINGUNA MARCA TEMPORAL, así que
+    no hay forma de reconstruirlo después: o se copia entero al publicar, o se
+    pierde. Por eso `snapshot` es un documento.
+
+    LO QUE NO GUARDA, y cada omisión es una decisión:
+
+      * El precio. Es OFERTA, no contenido: cambiar el precio no puede
+        invalidar el temario que alguien está viendo. Va en la orden.
+      * El estado de revisión. Es un eje aparte y vive en `courses`.
+      * Las rutas de los medios. Apuntan a Storage, que es mutable por fuera:
+        guardarlas aquí sería prometer una inmutabilidad que no se tiene.
+      * El cuerpo de las lecciones. Corregir una errata generaría una versión
+        nueva y, con ella, ruido en las garantías vivas.
+    """
+
+    __tablename__ = "course_versions"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="CASCADE"), index=True
+    )
+    #: 1, 2, 3… por curso. Legible para una persona, a diferencia del uuid.
+    version: Mapped[int] = mapped_column(Integer)
+    #: `published` es la vigente; `superseded`, las anteriores.
+    status: Mapped[str] = mapped_column(
+        String(16), default="published", server_default="published"
+    )
+    #: SHA-256 del snapshot canónico. Republicar sin cambios no crea versión.
+    content_hash: Mapped[str] = mapped_column(Text)
+    snapshot: Mapped[dict] = mapped_column(_DOCUMENTO, default=dict)
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    published_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    #: `publish` es una versión creada al publicar de verdad. `backfill` es una
+    #: reconstruida del estado actual del curso: dice lo que el curso ES, no
+    #: necesariamente lo que se vendió. La distinción no se debe borrar.
+    origin: Mapped[str] = mapped_column(
+        String(16), default="publish", server_default="publish"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="course_versions_version_positiva"),
+        CheckConstraint(
+            "status in ('published', 'superseded')", name="course_versions_status"
+        ),
+        CheckConstraint(
+            "origin in ('publish', 'backfill')", name="course_versions_origin"
+        ),
+        Index("course_versions_numero_unico", "course_id", "version", unique=True),
+        # UNA SOLA VIGENTE POR CURSO, y lo decide la base.
+        #
+        # `publish_course` lee, valida y escribe sin bloqueo: mientras solo
+        # cambiaba `status` era inocuo, pero en cuanto publicar CREA una fila,
+        # dos peticiones simultáneas crearían dos versiones vigentes. Un `if` en
+        # Python no lo impide; este índice sí.
+        Index(
+            "course_versions_vigente_unica",
+            "course_id",
+            unique=True,
+            postgresql_where=text("status = 'published'"),
+            sqlite_where=text("status = 'published'"),
+        ),
     )

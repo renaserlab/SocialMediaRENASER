@@ -87,6 +87,7 @@ async def create_all_dev() -> None:
     from app.modules.bookings import models as _bookings  # noqa: F401
     from app.modules.catalog import models as _catalog  # noqa: F401
     from app.modules.communities import models as _communities  # noqa: F401
+    from app.modules.gobernanza import models as _gobernanza  # noqa: F401
     from app.modules.content import models as _content  # noqa: F401
     from app.modules.learning import models as _learning  # noqa: F401
     from app.modules.messaging import models as _messaging  # noqa: F401

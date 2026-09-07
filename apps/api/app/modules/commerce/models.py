@@ -201,6 +201,46 @@ class Order(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ------------------------------------------------------------------ #
+    # LA OFERTA, CONGELADA (0050)
+    #
+    # La orden ya era el snapshot del dinero —importe y moneda desde la 0035—;
+    # esto completa lo que faltaba: QUE se compro y con QUE promesa. En columnas
+    # y no en una tabla aparte porque la relacion es uno a uno, y una fila mas
+    # que puede faltar es una fila mas que puede faltar justo donde el dinero no
+    # admite «casi».
+    # ------------------------------------------------------------------ #
+
+    #: ANULABLE, y no se puede evitar: las ordenes anteriores a la 0050 no
+    #: tienen version, y ponerles una seria afirmar que se vendio. El temario no
+    #: guarda ninguna marca temporal, asi que no hay forma de saberlo.
+    course_version_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("course_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    #: La promesa de garantia que se enseño, en horas. 168 por defecto porque es
+    #: lo que el codigo aplica hoy a todos los cursos; congelarlo aqui NO cambia
+    #: ningun plazo vivo —las ventanas guardan su propio `expires_at`— y evita
+    #: una segunda migracion sobre ordenes ya pagadas el dia que la duracion
+    #: deje de ser unica.
+    guarantee_hours: Mapped[int] = mapped_column(
+        Integer, default=168, server_default="168"
+    )
+    guarantee_policy: Mapped[str] = mapped_column(
+        Text, default="refund_v1", server_default="refund_v1"
+    )
+    #: Reservada. HOY SIEMPRE NULA: no hay terminos de compra aprobados porque
+    #: falta decidir entidad vendedora, jurisdiccion e impuestos.
+    terms_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    offer_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: `live` cuando la orden nacio con version; `legacy` para lo anterior. El
+    #: valor por defecto es `legacy` a proposito: si el codigo no lo rellena, lo
+    #: honesto es decir que no se sabe.
+    snapshot_origin: Mapped[str] = mapped_column(
+        String(16), default="legacy", server_default="legacy"
+    )
+
     __table_args__ = (
         CheckConstraint("channel in ('ios', 'android', 'web')", name="orders_channel"),
         CheckConstraint(
@@ -208,6 +248,10 @@ class Order(Base):
             name="orders_status",
         ),
         CheckConstraint("amount_minor >= 0", name="orders_amount_minor"),
+        CheckConstraint(
+            "snapshot_origin in ('live', 'legacy')", name="orders_snapshot_origin"
+        ),
+        CheckConstraint("guarantee_hours >= 0", name="orders_guarantee_hours"),
     )
 
 
@@ -332,6 +376,21 @@ class Entitlement(Base):
     #: antiguos, y esa decision tomada con prisa deja gente fuera.
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    #: QUE VERSION ABRE ESTE DERECHO (0050).
+    #:
+    #: Esta aqui ADEMAS de en la orden porque el derecho es el UNICO punto comun
+    #: a las tres vias de acceso: compra por web, compra por tienda y beta. La
+    #: beta no crea orden ninguna, asi que un snapshot que viviera solo en
+    #: `orders` la dejaria fuera.
+    #:
+    #: `SET NULL` y no `RESTRICT`: aqui la version es informativa —quien decide
+    #: el acceso es el producto—, y un derecho vivo no puede quedar bloqueado
+    #: por una fila de version.
+    course_version_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("course_versions.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     __table_args__ = (

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,7 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import cursos_v2, esquema, eventos
+from app.modules.catalog import cursos_v2, esquema, eventos, versiones
 from app.modules.catalog.models import Course, Event, EventRegistration
 from app.modules.catalog.schemas import (
     CoursePublishResult,
@@ -28,6 +28,9 @@ from app.modules.catalog.schemas import (
     EventUpdate,
 )
 from app.modules.learning.models import CourseLesson, CourseModule
+from app.modules.gobernanza import auditoria
+from app.modules.gobernanza.schemas import VersionDeCurso
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.recommendations import cache as memoria_del_recomendador
 from app.modules.recommendations import temas_de_curso
 from app.modules.recommendations.models import CourseTopic
@@ -609,6 +612,7 @@ async def _requisitos_de_cobro(
 @router.post("/courses/{course_id}/publish", response_model=CoursePublishResult)
 async def publish_course(
     course_id: str,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CoursePublishResult:
@@ -646,7 +650,28 @@ async def publish_course(
             id=course.id, status=course.status, published=False, missing=faltan
         )
 
+    anterior = course.status
     course.status = "published"
+
+    # LA VERSIÓN Y EL CAMBIO DE ESTADO, EN LA MISMA TRANSACCIÓN. Publicar deja
+    # de ser solo mover una columna: congela lo que el curso ofrece en ese
+    # momento, y esa fotografía es lo que la orden de mañana va a señalar. Si se
+    # confirmara el estado sin la versión, habría un curso publicado del que no
+    # se puede decir qué ofrecía. Con la 0050 sin aplicar devuelve `None` y todo
+    # sigue exactamente como antes.
+    version = await versiones.asegurar_version(db, course, publicada_por=current_user.id)
+    await auditoria.anotar(
+        db,
+        action="course.published",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        previous_state=anterior,
+        new_state="published",
+        payload={"version": version.version if version else None},
+        origen=leer_origen(request),
+    )
     await db.commit()
     # El curso acaba de ENTRAR en el universo de candidatos del recomendador, y
     # eso no es un cambio de esta persona: es un cambio del catalogo. La memoria
@@ -840,6 +865,7 @@ async def review_course(
 @router.post("/courses/{course_id}/unpublish", response_model=CourseRead)
 async def unpublish_course(
     course_id: str,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseRead:
@@ -858,7 +884,22 @@ async def unpublish_course(
     await require_owner_or_admin(
         db, course.author_id, current_user, "No puedes retirar este curso."
     )
+    anterior = course.status
     course.status = "hidden"
+    # La versión deja de ser la vigente. NO SE BORRA: es lo que alguien compró,
+    # y borrarla dejaría órdenes apuntando a nada. Pasa a historial.
+    await versiones.retirar_vigente(db, course.id)
+    await auditoria.anotar(
+        db,
+        action="course.unpublished",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        previous_state=anterior,
+        new_state="hidden",
+        origen=leer_origen(request),
+    )
     await db.commit()
     await db.refresh(course)
     # La otra mitad de lo mismo: retirarlo lo saca del universo de candidatos.
@@ -866,6 +907,41 @@ async def unpublish_course(
     # manda a la gente a una puerta cerrada.
     memoria_del_recomendador.invalidar_tipo("cursos")
     return await _leer_curso(db, course)
+
+
+@router.get("/courses/{course_id}/version", response_model=VersionDeCurso)
+async def version_publicada(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> VersionDeCurso:
+    """Qué ofrece hoy este curso, congelado.
+
+    NO PIDE SESIÓN: es la ficha de un curso publicado, lo mismo que ya devuelve
+    el catálogo. Lo que aporta es que esto NO CAMBIA cuando el autor edita: es
+    la fotografía que la orden de mañana va a señalar.
+
+    404 cuando el curso no tiene versión todavía, que es el caso de todos los
+    que no se han republicado desde la 0050. No se inventa una al vuelo: sería
+    afirmar que eso es lo que se publicó.
+    """
+    ensure_uuid(course_id, "Curso no encontrado.")
+    version = await versiones.vigente(db, course_id)
+    if version is None:
+        raise NotFoundError(
+            "Este curso todavía no tiene una versión publicada.",
+            code="course_version_not_available",
+        )
+    return VersionDeCurso(
+        id=version.id,
+        course_id=version.course_id,
+        version=version.version,
+        status=version.status,
+        published_at=version.published_at,
+        # LA DISTINCIÓN QUE NO SE PUEDE PERDER: una versión reconstruida por el
+        # backfill dice lo que el curso ES hoy, no lo que se vendió.
+        reconstruida=version.origin == "backfill",
+        snapshot=dict(version.snapshot or {}),
+    )
 
 
 async def _leer_curso(db: AsyncSession, course: Course) -> CourseRead:
