@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,8 @@ from app.core.security import AuthUser, get_current_user
 from app.modules.catalog.models import Course
 from app.modules.commerce.models import CommerceProduct, Order, OwnerSaleBalance
 from app.modules.commerce import liquidacion
+from app.modules.gobernanza import auditoria
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.commerce.schemas import (
     ESTADOS_DE_SALDO,
     Comprador,
@@ -309,6 +311,7 @@ async def salud_de_los_saldos(
 
 @admin_router.post("/owner-balances/settle", response_model=ResultadoDeLiquidacion)
 async def liquidar(
+    request: Request,
     limite: int = Query(default=100, ge=1, le=500),
     solo_liberar: bool = Query(default=False),
     current_user: AuthUser = Depends(get_current_user),
@@ -357,6 +360,23 @@ async def liquidar(
         return resultado
 
     resultado.liberados = await liquidacion.liberar_vencidos(db, limite=limite)
+    if resultado.liberados:
+        # QUIEN LO DISPARO Y CUANTOS SE MOVIERON. Antes esto solo devolvia un
+        # contador: no quedaba constancia de que alguien hubiera pasado saldos a
+        # disponibles, ni de cuando. Va en la MISMA transaccion que el cambio.
+        await auditoria.anotar(
+            db,
+            action="balances.released",
+            entity_type="owner_sale_balance",
+            # No hay una entidad unica: es una pasada. Se apunta contra quien la
+            # lanzo, que es la respuesta a «¿quien movio esto?».
+            entity_id=current_user.id,
+            actor_id=current_user.id,
+            actor_role="admin",
+            new_state="eligible",
+            payload={"liberados": resultado.liberados, "limite": limite},
+            origen=leer_origen(request),
+        )
     await db.commit()
     if solo_liberar:
         return resultado
@@ -408,6 +428,22 @@ async def liquidar(
             omitidos["taken"] = omitidos.get("taken", 0) + 1
             continue
         resultado.transferencias_intentadas += 1
+        await auditoria.anotar(
+            db,
+            action="transfer.executed",
+            entity_type="owner_sale_balance",
+            entity_id=balance_id,
+            actor_id=current_user.id,
+            actor_role="admin",
+            # `ok` solo cuando la pasarela lo dio por completado. Un intento en
+            # curso no es un pago hecho, y un rastro que no lo distingue no
+            # sirve para investigar nada.
+            outcome="ok" if estado_del_intento == "completed" else "error",
+            new_state=estado_del_intento,
+            payload={"transfer_id": intento.id},
+            origen=leer_origen(request),
+        )
+        await db.commit()
         # `estado_del_intento` se leyo ANTES del commit: despues, el objeto esta
         # caducado y leerle el estado seria otra recarga perezosa.
         if estado_del_intento == "completed":

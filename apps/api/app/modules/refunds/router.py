@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,9 @@ from app.modules.catalog.models import Course
 from app.modules.commerce import liquidacion
 from app.modules.commerce.models import Order
 from app.modules.profiles.models import Profile
+from app.modules.gobernanza import auditoria, consentimientos
+from app.modules.gobernanza import politicas as politicas_compartidas
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.refunds import esquema, estados, politica, validacion
 from app.modules.refunds import service as devoluciones
 from app.modules.refunds.models import RefundRequest
@@ -321,6 +324,7 @@ async def aviso_de_recompra(
 @router.post("/repurchase-acceptance", status_code=status.HTTP_204_NO_CONTENT)
 async def aceptar_recompra(
     payload: PolicyAcceptanceCreate,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -340,13 +344,67 @@ async def aceptar_recompra(
         raise ValidationAppError(
             "Esta compra no necesita aceptación.", code="refund_acceptance_not_needed"
         )
+    fecha_legible = usada.date().isoformat()
     await devoluciones.registrar_aceptacion(
         db,
         user_id=current_user.id,
         course_id=payload.course_id,
         order_id=None,
-        fecha_legible=usada.date().isoformat(),
+        fecha_legible=fecha_legible,
     )
+
+    # ------------------------------------------------------------------ #
+    # TRAZABILIDAD ADICIONAL (0050). No cambia ninguna decisión.
+    #
+    # `refund_policy_acceptances` SIGUE SIENDO LA AUTORIDAD: es la que consulta
+    # el checkout para dejar comprar, y moverla de sitio en la misma ronda en
+    # que se crea la tabla nueva sería cambiar un flujo legal y su almacén a la
+    # vez. Lo que se añade aquí es lo que a aquella le faltaba: de dónde vino la
+    # aceptación —huella de IP, prefijo de red, familia del navegador,
+    # identificador de petición— y un rastro auditable.
+    #
+    # SI ALGO DE ESTO FALLA, LA ACEPTACIÓN NO SE PIERDE: va en un savepoint. El
+    # caso concreto es que la política todavía no esté sembrada, que es lo
+    # normal hasta que alguien llame al endpoint de siembra después de aplicar
+    # la 0050. Bloquear una compra por eso sería una regresión.
+    # ------------------------------------------------------------------ #
+    origen = leer_origen(request)
+    try:
+        async with db.begin_nested():
+            consentimiento = await consentimientos.registrar(
+                db,
+                subject_id=current_user.id,
+                policy_type=politicas_compartidas.RECOMPRA,
+                # EL TEXTO EXACTO que se le enseñó, con su fecha dentro. La
+                # huella de la plantilla no demostraría nada.
+                texto_mostrado=(
+                    politica.texto_de_recompra(fecha_legible)
+                    + "\n"
+                    + politica.CASILLA_DE_ACEPTACION
+                ),
+                scope_kind="course",
+                scope_id=payload.course_id,
+                origen=origen,
+            )
+            await auditoria.anotar(
+                db,
+                action="consent.accepted",
+                entity_type="course",
+                entity_id=payload.course_id,
+                actor_id=current_user.id,
+                actor_role="user",
+                reason="recompra sin garantia",
+                payload={
+                    "policy_type": politicas_compartidas.RECOMPRA,
+                    "consent_id": consentimiento.id if consentimiento else None,
+                },
+                origen=origen,
+            )
+    except politicas_compartidas.PoliticaAusente:
+        logger.warning(
+            "[devoluciones] aceptacion sin politica sembrada: se guardo en "
+            "refund_policy_acceptances pero no en consent_records"
+        )
     await db.commit()
 
 
@@ -1116,6 +1174,7 @@ async def _transicion(
     *,
     notes: str | None,
 ) -> None:
+    desde = solicitud.status
     try:
         await devoluciones.transicionar(
             db,
@@ -1128,7 +1187,39 @@ async def _transicion(
     except estados.TransicionInvalida as error:
         # 409 y no 500: dos administradores pulsando a la vez es algo que pasa,
         # no un fallo del servidor. El segundo se entera de que llegó tarde.
+        #
+        # Y SE AUDITA EL INTENTO RECHAZADO. Un rastro que solo apunta lo que
+        # salió bien no sirve para investigar: «alguien intentó aprobar dos
+        # veces» es exactamente lo que se quiere poder ver después.
+        await auditoria.anotar(
+            db,
+            action=f"refund.{hasta}",
+            entity_type="refund_request",
+            entity_id=solicitud.id,
+            actor_id=current_user.id,
+            actor_role="admin",
+            outcome="denied",
+            previous_state=desde,
+            new_state=hasta,
+            reason=str(error)[:300],
+        )
         raise ValidationAppError(str(error), code="refund_invalid_transition")
+
+    # EL EXPEDIENTE YA LO ANOTA `_anotar` en `refund_request_events`, que es su
+    # máquina de estados y sigue siendo la autoridad. Esto es el rastro
+    # TRANSVERSAL: el que responde «¿qué se movió hoy y quién lo movió?» sin
+    # tener que saber que existe un módulo de devoluciones.
+    await auditoria.anotar(
+        db,
+        action=f"refund.{hasta}",
+        entity_type="refund_request",
+        entity_id=solicitud.id,
+        actor_id=current_user.id,
+        actor_role="admin",
+        previous_state=desde,
+        new_state=hasta,
+        payload={"order_id": solicitud.order_id, "course_id": solicitud.course_id},
+    )
 
 
 async def _cualquiera(db: AsyncSession, request_id: str) -> RefundRequest:
