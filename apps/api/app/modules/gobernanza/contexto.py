@@ -160,6 +160,42 @@ def _ip_del_cliente(cabecera: str | None, respaldo: str | None) -> str | None:
     return directa
 
 
+#: Las redes que solo pueden ser el proxy o la red local. NO se usa
+#: `ipaddress.is_private`, que además marca como privados los rangos reservados
+#: para documentación (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`):
+#: esos nunca llegan como dirección de un socket real, y tratarlos como internos
+#: solo confundiría a quien lea esto.
+_REDES_INTERNAS = tuple(
+    ipaddress.ip_network(r)
+    for r in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+              "fc00::/7")
+)
+
+
+def _es_publica(ip: str) -> bool:
+    """Si la dirección puede ser la de quien pide de verdad.
+
+    UNA DIRECCIÓN PRIVADA AQUÍ NO ES DE NADIE. Detrás de un proxy —que es como
+    está desplegado esto— el socket trae la dirección interna del router de la
+    plataforma: la MISMA para todo el mundo. Guardar su huella y su prefijo
+    llenaría las dos columnas con un valor idéntico en todas las filas, y
+    entonces «estas dos aceptaciones vienen del mismo sitio» sería cierto de
+    cualquier par de filas. Eso no es un dato pobre: es un dato FALSO en la
+    tabla que alguien va a mirar para resolver un caso de abuso.
+
+    Con `TRUST_PROXY_HEADERS` bien puesto, la dirección buena llega por la
+    cabecera y esto no se dispara. Sin él, se guarda `NULL`, que dice la verdad:
+    no se sabe de dónde vino.
+    """
+    try:
+        direccion = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if direccion.is_loopback or direccion.is_link_local or direccion.is_unspecified:
+        return False
+    return not any(direccion in red for red in _REDES_INTERNAS)
+
+
 def _prefijo(ip: str) -> str | None:
     try:
         direccion = ipaddress.ip_address(ip)
@@ -218,6 +254,8 @@ def leer_origen(peticion) -> OrigenDeLaPeticion:
     ip = _ip_del_cliente(
         cabeceras.get("x-forwarded-for"), getattr(cliente, "host", None)
     )
+    if ip is not None and not _es_publica(ip):
+        ip = None
     return OrigenDeLaPeticion(
         ip_hash=_huella(ip) if ip else None,
         ip_prefix=_prefijo(ip) if ip else None,

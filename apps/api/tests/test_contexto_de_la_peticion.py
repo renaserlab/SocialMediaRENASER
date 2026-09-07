@@ -132,6 +132,34 @@ def test_una_ip_ilegible_no_se_guarda_de_ninguna_forma(ajustes) -> None:
     assert origen.ip_hash is None
 
 
+@pytest.mark.parametrize(
+    "interna",
+    ["10.0.0.7", "172.16.4.1", "192.168.1.20", "127.0.0.1", "169.254.1.1", "fc00::1"],
+)
+def test_una_direccion_interna_no_se_guarda_como_origen(ajustes, interna) -> None:
+    """UNA DIRECCION PRIVADA AQUI NO ES DE NADIE.
+
+    Detras de un proxy —que es como esta desplegado esto— el socket trae la
+    direccion interna del router de la plataforma: la MISMA para todo el mundo.
+    Guardarla llenaria las dos columnas con un valor identico en todas las
+    filas, y entonces «estas dos aceptaciones vienen del mismo sitio» seria
+    cierto de cualquier par. Eso no es un dato pobre: es un dato FALSO en la
+    tabla que alguien va a mirar para resolver un caso de abuso.
+    """
+    ajustes.ip_hash_salt = SAL
+    origen = leer_origen(_Peticion({}, host=interna))
+    assert origen.ip_hash is None
+    assert origen.ip_prefix is None
+
+
+def test_una_direccion_publica_si_se_guarda(ajustes) -> None:
+    """Lo de arriba no puede haber vaciado la columna para todo el mundo."""
+    ajustes.ip_hash_salt = SAL
+    origen = leer_origen(_Peticion({}, host="8.8.8.8"))
+    assert origen.ip_hash is not None
+    assert origen.ip_prefix == "8.8.8.0/24"
+
+
 def test_una_sal_demasiado_corta_cuenta_como_no_tener_sal(ajustes) -> None:
     """El limite no es decorativo.
 
