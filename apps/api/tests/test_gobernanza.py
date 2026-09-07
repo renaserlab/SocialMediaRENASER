@@ -435,7 +435,10 @@ async def test_la_auditoria_no_guarda_cuerpos_ni_secretos(sesiones) -> None:
             entity_id="00000000-0000-0000-0000-0000000000b1",
             payload={
                 "balance_id": "b1",
-                "authorization": "Bearer sk_live_secreto",
+                # Un valor que NO se parece a una clave de verdad: el escaner de
+                # secretos del repositorio mira patrones, no intenciones, y un
+                # `sk_live_...` en una prueba lo hace saltar igual.
+                "authorization": "Bearer <una-credencial-cualquiera>",
                 "body": {"card": "4242"},
                 "token": "tok_123",
                 "email": "quien@ejemplo.com",
