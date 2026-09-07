@@ -86,9 +86,19 @@ borradores, nunca el historial de compras ni el acceso a un curso: allí no hay
 forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
-aplicados a mano. La última es la **0050**. Las pruebas no las ejecutan:
-construyen el esquema desde los modelos de SQLAlchemy, así que **una migración
-sin aplicar no la detecta ninguna prueba**. Se comprueba mirando la base.
+aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
+migración. Por eso el código siempre pregunta si su migración está aplicada
+antes de usarla, y sigue funcionando cuando no lo está. La última es la **0050**.
+
+La suite general construye el esquema desde los modelos de SQLAlchemy, no desde
+el SQL. Eso ya no queda sin vigilar: hay una comprobación estática que corre
+siempre y otra que **ejecuta las cincuenta migraciones** sobre un PostgreSQL
+desechable —en CI, o con Docker en local—. Ver
+[`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md` §8](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md).
+
+Lo que ninguna prueba puede decirte es si una base **externa** las tiene
+aplicadas. Eso se mira en esa base, y nunca se aplica nada sobre ella sin
+autorización.
 
 ## Reglas que sostienen el dinero
 
