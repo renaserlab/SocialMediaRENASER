@@ -87,6 +87,14 @@ export function CourseScreen() {
   const [aceptando, setAceptando] = useState(false);
   /** Cerrojo sincrono: dos toques rapidos no pueden abrir dos pagos. */
   const aceptandoRef = useRef(false);
+  /*
+    CERROJO SINCRONO PARA COBRAR Y PARA RESTAURAR. `comprando` es estado: no
+    esta puesto hasta el siguiente render, y entre el primer toque y ese render
+    caben mas toques. Con dos, se abren dos checkouts de Stripe o se lanzan dos
+    compras a la tienda sobre el mismo curso. Una referencia se actualiza en el
+    acto, asi que el segundo toque encuentra la puerta cerrada.
+  */
+  const comprandoRef = useRef(false);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
@@ -247,7 +255,8 @@ export function CourseScreen() {
    * y se lo piense es una decision normal, no un fallo.
    */
   const comprar = async () => {
-    if (!course || !oferta?.sePuedeComprar) return;
+    if (!course || !oferta?.sePuedeComprar || comprandoRef.current) return;
+    comprandoRef.current = true;
     setComprando(true);
     try {
       if (oferta.plataforma === 'web') {
@@ -284,6 +293,7 @@ export function CourseScreen() {
         e instanceof Error ? e.message : t('common.tryAgain'),
       );
     } finally {
+      comprandoRef.current = false;
       setComprando(false);
     }
   };
@@ -295,6 +305,8 @@ export function CourseScreen() {
    * pago, y las tiendas lo exigen.
    */
   const restaurar = async () => {
+    if (comprandoRef.current) return;
+    comprandoRef.current = true;
     setComprando(true);
     try {
       const resultado = await restaurarCompras();
@@ -307,6 +319,7 @@ export function CourseScreen() {
         notify(t('course.almost'), t('course.checkingPurchases'));
       }
     } finally {
+      comprandoRef.current = false;
       setComprando(false);
     }
   };

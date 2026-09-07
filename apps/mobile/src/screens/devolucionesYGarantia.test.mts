@@ -291,6 +291,35 @@ describe('la solicitud de devolución', () => {
     }
   });
 
+  it('cobrar y restaurar tienen cerrojo síncrono, no solo estado', () => {
+    /*
+      `comprando` ES ESTADO, y el estado no está puesto hasta el siguiente
+      render. Entre el primer toque y ese render caben más toques: con dos se
+      abren dos checkouts de Stripe, o se lanzan dos compras a la tienda sobre
+      el mismo curso. Una referencia se actualiza en el acto.
+
+      Se comprueba tambien que se suelta en el `finally`, o el botón se queda
+      muerto en cuanto una compra falle.
+    */
+    assert.ok(
+      CURSO.includes('const comprandoRef = useRef(false);'),
+      'Falta el cerrojo síncrono de compra.',
+    );
+    assert.ok(
+      CURSO.includes('|| comprandoRef.current) return;'),
+      'Comprar tiene que salir si ya hay una compra en marcha.',
+    );
+    assert.ok(
+      CURSO.includes('if (comprandoRef.current) return;'),
+      'Restaurar tiene que salir si ya hay una operación en marcha.',
+    );
+    assert.strictEqual(
+      CURSO.split('comprandoRef.current = false;').length - 1,
+      2,
+      'Los dos caminos sueltan el cerrojo en su `finally`.',
+    );
+  });
+
   it('resume las consecuencias y confirma antes de enviar', () => {
     assert.ok(
       FORMULARIO.includes("t('devolucion.consecuenciasTitulo')"),
@@ -606,13 +635,28 @@ describe('la versión adquirida', () => {
       Por eso la condición es `!== null` y NO hay rama `else`: callarse es la
       respuesta honesta.
     */
-    assert.ok(
-      HISTORIAL.includes('compra.courseVersion !== null ? ('),
-      'La versión se pinta solo cuando el servidor la manda.',
+    const inicio = HISTORIAL.indexOf('compra.courseVersion !== null ? (');
+    assert.ok(inicio !== -1, 'La versión se pinta solo cuando el servidor la manda.');
+
+    // SE COMPRUEBA LA RAMA `else`, NO SOLO LA CONDICIÓN. Mirando únicamente que
+    // exista el `!== null`, esta prueba seguía pasando con un
+    // `) : <Text>versión 1</Text>}` detrás, que es exactamente el fallo que
+    // pretende impedir. Lo que hay que afirmar es que cuando no consta no se
+    // pinta NADA.
+    const cierre = HISTORIAL.indexOf(') : ', inicio);
+    assert.ok(cierre !== -1, 'Falta el cierre del ternario de la versión.');
+    assert.strictEqual(
+      HISTORIAL.slice(cierre, cierre + 9),
+      ') : null}',
+      'Si no consta la versión no se pinta nada: callarse es la respuesta honesta.',
     );
     assert.ok(
-      !/courseVersion\s*\?\?\s*1/.test(HISTORIAL),
+      !/courseVersion\s*\?\?\s*\d/.test(HISTORIAL),
       'No se puede rellenar una versión ausente con un número.',
+    );
+    assert.ok(
+      !/courseVersion\s*\|\|\s*\d/.test(HISTORIAL),
+      'Tampoco con un `||`, que además trataría la versión 0 como ausente.',
     );
   });
 });
