@@ -401,3 +401,68 @@ async def test_un_curso_sin_version_responde_404_y_no_se_inventa_una(entorno) ->
     respuesta = await http.get(f"{CATALOGO}/courses/{CURSO}/version")
     assert respuesta.status_code == 404
     assert "course_version_not_available" in respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_una_version_reconstruida_no_se_reescribe_al_republicar(entorno) -> None:
+    """La v1 del backfill se queda como está, y la primera publicación crea la v2.
+
+    LO QUE ESTA PRUEBA FIJA, Y POR QUE HUBO QUE APRENDERLO MIRANDO LA BASE. El
+    backfill de la 0050 arma su documento en SQL y solo reúne cinco campos: le
+    faltan el subtítulo, el idioma, el nivel, el público, los requisitos y el
+    tipo y la condición de muestra de cada lección. Es una fotografía PARCIAL.
+
+    Hubo un intento de «adoptar» esa fila reescribiéndole la huella para evitar
+    una v2. Era doblemente erróneo: dejaba una fotografía incompleta haciéndose
+    pasar por la vigente, y además el disparador `course_versions_inmutable`
+    RECHAZA cualquier cambio de `content_hash`. Ninguna prueba lo cazó porque
+    SQLite no ejecuta disparadores.
+
+    Lo correcto es lo que se comprueba aquí: la reconstruida no se toca, y la
+    primera publicación real produce la versión completa. La distinción entre
+    «esto es lo que reconstruimos» y «esto es lo que se publicó» se conserva.
+    """
+    http, sesiones, _ = entorno
+
+    async with sesiones() as db:
+        db.add(
+            CourseVersion(
+                course_id=CURSO,
+                version=1,
+                status="published",
+                # La huella que escribe la 0050: nunca coincide con la canónica.
+                content_hash="d95d3702" + "0" * 56,
+                snapshot={
+                    "title": "Curso de Bruno",
+                    "description": "Una descripcion",
+                    "highlights": [],
+                    "modules": [],
+                    "reconstruido": True,
+                },
+                origin="backfill",
+            )
+        )
+        await db.commit()
+        huella_original = "d95d3702" + "0" * 56
+
+    await _publicar(http)
+
+    async with sesiones() as db:
+        todas = sorted(await db.scalars(select(CourseVersion)), key=lambda v: v.version)
+        assert [v.version for v in todas] == [1, 2], "la publicacion tiene que crear la v2"
+
+        reconstruida = todas[0]
+        assert reconstruida.origin == "backfill", "la v1 sigue siendo lo que era"
+        assert reconstruida.content_hash == huella_original, (
+            "NADIE reescribe la huella de una version: el disparador lo rechaza"
+        )
+        assert reconstruida.snapshot["reconstruido"] is True
+        assert reconstruida.status == "superseded"
+
+        completa = todas[1]
+        assert completa.origin == "publish"
+        assert completa.status == "published"
+        # Y la nueva SI trae lo que el backfill no podia reunir.
+        assert "language" in completa.snapshot
+        assert "level" in completa.snapshot
+        assert completa.snapshot["modules"][0]["lessons"][0]["is_preview"] is False

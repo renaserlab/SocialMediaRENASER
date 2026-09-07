@@ -36,9 +36,6 @@ from app.modules.learning.models import CourseLesson, CourseModule
 
 logger = logging.getLogger("renaser.catalog")
 
-#: Lo que escribe el backfill de la 0050 en `content_hash`. Ver `asegurar_version`.
-CENTINELA_DE_BACKFILL = "backfill:"
-
 
 def _canonico(snapshot: dict[str, Any]) -> str:
     """El documento en una forma estable, para poder compararlo.
@@ -171,22 +168,27 @@ async def asegurar_version(
         .limit(1)
     )
 
-    # UNA VERSION RECONSTRUIDA NO TIENE HUELLA COMPARABLE. El backfill de la
-    # 0050 no puede calcular la huella canonica —tendria que reproducir en SQL la
-    # forma exacta del documento, y las dos se separarian al primer cambio—, asi
-    # que escribe un centinela. Tratarlo como una huella normal haria que la
-    # primera republicacion creara SIEMPRE una version 2 identica: el historial
-    # contaria un cambio que no ocurrio.
+    # UNA VERSIÓN RECONSTRUIDA NUNCA VA A COINCIDIR, Y ESTÁ BIEN QUE ASÍ SEA.
     #
-    # Se reutiliza la fila y se le pone la huella de verdad, sin cambiar su
-    # numero ni su contenido: sigue siendo la version 1 reconstruida.
-    if ultima is not None and str(ultima.content_hash or "").startswith(CENTINELA_DE_BACKFILL):
-        if ultima.status != "published":
-            ultima.status = "published"
-        ultima.content_hash = firma
-        await db.flush()
-        return ultima
-
+    # El backfill de la 0050 arma su documento en SQL y solo puede reunir cinco
+    # campos: título, descripción, puntos destacados, el temario básico y la
+    # marca de reconstruido. Le faltan el subtítulo, el idioma, el nivel, el
+    # público, los requisitos, y el tipo y la condición de muestra de cada
+    # lección. Es una fotografía PARCIAL, y no puede ser otra cosa: reproducir
+    # en SQL la forma canónica del documento sería mantener dos veces la misma
+    # decisión, y se separarían al primer cambio.
+    #
+    # Por eso la primera publicación real crea una versión 2 CON LA FOTOGRAFÍA
+    # COMPLETA, y eso no es ruido en el historial: es la diferencia entre «esto
+    # es lo que reconstruimos» y «esto es lo que se publicó». La v1 se queda
+    # como lo que es, marcada `backfill`.
+    #
+    # HUBO AQUÍ UN INTENTO DE «ADOPTAR» LA FILA reescribiéndole la huella para
+    # evitar esa v2. Era doblemente erróneo: dejaba una fotografía incompleta
+    # haciéndose pasar por la vigente, y además el disparador
+    # `course_versions_inmutable` RECHAZA cualquier cambio de `content_hash`.
+    # No lo cazó ninguna prueba porque SQLite no ejecuta disparadores; lo cazó
+    # mirar la base de verdad.
     if ultima is not None and ultima.content_hash == firma:
         # El mismo contenido. Si estaba retirada, vuelve a ser la vigente.
         if ultima.status != "published":
