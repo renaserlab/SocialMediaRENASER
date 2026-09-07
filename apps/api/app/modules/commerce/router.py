@@ -44,7 +44,7 @@ from app.modules.refunds import esquema as esquema_devoluciones
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin, puede_mover_dinero
+from app.shared.permissions import puede_mover_dinero
 
 logger = logging.getLogger("renaser.commerce")
 
@@ -59,7 +59,14 @@ async def _curso_propio(
     curso = await db.get(Course, course_id)
     if curso is None:
         raise NotFoundError("Curso no encontrado.")
-    if curso.author_id != current_user.id and not await is_admin(db, current_user.id):
+    # `puede_mover_dinero` Y NO `is_admin`. `is_admin` incluye `moderator`, que
+    # es la cuenta creada para ocultar una publicacion o resolver un reporte; con
+    # ella se veian importes brutos, comision de plataforma, neto del autor y el
+    # listado de ventas de CUALQUIER curso. Moderar contenido y mirar la caja de
+    # otra persona son dos permisos distintos, y aqui lo eran solo en el nombre.
+    if curso.author_id != current_user.id and not await puede_mover_dinero(
+        db, current_user.id
+    ):
         raise ForbiddenError("No puedes ver las ventas de este curso.")
     return curso
 
