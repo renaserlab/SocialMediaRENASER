@@ -99,6 +99,16 @@ class CourseRefundWindow(Base):
         CheckConstraint(
             "expires_at > first_accessed_at", name="course_refund_windows_plazo"
         ),
+        # Si está usada, tiene fecha de uso; y al revés. Estaba solo en el SQL
+        # de la 0049, así que en pruebas se podía crear una garantía consumida
+        # SIN fecha de consumo —un estado que producción rechaza— y la suite se
+        # ponía verde. Las restricciones que decide la base tienen que estar en
+        # los dos sitios o no protegen nada donde se comprueban las cosas.
+        CheckConstraint(
+            "(refund_used_at is null and refund_request_id is null) "
+            "or (refund_used_at is not null)",
+            name="course_refund_windows_uso_coherente",
+        ),
         # LA INVARIANTE NÚMERO UNO. Sin esto, dos peticiones simultáneas a la
         # primera lección crean dos ventanas y la persona tiene dos garantías.
         Index("course_refund_windows_unica", "user_id", "course_id", unique=True),
@@ -177,6 +187,13 @@ class RefundRequest(Base):
             name="refund_requests_reason",
         ),
         CheckConstraint("amount_minor >= 0", name="refund_requests_amount"),
+        # El entorno es 'sandbox' o 'production', y nada más. Estaba solo en el
+        # SQL: en pruebas se podía escribir 'live' o 'test' —lo que devuelve
+        # cualquier pasarela— y la fila entraba; en producción la rechaza.
+        CheckConstraint(
+            "environment is null or environment in ('sandbox', 'production')",
+            name="refund_requests_environment",
+        ),
         # UNA SOLICITUD VIVA POR ORDEN. Parcial: rechazadas y canceladas puede
         # haber varias —es historial—; abiertas sobre el mismo dinero, una.
         #

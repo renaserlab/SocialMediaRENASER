@@ -30,3 +30,43 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
       - run: pytest
+
+  # Las migraciones, EJECUTADAS. La suite de arriba construye el esquema desde
+  # los modelos, asi que un SQL invalido, un indice parcial mal escrito o una
+  # politica RLS rota pasarian en verde y solo darian la cara al pegarlos en el
+  # editor de Supabase, que es donde se aplican a mano.
+  #
+  # La base es un contenedor efimero del propio runner: sin credenciales, sin
+  # red hacia fuera y se destruye al terminar. La variable se llama
+  # MIGRACIONES_DATABASE_URL y NO DATABASE_URL a proposito, porque la prueba
+  # borra y recrea el esquema `public`.
+  migraciones:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: renaser_migraciones
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIGRACIONES_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/renaser_migraciones
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: pip install 'psycopg[binary]'
+      - run: pytest tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py -v

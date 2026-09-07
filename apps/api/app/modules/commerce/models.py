@@ -585,6 +585,13 @@ class OwnerTransfer(Base):
             name="owner_transfers_status",
         ),
         CheckConstraint("amount_minor >= 0", name="owner_transfers_amount"),
+        # Igual que en `refund_requests`: estaba solo en el SQL de la 0049, así
+        # que una transferencia con entorno 'live' pasaba en pruebas y la base
+        # de verdad la rechaza. Aquí no admite nulo, y ese matiz también importa.
+        CheckConstraint(
+            "environment in ('sandbox', 'production')",
+            name="owner_transfers_environment",
+        ),
         # UNA TRANSFERENCIA VIVA POR SALDO. Parcial porque un fallo se puede
         # reintentar y los intentos fallidos son historial.
         Index(
