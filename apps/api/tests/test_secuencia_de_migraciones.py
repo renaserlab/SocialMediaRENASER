@@ -33,6 +33,10 @@ DEL_DINERO = (
     "0050_versiones_politicas_y_auditoria.sql",
 )
 
+#: Migraciones que NO crean tablas: corrigen algo de una anterior. El contrato
+#: SQL-modelos no aplica, pero la secuencia y las reglas de proyecto si.
+SOLO_CORRIGEN = ("0051_endurecer_la_inmutabilidad_de_versiones.sql",)
+
 
 def _ficheros() -> list[Path]:
     return sorted(MIGRACIONES.glob("*.sql"))
