@@ -108,15 +108,20 @@ quien decide qué se lee es la RLS, no el esquema de salida de FastAPI. Confirma
 contra la base: `is_admin()` incluye a `moderator`, y `anon` / `authenticated`
 tienen concesiones de `select` sobre las tablas nuevas.
 
-Tres fugas, todas del mismo tipo:
+Dos formas de la misma fuga:
 
-1. `audit_events` era legible por `is_admin()`, o sea también por `moderator`: la
-   cuenta creada para ocultar una publicación podía leer quién movió cada euro,
-   con huella de IP y prefijo de red.
-2. `consent_records` entregaba a cada persona su fila **con** `ip_hash`,
-   `ip_prefix` y `user_agent_family`, que el esquema de salida omite a propósito.
-3. `refund_requests` (viene de la 0049) entregaba al alumno el identificador del
-   reembolso en la pasarela y el uuid de quien revisó su expediente.
+1. **Nueve políticas** de tablas de dinero decidían con `is_admin()`, que incluye
+   a `moderator`. Con su propio JWT y la clave anónima, la cuenta creada para
+   ocultar una publicación llegaba a `refund_requests.explanation` —el motivo
+   privado que escribe cada alumno, la columna que la 0049 marca «PRIVADO»—, a
+   las notas internas de revisión, a los saldos brutos y netos de cada autor, y
+   a `audit_events` entero. La API separa moderar de mover dinero desde hace
+   tiempo; la RLS no lo hacía, y la RLS es la que decide por PostgREST.
+2. Columnas de más en filas que sí corresponden: `consent_records` entregaba a
+   cada persona su fila **con** `ip_hash`, `ip_prefix` y `user_agent_family`, y
+   `refund_requests` (0049) entregaba al alumno el identificador del reembolso
+   en la pasarela y el uuid de quien revisó su expediente. Los esquemas de
+   salida omiten los dos grupos a propósito.
 
 **Corregido en la migración `0052`**, por columnas —lo que sobra son columnas,
 no filas: quitar la fila dejaría a la persona sin ver su propio consentimiento—
@@ -146,6 +151,25 @@ lo que impide es que se use mañana sin darse cuenta.
 El mismo reparto se corrigió en la API, donde el resumen de ventas de un curso
 ajeno se abría con `is_admin()`: moderar contenido y mirar la caja de otra
 persona son dos permisos distintos.
+
+---
+
+## 6 bis. Lo que encontró la revisión independiente
+
+Una revisión hecha por quien no implementó nada de esto, sobre el diff completo
+de la fase. Ocho hallazgos, todos comprobados por mí antes de tocar nada, y
+todos corregidos:
+
+| Gravedad | Qué | Cómo se cerró |
+|---|---|---|
+| Grave | Ocho políticas de dinero más seguían con `is_admin()`; solo se había corregido una | Sección 2 bis de la 0052, y una prueba que recorre todas las migraciones en orden y mira **cómo termina** cada política |
+| Grave | El filtro nuevo comparaba por subcadena y se comía en silencio `body_sha256` —el único campo que dice **qué** texto se publicó—, además de `description`, `subscription_id`, `zip`, `discard`… | Los trozos cortos (`ip`, `body`, `card`, `raw`…) pasan a compararse como segmento completo del nombre; la clave de la nota se llama ahora `policy_hash` |
+| Media | `test_migraciones_reales` fijaba la última migración en `0051` con la 0052 ya en el cambio: verde solo porque el módulo se salta sin PostgreSQL, rojo en cuanto CI tenga uno | Corregido, con el motivo escrito al lado |
+| Media | El contexto de origen quedaba inerte en el despliegue: sin sal, `ip_hash` es `NULL`; y sin proxy declarado, `ip_prefix` era la /24 interna de la plataforma, **la misma para todo el mundo** | Las direcciones internas ya no se guardan como origen —un dato idéntico en todas las filas no es un dato pobre, es falso—, y las dos variables quedan declaradas en `render.yaml` sin valor |
+| Baja | El filtro detectaba IPv4 y correos, pero no IPv6, que el sistema sí maneja | Añadido, preguntándole a `ipaddress` en vez de con una expresión regular aproximada |
+| Baja | Una constante de pruebas declarada y nunca usada | Ahora sostiene una regla: una migración correctora no crea tablas y dice cómo deshacerse |
+| Baja | La 0051 no cambia nada en una base nueva, y el fichero no lo decía | Dicho en su cabecera |
+| Baja | La separación de savepoints no tenía prueba | Tres pruebas; comprobadas fusionando de nuevo los savepoints, con lo que dos de las tres fallan |
 
 ---
 
@@ -190,7 +214,16 @@ ejecutaron y no se dan por aprobadas.** Quedan sin ejecutar:
 La sustituta que hay hoy comprueba el índice directamente, que es útil pero **no
 es la misma prueba**. La base real nunca se usa como sustituto de esto.
 
-### 7.3 QA físico — **pendiente**
+### 7.3 Poner la sal y decidir el proxy — **pendiente, es una acción de persona**
+
+`IP_HASH_SALT` y `TRUST_PROXY_HEADERS` quedan declaradas en `render.yaml` sin
+valor. Hasta que alguien ponga la sal en el panel —32 caracteres o más, distinta
+por entorno— `ip_hash` será `NULL` en todas las filas, a propósito. Y
+`TRUST_PROXY_HEADERS` solo se pone en `true` sabiendo cuántos proxys hay
+delante: con dos saltos, la última entrada de `X-Forwarded-For` es la del proxy
+interior y no la de quien pide.
+
+### 7.4 QA físico — **pendiente**
 
 Sin ejecutar y sin dar por válido: botón atrás de Android, gesto de retroceso
 predictivo, micrófono, notas de voz, cámara, adjuntos, recorte, tipografía
@@ -231,6 +264,11 @@ Orden correcto: `0050` → `0051` → `0052` → código.
 * Una prueba del móvil sobre la versión adquirida era tautológica: comprobaba la
   condición, no la rama `else`, así que pasaba igual con el defecto que decía
   impedir. Corregida, y comprobada inyectando ese defecto.
+* Al revertir una prueba de inyección con `git checkout --` sobre un fichero que
+  además tenía trabajo sin confirmar, perdí ese trabajo y tuve que rehacerlo.
+  Para comprobar que una prueba falla con el defecto puesto, el fichero se copia
+  antes a un sitio aparte; `git checkout` restaura la versión confirmada, no la
+  que había hace un minuto.
 * La primera versión de la 0052 cerraba las columnas con `revoke` de columna
   sobre una concesión de tabla, que en PostgreSQL no quita nada. Se detectó antes
   de aplicarla, comprobando de dónde salen las concesiones de `anon` y
