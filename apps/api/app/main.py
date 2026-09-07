@@ -21,6 +21,8 @@ from app.modules.content.router import router as content_router
 from app.modules.content.reposts import router as reposts_router
 from app.modules.content.router_etiquetas import router as etiquetas_router
 from app.modules.commerce.router import admin_router as commerce_admin_router
+from app.modules.gobernanza.router import admin_router as gobernanza_admin_router
+from app.modules.gobernanza.router import router as gobernanza_router
 from app.modules.commerce.router import router as commerce_router
 from app.modules.identity.router import router as identity_router
 from app.modules.learning.router import router as learning_router
@@ -88,6 +90,28 @@ def create_app() -> FastAPI:
                 "separados por comas."
             )
 
+    # EL IDENTIFICADOR DE LA PETICION. Lo genera aqui si no viene de fuera, lo
+    # deja en un `ContextVar` para que lo lean la auditoria y el registro sin
+    # pasarlo por veinte firmas, y lo devuelve en la respuesta para que quien
+    # reporta un fallo pueda decir cual fue el suyo.
+    @app.middleware("http")
+    async def _con_identificador(request, call_next):  # noqa: ANN001, ANN202
+        from app.modules.gobernanza.contexto import fijar_request_id, nuevo_request_id
+
+        entrante = (request.headers.get("x-request-id") or "").strip()
+        # Se acota lo que viene de fuera: es una cabecera que manda cualquiera y
+        # acaba en una columna y en cada linea de registro.
+        identificador = entrante[:64] if entrante else nuevo_request_id()
+        testigo = fijar_request_id(identificador)
+        try:
+            respuesta = await call_next(request)
+        finally:
+            from app.modules.gobernanza.contexto import _peticion
+
+            _peticion.reset(testigo)
+        respuesta.headers["X-Request-Id"] = identificador
+        return respuesta
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -141,6 +165,11 @@ def create_app() -> FastAPI:
     # La vista comercial del propietario. Sin la 0049 responde ceros.
     app.include_router(commerce_router, prefix=prefix)
     app.include_router(commerce_admin_router, prefix=prefix)
+    # Politicas versionadas, consentimientos y auditoria (0050). Se monta
+    # siempre: sin la migracion responde vacio o 404, que es la verdad, en vez
+    # de reventar.
+    app.include_router(gobernanza_router, prefix=prefix)
+    app.include_router(gobernanza_admin_router, prefix=prefix)
 
     return app
 
