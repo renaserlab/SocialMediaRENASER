@@ -35,10 +35,10 @@ type Props = {
   cursoId: string;
   /**
    * Si a esta persona se le OFRECE valorar. Es una pista para no ensenar un
-   * boton imposible —quien no ha entrado nunca al curso no puede valorarlo—,
-   * NO un permiso: quien decide es el servidor, que vuelve a mirar la compra y
-   * la devolucion en cada escritura. Por eso todos sus rechazos estan
-   * traducidos y se leen dentro de la hoja.
+   * boton imposible —valorar pide haber PAGADO el curso, asi que en uno gratis
+   * no lo hay—, NO un permiso: quien decide es el servidor, que vuelve a mirar
+   * la compra y la devolucion en cada escritura. Por eso todos sus rechazos
+   * estan traducidos y se leen dentro de la hoja.
    */
   puedeValorar: boolean;
 };
@@ -239,23 +239,40 @@ export function ValoracionesDelCurso({ cursoId, puedeValorar }: Props) {
 
           {mia ? (
             <React.Fragment>
+              {/*
+                MODERADA: se dice. Aparece en la lista porque la propia se ve
+                siempre, y sin este aviso quien la escribio la daria por
+                publicada y no entenderia por que la media no se movio.
+              */}
+              {mia.enRevision ? (
+                <Text variant="secondary" color={colors.textMuted} style={styles.vacio}>
+                  {t('valoracion.enRevision')}
+                </Text>
+              ) : null}
               <Button
                 label={t('valoracion.editarMia')}
                 variant="secondary"
                 onPress={() => setHojaAbierta(true)}
                 style={styles.accion}
               />
-              <Pressable
-                onPress={() => void retirar()}
-                style={styles.retirar}
-                accessibilityRole="button"
-                accessibilityLabel={t('valoracion.retirarTitulo')}
-              >
-                <Feather name="trash-2" size={14} color={colors.textMuted} />
-                <Text variant="secondary" weight="700" color={colors.textMuted}>
-                  {t('valoracion.retirarTitulo')}
-                </Text>
-              </Pressable>
+              {/*
+                Retirar una moderada la borraria y dejaria publicar otra igual,
+                asi que el servidor lo rechaza. No se ofrece el boton para no
+                mandar a nadie a un error.
+              */}
+              {mia.enRevision ? null : (
+                <Pressable
+                  onPress={() => void retirar()}
+                  style={styles.retirar}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('valoracion.retirarTitulo')}
+                >
+                  <Feather name="trash-2" size={14} color={colors.textMuted} />
+                  <Text variant="secondary" weight="700" color={colors.textMuted}>
+                    {t('valoracion.retirarTitulo')}
+                  </Text>
+                </Pressable>
+              )}
             </React.Fragment>
           ) : puedeValorar ? (
             <Button

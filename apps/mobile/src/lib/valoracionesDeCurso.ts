@@ -304,6 +304,9 @@ export function mensajeDeErrorDeValoracion(
       return t('valoracion.yaValoraste');
     case 'course_reviews_not_available':
       return t('valoracion.noDisponible');
+    // Se moderó entre que se cargó la lista y se tocó el boton.
+    case 'course_review_moderated':
+      return t('valoracion.enRevision');
     default:
       break;
   }

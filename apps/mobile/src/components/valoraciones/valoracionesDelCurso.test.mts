@@ -299,11 +299,14 @@ describe('nada de datos inventados', () => {
 
 describe('el detalle del curso monta la seccion', () => {
   it('la pinta con el curso que se esta viendo', () => {
-    assert.match(PANTALLA, /<ValoracionesDelCurso cursoId=\{course\.id\}/);
+    assert.ok(PANTALLA.includes('<ValoracionesDelCurso'));
+    assert.ok(PANTALLA.includes('cursoId={course.id}'));
   });
 
-  it('no ofrece valorar a quien no ha entrado al curso ni a quien lo publico', () => {
-    assert.match(PANTALLA, /puedeValorar=\{hasAccess && !canManage\}/);
+  it('no ofrece valorar donde el servidor siempre diria que no', () => {
+    // Valorar pide haber PAGADO: en un curso gratis nadie compro, asi que el
+    // boton contestaba 422. Y quien lo publico no valora lo propio.
+    assert.ok(PANTALLA.includes('puedeValorar={esDePago && hasAccess && !canManage}'));
   });
 });
 
@@ -330,5 +333,46 @@ describe('los tres idiomas dicen todo lo que la seccion pregunta', () => {
       }
     }
     assert.deepEqual(faltan, [], `sin traducir: ${faltan.join(', ')}`);
+  });
+});
+
+describe('una valoracion moderada', () => {
+  it('se dice que esta en revision, en los tres idiomas', () => {
+    assert.ok(SECCION.includes("t('valoracion.enRevision')"));
+    for (const [nombre, diccionario] of [
+      ['es', es],
+      ['en', en],
+      ['pt', pt],
+    ] as Array<[string, Record<string, string>]>) {
+      assert.ok(
+        (diccionario['valoracion.enRevision'] ?? '').trim() !== '',
+        `falta valoracion.enRevision en ${nombre}`,
+      );
+    }
+  });
+
+  it('no se ofrece retirarla', () => {
+    // El servidor lo rechaza con 409: borrarla dejaria publicar otra igual y
+    // eso deshace la moderacion. Ensenar el boton seria mandar a un error.
+    assert.ok(SECCION.includes('mia.enRevision ? null : ('));
+  });
+
+  it('si se puede editarla', () => {
+    // Sigue oculta al editarla: no es una via para republicarla, es la unica
+    // forma de arreglar lo que se senalo.
+    const editar = SECCION.indexOf("t('valoracion.editarMia')");
+    assert.notEqual(editar, -1);
+    assert.ok(!SECCION.slice(0, editar).includes('mia.enRevision ? null'));
+  });
+
+  it('el estado llega del servidor y un campo ausente no lo inventa', () => {
+    assert.ok(REPOSITORIO.includes('enRevision: dto.hidden === true'));
+  });
+
+  it('el rechazo del servidor tambien esta traducido', () => {
+    // Por si se modera entre que se carga la lista y se toca el boton.
+    assert.ok(
+      sinComentarios(fuente(RUTAS.logica)).includes("case 'course_review_moderated'"),
+    );
   });
 });

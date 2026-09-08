@@ -1837,6 +1837,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'valoracion.publicada': 'Thanks for your rating',
   'valoracion.actualizada': 'Rating updated',
   'valoracion.retirarTitulo': 'Remove my rating',
+  'valoracion.enRevision': 'Your rating is under review: for now only you can see it and it does not count towards the average.',
   'valoracion.retirarCuerpo': 'It will stop showing on the course and its score will leave the average.',
   'valoracion.retirarConfirmar': 'Remove',
   'valoracion.retirada': 'Rating removed',

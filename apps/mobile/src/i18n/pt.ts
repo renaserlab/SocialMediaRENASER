@@ -1841,6 +1841,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'valoracion.publicada': 'Obrigado pela tua avaliação',
   'valoracion.actualizada': 'Avaliação atualizada',
   'valoracion.retirarTitulo': 'Retirar a minha avaliação',
+  'valoracion.enRevision': 'A tua avaliação está em revisão: por agora só tu a vês e não conta na média.',
   'valoracion.retirarCuerpo': 'Deixará de aparecer no curso e a pontuação sairá da média.',
   'valoracion.retirarConfirmar': 'Retirar',
   'valoracion.retirada': 'Avaliação retirada',

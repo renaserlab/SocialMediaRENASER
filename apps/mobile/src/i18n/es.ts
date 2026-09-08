@@ -1940,6 +1940,7 @@ export const es = {
   'valoracion.publicada': 'Gracias por tu valoración',
   'valoracion.actualizada': 'Valoración actualizada',
   'valoracion.retirarTitulo': 'Retirar mi valoración',
+  'valoracion.enRevision': 'Tu valoración está en revisión: por ahora solo la ves tú y no cuenta en el promedio.',
   'valoracion.retirarCuerpo': 'Dejará de verse en el curso y su puntuación saldrá de la media.',
   'valoracion.retirarConfirmar': 'Retirar',
   'valoracion.retirada': 'Valoración retirada',

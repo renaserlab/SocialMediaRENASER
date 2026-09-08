@@ -48,6 +48,11 @@ export type ValoracionDeCurso = {
   compraVerificada: boolean;
   /** Si la escribio quien esta mirando. Solo asi se puede editar o retirar. */
   esMia: boolean;
+  /**
+   * Moderada: no la ve nadie mas y no cuenta en la media. Solo puede venir en
+   * la propia. Sin esto, quien la escribio la ve listada y la da por publicada.
+   */
+  enRevision: boolean;
 };
 
 type ValoracionDto = {
@@ -62,6 +67,7 @@ type ValoracionDto = {
   author_username?: string | null;
   verified_purchase?: boolean | null;
   is_mine?: boolean | null;
+  hidden?: boolean | null;
 };
 
 function aValoracion(dto: ValoracionDto): ValoracionDeCurso {
@@ -78,6 +84,7 @@ function aValoracion(dto: ValoracionDto): ValoracionDeCurso {
     // `=== true` y no `?? false`: un campo ausente NO es un sello de compra.
     compraVerificada: dto.verified_purchase === true,
     esMia: dto.is_mine === true,
+    enRevision: dto.hidden === true,
   };
 }
 

@@ -8,7 +8,7 @@ import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
-import { deCentavos } from '@/lib/dinero';
+import { importeConMoneda } from '@/lib/dinero';
 import { ordenDeLaUrl } from '@/lib/vueltaDelPago';
 import { CommerceRepository, type EstadoDeOrden } from '@/repositories/PaymentRepository';
 import { radius, spacing } from '@/theme/tokens';
@@ -91,7 +91,7 @@ export function ConstanciaDeCompraScreen() {
     { etiqueta: t('constancia.curso'), valor: orden.cursoTitulo },
     { etiqueta: t('constancia.estado'), valor: t(`constancia.estados.${orden.status}` as 'constancia.estados.paid') },
     { etiqueta: t('constancia.fecha'), valor: fecha(orden.pagadaEn ?? orden.creadaEn) },
-    { etiqueta: t('constancia.total'), valor: deCentavos(orden.amountMinor, orden.currency) },
+    { etiqueta: t('constancia.total'), valor: importeConMoneda(orden.amountMinor, orden.currency) },
     { etiqueta: t('constancia.proveedor'), valor: orden.proveedor },
     { etiqueta: t('constancia.operacion'), valor: orden.id },
   ];

@@ -774,10 +774,11 @@ export function CourseScreen() {
           {/*
             LAS VALORACIONES.
 
-            `puedeValorar` es solo para no ensenar un boton imposible: quien
-            nunca ha entrado al curso no puede valorarlo, y quien lo publico
-            tampoco —valorar lo propio no es una opinion, es publicidad, y el
-            servidor lo rechaza con `review_owner_not_allowed`—. Quien DECIDE
+            `puedeValorar` es solo para no ensenar un boton imposible: valorar
+            pide HABER PAGADO el curso, no poder entrar. En uno gratis nadie
+            compro, asi que el boton contestaba siempre 422
+            `review_purchase_required`; y quien lo publico tampoco valora
+            —valorar lo propio no es una opinion, es publicidad—. Quien DECIDE
             sigue siendo el servidor, que vuelve a mirar la compra y la
             devolucion en cada escritura; por eso sus rechazos estan traducidos
             y se leen dentro de la hoja.
@@ -785,7 +786,10 @@ export function CourseScreen() {
             La seccion se calla entera si esta instalacion no tiene la
             migracion 0056 (503 `course_reviews_not_available`).
           */}
-          <ValoracionesDelCurso cursoId={course.id} puedeValorar={hasAccess && !canManage} />
+          <ValoracionesDelCurso
+            cursoId={course.id}
+            puedeValorar={esDePago && hasAccess && !canManage}
+          />
 
           {/*
             Restaurar compras. Obligatorio en movil y visible cuando hace

@@ -45,8 +45,10 @@ describe('la constancia de compra', () => {
     }
   });
 
-  it('el importe sale de la orden, no del catálogo', () => {
-    assert.ok(PANTALLA_ENTERA.includes('deCentavos(orden.amountMinor, orden.currency)'));
+  it('el importe sale de la orden, no del catálogo, y lleva la moneda', () => {
+    // Con el simbolo solo, «$ 49.90» no distingue MXN de USD, y esto es la
+    // prueba de cuanto se pago.
+    assert.ok(PANTALLA_ENTERA.includes('importeConMoneda(orden.amountMinor, orden.currency)'));
     assert.ok(
       !PANTALLA.includes('priceMinor'),
       'el precio de hoy del catálogo no representa una compra histórica.',
