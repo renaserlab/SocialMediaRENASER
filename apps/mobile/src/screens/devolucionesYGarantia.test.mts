@@ -348,35 +348,10 @@ describe('la solicitud de devolución', () => {
     }
   });
 
-  it('restaurar solo dice «restauradas» si el servidor restauró algo', () => {
-    /*
-      PREGUNTAR NO ES RESTAURAR. `sincronizar()` tiraba el resultado del
-      servidor y devolvía «comprada» con que la petición no fallara, así que
-      quien pulsaba «Restaurar compras» sin ninguna compra en esa cuenta de la
-      tienda leía «Compras restauradas» y seguía viendo el botón de comprar.
-
-      La aplicación le decía que había hecho algo que no había hecho, y encima
-      le tapaba la pista de que estaba en la cuenta de tienda equivocada, que es
-      la causa más común de que esto se pulse una y otra vez.
-    */
-    const COMPRAS = fuente('services/compras.ts');
-    assert.ok(
-      COMPRAS.includes('const { granted } = await CommerceRepository.nativeSync('),
-      'sincronizar tiene que mirar lo que contesta el servidor, no solo que no falle.',
-    );
-    assert.ok(
-      COMPRAS.includes('concedidos: granted.length'),
-      'el resultado tiene que llevar cuántos accesos se concedieron de verdad.',
-    );
-    assert.ok(
-      CURSO.includes("resultado.estado === 'comprada' && resultado.concedidos > 0"),
-      'el mensaje de éxito tiene que depender de que se haya concedido algo.',
-    );
-    assert.ok(
-      CURSO.includes("t('course.noPurchasesFound')"),
-      'sin compras que restaurar hace falta un mensaje propio, no el de éxito.',
-    );
-  });
+  // La prueba de «restaurar compras» vivia aqui y miraba subcadenas del
+  // codigo fuente: cambiando `granted.length` por `granted.length + 1` seguia
+  // verde y el mensaje falso volvia. Se sustituyo por una que EJECUTA el
+  // codigo, en `lib/restauracion.test.mts`.
 
   it('resume las consecuencias y confirma antes de enviar', () => {
     assert.ok(
