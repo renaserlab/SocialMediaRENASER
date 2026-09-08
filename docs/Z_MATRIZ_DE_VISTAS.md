@@ -238,3 +238,53 @@ sobre `mockData` (son el cuestionario de onboarding, no una evaluación), y
    jurisdicción, sin las cuales la venta se bloquea por diseño.
 8. **Certificados y evaluaciones (R26).** Deliberadamente al final: son valor
    añadido de Cursos y ni siquiera está decidido que entren en el alcance.
+
+---
+
+## Estado tras el incremento de Cursos (8/09/2026)
+
+Lo que cambió respecto a la tabla de arriba. Solo lo verificable.
+
+### Terminadas
+
+| Vista | Qué la sostiene |
+|---|---|
+| Explorar con accesos a las cuatro verticales | Cursos y Eventos navegan; Servicios y Productos avisan de que aún no están |
+| Portada de Cursos | `GET /catalog/courses` con `q`, `level` y `language`; `GET /learning/me/courses`; `GET /recommendations/courses`; `GET /catalog/courses/saved` |
+| Búsqueda y filtro | En el servidor, antes de paginar, con medio segundo de calma |
+| Guardados | `PUT`/`DELETE /catalog/courses/{id}/saved`, idempotentes; carrusel y marcador |
+| Ficha del detalle | Duración —sumada por el servidor—, idioma, nivel, aprendizajes, público objetivo y requisitos |
+| Creador en el detalle | Nombre desde `CourseDetailRead`, enlace al perfil |
+| Condiciones antes de pagar | Precio, versión de la oferta y plazo de garantía, los tres del servidor |
+| Retorno de compra | `/pago` y `/pago/cancelado` con siete estados |
+| Edición del temario | Ocho endpoints; cero escrituras directas a `course_modules`, `course_lessons` y `courses` |
+
+### Parciales
+
+- **Resultados y filtros** viven dentro de la portada, no como pantalla aparte.
+  Mismo recorrido con una pantalla menos.
+- **Constancia de compra**: el historial existe (`/compras`) y
+  `GET /payments/orders/{id}` devuelve estado, curso, importe y acceso. Falta la
+  pantalla de detalle de una compra. **No se llamará «factura»**: no hay
+  integración tributaria, así que es una constancia.
+
+### Bloqueadas por contrato, no por tiempo
+
+- **Valoraciones del curso.** No existe puntuación en el modelo: `ReviewRead` no
+  tiene `rating` y las reseñas actuales son de persona a persona. El contrato
+  mínimo que haría falta —puntuación de 1 a 5, comentario opcional, ligada a una
+  compra verificada, una activa por derecho, editable, media y conteo calculados
+  en el servidor— es una tabla nueva y una decisión de producto sobre quién
+  puede valorar. **La sección no se pinta**: una estrella inventada vale menos
+  que ninguna.
+- **Sellos de verificación.** No hay campo de verificación en `profiles` ni en
+  `identity`. «Experto verificado» no se muestra.
+- **Duración como filtro.** No hay columna: solo `duration_seconds` por lección.
+  Sumarla en cada página o desnormalizarla son las dos una migración.
+- **Certificado y evaluación.** Fuera del alcance de este incremento.
+
+### Un dato de contenido, no de código
+
+Los cuatro cursos publicados tienen `level = NULL`. El filtro de nivel funciona,
+pero hoy devuelve cero para cualquier nivel porque nadie ha rellenado esa
+columna.
