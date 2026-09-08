@@ -273,8 +273,10 @@ interior y no la de quien pide.
 - Las **67 tablas del ORM** se consultan sin error contra el esquema real: no hay
   ninguna columna que el modelo declare y la base no tenga.
 - La restricción por columnas de la 0052 **no rompe la API**, y no podía
-  hacerlo: FastAPI entra por SQLAlchemy con identidad propia y no hay una sola
-  llamada a PostgREST en todo `apps/api`.
+  hacerlo. Comprobado en la propia conexión: la API entra como `postgres`, un rol
+  con `rolbypassrls`, así que ni las políticas ni las concesiones a `anon` y
+  `authenticated` le afectan. Y no hay una sola llamada a PostgREST en todo
+  `apps/api`. Lo mismo vale para la 0053.
 - La aplicación **no depende** del acceso directo del móvil a ninguna tabla que
   la 0052 o la 0053 tocan.
 
