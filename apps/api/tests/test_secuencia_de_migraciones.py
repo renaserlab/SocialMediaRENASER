@@ -39,6 +39,7 @@ SOLO_CORRIGEN = (
     "0051_endurecer_la_inmutabilidad_de_versiones.sql",
     "0052_cerrar_lectura_directa_de_datos_sensibles.sql",
     "0053_cerrar_el_comercio_por_postgrest.sql",
+    "0054_aceptacion_de_recompra_en_las_tiendas.sql",
 )
 
 
