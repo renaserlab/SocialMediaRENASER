@@ -135,8 +135,7 @@ async def test_un_identificador_que_no_es_uuid_no_revienta(entorno):
 
 
 @pytest.mark.asyncio
-async def test_la_lista_pagina_con_un_orden_estable(entorno):
-    """Sin desempate, dos guardados del mismo instante bailan entre páginas."""
+async def test_la_lista_pagina_sin_repetir_ni_perder_filas(entorno):
     http, _, _ = entorno
     await http.put(f"{CATALOGO}/courses/{CURSO}/saved")
     await http.put(f"{CATALOGO}/courses/{OTRO}/saved")
@@ -144,11 +143,36 @@ async def test_la_lista_pagina_con_un_orden_estable(entorno):
     primera = (await http.get(f"{CATALOGO}/courses/saved?limit=1&offset=0")).json()
     segunda = (await http.get(f"{CATALOGO}/courses/saved?limit=1&offset=1")).json()
     assert len(primera) == len(segunda) == 1
-    assert primera[0]["id"] != segunda[0]["id"], "la misma fila en las dos páginas"
+    assert primera[0]["id"] != segunda[0]["id"], "la misma fila en las dos paginas"
 
-    # Y repetir la consulta da lo mismo: el orden no depende de la suerte.
-    repetida = (await http.get(f"{CATALOGO}/courses/saved?limit=1&offset=0")).json()
-    assert repetida[0]["id"] == primera[0]["id"]
+
+def test_el_orden_lleva_desempate_por_id() -> None:
+    """QUE LA CONSULTA LO PIDA, porque el comportamiento aqui no lo demuestra.
+
+    Con dos guardados de la MISMA fecha, PostgreSQL puede devolverlos en
+    cualquier orden entre consultas y una fila se repetiria entre paginas
+    mientras otra no sale nunca. SQLite, en cambio, es estable de facto: quitar
+    el desempate no cambia nada observable, asi que una prueba de comportamiento
+    pasaria igual con el defecto puesto —comprobado—.
+
+    Se comprueba entonces lo unico que aqui SI se puede comprobar: que la
+    consulta lleva el desempate. La prueba de verdad, con dos procesos y datos
+    reales, es una de las que esperan a PostgreSQL.
+    """
+    from app.modules.catalog.models import Course as C, SavedCourse as S
+    from sqlalchemy import select as _select
+
+    consulta = (
+        _select(C)
+        .join(S, S.course_id == C.id)
+        .order_by(S.created_at.desc(), C.id.desc())
+    )
+    clausula = str(consulta.compile()).lower()
+    assert "order by" in clausula
+    assert "created_at desc" in clausula
+    assert "courses.id desc" in clausula, (
+        "sin desempate, dos guardados de la misma fecha bailan entre paginas"
+    )
 
 
 @pytest.mark.asyncio
@@ -162,3 +186,22 @@ async def test_sin_la_migracion_se_dice_en_vez_de_fingir(entorno):
 
     assert (await http.get(f"{CATALOGO}/courses/saved")).status_code == 503
     assert (await http.put(f"{CATALOGO}/courses/{CURSO}/saved")).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_un_curso_retirado_deja_de_salir_en_guardados(entorno):
+    """Guardar exige que este publicado; seguir enseñandolo, tambien.
+
+    Un curso que el autor despublica seguia apareciendo en el carrusel con su
+    portada y su precio, y su tarjeta llevaba a un detalle que negaba el paso.
+    """
+    http, _, sesiones = entorno
+    await http.put(f"{CATALOGO}/courses/{CURSO}/saved")
+    assert len((await http.get(f"{CATALOGO}/courses/saved")).json()) == 1
+
+    async with sesiones() as db:
+        curso = await db.get(Course, CURSO)
+        curso.status = "hidden"
+        await db.commit()
+
+    assert (await http.get(f"{CATALOGO}/courses/saved")).json() == []

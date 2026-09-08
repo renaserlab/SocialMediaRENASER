@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.security import AuthUser, get_current_user
@@ -21,6 +21,7 @@ from app.shared.database import Base, get_db
 CATALOGO = "/api/v1/catalog"
 AUTORA = "aaaaaaaa-0000-0000-0000-000000000001"
 AJENO = "bbbbbbbb-0000-0000-0000-000000000002"
+MODERADOR = "dddddddd-0000-0000-0000-000000000003"
 CURSO = "cccccccc-0000-0000-0000-000000000001"
 VENDIDO = "cccccccc-0000-0000-0000-000000000002"
 
@@ -30,6 +31,16 @@ async def entorno():
     esquema.olvidar()
     esquema_comercio.olvidar()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    # LAS CLAVES AJENAS, ENCENDIDAS. SQLite las ignora por defecto, y sin
+    # ellas el RESTRICT de `commerce_products.course_id` no existe aqui: el
+    # borrado que en PostgreSQL da un 500 pasaria en verde.
+    @event.listens_for(engine.sync_engine, 'connect')
+    def _claves_ajenas(conexion, _registro):  # noqa: ANN001, ANN202
+        cursor = conexion.cursor()
+        cursor.execute('pragma foreign_keys=ON')
+        cursor.close()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     sesiones = async_sessionmaker(engine, expire_on_commit=False)
@@ -37,6 +48,14 @@ async def entorno():
     async with sesiones() as db:
         db.add(Profile(id=AUTORA, full_name="Ana", username="ana"))
         db.add(Profile(id=AJENO, full_name="Bruno", username="bruno"))
+        db.add(
+            Profile(
+                id=MODERADOR, full_name="Marta", username="marta", role="moderator"
+            )
+        )
+        # Con las claves ajenas encendidas, los perfiles tienen que existir
+        # antes que los cursos que los referencian.
+        await db.flush()
         for cid in (CURSO, VENDIDO):
             db.add(
                 Course(
@@ -161,3 +180,65 @@ async def test_una_orden_pagada_tambien_lo_protege(entorno):
 
     respuesta = await http.delete(f"{CATALOGO}/courses/{VENDIDO}")
     assert respuesta.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_un_moderador_NO_puede_borrar_un_curso(entorno):
+    """Moderar es ocultar una publicacion, no hacer desaparecer un curso.
+
+    El guardia de siempre —`require_owner_or_admin`— admite `moderator`, porque
+    para moderar contenido eso es lo correcto. Borrar no es moderar: se lleva el
+    curso y todo lo que cuelga de el.
+    """
+    http, identidad, sesiones = entorno
+    identidad["uid"] = MODERADOR
+    respuesta = await http.delete(f"{CATALOGO}/courses/{CURSO}")
+    assert respuesta.status_code == 403
+    async with sesiones() as db:
+        assert await db.get(Course, CURSO) is not None
+
+
+@pytest.mark.asyncio
+async def test_un_curso_con_producto_pero_sin_ventas_tampoco_se_borra(entorno):
+    """Y no con un 500, que es lo que salia antes.
+
+    `commerce_products.course_id` es RESTRICT: borrar el curso reventaba contra
+    la clave ajena. El acceso de Beta crea ese producto, asi que el caso no es
+    raro.
+    """
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        curso = await db.get(Course, CURSO)
+        db.add(CommerceProduct(course_id=curso.id))
+        await db.commit()
+
+    respuesta = await http.delete(f"{CATALOGO}/courses/{CURSO}")
+    assert respuesta.status_code == 409, respuesta.text
+    assert "course_has_buyers" in respuesta.text
+    async with sesiones() as db:
+        assert await db.get(Course, CURSO) is not None
+
+
+@pytest.mark.asyncio
+async def test_solo_una_compra_heredada_ya_lo_protege(entorno):
+    """La tabla `purchases` sigue viva mientras dura el trasvase de la 0036."""
+    from app.modules.learning.models import Purchase
+
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        db.add(
+            Purchase(
+                user_id=AJENO,
+                course_id=CURSO,
+                provider="web",
+                amount_minor=4900,
+                currency="PEN",
+                status="paid",
+            )
+        )
+        await db.commit()
+
+    respuesta = await http.delete(f"{CATALOGO}/courses/{CURSO}")
+    assert respuesta.status_code == 409
+    async with sesiones() as db:
+        assert await db.get(Course, CURSO) is not None

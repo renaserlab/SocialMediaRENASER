@@ -49,7 +49,11 @@ from app.modules.recommendations.models import CourseTopic
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import require_admin, require_owner_or_admin
+from app.shared.permissions import (
+    require_admin,
+    require_owner_or_admin,
+    require_owner_or_strict_admin,
+)
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -501,7 +505,7 @@ async def cursos_guardados(
         await db.scalars(
             select(Course)
             .join(SavedCourse, SavedCourse.course_id == Course.id)
-            .where(SavedCourse.user_id == current_user.id)
+            .where(SavedCourse.user_id == current_user.id, Course.status == "published")
             # Orden determinista: sin el desempate por id, dos guardados del
             # mismo instante pueden salir en distinto orden en cada página.
             .order_by(SavedCourse.created_at.desc(), Course.id.desc())
@@ -1061,7 +1065,15 @@ async def borrar_curso(
     compradores, sin auditoría y sin transacción. La RLS se lo permitía al
     autor, así que un curso vendido podía desaparecer con su contenido.
     """
-    course = await _curso_gestionable(db, course_id, current_user, "borrar")
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    course = await db.get(Course, cid)
+    if course is None:
+        raise NotFoundError("Curso no encontrado.")
+    # NO `_curso_gestionable`: ese admite `moderator`, que existe para
+    # ocultar una publicación, no para hacer desaparecer un curso entero.
+    await require_owner_or_strict_admin(
+        db, course.author_id, current_user, "No puedes borrar este curso."
+    )
 
     if await _tiene_compradores(db, course.id):
         raise ConflictError(
@@ -1076,7 +1088,11 @@ async def borrar_curso(
         action="course.deleted",
         entity_type="course",
         entity_id=course.id,
-        reason="borrado por su autor, sin compradores",
+        reason=(
+            "borrado por su autor"
+            if course.author_id == current_user.id
+            else "borrado por administración"
+        ),
         payload={"course_status": course.status},
     )
     await db.delete(course)
@@ -1084,10 +1100,15 @@ async def borrar_curso(
 
 
 async def _tiene_compradores(db: AsyncSession, course_id: str) -> bool:
-    """Si alguien pagó o tiene acceso concedido a este curso.
+    """Si este curso llegó a venderse, o siquiera a poder venderse.
 
-    Mira las tres vías que conceden acceso —la tabla heredada, el comercio y las
-    matrículas— porque conviven mientras dura el trasvase de la 0036.
+    Se responde que SÍ en cuanto existe su producto de comercio, aunque no haya
+    ni una venta: `commerce_products.course_id` es `RESTRICT`, así que borrar el
+    curso reventaría contra la clave ajena y saldría un 500 en vez de un 409.
+
+    Y una orden `refunded` cuenta: tras una devolución total la orden queda así y
+    el derecho `revoked`, pero alguien pagó por ese curso y su expediente cuelga
+    de él.
     """
     from app.modules.learning.models import Purchase
 
@@ -1099,29 +1120,15 @@ async def _tiene_compradores(db: AsyncSession, course_id: str) -> bool:
     if not await esquema_comercio.hay_comercio(db):
         return False
 
-    from app.modules.commerce.models import CommerceProduct, Entitlement, Order
+    from app.modules.commerce.models import CommerceProduct
 
     producto = await db.scalar(
         select(CommerceProduct.id).where(CommerceProduct.course_id == course_id)
     )
     if producto is None:
         return False
-    if await db.scalar(
-        select(Order.id)
-        .where(Order.commerce_product_id == producto, Order.status == "paid")
-        .limit(1)
-    ):
-        return True
-    return bool(
-        await db.scalar(
-            select(Entitlement.id)
-            .where(
-                Entitlement.commerce_product_id == producto,
-                Entitlement.status == "active",
-            )
-            .limit(1)
-        )
-    )
+    # El producto ya basta: la clave ajena es RESTRICT.
+    return True
 
 
 @router.get("/courses/{course_id}/version", response_model=VersionDeCurso)

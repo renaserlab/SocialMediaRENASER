@@ -79,3 +79,22 @@ async def require_owner_or_admin(
     if await is_admin(db, current_user.id):
         return
     raise ForbiddenError(message)
+
+
+async def require_owner_or_strict_admin(
+    db: AsyncSession,
+    owner_id: str | None,
+    current_user: AuthUser,
+    message: str = "No puedes modificar este contenido.",
+) -> None:
+    """Como `require_owner_or_admin`, pero SIN moderacion.
+
+    `is_admin` incluye a `moderator`, que existe para ocultar una publicacion o
+    resolver un reporte. Hay operaciones que no son moderar —borrar un curso lo
+    hace desaparecer con su contenido— y para esas vale el autor o `admin`.
+    """
+    if owner_id == current_user.id:
+        return
+    if await puede_mover_dinero(db, current_user.id):
+        return
+    raise ForbiddenError(message)
