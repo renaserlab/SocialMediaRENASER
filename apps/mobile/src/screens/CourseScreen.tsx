@@ -155,7 +155,7 @@ export function CourseScreen() {
     let vigente = true;
     if (!course || !esDePago || hasAccess) return;
     void LearningRepository.publishedVersion(course.id)
-      .then((v) => vigente && setVersionDeLaOferta(v))
+      .then((v) => vigente && setVersionDeLaOferta(v?.version ?? null))
       .catch(() => null);
     void DevolucionesRepository.garantia(course.id)
       .then((e) => vigente && setHorasDeGarantia(e.horasDeGarantia))
@@ -575,8 +575,7 @@ export function CourseScreen() {
               void comprar();
             }}
             titulo={course.title}
-            precioMinor={course.priceMinor}
-            moneda={course.currency}
+            precio={oferta?.precio ?? etiquetaDePrecio(course.priceMinor, course.currency)}
             version={versionDeLaOferta}
             horasDeGarantia={horasDeGarantia}
             confirmando={comprando}

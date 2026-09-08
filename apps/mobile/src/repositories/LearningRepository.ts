@@ -259,12 +259,16 @@ export const LearningRepository = {
 
   /** Edita un curso. Solo su autor o la administracion (lo verifica el backend). */
   /** El numero de la version publicada, o null si el curso no tiene. */
-  async publishedVersion(courseId: string): Promise<number | null> {
-    const dto = await apiRequest<{ version: number }>(
+  async publishedVersion(
+    courseId: string,
+  ): Promise<{ version: number; contentHash: string } | null> {
+    const dto = await apiRequest<{ version: number; content_hash: string }>(
       `${API_V1}/catalog/courses/${courseId}/version`,
       { auth: false },
     );
-    return dto.version ?? null;
+    // La huella es lo que el editor manda en `If-Match`: sin ella el 409 de
+    // conflicto no se dispara nunca.
+    return { version: dto.version, contentHash: dto.content_hash };
   },
 
   /** Borra el curso. El servidor lo niega con 409 si ya tiene alumnos. */

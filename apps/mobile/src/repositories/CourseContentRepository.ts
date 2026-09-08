@@ -21,10 +21,9 @@ import { supabase } from '@/services/supabase';
  * devuelva eso. Mientras no lo haya, cambiarlas seria empeorar la pantalla para
  * que el fichero quedara uniforme.
  *
- * TAMPOCO se han movido las escrituras que NO son temario: los recursos
- * descargables (`addResource`, `removeResource`) y `removeCourse`, que no
- * tienen endpoint ninguno, y `setHighlights` y `setComingSoon`, que son campos
- * de la FICHA del curso. Cada una dice en su sitio por que sigue ahi.
+ * SIGUEN CONTRA SUPABASE los recursos descargables (`addResource`,
+ * `removeResource`), que no tienen endpoint. `setHighlights`, `setComingSoon` y
+ * `removeCourse` YA van por la API.
  */
 
 /** Los tipos de lección que la aplicación sabe pintar (migración 0034). */
@@ -184,6 +183,21 @@ function aTipo(valor: string | null | undefined): LessonKind {
   return valor === 'text' ? 'text' : 'video';
 }
 
+/**
+ * La huella de la version vigente de cada curso, tal como estaba al CARGAR el
+ * temario. Es lo que se manda en `If-Match`: si otro autor publica entre
+ * medias, el servidor responde 409 en vez de dejar que se pise su trabajo.
+ *
+ * Se refresca en cada `listContent`, que es justo lo que hace el editor
+ * despues de un conflicto.
+ */
+const huellasPorCurso = new Map<string, string>();
+
+/** Solo para las pruebas. */
+export function olvidarHuellas(): void {
+  huellasPorCurso.clear();
+}
+
 /** Donde vive el temario en la API. Las ocho escrituras cuelgan de aquí. */
 const CURSOS = `${API_V1}/catalog/courses`;
 
@@ -199,13 +213,10 @@ const CURSOS = `${API_V1}/catalog/courses`;
  * El servidor lo devuelve como 409 `course_version_mismatch` cuando la petición
  * llevaba `If-Match` con una huella que ya no es la vigente.
  *
- * HOY LA APP NO MANDA `If-Match`, y no por dejadez: NINGÚN endpoint entrega el
- * `content_hash` de la versión vigente. `GET /catalog/courses/{id}/version`
- * devuelve número, estado y fotografía, pero no la huella, así que no hay de
- * dónde sacar lo que habría que mandar, y calcularla aquí sería reescribir en
- * la app la firma que hace `versiones.py`. La traducción se deja puesta porque
- * el día que el backend exponga la huella esto tiene que estar ya resuelto, no
- * descubrirse con el primer autor que pierda su trabajo.
+ * La huella sale de `GET /catalog/courses/{id}/version`, que ya la publica; el
+ * editor la guarda al cargar el temario y la manda en cada escritura. Sin
+ * mandarla el servidor no comprueba nada, y dos autores se pisarían en
+ * silencio.
  */
 export class ContenidoDelCursoCambiado extends Error {
   constructor(mensaje: string) {
@@ -264,15 +275,26 @@ export type ReferenciaDeLeccion = {
  */
 async function escribirTemario(
   ruta: string,
-  opciones: { method: string; cuerpo?: unknown; claveDeIdempotencia?: string },
+  opciones: {
+    method: string;
+    cuerpo?: unknown;
+    claveDeIdempotencia?: string;
+    /** Huella de la version vigente al cargar el temario. */
+  },
 ): Promise<void> {
+  // La ruta empieza por la base del catalogo seguida del curso: de ahi sale.
+  const curso = ruta.slice(CURSOS.length + 1).split('/')[0] ?? '';
+  const huella = huellasPorCurso.get(curso);
   try {
     await apiRequest<void>(ruta, {
       method: opciones.method,
       ...(opciones.cuerpo !== undefined ? { body: JSON.stringify(opciones.cuerpo) } : {}),
-      ...(opciones.claveDeIdempotencia
-        ? { headers: { 'Idempotency-Key': opciones.claveDeIdempotencia } }
-        : {}),
+      headers: {
+        ...(opciones.claveDeIdempotencia
+          ? { 'Idempotency-Key': opciones.claveDeIdempotencia }
+          : {}),
+        ...(huella ? { 'If-Match': huella } : {}),
+      },
     });
   } catch (fallo) {
     if (fallo instanceof ApiError && fallo.code === 'course_version_mismatch') {
@@ -314,6 +336,11 @@ export const CourseContentRepository = {
   /** Modulos de un curso con sus lecciones, en orden y con las URLs firmadas. */
   async listContent(courseId: string): Promise<CourseModule[]> {
     const db = client();
+    // Un curso sin publicar no tiene version: entonces no hay nada contra
+    // que comparar y las escrituras van sin `If-Match`.
+    void LearningRepository.publishedVersion(courseId)
+      .then((v) => v && huellasPorCurso.set(courseId, v.contentHash))
+      .catch(() => huellasPorCurso.delete(courseId));
     // Se pregunta ANTES de nombrar columnas: pedir `kind` a una base sin la
     // 0034 no devuelve la fila sin ese campo, devuelve un error y ninguna fila.
     const v2 = await soportaContenidoV2();

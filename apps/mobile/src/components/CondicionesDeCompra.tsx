@@ -6,7 +6,6 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
-import { etiquetaDePrecio } from '@/lib/dinero';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -22,8 +21,7 @@ export function CondicionesDeCompra({
   onClose,
   onConfirmar,
   titulo,
-  precioMinor,
-  moneda,
+  precio,
   version,
   horasDeGarantia,
   confirmando,
@@ -32,8 +30,15 @@ export function CondicionesDeCompra({
   onClose: () => void;
   onConfirmar: () => void;
   titulo: string;
-  precioMinor: number;
-  moneda: string;
+  /**
+   * El precio YA FORMATEADO, tal como se va a cobrar.
+   *
+   * En movil lo pone la TIENDA —localizado, con su moneda y sus impuestos—
+   * y no `price_minor` del catalogo, que es otra cifra. Esta es la ultima
+   * pantalla antes de pagar: ensenar aqui el numero del catalogo seria
+   * ensenar uno distinto del que se cobra.
+   */
+  precio: string;
   /** Versión publicada de la oferta, o `null` si el servidor no la da. */
   version: number | null;
   /** Las que diga el servidor. Sin dato, no se promete plazo. */
@@ -60,7 +65,7 @@ export function CondicionesDeCompra({
         <View style={styles.linea}>
           <Text style={[styles.concepto, { color: colors.text }]}>{titulo}</Text>
           <Text style={[styles.importe, { color: colors.text }]}>
-            {etiquetaDePrecio(precioMinor, moneda)}
+            {precio}
           </Text>
         </View>
 

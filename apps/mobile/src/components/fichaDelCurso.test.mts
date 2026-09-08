@@ -68,3 +68,25 @@ describe('la ficha del curso', () => {
     assert.ok(DETALLE.includes('<FichaDelCurso course={course}'));
   });
 });
+
+describe('el precio de la hoja de condiciones', () => {
+  const HOJA = fuente('components/CondicionesDeCompra.tsx');
+  const PANTALLA = fuente('screens/CourseScreen.tsx');
+
+  it('es el que se va a cobrar, no el del catalogo', () => {
+    /*
+      En movil el precio lo pone la TIENDA, localizado y con sus impuestos.
+      La hoja recibia course.priceMinor y ensenaba una cifra distinta de la que
+      la ficha mostraba 36 lineas mas arriba, en la ultima pantalla antes de
+      pagar.
+    */
+    assert.ok(
+      PANTALLA.includes('precio={oferta?.precio ??'),
+      'la hoja tiene que recibir el precio de la oferta.',
+    );
+    assert.ok(
+      !HOJA.includes('precioMinor'),
+      'la hoja ya no formatea el precio del catalogo por su cuenta.',
+    );
+  });
+});
