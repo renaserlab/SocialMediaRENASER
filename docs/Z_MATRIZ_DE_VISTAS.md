@@ -288,3 +288,33 @@ Lo que cambió respecto a la tabla de arriba. Solo lo verificable.
 Los cuatro cursos publicados tienen `level = NULL`. El filtro de nivel funciona,
 pero hoy devuelve cero para cualquier nivel porque nadie ha rellenado esa
 columna.
+
+---
+
+## Vistas de aprendizaje (13–16), estado real
+
+| Vista | Existe | Parcial | Falta | Contrato disponible | Acción |
+|---|---|---|---|---|---|
+| 13 · Mis cursos | sí | | | `GET /learning/me/courses` con los tres estados y progreso del servidor | ninguna |
+| 14 · Reproductor | | sí | siguiente y anterior lección | el temario ya llega en el detalle | implementada aquí |
+| 15 · Temario y progreso | sí | | | progreso calculado en servidor; `hasAccess` decide el bloqueo | ninguna |
+| 16 · Recursos | sí | | | `LessonResources` con URLs firmadas | ninguna |
+| 16 · Notas privadas | | | todo | **no hay modelo** | documentada, no implementada |
+
+**Notas privadas del alumno.** No existe tabla ni endpoint. El contrato mínimo
+sería `lesson_notes(user_id, lesson_id, body, updated_at)` con clave única por
+las dos primeras y RLS de dueño. Es una migración más, así que queda para el
+siguiente incremento: mezclarlas con los comentarios o con los recursos del
+instructor sería confundir dos cosas distintas.
+
+**Evaluación y certificado** siguen fuera: no hay modelo y necesitan decisión de
+producto sobre qué cuenta como aprobado.
+
+## Nivel de los cursos
+
+El filtro está probado con los cuatro casos reales, incluido `level` nulo: sin
+filtro esos cursos siguen visibles, y con filtro no se cuelan en ningún nivel.
+El asistente permite completarlo y publicar **no** lo exige.
+
+**Completar el nivel de los cuatro cursos publicados es una tarea de contenido,
+no de código.** No se rellena automáticamente.

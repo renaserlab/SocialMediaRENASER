@@ -263,3 +263,26 @@ async def test_sin_la_0034_filtrar_por_nivel_responde_503(http_sin_0034) -> None
     )
     assert respuesta.status_code == 503
     assert respuesta.json()["error"]["code"] == "course_filters_not_available"
+
+
+@pytest.mark.asyncio
+async def test_un_curso_sin_nivel_sale_sin_filtro_y_no_con_filtro(http) -> None:
+    """El caso real: los cuatro cursos publicados tienen `level` nulo.
+
+    Sin filtro tienen que seguir visibles —no especificar el nivel no es motivo
+    para desaparecer del catalogo— y con filtro no pueden colarse en ninguno,
+    porque no coinciden con ninguno.
+    """
+    from app.shared.database import get_db
+
+    sesion = app.dependency_overrides[get_db]
+    async for db in sesion():
+        await db.execute(text("update courses set level = null"))
+        await db.commit()
+        break
+
+    assert len(await _titulos(http)) > 0, "sin nivel no se desaparece del catalogo"
+    for nivel in ("beginner", "intermediate", "advanced"):
+        assert await _titulos(http, level=nivel) == [], (
+            f"un curso sin nivel no puede salir como {nivel}"
+        )
