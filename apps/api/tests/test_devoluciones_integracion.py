@@ -804,6 +804,118 @@ async def test_sin_la_politica_sembrada_la_recompra_no_se_bloquea(entorno):
         assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 0
 
 
+ORDEN_2 = "00000000-0000-0000-0000-0000000000a2"
+
+
+@pytest.mark.asyncio
+async def test_la_recompra_de_punta_a_punta(entorno):
+    """EL ESCENARIO COMPLETO, que hasta ahora estaba probado a trozos.
+
+    Aceptar, recomprar, y las tres consecuencias que la politica promete y que
+    nadie comprobaba juntas:
+
+      1. La aceptacion se consume UNA vez, y queda atada a la orden concreta
+         que se creo. Es lo que permite responder «que acepto exactamente quien
+         compro ESTA orden» con una sola respuesta.
+      2. La segunda compra NO abre una segunda garantia. Por politica solo hay
+         una devolucion voluntaria por persona y curso; si la recompra
+         reiniciara el plazo, la promesa seria otra.
+      3. Y por eso una segunda devolucion voluntaria se rechaza, con el motivo
+         de fondo —ya la usaste— y no con «se te paso el plazo», que le haria
+         pensar que llego tarde por poco.
+    """
+    from app.modules.commerce.models import Order
+    from app.modules.gobernanza.models import ConsentRecord
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import CourseRefundWindow, RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)
+    async with sesiones() as db:
+        await politicas_de_gobernanza(db)
+
+    # --- Se exige aceptar, y el texto lo pone el servidor -------------------- #
+    aviso = (await http.get(f"{PAGOS}/courses/{CURSO}/repurchase-notice")).json()
+    assert aviso["requires_acceptance"] is True
+    assert aviso["policy_version"] and aviso["notice"]
+
+    assert (
+        await http.post(
+            f"{PAGOS}/repurchase-acceptance",
+            json={"course_id": CURSO, "accepted": True},
+        )
+    ).status_code == 204
+
+    async with sesiones() as db:
+        sueltas = list(
+            await db.scalars(
+                select(RefundPolicyAcceptance).where(
+                    RefundPolicyAcceptance.order_id.is_(None)
+                )
+            )
+        )
+        assert len(sueltas) == 1, "la aceptacion nace suelta y solo una vez"
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 1
+        original = await db.scalar(select(CourseRefundWindow))
+        primera_fecha, usada = original.first_accessed_at, original.refund_used_at
+
+    # --- La recompra: se crea la orden y se ata la aceptacion --------------- #
+    async with sesiones() as db:
+        producto = await db.scalar(select(CommerceProduct))
+        db.add(
+            Order(
+                id=ORDEN_2,
+                user_id=ANA,
+                commerce_product_id=producto.id,
+                provider="stripe",
+                channel="web",
+                environment="sandbox",
+                status="paid",
+                amount_minor=PRECIO,
+                currency="PEN",
+            )
+        )
+        await db.flush()
+        await devoluciones.enlazar_aceptacion(
+            db, user_id=ANA, course_id=CURSO, order_id=ORDEN_2
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        aceptaciones = list(await db.scalars(select(RefundPolicyAcceptance)))
+        assert len(aceptaciones) == 1, "recomprar no duplica la aceptacion"
+        assert aceptaciones[0].order_id == ORDEN_2, "quedo atada a la orden nueva"
+
+    # --- Entrar al curso otra vez NO abre una segunda garantia -------------- #
+    async with sesiones() as db:
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=ORDEN_2
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        ventanas = list(await db.scalars(select(CourseRefundWindow)))
+        assert len(ventanas) == 1, "la recompra abrio una segunda garantia"
+        assert ventanas[0].first_accessed_at == primera_fecha, "se reinicio el plazo"
+        assert ventanas[0].refund_used_at == usada, "se borro que ya se uso"
+
+    # --- Y una segunda devolucion voluntaria se rechaza --------------------- #
+    elegible = (
+        await http.get(f"{PAGOS}/courses/{CURSO}/refund-eligibility")
+    ).json()
+    assert elegible["eligible"] is False
+    assert elegible["reason_code"] == "already_refunded", (
+        "el motivo tiene que ser el de fondo, no «fuera de plazo»"
+    )
+    segunda = await _pedir(http, orden=ORDEN_2)
+    assert segunda.status_code == 422, segunda.text
+    assert "already_refunded" in segunda.text
+
+    # --- Y ya no se vuelve a pedir la aceptacion ---------------------------- #
+    despues = (await http.get(f"{PAGOS}/courses/{CURSO}/repurchase-notice")).json()
+    assert despues["requires_acceptance"] is False
+
+
 @pytest.mark.asyncio
 async def test_no_se_puede_aceptar_sin_marcar_la_casilla(entorno):
     http, _, sesiones = entorno
