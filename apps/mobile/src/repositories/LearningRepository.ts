@@ -208,6 +208,27 @@ export const LearningRepository = {
     return firmarPortadas(dtos.map(toCourseFromSummary));
   },
 
+  /** Los cursos que esta persona guardo, del mas reciente al mas antiguo. */
+  async savedCourses(limite = 24): Promise<Course[]> {
+    const dtos = await apiRequest<CourseDto[]>(
+      `${API_V1}/catalog/courses/saved?limit=${limite}`,
+    );
+    return firmarPortadas(dtos.map(toCourseFromSummary));
+  },
+
+  /** Guardar y quitar son idempotentes: repetirlos deja el mismo estado. */
+  async saveCourse(courseId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/catalog/courses/${courseId}/saved`, {
+      method: 'PUT',
+    });
+  },
+
+  async unsaveCourse(courseId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/catalog/courses/${courseId}/saved`, {
+      method: 'DELETE',
+    });
+  },
+
   /**
    * Los cursos de quien pregunta, en cualquier estado.
    *

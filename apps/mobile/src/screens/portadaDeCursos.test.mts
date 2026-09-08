@@ -132,3 +132,34 @@ describe('los accesos a las verticales', () => {
     assert.ok(ACCESOS.includes('<SinCambioDeSeccion>'));
   });
 });
+
+describe('guardar un curso', () => {
+  it('el marcador responde al dedo y se deshace si falla', () => {
+    assert.ok(
+      PORTADA_ENTERA.includes('setIdsGuardados((previos) => {'),
+      'se pinta antes de saber el resultado.',
+    );
+    assert.ok(
+      new RegExp('catch \\(e\\) \\{[\\s\\S]*?setIdsGuardados').test(PORTADA_ENTERA),
+      'y se revierte si la peticion falla.',
+    );
+  });
+
+  it('dos toques seguidos no mandan dos peticiones', () => {
+    assert.ok(PORTADA_ENTERA.includes('if (guardando.current.has(curso.id)) return;'));
+    assert.ok(PORTADA_ENTERA.includes('guardando.current.add(curso.id)'));
+    assert.ok(
+      PORTADA_ENTERA.includes('guardando.current.delete(curso.id)'),
+      'y el cerrojo se suelta, o el marcador queda muerto tras un fallo.',
+    );
+  });
+
+  it('guardar y quitar van por la API, no a la tabla', () => {
+    assert.ok(REPOSITORIO.includes('${API_V1}/catalog/courses/${courseId}/saved'));
+    assert.ok(
+      !PORTADA_ENTERA.includes("from('saved_") &&
+        !REPOSITORIO.includes("from('saved_"),
+      'nada de escribir la tabla desde el telefono.',
+    );
+  });
+});

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,7 @@ import { CursosParaTi } from '@/components/CursosParaTi';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
+import { notify } from '@/lib/confirm';
 import { useTranslation } from '@/i18n/useTranslation';
 import { etiquetaDePrecio } from '@/lib/dinero';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -64,6 +65,11 @@ export function CursosScreen() {
    */
   const [textoAplicado, setTextoAplicado] = useState('');
   const [nivel, setNivel] = useState<FiltrosDeCatalogo['nivel']>(undefined);
+  const [guardados, setGuardados] = useState<Course[]>([]);
+  /** Ids guardados, para pintar el marcador sin recorrer la lista. */
+  const [idsGuardados, setIdsGuardados] = useState<Set<string>>(new Set());
+  /** Cerrojo por curso: dos toques seguidos no mandan dos peticiones. */
+  const guardando = useRef<Set<string>>(new Set());
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState<string | null>(null);
 
@@ -84,6 +90,14 @@ export function CursosScreen() {
       const cursos = await LearningRepository.listCourses(24, { texto: textoAplicado, nivel });
       setCatalogo(cursos);
       try {
+        const suyos = await LearningRepository.savedCourses();
+        setGuardados(suyos);
+        setIdsGuardados(new Set(suyos.map((c) => c.id)));
+      } catch {
+        setGuardados([]);
+        setIdsGuardados(new Set());
+      }
+      try {
         const mios = await LearningRepository.myCourses();
         setEnCurso(mios.filter((c) => c.state === 'in_progress'));
       } catch {
@@ -95,6 +109,40 @@ export function CursosScreen() {
       setCargando(false);
     }
   }, [t, textoAplicado, nivel]);
+
+  const alternarGuardado = useCallback(async (curso: Course) => {
+    if (guardando.current.has(curso.id)) return;
+    guardando.current.add(curso.id);
+    const estaba = idsGuardados.has(curso.id);
+    // Se pinta antes de saber el resultado y se deshace si falla: el
+    // marcador tiene que responder al dedo, no a la red.
+    setIdsGuardados((previos) => {
+      const siguiente = new Set(previos);
+      if (estaba) siguiente.delete(curso.id);
+      else siguiente.add(curso.id);
+      return siguiente;
+    });
+    setGuardados((previos) =>
+      estaba ? previos.filter((c) => c.id !== curso.id) : [curso, ...previos],
+    );
+    try {
+      if (estaba) await LearningRepository.unsaveCourse(curso.id);
+      else await LearningRepository.saveCourse(curso.id);
+    } catch (e) {
+      setIdsGuardados((previos) => {
+        const siguiente = new Set(previos);
+        if (estaba) siguiente.add(curso.id);
+        else siguiente.delete(curso.id);
+        return siguiente;
+      });
+      setGuardados((previos) =>
+        estaba ? [curso, ...previos] : previos.filter((c) => c.id !== curso.id),
+      );
+      notify(t('cursos.noSePudoGuardar'), e instanceof Error ? e.message : '');
+    } finally {
+      guardando.current.delete(curso.id);
+    }
+  }, [idsGuardados, t]);
 
   useEffect(() => {
     void cargar();
@@ -233,6 +281,38 @@ export function CursosScreen() {
 
         <CursosParaTi />
 
+        {guardados.length > 0 ? (
+          <View style={styles.seccion}>
+            <SectionTitle title={t('cursos.guardados')} />
+            <SinCambioDeSeccion>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.carrusel}
+              >
+                {guardados.map((curso) => (
+                  <Pressable
+                    key={curso.id}
+                    style={styles.guardado}
+                    onPress={() => router.push(`/course/${curso.id}`)}
+                    accessibilityRole="button"
+                    accessibilityLabel={curso.title}
+                  >
+                    {curso.coverUrl ? (
+                      <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                    ) : (
+                      <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                    )}
+                    <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
+                      {curso.title}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </SinCambioDeSeccion>
+          </View>
+        ) : null}
+
         <View style={styles.seccion}>
           <SectionTitle title={t('cursos.todoElCatalogo')} />
           {catalogo.length === 0 ? (
@@ -250,11 +330,31 @@ export function CursosScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={curso.title}
                 >
-                  {curso.coverUrl ? (
-                    <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
-                  ) : (
-                    <View style={[styles.portada, { backgroundColor: colors.surface }]} />
-                  )}
+                  <View>
+                    {curso.coverUrl ? (
+                      <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                    ) : (
+                      <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                    )}
+                    <Pressable
+                      onPress={() => void alternarGuardado(curso)}
+                      hitSlop={10}
+                      style={styles.marcador}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: idsGuardados.has(curso.id) }}
+                      accessibilityLabel={
+                        idsGuardados.has(curso.id)
+                          ? t('cursos.quitarDeGuardados')
+                          : t('cursos.guardar')
+                      }
+                    >
+                      <Feather
+                        name={idsGuardados.has(curso.id) ? 'bookmark' : 'bookmark'}
+                        size={18}
+                        color={idsGuardados.has(curso.id) ? colors.text : colors.textMuted}
+                      />
+                    </Pressable>
+                  </View>
                   <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
                     {curso.title}
                   </Text>
@@ -316,6 +416,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   tarjeta: { width: '47%', gap: 4 },
+  marcador: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    padding: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+  },
+  carrusel: { gap: spacing.sm, paddingHorizontal: spacing.md },
+  guardado: { width: 160, gap: 4 },
   portada: { width: '100%', aspectRatio: 16 / 10, borderRadius: radius.sm },
   tituloDeTarjeta: { fontSize: 14, fontWeight: '600' },
   precio: { fontSize: 13 },
