@@ -106,11 +106,20 @@ test('las acciones financieras avisan ANTES de ejecutarse', () => {
 });
 
 test('rechazar SIN motivo no llega al servidor', () => {
-  assert.match(BANDEJA, /accion === 'reject' && motivo === ''/);
   const ejecutar = BANDEJA.slice(BANDEJA.indexOf('const ejecutar'));
   const guarda = ejecutar.indexOf("accion === 'reject' && motivo === ''");
   const peticion = ejecutar.indexOf('OwnerRepository.accion');
   assert.ok(guarda > 0 && peticion > guarda, 'se rechaza sin comprobar el motivo');
+
+  // Y QUE LA GUARDA CORTE, que es lo que no se comprobaba. Antes bastaba con
+  // que la condicion existiera antes de la llamada: quitando el `return;` y
+  // dejando el aviso, un rechazo sin motivo llegaba al servidor y las 1134
+  // pruebas seguian en verde. Comprobado quitandolo.
+  assert.match(
+    ejecutar,
+    /accion === 'reject' && motivo === ''\)\s*\{[^}]*\breturn;\s*\}/,
+    'avisar no basta: sin `return` el rechazo sin motivo sale igual',
+  );
 });
 
 test('el motivo se manda en el cuerpo, como pide el contrato', () => {

@@ -310,9 +310,15 @@ export function CourseScreen() {
     setComprando(true);
     try {
       const resultado = await restaurarCompras();
-      if (resultado.estado === 'comprada') {
+      if (resultado.estado === 'comprada' && resultado.concedidos > 0) {
         toast(t('course.purchasesRestored'));
         reload();
+      } else if (resultado.estado === 'comprada') {
+        // PREGUNTAR NO ES RESTAURAR. El servidor contestó y no había ninguna
+        // compra que devolver: decir «restauradas» sería mentir, y además deja
+        // sin diagnóstico a quien está en la cuenta de tienda equivocada, que
+        // es la causa más común de que esto se pulse dos veces.
+        notify(t('course.noPurchasesFound'), t('course.noPurchasesFoundBody'));
       } else if (resultado.estado === 'error') {
         notify(t('course.restoreFailed'), resultado.mensaje);
       } else {

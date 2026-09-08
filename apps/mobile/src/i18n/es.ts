@@ -792,6 +792,8 @@ export const es = {
     'Estamos activando tu acceso. Si no aparece en un momento, usa «Restaurar compras».',
   'course.purchased': 'Curso comprado',
   'course.purchasesRestored': 'Compras restauradas',
+  'course.noPurchasesFound': 'No encontramos compras',
+  'course.noPurchasesFoundBody': 'No hay compras asociadas a esta cuenta de la tienda. Comprueba que has iniciado sesion en la tienda con la cuenta que usaste al comprar.',
   'course.headerTitle': 'Programa',
   'course.restorePurchases': 'Restaurar compras',
   'course.notFound': 'Curso no encontrado.',

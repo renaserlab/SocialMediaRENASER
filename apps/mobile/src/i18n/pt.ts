@@ -737,6 +737,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
     'Estamos ativando seu acesso. Se não aparecer em instantes, use «Restaurar compras».',
   'course.purchased': 'Curso comprado',
   'course.purchasesRestored': 'Compras restauradas',
+  'course.noPurchasesFound': 'Nao encontramos compras',
+  'course.noPurchasesFoundBody': 'Nao ha compras associadas a esta conta da loja. Verifique se iniciou sessao na loja com a conta que usou para comprar.',
   'course.headerTitle': 'Programa',
   'course.restorePurchases': 'Restaurar compras',
   'course.notFound': 'Curso não encontrado.',

@@ -172,7 +172,12 @@ export async function ofertaPara(courseId: string): Promise<OfertaDeCompra> {
 }
 
 export type ResultadoDeCompraCompleta =
-  | { estado: 'comprada' }
+  /**
+   * `concedidos` es CUÁNTOS accesos ha dado el servidor de verdad, y existe
+   * porque sin ese número no se podía distinguir «restauré tus compras» de
+   * «pregunté y no había ninguna». Las dos terminaban diciendo lo mismo.
+   */
+  | { estado: 'comprada'; concedidos: number }
   | { estado: 'cancelada' }
   | { estado: 'pendiente_de_sincronizar' }
   | { estado: 'error'; mensaje: string };
@@ -226,8 +231,14 @@ export async function sincronizar(): Promise<ResultadoDeCompraCompleta> {
   const plataforma = plataformaDeCompra();
   if (plataforma === 'web') return { estado: 'error', mensaje: 'Solo móvil.' };
   try {
-    await CommerceRepository.nativeSync(plataforma);
-    return { estado: 'comprada' };
+    // SE MIRA LO QUE CONTESTA, no solo que no falle. El resultado se tiraba y
+    // se devolvía «comprada» con que la petición no reventara, así que quien
+    // pulsaba «Restaurar compras» sin ninguna compra en esa cuenta de la tienda
+    // leía «Compras restauradas» y seguía viendo el botón de comprar: la
+    // aplicación le decía que había hecho algo que no había hecho, y encima le
+    // quitaba la única pista de que la cuenta de la tienda no era la suya.
+    const { granted } = await CommerceRepository.nativeSync(plataforma);
+    return { estado: 'comprada', concedidos: granted.length };
   } catch {
     return { estado: 'pendiente_de_sincronizar' };
   }

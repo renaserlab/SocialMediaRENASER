@@ -734,6 +734,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
     'We are turning your access on. If it does not show up in a moment, use "Restore purchases".',
   'course.purchased': 'Course purchased',
   'course.purchasesRestored': 'Purchases restored',
+  'course.noPurchasesFound': 'No purchases found',
+  'course.noPurchasesFoundBody': 'There are no purchases linked to this store account. Check that you are signed in to the store with the account you bought with.',
   'course.headerTitle': 'Program',
   'course.restorePurchases': 'Restore purchases',
   'course.notFound': 'Course not found.',
