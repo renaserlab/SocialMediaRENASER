@@ -594,10 +594,30 @@ export const DevolucionesRepository = {
   },
 
   /** Guarda la aceptacion. Sin ella el servidor no deja seguir al pago. */
-  async aceptarRecompra(courseId: string): Promise<void> {
+  /**
+   * Firma que se acepta recomprar sin garantia.
+   *
+   * `origen` DICE POR DONDE SE VA A COMPRAR, y solo hace falta en las tiendas:
+   * en la web la orden identifica la compra, pero en Google y Apple la orden no
+   * existe hasta despues del cobro, asi que sin esto no se puede responder «que
+   * acepto exactamente quien hizo ESTA compra».
+   *
+   * NO DECIDE NADA. Es una etiqueta para el rastro: lo que concede el acceso lo
+   * resuelve el servidor contra RevenueCat, pase lo que pase por aqui.
+   */
+  async aceptarRecompra(
+    courseId: string,
+    origen?: { proveedor: 'apple' | 'google'; productoDeTienda: string },
+  ): Promise<void> {
     await apiRequest<void>(`${API_V1}/payments/repurchase-acceptance`, {
       method: 'POST',
-      body: JSON.stringify({ course_id: courseId, accepted: true }),
+      body: JSON.stringify({
+        course_id: courseId,
+        accepted: true,
+        ...(origen
+          ? { provider: origen.proveedor, product_id: origen.productoDeTienda }
+          : {}),
+      }),
     });
   },
 };

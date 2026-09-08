@@ -209,7 +209,24 @@ export function CourseScreen() {
     aceptandoRef.current = true;
     setAceptando(true);
     try {
-      await DevolucionesRepository.aceptarRecompra(course.id);
+      /*
+        SE MANDA DE DONDE VIENE LA COMPRA cuando es de tienda. En la web la
+        orden identifica la firma; en Google y Apple la orden no existe hasta
+        despues del cobro, asi que sin esto la aceptacion no se puede atar a
+        la compra concreta que la consumio.
+      */
+      const proveedor =
+        oferta?.plataforma === 'ios'
+          ? ('apple' as const)
+          : oferta?.plataforma === 'android'
+            ? ('google' as const)
+            : null;
+      await DevolucionesRepository.aceptarRecompra(
+        course.id,
+        proveedor && oferta?.productoDeTienda
+          ? { proveedor, productoDeTienda: oferta.productoDeTienda }
+          : undefined,
+      );
       // Aceptado y guardado: la puerta desaparece y se pasa al pago.
       setAvisoDeRecompra((previo) =>
         previo ? { ...previo, requiereAceptacion: false } : previo,

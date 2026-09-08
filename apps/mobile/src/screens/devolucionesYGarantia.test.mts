@@ -635,8 +635,32 @@ describe('el repositorio de devoluciones', () => {
 
   it('la aceptación se manda como aceptada de verdad', () => {
     assert.ok(
-      REPOSITORIO.includes('{ course_id: courseId, accepted: true }'),
+      /course_id: courseId,\s*accepted: true,/.test(REPOSITORIO),
       'El endpoint rechaza `accepted: false`, y hace bien.',
+    );
+  });
+
+  it('y con el origen de la compra cuando es de tienda', () => {
+    /*
+      En la web la orden identifica la firma. En Google y Apple la orden no
+      existe hasta DESPUÉS del cobro, así que sin el proveedor y el producto la
+      aceptación no se puede atar a la compra concreta que la consumió, y «qué
+      aceptó exactamente quien hizo ESTA compra» se queda sin respuesta.
+
+      Es una etiqueta para el rastro y no decide nada: lo que concede el acceso
+      lo sigue resolviendo el servidor contra RevenueCat.
+    */
+    assert.ok(
+      REPOSITORIO.includes('provider: origen.proveedor'),
+      'el proveedor tiene que viajar en el cuerpo.',
+    );
+    assert.ok(
+      REPOSITORIO.includes('product_id: origen.productoDeTienda'),
+      'y el producto de la tienda con él.',
+    );
+    assert.ok(
+      CURSO.includes("oferta?.plataforma === 'ios'"),
+      'la pantalla decide el proveedor a partir de la plataforma de la oferta.',
     );
   });
 
