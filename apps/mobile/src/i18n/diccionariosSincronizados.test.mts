@@ -96,6 +96,8 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // «Motivo» se escribe exactamente igual en los dos idiomas.
+    'solicitud.motivo',
     // «Anterior», «Ver certificado», «Certificado», «Este documento certifica
     // que», «Verificar certificado» y «Continuar» se escriben exactamente
     // igual en los dos idiomas.

@@ -805,6 +805,20 @@ export function CourseScreen() {
           ) : null}
 
           {/*
+            AYUDA DEL CURSO. Para quien lo tiene: es donde se llega con «no
+            puedo entrar», «el video falla» o «quiero mi dinero». No abre un
+            sistema de soporte nuevo, reparte hacia el que ya resuelve cada
+            cosa.
+          */}
+          {hasAccess && !canManage ? (
+            <Button
+              label={t('ayuda.titulo')}
+              variant="ghost"
+              onPress={() => router.push(`/ayuda/${course.id}`)}
+            />
+          ) : null}
+
+          {/*
             LA GARANTIA DE DEVOLUCION, para quien compro este curso.
 
             Se pinta solo cuando hay compra de pago con acceso; quien lo
