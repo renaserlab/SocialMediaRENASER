@@ -88,6 +88,101 @@ async def sincronizar(
     return resultado
 
 
+async def _resolver_aceptacion_de_recompra(
+    db,
+    *,
+    user_id: str,
+    course_id: str,
+    proveedor: str,
+    producto_externo: str | None,
+) -> None:
+    """Ata la aceptación de recompra a la compra de tienda, o deja constancia.
+
+    LO QUE **NO** HACE, Y ES LA DECISIÓN ENTERA: no rechaza. Cuando esto corre,
+    la compra en la tienda YA OCURRIÓ y el dinero YA SE MOVIÓ —Google y Apple
+    cobran antes de que nosotros nos enteremos—, así que negar el acceso aquí
+    sería cobrar y no entregar. La aceptación se pide ANTES, en la aplicación,
+    contra `POST /payments/repurchase-acceptance`; aquí solo se cierra el
+    círculo.
+
+    TRES CAMINOS:
+
+      1. La garantía de esta persona en este curso no está usada: no hace falta
+         ninguna aceptación y no se toca nada. Es el caso normal.
+      2. Está usada y hay aceptación suelta: se ata a la orden que acaba de
+         nacer, y con eso se puede responder «qué aceptó exactamente quien hizo
+         ESTA compra».
+      3. Está usada y NO hay aceptación: se concede igual —ver arriba— y se
+         escribe una nota de auditoría. Es lo único que convierte «la casilla
+         del cliente se saltó» en algo que alguien puede ver y revisar, en vez
+         de en nada.
+
+    NUNCA REVIENTA LA SINCRONIZACIÓN. Un fallo aquí no puede tumbar la
+    concesión de un acceso que ya está pagado.
+    """
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    try:
+        if not await esquema_devoluciones.hay_devoluciones(db):
+            return
+
+        from app.modules.refunds import service as devoluciones
+
+        if await devoluciones.ya_devolvio(db, user_id=user_id, course_id=course_id) is None:
+            return  # Camino 1: no hay garantía gastada, no hay nada que aceptar.
+
+        if await devoluciones.tiene_aceptacion(db, user_id=user_id, course_id=course_id):
+            orden = await _ultima_orden_pagada(db, user_id=user_id, course_id=course_id)
+            if orden is not None:
+                await devoluciones.enlazar_aceptacion(
+                    db, user_id=user_id, course_id=course_id, order_id=orden
+                )
+            return  # Camino 2.
+
+        # Camino 3: se concedió sin aceptación. Se deja escrito.
+        from app.modules.gobernanza import auditoria
+
+        await auditoria.anotar(
+            db,
+            actor_id=user_id,
+            action="repurchase.sin_aceptacion",
+            entity_type="course",
+            entity_id=course_id,
+            # "ok" PORQUE LA OPERACION SE HIZO: el acceso se concedio de verdad.
+            # Lo que falto es la aceptacion previa, y eso lo cuentan "action" y
+            # "reason". Marcarlo "denied" diria que no se concedio, que es
+            # justamente lo contrario de lo que paso.
+            outcome="ok",
+            reason="compra de tienda sobre una garantia ya usada, sin aceptacion previa",
+            payload={"provider": proveedor, "store_product": producto_externo},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[pagos] no se pudo resolver la aceptacion de recompra de %s",
+            course_id,
+            exc_info=True,
+        )
+
+
+async def _ultima_orden_pagada(db, *, user_id: str, course_id: str) -> str | None:
+    """La orden pagada más reciente de esta persona para este curso."""
+    from sqlalchemy import select
+
+    from app.modules.commerce.models import CommerceProduct, Order
+
+    return await db.scalar(
+        select(Order.id)
+        .join(CommerceProduct, CommerceProduct.id == Order.commerce_product_id)
+        .where(
+            Order.user_id == user_id,
+            CommerceProduct.course_id == course_id,
+            Order.status == "paid",
+        )
+        .order_by(Order.created_at.desc())
+        .limit(1)
+    )
+
+
 async def _aplicar(
     db: AsyncSession,
     *,
@@ -170,3 +265,12 @@ async def _aplicar(
     destino = resultado.concedidos if concesion.nuevo else resultado.sin_cambios
     if concesion.course_id not in destino:
         destino.append(concesion.course_id)
+
+    if concesion.nuevo:
+        await _resolver_aceptacion_de_recompra(
+            db,
+            user_id=user_id,
+            course_id=concesion.course_id,
+            proveedor=compra.canal or "android",
+            producto_externo=compra.store_product_id,
+        )

@@ -38,7 +38,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.modules.catalog.models import Course
 from app.modules.commerce import esquema, service as comercio
 from app.modules.commerce.models import Entitlement, PaymentTransaction, ProviderProduct
+from app.modules.gobernanza import models as _modelos_de_gobernanza  # noqa: F401
 from app.modules.payments import nativo, service
+from app.modules.refunds import models as _modelos_de_devoluciones  # noqa: F401
 from app.modules.payments.providers import PROVIDERS
 from app.modules.payments.revenuecat import RevenueCatClient, RevenueCatError
 from app.modules.payments.stripe_provider import (
@@ -213,6 +215,93 @@ async def test_una_compra_real_concede_derecho_y_matricula(sesiones):
         )
         assert acceso.tiene_acceso is True
         assert CURSO in await comercio.cursos_con_acceso(db, user_id=ANA)
+
+
+@pytest.mark.asyncio
+async def test_una_recompra_sin_aceptacion_CONCEDE_y_deja_constancia(sesiones):
+    """EL DINERO YA SE MOVIO CUANDO ESTO CORRE, y esa es la decision entera.
+
+    La aceptacion de recompra —«se que esta compra no tiene garantia»— solo se
+    exigia en el checkout web. En iOS y Android el acceso lo concede
+    `native/sync`, y ahi no se comprobaba nada: la casilla de la aplicacion era
+    la unica puerta, y una puerta que vive en el telefono no es una puerta.
+
+    PERO RECHAZAR AQUI SERIA PEOR. Google y Apple cobran antes de que nosotros
+    nos enteremos, asi que negar el acceso en la sincronizacion es cobrar y no
+    entregar. Se concede, y se deja una nota de auditoria: es lo unico que
+    convierte «la casilla se salto» en algo que alguien puede ver.
+    """
+    from app.modules.gobernanza.models import AuditEvent
+    from app.modules.refunds import service as devoluciones
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        # Ana ya uso su garantia en este curso.
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        resultado = await nativo.sincronizar(
+            db, user_id=ANA, cliente=cliente, entorno="sandbox"
+        )
+
+        assert resultado.concedidos == [CURSO], "una compra pagada SIEMPRE concede"
+        notas = list(await db.scalars(_select(AuditEvent)))
+        assert len(notas) == 1, "sin aceptacion tiene que quedar constancia"
+        assert notas[0].action == "repurchase.sin_aceptacion"
+        assert notas[0].entity_id == CURSO
+        assert notas[0].outcome == "ok", "el acceso SI se concedio: lo que falto es la aceptacion"
+
+
+@pytest.mark.asyncio
+async def test_una_recompra_con_aceptacion_no_deja_nota_de_incidencia(sesiones):
+    """El camino normal: se acepto antes de comprar, y no hay nada que reportar."""
+    from app.modules.gobernanza.models import AuditEvent
+    from app.modules.refunds import service as devoluciones
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await devoluciones.registrar_aceptacion(
+            db, user_id=ANA, course_id=CURSO, order_id=None, fecha_legible="1 de enero"
+        )
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+
+        incidencias = [
+            n
+            for n in await db.scalars(_select(AuditEvent))
+            if n.action == "repurchase.sin_aceptacion"
+        ]
+        assert incidencias == [], "con aceptacion no hay incidencia que anotar"
+
+
+@pytest.mark.asyncio
+async def test_sin_garantia_usada_no_se_exige_ni_se_anota_nada(sesiones):
+    """La primera compra no tiene nada que aceptar, y no puede ensuciar nada."""
+    from app.modules.gobernanza.models import AuditEvent
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        cliente, _ = _cliente([_compra()])
+        resultado = await nativo.sincronizar(
+            db, user_id=ANA, cliente=cliente, entorno="sandbox"
+        )
+        assert resultado.concedidos == [CURSO]
+        assert list(await db.scalars(_select(AuditEvent))) == []
 
 
 @pytest.mark.asyncio
