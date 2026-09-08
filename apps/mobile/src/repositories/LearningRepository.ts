@@ -497,6 +497,32 @@ export const LearningRepository = {
   },
 
   /**
+   * Darla por terminada a mano.
+   *
+   * El vídeo ya la cierra solo al llegar al final, pero una lección puede ser
+   * texto, o verse fuera de la aplicación, o quedarse a treinta segundos. Lo
+   * decide el servidor: aquí solo se pide.
+   *
+   * Idempotente: pedirlo dos veces deja el mismo estado.
+   */
+  async completeLesson(lessonId: string): Promise<ProgresoGuardado> {
+    const dto = await apiRequest<{
+      lesson_id: string;
+      progress_seconds: number;
+      completed: boolean;
+      course_completed: boolean;
+      course_progress_percent: number;
+    }>(`${API_V1}/learning/lessons/${lessonId}/complete`, { method: 'POST' });
+    return {
+      lessonId: dto.lesson_id,
+      progressSeconds: dto.progress_seconds,
+      completed: dto.completed,
+      courseCompleted: dto.course_completed,
+      courseProgressPercent: dto.course_progress_percent,
+    };
+  },
+
+  /**
    * La biblioteca, desde el SERVIDOR.
    *
    * Antes salia de `purchasedCourseIds`, una lista guardada en el telefono:

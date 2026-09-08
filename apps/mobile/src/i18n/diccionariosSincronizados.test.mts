@@ -96,6 +96,14 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // «Recursos», «Notas», «Guardar nota», «Nota guardada», «Editar nota» y
+    // «Notas guardadas» se escriben exactamente igual en los dos idiomas.
+    'lesson.tabResources',
+    'lesson.tabNotes',
+    'nota.guardar',
+    'nota.guardada',
+    'nota.editar',
+    'nota.guardadas',
     // «Cursos» y «Eventos» se escriben exactamente igual en los dos idiomas.
     'verticales.cursos',
     // «Todos» y «Principiante» se escriben igual en los dos idiomas.
