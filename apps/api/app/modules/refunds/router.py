@@ -138,6 +138,7 @@ async def refund_eligibility(
         first_accessed_at=estado.first_accessed_at,
         expires_at=estado.expires_at,
         seconds_remaining=estado.seconds_remaining,
+        guarantee_hours=devoluciones.HORAS_DE_GARANTIA,
         refund_used=estado.refund_used,
         refund_used_at=estado.refund_used_at,
         active_request_id=estado.request_id,

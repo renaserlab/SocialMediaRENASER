@@ -43,6 +43,10 @@ class RefundEligibilityRead(BaseModel):
     first_accessed_at: datetime | None = None
     expires_at: datetime | None = None
     seconds_remaining: int = 0
+    #: Las horas que dura la garantía, según el servidor. La app las tenía
+    #: escritas a mano («7 días»), así que el día que cambien diría un plazo
+    #: que nadie honra.
+    guarantee_hours: int
     refund_used: bool = False
     refund_used_at: datetime | None = None
     active_request_id: str | None = None
