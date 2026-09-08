@@ -38,6 +38,7 @@ DEL_DINERO = (
 SOLO_CORRIGEN = (
     "0051_endurecer_la_inmutabilidad_de_versiones.sql",
     "0052_cerrar_lectura_directa_de_datos_sensibles.sql",
+    "0053_cerrar_el_comercio_por_postgrest.sql",
 )
 
 
@@ -208,20 +209,68 @@ def _tablas_del_orm() -> dict[str, object]:
     return dict(Base.metadata.tables)
 
 
-#: Tablas donde `is_admin()` NO puede ser quien decide la lectura. `is_admin()`
-#: es `role in ('moderator', 'admin')`, y `moderator` es la cuenta creada para
-#: ocultar una publicacion o resolver un reporte.
-DE_LECTURA_RESTRINGIDA = (
-    "audit_events",
-    "consent_records",
-    "course_refund_windows",
-    "refund_requests",
-    "refund_request_events",
-    "refund_policy_acceptances",
-    "owner_payout_accounts",
-    "owner_sale_balances",
-    "owner_transfers",
+#: El bloque `create table` completo, hasta el parentesis de cierre en su propia
+#: linea. Se declara aparte por legibilidad: lleva un salto de linea dentro.
+_CREA_TABLA = re.compile(
+    r"create\s+table\s+if\s+not\s+exists\s+public\.([a-z_0-9]+)\s*\((.*?)\n\);",
+    re.S | re.I,
 )
+
+#: Señales de que una tabla guarda dinero. NO SE MIRA EL NOMBRE: se mira lo que
+#: declara, porque el nombre lo elige quien la crea y estas columnas no.
+_SENAL_DE_DINERO = re.compile(
+    r"amount_minor|amount_cents|_fee_minor|_fee_bps|currency"
+    r"|external_[a-z_]*id|balance_minor|payout|transfer",
+    re.I,
+)
+
+#: Tablas que guardan rastro de una persona sin llevar importes, asi que la
+#: deteccion de arriba no las ve. Van a mano y con motivo.
+SIN_IMPORTES_PERO_IGUAL_DE_SENSIBLES = (
+    "audit_events",              # quien movio cada euro, con huella de red
+    "consent_records",           # quien acepto que, y cuando
+    "entitlements",              # quien tiene acceso a que, o sea quien compro
+    "course_enrollments",        # lo mismo con otra forma
+    "course_refund_windows",     # quien uso su garantia
+    "refund_request_events",     # notas internas de revision
+    "refund_policy_acceptances", # quien acepto recomprar tras devolver
+)
+
+#: Politicas que SIGUEN con `is_admin()` a proposito. Cada una necesita un
+#: motivo escrito aqui; sin entrada en esta lista, la prueba falla.
+#:
+#: NO ES UNA VALVULA DE ESCAPE. Es lo contrario: obliga a que la proxima
+#: excepcion sea una decision y no un olvido, que es exactamente como se
+#: quedaron cinco politicas del comercio con `is_admin()` hasta la 0053.
+EXCEPCIONES_DELIBERADAS = {
+    # Contenido y textos: ver un borrador sin publicar ES parte de moderar.
+    "course_versions_read",
+    "policy_versions_read",
+    # Catalogo publico: lleva precio y moneda porque es el escaparate.
+    "commerce_products_read",
+}
+
+
+def _tablas_con_dinero() -> set[str]:
+    """Se DEDUCE del esquema, no se escribe a mano.
+
+    ESCRIBIRLA A MANO FUE EL FALLO. La lista anterior salio del incidente que la
+    motivo —las nueve tablas que arreglo la 0052— y no de que tablas guardan
+    dinero. La prueba estaba en verde y lo que significaba era «moderar no llega
+    a estas nueve», mientras `orders`, `payment_transactions` y
+    `provider_products` seguian abiertas a quien solo modera. Deducirla es lo
+    que hace que una tabla de dinero futura entre sola.
+    """
+    encontradas: set[str] = set(SIN_IMPORTES_PERO_IGUAL_DE_SENSIBLES)
+    for ruta in _ficheros():
+        sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
+        for bloque in re.finditer(
+            _CREA_TABLA,
+            sql,
+        ):
+            if _SENAL_DE_DINERO.search(bloque.group(2)):
+                encontradas.add(bloque.group(1))
+    return encontradas
 
 
 def _politicas_finales() -> dict[str, tuple[str, str]]:
@@ -248,22 +297,117 @@ def test_moderar_no_da_acceso_a_las_tablas_de_dinero_por_la_rls() -> None:
 
     El movil habla con PostgREST usando la clave anonima, asi que quien decide
     que filas se leen es la politica, no el esquema de salida de FastAPI. La API
-    separaba moderar de mover dinero con `puede_mover_dinero`; nueve politicas
-    seguian con `is_admin()`. Con su propio JWT, una cuenta que solo modera
-    llegaba al motivo privado que escribio cada alumno al pedir su devolucion y
-    a los saldos de cada autor.
+    separaba moderar de mover dinero con `puede_mover_dinero`; primero nueve
+    politicas y despues otras cinco seguian con `is_admin()`, que incluye a
+    `moderator`. Con su propio JWT, una cuenta que solo modera llegaba al motivo
+    privado que escribio cada alumno al pedir su devolucion, a los saldos de
+    cada autor y al historial de compras de todo el mundo.
 
-    Esta prueba mira COMO TERMINA la base tras aplicar todas las migraciones en
-    orden, no lo que dice una suelta.
+    Mira COMO TERMINA la base tras aplicar todas las migraciones en orden, no lo
+    que dice una suelta, porque una posterior puede redefinir la politica de
+    otra. Y la lista de tablas se deduce del esquema: ver `_tablas_con_dinero`.
     """
+    con_dinero = _tablas_con_dinero()
     abiertas = [
         f"{tabla}.{politica}"
         for politica, (tabla, cuerpo) in _politicas_finales().items()
-        if tabla in DE_LECTURA_RESTRINGIDA and "is_admin" in cuerpo
+        if tabla in con_dinero
+        and "is_admin" in cuerpo
+        and politica not in EXCEPCIONES_DELIBERADAS
     ]
     assert not abiertas, (
         "politicas de tablas de dinero que siguen decidiendo con is_admin(), "
         f"que incluye a moderator: {sorted(abiertas)}"
+    )
+
+
+_ROLES_DE_FUNCION = re.compile(
+    r"create\s+or\s+replace\s+function\s+public\.(is_admin|puede_mover_dinero)\s*\(\)"
+    r".*?role\s+(?:in\s*\((?P<lista>[^)]*)\)|=\s*(?P<uno>'[a-z_]+'))",
+    re.S | re.I,
+)
+
+
+def _roles_en_sql() -> dict[str, set[str]]:
+    """Los roles que cada funcion SQL acepta, segun la ULTIMA definicion."""
+    encontrados: dict[str, set[str]] = {}
+    for ruta in _ficheros():
+        sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
+        for casa in _ROLES_DE_FUNCION.finditer(sql):
+            crudo = casa.group("lista") or casa.group("uno") or ""
+            encontrados[casa.group(1)] = {
+                t.strip().strip("'") for t in crudo.split(",") if t.strip()
+            }
+    return encontrados
+
+
+def test_los_roles_de_la_base_y_los_del_codigo_dicen_lo_mismo() -> None:
+    """Dos copias del mismo reparto, una en Python y otra en SQL.
+
+    ES EL FALLO DE ESTE PROYECTO, girado. Primero la API separo moderar de mover
+    dinero y la RLS no; el dia que se anada un rol de tesoreria a
+    `FINANCE_ROLES`, la API se lo concedera y la funcion SQL —con `admin`
+    escrito a mano— se lo negara. La divergencia vuelve, en la otra direccion, y
+    otra vez sin que nadie se entere hasta que alguien la sufra.
+    """
+    from app.shared.permissions import ADMIN_ROLES, FINANCE_ROLES
+
+    en_sql = _roles_en_sql()
+    assert en_sql.get("puede_mover_dinero") == FINANCE_ROLES, (
+        f"puede_mover_dinero() acepta {sorted(en_sql.get('puede_mover_dinero', []))} "
+        f"y FINANCE_ROLES dice {sorted(FINANCE_ROLES)}"
+    )
+    assert en_sql.get("is_admin") == ADMIN_ROLES, (
+        f"is_admin() acepta {sorted(en_sql.get('is_admin', []))} "
+        f"y ADMIN_ROLES dice {sorted(ADMIN_ROLES)}"
+    )
+
+
+def test_las_excepciones_a_la_regla_siguen_existiendo() -> None:
+    """Una excepcion que ya no apunta a nada deja de ser una decision.
+
+    Si una politica de `EXCEPCIONES_DELIBERADAS` se renombra o se borra, la
+    entrada se queda ahi tapando una politica futura que se llame igual. Se
+    comprueba que las tres siguen siendo politicas reales.
+    """
+    reales = set(_politicas_finales())
+    fantasmas = sorted(EXCEPCIONES_DELIBERADAS - reales)
+    assert not fantasmas, f"excepciones que ya no corresponden a ninguna politica: {fantasmas}"
+
+
+def test_las_tablas_de_dinero_no_se_sirven_por_postgrest() -> None:
+    """SEGUNDA BARRERA, porque la RLS era la unica.
+
+    Supabase concede por defecto todos los privilegios de cada tabla a `anon` y
+    `authenticated`. En las tablas de dinero eso dejaba a la politica como unica
+    cosa entre la clave anonima y los datos: una politica mal escrita manana no
+    tendria nada detras. Y `truncate` ni siquiera pasa por la RLS.
+
+    El movil no lee ninguna de estas tablas —habla con FastAPI—, asi que la
+    concesion no le hace falta a nadie.
+    """
+    concedidas: dict[str, str] = {}
+    for ruta in _ficheros():
+        sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
+        for bloque in re.finditer(
+            r"(?<![A-Za-z_])(grant|revoke)\s+(.*?)\s+(?:on|ON)\s+(.*?)\s+(?:to|from)\s+([^;]+);",
+            sql,
+            flags=re.S | re.I,
+        ):
+            verbo = bloque.group(1).lower()
+            quien = bloque.group(4).lower()
+            if "anon" not in quien and "authenticated" not in quien:
+                continue
+            for tabla in re.findall(r"public\.([a-z_0-9]+)", bloque.group(3)):
+                concedidas[tabla] = verbo
+    sin_cerrar = sorted(
+        t
+        for t in _tablas_con_dinero()
+        if concedidas.get(t) != "revoke"
+    )
+    assert not sin_cerrar, (
+        "tablas de dinero que siguen con la concesion por defecto de Supabase "
+        f"para anon/authenticated: {sin_cerrar}"
     )
 
 
