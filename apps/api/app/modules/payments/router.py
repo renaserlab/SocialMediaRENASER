@@ -67,6 +67,7 @@ from app.modules.payments.schemas import (
     CheckoutCreate,
     CheckoutRead,
     CourseAccessRead,
+    EstadoDeOrdenRead,
     NativeSyncCreate,
     NativeSyncRead,
     PurchaseHistoryRead,
@@ -259,6 +260,62 @@ async def my_purchases(
         .order_by(Purchase.purchased_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def _curso_de_la_orden(db: AsyncSession, orden) -> str | None:
+    """El curso al que apunta una orden, a través de su producto de comercio."""
+    from app.modules.commerce.models import CommerceProduct
+
+    producto = await db.get(CommerceProduct, orden.commerce_product_id)
+    return str(producto.course_id) if producto is not None else None
+
+
+@router.get("/orders/{order_id}", response_model=EstadoDeOrdenRead)
+async def estado_de_la_orden(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EstadoDeOrdenRead:
+    """En qué quedó una orden. Es lo que mira la pantalla de vuelta del pago.
+
+    LA PANTALLA NO PUEDE CREERSE LA URL. Al volver de la pasarela, el navegador
+    trae `?order=<id>` y nada más: ese parámetro lo escribe cualquiera, y
+    conceder acceso —o simplemente decir «pago confirmado»— a partir de él sería
+    dejar que quien pide decida si ha pagado. Aquí se le pregunta al servidor.
+
+    Y SE DEVUELVE EL ACCESO APARTE DEL ESTADO. Una orden puede estar `paid` con
+    el acceso todavía sin conceder, porque quien lo concede es el aviso de la
+    pasarela y aún no ha llegado. Son segundos, pero son exactamente los
+    segundos en los que la persona está mirando la pantalla.
+
+    404 SI NO ES SUYA, y no 403: responder «prohibido» confirmaría que esa orden
+    existe, y con eso se puede recorrer el espacio de identificadores para saber
+    qué órdenes hay. Que una orden ajena y una inexistente se vean igual desde
+    fuera es lo correcto.
+    """
+    from app.modules.commerce.models import Order
+
+    oid = ensure_uuid(order_id, "order_id")
+    orden = await db.get(Order, oid)
+    if orden is None or orden.user_id != current_user.id:
+        raise NotFoundError("Orden no encontrada.")
+
+    curso = await _curso_de_la_orden(db, orden)
+    acceso = False
+    if curso is not None and await esquema_comercio.hay_comercio(db):
+        resuelto = await comercio_service.resolver_acceso_al_curso(
+            db, user_id=current_user.id, course_id=curso, es_admin=False
+        )
+        acceso = resuelto.tiene_acceso
+
+    return EstadoDeOrdenRead(
+        id=str(orden.id),
+        course_id=curso or "",
+        status=orden.status,
+        amount_minor=orden.amount_minor,
+        currency=orden.currency,
+        has_access=acceso,
+    )
 
 
 @router.get("/courses/{course_id}/access", response_model=CourseAccessRead)

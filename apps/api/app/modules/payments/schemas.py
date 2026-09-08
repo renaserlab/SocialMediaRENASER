@@ -38,6 +38,31 @@ class PurchaseRead(BaseModel):
     purchased_at: datetime
 
 
+class EstadoDeOrdenRead(BaseModel):
+    """En qué quedó una orden concreta. Para la pantalla de vuelta del pago.
+
+    POR QUÉ EXISTE. Al volver de la pasarela, el navegador trae `?order=<id>` y
+    nada más. Sin este endpoint, la pantalla solo podía creerse ese parámetro —o
+    la ausencia de él— para decidir si felicitar a alguien por una compra. Un
+    parámetro de la barra de direcciones lo escribe cualquiera.
+
+    `has_access` va aparte de `status` A PROPÓSITO, y no es redundante: la orden
+    puede estar `paid` y el acceso todavía no concedido porque el aviso de la
+    pasarela no ha llegado. La pantalla necesita distinguir «pagado, dándote
+    acceso» de «ya puedes entrar», y esa diferencia dura segundos pero es
+    exactamente cuando la persona está mirando.
+    """
+
+    id: str
+    course_id: str
+    #: 'pending', 'paid', 'failed', 'cancelled' o 'refunded'.
+    status: str
+    amount_minor: int
+    currency: str
+    #: Si el acceso ya está concedido. Lo resuelve el comercio, no la orden.
+    has_access: bool
+
+
 class CourseAccessRead(BaseModel):
     """Si la persona puede ver el contenido de un curso, y por qué."""
 

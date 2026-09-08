@@ -165,6 +165,57 @@ async def _pedir(http, *, orden=ORDEN, motivo="not_as_expected"):
 
 
 # --------------------------------------------------------------------------- #
+# 0. El estado de una orden: lo que mira la pantalla de vuelta del pago
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_el_estado_de_la_orden_lo_dice_el_servidor(entorno):
+    """LA PANTALLA DE VUELTA NO PUEDE CREERSE LA URL.
+
+    Al volver de la pasarela, el navegador trae `?order=<id>` y nada mas. Ese
+    parametro lo escribe cualquiera, asi que decir «pago confirmado» a partir de
+    el seria dejar que quien pide decida si ha pagado.
+    """
+    http, _, _ = entorno
+    cuerpo = (await http.get(f"{PAGOS}/orders/{ORDEN}")).json()
+    assert cuerpo["id"] == ORDEN
+    assert cuerpo["status"] == "paid"
+    assert cuerpo["course_id"] == CURSO
+    assert cuerpo["currency"] == "PEN"
+    # El acceso viaja APARTE del estado: una orden puede estar pagada con el
+    # acceso sin conceder todavia, porque quien lo concede es el aviso de la
+    # pasarela. Son segundos, y son justo los que la persona esta mirando.
+    assert "has_access" in cuerpo
+
+
+@pytest.mark.asyncio
+async def test_la_orden_de_otra_persona_responde_404_y_no_403(entorno):
+    """404 Y NO 403, y la diferencia importa.
+
+    Un «prohibido» confirmaria que esa orden existe, y con eso se puede recorrer
+    el espacio de identificadores para averiguar que ordenes hay. Una orden
+    ajena y una inexistente tienen que verse igual desde fuera.
+    """
+    http, identidad, _ = entorno
+    identidad["uid"] = CARLA
+    ajena = await http.get(f"{PAGOS}/orders/{ORDEN}")
+    inexistente = await http.get(f"{PAGOS}/orders/00000000-0000-0000-0000-00000000ffff")
+    assert ajena.status_code == 404
+    assert inexistente.status_code == 404
+    assert ajena.json() == inexistente.json(), (
+        "las dos respuestas tienen que ser indistinguibles"
+    )
+
+
+@pytest.mark.asyncio
+async def test_un_identificador_que_no_es_uuid_no_revienta(entorno):
+    http, _, _ = entorno
+    respuesta = await http.get(f"{PAGOS}/orders/no-soy-un-uuid")
+    assert respuesta.status_code in (404, 422)
+
+
+# --------------------------------------------------------------------------- #
 # 1. Elegibilidad
 # --------------------------------------------------------------------------- #
 
