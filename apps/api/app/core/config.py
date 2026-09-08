@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     #: a cancelar es mentirle a la persona sobre lo que acaba de pasar.
     payments_cancel_url: str = "https://social-media-renaser.vercel.app/pago/cancelado"
 
+    #: Donde se verifica un certificado. Es una pagina de la WEB porque el
+    #: destinatario de un certificado —una empresa, alguien que contrata— no
+    #: tiene la aplicacion instalada, y pedirle que se la instale para
+    #: comprobar un codigo es no ofrecer verificacion.
+    certificates_verify_url: str = (
+        "https://social-media-renaser.vercel.app/verificar"
+    )
+
     # --- Pagos: nativo (RevenueCat) ---
     #: Verificacion servidor a servidor de las compras de las tiendas. APAGADA
     #: por defecto. Mientras este en false, `POST /payments/native/sync`
