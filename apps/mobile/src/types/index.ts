@@ -325,6 +325,9 @@ export type Course = {
   id: string;
   /** Quién publica el curso; permite listar los de un perfil. */
   authorId?: string;
+  /** Nombre y usuario del autor. Solo los trae el detalle. */
+  authorName?: string | null;
+  authorUsername?: string | null;
   title: string;
   /** Ruta de la portada en Storage (bucket post-media). */
   coverPath?: string | null;

@@ -865,6 +865,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'ficha.requisitos': "Requirements",
   'syllabus.versionConflictTitle': "The course changed underneath",
   'syllabus.versionConflict': "The syllabus changed while you were editing. Reload it before saving.",
+  'curso.por': "By {nombre}",
+  'curso.verPerfilDe': "View {nombre}'s profile",
   'confirm.access': 'You now have access to',
   'confirm.yourNewCourse': 'your new course',
   'confirm.goToCourse': 'Go to the course',

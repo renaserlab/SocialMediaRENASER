@@ -19,6 +19,7 @@ import type { AvisoDeRecompra } from '@/repositories/PaymentRepository';
 import { confirm, notify } from '@/lib/confirm';
 import * as WebBrowser from 'expo-web-browser';
 import { etiquetaDePrecio } from '@/lib/dinero';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import type { AccesoDeBeta } from '@/repositories/LearningRepository';
@@ -529,6 +530,21 @@ export function CourseScreen() {
 
           <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
 
+          {course.authorName ? (
+            <Pressable
+              style={styles.autor}
+              onPress={() => irAlPerfil(router, course.authorId)}
+              accessibilityRole="button"
+              accessibilityLabel={t('curso.verPerfilDe').replace('{nombre}', course.authorName)}
+            >
+              <Feather name="user" size={15} color={colors.textMuted} />
+              <Text style={[styles.textoDeAutor, { color: colors.textMuted }]}>
+                {t('curso.por').replace('{nombre}', course.authorName)}
+              </Text>
+              <Feather name="chevron-right" size={15} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
+
           <FichaDelCurso course={course} duracionSegundos={durationSecondsTotal} />
 
           {/*
@@ -831,6 +847,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   casillaTexto: { fontSize: 13, lineHeight: 19, flex: 1 },
+  autor: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  textoDeAutor: { flex: 1, fontSize: 14 },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
