@@ -274,3 +274,56 @@ En orden, y ninguno es opcional:
    son tantas pasadas simultáneas como réplicas haya.
 5. Correo transaccional (R22).
 6. QA en dispositivo físico.
+
+---
+
+## 7. Decisiones tomadas al verificar las migraciones (8/09/2026)
+
+Ver [`Z_VERIFICACION_0051_0052.md`](Z_VERIFICACION_0051_0052.md) para la
+evidencia. Aquí solo lo que se decidió y por qué.
+
+**D8 · Moderar y mover dinero son permisos distintos también en la base.**
+`is_admin()` es `role in ('moderator','admin')` y se usa en veinte políticas de
+moderación; estrecharla habría dejado sin trabajar a quien modera. Se declara
+`puede_mover_dinero()` aparte —solo `admin`— y se pasan a ella las políticas de
+las catorce tablas que guardan dinero o rastro de una persona. `is_admin()` se
+queda donde toca: contenido y textos.
+
+**D9 · La lista de tablas de dinero se deduce del esquema, no se escribe.**
+Escribirla a mano fue lo que dejó cinco políticas del comercio abiertas después
+de creer el problema cerrado. Ahora toda tabla que declare `amount_minor`,
+`currency`, `external_*_id` o `balance` entra sola en la comprobación, y cada
+excepción tiene que declararse con su motivo.
+
+**D10 · El dinero no se sirve por PostgREST.** Se retira la concesión de tabla
+que Supabase da por defecto a `anon` y `authenticated` sobre esas tablas. La RLS
+seguía siendo la única barrera, y `truncate` ni siquiera pasa por ella. Se puede
+hacer porque el móvil no lee ninguna: habla con FastAPI.
+
+**D11 · `course_enrollments` se reparte como si guardara dinero**, aunque no
+guarde importes: dice quién tiene acceso a qué curso, y cruzada con el precio
+dice quién compró qué y por cuánto. Es el mismo dato con otra forma.
+
+**D12 · Una tabla nueva ya no nace concedida.** Se cambian los privilegios por
+defecto del esquema. A partir de ahí hay que conceder a propósito, y si alguien
+olvida hacerlo la pantalla falla durante el desarrollo. Es preferible a que una
+tabla de dinero se sirva sola. Va en una sección aparte de la 0053 porque cambia
+el comportamiento futuro y se puede aplicar en otro momento.
+
+**D13 · La huella de IP se queda nula antes que ser falsa.** Sin sal —o con una
+de menos de 32 caracteres— no se guarda ninguna, porque el espacio de IPv4 se
+recorre en minutos. Y una dirección de red interna no se guarda como origen:
+detrás de un proxy es la misma para todo el mundo, así que llenaría la columna
+con un valor idéntico en todas las filas. Un dato falso en la tabla que alguien
+mirará para investigar un abuso es peor que no tener dato.
+
+### Pendiente de decisión de negocio
+
+- **La ruta de vuelta de Stripe** (`/pago`) no existe en la aplicación. Inerte
+  mientras las compras estén apagadas; hay que decidirla antes de encenderlas.
+- **La aceptación de recompra en las tiendas.** `native/sync` concede acceso sin
+  comprobarla. Rechazar no vale: cuando ese endpoint corre, el dinero ya se
+  movió. Hay que decidir entre atar la aceptación y auditar, o exigirla antes de
+  lanzar la compra en la tienda.
+- **El móvil edita el contenido del curso directo por PostgREST**, así que un
+  autor puede alterar lo que vendió sin dejar versión ni auditoría.
