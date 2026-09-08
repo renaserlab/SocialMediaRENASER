@@ -258,6 +258,15 @@ export const LearningRepository = {
   },
 
   /** Edita un curso. Solo su autor o la administracion (lo verifica el backend). */
+  /** El numero de la version publicada, o null si el curso no tiene. */
+  async publishedVersion(courseId: string): Promise<number | null> {
+    const dto = await apiRequest<{ version: number }>(
+      `${API_V1}/catalog/courses/${courseId}/version`,
+      { auth: false },
+    );
+    return dto.version ?? null;
+  },
+
   /** Borra el curso. El servidor lo niega con 409 si ya tiene alumnos. */
   async deleteCourse(courseId: string): Promise<void> {
     await apiRequest<void>(`${API_V1}/catalog/courses/${courseId}`, {

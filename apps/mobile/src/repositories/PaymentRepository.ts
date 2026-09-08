@@ -402,6 +402,8 @@ export type EstadoDeGarantia = {
   primerAccesoEn: string | null;
   venceEn: string | null;
   segundosRestantes: number;
+  /** Las horas que dura la garantia, segun el SERVIDOR. */
+  horasDeGarantia: number;
   garantiaUsada: boolean;
   garantiaUsadaEn: string | null;
   solicitudActivaId: string | null;
@@ -446,6 +448,7 @@ type ElegibilidadDto = {
   first_accessed_at: string | null;
   expires_at: string | null;
   seconds_remaining: number;
+  guarantee_hours: number;
   refund_used: boolean;
   refund_used_at: string | null;
   active_request_id: string | null;
@@ -514,6 +517,7 @@ export const DevolucionesRepository = {
       primerAccesoEn: dto.first_accessed_at,
       venceEn: dto.expires_at,
       segundosRestantes: dto.seconds_remaining ?? 0,
+      horasDeGarantia: dto.guarantee_hours,
       garantiaUsada: dto.refund_used ?? false,
       garantiaUsadaEn: dto.refund_used_at,
       solicitudActivaId: dto.active_request_id,

@@ -8,6 +8,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { CoachMark } from '@/components/CoachMark';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
+import { CondicionesDeCompra } from '@/components/CondicionesDeCompra';
 import { CourseHighlights } from '@/components/CourseHighlights';
 import { FichaDelCurso } from '@/components/FichaDelCurso';
 import { StateView } from '@/components/StateView';
@@ -98,6 +99,11 @@ export function CourseScreen() {
     acto, asi que el segundo toque encuentra la puerta cerrada.
   */
   const comprandoRef = useRef(false);
+  /** La hoja de condiciones se enseña antes de ir al pago. */
+  const [viendoCondiciones, setViendoCondiciones] = useState(false);
+  /** Version publicada y horas de garantia, las dos del SERVIDOR. */
+  const [versionDeLaOferta, setVersionDeLaOferta] = useState<number | null>(null);
+  const [horasDeGarantia, setHorasDeGarantia] = useState<number | null>(null);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
@@ -145,6 +151,20 @@ export function CourseScreen() {
    * condiciones que la oferta —de pago y sin acceso— porque en cualquier otro
    * caso no hay nada que conceder.
    */
+  React.useEffect(() => {
+    let vigente = true;
+    if (!course || !esDePago || hasAccess) return;
+    void LearningRepository.publishedVersion(course.id)
+      .then((v) => vigente && setVersionDeLaOferta(v))
+      .catch(() => null);
+    void DevolucionesRepository.garantia(course.id)
+      .then((e) => vigente && setHorasDeGarantia(e.horasDeGarantia))
+      .catch(() => null);
+    return () => {
+      vigente = false;
+    };
+  }, [course, esDePago, hasAccess]);
+
   React.useEffect(() => {
     let vigente = true;
     if (!course || !esDePago || hasAccess) {
@@ -547,6 +567,21 @@ export function CourseScreen() {
 
           <FichaDelCurso course={course} duracionSegundos={durationSecondsTotal} />
 
+          <CondicionesDeCompra
+            visible={viendoCondiciones}
+            onClose={() => setViendoCondiciones(false)}
+            onConfirmar={() => {
+              setViendoCondiciones(false);
+              void comprar();
+            }}
+            titulo={course.title}
+            precioMinor={course.priceMinor}
+            moneda={course.currency}
+            version={versionDeLaOferta}
+            horasDeGarantia={horasDeGarantia}
+            confirmando={comprando}
+          />
+
           {/*
             Solo hechos que salen de la base de datos. Antes aqui ponia
             «Plantillas y ejercicios» y «Comunidad privada» para todos los
@@ -700,7 +735,7 @@ export function CourseScreen() {
                   label={comprando ? t('course.processing') : t('course.buy')}
                   disabled={comprando}
                   loading={comprando}
-                  onPress={() => void comprar()}
+                  onPress={() => setViendoCondiciones(true)}
                   style={{ marginTop: spacing.xl }}
                 />
               )
