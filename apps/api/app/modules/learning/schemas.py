@@ -194,3 +194,39 @@ class CourseStudentRead(BaseModel):
     #: Estado COMERCIAL, el único que el propietario necesita: si la venta
     #: sigue en pie, si está en revisión o si se devolvió. Sin el motivo.
     commercial_state: str = "none"
+
+
+class NotaCreate(BaseModel):
+    """Lo único que el cliente manda al crear una nota.
+
+    NO lleva `user_id`: lo pone el servidor con la sesión. Y no lleva la versión
+    del curso: la resuelve el servidor mirando cuál está publicada, porque es
+    una afirmación sobre qué se estudió.
+    """
+
+    body: str = Field(min_length=1, max_length=2000)
+    #: El minuto del vídeo. `None` cuando el reproductor no da una posición
+    #: real; nunca 0 por defecto, que diría «al principio».
+    position_seconds: int | None = Field(default=None, ge=0)
+
+
+class NotaUpdate(BaseModel):
+    """Un PATCH cambia lo que trae; lo que no viene se queda como estaba."""
+
+    body: str | None = Field(default=None, min_length=1, max_length=2000)
+    position_seconds: int | None = Field(default=None, ge=0)
+
+
+class NotaRead(BaseModel):
+    id: str
+    lesson_id: str
+    course_id: str
+    body: str
+    position_seconds: int | None = None
+    #: La versión que se estudiaba. `None` cuando el curso no tenía ninguna
+    #: publicada al escribirla.
+    course_version: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -1,7 +1,7 @@
-"""Modelos de aprendizaje: módulos, lecciones, inscripción y progreso.
+"""Modelos de aprendizaje: módulos, lecciones, inscripción, progreso y notas.
 
 Mapean public.course_modules, public.course_lessons, public.purchases
-(acceso al curso) y public.lesson_progress.
+(acceso al curso), public.lesson_progress y public.lesson_notes.
 """
 
 from datetime import datetime
@@ -9,8 +9,10 @@ from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -99,4 +101,55 @@ class LessonProgress(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LessonNote(Base):
+    """Un apunte privado de alguien sobre una lección. Migración 0057.
+
+    NO es un comentario ni una reseña: no se publica, no se modera y no la lee
+    nadie más. Ni el autor del curso, ni moderación. Vive aquí y no en
+    `content/` porque su política es justo la contraria a la de todo lo que se
+    publica.
+    """
+
+    __tablename__ = "lesson_notes"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE")
+    )
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="CASCADE")
+    )
+    lesson_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("course_lessons.id", ondelete="CASCADE")
+    )
+    #: La versión que se estaba estudiando. Nula si el curso no tiene ninguna
+    #: publicada: inventar un número sería peor que no tenerlo.
+    course_version_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("course_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    body: Mapped[str] = mapped_column(Text)
+    #: El minuto del vídeo. Nulo cuando no hay posición real; no cero, que
+    #: diría «al principio».
+    position_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(body)) between 1 and 2000", name="lesson_notes_texto"
+        ),
+        CheckConstraint(
+            "position_seconds is null or position_seconds >= 0",
+            name="lesson_notes_posicion",
+        ),
+        Index("lesson_notes_por_leccion", "user_id", "lesson_id", "created_at"),
     )

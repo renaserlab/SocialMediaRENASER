@@ -11,21 +11,30 @@ Las dos tienen que decir lo mismo. `tests/test_muro_de_pago.py` las compara.
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
+from app.core.exceptions import (
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationAppError,
+)
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import cursos_v2
-from app.modules.catalog.models import Course
+from app.modules.catalog import cursos_v2, versiones
+from app.modules.catalog.contenido import id_idempotente
+from app.modules.catalog.models import Course, CourseVersion
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce import service as comercio_service
+from app.modules.learning import esquema as esquema_aprendizaje
 from app.modules.learning import progreso
 from app.modules.learning.models import (
     CourseLesson,
     CourseModule,
+    LessonNote,
     LessonProgress,
     Purchase,
 )
@@ -38,6 +47,9 @@ from app.modules.learning.schemas import (
     LessonRead,
     ModuleRead,
     MyCourseRead,
+    NotaCreate,
+    NotaRead,
+    NotaUpdate,
 )
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import temas_de_curso
@@ -1195,3 +1207,192 @@ async def _estado_comercial(
         elif situacion in VIVOS and resultado.get(uid) != "refunded":
             resultado[uid] = "under_review"
     return resultado
+
+
+# --------------------------------------------------------------------------- #
+# Notas privadas de una lección (0057)
+#
+# PRIVADAS SIN EXCEPCIONES. No hay ruta para leer las de otro: ni el autor del
+# curso, ni moderación, ni administración. Por eso ninguna de estas funciones
+# acepta un `user_id` y todas filtran por `current_user.id`.
+# --------------------------------------------------------------------------- #
+
+
+async def _exigir_notas(db: AsyncSession) -> None:
+    if not await esquema_aprendizaje.hay_notas(db):
+        raise ServiceUnavailableError(
+            "Las notas todavía no están disponibles.",
+            code="lesson_notes_not_available",
+        )
+
+
+def _a_nota(fila: LessonNote, version: int | None) -> NotaRead:
+    return NotaRead(
+        id=fila.id,
+        lesson_id=fila.lesson_id,
+        course_id=fila.course_id,
+        body=fila.body,
+        position_seconds=fila.position_seconds,
+        course_version=version,
+        created_at=fila.created_at,
+        updated_at=fila.updated_at,
+    )
+
+
+async def _versiones_de(db: AsyncSession, ids: set[str]) -> dict[str, int]:
+    """El número legible de cada versión, en UNA consulta."""
+    limpios = {i for i in ids if i}
+    if not limpios:
+        return {}
+    filas = await db.execute(
+        select(CourseVersion.id, CourseVersion.version).where(
+            CourseVersion.id.in_(limpios)
+        )
+    )
+    return {vid: numero for vid, numero in filas}
+
+
+async def _mi_nota(db: AsyncSession, note_id: str, uid: str) -> LessonNote:
+    """La nota propia, o 404. Nunca 403: decir «existe pero no es tuya» ya
+    cuenta algo de lo que otra persona escribió."""
+    fila = await db.get(LessonNote, ensure_uuid(note_id, "Nota no encontrada."))
+    if fila is None or fila.user_id != uid:
+        raise NotFoundError("Nota no encontrada.")
+    return fila
+
+
+@router.get("/lessons/{lesson_id}/notes", response_model=list[NotaRead])
+async def listar_notas(
+    lesson_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[NotaRead]:
+    """Mis notas de esta lección, de la más reciente a la más vieja."""
+    await _exigir_notas(db)
+    lid = ensure_uuid(lesson_id, "Lección no encontrada.")
+
+    filas = list(
+        await db.scalars(
+            select(LessonNote)
+            .where(LessonNote.user_id == current_user.id, LessonNote.lesson_id == lid)
+            # Desempate por id: sin él, dos del mismo instante bailan entre cargas.
+            .order_by(LessonNote.created_at.desc(), LessonNote.id.desc())
+        )
+    )
+    numeros = await _versiones_de(db, {f.course_version_id for f in filas})
+    return [_a_nota(f, numeros.get(f.course_version_id)) for f in filas]
+
+
+@router.post(
+    "/lessons/{lesson_id}/notes",
+    response_model=NotaRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_nota(
+    lesson_id: str,
+    payload: NotaCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> NotaRead:
+    """Apuntar algo en esta lección.
+
+    PIDE ACCESO al contenido del curso: tomar apuntes de una lección que no se
+    puede abrir no es un caso real, y sin esta comprobación cualquiera podría
+    escribir filas asociadas a cualquier curso.
+
+    UN DOBLE TOQUE NO CREA DOS NOTAS: con `Idempotency-Key` el id se DERIVA de
+    la clave, así que la segunda inserción choca contra la clave primaria y se
+    devuelve la que ya estaba. Lo sostiene la base, no un `if`.
+    """
+    await _exigir_notas(db)
+    leccion, _modulo, curso = await _leccion_con_curso(db, lesson_id)
+    if not await _tiene_acceso(db, current_user.id, curso):
+        raise ForbiddenError(
+            "Necesitas acceso al curso para tomar notas.",
+            code="lesson_notes_access_required",
+        )
+
+    texto = payload.body.strip()
+    if not texto:
+        raise ValidationAppError(
+            "La nota no puede estar vacía.", code="lesson_note_empty"
+        )
+
+    derivado = id_idempotente(f"nota:{leccion.id}", current_user.id, idempotency_key)
+    if derivado is not None:
+        existente = await db.get(LessonNote, derivado)
+        if existente is not None:
+            numeros = await _versiones_de(db, {existente.course_version_id})
+            return _a_nota(existente, numeros.get(existente.course_version_id))
+
+    version = await versiones.vigente(db, curso.id)
+    fila = LessonNote(
+        user_id=current_user.id,
+        course_id=curso.id,
+        lesson_id=leccion.id,
+        course_version_id=version.id if version is not None else None,
+        body=texto,
+        position_seconds=payload.position_seconds,
+    )
+    if derivado is not None:
+        fila.id = derivado
+    db.add(fila)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existente = await db.get(LessonNote, derivado) if derivado else None
+        if existente is None:
+            raise
+        numeros = await _versiones_de(db, {existente.course_version_id})
+        return _a_nota(existente, numeros.get(existente.course_version_id))
+
+    await db.refresh(fila)
+    return _a_nota(fila, version.version if version is not None else None)
+
+
+@router.patch("/notes/{note_id}", response_model=NotaRead)
+async def editar_nota(
+    note_id: str,
+    payload: NotaUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotaRead:
+    """Corregir una nota propia. La versión anotada NO se toca: dice cuándo se
+    estudió, no cuándo se editó."""
+    await _exigir_notas(db)
+    fila = await _mi_nota(db, note_id, current_user.id)
+
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        raise ValidationAppError(
+            "No hay nada que cambiar.", code="lesson_note_no_changes"
+        )
+    if "body" in cambios:
+        texto = (cambios["body"] or "").strip()
+        if not texto:
+            raise ValidationAppError(
+                "La nota no puede estar vacía.", code="lesson_note_empty"
+            )
+        fila.body = texto
+    if "position_seconds" in cambios:
+        fila.position_seconds = cambios["position_seconds"]
+
+    await db.commit()
+    await db.refresh(fila)
+    numeros = await _versiones_de(db, {fila.course_version_id})
+    return _a_nota(fila, numeros.get(fila.course_version_id))
+
+
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def retirar_nota(
+    note_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Borrar una nota propia. Es suya: se borra de verdad, no se oculta."""
+    await _exigir_notas(db)
+    fila = await _mi_nota(db, note_id, current_user.id)
+    await db.delete(fila)
+    await db.commit()
