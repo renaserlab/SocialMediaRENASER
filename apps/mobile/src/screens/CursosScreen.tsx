@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -13,6 +13,8 @@ import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import { etiquetaDePrecio } from '@/lib/dinero';
 import { LearningRepository } from '@/repositories/LearningRepository';
+import type { FiltrosDeCatalogo } from '@/repositories/LearningRepository';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Course, MyCourse } from '@/types';
@@ -35,9 +37,14 @@ import type { Course, MyCourse } from '@/types';
  *     `GET /recommendations/courses`.
  *   · «Todo el catálogo» — `GET /catalog/courses`, que solo trae publicados.
  *
- * NO HAY BUSCADOR TODAVÍA, y es a propósito: `GET /catalog/courses` no acepta
- * ningún parámetro de búsqueda. Una caja de búsqueda que devolviera el catálogo
- * entero sin filtrar sería peor que no tenerla, porque parecería que ha buscado.
+ * EL BUSCADOR Y EL FILTRO DE NIVEL VAN AL SERVIDOR, y ahí está todo el asunto:
+ * filtrando aquí sobre la página que llega, pedir «avanzado» devolvería los
+ * avanzados QUE HUBIERA en los primeros veinticuatro y la pantalla juraría que
+ * no hay más.
+ *
+ * NO HAY FILTRO DE DURACIÓN NI DE GARANTÍA, y no por olvido: no existe columna
+ * de duración que filtrar, y la garantía es de 168 horas para todos, así que no
+ * separaría nada. Tampoco de objetivo: no hay taxonomía de objetivos.
  */
 export function CursosScreen() {
   const { t } = useTranslation();
@@ -46,8 +53,25 @@ export function CursosScreen() {
 
   const [enCurso, setEnCurso] = useState<MyCourse[]>([]);
   const [catalogo, setCatalogo] = useState<Course[]>([]);
+  /** Lo que se está escribiendo ahora mismo. */
+  const [texto, setTexto] = useState('');
+  /**
+   * Lo que se le ha pedido al servidor.
+   *
+   * SON DOS ESTADOS Y NO UNO. Buscando con cada tecla, escribir «liderazgo» son
+   * nueve peticiones y ocho respuestas que llegan tarde y se pisan entre sí: la
+   * lista parpadea y puede acabar enseñando los resultados de «liderazg».
+   */
+  const [textoAplicado, setTextoAplicado] = useState('');
+  const [nivel, setNivel] = useState<FiltrosDeCatalogo['nivel']>(undefined);
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState<string | null>(null);
+
+  // Medio segundo de calma antes de preguntar. Se cancela al teclear otra vez.
+  useEffect(() => {
+    const espera = setTimeout(() => setTextoAplicado(texto), 500);
+    return () => clearTimeout(espera);
+  }, [texto]);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -57,7 +81,7 @@ export function CursosScreen() {
       // petición de mis cursos caída, la portada tiene que seguir enseñando el
       // catálogo: convertir un fallo de lo accesorio en una pantalla vacía deja
       // sin ver la tienda a quien solo venía a mirar.
-      const cursos = await LearningRepository.listCourses(24);
+      const cursos = await LearningRepository.listCourses(24, { texto: textoAplicado, nivel });
       setCatalogo(cursos);
       try {
         const mios = await LearningRepository.myCourses();
@@ -70,7 +94,7 @@ export function CursosScreen() {
     } finally {
       setCargando(false);
     }
-  }, [t]);
+  }, [t, textoAplicado, nivel]);
 
   useEffect(() => {
     void cargar();
@@ -97,6 +121,72 @@ export function CursosScreen() {
   return (
     <AppScreen>
       <AppHeader title={t('verticales.cursos')} />
+      <View style={[styles.buscador, { borderColor: colors.border }]}>
+        <Feather name="search" size={16} color={colors.textMuted} />
+        <TextInput
+          placeholder={t('cursos.queQuieresAprender')}
+          placeholderTextColor={colors.textMuted}
+          value={texto}
+          onChangeText={setTexto}
+          style={[styles.entrada, { color: colors.text }]}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel={t('cursos.queQuieresAprender')}
+        />
+        {texto.length > 0 ? (
+          <Pressable
+            onPress={() => setTexto('')}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={t('search.clear')}
+          >
+            <Feather name="x" size={16} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {/*
+        Blindada contra el carrusel de secciones, como toda lista horizontal
+        dentro de las pestañas.
+      */}
+      <SinCambioDeSeccion>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.niveles}
+        >
+          {([undefined, 'beginner', 'intermediate', 'advanced'] as const).map((cual) => {
+            const activo = nivel === cual;
+            return (
+              <Pressable
+                key={cual ?? 'todos'}
+                onPress={() => setNivel(cual)}
+                style={[
+                  styles.nivel,
+                  {
+                    borderColor: activo ? colors.text : colors.border,
+                    backgroundColor: activo ? colors.text : 'transparent',
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: activo }}
+                accessibilityLabel={t(cual ? `cursos.nivel.${cual}` : 'cursos.nivel.todos')}
+              >
+                <Text
+                  style={[
+                    styles.etiquetaDeNivel,
+                    { color: activo ? colors.background : colors.text },
+                  ]}
+                >
+                  {t(cual ? `cursos.nivel.${cual}` : 'cursos.nivel.todos')}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SinCambioDeSeccion>
+
       <ScrollView contentContainerStyle={styles.contenido}>
         {enCurso.length > 0 ? (
           <View style={styles.seccion}>
@@ -185,6 +275,26 @@ export function CursosScreen() {
 
 const styles = StyleSheet.create({
   contenido: { paddingBottom: spacing.xl, gap: spacing.lg },
+  buscador: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  entrada: { flex: 1, fontSize: 15, padding: 0 },
+  niveles: { gap: spacing.xs, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  nivel: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+  },
+  etiquetaDeNivel: { fontSize: 13, fontWeight: '600' },
   seccion: { gap: spacing.sm },
   fila: {
     flexDirection: 'row',

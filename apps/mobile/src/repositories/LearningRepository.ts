@@ -156,17 +156,52 @@ async function firmarPortadas(courses: Course[]): Promise<Course[]> {
  * `services/repositories/*`, que apuntaban a una tabla `lessons` inexistente
  * (se llama `course_lessons`) y devolvian la fila sin mapear.
  */
+/**
+ * Los filtros que el catalogo sabe aplicar EN EL SERVIDOR.
+ *
+ * La lista es corta a proposito: son exactamente los que existen. La
+ * duracion y la garantia no estan porque no hay columna que filtrar —la
+ * garantia ademas es de 168 horas para todos, asi que no separaria nada—, y
+ * el objetivo tampoco, porque no hay taxonomia de objetivos en el modelo.
+ */
+export type FiltrosDeCatalogo = {
+  texto?: string;
+  nivel?: 'beginner' | 'intermediate' | 'advanced';
+  /** Codigo de dos letras, como lo guarda el curso. */
+  idioma?: string;
+};
 export const LearningRepository = {
   /** El catalogo publico: SOLO cursos publicados. */
   /**
    * El catálogo público.
    *
+   * @param filtros los que el SERVIDOR sabe aplicar. La duración NO está, y no
+   *   por olvido: no existe esa columna. Lo único que hay es `duration_seconds`
+   *   por lección, y sumarla en cada página del catálogo o desnormalizarla en
+   *   `courses` son las dos una migración.
+   *
    * @param limite cuántos traer. Sin indicarlo NO se manda el parámetro y el
    *   servidor decide, que es lo que pasaba antes: hay quien lo llama para
    *   filtrar por autor en el cliente y necesita la lista entera.
    */
-  async listCourses(limite?: number): Promise<Course[]> {
-    const consulta = limite ? `?limit=${limite}` : '';
+  async listCourses(
+    limite?: number,
+    filtros?: FiltrosDeCatalogo,
+  ): Promise<Course[]> {
+    /*
+      LOS FILTROS VIAJAN AL SERVIDOR, no se aplican sobre lo que llega. Filtrando
+      aqui sobre la pagina recibida, pedir «avanzado» devuelve los avanzados QUE
+      HUBIERA en los veinte primeros y la pantalla jura que no hay mas.
+
+      Sin filtros no se manda ni un parametro de mas: el catalogo tiene que
+      seguir devolviendo exactamente lo de siempre.
+    */
+    const partes: string[] = [];
+    if (limite) partes.push(`limit=${limite}`);
+    if (filtros?.texto?.trim()) partes.push(`q=${encodeURIComponent(filtros.texto.trim())}`);
+    if (filtros?.nivel) partes.push(`level=${filtros.nivel}`);
+    if (filtros?.idioma) partes.push(`language=${filtros.idioma}`);
+    const consulta = partes.length > 0 ? `?${partes.join('&')}` : '';
     const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses${consulta}`, {
       auth: false,
     });
