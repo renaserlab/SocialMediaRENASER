@@ -925,6 +925,8 @@ export const es = {
   'ficha.aprenderas': "Lo que aprenderás",
   'ficha.paraQuien': "Para quién es",
   'ficha.requisitos': "Requisitos",
+  'syllabus.versionConflictTitle': "El curso cambió por debajo",
+  'syllabus.versionConflict': "El temario cambió mientras lo editabas. Vuelve a cargarlo antes de guardar.",
   'confirm.access': 'Ya tienes acceso a',
   'confirm.yourNewCourse': 'tu nuevo curso',
   'confirm.goToCourse': 'Ir al curso',

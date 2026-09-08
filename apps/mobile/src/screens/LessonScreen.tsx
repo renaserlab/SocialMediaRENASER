@@ -164,7 +164,12 @@ export function LessonScreen() {
   const saveDescription = async () => {
     setSavingDescription(true);
     try {
-      await CourseContentRepository.updateLesson(lesson.id, { body: descriptionDraft.trim() });
+      // SIN `moduleId`: el detalle de la lección devuelve `module_title` pero
+      // no su id, así que lo resuelve el repositorio. Ver `moduloDeLaLeccion`.
+      await CourseContentRepository.updateLesson(
+        { courseId: lesson.courseId, lessonId: lesson.id },
+        { body: descriptionDraft.trim() },
+      );
       toast(t('lesson.descriptionSaved'));
       setEditingDescription(false);
       reload();
@@ -188,7 +193,10 @@ export function LessonScreen() {
     });
     if (!accepted) return;
     try {
-      await CourseContentRepository.removeLesson(lesson.id);
+      await CourseContentRepository.removeLesson({
+        courseId: lesson.courseId,
+        lessonId: lesson.id,
+      });
       toast(t('lesson.deleted'));
       if (router.canGoBack()) router.back();
       else router.replace('/');

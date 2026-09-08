@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
@@ -12,7 +12,9 @@ import { StateView } from '@/components/StateView';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import {
+  ContenidoDelCursoCambiado,
   CourseContentRepository,
+  nuevaClaveDeCreacion,
   type CourseModule,
 } from '@/repositories/CourseContentRepository';
 import { pickVideo, uploadCourseMedia, type UploadProgress } from '@/services/storage';
@@ -97,6 +99,20 @@ export function CourseContentEditor({
   const [moduleTitle, setModuleTitle] = useState('');
   const [addingModule, setAddingModule] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
+  /**
+   * La clave de idempotencia del módulo que se está creando.
+   *
+   * ES UNA REFERENCIA Y NO UN ESTADO a propósito: se escribe y se lee en la
+   * MISMA vuelta, antes de cualquier `await`, así que el segundo toque —que
+   * llega antes de que React repinte nada— lee ya la clave del primero y el
+   * servidor devuelve el módulo que ya creó en vez de crear otro. Con `useState`
+   * el segundo toque leería todavía el valor viejo, que es el fallo entero.
+   *
+   * Se conserva mientras la hoja siga abierta: reintentar tras un corte de red
+   * o tras un conflicto tiene que mandar LA MISMA clave, porque la primera
+   * petición pudo llegar aunque la respuesta no volviera.
+   */
+  const claveDeModulo = useRef<string | null>(null);
   /** Modulo al que se le esta anadiendo una leccion. */
   const [lessonFor, setLessonFor] = useState<CourseModule | null>(null);
 
@@ -157,13 +173,26 @@ export function CourseContentEditor({
     const title = moduleTitle.trim();
     if (!title) return;
     setModuleError(null);
+    // Se reserva ANTES del `await`: es lo que hace que el segundo toque use la
+    // clave del primero. Ya no se manda posición, el módulo va al final.
+    claveDeModulo.current ??= nuevaClaveDeCreacion();
     try {
-      await CourseContentRepository.createModule(courseId, title, modules.length);
+      await CourseContentRepository.createModule({
+        courseId,
+        title,
+        claveDeIdempotencia: claveDeModulo.current,
+      });
+      claveDeModulo.current = null;
       setModuleTitle('');
       setAddingModule(false);
       toast(t('syllabus.moduleAdded'));
       await reloadAndNotify();
     } catch (error) {
+      // El temario cambió por debajo mientras se escribía: guardar otra vez sin
+      // mirar pisaría lo que acaba de hacer el otro, así que se recarga lo que
+      // hay de verdad y se deja el aviso —que ya dice qué pasó y qué hacer— en
+      // la hoja, que sigue abierta.
+      if (error instanceof ContenidoDelCursoCambiado) await reloadAndNotify();
       // La hoja sigue abierta al fallar: el aviso tiene que vivir dentro de
       // ella, porque en iOS un dialogo no se abre encima de un Modal.
       setModuleError(error instanceof Error ? error.message : t('syllabus.addFailed'));
@@ -182,10 +211,18 @@ export function CourseContentEditor({
     });
     if (!accepted) return;
     try {
-      await CourseContentRepository.removeModule(module.id);
+      await CourseContentRepository.removeModule(courseId, module.id);
       toast(t('syllabus.moduleDeleted'));
       await reloadAndNotify();
-    } catch {
+    } catch (error) {
+      // «Inténtalo de nuevo» sería un mal consejo aquí: lo que hay que hacer es
+      // mirar el temario que hay ahora, y por eso se recarga y se enseña lo que
+      // dice el servidor en vez del texto de reintento.
+      if (error instanceof ContenidoDelCursoCambiado) {
+        await reloadAndNotify();
+        notify(t('common.deleteFailed'), error.message);
+        return;
+      }
       notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
@@ -199,10 +236,15 @@ export function CourseContentEditor({
     });
     if (!accepted) return;
     try {
-      await CourseContentRepository.removeLesson(lessonId);
+      await CourseContentRepository.removeLesson({ courseId, lessonId });
       toast(t('lesson.deleted'));
       await reloadAndNotify();
-    } catch {
+    } catch (error) {
+      if (error instanceof ContenidoDelCursoCambiado) {
+        await reloadAndNotify();
+        notify(t('common.deleteFailed'), error.message);
+        return;
+      }
       notify(t('common.deleteFailed'), t('common.tryAgain'));
     }
   };
@@ -373,6 +415,9 @@ export function CourseContentEditor({
           setAddingModule(false);
           setModuleTitle('');
           setModuleError(null);
+          // Cerrar la hoja termina el intento: el módulo siguiente es OTRO
+          // módulo, y con la clave vieja el servidor devolvería el anterior.
+          claveDeModulo.current = null;
         }}
       >
         <Text style={styles.sheetTitle} color={colors.text}>
@@ -424,6 +469,15 @@ function AddLessonSheet({
   // Dentro de una hoja el error se pinta en la propia hoja: en iOS un dialogo
   // no puede abrirse sobre un Modal y el aviso no llegaba a verse.
   const [error, setError] = useState<string | null>(null);
+  /**
+   * La clave de idempotencia de ESTA lección. Ver `claveDeModulo`.
+   *
+   * Aquí importa todavía más: antes de crear la lección se sube el vídeo, así
+   * que el guardado puede tardar mucho y quien mira tiene tiempo de sobra para
+   * volver a pulsar. La hoja se monta y se desmonta con cada alta, de modo que
+   * la referencia nace vacía por sí sola y no hay que limpiarla.
+   */
+  const claveDeLeccion = useRef<string | null>(null);
 
   const choose = async () => {
     try {
@@ -456,6 +510,7 @@ function AddLessonSheet({
     }
     setSaving(true);
     setError(null);
+    claveDeLeccion.current ??= nuevaClaveDeCreacion();
     try {
       const mediaPath = video
         ? // `module.courseId` y no una prop nueva: el modulo ya sabe de que curso es,
@@ -463,18 +518,24 @@ function AddLessonSheet({
           await uploadCourseMedia(video, module.courseId, setProgress)
         : null;
       await CourseContentRepository.createLesson({
+        courseId: module.courseId,
         moduleId: module.id,
         title: title.trim(),
         mediaPath,
         // El selector informa la duracion en ms; la base la guarda en segundos.
         durationSeconds,
-        sortOrder: module.lessons.length,
+        claveDeIdempotencia: claveDeLeccion.current,
       });
+      claveDeLeccion.current = null;
       onCreated();
       // Cerrar antes del aviso: la hoja es un Modal y en iOS tapa el toast.
       onClose();
       toast(t('syllabus.lessonAdded'));
     } catch (failure) {
+      // El conflicto de versión se lee aquí dentro, en la hoja, que sigue
+      // abierta: el mensaje del servidor ya dice que el curso cambió y que hay
+      // que volver a cargarlo. NO se llama a `onCreated`, que recargaría: no se
+      // creó nada, y decir lo contrario es lo que confunde a quien lo lee.
       setError(failure instanceof Error ? failure.message : t('highlights.saveFailed'));
     } finally {
       setSaving(false);

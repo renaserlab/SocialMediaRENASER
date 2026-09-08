@@ -1,16 +1,30 @@
+import { LearningRepository } from '@/repositories/LearningRepository';
+import { API_V1, ApiError, apiRequest } from '@/services/api';
 import { signCourseUrls } from '@/services/storage';
 import { supabase } from '@/services/supabase';
 
 /**
- * Modulos y lecciones de un curso, contra Supabase (PostgREST).
+ * Modulos y lecciones de un curso.
  *
- * Los cursos se crean por la API FastAPI, pero su CONTENIDO no tenia camino:
- * la API solo expone lectura y las tablas no tenian politica de escritura. Se
- * abre por aqui, como ya se hizo con historias y testimonios, porque la API
- * desplegada se construye desde otra rama.
+ * ## Escribir el temario va POR LA API. Leerlo, todavia no.
  *
- * Quien puede escribir lo decide la RLS de 0012_course_content.sql (autor del
- * curso o administracion), no esta capa.
+ * Todo esto se escribia contra PostgREST con la clave anonima porque la API no
+ * ofrecia otro camino. La RLS de 0012 decidia quien podia, asi que no era un
+ * agujero de permisos: era un agujero de RASTRO. Un autor reescribia el temario
+ * de un curso YA VENDIDO y no quedaba ni una linea diciendo que habia pasado, y
+ * ni siquiera se sabia sobre que version se habia editado. Los ocho endpoints
+ * de `catalog/router.py` cierran eso: cada escritura deja su nota de auditoria
+ * con el estado del curso y su version vigente.
+ *
+ * LAS LECTURAS SIGUEN POR SUPABASE, y no por descuido: `listContent` compone el
+ * temario entero con sus URLs firmadas en dos consultas, y no hay endpoint que
+ * devuelva eso. Mientras no lo haya, cambiarlas seria empeorar la pantalla para
+ * que el fichero quedara uniforme.
+ *
+ * TAMPOCO se han movido las escrituras que NO son temario: los recursos
+ * descargables (`addResource`, `removeResource`) y `removeCourse`, que no
+ * tienen endpoint ninguno, y `setHighlights` y `setComingSoon`, que son campos
+ * de la FICHA del curso. Cada una dice en su sitio por que sigue ahi.
  */
 
 /** Los tipos de lección que la aplicación sabe pintar (migración 0034). */
@@ -98,11 +112,16 @@ function client() {
 /*
   ¿SABE ESTA BASE DE LA 0034?
 
-  El contenido de un curso se escribe contra Supabase directamente (es la RLS de
-  0012 la que decide quién puede), así que aquí no hay un backend que degrade
-  por nosotros: si se manda `kind` a una base sin esa columna, PostgREST rechaza
-  la fila ENTERA y la lección no se guarda. Perder una lección por un campo
-  accesorio es exactamente lo que no puede pasar.
+  El temario se LEE contra Supabase directamente, así que en la lectura no hay
+  un backend que degrade por nosotros: si se le pide `kind` a una base sin esa
+  columna, PostgREST no devuelve la fila sin ese campo, devuelve un error y
+  ninguna fila. El temario entero desaparecería por un campo accesorio.
+
+  ESCRIBIR YA NO NECESITA PREGUNTAR: las ocho operaciones van por la API, que
+  acepta `kind`, `is_preview` y `description` y los ignora si la migración no
+  está (ver `catalog/cursos_v2.py`). Lo que queda de esta comprobación es la
+  lectura y una decisión de interfaz: el asistente no ofrece un interruptor de
+  «muestra gratuita» que la base de hoy no vaya a recordar.
 
   Se pregunta UNA vez por sesión y se recuerda la respuesta, igual que hace el
   backend en `catalog/esquema.py`. Y solo se recuerda cuando la respuesta es
@@ -165,22 +184,130 @@ function aTipo(valor: string | null | undefined): LessonKind {
   return valor === 'text' ? 'text' : 'video';
 }
 
+/** Donde vive el temario en la API. Las ocho escrituras cuelgan de aquí. */
+const CURSOS = `${API_V1}/catalog/courses`;
+
 /**
- * Escribe `sort_order` = posición para toda la lista.
+ * El temario cambió por debajo mientras alguien lo editaba.
  *
- * Las escrituras van EN SERIE y no en paralelo a propósito: son pocas y así, si
- * una falla, se sabe cuántas se aplicaron. Un `Promise.all` que falla a la
- * mitad deja el temario en un orden que nadie pidió y sin forma de saber cuál.
+ * ES UN TIPO PROPIO Y NO EL `ApiError` CRUDO porque quien lo recibe tiene que
+ * poder distinguirlo sin leer el texto del mensaje: ante esto NO se reintenta
+ * —guardar otra vez pisaría lo que acaba de hacer el otro— sino que se vuelve a
+ * cargar el temario y se dice qué pasó. Comparar cadenas para decidirlo se
+ * rompe en cuanto el mensaje se traduce.
+ *
+ * El servidor lo devuelve como 409 `course_version_mismatch` cuando la petición
+ * llevaba `If-Match` con una huella que ya no es la vigente.
+ *
+ * HOY LA APP NO MANDA `If-Match`, y no por dejadez: NINGÚN endpoint entrega el
+ * `content_hash` de la versión vigente. `GET /catalog/courses/{id}/version`
+ * devuelve número, estado y fotografía, pero no la huella, así que no hay de
+ * dónde sacar lo que habría que mandar, y calcularla aquí sería reescribir en
+ * la app la firma que hace `versiones.py`. La traducción se deja puesta porque
+ * el día que el backend exponga la huella esto tiene que estar ya resuelto, no
+ * descubrirse con el primer autor que pierda su trabajo.
  */
-async function ordenar(tabla: 'course_modules' | 'course_lessons', ids: string[]): Promise<void> {
-  const db = client();
-  for (let posicion = 0; posicion < ids.length; posicion += 1) {
-    const { error } = await db
-      .from(tabla)
-      .update({ sort_order: posicion })
-      .eq('id', ids[posicion]);
-    if (error) throw new Error(error.message);
+export class ContenidoDelCursoCambiado extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = 'ContenidoDelCursoCambiado';
   }
+}
+
+/*
+  LA CLAVE DE IDEMPOTENCIA, Y POR QUÉ LA TRAE QUIEN LLAMA.
+
+  El servidor DERIVA el identificador de la fila a partir de esta clave (ver
+  `catalog/contenido.py`), así que dos peticiones con la misma clave crean UN
+  módulo: la segunda choca contra la clave primaria y recibe el que ya estaba.
+  Eso es lo que convierte un doble toque —o un reintento tras un corte de red
+  que quizá sí llegó— en una sola alta, y lo garantiza la base, no un `if`.
+
+  NO SE GENERA DENTRO DEL REPOSITORIO. Una clave nueva en cada llamada no
+  protegería de nada: sería un identificador distinto por petición, que es
+  exactamente el problema. La clave pertenece al INTENTO DE GUARDADO, y quien
+  sabe cuándo empieza y cuándo acaba un intento es la pantalla; por eso la
+  guarda en una referencia y la reusa mientras la hoja siga abierta.
+
+  Y TAMPOCO SE DERIVA DEL CONTENIDO (curso + título): dos módulos que alguien
+  quiere llamar igual —«Práctica», dos veces— serían entonces el mismo módulo, y
+  el segundo no se crearía nunca.
+*/
+let creaciones = 0;
+
+/** Una clave para un intento de creación. Se reusa mientras sea el mismo. */
+export function nuevaClaveDeCreacion(): string {
+  creaciones += 1;
+  // Hora, contador y azar juntos: la hora sola repite si dos altas caen en el
+  // mismo milisegundo, y el contador solo repite entre dos arranques de la app.
+  return `${Date.now().toString(36)}-${creaciones}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Lo que hace falta para escribir en una lección concreta. */
+export type ReferenciaDeLeccion = {
+  courseId: string;
+  /**
+   * Puede faltar: `GET /learning/lessons/{id}` devuelve `module_title` pero no
+   * `module_id`, así que la pantalla de la lección no lo tiene. Ver
+   * `moduloDeLaLeccion`.
+   */
+  moduleId?: string;
+  lessonId: string;
+};
+
+/**
+ * Una escritura del temario, con el conflicto de versión ya traducido.
+ *
+ * Pasa por aquí TODO lo que escribe módulos y lecciones para que la traducción
+ * del 409 exista en un solo sitio: repartida por las ocho operaciones, la
+ * siguiente que se añada se olvidaría de hacerla.
+ */
+async function escribirTemario(
+  ruta: string,
+  opciones: { method: string; cuerpo?: unknown; claveDeIdempotencia?: string },
+): Promise<void> {
+  try {
+    await apiRequest<void>(ruta, {
+      method: opciones.method,
+      ...(opciones.cuerpo !== undefined ? { body: JSON.stringify(opciones.cuerpo) } : {}),
+      ...(opciones.claveDeIdempotencia
+        ? { headers: { 'Idempotency-Key': opciones.claveDeIdempotencia } }
+        : {}),
+    });
+  } catch (fallo) {
+    if (fallo instanceof ApiError && fallo.code === 'course_version_mismatch') {
+      throw new ContenidoDelCursoCambiado(fallo.message);
+    }
+    throw fallo;
+  }
+}
+
+/**
+ * A qué módulo pertenece una lección.
+ *
+ * Existe por UN caso: la pantalla de la lección llega con el curso y la lección
+ * y nada más, porque el detalle de `learning` no devuelve `module_id`. Los dos
+ * editores sí lo traen en el propio modelo y no pagan esta consulta.
+ *
+ * Es una LECTURA por PostgREST, de las que se quedan mientras la API no ofrezca
+ * el temario completo.
+ */
+async function moduloDeLaLeccion(lessonId: string): Promise<string> {
+  const { data, error } = await client()
+    .from('course_lessons')
+    .select('module_id')
+    .eq('id', lessonId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const moduleId = (data as { module_id?: string } | null)?.module_id;
+  if (!moduleId) throw new Error('Lección no encontrada.');
+  return moduleId;
+}
+
+/** La ruta de una lección, resolviendo el módulo solo cuando no viene dado. */
+async function rutaDeLeccion(ref: ReferenciaDeLeccion): Promise<string> {
+  const moduleId = ref.moduleId ?? (await moduloDeLaLeccion(ref.lessonId));
+  return `${CURSOS}/${ref.courseId}/modules/${moduleId}/lessons/${ref.lessonId}`;
 }
 
 export const CourseContentRepository = {
@@ -258,12 +385,17 @@ export const CourseContentRepository = {
     return (data?.highlights as string[] | null) ?? [];
   },
 
+  /**
+   * SIGUE CONTRA SUPABASE, y queda apuntado como lo que es: pendiente.
+   *
+   * Esto NO es temario —es la ficha del curso, `courses.highlights`— así que no
+   * lo cubre ninguno de los ocho endpoints de módulos y lecciones. Sí lo
+   * aceptaría `PATCH /catalog/courses/{id}`, que además deja rastro; moverlo es
+   * un cambio de la ficha, con su propia pantalla y sus propias pruebas, y
+   * meterlo aquí sería arrastrarlo dentro de otra cosa.
+   */
   async setHighlights(courseId: string, highlights: string[]): Promise<void> {
-    const { error } = await client()
-      .from('courses')
-      .update({ highlights })
-      .eq('id', courseId);
-    if (error) throw new Error(error.message);
+    await LearningRepository.updateCourse(courseId, { highlights });
   },
 
   /**
@@ -273,15 +405,14 @@ export const CourseContentRepository = {
    * Supabase— mientras la ficha del curso leía el MISMO dato de la API. Dos
    * fuentes para lo mismo son dos respuestas posibles: la etiqueta de arriba
    * decía una cosa y el bloque del temario otra. Se lee del detalle del curso,
-   * que es de donde viene todo lo demás de esa pantalla; escribir sigue aquí
-   * porque el contenido del curso se escribe contra Supabase directamente.
+   * que es de donde viene todo lo demás de esa pantalla.
+   *
+   * ESCRIBIR SIGUE AQUÍ por lo mismo que `setHighlights`: `coming_soon` es un
+   * campo de la ficha del curso, no del temario, y no lo toca ninguno de los
+   * ocho endpoints que se acaban de migrar.
    */
   async setComingSoon(courseId: string, comingSoon: boolean): Promise<void> {
-    const { error } = await client()
-      .from('courses')
-      .update({ coming_soon: comingSoon })
-      .eq('id', courseId);
-    if (error) throw new Error(error.message);
+    await LearningRepository.updateCourse(courseId, { comingSoon });
   },
 
   /**
@@ -292,10 +423,13 @@ export const CourseContentRepository = {
    * OJO: un curso con compras tiene `on delete restrict` en purchases, asi que
    * la base lo rechazara si alguien ya lo compro. Es intencionado: no se borra
    * algo por lo que alguien pago.
+   *
+   * SIGUE CONTRA SUPABASE porque NO HAY endpoint: el catálogo no expone
+   * `DELETE /courses/{id}`. Es, además, la escritura que más falta le hace un
+   * rastro, así que queda apuntada aquí y no en un documento aparte.
    */
   async removeCourse(courseId: string): Promise<void> {
-    const { error } = await client().from('courses').delete().eq('id', courseId);
-    if (error) throw new Error(error.message);
+    await LearningRepository.deleteCourse(courseId);
   },
 
   /** Material descargable de una leccion, con las URLs ya firmadas. */
@@ -339,6 +473,11 @@ export const CourseContentRepository = {
     return urls[storagePath] ?? null;
   },
 
+  /*
+    LOS RECURSOS SE QUEDAN CONTRA SUPABASE, y no hay decisión que tomar: la API
+    no conoce `course_lesson_resources`. No hay endpoint que crear ni borrar un
+    documento de una lección, así que migrarlos hoy sería inventárselos.
+  */
   async addResource(input: {
     lessonId: string;
     title: string;
@@ -363,92 +502,121 @@ export const CourseContentRepository = {
     if (error) throw new Error(error.message);
   },
 
-  async createModule(
-    courseId: string,
-    title: string,
-    sortOrder: number,
-    description = '',
-  ): Promise<void> {
-    const fila: Record<string, unknown> = {
-      course_id: courseId,
-      title,
-      sort_order: sortOrder,
-    };
-    // La descripción solo viaja si hay dónde guardarla: sin la 0034, mandarla
-    // haría que PostgREST rechazara el módulo entero.
-    if (description && (await soportaContenidoV2())) fila.description = description;
-    const { error } = await client().from('course_modules').insert(fila);
-    if (error) throw new Error(error.message);
+  /*
+    LAS ALTAS YA NO ELIGEN POSICIÓN, y por eso desapareció `sortOrder`.
+
+    Lo elegía el cliente contando lo que tenía en pantalla, y dos altas seguidas
+    —o dos personas a la vez— proponían el MISMO número: dos elementos con el
+    mismo `sort_order` dejan el temario a merced de cómo devuelva las filas la
+    base, y el alumno ve las lecciones bailar entre dos cargas de la misma
+    pantalla. Ahora se añade siempre al final y el orden se cambia en un solo
+    sitio, `reorder`, que reescribe la lista entera.
+
+    Las dos pantallas pasaban justamente «cuántos hay», que es el final: no se
+    pierde nada al quitarlo.
+  */
+
+  /** Añade un módulo AL FINAL del temario. */
+  async createModule(input: {
+    courseId: string;
+    title: string;
+    description?: string;
+    /** Ver `nuevaClaveDeCreacion`. Obligatoria: sin ella dos toques, dos módulos. */
+    claveDeIdempotencia: string;
+  }): Promise<void> {
+    await escribirTemario(`${CURSOS}/${input.courseId}/modules`, {
+      method: 'POST',
+      // La descripción viaja SIEMPRE. Antes había que preguntar si la 0034
+      // estaba puesta, porque nombrarle a PostgREST una columna que no existe
+      // hace que rechace la fila entera y se pierda el módulo; ahora degrada el
+      // servidor, que la acepta y no la guarda si no tiene dónde.
+      cuerpo: { title: input.title, description: input.description ?? '' },
+      claveDeIdempotencia: input.claveDeIdempotencia,
+    });
   },
 
+  /** Edita un módulo. Lo que no viaja no se toca. */
   async updateModule(
+    courseId: string,
     moduleId: string,
     cambios: { title?: string; description?: string },
   ): Promise<void> {
     const patch: Record<string, unknown> = {};
     if (cambios.title !== undefined) patch.title = cambios.title;
-    if (cambios.description !== undefined && (await soportaContenidoV2())) {
-      patch.description = cambios.description;
-    }
+    if (cambios.description !== undefined) patch.description = cambios.description;
+    // Un PATCH sin campos no es una edición: se ahorra el viaje y, sobre todo,
+    // la línea de auditoría que diría que alguien tocó algo sin tocarlo.
     if (Object.keys(patch).length === 0) return;
-    const { error } = await client().from('course_modules').update(patch).eq('id', moduleId);
-    if (error) throw new Error(error.message);
+    await escribirTemario(`${CURSOS}/${courseId}/modules/${moduleId}`, {
+      method: 'PATCH',
+      cuerpo: patch,
+    });
   },
 
   /** Se mantiene por los sitios que solo cambian el título. */
-  async renameModule(moduleId: string, title: string): Promise<void> {
-    return CourseContentRepository.updateModule(moduleId, { title });
+  async renameModule(courseId: string, moduleId: string, title: string): Promise<void> {
+    return CourseContentRepository.updateModule(courseId, moduleId, { title });
   },
 
   /**
    * Deja los módulos EN ESTE orden. `ids` es la lista completa y definitiva.
    *
-   * Se escribe el orden de todos y no solo el del que se movió: `sort_order`
-   * empatados dejan el temario a merced de cómo devuelva las filas la base, que
-   * es lo mismo que no tener orden.
+   * UNA sola petición donde antes había una por módulo. No es solo ahorro: el
+   * servidor rechaza una lista incompleta o con intrusos ANTES de escribir
+   * nada, mientras que el bucle podía aplicar la mitad y fallar, y entonces el
+   * temario quedaba en un orden que no había pedido nadie.
    */
-  async reorderModules(ids: string[]): Promise<void> {
-    await ordenar('course_modules', ids);
+  async reorderModules(courseId: string, ids: string[]): Promise<void> {
+    await escribirTemario(`${CURSOS}/${courseId}/modules/reorder`, {
+      method: 'POST',
+      cuerpo: { ids },
+    });
   },
 
-  async reorderLessons(ids: string[]): Promise<void> {
-    await ordenar('course_lessons', ids);
+  /** El orden se reescribe DENTRO de un módulo: mover de módulo es otra cosa. */
+  async reorderLessons(courseId: string, moduleId: string, ids: string[]): Promise<void> {
+    await escribirTemario(`${CURSOS}/${courseId}/modules/${moduleId}/lessons/reorder`, {
+      method: 'POST',
+      cuerpo: { ids },
+    });
   },
 
   /** Borrar un modulo arrastra sus lecciones (cascada en la base). */
-  async removeModule(moduleId: string): Promise<void> {
-    const { error } = await client().from('course_modules').delete().eq('id', moduleId);
-    if (error) throw new Error(error.message);
+  async removeModule(courseId: string, moduleId: string): Promise<void> {
+    await escribirTemario(`${CURSOS}/${courseId}/modules/${moduleId}`, { method: 'DELETE' });
   },
 
+  /** Añade una lección AL FINAL del módulo. */
   async createLesson(input: {
+    courseId: string;
     moduleId: string;
     title: string;
     body?: string;
     mediaPath?: string | null;
     durationSeconds?: number;
-    sortOrder: number;
     kind?: LessonKind;
     isPreview?: boolean;
+    /** Ver `nuevaClaveDeCreacion`. Obligatoria por el mismo motivo. */
+    claveDeIdempotencia: string;
   }): Promise<void> {
-    const fila: Record<string, unknown> = {
-      module_id: input.moduleId,
-      title: input.title,
-      body: input.body ?? '',
-      media_path: input.mediaPath ?? null,
-      duration_seconds: input.durationSeconds ?? 0,
-      sort_order: input.sortOrder,
-    };
-    if (await soportaContenidoV2()) {
-      fila.kind = input.kind ?? 'video';
-      fila.is_preview = input.isPreview ?? false;
-    }
-    const { error } = await client().from('course_lessons').insert(fila);
-    if (error) throw new Error(error.message);
+    await escribirTemario(`${CURSOS}/${input.courseId}/modules/${input.moduleId}/lessons`, {
+      method: 'POST',
+      cuerpo: {
+        title: input.title,
+        body: input.body ?? '',
+        media_path: input.mediaPath ?? null,
+        duration_seconds: input.durationSeconds ?? 0,
+        // `kind` e `is_preview` viajan siempre por lo mismo que la descripción:
+        // sin la 0034 los ignora el servidor en vez de perderse la lección.
+        kind: input.kind ?? 'video',
+        is_preview: input.isPreview ?? false,
+      },
+      claveDeIdempotencia: input.claveDeIdempotencia,
+    });
   },
 
   async updateLesson(
-    lessonId: string,
+    ref: ReferenciaDeLeccion,
     changes: {
       title?: string;
       body?: string;
@@ -461,21 +629,17 @@ export const CourseContentRepository = {
     const patch: Record<string, unknown> = {};
     if (changes.title !== undefined) patch.title = changes.title;
     if (changes.body !== undefined) patch.body = changes.body;
+    // `mediaPath: null` SÍ borra el vídeo: es la única forma de quitarlo, y por
+    // eso se mira si el campo se envió y no si vale algo.
     if (changes.mediaPath !== undefined) patch.media_path = changes.mediaPath;
     if (changes.durationSeconds !== undefined) patch.duration_seconds = changes.durationSeconds;
-    if (changes.kind !== undefined || changes.isPreview !== undefined) {
-      if (await soportaContenidoV2()) {
-        if (changes.kind !== undefined) patch.kind = changes.kind;
-        if (changes.isPreview !== undefined) patch.is_preview = changes.isPreview;
-      }
-    }
+    if (changes.kind !== undefined) patch.kind = changes.kind;
+    if (changes.isPreview !== undefined) patch.is_preview = changes.isPreview;
     if (Object.keys(patch).length === 0) return;
-    const { error } = await client().from('course_lessons').update(patch).eq('id', lessonId);
-    if (error) throw new Error(error.message);
+    await escribirTemario(await rutaDeLeccion(ref), { method: 'PATCH', cuerpo: patch });
   },
 
-  async removeLesson(lessonId: string): Promise<void> {
-    const { error } = await client().from('course_lessons').delete().eq('id', lessonId);
-    if (error) throw new Error(error.message);
+  async removeLesson(ref: ReferenciaDeLeccion): Promise<void> {
+    await escribirTemario(await rutaDeLeccion(ref), { method: 'DELETE' });
   },
 };

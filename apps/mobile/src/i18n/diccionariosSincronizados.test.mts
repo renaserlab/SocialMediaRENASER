@@ -96,6 +96,10 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'verticales.cursos',
     // «Todos» y «Principiante» se escriben igual en los dos idiomas.
     'cursos.nivel.todos',
+    // «Guardados», «Guardar curso» y «Requisitos» se escriben igual.
+    'cursos.guardados',
+    'cursos.guardar',
+    'ficha.requisitos',
     'cursos.nivel.beginner',
     'verticales.eventos',
     // «Programa» y «Restaurar compras» se escriben igual en los dos idiomas.
