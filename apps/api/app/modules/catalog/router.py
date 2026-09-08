@@ -9,16 +9,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     ConflictError,
+    ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import contenido, cursos_v2, esquema, eventos, versiones
-from app.modules.catalog.models import Course, Event, EventRegistration, SavedCourse
+from app.modules.catalog import (
+    contenido,
+    cursos_v2,
+    esquema,
+    eventos,
+    valoraciones,
+    versiones,
+)
+from app.modules.catalog.models import (
+    Course,
+    CourseReview,
+    Event,
+    EventRegistration,
+    SavedCourse,
+)
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce.service import _insert as _insert_de_comercio
 from app.modules.catalog.schemas import (
+    ResumenDeValoraciones,
+    ValoracionCreate,
+    ValoracionRead,
     IDIOMA,
     NIVEL,
     CoursePublishResult,
@@ -41,6 +58,7 @@ from app.modules.catalog.schemas import (
 )
 from app.modules.learning.models import CourseLesson, CourseModule
 from app.modules.gobernanza import auditoria
+from app.modules.profiles.models import Profile
 from app.modules.gobernanza.schemas import VersionDeCurso
 from app.modules.gobernanza.contexto import leer_origen
 from app.modules.recommendations import cache as memoria_del_recomendador
@@ -50,6 +68,7 @@ from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 from app.shared.permissions import (
+    is_admin,
     require_admin,
     require_owner_or_admin,
     require_owner_or_strict_admin,
@@ -1129,6 +1148,225 @@ async def _tiene_compradores(db: AsyncSession, course_id: str) -> bool:
         return False
     # El producto ya basta: la clave ajena es RESTRICT.
     return True
+
+
+async def _exigir_valoraciones(db: AsyncSession) -> None:
+    if not await esquema.hay_valoraciones(db):
+        raise ServiceUnavailableError(
+            "Las valoraciones todavía no están disponibles.",
+            code="course_reviews_not_available",
+        )
+
+
+def _a_valoracion(fila, autor, verificada: bool, mia: bool) -> ValoracionRead:
+    return ValoracionRead(
+        id=fila.id,
+        course_id=fila.course_id,
+        rating=fila.rating,
+        comment=fila.comment,
+        created_at=fila.created_at,
+        updated_at=fila.updated_at,
+        author_id=fila.user_id,
+        author_name=autor.full_name if autor else "",
+        author_username=autor.username if autor else "",
+        verified_purchase=verificada,
+        is_mine=mia,
+    )
+
+
+@router.get("/courses/{course_id}/reviews", response_model=list[ValoracionRead])
+async def listar_valoraciones(
+    course_id: str,
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ValoracionRead]:
+    """Las valoraciones visibles de un curso, de la mas reciente a la mas vieja."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    yo = current_user.id if current_user else None
+
+    filas = list(
+        await db.scalars(
+            select(CourseReview)
+            .where(CourseReview.course_id == cid, CourseReview.status == "visible")
+            # Desempate por id: sin el, dos del mismo instante bailan entre paginas.
+            .order_by(CourseReview.created_at.desc(), CourseReview.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+    )
+    if not filas:
+        return []
+
+    # Los autores en UNA consulta: uno por fila seria N+1 en cada pagina.
+    autores = {
+        perfil.id: perfil
+        for perfil in await db.scalars(
+            select(Profile).where(Profile.id.in_({f.user_id for f in filas}))
+        )
+    }
+    salida = []
+    for fila in filas:
+        verificada = await valoraciones.tiene_acceso_ahora(
+            db, user_id=fila.user_id, course_id=cid
+        )
+        salida.append(
+            _a_valoracion(
+                fila, autores.get(fila.user_id), verificada, fila.user_id == yo
+            )
+        )
+    return salida
+
+
+@router.get(
+    "/courses/{course_id}/reviews/summary", response_model=ResumenDeValoraciones
+)
+async def resumen_de_valoraciones(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ResumenDeValoraciones:
+    """Promedio, total y distribucion. Solo con las visibles."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    return ResumenDeValoraciones(**await valoraciones.resumen(db, cid))
+
+
+@router.post(
+    "/courses/{course_id}/reviews",
+    response_model=ValoracionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_valoracion(
+    course_id: str,
+    payload: ValoracionCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ValoracionRead:
+    """Valorar un curso comprado. Una por persona y curso."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+
+    permitido, motivo = await valoraciones.puede_valorar(
+        db, user_id=current_user.id, course_id=cid
+    )
+    if not permitido:
+        if motivo == "course_not_found":
+            raise NotFoundError("Curso no encontrado.")
+        raise ValidationAppError("No puedes valorar este curso todavía.", code=motivo)
+
+    fila = CourseReview(
+        course_id=cid,
+        user_id=current_user.id,
+        rating=payload.rating,
+        comment=payload.comment,
+    )
+    db.add(fila)
+    try:
+        await db.commit()
+    except IntegrityError:
+        # La unicidad la sostiene la base, no un `if`: dos peticiones a la vez
+        # no pueden crear dos votos de la misma persona.
+        await db.rollback()
+        raise ConflictError(
+            "Ya valoraste este curso. Edita tu valoración.",
+            code="course_review_exists",
+        ) from None
+
+    await db.refresh(fila)
+    autor = await db.get(Profile, current_user.id)
+    return _a_valoracion(fila, autor, True, True)
+
+
+@router.patch("/courses/{course_id}/reviews/{review_id}", response_model=ValoracionRead)
+async def editar_valoracion(
+    course_id: str,
+    review_id: str,
+    payload: ValoracionCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ValoracionRead:
+    """Editar la propia. Nadie edita la de otro, ni siquiera administracion."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    fila = await db.get(
+        CourseReview, ensure_uuid(review_id, "Valoración no encontrada.")
+    )
+    # Identificadores cruzados: una valoracion de otro curso no vale.
+    if fila is None or fila.course_id != cid:
+        raise NotFoundError("Valoración no encontrada.")
+    if fila.user_id != current_user.id:
+        raise ForbiddenError("Solo puedes editar tu propia valoración.")
+
+    fila.rating = payload.rating
+    fila.comment = payload.comment
+    await db.commit()
+    await db.refresh(fila)
+    autor = await db.get(Profile, current_user.id)
+    verificada = await valoraciones.tiene_acceso_ahora(
+        db, user_id=fila.user_id, course_id=cid
+    )
+    return _a_valoracion(fila, autor, verificada, True)
+
+
+@router.delete(
+    "/courses/{course_id}/reviews/{review_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def retirar_valoracion(
+    course_id: str,
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Retirar la propia."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    fila = await db.get(
+        CourseReview, ensure_uuid(review_id, "Valoración no encontrada.")
+    )
+    if fila is None or fila.course_id != cid:
+        raise NotFoundError("Valoración no encontrada.")
+    if fila.user_id != current_user.id:
+        raise ForbiddenError("Solo puedes retirar tu propia valoración.")
+    await db.delete(fila)
+    await db.commit()
+
+
+@router.post(
+    "/courses/{course_id}/reviews/{review_id}/hide", response_model=ValoracionRead
+)
+async def ocultar_valoracion(
+    course_id: str,
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ValoracionRead:
+    """Moderar: ocultar o restaurar. NO cambia la puntuacion ni el autor."""
+    await _exigir_valoraciones(db)
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo moderación puede ocultar una valoración.")
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    fila = await db.get(
+        CourseReview, ensure_uuid(review_id, "Valoración no encontrada.")
+    )
+    if fila is None or fila.course_id != cid:
+        raise NotFoundError("Valoración no encontrada.")
+
+    fila.status = "hidden" if fila.status == "visible" else "visible"
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        action="course_review.moderated",
+        entity_type="course_review",
+        entity_id=fila.id,
+        new_state=fila.status,
+        payload={"course_id": cid},
+    )
+    await db.commit()
+    await db.refresh(fila)
+    autor = await db.get(Profile, fila.user_id)
+    return _a_valoracion(fila, autor, False, False)
 
 
 @router.get("/courses/{course_id}/version", response_model=VersionDeCurso)

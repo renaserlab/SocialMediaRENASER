@@ -367,3 +367,44 @@ class CourseReviewDecision(BaseModel):
     #: Obligatorio al rechazar. Un «no» sin motivo es un muro sin puerta: quien
     #: lo recibe no sabe que corregir y vuelve a enviar lo mismo.
     reason: str | None = Field(default=None, max_length=1000)
+
+
+# ---------------------------------------------------------------------------
+# Valoraciones de cursos (migración 0056)
+# ---------------------------------------------------------------------------
+
+
+class ValoracionCreate(BaseModel):
+    """Lo único que el cliente puede mandar.
+
+    NO lleva `verified`: eso lo decide el servidor mirando la compra. Un cliente
+    que pudiera marcarse como verificado convertiría la etiqueta en un adorno.
+    """
+
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ValoracionRead(BaseModel):
+    id: str
+    course_id: str
+    rating: int
+    comment: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    #: Perfil público mínimo de quien valora.
+    author_id: str
+    author_name: str = ""
+    author_username: str = ""
+    #: Calculada por el servidor: compró y su acceso sigue vivo.
+    verified_purchase: bool = False
+    #: Solo la ve quien la escribió, para poder editarla.
+    is_mine: bool = False
+
+
+class ResumenDeValoraciones(BaseModel):
+    #: `None` cuando no hay ninguna. NO es 0: un 0,0 diría que está mal valorado.
+    average: float | None = None
+    total: int = 0
+    #: Cuántas de cada puntuación, de "1" a "5".
+    distribution: dict[str, int] = Field(default_factory=dict)

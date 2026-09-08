@@ -16,6 +16,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
     text,
@@ -232,4 +233,46 @@ class SavedCourse(Base):
 
     __table_args__ = (
         Index("saved_courses_por_fecha", "user_id", "created_at"),
+    )
+
+
+class CourseReview(Base):
+    """Valoración de un curso, de 1 a 5. Migración 0056.
+
+    Vive aquí y no en `reviews/` porque `profile_reviews` valora personas: son
+    dos cosas distintas con la misma palabra.
+
+    NO guarda si la compra está verificada ni el promedio: los dos se derivan al
+    leer. Guardarlos los dejaría obsoletos en cuanto alguien devuelve.
+    """
+
+    __tablename__ = "course_reviews"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE")
+    )
+    rating: Mapped[int] = mapped_column(Integer)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: 'visible' o 'hidden'. Moderar oculta; no borra.
+    status: Mapped[str] = mapped_column(String(16), default="visible")
+    #: Interno: no sale por ninguna respuesta pública.
+    moderation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("rating >= 1 and rating <= 5", name="course_reviews_rating"),
+        CheckConstraint(
+            "status in ('visible', 'hidden')", name="course_reviews_status"
+        ),
+        UniqueConstraint("user_id", "course_id", name="course_reviews_unica"),
+        Index("course_reviews_por_curso", "course_id", "created_at"),
     )
