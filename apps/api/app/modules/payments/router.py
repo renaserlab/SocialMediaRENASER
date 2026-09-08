@@ -308,13 +308,53 @@ async def estado_de_la_orden(
         )
         acceso = resuelto.tiene_acceso
 
+    titulo = ""
+    version = None
+    if curso:
+        ficha = await db.get(Course, curso)
+        titulo = ficha.title if ficha else ""
+        version = await _numero_de_version(db, orden.course_version_id)
+
     return EstadoDeOrdenRead(
         id=str(orden.id),
         course_id=curso or "",
+        course_title=titulo,
         status=orden.status,
         amount_minor=orden.amount_minor,
         currency=orden.currency,
         has_access=acceso,
+        created_at=orden.created_at,
+        paid_at=orden.paid_at,
+        provider=orden.provider or "",
+        course_version=version,
+        guarantee_hours=orden.guarantee_hours,
+        repurchase_without_guarantee=await _fue_recompra_sin_garantia(db, orden.id),
+    )
+
+
+async def _numero_de_version(db: AsyncSession, version_id: str | None) -> int | None:
+    if version_id is None:
+        return None
+    from app.modules.catalog.models import CourseVersion
+
+    fila = await db.get(CourseVersion, version_id)
+    return fila.version if fila else None
+
+
+async def _fue_recompra_sin_garantia(db: AsyncSession, order_id: str) -> bool:
+    """Si esta compra se hizo firmando que no tendria garantia."""
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return False
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    return bool(
+        await db.scalar(
+            select(RefundPolicyAcceptance.id)
+            .where(RefundPolicyAcceptance.order_id == order_id)
+            .limit(1)
+        )
     )
 
 

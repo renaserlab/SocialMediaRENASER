@@ -55,12 +55,26 @@ class EstadoDeOrdenRead(BaseModel):
 
     id: str
     course_id: str
+    course_title: str = ""
     #: 'pending', 'paid', 'failed', 'cancelled' o 'refunded'.
     status: str
     amount_minor: int
     currency: str
     #: Si el acceso ya está concedido. Lo resuelve el comercio, no la orden.
     has_access: bool
+
+    # ---- Lo que hace falta para la constancia (no fiscal) ------------------ #
+    created_at: datetime
+    #: Cuándo se confirmó el cobro. Nulo mientras no se haya confirmado.
+    paid_at: datetime | None = None
+    provider: str = ""
+    #: Qué versión del curso se compró. Nulo en las compras anteriores al
+    #: versionado: ahí no hay forma de saberlo y decir «1» sería inventarlo.
+    course_version: int | None = None
+    #: Las horas de garantía que se prometieron en ESTA compra.
+    guarantee_hours: int | None = None
+    #: Si esta compra se hizo sabiendo que no tendría garantía.
+    repurchase_without_guarantee: bool = False
 
 
 class CourseAccessRead(BaseModel):

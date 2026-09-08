@@ -190,6 +190,54 @@ async def test_el_estado_de_la_orden_lo_dice_el_servidor(entorno):
 
 
 @pytest.mark.asyncio
+async def test_la_constancia_trae_lo_que_hace_falta_y_nada_mas(entorno):
+    """Los datos de una constancia NO fiscal, todos de la orden.
+
+    Sin numero fiscal, sin razon social, sin RUC y sin impuestos: no se calculan
+    en ninguna parte, y ponerlos a cero seria afirmar que no los hay.
+    """
+    http, _, _ = entorno
+    cuerpo = (await http.get(f"{PAGOS}/orders/{ORDEN}")).json()
+
+    for campo in (
+        "id", "course_id", "course_title", "status", "amount_minor", "currency",
+        "created_at", "provider", "has_access",
+    ):
+        assert campo in cuerpo, f"falta {campo}"
+    assert cuerpo["course_title"], "el titulo del curso viene del servidor"
+    assert cuerpo["amount_minor"] == PRECIO, "el importe es el de LA ORDEN"
+
+    prohibidos = (
+        "payment_intent", "client_secret", "token", "idempotency", "user_id",
+        "tax", "impuesto", "ruc", "serie", "razon_social", "card", "tarjeta",
+    )
+    for campo in cuerpo:
+        assert not any(p in campo.lower() for p in prohibidos), (
+            f"la constancia no puede llevar «{campo}»"
+        )
+
+
+@pytest.mark.asyncio
+async def test_la_constancia_no_usa_el_precio_de_hoy_del_catalogo(entorno):
+    """UNA COMPRA HISTORICA VALE LO QUE VALIO.
+
+    Si el autor sube el precio manana, la constancia de una compra de ayer
+    seguiria diciendo lo que se cobro. Leerlo del catalogo seria reescribir un
+    justificante.
+    """
+    from app.modules.catalog.models import Course as C
+
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        curso = await db.get(C, CURSO)
+        curso.price_minor = PRECIO * 3
+        await db.commit()
+
+    cuerpo = (await http.get(f"{PAGOS}/orders/{ORDEN}")).json()
+    assert cuerpo["amount_minor"] == PRECIO
+
+
+@pytest.mark.asyncio
 async def test_la_orden_de_otra_persona_responde_404_y_no_403(entorno):
     """404 Y NO 403, y la diferencia importa.
 
