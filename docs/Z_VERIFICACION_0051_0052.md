@@ -384,3 +384,51 @@ y 0053 tocan disparadores, políticas y permisos, nunca filas.
   un mensaje falso. Se dejó así, con el motivo escrito: la prueba del tercer
   defecto vive en el mismo fichero que las otras dos y separarlas exigía partir
   el fichero.
+
+---
+
+## 13. La 0053, aplicada y verificada (8/09/2026)
+
+El usuario la aplicó a mano. Comprobado con consultas de solo lectura, y **esta
+vez con el guardia puesto de verdad**: `set session characteristics as
+transaction read only` seguido de comprobar que
+`current_setting('default_transaction_read_only')` vale `on` antes de consultar
+nada. Si no lo valiera, el script aborta sin preguntar.
+
+| Qué se comprobó | Resultado |
+|---|---|
+| Políticas de las 16 tablas financieras y de rastro que sigan con `is_admin()` | **ninguna** |
+| Políticas que deciden con `puede_mover_dinero()` | 15 |
+| RLS activa | 16 de 16 |
+| Concesiones de tabla a `anon` / `authenticated` sobre esas tablas | **ninguna** |
+| `TRUNCATE` para `anon` / `authenticated` | **retirado** |
+| Columnas sensibles concedidas (`ip_hash`, `ip_prefix`, `user_agent_family`, `external_refund_id`, `reviewer_id`, `provider`, `environment`) | **ninguna** |
+| Lectura por columnas que la 0052 sí concede | intacta: 15 columnas visibles en cada una de las tres tablas |
+| `purchases` incluida | sí, sin política con `is_admin()` y sin concesiones |
+| Privilegios por defecto del esquema para el rol `postgres` | ya **no** incluyen `anon` ni `authenticated` |
+
+**Moderación conserva lo suyo:** más de treinta políticas siguen decidiendo con
+`is_admin()`, y todas son de contenido —audios, comentarios, círculos, módulos y
+lecciones de curso, catálogo comercial—. Moderar sigue siendo moderar; lo que se
+fue es la caja.
+
+**Los datos no cambiaron:** 4 versiones de curso, 4 cursos publicados, 0 órdenes,
+0 accesos, 0 devoluciones, 0 consentimientos, 0 auditorías. Las 5 filas de
+`purchases` son anteriores y la 0053 no toca filas, solo políticas y permisos.
+
+**Queda un residuo conocido y ya previsto:** los privilegios por defecto del rol
+`supabase_admin` siguen concediendo a `anon` y `authenticated`. Las migraciones
+se aplican como `postgres`, así que las tablas que cree este proyecto nacen
+cerradas; una tabla creada desde el panel de Supabase con ese otro rol, no.
+
+### Las 12 pruebas de PostgreSQL siguen **omitidas**
+
+Se intentó otra vez, en el mismo orden: no hay PostgreSQL local, no hay servicio,
+**Docker Desktop no está instalado** y no existe rueda de Windows para un
+PostgreSQL embebido. La única vía que queda es CI, y llegar a CI exige un push
+que esta fase no puede hacer.
+
+Lo que sí cambió: el prólogo de pruebas ahora reproduce el
+`alter default privileges … grant all` de Supabase, así que cuando corran
+significarán algo. Antes las tablas nacían sin concesiones y la verificación de
+la 0052 y la 0053 no podía ponerse en rojo aunque el `revoke` estuviera mal.
