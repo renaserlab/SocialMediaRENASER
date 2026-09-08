@@ -7,7 +7,8 @@
 -- `role in ('moderator', 'admin')`:
 --
 --     select tablename, policyname from pg_policies where qual like '%is_admin%';
---     -> orders.orders_read_own
+--     -> purchases.purchases_read_own          <- de la 0001, la mas antigua
+--        orders.orders_read_own
 --        payment_transactions.payment_transactions_read_own
 --        entitlements.entitlements_read_own
 --        course_enrollments.course_enrollments_read_own
@@ -21,11 +22,18 @@
 -- reparto era cierto en Python y falso en la RLS, que es la que decide cuando
 -- se entra por PostgREST.
 --
--- POR QUÉ SE ESCAPÓ. Porque la lista de tablas a revisar se escribió a partir
--- del incidente anterior en vez de a partir de qué tablas guardan dinero. La
--- prueba `test_moderar_no_da_acceso_a_las_tablas_de_dinero_por_la_rls` estaba en
--- verde y significaba «moderar no llega a estas nueve», no «moderar no llega al
--- dinero». Esa prueba se corrige en el mismo cambio que este fichero.
+-- POR QUÉ SE ESCAPÓ, DOS VECES. La primera, porque la lista de tablas a revisar
+-- se escribió a partir del incidente anterior en vez de a partir de qué tablas
+-- guardan dinero. Se corrigió deduciéndola del esquema… y `purchases` siguió sin
+-- aparecer, porque la expresión que busca los `create table` exigía
+-- `if not exists` y las 23 tablas de la 0001 no lo llevan. Es decir: la lista
+-- que presumía de deducirse del esquema no veía medio esquema, y el fallo de
+-- arriba quedaba tapado por el de abajo.
+--
+-- `purchases` es la tabla de compras original —`amount_minor`, `currency`,
+-- `provider_transaction_id`— y sigue viva: la usan `learning/models.py`,
+-- `commerce/service.py` y `/payments/me`, que filtra siempre por el propio
+-- usuario, incluso para administración. Por PostgREST no filtraba nadie.
 --
 -- Y HAY UNA SEGUNDA CAPA QUE NO EXISTÍA. Supabase concede por defecto todos los
 -- privilegios sobre cada tabla a `anon` y `authenticated`, así que en las tablas
@@ -40,7 +48,10 @@
 -- ROLLBACK:
 --   -- volver a crear las cinco políticas con `public.is_admin()`, con el
 --   -- mismo texto que trae la 0035;
---   grant select on public.orders, public.payment_transactions,
+--   -- `grant all`, no `grant select`: la seccion 2 hace `revoke all`, asi que
+--   -- devolver solo la lectura dejaria la base en un tercer estado, ni el de
+--   -- antes ni el de despues.
+--   grant all on public.purchases, public.orders, public.payment_transactions,
 --     public.entitlements, public.course_enrollments, public.provider_products,
 --     public.owner_payout_accounts, public.owner_sale_balances,
 --     public.owner_transfers, public.course_refund_windows,
@@ -65,6 +76,10 @@
 -- importes. Guarda quién tiene acceso a qué curso y por qué vía, y cruzada con
 -- el precio del curso dice quién compró qué y por cuánto. Es el mismo dato con
 -- otra forma, así que se reparte igual.
+
+drop policy if exists purchases_read_own on public.purchases;
+create policy purchases_read_own on public.purchases
+  for select using (user_id = auth.uid() or public.puede_mover_dinero());
 
 drop policy if exists orders_read_own on public.orders;
 create policy orders_read_own on public.orders
@@ -121,6 +136,7 @@ create policy provider_products_admin_read on public.provider_products
 -- más. Nadie las necesita: el móvil no las toca.
 
 revoke all on
+  public.purchases,
   public.orders,
   public.payment_transactions,
   -- `payment_events` no tiene ninguna politica, a proposito: con RLS activa y
@@ -199,8 +215,8 @@ begin
     from pg_policies
     where schemaname = 'public'
       and tablename in (
-        'orders', 'payment_transactions', 'entitlements', 'course_enrollments',
-        'provider_products', 'audit_events', 'consent_records',
+        'purchases', 'orders', 'payment_transactions', 'entitlements',
+        'course_enrollments', 'provider_products', 'audit_events', 'consent_records',
         'course_refund_windows', 'refund_requests', 'refund_request_events',
         'refund_policy_acceptances', 'owner_payout_accounts',
         'owner_sale_balances', 'owner_transfers'
@@ -217,8 +233,8 @@ begin
     where table_schema = 'public'
       and grantee in ('anon', 'authenticated')
       and table_name in (
-        'orders', 'payment_transactions', 'entitlements', 'course_enrollments',
-        'provider_products', 'payment_events', 'owner_payout_accounts',
+        'purchases', 'orders', 'payment_transactions', 'entitlements',
+        'course_enrollments', 'provider_products', 'payment_events', 'owner_payout_accounts',
         'owner_sale_balances', 'owner_transfers', 'course_refund_windows',
         'refund_request_events', 'refund_policy_acceptances'
       )

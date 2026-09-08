@@ -211,8 +211,15 @@ def _tablas_del_orm() -> dict[str, object]:
 
 #: El bloque `create table` completo, hasta el parentesis de cierre en su propia
 #: linea. Se declara aparte por legibilidad: lleva un salto de linea dentro.
+#:
+#: `IF NOT EXISTS` ES OPCIONAL, y no es un detalle. Exigirlo dejaba fuera las 23
+#: tablas de la 0001 y las de la 0003, que se declaran `create table public.X (`
+#: a secas. Entre ellas esta `purchases`, con `amount_minor`, `currency` y
+#: `provider_transaction_id`: la tabla de compras mas antigua del proyecto no la
+#: miraba nadie, y la lista que presume de deducirse del esquema no veia medio
+#: esquema.
 _CREA_TABLA = re.compile(
-    r"create\s+table\s+if\s+not\s+exists\s+public\.([a-z_0-9]+)\s*\((.*?)\n\);",
+    r"create\s+table\s+(?:if\s+not\s+exists\s+)?public\.([a-z_0-9]+)\s*\((.*?)\n\);",
     re.S | re.I,
 )
 
@@ -236,19 +243,23 @@ SIN_IMPORTES_PERO_IGUAL_DE_SENSIBLES = (
     "refund_policy_acceptances", # quien acepto recomprar tras devolver
 )
 
-#: Politicas que SIGUEN con `is_admin()` a proposito. Cada una necesita un
-#: motivo escrito aqui; sin entrada en esta lista, la prueba falla.
+#: Politicas de una tabla DE DINERO que sigan con `is_admin()` a proposito. Cada
+#: una necesita su motivo escrito aqui, como `tabla.politica`; sin entrada, la
+#: prueba falla.
 #:
 #: NO ES UNA VALVULA DE ESCAPE. Es lo contrario: obliga a que la proxima
 #: excepcion sea una decision y no un olvido, que es exactamente como se
-#: quedaron cinco politicas del comercio con `is_admin()` hasta la 0053.
-EXCEPCIONES_DELIBERADAS = {
-    # Contenido y textos: ver un borrador sin publicar ES parte de moderar.
-    "course_versions_read",
-    "policy_versions_read",
-    # Catalogo publico: lleva precio y moneda porque es el escaparate.
-    "commerce_products_read",
-}
+#: quedaron once politicas con `is_admin()` hasta la 0052 y la 0053.
+#:
+#: ESTA VACIA, Y ASI TIENE QUE ESTAR. Hubo aqui tres entradas —`course_versions`,
+#: `policy_versions` y `commerce_products`— y las tres sobraban: ninguna de esas
+#: tablas guarda dinero, asi que la deteccion no las mira y la excepcion no
+#: eximia de nada. Era un comentario disfrazado de regla, y de los peores: daba
+#: la sensacion de que alguien habia repasado esas politicas. La decision sobre
+#: `course_versions_read` y `policy_versions_read` —que siguen con `is_admin()`
+#: porque ver un borrador sin publicar es parte de moderar— esta escrita donde
+#: corresponde, en la cabecera de la 0052.
+EXCEPCIONES_DELIBERADAS: set[str] = set()
 
 
 def _tablas_con_dinero() -> set[str]:
@@ -288,7 +299,13 @@ def _politicas_finales() -> dict[str, tuple[str, str]]:
             sql,
             flags=re.S | re.I,
         ):
-            finales[bloque.group(1)] = (bloque.group(2), bloque.group(3))
+            # LA CLAVE LLEVA LA TABLA. Indexando solo por el nombre de la
+            # politica, dos homonimas en tablas distintas se pisaban: ganaba la
+            # ultima y la otra desaparecia de todas las comprobaciones.
+            finales[f"{bloque.group(2)}.{bloque.group(1)}"] = (
+                bloque.group(2),
+                bloque.group(3),
+            )
     return finales
 
 
@@ -309,11 +326,11 @@ def test_moderar_no_da_acceso_a_las_tablas_de_dinero_por_la_rls() -> None:
     """
     con_dinero = _tablas_con_dinero()
     abiertas = [
-        f"{tabla}.{politica}"
-        for politica, (tabla, cuerpo) in _politicas_finales().items()
+        clave
+        for clave, (tabla, cuerpo) in _politicas_finales().items()
         if tabla in con_dinero
         and "is_admin" in cuerpo
-        and politica not in EXCEPCIONES_DELIBERADAS
+        and clave not in EXCEPCIONES_DELIBERADAS
     ]
     assert not abiertas, (
         "politicas de tablas de dinero que siguen decidiendo con is_admin(), "
@@ -321,9 +338,20 @@ def test_moderar_no_da_acceso_a_las_tablas_de_dinero_por_la_rls() -> None:
     )
 
 
-_ROLES_DE_FUNCION = re.compile(
+#: La declaracion de la funcion y su CUERPO, que es lo que va entre los `$$`.
+#:
+#: ACOTAR AL CUERPO NO ES COSMETICA. Buscando `role …` con `.*?` a partir de la
+#: cabecera, el dia que el cuerpo dejara de nombrar `role` la expresion seguiria
+#: buscando por el resto del fichero y acabaria comparando `FINANCE_ROLES` con
+#: los roles de OTRA funcion, sin fallar y sin que nadie lo notase.
+_CUERPO_DE_FUNCION = re.compile(
     r"create\s+or\s+replace\s+function\s+public\.(is_admin|puede_mover_dinero)\s*\(\)"
-    r".*?role\s+(?:in\s*\((?P<lista>[^)]*)\)|=\s*(?P<uno>'[a-z_]+'))",
+    r"(?P<cabecera>[^$]*)\$\$(?P<cuerpo>.*?)\$\$",
+    re.S | re.I,
+)
+
+_ROLES_EN_EL_CUERPO = re.compile(
+    r"role\s+(?:in\s*\((?P<lista>[^)]*)\)|=\s*(?P<uno>'[a-z_]+'))",
     re.S | re.I,
 )
 
@@ -333,8 +361,13 @@ def _roles_en_sql() -> dict[str, set[str]]:
     encontrados: dict[str, set[str]] = {}
     for ruta in _ficheros():
         sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
-        for casa in _ROLES_DE_FUNCION.finditer(sql):
-            crudo = casa.group("lista") or casa.group("uno") or ""
+        for casa in _CUERPO_DE_FUNCION.finditer(sql):
+            roles = _ROLES_EN_EL_CUERPO.search(casa.group("cuerpo"))
+            assert roles is not None, (
+                f"public.{casa.group(1)}() ya no compara `role` en su cuerpo: "
+                "esta prueba dejaria de comprobar nada"
+            )
+            crudo = roles.group("lista") or roles.group("uno") or ""
             encontrados[casa.group(1)] = {
                 t.strip().strip("'") for t in crudo.split(",") if t.strip()
             }
@@ -370,9 +403,40 @@ def test_las_excepciones_a_la_regla_siguen_existiendo() -> None:
     entrada se queda ahi tapando una politica futura que se llame igual. Se
     comprueba que las tres siguen siendo politicas reales.
     """
-    reales = set(_politicas_finales())
-    fantasmas = sorted(EXCEPCIONES_DELIBERADAS - reales)
+    finales = _politicas_finales()
+    fantasmas = sorted(EXCEPCIONES_DELIBERADAS - set(finales))
     assert not fantasmas, f"excepciones que ya no corresponden a ninguna politica: {fantasmas}"
+
+    # Y QUE EXCLUYAN ALGO. Una excepcion sobre una tabla que la deteccion no
+    # considera de dinero no exime de nada: es un comentario disfrazado de
+    # regla. `commerce_products_read` estuvo aqui con el motivo «lleva precio y
+    # moneda» y esa tabla no tiene ni precio ni moneda.
+    inutiles = sorted(
+        c
+        for c in EXCEPCIONES_DELIBERADAS
+        if finales[c][0] not in _tablas_con_dinero() or "is_admin" not in finales[c][1]
+    )
+    assert not inutiles, (
+        "excepciones que no eximen de nada: o la tabla no es de dinero, o la "
+        f"politica ya no usa is_admin(): {inutiles}"
+    )
+
+
+#: Las tres que la 0052 cierra POR COLUMNA: se les retira el `select` de tabla y
+#: se les vuelve a conceder la lista de columnas visibles, para que cada persona
+#: siga viendo su propio consentimiento o su propia solicitud sin el rastro de
+#: red ni los campos internos. Ese `revoke` vive dentro de un bucle `do $$` con
+#: `execute format`, asi que ninguna expresion regular lo va a encontrar: se
+#: declaran aqui, y lo que se les exige es que ademas pierdan `truncate`.
+CERRADAS_POR_COLUMNA = frozenset(
+    {"audit_events", "consent_records", "refund_requests"}
+)
+
+
+def tabla_de_bloque_cerrada_por_columna(objetivo: str) -> bool:
+    """Si todas las tablas de este `revoke` son de las que cierra la 0052."""
+    tablas = set(re.findall(r"public\.([a-z_0-9]+)", objetivo))
+    return bool(tablas) and tablas <= CERRADAS_POR_COLUMNA
 
 
 def test_las_tablas_de_dinero_no_se_sirven_por_postgrest() -> None:
@@ -398,16 +462,37 @@ def test_las_tablas_de_dinero_no_se_sirven_por_postgrest() -> None:
             quien = bloque.group(4).lower()
             if "anon" not in quien and "authenticated" not in quien:
                 continue
+            # SE MIRAN LOS PRIVILEGIOS, NO SOLO EL VERBO. Mirando solo `revoke`,
+            # cambiar `revoke all` por `revoke trigger` dejaba `select` y
+            # `truncate` en pie para la clave anonima, la segunda barrera que la
+            # migracion anuncia no existia, y esta prueba seguia en verde.
+            # Comprobado con esa mutacion exacta.
+            privilegios = bloque.group(2).lower()
+            # QUE SEA UN `revoke` NO BASTA: hay que mirar QUÉ revoca. Cambiar
+            # `revoke all` por `revoke trigger` dejaba `select` y `truncate` en
+            # pie para la clave anonima —la segunda barrera que la migracion
+            # anuncia no existia— y esta prueba seguia en verde. `truncate`
+            # importa aparte porque es el unico que la RLS no controla: una
+            # politica no impide vaciar la tabla de auditoria.
+            if verbo != "revoke":
+                cierra = False
+            elif "all" in privilegios:
+                cierra = True
+            elif "truncate" not in privilegios:
+                cierra = False
+            else:
+                cierra = "select" in privilegios or tabla_de_bloque_cerrada_por_columna(
+                    bloque.group(3)
+                )
             for tabla in re.findall(r"public\.([a-z_0-9]+)", bloque.group(3)):
-                concedidas[tabla] = verbo
+                concedidas[tabla] = "cerrada" if cierra else "abierta"
     sin_cerrar = sorted(
-        t
-        for t in _tablas_con_dinero()
-        if concedidas.get(t) != "revoke"
+        t for t in _tablas_con_dinero() if concedidas.get(t) != "cerrada"
     )
     assert not sin_cerrar, (
-        "tablas de dinero que siguen con la concesion por defecto de Supabase "
-        f"para anon/authenticated: {sin_cerrar}"
+        "tablas de dinero que siguen alcanzables por anon/authenticated: hace "
+        "falta un `revoke all` (o al menos select y truncate), no un revoke "
+        f"cualquiera: {sin_cerrar}"
     )
 
 

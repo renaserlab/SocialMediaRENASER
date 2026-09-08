@@ -35,6 +35,30 @@ begin
   end if;
 end $$;
 
+-- LO QUE SUPABASE CONCEDE POR DEFECTO, Y SIN ESTO LA PRUEBA ES UNA MENTIRA
+-- PIADOSA.
+--
+-- En un proyecto de Supabase, cada tabla nueva nace con TODOS los privilegios
+-- concedidos a `anon` y `authenticated`. Comprobado en la base real:
+--
+--     select defaclacl from pg_default_acl;  ->  anon=arwdDxtm/postgres
+--
+-- Aqui solo se creaban los roles, asi que las tablas nacian sin ninguna
+-- concesion. Consecuencia: las migraciones 0052 y 0053, que existen ENTERAS
+-- para retirar esa concesion, se aplicaban sobre una base donde no habia nada
+-- que retirar, y sus bloques de verificacion no podian ponerse en rojo aunque
+-- el `revoke` estuviera mal escrito. Se habrian dado por buenas sin haber
+-- probado lo unico que hacen.
+--
+-- Reproduciendo aqui el punto de partida de Supabase, la prueba pasa a
+-- significar algo: si un `revoke` se queda corto, CI lo dice.
+alter default privileges in schema public
+  grant all on tables to anon, authenticated;
+alter default privileges in schema public
+  grant all on sequences to anon, authenticated;
+alter default privileges in schema public
+  grant execute on functions to anon, authenticated;
+
 -- `pg_trgm` se instala en su propio esquema porque asi lo pide la 0040.
 create schema if not exists extensions;
 create extension if not exists pgcrypto;
