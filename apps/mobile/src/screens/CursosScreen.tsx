@@ -168,7 +168,17 @@ export function CursosScreen() {
 
   return (
     <AppScreen>
-      <AppHeader title={t('verticales.cursos')} />
+      {/*
+        LA PUERTA A «MIS CURSOS». La biblioteca existia y no se enlazaba desde
+        ninguna parte fuera del modo de desarrollo, asi que quien habia comprado
+        un curso no tenia por donde volver a el. Vive aqui porque es donde va
+        quien busca sus cursos.
+      */}
+      <AppHeader
+        title={t('verticales.cursos')}
+        rightIcon="book-open"
+        onRightPress={() => router.push('/library' as never)}
+      />
       <View style={[styles.buscador, { borderColor: colors.border }]}>
         <Feather name="search" size={16} color={colors.textMuted} />
         <TextInput

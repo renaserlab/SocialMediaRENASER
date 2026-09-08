@@ -6,6 +6,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
+import { BarraDeProgreso } from '@/components/BarraDeProgreso';
 import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { StateView } from '@/components/StateView';
@@ -36,6 +37,13 @@ type Props = {
    * arriba y el bloque de aqui abajo dijeran cosas distintas.
    */
   comingSoon: boolean;
+  /**
+   * Que lecciones estan completadas, por su id. Llega del detalle del curso;
+   * `undefined` mientras no se sabe, que NO es lo mismo que «ninguna».
+   */
+  completadas?: ReadonlySet<string>;
+  /** El avance del curso en entero, calculado por el servidor. */
+  progresoDelCurso?: number;
   /** Al tocar una leccion (para abrirla en el reproductor). */
   onOpenLesson?: (lessonId: string) => void;
   /** Avisa a la pantalla de que el temario cambio, para refrescar contadores. */
@@ -79,6 +87,8 @@ export function CourseContentEditor({
   courseId,
   canEdit,
   comingSoon,
+  completadas,
+  progresoDelCurso,
   onOpenLesson,
   onChanged,
 }: Props) {
@@ -342,12 +352,42 @@ export function CourseContentEditor({
         </Text>
       ) : null}
 
+      {/*
+        EL AVANCE DEL CURSO. Llega calculado del servidor (`progreso.py`); aquí
+        no se cuenta nada. Solo se pinta cuando hay lecciones de las que hablar
+        y cuando quien mira es alumno: para quien edita, «62 % completado» sobre
+        su propio curso no dice nada útil.
+      */}
+      {!canEdit && progresoDelCurso !== undefined && modules.length > 0 ? (
+        <View style={styles.progresoDelCurso}>
+          <View style={styles.progresoCabecera}>
+            <Text variant="secondary" weight="700">
+              {t('temario.progresoDelCurso')}
+            </Text>
+            <Text variant="secondary" color={colors.textMuted}>
+              {t('biblioteca.completado', { porcentaje: progresoDelCurso })}
+            </Text>
+          </View>
+          <BarraDeProgreso porcentaje={progresoDelCurso} />
+        </View>
+      ) : null}
+
       {modules.map((module, index) => (
         <View key={module.id} style={[styles.module, { borderColor: colors.border }]}>
           <View style={styles.moduleHeader}>
             <Text variant="body" weight="700" style={{ flex: 1 }}>
               {index + 1}. {module.title}
             </Text>
+            {/* Cuántas van de este módulo. Solo con lecciones y solo si se sabe
+                qué está hecho: sin `completadas` diría «0 / 4» a todo el mundo. */}
+            {completadas && module.lessons.length > 0 ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {t('temario.leccionesDelModulo', {
+                  hechas: module.lessons.filter((l) => completadas.has(l.id)).length,
+                  total: module.lessons.length,
+                })}
+              </Text>
+            ) : null}
             {canEdit ? (
               <Pressable
                 onPress={() => void removeModule(module)}
@@ -377,7 +417,16 @@ export function CourseContentEditor({
                     .filter(Boolean)
                     .join(' · ')
                 }
-                leftIcon={lesson.mediaPath ? 'play-circle' : 'file-text'}
+                // El check dice que ESA lección está terminada. Sin saberlo
+                // —`completadas` sin definir— se enseña el icono de siempre en
+                // vez de un círculo vacío, que afirmaría que no lo está.
+                leftIcon={
+                  completadas?.has(lesson.id)
+                    ? 'check-circle'
+                    : lesson.mediaPath
+                      ? 'play-circle'
+                      : 'file-text'
+                }
                 rightIcon="chevron-right"
                 // Tocar SIEMPRE abre la leccion, tambien siendo administrador:
                 // antes la borraba, asi que Darren no podia ni previsualizar su
@@ -590,6 +639,8 @@ function AddLessonSheet({
 }
 
 const styles = StyleSheet.create({
+  progresoDelCurso: { gap: spacing.sm, marginBottom: spacing.lg },
+  progresoCabecera: { flexDirection: 'row', justifyContent: 'space-between' },
   center: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl },
   heading: { marginBottom: spacing.md },
   stateRow: {
