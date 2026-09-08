@@ -36,14 +36,18 @@
 
 create table if not exists public.course_quizzes (
   id uuid primary key default gen_random_uuid(),
-  course_id uuid not null unique references public.courses(id) on delete cascade,
+  course_id uuid not null
+    constraint course_quizzes_un_curso unique
+    references public.courses(id) on delete cascade,
   title text not null default '',
   -- Nota mínima para aprobar, en enteros. 70 es el valor por defecto; es una
   -- decisión de producto y por eso es configurable.
   pass_percent smallint not null default 70
+    constraint course_quizzes_pass_percent
     check (pass_percent between 1 and 100),
   -- 'draft' mientras se escribe; 'published' cuando el alumno puede verla.
   status text not null default 'draft'
+    constraint course_quizzes_status
     check (status in ('draft', 'published')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -52,7 +56,9 @@ create table if not exists public.course_quizzes (
 create table if not exists public.quiz_questions (
   id uuid primary key default gen_random_uuid(),
   quiz_id uuid not null references public.course_quizzes(id) on delete cascade,
-  prompt text not null check (length(trim(prompt)) between 1 and 500),
+  prompt text not null
+    constraint quiz_questions_prompt
+    check (length(trim(prompt)) between 1 and 500),
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
@@ -63,7 +69,9 @@ create index if not exists quiz_questions_por_orden
 create table if not exists public.quiz_options (
   id uuid primary key default gen_random_uuid(),
   question_id uuid not null references public.quiz_questions(id) on delete cascade,
-  body text not null check (length(trim(body)) between 1 and 300),
+  body text not null
+    constraint quiz_options_body
+    check (length(trim(body)) between 1 and 300),
   is_correct boolean not null default false,
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
@@ -95,10 +103,12 @@ create table if not exists public.quiz_attempts (
   course_version_id uuid references public.course_versions(id) on delete set null,
   -- 'in_progress' mientras se responde; 'submitted' es definitivo.
   status text not null default 'in_progress'
+    constraint quiz_attempts_status
     check (status in ('in_progress', 'submitted')),
   -- La nota, calculada por el SERVIDOR al enviar. Nula mientras no se envía:
   -- un 0 diría «lo hizo y sacó cero».
   score_percent smallint
+    constraint quiz_attempts_nota
     check (score_percent is null or score_percent between 0 and 100),
   passed boolean,
   started_at timestamptz not null default now(),
@@ -192,9 +202,15 @@ begin
     where conname = 'quiz_answers_alternativa_de_la_pregunta'
   ) then faltan := faltan || 'alternativa_de_su_pregunta '; end if;
   if not exists (
-    select 1 from pg_constraint con join pg_class c on c.oid = con.conrelid
-    where c.relname = 'course_quizzes' and con.contype = 'u'
+    select 1 from pg_constraint where conname = 'course_quizzes_un_curso'
   ) then faltan := faltan || 'una_evaluacion_por_curso '; end if;
+  -- Por nombre, no por el texto del CHECK: ver la nota de la 0057.
+  if not exists (
+    select 1 from pg_constraint where conname = 'quiz_options_body'
+  ) then faltan := faltan || 'limite_de_alternativa '; end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'quiz_questions_prompt'
+  ) then faltan := faltan || 'limite_de_enunciado '; end if;
 
   if faltan <> '' then
     raise exception '0058 incompleta, falta: %', faltan;

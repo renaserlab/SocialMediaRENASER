@@ -293,6 +293,10 @@ class QuizAttempt(Base):
         CheckConstraint(
             "status in ('in_progress', 'submitted')", name="quiz_attempts_status"
         ),
+        CheckConstraint(
+            "score_percent is null or score_percent between 0 and 100",
+            name="quiz_attempts_nota",
+        ),
         # Enviado tiene nota y fecha; abierto no tiene ninguna de las dos. Es lo
         # que separa «lo está haciendo» de «lo hizo», y de ahí sale el fin del
         # curso.

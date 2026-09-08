@@ -54,7 +54,9 @@ create table if not exists public.course_certificates (
   id uuid primary key default gen_random_uuid(),
   -- El código que se comparte. Lo genera la API con `secrets`; no es
   -- correlativo y no se puede recorrer.
-  public_id text not null unique
+  public_id text not null
+    constraint course_certificates_codigo_unico unique
+    constraint course_certificates_codigo
     check (length(public_id) between 16 and 64),
   user_id uuid not null references public.profiles(id) on delete cascade,
   course_id uuid not null references public.courses(id) on delete cascade,
@@ -67,6 +69,7 @@ create table if not exists public.course_certificates (
   completed_at timestamptz not null,
   issued_at timestamptz not null default now(),
   status text not null default 'valid'
+    constraint course_certificates_status
     check (status in ('valid', 'revoked')),
   revoked_at timestamptz,
   revoked_reason text,
@@ -77,7 +80,7 @@ create table if not exists public.course_certificates (
     or (status = 'revoked' and revoked_at is not null)
   ),
   -- UNO POR PERSONA Y CURSO. Reintentar la emisión devuelve el que ya hay.
-  unique (user_id, course_id)
+  constraint course_certificates_uno_por_curso unique (user_id, course_id)
 );
 
 create index if not exists course_certificates_por_persona
@@ -121,15 +124,12 @@ begin
     ) then faltan := faltan || 'concesion_' || t || ' '; end if;
   end loop;
 
+  -- TODAS POR NOMBRE, no por el texto de la definición: ver la nota de la 0057.
   if not exists (
-    select 1 from pg_constraint con join pg_class c on c.oid = con.conrelid
-    where c.relname = 'course_certificates' and con.contype = 'u'
-      and pg_get_constraintdef(con.oid) like '%public_id%'
+    select 1 from pg_constraint where conname = 'course_certificates_codigo_unico'
   ) then faltan := faltan || 'codigo_publico_unico '; end if;
   if not exists (
-    select 1 from pg_constraint con join pg_class c on c.oid = con.conrelid
-    where c.relname = 'course_certificates' and con.contype = 'u'
-      and pg_get_constraintdef(con.oid) like '%user_id, course_id%'
+    select 1 from pg_constraint where conname = 'course_certificates_uno_por_curso'
   ) then faltan := faltan || 'uno_por_persona_y_curso '; end if;
   if not exists (
     select 1 from pg_constraint where conname = 'course_certificates_coherente'

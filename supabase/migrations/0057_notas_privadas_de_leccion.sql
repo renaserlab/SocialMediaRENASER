@@ -37,10 +37,12 @@ create table if not exists public.lesson_notes (
   -- El texto. El límite lo pone la base, no solo el formulario: 2000 caracteres
   -- son cuatro pantallas de apuntes, y una nota vacía no es una nota.
   body text not null
+    constraint lesson_notes_texto
     check (length(trim(body)) between 1 and 2000),
   -- El minuto del vídeo en el que se tomó. Nulo cuando el reproductor no da una
   -- posición real; NO se pone cero, que diría «al principio».
   position_seconds integer
+    constraint lesson_notes_posicion
     check (position_seconds is null or position_seconds >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -74,11 +76,15 @@ begin
     select 1 from pg_indexes
     where schemaname = 'public' and indexname = 'lesson_notes_por_leccion'
   ) then faltan := faltan || 'indice_leccion '; end if;
+  -- POR NOMBRE, no por el texto del CHECK: cómo se reescribe `trim(body)` al
+  -- leerlo de vuelta depende de la versión de PostgreSQL, y buscar «btrim»
+  -- hacía fallar la comprobación de una restricción que sí estaba.
   if not exists (
-    select 1 from pg_constraint con join pg_class c on c.oid = con.conrelid
-    where c.relname = 'lesson_notes' and con.contype = 'c'
-      and pg_get_constraintdef(con.oid) like '%btrim%'
+    select 1 from pg_constraint where conname = 'lesson_notes_texto'
   ) then faltan := faltan || 'limite_de_texto '; end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'lesson_notes_posicion'
+  ) then faltan := faltan || 'limite_de_posicion '; end if;
   if not exists (
     select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relname = 'lesson_notes' and c.relrowsecurity
