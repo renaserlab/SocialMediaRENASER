@@ -726,6 +726,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'lesson.description': 'Descrição',
   'lesson.editDescription': 'Editar descrição',
   'lesson.noDescription': 'Ainda sem descrição.',
+  'lesson.previous': "Anterior",
+  'lesson.next': "Seguinte",
   'lesson.descriptionSheet': 'Descrição da aula',
   'lesson.descriptionPlaceholder': 'Sobre o que é esta aula…',
 

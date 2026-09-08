@@ -723,6 +723,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'lesson.description': 'Description',
   'lesson.editDescription': 'Edit description',
   'lesson.noDescription': 'No description yet.',
+  'lesson.previous': "Previous",
+  'lesson.next': "Next",
   'lesson.descriptionSheet': 'Lesson description',
   'lesson.descriptionPlaceholder': 'What this lesson is about…',
 

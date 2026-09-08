@@ -780,6 +780,8 @@ export const es = {
   'lesson.description': 'Descripción',
   'lesson.editDescription': 'Editar descripción',
   'lesson.noDescription': 'Sin descripción todavía.',
+  'lesson.previous': "Anterior",
+  'lesson.next': "Siguiente",
   'lesson.descriptionSheet': 'Descripción de la lección',
   'lesson.descriptionPlaceholder': 'De qué trata esta lección…',
 

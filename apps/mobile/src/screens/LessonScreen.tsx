@@ -13,7 +13,9 @@ import { ListRow } from '@/components/ListRow';
 import { Skeleton } from '@/components/Skeleton';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { useCourse } from '@/hooks/useCourse';
 import { useLesson } from '@/hooks/useLesson';
+import { vecinasDe } from '@/lib/vecinasDeLaLeccion';
 import { useProgresoDeLeccion } from '@/hooks/useProgresoDeLeccion';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
@@ -33,6 +35,9 @@ export function LessonScreen() {
   const router = useRouter();
 
   const { lesson, loading, error, reload } = useLesson(id);
+  // El temario del curso: de ahi salen la anterior y la siguiente.
+  const { lessons: temario } = useCourse(lesson?.courseId);
+  const vecinas = vecinasDe(temario, id ?? '');
   /*
     Quien puede editar ESTA leccion lo decide el SERVIDOR (`can_manage`), no el
     rol de administrador. Antes se usaba `isAdmin`, asi que el autor de un curso
@@ -311,6 +316,26 @@ export function LessonScreen() {
           ) : null}
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <View style={styles.vecinas}>
+            <Button
+              label={t('lesson.previous')}
+              variant="ghost"
+              disabled={!vecinas.anterior}
+              onPress={() =>
+                vecinas.anterior && router.replace(`/lesson/${vecinas.anterior}`)
+              }
+            />
+            <Button
+              label={t('lesson.next')}
+              variant="ghost"
+              disabled={!vecinas.siguiente}
+              onPress={() =>
+                vecinas.siguiente && router.replace(`/lesson/${vecinas.siguiente}`)
+              }
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <LessonResources lessonId={lesson.id} courseId={lesson.courseId} canEdit={canManage} />
         </View>
       </ScrollView>
@@ -359,6 +384,7 @@ const styles = StyleSheet.create({
   duration: {
     fontSize: 13,
   },
+  vecinas: { flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
   divider: {
     height: 1,
     marginVertical: spacing.sm,

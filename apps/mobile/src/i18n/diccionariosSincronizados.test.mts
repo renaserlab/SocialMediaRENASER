@@ -107,6 +107,8 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     // «Curso», «Estado», «Total», «Confirmada», «Cancelada» y «Reembolsada»
     // se escriben igual en los dos idiomas.
     'constancia.curso',
+    // «Anterior» se escribe igual en los dos idiomas.
+    'lesson.previous',
     'constancia.estado',
     'constancia.total',
     'constancia.estados.paid',
