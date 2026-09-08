@@ -5,6 +5,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { toast } from '@/lib/toast';
+import { AccesosAVerticales } from '@/components/AccesosAVerticales';
 import { AppHeader } from '@/components/AppHeader';
 import { CoachMark } from '@/components/CoachMark';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
@@ -796,6 +798,18 @@ export function ExploreScreen() {
           ) : null}
         </View>
       </View>
+
+      {/*
+        Los cuatro accesos de la referencia. Van AQUI, entre el buscador y el
+        muro, y no dentro de la cabecera de la lista: la cabecera se desplaza
+        con el muro, y un acceso que se va de la pantalla al bajar deja de ser
+        un acceso.
+      */}
+      <AccesosAVerticales
+        alTocarNoDisponible={(nombre) =>
+          toast(t('verticales.aunNoDisponible').replace('{vertical}', nombre))
+        }
+      />
 
       <View style={styles.lleno}>
         <MuroDePublicaciones

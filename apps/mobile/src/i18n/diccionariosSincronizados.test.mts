@@ -92,6 +92,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // «Cursos» y «Eventos» se escriben exactamente igual en los dos idiomas.
+    'verticales.cursos',
+    'verticales.eventos',
     // «Programa» y «Restaurar compras» se escriben igual en los dos idiomas.
     'course.headerTitle',
     'course.restorePurchases',

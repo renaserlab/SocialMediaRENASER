@@ -1,0 +1,122 @@
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+import { Text } from '@/components/Text';
+import { useTranslation } from '@/i18n/useTranslation';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
+import { spacing } from '@/theme/tokens';
+import { useAppTheme } from '@/theme/useAppTheme';
+
+/**
+ * Los cuatro accesos de la referencia: Cursos, Eventos, Servicios y Productos.
+ *
+ * DOS DE LAS CUATRO NO EXISTEN TODAVÍA, y eso se dice en vez de disimularse.
+ * Servicios y Productos no tienen ni pantalla ni endpoints —ver
+ * `docs/Z_MATRIZ_DE_VISTAS.md`—, así que su acceso avisa de que aún no está en
+ * lugar de llevar a una pantalla con datos inventados o a una compra que no se
+ * puede completar. Un acceso que promete algo que no hay cuesta más confianza
+ * que un acceso que dice «todavía no».
+ *
+ * NO SUSTITUYE A LA BÚSQUEDA SOCIAL. Va debajo del buscador y encima del muro:
+ * personas, publicaciones, temas e historias siguen exactamente donde estaban.
+ */
+
+type Vertical = {
+  clave: 'cursos' | 'eventos' | 'servicios' | 'productos';
+  icono: keyof typeof Feather.glyphMap;
+  /**
+   * La ruta a la que lleva, o `null` si la vertical aún no existe.
+   *
+   * Se escribe como literal para que expo-router la compruebe: si mañana
+   * alguien renombra `/cursos`, esto no compila en vez de fallar al tocarlo.
+   */
+  ruta: '/cursos' | '/events' | null;
+};
+
+const VERTICALES: readonly Vertical[] = [
+  { clave: 'cursos', icono: 'book-open', ruta: '/cursos' },
+  { clave: 'eventos', icono: 'calendar', ruta: '/events' },
+  // Sin pantalla y sin endpoints. Ver la matriz de vistas.
+  { clave: 'servicios', icono: 'briefcase', ruta: null },
+  { clave: 'productos', icono: 'shopping-bag', ruta: null },
+];
+
+export function AccesosAVerticales({
+  alTocarNoDisponible,
+}: {
+  /** Cómo se avisa de que una vertical todavía no está. Lo pone la pantalla. */
+  alTocarNoDisponible: (nombreDeLaVertical: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { colors } = useAppTheme();
+  const router = useRouter();
+
+  return (
+    /*
+      BLINDADA CONTRA EL CARRUSEL DE SECCIONES. Explorar se cambia de pestaña
+      con un gesto horizontal, y esta fila también se desplaza en horizontal:
+      sin `SinCambioDeSeccion`, arrastrarla a media lista cambia de sección en
+      vez de mover los accesos. Es la regla del proyecto para toda lista
+      horizontal dentro de las pestañas.
+    */
+    <SinCambioDeSeccion>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.fila}
+        nestedScrollEnabled
+      >
+      {VERTICALES.map((vertical) => {
+        const nombre = t(`verticales.${vertical.clave}`);
+        const disponible = vertical.ruta !== null;
+        return (
+          <Pressable
+            key={vertical.clave}
+            onPress={() =>
+              disponible ? router.push(vertical.ruta!) : alTocarNoDisponible(nombre)
+            }
+            style={({ pressed }) => [
+              styles.acceso,
+              { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              disponible ? nombre : `${nombre}. ${t('verticales.proximamente')}`
+            }
+          >
+            <Feather
+              name={vertical.icono}
+              size={20}
+              color={disponible ? colors.text : colors.textMuted}
+            />
+            <Text
+              style={[
+                styles.etiqueta,
+                { color: disponible ? colors.text : colors.textMuted },
+              ]}
+            >
+              {nombre}
+            </Text>
+          </Pressable>
+        );
+        })}
+      </ScrollView>
+    </SinCambioDeSeccion>
+  );
+}
+
+const styles = StyleSheet.create({
+  fila: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  acceso: {
+    minWidth: 96,
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+  },
+  etiqueta: { fontSize: 13, fontWeight: '600' },
+});
