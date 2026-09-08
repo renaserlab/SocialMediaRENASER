@@ -96,6 +96,15 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // «Anterior», «Ver certificado», «Certificado», «Este documento certifica
+    // que», «Verificar certificado» y «Continuar» se escriben exactamente
+    // igual en los dos idiomas.
+    'evaluacion.anterior',
+    'completado.verCertificado',
+    'certificado.titulo',
+    'certificado.certificaQue',
+    'certificado.verificar',
+    'biblioteca.continuar',
     // «Recursos», «Notas», «Guardar nota», «Nota guardada», «Editar nota» y
     // «Notas guardadas» se escriben exactamente igual en los dos idiomas.
     'lesson.tabResources',

@@ -38,12 +38,27 @@ export function CourseScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const { course, lessons, canManage, hasAccess, durationSecondsTotal, loading, error, reload } =
-    useCourse(id);
+  const {
+    course,
+    lessons,
+    canManage,
+    hasAccess,
+    progressPercent,
+    durationSecondsTotal,
+    loading,
+    error,
+    reload,
+  } = useCourse(id);
   // Primera leccion sin completar; si estan todas, la primera del curso.
   const siguiente = lessons.find((l) => !l.completed) ?? lessons[0];
   const firstLessonId = siguiente?.id;
   const empezado = lessons.some((l) => l.completed || l.progressSeconds > 0);
+  // Un conjunto y no un `find` por fila: el temario lo consulta una vez por
+  // leccion y con una lista larga eso es cuadratico.
+  const completadas = React.useMemo(
+    () => new Set(lessons.filter((l) => l.completed).map((l) => l.id)),
+    [lessons],
+  );
   const [enrolling, setEnrolling] = useState(false);
   const [publicando, setPublicando] = useState(false);
   /**
@@ -628,6 +643,11 @@ export function CourseScreen() {
               // Del detalle del curso, que es de donde sale todo lo demás de
               // esta pantalla: una sola fuente para un solo dato.
               comingSoon={!!course.comingSoon}
+              // Que hay hecho y cuanto se lleva: del detalle del curso, que es
+              // de donde sale todo lo demas de esta pantalla. El temario no lo
+              // calcula ni lo vuelve a pedir.
+              completadas={completadas}
+              progresoDelCurso={progressPercent}
               onOpenLesson={(lessonId) => router.push(`/lesson/${lessonId}` as never)}
               // Los contadores de arriba ("X modulos, Y lecciones") vienen del
               // detalle del curso, que se pide una sola vez al montar. Sin esto
@@ -759,6 +779,32 @@ export function CourseScreen() {
           )}
 
           {/*
+            LA EVALUACION Y EL FINAL DEL CURSO, para quien lo tiene.
+
+            Son dos destinos y no uno: la evaluacion se puede hacer con el
+            curso a medias, y la pantalla de finalizacion sirve tanto para
+            celebrarla como para decir que falta. Las dos preguntan al servidor
+            al abrirse, asi que desde aqui no se afirma nada: si esta
+            instalacion no tiene la 0058 o la 0059, cada una lo dice al llegar.
+          */}
+          {hasAccess && !canManage ? (
+            <View style={styles.accionesDeAprendizaje}>
+              <Button
+                label={t('evaluacion.titulo')}
+                variant="secondary"
+                onPress={() => router.push(`/evaluacion/${course.id}`)}
+                style={styles.accionDeAprendizaje}
+              />
+              <Button
+                label={t('completado.titulo')}
+                variant="secondary"
+                onPress={() => router.push(`/completado/${course.id}`)}
+                style={styles.accionDeAprendizaje}
+              />
+            </View>
+          ) : null}
+
+          {/*
             LA GARANTIA DE DEVOLUCION, para quien compro este curso.
 
             Se pinta solo cuando hay compra de pago con acceso; quien lo
@@ -853,6 +899,12 @@ function Info({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: str
 }
 
 const styles = StyleSheet.create({
+  accionesDeAprendizaje: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  accionDeAprendizaje: { flex: 1 },
   // 16:9 en vez de 1.1: una portada panoramica se recortaba de forma agresiva
   // en un lienzo casi cuadrado. Este ratio respeta mejor la imagen que se sube.
   hero: { width: '100%', aspectRatio: 16 / 9, resizeMode: 'cover' },
