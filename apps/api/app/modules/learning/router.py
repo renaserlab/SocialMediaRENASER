@@ -549,6 +549,45 @@ async def grant_beta_access(
     return {"granted": True, "already_granted": not es_nuevo}
 
 
+async def _evaluaciones_de(
+    db: AsyncSession, uid: str, course_ids: list[str]
+) -> tuple[set[str], set[str]]:
+    """Que cursos EXIGEN evaluacion y en cuales la aprobo esta persona.
+
+    Dos consultas para la lista entera. Preguntarlo curso a curso serian dos por
+    cada uno, y esto es la biblioteca completa de alguien.
+    """
+    if not course_ids or not await esquema_aprendizaje.hay_evaluaciones(db):
+        return set(), set()
+
+    exigen: dict[str, str] = {
+        quiz.course_id: quiz.id
+        for quiz in await db.scalars(
+            select(CourseQuiz).where(
+                CourseQuiz.course_id.in_(course_ids),
+                CourseQuiz.status == "published",
+            )
+        )
+    }
+    if not exigen:
+        return set(), set()
+
+    por_quiz = {qid: cid for cid, qid in exigen.items()}
+    aprobados = {
+        por_quiz[qid]
+        for qid in await db.scalars(
+            select(QuizAttempt.quiz_id).where(
+                QuizAttempt.quiz_id.in_(por_quiz.keys()),
+                QuizAttempt.user_id == uid,
+                QuizAttempt.status == "submitted",
+                QuizAttempt.passed.is_(True),
+            )
+        )
+        if qid in por_quiz
+    }
+    return set(exigen.keys()), aprobados
+
+
 @router.get("/me/courses", response_model=list[MyCourseRead])
 async def my_courses(
     current_user: AuthUser = Depends(get_current_user),
@@ -612,14 +651,27 @@ async def my_courses(
             )
         )
 
+    # TERMINAR ES LA MISMA REGLA AQUI QUE EN `/completion`. Contar solo lecciones
+    # dejaba la biblioteca diciendo «Finalizados» sobre un curso cuya evaluacion
+    # no se ha aprobado, mientras la pantalla de finalizacion decia que no y el
+    # certificado se rechazaba. Dos respuestas a la misma pregunta.
+    #
+    # En DOS consultas para todos los cursos, no una por curso: esta pantalla es
+    # la biblioteca entera de alguien.
+    exigen, aprobados = await _evaluaciones_de(db, uid, [c.id for c in cursos])
+
     salida: list[MyCourseRead] = []
     for curso in cursos:
         lecciones = por_curso.get(curso.id, [])
         completadas = [lid for lid in lecciones if lid in hechas]
         pendiente = next((lid for lid in lecciones if lid not in hechas), None)
+        contenido_hecho = bool(lecciones) and len(completadas) >= len(lecciones)
+        terminado = contenido_hecho and (
+            curso.id not in exigen or curso.id in aprobados
+        )
         if not lecciones:
             estado = "not_started"
-        elif len(completadas) >= len(lecciones):
+        elif terminado:
             estado = "completed"
         elif completadas:
             estado = "in_progress"
@@ -827,24 +879,6 @@ async def _guardar_progreso(
 
     await db.flush()
 
-    lecciones = list(
-        await db.scalars(
-            select(CourseLesson.id)
-            .join(CourseModule, CourseModule.id == CourseLesson.module_id)
-            .where(CourseModule.course_id == curso.id)
-        )
-    )
-    hechas: set[str] = set()
-    if lecciones:
-        hechas = set(
-            await db.scalars(
-                select(LessonProgress.lesson_id).where(
-                    LessonProgress.user_id == uid,
-                    LessonProgress.completed.is_(True),
-                    LessonProgress.lesson_id.in_(lecciones),
-                )
-            )
-        )
     # TERMINAR EL CURSO NO ES SOLO VER LAS LECCIONES. Si hay evaluacion final
     # publicada, hace falta ademas un intento aprobado; la regla entera vive en
     # `finalizacion.py` y aqui se pregunta, no se repite.
@@ -1603,6 +1637,21 @@ async def guardar_evaluacion(
                     sort_order=orden,
                 )
             )
+    await db.flush()
+    # UNA EVALUACIÓN PUBLICADA SIEMPRE SE PUEDE APROBAR. Vaciarla o dejar una
+    # pregunta sin respuesta correcta la volvía imposible de aprobar SIN dejar
+    # de ser obligatoria, y con eso el curso entero se quedaba sin poder
+    # terminarse para todos sus alumnos. Vuelve a borrador, que es lo que es, y
+    # el estado sale en la respuesta para que quien la editó lo vea.
+    if quiz.status == "published":
+        filas = await _preguntas_con_opciones(db, quiz.id)
+        if (
+            evaluacion.motivo_para_no_publicar(
+                [(p.id, [o.is_correct for o in opciones]) for p, opciones in filas]
+            )
+            is not None
+        ):
+            quiz.status = "draft"
     await db.commit()
     return await borrador_de_evaluacion(course_id, current_user, db)
 
@@ -1974,7 +2023,7 @@ async def emitir_certificado(
     existente = await _certificado_de(
         db, user_id=current_user.id, course_id=curso.id
     )
-    if existente is not None:
+    if existente is not None and existente.status == "valid":
         return _a_certificado(existente)
 
     estado = await finalizacion.registrar(
@@ -1996,6 +2045,20 @@ async def emitir_certificado(
     perfil = await db.get(Profile, current_user.id)
     autor = await db.get(Profile, curso.author_id)
     version = await versiones.vigente(db, curso.id)
+
+    # REVOCADO Y VUELTO A GANAR. Quien devolvió el curso, lo compró otra vez y
+    # volvió a terminarlo tiene derecho al certificado; sin esto se quedaba con
+    # el revocado para siempre, porque solo puede haber uno por persona y curso.
+    # NO se pierde nada: la revocación y esta reposición quedan las dos en
+    # auditoría.
+    if existente is not None:
+        await certificados.reponer(
+            db, existente, actor_id=current_user.id, completado_en=estado.terminado_en
+        )
+        await db.commit()
+        await db.refresh(existente)
+        return _a_certificado(existente)
+
     fila = CourseCertificate(
         public_id=certificados.nuevo_codigo_publico(),
         user_id=current_user.id,

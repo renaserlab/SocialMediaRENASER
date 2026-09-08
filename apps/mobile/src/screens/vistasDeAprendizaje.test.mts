@@ -76,9 +76,13 @@ describe('la evaluación no corrige en el teléfono', () => {
 
 describe('curso completado', () => {
   it('el porcentaje sale del servidor, no de contar lecciones aquí', () => {
-    assert.ok(COMPLETADO.includes('estado.porcentaje'));
-    assert.ok(!COMPLETADO.includes('filter((l)'));
-    assert.ok(!COMPLETADO.includes('100'), 'no se escribe un 100 a mano');
+    // `!includes('100')` era una comprobación frágil: cualquier literal con un
+    // 100 dentro —un tamaño, un tiempo de espera— la rompía sin que nadie
+    // hubiera escrito un porcentaje a mano. Lo que importa es que la cifra que
+    // se pinta venga del estado y que aquí no se cuente ninguna lección.
+    assert.ok(COMPLETADO.includes('{estado.porcentaje}%'));
+    assert.ok(!COMPLETADO.includes('filter('));
+    assert.ok(!COMPLETADO.includes('lessons.length'));
   });
 
   it('si no está terminado, se dice qué falta', () => {
@@ -128,12 +132,21 @@ describe('la verificación pública', () => {
     assert.ok(verificar.includes('auth: false'));
   });
 
-  it('no enseña nada que el servidor no mande', () => {
-    for (const campo of ['email', 'correo', 'userId', 'orderId', 'amount', 'importe']) {
-      assert.ok(
-        !VERIFICAR.includes(campo),
-        `«${campo}» no puede aparecer en una página pública`,
-      );
+  it('el contrato de la verificación no declara datos personales', () => {
+    // Buscar «email» o «userId» en el .tsx no probaba nada: la pantalla pinta
+    // un DTO tipado que no tiene esos campos, así que pasaba por construcción.
+    // Lo que sí es una garantía es el TIPO: si alguien añade el campo aquí, es
+    // porque el servidor empezó a mandarlo. (Que no lo mande lo comprueba
+    // `test_la_verificacion_no_cuenta_nada_mas` en el backend, que llama al
+    // endpoint de verdad y mira la respuesta entera.)
+    const REPO = fuente('repositories/CertificateRepository.ts');
+    const tipo = REPO.slice(
+      REPO.indexOf('export type VerificacionPublica'),
+      REPO.indexOf('type FinalizacionDto'),
+    );
+    assert.ok(tipo.length > 50, 'no se encontró el tipo, la búsqueda falla');
+    for (const campo of ['email', 'userId', 'orderId', 'amount', 'cursoId']) {
+      assert.ok(!tipo.includes(campo), `«${campo}» no puede estar en el contrato`);
     }
   });
 

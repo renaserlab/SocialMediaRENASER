@@ -934,6 +934,47 @@ async def test_un_reembolso_quita_el_acceso_de_verdad(entorno):
 
 
 @pytest.mark.asyncio
+async def test_un_reembolso_deja_el_certificado_sin_vigencia(entorno):
+    """El curso terminado y certificado, y despues devuelto.
+
+    EL CERTIFICADO NO SE BORRA: sigue existiendo, marcado como revocado y con su
+    motivo, y la verificacion publica lo dice. Borrarlo dejaria a quien lo
+    hubiera compartido sin ninguna explicacion de por que desaparecio el enlace.
+
+    Esta prueba recorre el camino ENTERO —compra por Stripe, lecciones
+    completadas, certificado emitido y webhook de reembolso firmado— porque lo
+    que hay que comprobar no es la funcion suelta, es que este enganchada.
+    """
+    from app.modules.learning.models import CourseCertificate
+
+    await _comprar_por_stripe(entorno)
+    for leccion in (LECCION_PRIVADA, LECCION_MUESTRA, LECCION_DE_TEXTO):
+        respuesta = await entorno.http.post(f"{LEARNING}/lessons/{leccion}/complete")
+        assert respuesta.status_code == 200, respuesta.text
+
+    emitido = await entorno.http.post(f"{LEARNING}/courses/{CURSO_A}/certificate")
+    assert emitido.status_code == 201, emitido.text
+    codigo = emitido.json()["public_id"]
+    assert emitido.json()["status"] == "valid"
+
+    evento = _devolucion(importe=PRECIO_A)
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+
+    publica = await entorno.http.get(f"{LEARNING}/certificates/{codigo}")
+    assert publica.status_code == 200, "el certificado sigue existiendo"
+    assert publica.json()["status"] == "revoked"
+    # Y con su motivo, no en blanco.
+    async with entorno.sesiones() as db:
+        fila = await db.scalar(select(CourseCertificate))
+        assert fila is not None
+        assert (fila.revoked_reason or "").strip() != ""
+        assert fila.revoked_at is not None
+
+
+@pytest.mark.asyncio
 async def test_un_charge_refunded_SIN_identificador_de_reembolso_no_revoca(entorno):
     """El aviso trae el cobro pero no el reembolso: no hay qué conciliar.
 

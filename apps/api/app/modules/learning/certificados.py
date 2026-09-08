@@ -86,3 +86,37 @@ async def revocar(
         new_state="revoked",
         payload={"course_id": certificado.course_id, "reason": motivo or ""},
     )
+
+
+async def reponer(
+    db: AsyncSession,
+    certificado: CourseCertificate,
+    *,
+    actor_id: str | None,
+    completado_en,  # noqa: ANN001  datetime
+) -> None:
+    """Devolver la vigencia a uno revocado que se ha vuelto a ganar.
+
+    NO BORRA LA HISTORIA: la revocación quedó en auditoría y esta reposición
+    también. Lo que se limpia son las columnas de estado, porque un certificado
+    no puede estar vigente y revocado a la vez —lo impide la propia restricción
+    de la 0059— y la fecha de finalización se actualiza a la nueva, que es la
+    que este certificado acredita.
+    """
+    from app.modules.gobernanza import auditoria
+
+    certificado.status = "valid"
+    certificado.revoked_at = None
+    certificado.revoked_reason = None
+    if completado_en is not None:
+        certificado.completed_at = completado_en
+    certificado.issued_at = datetime.now(timezone.utc)
+    await auditoria.anotar(
+        db,
+        actor_id=actor_id,
+        action="course_certificate.reinstated",
+        entity_type="course_certificate",
+        entity_id=certificado.id,
+        new_state="valid",
+        payload={"course_id": certificado.course_id},
+    )

@@ -525,3 +525,266 @@ async def test_sin_la_migracion_se_dice_en_vez_de_fingir(entorno):
     estado = (await http.get(f"{LEARNING}/courses/{CURSO}/completion")).json()
     assert estado["completed"] is True
     assert estado["completed_at"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Lo que encontró la revisión independiente
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_volver_a_completar_una_leccion_ya_hecha_no_rompe_nada(entorno):
+    """Registrar la finalización es idempotente: la segunda vez no hace nada.
+
+    NO prueba la carrera —para eso está la prueba de más abajo, que sí llega al
+    choque—: prueba el camino normal, en el que la fila ya está y se sale antes.
+    """
+    http, _, sesiones, lecciones = entorno
+    await _terminar(http, lecciones)
+
+    # La finalización ya está anotada. Volver a completar una lección pasa otra
+    # vez por `registrar`, que ahora choca contra la fila que ya existe.
+    respuesta = await http.post(f"{LEARNING}/lessons/{lecciones[0]}/complete")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["completed"] is True
+    assert respuesta.json()["course_completed"] is True
+
+    async with sesiones() as db:
+        from app.modules.learning.models import LessonProgress
+
+        avance = await db.get(
+            LessonProgress, {"user_id": BRUNO, "lesson_id": lecciones[0]}
+        )
+        assert avance is not None and avance.completed is True
+
+
+@pytest.mark.asyncio
+async def test_el_intento_que_cierra_el_curso_queda_enviado_y_con_su_nota(entorno):
+    """`enviar_intento` vuelca el intento y DESPUÉS registra la finalización.
+
+    Las dos cosas tienen que sobrevivir al mismo `commit`.
+    """
+    http, identidad, _, lecciones = entorno
+    identidad["uid"] = AUTORA
+    await http.put(
+        f"{LEARNING}/courses/{CURSO}/quiz",
+        json={
+            "title": "Final",
+            "pass_percent": 50,
+            "questions": [
+                {
+                    "prompt": "¿Cuál?",
+                    "options": [
+                        {"body": "Correcta", "is_correct": True},
+                        {"body": "No", "is_correct": False},
+                    ],
+                }
+            ],
+        },
+    )
+    await http.post(f"{LEARNING}/courses/{CURSO}/quiz/publish")
+
+    identidad["uid"] = BRUNO
+    await _terminar(http, lecciones)
+    vista = (await http.get(f"{LEARNING}/courses/{CURSO}/quiz")).json()
+    intento = (await http.post(f"{LEARNING}/courses/{CURSO}/quiz/attempts")).json()
+    pregunta = vista["questions"][0]
+    buena = next(o for o in pregunta["options"] if o["body"] == "Correcta")
+
+    enviado = await http.post(
+        f"{LEARNING}/quiz-attempts/{intento['id']}/submit",
+        json={"answers": [{"question_id": pregunta["id"], "option_id": buena["id"]}]},
+    )
+    assert enviado.status_code == 200, enviado.text
+    assert enviado.json()["status"] == "submitted"
+    assert enviado.json()["score_percent"] == 100
+    assert enviado.json()["passed"] is True
+
+    # Y sigue enviado en el historial, no solo en la respuesta.
+    historial = (await http.get(f"{LEARNING}/courses/{CURSO}/quiz/attempts")).json()
+    assert [i["status"] for i in historial] == ["submitted"]
+
+
+@pytest.mark.asyncio
+async def test_devolver_y_volver_a_ganarlo_repone_el_certificado(entorno):
+    """Solo puede haber uno por persona y curso: sin reponerlo, quien devolvió,
+    recompró y volvió a terminar se quedaba con el revocado para siempre."""
+    http, identidad, sesiones, lecciones = entorno
+    await _terminar(http, lecciones)
+    codigo = (await http.post(f"{LEARNING}/courses/{CURSO}/certificate")).json()[
+        "public_id"
+    ]
+
+    identidad["uid"] = ADMIN
+    await http.post(
+        f"{LEARNING}/admin/certificates/{codigo}/revoke",
+        json={"reason": "Devolución total confirmada."},
+    )
+    identidad["uid"] = BRUNO
+    assert (await http.get(f"{LEARNING}/certificates/{codigo}")).json()[
+        "status"
+    ] == "revoked"
+
+    # Vuelve a tenerlo y vuelve a terminarlo: el certificado vuelve a valer.
+    repuesto = await http.post(f"{LEARNING}/courses/{CURSO}/certificate")
+    assert repuesto.status_code == 201, repuesto.text
+    assert repuesto.json()["status"] == "valid"
+    assert repuesto.json()["public_id"] == codigo, "sigue siendo el mismo código"
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(CourseCertificate)) == 1
+
+
+@pytest.mark.asyncio
+async def test_sin_acceso_no_se_repone_un_revocado(entorno):
+    """Reponer no puede ser la puerta de atrás del control de acceso."""
+    http, identidad, sesiones, lecciones = entorno
+    await _terminar(http, lecciones)
+    codigo = (await http.post(f"{LEARNING}/courses/{CURSO}/certificate")).json()[
+        "public_id"
+    ]
+    identidad["uid"] = ADMIN
+    await http.post(
+        f"{LEARNING}/admin/certificates/{codigo}/revoke", json={"reason": "Fraude."}
+    )
+
+    identidad["uid"] = BRUNO
+    async with sesiones() as db:
+        compra = await db.scalar(select(Purchase))
+        compra.status = "refunded"
+        await db.commit()
+
+    respuesta = await http.post(f"{LEARNING}/courses/{CURSO}/certificate")
+    assert respuesta.status_code == 403
+    async with sesiones() as db:
+        assert (await db.scalar(select(CourseCertificate))).status == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_la_biblioteca_dice_lo_mismo_que_la_finalizacion(entorno):
+    """Un curso con evaluación sin aprobar NO está finalizado en ninguna de las
+    dos pantallas. Antes la biblioteca lo daba por terminado contando solo
+    lecciones, y el certificado se rechazaba a continuación."""
+    http, identidad, _, lecciones = entorno
+    identidad["uid"] = AUTORA
+    await http.put(
+        f"{LEARNING}/courses/{CURSO}/quiz",
+        json={
+            "title": "Final",
+            "pass_percent": 70,
+            "questions": [
+                {
+                    "prompt": "¿Cuál?",
+                    "options": [
+                        {"body": "Correcta", "is_correct": True},
+                        {"body": "No", "is_correct": False},
+                    ],
+                }
+            ],
+        },
+    )
+    await http.post(f"{LEARNING}/courses/{CURSO}/quiz/publish")
+
+    identidad["uid"] = BRUNO
+    await _terminar(http, lecciones)
+
+    biblioteca = (await http.get(f"{LEARNING}/me/courses")).json()
+    mio = next(c for c in biblioteca if c["id"] == CURSO)
+    finalizacion_ = (await http.get(f"{LEARNING}/courses/{CURSO}/completion")).json()
+    assert finalizacion_["completed"] is False
+    assert mio["state"] != "completed", "la biblioteca no puede decir lo contrario"
+
+
+@pytest.mark.asyncio
+async def test_vaciar_una_evaluacion_publicada_no_deja_el_curso_sin_salida(entorno):
+    """Sin esto, el curso entero se volvía imposible de terminar para todos.
+
+    Una evaluación publicada y vacía sigue siendo obligatoria, y ninguna nota
+    llega al mínimo: nadie puede aprobarla y nadie puede terminar el curso.
+    """
+    http, identidad, _, lecciones = entorno
+    identidad["uid"] = AUTORA
+    await http.put(
+        f"{LEARNING}/courses/{CURSO}/quiz",
+        json={
+            "title": "Final",
+            "pass_percent": 70,
+            "questions": [
+                {
+                    "prompt": "¿Cuál?",
+                    "options": [
+                        {"body": "Correcta", "is_correct": True},
+                        {"body": "No", "is_correct": False},
+                    ],
+                }
+            ],
+        },
+    )
+    await http.post(f"{LEARNING}/courses/{CURSO}/quiz/publish")
+
+    vaciada = await http.put(
+        f"{LEARNING}/courses/{CURSO}/quiz",
+        json={"title": "Final", "pass_percent": 70, "questions": []},
+    )
+    assert vaciada.status_code == 200, vaciada.text
+    assert vaciada.json()["status"] == "draft", "deja de ser obligatoria"
+
+    identidad["uid"] = BRUNO
+    await _terminar(http, lecciones)
+    estado = (await http.get(f"{LEARNING}/courses/{CURSO}/completion")).json()
+    assert estado["quiz_required"] is False
+    assert estado["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_perder_la_carrera_no_deshace_el_trabajo_de_quien_la_pierde(
+    entorno, monkeypatch
+):
+    """El choque contra la clave primaria se recoge en un SAVEPOINT.
+
+    ESTA ES LA PRUEBA QUE LLEGA AL CHOQUE. En el camino normal no se alcanza
+    —`registrar` sale antes cuando la fila ya está—, así que se reproduce lo
+    único que lo provoca: dos peticiones que MIRARON a la vez y vieron el curso
+    terminado y sin fecha, y una de las dos inserta después de la otra.
+
+    Con el `db.rollback()` de antes, la que perdía la carrera perdía también su
+    propio trabajo sin confirmar: aquí, el progreso que acababa de guardar.
+    """
+    from dataclasses import replace
+
+    from app.modules.learning.models import CourseCompletion, LessonProgress
+
+    http, _, sesiones, lecciones = entorno
+    await _terminar(http, lecciones)
+
+    # Lo que vio la petición que va a perder: terminado y todavía sin fecha.
+    real = finalizacion.calcular
+
+    async def como_antes_de_la_otra(db, *, user_id, course_id):
+        estado = await real(db, user_id=user_id, course_id=course_id)
+        return replace(estado, terminado=True, terminado_en=None)
+
+    monkeypatch.setattr(finalizacion, "calcular", como_antes_de_la_otra)
+
+    async with sesiones() as db:
+        # Trabajo suyo, volcado y SIN confirmar.
+        avance = await db.get(
+            LessonProgress, {"user_id": BRUNO, "lesson_id": lecciones[0]}
+        )
+        assert avance is not None
+        avance.progress_seconds = 777
+        await db.flush()
+
+        # Y ahora choca contra la fila que la otra petición ya dejó.
+        await finalizacion.registrar(db, user_id=BRUNO, course_id=CURSO)
+        await db.commit()
+
+    async with sesiones() as db:
+        avance = await db.get(
+            LessonProgress, {"user_id": BRUNO, "lesson_id": lecciones[0]}
+        )
+        assert avance is not None
+        assert avance.progress_seconds == 777, "el choque se llevó por delante su avance"
+        # Y la finalización sigue siendo UNA, con la fecha de la primera.
+        assert (
+            await db.scalar(select(func.count()).select_from(CourseCompletion))
+        ) == 1

@@ -78,6 +78,14 @@ create unique index if not exists quiz_options_una_correcta
   on public.quiz_options (question_id)
   where is_correct;
 
+-- Para que una respuesta pueda apuntar a la PAREJA (pregunta, alternativa) y no
+-- a cada una por su lado. Sin esto, responder la pregunta 1 con una alternativa
+-- de la pregunta 2 es una fila perfectamente válida para la base.
+alter table public.quiz_options
+  drop constraint if exists quiz_options_de_su_pregunta;
+alter table public.quiz_options
+  add constraint quiz_options_de_su_pregunta unique (question_id, id);
+
 create table if not exists public.quiz_attempts (
   id uuid primary key default gen_random_uuid(),
   quiz_id uuid not null references public.course_quizzes(id) on delete cascade,
@@ -122,7 +130,13 @@ create table if not exists public.quiz_answers (
   option_id uuid not null references public.quiz_options(id) on delete cascade,
   answered_at timestamptz not null default now(),
   -- UNA RESPUESTA POR PREGUNTA Y POR INTENTO, y lo dice la clave primaria.
-  primary key (attempt_id, question_id)
+  primary key (attempt_id, question_id),
+  -- Y LA ALTERNATIVA ES DE ESA PREGUNTA, y lo dice la base. La API ya lo
+  -- comprueba (422 `quiz_option_unknown`), pero un `if` en Python no es un
+  -- invariante: cualquier otra vía de escritura se lo salta.
+  constraint quiz_answers_alternativa_de_la_pregunta
+    foreign key (question_id, option_id)
+    references public.quiz_options (question_id, id) on delete cascade
 );
 
 alter table public.course_quizzes enable row level security;
@@ -173,6 +187,10 @@ begin
     select 1 from pg_constraint
     where conname = 'quiz_attempts_coherente'
   ) then faltan := faltan || 'coherencia_del_intento '; end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'quiz_answers_alternativa_de_la_pregunta'
+  ) then faltan := faltan || 'alternativa_de_su_pregunta '; end if;
   if not exists (
     select 1 from pg_constraint con join pg_class c on c.oid = con.conrelid
     where c.relname = 'course_quizzes' and con.contype = 'u'

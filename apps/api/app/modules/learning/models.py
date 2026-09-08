@@ -12,10 +12,12 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -249,6 +251,8 @@ class QuizOption(Base):
             sqlite_where=sql_text("is_correct"),
             postgresql_where=sql_text("is_correct"),
         ),
+        # Para que una respuesta apunte a la PAREJA (pregunta, alternativa).
+        UniqueConstraint("question_id", "id", name="quiz_options_de_su_pregunta"),
     )
 
 
@@ -332,6 +336,17 @@ class QuizAnswer(Base):
     )
     answered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        # LA ALTERNATIVA ES DE ESA PREGUNTA, y lo dice la base. La API ya lo
+        # comprueba, pero un `if` en Python no es un invariante.
+        ForeignKeyConstraint(
+            ["question_id", "option_id"],
+            ["quiz_options.question_id", "quiz_options.id"],
+            name="quiz_answers_alternativa_de_la_pregunta",
+            ondelete="CASCADE",
+        ),
     )
 
 

@@ -172,18 +172,23 @@ async def registrar(db: AsyncSession, *, user_id: str, course_id: str) -> Estado
     from app.modules.catalog import versiones
 
     version = await versiones.vigente(db, course_id)
-    db.add(
-        CourseCompletion(
-            user_id=user_id,
-            course_id=course_id,
-            quiz_attempt_id=estado.intento_id,
-            course_version_id=version.id if version is not None else None,
-        )
-    )
     try:
-        await db.flush()
+        # UN SAVEPOINT, NO LA TRANSACCIÓN ENTERA. Esto se llama desde dentro de
+        # otras operaciones —guardar progreso, enviar un intento— que ya tienen
+        # trabajo volcado y sin confirmar. Un `db.rollback()` aquí deshacía TODO
+        # lo suyo: quien perdía la carrera veía su evaluación como no enviada y
+        # su progreso perdido, por una fila de finalización que otra petición ya
+        # había anotado.
+        async with db.begin_nested():
+            db.add(
+                CourseCompletion(
+                    user_id=user_id,
+                    course_id=course_id,
+                    quiz_attempt_id=estado.intento_id,
+                    course_version_id=version.id if version is not None else None,
+                )
+            )
     except IntegrityError:
         # Otra petición la anotó primero. Su fecha es tan buena como esta.
-        await db.rollback()
-        return await calcular(db, user_id=user_id, course_id=course_id)
+        pass
     return await calcular(db, user_id=user_id, course_id=course_id)
