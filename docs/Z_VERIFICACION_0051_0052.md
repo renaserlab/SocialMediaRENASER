@@ -4,10 +4,31 @@
 **Qué se aplicó a mano y en qué orden:** 0050 → 0051 → 0052 → código.
 **Entorno inspeccionado:** base gestionada de Supabase. No se puede descartar que
 sea la de producción, así que **todo lo que sigue se comprobó con consultas de
-solo lectura**, con `default_transaction_read_only = on` en la sesión. No se
-creó ni un dato de prueba, no se ejecutó ninguna prueba destructiva y no se
-sembró ninguna política. La cadena de conexión no aparece en ningún sitio de
-este documento ni de los registros.
+lectura**: solo `select`, ni un dato de prueba, ninguna prueba destructiva,
+ninguna prueba de concurrencia y ninguna política sembrada. La cadena de conexión
+no aparece en ningún sitio de este documento ni de los registros.
+
+> **Aviso sobre el guardia de solo lectura, y es una corrección.** Estas consultas
+> se lanzaron con la intención de que la sesión llevara puesto
+> `default_transaction_read_only = on`, pasándolo por `connect_args` /
+> `server_settings` al crear el motor. **Ese guardia nunca llegó a aplicarse**:
+> comprobado después, `current_setting('default_transaction_read_only')` valía
+> `off`. Las consultas fueron todas de lectura y no se escribió nada, pero
+> durante la verificación no hubo la red de seguridad que se creía tener.
+>
+> La forma que **sí** funciona es una sentencia explícita nada más abrir la
+> conexión, y comprobar que ha tomado efecto antes de consultar nada:
+>
+> ```sql
+> set session characteristics as transaction read only;
+> select current_setting('default_transaction_read_only');  -- tiene que ser 'on'
+> ```
+>
+> No se probó a forzar una escritura para demostrar que el guardia rechaza: sobre
+> una base que puede ser la de producción, comprobar un guardia intentando
+> romperlo es exactamente lo que no se hace. (Un `create temporary table` sí pasa
+> con el guardia puesto, y no es un fallo: PostgreSQL solo prohíbe escribir en
+> tablas no temporales.)
 
 Continúa [Z_VERIFICACION_0050.md](Z_VERIFICACION_0050.md).
 
@@ -337,6 +358,13 @@ y 0053 tocan disparadores, políticas y permisos, nunca filas.
   `await comprarEnTienda`. Se comprobó **en los dos sentidos**: verde con el
   código bueno, roja con el defecto puesto. Una prueba que solo se comprueba en
   un sentido no está comprobada.
+- **El guardia de solo lectura no estaba puesto durante casi toda la
+  verificación.** Se pasó por `connect_args`/`server_settings` y asyncpg lo
+  ignoró en silencio; se descubrió al final, al preguntar por el rol de la
+  conexión. Todo lo que se ejecutó fueron `select`, así que no se escribió nada,
+  pero la protección que se creía tener no existía. La lección es la de siempre
+  en este proyecto: **un guardia que no se comprueba no es un guardia.** La forma
+  correcta está escrita arriba, con su verificación.
 - Un commit salió mezclando la corrección de dos pruebas tautológicas con la de
   un mensaje falso. Se dejó así, con el motivo escrito: la prueba del tercer
   defecto vive en el mismo fichero que las otras dos y separarlas exigía partir
