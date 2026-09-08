@@ -219,7 +219,49 @@ type HistorialDto = {
   guarantee_hours: number | null;
 };
 
+/** En que quedo una orden, segun el SERVIDOR. */
+export type EstadoDeOrden = {
+  id: string;
+  courseId: string;
+  /** 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded'. */
+  status: string;
+  amountMinor: number;
+  currency: string;
+  /** Si el acceso ya esta concedido. Va aparte del estado a proposito. */
+  tieneAcceso: boolean;
+};
+
+type EstadoDeOrdenDto = {
+  id: string;
+  course_id: string;
+  status: string;
+  amount_minor: number;
+  currency: string;
+  has_access: boolean;
+};
+
 export const CommerceRepository = {
+  /**
+   * En que quedo una orden. Lo unico que puede creerse la pantalla de vuelta.
+   *
+   * AL VOLVER DE LA PASARELA SOLO LLEGA `?order=<id>` EN LA URL, y ese
+   * parametro lo escribe cualquiera. Decir «pago confirmado» a partir de el
+   * seria dejar que quien pide decida si ha pagado.
+   */
+  async estadoDeOrden(orderId: string): Promise<EstadoDeOrden> {
+    const dto = await apiRequest<EstadoDeOrdenDto>(
+      `${API_V1}/payments/orders/${orderId}`,
+    );
+    return {
+      id: dto.id,
+      courseId: dto.course_id,
+      status: dto.status,
+      amountMinor: dto.amount_minor,
+      currency: dto.currency,
+      tieneAcceso: dto.has_access,
+    };
+  },
+
   /**
    * Que se puede comprar para un curso desde ESTA plataforma.
    *
