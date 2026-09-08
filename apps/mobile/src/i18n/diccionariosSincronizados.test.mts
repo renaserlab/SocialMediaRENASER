@@ -32,6 +32,7 @@ import { RESPALDOS_ES as RESPALDOS_DE_ENLACE } from '../lib/authLink.ts';
 import { RESPALDOS_ES as RESPALDOS_DE_DINERO } from '../lib/dinero.ts';
 import { RESPALDOS_ES as RESPALDOS_DE_HISTORIAS } from '../lib/historias.ts';
 import { RESPALDOS_ES as RESPALDOS_DE_GUARDADOS } from '../lib/guardados.ts';
+import { RESPALDOS_ES as RESPALDOS_DE_VALORACIONES } from '../lib/valoracionesDeCurso.ts';
 
 /**
  * Los módulos que guardan su propia copia del español.
@@ -51,6 +52,7 @@ const RESPALDOS: Array<[string, Record<string, string>]> = [
   ['lib/dinero.ts', RESPALDOS_DE_DINERO],
   ['lib/historias.ts', RESPALDOS_DE_HISTORIAS],
   ['lib/guardados.ts', RESPALDOS_DE_GUARDADOS],
+  ['lib/valoracionesDeCurso.ts', RESPALDOS_DE_VALORACIONES],
 ];
 
 type Diccionario = Record<string, string>;
@@ -250,6 +252,14 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'syllabus.titleField',
     'wizard.levelBeginner',
     'wizard.language',
+    // Valoraciones de un curso: «{n} de 5» y «Retirar» se escriben exactamente
+    // igual en los dos idiomas, y «Compra verificada» tambien (el portugues
+    // dice «compra» y «verificada» con la misma grafia). El resto de la
+    // seccion SI cambia: «Avaliações», «Sem avaliações», «1 avaliação».
+    'valoracion.deCinco',
+    'valoracion.distribucionA11y',
+    'valoracion.compraVerificada',
+    'valoracion.retirarConfirmar',
   ]),
 };
 
