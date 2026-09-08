@@ -16,6 +16,7 @@ from app.core.exceptions import (
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.catalog import contenido, cursos_v2, esquema, eventos, versiones
 from app.modules.catalog.models import Course, Event, EventRegistration, SavedCourse
+from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce.service import _insert as _insert_de_comercio
 from app.modules.catalog.schemas import (
     IDIOMA,
@@ -1048,6 +1049,81 @@ async def unpublish_course(
     return await _leer_curso(db, course)
 
 
+@router.delete("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def borrar_curso(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Borra un curso, y solo si nadie lo compró.
+
+    El móvil lo borraba directamente contra PostgREST: sin comprobar
+    compradores, sin auditoría y sin transacción. La RLS se lo permitía al
+    autor, así que un curso vendido podía desaparecer con su contenido.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "borrar")
+
+    if await _tiene_compradores(db, course.id):
+        raise ConflictError(
+            "Este curso ya tiene alumnos: no se puede borrar. Retíralo del "
+            "catálogo si no quieres que se siga vendiendo.",
+            code="course_has_buyers",
+        )
+
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        action="course.deleted",
+        entity_type="course",
+        entity_id=course.id,
+        reason="borrado por su autor, sin compradores",
+        payload={"course_status": course.status},
+    )
+    await db.delete(course)
+    await db.commit()
+
+
+async def _tiene_compradores(db: AsyncSession, course_id: str) -> bool:
+    """Si alguien pagó o tiene acceso concedido a este curso.
+
+    Mira las tres vías que conceden acceso —la tabla heredada, el comercio y las
+    matrículas— porque conviven mientras dura el trasvase de la 0036.
+    """
+    from app.modules.learning.models import Purchase
+
+    if await db.scalar(
+        select(Purchase.id).where(Purchase.course_id == course_id).limit(1)
+    ):
+        return True
+
+    if not await esquema_comercio.hay_comercio(db):
+        return False
+
+    from app.modules.commerce.models import CommerceProduct, Entitlement, Order
+
+    producto = await db.scalar(
+        select(CommerceProduct.id).where(CommerceProduct.course_id == course_id)
+    )
+    if producto is None:
+        return False
+    if await db.scalar(
+        select(Order.id)
+        .where(Order.commerce_product_id == producto, Order.status == "paid")
+        .limit(1)
+    ):
+        return True
+    return bool(
+        await db.scalar(
+            select(Entitlement.id)
+            .where(
+                Entitlement.commerce_product_id == producto,
+                Entitlement.status == "active",
+            )
+            .limit(1)
+        )
+    )
+
+
 @router.get("/courses/{course_id}/version", response_model=VersionDeCurso)
 async def version_publicada(
     course_id: str,
@@ -1076,6 +1152,7 @@ async def version_publicada(
         version=version.version,
         status=version.status,
         published_at=version.published_at,
+        content_hash=version.content_hash,
         # LA DISTINCIÓN QUE NO SE PUEDE PERDER: una versión reconstruida por el
         # backfill dice lo que el curso ES hoy, no lo que se vendió.
         reconstruida=version.origin == "backfill",

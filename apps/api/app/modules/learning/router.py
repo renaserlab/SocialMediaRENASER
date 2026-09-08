@@ -273,9 +273,12 @@ async def get_course_detail(
 
     temas = await temas_de_curso.leer(db, [course.id])
     ficha = await cursos_v2.leer_una(db, course.id)
+    autor = await db.get(Profile, course.author_id)
     return CourseDetailRead(
         id=course.id,
         author_id=course.author_id,
+        author_name=autor.full_name if autor else None,
+        author_username=autor.username if autor else None,
         title=course.title,
         description=course.description,
         cover_path=course.cover_path,

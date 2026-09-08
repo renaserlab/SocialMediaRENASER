@@ -75,6 +75,10 @@ class CourseDetailRead(BaseModel):
     #: Quien lo creo. Sin este campo la aplicacion no podia saber si quien mira
     #: es el autor, y acababa dando la gestion solo a la administracion.
     author_id: str
+    #: Nombre y usuario del autor. Van en el detalle para no obligar a la
+    #: ficha a pedir el perfil aparte solo para escribir «por Fulana».
+    author_name: str | None = None
+    author_username: str | None = None
     title: str
     description: str
     cover_path: str | None = None

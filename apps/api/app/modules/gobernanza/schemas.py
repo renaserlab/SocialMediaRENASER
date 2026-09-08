@@ -70,6 +70,9 @@ class VersionDeCurso(BaseModel):
     version: int
     status: str
     published_at: datetime
+    #: La huella del contenido congelado. El editor la manda en `If-Match`
+    #: para que guardar sobre un temario que cambió por debajo dé 409.
+    content_hash: str
     reconstruida: bool
     snapshot: dict
 
