@@ -110,10 +110,11 @@ interno de estados, que vive en `refund_request_events` y es solo de tesorería.
 Aquí está el hallazgo de esta fase, y es del mismo tipo que el anterior.
 
 La 0052 corrigió nueve políticas y el problema se dio por cerrado. Contra la base
-real aparecieron **cinco más**, las de la 0035, que son las más antiguas y por
-eso no estaban en la lista:
+real aparecieron **seis más**: las cinco de la 0035 y una de la 0001, que es la
+tabla de compras original y la más antigua de todas:
 
 ```
+purchases.purchases_read_own          <- de la 0001
 orders.orders_read_own
 payment_transactions.payment_transactions_read_own
 entitlements.entitlements_read_own
@@ -125,10 +126,14 @@ Con su propio JWT y la clave anónima, una cuenta que solo modera podía pedir
 `GET /rest/v1/orders?select=*` y llevarse el historial de compras de todo el
 mundo, con importe, moneda, proveedor y entorno. La API no le da eso a nadie.
 
-**Por qué se escapó**, que es lo que de verdad había que arreglar: la lista de
-tablas a revisar se escribió a partir del incidente en vez de a partir de qué
-tablas guardan dinero. La prueba estaba en verde y lo que significaba era
-«moderar no llega a estas nueve».
+**Por qué se escapó, dos veces.** La primera, porque la lista de tablas a revisar
+se escribió a partir del incidente en vez de a partir de qué tablas guardan
+dinero: la prueba estaba en verde y lo que significaba era «moderar no llega a
+estas nueve». Se corrigió deduciéndola del esquema… y `purchases` **siguió sin
+aparecer**, porque la expresión que busca los `create table` exigía
+`if not exists` y las 23 tablas de la 0001 no lo llevan. La lista que presumía de
+deducirse del esquema no veía medio esquema, y el primer fallo quedaba tapado por
+el segundo. Lo encontró la revisión independiente, no yo.
 
 Y una segunda capa que no existía: `pg_default_acl` confirma que Supabase concede
 por defecto **todos** los privilegios de cada tabla a `anon` y `authenticated`
@@ -139,17 +144,19 @@ no controla**: una política no impide vaciar la tabla de auditoría.
 ### Lo que hace la 0053
 
 1. Redefine las cinco políticas con `puede_mover_dinero()`.
-2. Retira la concesión de tabla de `anon` y `authenticated` sobre las once tablas
-   de dinero, y los privilegios de escritura —incluido `truncate`— sobre las tres
+2. Retira la concesión de tabla de `anon` y `authenticated` sobre las trece
+   tablas de dinero, y los privilegios de escritura —incluido `truncate`— sobre las tres
    que la 0052 dejó con lectura por columnas.
 3. Cambia los privilegios por defecto del esquema para que la próxima tabla no
    nazca concedida. Va en una sección aparte porque **cambia el comportamiento
    futuro**, no el estado actual, y se puede aplicar en otro momento.
 
 **Se puede revocar sin romper nada.** El móvil alcanza por PostgREST exactamente
-nueve tablas —`courses`, `course_modules`, `course_lessons`,
-`course_lesson_resources`, `lessons`, `stories`, `story_views`, `testimonials`,
-`device_tokens`— y ninguna es de estas. Todo el comercio, las devoluciones y la
+ocho tablas —`courses`, `course_modules`, `course_lessons`,
+`course_lesson_resources`, `stories`, `story_views`, `testimonials`,
+`device_tokens`— y ninguna es de estas. (Una versión anterior de este documento
+decía nueve e incluía `lessons`: esa tabla **no existe**, y el propio
+`repositories/lessons.ts` lo explica.) Todo el comercio, las devoluciones y la
 gobernanza pasan por FastAPI, que entra por SQLAlchemy con identidad propia.
 
 **La 0053 no condiciona el despliegue del código**: solo toca RLS y permisos, y
@@ -167,6 +174,12 @@ Estado **tras aplicar la 0053**; entre paréntesis, lo que pasa si no se aplica.
 | alumno | SÍ | SÍ | NO | SÍ | NO | NO | NO | NO | NO | NO |
 | creador | SÍ | SÍ | NO | SÍ | NO | NO | NO | SÍ | NO | NO |
 | moderador | SÍ | SÍ | NO (⚠ **SÍ** sin la 0053) | SÍ | NO | NO | NO | NO | NO | NO |
+
+> La celda «compras ajenas» del moderador decía `NO` en la primera versión de
+> esta tabla **y era falsa también con la 0053 aplicada**, porque a la 0053 le
+> faltaba `purchases` —la tabla de compras de la 0001—. Lo encontró la revisión
+> independiente. Ya está incluida; la celda es correcta con la 0053 tal como
+> queda ahora.
 | administrador | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ |
 | financiero (`FINANCE_ROLES`) | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ |
 | sistema (`service_role`) | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ | SÍ |

@@ -808,8 +808,14 @@ ORDEN_2 = "00000000-0000-0000-0000-0000000000a2"
 
 
 @pytest.mark.asyncio
-async def test_la_recompra_de_punta_a_punta(entorno):
-    """EL ESCENARIO COMPLETO, que hasta ahora estaba probado a trozos.
+async def test_la_recompra_hasta_la_segunda_devolucion(entorno):
+    """EL ESCENARIO, que hasta ahora estaba probado a trozos.
+
+    NO ES DE PUNTA A PUNTA, y conviene decirlo aqui en vez de prometerlo en el
+    nombre: el aviso, la aceptacion y la elegibilidad pasan por HTTP, pero la
+    segunda compra se monta a mano —una `Order` insertada y las llamadas
+    directas a `enlazar_aceptacion` y `asegurar_ventana`—. El checkout, que es
+    quien crearia esa orden de verdad, no se ejercita aqui.
 
     Aceptar, recomprar, y las tres consecuencias que la politica promete y que
     nadie comprobaba juntas:
