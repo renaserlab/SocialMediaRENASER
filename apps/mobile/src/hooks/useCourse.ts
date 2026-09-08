@@ -18,6 +18,8 @@ export function useCourse(id?: string) {
   // ficha del curso, asi que en castellano no cambiaban de idioma nunca.
   const { t } = useTranslation();
   const [course, setCourse] = useState<Course | null>(null);
+  /** La suma la hace el servidor: aqui no se recalcula. */
+  const [durationSecondsTotal, setDurationSecondsTotal] = useState(0);
   /** Lecciones en orden; permite abrir la primera real desde "Comenzar". */
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
   /**
@@ -52,6 +54,7 @@ export function useCourse(id?: string) {
         setCanManage(detail.canManage);
         setHasAccess(detail.hasAccess);
         setProgressPercent(detail.progressPercent);
+        setDurationSecondsTotal(detail.durationSecondsTotal);
       } else {
         const data = await fetchCourseById(id);
         if (!data) setError(t('course.notFound'));
@@ -60,6 +63,7 @@ export function useCourse(id?: string) {
         setCanManage(false);
         setHasAccess(true);
         setProgressPercent(0);
+        setDurationSecondsTotal(0);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('course.loadFailed'));
@@ -78,6 +82,7 @@ export function useCourse(id?: string) {
     canManage,
     hasAccess,
     progressPercent,
+    durationSecondsTotal,
     loading,
     error,
     reload: load,

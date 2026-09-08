@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { CoachMark } from '@/components/CoachMark';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
 import { CourseHighlights } from '@/components/CourseHighlights';
+import { FichaDelCurso } from '@/components/FichaDelCurso';
 import { StateView } from '@/components/StateView';
 import { TarjetaDeGarantia } from '@/components/TarjetaDeGarantia';
 import { esMovil, explicar, ofertaPara, comprarEnTienda, restaurarCompras } from '@/services/compras';
@@ -34,7 +35,8 @@ export function CourseScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const { course, lessons, canManage, hasAccess, loading, error, reload } = useCourse(id);
+  const { course, lessons, canManage, hasAccess, durationSecondsTotal, loading, error, reload } =
+    useCourse(id);
   // Primera leccion sin completar; si estan todas, la primera del curso.
   const siguiente = lessons.find((l) => !l.completed) ?? lessons[0];
   const firstLessonId = siguiente?.id;
@@ -526,6 +528,8 @@ export function CourseScreen() {
           ) : null}
 
           <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
+
+          <FichaDelCurso course={course} duracionSegundos={durationSecondsTotal} />
 
           {/*
             Solo hechos que salen de la base de datos. Antes aqui ponia
