@@ -160,6 +160,13 @@ export function VueltaDelPagoScreen({ cancelada = false }: { cancelada?: boolean
         <Text style={[styles.cuerpo, { color: colors.textMuted }]}>{vista.cuerpo}</Text>
       </View>
       <Button label={vista.accion} onPress={vista.alPulsar} />
+      {estado === 'confirmado' && orderId ? (
+        <Button
+          label={t('pago.verConstancia')}
+          variant="ghost"
+          onPress={() => router.push(`/compras/${orderId}`)}
+        />
+      ) : null}
       {estado !== 'confirmado' ? (
         <Button
           label={t('pago.volverAlInicio')}

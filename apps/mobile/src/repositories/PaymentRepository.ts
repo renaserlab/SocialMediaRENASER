@@ -229,6 +229,14 @@ export type EstadoDeOrden = {
   currency: string;
   /** Si el acceso ya esta concedido. Va aparte del estado a proposito. */
   tieneAcceso: boolean;
+  cursoTitulo: string;
+  creadaEn: string;
+  pagadaEn: string | null;
+  proveedor: string;
+  /** `null` en las compras anteriores al versionado. No se inventa. */
+  version: number | null;
+  horasDeGarantia: number | null;
+  recompraSinGarantia: boolean;
 };
 
 type EstadoDeOrdenDto = {
@@ -238,6 +246,13 @@ type EstadoDeOrdenDto = {
   amount_minor: number;
   currency: string;
   has_access: boolean;
+  course_title: string;
+  created_at: string;
+  paid_at: string | null;
+  provider: string;
+  course_version: number | null;
+  guarantee_hours: number | null;
+  repurchase_without_guarantee: boolean;
 };
 
 export const CommerceRepository = {
@@ -259,6 +274,13 @@ export const CommerceRepository = {
       amountMinor: dto.amount_minor,
       currency: dto.currency,
       tieneAcceso: dto.has_access,
+      cursoTitulo: dto.course_title,
+      creadaEn: dto.created_at,
+      pagadaEn: dto.paid_at,
+      proveedor: dto.provider,
+      version: dto.course_version,
+      horasDeGarantia: dto.guarantee_hours,
+      recompraSinGarantia: dto.repurchase_without_guarantee,
     };
   },
 

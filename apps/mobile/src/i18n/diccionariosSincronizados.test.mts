@@ -71,6 +71,8 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // «Total» se escribe igual en los dos idiomas.
+    'constancia.total',
     'home.live', // «Live» ya es la palabra inglesa.
     'home.podcast',
     'profile.podcast',
@@ -102,6 +104,14 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'curso.por',
     // «Antes de continuar» se escribe igual en los dos idiomas.
     'condiciones.titulo',
+    // «Curso», «Estado», «Total», «Confirmada», «Cancelada» y «Reembolsada»
+    // se escriben igual en los dos idiomas.
+    'constancia.curso',
+    'constancia.estado',
+    'constancia.total',
+    'constancia.estados.paid',
+    'constancia.estados.cancelled',
+    'constancia.estados.refunded',
     'cursos.guardar',
     'ficha.requisitos',
     'cursos.nivel.beginner',
