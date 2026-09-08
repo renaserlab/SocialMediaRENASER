@@ -36,6 +36,7 @@ from app.modules.catalog.schemas import (
     ResumenDeValoraciones,
     ValoracionCreate,
     ValoracionRead,
+    ValoracionUpdate,
     IDIOMA,
     NIVEL,
     CoursePublishResult,
@@ -1171,6 +1172,7 @@ def _a_valoracion(fila, autor, verificada: bool, mia: bool) -> ValoracionRead:
         author_username=autor.username if autor else "",
         verified_purchase=verificada,
         is_mine=mia,
+        hidden=fila.status == "hidden",
     )
 
 
@@ -1189,7 +1191,12 @@ async def listar_valoraciones(
     filas = list(
         await db.scalars(
             select(CourseReview)
-            .where(CourseReview.course_id == cid, CourseReview.status == "visible")
+            # La propia se ve SIEMPRE, aunque este oculta: si no, quien la
+            # escribio no puede editarla y el 409 la deja sin salida.
+            .where(
+                CourseReview.course_id == cid,
+                or_(CourseReview.status == "visible", CourseReview.user_id == yo),
+            )
             # Desempate por id: sin el, dos del mismo instante bailan entre paginas.
             .order_by(CourseReview.created_at.desc(), CourseReview.id.desc())
             .limit(page.limit)
@@ -1206,17 +1213,20 @@ async def listar_valoraciones(
             select(Profile).where(Profile.id.in_({f.user_id for f in filas}))
         )
     }
-    salida = []
-    for fila in filas:
-        verificada = await valoraciones.tiene_acceso_ahora(
-            db, user_id=fila.user_id, course_id=cid
+    # El sello, tambien en UNA consulta: preguntarlo fila a fila eran dos
+    # sentencias por valoracion, y este endpoint es publico y admite limit=100.
+    verificados = await valoraciones.quienes_compraron(
+        db, course_id=cid, user_ids={f.user_id for f in filas}
+    )
+    return [
+        _a_valoracion(
+            fila,
+            autores.get(fila.user_id),
+            fila.user_id in verificados,
+            fila.user_id == yo,
         )
-        salida.append(
-            _a_valoracion(
-                fila, autores.get(fila.user_id), verificada, fila.user_id == yo
-            )
-        )
-    return salida
+        for fila in filas
+    ]
 
 
 @router.get(
@@ -1282,7 +1292,7 @@ async def crear_valoracion(
 async def editar_valoracion(
     course_id: str,
     review_id: str,
-    payload: ValoracionCreate,
+    payload: ValoracionUpdate,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ValoracionRead:
@@ -1298,8 +1308,21 @@ async def editar_valoracion(
     if fila.user_id != current_user.id:
         raise ForbiddenError("Solo puedes editar tu propia valoración.")
 
-    fila.rating = payload.rating
-    fila.comment = payload.comment
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        raise ValidationAppError(
+            "No hay nada que cambiar.", code="course_review_no_changes"
+        )
+    if "rating" in cambios:
+        if cambios["rating"] is None:
+            raise ValidationAppError(
+                "La puntuación no puede quedar vacía.",
+                code="course_review_rating_required",
+            )
+        fila.rating = cambios["rating"]
+    # Solo se toca el texto si viene: un PATCH sin `comment` no lo borra.
+    if "comment" in cambios:
+        fila.comment = cambios["comment"]
     await db.commit()
     await db.refresh(fila)
     autor = await db.get(Profile, current_user.id)
@@ -1329,6 +1352,13 @@ async def retirar_valoracion(
         raise NotFoundError("Valoración no encontrada.")
     if fila.user_id != current_user.id:
         raise ForbiddenError("Solo puedes retirar tu propia valoración.")
+    if fila.status == "hidden":
+        # Borrarla y publicar de nuevo deshace la moderacion: el 409 de unicidad
+        # deja de saltar y vuelve una valoracion visible con el mismo texto.
+        raise ConflictError(
+            "Esta valoración está en revisión y no se puede retirar.",
+            code="course_review_moderated",
+        )
     await db.delete(fila)
     await db.commit()
 

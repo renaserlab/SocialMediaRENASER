@@ -54,16 +54,62 @@ async def compro_el_curso(db: AsyncSession, *, user_id: str, course_id: str) -> 
 
 
 async def tiene_acceso_ahora(db: AsyncSession, *, user_id: str, course_id: str) -> bool:
-    """Si el acceso sigue vivo. Es lo que decide «compra verificada» HOY."""
+    """Si su compra sigue viva. Es lo que decide «compra verificada»."""
+    return user_id in await quienes_compraron(
+        db, course_id=course_id, user_ids={user_id}
+    )
+
+
+async def quienes_compraron(
+    db: AsyncSession, *, course_id: str, user_ids: set[str]
+) -> set[str]:
+    """De ese grupo, quiénes conservan hoy el curso por haberlo pagado.
+
+    No sirve `resolver_acceso_al_curso`: aquello responde «puede entrar», y
+    empieza cortocircuitando en `price_minor <= 0`, en el autor y en quien
+    administra. El sello dice «lo pagó», así que un curso que pase a gratis no
+    puede sellar de golpe a todo el mundo.
+
+    Se resuelve en dos consultas para el grupo entero, no dos por valoración:
+    el listado es público y admite cien por página.
+    """
+    if not user_ids:
+        return set()
+
+    from app.modules.learning.models import Purchase
+
+    tienen = {
+        uid
+        for uid in await db.scalars(
+            select(Purchase.user_id).where(
+                Purchase.course_id == course_id,
+                Purchase.user_id.in_(user_ids),
+                Purchase.status == "paid",
+            )
+        )
+    }
+
     from app.modules.commerce import esquema as esquema_comercio
-    from app.modules.commerce import service as comercio
 
     if not await esquema_comercio.hay_comercio(db):
-        return await compro_el_curso(db, user_id=user_id, course_id=course_id)
-    acceso = await comercio.resolver_acceso_al_curso(
-        db, user_id=user_id, course_id=course_id, es_admin=False
-    )
-    return acceso.tiene_acceso
+        return tienen
+
+    from app.modules.commerce.models import CommerceProduct, Entitlement
+    from app.modules.commerce.service import _vigente
+
+    for uid, caduca in await db.execute(
+        select(Entitlement.user_id, Entitlement.expires_at)
+        .join(CommerceProduct, CommerceProduct.id == Entitlement.commerce_product_id)
+        .where(
+            CommerceProduct.course_id == course_id,
+            CommerceProduct.kind == "course_lifetime",
+            Entitlement.user_id.in_(user_ids),
+            Entitlement.status == "active",
+        )
+    ):
+        if _vigente(caduca):
+            tienen.add(uid)
+    return tienen
 
 
 async def puede_valorar(

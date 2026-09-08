@@ -385,6 +385,17 @@ class ValoracionCreate(BaseModel):
     comment: str | None = Field(default=None, max_length=2000)
 
 
+class ValoracionUpdate(BaseModel):
+    """Un PATCH cambia lo que trae; lo que no viene se queda como estaba.
+
+    Con el esquema de creación, subir la puntuación sin reenviar el texto lo
+    borraba en silencio.
+    """
+
+    rating: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
 class ValoracionRead(BaseModel):
     id: str
     course_id: str
@@ -400,6 +411,9 @@ class ValoracionRead(BaseModel):
     verified_purchase: bool = False
     #: Solo la ve quien la escribió, para poder editarla.
     is_mine: bool = False
+    #: Moderada. Solo puede llegar a `True` en la propia: el listado no devuelve
+    #: las ocultas de otros. Sin esto, quien la escribió la ve publicada.
+    hidden: bool = False
 
 
 class ResumenDeValoraciones(BaseModel):
