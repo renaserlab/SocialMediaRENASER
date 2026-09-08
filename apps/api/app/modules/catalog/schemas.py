@@ -17,6 +17,12 @@ IDIOMA = "^[a-z]{2}$"
 MAX_FRASES = 12
 MAX_FRASE = 200
 
+#: Los tipos de leccion que la interfaz sabe pintar. TIENE QUE DECIR LO MISMO
+#: que `cursos_v2.TIPOS_DE_LECCION` y que el CHECK de la 0034: una leccion de un
+#: tipo que ninguna pantalla sabe abrir es una leccion rota, no una funcion
+#: adelantada.
+TIPO_DE_LECCION = "^(video|text)$"
+
 
 class _FichaDeCursoV2(BaseModel):
     """Los metadatos que anade la 0034. Todos opcionales, en alta y en edicion.
@@ -241,6 +247,115 @@ class CourseSubmitResult(BaseModel):
     review_status: str
     submitted: bool
     missing: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# El temario: modulos y lecciones.
+#
+# NINGUNA ALTA ACEPTA `sort_order`, y es la decision que ordena todo el bloque.
+# Lo elegia el cliente, y dos elementos con el mismo numero dejan el temario a
+# merced de como devuelva las filas la base: el alumno ve las lecciones bailar
+# entre dos cargas de la misma pantalla. Crear anade AL FINAL y el orden se
+# cambia en un solo sitio (`/reorder`), que reescribe la lista entera.
+# --------------------------------------------------------------------------- #
+
+
+class CourseModuleCreate(BaseModel):
+    """Alta de un modulo. Se anade al final del temario."""
+
+    title: str = Field(min_length=1, max_length=160)
+    #: De que va el bloque (0034). Sin la migracion se acepta y NO se guarda,
+    #: igual que el resto de la ficha ampliada: un campo que todavia no tiene
+    #: donde vivir no puede impedir crear el modulo.
+    description: str = Field(default="", max_length=2000)
+
+
+class CourseModuleUpdate(BaseModel):
+    """Edicion de un modulo. Renombrar es esto con `title` y nada mas.
+
+    Todo opcional: lo que no viaja no se toca. Sin `exclude_unset` en el router,
+    cambiar el titulo borraria la descripcion.
+    """
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class CourseModuleRead(BaseModel):
+    id: str
+    course_id: str
+    title: str
+    #: Vacia mientras la 0034 no este aplicada. Es la verdad, no un error.
+    description: str = ""
+    sort_order: int
+
+
+class CourseLessonCreate(BaseModel):
+    """Alta de una leccion dentro de un modulo. Se anade al final."""
+
+    title: str = Field(min_length=1, max_length=160)
+    #: El cuerpo de la leccion. En una de tipo `text` es el contenido entero,
+    #: por eso el tope es alto y no el de una descripcion.
+    body: str = Field(default="", max_length=20_000)
+    #: Ruta en `course-media`, NO una URL: la URL se firma al reproducir y
+    #: caduca. Guardar una firma seria guardar algo que manana no vale.
+    media_path: str | None = Field(default=None, max_length=500)
+    #: Un dia entero de tope. No es una regla de negocio: una leccion de mas de
+    #: veinticuatro horas es un cliente que mando milisegundos, y ese numero se
+    #: suma en la duracion que se ensena en la ficha del curso.
+    duration_seconds: int = Field(default=0, ge=0, le=86_400)
+    #: `video` o `text` (0034). Sin la migracion se acepta y no se guarda: hoy
+    #: todas son de video, que es lo que hay.
+    kind: str = Field(default="video", pattern=TIPO_DE_LECCION)
+    #: Leccion abierta sin comprar. DECIDE QUE SE VE SIN PAGAR, asi que entra en
+    #: la fotografia de la version: convertir en muestra la unica leccion de
+    #: pago de un curso ya vendido cambia el producto.
+    is_preview: bool = False
+
+
+class CourseLessonUpdate(BaseModel):
+    """Edicion de una leccion. Todo opcional; lo que no viaja no se toca.
+
+    `media_path` en `null` SI borra la ruta: es la unica forma de quitar un
+    video, y por eso el router distingue «no enviado» de «enviado vacio».
+    """
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    body: str | None = Field(default=None, max_length=20_000)
+    media_path: str | None = Field(default=None, max_length=500)
+    duration_seconds: int | None = Field(default=None, ge=0, le=86_400)
+    kind: str | None = Field(default=None, pattern=TIPO_DE_LECCION)
+    is_preview: bool | None = None
+
+
+class CourseLessonRead(BaseModel):
+    id: str
+    module_id: str
+    title: str
+    body: str = ""
+    media_path: str | None = None
+    duration_seconds: int
+    sort_order: int
+    #: Sin la 0034 todas son de video y NINGUNA es muestra. Es exactamente lo
+    #: que hay hoy, y ademas es el lado seguro: una leccion que no consta como
+    #: muestra no entrega su video sin acceso.
+    kind: str = "video"
+    is_preview: bool = False
+
+
+#: Tope de elementos en una reordenacion. Es el mismo numero para modulos y
+#: lecciones porque protege de lo mismo: un cuerpo enorme que hay que recorrer
+#: entero antes de poder rechazarlo.
+MAX_ELEMENTOS_ORDENADOS = 500
+
+
+class CourseOrder(BaseModel):
+    """El orden nuevo: la lista COMPLETA de ids, en el orden que van a quedar.
+
+    Es la lista entera y no «el que se movio»: ver `contenido.exigir_orden_completo`.
+    """
+
+    ids: list[str] = Field(min_length=1, max_length=MAX_ELEMENTOS_ORDENADOS)
 
 
 class CourseReviewDecision(BaseModel):

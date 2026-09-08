@@ -2,8 +2,9 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Request, status
-from sqlalchemy import func, literal, select
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from sqlalchemy import delete, func, literal, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -13,11 +14,20 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import cursos_v2, esquema, eventos, versiones
+from app.modules.catalog import contenido, cursos_v2, esquema, eventos, versiones
 from app.modules.catalog.models import Course, Event, EventRegistration
 from app.modules.catalog.schemas import (
+    IDIOMA,
+    NIVEL,
     CoursePublishResult,
     CourseCreate,
+    CourseLessonCreate,
+    CourseLessonRead,
+    CourseLessonUpdate,
+    CourseModuleCreate,
+    CourseModuleRead,
+    CourseModuleUpdate,
+    CourseOrder,
     CourseRead,
     CourseRequirements,
     CourseReviewDecision,
@@ -452,8 +462,28 @@ async def cancel_reservation(
     return _to_event_read(event, count, 0)
 
 
+def _patron_de_busqueda(texto: str) -> str:
+    """El texto buscado, convertido en un patron de `LIKE` que no muerde.
+
+    `%` y `_` SON COMODINES EN SQL. Sin escaparlos, buscar «%» devuelve el
+    catalogo entero y «a_a» encuentra «ana», «ala» y «aja»: quien busca no sabe
+    que ha escrito un comodin y la lista le miente sin avisar. La barra
+    invertida se escapa primero, porque si no la que se anade despues se
+    duplicaria.
+
+    Es la misma regla que `messaging/router.py` aplica a la bandeja. Se repite y
+    no se comparte a proposito: sacarla a `shared/` es tocar dos modulos mas
+    para ahorrar una linea.
+    """
+    limpio = texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{limpio}%"
+
+
 @router.get("/courses", response_model=list[CourseRead])
 async def list_courses(
+    q: str | None = Query(default=None, max_length=120),
+    level: str | None = Query(default=None, pattern=NIVEL),
+    language: str | None = Query(default=None, pattern=IDIOMA),
     page: Page = Depends(pagination_params),
     db: AsyncSession = Depends(get_db),
 ) -> list[CourseRead]:
@@ -463,12 +493,48 @@ async def list_courses(
     con un parametro convertiria el listado publico en un endpoint que devuelve
     cosas distintas segun quien pregunte, que es como se cuela un borrador en la
     pantalla de otra persona.
+
+    LOS FILTROS SE APLICAN ANTES DE PAGINAR, y ese es todo el punto. Filtrando
+    en el movil sobre la pagina que llega, pedir «avanzado» devuelve los cursos
+    avanzados QUE HUBIERA en los veinte primeros: la pantalla ensena tres
+    resultados y jura que no hay mas. Aqui la base filtra y despues corta.
+
+    SIN NINGUN PARAMETRO, LA CONSULTA ES LA DE SIEMPRE. Ni un `where` de mas: lo
+    que devuelve hoy el catalogo tiene que seguir devolviendo exactamente lo
+    mismo, o el filtro habria cambiado la pantalla de inicio de todo el mundo.
     """
+    consulta = select(Course).where(Course.status == "published")
+
+    texto = (q or "").strip()
+    if texto:
+        patron = _patron_de_busqueda(texto)
+        # Titulo Y descripcion: buscar solo en el titulo deja fuera el curso que
+        # se llama «Fundamentos» y explica en la descripcion que es de cocina.
+        consulta = consulta.where(
+            or_(
+                Course.title.ilike(patron, escape="\\"),
+                Course.description.ilike(patron, escape="\\"),
+            )
+        )
+
+    if level is not None or language is not None:
+        # 503 Y NO UNA LISTA VACIA NI EL CATALOGO ENTERO. Sin la 0034 esas
+        # columnas no existen: devolver todo seria mentir —el filtro no se
+        # aplico— y devolver vacio haria pensar que no hay cursos de ese nivel.
+        # La funcion existe, todavia no esta montada, y eso es un 503; es lo
+        # mismo que ya responde la revision de cursos.
+        if not await esquema.hay_cursos_v2(db):
+            raise ServiceUnavailableError(
+                "Filtrar por nivel o idioma todavía no está disponible.",
+                code="course_filters_not_available",
+            )
+        consulta = consulta.where(
+            Course.id.in_(cursos_v2.ids_de_cursos_con(level=level, language=language))
+        )
+
     cursos = list(
         await db.scalars(
-            select(Course)
-            .where(Course.status == "published")
-            .order_by(Course.created_at.desc())
+            consulta.order_by(Course.created_at.desc())
             .limit(page.limit)
             .offset(page.offset)
         )
@@ -942,6 +1008,573 @@ async def version_publicada(
         reconstruida=version.origin == "backfill",
         snapshot=dict(version.snapshot or {}),
     )
+
+
+# --------------------------------------------------------------------------- #
+# EL TEMARIO: modulos y lecciones.
+#
+# POR QUE EXISTE ESTE BLOQUE. El editor del movil escribia `course_modules` y
+# `course_lessons` directamente contra PostgREST porque la API no ofrecia otro
+# camino. La RLS decidia quien podia escribir, asi que no era un agujero de
+# permisos; era un agujero de RASTRO: un autor reescribia el temario de un curso
+# ya vendido y no quedaba ni una linea diciendo que habia pasado.
+#
+# QUE NO HACE ESTE BLOQUE, y es igual de importante: NO crea versiones. Una
+# version nace al PUBLICAR (`versiones.asegurar_version`) y la vigente es
+# INMUTABLE —la 0050 lo impone con un disparador, no con un comentario—. Editar
+# el temario de un curso publicado deja el rastro y no toca la fotografia; lo
+# que el alumno compro sigue diciendo lo que decia.
+# --------------------------------------------------------------------------- #
+
+
+def _titulo(valor: str) -> str:
+    """El titulo sin espacios sueltos, y nunca vacio.
+
+    `min_length=1` deja pasar «   », y un modulo titulado con espacios se pinta
+    como una fila en blanco que parece un fallo de la aplicacion. Se limpia al
+    escribir y no al leer, porque lo que se guarda es lo que despues se ensena.
+    """
+    limpio = valor.strip()
+    if not limpio:
+        raise ValidationAppError("El título no puede estar vacío.")
+    return limpio
+
+
+async def _modulo_del_curso(
+    db: AsyncSession, course: Course, module_id: str
+) -> CourseModule:
+    """El modulo, si de verdad es de ESTE curso.
+
+    Comprobar solo que el modulo existe dejaria editar el de otro curso pasando
+    su id por la URL: el permiso se valido sobre el curso de la ruta, no sobre
+    el dueno del modulo. Es la misma clase de fallo que arreglar un `where` de
+    menos en una consulta.
+    """
+    ensure_uuid(module_id, "Módulo no encontrado.")
+    modulo = await db.get(CourseModule, module_id)
+    if modulo is None or modulo.course_id != course.id:
+        raise NotFoundError("Módulo no encontrado.")
+    return modulo
+
+
+async def _leccion_del_modulo(
+    db: AsyncSession, modulo: CourseModule, lesson_id: str
+) -> CourseLesson:
+    """La leccion, si de verdad es de ESE modulo. Mismo motivo que arriba."""
+    ensure_uuid(lesson_id, "Lección no encontrada.")
+    leccion = await db.get(CourseLesson, lesson_id)
+    if leccion is None or leccion.module_id != modulo.id:
+        raise NotFoundError("Lección no encontrada.")
+    return leccion
+
+
+async def _leer_modulo(db: AsyncSession, modulo: CourseModule) -> CourseModuleRead:
+    descripciones = await cursos_v2.descripciones_de_modulos(db, [modulo.id])
+    return CourseModuleRead(
+        id=modulo.id,
+        course_id=modulo.course_id,
+        title=modulo.title,
+        description=descripciones.get(modulo.id, ""),
+        sort_order=modulo.sort_order,
+    )
+
+
+async def _leer_leccion(db: AsyncSession, leccion: CourseLesson) -> CourseLessonRead:
+    tipo, muestra = (await cursos_v2.tipos_de_lecciones(db, [leccion.id])).get(
+        leccion.id, ("video", False)
+    )
+    return CourseLessonRead(
+        id=leccion.id,
+        module_id=leccion.module_id,
+        title=leccion.title,
+        body=leccion.body or "",
+        media_path=leccion.media_path,
+        duration_seconds=leccion.duration_seconds,
+        sort_order=leccion.sort_order,
+        kind=tipo,
+        is_preview=muestra,
+    )
+
+
+@router.post(
+    "/courses/{course_id}/modules",
+    response_model=CourseModuleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_course_module(
+    course_id: str,
+    payload: CourseModuleCreate,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", max_length=200
+    ),
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseModuleRead:
+    """Anade un modulo AL FINAL del temario.
+
+    UN DOBLE TOQUE NO CREA DOS MODULOS si el cliente manda `Idempotency-Key`. Y
+    no porque se mire antes si existe —eso lo pasan dos peticiones a la vez—
+    sino porque el id de la fila se deriva de la clave: la segunda insercion
+    choca contra la clave primaria y se devuelve el modulo que ya estaba, con el
+    mismo 201 que la primera vez.
+
+    LA POSICION NO LA ELIGE EL CLIENTE. Ver `contenido.siguiente_posicion`.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    propuesto = contenido.id_idempotente(course.id, current_user.id, idempotency_key)
+
+    if propuesto is not None:
+        repetido = await db.scalar(
+            select(CourseModule).where(
+                CourseModule.id == propuesto, CourseModule.course_id == course.id
+            )
+        )
+        if repetido is not None:
+            return await _leer_modulo(db, repetido)
+
+    modulo = CourseModule(
+        course_id=course.id,
+        title=_titulo(payload.title),
+        sort_order=await contenido.siguiente_posicion(
+            db, CourseModule.sort_order, CourseModule.course_id == course.id
+        ),
+    )
+    if propuesto is not None:
+        modulo.id = propuesto
+    try:
+        # DENTRO DEL SAVEPOINT, igual que en `versiones.asegurar_version`: con el
+        # `add` fuera, el objeto pertenece a la transaccion exterior y deshacer
+        # el savepoint no lo saca, asi que el commit de despues lo escribiria
+        # igualmente.
+        async with db.begin_nested():
+            db.add(modulo)
+            await db.flush()
+    except IntegrityError:
+        # Otra peticion con la misma clave llego antes. La suya es la buena.
+        repetido = await db.scalar(
+            select(CourseModule).where(
+                CourseModule.id == propuesto, CourseModule.course_id == course.id
+            )
+        )
+        if repetido is None:
+            # No fue la idempotencia: es un fallo de verdad y quien llama tiene
+            # que enterarse en vez de recibir un 201 sin modulo detras.
+            raise
+        return await _leer_modulo(db, repetido)
+
+    await cursos_v2.guardar_modulo(db, modulo.id, {"description": payload.description})
+    await auditoria.anotar(
+        db,
+        action="course.module_created",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={"module_id": modulo.id, **contenido.nota_de_contexto(course, version)},
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_modulo(db, modulo)
+
+
+@router.patch(
+    "/courses/{course_id}/modules/{module_id}", response_model=CourseModuleRead
+)
+async def update_course_module(
+    course_id: str,
+    module_id: str,
+    payload: CourseModuleUpdate,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseModuleRead:
+    """Edita un modulo. RENOMBRAR ES ESTO con `title` y nada mas.
+
+    No hay un endpoint aparte para renombrar: seria la misma escritura, el mismo
+    permiso y el mismo rastro con otro nombre, y el dia que uno cambie el otro
+    se queda atras.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+
+    # `exclude_unset` distingue «no enviado» de «enviado vacio»: sin ello,
+    # cambiar el titulo borraria la descripcion.
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        # Un PATCH vacio no es una edicion. Anotarlo llenaria el rastro de ruido
+        # justo donde hace falta poder leerlo.
+        return await _leer_modulo(db, modulo)
+
+    if "title" in cambios:
+        modulo.title = _titulo(cambios["title"])
+    if "description" in cambios:
+        await cursos_v2.guardar_modulo(
+            db, modulo.id, {"description": cambios["description"]}
+        )
+
+    await auditoria.anotar(
+        db,
+        action="course.module_updated",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        # LOS NOMBRES DE LOS CAMPOS, NO SU CONTENIDO. El rastro sirve para saber
+        # que se toco; archivar el texto convertiria `audit_events` en una copia
+        # del curso, y ese payload se sirve por `GET /admin/audit-events`.
+        payload={
+            "module_id": modulo.id,
+            "fields": sorted(cambios),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_modulo(db, modulo)
+
+
+@router.post(
+    "/courses/{course_id}/modules/reorder", response_model=list[CourseModuleRead]
+)
+async def reorder_course_modules(
+    course_id: str,
+    payload: CourseOrder,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseModuleRead]:
+    """Deja los modulos EN ESTE orden. `ids` es la lista completa y definitiva.
+
+    Se reescribe la posicion de TODOS y no solo la del que se movio: dos
+    `sort_order` empatados dejan el temario a merced de como devuelva las filas
+    la base, que es lo mismo que no tener orden.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+
+    modulos = {
+        m.id: m
+        for m in await db.scalars(
+            select(CourseModule).where(CourseModule.course_id == course.id)
+        )
+    }
+    contenido.exigir_orden_completo(list(modulos), payload.ids)
+
+    for posicion, ident in enumerate(payload.ids):
+        modulos[ident].sort_order = posicion
+
+    await auditoria.anotar(
+        db,
+        action="course.modules_reordered",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "total": len(payload.ids),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return [await _leer_modulo(db, modulos[ident]) for ident in payload.ids]
+
+
+@router.delete(
+    "/courses/{course_id}/modules/{module_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_course_module(
+    course_id: str,
+    module_id: str,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Borra un modulo y las lecciones que colgaban de el.
+
+    LAS LECCIONES SE BORRAN A MANO Y NO SE DEJA SOLO EN LA CASCADA. No es
+    desconfianza de la clave foranea: es que hay que CONTARLAS para poder
+    anotarlas. «Se borro un modulo» y «se borraron un modulo y siete lecciones
+    de un curso publicado» no son el mismo hecho, y el segundo es el que alguien
+    va a querer reconstruir dentro de seis meses.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+
+    cuantas = (
+        await db.scalar(
+            select(func.count())
+            .select_from(CourseLesson)
+            .where(CourseLesson.module_id == modulo.id)
+        )
+    ) or 0
+    await db.execute(delete(CourseLesson).where(CourseLesson.module_id == modulo.id))
+    await db.delete(modulo)
+
+    await auditoria.anotar(
+        db,
+        action="course.module_deleted",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lessons": cuantas,
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/courses/{course_id}/modules/{module_id}/lessons",
+    response_model=CourseLessonRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_course_lesson(
+    course_id: str,
+    module_id: str,
+    payload: CourseLessonCreate,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", max_length=200
+    ),
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseLessonRead:
+    """Anade una leccion AL FINAL del modulo. Misma idempotencia que el modulo.
+
+    `kind` e `is_preview` se guardan en una sentencia aparte porque no estan en
+    el ORM (ver `cursos_v2`); van en la MISMA transaccion, asi que o entra la
+    leccion con su tipo o no entra nada.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+    propuesto = contenido.id_idempotente(modulo.id, current_user.id, idempotency_key)
+
+    if propuesto is not None:
+        repetida = await db.scalar(
+            select(CourseLesson).where(
+                CourseLesson.id == propuesto, CourseLesson.module_id == modulo.id
+            )
+        )
+        if repetida is not None:
+            return await _leer_leccion(db, repetida)
+
+    leccion = CourseLesson(
+        module_id=modulo.id,
+        title=_titulo(payload.title),
+        body=payload.body,
+        media_path=payload.media_path,
+        duration_seconds=payload.duration_seconds,
+        sort_order=await contenido.siguiente_posicion(
+            db, CourseLesson.sort_order, CourseLesson.module_id == modulo.id
+        ),
+    )
+    if propuesto is not None:
+        leccion.id = propuesto
+    try:
+        async with db.begin_nested():
+            db.add(leccion)
+            await db.flush()
+    except IntegrityError:
+        repetida = await db.scalar(
+            select(CourseLesson).where(
+                CourseLesson.id == propuesto, CourseLesson.module_id == modulo.id
+            )
+        )
+        if repetida is None:
+            raise
+        return await _leer_leccion(db, repetida)
+
+    await cursos_v2.guardar_leccion(
+        db, leccion.id, {"kind": payload.kind, "is_preview": payload.is_preview}
+    )
+    await auditoria.anotar(
+        db,
+        action="course.lesson_created",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lesson_id": leccion.id,
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_leccion(db, leccion)
+
+
+@router.patch(
+    "/courses/{course_id}/modules/{module_id}/lessons/{lesson_id}",
+    response_model=CourseLessonRead,
+)
+async def update_course_lesson(
+    course_id: str,
+    module_id: str,
+    lesson_id: str,
+    payload: CourseLessonUpdate,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseLessonRead:
+    """Edita una leccion.
+
+    `media_path` en `null` SI borra la ruta: es la unica forma de quitar un
+    video. Por eso se mira lo ENVIADO y no lo que vale distinto de `None`.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+    leccion = await _leccion_del_modulo(db, modulo, lesson_id)
+
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        return await _leer_leccion(db, leccion)
+
+    if "title" in cambios:
+        leccion.title = _titulo(cambios["title"])
+    for campo in ("body", "media_path", "duration_seconds"):
+        if campo in cambios:
+            setattr(leccion, campo, cambios[campo])
+    ficha = {
+        k: v
+        for k, v in cambios.items()
+        if k in cursos_v2.CAMPOS_EDITABLES_DE_LECCION
+    }
+    if ficha:
+        await cursos_v2.guardar_leccion(db, leccion.id, ficha)
+
+    await auditoria.anotar(
+        db,
+        action="course.lesson_updated",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lesson_id": leccion.id,
+            "fields": sorted(cambios),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_leccion(db, leccion)
+
+
+@router.post(
+    "/courses/{course_id}/modules/{module_id}/lessons/reorder",
+    response_model=list[CourseLessonRead],
+)
+async def reorder_course_lessons(
+    course_id: str,
+    module_id: str,
+    payload: CourseOrder,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseLessonRead]:
+    """Deja las lecciones DE ESE MODULO en este orden. Lista completa, como arriba.
+
+    El orden se reescribe dentro de un modulo y no en todo el curso: mover una
+    leccion de modulo es otra operacion, y mezclarlas dejaria que una
+    reordenacion cambiara a que bloque pertenece cada cosa sin decirlo.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+
+    lecciones = {
+        x.id: x
+        for x in await db.scalars(
+            select(CourseLesson).where(CourseLesson.module_id == modulo.id)
+        )
+    }
+    contenido.exigir_orden_completo(list(lecciones), payload.ids)
+
+    for posicion, ident in enumerate(payload.ids):
+        lecciones[ident].sort_order = posicion
+
+    await auditoria.anotar(
+        db,
+        action="course.lessons_reordered",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "total": len(payload.ids),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return [await _leer_leccion(db, lecciones[ident]) for ident in payload.ids]
+
+
+@router.delete(
+    "/courses/{course_id}/modules/{module_id}/lessons/{lesson_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_course_lesson(
+    course_id: str,
+    module_id: str,
+    lesson_id: str,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Borra una leccion. El progreso de quien la estaba viendo cae con ella.
+
+    Lo hace la cascada de `lesson_progress` en la base, no este codigo: es un
+    dato de OTRO modulo y borrarlo desde aqui seria el catalogo escribiendo en
+    las tablas de aprendizaje.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+    leccion = await _leccion_del_modulo(db, modulo, lesson_id)
+
+    await db.delete(leccion)
+    await auditoria.anotar(
+        db,
+        action="course.lesson_deleted",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lesson_id": lesson_id,
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 async def _leer_curso(db: AsyncSession, course: Course) -> CourseRead:
