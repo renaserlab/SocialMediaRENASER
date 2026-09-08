@@ -170,13 +170,16 @@ reseña puede además señalar un curso de la persona reseñada.
 curso, con compra verificada y consumo mínimo (≥20 % o ≥30 minutos únicos), y un
 error `REVIEW_NOT_ELIGIBLE` para quien no cumple.
 
-Son dos productos distintos, y el segundo no está construido. Además, el
-consumo mínimo que pide el blueprint se apoya en **segundos únicos**, que hoy no
-se miden (R11).
+Son dos productos distintos. **D6 resuelta: entidad propia.** La reseña de
+curso es `course_reviews` (0056, SIN APLICAR), no un endurecimiento de la de
+perfil: `profile_reviews` valora personas, no lleva puntuación, y cambiar la
+entidad valorada habría sido rehacer esa tabla, no reutilizarla.
 
-**Decisión pendiente D6:** ¿la reseña de curso es una entidad propia, o el
-blueprint se satisface endureciendo el enlace a curso de la reseña de perfil? Es
-una decisión de producto, no técnica.
+**Lo que sigue faltando del blueprint §7: el consumo mínimo** (≥20 % o ≥30
+minutos únicos). Se apoya en **segundos únicos**, que hoy no se miden (R11), así
+que exigirlo sería inventarse el dato. Hoy la condición es haber comprado y
+conservar el curso; `review_purchase_required` y `review_access_required` ocupan
+el lugar de `REVIEW_NOT_ELIGIBLE`.
 
 Lo que sí se ha corregido en esta ronda: el sello miraba solo la tabla heredada
 `purchases`, así que una compra por Stripe no lo obtenía. Ahora mira también las
@@ -317,13 +320,54 @@ detrás de un proxy es la misma para todo el mundo, así que llenaría la column
 con un valor idéntico en todas las filas. Un dato falso en la tabla que alguien
 mirará para investigar un abuso es peor que no tener dato.
 
+## 8. Decisiones al cerrar las valoraciones (8/09/2026)
+
+**D14 · «Compra verificada» habla de haber PAGADO, no de poder entrar.** El
+sello salía de `resolver_acceso_al_curso`, que responde a otra pregunta y
+empieza cortocircuitando en `price_minor <= 0`, en el autor y en quien
+administra. Con eso, bajar un curso a gratis sellaba de golpe todas sus
+valoraciones —incluidas las de quien ya había devuelto—. Ahora se resuelve
+contra la compra: `Purchase` pagada, o `Entitlement` activo y vigente del
+producto de ese curso. Sigue sin guardarse: se deriva en cada lectura, así que
+una devolución apaga el sello sin borrar la opinión.
+
+**D15 · Moderar no se deshace desde el cliente.** Una valoración oculta se
+podía retirar, y con la fila fuera la unicidad dejaba de dar 409: se volvía a
+publicar el mismo texto, visible. El `DELETE` sobre una oculta ahora responde
+409 `course_review_moderated`. A cambio, la propia se lista SIEMPRE aunque esté
+oculta —como ya decía la política de la 0056— y se dice que está en revisión:
+sin eso, quien la escribió no podía verla, ni editarla, ni entender por qué la
+media no se movía.
+
+**D16 · La constancia de compra lleva el código de la moneda.** `MXN` y `USD`
+comparten el símbolo `$`, y una moneda que no está en la tabla salía sin
+ninguno. En el catálogo el contexto basta; en el documento que prueba cuánto se
+pagó, no. Solo cambia ahí: `deCentavos` se queda como estaba.
+
+**D17 · Un `PATCH` cambia lo que trae.** Con el esquema de creación, subir la
+puntuación sin reenviar el texto lo borraba en silencio. Mandar `comment: null`
+sí lo borra; lo que no vale es borrarlo sin pedirlo.
+
+**D18 · Valorar se ofrece solo donde el servidor podría decir que sí.** En un
+curso gratis nadie compró, así que el botón contestaba siempre 422
+`review_purchase_required`. Sigue siendo una pista, no un permiso: quien decide
+es el servidor en cada escritura.
+
 ### Pendiente de decisión de negocio
 
-- **La ruta de vuelta de Stripe** (`/pago`) no existe en la aplicación. Inerte
-  mientras las compras estén apagadas; hay que decidirla antes de encenderlas.
 - **La aceptación de recompra en las tiendas.** `native/sync` concede acceso sin
   comprobarla. Rechazar no vale: cuando ese endpoint corre, el dinero ya se
-  movió. Hay que decidir entre atar la aceptación y auditar, o exigirla antes de
-  lanzar la compra en la tienda.
-- **El móvil edita el contenido del curso directo por PostgREST**, así que un
-  autor puede alterar lo que vendió sin dejar versión ni auditoría.
+  movió. Hoy se concede y se anota `repurchase.sin_aceptacion` en auditoría. Hay
+  que decidir si eso basta o si la aceptación se exige antes de lanzar la compra
+  en la tienda.
+- **Qué se hace con quien vuelve a comprar y ya tenía valoración.** Hoy conserva
+  la que escribió: una recompra no da un segundo voto. Nadie ha dicho si debería
+  poder rehacerla.
+
+### Cerrado desde que se escribió esta lista
+
+- **La ruta de vuelta de Stripe** (`/pago`, `/pago/cancelado`) ya existe, con
+  reintento y lectura del estado de la orden. Sigue inerte mientras las compras
+  estén apagadas.
+- **El móvil ya no edita el contenido del curso por PostgREST.** Las doce
+  escrituras directas pasan por la API, que versiona y audita.
