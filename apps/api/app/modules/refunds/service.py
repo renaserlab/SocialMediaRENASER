@@ -648,6 +648,8 @@ async def registrar_aceptacion(
     course_id: str,
     order_id: str | None,
     fecha_legible: str,
+    provider: str | None = None,
+    external_product_id: str | None = None,
 ) -> RefundPolicyAcceptance:
     """Guarda que aceptó comprar sin garantía, con la huella del texto exacto.
 
@@ -673,6 +675,11 @@ async def registrar_aceptacion(
         order_id=order_id,
         policy_version=politica.VERSION_ACTUAL,
         policy_hash=politica.huella_de_recompra(fecha_legible),
+        # DE DONDE VENIA LA COMPRA cuando se acepto. Opcional porque en el
+        # checkout web no hace falta —la orden lo dice— y porque las
+        # aceptaciones anteriores a la 0054 no lo tienen.
+        provider=provider,
+        external_product_id=external_product_id,
     )
     db.add(aceptacion)
     await db.flush()
@@ -700,7 +707,12 @@ async def tiene_aceptacion(
 
 
 async def enlazar_aceptacion(
-    db: AsyncSession, *, user_id: str, course_id: str, order_id: str
+    db: AsyncSession,
+    *,
+    user_id: str,
+    course_id: str,
+    order_id: str,
+    operation_ref: str | None = None,
 ) -> None:
     """Ata la aceptación suelta a la orden que acabó creándose.
 
@@ -728,6 +740,13 @@ async def enlazar_aceptacion(
     await db.execute(
         update(RefundPolicyAcceptance)
         .where(RefundPolicyAcceptance.id == suelta)
-        .values(order_id=order_id)
+        # `operation_ref` SOLO SE ESCRIBE SI VIENE, y nunca se borra el que ya
+        # hubiera: es la referencia de la operación de tienda que consumió esta
+        # aceptación, y sobrescribirla con nulo desde el camino web dejaría sin
+        # respuesta la pregunta que existe para contestar.
+        .values(
+            **{"order_id": order_id},
+            **({"operation_ref": operation_ref} if operation_ref else {}),
+        )
     )
     await db.flush()

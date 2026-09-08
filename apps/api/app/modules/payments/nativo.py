@@ -88,13 +88,20 @@ async def sincronizar(
     return resultado
 
 
+#: El canal NO es el proveedor, y confundirlos revienta al insertar: el CHECK de
+#: `refund_policy_acceptances.provider` admite 'stripe', 'apple' y 'google', y el
+#: canal que trae RevenueCat es 'android' / 'ios'.
+_CANAL_A_PROVEEDOR: dict[str, str] = {"android": "google", "ios": "apple"}
+
+
 async def _resolver_aceptacion_de_recompra(
     db,
     *,
     user_id: str,
     course_id: str,
-    proveedor: str,
+    canal: str,
     producto_externo: str | None,
+    operacion: str | None,
 ) -> None:
     """Ata la aceptación de recompra a la compra de tienda, o deja constancia.
 
@@ -135,7 +142,14 @@ async def _resolver_aceptacion_de_recompra(
             orden = await _ultima_orden_pagada(db, user_id=user_id, course_id=course_id)
             if orden is not None:
                 await devoluciones.enlazar_aceptacion(
-                    db, user_id=user_id, course_id=course_id, order_id=orden
+                    db,
+                    user_id=user_id,
+                    course_id=course_id,
+                    order_id=orden,
+                    # La transacción de la tienda es lo que identifica ESTA
+                    # compra en el mundo de Google o Apple. Sin ella, dos
+                    # recompras del mismo curso serían indistinguibles.
+                    operation_ref=operacion,
                 )
             return  # Camino 2.
 
@@ -154,7 +168,11 @@ async def _resolver_aceptacion_de_recompra(
             # justamente lo contrario de lo que paso.
             outcome="ok",
             reason="compra de tienda sobre una garantia ya usada, sin aceptacion previa",
-            payload={"provider": proveedor, "store_product": producto_externo},
+            payload={
+                "provider": _CANAL_A_PROVEEDOR.get(canal, canal),
+                "store_product": producto_externo,
+                "operation": operacion,
+            },
         )
     except Exception:  # noqa: BLE001
         logger.warning(
@@ -271,6 +289,7 @@ async def _aplicar(
             db,
             user_id=user_id,
             course_id=concesion.course_id,
-            proveedor=compra.canal or "android",
+            canal=compra.canal or "android",
             producto_externo=compra.store_product_id,
+            operacion=compra.external_transaction_id,
         )

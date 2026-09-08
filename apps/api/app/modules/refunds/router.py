@@ -351,6 +351,8 @@ async def aceptar_recompra(
         course_id=payload.course_id,
         order_id=None,
         fecha_legible=fecha_legible,
+        provider=payload.provider,
+        external_product_id=payload.product_id,
     )
 
     # ------------------------------------------------------------------ #

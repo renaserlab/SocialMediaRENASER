@@ -289,6 +289,129 @@ async def test_una_recompra_con_aceptacion_no_deja_nota_de_incidencia(sesiones):
 
 
 @pytest.mark.asyncio
+async def test_la_aceptacion_queda_atada_a_la_orden_y_a_la_operacion(sesiones):
+    """LA MIGRACION 0054 SIRVE PARA ESTO Y PARA NADA MAS.
+
+    En el checkout web basta con `order_id`: la orden identifica la compra. En
+    las tiendas la orden no existe hasta despues del cobro, asi que sin la
+    referencia de la operacion dos recompras del mismo curso serian
+    indistinguibles y «que acepto exactamente quien hizo ESTA compra» no tendria
+    respuesta.
+
+    Y EL PROVEEDOR NO ES EL CANAL. El canal que trae RevenueCat es 'android' /
+    'ios'; el CHECK de la base admite 'google' / 'apple' / 'stripe'. Guardar el
+    canal reventaria al insertar.
+    """
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundPolicyAcceptance
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await devoluciones.registrar_aceptacion(
+            db,
+            user_id=ANA,
+            course_id=CURSO,
+            order_id=None,
+            fecha_legible="1 de enero",
+            provider="google",
+            external_product_id="z.curso.respiracion.lifetime",
+        )
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+
+        aceptaciones = list(await db.scalars(_select(RefundPolicyAcceptance)))
+        assert len(aceptaciones) == 1, "la sincronizacion no duplica la aceptacion"
+        firmada = aceptaciones[0]
+        assert firmada.order_id is not None, "tiene que quedar atada a la orden"
+        assert firmada.operation_ref, "y a la operacion de tienda"
+        assert firmada.provider == "google", "el proveedor, no el canal"
+        assert firmada.external_product_id == "z.curso.respiracion.lifetime"
+
+
+@pytest.mark.asyncio
+async def test_una_aceptacion_anterior_a_la_0054_sigue_funcionando(sesiones):
+    """LAS FILAS VIEJAS NO SE RELLENAN HACIA ATRAS, y tienen que valer igual.
+
+    Una aceptacion firmada antes de la 0054 no tiene proveedor ni producto. Eso
+    NO la invalida: se acepto, y esta fechada y con la huella del texto.
+    Inventarle un valor plausible seria escribir en un registro de
+    consentimientos algo que nadie firmo.
+    """
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundPolicyAcceptance
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        # Sin proveedor ni producto: exactamente como las de antes.
+        await devoluciones.registrar_aceptacion(
+            db, user_id=ANA, course_id=CURSO, order_id=None, fecha_legible="1 de enero"
+        )
+        await db.flush()
+
+        assert await devoluciones.tiene_aceptacion(db, user_id=ANA, course_id=CURSO)
+
+        cliente, _ = _cliente([_compra()])
+        resultado = await nativo.sincronizar(
+            db, user_id=ANA, cliente=cliente, entorno="sandbox"
+        )
+        assert resultado.concedidos == [CURSO]
+        firmada = await db.scalar(_select(RefundPolicyAcceptance))
+        assert firmada.provider is None, "no se le inventa un proveedor"
+        assert firmada.order_id is not None, "pero si se ata a la orden"
+
+
+@pytest.mark.asyncio
+async def test_sincronizar_dos_veces_no_duplica_ni_reescribe_la_aceptacion(sesiones):
+    """IDEMPOTENCIA: el movil llama a esto al comprar, al restaurar y al entrar."""
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundPolicyAcceptance
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await devoluciones.registrar_aceptacion(
+            db,
+            user_id=ANA,
+            course_id=CURSO,
+            order_id=None,
+            fecha_legible="1 de enero",
+            provider="google",
+            external_product_id="z.curso.respiracion.lifetime",
+        )
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+        primera = await db.scalar(_select(RefundPolicyAcceptance))
+        atada_a, operacion = primera.order_id, primera.operation_ref
+
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+        todas = list(await db.scalars(_select(RefundPolicyAcceptance)))
+        assert len(todas) == 1, "la segunda pasada no crea otra aceptacion"
+        assert todas[0].order_id == atada_a, "ni la reata a otra orden"
+        assert todas[0].operation_ref == operacion
+
+
+@pytest.mark.asyncio
 async def test_sin_garantia_usada_no_se_exige_ni_se_anota_nada(sesiones):
     """La primera compra no tiene nada que aceptar, y no puede ensuciar nada."""
     from app.modules.gobernanza.models import AuditEvent

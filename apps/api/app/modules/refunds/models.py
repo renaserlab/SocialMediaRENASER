@@ -288,6 +288,25 @@ class RefundPolicyAcceptance(Base):
     )
     policy_version: Mapped[str] = mapped_column(String(32))
     policy_hash: Mapped[str] = mapped_column(String(64))
+
+    # ---- Por dónde se iba a comprar cuando se aceptó (migración 0054) ------- #
+    #
+    # LAS TRES SON OPCIONALES Y NO SE RELLENAN HACIA ATRÁS. Las aceptaciones
+    # anteriores a la 0054 se firmaron sin estos datos, y una fila con `provider`
+    # nulo significa exactamente eso. Inventarles un valor plausible sería
+    # escribir en un registro de consentimientos algo que nadie firmó.
+    #
+    # `provider` NO ES EL CANAL. El canal es 'android' / 'ios'; el proveedor es
+    # 'google' / 'apple' / 'stripe', y es lo que admite el CHECK de la base.
+    # Guardar el canal aquí reventaría al insertar.
+    provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    external_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: La referencia de la operación de tienda con la que se consumió. En el
+    #: checkout web esto va por `order_id`; en las tiendas la orden no existe
+    #: hasta después del cobro, así que hace falta otra forma de responder «qué
+    #: aceptó exactamente quien hizo ESTA compra».
+    operation_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     accepted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
