@@ -353,8 +353,70 @@ curso gratis nadie compró, así que el botón contestaba siempre 422
 `review_purchase_required`. Sigue siendo una pista, no un permiso: quien decide
 es el servidor en cada escritura.
 
+## 9. Decisiones del aprendizaje: notas, evaluación y certificado (8/09/2026)
+
+**D19 · Una nota privada no la lee nadie más, y no hay matiz.** Ni el autor del
+curso, ni moderación, ni administración por rutas ordinarias. La consecuencia
+de diseño es que NINGUNA función del módulo acepta un identificador de usuario:
+quien pregunta sale del token. Editar o borrar la ajena responde 404 y no 403,
+porque «existe pero no es tuya» ya cuenta algo de lo que otra persona escribió.
+
+**D20 · La respuesta correcta no sale de la API mientras se responde**, y la
+garantía no es acordarse de excluirla: son dos familias de esquemas y el del
+alumno no declara el campo. Añadirlo por descuido a `OpcionRead` es la única
+forma de romperlo, y hay una prueba que se pone roja si ocurre.
+
+**D21 · La nota la calcula el servidor sobre el TOTAL de preguntas.** Contar
+solo lo respondido premiaría dejar preguntas en blanco. Un intento enviado no se
+vuelve a enviar: reenviarlo sería ir probando respuestas hasta acertar.
+
+**D22 · Un curso está terminado cuando están todas sus lecciones y, si hay
+evaluación publicada, hay un intento aprobado.** Nada de porcentajes declarados
+por el cliente ni de tiempo reproducido deducido. Un curso sin lecciones NO está
+terminado: cero de cero es el 100 % en aritmética y una afirmación falsa en
+producto.
+
+**D23 · La fecha de finalización se guarda una vez y no se mueve.** Se guarda
+—en vez de recalcularla— porque el certificado dice una fecha, y recalcularla
+mañana con las lecciones de mañana daría otra: añadir una lección movería el día
+en que alguien terminó.
+
+**D24 · El código público de un certificado son 128 bits de `secrets`.** No es
+correlativo y no lleva año: un «ZC-2025-034892» se recorre entero en una tarde y
+deja listar el nombre y el curso de todo el que se haya certificado. La
+verificación pública no lleva correo, ni identificador de usuario, ni orden, ni
+importe.
+
+**D25 · Revocar no borra.** Una devolución total confirmada revoca el acceso y
+deja el certificado marcado como no vigente, con su motivo y su fecha. Borrarlo
+dejaría a quien lo compartió sin ninguna explicación de por qué desapareció el
+enlace. Es la política MVP que pidió el encargo, implementada como enganche en
+el paso 5 del reembolso; el motor de devoluciones no cambia.
+
+**D26 · El certificado no se llama título ni acreditación.** Es un certificado
+de finalización de un curso. Y no se genera PDF: pediría una dependencia nueva y
+un servicio que lo firme, y la verificación pública ya cubre lo que el PDF
+prometía —que alguien de fuera pueda comprobarlo—.
+
+**D27 · La ayuda del curso no es un sistema de soporte nuevo.** Los cuatro tipos
+de problema llevan a lo que ya los resuelve. Una bandeja de tickets era un
+dominio entero para repartir a mano lo que ya está repartido.
+
 ### Pendiente de decisión de negocio
 
+- **Las subnotas y la evidencia de la captura 19.** La referencia enseña tres
+  puntuaciones —contenido, claridad, aplicación— y un adjunto. La 0056 guarda un
+  solo `rating`, y aceptar archivos de alumnos abre una superficie de moderación
+  que hoy no tiene política. Hace falta decidir si el producto las quiere antes
+  de crear columnas.
+- **Quién puede reescribir una evaluación publicada.** Hoy vale «el autor o la
+  administración», que es la misma regla que rige módulos, lecciones y
+  descripción en todo el módulo. Que moderación pueda cambiar las respuestas
+  correctas de un curso ajeno —y con ellas quién se certifica— merece decidirse
+  a propósito, no heredarse.
+- **Los módulos con requisito previo de la captura 15.** Nada en el modelo dice
+  que un módulo dependa de otro; pintar el candado sería inventarse la regla de
+  desbloqueo.
 - **La aceptación de recompra en las tiendas.** `native/sync` concede acceso sin
   comprobarla. Rechazar no vale: cuando ese endpoint corre, el dinero ya se
   movió. Hoy se concede y se anota `repurchase.sin_aceptacion` en auditoría. Hay

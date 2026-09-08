@@ -318,3 +318,44 @@ El asistente permite completarlo y publicar **no** lo exige.
 
 **Completar el nivel de los cuatro cursos publicados es una tarea de contenido,
 no de código.** No se rellena automáticamente.
+
+
+---
+
+## Vistas 13–24 tras el incremento de aprendizaje (8/09/2026)
+
+Una fila por captura. **Adaptada** significa que la vista está construida pero
+se apartó de la referencia por una regla real del producto, y la regla se
+nombra: sin nombrarla, «adaptada» es una excusa.
+
+| # | Vista | Estado | Por qué |
+|---|---|---|---|
+| 13 | Mis cursos | **Terminada** | Tres estados en pestañas, avance real y «Continuar» solo cuando hay lección siguiente. La biblioteca ya se abre desde Cursos: antes solo existía en modo de desarrollo. |
+| 14 | Reproductor | **Terminada** | Pestañas Descripción / Recursos / Notas y «Marcar como completada». |
+| 15 | Temario y progreso | **Adaptada** | Check por lección y contador por módulo, con el avance del curso arriba. **No hay módulos bloqueados**: nada en el modelo dice que un módulo dependa de otro, y pintar un candado sería inventarse una regla de desbloqueo. |
+| 16 | Recursos y notas | **Terminada** | Recursos ya existían; las notas privadas son la 0057. Varias por lección, cada una con su minuto. |
+| 17 | Evaluación | **Terminada** | Migración 0058. Sustituye al cuestionario de `mockData.ts`, que no estaba atado a ningún curso. |
+| 18 | Curso completado | **Terminada** | No pinta el 100 % hasta que el servidor lo confirma, y si falta algo dice qué. |
+| 19 | Valorar curso | **Adaptada** | UNA puntuación, no cuatro. La captura enseña tres subnotas —contenido, claridad, aplicación— y un adjunto de evidencia; la 0056 guarda un solo `rating` y no hay política de moderación para archivos subidos por alumnos. Las subnotas y la evidencia son **decisión de producto pendiente**, no un olvido. |
+| 20 | Garantía y reembolso | **Adaptada** | La tarjeta de garantía y el formulario ya existían con el reloj del servidor. La captura enseña «solo aplica si tu consumo es menor al 50 % del contenido»: **esa regla no existe** en el motor de devoluciones —la garantía son 168 horas desde el primer acceso— y escribirla en pantalla sería anunciar una condición que nadie aplica. |
+| 21 | Certificado | **Adaptada** | Migración 0059, con verificación pública. **Sin PDF y sin QR**: generarlos pide una dependencia nueva y un servicio que los firme, y la verificación pública ya cubre lo que el PDF prometía. Se comparte el enlace. El identificador NO es «ZC-2025-034892»: un código con año y contador se recorre entero en una tarde. |
+| 22 | Ayuda del curso | **Adaptada** | Los cuatro tipos de problema llevan a lo que YA los resuelve. **No hay bandeja de tickets**: montarla era un dominio entero, y «Mis solicitudes» son las devoluciones, que es lo único con expediente propio. |
+| 23 | Solicitud recibida | **Terminada** | Línea de tiempo de tres pasos sobre los ocho estados del expediente. Sin identificador técnico, que es la regla que ya fijaba la pantalla de compras. |
+| 24 | Reembolso completado | **Terminada** | La misma pantalla que la 23 en su estado final. El aviso de acceso retirado solo con el dinero devuelto: `approved` no es haber pagado. |
+
+### Lo que sigue bloqueado por contrato
+
+- **Consumo mínimo del blueprint** (≥20 % o ≥30 minutos únicos) para poder
+  valorar: se apoya en segundos únicos, que no se miden. Exigirlo sería
+  inventarse el dato.
+- **Módulos con requisitos previos** (captura 15): no hay dependencia entre
+  módulos en el modelo.
+- **Método de reembolso** en la captura 24 («Visa terminada en 4242»): la orden
+  guarda proveedor, no los cuatro últimos dígitos, y no debe guardarlos.
+
+### Estados que se implementaron aunque no salgan en ninguna captura
+
+Cargando, vacío, error con reintento y «esta función no está montada aquí» (503
+por migración sin aplicar) en las seis pantallas nuevas. El cuarto es el que más
+importa: con la 0057, 0058 o 0059 sin aplicar, cada pantalla lo dice al llegar
+en vez de fingir una avería.
