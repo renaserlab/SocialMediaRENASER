@@ -209,3 +209,27 @@ class CourseVersion(Base):
             sqlite_where=text("status = 'published'"),
         ),
     )
+
+
+class SavedCourse(Base):
+    """Un curso guardado para después. Migración 0055."""
+
+    __tablename__ = "saved_courses"
+
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    course_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("saved_courses_por_fecha", "user_id", "created_at"),
+    )

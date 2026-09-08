@@ -15,7 +15,8 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.catalog import contenido, cursos_v2, esquema, eventos, versiones
-from app.modules.catalog.models import Course, Event, EventRegistration
+from app.modules.catalog.models import Course, Event, EventRegistration, SavedCourse
+from app.modules.commerce.service import _insert as _insert_de_comercio
 from app.modules.catalog.schemas import (
     IDIOMA,
     NIVEL,
@@ -477,6 +478,78 @@ def _patron_de_busqueda(texto: str) -> str:
     """
     limpio = texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{limpio}%"
+
+
+async def _exigir_guardados(db: AsyncSession) -> None:
+    if not await esquema.hay_guardados(db):
+        raise ServiceUnavailableError(
+            "Guardar cursos todavía no está disponible.",
+            code="saved_courses_not_available",
+        )
+
+
+@router.get("/courses/saved", response_model=list[CourseRead])
+async def cursos_guardados(
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseRead]:
+    """Los cursos que esta persona guardó, del más reciente al más antiguo."""
+    await _exigir_guardados(db)
+    cursos = list(
+        await db.scalars(
+            select(Course)
+            .join(SavedCourse, SavedCourse.course_id == Course.id)
+            .where(SavedCourse.user_id == current_user.id)
+            # Orden determinista: sin el desempate por id, dos guardados del
+            # mismo instante pueden salir en distinto orden en cada página.
+            .order_by(SavedCourse.created_at.desc(), Course.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+    )
+    return await _leer_cursos(db, cursos)
+
+
+@router.put("/courses/{course_id}/saved", status_code=status.HTTP_204_NO_CONTENT)
+async def guardar_curso(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Guarda el curso. Llamarlo dos veces deja el mismo resultado."""
+    await _exigir_guardados(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    curso = await db.get(Course, cid)
+    if curso is None or curso.status != "published":
+        # Guardar un borrador ajeno diría que existe.
+        raise NotFoundError("Curso no encontrado.")
+
+    # La clave primaria compuesta es la que impide el duplicado; el
+    # `on conflict do nothing` recoge la carrera sin romper la transacción.
+    await db.execute(
+        _insert_de_comercio(db)(SavedCourse.__table__)
+        .values(user_id=current_user.id, course_id=cid)
+        .on_conflict_do_nothing()
+    )
+    await db.commit()
+
+
+@router.delete("/courses/{course_id}/saved", status_code=status.HTTP_204_NO_CONTENT)
+async def quitar_curso_guardado(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Lo quita. Quitar algo que no estaba tampoco es un error."""
+    await _exigir_guardados(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    await db.execute(
+        delete(SavedCourse).where(
+            SavedCourse.user_id == current_user.id, SavedCourse.course_id == cid
+        )
+    )
+    await db.commit()
 
 
 @router.get("/courses", response_model=list[CourseRead])
