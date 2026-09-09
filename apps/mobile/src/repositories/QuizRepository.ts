@@ -14,6 +14,11 @@ import { apiRequest, API_V1 } from '@/services/api';
  * SIN LA MIGRACION 0058 APLICADA todo esto responde 503 con
  * `course_quiz_not_available`. No se traga aqui: quien pinta necesita
  * distinguirlo para no ensenar la seccion.
+ *
+ * EL LADO DEL AUTOR VIVE EN OTRO FICHERO (`QuizAutorRepository.ts`) y no por
+ * orden: alli SI viaja `is_correct`, y la frontera entre los dos contratos es
+ * justo lo que hay que poder comprobar de un vistazo. En ESTE fichero la
+ * palabra no puede aparecer, y hay una prueba que se pone roja si aparece.
  */
 
 const LEARNING = `${API_V1}/learning`;

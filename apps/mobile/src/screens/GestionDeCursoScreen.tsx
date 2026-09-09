@@ -184,6 +184,19 @@ export function GestionDeCursoScreen() {
           pie={t('gestion.ventasPie')}
           onPress={() => router.push(`/gestionar-curso/${courseId}/ventas` as never)}
         />
+        {/*
+          LA EVALUACIÓN FINAL. Vive aquí y no en el asistente de edición porque
+          no es parte de la ficha del curso: decide quién lo aprueba, y de ahí
+          sale un certificado verificable.
+        */}
+        <Fila
+          icono="check-square"
+          titulo={t('gestion.evaluacion')}
+          pie={t('gestion.evaluacionPie')}
+          onPress={() =>
+            router.push(`/gestionar-curso/${courseId}/evaluacion` as never)
+          }
+        />
         <Fila
           icono="edit-3"
           titulo={t('gestion.editar')}

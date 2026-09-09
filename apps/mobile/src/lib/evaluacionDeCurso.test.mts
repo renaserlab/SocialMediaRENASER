@@ -39,9 +39,14 @@ const CUATRO = [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' }];
 
 describe('el teléfono no corrige', () => {
   it('la evaluación que llega no trae la respuesta correcta', () => {
+    // El contrato del AUTOR vive en otro fichero y allí sí viaja `is_correct`:
+    // la frontera es física, no una convención, y por eso se puede comprobar de
+    // un vistazo que en este lado la palabra no aparece.
     const REPO = sinComentarios(fuente('repositories/QuizRepository.ts'));
     assert.ok(!REPO.includes('is_correct'));
-    assert.ok(!REPO.toLowerCase().includes('correcta:'));
+    assert.ok(!REPO.toLowerCase().includes('correcta'));
+    const AUTOR = sinComentarios(fuente('repositories/QuizAutorRepository.ts'));
+    assert.ok(AUTOR.includes('is_correct'), 'el del autor sí la necesita');
   });
 
   it('y nada de la lógica calcula una nota', () => {
