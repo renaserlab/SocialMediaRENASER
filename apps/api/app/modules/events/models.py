@@ -441,11 +441,16 @@ class EventTicketType(Base):
     quota: Mapped[int] = mapped_column(Integer)
     min_per_order: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     max_per_order: Mapped[int] = mapped_column(Integer, server_default=text("10"))
-    inclusions: Mapped[list | None] = mapped_column(
-        _LISTA_DE_TEXTO, nullable=True
+    # NO ANULABLES, como las creo la 0061 (`not null default '{}'`). Se
+    # declaraban anulables y el esquema que las pruebas de SQLite construyen a
+    # partir de este modelo salia mas permisivo que produccion. `default=list`
+    # y no `server_default`: el valor por omision de PostgreSQL es `'{}'` y el
+    # de SQLite tendria que ser `'[]'`, asi que lo pone Python en los dos.
+    inclusions: Mapped[list] = mapped_column(
+        _LISTA_DE_TEXTO, nullable=False, default=list
     )
-    restrictions: Mapped[list | None] = mapped_column(
-        _LISTA_DE_TEXTO, nullable=True
+    restrictions: Mapped[list] = mapped_column(
+        _LISTA_DE_TEXTO, nullable=False, default=list
     )
     status: Mapped[str] = mapped_column(String(16), server_default=text("'draft'"))
     sort_order: Mapped[int] = mapped_column(Integer, server_default=text("0"))

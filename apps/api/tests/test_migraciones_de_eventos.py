@@ -1043,6 +1043,92 @@ def test_borrar_la_reserva_entera_si_se_puede(conexion, con_entradas) -> None:
     )
 
 
+# --------------------------------------------------------------------------- #
+# El ORM y el esquema real dicen lo mismo
+# --------------------------------------------------------------------------- #
+#: Las nueve tablas de Eventos: cinco de la 0060 y cuatro de la 0061.
+TABLAS_DE_EVENTOS = TABLAS + TABLAS_DE_ENTRADAS
+
+
+@SIN_POSTGRES
+def test_el_orm_declara_las_mismas_columnas_que_la_base(conexion, aplicadas) -> None:
+    """Una columna que el ORM no conoce no se lee; una que no existe, revienta."""
+    from app.modules.events import models as modelos
+
+    por_tabla = {m.__tablename__: m for m in _modelos_de_eventos(modelos)}
+    problemas = []
+    for tabla in TABLAS_DE_EVENTOS:
+        modelo = por_tabla.get(tabla)
+        assert modelo is not None, f"sin modelo ORM para {tabla}"
+        reales = set(
+            _lista(
+                conexion,
+                "select column_name from information_schema.columns "
+                "where table_schema = 'public' and table_name = %s",
+                tabla,
+            )
+        )
+        del_orm = {c.name for c in modelo.__table__.columns}
+        if del_orm - reales:
+            problemas.append(f"{tabla}: el ORM nombra {sorted(del_orm - reales)}")
+        if reales - del_orm:
+            problemas.append(f"{tabla}: la base tiene {sorted(reales - del_orm)}")
+    assert problemas == [], "; ".join(problemas)
+
+
+@SIN_POSTGRES
+def test_el_orm_y_la_base_coinciden_en_nulabilidad(conexion, aplicadas) -> None:
+    """Que la base sea MAS estricta que el ORM tambien es una divergencia.
+
+    `event_ticket_types.inclusions` se declaraba anulable en el ORM y la 0061 la
+    creo `not null default '{}'`. Por la API no se podia colar un nulo, pero el
+    esquema que las pruebas de SQLite construyen a partir del ORM SI lo admitia:
+    la suite era mas permisiva que produccion justo en las dos columnas donde no
+    lo parecia, y cualquier camino nuevo que escribiera `None` habria dado un
+    500 solo contra PostgreSQL.
+    """
+    from app.modules.events import models as modelos
+
+    por_tabla = {m.__tablename__: m for m in _modelos_de_eventos(modelos)}
+    problemas = []
+    for tabla in TABLAS_DE_EVENTOS:
+        modelo = por_tabla[tabla]
+        reales = dict(
+            _pares(
+                conexion,
+                "select column_name, is_nullable from information_schema.columns "
+                "where table_schema = 'public' and table_name = %s",
+                tabla,
+            )
+        )
+        for col in modelo.__table__.columns:
+            if col.name not in reales:
+                continue
+            base_admite_nulo = reales[col.name] == "YES"
+            orm_admite_nulo = bool(col.nullable) and not col.primary_key
+            if base_admite_nulo != orm_admite_nulo:
+                problemas.append(
+                    f"{tabla}.{col.name}: orm={orm_admite_nulo}, base={base_admite_nulo}"
+                )
+    assert problemas == [], "; ".join(problemas)
+
+
+def _modelos_de_eventos(modelos):
+    from app.shared.database import Base
+
+    return [
+        m
+        for m in Base.registry._class_registry.values()
+        if hasattr(m, "__tablename__") and m.__module__ == modelos.__name__
+    ]
+
+
+def _pares(conexion, sql: str, *args) -> list:
+    with conexion.cursor() as cur:
+        cur.execute(sql, args or None)
+        return list(cur.fetchall())
+
+
 @SIN_POSTGRES
 def test_las_cuatro_tablas_de_entradas_tienen_rls(conexion, aplicadas) -> None:
     sin_rls = [
