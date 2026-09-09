@@ -334,11 +334,19 @@ async def _guardar_temas(
 
 
 def _to_event_read(
-    event: Event, count: int, reserved: int, momento: datetime | None = None
+    event: Event,
+    count: int,
+    reserved: int,
+    momento: datetime | None = None,
+    organizador: Profile | None = None,
 ) -> EventRead:
     return EventRead(
         id=event.id,
         organizer_id=event.organizer_id,
+        # Vacíos si no hay perfil. El servidor manda '' y la pantalla decide qué
+        # hacer con eso; inventar un nombre sería peor que no escribir ninguno.
+        organizer_name=(organizador.full_name or "") if organizador else "",
+        organizer_username=(organizador.username or "") if organizador else "",
         title=event.title,
         description=event.description,
         starts_at=event.starts_at,
@@ -370,6 +378,8 @@ async def _registrations_count(db: AsyncSession, event_id: str) -> int:
 @router.get("/events", response_model=list[EventRead])
 async def list_events(
     when: str = Query(default=eventos.TODOS, pattern=eventos.CUANDO),
+    q: str | None = Query(default=None, max_length=120),
+    event_type: str | None = Query(default=None, pattern="^(online|presential|live)$"),
     page: Page = Depends(pagination_params),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
@@ -423,6 +433,20 @@ async def list_events(
     grupo = eventos.condicion(when, momento)
     if grupo is not None:
         consulta = consulta.where(grupo)
+    # BUSCAR Y FILTRAR AQUÍ, no sobre la página ya descargada: filtrar en el
+    # teléfono deja fuera todo lo que no cupo en la primera página, y el
+    # resultado depende de cuánto se haya bajado.
+    if q and q.strip():
+        patron = f"%{q.strip()}%"
+        consulta = consulta.where(
+            or_(
+                Event.title.ilike(patron),
+                Event.description.ilike(patron),
+                Event.location.ilike(patron),
+            )
+        )
+    if event_type:
+        consulta = consulta.where(Event.event_type == event_type)
     rows = (
         await db.execute(
             consulta.order_by(*eventos.orden(momento))
@@ -430,7 +454,69 @@ async def list_events(
             .offset(page.offset)
         )
     ).all()
-    return [_to_event_read(*row, momento=momento) for row in rows]
+    if not rows:
+        return []
+    # Los organizadores en UNA consulta: uno por fila sería N+1 en cada página.
+    organizadores = {
+        perfil.id: perfil
+        for perfil in await db.scalars(
+            select(Profile).where(
+                Profile.id.in_({fila[0].organizer_id for fila in rows})
+            )
+        )
+    }
+    return [
+        _to_event_read(
+            *fila, momento=momento, organizador=organizadores.get(fila[0].organizer_id)
+        )
+        for fila in rows
+    ]
+
+
+@router.get("/events/{event_id}", response_model=EventRead)
+async def get_event(
+    event_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> EventRead:
+    """La ficha de UN evento.
+
+    NO EXISTÍA, y por eso todo —Explorar, la búsqueda, el listado— llevaba al
+    listado entero: tocar un evento concreto abría la lista donde ese evento
+    era una fila más.
+
+    SE LEE SIN SESIÓN: un evento publicado es público, igual que el catálogo.
+    Lo que cambia con sesión es `reserved_by_me`, que sin ella es `false`
+    porque no hay a quién preguntárselo.
+
+    SOLO LOS PUBLICADOS. Un borrador responde 404 y no 403: decir «existe pero
+    no puedes verlo» cuenta que alguien está preparando algo.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    uid = current_user.id if current_user else None
+    momento = eventos.ahora()
+
+    evento = await db.get(Event, event_id)
+    if evento is None or evento.status != "published":
+        raise NotFoundError("Evento no encontrado.")
+
+    inscritos = await _registrations_count(db, evento.id)
+    mia = 0
+    if uid:
+        mia = int(
+            bool(
+                await db.scalar(
+                    select(EventRegistration.event_id).where(
+                        EventRegistration.event_id == evento.id,
+                        EventRegistration.user_id == uid,
+                    )
+                )
+            )
+        )
+    organizador = await db.get(Profile, evento.organizer_id)
+    return _to_event_read(
+        evento, inscritos, mia, momento=momento, organizador=organizador
+    )
 
 
 @router.post("/events/{event_id}/reserve", response_model=EventRead)

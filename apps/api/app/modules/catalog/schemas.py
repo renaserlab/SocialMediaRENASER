@@ -145,6 +145,11 @@ class CourseUpdate(_PrecioDeCurso, _FichaDeCursoV2):
 class EventRead(BaseModel):
     id: str
     organizer_id: str
+    #: Nombre y usuario de quien organiza. Van aquí para que la ficha no tenga
+    #: que pedir el perfil aparte solo para escribir «organiza Fulana». Vacíos
+    #: cuando el perfil no está: NO se inventa un nombre.
+    organizer_name: str = ""
+    organizer_username: str = ""
     title: str
     description: str
     starts_at: datetime | None = None
