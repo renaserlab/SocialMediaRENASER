@@ -1574,11 +1574,29 @@ async def borrador_de_evaluacion(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EvaluacionDeAutorRead:
-    """La evaluación CON las respuestas correctas. Solo quien gestiona el curso."""
+    """La evaluación CON las respuestas correctas. Solo quien gestiona el curso.
+
+    ESTE GET ESCRIBE, y es a propósito: es la única puerta de toda la API por la
+    que sale `is_correct`, así que cuando la abre alguien que no es el autor
+    tiene que quedar constancia. `anotar` solo hace `flush` y nadie confirma por
+    una petición de lectura, así que el `commit` va aquí: sin él la nota se
+    deshacía al cerrar la sesión y la puerta quedaba sin rastro.
+    """
     await _exigir_evaluaciones(db)
     curso = await _curso_o_404(db, course_id)
     await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "read_draft")
+    await db.commit()
+    return await _leer_borrador(db, curso)
 
+
+async def _leer_borrador(db: AsyncSession, curso: Course) -> EvaluacionDeAutorRead:
+    """El borrador, SIN comprobar permiso y sin anotar nada.
+
+    Lo llaman `guardar` y `publicar` para devolver el estado nuevo: pasar por el
+    endpoint dejaba una segunda nota `read_draft` en cada escritura, escrita
+    después del `commit` y por tanto descartada. Una nota que no se guarda y un
+    hecho que no ocurrió.
+    """
     quiz = await _quiz_del_curso(db, curso.id)
     if quiz is None:
         raise NotFoundError(
@@ -1682,7 +1700,7 @@ async def guardar_evaluacion(
         ):
             quiz.status = "draft"
     await db.commit()
-    return await borrador_de_evaluacion(course_id, current_user, db)
+    return await _leer_borrador(db, curso)
 
 
 @router.post("/courses/{course_id}/quiz/publish", response_model=EvaluacionDeAutorRead)
@@ -1713,7 +1731,7 @@ async def publicar_evaluacion(
 
     quiz.status = "published"
     await db.commit()
-    return await borrador_de_evaluacion(course_id, current_user, db)
+    return await _leer_borrador(db, curso)
 
 
 @router.get("/courses/{course_id}/quiz", response_model=EvaluacionRead)

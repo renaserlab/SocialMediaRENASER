@@ -305,6 +305,55 @@ async def test_administracion_con_poder_real_si_puede_y_queda_anotado(entorno):
 
 
 @pytest.mark.asyncio
+async def test_abrir_el_borrador_ajeno_deja_rastro_QUE_SE_GUARDA(entorno):
+    """El GET escribe, y tiene que confirmarlo él.
+
+    `anotar` solo hace `flush` y nadie confirma por una lectura: sin el `commit`
+    la nota se deshacía al cerrar la sesión y la ÚNICA puerta por la que sale
+    `is_correct` quedaba sin rastro.
+    """
+    http, identidad, sesiones = entorno
+    identidad["uid"] = AUTORA
+    await http.put(f"{LEARNING}/courses/{CURSO}/quiz", json=CUATRO_PREGUNTAS)
+
+    identidad["uid"] = ADMIN
+    respuesta = await http.get(f"{LEARNING}/courses/{CURSO}/quiz/draft")
+    assert respuesta.status_code == 200, respuesta.text
+    assert "is_correct" in respuesta.text, "el borrador SÍ lleva las correctas"
+
+    async with sesiones() as db:
+        from app.modules.gobernanza.models import AuditEvent
+
+        acciones = list(
+            await db.scalars(select(AuditEvent.action).where(AuditEvent.actor_id == ADMIN))
+        )
+    assert acciones == ["course_quiz.read_draft"]
+
+
+@pytest.mark.asyncio
+async def test_guardar_no_deja_una_segunda_nota_de_lectura(entorno):
+    """Devolver el estado nuevo pasando por el endpoint anotaba un `read_draft`
+    fantasma: escrito después del `commit` y por tanto descartado. Una nota que
+    no se guarda y un hecho que no ocurrió."""
+    http, identidad, sesiones = entorno
+    identidad["uid"] = ADMIN
+    assert (
+        await http.put(f"{LEARNING}/courses/{CURSO}/quiz", json=CUATRO_PREGUNTAS)
+    ).status_code == 200
+    assert (
+        await http.post(f"{LEARNING}/courses/{CURSO}/quiz/publish")
+    ).status_code == 200
+
+    async with sesiones() as db:
+        from app.modules.gobernanza.models import AuditEvent
+
+        acciones = sorted(
+            await db.scalars(select(AuditEvent.action).where(AuditEvent.actor_id == ADMIN))
+        )
+    assert acciones == ["course_quiz.published", "course_quiz.written"]
+
+
+@pytest.mark.asyncio
 async def test_el_autor_edita_lo_suyo_sin_dejar_rastro_de_auditoria(entorno):
     """Que alguien edite su propio curso no es un hecho que investigar."""
     http, identidad, sesiones = entorno
