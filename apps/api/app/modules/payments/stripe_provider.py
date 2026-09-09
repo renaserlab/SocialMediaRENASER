@@ -221,7 +221,7 @@ class StripeProvider(PaymentProvider):
                     "price_data": {
                         "currency": request.currency.lower(),
                         "unit_amount": request.amount_minor,
-                        "product_data": {"name": request.course_title},
+                        "product_data": {"name": request.concepto},
                     },
                 }
             ],
@@ -317,6 +317,7 @@ def traducir_evento(evento: dict[str, Any]) -> PaymentEvent:
     return PaymentEvent(
         refund_id=_identificador_del_reembolso(tipo, objeto),
         purchase_id=interno,
+        dominio=_dominio(objeto),
         provider_transaction_id=referencia,
         status=estado,
         amount_minor=_importe(objeto),
@@ -421,6 +422,16 @@ def _importe_del_cobro(objeto: dict[str, Any]) -> int:
             return valor
     valor = objeto.get("charge_amount")
     return valor if isinstance(valor, int) else 0
+
+
+def _dominio(objeto: dict[str, Any]) -> str:
+    """De que dominio es este cobro, segun la metadata que le adjuntamos."""
+    metadata = objeto.get("metadata")
+    if isinstance(metadata, dict):
+        valor = metadata.get("dominio")
+        if isinstance(valor, str):
+            return valor
+    return ""
 
 
 def _identificador_interno(objeto: dict[str, Any]) -> str:

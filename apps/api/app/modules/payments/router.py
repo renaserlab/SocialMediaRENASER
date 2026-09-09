@@ -60,6 +60,7 @@ from app.modules.learning.models import Purchase
 from app.modules.catalog import esquema as esquema_catalogo
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce import service as comercio_service
+from app.modules.events import pagos as eventos_pagos
 from app.modules.payments import nativo, service
 from app.modules.payments.providers import CheckoutRequest, get_provider
 from app.modules.payments.revenuecat import RevenueCatClient, RevenueCatError
@@ -161,7 +162,7 @@ async def create_checkout(
     session = await provider.create_checkout(
         CheckoutRequest(
             purchase_id=purchase.id,
-            course_title=course.title,
+            concepto=course.title,
             amount_minor=purchase.amount_minor,
             currency=purchase.currency,
             user_email=current_user.email or "",
@@ -702,7 +703,7 @@ async def stripe_checkout(
         sesion = await proveedor.create_checkout(
             CheckoutRequest(
                 purchase_id=pedido.id,
-                course_title=course.title,
+                concepto=course.title,
                 # Del PEDIDO, no del curso: es el importe que se congeló en el
                 # servidor al abrirlo. Si el precio del curso cambia mientras
                 # alguien está pagando, paga lo que se le enseñó.
@@ -759,6 +760,13 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
         # probando a falsificarla.
         logger.warning("[pagos] aviso de Stripe rechazado", exc_info=True)
         raise ValidationAppError("Aviso no válido.")
+
+    # LOS AVISOS DE ENTRADAS SE ENTREGAN A EVENTOS, y antes de la bandera de
+    # Cursos: `stripe_payments_enabled` gobierna la compra de un CURSO y no
+    # tiene nada que decir sobre una entrada. El dominio sale de la metadata que
+    # nosotros adjuntamos al abrir el cobro, no de un campo que Stripe rellene.
+    if evento.dominio == eventos_pagos.DOMINIO:
+        return await _webhook_de_eventos(db, evento)
 
     if not ajustes.stripe_payments_enabled and evento.status not in _ESTADOS_DE_DEVOLUCION:
         # Firma valida, pero es un aviso de COMPRA y las compras estan
@@ -828,6 +836,61 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
     # vez, cuando la operación entera ha salido bien. Al revés, un webhook que
     # concede el derecho y luego falla al marcar la orden dejaría las dos cosas
     # a medias.
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _webhook_de_eventos(db: AsyncSession, evento) -> Response:
+    """Un aviso de entradas, ya verificado. Mismas garantias que el de Cursos.
+
+    LA BANDERA DE VENTA NO SE MIRA AQUI. Apagar `FEATURE_EVENT_PAYMENTS` impide
+    ABRIR cobros nuevos; rechazar el aviso de uno que ya se abrio dejaria a
+    quien pago sin su entrada y a Stripe reintentando en bucle.
+    """
+    ajustes = get_settings()
+
+    if not await esquema_comercio.hay_comercio(db):
+        # Sin la 0035 no hay donde anotar el aviso, y sin anotarlo no se puede
+        # garantizar que no se procese dos veces. Se falla en cerrado.
+        logger.error("[eventos] aviso de Stripe sin la migración 0035 aplicada")
+        raise ServiceUnavailableError("El módulo de compras aún no está desplegado.")
+
+    if evento.environment != ajustes.payments_environment:
+        # Un aviso de pruebas NO emite una entrada en producción, ni al revés.
+        logger.info("[eventos] aviso de otro entorno: %s", evento.environment)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # ANTI-REPETICION EN LA BASE, no en un `if`: dos avisos simultáneos pasarían
+    # los dos por una comprobación y por el índice único pasa uno.
+    _fila, es_nuevo = await comercio_service.registrar_evento(
+        db,
+        provider="stripe",
+        external_event_id=evento.event_id,
+        event_type=evento.event_type,
+        environment=evento.environment,
+        payload=dict(evento.payload),
+    )
+    if not es_nuevo:
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    id_del_aviso = _fila.id
+    try:
+        async with db.begin_nested():
+            await eventos_pagos.atender_aviso(db, evento)
+    except Exception as error:  # noqa: BLE001
+        logger.exception("[eventos] no se pudo aplicar el aviso %s", evento.event_id)
+        await comercio_service.marcar_evento_procesado(
+            db, event_id=id_del_aviso, error=str(error)[:500]
+        )
+        await db.commit()
+        # NO SE PROPAGA. Un aviso que no cuadra —importe distinto, reserva
+        # vencida, pedido cancelado— no se arregla reintentandolo: queda
+        # anotado con su error para que una persona lo concilie. Propagar
+        # pondria a Stripe a repetirlo cada pocos minutos durante días.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await comercio_service.marcar_evento_procesado(db, event_id=id_del_aviso)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

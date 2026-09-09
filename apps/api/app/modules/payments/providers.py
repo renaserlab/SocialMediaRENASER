@@ -35,7 +35,10 @@ class CheckoutRequest:
     """Lo que se le pide a la pasarela para iniciar un cobro."""
 
     purchase_id: str
-    course_title: str
+    #: Qué se está cobrando, tal y como lo verá quien paga. Se llamaba
+    #: `course_title` porque Cursos fue el primero en usar este puerto; ahora lo
+    #: usan también las entradas de un evento, y el nombre lo dice.
+    concepto: str
     #: En la unidad MENOR de la moneda (céntimos). Nunca en decimales: los
     #: flotantes pierden precisión y en dinero eso acaba en descuadres.
     amount_minor: int
@@ -92,6 +95,17 @@ class PaymentEvent:
     environment: str = "sandbox"
     #: El cuerpo verificado, para dejarlo en `payment_events.payload`.
     payload: Mapping[str, object] = field(default_factory=dict)
+    #: A QUÉ DOMINIO pertenece el cobro: '' para una compra de curso —que es
+    #: lo que había cuando este puerto se escribió— y 'evento' para una orden de
+    #: entradas. Sale de la metadata que se le adjunta al abrir el cobro, nunca
+    #: de un campo que el proveedor rellene por su cuenta.
+    #:
+    #: EXISTE PARA NO ADIVINAR. Sin él, el webhook tendría que buscar el
+    #: identificador en la tabla de pedidos de Cursos, no encontrarlo, y probar
+    #: en la de eventos: un aviso legítimo de un dominio quedaría registrado
+    #: como «pedido inexistente» del otro.
+    dominio: str = ""
+
     #: El identificador REAL del reembolso (`re_...`), solo en avisos de
     #: devolución. Vacío en todo lo demás.
     #:
