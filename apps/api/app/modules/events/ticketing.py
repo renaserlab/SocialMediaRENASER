@@ -134,6 +134,8 @@ class YaTienesUnaReserva(_ErrorDeEntradas):
     """
 
     code = "ticket_hold_already_active"
+
+    #: `details` lleva `{"hold_id": ...}`: es la reserva a la que hay que ir.
     message = (
         "Ya tienes una reserva en curso para este evento. Libérala o espera a "
         "que venza."
@@ -488,8 +490,15 @@ async def crear_hold(
         )
     )
     if en_curso is not None:
+        # EL IDENTIFICADOR VIAJA EN EL ERROR, y no es un adorno: sin él la
+        # persona que cierra la aplicación con una reserva viva y vuelve a
+        # entrar no tiene forma de llegar a ella ni de liberarla. Se quedaba
+        # diez minutos bloqueada, con la única salida de esperar.
+        #
+        # Se lee ANTES del `rollback`, que expira los objetos de la sesión.
+        estorba = {"hold_id": en_curso.id}
         await db.rollback()
-        raise YaTienesUnaReserva()
+        raise YaTienesUnaReserva(details=estorba)
 
     # Los tipos pedidos, en orden determinista.
     pedido_normal = sorted((str(t), int(c)) for t, c in pedido)

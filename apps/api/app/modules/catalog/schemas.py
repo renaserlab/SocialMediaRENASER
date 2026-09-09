@@ -190,6 +190,12 @@ class EventRead(BaseModel):
     #: ninguno a la venta: entonces no se escribe «Desde», que sería un precio
     #: sobre una lista vacía.
     price_from_minor: int | None = None
+    #: La moneda de ese precio. ISO 4217, y solo en la FICHA de un evento con
+    #: entradas. Sin ella la pantalla escribía «S/» sobre un importe que podía
+    #: estar en dólares: un precio con la moneda equivocada es un precio falso,
+    #: y era el único sitio del incremento donde la app afirmaba algo que el
+    #: servidor no había dicho.
+    currency: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -615,6 +615,7 @@ async def get_event(
                 await entradas.tipos_de(db, evento.id, solo_a_la_venta=True),
                 libre.por_tipo,
             )
+            ficha.currency = ajustes.currency if ajustes else None
     return ficha
 
 

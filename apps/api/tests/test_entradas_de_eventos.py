@@ -1118,3 +1118,39 @@ async def test_sin_la_0061_la_reserva_gratuita_funciona_como_siempre(entorno):
     esquema.olvidar()
 
     assert (await http.post(f"{CATALOGO}/events/{GRATUITO}/reserve")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_el_conflicto_dice_cual_es_la_reserva_que_estorba(entorno):
+    """Sin el identificador no hay salida: diez minutos bloqueado esperando.
+
+    Escenario: se apartan entradas, se cierra la aplicación, se vuelve a entrar
+    a elegir. El 409 tiene que llevar a dónde ir, no solo decir que no.
+    """
+    http, _, _ = entorno
+    creada = await _apartar(http, GENERAL, 1, "la-primera")
+    assert creada.status_code == 201
+
+    otra = await _apartar(http, VIP, 1, "la-segunda")
+    assert otra.status_code == 409
+    error = otra.json()["error"]
+    assert error["code"] == "ticket_hold_already_active"
+    assert error["details"]["hold_id"] == creada.json()["id"]
+
+    # Y ese identificador sirve de verdad: lleva a la reserva.
+    resumen = await http.get(f"{EVENTOS}/ticket-holds/{error['details']['hold_id']}")
+    assert resumen.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_la_ficha_dice_en_que_moneda_esta_el_precio(entorno):
+    """«Desde 100» sin moneda es un precio que la pantalla tiene que inventar."""
+    http, _, _ = entorno
+    ficha = (await http.get(f"{CATALOGO}/events/{CON_ENTRADAS}")).json()
+    assert ficha["price_from_minor"] == 4900
+    assert ficha["currency"] == "PEN"
+
+    # Y un evento gratuito no lleva ni precio ni moneda: no hay nada que decir.
+    gratis = (await http.get(f"{CATALOGO}/events/{GRATUITO}")).json()
+    assert gratis["price_from_minor"] is None
+    assert gratis["currency"] is None
