@@ -334,3 +334,150 @@ de baja la cuenta de su autor.
 El arreglo es el mismo que lleva la 0060: dejar pasar el borrado cuando la fila
 padre ya no está. Toca migraciones aplicadas y el módulo de Cursos, y ninguna de
 las dos cosas entra en este incremento.
+
+---
+
+# Eventos · Incremento 2
+
+Tipos de entrada, inventario y reserva temporal. **No cobra nada.**
+
+## 14. Qué es una reserva temporal y qué no es
+
+Es «estas cuatro entradas quedan apartadas para ti durante diez minutos». No es
+una compra, no es una orden, no es una entrada emitida y no mueve un céntimo.
+
+El incremento llega hasta aquí a propósito: el cobro necesita decisiones que la
+empresa no ha tomado —quién figura como vendedor, la comisión, los impuestos,
+los comprobantes— y un carrito que no lleva a ninguna parte es peor que no
+tenerlo. `event_ticket_holds.status` admite `CONSUMED` porque lo pide el
+contrato, y **ningún camino lo escribe**: hay una prueba que lee el código para
+comprobarlo.
+
+## 15. Los dos modos de acceso
+
+| | `FREE_RSVP` | `TICKETED` |
+|---|---|---|
+| Qué ofrece la ficha | «Reservar» | «Elegir entradas» |
+| Qué se guarda | `event_registrations` | `event_ticket_holds` |
+| Conviven | **No.** Nunca los dos a la vez | |
+
+`INVITATION_ONLY` está en el contrato y **no tiene flujo**: la columna lo
+admite, la aplicación no lo ofrece. Un modo que la base acepta y la interfaz no
+enseña es honesto; uno que la interfaz enseña sin flujo detrás, no.
+
+**Sin fila de configuración significa `FREE_RSVP`.** Es lo que son los ocho
+eventos que existen, y por eso la 0061 **no hace backfill**: escribirles una
+fila que dijera lo que ya se sabe por su ausencia haría creer que alguien
+decidió algo sobre ellos. La migración se lo exige a sí misma.
+
+**No se pasa de gratuito a con entradas con reservas encima.** Convertirlas en
+compradas sería regalar entradas que nadie pagó; borrarlas, echar a quien ya se
+apuntó. La conversión necesita decidir qué pasa con cada una.
+
+En el móvil, `accessMode` a `null` significa **«no se preguntó»** —es lo que
+llega del listado, que no lo trae para no hacer una consulta por fila— y
+entonces se ofrece lo de siempre.
+
+## 16. La migración 0061
+
+Cuatro tablas: `event_ticketing_settings`, `event_ticket_types`,
+`event_ticket_holds`, `event_ticket_hold_items`. RLS en las cuatro, cero
+concesiones, **ninguna política** (una `for select` entrega la fila entera, y la
+de un tipo lleva el cupo y los topes, que son inventario).
+
+### Lo que sostiene la base, y no un `if`
+
+| Invariante | Cómo |
+|---|---|
+| Una sola moneda por evento | Clave ajena **compuesta** `(event_id, currency)` de los tipos contra la configuración |
+| Un tipo de otro evento no entra en una reserva | Otra clave compuesta, la forma de `quiz_answers` en la 0058 |
+| `subtotal = cantidad × precio` | CHECK por línea |
+| La suma de líneas cuadra con la cabecera | Disparador **diferido**: es una restricción entre filas, se comprueba al confirmar |
+| Una sola reserva `ACTIVE` por persona y evento | Índice parcial |
+| Una clave de idempotencia no se repite | `unique (event_id, user_id, idempotency_key)` |
+| No se borra un tipo con reservas | `on delete restrict` |
+
+El índice parcial **no puede mirar el reloj** (`now()` no es inmutable). Lo
+resuelve el servicio: antes de crear un hold marca `EXPIRED` los pasados de hora
+de esa persona. Así el índice sostiene la invariante sin depender de que la
+limpieza haya corrido.
+
+## 17. Inventario y concurrencia
+
+```
+aforo aprobado
+  − reservas gratuitas confirmadas
+  − lo apartado en holds ACTIVOS y no vencidos
+  − entradas vendidas          ← no existen todavía, y no se inventan
+```
+
+El tercer sumando está en la fórmula y vale cero: no hay tabla que las guarde.
+Se deja escrito para que añadirla no obligue a rehacer el cálculo.
+
+**Se calcula, no se guarda.** Un contador es una copia que se desincroniza en
+cuanto una transacción se deshace.
+
+**El mismo cerrojo que el aforo gratuito.** `crear_hold` bloquea la fila del
+evento: un evento no reparte aforo por dos caminos a la vez y no hay dos órdenes
+de bloqueo que puedan invertirse. Los tipos se leen después, ordenados por
+identificador.
+
+**Comprobado con una mutación:** quitando `bloquear_evento` se ponen rojas cinco
+pruebas —dos por la última entrada, diez por tres, dos tipos compartiendo aforo,
+un evento sin aforo y la idempotencia simultánea—.
+
+## 18. Expiración
+
+Un hold dura diez minutos. Dos mecanismos, y el orden importa:
+
+1. **La lectura es correcta sola.** Un hold con `expires_at <= now()` no ocupa
+   inventario aunque su fila siga diciendo `ACTIVE`.
+2. **La limpieza es comodidad.** `POST /admin/events/ticket-holds/expire`,
+   protegida, por lotes, idempotente y sin bucle: devuelve cuántas procesó y
+   quien la llame decide si vuelve. Pensada para un programador externo; un
+   temporizador dentro de FastAPI la ataría a que hubiera exactamente un proceso
+   vivo.
+
+La disponibilidad **no espera** a la limpieza. Si esa fuera la única forma de
+liberar inventario, un fallo del programador dejaría el evento agotado con la
+sala vacía.
+
+## 19. El dinero
+
+Enteros, en unidad menor. **4900 son S/ 49.00.** Ni una división, ni un
+`toFixed`, ni un `parseFloat` en ninguna cuenta de dinero, en Python ni en
+TypeScript. Hay una prueba que lo comprueba sobre el código sin comentarios y
+acotada al tramo del dinero.
+
+**El servidor calcula todo.** El cliente manda tipo y cantidad; el precio **no
+cabe en el contrato**. Y se congela en la reserva junto con el nombre del tipo:
+si el organizador los cambia después, el resumen sigue contando lo que se apartó.
+
+### Lo que la interfaz dice, y lo que no
+
+- Dice **«subtotal de entradas»**. Nunca «total».
+- Avisa de que los cargos y las condiciones finales se mostrarán antes de una
+  compra real, cuando estén definidos.
+- **No muestra una comisión de cero** como si estuviera decidida.
+- **No hay botón de pagar, ni siquiera apagado.** Uno deshabilitado sugiere que
+  llega en un minuto, y lo que falta no es un botón.
+
+## 20. La bandera
+
+`FEATURE_EVENT_TICKETING`, apagada.
+
+| | Migración sin aplicar | Aplicada, bandera apagada |
+|---|---|---|
+| Rutas nuevas | 503 `event_ticketing_not_available` | 503, el mismo |
+| Catálogo y ficha | igual | igual |
+| Reserva gratuita | igual | igual |
+| Datos | no existen | existen, sin ofrecerse |
+
+## 21. Qué depende de negocio
+
+Del capítulo 24 del blueprint, ninguno resuelto y ninguno inventado: vendedor de
+registro, disponibilidad de Stripe Connect por país, tratamiento tributario y
+comprobantes, texto jurídico de protección y reembolso, garantías y permisos por
+categoría, **porcentaje de comisión**, SLA de soporte y fondo de reserva.
+
+Mientras no estén cerrados no hay cobro, y por eso el subtotal se llama subtotal.

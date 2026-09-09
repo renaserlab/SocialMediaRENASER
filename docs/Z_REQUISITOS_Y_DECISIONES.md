@@ -471,6 +471,52 @@ prueba escrita **antes** de aplicar la migración; corregido en la 0060, que
 sigue sin aplicar. Es la misma lógica de tres valores que ya mordió en
 `catalog/eventos.py` con los `is_not(None)`.
 
+**D37 · Una migración histórica no tiene que ser reejecutable.**
+
+La prueba de idempotencia aplicaba las 60 migraciones una segunda vez y exigía
+que ninguna fallara. Estaba imponiendo retroactivamente un contrato que la 0001
+nunca prometió: crea `type app_role` y una veintena de tablas sin `if not
+exists`, porque se escribió para correr **una vez** sobre una base vacía.
+Arreglar solo el `create type` no arregla nada: detrás aparecen las tablas.
+
+Se separan tres garantías —instalación limpia, reejecución de las que prometen
+serlo, y las que ya constan aplicadas— y la frontera no se adivinó: se aplicaron
+las 60 y después se intentó cada una otra vez. Fallan tres, y no son «las
+antiguas»: 0001, 0003 y la 0058, de hace dos semanas. La lista es de
+**exclusiones**, así que una migración nueva entra por defecto.
+
+**D38 · El cerrojo del aforo tiene tiempo límite.**
+
+Sin él, dos peticiones por el mismo evento esperan indefinidamente y cada una
+ocupa una conexión del pool: un evento popular con gente reintentando lo agota,
+y entonces se para la API entera y no ese evento. `SET LOCAL lock_timeout`, que
+vale para esa transacción y no cambia nada en la base.
+
+Y el fallo **no se cuenta como aforo lleno**: «no queda sitio» es definitivo y
+«vuelve a intentarlo» no. Tiene su propio código, `inventory_lock_timeout`.
+
+**D39 · Sin fila de configuración, el evento es gratuito.**
+
+La 0061 no escribe una fila por evento. La ausencia no es un hueco: es la
+respuesta, y es la correcta para los ocho eventos que existen. Escribirles una
+fila que dijera eso mismo haría creer que alguien decidió algo sobre ellos.
+
+**D40 · Una reserva temporal no es una compra, y el contrato no lo insinúa.**
+
+No hay botón de pagar, ni siquiera apagado —uno deshabilitado sugiere que llega
+en un minuto—. Se dice «subtotal de entradas» y no «total», porque faltan
+comisión e impuestos que la empresa no ha definido. Y no se muestra una comisión
+de cero como si estuviera decidida.
+
+`CONSUMED` existe como estado porque lo pide el contrato y ningún camino lo
+escribe: no hay orden que lo justifique.
+
+**D41 · La disponibilidad se calcula; la limpieza es comodidad.**
+
+Un hold vencido deja de ocupar aunque su fila siga diciendo `ACTIVE`. Si la
+limpieza fuera la única forma de liberar inventario, un fallo del programador
+externo dejaría el evento agotado con la sala vacía.
+
 ### Pendiente de decisión de negocio
 
 - **Las subnotas y la evidencia de la captura 19.** La referencia enseña tres

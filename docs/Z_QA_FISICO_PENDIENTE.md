@@ -143,3 +143,57 @@ Android real, dos cuentas distintas y, para la última, dos teléfonos.
       dentro del inglés.
 - [ ] Las cuatro en modo claro y oscuro, con el sello y la falla crítica
       legibles en los dos.
+
+## 8. Eventos · entradas e inventario (Incremento 2)
+
+**Nada de esto se puede marcar sin la 0061 aplicada y `FEATURE_EVENT_TICKETING`
+encendida.** Mientras estén como se entregan, la comprobación que toca es la
+última de esta lista.
+
+### Organizador
+
+- [ ] Configurar un evento como **con entradas** y ver que la ficha cambia de
+      «Reservar» a «Elegir entradas».
+- [ ] Intentar convertir a entradas un evento **con reservas gratuitas**: se
+      niega y dice por qué.
+- [ ] Crear un tipo, ponerlo a la venta, pausarlo y retirarlo.
+- [ ] Comprobar que **la suma de los cupos frente al aforo** se ve, y que se
+      pone en rojo cuando se pasa.
+- [ ] Crear un tipo con cupo mayor que el aforo aprobado: se niega.
+- [ ] Con el **teclado en pantalla**, los campos de precio y cupo siguen
+      visibles y el botón de crear es alcanzable.
+
+### Quien compra
+
+- [ ] Elegir entradas de dos tipos y ver el subtotal por tipo y el general.
+- [ ] Que en ningún sitio ponga «total», ni aparezca una comisión.
+- [ ] **Doble toque real** en «Apartar», con el dedo: una sola reserva.
+- [ ] Ver la cuenta atrás bajar y **dejarla llegar a cero**: la pantalla
+      pregunta al servidor y dice que venció, sin liberar nada por su cuenta.
+- [ ] Liberar una reserva y comprobar que las entradas vuelven a estar
+      disponibles **al momento**.
+- [ ] Liberar dos veces: no es un error.
+- [ ] Poner el reloj del teléfono **adelantado media hora** y abrir una reserva
+      recién creada: sigue viva, porque quien decide es el servidor.
+- [ ] Quedarse **sin red** a media selección y recuperarla.
+
+### Inventario, con dos teléfonos
+
+- [ ] **Dos teléfonos a la vez** sobre un tipo con una sola entrada: uno la
+      aparta y el otro recibe «no quedan entradas suficientes».
+- [ ] Dos tipos que suman más que el aforo: no se puede apartar más de lo que
+      cabe en la sala.
+
+### Idiomas, modo oscuro y accesibilidad
+
+- [ ] Las tres pantallas nuevas en **es / en / pt**.
+- [ ] En modo claro y oscuro, con el importe y la cuenta atrás legibles.
+- [ ] Los botones de más y menos con lector de pantalla, y con área táctil
+      suficiente.
+
+### Con todo apagado, que es como se entrega
+
+- [ ] Con la 0061 **sin aplicar**: el catálogo, la ficha y la reserva gratuita
+      funcionan igual, y las pantallas de entradas dicen que la función todavía
+      no está disponible.
+- [ ] Con la 0061 aplicada y la **bandera apagada**: lo mismo.
