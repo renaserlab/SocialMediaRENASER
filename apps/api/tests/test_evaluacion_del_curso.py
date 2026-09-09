@@ -35,6 +35,7 @@ AUTORA = "cccccccc-0000-0000-0000-00000000000a"
 BRUNO = "bbbbbbbb-0000-0000-0000-000000000002"
 CARLA = "bbbbbbbb-0000-0000-0000-000000000003"
 MODERADOR = "dddddddd-0000-0000-0000-000000000003"
+ADMIN = "dddddddd-0000-0000-0000-000000000004"
 CURSO = "cccccccc-0000-0000-0000-000000000001"
 PRECIO = 4900
 
@@ -129,6 +130,7 @@ async def entorno():
         db.add(
             Profile(id=MODERADOR, full_name="Marta", username="marta", role="moderator")
         )
+        db.add(Profile(id=ADMIN, full_name="Ada", username="ada", role="admin"))
         db.add(
             Course(
                 id=CURSO,
@@ -260,23 +262,63 @@ async def test_un_tercero_no_escribe_la_evaluacion_de_otro(entorno):
 
 
 @pytest.mark.asyncio
-async def test_la_administracion_gestiona_la_evaluacion_como_el_resto_del_temario(
-    entorno,
-):
-    """La misma regla que ya rige módulos, lecciones y descripción del curso.
+async def test_moderacion_NO_toca_las_respuestas_correctas(entorno):
+    """Moderar no es decidir quién se certifica.
 
-    NO es una excepción de la evaluación: `_puede_gestionar` es «el autor o la
-    administración» en todo el módulo, y estrecharla solo aquí dejaría dos
-    reglas distintas para el mismo contenido. Que moderación pueda reescribir
-    las respuestas correctas de un curso ajeno es una decisión de producto
-    pendiente, no un defecto de este endpoint.
+    `_puede_gestionar` —la regla del resto del temario— incluye a `moderator`,
+    que existe para ocultar contenido y resolver reportes. Aquí no vale: quien
+    cambia la alternativa correcta cambia quién aprueba, y con ello quién
+    obtiene un certificado verificable.
     """
     http, identidad, _ = entorno
     identidad["uid"] = MODERADOR
+    for peticion in (
+        http.put(f"{LEARNING}/courses/{CURSO}/quiz", json=CUATRO_PREGUNTAS),
+        http.post(f"{LEARNING}/courses/{CURSO}/quiz/publish"),
+        http.get(f"{LEARNING}/courses/{CURSO}/quiz/draft"),
+    ):
+        assert (await peticion).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_administracion_con_poder_real_si_puede_y_queda_anotado(entorno):
+    """`admin` —la misma que mueve dinero— sí, y con rastro.
+
+    Alguien tiene que poder arreglar una evaluación cuyo autor desapareció. Lo
+    que no puede es hacerlo en silencio: es una decisión sobre el logro de
+    terceros.
+    """
+    http, identidad, sesiones = entorno
+    identidad["uid"] = ADMIN
     respuesta = await http.put(
         f"{LEARNING}/courses/{CURSO}/quiz", json=CUATRO_PREGUNTAS
     )
-    assert respuesta.status_code == 200
+    assert respuesta.status_code == 200, respuesta.text
+
+    async with sesiones() as db:
+        from app.modules.gobernanza.models import AuditEvent
+
+        acciones = list(
+            await db.scalars(select(AuditEvent.action).where(AuditEvent.actor_id == ADMIN))
+        )
+    assert "course_quiz.written" in acciones
+
+
+@pytest.mark.asyncio
+async def test_el_autor_edita_lo_suyo_sin_dejar_rastro_de_auditoria(entorno):
+    """Que alguien edite su propio curso no es un hecho que investigar."""
+    http, identidad, sesiones = entorno
+    identidad["uid"] = AUTORA
+    assert (
+        await http.put(f"{LEARNING}/courses/{CURSO}/quiz", json=CUATRO_PREGUNTAS)
+    ).status_code == 200
+
+    async with sesiones() as db:
+        from app.modules.gobernanza.models import AuditEvent
+
+        assert (
+            await db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+        )
 
 
 @pytest.mark.asyncio

@@ -975,6 +975,88 @@ async def test_un_reembolso_deja_el_certificado_sin_vigencia(entorno):
 
 
 @pytest.mark.asyncio
+async def test_una_devolucion_PARCIAL_no_toca_el_certificado(entorno):
+    """Devolver la mitad no es devolver.
+
+    `exigir_importe` rechaza el aviso por no conciliado, asi que no se llega a
+    revocar nada: ni el acceso, ni el certificado. Es la misma puerta que
+    protege el acceso, y aqui se comprueba que tambien cubre el certificado.
+    """
+    from app.modules.learning.models import CourseCertificate
+
+    await _comprar_por_stripe(entorno)
+    for leccion in (LECCION_PRIVADA, LECCION_MUESTRA, LECCION_DE_TEXTO):
+        assert (
+            await entorno.http.post(f"{LEARNING}/lessons/{leccion}/complete")
+        ).status_code == 200
+    codigo = (
+        await entorno.http.post(f"{LEARNING}/courses/{CURSO_A}/certificate")
+    ).json()["public_id"]
+
+    # La mitad del importe: no concilia.
+    evento = _devolucion(importe=PRECIO_A // 2)
+    crudo = json.dumps(evento).encode("utf-8")
+    await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+    publica = (await entorno.http.get(f"{LEARNING}/certificates/{codigo}")).json()
+    assert publica["status"] == "valid", "una devolucion parcial no revoca"
+    async with entorno.sesiones() as db:
+        assert (await db.scalar(select(CourseCertificate))).revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_aprobar_una_devolucion_TODAVIA_no_revoca_el_certificado(entorno):
+    """Aprobar no es haber pagado.
+
+    El certificado se retira cuando el dinero vuelve —lo hace `reembolso.aplicar`
+    con un webhook conciliado—, no cuando alguien aprueba el expediente. Entre
+    las dos cosas puede pasar de todo, incluido que el reembolso falle.
+    """
+    from app.modules.learning.models import CourseCertificate
+    from app.modules.refunds import estados
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundRequest
+
+    await _comprar_por_stripe(entorno)
+    for leccion in (LECCION_PRIVADA, LECCION_MUESTRA, LECCION_DE_TEXTO):
+        assert (
+            await entorno.http.post(f"{LEARNING}/lessons/{leccion}/complete")
+        ).status_code == 200
+    codigo = (
+        await entorno.http.post(f"{LEARNING}/courses/{CURSO_A}/certificate")
+    ).json()["public_id"]
+
+    async with entorno.sesiones() as db:
+        orden = await db.scalar(select(Order))
+        solicitud = RefundRequest(
+            user_id=ANA,
+            order_id=orden.id,
+            course_id=CURSO_A,
+            reason="other",
+            amount_minor=PRECIO_A,
+            currency="PEN",
+            status=estados.REQUESTED,
+        )
+        db.add(solicitud)
+        await db.commit()
+
+        # El camino real del expediente: recibida, en revision, aprobada.
+        for hasta in (estados.UNDER_REVIEW, estados.APPROVED):
+            await devoluciones.transicionar(
+                db, solicitud, hasta=hasta, rol="admin", actor_id=ANA
+            )
+        await db.commit()
+        assert solicitud.status == estados.APPROVED
+
+    # Aprobada, y el certificado intacto.
+    publica = (await entorno.http.get(f"{LEARNING}/certificates/{codigo}")).json()
+    assert publica["status"] == "valid"
+    async with entorno.sesiones() as db:
+        assert (await db.scalar(select(CourseCertificate))).status == "valid"
+
+
+@pytest.mark.asyncio
 async def test_un_charge_refunded_SIN_identificador_de_reembolso_no_revoca(entorno):
     """El aviso trae el cobro pero no el reembolso: no hay qué conciliar.
 

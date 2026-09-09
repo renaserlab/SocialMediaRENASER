@@ -28,6 +28,7 @@ from app.core.exceptions import (
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.catalog import cursos_v2, versiones
 from app.modules.catalog.contenido import id_idempotente
+from app.modules.gobernanza import auditoria
 from app.modules.catalog.models import Course, CourseVersion
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce import service as comercio_service
@@ -78,7 +79,7 @@ from app.modules.recommendations.signals import registrar_senal
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin
+from app.shared.permissions import is_admin, require_owner_or_strict_admin
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
@@ -1474,6 +1475,36 @@ async def _exigir_evaluaciones(db: AsyncSession) -> None:
         )
 
 
+async def _exigir_autoria_de_la_evaluacion(
+    db: AsyncSession, curso: Course, current_user: AuthUser, accion: str
+) -> None:
+    """Quien puede TOCAR las respuestas correctas de un curso.
+
+    NO ES `_puede_gestionar`, que incluye a `moderator`. Moderar existe para
+    ocultar contenido y resolver reportes, no para decidir quien se certifica:
+    quien cambia la alternativa correcta cambia quien aprueba, y con ello quien
+    obtiene un certificado verificable. Eso es del autor, o de administracion
+    con poder real —la misma que mueve dinero—, y queda anotado.
+    """
+    if curso.author_id != current_user.id:
+        await require_owner_or_strict_admin(
+            db,
+            curso.author_id,
+            current_user,
+            "Solo el autor del curso puede administrar su evaluación.",
+        )
+        # Solo se anota cuando NO es el autor: que alguien edite lo suyo no es
+        # un hecho que investigar.
+        await auditoria.anotar(
+            db,
+            actor_id=current_user.id,
+            action=f"course_quiz.{accion}",
+            entity_type="course",
+            entity_id=curso.id,
+            payload={"author_id": curso.author_id},
+        )
+
+
 async def _curso_o_404(db: AsyncSession, course_id: str) -> Course:
     curso = await db.get(Course, ensure_uuid(course_id, "Curso no encontrado."))
     if curso is None or curso.status == "deleted":
@@ -1546,8 +1577,7 @@ async def borrador_de_evaluacion(
     """La evaluación CON las respuestas correctas. Solo quien gestiona el curso."""
     await _exigir_evaluaciones(db)
     curso = await _curso_o_404(db, course_id)
-    if not await _puede_gestionar(db, current_user.id, curso):
-        raise ForbiddenError("Solo el autor del curso puede ver la evaluación.")
+    await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "read_draft")
 
     quiz = await _quiz_del_curso(db, curso.id)
     if quiz is None:
@@ -1599,8 +1629,7 @@ async def guardar_evaluacion(
     """
     await _exigir_evaluaciones(db)
     curso = await _curso_o_404(db, course_id)
-    if not await _puede_gestionar(db, current_user.id, curso):
-        raise ForbiddenError("Solo el autor del curso puede escribir la evaluación.")
+    await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "written")
 
     for pregunta in payload.questions:
         if sum(1 for o in pregunta.options if o.is_correct) > 1:
@@ -1665,8 +1694,7 @@ async def publicar_evaluacion(
     """Ponerla delante del alumno. Se comprueba ANTES de tocar el estado."""
     await _exigir_evaluaciones(db)
     curso = await _curso_o_404(db, course_id)
-    if not await _puede_gestionar(db, current_user.id, curso):
-        raise ForbiddenError("Solo el autor del curso puede publicar la evaluación.")
+    await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "published")
 
     quiz = await _quiz_del_curso(db, curso.id)
     if quiz is None:
