@@ -547,7 +547,8 @@ async def _listo_para_enviar(motor) -> str:
         await conexion.execute(
             text(
                 "update public.event_operations set workflow_status = 'DRAFT', "
-                "promise = 'Algo bueno', category = 'gastronomia' "
+                "promise = 'Algo bueno', category = 'gastronomia', "
+                "timezone = 'America/Lima' "
                 "where event_id = cast(:e as uuid)"
             ),
             {"e": evento},
