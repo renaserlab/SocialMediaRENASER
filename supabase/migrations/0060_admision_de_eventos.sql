@@ -320,46 +320,25 @@ revoke all on public.event_admission_reviews from anon, authenticated;
 revoke all on public.event_admission_decisions from anon, authenticated;
 revoke all on public.event_documents from anon, authenticated;
 
--- `event_admission_reviews` NO TIENE NINGUNA POLÍTICA, y es a propósito. Una
--- política `for select` entrega la FILA ENTERA, y esa fila es la deliberación
--- interna de curaduría: los ocho puntajes y la evidencia. La ficha de revisión
--- la sirve la API, que elige qué sale y para quién. Lo mismo vale para
--- `event_documents`, que puede llevar observaciones internas.
+-- NINGUNA DE LAS CINCO TIENE POLÍTICA, y es a propósito.
 --
--- El ciclo de un evento publicado sí es información pública —el sello Z se
--- enseña— y por eso `event_operations` tiene una política de lectura acotada a
--- lo que ya se ve en el catálogo.
-drop policy if exists event_operations_de_lo_publicado on public.event_operations;
-create policy event_operations_de_lo_publicado on public.event_operations
-  for select using (
-    workflow_status = 'PUBLISHED'
-    or exists (
-      select 1 from public.events e
-      where e.id = event_operations.event_id and e.organizer_id = auth.uid()
-    )
-  );
-
--- Las versiones y las decisiones: solo su organizador. Es lo que le devuelven
--- cuando le piden correcciones, y no tiene por qué verlo nadie más.
-drop policy if exists event_versions_de_su_organizador on public.event_versions;
-create policy event_versions_de_su_organizador on public.event_versions
-  for select using (
-    exists (
-      select 1 from public.events e
-      where e.id = event_versions.event_id and e.organizer_id = auth.uid()
-    )
-  );
-
-drop policy if exists event_admission_decisions_de_su_organizador
-  on public.event_admission_decisions;
-create policy event_admission_decisions_de_su_organizador
-  on public.event_admission_decisions
-  for select using (
-    exists (
-      select 1 from public.events e
-      where e.id = event_admission_decisions.event_id and e.organizer_id = auth.uid()
-    )
-  );
+-- Una política `for select` entrega la FILA ENTERA, no las columnas que uno
+-- tenía en mente. Se probó a dejar tres:
+--
+--   * `event_admission_reviews` nunca la tuvo: esa fila es la deliberación de
+--     curaduría, los ocho puntajes y la evidencia.
+--   * `event_admission_decisions` iba a tener una para que el organizador
+--     leyera lo que le piden. Pero la fila lleva también `total` —el puntaje
+--     agregado— y `decided_by`, que es justo lo que `ObservacionRead` omite a
+--     propósito: la API decide qué sale y para quién.
+--   * `event_operations` iba a tener otra «porque el sello es público». La
+--     fila lleva además `approved_capacity`, `submitted_at`, `decided_at` y
+--     `origin`, que dice qué eventos publicados nunca pasaron por admisión.
+--
+-- Hoy los `revoke` de arriba las hacen inalcanzables, así que dejarlas no
+-- rompía nada. Pero una política escrita es una decisión escrita: el día que
+-- alguien conceda un `grant select` «para leer solo el sello», se lleva el
+-- resto sin enterarse. Nada de esto lo lee el móvil: todo pasa por la API.
 
 -- ------------------------------------------------------------------------- --
 -- 8. Comprobación final.

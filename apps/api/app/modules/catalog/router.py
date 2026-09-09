@@ -103,6 +103,12 @@ async def create_event(
     Lo que protege esto de verdad es el servidor, no la interfaz: que la app
     oculte un boton no impide llamar al endpoint a mano.
     """
+    # SIN LA 0060 NO SE CREA NADA. El evento naceria borrador y no habria por
+    # donde enviarlo a revision: quedaria un evento invisible que su organizador
+    # da por publicado. Un 503 con su codigo dice lo que pasa; un 201 sobre algo
+    # que nadie va a ver, no.
+    await esquema_de_eventos.exigir_eventos_v2(db)
+
     event = Event(
         organizer_id=current_user.id,
         title=payload.title,
@@ -117,18 +123,14 @@ async def create_event(
     )
     db.add(event)
     await db.flush()
-    if await esquema_de_eventos.hay_eventos_v2(db):
-        # Con la 0060 puesta, el evento entra en el ciclo operativo desde el
-        # primer momento. Sin ella se queda en borrador igual: `status` es lo
-        # que el catalogo publico mira, y `draft` no se enseña.
-        db.add(
-            EventOperations(
-                event_id=event.id,
-                workflow_status=estados_de_evento.BORRADOR,
-                selection_status="none",
-                origin="events_v2",
-            )
+    db.add(
+        EventOperations(
+            event_id=event.id,
+            workflow_status=estados_de_evento.BORRADOR,
+            selection_status="none",
+            origin="events_v2",
         )
+    )
     await db.commit()
     await db.refresh(event)
     return _to_event_read(event, 0, 0)
@@ -141,20 +143,33 @@ async def update_event(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
+    """Edita un evento. LAS MISMAS REGLAS que `PATCH /events/{id}`.
+
+    ESTA RUTA ERA LA PUERTA DE ATRAS. Comprobaba `require_owner_or_admin` y
+    escribia los campos, y nada mas: con ella se reescribia el titulo, la
+    descripcion y el recinto de un evento YA APROBADO Y PUBLICADO. Seguia
+    publicado, con su sello, sobre contenido que nadie habia revisado, sin
+    version nueva y sin una linea de auditoria. Ademas `require_owner_or_admin`
+    incluye `moderator`, asi que curaduria podia reescribir el contenido publico
+    de cualquier evento ajeno, algo que ninguna ruta del modulo nuevo concede.
+
+    Ahora delega en el servicio, que exige ser SU organizador —ajeno responde
+    404— y que el evento siga siendo borrador o condicional. Lo que ya se
+    reviso se cambia publicando una version nueva.
+    """
+    await esquema_de_eventos.exigir_eventos_v2(db)
     ensure_uuid(event_id, "Evento no encontrado.")
-    event = await db.get(Event, event_id)
-    if event is None:
-        raise NotFoundError("Evento no encontrado.")
-    await require_owner_or_admin(
-        db, event.organizer_id, current_user, "No puedes editar este evento."
-    )
     # `exclude_unset` distingue "no enviado" de "enviado vacio", igual que en
     # el perfil: sin ello, editar el titulo borraria el resto de campos.
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(event, field, value)
-    await db.commit()
-    await db.refresh(event)
-    return _to_event_read(event, 0, 0)
+    exp = await servicio_de_eventos.actualizar_borrador(
+        db,
+        evento_id=event_id,
+        datos=payload.model_dump(exclude_unset=True),
+        usuario=current_user,
+    )
+    return _to_event_read(
+        exp.evento, exp.inscritos, 0, operacion=exp.operacion
+    )
 
 
 @router.patch("/courses/{course_id}", response_model=CourseRead)
@@ -399,10 +414,21 @@ def _to_event_read(
 
 
 async def _registrations_count(db: AsyncSession, event_id: str) -> int:
+    """Los inscritos que OCUPAN SITIO.
+
+    Contaba TODAS las filas, y el árbitro del aforo cuenta solo las
+    `confirmed` (ver `events/inventory.ACTIVAS`). `event_registrations.status`
+    admite `waitlist` desde la 0001: en cuanto exista una, la ficha diría un
+    número y el aforo aplicaría otro. Dos formas de contar la misma cosa es una
+    de más.
+    """
     value = await db.scalar(
         select(func.count())
         .select_from(EventRegistration)
-        .where(EventRegistration.event_id == event_id)
+        .where(
+            EventRegistration.event_id == event_id,
+            EventRegistration.status.in_(inventario.ACTIVAS),
+        )
     )
     return value or 0
 
@@ -445,7 +471,11 @@ async def list_events(
     count_sq = (
         select(func.count())
         .select_from(EventRegistration)
-        .where(EventRegistration.event_id == Event.id)
+        .where(
+            EventRegistration.event_id == Event.id,
+            # Las mismas que cuenta el aforo. Ver `_registrations_count`.
+            EventRegistration.status.in_(inventario.ACTIVAS),
+        )
         .scalar_subquery()
     )
     reserved_sq = (
@@ -591,12 +621,16 @@ async def reserve_event(
         db, evento_id=event_id, usuario_id=current_user.id, momento=momento
     )
     organizador = await db.get(Profile, resultado.evento.organizer_id)
+    # CON SU OPERACION. Sin ella la respuesta decia `selection_status: none` y
+    # el sello desaparecia al reservar: el mismo evento contaba dos cosas
+    # distintas segun por que ruta se preguntara.
     return _to_event_read(
         resultado.evento,
         resultado.inscritos,
         1,
         momento=momento,
         organizador=organizador,
+        operacion=resultado.operacion,
     )
 
 
@@ -618,7 +652,12 @@ async def cancel_reservation(
     )
     organizador = await db.get(Profile, resultado.evento.organizer_id)
     return _to_event_read(
-        resultado.evento, resultado.inscritos, 0, momento=momento, organizador=organizador
+        resultado.evento,
+        resultado.inscritos,
+        0,
+        momento=momento,
+        organizador=organizador,
+        operacion=resultado.operacion,
     )
 
 

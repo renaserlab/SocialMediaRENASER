@@ -77,6 +77,8 @@ class Resultado:
     evento: Event
     inscritos: int
     reservada: bool
+    #: La fila operativa, para que quien responda pueda decir si lleva sello.
+    operacion: object | None = None
 
 
 def aforo_de(evento: Event, aprobado: int | None = None) -> int | None:
@@ -109,7 +111,7 @@ async def _operacion(db: AsyncSession, evento_id: str):
     return await db.get(EventOperations, evento_id)
 
 
-async def _bloquear(db: AsyncSession, evento_id: str) -> Event:
+async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
     """La fila del evento, bloqueada hasta que la transacción termine.
 
     Este es el punto de serialización de todo el módulo. Todas las rutas que
@@ -156,25 +158,37 @@ async def reservar(
     hace que un doble toque, un reintento de la red o un botón pulsado dos veces
     den la misma respuesta.
     """
-    evento = await _bloquear(db, evento_id)
+    evento = await bloquear_evento(db, evento_id)
     operacion = await _operacion(db, evento_id)
 
     ya = await _mia(db, evento_id, usuario_id)
     if ya is not None and ya.status in ACTIVAS:
-        return Resultado(evento, await contar(db, evento_id), True)
+        # Nada que escribir. Se CONFIRMA igual —no se hace `rollback`— porque
+        # confirmar suelta el cerrojo sin expirar los objetos ya leídos, y
+        # quien llama todavía necesita leer el evento para responder.
+        inscritos = await contar(db, evento_id)
+        await db.commit()
+        return Resultado(evento, inscritos, True, operacion)
 
     workflow = operacion.workflow_status if operacion else None
     if not states.se_puede_saber_que_existe(workflow, evento.status):
         # 404 Y NO 409. Un borrador ajeno no existe para quien no lo organiza:
         # contestar «no admite reservas» ya cuenta que alguien prepara algo.
+        await db.rollback()
         raise NotFoundError("Evento no encontrado.")
 
     motivo = states.motivo_para_no_reservar(evento, momento, workflow)
     if motivo is not None:
+        # SE SUELTA EL CERROJO ANTES DE LANZAR. Sin esto, la fila del evento
+        # sigue bloqueada mientras FastAPI serializa la respuesta de error, y
+        # un evento popular con gente reintentando encadena esperas hasta
+        # agotar el pool de conexiones: se para la API entera, no ese evento.
+        await db.rollback()
         raise ConflictError(motivo)
 
     aforo = aforo_de(evento, operacion.approved_capacity if operacion else None)
     if aforo is not None and await contar(db, evento_id) >= aforo:
+        await db.rollback()
         raise ConflictError("El evento alcanzó su capacidad máxima.")
 
     if ya is not None:
@@ -201,8 +215,13 @@ async def reservar(
                 raise
             existente.status = "confirmed"
 
+    # EL CONTEO SE LEE DENTRO DEL CERROJO, antes de confirmar. Leerlo después
+    # abre una transacción nueva y devuelve un número que ya ha cambiado: quien
+    # acaba de apuntarse recibiría el conteo de los que entraron detrás.
+    await db.flush()
+    inscritos = await contar(db, evento_id)
     await db.commit()
-    return Resultado(evento, await contar(db, evento_id), True)
+    return Resultado(evento, inscritos, True, operacion)
 
 
 async def cancelar(
@@ -213,12 +232,26 @@ async def cancelar(
     Toma el MISMO cerrojo que reservar, en el mismo orden: sin él, la plaza que
     se libera podría contarse dos veces por dos reservas simultáneas.
     """
-    evento = await _bloquear(db, evento_id)
+    evento = await bloquear_evento(db, evento_id)
+    operacion = await _operacion(db, evento_id)
+    # LA MISMA PUERTA QUE AL RESERVAR, y faltaba. `cancelar` devuelve la ficha
+    # entera del evento —titulo, descripcion, recinto, aforo, organizador—, asi
+    # que sin esta comprobacion bastaba con tener el id de un borrador ajeno
+    # para leerlo: 200 aqui y 404 en la ficha decian cosas distintas del mismo
+    # evento.
+    if not states.se_puede_saber_que_existe(
+        operacion.workflow_status if operacion else None, evento.status
+    ):
+        await db.rollback()
+        raise NotFoundError("Evento no encontrado.")
+
     ya = await _mia(db, evento_id, usuario_id)
     if ya is not None:
         await db.delete(ya)
-        await db.commit()
-    return Resultado(evento, await contar(db, evento_id), False)
+        await db.flush()
+    inscritos = await contar(db, evento_id)
+    await db.commit()
+    return Resultado(evento, inscritos, False, operacion)
 
 
 async def esta_lleno(

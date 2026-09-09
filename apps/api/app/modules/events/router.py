@@ -268,7 +268,11 @@ async def expediente(
     await esquema.exigir_eventos_v2(db)
     await permissions.exigir_curaduria(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
-    return _expediente(await service.expediente(db, evento_id))
+    exp = await service.expediente(db, evento_id)
+    # NI SU PROPIO EXPEDIENTE. Los ocho puntajes son la deliberación; su evento
+    # lo ve por la puerta del organizador, donde no salen.
+    await permissions.exigir_curaduria_ajena(db, exp.evento, current_user)
+    return _expediente(exp)
 
 
 @admin_router.post("/{evento_id}/review", response_model=ExpedienteRead)
@@ -282,6 +286,9 @@ async def evaluar(
     await esquema.exigir_eventos_v2(db)
     await permissions.exigir_curaduria(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
+    await permissions.exigir_curaduria_ajena(
+        db, (await service.expediente(db, evento_id)).evento, current_user
+    )
     await service.evaluar(
         db,
         evento_id=evento_id,
@@ -309,6 +316,9 @@ async def pedir_correcciones(
     await esquema.exigir_eventos_v2(db)
     await permissions.exigir_curaduria(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
+    await permissions.exigir_curaduria_ajena(
+        db, (await service.expediente(db, evento_id)).evento, current_user
+    )
     exp = await service.decidir(
         db,
         evento_id=evento_id,
@@ -328,6 +338,9 @@ async def decidir(
 ) -> ExpedienteRead:
     """Aprueba, condiciona o rechaza. Solo administración, y nunca lo propio."""
     await esquema.exigir_eventos_v2(db)
+    # EL ROL ANTES DE BUSCAR EL EVENTO. Al revés, un identificador inventado da
+    # 404 y uno real da 403, y con eso se sondea qué eventos existen.
+    await permissions.exigir_rol_de_admision(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.expediente(db, evento_id)
     await permissions.exigir_admision(db, exp.evento, current_user)
@@ -355,6 +368,9 @@ async def publicar(
 ) -> ExpedienteRead:
     """Hace visible un evento APROBADO. Nada más se puede publicar."""
     await esquema.exigir_eventos_v2(db)
+    # EL ROL ANTES DE BUSCAR EL EVENTO. Al revés, un identificador inventado da
+    # 404 y uno real da 403, y con eso se sondea qué eventos existen.
+    await permissions.exigir_rol_de_admision(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.expediente(db, evento_id)
     await permissions.exigir_admision(db, exp.evento, current_user)
@@ -370,6 +386,9 @@ async def suspender(
 ) -> ExpedienteRead:
     """Detiene las reservas y lo saca del catálogo mientras se resuelve."""
     await esquema.exigir_eventos_v2(db)
+    # EL ROL ANTES DE BUSCAR EL EVENTO. Al revés, un identificador inventado da
+    # 404 y uno real da 403, y con eso se sondea qué eventos existen.
+    await permissions.exigir_rol_de_admision(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.expediente(db, evento_id)
     await permissions.exigir_admision(db, exp.evento, current_user)
@@ -392,6 +411,9 @@ async def reanudar(
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteRead:
     await esquema.exigir_eventos_v2(db)
+    # EL ROL ANTES DE BUSCAR EL EVENTO. Al revés, un identificador inventado da
+    # 404 y uno real da 403, y con eso se sondea qué eventos existen.
+    await permissions.exigir_rol_de_admision(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.expediente(db, evento_id)
     await permissions.exigir_admision(db, exp.evento, current_user)
@@ -417,6 +439,9 @@ async def registrar_documento(
     await esquema.exigir_eventos_v2(db)
     await permissions.exigir_curaduria(db, current_user)
     ensure_uuid(evento_id, "Evento no encontrado.")
+    await permissions.exigir_curaduria_ajena(
+        db, (await service.expediente(db, evento_id)).evento, current_user
+    )
     await service.guardar_documento(
         db, evento_id=evento_id, datos=payload.model_dump(), usuario=current_user
     )

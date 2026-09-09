@@ -524,27 +524,31 @@ def test_ninguna_politica_permite_escribir(conexion, aplicadas) -> None:
 
 
 @SIN_POSTGRES
-def test_la_evaluacion_interna_no_tiene_ninguna_politica(conexion, aplicadas) -> None:
-    """Una politica `for select` entrega la FILA ENTERA, y esa fila es la
-    deliberacion de curaduria: los ocho puntajes y la evidencia. La ficha de
-    revision la sirve la API, que elige que sale y para quien."""
-    for cerrada in ("event_admission_reviews", "event_documents"):
-        assert not _lista(
+def test_ninguna_de_las_cinco_tiene_politica(conexion, aplicadas) -> None:
+    """Una politica `for select` entrega LA FILA ENTERA, no las columnas que
+    uno tenia en mente.
+
+    La de la evaluacion nunca existio: esa fila es la deliberacion de
+    curaduria. Las otras dos —decisiones y ciclo— se quitaron: la primera lleva
+    `total` y `decided_by`, que es justo lo que la API omite al devolver una
+    observacion; la segunda lleva `approved_capacity`, las fechas internas y
+    `origin`, que dice que eventos publicados nunca pasaron por admision.
+
+    Hoy los `revoke` las hacen inalcanzables. Pero una politica escrita es una
+    decision escrita, y el dia que alguien conceda un `grant select` «para leer
+    solo el sello» se lleva el resto sin enterarse.
+    """
+    con_politica = [
+        t
+        for t in TABLAS
+        if _lista(
             conexion,
             "select policyname from pg_policies where schemaname = 'public' "
             "and tablename = %s",
-            cerrada,
-        ), cerrada
-
-
-@SIN_POSTGRES
-def test_el_ciclo_de_lo_publicado_si_se_puede_leer(conexion, aplicadas) -> None:
-    """El sello Z se enseña: el ciclo de un evento publicado es publico."""
-    assert _lista(
-        conexion,
-        "select policyname from pg_policies where schemaname = 'public' "
-        "and tablename = 'event_operations'",
-    )
+            t,
+        )
+    ]
+    assert not con_politica, con_politica
 
 
 @SIN_POSTGRES

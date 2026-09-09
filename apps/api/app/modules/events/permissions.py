@@ -59,23 +59,56 @@ def exigir_organizador(evento, usuario: AuthUser) -> None:
 
 
 async def exigir_curaduria(db: AsyncSession, usuario: AuthUser) -> None:
+    """Para lo que no habla de UN evento concreto: la cola de revisión."""
     if not await es_curador(db, usuario.id):
         raise ForbiddenError("Solo la curaduría puede evaluar un evento.")
+
+
+async def exigir_curaduria_ajena(db: AsyncSession, evento, usuario: AuthUser) -> None:
+    """Revisar un evento de OTRA persona.
+
+    PUNTUARSE A SÍ MISMO ERA LA PUERTA DE AL LADO de aprobarse. Aprobar lo
+    propio ya estaba cerrado, pero el puntaje es exactamente lo que habilita la
+    aprobación de otra persona: una cuenta de curaduría que organiza podía
+    ponerse 100/100 y esperar a que alguien pulsara aprobar. Quien fabrica la
+    condición acababa siendo el propio organizador.
+
+    Vale igual para leer el expediente: los ocho puntajes son la deliberación, y
+    su evento lo ve por la puerta del organizador, donde no salen.
+    """
+    if es_organizador(evento, usuario):
+        raise ForbiddenError(
+            "Nadie revisa ni puntúa su propio evento: lo mira otra persona."
+        )
+    await exigir_curaduria(db, usuario)
+
+
+async def exigir_rol_de_admision(db: AsyncSession, usuario: AuthUser) -> None:
+    """Solo el rol, SIN mirar de quién es el evento.
+
+    Se comprueba ANTES de buscar el evento: al revés, un id inexistente daba 404
+    y uno real daba 403, y sondear identificadores decía cuáles corresponden a
+    eventos de verdad que todavía no se han publicado.
+    """
+    if not await es_admision(db, usuario.id):
+        raise ForbiddenError("Solo la administración puede decidir sobre un evento.")
 
 
 async def exigir_admision(db: AsyncSession, evento, usuario: AuthUser) -> None:
     """Decide sobre un evento AJENO.
 
-    El orden de las dos comprobaciones no es indiferente: primero se descarta
-    que sea su propio evento y después se mira el rol. Al revés, un
-    administrador que organiza podría aprobarse el suyo.
+    Las dos comprobaciones, y el ORDEN importa por dos motivos distintos:
+
+      - El rol primero, porque el evento hay que buscarlo y un 404 en vez de un
+        403 dice si ese identificador existe.
+      - La propiedad después, porque un administrador que organiza no puede
+        aprobarse el suyo.
     """
+    await exigir_rol_de_admision(db, usuario)
     if es_organizador(evento, usuario):
         raise ForbiddenError(
             "Nadie aprueba ni publica su propio evento: lo revisa otra persona."
         )
-    if not await es_admision(db, usuario.id):
-        raise ForbiddenError("Solo la administración puede decidir sobre un evento.")
 
 
 async def puede_ver_expediente(db: AsyncSession, evento, usuario: AuthUser) -> bool:

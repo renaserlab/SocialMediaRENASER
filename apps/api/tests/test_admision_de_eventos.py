@@ -643,6 +643,137 @@ async def test_publicar_dos_veces_no_se_puede(entorno):
 
 
 # --------------------------------------------------------------------------- #
+# Las dos puertas de atrás del catálogo
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_cancelar_una_reserva_no_ensena_un_evento_que_no_existe_para_ti(entorno):
+    """`DELETE .../reserve` devolvía la ficha ENTERA de cualquier evento.
+
+    `reservar` comprobaba que el evento fuera visible; `cancelar` no. Con el id
+    de un borrador ajeno —o de uno suspendido por un motivo grave— cualquier
+    cuenta recibía 200 con título, descripción, recinto, aforo y organizador.
+    """
+    http, identidad, _ = entorno
+    ident = await _crea_y_envia(http, identidad)
+
+    identidad["uid"] = OTRA_ORG
+    respuesta = await http.delete(f"{CATALOGO}/events/{ident}/reserve")
+    assert respuesta.status_code == 404, respuesta.text
+    assert "Cena de autor" not in respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_lo_ya_aprobado_no_se_edita_por_la_ruta_antigua(entorno):
+    """`PATCH /catalog/events/{id}` esquivaba la máquina de estados entera.
+
+    Se aprobaba un evento inocuo, se publicaba con su sello, y después se
+    reescribían título, descripción y recinto por la ruta de siempre: seguía
+    PUBLICADO, con sello, sobre contenido que nadie revisó, sin versión nueva y
+    sin una línea de auditoría.
+    """
+    http, identidad, _ = entorno
+    ident = await _hasta_publicar(http, identidad)
+    identidad["uid"] = ADMINISTRA
+    await http.post(f"{ADMIN}/{ident}/publish")
+
+    identidad["uid"] = ORG
+    respuesta = await http.patch(
+        f"{CATALOGO}/events/{ident}",
+        json={"title": "Otra cosa completamente distinta"},
+    )
+    assert respuesta.status_code == 409, respuesta.text
+
+    ficha = (await http.get(f"{CATALOGO}/events/{ident}")).json()
+    assert ficha["title"] == "Cena de autor en Barranco"
+
+
+@pytest.mark.asyncio
+async def test_moderacion_no_reescribe_el_evento_de_otra_persona(entorno):
+    """`require_owner_or_admin` incluye `moderator`, y con eso curaduría podía
+    reescribir el contenido público de cualquier evento ajeno: algo que ninguna
+    ruta del módulo nuevo le concede."""
+    http, identidad, _ = entorno
+    ident = await _crea_y_envia(http, identidad)
+    identidad["uid"] = CURADORA
+    respuesta = await http.patch(
+        f"{CATALOGO}/events/{ident}", json={"title": "Lo cambio yo"}
+    )
+    assert respuesta.status_code == 404, respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_un_borrador_propio_si_se_edita_por_la_ruta_antigua(entorno):
+    """La compatibilidad que SÍ se conserva: editar lo que aún es borrador."""
+    http, identidad, _ = entorno
+    creado = await http.post(EVENTOS, json=_borrador())
+    ident = creado.json()["id"]
+    respuesta = await http.patch(
+        f"{CATALOGO}/events/{ident}", json={"title": "Mejor así"}
+    )
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["title"] == "Mejor así"
+
+
+@pytest.mark.asyncio
+async def test_decidir_sobre_un_evento_que_no_existe_no_lo_distingue(entorno):
+    """403 antes que 404: si no, sondear ids dice cuáles son eventos reales."""
+    http, identidad, _ = entorno
+    real = await _crea_y_envia(http, identidad)
+    inventado = "eeeeeeee-1111-0000-0000-0000000000aa"
+
+    identidad["uid"] = OTRA_ORG
+    cuerpo = {"decision": "approved", "motivo": "Va"}
+    de_uno = await http.post(f"{ADMIN}/{real}/decision", json=cuerpo)
+    de_otro = await http.post(f"{ADMIN}/{inventado}/decision", json=cuerpo)
+    assert de_uno.status_code == de_otro.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_nadie_se_puntua_a_si_mismo(entorno):
+    """Aprobar lo propio ya estaba cerrado; PUNTUARLO era la puerta de al lado.
+
+    Una cuenta de curaduría que organiza podía ponerse 100/100, y el puntaje es
+    exactamente lo que habilita la aprobación de otra persona: quien fabrica la
+    condición de aprobación acaba siendo el propio organizador.
+    """
+    http, identidad, _ = entorno
+    identidad["uid"] = ADMIN_QUE_ORGANIZA
+    creado = await http.post(EVENTOS, json=_borrador())
+    ident = creado.json()["id"]
+    await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+
+    for ruta, cuerpo in (
+        (f"{ADMIN}/{ident}/review", {"evidencia": "Está genial", **APRUEBA}),
+        (f"{ADMIN}/{ident}/request-changes", {"motivo": "Me lo devuelvo"}),
+        (
+            f"{ADMIN}/{ident}/documents",
+            {"kind": "seguro", "status": "approved", "blocks_publication": False},
+        ),
+    ):
+        respuesta = (
+            await http.put(ruta, json=cuerpo)
+            if ruta.endswith("documents")
+            else await http.post(ruta, json=cuerpo)
+        )
+        assert respuesta.status_code == 403, ruta
+
+
+@pytest.mark.asyncio
+async def test_quien_organiza_no_lee_su_propio_expediente_interno(entorno):
+    """Ni siendo administración: los ocho puntajes son la deliberación."""
+    http, identidad, _ = entorno
+    identidad["uid"] = ADMIN_QUE_ORGANIZA
+    creado = await http.post(EVENTOS, json=_borrador())
+    ident = creado.json()["id"]
+    await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+
+    respuesta = await http.get(f"{ADMIN}/{ident}")
+    assert respuesta.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
 # Herencia, auditoría y listados
 # --------------------------------------------------------------------------- #
 
@@ -679,6 +810,116 @@ async def test_cada_decision_deja_rastro(entorno):
     assert aprobacion.previous_state == "SUBMITTED"
     assert aprobacion.new_state == "APPROVED"
     assert aprobacion.actor_id == ADMINISTRA
+
+
+@pytest.mark.asyncio
+async def test_mis_eventos_trae_lo_que_pidio_la_revision(entorno):
+    """La lista devolvía `ultima_observacion: null` SIEMPRE.
+
+    A quien le devolvían el evento con correcciones veía una fila «Borrador»
+    sin ninguna señal de que le habían pedido algo, y solo se enteraba si lo
+    abría. Mismo fallo que tenía la cola: un dato ausente que se lee como «no
+    hay nada que hacer».
+    """
+    http, identidad, _ = entorno
+    ident = await _crea_y_envia(http, identidad)
+    identidad["uid"] = CURADORA
+    await http.post(
+        f"{ADMIN}/{ident}/request-changes",
+        json={"motivo": "Falta el nombre del recinto."},
+    )
+
+    identidad["uid"] = ORG
+    mios = (await http.get(f"{EVENTOS}/mine")).json()
+    assert mios[0]["ultima_observacion"] is not None
+    assert mios[0]["ultima_observacion"]["decision"] == "changes_requested"
+    assert mios[0]["ultima_observacion"]["reason"].startswith("Falta el nombre")
+
+
+@pytest.mark.asyncio
+async def test_subir_un_puntaje_deja_dicho_cual_habia(entorno):
+    """La evaluación se sobrescribe en su sitio: sin el «antes», pasar un 75 a
+    un 90 no dejaba constancia de que hubiera habido un 75."""
+    http, identidad, sesiones = entorno
+    ident = await _crea_y_envia(http, identidad)
+    await _evalua(http, identidad, ident, NO_LLEGA)
+    await _evalua(http, identidad, ident, APRUEBA)
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(AuditEvent).where(AuditEvent.action == "event.reviewed")
+            )
+        )
+    assert len(filas) == 2
+    primera, segunda = sorted(filas, key=lambda f: f.payload["total"])
+    assert primera.payload["antes"] is None
+    assert segunda.payload["antes"]["total"] == 75
+    assert segunda.payload["antes"]["propuesta"] == 10
+
+
+@pytest.mark.asyncio
+async def test_editar_un_borrador_deja_rastro_de_que_campos_se_tocaron(entorno):
+    """Editar un condicional cambia justo lo que curaduría acaba de mirar."""
+    http, identidad, sesiones = entorno
+    creado = await http.post(EVENTOS, json=_borrador())
+    ident = creado.json()["id"]
+    await http.patch(f"{EVENTOS}/{ident}", json={"title": "Otro", "location": "Otro sitio"})
+
+    async with sesiones() as db:
+        fila = await db.scalar(
+            select(AuditEvent).where(AuditEvent.action == "event.draft_updated")
+        )
+    assert fila is not None
+    assert fila.payload["campos"] == ["location", "title"]
+    # Los VALORES no se archivan: la versión ya los guarda y esto convertiría
+    # la auditoría en una copia del evento.
+    assert "Otro sitio" not in str(fila.payload)
+
+
+@pytest.mark.asyncio
+async def test_reenviar_un_condicional_audita_de_donde_venia(entorno):
+    """`previous_state` estaba fijo en DRAFT, y submit también sale de
+    CONDITIONAL: el reenvío quedaba registrado con un «antes» falso."""
+    http, identidad, sesiones = entorno
+    ident = await _crea_y_envia(http, identidad)
+    await _evalua(http, identidad, ident, CONDICIONA)
+    identidad["uid"] = ADMINISTRA
+    await http.post(
+        f"{ADMIN}/{ident}/decision",
+        json={"decision": "conditional", "motivo": "Falta el seguro."},
+    )
+    identidad["uid"] = ORG
+    await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": "Ya está"})
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(AuditEvent).where(AuditEvent.action == "event.submitted")
+            )
+        )
+    assert [f.previous_state for f in filas] == ["DRAFT", "CONDITIONAL"]
+
+
+@pytest.mark.asyncio
+async def test_reservar_no_borra_el_sello_de_la_respuesta(entorno):
+    """La respuesta de reservar decía `selection_status: none`.
+
+    El mismo evento contaba dos cosas distintas según por qué ruta se
+    preguntara, y una pantalla que pintase la ficha con esa respuesta hacía
+    desaparecer el sello al reservar.
+    """
+    http, identidad, _ = entorno
+    ident = await _hasta_publicar(http, identidad)
+    identidad["uid"] = ADMINISTRA
+    await http.post(f"{ADMIN}/{ident}/publish")
+
+    identidad["uid"] = OTRA_ORG
+    respuesta = await http.post(f"{CATALOGO}/events/{ident}/reserve")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["seleccionado_por_z"] is True
+    cancelada = await http.delete(f"{CATALOGO}/events/{ident}/reserve")
+    assert cancelada.json()["seleccionado_por_z"] is True
 
 
 @pytest.mark.asyncio

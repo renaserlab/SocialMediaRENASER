@@ -31,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.security import AuthUser
 from app.modules.events import esquema, inventory
 from app.modules.events import models as _modelos_de_evento  # noqa: F401
 from app.modules.profiles import models as _modelos_de_perfil  # noqa: F401
@@ -216,7 +217,7 @@ async def test_mientras_una_reserva_tiene_la_fila_bloqueada_la_otra_espera(
     segunda = await _persona(motor, "espera")
 
     async with sesiones() as a:
-        await inventory._bloquear(a, evento)  # A se queda con la fila
+        await inventory.bloquear_evento(a, evento)  # A se queda con la fila
 
         async with sesiones() as b:
             intento = asyncio.create_task(
@@ -339,14 +340,19 @@ async def test_el_aforo_aprobado_manda_sobre_el_declarado(motor, sesiones) -> No
     assert await _confirmadas(motor, evento) == 2
 
 
-async def test_perder_la_carrera_no_deshace_la_reserva_de_quien_la_gano(
+async def test_la_reserva_de_quien_gana_sobrevive_al_conflicto_de_quien_pierde(
     motor, sesiones
 ) -> None:
-    """El fallo de una petición no puede tocar el trabajo de otra.
+    """El estado final después de un conflicto: la ganadora sigue apuntada.
 
-    Es la propiedad que un `rollback` mal puesto rompe sin hacer ruido: la que
-    pierde deshace la transacción, y con ella la fila que la ganadora acababa
-    de confirmar.
+    QUÉ NO PRUEBA ESTO, y se dice para que nadie lo lea como más de lo que es:
+    las dos peticiones usan SESIONES DISTINTAS, así que la segunda no podría
+    deshacer el trabajo de la primera aunque hiciera `rollback` de todo. Esa
+    propiedad es estructural, no algo que esta prueba observe. Se llamaba
+    «perder la carrera no deshace...» y aquí no hay ninguna carrera.
+
+    La serialización de verdad la prueba
+    `test_mientras_una_reserva_tiene_la_fila_bloqueada_la_otra_espera`.
     """
     organizador = await _persona(motor, "org")
     evento = await _evento(motor, organizador, 1)
@@ -479,7 +485,9 @@ async def test_una_transaccion_que_falla_no_queda_inservible(motor, sesiones) ->
             await inventory.reservar(
                 db, evento_id=lleno, usuario_id=persona, momento=inventory.eventos.ahora()
             )
-        await db.rollback()
+        # SIN `rollback` A MANO. Antes la prueba lo hacía por su cuenta, así
+        # que comprobaba una limpieza que el código de producción no hacía: es
+        # `reservar` quien suelta la transacción —y el cerrojo— antes de lanzar.
         resultado = await inventory.reservar(
             db, evento_id=libre, usuario_id=persona, momento=inventory.eventos.ahora()
         )
@@ -494,12 +502,197 @@ async def test_el_conteo_que_se_devuelve_es_el_de_las_confirmadas(motor, sesione
     personas = [await _persona(motor, f"t{i}") for i in range(4)]
 
     await _a_la_vez(sesiones, evento, personas)
+    # UNA PERSONA NUEVA, no una de las cuatro. Con alguien ya inscrito se sale
+    # por el camino idempotente y nunca se toca el conteo posterior a la
+    # inserción, que es justo el que se quiere comprobar.
+    nueva = await _persona(motor, "quinta")
     async with sesiones() as db:
         resultado = await inventory.reservar(
-            db,
-            evento_id=evento,
-            usuario_id=personas[0],
-            momento=inventory.eventos.ahora(),
+            db, evento_id=evento, usuario_id=nueva, momento=inventory.eventos.ahora()
         )
 
-    assert resultado.inscritos == await _confirmadas(motor, evento) == 4
+    assert resultado.inscritos == await _confirmadas(motor, evento) == 5
+
+
+# --------------------------------------------------------------------------- #
+# La misma carrera, un nivel más arriba: el ciclo del evento
+# --------------------------------------------------------------------------- #
+
+#: 90 sobre 100, dentro de los ocho topes.
+PUNTAJES = {
+    "propuesta": 18,
+    "trayectoria": 14,
+    "programa": 14,
+    "recinto": 13,
+    "seguridad": 13,
+    "precio": 9,
+    "accesibilidad": 5,
+    "afinidad": 4,
+}
+
+
+async def _listo_para_enviar(motor) -> str:
+    """Un evento con lo mínimo para que `enviar_a_revision` lo acepte."""
+    organizador = await _persona(motor, "org")
+    evento = await _evento(motor, organizador, 20, publicado=False)
+    async with motor.begin() as conexion:
+        await conexion.execute(
+            text(
+                "update public.events set title = 'Cena', description = "
+                "'Una descripcion larga y suficiente para poder revisarla', "
+                "event_type = 'online' where id = cast(:e as uuid)"
+            ),
+            {"e": evento},
+        )
+        await conexion.execute(
+            text(
+                "update public.event_operations set workflow_status = 'DRAFT', "
+                "promise = 'Algo bueno', category = 'gastronomia' "
+                "where event_id = cast(:e as uuid)"
+            ),
+            {"e": evento},
+        )
+    return evento
+
+
+def _como(ident: str) -> AuthUser:
+    return AuthUser(id=ident, email="x@y.test", role="authenticated")
+
+
+async def test_dos_envios_a_la_vez_no_dan_un_500(motor, sesiones) -> None:
+    """Dos `submit` simultáneos calculaban el mismo número de versión.
+
+    Chocaban contra `event_versions_correlativa` y el perdedor recibía un 500
+    en vez de una respuesta con sentido. Con el cerrojo, el segundo ve el
+    evento ya enviado y responde que desde ahí no se puede enviar.
+
+    HASTA DÓNDE LLEGA ESTA PRUEBA. Es probabilista, y además aquí el cerrojo no
+    es lo único que serializa: insertar una versión toma un `FOR KEY SHARE`
+    sobre la fila del evento por la clave ajena, y eso ya choca con el
+    `FOR UPDATE`. Quitar `bloquear_evento` NO la pone roja. Lo que comprueba de
+    verdad es el resultado: una sola versión y ningún 500.
+
+    La prueba que sí demuestra el cerrojo del ciclo es
+    `test_dos_decisiones_a_la_vez_no_producen_una_transicion_imposible`: allí
+    la clave ajena no salva nada, porque la validación ya se hizo contra un
+    estado caducado antes de que ninguna fila se insertara.
+    """
+    from app.modules.events import service
+
+    evento = await _listo_para_enviar(motor)
+    async with motor.connect() as conexion:
+        organizador = (
+            await conexion.execute(
+                text("select organizer_id::text from public.events where id = cast(:e as uuid)"),
+                {"e": evento},
+            )
+        ).scalar_one()
+
+    async def envia():
+        async with sesiones() as db:
+            try:
+                await service.enviar_a_revision(
+                    db, evento_id=evento, usuario=_como(organizador), motivo=""
+                )
+                return "ok"
+            except ConflictError as error:
+                return error
+
+    resultados = await asyncio.gather(envia(), envia(), envia())
+
+    # Uno entra. Los otros dos reciben un conflicto EXPLICADO, no un 500: lo
+    # que sube de `enviar_a_revision` es `ConflictError`, y cualquier otra cosa
+    # —un `IntegrityError` contra `event_versions_correlativa`, por ejemplo—
+    # haria fallar este `gather`, porque solo se captura la primera.
+    assert sum(r == "ok" for r in resultados) == 1, resultados
+    async with motor.connect() as conexion:
+        versiones = (
+            await conexion.execute(
+                text(
+                    "select count(*) from public.event_versions "
+                    "where event_id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+    assert versiones == 1
+
+
+async def test_dos_decisiones_a_la_vez_no_producen_una_transicion_imposible(
+    motor, sesiones
+) -> None:
+    """EL MISMO FALLO QUE EL DEL AFORO, un nivel más arriba.
+
+    Sin el cerrojo, un `reject` y un `approve` simultáneos sobre un evento en
+    SUBMITTED leían los dos ese estado, los dos validaban contra él y los dos
+    escribían: quedaba `SUBMITTED -> DRAFT -> APPROVED`, una transición que la
+    máquina de estados no permite, con el sello puesto y dos decisiones
+    contradictorias en el expediente.
+    """
+    from app.modules.events import service
+
+    evento = await _listo_para_enviar(motor)
+    async with motor.connect() as conexion:
+        organizador = (
+            await conexion.execute(
+                text("select organizer_id::text from public.events where id = cast(:e as uuid)"),
+                {"e": evento},
+            )
+        ).scalar_one()
+    async with sesiones() as db:
+        await service.enviar_a_revision(
+            db, evento_id=evento, usuario=_como(organizador), motivo=""
+        )
+    revisora = await _persona(motor, "cur")
+    async with sesiones() as db:
+        await service.evaluar(
+            db,
+            evento_id=evento,
+            puntajes=PUNTAJES,
+            evidencia="Recinto confirmado y programa completo.",
+            falla_critica=False,
+            motivo_de_la_falla="",
+            usuario=_como(revisora),
+        )
+
+    async def decide(decision: str):
+        async with sesiones() as db:
+            try:
+                await service.decidir(
+                    db,
+                    evento_id=evento,
+                    decision=decision,
+                    motivo=f"Porque {decision}",
+                    usuario=_como(revisora),
+                )
+                return "ok"
+            except ConflictError as error:
+                return error
+
+    resultados = await asyncio.gather(decide("approved"), decide("rejected"))
+
+    assert sum(r == "ok" for r in resultados) == 1, resultados
+    async with motor.connect() as conexion:
+        estado, sello = (
+            await conexion.execute(
+                text(
+                    "select workflow_status, selection_status "
+                    "from public.event_operations where event_id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).one()
+        decisiones = (
+            await conexion.execute(
+                text(
+                    "select count(*) from public.event_admission_decisions "
+                    "where event_id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+
+    assert estado in ("APPROVED", "DRAFT")
+    assert decisiones == 1, "una decision rechazada no puede dejar fila"
+    # Y el sello acompana al estado, nunca al reves.
+    assert (sello == "approved") == (estado == "APPROVED")

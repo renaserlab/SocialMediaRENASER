@@ -118,6 +118,28 @@ async def _exigir_operacion(db: AsyncSession, evento_id: str) -> EventOperations
     return operacion
 
 
+async def _tomar_el_turno(db: AsyncSession, evento_id: str) -> EventOperations:
+    """La fila operativa, con el evento BLOQUEADO. Para todo lo que decide.
+
+    ES EL MISMO FALLO QUE EL DEL AFORO, un nivel más arriba. Sin el cerrojo,
+    dos decisiones simultáneas leen el mismo `workflow_status` y las dos validan
+    contra un valor ya caducado: un `reject` y un `approve` a la vez sobre un
+    evento en SUBMITTED dejaban `SUBMITTED -> DRAFT -> APPROVED`, una transición
+    que la máquina de estados no permite, con el sello puesto y dos decisiones
+    contradictorias en el expediente.
+
+    También convierte en espera lo que antes eran choques contra las claves
+    únicas —dos `submit` calculando el mismo número de versión, dos
+    evaluaciones de la misma versión— que llegaban al cliente como un 500.
+
+    Se bloquea la fila de `events` y no la de `event_operations` porque es el
+    MISMO cerrojo que toma el aforo: un solo punto de serialización y ningún
+    orden que invertir.
+    """
+    await inventory.bloquear_evento(db, evento_id)
+    return await _exigir_operacion(db, evento_id)
+
+
 async def ultima_version(db: AsyncSession, evento_id: str) -> EventVersion | None:
     return await db.scalar(
         select(EventVersion)
@@ -229,7 +251,7 @@ async def actualizar_borrador(
     """
     evento = await _exigir_evento(db, evento_id)
     permissions.exigir_organizador(evento, usuario)
-    operacion = await _exigir_operacion(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
 
     if operacion.workflow_status not in (states.BORRADOR, states.CONDICIONAL):
         raise ConflictError(
@@ -237,12 +259,30 @@ async def actualizar_borrador(
             "una versión nueva."
         )
 
+    tocados = list(datos)
+
     for campo in ("promise", "category", "timezone"):
         if campo in datos:
             setattr(operacion, campo, datos.pop(campo))
     for campo, valor in datos.items():
         setattr(evento, campo, valor)
     operacion.updated_at = ahora()
+
+    # SE AUDITA QUÉ CAMPOS SE TOCARON, no sus valores: editar un condicional
+    # cambia justo lo que curaduría acaba de mirar, y hasta ahora no dejaba
+    # rastro. Los valores no se archivan —la versión ya los guarda— y meterlos
+    # aquí convertiría `audit_events` en una copia del evento.
+    await auditoria.anotar(
+        db,
+        actor_id=usuario.id,
+        action="event.draft_updated",
+        entity_type="event",
+        entity_id=evento_id,
+        payload={
+            "campos": sorted(tocados),
+            "workflow_status": operacion.workflow_status,
+        },
+    )
     await db.commit()
     await db.refresh(evento)
     await db.refresh(operacion)
@@ -304,9 +344,10 @@ async def enviar_a_revision(
     """
     evento = await _exigir_evento(db, evento_id)
     permissions.exigir_organizador(evento, usuario)
-    operacion = await _exigir_operacion(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
 
-    destino = _destino("submit", operacion.workflow_status)
+    estado_de_partida = operacion.workflow_status
+    destino = _destino("submit", estado_de_partida)
     fallo = motivo_para_no_enviar(evento, operacion)
     if fallo is not None:
         raise ValidationAppError(fallo)
@@ -342,7 +383,10 @@ async def enviar_a_revision(
         action="event.submitted",
         entity_type="event",
         entity_id=evento_id,
-        previous_state=states.BORRADOR,
+        # El estado REAL de partida. Estaba fijo en BORRADOR, y `submit`
+        # también se admite desde CONDITIONAL: el reenvío de un condicional
+        # quedaba registrado con un «antes» falso.
+        previous_state=estado_de_partida,
         new_state=destino,
         reason=motivo.strip() or None,
         payload={"version": numero},
@@ -389,7 +433,7 @@ async def evaluar(
     if falla_critica and not motivo_de_la_falla.strip():
         raise ValidationAppError("Una falla crítica necesita decir cuál es.")
 
-    operacion = await _exigir_operacion(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
     if operacion.workflow_status not in (states.ENVIADO, states.CONDICIONAL):
         raise ConflictError("Solo se evalúa un evento que está en revisión.")
     if operacion.current_version is None:
@@ -397,6 +441,19 @@ async def evaluar(
 
     evaluacion = await evaluacion_de(db, evento_id, operacion.current_version)
     total = sum(puntajes[nombre] for nombre in admission.CRITERIOS)
+    # QUÉ HABÍA ANTES. La evaluación se sobrescribe en su sitio —es única por
+    # evento y versión—, así que sin esto subir un 70 a un 90 no dejaba
+    # constancia de que hubiera habido un 70. «Nadie modifica un puntaje sin
+    # motivo, evidencia y auditoría» empieza por saber qué se modificó.
+    antes = (
+        {
+            "total": evaluacion.total,
+            "critical_failure": evaluacion.critical_failure,
+            **{n: getattr(evaluacion, n) for n in admission.CRITERIOS},
+        }
+        if evaluacion is not None
+        else None
+    )
     if evaluacion is None:
         evaluacion = EventAdmissionReview(
             event_id=evento_id, version=operacion.current_version
@@ -421,6 +478,7 @@ async def evaluar(
             "version": operacion.current_version,
             "total": total,
             "critical_failure": falla_critica,
+            "antes": antes,
         },
     )
     await db.commit()
@@ -456,7 +514,7 @@ async def decidir(
     if decision not in _ACCION_POR_DECISION:
         raise ValidationAppError(f"«{decision}» no es una decisión de admisión.")
 
-    operacion = await _exigir_operacion(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
     anterior = operacion.workflow_status
     destino = _destino(_ACCION_POR_DECISION[decision], anterior)
 
@@ -553,7 +611,7 @@ async def publicar(
     las dos, publicar es un solo sitio en el código.
     """
     evento = await _exigir_evento(db, evento_id)
-    operacion = await _exigir_operacion(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
     anterior = operacion.workflow_status
     destino = _destino("publish", anterior)
 
@@ -598,7 +656,7 @@ async def cambiar_visibilidad(
         raise ValidationAppError("Suspender un evento necesita un motivo.")
 
     evento = await _exigir_evento(db, evento_id)
-    operacion = await _exigir_operacion(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
     anterior = operacion.workflow_status
     destino = _destino(accion, anterior)
 
@@ -630,7 +688,7 @@ async def guardar_documento(
     usuario: AuthUser,
 ) -> EventDocument:
     """Registra un requisito documental y su estado. Uno por tipo y evento."""
-    await _exigir_evento(db, evento_id)
+    await inventory.bloquear_evento(db, evento_id)
     tipo = str(datos.get("kind", "")).strip()
     if not tipo:
         raise ValidationAppError("El requisito necesita un tipo.")
@@ -643,6 +701,10 @@ async def guardar_documento(
     if doc is None:
         doc = EventDocument(event_id=evento_id, kind=tipo)
         db.add(doc)
+    # `blocks_publication` es el campo que LEVANTA el bloqueo de publicación:
+    # cambiarlo sin dejar dicho qué había antes es cambiar quién puede publicar
+    # sin rastro.
+    antes = {"status": doc.status, "blocks_publication": doc.blocks_publication}
     for campo in ("status", "expires_at", "required", "blocks_publication", "note", "file_path"):
         if campo in datos and datos[campo] is not None:
             setattr(doc, campo, datos[campo])
@@ -654,7 +716,12 @@ async def guardar_documento(
         action="event.document_recorded",
         entity_type="event",
         entity_id=evento_id,
-        payload={"kind": tipo, "status": doc.status},
+        payload={
+            "kind": tipo,
+            "status": doc.status,
+            "blocks_publication": doc.blocks_publication,
+            "antes": antes,
+        },
     )
     await db.commit()
     await db.refresh(doc)
@@ -679,7 +746,32 @@ async def mis_eventos(
             .offset(desplazamiento)
         )
     ).all()
-    return await _con_conteos(db, filas)
+    expedientes = await _con_conteos(db, filas)
+    # LA ÚLTIMA OBSERVACIÓN, en UNA consulta. Sin esto la lista devolvía
+    # `ultima_observacion: null` siempre: a quien le devolvían un evento con
+    # correcciones veía una fila «Borrador» sin ninguna señal de que le habían
+    # pedido algo. Es el mismo fallo que tenía la cola de revisión.
+    await _con_decisiones(db, expedientes)
+    return expedientes
+
+
+async def _con_decisiones(db: AsyncSession, expedientes: list[Expediente]) -> None:
+    """La decisión MÁS RECIENTE de cada evento, sin una consulta por evento."""
+    ids = [exp.evento.id for exp in expedientes]
+    if not ids:
+        return
+    filas = await db.scalars(
+        select(EventAdmissionDecision)
+        .where(EventAdmissionDecision.event_id.in_(set(ids)))
+        .order_by(EventAdmissionDecision.created_at.asc())
+    )
+    # Ascendente y sobrescribiendo: la última que se lee de cada evento es la
+    # más reciente. Un `distinct on` no existe en SQLite.
+    ultima: dict[str, EventAdmissionDecision] = {}
+    for fila in filas:
+        ultima[fila.event_id] = fila
+    for exp in expedientes:
+        exp.decision = ultima.get(exp.evento.id)
 
 
 #: Lo que espera una decisión. `CONDITIONAL` entra: tiene un pendiente y sigue
