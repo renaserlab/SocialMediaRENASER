@@ -83,10 +83,20 @@ espera en el paso 1 y no llega al paso 4 hasta que la primera ha confirmado.
 cancelación podría colarse entre el conteo y la inserción y el hueco que libera
 se contaría dos veces.
 
-La colisión se recoge en un **SAVEPOINT** (`db.begin_nested()`), no con un
-`rollback` de la transacción entera: perder la carrera no puede deshacer el
-trabajo de quien la ganó. Y se captura **solo** la colisión esperada; cualquier
-otro error sube.
+La colisión se recoge en un **SAVEPOINT** (`db.begin_nested()`) y no con un
+`rollback` de la transacción entera, y se captura **solo** la colisión esperada.
+Dicho lo cual: con el cerrojo puesto y siendo estas dos funciones las únicas que
+escriben reservas, **esa rama no puede ejecutarse**, y por tanto no está
+probada. Está anotada como tal en el código.
+
+El cerrojo **se suelta en todos los caminos**, también en los de error y en el
+idempotente. No hacerlo dejaba la fila bloqueada mientras FastAPI serializaba la
+respuesta y mientras el router pedía el perfil del organizador: un evento
+popular con gente reintentando encadenaba esperas hasta agotar el pool.
+
+Y el conteo que se devuelve se lee **dentro** de la transacción que lo cambió.
+Leerlo después del `commit` abre otra transacción y devuelve el número de los
+que entraron detrás.
 
 **En SQLite no hay `FOR UPDATE`** y SQLAlchemy lo omite al compilar. Por eso las
 pruebas están partidas: las reglas se prueban en SQLite y la carrera solo
@@ -94,7 +104,7 @@ significa algo contra PostgreSQL.
 
 ## 5. Evidencia de concurrencia real
 
-`apps/api/tests/test_aforo_concurrente_postgres.py`, 14 pruebas contra un
+`apps/api/tests/test_aforo_concurrente_postgres.py`, 16 pruebas contra un
 PostgreSQL 16 desechable, con **sesiones distintas** peleando a la vez.
 
 La que manda es `test_mientras_una_reserva_tiene_la_fila_bloqueada_la_otra_
@@ -111,6 +121,14 @@ B  ->  despierta, cuenta lo que hay AHORA y ve el evento lleno
 peticiones por tres cupos y la del aforo aprobado. Las de una sola plaza
 pasaban igual sin el cerrojo —el planificador las serializaba solo—, y por eso
 la garantía es la determinista.
+
+**El mismo cerrojo protege el ciclo del evento.** `decidir`, `publicar`,
+`suspender`, `enviar` y `evaluar` leían `workflow_status`, validaban contra él y
+escribían, sin nada en medio: un `reject` y un `approve` simultáneos sobre un
+evento en SUBMITTED dejaban `SUBMITTED → DRAFT → APPROVED`, una transición que
+la máquina no permite, con el sello puesto y dos decisiones contradictorias.
+`test_dos_decisiones_a_la_vez_no_producen_una_transicion_imposible` lo prueba y
+se pone roja al quitar el cerrojo.
 
 ## 6. Estados
 
@@ -166,8 +184,15 @@ aprobado nada.
 un moderador podía aprobar y publicar. Es el mismo patrón que separó moderar
 contenido de mover dinero.
 
-**Nadie aprueba su propio evento.** Se comprueba **antes** que el rol: al revés,
-un administrador que organiza podría aprobarse el suyo.
+**Nadie aprueba, publica ni PUNTÚA su propio evento.** Puntuarse era la puerta
+de al lado de aprobarse: el puntaje es exactamente lo que habilita la aprobación
+de otra persona, así que una cuenta de curaduría que organiza podía ponerse
+100/100 y esperar a que alguien pulsara aprobar. Evaluar, pedir correcciones,
+registrar requisitos y leer el expediente exigen que el evento sea ajeno.
+
+**El rol se comprueba antes de buscar el evento.** Al revés, un identificador
+inventado daba 404 y uno real 403, y con eso se sondea qué eventos existen. La
+propiedad se comprueba después, que es lo que impide aprobarse el propio.
 
 **El organizador no ve la evaluación interna.** No es que se filtre y se quite:
 `EventoDelOrganizador` no declara los ocho puntajes. La deliberación no cabe en
@@ -280,3 +305,32 @@ Del capítulo 24 del blueprint, ninguno resuelto y ninguno inventado:
 
 Mientras no estén cerrados, la reserva es gratuita y no hay dinero de eventos en
 ninguna tabla.
+
+---
+
+## 13. Lo que la revisión independiente dejó abierto
+
+Tres agentes revisaron el diff —concurrencia, permisos y contratos— y cada
+hallazgo se reprodujo antes de tocar nada. Lo corregido está en los commits;
+esto es lo que se decidió **no** hacer, y por qué.
+
+| Abierto | Por qué se deja |
+|---|---|
+| Los listados piden 50 y no hay «cargar más» | A partir del evento 51 el contenido es inalcanzable. El servidor ya acepta `offset`; falta la interfaz. No hay ningún organizador con 50 eventos todavía. |
+| `documentos` y `bloqueos_para_publicar` llegan vacíos en `/pending` | La lista no los pinta, así que hoy no dice nada falso. El mismo tipo significa cosas distintas según la ruta, que es lo que hay que arreglar cuando se use. |
+| No hay portada, enlace al grupo ni zona horaria en el editor nuevo | Los dos primeros se editan desde la hoja del perfil mientras el evento sea borrador. `timezone` queda en `null`: la columna existe y nadie la escribe. Ausente es honesto; poner la del teléfono sería inventarla. |
+| Sin `lock_timeout` en la conexión | Un cerrojo pegado espera indefinidamente con un pool de diez. Ya no hay ninguno que se quede pegado, pero el parámetro protegería de los que vengan. Es una decisión de toda la API, no de Eventos. |
+| La rama `IntegrityError` del aforo no está probada | Con el cerrojo puesto no puede ocurrir: no hay otro escritor. Está anotada como defensa sin verificar en el propio código. |
+| La migración 0001 no es idempotente | `create type public.app_role` no tiene guarda, así que aplicar las migraciones dos veces falla ahí. Es la única prueba de PostgreSQL en rojo. Corregirlo toca una migración **aplicada** y necesita autorización expresa. |
+
+### El hallazgo de línea base que no se toca
+
+`course_versions` (0050/0051, aplicadas) tiene un disparador que impide borrar
+una versión, **y la cascada de `courses` choca con él**. Comprobado contra
+PostgreSQL: borrar un curso con una versión publicada falla con «Una version de
+curso no se borra». Por la cascada de `courses.author_id`, tampoco se puede dar
+de baja la cuenta de su autor.
+
+El arreglo es el mismo que lleva la 0060: dejar pasar el borrado cuando la fila
+padre ya no está. Toca migraciones aplicadas y el módulo de Cursos, y ninguna de
+las dos cosas entra en este incremento.

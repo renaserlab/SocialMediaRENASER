@@ -210,6 +210,14 @@ async def reservar(
             # La única colisión que esta operación puede provocar es la clave
             # `(event_id, user_id)`, y significa exactamente «ya estaba». No se
             # silencia ningún otro error: cualquier otro sube.
+            #
+            # ESTA RAMA NO ESTÁ PROBADA, Y NO SE PUEDE PROBAR. Con el cerrojo
+            # puesto y siendo estas dos funciones las únicas que escriben en
+            # `event_registrations`, el choque no puede ocurrir: nadie más llega
+            # a insertar mientras la fila del evento está tomada. Se deja porque
+            # el día que aparezca otro escritor —una lista de espera, una
+            # importación— el fallo sería una plaza perdida y no un error
+            # visible. Que quede dicho que es defensa sin verificar.
             existente = await _mia(db, evento_id, usuario_id)
             if existente is None:
                 raise
