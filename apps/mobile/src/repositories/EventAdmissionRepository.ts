@@ -1,5 +1,8 @@
 import { apiRequest, API_V1 } from '@/services/api';
-import type { EventoDelOrganizador } from '@/repositories/EventOrganizerRepository';
+import {
+  TAMANO_DE_PAGINA,
+  type EventoDelOrganizador,
+} from '@/repositories/EventOrganizerRepository';
 
 /**
  * La admisión: la cola de revisión, los ocho puntajes y las decisiones.
@@ -57,8 +60,17 @@ export type DecisionDeAdmision = 'approved' | 'conditional' | 'rejected';
 const base = `${API_V1}/admin/events`;
 
 export const EventAdmissionRepository = {
-  async pendientes(): Promise<ExpedienteDeEvento[]> {
-    return apiRequest<ExpedienteDeEvento[]>(`${base}/pending?limit=50`);
+  /** Una página de la cola. Mismo criterio que los eventos del organizador. */
+  async pendientes(
+    desplazamiento = 0,
+  ): Promise<{ items: ExpedienteDeEvento[]; hayMas: boolean }> {
+    const filas = await apiRequest<ExpedienteDeEvento[]>(
+      `${base}/pending?limit=${TAMANO_DE_PAGINA + 1}&offset=${desplazamiento}`,
+    );
+    return {
+      items: filas.slice(0, TAMANO_DE_PAGINA),
+      hayMas: filas.length > TAMANO_DE_PAGINA,
+    };
   },
 
   async expediente(id: string): Promise<ExpedienteDeEvento> {

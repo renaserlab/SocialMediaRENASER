@@ -40,8 +40,51 @@ export type CamposDelBorrador = {
   dia: string;
   /** HH:MM en 24 h. Vacío es VACÍO: no se inventa ninguna hora. */
   hora: string;
+  /** Fin, opcional. Un evento puede anunciarse sin hora de cierre. */
+  diaFin: string;
+  horaFin: string;
+  /** Zona IANA («America/Lima»). Vacía mientras no se elija: no se supone. */
+  timezone: string;
   capacity: string;
 };
+
+/**
+ * Las zonas horarias que se ofrecen, en formato IANA.
+ *
+ * NO SE PONE LA DEL TELÉFONO POR DEFECTO. Quien organiza desde un aeropuerto no
+ * está creando un evento en la zona del aeropuerto, y `starts_at` guarda el
+ * instante: la zona es una afirmación aparte sobre dónde ocurre. Se ofrece la
+ * del dispositivo como primera opción de la lista, pero hay que elegirla.
+ *
+ * La lista es corta a propósito —el mercado inicial es Perú— y crece cuando
+ * haya eventos que la necesiten. Un desplegable con las 400 zonas de la base de
+ * datos IANA no ayuda a nadie a encontrar la suya.
+ */
+export const ZONAS_HORARIAS = [
+  'America/Lima',
+  'America/Bogota',
+  'America/Mexico_City',
+  'America/Santiago',
+  'America/Argentina/Buenos_Aires',
+  'America/Sao_Paulo',
+  'America/New_York',
+  'Europe/Madrid',
+] as const;
+
+/** La zona del dispositivo, si es una IANA reconocible. `''` si no. */
+export function zonaDelDispositivo(): string {
+  try {
+    const zona = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zona === 'string' && zona.includes('/') ? zona : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Si el texto tiene forma de zona IANA. No valida que exista. */
+export function pareceZonaIana(valor: string): boolean {
+  return /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+){1,2}$/.test(valor.trim());
+}
 
 /**
  * Día y hora combinados, o `null` si falta alguno o no son reales.
@@ -100,7 +143,37 @@ export function motivoParaNoEnviar(campos: CamposDelBorrador): string | null {
   if (campos.eventType === 'presential' && campos.location.trim() === '') {
     return 'miEvento.faltaRecinto';
   }
+  if (campos.timezone.trim() === '') return 'miEvento.faltaZona';
+  if (!pareceZonaIana(campos.timezone)) return 'miEvento.zonaInvalida';
+  const fin = fechaDeFin(campos);
+  if (fin === 'invalida') return 'miEvento.finImposible';
+  if (fin === 'anterior') return 'miEvento.finAntesDelInicio';
   return null;
+}
+
+/**
+ * La fecha de fin: `null` si no se puso, la fecha, o por qué no vale.
+ *
+ * SE ADMITE SIN FIN. Un evento puede anunciarse sin hora de cierre y el modelo
+ * lo permite (`ends_at` es anulable). Lo que no se admite es un fin ANTERIOR al
+ * inicio, que no es un evento: es un error de tecleo que después sale impreso
+ * en la ficha como un rango al revés.
+ *
+ * Poner solo el día o solo la hora es incompleto, no vacío: se rechaza en vez
+ * de completar la otra mitad por nuestra cuenta.
+ */
+export function fechaDeFin(
+  campos: CamposDelBorrador,
+): Date | null | 'invalida' | 'anterior' {
+  const dia = campos.diaFin.trim();
+  const hora = campos.horaFin.trim();
+  if (dia === '' && hora === '') return null;
+  if (dia === '' || hora === '') return 'invalida';
+  const fin = fechaDeInicio(dia, hora);
+  if (fin === null) return 'invalida';
+  const inicio = fechaDeInicio(campos.dia, campos.hora);
+  if (inicio !== null && fin.getTime() < inicio.getTime()) return 'anterior';
+  return fin;
 }
 
 /**
@@ -132,7 +205,10 @@ export function hayCambiosSinGuardar(
     actual.eventType === guardado.eventType &&
     actual.capacity === guardado.capacity &&
     actual.dia === guardado.dia &&
-    actual.hora === guardado.hora;
+    actual.hora === guardado.hora &&
+    actual.diaFin === guardado.diaFin &&
+    actual.horaFin === guardado.horaFin &&
+    actual.timezone === guardado.timezone;
   return !iguales;
 }
 

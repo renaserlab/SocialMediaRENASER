@@ -78,9 +78,28 @@ export type BorradorDeEvento = {
   capacity?: number | null;
 };
 
+/**
+ * Cuántos trae cada página.
+ *
+ * Se pide UNO DE MÁS que los que se pintan. Es la forma barata de saber si hay
+ * página siguiente sin una consulta de conteo: si vuelven `TAMANO + 1`, hay más;
+ * el sobrante se descarta. Preguntar «¿cuántos hay?» cuesta un recorrido entero
+ * de la tabla y no se usa para nada más.
+ */
+export const TAMANO_DE_PAGINA = 20;
+
 export const EventOrganizerRepository = {
-  async listarMios(): Promise<EventoDelOrganizador[]> {
-    return apiRequest<EventoDelOrganizador[]>(`${API_V1}/events/mine?limit=50`);
+  /** Una página de los eventos propios. `hayMas` dice si falta alguna. */
+  async listarMios(
+    desplazamiento = 0,
+  ): Promise<{ items: EventoDelOrganizador[]; hayMas: boolean }> {
+    const filas = await apiRequest<EventoDelOrganizador[]>(
+      `${API_V1}/events/mine?limit=${TAMANO_DE_PAGINA + 1}&offset=${desplazamiento}`,
+    );
+    return {
+      items: filas.slice(0, TAMANO_DE_PAGINA),
+      hayMas: filas.length > TAMANO_DE_PAGINA,
+    };
   },
 
   async leer(id: string): Promise<EventoDelOrganizador> {

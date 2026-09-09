@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { claveDelEstado } from '@/lib/admisionDeEvento';
@@ -38,15 +39,18 @@ export function AdminEventosScreen() {
   );
   const [sinPermiso, setSinPermiso] = useState(false);
   const [noDisponible, setNoDisponible] = useState(false);
+  const [hayMas, setHayMas] = useState(false);
+  const [trayendoMas, setTrayendoMas] = useState(false);
 
   const cargar = useCallback(async () => {
     setEstado('loading');
     setSinPermiso(false);
     setNoDisponible(false);
     try {
-      const pendientes = await EventAdmissionRepository.pendientes();
-      setCola(pendientes);
-      setEstado(pendientes.length === 0 ? 'empty' : 'content');
+      const { items, hayMas: mas } = await EventAdmissionRepository.pendientes();
+      setCola(items);
+      setHayMas(mas);
+      setEstado(items.length === 0 ? 'empty' : 'content');
     } catch (error) {
       /*
         POR EL ESTADO Y EL CÓDIGO. Se buscaba «403» y la palabra «curaduría»
@@ -77,6 +81,23 @@ export function AdminEventosScreen() {
       void cargar();
     }, [cargar]),
   );
+
+  /** La página siguiente. El orden del servidor es estable: no repite. */
+  const traerMas = async () => {
+    if (trayendoMas || !hayMas) return;
+    setTrayendoMas(true);
+    try {
+      const { items, hayMas: mas } = await EventAdmissionRepository.pendientes(
+        cola.length,
+      );
+      setCola((previos) => [...previos, ...items]);
+      setHayMas(mas);
+    } catch {
+      setHayMas(false);
+    } finally {
+      setTrayendoMas(false);
+    }
+  };
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
@@ -145,6 +166,16 @@ export function AdminEventosScreen() {
             </Pressable>
           ))
         : null}
+
+      {estado === 'content' && hayMas ? (
+        <Button
+          label={t('common.loadMore')}
+          variant="secondary"
+          onPress={() => void traerMas()}
+          loading={trayendoMas}
+          disabled={trayendoMas}
+        />
+      ) : null}
     </AppScreen>
   );
 }

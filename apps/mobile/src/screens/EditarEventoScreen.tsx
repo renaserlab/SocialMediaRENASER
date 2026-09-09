@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { DateField } from '@/components/DateField';
+import { CoverImage } from '@/components/CoverImage';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { TimeField } from '@/components/TimeField';
 import { Input } from '@/components/Input';
@@ -16,16 +17,20 @@ import { claveDelEstado } from '@/lib/admisionDeEvento';
 import { confirm, notify } from '@/lib/confirm';
 import {
   CATEGORIAS,
+  ZONAS_HORARIAS,
   aforoEscrito,
   claveDeCategoria,
   estaEnRevision,
+  fechaDeFin,
   fechaDeInicio,
   hayCambiosSinGuardar,
   motivoParaNoEnviar,
   sePuedeEditar,
+  zonaDelDispositivo,
   type CamposDelBorrador,
 } from '@/lib/eventoDelOrganizador';
 import { toast } from '@/lib/toast';
+import { pickImage, signMediaUrls, uploadPostMedia } from '@/services/storage';
 import {
   EventOrganizerRepository,
   type EventoDelOrganizador,
@@ -50,6 +55,9 @@ const vacio = (): CamposDelBorrador => ({
   eventType: 'presential',
   dia: '',
   hora: '',
+  diaFin: '',
+  horaFin: '',
+  timezone: '',
   capacity: '',
 });
 
@@ -74,6 +82,9 @@ function aCampos(evento: EventoDelOrganizador): CamposDelBorrador {
     location: evento.location ?? '',
     eventType: evento.event_type,
     ...partes(evento.starts_at),
+    diaFin: partes(evento.ends_at).dia,
+    horaFin: partes(evento.ends_at).hora,
+    timezone: evento.timezone ?? '',
     capacity: evento.capacity === null ? '' : String(evento.capacity),
   };
 }
@@ -108,6 +119,11 @@ export function EditarEventoScreen() {
   const [fallo, setFallo] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  /** Ruta en Storage, que es lo que se guarda. Nunca una URL firmada. */
+  const [portada, setPortada] = useState<string | null>(null);
+  /** URL firmada, solo para pintarla. Caduca; por eso no se guarda. */
+  const [portadaUrl, setPortadaUrl] = useState<string | null>(null);
+  const [subiendo, setSubiendo] = useState(false);
   /** Cerrojo síncrono: dos toques no mandan dos envíos. */
   const ocupadoRef = useRef(false);
 
@@ -120,6 +136,14 @@ export function EditarEventoScreen() {
       setEvento(datos);
       setCampos(aCampos(datos));
       setGuardado(aCampos(datos));
+      setPortada(datos.cover_path);
+      if (datos.cover_path) {
+        // Se firma para poder verla: el bucket es privado.
+        const urls = await signMediaUrls([datos.cover_path]);
+        setPortadaUrl(urls[datos.cover_path] ?? null);
+      } else {
+        setPortadaUrl(null);
+      }
     } catch {
       setFallo(true);
     } finally {
@@ -132,6 +156,17 @@ export function EditarEventoScreen() {
   }, [cargar]);
 
   const editable = evento !== null && sePuedeEditar(evento.workflow_status);
+  /*
+    La del dispositivo va PRIMERA y sin marcar. Se ofrece porque casi siempre es
+    la correcta; no se elige sola porque quien organiza desde un aeropuerto no
+    está creando un evento en la zona del aeropuerto.
+  */
+  const zonas = (() => {
+    const propia = zonaDelDispositivo();
+    const lista = [...ZONAS_HORARIAS] as string[];
+    if (propia && !lista.includes(propia)) lista.unshift(propia);
+    return lista;
+  })();
   const ocupado = guardando || enviando;
   const sinGuardar = hayCambiosSinGuardar(campos, guardado);
   const faltante = motivoParaNoEnviar(campos);
@@ -147,6 +182,15 @@ export function EditarEventoScreen() {
     // único cierto: antes se componía la fecha a las 19:00 «por poner algo» y
     // esa hora acababa impresa en la ficha pública.
     starts_at: fechaDeInicio(campos.dia, campos.hora)?.toISOString() ?? null,
+    // El fin solo viaja si es una fecha de verdad. `'invalida'` y `'anterior'`
+    // se quedan aquí: el aviso ya lo da `motivoParaNoEnviar`, y mandar una
+    // fecha rota al servidor solo cambia dónde se ve el error.
+    ends_at: (() => {
+      const fin = fechaDeFin(campos);
+      return fin instanceof Date ? fin.toISOString() : null;
+    })(),
+    timezone: campos.timezone.trim() || null,
+    cover_path: portada,
     capacity: aforoEscrito(campos.capacity),
   });
 
@@ -170,6 +214,23 @@ export function EditarEventoScreen() {
     } finally {
       ocupadoRef.current = false;
       setGuardando(false);
+    }
+  };
+
+  const elegirPortada = async () => {
+    if (subiendo || !editable) return;
+    setSubiendo(true);
+    try {
+      const elegida = await pickImage({ allowsEditing: false });
+      if (!elegida) return;
+      const { storagePath } = await uploadPostMedia(elegida);
+      setPortada(storagePath);
+      const urls = await signMediaUrls([storagePath]);
+      setPortadaUrl(urls[storagePath] ?? elegida.uri);
+    } catch {
+      notify(t('common.saveFailed'), t('catalog.galleryFailed'));
+    } finally {
+      setSubiendo(false);
     }
   };
 
@@ -279,6 +340,21 @@ export function EditarEventoScreen() {
         <Text variant="caption" color={colors.textMuted}>
           {t('miEvento.soloLectura')}
         </Text>
+      ) : null}
+
+      {/* LA PORTADA. Se guarda la RUTA de Storage, no la URL firmada: una URL
+          guardada es una llave que caduca en la base y sigue pareciendo
+          válida. */}
+      {portadaUrl ? <CoverImage uri={portadaUrl} /> : null}
+      {editable ? (
+        <Button
+          label={portada ? t('miEvento.cambiarPortada') : t('miEvento.ponerPortada')}
+          variant="secondary"
+          icon="image"
+          onPress={() => void elegirPortada()}
+          loading={subiendo}
+          disabled={ocupado || subiendo}
+        />
       ) : null}
 
       <Input
@@ -401,6 +477,64 @@ export function EditarEventoScreen() {
               : t('evento.sinFecha')
           }
         />
+      )}
+
+      {/* La fecha de FIN, opcional. Si se pone, tiene que ser posterior. */}
+      {editable ? (
+        <>
+          <DateField
+            label={t('miEvento.campoFechaFin')}
+            value={campos.diaFin}
+            onChange={(v) => setCampos({ ...campos, diaFin: v })}
+            minDate={fechaDeInicio(campos.dia, campos.hora) ?? new Date()}
+          />
+          <TimeField
+            label={t('miEvento.campoHoraFin')}
+            value={campos.horaFin}
+            onChange={(v) => setCampos({ ...campos, horaFin: v })}
+          />
+        </>
+      ) : campos.diaFin && campos.horaFin ? (
+        <Dato
+          etiqueta={t('miEvento.campoFechaFin')}
+          valor={`${campos.diaFin} · ${campos.horaFin}`}
+        />
+      ) : null}
+
+      {/* LA ZONA HORARIA, en IANA y ELEGIDA. `starts_at` guarda el instante, no
+          dónde ocurre: sin esto la ficha no puede decir «19:00 hora de Lima»
+          sin inventárselo. No se pone la del teléfono por defecto. */}
+      <Text variant="caption" color={colors.textMuted}>
+        {t('miEvento.campoZona')}
+      </Text>
+      {editable ? (
+        <View style={styles.fichas}>
+          {zonas.map((zona) => {
+            const elegida = campos.timezone === zona;
+            return (
+              <Pressable
+                key={zona}
+                disabled={ocupado}
+                onPress={() => setCampos({ ...campos, timezone: zona })}
+                style={[
+                  styles.ficha,
+                  {
+                    borderColor: elegida ? colors.primary : colors.border,
+                    backgroundColor: elegida ? colors.primary : 'transparent',
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: elegida }}
+              >
+                <Text variant="caption" color={elegida ? colors.onPrimary : colors.text}>
+                  {zona}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
+        <Text variant="secondary">{campos.timezone || t('miEvento.sinZona')}</Text>
       )}
 
       {campos.eventType === 'presential' ? (

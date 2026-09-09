@@ -43,6 +43,8 @@ export function MisEventosScreen() {
     'loading',
   );
   const [noDisponible, setNoDisponible] = useState(false);
+  const [hayMas, setHayMas] = useState(false);
+  const [trayendoMas, setTrayendoMas] = useState(false);
   const [creando, setCreando] = useState(false);
   /** Cerrojo síncrono: dos toques no crean dos borradores. */
   const creandoRef = useRef(false);
@@ -50,9 +52,10 @@ export function MisEventosScreen() {
   const cargar = useCallback(async () => {
     setEstado('loading');
     try {
-      const mios = await EventOrganizerRepository.listarMios();
-      setEventos(mios);
-      setEstado(mios.length === 0 ? 'empty' : 'content');
+      const { items, hayMas: mas } = await EventOrganizerRepository.listarMios();
+      setEventos(items);
+      setHayMas(mas);
+      setEstado(items.length === 0 ? 'empty' : 'content');
       setNoDisponible(false);
     } catch (error) {
       /*
@@ -81,6 +84,31 @@ export function MisEventosScreen() {
       void cargar();
     }, [cargar]),
   );
+
+  /**
+   * La página siguiente, pedida al SERVIDOR.
+   *
+   * Antes se pedían 50 y ahí se acababa la lista: a partir del evento 51 el
+   * contenido era inalcanzable y nada decía que estuviera recortado. El orden
+   * del servidor es estable —`updated_at` y, para desempatar, el id—, así que
+   * paginar no repite ni pierde filas.
+   */
+  const traerMas = async () => {
+    if (trayendoMas || !hayMas) return;
+    setTrayendoMas(true);
+    try {
+      const { items, hayMas: mas } = await EventOrganizerRepository.listarMios(
+        eventos.length,
+      );
+      setEventos((previos) => [...previos, ...items]);
+      setHayMas(mas);
+    } catch {
+      // Se deja la lista como está: lo ya traído sigue siendo válido.
+      setHayMas(false);
+    } finally {
+      setTrayendoMas(false);
+    }
+  };
 
   const crear = async () => {
     // Sin esto, dos toques dejaban dos «Evento sin título» y solo se navegaba
@@ -188,6 +216,16 @@ export function MisEventosScreen() {
             </Pressable>
           ))
         : null}
+
+      {estado === 'content' && hayMas ? (
+        <Button
+          label={t('common.loadMore')}
+          variant="secondary"
+          onPress={() => void traerMas()}
+          loading={trayendoMas}
+          disabled={trayendoMas}
+        />
+      ) : null}
 
       {estado === 'content' ? (
         <Button

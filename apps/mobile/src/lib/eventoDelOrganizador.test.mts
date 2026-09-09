@@ -37,6 +37,9 @@ const completo = (extra: Partial<CamposDelBorrador> = {}): CamposDelBorrador => 
   eventType: 'presential',
   dia: '20/11/2026',
   hora: '19:00',
+  diaFin: '',
+  horaFin: '',
+  timezone: 'America/Lima',
   capacity: '20',
   ...extra,
 });
@@ -144,6 +147,50 @@ describe('qué falta para poder enviarlo', () => {
   it('en línea SIN recinto sí se puede: no hay recinto que dar', () => {
     assert.equal(
       motivoParaNoEnviar(completo({ eventType: 'online', location: '' })),
+      null,
+    );
+  });
+
+  it('sin zona horaria', () => {
+    // `starts_at` guarda el instante, no dónde ocurre: sin zona, la ficha no
+    // puede escribir «19:00 hora de Lima» sin inventárselo.
+    assert.equal(motivoParaNoEnviar(completo({ timezone: '' })), 'miEvento.faltaZona');
+  });
+
+  it('con una zona que no tiene forma de IANA', () => {
+    assert.equal(
+      motivoParaNoEnviar(completo({ timezone: 'GMT-5' })),
+      'miEvento.zonaInvalida',
+    );
+  });
+
+  it('con un fin anterior al inicio', () => {
+    assert.equal(
+      motivoParaNoEnviar(completo({ diaFin: '20/11/2026', horaFin: '10:00' })),
+      'miEvento.finAntesDelInicio',
+    );
+  });
+
+  it('con un fin a medias', () => {
+    // Solo el día o solo la hora es incompleto, no vacío. No se completa la
+    // otra mitad por nuestra cuenta.
+    assert.equal(
+      motivoParaNoEnviar(completo({ diaFin: '21/11/2026' })),
+      'miEvento.finImposible',
+    );
+    assert.equal(
+      motivoParaNoEnviar(completo({ horaFin: '22:00' })),
+      'miEvento.finImposible',
+    );
+  });
+
+  it('SIN fin sí se puede enviar: `ends_at` es anulable', () => {
+    assert.equal(motivoParaNoEnviar(completo({ diaFin: '', horaFin: '' })), null);
+  });
+
+  it('con un fin posterior, también', () => {
+    assert.equal(
+      motivoParaNoEnviar(completo({ diaFin: '20/11/2026', horaFin: '23:00' })),
       null,
     );
   });
