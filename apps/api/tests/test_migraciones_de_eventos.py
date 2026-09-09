@@ -1046,8 +1046,17 @@ def test_borrar_la_reserva_entera_si_se_puede(conexion, con_entradas) -> None:
 # --------------------------------------------------------------------------- #
 # El ORM y el esquema real dicen lo mismo
 # --------------------------------------------------------------------------- #
-#: Las nueve tablas de Eventos: cinco de la 0060 y cuatro de la 0061.
-TABLAS_DE_EVENTOS = TABLAS + TABLAS_DE_ENTRADAS
+#: Las cuatro que anade la 0062.
+TABLAS_DE_ORDENES = (
+    "event_orders",
+    "event_order_items",
+    "event_tickets",
+    "event_checkins",
+)
+
+#: Las trece tablas de Eventos: cinco de la 0060, cuatro de la 0061 y cuatro de
+#: la 0062.
+TABLAS_DE_EVENTOS = TABLAS + TABLAS_DE_ENTRADAS + TABLAS_DE_ORDENES
 
 
 @SIN_POSTGRES

@@ -590,3 +590,358 @@ class EventTicketHoldItem(Base):
         ),
         Index("event_ticket_hold_items_por_tipo", "ticket_type_id"),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Órdenes, entradas y check-in. Migración 0062, SIN APLICAR.
+# --------------------------------------------------------------------------- #
+
+#: Los estados de una orden de evento. Cada uno tiene una transición real que lo
+#: escribe; ninguno está «por si acaso».
+ORDEN_PENDIENTE = "PENDING_PAYMENT"
+ORDEN_PROCESANDO = "PAYMENT_PROCESSING"
+ORDEN_PAGADA = "PAID"
+ORDEN_FALLIDA = "PAYMENT_FAILED"
+ORDEN_VENCIDA = "EXPIRED"
+ORDEN_CANCELADA = "CANCELLED"
+
+ESTADOS_DE_ORDEN = (
+    ORDEN_PENDIENTE,
+    ORDEN_PROCESANDO,
+    ORDEN_PAGADA,
+    ORDEN_FALLIDA,
+    ORDEN_VENCIDA,
+    ORDEN_CANCELADA,
+)
+
+#: Estados desde los que todavía se puede llegar a pagar.
+ORDEN_EN_CURSO = (ORDEN_PENDIENTE, ORDEN_PROCESANDO)
+
+ENTRADA_VALIDA = "VALID"
+ENTRADA_USADA = "USED"
+ENTRADA_REVOCADA = "REVOKED"
+
+
+class EventOrder(Base):
+    """La intención comercial nacida de una reserva vigente.
+
+    NO ES UNA COMPRA HASTA QUE ESTÁ `PAID`, y quien lo decide es el webhook
+    verificado del proveedor —o, si el total es cero, el propio servidor, que
+    entonces no necesita a nadie más.
+    """
+
+    __tablename__ = "event_orders"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    event_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    buyer_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    hold_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+
+    status: Mapped[str] = mapped_column(
+        String(24), server_default=text(f"'{ORDEN_PENDIENTE}'")
+    )
+    currency: Mapped[str] = mapped_column(String(3))
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger)
+    total_minor: Mapped[int] = mapped_column(BigInteger)
+
+    #: `none` es una orden gratuita: no hay pasarela detrás y no la habrá.
+    provider: Mapped[str] = mapped_column(String(24), server_default=text("'none'"))
+    environment: Mapped[str] = mapped_column(String(16), server_default=text("'sandbox'"))
+    #: El identificador REAL del cobro en la pasarela. Nunca uno derivado.
+    external_payment_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: La clave determinista que se le manda a la pasarela para que un reintento
+    #: nuestro no abra dos cobros.
+    operation_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    request_fingerprint: Mapped[str] = mapped_column(Text, server_default=text("''"))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status in ({_en_comillas(ESTADOS_DE_ORDEN)})", name="event_orders_estado"
+        ),
+        CheckConstraint("subtotal_minor >= 0", name="event_orders_subtotal"),
+        CheckConstraint("total_minor >= subtotal_minor", name="event_orders_total"),
+        CheckConstraint(
+            "provider in ('none', 'stripe')", name="event_orders_proveedor"
+        ),
+        CheckConstraint(
+            "environment in ('sandbox', 'production')", name="event_orders_entorno"
+        ),
+        CheckConstraint(
+            f"(status = '{ORDEN_PAGADA}') = (paid_at is not null)",
+            name="event_orders_pagada_con_fecha",
+        ),
+        CheckConstraint(
+            f"(status in ('{ORDEN_CANCELADA}', '{ORDEN_VENCIDA}'))"
+            " = (cancelled_at is not null)",
+            name="event_orders_cerrada_con_fecha",
+        ),
+        CheckConstraint(
+            f"status <> '{ORDEN_PAGADA}' or provider = 'none'"
+            " or external_payment_id is not null",
+            name="event_orders_pago_con_evidencia",
+        ),
+        CheckConstraint(
+            "provider <> 'none' or external_payment_id is null",
+            name="event_orders_gratuita_sin_referencia",
+        ),
+        ForeignKeyConstraint(
+            ["event_id"], ["events.id"], name="event_orders_event_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["buyer_id"], ["profiles.id"], name="event_orders_buyer_id_fkey",
+            ondelete="CASCADE",
+        ),
+        # LA ORDEN HEREDA DE SU RESERVA. Evento, comprador y moneda salen de la
+        # misma fila que se apartó: no hay forma de crear una orden a nombre de
+        # otro, sobre otro evento, ni en otra divisa.
+        ForeignKeyConstraint(
+            ["hold_id", "event_id", "buyer_id", "currency"],
+            [
+                "event_ticket_holds.id",
+                "event_ticket_holds.event_id",
+                "event_ticket_holds.user_id",
+                "event_ticket_holds.currency",
+            ],
+            name="event_orders_de_su_reserva",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("hold_id", name="event_orders_una_por_reserva"),
+        UniqueConstraint(
+            "event_id", "buyer_id", "idempotency_key", name="event_orders_clave_unica"
+        ),
+        UniqueConstraint("id", "event_id", name="event_orders_de_su_evento"),
+        Index(
+            "event_orders_del_comprador",
+            "buyer_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "event_orders_del_evento",
+            "event_id",
+            "status",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "event_orders_referencia_unica",
+            "provider",
+            "environment",
+            "external_payment_id",
+            unique=True,
+            postgresql_where=text("external_payment_id is not null"),
+            sqlite_where=text("external_payment_id is not null"),
+        ),
+    )
+
+
+class EventOrderItem(Base):
+    """Una línea de la orden. Copia comercial, no referencia viva."""
+
+    __tablename__ = "event_order_items"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    order_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    event_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    ticket_type_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    #: CONGELADO. El organizador puede renombrar o retirar el tipo después.
+    ticket_type_name_snapshot: Mapped[str] = mapped_column(Text)
+    unit_price_minor: Mapped[int] = mapped_column(BigInteger)
+    quantity: Mapped[int] = mapped_column(Integer)
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="event_order_items_cantidad"),
+        CheckConstraint("unit_price_minor >= 0", name="event_order_items_precio"),
+        CheckConstraint("subtotal_minor >= 0", name="event_order_items_subtotal"),
+        CheckConstraint(
+            "subtotal_minor = quantity * unit_price_minor",
+            name="event_order_items_cuadra",
+        ),
+        ForeignKeyConstraint(
+            ["order_id", "event_id"],
+            ["event_orders.id", "event_orders.event_id"],
+            name="event_order_items_del_evento_de_la_orden",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["event_id", "ticket_type_id"],
+            ["event_ticket_types.event_id", "event_ticket_types.id"],
+            name="event_order_items_del_evento",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "order_id", "ticket_type_id", name="event_order_items_un_tipo"
+        ),
+        UniqueConstraint("id", "order_id", name="event_order_items_de_su_orden"),
+        Index("event_order_items_de_la_orden", "order_id"),
+    )
+
+
+class EventTicket(Base):
+    """Una entrada emitida. Una fila por entrada.
+
+    LA CREDENCIAL NO ESTÁ AQUÍ: está su `sha256`. El valor en claro se entrega
+    una vez a quien compró, viaja dentro del QR y no vuelve a existir en el
+    servidor. Guardarlo en claro convertiría cada copia de seguridad en un juego
+    completo de entradas.
+    """
+
+    __tablename__ = "event_tickets"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    event_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    order_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    order_item_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    ticket_type_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    ticket_type_name_snapshot: Mapped[str] = mapped_column(Text)
+
+    #: El código que se TECLEA cuando la cámara no funciona. No sirve por sí
+    #: solo para entrar: la credencial es la de abajo.
+    code: Mapped[str] = mapped_column(Text)
+    credential_hash: Mapped[str] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(
+        String(16), server_default=text(f"'{ENTRADA_VALIDA}'")
+    )
+    issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    checked_in_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    checked_in_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status in ('{ENTRADA_VALIDA}', '{ENTRADA_USADA}', '{ENTRADA_REVOCADA}')",
+            name="event_tickets_estado",
+        ),
+        CheckConstraint(
+            f"(status = '{ENTRADA_USADA}') = (checked_in_at is not null)",
+            name="event_tickets_usada_con_fecha",
+        ),
+        CheckConstraint(
+            f"(status = '{ENTRADA_REVOCADA}') = (revoked_at is not null)",
+            name="event_tickets_revocada_con_fecha",
+        ),
+        ForeignKeyConstraint(
+            ["owner_id"], ["profiles.id"], name="event_tickets_owner_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["order_id", "event_id"],
+            ["event_orders.id", "event_orders.event_id"],
+            name="event_tickets_del_evento_de_la_orden",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["order_item_id", "order_id"],
+            ["event_order_items.id", "event_order_items.order_id"],
+            name="event_tickets_de_su_linea",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["event_id", "ticket_type_id"],
+            ["event_ticket_types.event_id", "event_ticket_types.id"],
+            name="event_tickets_del_evento",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("code", name="event_tickets_codigo_unico"),
+        UniqueConstraint("credential_hash", name="event_tickets_credencial_unica"),
+        Index(
+            "event_tickets_de_quien_compro",
+            "owner_id",
+            text("issued_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "event_tickets_del_evento",
+            "event_id",
+            "status",
+            text("issued_at desc"),
+            text("id desc"),
+        ),
+        Index("event_tickets_de_la_linea", "order_item_id"),
+    )
+
+
+class EventCheckin(Base):
+    """Un intento de admisión, correcto o no.
+
+    TABLA PROPIA Y NO LA AUDITORÍA COMPARTIDA: la puerta necesita listar quién
+    entró y a qué hora, paginado y filtrado, y eso no se hace abriendo un
+    `payload` JSON por fila. Además sostiene una invariante —un solo check-in
+    correcto por entrada— que un payload no puede sostener. La auditoría se
+    escribe ADEMÁS, para lo que es.
+    """
+
+    __tablename__ = "event_checkins"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    #: Anulable a propósito: un intento con una credencial inexistente también se
+    #: registra, y no tiene entrada a la que apuntar.
+    ticket_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("event_tickets.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    event_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("events.id", ondelete="CASCADE")
+    )
+    operator_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    result: Mapped[str] = mapped_column(String(24))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "result in ('OK', 'ALREADY_USED', 'REVOKED', 'NOT_FOUND',"
+            " 'WRONG_EVENT', 'NOT_ADMITTING')",
+            name="event_checkins_resultado",
+        ),
+        # UNA ENTRADA SE USA UNA VEZ, y lo dice la base. Dos lectores escaneando
+        # el mismo QR en el mismo segundo pasan los dos por cualquier `if`.
+        Index(
+            "event_checkins_uno_correcto",
+            "ticket_id",
+            unique=True,
+            postgresql_where=text("result = 'OK'"),
+            sqlite_where=text("result = 'OK'"),
+        ),
+        Index(
+            "event_checkins_del_evento",
+            "event_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+    )
