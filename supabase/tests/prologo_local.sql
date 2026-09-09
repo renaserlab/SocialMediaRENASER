@@ -65,6 +65,20 @@ create extension if not exists pgcrypto;
 create extension if not exists pg_trgm with schema extensions;
 grant usage on schema extensions to public;
 
+-- Y `extensions` EN EL CAMINO DE BUSQUEDA, como en Supabase. Sin esto la 0040
+-- crea un indice con `gin_trgm_ops` y PostgreSQL responde que esa clase de
+-- operadores no existe: esta, pero en un esquema que nadie mira.
+-- Las dos formas hacen falta: `alter database` para las sesiones siguientes y
+-- `set` para la que esta aplicando las migraciones ahora mismo.
+do $$
+begin
+  execute format(
+    'alter database %I set search_path = "$user", public, extensions',
+    current_database()
+  );
+end $$;
+set search_path = "$user", public, extensions;
+
 -- ------------------------------------------------------------------------- --
 -- auth
 -- ------------------------------------------------------------------------- --
@@ -72,8 +86,12 @@ create schema if not exists auth;
 
 create table if not exists auth.users (
   id uuid primary key default gen_random_uuid(),
-  email text
+  email text,
+  -- El disparador de la 0001 crea el perfil leyendo de aqui el nombre.
+  raw_user_meta_data jsonb
 );
+
+alter table auth.users add column if not exists raw_user_meta_data jsonb;
 
 -- NULL a proposito: ver la cabecera. Es exactamente lo que ve la API cuando
 -- entra con la clave de servicio.
@@ -93,16 +111,29 @@ create schema if not exists storage;
 create table if not exists storage.buckets (
   id text primary key,
   name text not null,
-  public boolean not null default false
+  public boolean not null default false,
+  -- Las dos que la 0004 y la 0033 ESCRIBEN. Sin ellas el prologo se contradice
+  -- con lo que promete arriba y las migraciones no llegan ni a la 0005.
+  file_size_limit bigint,
+  allowed_mime_types text[]
 );
+
+-- Para un contenedor que ya tenia el esquema `storage` de una ejecucion previa:
+-- `create table if not exists` no anade columnas a una tabla que ya existe.
+alter table storage.buckets add column if not exists file_size_limit bigint;
+alter table storage.buckets add column if not exists allowed_mime_types text[];
 
 create table if not exists storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text references storage.buckets(id),
   name text not null,
   owner uuid,
+  -- La 0018 filtra por `metadata->>'mimetype'`.
+  metadata jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table storage.objects add column if not exists metadata jsonb;
 
 -- Parte la ruta por `/`, como la de Supabase: las politicas de Storage la usan
 -- para exigir que el primer tramo sea el identificador de quien sube.

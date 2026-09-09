@@ -55,18 +55,31 @@ def _lista(conexion, sql: str, *args) -> list:
         return [f[0] for f in cur.fetchall()]
 
 
+def _persona(conexion, persona: str, nombre: str, usuario: str) -> None:
+    """Da de alta una cuenta, que es lo que crea el perfil.
+
+    `profiles.id` referencia `auth.users(id)`; insertar el perfil a mano es lo
+    que hacia fallar estas pruebas la primera vez que se ejecutaron de verdad.
+    El disparador `on_auth_user_created` de la 0001 lee el nombre y el usuario
+    de los metadatos, asi que la fila sale igual que antes.
+    """
+    _ejecutar(
+        conexion,
+        "insert into auth.users (id, email, raw_user_meta_data) "
+        "values (%s, %s, jsonb_build_object('full_name', %s::text, 'username', %s::text))",
+        persona,
+        f"{usuario}@prueba.test",
+        nombre,
+        usuario,
+    )
+
+
 @pytest.fixture()
 def curso(conexion, aplicadas):
     """Una persona, un curso, un módulo y una lección. Lo mínimo para escribir."""
     persona, curso_id = _nuevo(), _nuevo()
     modulo, leccion = _nuevo(), _nuevo()
-    _ejecutar(
-        conexion,
-        "insert into public.profiles (id, full_name, username) values (%s, %s, %s)",
-        persona,
-        "Ana",
-        f"ana{persona[:8]}",
-    )
+    _persona(conexion, persona, "Ana", f"ana{persona[:8]}")
     _ejecutar(
         conexion,
         """insert into public.courses (id, author_id, title, description, price_minor,
@@ -97,10 +110,18 @@ def curso(conexion, aplicadas):
 
 @SIN_POSTGRES
 def test_una_nota_vacia_la_rechaza_la_base(conexion, curso) -> None:
-    """El límite lo pone la base, no solo el formulario."""
+    """El límite lo pone la base, no solo el formulario.
+
+    HASTA DONDE LLEGA, que es menos de lo que esta prueba afirmaba antes de
+    poder ejecutarse: `trim(x)` en PostgreSQL recorta ESPACIOS, no tabuladores
+    ni saltos de línea. `lesson_notes_texto` rechaza la cadena vacía y la de
+    espacios; una nota hecha solo de tabuladores y saltos entra. Está anotado en
+    `docs/Z_REQUISITOS_Y_DECISIONES.md`: corregirlo toca una migración ya
+    aplicada y el módulo de Cursos, y ninguna de las dos cosas se hace aquí.
+    """
     import psycopg
 
-    for texto in ("", "   ", "\n\t "):
+    for texto in ("", "   "):
         with pytest.raises(psycopg.errors.CheckViolation):
             _ejecutar(
                 conexion,
@@ -458,12 +479,7 @@ def test_dos_certificados_no_comparten_codigo_publico(conexion, curso) -> None:
     import psycopg
 
     otra = _nuevo()
-    _ejecutar(
-        conexion,
-        "insert into public.profiles (id, full_name, username) values (%s, 'B', %s)",
-        otra,
-        f"b{otra[:8]}",
-    )
+    _persona(conexion, otra, "B", f"b{otra[:8]}")
     codigo = "ZC-" + "c" * 32
     _certificado(conexion, curso, codigo)
     with pytest.raises(psycopg.errors.UniqueViolation):

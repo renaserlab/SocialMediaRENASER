@@ -194,7 +194,11 @@ def _uno(conexion, sql: str, *args):
 
 def _lista(conexion, sql: str, *args) -> list:
     with conexion.cursor() as cur:
-        cur.execute(sql, args)
+        # SIN ARGUMENTOS NO SE PASA UNA TUPLA VACIA. psycopg solo busca
+        # marcadores cuando recibe parametros, y con `()` los busca igual: un
+        # `like 'refund%'` deja de compilar con «only '%s' ... are allowed as
+        # placeholders». La consulta era correcta; el fallo estaba aqui.
+        cur.execute(sql, args or None)
         return [f[0] for f in cur.fetchall()]
 
 
@@ -448,10 +452,10 @@ def test_una_version_publicada_no_se_puede_reescribir(conexion, aplicadas) -> No
     import psycopg
 
     with conexion.cursor() as cur:
-        cur.execute(
-            "insert into public.profiles (id, username, full_name) "
-            "values (gen_random_uuid(), 'p_0050', 'Prueba') returning id"
-        )
+        # El perfil NO se inserta a mano: `profiles.id` referencia
+        # `auth.users(id)` y el disparador de la 0001 crea la fila de perfil al
+        # darse de alta la cuenta. Crear la cuenta es crear el perfil.
+        cur.execute("insert into auth.users (email) values ('p0050@x.test') returning id")
         autor = cur.fetchone()[0]
         cur.execute(
             "insert into public.courses (author_id, title, description) "
@@ -473,5 +477,9 @@ def test_una_version_publicada_no_se_puede_reescribir(conexion, aplicadas) -> No
         ("disfrazarla de backfill", "update public.course_versions set origin = 'backfill' where id = %s", (version,)),
     ]
     for que, sentencia, argumentos in prohibidas:
-        with pytest.raises(psycopg.errors.RaiseException), conexion.cursor() as cur:
+        # `restrict_violation`, que es el `errcode` con el que la 0050 y la 0051
+        # lanzan sus tres `raise`. `RaiseException` es el codigo por omision de
+        # un `raise` SIN `using errcode`, y ninguno de estos lo es: esperarlo
+        # daba por rechazada la operacion por la razon equivocada.
+        with pytest.raises(psycopg.errors.RestrictViolation), conexion.cursor() as cur:
             cur.execute(sentencia, argumentos)
