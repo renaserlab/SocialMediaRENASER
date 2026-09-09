@@ -1247,6 +1247,20 @@ export function ProfileSection({
             </View>
           ))}
 
+      {/*
+        LA PUERTA A «MIS EVENTOS», en la seccion de eventos del propio perfil.
+        No se ofrece «crear evento» aqui: un evento ya no se publica al crearlo,
+        pasa por admision, y el sitio donde eso se explica es su consola.
+      */}
+      {kind === 'eventos' && canManage ? (
+        <Button
+          label={t('misEventos.titulo')}
+          variant="secondary"
+          icon="calendar"
+          onPress={() => router.push('/mis-eventos' as never)}
+        />
+      ) : null}
+
       {/* Alta de un curso nuevo, debajo de los ya publicados. */}
       {kind === 'cursos' && canManage ? (
         <Button

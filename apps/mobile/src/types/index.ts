@@ -289,6 +289,12 @@ export type Conversation = {
 
 export type EventItem = {
   id: string;
+  /**
+   * «Seleccionado por Z». LO CONFIRMA EL SERVIDOR y no se deduce de nada mas:
+   * ni del estado, ni de la puntuacion —que no llega aqui—, ni de que el
+   * evento lleve tiempo publicado. Sin confirmacion, no se pinta.
+   */
+  seleccionadoPorZ?: boolean;
   /** Quien organiza el evento; permite listar los de un perfil. */
   organizerId?: string;
   /** Fecha real de inicio; `date` es solo el texto ya formateado. */

@@ -30,9 +30,13 @@ import { useTranslation } from '@/i18n/useTranslation';
  * NO EXISTÍA. Tocar un evento —desde Explorar, desde la búsqueda, desde el
  * listado— abría la LISTA entera, donde ese evento era una fila más.
  *
+ * EL SELLO «SELECCIONADO POR Z» SÍ SE PINTA, y solo cuando el servidor lo
+ * confirma en `seleccionado_por_z`. Sale de `selection_status = 'approved'`,
+ * que únicamente escribe una decisión de admisión real; un evento heredado no
+ * lo lleva por llevar tiempo publicado.
+ *
  * LO QUE NO SE PINTA, y cada omisión es una decisión, no un olvido:
  *
- *   - El sello «Seleccionado por Z»: no hay `selection_status` en el modelo.
  *   - «A 2 km de ti»: `events` no tiene coordenadas. La distancia es la
  *     afirmación más comprobable de la captura y no hay con qué hacerla.
  *   - El precio y «Elegir entradas»: los eventos no tienen precio ni entradas.
@@ -158,6 +162,21 @@ export function EventoScreen() {
         resizeMode="cover"
         accessibilityIgnoresInvertColors
       />
+
+      {/*
+        EL SELLO, y solo si el servidor lo confirma. `seleccionadoPorZ` viene de
+        `selection_status = 'approved'`, que solo escribe una decision de
+        admision real: un evento heredado —publicado antes de que existiera la
+        curaduria— no lo lleva por llevar tiempo publicado.
+      */}
+      {evento.seleccionadoPorZ ? (
+        <View style={[styles.sello, { borderColor: colors.primary }]}>
+          <Feather name="award" size={14} color={colors.primary} />
+          <Text variant="caption" color={colors.primary} weight="700">
+            {t('evento.selloZ')}
+          </Text>
+        </View>
+      ) : null}
 
       <Text variant="title">{evento.title}</Text>
 
@@ -286,6 +305,16 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   descripcion: { marginTop: spacing.sm },
+  sello: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
   aviso: {
     flexDirection: 'row',
     alignItems: 'center',

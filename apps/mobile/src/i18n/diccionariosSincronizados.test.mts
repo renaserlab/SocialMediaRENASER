@@ -96,6 +96,17 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // Admision de eventos. «Publicado», «Cancelado», «Editar evento»,
+    // «Titulo», «Publicar» y «Total: … de …» se escriben exactamente igual en
+    // los dos idiomas; `admisionEvento.deTope` es formato puro.
+    'estadoDeEvento.PUBLISHED',
+    'estadoDeEvento.CANCELLED',
+    'miEvento.titulo',
+    'miEvento.campoTitulo',
+    'admisionEvento.deTope',
+    'admisionEvento.total',
+    'admisionEvento.publicar',
+    'admisionEvento.publicado',
     // «Evento», «Organizador», «inscritos», «Cancelar reserva», «Reserva
     // cancelada», «Presencial» y «Todas» se escriben igual en los dos idiomas.
     'evento.titulo',

@@ -23,6 +23,13 @@ export type EventDto = {
   time_state?: string | null;
   organizer_name?: string | null;
   organizer_username?: string | null;
+  /**
+   * La curaduria: `none`, `pending`, `approved` o `rejected`. Opcional porque
+   * una API todavia sin desplegar no lo manda, y entonces NO hay sello.
+   */
+  selection_status?: string | null;
+  /** «Seleccionado por Z». LO AFIRMA EL SERVIDOR; aqui no se deduce. */
+  seleccionado_por_z?: boolean | null;
 };
 
 /**
@@ -91,5 +98,10 @@ export function toEventItem(dto: EventDto): EventItem {
     // `?? null` y no `?? 0`: cero sería «aforo cero», que es otra cosa.
     capacity: dto.capacity ?? null,
     reservedByMe: dto.reserved_by_me === true,
+    // `=== true` Y NO UN VALOR POR DEFECTO. Un servidor que no manda el campo
+    // —una version anterior, o la 0060 sin aplicar— NO tiene sello, y sin esta
+    // comparacion `undefined` acabaria pintandolo en cuanto alguien escribiera
+    // `!== false` por descuido.
+    seleccionadoPorZ: dto.seleccionado_por_z === true,
   };
 }
