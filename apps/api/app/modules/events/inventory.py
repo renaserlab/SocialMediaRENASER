@@ -51,11 +51,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.config import get_settings
+from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.modules.catalog import eventos
 from app.modules.catalog.models import Event, EventRegistration
 from app.modules.events import esquema, states
@@ -111,16 +112,68 @@ async def _operacion(db: AsyncSession, evento_id: str):
     return await db.get(EventOperations, evento_id)
 
 
+#: SQLSTATE de PostgreSQL cuando `lock_timeout` se agota.
+_CERROJO_AGOTADO = "55P03"
+
+
+class CerrojoOcupado(AppError):
+    """El evento estaba bloqueado y la espera se agotó.
+
+    NO ES «EL EVENTO ESTÁ LLENO», y por eso tiene su propio código: decirle a
+    alguien que no queda sitio cuando lo que pasó es que otra petición tardó
+    demasiado es mentirle sobre algo comprobable. Esto se reintenta; aquello no.
+
+    409 y no 503: el servicio está bien, lo que hay es un conflicto de acceso
+    momentáneo sobre ese evento concreto.
+    """
+
+    status_code = 409
+    code = "inventory_lock_timeout"
+    message = "Hay otra reserva en curso para este evento. Inténtalo otra vez."
+
+
+async def _limitar_la_espera(db: AsyncSession) -> None:
+    """`SET LOCAL lock_timeout` para ESTA transacción.
+
+    `LOCAL` importa: no cambia nada en la base ni en la sesión, se deshace al
+    terminar la transacción y no afecta a ninguna otra consulta.
+
+    En SQLite no existe y no hace falta: allí no hay dos escritores.
+    """
+    if db.bind is None or db.bind.dialect.name != "postgresql":
+        return
+    ms = get_settings().inventory_lock_timeout_ms
+    if ms <= 0:
+        return
+    await db.execute(text(f"set local lock_timeout = '{int(ms)}ms'"))
+
+
 async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
     """La fila del evento, bloqueada hasta que la transacción termine.
 
     Este es el punto de serialización de todo el módulo. Todas las rutas que
     crean o cancelan reservas pasan por aquí y en el mismo orden, que es lo que
     evita que dos operaciones se bloqueen la una a la otra.
+
+    Y con TIEMPO LÍMITE: sin él, dos peticiones por el mismo evento esperan
+    indefinidamente, cada una ocupando una conexión del pool.
     """
-    evento = await db.scalar(
-        select(Event).where(Event.id == evento_id).with_for_update()
-    )
+    await _limitar_la_espera(db)
+    try:
+        evento = await db.scalar(
+            select(Event).where(Event.id == evento_id).with_for_update()
+        )
+    except DBAPIError as error:
+        if getattr(getattr(error, "orig", None), "sqlstate", None) != _CERROJO_AGOTADO:
+            raise
+        # LA TRANSACCIÓN SE DESHACE ANTES DE LANZAR. En PostgreSQL una sentencia
+        # fallida la deja abortada, y sin esto la sesión quedaría inservible
+        # para lo siguiente que la use.
+        #
+        # No se registra el SQL: llevaría el identificador del evento y el de
+        # quien lo pedía a un sitio donde no hacen falta.
+        await db.rollback()
+        raise CerrojoOcupado from None
     if evento is None:
         raise NotFoundError("Evento no encontrado.")
     return evento

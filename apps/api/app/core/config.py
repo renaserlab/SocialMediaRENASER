@@ -64,6 +64,26 @@ class Settings(BaseSettings):
         "https://social-media-renaser.vercel.app/verificar"
     )
 
+    # --- Eventos ---
+    #: Cuanto espera una reserva a que se suelte el cerrojo del evento, en
+    #: milisegundos. CERO lo desactiva.
+    #:
+    #: Sin limite, dos peticiones por el mismo evento esperan indefinidamente y
+    #: cada una ocupa una conexion del pool: un evento popular con gente
+    #: reintentando encadena esperas hasta agotarlo, y entonces se para la API
+    #: entera y no ese evento. Cinco segundos es mucho mas de lo que tarda una
+    #: reserva y mucho menos de lo que aguanta quien mira la pantalla.
+    #:
+    #: Se aplica con `SET LOCAL`, asi que vale para ESA transaccion y no cambia
+    #: nada en la base.
+    inventory_lock_timeout_ms: int = 5000
+
+    #: La venta de entradas de eventos. APAGADA: el flujo esta construido hasta
+    #: la reserva temporal, pero no hay cobro, ni entrada emitida, ni
+    #: liquidacion. Encenderla sin eso ofreceria un carrito que no lleva a
+    #: ninguna parte.
+    feature_event_ticketing: bool = False
+
     # --- Pagos: nativo (RevenueCat) ---
     #: Verificacion servidor a servidor de las compras de las tiendas. APAGADA
     #: por defecto. Mientras este en false, `POST /payments/native/sync`

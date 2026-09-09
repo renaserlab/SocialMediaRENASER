@@ -331,6 +331,21 @@ def motivo_para_no_enviar(evento: Event, operacion: EventOperations) -> str | No
         return "Falta la fecha de inicio."
     if evento.event_type == "presential" and not (evento.location or "").strip():
         return "Un evento presencial necesita el recinto."
+    if not (operacion.timezone or "").strip():
+        return "Falta la zona horaria del evento."
+    if evento.ends_at is not None:
+        # EL FIN NO PUEDE IR ANTES QUE EL INICIO. No es una regla de estilo: la
+        # ficha pinta un rango con las dos fechas, y al revés queda un evento
+        # que termina antes de empezar. Se compara con las dos en la misma
+        # forma porque SQLite las devuelve sin zona y PostgreSQL con ella.
+        inicio = evento.starts_at
+        fin = evento.ends_at
+        if inicio.tzinfo is None and fin.tzinfo is not None:
+            fin = fin.replace(tzinfo=None)
+        elif inicio.tzinfo is not None and fin.tzinfo is None:
+            fin = fin.replace(tzinfo=timezone.utc)
+        if fin < inicio:
+            return "El fin no puede ser anterior al inicio."
     return None
 
 

@@ -696,3 +696,169 @@ async def test_dos_decisiones_a_la_vez_no_producen_una_transicion_imposible(
     assert decisiones == 1, "una decision rechazada no puede dejar fila"
     # Y el sello acompana al estado, nunca al reves.
     assert (sello == "approved") == (estado == "APPROVED")
+
+
+# --------------------------------------------------------------------------- #
+# El tiempo límite del cerrojo
+# --------------------------------------------------------------------------- #
+
+
+async def test_una_espera_demasiado_larga_no_dice_que_el_evento_esta_lleno(
+    motor, sesiones, monkeypatch
+) -> None:
+    """LO QUE NO PUEDE PASAR: que un cerrojo ocupado se cuente como aforo lleno.
+
+    Son dos cosas distintas y la diferencia importa para quien mira la
+    pantalla: «no queda sitio» es definitivo y «vuelve a intentarlo» no. Por eso
+    el fallo tiene su propio código, `inventory_lock_timeout`, y un 409 con un
+    mensaje de reintento.
+
+    Se baja el límite a 300 ms para no tener la prueba esperando cinco segundos.
+    """
+    from app.core.config import get_settings
+
+    ajustes = get_settings()
+    monkeypatch.setattr(ajustes, "inventory_lock_timeout_ms", 300, raising=False)
+
+    organizador = await _persona(motor, "org")
+    evento = await _evento(motor, organizador, 10)
+    persona = await _persona(motor, "espera")
+
+    async with sesiones() as a:
+        await inventory.bloquear_evento(a, evento)  # A se queda con la fila
+
+        async with sesiones() as b:
+            with pytest.raises(inventory.CerrojoOcupado) as fallo:
+                await inventory.reservar(
+                    db=b,
+                    evento_id=evento,
+                    usuario_id=persona,
+                    momento=inventory.eventos.ahora(),
+                )
+            assert fallo.value.code == "inventory_lock_timeout"
+            assert fallo.value.status_code == 409
+            # Y NO se apuntó a nadie.
+            assert await _confirmadas(motor, evento) == 0
+
+            # LA SESIÓN SIGUE SIRVIENDO. En PostgreSQL una sentencia fallida
+            # deja la transacción abortada; si no se deshiciera, lo siguiente
+            # que usara esa conexión fallaría por un motivo que no es el suyo.
+            otro = await _evento(motor, organizador, 5)
+            resultado = await inventory.reservar(
+                db=b,
+                evento_id=otro,
+                usuario_id=persona,
+                momento=inventory.eventos.ahora(),
+            )
+            assert resultado.inscritos == 1
+
+
+async def test_soltado_el_cerrojo_a_tiempo_la_reserva_entra(
+    motor, sesiones, monkeypatch
+) -> None:
+    """El límite no rechaza lo que llega dentro de plazo."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(
+        get_settings(), "inventory_lock_timeout_ms", 3000, raising=False
+    )
+
+    organizador = await _persona(motor, "org")
+    evento = await _evento(motor, organizador, 10)
+    persona = await _persona(motor, "paciente")
+
+    async with sesiones() as a:
+        await inventory.bloquear_evento(a, evento)
+        async with sesiones() as b:
+            intento = asyncio.create_task(
+                inventory.reservar(
+                    db=b,
+                    evento_id=evento,
+                    usuario_id=persona,
+                    momento=inventory.eventos.ahora(),
+                )
+            )
+            await asyncio.sleep(0.3)
+            assert not intento.done()
+            await a.commit()  # se suelta dentro del plazo
+            resultado = await intento
+
+    assert resultado.inscritos == 1
+    assert await _confirmadas(motor, evento) == 1
+
+
+async def test_tras_el_tiempo_limite_se_puede_reintentar(
+    motor, sesiones, monkeypatch
+) -> None:
+    """Reintentar es la salida, y funciona en cuanto el otro suelta."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "inventory_lock_timeout_ms", 300, raising=False)
+
+    organizador = await _persona(motor, "org")
+    evento = await _evento(motor, organizador, 10)
+    persona = await _persona(motor, "reintenta")
+
+    async with sesiones() as a:
+        await inventory.bloquear_evento(a, evento)
+        async with sesiones() as b:
+            with pytest.raises(inventory.CerrojoOcupado):
+                await inventory.reservar(
+                    db=b,
+                    evento_id=evento,
+                    usuario_id=persona,
+                    momento=inventory.eventos.ahora(),
+                )
+        await a.commit()
+
+    async with sesiones() as b:
+        resultado = await inventory.reservar(
+            db=b, evento_id=evento, usuario_id=persona, momento=inventory.eventos.ahora()
+        )
+    assert resultado.inscritos == 1
+
+
+async def test_el_tiempo_limite_no_deja_pasar_de_aforo(
+    motor, sesiones, monkeypatch
+) -> None:
+    """Ni con el límite puesto se cuela nadie de más.
+
+    El cerrojo con plazo sigue siendo un cerrojo: quien no llega a tomarlo no
+    inserta, y quien lo toma cuenta lo que hay.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "inventory_lock_timeout_ms", 2000, raising=False)
+
+    organizador = await _persona(motor, "org")
+    evento = await _evento(motor, organizador, 2)
+    personas = [await _persona(motor, f"lim{i}") for i in range(8)]
+
+    resultados = await _a_la_vez(sesiones, evento, personas)
+
+    entraron = sum(r == "ok" for r in resultados)
+    assert entraron == 2, resultados
+    assert await _confirmadas(motor, evento) == 2
+
+
+async def test_sin_limite_configurado_no_se_toca_la_base(
+    motor, sesiones, monkeypatch
+) -> None:
+    """Cero desactiva el límite, y entonces no se emite ningún `SET`.
+
+    Lo que se comprueba es que la reserva sigue funcionando igual: el ajuste es
+    una decisión de despliegue, no una condición para que el aforo funcione.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "inventory_lock_timeout_ms", 0, raising=False)
+
+    organizador = await _persona(motor, "org")
+    evento = await _evento(motor, organizador, 3)
+    persona = await _persona(motor, "sinlimite")
+
+    async with sesiones() as db:
+        resultado = await inventory.reservar(
+            db=db, evento_id=evento, usuario_id=persona, momento=inventory.eventos.ahora()
+        )
+    assert resultado.inscritos == 1

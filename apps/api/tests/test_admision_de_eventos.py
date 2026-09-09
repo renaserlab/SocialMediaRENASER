@@ -205,6 +205,51 @@ async def test_un_borrador_incompleto_dice_que_le_falta(entorno):
 
 
 @pytest.mark.asyncio
+async def test_sin_zona_horaria_no_se_envia(entorno):
+    """`starts_at` guarda el instante, no dónde ocurre.
+
+    Sin la zona, la ficha no puede escribir «19:00 hora de Lima» sin
+    inventárselo, y el blueprint la pide en el punto 3 del detalle.
+    """
+    http, _, _ = entorno
+    creado = await http.post(EVENTOS, json=_borrador(timezone=None))
+    ident = creado.json()["id"]
+    assert creado.json()["motivo_para_no_enviar"] == "Falta la zona horaria del evento."
+    respuesta = await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+    assert respuesta.status_code == 422
+    assert "zona horaria" in respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_un_fin_anterior_al_inicio_no_se_envia(entorno):
+    """Un evento que termina antes de empezar sale impreso como un rango al
+    revés en la ficha pública."""
+    http, _, _ = entorno
+    inicio = datetime.now(timezone.utc) + timedelta(days=30)
+    creado = await http.post(
+        EVENTOS,
+        json=_borrador(
+            starts_at=inicio.isoformat(),
+            ends_at=(inicio - timedelta(hours=2)).isoformat(),
+        ),
+    )
+    ident = creado.json()["id"]
+    assert creado.json()["motivo_para_no_enviar"] == (
+        "El fin no puede ser anterior al inicio."
+    )
+    respuesta = await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+    assert respuesta.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_sin_fin_si_se_puede_enviar(entorno):
+    """`ends_at` es anulable: un evento puede anunciarse sin hora de cierre."""
+    http, _, _ = entorno
+    creado = await http.post(EVENTOS, json=_borrador(ends_at=None))
+    assert creado.json()["motivo_para_no_enviar"] is None
+
+
+@pytest.mark.asyncio
 async def test_el_borrador_se_guarda_a_medias(entorno):
     http, _, _ = entorno
     creado = await http.post(EVENTOS, json={"title": "Empiezo", "description": ""})
