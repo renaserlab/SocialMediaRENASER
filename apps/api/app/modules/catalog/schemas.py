@@ -172,6 +172,13 @@ class EventRead(BaseModel):
     #: `upcoming` por defecto SOLO para que el esquema tenga un valor de
     #: respaldo; el router siempre lo escribe.
     time_state: str = "upcoming"
+    #: La curaduria: `none`, `pending`, `approved` o `rejected`. Un evento
+    #: heredado —de antes de que existiera la admision— es `none`, y no se le
+    #: regala el sello por llevar tiempo publicado.
+    selection_status: str = "none"
+    #: «Seleccionado por Z». Lo AFIRMA EL SERVIDOR y la app no lo deduce de
+    #: ninguna otra cosa: sin este campo en verdadero, el sello no se pinta.
+    seleccionado_por_z: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

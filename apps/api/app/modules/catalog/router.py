@@ -58,6 +58,11 @@ from app.modules.catalog.schemas import (
     EventUpdate,
 )
 from app.modules.learning.models import CourseLesson, CourseModule
+from app.modules.events import esquema as esquema_de_eventos
+from app.modules.events import inventory as inventario
+from app.modules.events import states as estados_de_evento
+from app.modules.events import service as servicio_de_eventos
+from app.modules.events.models import EventOperations
 from app.modules.gobernanza import auditoria
 from app.modules.profiles.models import Profile
 from app.modules.gobernanza.schemas import VersionDeCurso
@@ -84,11 +89,19 @@ async def create_event(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    """Publica un evento o una cita. Queda a nombre de quien lo organiza.
+    """Crea un evento a nombre de quien lo organiza. NACE BORRADOR.
+
+    ANTES NACIA PUBLICADO, y eso era autopublicacion: cualquiera con una cuenta
+    ponia un evento en el catalogo sin que nadie lo revisara. El blueprint lo
+    prohibe en su primera decision cerrada, y ademas era la puerta mas ancha que
+    tenia la aplicacion.
+
+    LA RUTA SE MANTIENE por compatibilidad con los binarios ya instalados: lo
+    que cambia es que el evento no se ve hasta que la admision lo aprueba. Para
+    llevarlo por el flujo entero —enviar, revisar, publicar— esta `/events`.
 
     Lo que protege esto de verdad es el servidor, no la interfaz: que la app
-    oculte un boton no impide llamar al endpoint a mano. Por eso editar sigue
-    comprobandose aqui contra el organizador.
+    oculte un boton no impide llamar al endpoint a mano.
     """
     event = Event(
         organizer_id=current_user.id,
@@ -100,9 +113,22 @@ async def create_event(
         cover_path=payload.cover_path,
         whatsapp_url=payload.whatsapp_url,
         event_type=payload.event_type,
-        status="published",
+        status="draft",
     )
     db.add(event)
+    await db.flush()
+    if await esquema_de_eventos.hay_eventos_v2(db):
+        # Con la 0060 puesta, el evento entra en el ciclo operativo desde el
+        # primer momento. Sin ella se queda en borrador igual: `status` es lo
+        # que el catalogo publico mira, y `draft` no se enseña.
+        db.add(
+            EventOperations(
+                event_id=event.id,
+                workflow_status=estados_de_evento.BORRADOR,
+                selection_status="none",
+                origin="events_v2",
+            )
+        )
     await db.commit()
     await db.refresh(event)
     return _to_event_read(event, 0, 0)
@@ -339,8 +365,14 @@ def _to_event_read(
     reserved: int,
     momento: datetime | None = None,
     organizador: Profile | None = None,
+    operacion: EventOperations | None = None,
 ) -> EventRead:
+    # EL SELLO SOLO SI EL SERVIDOR LO CONFIRMA. Sin fila operativa —evento
+    # heredado, o la 0060 todavia sin aplicar— es `none`, y la app no lo pinta.
+    seleccion = operacion.selection_status if operacion is not None else "none"
     return EventRead(
+        selection_status=seleccion,
+        seleccionado_por_z=seleccion == "approved",
         id=event.id,
         organizer_id=event.organizer_id,
         # Vacíos si no hay perfil. El servidor manda '' y la pantalla decide qué
@@ -465,9 +497,19 @@ async def list_events(
             )
         )
     }
+    # Las filas operativas de la pagina, en UNA consulta. Una por evento seria
+    # N+1 en el listado mas visitado de la aplicacion.
+    operaciones = (
+        await servicio_de_eventos.operaciones_de(db, [fila[0].id for fila in rows])
+        if await esquema_de_eventos.hay_eventos_v2(db)
+        else {}
+    )
     return [
         _to_event_read(
-            *fila, momento=momento, organizador=organizadores.get(fila[0].organizer_id)
+            *fila,
+            momento=momento,
+            organizador=organizadores.get(fila[0].organizer_id),
+            operacion=operaciones.get(fila[0].id),
         )
         for fila in rows
     ]
@@ -514,8 +556,18 @@ async def get_event(
             )
         )
     organizador = await db.get(Profile, evento.organizer_id)
+    operacion = (
+        await servicio_de_eventos.operacion_de(db, evento.id)
+        if await esquema_de_eventos.hay_eventos_v2(db)
+        else None
+    )
     return _to_event_read(
-        evento, inscritos, mia, momento=momento, organizador=organizador
+        evento,
+        inscritos,
+        mia,
+        momento=momento,
+        organizador=organizador,
+        operacion=operacion,
     )
 
 
@@ -525,34 +577,27 @@ async def reserve_event(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    event = await db.get(Event, event_id)
-    if event is None or event.status != "published":
-        raise NotFoundError("Evento no encontrado.")
+    """Apunta a alguien a un evento gratuito.
 
-    existing = await db.get(
-        EventRegistration, {"event_id": event_id, "user_id": current_user.id}
+    EL AFORO LO ARBITRA LA BASE, no este endpoint. Contar y despues insertar
+    —que es lo que habia aqui— deja pasar a dos personas al ultimo sitio: las
+    dos leen el mismo numero antes de que ninguna haya escrito. Ahora la fila
+    del evento se bloquea y todo ocurre dentro de esa transaccion; el detalle
+    esta en `events/inventory.py`.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    momento = eventos.ahora()
+    resultado = await inventario.reservar(
+        db, evento_id=event_id, usuario_id=current_user.id, momento=momento
     )
-    if existing is None:
-        # NO SE RESERVA ALGO QUE YA TERMINO. La interfaz dejo de ofrecerlo al
-        # separar los eventos por fecha, pero la interfaz no es la proteccion:
-        # una peticion directa —o un binario viejo, que sigue enseñando el boton
-        # porque no sabe distinguir— apuntaba a este endpoint y se apuntaba a un
-        # evento del mes pasado.
-        #
-        # Se comprueba SOLO al crear la reserva. Quien ya la tenia recibe la
-        # misma respuesta de siempre: el evento paso, pero su reserva existio y
-        # negarla ahora seria reescribir el pasado.
-        if eventos.estado_de(event, eventos.ahora()) == eventos.ANTERIOR:
-            raise ConflictError("Ese evento ya terminó.")
-        if event.capacity is not None:
-            count = await _registrations_count(db, event_id)
-            if count >= event.capacity:
-                raise ConflictError("El evento alcanzó su capacidad máxima.")
-        db.add(EventRegistration(event_id=event_id, user_id=current_user.id))
-        await db.commit()
-
-    count = await _registrations_count(db, event_id)
-    return _to_event_read(event, count, 1)
+    organizador = await db.get(Profile, resultado.evento.organizer_id)
+    return _to_event_read(
+        resultado.evento,
+        resultado.inscritos,
+        1,
+        momento=momento,
+        organizador=organizador,
+    )
 
 
 @router.delete("/events/{event_id}/reserve", response_model=EventRead)
@@ -561,17 +606,20 @@ async def cancel_reservation(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    event = await db.get(Event, event_id)
-    if event is None:
-        raise NotFoundError("Evento no encontrado.")
-    existing = await db.get(
-        EventRegistration, {"event_id": event_id, "user_id": current_user.id}
+    """Devuelve la plaza. Cancelar lo que no existe no es un error.
+
+    Toma EL MISMO cerrojo que reservar: sin el, el hueco que se libera podria
+    contarse dos veces.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    momento = eventos.ahora()
+    resultado = await inventario.cancelar(
+        db, evento_id=event_id, usuario_id=current_user.id
     )
-    if existing is not None:
-        await db.delete(existing)
-        await db.commit()
-    count = await _registrations_count(db, event_id)
-    return _to_event_read(event, count, 0)
+    organizador = await db.get(Profile, resultado.evento.organizer_id)
+    return _to_event_read(
+        resultado.evento, resultado.inscritos, 0, momento=momento, organizador=organizador
+    )
 
 
 def _patron_de_busqueda(texto: str) -> str:
