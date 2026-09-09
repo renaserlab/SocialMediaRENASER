@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
@@ -701,7 +701,40 @@ async def pendientes(
             .offset(desplazamiento)
         )
     ).all()
-    return await _con_conteos(db, filas)
+    expedientes = await _con_conteos(db, filas)
+    # LAS EVALUACIONES DE LA PÁGINA, en UNA consulta. Sin esto la cola decía
+    # «sin evaluar» en todas las filas, incluidas las que ya tenían puntaje:
+    # no es que faltara un dato, es que enseñaba uno falso.
+    await _con_evaluaciones(db, expedientes)
+    return expedientes
+
+
+async def _con_evaluaciones(db: AsyncSession, expedientes: list[Expediente]) -> None:
+    """Cuelga a cada expediente la evaluación DE SU VERSIÓN VIGENTE.
+
+    Se pide por el par `(evento, versión)` y no solo por evento: una evaluación
+    de la versión 1 no dice nada de la 2, y colgarla ahí haría creer que lo
+    último enviado ya se miró.
+    """
+    pares = [
+        (exp.evento.id, exp.operacion.current_version)
+        for exp in expedientes
+        if exp.operacion.current_version is not None
+    ]
+    if not pares:
+        return
+    filas = await db.scalars(
+        select(EventAdmissionReview).where(
+            tuple_(
+                EventAdmissionReview.event_id, EventAdmissionReview.version
+            ).in_(pares)
+        )
+    )
+    por_evento = {(f.event_id, f.version): f for f in filas}
+    for exp in expedientes:
+        exp.evaluacion = por_evento.get(
+            (exp.evento.id, exp.operacion.current_version)
+        )
 
 
 async def _con_conteos(db: AsyncSession, filas) -> list[Expediente]:

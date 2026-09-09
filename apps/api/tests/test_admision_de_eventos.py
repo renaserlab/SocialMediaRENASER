@@ -692,6 +692,52 @@ async def test_la_cola_de_revision_trae_lo_enviado(entorno):
 
 
 @pytest.mark.asyncio
+async def test_la_cola_dice_cual_ya_esta_evaluado(entorno):
+    """La cola decía «sin evaluar» en TODAS las filas, tuvieran puntaje o no.
+
+    No era un dato que faltara: era un dato falso. `pendientes` no cargaba la
+    evaluación y la pantalla lo interpretaba como que nadie lo había mirado.
+    """
+    http, identidad, _ = entorno
+    evaluado = await _crea_y_envia(http, identidad)
+    await _evalua(http, identidad, evaluado, APRUEBA)
+    identidad["uid"] = ORG
+    sin_evaluar = await _crea_y_envia(http, identidad)
+
+    identidad["uid"] = CURADORA
+    cola = {e["id"]: e for e in (await http.get(f"{ADMIN}/pending")).json()}
+
+    assert cola[evaluado]["evaluacion"] is not None
+    assert cola[evaluado]["evaluacion"]["total"] == 90
+    assert cola[sin_evaluar]["evaluacion"] is None
+
+
+@pytest.mark.asyncio
+async def test_la_evaluacion_de_una_version_vieja_no_cuenta_por_la_nueva(entorno):
+    """Evaluar la versión 1 no dice nada de la 2.
+
+    Colgarla igual haría creer que lo último enviado ya se miró, que es peor
+    que no decir nada.
+    """
+    http, identidad, _ = entorno
+    ident = await _crea_y_envia(http, identidad)
+    await _evalua(http, identidad, ident, APRUEBA)
+
+    identidad["uid"] = CURADORA
+    await http.post(
+        f"{ADMIN}/{ident}/request-changes", json={"motivo": "Falta el recinto exacto."}
+    )
+    identidad["uid"] = ORG
+    await http.patch(f"{EVENTOS}/{ident}", json={"location": "Casa Tupac"})
+    await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": "Corregido"})
+
+    identidad["uid"] = CURADORA
+    cola = (await http.get(f"{ADMIN}/pending")).json()
+    assert cola[0]["current_version"] == 2
+    assert cola[0]["evaluacion"] is None
+
+
+@pytest.mark.asyncio
 async def test_mis_eventos_solo_trae_los_mios(entorno):
     http, identidad, _ = entorno
     mio = await _crea_y_envia(http, identidad)
