@@ -358,7 +358,11 @@ export function ConfigurarEntradasScreen() {
               maxLength={9}
             />
             <Text variant="caption" color={colors.textMuted}>
-              {t('entradas.precioEnCentavos')}
+              {/* EL EJEMPLO, EN LA MONEDA DEL EVENTO. Fijaba «S/ 49.00»
+                  tambien para un evento en dolares. */}
+              {t('entradas.precioEnCentavos', {
+                ejemplo: importeConMoneda(4900, config?.currency ?? ''),
+              })}
             </Text>
             <Input
               label={t('entradas.campoCupo')}

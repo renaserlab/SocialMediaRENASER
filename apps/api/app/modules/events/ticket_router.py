@@ -13,6 +13,8 @@ ficha y la reserva gratuita siguen exactamente igual.
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,9 +78,14 @@ async def _hold_leido(
     db: AsyncSession, hold, momento
 ) -> HoldRead:
     lineas = await ticketing.lineas_de(db, hold.id)
-    restantes = int(
+    # HACIA ARRIBA, NO TRUNCADO. Con 0,4 segundos por delante, `int()` devolvia
+    # cero sobre una reserva que el servidor sigue considerando ACTIVA: la
+    # pantalla veia el contador en cero, volvia a preguntar, recibia lo mismo y
+    # repetia la peticion durante esa ventana de menos de un segundo. Redondear
+    # hacia arriba dice la verdad —queda algo— y cierra el bucle.
+    restantes = math.ceil(
         max(
-            0,
+            0.0,
             (
                 ticketing._comparable(hold.expires_at, momento) - momento
             ).total_seconds(),

@@ -13,6 +13,7 @@ import { importeConMoneda } from '@/lib/dinero';
 import {
   claveDeErrorDeEntradas,
   claveDelEstadoDeReserva,
+  esFalloDeRed,
   comoReloj,
   segundosRestantes,
   sigueEnPie,
@@ -56,9 +57,9 @@ export function ReservaDeEntradasScreen() {
    * Las otras dos pantallas ya ramificaban por código; esta lo mandaba todo al
    * mismo saco.
    */
-  const [fallo, setFallo] = useState<'red' | 'noEncontrada' | 'noDisponible' | null>(
-    null,
-  );
+  const [fallo, setFallo] = useState<
+    'red' | 'sinConexion' | 'noEncontrada' | 'noDisponible' | null
+  >(null);
   const [liberando, setLiberando] = useState(false);
   const liberandoRef = useRef(false);
   /** Para no volver a preguntar en bucle cuando el contador llega a cero. */
@@ -83,6 +84,8 @@ export function ReservaDeEntradasScreen() {
         error.code === 'event_ticketing_not_available'
       ) {
         setFallo('noDisponible');
+      } else if (error instanceof ApiError && esFalloDeRed(error.code)) {
+        setFallo('sinConexion');
       } else {
         setFallo('red');
       }
@@ -191,8 +194,8 @@ export function ReservaDeEntradasScreen() {
           />
         ) : (
           <StateView
-            state="error"
-            description={t('common.loadFailed')}
+            state={fallo === 'sinConexion' ? 'offline' : 'error'}
+            description={fallo === 'sinConexion' ? undefined : t('common.loadFailed')}
             onRetry={() => void cargar()}
           />
         )}

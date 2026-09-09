@@ -193,6 +193,17 @@ export function claveDeErrorDeEntradas(
 }
 
 /**
+ * Si el fallo fue de la red y no del servidor.
+ *
+ * `StateView` tiene un estado `offline` con su icono y su frase, y ninguna de
+ * las tres pantallas lo usaba: un teléfono sin cobertura leía «No pudimos
+ * cargar el contenido», que suena a que algo se rompió y no a lo que pasa.
+ */
+export function esFalloDeRed(codigo: string | null | undefined): boolean {
+  return codigo === 'network_error' || codigo === 'timeout';
+}
+
+/**
  * La reserva que estorba, sacada del detalle de un 409.
  *
  * El servidor manda `{"hold_id": ...}` con `ticket_hold_already_active`. Sin

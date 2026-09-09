@@ -2199,7 +2199,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'entradas.campoNombre': 'Name',
   'entradas.campoDescripcion': 'Description',
   'entradas.campoPrecio': 'Price in {moneda}',
-  'entradas.precioEnCentavos': 'In cents: 4900 is S/ 49.00.',
+  'entradas.precioEnCentavos': 'In minor units: 4900 is {ejemplo}.',
   'entradas.campoCupo': 'Quota',
   'entradas.campoMinimo': 'Minimum per order',
   'entradas.campoMaximo': 'Maximum per order',

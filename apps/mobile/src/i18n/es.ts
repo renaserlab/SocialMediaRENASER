@@ -2302,7 +2302,7 @@ export const es = {
   'entradas.campoNombre': 'Nombre',
   'entradas.campoDescripcion': 'Descripción',
   'entradas.campoPrecio': 'Precio en {moneda}',
-  'entradas.precioEnCentavos': 'En céntimos: 4900 son S/ 49.00.',
+  'entradas.precioEnCentavos': 'En céntimos: 4900 son {ejemplo}.',
   'entradas.campoCupo': 'Cupo',
   'entradas.campoMinimo': 'Mínimo por operación',
   'entradas.campoMaximo': 'Máximo por operación',

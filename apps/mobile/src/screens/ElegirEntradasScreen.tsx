@@ -14,6 +14,7 @@ import {
   cantidadPosible,
   claveDeErrorDeEntradas,
   cuantasElegidas,
+  esFalloDeRed,
   hayExistencias,
   huellaDeSeleccion,
   menorTope,
@@ -61,7 +62,9 @@ export function ElegirEntradasScreen() {
   const [libre, setLibre] = useState<Disponibilidad | null>(null);
   const [seleccion, setSeleccion] = useState<Seleccion>({});
   const [cargando, setCargando] = useState(true);
-  const [fallo, setFallo] = useState<'red' | 'sinEntradas' | 'noDisponible' | null>(null);
+  const [fallo, setFallo] = useState<
+    'red' | 'sinConexion' | 'sinEntradas' | 'noDisponible' | null
+  >(null);
   const [apartando, setApartando] = useState(false);
   /** Cerrojo síncrono: dos toques no mandan dos reservas. */
   const apartandoRef = useRef(false);
@@ -105,6 +108,8 @@ export function ElegirEntradasScreen() {
         error.code === 'event_ticketing_not_available'
       ) {
         setFallo('noDisponible');
+      } else if (error instanceof ApiError && esFalloDeRed(error.code)) {
+        setFallo('sinConexion');
       } else {
         setFallo('red');
       }
@@ -207,10 +212,10 @@ export function ElegirEntradasScreen() {
     return (
       <AppScreen>
         <AppHeader title={t('entradas.titulo')} onBack={volver} />
-        {fallo === 'red' ? (
+        {fallo === 'red' || fallo === 'sinConexion' ? (
           <StateView
-            state="error"
-            description={t('common.loadFailed')}
+            state={fallo === 'sinConexion' ? 'offline' : 'error'}
+            description={fallo === 'sinConexion' ? undefined : t('common.loadFailed')}
             onRetry={() => void cargar()}
           />
         ) : (

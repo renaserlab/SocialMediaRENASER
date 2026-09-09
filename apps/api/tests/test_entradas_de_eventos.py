@@ -1154,3 +1154,24 @@ async def test_la_ficha_dice_en_que_moneda_esta_el_precio(entorno):
     gratis = (await http.get(f"{CATALOGO}/events/{GRATUITO}")).json()
     assert gratis["price_from_minor"] is None
     assert gratis["currency"] is None
+
+
+@pytest.mark.asyncio
+async def test_una_reserva_viva_nunca_dice_cero_segundos(entorno):
+    """Cero segundos sobre una reserva ACTIVA hacía que la pantalla preguntara
+    en bucle: veía el contador a cero, recargaba, recibía lo mismo y repetía.
+
+    Con menos de un segundo por delante queda algo, y el número lo dice.
+    """
+    http, _, sesiones = entorno
+    creada = await _apartar(http, GENERAL, 1, "medio-segundo")
+    assert creada.status_code == 201
+
+    async with sesiones() as db:
+        hold = await db.get(EventTicketHold, creada.json()["id"])
+        hold.expires_at = datetime.now(timezone.utc) + timedelta(milliseconds=400)
+        await db.commit()
+
+    leida = (await http.get(f"{EVENTOS}/ticket-holds/{creada.json()['id']}")).json()
+    assert leida["status"] == "ACTIVE"
+    assert leida["segundos_restantes"] >= 1, "activa y con cero segundos es un bucle"
