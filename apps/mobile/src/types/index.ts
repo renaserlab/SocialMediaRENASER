@@ -295,6 +295,13 @@ export type EventItem = {
    * evento lleve tiempo publicado. Sin confirmacion, no se pinta.
    */
   seleccionadoPorZ?: boolean;
+  /**
+   * Como se accede al evento. `null` significa «no se pregunto»: solo la ficha
+   * lo trae, y sin el la pantalla NO decide que es gratuito.
+   */
+  accessMode?: string | null;
+  /** El precio mas barato que queda, en unidad menor. `null` si no hay. */
+  precioDesde?: number | null;
   /** Quien organiza el evento; permite listar los de un perfil. */
   organizerId?: string;
   /** Fecha real de inicio; `date` es solo el texto ya formateado. */

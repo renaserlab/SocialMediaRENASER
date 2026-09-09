@@ -566,6 +566,16 @@ export function EditarEventoScreen() {
         </Text>
       ) : null}
 
+      {/* La configuración de entradas vive en su propia pantalla: aquí es el
+          evento, allí es lo que se vende. */}
+      <Button
+        label={t('entradas.configurar')}
+        variant="secondary"
+        icon="tag"
+        onPress={() => router.push(`/configurar-entradas/${id}` as never)}
+        disabled={ocupado}
+      />
+
       {editable ? (
         <>
           <Button

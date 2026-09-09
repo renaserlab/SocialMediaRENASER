@@ -61,6 +61,7 @@ from app.modules.learning.models import CourseLesson, CourseModule
 from app.modules.events import esquema as esquema_de_eventos
 from app.modules.events import inventory as inventario
 from app.modules.events import states as estados_de_evento
+from app.modules.events import ticketing as entradas
 from app.modules.events import service as servicio_de_eventos
 from app.modules.events.models import EventOperations
 from app.modules.gobernanza import auditoria
@@ -591,7 +592,7 @@ async def get_event(
         if await esquema_de_eventos.hay_eventos_v2(db)
         else None
     )
-    return _to_event_read(
+    ficha = _to_event_read(
         evento,
         inscritos,
         mia,
@@ -599,6 +600,17 @@ async def get_event(
         organizador=organizador,
         operacion=operacion,
     )
+    # EL MODO DE ACCESO Y EL PRECIO DESDE, solo en la FICHA. Preguntarlo por
+    # cada fila del listado seria una consulta por evento en la pantalla mas
+    # visitada, y este es un evento.
+    if await esquema_de_eventos.hay_entradas(db):
+        ajustes = await entradas.configuracion(db, evento.id)
+        ficha.access_mode = entradas.modo_de_acceso(ajustes)
+        if entradas.vende_entradas(ajustes):
+            ficha.price_from_minor = entradas.precio_desde(
+                await entradas.tipos_de(db, evento.id, solo_a_la_venta=True)
+            )
+    return ficha
 
 
 @router.post("/events/{event_id}/reserve", response_model=EventRead)

@@ -150,8 +150,19 @@ describe('lo que la ficha NO pinta', () => {
     }
   });
 
-  it('ni precio ni entradas: los eventos no tienen ninguna de las dos cosas', () => {
-    for (const palabra of ['precio', 'price', 'Desde S/', 'entrada', 'ticket', 'comprar']) {
+  it('el precio solo cuando el evento vende entradas', () => {
+    /*
+      ESTA PRUEBA DECÍA LO CONTRARIO, y tenía razón entonces: los eventos no
+      tenían precio ni entradas, así que cualquier mención prometía un flujo
+      que no existía. Ahora existe, y lo que hay que defender es otra cosa: que
+      el precio no aparezca en un evento GRATUITO.
+
+      La condición es `vendeEntradas(evento.accessMode)`, y `accessMode` a
+      `null` —que es lo que llega del listado— NO vende entradas.
+    */
+    assert.ok(PANTALLA.includes('vendeEntradas(evento.accessMode)'));
+    // Y sigue sin haber compra: ni pasarela, ni total, ni «comprar».
+    for (const palabra of ['comprar', 'checkout', 'Stripe', 'pagar']) {
       assert.ok(
         !PANTALLA.toLowerCase().includes(palabra.toLowerCase()),
         `«${palabra}» prometería un flujo que no existe`,

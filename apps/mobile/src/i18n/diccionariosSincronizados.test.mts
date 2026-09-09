@@ -73,6 +73,9 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Formato puro: un numero, un separador y un importe ya formateado.
+    'entradas.subtotalDeTipo',
+    'reserva.porUnidad',
     // «Total» se escribe igual en los dos idiomas.
     'constancia.total',
     'home.live', // «Live» ya es la palabra inglesa.
@@ -96,6 +99,15 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // Entradas: «Desde», «Reserva gratuita», «Retirar» y «Retirado» se
+    // escriben exactamente igual en los dos idiomas; las dos ultimas son
+    // formato puro.
+    'evento.desde',
+    'modoDeAcceso.FREE_RSVP',
+    'entradas.retirar',
+    'entradas.estado.retired',
+    'entradas.subtotalDeTipo',
+    'reserva.porUnidad',
     // Admision de eventos. «Publicado», «Cancelado», «Editar evento»,
     // «Titulo», «Publicar» y «Total: … de …» se escriben exactamente igual en
     // los dos idiomas; `admisionEvento.deTope` es formato puro.

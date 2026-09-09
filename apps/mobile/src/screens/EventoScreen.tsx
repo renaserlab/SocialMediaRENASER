@@ -10,6 +10,8 @@ import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
+import { importeConMoneda } from '@/lib/dinero';
+import { vendeEntradas } from '@/lib/entradasDeEvento';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
 import {
@@ -249,7 +251,29 @@ export function EventoScreen() {
         precio, ni entradas, ni pago de eventos. Ofrecer «Comprar» sería
         prometer un flujo que no existe.
       */}
-      {puedeReservar ? (
+      {/*
+        LOS DOS FLUJOS NO CONVIVEN. Un evento gratuito ofrece «Reservar»; uno con
+        entradas, «Elegir entradas». Enseñar los dos dejaría a alguien apuntado
+        gratis a un evento que vende entradas.
+
+        `accessMode` a `null` significa «no se preguntó», y entonces se ofrece lo
+        de siempre: es el comportamiento heredado y el único que no inventa nada.
+      */}
+      {puedeReservar && vendeEntradas(evento.accessMode) ? (
+        <>
+          {evento.precioDesde !== null && evento.precioDesde !== undefined ? (
+            <Text variant="secondary" weight="700">
+              {t('evento.desde', {
+                importe: importeConMoneda(evento.precioDesde, 'PEN'),
+              })}
+            </Text>
+          ) : null}
+          <Button
+            label={t('evento.elegirEntradas')}
+            onPress={() => router.push(`/entradas/${evento.id}` as never)}
+          />
+        </>
+      ) : puedeReservar ? (
         <Button
           label={evento.reservedByMe ? t('evento.cancelar') : t('evento.reservar')}
           variant={evento.reservedByMe ? 'secondary' : 'primary'}

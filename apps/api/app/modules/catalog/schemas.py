@@ -179,6 +179,17 @@ class EventRead(BaseModel):
     #: «Seleccionado por Z». Lo AFIRMA EL SERVIDOR y la app no lo deduce de
     #: ninguna otra cosa: sin este campo en verdadero, el sello no se pinta.
     seleccionado_por_z: bool = False
+    #: Cómo se accede: `FREE_RSVP`, `TICKETED` o `INVITATION_ONLY`.
+    #:
+    #: `None` SIGNIFICA «NO SE PREGUNTÓ», y solo la FICHA lo rellena. El listado
+    #: no lo trae a propósito: averiguarlo por cada fila sería una consulta por
+    #: evento en la pantalla más visitada, y devolver `FREE_RSVP` por omisión
+    #: haría que un evento con entradas apareciera como gratuito.
+    access_mode: str | None = None
+    #: El precio más barato que queda, en unidad menor. `None` cuando no hay
+    #: ninguno a la venta: entonces no se escribe «Desde», que sería un precio
+    #: sobre una lista vacía.
+    price_from_minor: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -30,6 +30,15 @@ export type EventDto = {
   selection_status?: string | null;
   /** «Seleccionado por Z». LO AFIRMA EL SERVIDOR; aqui no se deduce. */
   seleccionado_por_z?: boolean | null;
+  /**
+   * `FREE_RSVP`, `TICKETED` o `INVITATION_ONLY`.
+   *
+   * AUSENTE SIGNIFICA «NO SE PREGUNTO», y solo la FICHA lo trae: el listado no
+   * lo pide porque averiguarlo por fila seria una consulta por evento.
+   */
+  access_mode?: string | null;
+  /** El precio mas barato que queda, en unidad menor. */
+  price_from_minor?: number | null;
 };
 
 /**
@@ -103,5 +112,10 @@ export function toEventItem(dto: EventDto): EventItem {
     // comparacion `undefined` acabaria pintandolo en cuanto alguien escribiera
     // `!== false` por descuido.
     seleccionadoPorZ: dto.seleccionado_por_z === true,
+    // `?? null` y no un valor por defecto: `FREE_RSVP` por omision haria que un
+    // evento con entradas apareciera como gratuito en cuanto el servidor no lo
+    // mandara (el listado no lo manda).
+    accessMode: dto.access_mode ?? null,
+    precioDesde: dto.price_from_minor ?? null,
   };
 }
