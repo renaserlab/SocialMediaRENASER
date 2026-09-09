@@ -26,9 +26,11 @@
 --   * Un tipo de entrada de OTRO evento no puede estar en una reserva. Otra
 --     clave ajena compuesta, la misma idea que usa `quiz_answers` en la 0058.
 --   * `subtotal = cantidad × precio unitario`, en cada línea.
---   * La suma de las líneas cuadra con la cabecera. Es una restricción entre
---     filas, así que la sostiene un disparador DIFERIDO: se comprueba al
---     confirmar, cuando ya están todas las líneas escritas.
+--   * La suma de las líneas cuadra con la cabecera, Y la cabecera tiene al
+--     menos una línea. Es una restricción entre filas, así que la sostiene un
+--     disparador DIFERIDO: se comprueba al confirmar, cuando ya están todas
+--     las líneas escritas. Cuelga de las dos tablas, porque una cabecera sola
+--     no dispara nada colgado solo de las líneas.
 --   * Un solo hold ACTIVO por persona y evento (índice parcial).
 --   * Una clave de idempotencia no se repite para la misma persona y evento.
 --   * Cantidades y precios enteros y no negativos. Nunca un flotante: en dinero
@@ -43,6 +45,7 @@
 -- creer que alguien decidió algo sobre ellos.
 --
 -- ROLLBACK REALISTA:
+--   drop trigger if exists event_ticket_holds_cuadran on public.event_ticket_holds;
 --   drop trigger if exists event_ticket_hold_items_cuadran on public.event_ticket_hold_items;
 --   drop function if exists public.exigir_que_el_hold_cuadre();
 --   drop table if exists public.event_ticket_hold_items;
@@ -110,7 +113,12 @@ create table if not exists public.event_ticket_types (
   -- EN UNIDAD MENOR Y ENTERO. 4900 son S/ 49.00. Cero es válido: una entrada
   -- gratuita dentro de un evento con entradas es un caso real —una cortesía—,
   -- y no es lo mismo que un evento `FREE_RSVP`.
-  price_minor integer not null
+  -- BIGINT, no `integer`. El CHECK de las líneas multiplica precio por
+  -- cantidad, y `int4 * int4` desborda en PostgreSQL: con 100 entradas de
+  -- 21 474 837 céntimos la operación revienta con «integer out of range», que
+  -- llega al cliente como un 500 en vez de un 422. El contrato lo acota
+  -- además por arriba, pero la columna no puede ser el eslabón corto.
+  price_minor bigint not null
     constraint event_ticket_types_precio check (price_minor >= 0),
   currency char(3) not null
     constraint event_ticket_types_moneda check (currency ~ '^[A-Z]{3}$'),
@@ -181,7 +189,7 @@ create table if not exists public.event_ticket_holds (
     constraint event_ticket_holds_moneda check (currency ~ '^[A-Z]{3}$'),
 
   -- Suma de las líneas. El disparador de más abajo lo comprueba.
-  subtotal_minor integer not null
+  subtotal_minor bigint not null
     constraint event_ticket_holds_subtotal check (subtotal_minor >= 0),
 
   expires_at timestamptz not null,
@@ -229,11 +237,11 @@ create table if not exists public.event_ticket_hold_items (
 
   -- EL PRECIO CONGELADO. Se copia del tipo al crear la reserva: si el
   -- organizador lo cambia después, el resumen sigue diciendo lo que se apartó.
-  unit_price_minor integer not null
+  unit_price_minor bigint not null
     constraint event_ticket_hold_items_precio check (unit_price_minor >= 0),
-  subtotal_minor integer not null
+  subtotal_minor bigint not null
     constraint event_ticket_hold_items_subtotal
-    check (subtotal_minor = quantity * unit_price_minor),
+    check (subtotal_minor = quantity::bigint * unit_price_minor),
 
   -- Y el nombre, también congelado, por lo mismo.
   ticket_type_name_snapshot text not null
@@ -269,12 +277,23 @@ returns trigger
 language plpgsql
 as $$
 declare
-  objetivo uuid := coalesce(new.hold_id, old.hold_id);
-  suma integer;
-  cabecera integer;
+  objetivo uuid;
+  suma bigint;
+  cabecera bigint;
+  lineas integer;
 begin
-  select coalesce(sum(subtotal_minor), 0) into suma
-  from public.event_ticket_hold_items where hold_id = objetivo;
+  -- DE QUÉ RESERVA SE HABLA. El mismo disparador cuelga de las DOS tablas, y
+  -- no por simetría: colgado solo de las líneas, una cabecera SIN NINGUNA
+  -- línea no lo dispara jamás. Una fila que dice «he apartado 500 soles» y no
+  -- tiene debajo ni una entrada entraba y se quedaba, y la migración afirmaba
+  -- justo lo contrario. Se mira `TG_OP` explícitamente, como en la 0050.
+  if TG_TABLE_NAME = 'event_ticket_holds' then
+    objetivo := new.id;
+  elsif TG_OP = 'DELETE' then
+    objetivo := old.hold_id;
+  else
+    objetivo := new.hold_id;
+  end if;
 
   select subtotal_minor into cabecera
   from public.event_ticket_holds where id = objetivo;
@@ -282,6 +301,14 @@ begin
   -- La cabecera puede haberse borrado en la misma transacción (cascada).
   if cabecera is null then
     return null;
+  end if;
+
+  select count(*), coalesce(sum(subtotal_minor), 0) into lineas, suma
+  from public.event_ticket_hold_items where hold_id = objetivo;
+
+  if lineas = 0 then
+    raise exception 'Una reserva sin lineas no aparta nada'
+      using errcode = 'check_violation';
   end if;
 
   if suma <> cabecera then
@@ -296,6 +323,17 @@ $$;
 drop trigger if exists event_ticket_hold_items_cuadran on public.event_ticket_hold_items;
 create constraint trigger event_ticket_hold_items_cuadran
 after insert or update or delete on public.event_ticket_hold_items
+deferrable initially deferred
+for each row execute function public.exigir_que_el_hold_cuadre();
+
+-- Y EL MISMO, SOBRE LA CABECERA. `update of subtotal_minor` y no `update` a
+-- secas a propósito: el cambio de estado a `EXPIRED` de la limpieza masiva no
+-- toca el subtotal y no tiene por qué revalidar nada, y son cientos de filas
+-- por transacción. Lo que sí revalida es reescribir el subtotal sin tocar las
+-- líneas, que era la otra forma de descuadrar sin que nadie mirase.
+drop trigger if exists event_ticket_holds_cuadran on public.event_ticket_holds;
+create constraint trigger event_ticket_holds_cuadran
+after insert or update of subtotal_minor on public.event_ticket_holds
 deferrable initially deferred
 for each row execute function public.exigir_que_el_hold_cuadre();
 

@@ -622,22 +622,49 @@ def con_entradas(conexion, evento):
     return {**evento, "tipo": tipo}
 
 
-def _hold(conexion, datos, subtotal=4900, estado="ACTIVE", clave=None, minutos=10):
+def _hold(
+    conexion,
+    datos,
+    subtotal=4900,
+    estado="ACTIVE",
+    clave=None,
+    minutos=10,
+    con_linea=True,
+):
+    """Una reserva ENTERA: cabecera y su linea.
+
+    Antes creaba la cabecera sola, y eso ya no es una reserva valida: el
+    disparador de la 0061 exige al menos una linea. Quien monte sus propias
+    lineas dentro de su propia transaccion pasa `con_linea=False`.
+    """
     ident = _nuevo()
-    _ejecutar(
-        conexion,
-        "insert into public.event_ticket_holds "
-        "(id, event_id, user_id, idempotency_key, request_fingerprint, status, "
-        " currency, subtotal_minor, expires_at) "
-        "values (%s, %s, %s, %s, 'huella', %s, 'PEN', %s, "
-        f"       now() + interval '{int(minutos)} minutes')",
-        ident,
-        datos["evento"],
-        datos["organizador"],
-        clave or ident,
-        estado,
-        subtotal,
-    )
+
+    def _cabecera():
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticket_holds "
+            "(id, event_id, user_id, idempotency_key, request_fingerprint, status, "
+            " currency, subtotal_minor, expires_at) "
+            "values (%s, %s, %s, %s, 'huella', %s, 'PEN', %s, "
+            f"       now() + interval '{int(minutos)} minutes')",
+            ident,
+            datos["evento"],
+            datos["organizador"],
+            clave or ident,
+            estado,
+            subtotal,
+        )
+
+    if not con_linea:
+        _cabecera()
+        return ident
+
+    # LAS DOS EN LA MISMA TRANSACCION. Con `autocommit`, la cabecera sola se
+    # confirmaria antes de que existiera la linea y el disparador diferido —que
+    # se comprueba justo al confirmar— la rechazaria con razon.
+    with conexion.transaction():
+        _cabecera()
+        _linea(conexion, datos, ident, cantidad=1, precio=subtotal)
     return ident
 
 
@@ -764,7 +791,7 @@ def test_la_suma_de_las_lineas_cuadra_con_la_cabecera(conexion, con_entradas) ->
 
     conexion.autocommit = False
     try:
-        hold = _hold(conexion, con_entradas, subtotal=9800)
+        hold = _hold(conexion, con_entradas, subtotal=9800, con_linea=False)
         _linea(conexion, con_entradas, hold, cantidad=1)  # 4900, no 9800
         with pytest.raises(psycopg.errors.CheckViolation):
             conexion.commit()
@@ -777,7 +804,7 @@ def test_la_suma_de_las_lineas_cuadra_con_la_cabecera(conexion, con_entradas) ->
 def test_una_reserva_que_cuadra_si_se_confirma(conexion, con_entradas) -> None:
     conexion.autocommit = False
     try:
-        hold = _hold(conexion, con_entradas, subtotal=9800)
+        hold = _hold(conexion, con_entradas, subtotal=9800, con_linea=False)
         _linea(conexion, con_entradas, hold, cantidad=2)
         conexion.commit()
     finally:
@@ -834,7 +861,7 @@ def test_una_linea_por_tipo_dentro_de_una_reserva(conexion, con_entradas) -> Non
 
     conexion.autocommit = False
     try:
-        hold = _hold(conexion, con_entradas, subtotal=9800)
+        hold = _hold(conexion, con_entradas, subtotal=9800, con_linea=False)
         _linea(conexion, con_entradas, hold, cantidad=1)
         with pytest.raises(psycopg.errors.UniqueViolation):
             _linea(conexion, con_entradas, hold, cantidad=1)
@@ -924,7 +951,7 @@ def test_no_se_borra_un_tipo_con_reservas_encima(conexion, con_entradas) -> None
 
     conexion.autocommit = False
     try:
-        hold = _hold(conexion, con_entradas)
+        hold = _hold(conexion, con_entradas, con_linea=False)
         _linea(conexion, con_entradas, hold, cantidad=1)
         conexion.commit()
     finally:
@@ -936,6 +963,84 @@ def test_no_se_borra_un_tipo_con_reservas_encima(conexion, con_entradas) -> None
             "delete from public.event_ticket_types where id = %s",
             con_entradas["tipo"],
         )
+
+
+@SIN_POSTGRES
+def test_una_cabecera_sin_lineas_no_es_una_reserva(conexion, con_entradas) -> None:
+    """Una fila que dice «he apartado 500 soles» y no tiene debajo ni una
+    entrada no aparta nada, y hasta ahora entraba y se quedaba.
+
+    El disparador colgaba solo de las lineas, asi que una cabecera sola no lo
+    disparaba jamas. Ahora cuelga tambien de la cabecera.
+    """
+    import psycopg
+
+    conexion.autocommit = False
+    try:
+        _hold(conexion, con_entradas, subtotal=50000, con_linea=False)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conexion.commit()
+        conexion.rollback()
+    finally:
+        conexion.autocommit = True
+
+
+@SIN_POSTGRES
+def test_reescribir_el_subtotal_sin_tocar_las_lineas_no_cuela(
+    conexion, con_entradas
+) -> None:
+    """La otra forma de descuadrar sin que nadie mirase."""
+    import psycopg
+
+    hold = _hold(conexion, con_entradas, subtotal=4900)
+
+    conexion.autocommit = False
+    try:
+        _ejecutar(
+            conexion,
+            "update public.event_ticket_holds set subtotal_minor = 1 where id = %s",
+            hold,
+        )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conexion.commit()
+        conexion.rollback()
+    finally:
+        conexion.autocommit = True
+
+
+@SIN_POSTGRES
+def test_quitar_todas_las_lineas_deja_una_reserva_que_no_cuadra(
+    conexion, con_entradas
+) -> None:
+    """La rama DELETE del disparador, ejercida."""
+    import psycopg
+
+    hold = _hold(conexion, con_entradas, subtotal=4900)
+
+    conexion.autocommit = False
+    try:
+        _ejecutar(
+            conexion,
+            "delete from public.event_ticket_hold_items where hold_id = %s",
+            hold,
+        )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conexion.commit()
+        conexion.rollback()
+    finally:
+        conexion.autocommit = True
+
+
+@SIN_POSTGRES
+def test_borrar_la_reserva_entera_si_se_puede(conexion, con_entradas) -> None:
+    """Y la cascada sigue pasando: no se rechaza lo que si es legitimo."""
+    hold = _hold(conexion, con_entradas, subtotal=4900)
+    _ejecutar(conexion, "delete from public.event_ticket_holds where id = %s", hold)
+    assert not _lista(
+        conexion,
+        "select id::text from public.event_ticket_holds where id = %s",
+        hold,
+    )
 
 
 @SIN_POSTGRES
