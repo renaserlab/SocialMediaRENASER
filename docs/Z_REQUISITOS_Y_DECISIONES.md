@@ -402,6 +402,32 @@ prometía —que alguien de fuera pueda comprobarlo—.
 de problema llevan a lo que ya los resuelve. Una bandeja de tickets era un
 dominio entero para repartir a mano lo que ya está repartido.
 
+## 10. Cierre técnico de Cursos (9/09/2026)
+
+**D28 · Moderación no toca las respuestas correctas.** `_puede_gestionar` —la
+regla del resto del temario— incluye a `moderator`, que existe para ocultar
+contenido y resolver reportes. Quien cambia la alternativa correcta cambia quién
+aprueba, y con ello quién obtiene un certificado verificable. Pasa a ser el
+autor, o administración con poder real (`puede_mover_dinero`), y cuando no es el
+autor QUEDA ANOTADO. Editar lo propio no deja rastro: no es un hecho que
+investigar. Esto cierra la decisión que quedó abierta en el incremento anterior.
+
+**D29 · La lectura del borrador es un hecho auditable, y por eso ese GET
+escribe.** `GET /quiz/draft` es la única puerta de toda la API por la que sale
+`is_correct`. `auditoria.anotar` solo hace `flush` y nadie confirma por una
+lectura, así que la nota se deshacía sola: el `commit` va en el propio endpoint.
+
+**D30 · Un borrador se puede guardar a medias, pero nunca con texto vacío.** La
+base exige `length(trim(...)) >= 1` en enunciados y alternativas. Las preguntas
+completamente en blanco no se mandan; una a medio escribir se señala. Guardar
+admite lo que publicar no —sin correcta marcada sigue siendo un borrador—.
+
+**D31 · Las invariantes de 0057-0059 solo significan algo en PostgreSQL.**
+Índices únicos parciales, claves foráneas compuestas y RLS no existen en SQLite:
+allí esas pruebas pasan sin que la base sostenga nada. Se escribieron 24 pruebas
+que intentan escribir lo prohibido; se omiten sin `MIGRACIONES_DATABASE_URL` y
+las corre CI contra un PostgreSQL 16 desechable.
+
 ### Pendiente de decisión de negocio
 
 - **Las subnotas y la evidencia de la captura 19.** La referencia enseña tres
@@ -409,11 +435,6 @@ dominio entero para repartir a mano lo que ya está repartido.
   solo `rating`, y aceptar archivos de alumnos abre una superficie de moderación
   que hoy no tiene política. Hace falta decidir si el producto las quiere antes
   de crear columnas.
-- **Quién puede reescribir una evaluación publicada.** Hoy vale «el autor o la
-  administración», que es la misma regla que rige módulos, lecciones y
-  descripción en todo el módulo. Que moderación pueda cambiar las respuestas
-  correctas de un curso ajeno —y con ellas quién se certifica— merece decidirse
-  a propósito, no heredarse.
 - **Los módulos con requisito previo de la captura 15.** Nada en el modelo dice
   que un módulo dependa de otro; pintar el candado sería inventarse la regla de
   desbloqueo.

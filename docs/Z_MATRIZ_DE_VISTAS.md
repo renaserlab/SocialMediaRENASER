@@ -359,3 +359,42 @@ Cargando, vacío, error con reintento y «esta función no está montada aquí»
 por migración sin aplicar) en las seis pantallas nuevas. El cuarto es el que más
 importa: con la 0057, 0058 o 0059 sin aplicar, cada pantalla lo dice al llegar
 en vez de fingir una avería.
+
+
+---
+
+## Cierre técnico de Cursos (9/09/2026)
+
+Lo que cerró el hueco que quedaba abierto en el incremento anterior.
+
+| Pieza | Estado | Nota |
+|---|---|---|
+| Editor de la evaluación (creador) | **Terminado** | En «Gestionar curso», no en el asistente: no es parte de la ficha, decide quién aprueba. |
+| Autorización de la evaluación | **Cambiada** | Autor o administración con poder real. **Moderación ya no toca las respuestas correctas.** |
+| Auditoría del borrador | **Corregida** | La nota se confirma: antes se deshacía sola en la única puerta por la que sale `is_correct`. |
+| Invariantes en PostgreSQL | **Escritas, sin ejecutar** | 24 pruebas nuevas. Omitidas aquí por no haber PostgreSQL; CI las corre. |
+
+### La vista del creador, contra la referencia
+
+La captura no incluye una pantalla de autoría de evaluaciones: es una vista que
+el producto necesita y la referencia no cubre. Se construyó con los patrones ya
+consolidados —cabecera, `Input`, `Button`, confirmación, cerrojos, estados— y no
+como un editor genérico de formularios.
+
+Lo que sostiene, y por qué:
+
+- **La correcta es UNA.** Marcar una apaga las demás. La base lo impone con un
+  índice único parcial; dejar llegar a dos correctas sería un guardado que
+  revienta sin explicación.
+- **Al borrar la correcta la pregunta se queda sin correcta.** No se hereda la
+  marca: elegir por su cuenta la respuesta buena de un examen es justo lo que
+  una interfaz no puede hacer.
+- **Se puede guardar a medias.** Las preguntas completamente en blanco no se
+  mandan —la base exige texto— y una a medio escribir se señala en vez de tirarse.
+- **Mientras se guarda no se escribe.** Al volver el PUT se reemplaza el
+  borrador con el eco del servidor; fusionarlo con lo tecleado sería adivinar.
+- **Publicar guarda antes.** Publicar lo que está en el servidor mientras la
+  pantalla enseña otra cosa es publicar a ciegas.
+- **Despublicar al guardar se dice.** Si lo guardado ya no se puede aprobar, el
+  servidor la devuelve a borrador: eso deja a los alumnos sin poder hacerla y no
+  puede pasar bajo un toast verde.
