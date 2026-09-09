@@ -196,3 +196,141 @@ class ExpedienteRead(EventoDelOrganizador):
     documentos: list[DocumentoRead] = Field(default_factory=list)
     #: Los requisitos que hoy impedirían publicar.
     bloqueos_para_publicar: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Entradas e inventario (Incremento 2)
+#
+# EL CLIENTE NO MANDA PRECIOS. `HoldCreate` lleva tipo y cantidad, y nada más:
+# lo que cuesta cada entrada lo lee el servidor de la base. No es que se ignore
+# un precio que llegue; es que no cabe en el contrato.
+# --------------------------------------------------------------------------- #
+
+
+class TicketingRead(BaseModel):
+    """La configuración de venta de un evento."""
+
+    access_mode: str
+    currency: str
+    max_per_order: int | None = None
+    sales_open_at: datetime | None = None
+    sales_close_at: datetime | None = None
+
+
+class TicketingUpsert(BaseModel):
+    access_mode: str = Field(pattern="^(FREE_RSVP|TICKETED|INVITATION_ONLY)$")
+    currency: str = Field(default="PEN", pattern="^[A-Z]{3}$")
+    max_per_order: int | None = Field(default=None, ge=1, le=100)
+    sales_open_at: datetime | None = None
+    sales_close_at: datetime | None = None
+
+
+class TicketTypeRead(BaseModel):
+    """Un tipo de entrada, como lo ve quien compra.
+
+    NO LLEVA EL CUPO. `quota` es inventario del organizador; lo que necesita
+    quien elige es cuántas quedan, y eso viaja en `disponibles`.
+    """
+
+    id: str
+    name: str
+    description: str = ""
+    price_minor: int
+    currency: str
+    min_per_order: int
+    max_per_order: int
+    inclusions: list[str] = Field(default_factory=list)
+    restrictions: list[str] = Field(default_factory=list)
+    sort_order: int = 0
+    disponibles: int = 0
+
+
+class TicketTypeDelOrganizador(TicketTypeRead):
+    """El mismo tipo, con lo que solo le importa a quien lo administra."""
+
+    quota: int
+    status: str
+
+
+class TicketTypeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
+    #: En unidad MENOR y entero. 4900 son S/ 49.00. Cero vale: una cortesía.
+    price_minor: int = Field(ge=0, le=100_000_000)
+    quota: int = Field(ge=1, le=1_000_000)
+    min_per_order: int = Field(default=1, ge=1, le=100)
+    max_per_order: int = Field(default=10, ge=1, le=100)
+    inclusions: list[str] = Field(default_factory=list, max_length=20)
+    restrictions: list[str] = Field(default_factory=list, max_length=20)
+    status: str = Field(default="draft", pattern="^(draft|on_sale|paused|retired)$")
+    sort_order: int = Field(default=0, ge=0, le=1000)
+    #: `currency` NO está: la pone el evento. Un tipo en otra moneda dentro del
+    #: mismo evento lo rechaza una clave ajena compuesta de la 0061.
+
+
+class TicketTypeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    price_minor: int | None = Field(default=None, ge=0, le=100_000_000)
+    quota: int | None = Field(default=None, ge=1, le=1_000_000)
+    min_per_order: int | None = Field(default=None, ge=1, le=100)
+    max_per_order: int | None = Field(default=None, ge=1, le=100)
+    inclusions: list[str] | None = Field(default=None, max_length=20)
+    restrictions: list[str] | None = Field(default=None, max_length=20)
+    status: str | None = Field(default=None, pattern="^(draft|on_sale|paused|retired)$")
+    sort_order: int | None = Field(default=None, ge=0, le=1000)
+
+
+class DisponibilidadRead(BaseModel):
+    """Lo que queda ahora mismo. Se calcula; no hay contador que mantener."""
+
+    #: `None` cuando el evento no tiene aforo: mandan solo los cupos por tipo.
+    general: int | None = None
+    por_tipo: dict[str, int] = Field(default_factory=dict)
+
+
+class LineaPedida(BaseModel):
+    ticket_type_id: str
+    quantity: int = Field(ge=1, le=100)
+
+
+class HoldCreate(BaseModel):
+    """Lo que el cliente manda para apartar entradas.
+
+    Tipo y cantidad. Ni precio, ni moneda, ni subtotal, ni total: eso lo decide
+    el servidor y el contrato no ofrece dónde escribirlo.
+    """
+
+    items: list[LineaPedida] = Field(min_length=1, max_length=20)
+
+
+class LineaDeHold(BaseModel):
+    ticket_type_id: str
+    #: El nombre CONGELADO. Si el organizador lo cambia, el resumen no cambia.
+    name: str
+    quantity: int
+    unit_price_minor: int
+    subtotal_minor: int
+
+
+class HoldRead(BaseModel):
+    """Una reserva temporal. NO ES UNA COMPRA, y el contrato no lo insinúa."""
+
+    id: str
+    event_id: str
+    #: `ACTIVE`, `EXPIRED`, `RELEASED` o `CONSUMED`, con el reloj ya aplicado:
+    #: un `ACTIVE` pasado de hora llega como `EXPIRED`.
+    status: str
+    currency: str
+    #: SOLO LAS ENTRADAS. No es el total a pagar: faltan comisión, impuestos y
+    #: condiciones, que la empresa no ha definido. Ver `docs/`.
+    subtotal_minor: int
+    items: list[LineaDeHold] = Field(default_factory=list)
+    expires_at: datetime
+    #: Segundos que quedan según el SERVIDOR. El contador del cliente es
+    #: informativo; quien decide si venció es esto.
+    segundos_restantes: int = 0
+
+
+class VencidosRead(BaseModel):
+    procesados: int

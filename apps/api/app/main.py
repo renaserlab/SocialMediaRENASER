@@ -26,6 +26,8 @@ from app.modules.gobernanza.router import router as gobernanza_router
 from app.modules.commerce.router import router as commerce_router
 from app.modules.identity.router import router as identity_router
 from app.modules.events.router import admin_router as events_admin_router
+from app.modules.events.ticket_router import admin_router as tickets_admin_router
+from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
 from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
@@ -156,6 +158,13 @@ def create_app() -> FastAPI:
     app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)
     # El dominio de Eventos. La lectura publica sigue en `catalog`.
+    #
+    # LAS ENTRADAS VAN ANTES. `/events/ticket-holds/{id}` y
+    # `/events/{event_id}/ticket-types` tienen los dos tres tramos y FastAPI
+    # resuelve por orden de registro: declarado despues, un identificador de
+    # reserva podria intentar casar con la ruta de tipos.
+    app.include_router(tickets_router, prefix=prefix)
+    app.include_router(tickets_admin_router, prefix=prefix)
     app.include_router(events_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)

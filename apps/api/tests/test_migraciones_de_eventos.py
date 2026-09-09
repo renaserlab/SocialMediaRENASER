@@ -587,3 +587,411 @@ def test_borrar_un_evento_se_lleva_su_expediente(conexion, evento) -> None:
             f"select event_id::text from public.{tabla} where event_id = %s",
             evento["evento"],
         ), tabla
+
+
+# --------------------------------------------------------------------------- #
+# Entradas e inventario (0061)
+# --------------------------------------------------------------------------- #
+
+TABLAS_DE_ENTRADAS = (
+    "event_ticketing_settings",
+    "event_ticket_types",
+    "event_ticket_holds",
+    "event_ticket_hold_items",
+)
+
+
+@pytest.fixture()
+def con_entradas(conexion, evento):
+    """El evento de arriba, configurado para vender, con un tipo a la venta."""
+    _ejecutar(
+        conexion,
+        "insert into public.event_ticketing_settings "
+        "(event_id, access_mode, currency) values (%s, 'TICKETED', 'PEN')",
+        evento["evento"],
+    )
+    tipo = _nuevo()
+    _ejecutar(
+        conexion,
+        "insert into public.event_ticket_types "
+        "(id, event_id, name, price_minor, currency, quota, status) "
+        "values (%s, %s, 'General', 4900, 'PEN', 10, 'on_sale')",
+        tipo,
+        evento["evento"],
+    )
+    return {**evento, "tipo": tipo}
+
+
+def _hold(conexion, datos, subtotal=4900, estado="ACTIVE", clave=None, minutos=10):
+    ident = _nuevo()
+    _ejecutar(
+        conexion,
+        "insert into public.event_ticket_holds "
+        "(id, event_id, user_id, idempotency_key, request_fingerprint, status, "
+        " currency, subtotal_minor, expires_at) "
+        "values (%s, %s, %s, %s, 'huella', %s, 'PEN', %s, "
+        f"       now() + interval '{int(minutos)} minutes')",
+        ident,
+        datos["evento"],
+        datos["organizador"],
+        clave or ident,
+        estado,
+        subtotal,
+    )
+    return ident
+
+
+def _linea(conexion, datos, hold, cantidad=1, precio=4900, tipo=None):
+    _ejecutar(
+        conexion,
+        "insert into public.event_ticket_hold_items "
+        "(id, hold_id, event_id, ticket_type_id, quantity, unit_price_minor, "
+        " subtotal_minor, ticket_type_name_snapshot) "
+        "values (%s, %s, %s, %s, %s, %s, %s, 'General')",
+        _nuevo(),
+        hold,
+        datos["evento"],
+        tipo or datos["tipo"],
+        cantidad,
+        precio,
+        cantidad * precio,
+    )
+
+
+@SIN_POSTGRES
+def test_una_sola_moneda_por_evento(conexion, con_entradas) -> None:
+    """La clave ajena COMPUESTA `(event_id, currency)`.
+
+    Un tipo en dolares dentro de un evento en soles no entra: para meterlo
+    habria que cambiar la moneda del evento entero, que es justo la decision que
+    se quiere que sea explicita.
+    """
+    import psycopg
+
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticket_types "
+            "(id, event_id, name, price_minor, currency, quota) "
+            "values (%s, %s, 'En dolares', 100, 'USD', 5)",
+            _nuevo(),
+            con_entradas["evento"],
+        )
+
+
+@SIN_POSTGRES
+def test_un_tipo_de_otro_evento_no_entra_en_una_reserva(conexion, con_entradas) -> None:
+    """La otra clave ajena compuesta: la linea, su reserva y su tipo hablan del
+    mismo evento. Es la misma forma que usa `quiz_answers` en la 0058."""
+    import psycopg
+
+    otro = _nuevo()
+    _ejecutar(
+        conexion,
+        "insert into auth.users (id, email, raw_user_meta_data) values "
+        "(%s, %s, jsonb_build_object('full_name', 'B', 'username', %s::text))",
+        otro,
+        f"b{otro[:8]}@x.test",
+        f"b{otro[:8]}",
+    )
+    evento2 = _nuevo()
+    _ejecutar(
+        conexion,
+        "insert into public.events (id, organizer_id, title, description, status) "
+        "values (%s, %s, 'Otro', 'x', 'draft')",
+        evento2,
+        otro,
+    )
+    _ejecutar(
+        conexion,
+        "insert into public.event_ticketing_settings (event_id, access_mode, currency) "
+        "values (%s, 'TICKETED', 'PEN')",
+        evento2,
+    )
+    tipo_ajeno = _nuevo()
+    _ejecutar(
+        conexion,
+        "insert into public.event_ticket_types "
+        "(id, event_id, name, price_minor, currency, quota, status) "
+        "values (%s, %s, 'Ajeno', 100, 'PEN', 5, 'on_sale')",
+        tipo_ajeno,
+        evento2,
+    )
+
+    hold = _hold(conexion, con_entradas)
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        _linea(conexion, con_entradas, hold, tipo=tipo_ajeno)
+
+
+@SIN_POSTGRES
+def test_una_cantidad_que_no_es_positiva_la_rechaza_la_base(conexion, con_entradas) -> None:
+    import psycopg
+
+    hold = _hold(conexion, con_entradas)
+    for cantidad in (0, -3):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            _linea(conexion, con_entradas, hold, cantidad=cantidad)
+
+
+@SIN_POSTGRES
+def test_un_subtotal_de_linea_que_no_cuadra_no_cabe(conexion, con_entradas) -> None:
+    """`subtotal = cantidad x precio`, en cada linea."""
+    import psycopg
+
+    hold = _hold(conexion, con_entradas)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticket_hold_items "
+            "(id, hold_id, event_id, ticket_type_id, quantity, unit_price_minor, "
+            " subtotal_minor, ticket_type_name_snapshot) "
+            "values (%s, %s, %s, %s, 2, 4900, 1, 'General')",
+            _nuevo(),
+            hold,
+            con_entradas["evento"],
+            con_entradas["tipo"],
+        )
+
+
+@SIN_POSTGRES
+def test_la_suma_de_las_lineas_cuadra_con_la_cabecera(conexion, con_entradas) -> None:
+    """El disparador DIFERIDO, ejercido.
+
+    Es una restriccion ENTRE FILAS, asi que no cabe en un CHECK: se comprueba al
+    CONFIRMAR, cuando la cabecera y todas sus lineas ya estan escritas.
+    """
+    import psycopg
+
+    conexion.autocommit = False
+    try:
+        hold = _hold(conexion, con_entradas, subtotal=9800)
+        _linea(conexion, con_entradas, hold, cantidad=1)  # 4900, no 9800
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conexion.commit()
+        conexion.rollback()
+    finally:
+        conexion.autocommit = True
+
+
+@SIN_POSTGRES
+def test_una_reserva_que_cuadra_si_se_confirma(conexion, con_entradas) -> None:
+    conexion.autocommit = False
+    try:
+        hold = _hold(conexion, con_entradas, subtotal=9800)
+        _linea(conexion, con_entradas, hold, cantidad=2)
+        conexion.commit()
+    finally:
+        conexion.autocommit = True
+    assert _lista(
+        conexion,
+        "select id::text from public.event_ticket_holds where id = %s",
+        hold,
+    )
+
+
+@SIN_POSTGRES
+def test_una_sola_reserva_activa_por_persona_y_evento(conexion, con_entradas) -> None:
+    """El indice PARCIAL. Sin el, dos claves distintas evaden cualquier tope."""
+    import psycopg
+
+    _hold(conexion, con_entradas)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _hold(conexion, con_entradas)
+
+
+@SIN_POSTGRES
+def test_las_vencidas_y_liberadas_no_estorban(conexion, con_entradas) -> None:
+    """Y por eso el indice es parcial: el historial cabe entero."""
+    _hold(conexion, con_entradas, estado="EXPIRED")
+    _hold(conexion, con_entradas, estado="RELEASED")
+    _hold(conexion, con_entradas, estado="ACTIVE")
+    assert (
+        len(
+            _lista(
+                conexion,
+                "select id::text from public.event_ticket_holds where event_id = %s",
+                con_entradas["evento"],
+            )
+        )
+        == 3
+    )
+
+
+@SIN_POSTGRES
+def test_una_clave_de_idempotencia_no_se_repite(conexion, con_entradas) -> None:
+    import psycopg
+
+    _hold(conexion, con_entradas, estado="RELEASED", clave="repetida")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _hold(conexion, con_entradas, estado="RELEASED", clave="repetida")
+
+
+@SIN_POSTGRES
+def test_una_linea_por_tipo_dentro_de_una_reserva(conexion, con_entradas) -> None:
+    """Dos lineas del mismo tipo son dos formas de decir lo mismo, y la segunda
+    se olvida al sumar."""
+    import psycopg
+
+    conexion.autocommit = False
+    try:
+        hold = _hold(conexion, con_entradas, subtotal=9800)
+        _linea(conexion, con_entradas, hold, cantidad=1)
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            _linea(conexion, con_entradas, hold, cantidad=1)
+        conexion.rollback()
+    finally:
+        conexion.autocommit = True
+
+
+@SIN_POSTGRES
+def test_un_modo_de_acceso_inventado_no_cabe(conexion, evento) -> None:
+    import psycopg
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticketing_settings (event_id, access_mode) "
+            "values (%s, 'GRATIS_PARA_AMIGOS')",
+            evento["evento"],
+        )
+
+
+@SIN_POSTGRES
+def test_un_precio_negativo_no_cabe(conexion, con_entradas) -> None:
+    import psycopg
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticket_types "
+            "(id, event_id, name, price_minor, currency, quota) "
+            "values (%s, %s, 'Al reves', -100, 'PEN', 5)",
+            _nuevo(),
+            con_entradas["evento"],
+        )
+
+
+@SIN_POSTGRES
+def test_un_cupo_de_cero_no_cabe(conexion, con_entradas) -> None:
+    """Cero no es un cupo: es un tipo que no existe. Para eso esta `retired`."""
+    import psycopg
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticket_types "
+            "(id, event_id, name, price_minor, currency, quota) "
+            "values (%s, %s, 'Vacio', 100, 'PEN', 0)",
+            _nuevo(),
+            con_entradas["evento"],
+        )
+
+
+@SIN_POSTGRES
+def test_un_maximo_menor_que_el_minimo_no_cabe(conexion, con_entradas) -> None:
+    import psycopg
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticket_types "
+            "(id, event_id, name, price_minor, currency, quota, min_per_order, "
+            " max_per_order) values (%s, %s, 'Raro', 100, 'PEN', 5, 4, 2)",
+            _nuevo(),
+            con_entradas["evento"],
+        )
+
+
+@SIN_POSTGRES
+def test_una_ventana_de_venta_al_reves_no_cabe(conexion, evento) -> None:
+    import psycopg
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _ejecutar(
+            conexion,
+            "insert into public.event_ticketing_settings "
+            "(event_id, access_mode, sales_open_at, sales_close_at) values "
+            "(%s, 'TICKETED', now() + interval '2 days', now())",
+            evento["evento"],
+        )
+
+
+@SIN_POSTGRES
+def test_no_se_borra_un_tipo_con_reservas_encima(conexion, con_entradas) -> None:
+    """`on delete restrict`: el resumen de una reserva tiene que seguir
+    contando lo mismo."""
+    import psycopg
+
+    conexion.autocommit = False
+    try:
+        hold = _hold(conexion, con_entradas)
+        _linea(conexion, con_entradas, hold, cantidad=1)
+        conexion.commit()
+    finally:
+        conexion.autocommit = True
+
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        _ejecutar(
+            conexion,
+            "delete from public.event_ticket_types where id = %s",
+            con_entradas["tipo"],
+        )
+
+
+@SIN_POSTGRES
+def test_las_cuatro_tablas_de_entradas_tienen_rls(conexion, aplicadas) -> None:
+    sin_rls = [
+        t
+        for t in TABLAS_DE_ENTRADAS
+        if not _lista(
+            conexion,
+            "select c.relrowsecurity from pg_class c join pg_namespace n "
+            "on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = %s",
+            t,
+        )[0]
+    ]
+    assert not sin_rls, sin_rls
+
+
+@SIN_POSTGRES
+def test_las_entradas_no_se_sirven_por_postgrest(conexion, aplicadas) -> None:
+    """Ni lectura. `event_ticket_types` parece publica —el precio se ensena—
+    pero la fila lleva el cupo, el estado y los topes, que son inventario."""
+    concedidas = _lista(
+        conexion,
+        "select table_name || ':' || grantee || ':' || privilege_type "
+        "from information_schema.role_table_grants "
+        "where table_schema = 'public' and grantee in ('anon', 'authenticated') "
+        "  and table_name = any(%s)",
+        list(TABLAS_DE_ENTRADAS),
+    )
+    assert not concedidas, concedidas
+    politicas = _lista(
+        conexion,
+        "select tablename || ':' || policyname from pg_policies "
+        "where schemaname = 'public' and tablename = any(%s)",
+        list(TABLAS_DE_ENTRADAS),
+    )
+    assert not politicas, politicas
+
+
+def test_la_0061_no_hace_backfill() -> None:
+    """SIN FILA SIGNIFICA `FREE_RSVP`.
+
+    Escribir una configuracion por evento diria lo que ya se sabe por su
+    ausencia, y ademas haria creer que alguien decidio algo sobre esos eventos.
+
+    SE MIRA EL SQL Y NO LA BASE a proposito: las pruebas de este modulo
+    comparten conexion y escriben configuraciones a monton, asi que contar filas
+    aqui mediria a las hermanas y no a la migracion. La migracion ademas se
+    comprueba a si misma: su bloque final falla si la tabla tiene alguna fila al
+    aplicarse.
+    """
+    sql = (MIGRACIONES / "0061_entradas_e_inventario_de_eventos.sql").read_text(
+        encoding="utf-8"
+    )
+    minuscula = sql.lower()
+    assert "insert into public.event_ticketing_settings" not in minuscula
+    assert "insert into public.event_ticket_types" not in minuscula
+    # Y la migracion se lo exige a si misma.
+    assert "backfill_que_no_deberia_existir" in minuscula

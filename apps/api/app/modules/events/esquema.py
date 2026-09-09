@@ -58,6 +58,28 @@ async def hay_eventos_v2(db: AsyncSession) -> bool:
     return _cache["eventos_v2"]
 
 
+#: Las cuatro que añade la 0061.
+_TABLAS_DE_ENTRADAS = (
+    "event_ticketing_settings",
+    "event_ticket_types",
+    "event_ticket_holds",
+    "event_ticket_hold_items",
+)
+
+
+async def hay_entradas(db: AsyncSession) -> bool:
+    """Si la 0061 está aplicada: tipos de entrada, inventario y reservas."""
+    if "entradas" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            return all(inspector.has_table(t) for t in _TABLAS_DE_ENTRADAS)
+
+        _cache["entradas"] = await conexion.run_sync(_mirar)
+    return _cache["entradas"]
+
+
 async def exigir_eventos_v2(db: AsyncSession) -> None:
     if not await hay_eventos_v2(db):
         raise ServiceUnavailableError(
