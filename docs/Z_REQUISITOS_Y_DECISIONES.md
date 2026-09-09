@@ -428,6 +428,49 @@ allí esas pruebas pasan sin que la base sostenga nada. Se escribieron 24 prueba
 que intentan escribir lo prohibido; se omiten sin `MIGRACIONES_DATABASE_URL` y
 las corre CI contra un PostgreSQL 16 desechable.
 
+**D32 · El aforo lo arbitra la base, no un conteo.**
+
+La reserva contaba, comparaba e insertaba, con nada en medio. Dos peticiones
+simultáneas leían el mismo número y las dos entraban; la clave única
+`(event_id, user_id)` solo impedía que **una persona** se duplicara, así que el
+fallo no se veía probando a mano. Ahora se bloquea la fila del evento con
+`select ... for update` y todo ocurre dentro de esa transacción. Un `asyncio.Lock`
+no valía —ordena un proceso, no varias réplicas— y un índice único tampoco:
+«como mucho N» no es una propiedad de una fila. Detalle en
+`Z_EVENTOS_ARQUITECTURA.md`.
+
+**D33 · Un evento nuevo nace borrador, y la ruta antigua también.**
+
+`POST /catalog/events` creaba con `status = 'published'`. Eso era
+autopublicación: cualquier cuenta ponía un evento en el catálogo sin que nadie
+lo mirara. La ruta se mantiene por compatibilidad con los binarios instalados,
+pero lo que crea es un borrador. Publicar exige aprobación.
+
+**D34 · Curaduría puntúa; administración decide.**
+
+`is_admin` incluye `moderator`, y con esa comprobación un moderador podía
+aprobar y publicar un evento. Aprobar es autorizar que se venda algo, y no es lo
+mismo que revisar si está bien escrito. Es el mismo patrón que ya separó moderar
+contenido de mover dinero. Y nadie aprueba ni publica su propio evento, ni
+siendo administrador: se comprueba **antes** que el rol.
+
+**D35 · Los estados derivados no son columnas.**
+
+El contrato nombra doce estados; solo siete se guardan. `SOLD_OUT` se deriva del
+aforo —guardado, miente en cuanto alguien cancela—, `IN_PROGRESS` y
+`COMPLETED_PENDING` de las fechas, y `SETTLED` de una liquidación que este
+incremento no implementa: escribirlo sería afirmar que se transfirió un dinero
+que nadie movió. El CHECK de la 0060 acepta exactamente los siete guardables.
+
+**D36 · Un CHECK que evalúa a NULL se cumple.**
+
+El umbral de aprobación decía `total >= 85`. Con `total` nulo eso no da FALSO:
+da NULL, y la restricción entera pasa. Quedaba aprobado un evento sin ninguna
+puntuación, que es justo lo que esa línea existe para impedir. Lo encontró una
+prueba escrita **antes** de aplicar la migración; corregido en la 0060, que
+sigue sin aplicar. Es la misma lógica de tres valores que ya mordió en
+`catalog/eventos.py` con los `is_not(None)`.
+
 ### Pendiente de decisión de negocio
 
 - **Las subnotas y la evidencia de la captura 19.** La referencia enseña tres

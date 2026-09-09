@@ -89,3 +89,57 @@ negocio: la ruta de vuelta de Stripe y la aceptación de recompra en las tiendas
 - [ ] Pagar por web desde el teléfono y volver: no se cae en una ruta que no
       existe.
 - [ ] Quedarse sin red a media compra y recuperarla.
+
+## 7. Eventos · admisión (Incremento 1)
+
+Ninguna de estas casillas la puede marcar una prueba automática: hacen falta un
+Android real, dos cuentas distintas y, para la última, dos teléfonos.
+
+### Organizador
+
+- [ ] Crear un evento desde «Mis eventos» y ver que **no aparece** en el
+      catálogo ni en Explorar.
+- [ ] Guardar el borrador **a medias**, salir de la pantalla y volver: lo escrito
+      sigue ahí y no se ha borrado ningún campo por no haberlo tocado.
+- [ ] Con el **teclado en pantalla**, la descripción larga sigue visible y el
+      botón de guardar es alcanzable.
+- [ ] Intentar enviar sin promesa, sin categoría y sin fecha: dice qué falta,
+      una cosa cada vez, y no envía nada.
+- [ ] **Doble toque real** en «Enviar a revisión», con el dedo: un solo envío.
+- [ ] Tras enviar, la pantalla queda en solo lectura y dice que enviado no es
+      publicado.
+- [ ] Recibir una petición de correcciones, leerla, corregir y reenviar. La
+      versión sube a 2.
+- [ ] Navegación **Atrás** desde el borrador, desde «Mis eventos» y desde la
+      ficha de revisión, con el gesto y con el botón del sistema.
+
+### Curaduría y administración
+
+- [ ] Entrar en la cola con una cuenta **sin permiso**: dice que la cola no es
+      para esa cuenta, no «no hay nada».
+- [ ] Puntuar los ocho criterios con los botones: ninguno pasa de su tope y
+      ninguno baja de cero.
+- [ ] Marcar **falla crítica** con 98 puntos: la decisión posible baja a
+      «rechazado» y aprobar responde que no.
+- [ ] Aprobar con 84: responde que no llega.
+- [ ] Aprobar de verdad y comprobar que **aprobado no es publicado**: sigue sin
+      verse en el catálogo hasta pulsar Publicar.
+- [ ] Publicar y comprobar que el **sello «Seleccionado por Z»** aparece en la
+      ficha pública, y que un evento de siempre **no** lo tiene.
+- [ ] Suspender: deja de verse y deja de admitir reservas. Reanudar lo devuelve.
+- [ ] Con una cuenta de administración que **organiza** su propio evento:
+      aprobar y publicar responden que no.
+
+### Aforo
+
+- [ ] **Dos teléfonos a la vez** sobre un evento con una sola plaza: uno entra y
+      el otro recibe «alcanzó su capacidad máxima». Nunca los dos.
+- [ ] Cancelar en el primero y reservar en el segundo: entra.
+- [ ] Un evento **sin aforo** admite a los dos.
+
+### Idiomas y modo oscuro
+
+- [ ] Las cuatro pantallas nuevas en **es / en / pt**, sin frases en español
+      dentro del inglés.
+- [ ] Las cuatro en modo claro y oscuro, con el sello y la falla crítica
+      legibles en los dos.
