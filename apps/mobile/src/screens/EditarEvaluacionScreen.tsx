@@ -17,14 +17,20 @@ import {
   conAlternativaNueva,
   hayCambiosSinGuardar,
   marcarCorrecta,
+  motivoParaNoGuardar,
   motivoParaNoPublicar,
   moverPregunta,
+  paraGuardar,
   notaMinimaValida,
   preguntaNueva,
   sinAlternativa,
   type PreguntaEditable,
 } from '@/lib/editorDeEvaluacion';
-import { evaluacionNoMontada, mensajeDeErrorDeEvaluacion } from '@/lib/evaluacionDeCurso';
+import {
+  evaluacionNoMontada,
+  mensajeDeErrorDeEvaluacion,
+  sinEvaluacion,
+} from '@/lib/evaluacionDeCurso';
 import { toast } from '@/lib/toast';
 import {
   QuizAutorRepository,
@@ -85,6 +91,14 @@ export function EditarEvaluacionScreen() {
   const [fallo, setFallo] = useState<unknown>(null);
   const [guardando, setGuardando] = useState(false);
   const [publicando, setPublicando] = useState(false);
+  /*
+    MIENTRAS VIAJA EL PUT NO SE ESCRIBE. Al volver, la respuesta del servidor
+    reemplaza el borrador; si se pudiera seguir tecleando, lo escrito durante
+    esos segundos desaparecía y además `sinGuardar` quedaba en falso, así que al
+    salir tampoco avisaba. Bloquear los campos es la única forma honesta: la
+    alternativa —fusionar el eco con lo tecleado— es adivinar.
+  */
+  const ocupado = guardando || publicando;
 
   /** Cerrojos síncronos: dos toques no guardan ni publican dos veces. */
   const guardandoRef = useRef(false);
@@ -108,11 +122,7 @@ export function EditarEvaluacionScreen() {
       if (generacionRef.current !== generacion) return;
       // 404 `course_quiz_not_found` NO es un error: es un curso que todavía no
       // tiene evaluación, y esta pantalla existe justo para crearla.
-      const codigo =
-        typeof error === 'object' && error !== null && 'code' in error
-          ? (error as { code?: string }).code
-          : null;
-      if (codigo === 'course_quiz_not_found') {
+      if (sinEvaluacion(error)) {
         setBorrador(vacio());
         setGuardado(vacio());
         setEstado('draft');
@@ -142,19 +152,43 @@ export function EditarEvaluacionScreen() {
 
   const guardar = async (): Promise<boolean> => {
     if (guardandoRef.current || !cursoId) return false;
-    if (!notaMinimaValida(borrador.notaMinima)) {
-      notify(t('common.saveFailed'), t('editorEvaluacion.notaInvalida'));
+    // Se comprueba AQUÍ lo que la base va a rechazar de todos modos, para
+    // poder decir qué falta en vez de recibir un 422 genérico.
+    const impedimento = motivoParaNoGuardar(borrador.preguntas, borrador.notaMinima);
+    if (impedimento !== null) {
+      notify(
+        t('common.saveFailed'),
+        impedimento === 'quiz_pass_percent_invalid'
+          ? t('editorEvaluacion.notaInvalida')
+          : t(`editorEvaluacion.bloqueo.${impedimento}` as 'editorEvaluacion.bloqueo.quiz_option_empty'),
+      );
       return false;
     }
     guardandoRef.current = true;
     setGuardando(true);
+    const estabaPublicada = estado === 'published';
     try {
-      const datos = await QuizAutorRepository.guardar(cursoId, borrador);
+      const datos = await QuizAutorRepository.guardar(cursoId, {
+        ...borrador,
+        // Las preguntas en blanco no se mandan: la base exige texto y una fila
+        // recién añadida hacía fallar el guardado entero.
+        preguntas: paraGuardar(borrador.preguntas),
+      });
       const leido = aBorrador(datos);
       setBorrador(leido);
       setGuardado(leido);
       setEstado(datos.estado);
-      toast(t('editorEvaluacion.guardada'));
+      if (estabaPublicada && datos.estado === 'draft') {
+        // El servidor la devolvió a borrador porque lo guardado ya no se puede
+        // aprobar. Sus alumnos han dejado de poder hacerla: no puede pasar bajo
+        // un toast verde que dice «guardada».
+        notify(
+          t('editorEvaluacion.despublicadaTitulo'),
+          t('editorEvaluacion.despublicadaCuerpo'),
+        );
+      } else {
+        toast(t('editorEvaluacion.guardada'));
+      }
       return true;
     } catch (error) {
       // El borrador NO se limpia: perder lo escrito por un corte de red es
@@ -286,6 +320,7 @@ export function EditarEvaluacionScreen() {
         placeholder={t('editorEvaluacion.tituloMarcador')}
         placeholderTextColor={colors.textMuted}
         maxLength={200}
+        editable={!ocupado}
         accessibilityLabel={t('editorEvaluacion.tituloDeLaEvaluacion')}
         style={{ color: colors.text }}
       />
@@ -302,6 +337,7 @@ export function EditarEvaluacionScreen() {
         }}
         keyboardType="number-pad"
         maxLength={3}
+        editable={!ocupado}
         accessibilityLabel={t('editorEvaluacion.notaMinima')}
         style={{ color: colors.text }}
       />
@@ -367,7 +403,8 @@ export function EditarEvaluacionScreen() {
               multiline
               maxLength={LARGO_DEL_ENUNCIADO}
               textAlignVertical="top"
-              accessibilityLabel={t('editorEvaluacion.enunciadoMarcador')}
+              editable={!ocupado}
+              accessibilityLabel={t('editorEvaluacion.pregunta', { numero: indice + 1 })}
               style={{ color: colors.text, minHeight: 64 }}
             />
 
@@ -382,7 +419,7 @@ export function EditarEvaluacionScreen() {
                   hitSlop={8}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: alternativa.esCorrecta }}
-                  accessibilityLabel={t('editorEvaluacion.marcarCorrecta')}
+                  accessibilityLabel={`${t('editorEvaluacion.marcarCorrecta')} ${j + 1}`}
                   style={styles.marca}
                 >
                   <Feather
@@ -403,7 +440,8 @@ export function EditarEvaluacionScreen() {
                   placeholder={t('editorEvaluacion.alternativaMarcador')}
                   placeholderTextColor={colors.textMuted}
                   maxLength={LARGO_DE_LA_ALTERNATIVA}
-                  accessibilityLabel={t('editorEvaluacion.alternativaMarcador')}
+                  editable={!ocupado}
+                  accessibilityLabel={t('editorEvaluacion.alternativa', { numero: j + 1 })}
                   style={[styles.crece, { color: colors.text }]}
                 />
                 <IconoDeAccion
@@ -453,14 +491,14 @@ export function EditarEvaluacionScreen() {
         label={t('common.save')}
         onPress={() => void guardar()}
         loading={guardando}
-        disabled={guardando || publicando}
+        disabled={ocupado}
       />
       <Button
         label={t('editorEvaluacion.publicar')}
         variant="secondary"
         onPress={() => void publicar()}
         loading={publicando}
-        disabled={bloqueo !== null || guardando || publicando}
+        disabled={bloqueo !== null || !notaMinimaValida(borrador.notaMinima) || ocupado}
       />
     </AppScreen>
   );

@@ -101,6 +101,19 @@ export function mensajeDeErrorDeEvaluacion(fallo: unknown, t: Traductor): string
       return t('evaluacion.sinEvaluacion' as never);
     case 'course_quiz_not_available':
       return t('evaluacion.noDisponible' as never);
+    // Los rechazos del servidor al publicar. Sin esto salía su castellano fijo
+    // en una aplicación en inglés, que es justo cuando ocurren: el borrador
+    // cambió por debajo y el cálculo local ya no coincide con el suyo.
+    case 'quiz_without_questions':
+    case 'quiz_prompt_empty':
+    case 'quiz_option_count_invalid':
+    case 'quiz_option_empty':
+    case 'quiz_answer_missing':
+      return t(`editorEvaluacion.bloqueo.${codigoDeFallo(fallo)}` as never);
+    case 'quiz_multiple_correct':
+      return t('editorEvaluacion.bloqueo.quiz_answer_missing' as never);
+    case 'quiz_pass_percent_invalid':
+      return t('editorEvaluacion.notaInvalida' as never);
     default:
       break;
   }

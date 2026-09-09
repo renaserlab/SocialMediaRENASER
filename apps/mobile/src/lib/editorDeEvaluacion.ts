@@ -147,3 +147,50 @@ export function hayCambiosSinGuardar(
 export function notaMinimaValida(valor: number): boolean {
   return Number.isInteger(valor) && valor >= 1 && valor <= 100;
 }
+
+
+/** Una pregunta en la que no se ha escrito absolutamente nada. */
+export function estaEnBlanco(pregunta: PreguntaEditable): boolean {
+  return (
+    pregunta.enunciado.trim() === '' &&
+    pregunta.alternativas.every((a) => a.texto.trim() === '')
+  );
+}
+
+/**
+ * Lo que de verdad se manda al guardar.
+ *
+ * SE QUITAN LAS PREGUNTAS EN BLANCO. La base exige texto en el enunciado y en
+ * cada alternativa —`length(trim(...)) >= 1`—, así que una fila recién añadida
+ * y todavía vacía hacía fallar el guardado ENTERO con un 422 genérico: no había
+ * forma de escribir la pregunta diez, guardar y volver mañana.
+ *
+ * Solo se descartan las que están COMPLETAMENTE vacías. Una a medio escribir no
+ * se tira en silencio: eso lo dice `motivoParaGuardar`, que se comprueba antes.
+ */
+export function paraGuardar(
+  preguntas: readonly PreguntaEditable[],
+): PreguntaEditable[] {
+  return preguntas.filter((p) => !estaEnBlanco(p));
+}
+
+/**
+ * Por qué este borrador todavía no se puede GUARDAR, o `null`.
+ *
+ * Es más flojo que `motivoParaNoPublicar`: guardar admite una evaluación sin
+ * preguntas y sin respuesta correcta marcada —eso es un borrador—, pero NO
+ * admite texto vacío, porque la base lo rechaza.
+ */
+export function motivoParaNoGuardar(
+  preguntas: readonly PreguntaEditable[],
+  notaMinima: number,
+): string | null {
+  if (!notaMinimaValida(notaMinima)) return 'quiz_pass_percent_invalid';
+  for (const pregunta of paraGuardar(preguntas)) {
+    if (pregunta.enunciado.trim() === '') return 'quiz_prompt_empty';
+    if (pregunta.alternativas.some((a) => a.texto.trim() === '')) {
+      return 'quiz_option_empty';
+    }
+  }
+  return null;
+}

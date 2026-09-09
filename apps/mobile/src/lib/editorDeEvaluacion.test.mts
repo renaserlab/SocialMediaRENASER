@@ -24,7 +24,10 @@ import {
   marcarCorrecta,
   motivoParaNoPublicar,
   moverPregunta,
+  estaEnBlanco,
+  motivoParaNoGuardar,
   notaMinimaValida,
+  paraGuardar,
   preguntaNueva,
   sinAlternativa,
   type PreguntaEditable,
@@ -228,13 +231,12 @@ describe('lo que la pantalla sostiene', () => {
     assert.ok(cerrojo !== -1 && cerrojo < cuerpo.indexOf('await'));
   });
 
-  it('un fallo al guardar no borra lo escrito', () => {
-    const cuerpo = PANTALLA.slice(
-      PANTALLA.indexOf('const guardar ='),
-      PANTALLA.indexOf('const publicar ='),
-    );
-    const captura = cuerpo.slice(cuerpo.indexOf('} catch'));
-    assert.ok(!captura.includes('setBorrador(vacio'));
+  it('mientras se guarda no se puede escribir', () => {
+    // Al volver el PUT se reemplaza el borrador con el eco del servidor: lo
+    // tecleado durante el viaje desaparecía Y `sinGuardar` quedaba en falso,
+    // así que al salir tampoco avisaba.
+    const campos = PANTALLA.match(new RegExp('editable=\{!ocupado\}', 'g')) ?? [];
+    assert.ok(campos.length >= 4, `solo ${campos.length} campos se bloquean`);
   });
 
   it('salir con cambios sin guardar avisa', () => {
@@ -255,8 +257,22 @@ describe('lo que la pantalla sostiene', () => {
   });
 
   it('el curso sin evaluación NO es un error', () => {
-    // Es la pantalla que existe justo para crearla.
-    assert.ok(PANTALLA.includes("=== 'course_quiz_not_found'"));
+    // Es la pantalla que existe justo para crearla. Y se reconoce con el helper
+    // compartido, no reimplementando la comprobación aquí.
+    assert.ok(PANTALLA.includes('sinEvaluacion(error)'));
+  });
+
+  it('despublicar al guardar se dice, no pasa bajo un toast verde', () => {
+    const cuerpo = PANTALLA.slice(
+      PANTALLA.indexOf('const guardar ='),
+      PANTALLA.indexOf('const publicar ='),
+    );
+    assert.ok(cuerpo.includes('estabaPublicada'));
+    assert.ok(cuerpo.includes("editorEvaluacion.despublicadaTitulo"));
+  });
+
+  it('publicar tampoco con la nota mínima inválida', () => {
+    assert.ok(PANTALLA.includes('!notaMinimaValida(borrador.notaMinima)'));
   });
 });
 
@@ -302,5 +318,60 @@ describe('los tres idiomas dicen todo lo que el editor pregunta', () => {
         assert.ok((diccionario[clave] ?? '').trim() !== '', `falta ${clave} en ${nombre}`);
       }
     }
+  });
+});
+
+
+describe('guardar a medias', () => {
+  it('una pregunta recién añadida no impide guardar', () => {
+    // La base exige texto en el enunciado y en cada alternativa, así que una
+    // fila en blanco hacía fallar el guardado ENTERO con un 422 genérico: no
+    // había forma de escribir la pregunta diez y volver mañana.
+    const preguntas = [buena(), preguntaNueva()];
+    assert.equal(motivoParaNoGuardar(preguntas, 70), null);
+    assert.deepEqual(paraGuardar(preguntas), [buena()]);
+  });
+
+  it('una a medio escribir NO se tira en silencio: se dice qué falta', () => {
+    const media: PreguntaEditable = {
+      enunciado: 'Ya escribí la pregunta',
+      alternativas: [
+        { texto: '', esCorrecta: false },
+        { texto: '', esCorrecta: false },
+      ],
+    };
+    assert.equal(motivoParaNoGuardar([media], 70), 'quiz_option_empty');
+    assert.deepEqual(paraGuardar([media]), [media], 'no se descarta');
+  });
+
+  it('guardar SÍ admite lo que publicar no', () => {
+    // Un borrador sin correcta marcada es un borrador legítimo.
+    const sinCorrecta: PreguntaEditable = {
+      enunciado: '¿Cuál?',
+      alternativas: [
+        { texto: 'a', esCorrecta: false },
+        { texto: 'b', esCorrecta: false },
+      ],
+    };
+    assert.equal(motivoParaNoGuardar([sinCorrecta], 70), null);
+    assert.equal(motivoParaNoPublicar([sinCorrecta]), 'quiz_answer_missing');
+  });
+
+  it('una evaluación vacía se puede guardar y no publicar', () => {
+    assert.equal(motivoParaNoGuardar([], 70), null);
+    assert.equal(motivoParaNoPublicar([]), 'quiz_without_questions');
+  });
+
+  it('con la nota mínima inválida no se guarda', () => {
+    assert.equal(motivoParaNoGuardar([buena()], 0), 'quiz_pass_percent_invalid');
+    assert.equal(motivoParaNoGuardar([buena()], 101), 'quiz_pass_percent_invalid');
+  });
+
+  it('una pregunta en blanco se reconoce por estar entera vacía', () => {
+    assert.equal(estaEnBlanco(preguntaNueva()), true);
+    assert.equal(estaEnBlanco(buena()), false);
+    const conTexto = preguntaNueva();
+    conTexto.alternativas[0] = { texto: 'algo', esCorrecta: false };
+    assert.equal(estaEnBlanco(conTexto), false, 'algo escrito ya no es blanco');
   });
 });
