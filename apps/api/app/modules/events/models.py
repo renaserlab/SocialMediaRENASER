@@ -293,10 +293,13 @@ class EventAdmissionDecision(Base):
             name="event_admission_decisions_total",
         ),
         CheckConstraint(
+            # `total is not null` no sobra: en SQL, comparar contra NULL da
+            # NULL, y un CHECK que evalua a NULL SE CUMPLE. Sin eso, `approved`
+            # con el total vacio pasaba la restriccion entera.
             "(decision = 'approved' and critical_failure = false "
-            f"  and total >= {admission.UMBRAL_APROBACION}) "
+            f"  and total is not null and total >= {admission.UMBRAL_APROBACION}) "
             "or (decision = 'conditional' and critical_failure = false "
-            f"  and total between {admission.UMBRAL_CONDICIONAL} "
+            f"  and total is not null and total between {admission.UMBRAL_CONDICIONAL} "
             f"  and {admission.UMBRAL_APROBACION - 1}) "
             "or decision in ('rejected', 'changes_requested')",
             name="event_admission_decisions_umbral",

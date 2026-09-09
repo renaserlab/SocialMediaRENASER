@@ -133,6 +133,14 @@ language plpgsql
 as $$
 begin
   if tg_op = 'DELETE' then
+    -- SI EL EVENTO YA NO ESTA, esto es la cascada de su borrado y no un intento
+    -- de arrancarle una version. Sin esta salida el disparador impide borrar el
+    -- evento entero, y por la cascada de `events.organizer_id` tambien impide
+    -- dar de baja la cuenta de quien lo organizo. Lo que se protege es que
+    -- nadie borre una version SUELTA, dejando un expediente que ya no cuadra.
+    if not exists (select 1 from public.events where id = old.event_id) then
+      return old;
+    end if;
     raise exception 'Una version de evento no se borra: es lo que se reviso'
       using errcode = 'restrict_violation';
   end if;
@@ -229,10 +237,17 @@ create table if not exists public.event_admission_decisions (
   created_at timestamptz not null default now(),
 
   -- LA REGLA DE APROBACIÓN DEL BLUEPRINT, EN LA BASE.
+  -- `total is not null` NO SOBRA, aunque lo parezca. En SQL una comparacion
+  -- contra NULL no da FALSO: da NULL, y un CHECK que evalua a NULL SE CUMPLE.
+  -- Sin ese `is not null`, `decision = 'approved'` con el total vacio pasaba la
+  -- restriccion entera: quedaba aprobado un evento sin ninguna puntuacion, que
+  -- es justo lo que esta linea existe para impedir. Lo encontro
+  -- `test_aprobar_sin_puntaje_tampoco`.
   constraint event_admission_decisions_umbral check (
-    (decision = 'approved' and critical_failure = false and total >= 85)
+    (decision = 'approved' and critical_failure = false
+     and total is not null and total >= 85)
     or (decision = 'conditional' and critical_failure = false
-        and total between 80 and 84)
+        and total is not null and total between 80 and 84)
     or decision in ('rejected', 'changes_requested')
   )
 );

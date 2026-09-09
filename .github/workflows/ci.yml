@@ -69,4 +69,23 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
       - run: pip install 'psycopg[binary]'
-      - run: pytest tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py tests/test_migraciones_de_aprendizaje.py -v
+      # `-p no:randomly` NO se usa: el orden aleatorio es parte de lo que
+      # se comprueba. Lo que si importa es que estas pruebas NO se omitan;
+      # `--strict-markers` no lo garantiza, asi que la linea siguiente lo
+      # comprueba de verdad: si alguna se salta, el job falla.
+      - run: pytest -v tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py tests/test_migraciones_de_aprendizaje.py tests/test_migraciones_de_eventos.py tests/test_aforo_concurrente_postgres.py --junitxml=migraciones.xml
+      # Una prueba OMITIDA no es una prueba aprobada. Sin esto, borrar la
+      # variable de entorno dejaria el job en verde sin ejecutar nada.
+      - name: Ninguna prueba de PostgreSQL puede quedar omitida
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          suite = ET.parse('migraciones.xml').getroot()
+          total = int(suite.get('tests') or suite[0].get('tests'))
+          saltadas = int(suite.get('skipped') or suite[0].get('skipped'))
+          print(f'{total} pruebas, {saltadas} omitidas')
+          if saltadas:
+              sys.exit('hay pruebas de PostgreSQL omitidas: omitida no es aprobada')
+          if total < 100:
+              sys.exit(f'solo se ejecutaron {total}: falta alguna suite')
+          PY
