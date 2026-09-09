@@ -347,3 +347,169 @@ class HoldRead(BaseModel):
 
 class VencidosRead(BaseModel):
     procesados: int
+
+
+# --------------------------------------------------------------------------- #
+# Órdenes, entradas y check-in (Incremento 3)
+# --------------------------------------------------------------------------- #
+class LineaDeOrden(BaseModel):
+    ticket_type_id: str
+    #: CONGELADO al comprar. El organizador puede renombrar el tipo después.
+    name: str
+    quantity: int
+    unit_price_minor: int
+    subtotal_minor: int
+
+
+class OrdenRead(BaseModel):
+    """Un pedido de entradas.
+
+    NO ES UNA ENTRADA hasta que `status` es `PAID`, y no es una factura nunca:
+    faltan comisión, impuestos y entidad vendedora, que la empresa no ha
+    decidido. La pantalla lo llama pedido y lo dice.
+    """
+
+    id: str
+    event_id: str
+    #: `PENDING_PAYMENT`, `PAYMENT_PROCESSING`, `PAID`, `PAYMENT_FAILED`,
+    #: `EXPIRED` o `CANCELLED`.
+    status: str
+    currency: str
+    subtotal_minor: int
+    #: HOY IGUAL AL SUBTOTAL. Existe aparte porque comisión e impuestos suman
+    #: por encima cuando existan, no para insinuar que hoy hay cargos ocultos.
+    total_minor: int
+    items: list[LineaDeOrden] = Field(default_factory=list)
+    created_at: datetime
+    paid_at: datetime | None = None
+    #: Cuánto le queda a la reserva que sostiene este pedido. Cero significa que
+    #: el pedido ya no se puede pagar aunque su estado tarde en reflejarlo.
+    segundos_restantes: int = 0
+    #: NUNCA la referencia del proveedor ni notas internas: quien compra no
+    #: necesita el `pi_...` y publicarlo solo ayuda a quien quiera cruzarlo.
+
+
+class IntentoDePagoRead(BaseModel):
+    """A dónde ir a pagar. El importe no viaja: lo sabe el servidor."""
+
+    order_id: str
+    provider: str
+    checkout_url: str
+
+
+class EntradaRead(BaseModel):
+    """Una entrada emitida, sin su credencial.
+
+    La credencial se pide aparte y se entrega una sola vez: ver
+    `CredencialRead`.
+    """
+
+    id: str
+    event_id: str
+    order_id: str
+    ticket_type_id: str
+    name: str
+    #: `VALID`, `USED` o `REVOKED`.
+    status: str
+    #: El código que se teclea si la cámara falla. No es secuencial.
+    code: str
+    issued_at: datetime
+    checked_in_at: datetime | None = None
+
+
+class CredencialRead(BaseModel):
+    """El valor que va DENTRO del QR, entregado una vez.
+
+    No se guarda en el servidor —solo su `sha256`— y pedirla otra vez genera
+    una nueva, dejando la anterior inservible. Es lo que hace que un QR
+    fotografiado y compartido deje de valer.
+
+    LA IMAGEN LA DIBUJA EL CLIENTE. Aquí viaja el valor, no un PNG: guardar
+    imágenes de QR en la base es guardar entradas.
+    """
+
+    ticket_id: str
+    #: Opaco. Ni nombre, ni correo, ni precio, ni el identificador de la entrada.
+    credential: str
+    code: str
+
+
+class VerificarRequest(BaseModel):
+    #: Lo que leyó la cámara, o lo que se tecleó.
+    credential: str = Field(min_length=1, max_length=200)
+
+
+class CheckinRequest(BaseModel):
+    credential: str = Field(min_length=1, max_length=200)
+
+
+class VeredictoRead(BaseModel):
+    """Lo que la puerta necesita saber, y NADA que no necesite.
+
+    Sin nombre ni correo de quien compró: el operador decide si pasa, no
+    conoce a la persona.
+    """
+
+    #: `OK`, `ALREADY_USED`, `REVOKED`, `NOT_FOUND`, `WRONG_EVENT` o
+    #: `NOT_ADMITTING`.
+    result: str
+    ticket_id: str | None = None
+    name: str | None = None
+    checked_in_at: datetime | None = None
+
+
+class AsistenteRead(BaseModel):
+    """Una fila de la lista de asistentes, para el organizador.
+
+    LLEVA EL TIPO Y EL ESTADO, NO AL COMPRADOR. Quién compró cada entrada no le
+    hace falta a la puerta, y el organizador no necesita el correo de nadie para
+    dejarle pasar.
+    """
+
+    ticket_id: str
+    ticket_type_id: str
+    name: str
+    status: str
+    code: str
+    checked_in_at: datetime | None = None
+
+
+class VentasRead(BaseModel):
+    """El resumen del evento para quien lo organiza.
+
+    `ingresos_brutos_minor` cuenta SOLO pedidos pagados, y es BRUTO: no es lo
+    que el organizador va a cobrar. Faltan comisión, impuestos y liquidación,
+    que son decisiones que nadie ha tomado todavía. La pantalla lo dice con
+    esas palabras en vez de enseñar una cifra que parece un ingreso.
+    """
+
+    entradas_emitidas: int
+    entradas_usadas: int
+    entradas_revocadas: int
+    ordenes_pagadas: int
+    ordenes_pendientes: int
+    ingresos_brutos_minor: int
+    currency: str | None = None
+    checkins: int = 0
+
+
+class PaginaDeOrdenes(BaseModel):
+    items: list[OrdenRead] = Field(default_factory=list)
+    #: `null` cuando no hay más. Se pagina por cursor y no por número de página:
+    #: con filas que se crean mientras alguien mira, el desplazamiento repite y
+    #: se salta resultados.
+    next_cursor: str | None = None
+
+
+class PaginaDeEntradas(BaseModel):
+    items: list[EntradaRead] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class PaginaDeAsistentes(BaseModel):
+    items: list[AsistenteRead] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class RevocarRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=200)

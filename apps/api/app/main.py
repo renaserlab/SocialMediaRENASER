@@ -26,6 +26,8 @@ from app.modules.gobernanza.router import router as gobernanza_router
 from app.modules.commerce.router import router as commerce_router
 from app.modules.identity.router import router as identity_router
 from app.modules.events.router import admin_router as events_admin_router
+from app.modules.events.order_router import admin_router as orders_admin_router
+from app.modules.events.order_router import router as orders_router
 from app.modules.events.ticket_router import admin_router as tickets_admin_router
 from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
@@ -163,6 +165,12 @@ def create_app() -> FastAPI:
     # `/events/{event_id}/ticket-types` tienen los dos tres tramos y FastAPI
     # resuelve por orden de registro: declarado despues, un identificador de
     # reserva podria intentar casar con la ruta de tipos.
+    # Y LOS PEDIDOS ANTES QUE LAS ENTRADAS: `/events/ticket-holds/{id}/orders`
+    # tiene cuatro tramos y `/events/ticket-holds/{id}` tres, pero
+    # `/events/orders/{id}` y `/events/{event_id}/ticket-types` vuelven a
+    # colisionar en tres. Mismo criterio: lo mas concreto, primero.
+    app.include_router(orders_router, prefix=prefix)
+    app.include_router(orders_admin_router, prefix=prefix)
     app.include_router(tickets_router, prefix=prefix)
     app.include_router(tickets_admin_router, prefix=prefix)
     app.include_router(events_router, prefix=prefix)

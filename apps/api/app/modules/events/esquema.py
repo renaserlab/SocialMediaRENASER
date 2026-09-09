@@ -80,6 +80,28 @@ async def hay_entradas(db: AsyncSession) -> bool:
     return _cache["entradas"]
 
 
+#: Las cuatro que añade la 0062.
+_TABLAS_DE_ORDENES = (
+    "event_orders",
+    "event_order_items",
+    "event_tickets",
+    "event_checkins",
+)
+
+
+async def hay_ordenes(db: AsyncSession) -> bool:
+    """Si la 0062 está aplicada: órdenes, entradas emitidas y check-in."""
+    if "ordenes" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            return all(inspector.has_table(t) for t in _TABLAS_DE_ORDENES)
+
+        _cache["ordenes"] = await conexion.run_sync(_mirar)
+    return _cache["ordenes"]
+
+
 async def exigir_eventos_v2(db: AsyncSession) -> None:
     if not await hay_eventos_v2(db):
         raise ServiceUnavailableError(

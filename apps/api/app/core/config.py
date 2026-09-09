@@ -84,6 +84,26 @@ class Settings(BaseSettings):
     #: ninguna parte.
     feature_event_ticketing: bool = False
 
+    #: Cobrar una entrada de evento. SEPARADA de `feature_event_ticketing` a
+    #: propósito: apagarla detiene la VENTA y deja intactos los tipos de
+    #: entrada, la disponibilidad y las reservas temporales, que siguen siendo
+    #: útiles sin cobro. Y separada de las de Cursos, cuya semántica es otra:
+    #: allí `stripe_payments_enabled` gobierna la compra de un curso.
+    #:
+    #: APAGADA NO PARA EL DINERO YA EN CURSO. Un webhook verificado de una orden
+    #: que ya se inició se sigue procesando: apagar la venta significa «no se
+    #: abren cobros nuevos», no «el que pagó se queda sin su entrada».
+    feature_event_payments: bool = False
+
+    #: Qué pasarela cobra las entradas: `none` o `stripe`. Con `none` no se
+    #: puede iniciar un pago, y decirlo es más honesto que fallar al llamar.
+    event_payments_provider: str = "none"
+
+    #: Cuánto vive una orden pendiente de pago, en minutos. Nunca más que la
+    #: reserva que la sostiene: el inventario es del hold, y una orden que
+    #: sobreviviera a su reserva estaría prometiendo un aforo que ya se soltó.
+    event_order_ttl_minutes: int = 10
+
     # --- Pagos: nativo (RevenueCat) ---
     #: Verificacion servidor a servidor de las compras de las tiendas. APAGADA
     #: por defecto. Mientras este en false, `POST /payments/native/sync`
