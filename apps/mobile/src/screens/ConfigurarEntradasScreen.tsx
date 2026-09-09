@@ -14,6 +14,7 @@ import { confirm, notify } from '@/lib/confirm';
 import { importeConMoneda } from '@/lib/dinero';
 import {
   MODOS_OFRECIDOS,
+  claveDeErrorDeEntradas,
   claveDelModo,
   enteroEscrito,
   motivoParaNoGuardarTipo,
@@ -101,11 +102,16 @@ export function ConfigurarEntradasScreen() {
     try {
       await accion();
     } catch (error) {
+      // POR CODIGO, no por el texto del servidor, que siempre viene en espanol.
+      const clave =
+        error instanceof ApiError ? claveDeErrorDeEntradas(error.code) : null;
       notify(
         t('common.saveFailed'),
-        error instanceof Error && error.message.trim() !== ''
-          ? error.message
-          : t('common.tryAgain'),
+        clave !== null
+          ? t(clave as TranslationKey)
+          : error instanceof Error && error.message.trim() !== ''
+            ? error.message
+            : t('common.tryAgain'),
       );
     } finally {
       ocupadoRef.current = false;
@@ -236,7 +242,22 @@ export function ConfigurarEntradasScreen() {
           })}
         </View>
 
-        {!vendeEntradas(config?.access_mode) ? (
+        {/*
+          UN MODO QUE ESTA PANTALLA NO OFRECE SE NOMBRA. `INVITATION_ONLY` está
+          en el contrato y no tiene flujo, así que no aparece entre las fichas;
+          si un evento lo tiene puesto por otra vía, las dos fichas salían sin
+          seleccionar y debajo se leía «Con reserva gratuita no hay entradas que
+          configurar», que no es lo que ese evento es.
+        */}
+        {config !== null && !MODOS_OFRECIDOS.includes(config.access_mode as never) ? (
+          <View style={[styles.aviso, { backgroundColor: colors.surfaceAlt }]}>
+            <Text variant="caption" color={colors.textMuted}>
+              {t('entradas.modoSinFlujo', {
+                modo: t(claveDelModo(config.access_mode) as TranslationKey),
+              })}
+            </Text>
+          </View>
+        ) : !vendeEntradas(config?.access_mode) ? (
           <Text variant="caption" color={colors.textMuted}>
             {t('entradas.gratuitoExplicado')}
           </Text>
@@ -286,7 +307,12 @@ export function ConfigurarEntradasScreen() {
                   onPress={() => alternarVenta(tipo)}
                   style={[styles.boton, { borderColor: colors.border }]}
                   accessibilityRole="button"
-                  accessibilityLabel={t('entradas.alternarVenta')}
+                  accessibilityLabel={t(
+                    tipo.status === 'on_sale'
+                      ? 'entradas.pausarTipo'
+                      : 'entradas.ponerALaVentaTipo',
+                    { tipo: tipo.name },
+                  )}
                 >
                   <Feather
                     name={tipo.status === 'on_sale' ? 'pause' : 'play'}
@@ -299,7 +325,7 @@ export function ConfigurarEntradasScreen() {
                   onPress={() => retirar(tipo)}
                   style={[styles.boton, { borderColor: colors.border }]}
                   accessibilityRole="button"
-                  accessibilityLabel={t('entradas.retirar')}
+                  accessibilityLabel={t('entradas.retirarTipo', { tipo: tipo.name })}
                 >
                   <Feather name="archive" size={16} color={colors.text} />
                 </Pressable>
@@ -380,7 +406,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    minHeight: 36,
+    // 44, QUE ES EL MÍNIMO. Con 36 la ficha se pulsaba mal en un teléfono, y
+    // aquí lo que se pulsa mal es la decisión de si el evento cobra o no.
+    minHeight: 44,
     justifyContent: 'center',
   },
   tipo: {

@@ -153,6 +153,106 @@ export function comoReloj(segundos: number): string {
   return `${minutos}:${String(resto).padStart(2, '0')}`;
 }
 
+/**
+ * Qué decirle a la persona cuando el servidor dice que no.
+ *
+ * POR CÓDIGO ESTABLE, NO POR TEXTO. El servidor contesta siempre en español
+ * —los mensajes están escritos en `ticketing.py`—, así que pintar
+ * `error.message` le enseñaba «Como mucho 4 entradas por operación.» a alguien
+ * con la aplicación en inglés. Era el camino por el que salían todos los 409 y
+ * 422 de este flujo.
+ *
+ * `null` para un código que no se conoce: entonces la pantalla usa el texto del
+ * servidor, que en español es correcto y en otro idioma es mejor que nada.
+ */
+export function claveDeErrorDeEntradas(
+  codigo: string | null | undefined,
+): string | null {
+  const conocidos: Record<string, string> = {
+    event_not_ticketed: 'entradas.sinEntradas',
+    event_ticketing_not_available: 'entradas.noDisponible',
+    event_sales_not_open: 'errorDeEntradas.ventaSinAbrir',
+    event_sales_closed: 'errorDeEntradas.ventaCerrada',
+    ticket_type_unavailable: 'errorDeEntradas.tipoNoDisponible',
+    ticket_quantity_invalid: 'errorDeEntradas.cantidadInvalida',
+    ticket_limit_exceeded: 'errorDeEntradas.limiteSuperado',
+    event_capacity_exceeded: 'errorDeEntradas.sinCupo',
+    ticket_hold_expired: 'errorDeEntradas.reservaVencida',
+    ticket_hold_already_consumed: 'errorDeEntradas.reservaUsada',
+    ticket_hold_conflict: 'errorDeEntradas.otroPedido',
+    ticket_hold_already_active: 'errorDeEntradas.yaTienesUna',
+    ticket_hold_not_found: 'errorDeEntradas.reservaNoEncontrada',
+    ticket_type_not_found: 'errorDeEntradas.tipoNoEncontrado',
+    event_mode_conflict: 'errorDeEntradas.modoIncompatible',
+    ticket_quota_invalid: 'errorDeEntradas.cupoImposible',
+    ticket_type_in_use: 'errorDeEntradas.tipoEnUso',
+    inventory_lock_timeout: 'errorDeEntradas.otraEnCurso',
+  };
+  if (typeof codigo !== 'string') return null;
+  return conocidos[codigo] ?? null;
+}
+
+/**
+ * La reserva que estorba, sacada del detalle de un 409.
+ *
+ * El servidor manda `{"hold_id": ...}` con `ticket_hold_already_active`. Sin
+ * ese identificador la persona que cierra la aplicación con una reserva viva no
+ * tiene forma de volver a ella: se queda diez minutos bloqueada, y lo único que
+ * puede hacer es esperar.
+ */
+export function reservaQueEstorba(detalle: unknown): string | null {
+  if (typeof detalle !== 'object' || detalle === null) return null;
+  const valor = (detalle as Record<string, unknown>).hold_id;
+  return typeof valor === 'string' && valor.trim() !== '' ? valor : null;
+}
+
+/**
+ * El menor de varios topes, ignorando los que no existen.
+ *
+ * El evento puede tener DOS: lo que queda en la sala y el máximo por operación
+ * que fijó el organizador. Mirando solo el primero, la pantalla dejaba armar
+ * una selección que el servidor iba a rechazar con un 409.
+ */
+export function menorTope(...topes: (number | null | undefined)[]): number | null {
+  const puestos = topes.filter(
+    (tope): tope is number => typeof tope === 'number' && Number.isFinite(tope),
+  );
+  if (puestos.length === 0) return null;
+  return puestos.reduce((menor, tope) => (tope < menor ? tope : menor));
+}
+
+/**
+ * Una huella de lo elegido, para la clave de idempotencia.
+ *
+ * La clave se generaba UNA VEZ por pantalla. Apartar, volver atrás, cambiar la
+ * selección y apartar otra vez mandaba la misma clave con otro pedido: el
+ * servidor contestaba, con razón, que esa clave ya se usó para otra petición, y
+ * la clave no cambiaba mientras la pantalla siguiera viva. No había salida.
+ *
+ * Con la huella, un reintento del MISMO pedido reusa la clave —que es para lo
+ * que existe— y un pedido distinto estrena una.
+ */
+export function huellaDeSeleccion(seleccion: Seleccion): string {
+  return Object.entries(seleccion)
+    .filter(([, cantidad]) => cantidad > 0)
+    .map(([id, cantidad]) => `${id}:${cantidad}`)
+    .sort()
+    .join('|');
+}
+
+/**
+ * Si el evento todavía no ha puesto ningún tipo a la venta.
+ *
+ * NO ES LO MISMO QUE AGOTADO, y el servidor se molesta en separarlos. Un
+ * organizador que pone el evento en modo «con entradas» antes de crear los
+ * tipos tenía la ficha ofreciendo «Elegir entradas» y la pantalla contestando
+ * «Agotado · No quedan entradas de ningún tipo», que es una afirmación falsa
+ * sobre un evento que aún no ha empezado a vender.
+ */
+export function todaviaSinTipos(tipos: TipoDeEntrada[]): boolean {
+  return tipos.length === 0;
+}
+
 /** Los estados de una reserva que el servidor puede devolver. */
 export type EstadoDeReserva = 'ACTIVE' | 'EXPIRED' | 'RELEASED' | 'CONSUMED';
 

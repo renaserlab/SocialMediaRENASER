@@ -19,12 +19,17 @@ import {
   MODOS_DE_ACCESO,
   MODOS_OFRECIDOS,
   cantidadPosible,
+  claveDeErrorDeEntradas,
   claveDelEstadoDeReserva,
   claveDelModo,
   comoReloj,
   cuantasElegidas,
   enteroEscrito,
   hayExistencias,
+  huellaDeSeleccion,
+  menorTope,
+  reservaQueEstorba,
+  todaviaSinTipos,
   motivoParaNoGuardarTipo,
   motivoParaNoReservar,
   precioDesde,
@@ -416,9 +421,22 @@ describe('la pantalla no promete una compra', () => {
     assert.ok(cuerpo.includes('if (!id || apartandoRef.current) return;'));
   });
 
-  it('la clave de idempotencia se genera una vez por pantalla', () => {
-    // Una por pulsación haría que un reintento apartara otras tantas entradas.
-    assert.ok(ELEGIR.includes('const claveRef = useRef('));
+  it('la clave de idempotencia es una por PEDIDO, no una por pantalla', () => {
+    // Una por pulsacion haria que un reintento apartara otras tantas entradas.
+    // Una por pantalla dejaba a la persona encerrada: apartar, volver atras,
+    // cambiar la seleccion y apartar mandaba la misma clave con otra cosa
+    // dentro, el servidor contestaba que ya se uso, y la clave no cambiaba
+    // mientras la pantalla viviera. La huella del pedido decide cual de las dos.
+    assert.ok(ELEGIR.includes('const claveRef = useRef<string | null>(null)'));
+    assert.ok(ELEGIR.includes('huellaRef.current !== huella'));
+    assert.ok(
+      ELEGIR.includes('claveDelPedido(huellaDeSeleccion(seleccion))'),
+      'la clave que se manda sale de la huella del pedido',
+    );
+    assert.ok(
+      ELEGIR.includes('claveRef.current = null;'),
+      'con la reserva hecha, la siguiente estrena clave',
+    );
   });
 
   it('la disponibilidad se vuelve a pedir cuando el servidor dice que no', () => {
@@ -494,5 +512,139 @@ describe('los tres idiomas dicen todo lo que las entradas preguntan', () => {
         assert.ok((diccionario[clave] ?? '').trim() !== '', `falta ${clave} en ${nombre}`);
       }
     }
+  });
+});
+
+describe('el error que se lee en pantalla', () => {
+  it('traduce por código estable, nunca por el texto del servidor', () => {
+    assert.equal(
+      claveDeErrorDeEntradas('ticket_limit_exceeded'),
+      'errorDeEntradas.limiteSuperado',
+    );
+    assert.equal(
+      claveDeErrorDeEntradas('event_capacity_exceeded'),
+      'errorDeEntradas.sinCupo',
+    );
+  });
+
+  it('devuelve null para lo que no conoce, y entonces manda el servidor', () => {
+    assert.equal(claveDeErrorDeEntradas('algo_que_no_existe'), null);
+    assert.equal(claveDeErrorDeEntradas(null), null);
+    assert.equal(claveDeErrorDeEntradas(undefined), null);
+  });
+
+  it('todos los códigos que el servidor puede devolver tienen su frase', () => {
+    // La lista sale de `apps/api/app/modules/events/ticketing.py`. Si allí nace
+    // un código nuevo y aquí no, la persona vuelve a leer español en inglés.
+    const delServidor = [
+      'event_not_ticketed',
+      'event_ticketing_not_available',
+      'event_sales_not_open',
+      'event_sales_closed',
+      'ticket_type_unavailable',
+      'ticket_quantity_invalid',
+      'ticket_limit_exceeded',
+      'event_capacity_exceeded',
+      'ticket_hold_expired',
+      'ticket_hold_already_consumed',
+      'ticket_hold_conflict',
+      'ticket_hold_already_active',
+      'ticket_hold_not_found',
+      'ticket_type_not_found',
+      'event_mode_conflict',
+      'ticket_quota_invalid',
+      'ticket_type_in_use',
+      'inventory_lock_timeout',
+    ];
+    for (const codigo of delServidor) {
+      const clave = claveDeErrorDeEntradas(codigo);
+      assert.ok(clave !== null, `sin frase para ${codigo}`);
+      for (const [nombre, diccionario] of [
+        ['es', es],
+        ['en', en],
+        ['pt', pt],
+      ] as Array<[string, Record<string, string>]>) {
+        assert.ok(
+          (diccionario[clave as string] ?? '').trim() !== '',
+          `falta ${clave} en ${nombre}`,
+        );
+      }
+    }
+  });
+});
+
+describe('la reserva que estorba', () => {
+  it('sale del detalle del 409', () => {
+    assert.equal(reservaQueEstorba({ hold_id: 'abc' }), 'abc');
+  });
+
+  it('y nada más cuenta como identificador', () => {
+    assert.equal(reservaQueEstorba(null), null);
+    assert.equal(reservaQueEstorba(undefined), null);
+    assert.equal(reservaQueEstorba({}), null);
+    assert.equal(reservaQueEstorba({ hold_id: '' }), null);
+    assert.equal(reservaQueEstorba({ hold_id: 7 }), null);
+    assert.equal(reservaQueEstorba('abc'), null);
+  });
+});
+
+describe('los dos topes del evento', () => {
+  it('manda el menor', () => {
+    assert.equal(menorTope(10, 4), 4);
+    assert.equal(menorTope(2, 6), 2);
+  });
+
+  it('un tope que no existe no cuenta', () => {
+    assert.equal(menorTope(null, 4), 4);
+    assert.equal(menorTope(10, null), 10);
+    assert.equal(menorTope(undefined, 3), 3);
+  });
+
+  it('sin ningún tope, no hay tope', () => {
+    assert.equal(menorTope(null, undefined), null);
+    assert.equal(menorTope(), null);
+  });
+
+  it('el cero es un tope, no un hueco', () => {
+    assert.equal(menorTope(0, 5), 0);
+  });
+});
+
+describe('la clave de idempotencia', () => {
+  it('el mismo pedido tiene la misma huella, en cualquier orden', () => {
+    assert.equal(huellaDeSeleccion({ a: 2, b: 1 }), huellaDeSeleccion({ b: 1, a: 2 }));
+  });
+
+  it('otro pedido tiene otra huella: eso es lo que renueva la clave', () => {
+    assert.notEqual(huellaDeSeleccion({ a: 2 }), huellaDeSeleccion({ a: 3 }));
+    assert.notEqual(huellaDeSeleccion({ a: 2 }), huellaDeSeleccion({ b: 2 }));
+  });
+
+  it('un cero no es parte del pedido', () => {
+    assert.equal(huellaDeSeleccion({ a: 2, b: 0 }), huellaDeSeleccion({ a: 2 }));
+  });
+});
+
+describe('vacío y agotado no son lo mismo', () => {
+  it('sin tipos todavía no se vende; no es que se haya agotado', () => {
+    assert.equal(todaviaSinTipos([]), true);
+  });
+
+  it('con tipos, la pregunta es otra', () => {
+    const tipo = {
+      id: 'a',
+      name: 'General',
+      description: '',
+      price_minor: 4900,
+      currency: 'PEN',
+      min_per_order: 1,
+      max_per_order: 4,
+      inclusions: [],
+      restrictions: [],
+      sort_order: 0,
+      disponibles: 0,
+    };
+    assert.equal(todaviaSinTipos([tipo]), false);
+    assert.equal(hayExistencias([tipo]), false, 'ese sí está agotado');
   });
 });

@@ -17,6 +17,13 @@ export type Disponibilidad = {
   /** `null` cuando el evento no tiene aforo: mandan solo los cupos. */
   general: number | null;
   por_tipo: Record<string, number>;
+  /**
+   * El tope por operación del EVENTO, o `null` si no tiene uno propio.
+   *
+   * Sin él la pantalla dejaba armar una selección que el servidor iba a
+   * rechazar: el tope existía en la configuración y no llegaba a quien elige.
+   */
+  max_per_order: number | null;
 };
 
 export type LineaDeReserva = {

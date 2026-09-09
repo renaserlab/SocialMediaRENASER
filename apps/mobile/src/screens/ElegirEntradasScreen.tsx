@@ -12,11 +12,16 @@ import { notify } from '@/lib/confirm';
 import { importeConMoneda } from '@/lib/dinero';
 import {
   cantidadPosible,
+  claveDeErrorDeEntradas,
   cuantasElegidas,
   hayExistencias,
+  huellaDeSeleccion,
+  menorTope,
   motivoParaNoReservar,
+  reservaQueEstorba,
   subtotal,
   subtotalDe,
+  todaviaSinTipos,
   topeDe,
   type Seleccion,
   type TipoDeEntrada,
@@ -61,12 +66,25 @@ export function ElegirEntradasScreen() {
   /** Cerrojo síncrono: dos toques no mandan dos reservas. */
   const apartandoRef = useRef(false);
   /**
-   * La clave de idempotencia de ESTE intento.
+   * La clave de idempotencia de ESTE pedido, y la huella de lo que apartaba.
    *
-   * Se genera una vez por pantalla, no por pulsación: así un reintento tras un
-   * fallo de red devuelve la misma reserva en vez de apartar otras tantas.
+   * Una clave por PEDIDO, no por pantalla. Un reintento del mismo pedido tras
+   * un fallo de red reusa la clave —que es exactamente para lo que existe— y un
+   * pedido distinto estrena una. Generándola una sola vez por pantalla, apartar
+   * y luego cambiar la selección mandaba la misma clave con otra cosa dentro: el
+   * servidor contestaba que esa clave ya se usó, y no cambiaba mientras la
+   * pantalla viviera. La persona se quedaba encerrada en ese error.
    */
-  const claveRef = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const claveRef = useRef<string | null>(null);
+  const huellaRef = useRef('');
+
+  const claveDelPedido = (huella: string) => {
+    if (claveRef.current === null || huellaRef.current !== huella) {
+      claveRef.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      huellaRef.current = huella;
+    }
+    return claveRef.current;
+  };
 
   const cargar = useCallback(async () => {
     if (!id) return;
@@ -99,7 +117,10 @@ export function ElegirEntradasScreen() {
     void cargar();
   }, [cargar]);
 
-  const topePorOperacion = libre?.general ?? null;
+  // LOS DOS TOPES. Lo que queda en la sala y el máximo por operación que fijó
+  // el organizador. Mirando solo el primero, la pantalla dejaba armar una
+  // selección que el servidor iba a rechazar con un 409.
+  const topePorOperacion = menorTope(libre?.general, libre?.max_per_order);
 
   const cambiar = (tipo: TipoDeEntrada, delta: number) => {
     setSeleccion((previa) => {
@@ -125,24 +146,49 @@ export function ElegirEntradasScreen() {
       const reserva = await EventTicketRepository.apartar(
         id,
         seleccion,
-        claveRef.current,
+        claveDelPedido(huellaDeSeleccion(seleccion)),
       );
+      // LA CLAVE SE RETIRA con la reserva ya hecha: la siguiente que se aparte
+      // desde esta misma pantalla es otra reserva y merece otra clave.
+      claveRef.current = null;
       router.push(`/reserva/${reserva.id}` as never);
     } catch (error) {
+      // YA HAY UNA RESERVA VIVA: se lleva a ella en vez de dejar un error sin
+      // salida. El servidor manda su identificador justamente para esto.
+      const suya =
+        error instanceof ApiError && error.code === 'ticket_hold_already_active'
+          ? reservaQueEstorba(error.details)
+          : null;
+      if (suya !== null) {
+        router.replace(`/reserva/${suya}` as never);
+        return;
+      }
       // LA DISPONIBILIDAD SE VUELVE A PEDIR. Lo que se descargó pudo quedarse
       // viejo mientras alguien elegía, y quedarse con el número antiguo haría
       // que el botón siguiera ofreciendo algo que ya no está.
-      notify(
-        t('entradas.noSePuedeReservar'),
-        error instanceof Error && error.message.trim() !== ''
-          ? error.message
-          : t('common.tryAgain'),
-      );
+      notify(t('entradas.noSePuedeReservar'), textoDelError(error));
       void cargar();
     } finally {
       apartandoRef.current = false;
       setApartando(false);
     }
+  };
+
+  /**
+   * El error, en el idioma de quien lo lee.
+   *
+   * El servidor contesta siempre en español; sin esto, alguien con la
+   * aplicación en inglés leía «Como mucho 4 entradas por operación.». Se
+   * traduce por CÓDIGO estable, nunca comparando el texto, y lo que no se
+   * reconoce cae al mensaje del servidor, que es mejor que un texto genérico.
+   */
+  const textoDelError = (error: unknown) => {
+    const clave =
+      error instanceof ApiError ? claveDeErrorDeEntradas(error.code) : null;
+    if (clave !== null) return t(clave as TranslationKey);
+    return error instanceof Error && error.message.trim() !== ''
+      ? error.message
+      : t('common.tryAgain');
   };
 
   const volver = () =>
@@ -186,14 +232,20 @@ export function ElegirEntradasScreen() {
     );
   }
 
-  if (!hayExistencias(tipos)) {
+  // VACÍO Y AGOTADO NO SON LO MISMO, y el servidor se molesta en separarlos.
+  // Un evento cuyo organizador puso el modo antes de crear los tipos no está
+  // agotado: todavía no ha empezado a vender.
+  if (todaviaSinTipos(tipos) || !hayExistencias(tipos)) {
+    const sinTipos = todaviaSinTipos(tipos);
     return (
       <AppScreen>
         <AppHeader title={t('entradas.titulo')} onBack={volver} />
         <StateView
           state="empty"
-          title={t('entradas.agotado')}
-          description={t('entradas.agotadoCuerpo')}
+          title={sinTipos ? t('entradas.aunSinTipos') : t('entradas.agotado')}
+          description={
+            sinTipos ? t('entradas.aunSinTiposCuerpo') : t('entradas.agotadoCuerpo')
+          }
           actionLabel={t('common.tryAgain')}
           onAction={() => void cargar()}
         />
@@ -201,8 +253,13 @@ export function ElegirEntradasScreen() {
     );
   }
 
-  const total = subtotal(tipos, seleccion);
-  const moneda = tipos[0]?.currency ?? 'PEN';
+  // SUBTOTAL, NO TOTAL. Faltan comisión e impuestos, y el nombre lo dice.
+  const subtotalDeEntradas = subtotal(tipos, seleccion);
+  // LA MONEDA LA PONE EL SERVIDOR, y sale de un tipo de verdad. La lista no
+  // está vacía aquí —eso se resolvió arriba—, pero el compilador no lo sabe: sin
+  // moneda `importeConMoneda` escribe solo la cifra, que es preferible a
+  // inventarse «S/» sobre un importe que podría estar en otra divisa.
+  const moneda = tipos[0]?.currency ?? '';
   const elegidas = cuantasElegidas(seleccion);
 
   return (
@@ -259,7 +316,7 @@ export function ElegirEntradasScreen() {
                 onPress={() => cambiar(tipo, -1)}
                 style={[styles.boton, { borderColor: colors.border }]}
                 accessibilityRole="button"
-                accessibilityLabel={t('entradas.quitarUna')}
+                accessibilityLabel={t('entradas.quitarUnaDe', { tipo: tipo.name })}
               >
                 <Feather
                   name="minus"
@@ -267,7 +324,15 @@ export function ElegirEntradasScreen() {
                   color={cantidad === 0 ? colors.disabled : colors.text}
                 />
               </Pressable>
-              <Text variant="secondary" weight="700">
+              <Text
+                variant="secondary"
+                weight="700"
+                accessibilityLiveRegion="polite"
+                accessibilityLabel={t('entradas.elegidasDe', {
+                  n: cantidad,
+                  tipo: tipo.name,
+                })}
+              >
                 {cantidad}
               </Text>
               <Pressable
@@ -275,7 +340,7 @@ export function ElegirEntradasScreen() {
                 onPress={() => cambiar(tipo, 1)}
                 style={[styles.boton, { borderColor: colors.border }]}
                 accessibilityRole="button"
-                accessibilityLabel={t('entradas.anadirUna')}
+                accessibilityLabel={t('entradas.anadirUnaDe', { tipo: tipo.name })}
               >
                 <Feather
                   name="plus"
@@ -294,7 +359,7 @@ export function ElegirEntradasScreen() {
           {t('entradas.subtotal')}
         </Text>
         <Text variant="secondary" weight="700">
-          {importeConMoneda(total, moneda)}
+          {importeConMoneda(subtotalDeEntradas, moneda)}
         </Text>
       </View>
       <Text variant="caption" color={colors.textMuted}>
@@ -302,7 +367,9 @@ export function ElegirEntradasScreen() {
       </Text>
 
       <Button
-        label={t('entradas.apartar', { n: elegidas })}
+        label={t(elegidas === 1 ? 'entradas.apartarUna' : 'entradas.apartar', {
+          n: elegidas,
+        })}
         onPress={() => void apartar()}
         loading={apartando}
         disabled={apartando || elegidas === 0}

@@ -39,6 +39,8 @@ export type EventDto = {
   access_mode?: string | null;
   /** El precio mas barato que queda, en unidad menor. */
   price_from_minor?: number | null;
+  /** Moneda de `price_from_minor`, ISO 4217. Solo la ficha la trae. */
+  currency?: string | null;
 };
 
 /**
@@ -117,5 +119,6 @@ export function toEventItem(dto: EventDto): EventItem {
     // mandara (el listado no lo manda).
     accessMode: dto.access_mode ?? null,
     precioDesde: dto.price_from_minor ?? null,
+    monedaDelPrecio: dto.currency ?? null,
   };
 }

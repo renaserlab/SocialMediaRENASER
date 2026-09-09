@@ -105,6 +105,10 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'evento.desde',
     'modoDeAcceso.FREE_RSVP',
     'entradas.retirar',
+    // «Retirar {tipo}» y «{n} de {tipo}»: el verbo y la preposicion se escriben
+    // igual en los dos idiomas, y lo demas es el nombre que puso el organizador.
+    'entradas.retirarTipo',
+    'entradas.elegidasDe',
     'entradas.estado.retired',
     'entradas.subtotalDeTipo',
     'reserva.porUnidad',

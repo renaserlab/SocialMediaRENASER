@@ -261,10 +261,17 @@ export function EventoScreen() {
       */}
       {puedeReservar && vendeEntradas(evento.accessMode) ? (
         <>
-          {evento.precioDesde !== null && evento.precioDesde !== undefined ? (
+          {evento.precioDesde !== null &&
+          evento.precioDesde !== undefined &&
+          typeof evento.monedaDelPrecio === 'string' ? (
             <Text variant="secondary" weight="700">
               {t('evento.desde', {
-                importe: importeConMoneda(evento.precioDesde, 'PEN'),
+                // LA MONEDA LA DICE EL SERVIDOR. Sin ella no se escribe el
+                // precio: mejor callar que afirmar «S/» sobre dolares.
+                importe: importeConMoneda(
+                  evento.precioDesde,
+                  evento.monedaDelPrecio as string,
+                ),
               })}
             </Text>
           ) : null}

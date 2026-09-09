@@ -302,6 +302,13 @@ export type EventItem = {
   accessMode?: string | null;
   /** El precio mas barato que queda, en unidad menor. `null` si no hay. */
   precioDesde?: number | null;
+  /**
+   * La moneda de ese precio, ISO 4217. `null` cuando no se pregunto.
+   *
+   * Sin ella la ficha escribia «S/» sobre un importe que podia estar en
+   * dolares: un precio con la moneda equivocada es un precio falso.
+   */
+  monedaDelPrecio?: string | null;
   /** Quien organiza el evento; permite listar los de un perfil. */
   organizerId?: string;
   /** Fecha real de inicio; `date` es solo el texto ya formateado. */

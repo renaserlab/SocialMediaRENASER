@@ -11,6 +11,7 @@ import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
 import { importeConMoneda } from '@/lib/dinero';
 import {
+  claveDeErrorDeEntradas,
   claveDelEstadoDeReserva,
   comoReloj,
   segundosRestantes,
@@ -24,6 +25,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
+import { ApiError } from '@/services/api';
 
 /**
  * El resumen de una reserva temporal, con su cuenta atrás.
@@ -46,7 +48,17 @@ export function ReservaDeEntradasScreen() {
   const [reserva, setReserva] = useState<ReservaTemporal | null>(null);
   const [restantes, setRestantes] = useState(0);
   const [cargando, setCargando] = useState(true);
-  const [fallo, setFallo] = useState(false);
+  /**
+   * QUÉ falló, no solo que falló.
+   *
+   * `red` se reintenta; `noEncontrada` y `noDisponible` no, y ofrecer un botón
+   * de «Reintentar» que no va a funcionar nunca es peor que no ofrecer ninguno.
+   * Las otras dos pantallas ya ramificaban por código; esta lo mandaba todo al
+   * mismo saco.
+   */
+  const [fallo, setFallo] = useState<'red' | 'noEncontrada' | 'noDisponible' | null>(
+    null,
+  );
   const [liberando, setLiberando] = useState(false);
   const liberandoRef = useRef(false);
   /** Para no volver a preguntar en bucle cuando el contador llega a cero. */
@@ -55,7 +67,7 @@ export function ReservaDeEntradasScreen() {
   const cargar = useCallback(async () => {
     if (!id) return;
     setCargando(true);
-    setFallo(false);
+    setFallo(null);
     try {
       const datos = await EventTicketRepository.leerReserva(id);
       setReserva(datos);
@@ -63,8 +75,17 @@ export function ReservaDeEntradasScreen() {
       // va adelantado, la cuenta atrás empezaría ya vencida.
       setRestantes(datos.segundos_restantes);
       yaPreguntadoRef.current = false;
-    } catch {
-      setFallo(true);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'ticket_hold_not_found') {
+        setFallo('noEncontrada');
+      } else if (
+        error instanceof ApiError &&
+        error.code === 'event_ticketing_not_available'
+      ) {
+        setFallo('noDisponible');
+      } else {
+        setFallo('red');
+      }
     } finally {
       setCargando(false);
     }
@@ -92,25 +113,36 @@ export function ReservaDeEntradasScreen() {
 
   const liberar = async () => {
     if (!id || liberandoRef.current) return;
+    // EL CERROJO, ANTES DEL PRIMER `await`, que aquí es el propio diálogo. Sin
+    // esto dos toques rápidos encolaban dos diálogos y la persona veía
+    // «¿Liberar las entradas?» otra vez después de haber aceptado, que se lee
+    // como que la acción falló.
+    liberandoRef.current = true;
     const aceptado = await confirm({
       title: t('reserva.liberarTitulo'),
       message: t('reserva.liberarCuerpo'),
       confirmLabel: t('reserva.liberar'),
       destructive: true,
     });
-    if (!aceptado) return;
-    liberandoRef.current = true;
+    if (!aceptado) {
+      liberandoRef.current = false;
+      return;
+    }
     setLiberando(true);
     try {
       const datos = await EventTicketRepository.liberar(id);
       setReserva(datos);
       setRestantes(0);
     } catch (error) {
+      const clave =
+        error instanceof ApiError ? claveDeErrorDeEntradas(error.code) : null;
       notify(
         t('common.saveFailed'),
-        error instanceof Error && error.message.trim() !== ''
-          ? error.message
-          : t('common.tryAgain'),
+        clave !== null
+          ? t(clave as TranslationKey)
+          : error instanceof Error && error.message.trim() !== ''
+            ? error.message
+            : t('common.tryAgain'),
       );
     } finally {
       liberandoRef.current = false;
@@ -118,10 +150,17 @@ export function ReservaDeEntradasScreen() {
     }
   };
 
-  const volver = () =>
-    router.canGoBack()
-      ? router.back()
-      : router.replace(`/eventos/${reserva?.event_id ?? ''}` as never);
+  const volver = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    // A LA FICHA SI SE SABE CUÁL, Y SI NO, A LOS EVENTOS. `/eventos/` sin
+    // identificador no es ninguna ruta: `app/eventos/` solo tiene `[id].tsx`, y
+    // el respaldo caía en la pantalla de «no encontrado».
+    const evento = reserva?.event_id;
+    router.replace((evento ? `/eventos/${evento}` : '/mis-eventos') as never);
+  };
 
   if (cargando) {
     return (
@@ -132,15 +171,31 @@ export function ReservaDeEntradasScreen() {
     );
   }
 
-  if (fallo || !reserva) {
+  if (fallo !== null || !reserva) {
     return (
       <AppScreen>
         <AppHeader title={t('reserva.titulo')} onBack={volver} />
-        <StateView
-          state="error"
-          description={t('common.loadFailed')}
-          onRetry={() => void cargar()}
-        />
+        {fallo === 'noEncontrada' || fallo === 'noDisponible' ? (
+          <StateView
+            state="empty"
+            title={
+              fallo === 'noEncontrada'
+                ? t('errorDeEntradas.reservaNoEncontrada')
+                : t('entradas.noDisponible')
+            }
+            description={
+              fallo === 'noEncontrada'
+                ? t('reserva.noEncontradaCuerpo')
+                : t('entradas.noDisponibleCuerpo')
+            }
+          />
+        ) : (
+          <StateView
+            state="error"
+            description={t('common.loadFailed')}
+            onRetry={() => void cargar()}
+          />
+        )}
       </AppScreen>
     );
   }
