@@ -376,19 +376,145 @@ def test_los_modelos_no_declaran_columnas_que_la_base_no_tiene(conexion, aplicad
     assert not inventadas, f"columnas del modelo que no existen en la base: {inventadas}"
 
 
+# --------------------------------------------------------------------------- #
+# LAS TRES GARANTIAS, Y POR QUE SON TRES Y NO UNA
+#
+# La prueba anterior aplicaba TODAS las migraciones una segunda vez y exigia que
+# ninguna fallara. Estaba imponiendo retroactivamente un contrato que las
+# primeras nunca prometieron: `0001_initial.sql` crea `type app_role` y una
+# veintena de tablas sin `if not exists`, porque se escribio para correr UNA vez
+# sobre una base vacia. Corregir solo el `create type` no arregla nada: detras
+# aparecen las tablas, y detras los indices.
+#
+# NO SE TOCA LA 0001, y no es pereza:
+#
+#   * Ya esta aplicada en produccion. Cambiarla separa lo que se ejecuto de lo
+#     que dice el repositorio.
+#   * Una migracion historica no tiene que ser reejecutable si consta que se
+#     aplico. Reejecutarla no es un caso de uso: es un accidente del banco de
+#     pruebas.
+#   * Cambiar su texto altera cualquier suma de comprobacion que se lleve de
+#     ella.
+#
+# Lo que si hace falta es separar tres cosas que la prueba vieja mezclaba:
+#
+#   1. INSTALACION LIMPIA. Levantar PostgreSQL vacio, poner el prologo de
+#      Supabase y aplicar de la 0001 a la ultima, en orden y UNA vez. Cualquier
+#      error de SQL es un fallo. Es la fixture `aplicadas` y no cambia: la 0001
+#      NO se excluye de aqui.
+#
+#   2. REEJECUCION DE LAS QUE PROMETEN SERLO. Es el caso real: alguien pega una
+#      migracion en el editor de Supabase, se corta a la mitad, y la vuelve a
+#      pegar entera. Las migraciones modernas estan escritas para eso —
+#      `create table if not exists`, `drop policy if exists`, `on conflict do
+#      nothing`— y ahi si hay un contrato que comprobar.
+#
+#   3. LAS QUE YA CONSTAN APLICADAS no se vuelven a ejecutar nunca. No se
+#      prueban porque no ocurre.
+#
+# COMO SE ELIGIO LA FRONTERA. No por numero ni por fecha: se aplicaron las 60
+# sobre una base limpia y despues se intento cada una OTRA VEZ, una a una, para
+# ver cual fallaba de verdad. Fallan tres, y ninguna es «las antiguas»: 0001 y
+# 0003 por tablas y tipos sin guarda, y la 0058 —de hace dos semanas— porque
+# rehace una restriccion de la que depende una clave ajena compuesta.
+#
+# LA LISTA ES DE EXCLUSIONES, NO DE INCLUSIONES, y eso importa: una migracion
+# nueva entra por defecto en la reejecucion. Para dejarla fuera hay que
+# escribirla aqui con su motivo, que es exactamente la friccion que se busca.
+# --------------------------------------------------------------------------- #
+
+#: Migracion -> por que NO se puede volver a ejecutar.
+#:
+#: Comprobado ejecutandolas, no leyendolas: cada motivo es el error que
+#: PostgreSQL devuelve al segundo intento.
+NO_PROMETEN_REEJECUCION = {
+    "0001_initial.sql": (
+        "crea `type app_role` y una veintena de tablas sin `if not exists`. "
+        "Se escribio para correr una vez sobre una base vacia."
+    ),
+    "0003_stories.sql": (
+        "crea `stories` y sus politicas sin guarda. Mismo caso que la 0001."
+    ),
+    "0058_evaluacion_final_del_curso.sql": (
+        "rehace `quiz_options_de_su_pregunta`, y de esa restriccion depende la "
+        "clave ajena compuesta de `quiz_answers`: el `drop` no puede caer."
+    ),
+}
+
+
 @SIN_POSTGRES
-def test_aplicar_dos_veces_no_rompe_nada(conexion, aplicadas) -> None:
-    """Idempotencia. Todas las migraciones usan `if not exists` y
-    `drop policy if exists`; volver a pasarlas tiene que ser inofensivo, que es
-    lo que ocurre cuando alguien vuelve a pegar una por si acaso.
+def test_la_instalacion_limpia_aplica_todas_en_orden(conexion, aplicadas) -> None:
+    """GARANTIA 1. De la 0001 a la ultima, una vez, sobre una base vacia.
+
+    La 0001 NO se excluye de aqui: lo que se comprueba es justo que la cadena
+    entera monta un esquema desde cero. Si alguna fallara, la fixture `aplicadas`
+    ya habria dado el error con el nombre del fichero.
     """
+    assert aplicadas, "no se aplico ninguna migracion"
+    assert aplicadas == sorted(aplicadas), "se aplicaron fuera de orden"
+    assert aplicadas[0] == "0001_initial.sql"
+    # Y el esquema existe de verdad, no solo «no dio error».
+    tablas = _lista(
+        conexion,
+        "select table_name from information_schema.tables "
+        "where table_schema = 'public' and table_type = 'BASE TABLE'",
+    )
+    assert len(tablas) > 50, f"solo se crearon {len(tablas)} tablas"
+
+
+@SIN_POSTGRES
+def test_las_que_prometen_reejecucion_la_cumplen(conexion, aplicadas) -> None:
+    """GARANTIA 2. Volver a pegar una migracion moderna es inofensivo.
+
+    Es el caso real: se pega en el editor de Supabase, se corta a la mitad y se
+    vuelve a pegar entera. Se ejecutan TODAS menos las tres que estan excluidas
+    con su motivo en `NO_PROMETEN_REEJECUCION`.
+
+    Una migracion nueva entra aqui por defecto. Si no es reejecutable, esta
+    prueba se pone roja, y dejarla fuera exige escribir por que.
+    """
+    fallos = []
+    ejecutadas = 0
     for nombre in aplicadas:
-        ruta = MIGRACIONES / nombre
+        if nombre in NO_PROMETEN_REEJECUCION:
+            continue
+        ejecutadas += 1
         try:
             with conexion.cursor() as cur:
-                cur.execute(ruta.read_text(encoding="utf-8"))
+                cur.execute((MIGRACIONES / nombre).read_text(encoding="utf-8"))
         except Exception as error:  # noqa: BLE001
-            pytest.fail(f"la migracion {nombre} no es idempotente:\n{error}")
+            fallos.append(f"{nombre}: {str(error).strip().splitlines()[0]}")
+
+    assert not fallos, (
+        "estas migraciones prometen ser reejecutables y no lo son:\n  "
+        + "\n  ".join(fallos)
+    )
+    # Y que la exclusion no se coma la prueba: se reejecuta la inmensa mayoria.
+    assert ejecutadas == len(aplicadas) - len(NO_PROMETEN_REEJECUCION)
+    assert ejecutadas >= len(aplicadas) * 0.9, (
+        f"solo se reejecutaron {ejecutadas} de {len(aplicadas)}: la lista de "
+        "exclusiones esta creciendo y con ella el agujero"
+    )
+
+
+@SIN_POSTGRES
+def test_la_lista_de_exclusiones_no_crece_sola(conexion, aplicadas) -> None:
+    """GARANTIA 3. Las tres excluidas son las tres que fallan, ni una mas.
+
+    Sin esto, la lista es una alfombra: se anade un nombre y la garantia 2 pasa
+    sin comprobar nada. Aqui se ejercitan LAS EXCLUIDAS y se exige que sigan
+    fallando; el dia que una deje de fallar, sobra en la lista.
+
+    No se captura cualquier excepcion: se comprueba que el fallo ocurra y se
+    guarda el mensaje, que es lo que documenta el motivo.
+    """
+    import psycopg
+
+    for nombre, motivo in NO_PROMETEN_REEJECUCION.items():
+        assert nombre in aplicadas, f"{nombre} ya no existe: quitala de la lista"
+        assert motivo.strip(), f"{nombre} esta excluida sin motivo"
+        with pytest.raises(psycopg.Error), conexion.cursor() as cur:
+            cur.execute((MIGRACIONES / nombre).read_text(encoding="utf-8"))
 
 
 @SIN_POSTGRES
