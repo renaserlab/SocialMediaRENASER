@@ -18,6 +18,7 @@ import {
   claveDeCategoria,
   estaEnRevision,
   estaPublicado,
+  fechaDeInicio,
   hayCambiosSinGuardar,
   motivoParaNoEnviar,
   sePuedeEditar,
@@ -34,7 +35,8 @@ const completo = (extra: Partial<CamposDelBorrador> = {}): CamposDelBorrador => 
   category: 'gastronomia',
   location: 'Barranco, Lima',
   eventType: 'presential',
-  startsAt: new Date('2026-11-20T19:00:00Z'),
+  dia: '20/11/2026',
+  hora: '19:00',
   capacity: '20',
   ...extra,
 });
@@ -111,8 +113,25 @@ describe('qué falta para poder enviarlo', () => {
     assert.equal(motivoParaNoEnviar(completo({ category: '' })), 'miEvento.faltaCategoria');
   });
 
-  it('sin fecha', () => {
-    assert.equal(motivoParaNoEnviar(completo({ startsAt: null })), 'miEvento.faltaFecha');
+  it('sin día', () => {
+    assert.equal(motivoParaNoEnviar(completo({ dia: '' })), 'miEvento.faltaFecha');
+  });
+
+  it('sin hora', () => {
+    // LA HORA NO SE INVENTA. La primera versión componía la fecha a las 19:00
+    // «por poner algo», y esa hora se publicaba en la ficha.
+    assert.equal(motivoParaNoEnviar(completo({ hora: '' })), 'miEvento.faltaHora');
+  });
+
+  it('con una fecha que no existe', () => {
+    assert.equal(
+      motivoParaNoEnviar(completo({ dia: '31/02/2026' })),
+      'miEvento.fechaImposible',
+    );
+    assert.equal(
+      motivoParaNoEnviar(completo({ hora: '25:00' })),
+      'miEvento.fechaImposible',
+    );
   });
 
   it('presencial sin recinto', () => {
@@ -136,6 +155,48 @@ describe('qué falta para poder enviarlo', () => {
     for (const inventado of ['programa', 'participantes', 'accesibilidad', 'seguro']) {
       assert.ok(!reglas.includes(`miEvento.falta${inventado}`), inventado);
     }
+  });
+});
+
+describe('la fecha de inicio NO se inventa', () => {
+  it('con día y hora, la fecha que se escribió', () => {
+    const f = fechaDeInicio('20/11/2026', '19:30');
+    assert.ok(f !== null);
+    assert.equal(f!.getFullYear(), 2026);
+    assert.equal(f!.getMonth(), 10);
+    assert.equal(f!.getDate(), 20);
+    assert.equal(f!.getHours(), 19);
+    assert.equal(f!.getMinutes(), 30);
+  });
+
+  it('sin hora NO hay fecha, y no se pone una por defecto', () => {
+    /*
+      EL FALLO. La pantalla solo pedía el día y componía
+      `new Date(a, m - 1, d, 19, 0, 0)`: las siete de la tarde, porque sí. Y esa
+      hora se publicaba —la ficha la imprime con `toLocaleTimeString`—, así que
+      quien abría el evento leía «07:00 p. m.» sin que nadie la hubiera escrito.
+    */
+    assert.equal(fechaDeInicio('20/11/2026', ''), null);
+    assert.equal(fechaDeInicio('20/11/2026', '  '), null);
+  });
+
+  it('sin día tampoco', () => {
+    assert.equal(fechaDeInicio('', '19:00'), null);
+  });
+
+  it('un día que no existe no se normaliza en silencio', () => {
+    // `new Date(2026, 1, 31)` da el 3 de marzo sin protestar.
+    assert.equal(fechaDeInicio('31/02/2026', '19:00'), null);
+  });
+
+  it('una hora que no existe tampoco', () => {
+    assert.equal(fechaDeInicio('20/11/2026', '25:00'), null);
+    assert.equal(fechaDeInicio('20/11/2026', '10:71'), null);
+  });
+
+  it('una fecha mal escrita no se adivina', () => {
+    assert.equal(fechaDeInicio('20-11-2026', '19:00'), null);
+    assert.equal(fechaDeInicio('mañana', '19:00'), null);
   });
 });
 
@@ -174,7 +235,8 @@ describe('los cambios sin guardar', () => {
       { location: 'Miraflores' },
       { eventType: 'online' },
       { capacity: '30' },
-      { startsAt: new Date('2027-01-01T19:00:00Z') },
+      { dia: '01/01/2027' },
+      { hora: '20:30' },
     ];
     for (const cambio of campos) {
       assert.equal(
@@ -185,13 +247,14 @@ describe('los cambios sin guardar', () => {
     }
   });
 
-  it('dos fechas iguales en objetos distintos no son un cambio', () => {
-    // Comparar las referencias diría que sí y el botón «Guardar» se quedaría
-    // encendido para siempre.
+  it('la misma fecha escrita dos veces no es un cambio', () => {
+    // Cuando la fecha era un `Date`, comparar las referencias decía que sí y
+    // el botón «Guardar» se quedaba encendido para siempre. En texto no puede
+    // pasar, y por eso el formulario habla en texto.
     assert.equal(
       hayCambiosSinGuardar(
-        completo({ startsAt: new Date('2026-11-20T19:00:00Z') }),
-        completo({ startsAt: new Date('2026-11-20T19:00:00Z') }),
+        completo({ dia: '20/11/2026', hora: '19:00' }),
+        completo({ dia: '20/11/2026', hora: '19:00' }),
       ),
       false,
     );
@@ -245,6 +308,27 @@ describe('la pantalla del borrador', () => {
   it('dos toques no mandan dos envíos', () => {
     const cuerpo = PANTALLA.slice(PANTALLA.indexOf('const enviar ='));
     assert.ok(cuerpo.includes('if (!id || ocupadoRef.current) return;'));
+  });
+
+  it('la hora se pide, no se inventa', () => {
+    assert.ok(PANTALLA.includes('<TimeField'));
+    assert.ok(!PANTALLA.includes('19, 0, 0'));
+  });
+
+  it('la fecha no se puede tocar en solo lectura', () => {
+    // `DateField` no acepta `editable`, así que en un evento que ya no se
+    // puede guardar se pintaba igual y el cambio se perdía sin avisar.
+    assert.ok(PANTALLA.includes('{editable ? (\n        <>\n          <DateField'));
+  });
+
+  it('salir con cambios sin guardar avisa', () => {
+    assert.ok(PANTALLA.includes("t('miEvento.salirSinGuardar')"));
+  });
+
+  it('el teclado no tapa lo que se escribe', () => {
+    // El proyecto tiene UN componente para esto y todas las pantallas con
+    // formulario lo usan.
+    assert.ok(PANTALLA.includes('<SinTecladoDelante>'));
   });
 
   it('no hay ningún control que escriba el estado', () => {

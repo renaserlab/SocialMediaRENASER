@@ -2144,6 +2144,7 @@ export const es = {
   'valoracion.noDisponible': 'Las valoraciones todavía no están disponibles.',
 
   // Admisión de eventos (blueprint §4 y §5)
+  'catalog.eventDraftCreated': 'Borrador creado. Complétalo y envíalo a revisión.',
   'evento.selloZ': 'Seleccionado por Z',
 
   'estadoDeEvento.DRAFT': 'Borrador',
@@ -2190,6 +2191,12 @@ export const es = {
   'miEvento.campoAforo': 'Aforo',
   'miEvento.aforoVacio': 'En blanco significa sin límite. Cero significa que no cabe nadie.',
   'miEvento.aforoAprobado': 'La admisión autorizó {aforo} plazas.',
+  'miEvento.campoHora': 'Hora de inicio',
+  'miEvento.faltaHora': 'Falta la hora de inicio.',
+  'miEvento.fechaImposible': 'Esa fecha y hora no existen. Revísalas.',
+  'miEvento.salirSinGuardar': 'Tienes cambios sin guardar',
+  'miEvento.salirSinGuardarCuerpo': 'Si sales ahora se pierden.',
+  'miEvento.salirIgual': 'Salir igualmente',
   'miEvento.guardar': 'Guardar borrador',
   'miEvento.enviar': 'Enviar a revisión',
   'miEvento.enviarTitulo': '¿Enviar a revisión?',

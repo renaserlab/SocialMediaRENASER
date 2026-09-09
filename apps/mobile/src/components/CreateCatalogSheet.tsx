@@ -286,6 +286,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     setError(null);
     //: El curso que se acaba de crear, para abrir su asistente al terminar.
     let nuevoCurso: string | null = null;
+    let nuevoEvento: string | null = null;
     try {
       // La portada se sube primero: se guarda su RUTA, no una URL.
       const coverPath = cover ? (await uploadPostMedia(cover)).storagePath : null;
@@ -313,7 +314,10 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           ...(coverPath ? { coverPath } : {}),
         };
         if (editing) await CatalogRepository.updateEvent(editing.id, data);
-        else await CatalogRepository.createEvent({ ...data, coverPath });
+        else {
+          const creado = await CatalogRepository.createEvent({ ...data, coverPath });
+          nuevoEvento = creado.id;
+        }
       } else {
         // El precio se lee UNA vez y en un sitio (`lib/dinero.ts`): repartir
         // el calculo por los componentes acaba en dos importes distintos para
@@ -359,7 +363,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         editing
           ? isEvent ? t('catalog.eventUpdated') : t('catalog.courseUpdated')
           : isPodcast ? t('catalog.episodePublished')
-          : isEvent ? t('catalog.eventPublished') : t('catalog.courseDraftCreated'),
+          : isEvent ? t('catalog.eventDraftCreated') : t('catalog.courseDraftCreated'),
       );
       /*
         UN CURSO RECIEN CREADO NO ESTA TERMINADO, y esta hoja no puede
@@ -371,6 +375,13 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         en iOS esta hoja es un Modal y navegar por debajo la dejaria encima.
       */
       if (nuevoCurso) router.push(`/editar-curso/${nuevoCurso}` as never);
+      /*
+        UN EVENTO RECIEN CREADO YA NO SE PUBLICA SOLO. Nace borrador y pasa por
+        admision, asi que el aviso decia «Evento publicado» sobre algo que no
+        se ve en ningun sitio. Se lleva a su borrador, que es donde se completa
+        y desde donde se envia a revision.
+      */
+      if (nuevoEvento) router.push(`/editar-evento/${nuevoEvento}` as never);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('create.publishFailed'));
     } finally {

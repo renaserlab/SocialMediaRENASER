@@ -2041,6 +2041,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'valoracion.noDisponible': 'Ratings aren\'t available yet.',
 
   // Event admission
+  'catalog.eventDraftCreated': 'Draft created. Fill it in and send it for review.',
   'evento.selloZ': 'Selected by Z',
 
   'estadoDeEvento.DRAFT': 'Draft',
@@ -2087,6 +2088,12 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'miEvento.campoAforo': 'Capacity',
   'miEvento.aforoVacio': 'Blank means no limit. Zero means nobody fits.',
   'miEvento.aforoAprobado': 'Admission authorised {aforo} places.',
+  'miEvento.campoHora': 'Start time',
+  'miEvento.faltaHora': 'The start time is missing.',
+  'miEvento.fechaImposible': 'That date and time do not exist. Check them.',
+  'miEvento.salirSinGuardar': 'You have unsaved changes',
+  'miEvento.salirSinGuardarCuerpo': 'If you leave now they are lost.',
+  'miEvento.salirIgual': 'Leave anyway',
   'miEvento.guardar': 'Save draft',
   'miEvento.enviar': 'Send for review',
   'miEvento.enviarTitulo': 'Send for review?',

@@ -2045,6 +2045,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'valoracion.noDisponible': 'As avaliações ainda não estão disponíveis.',
 
   // Admissão de eventos
+  'catalog.eventDraftCreated': 'Rascunho criado. Completa-o e envia para análise.',
   'evento.selloZ': 'Selecionado pela Z',
 
   'estadoDeEvento.DRAFT': 'Rascunho',
@@ -2091,6 +2092,12 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'miEvento.campoAforo': 'Lotação',
   'miEvento.aforoVacio': 'Em branco significa sem limite. Zero significa que não cabe ninguém.',
   'miEvento.aforoAprobado': 'A admissão autorizou {aforo} lugares.',
+  'miEvento.campoHora': 'Hora de início',
+  'miEvento.faltaHora': 'Falta a hora de início.',
+  'miEvento.fechaImposible': 'Essa data e hora não existem. Verifica-as.',
+  'miEvento.salirSinGuardar': 'Tens alterações por guardar',
+  'miEvento.salirSinGuardarCuerpo': 'Se saíres agora, perdem-se.',
+  'miEvento.salirIgual': 'Sair mesmo assim',
   'miEvento.guardar': 'Guardar rascunho',
   'miEvento.enviar': 'Enviar para análise',
   'miEvento.enviarTitulo': 'Enviar para análise?',

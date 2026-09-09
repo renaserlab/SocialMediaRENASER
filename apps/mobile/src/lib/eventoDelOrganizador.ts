@@ -36,9 +36,45 @@ export type CamposDelBorrador = {
   category: string;
   location: string;
   eventType: 'online' | 'presential' | 'live';
-  startsAt: Date | null;
+  /** dd/mm/aaaa. Texto, como en el resto de formularios del proyecto. */
+  dia: string;
+  /** HH:MM en 24 h. Vacío es VACÍO: no se inventa ninguna hora. */
+  hora: string;
   capacity: string;
 };
+
+/**
+ * Día y hora combinados, o `null` si falta alguno o no son reales.
+ *
+ * LA HORA NO SE INVENTA. La primera versión de esta pantalla solo pedía el día
+ * y componía la fecha con `new Date(a, m - 1, d, 19, 0, 0)`: las siete de la
+ * tarde, porque sí. Y esa hora se publicaba —`fechaLargaDelEvento` la imprime
+ * en la ficha—, así que quien abría el evento leía «07:00 p. m.» sin que nadie
+ * la hubiera escrito. Sin hora no hay fecha, y sin fecha no se puede enviar.
+ *
+ * Rechaza además lo imposible (31/02, 25:00), que `Date` normalizaría en
+ * silencio a otro día.
+ */
+export function fechaDeInicio(dia: string, hora: string): Date | null {
+  const d = dia.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const h = hora.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!d || !h) return null;
+  const [, dd, mm, yyyy] = d;
+  const [, hh, min] = h;
+  if (Number(hh) > 23 || Number(min) > 59) return null;
+  const fecha = new Date(
+    Number(yyyy),
+    Number(mm) - 1,
+    Number(dd),
+    Number(hh),
+    Number(min),
+  );
+  const coincide =
+    fecha.getFullYear() === Number(yyyy) &&
+    fecha.getMonth() === Number(mm) - 1 &&
+    fecha.getDate() === Number(dd);
+  return coincide ? fecha : null;
+}
 
 /**
  * Qué le falta al borrador para poder enviarse, como CLAVE de traducción.
@@ -56,7 +92,11 @@ export function motivoParaNoEnviar(campos: CamposDelBorrador): string | null {
   if (campos.description.trim().length < 40) return 'miEvento.faltaDescripcion';
   if (campos.promise.trim() === '') return 'miEvento.faltaPromesa';
   if (campos.category.trim() === '') return 'miEvento.faltaCategoria';
-  if (campos.startsAt === null) return 'miEvento.faltaFecha';
+  if (campos.dia.trim() === '') return 'miEvento.faltaFecha';
+  if (campos.hora.trim() === '') return 'miEvento.faltaHora';
+  if (fechaDeInicio(campos.dia, campos.hora) === null) {
+    return 'miEvento.fechaImposible';
+  }
   if (campos.eventType === 'presential' && campos.location.trim() === '') {
     return 'miEvento.faltaRecinto';
   }
@@ -91,7 +131,8 @@ export function hayCambiosSinGuardar(
     actual.location === guardado.location &&
     actual.eventType === guardado.eventType &&
     actual.capacity === guardado.capacity &&
-    (actual.startsAt?.getTime() ?? null) === (guardado.startsAt?.getTime() ?? null);
+    actual.dia === guardado.dia &&
+    actual.hora === guardado.hora;
   return !iguales;
 }
 

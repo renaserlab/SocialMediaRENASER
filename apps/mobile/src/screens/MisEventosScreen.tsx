@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -15,6 +15,7 @@ import {
   EventOrganizerRepository,
   type EventoDelOrganizador,
 } from '@/repositories/EventOrganizerRepository';
+import { ApiError } from '@/services/api';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
@@ -42,6 +43,9 @@ export function MisEventosScreen() {
     'loading',
   );
   const [noDisponible, setNoDisponible] = useState(false);
+  const [creando, setCreando] = useState(false);
+  /** Cerrojo síncrono: dos toques no crean dos borradores. */
+  const creandoRef = useRef(false);
 
   const cargar = useCallback(async () => {
     setEstado('loading');
@@ -51,10 +55,19 @@ export function MisEventosScreen() {
       setEstado(mios.length === 0 ? 'empty' : 'content');
       setNoDisponible(false);
     } catch (error) {
-      // 503 `events_workflow_not_available`: la migración todavía no está
-      // aplicada. Se dice tal cual, que es distinto de «falló algo».
-      const texto = error instanceof Error ? error.message : '';
-      if (texto.includes('events_workflow_not_available')) {
+      /*
+        POR EL CÓDIGO, NO POR EL MENSAJE. Se miraba `error.message`, que lleva
+        la frase para leer; el código va en `error.code`. La condición no se
+        cumplía nunca, así que con la 0060 sin aplicar —que es como se
+        entrega— quien pulsaba «Mis eventos» veía un error genérico con un
+        botón de reintentar que iba a fallar siempre, y todo el estado
+        «todavía no está disponible», traducido a tres idiomas, era código
+        muerto.
+      */
+      if (
+        error instanceof ApiError &&
+        error.code === 'events_workflow_not_available'
+      ) {
         setNoDisponible(true);
         setEstado('empty');
         return;
@@ -70,6 +83,11 @@ export function MisEventosScreen() {
   );
 
   const crear = async () => {
+    // Sin esto, dos toques dejaban dos «Evento sin título» y solo se navegaba
+    // al segundo: el primero se quedaba en la lista sin que nadie lo pidiera.
+    if (creandoRef.current) return;
+    creandoRef.current = true;
+    setCreando(true);
     try {
       const creado = await EventOrganizerRepository.crear({
         title: t('misEventos.tituloPorDefecto'),
@@ -83,6 +101,9 @@ export function MisEventosScreen() {
           ? error.message
           : t('common.tryAgain'),
       );
+    } finally {
+      creandoRef.current = false;
+      setCreando(false);
     }
   };
 
@@ -169,7 +190,12 @@ export function MisEventosScreen() {
         : null}
 
       {estado === 'content' ? (
-        <Button label={t('misEventos.crear')} onPress={() => void crear()} />
+        <Button
+          label={t('misEventos.crear')}
+          onPress={() => void crear()}
+          loading={creando}
+          disabled={creando}
+        />
       ) : null}
 
       {/*

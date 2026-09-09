@@ -7,6 +7,8 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { DateField } from '@/components/DateField';
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { TimeField } from '@/components/TimeField';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
@@ -17,6 +19,7 @@ import {
   aforoEscrito,
   claveDeCategoria,
   estaEnRevision,
+  fechaDeInicio,
   hayCambiosSinGuardar,
   motivoParaNoEnviar,
   sePuedeEditar,
@@ -45,9 +48,22 @@ const vacio = (): CamposDelBorrador => ({
   category: '',
   location: '',
   eventType: 'presential',
-  startsAt: null,
+  dia: '',
+  hora: '',
   capacity: '',
 });
+
+/** Date -> dd/mm/aaaa y HH:MM, que es como hablan `DateField` y `TimeField`. */
+function partes(iso: string | null): { dia: string; hora: string } {
+  if (!iso) return { dia: '', hora: '' };
+  const f = new Date(iso);
+  if (Number.isNaN(f.getTime())) return { dia: '', hora: '' };
+  const dos = (n: number) => String(n).padStart(2, '0');
+  return {
+    dia: `${dos(f.getDate())}/${dos(f.getMonth() + 1)}/${f.getFullYear()}`,
+    hora: `${dos(f.getHours())}:${dos(f.getMinutes())}`,
+  };
+}
 
 function aCampos(evento: EventoDelOrganizador): CamposDelBorrador {
   return {
@@ -57,25 +73,9 @@ function aCampos(evento: EventoDelOrganizador): CamposDelBorrador {
     category: evento.category ?? '',
     location: evento.location ?? '',
     eventType: evento.event_type,
-    startsAt: evento.starts_at ? new Date(evento.starts_at) : null,
+    ...partes(evento.starts_at),
     capacity: evento.capacity === null ? '' : String(evento.capacity),
   };
-}
-
-/** dd/mm/aaaa <-> Date, que es lo que `DateField` intercambia. */
-function aTexto(fecha: Date | null): string {
-  if (!fecha || Number.isNaN(fecha.getTime())) return '';
-  const dos = (n: number) => String(n).padStart(2, '0');
-  return `${dos(fecha.getDate())}/${dos(fecha.getMonth() + 1)}/${fecha.getFullYear()}`;
-}
-
-function aFecha(texto: string): Date | null {
-  const partes = texto.split('/');
-  if (partes.length !== 3) return null;
-  const [d, m, a] = partes.map(Number);
-  if (!d || !m || !a) return null;
-  const fecha = new Date(a, m - 1, d, 19, 0, 0);
-  return Number.isNaN(fecha.getTime()) ? null : fecha;
 }
 
 /**
@@ -143,7 +143,10 @@ export function EditarEventoScreen() {
     category: campos.category.trim() || null,
     location: campos.location.trim() || null,
     event_type: campos.eventType,
-    starts_at: campos.startsAt ? campos.startsAt.toISOString() : null,
+    // LA HORA NO SE INVENTA. Sin día o sin hora se manda `null`, que es lo
+    // único cierto: antes se componía la fecha a las 19:00 «por poner algo» y
+    // esa hora acababa impresa en la ficha pública.
+    starts_at: fechaDeInicio(campos.dia, campos.hora)?.toISOString() ?? null,
     capacity: aforoEscrito(campos.capacity),
   });
 
@@ -208,13 +211,25 @@ export function EditarEventoScreen() {
     }
   };
 
-  const volver = () =>
+  const salir = () =>
     router.canGoBack() ? router.back() : router.replace('/mis-eventos' as never);
+
+  const volver = async () => {
+    // Salir con algo escrito y sin guardar lo perdía en silencio.
+    if (!sinGuardar || !editable) return salir();
+    const seguir = await confirm({
+      title: t('miEvento.salirSinGuardar'),
+      message: t('miEvento.salirSinGuardarCuerpo'),
+      confirmLabel: t('miEvento.salirIgual'),
+      destructive: true,
+    });
+    if (seguir) salir();
+  };
 
   if (cargando) {
     return (
       <AppScreen>
-        <AppHeader title={t('miEvento.titulo')} onBack={volver} />
+        <AppHeader title={t('miEvento.titulo')} onBack={() => void volver()} />
         <StateView state="loading" />
       </AppScreen>
     );
@@ -223,7 +238,7 @@ export function EditarEventoScreen() {
   if (fallo || !evento) {
     return (
       <AppScreen>
-        <AppHeader title={t('miEvento.titulo')} onBack={volver} />
+        <AppHeader title={t('miEvento.titulo')} onBack={() => void volver()} />
         <StateView
           state="error"
           description={t('common.loadFailed')}
@@ -234,8 +249,9 @@ export function EditarEventoScreen() {
   }
 
   return (
+    <SinTecladoDelante>
     <AppScreen contentStyle={styles.contenido}>
-      <AppHeader title={t('miEvento.titulo')} onBack={volver} />
+      <AppHeader title={t('miEvento.titulo')} onBack={() => void volver()} />
 
       {/* El estado, siempre a la vista. */}
       <View style={[styles.aviso, { backgroundColor: colors.surfaceAlt }]}>
@@ -355,12 +371,37 @@ export function EditarEventoScreen() {
         })}
       </View>
 
-      <DateField
-        label={t('miEvento.campoFecha')}
-        value={aTexto(campos.startsAt)}
-        onChange={(v) => setCampos({ ...campos, startsAt: aFecha(v) })}
-        minDate={new Date()}
-      />
+      {/*
+        DÍA Y HORA, LOS DOS. El selector de fecha no captura hora, así que con
+        él solo había que inventarla; y una hora inventada se publica igual que
+        una escrita. En solo lectura no se pintan: el componente no acepta
+        `editable`, y dejarlo activo permitía cambiar la fecha de un evento que
+        ya no se puede guardar, perdiendo el cambio sin avisar.
+      */}
+      {editable ? (
+        <>
+          <DateField
+            label={t('miEvento.campoFecha')}
+            value={campos.dia}
+            onChange={(v) => setCampos({ ...campos, dia: v })}
+            minDate={new Date()}
+          />
+          <TimeField
+            label={t('miEvento.campoHora')}
+            value={campos.hora}
+            onChange={(v) => setCampos({ ...campos, hora: v })}
+          />
+        </>
+      ) : (
+        <Dato
+          etiqueta={t('miEvento.campoFecha')}
+          valor={
+            campos.dia && campos.hora
+              ? `${campos.dia} · ${campos.hora}`
+              : t('evento.sinFecha')
+          }
+        />
+      )}
 
       {campos.eventType === 'presential' ? (
         <Input
@@ -414,6 +455,20 @@ export function EditarEventoScreen() {
         </>
       ) : null}
     </AppScreen>
+    </SinTecladoDelante>
+  );
+}
+
+/** Un dato que ya no se puede editar. */
+function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  const { colors } = useAppTheme();
+  return (
+    <View>
+      <Text variant="caption" color={colors.textMuted}>
+        {etiqueta}
+      </Text>
+      <Text variant="secondary">{valor}</Text>
+    </View>
   );
 }
 

@@ -12,6 +12,7 @@ import {
   EventAdmissionRepository,
   type ExpedienteDeEvento,
 } from '@/repositories/EventAdmissionRepository';
+import { ApiError } from '@/services/api';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
@@ -36,18 +37,34 @@ export function AdminEventosScreen() {
     'loading',
   );
   const [sinPermiso, setSinPermiso] = useState(false);
+  const [noDisponible, setNoDisponible] = useState(false);
 
   const cargar = useCallback(async () => {
     setEstado('loading');
     setSinPermiso(false);
+    setNoDisponible(false);
     try {
       const pendientes = await EventAdmissionRepository.pendientes();
       setCola(pendientes);
       setEstado(pendientes.length === 0 ? 'empty' : 'content');
     } catch (error) {
-      const texto = error instanceof Error ? error.message : '';
-      if (texto.includes('403') || texto.toLowerCase().includes('curaduría')) {
+      /*
+        POR EL ESTADO Y EL CÓDIGO. Se buscaba «403» y la palabra «curaduría»
+        dentro del mensaje: lo primero no aparece nunca —el número va en
+        `error.status`— y lo segundo acertaba de casualidad, porque el servidor
+        contesta esa palabra en español. Cambiar la redacción rompía la
+        detección en silencio.
+      */
+      if (error instanceof ApiError && error.status === 403) {
         setSinPermiso(true);
+        setEstado('empty');
+        return;
+      }
+      if (
+        error instanceof ApiError &&
+        error.code === 'events_workflow_not_available'
+      ) {
+        setNoDisponible(true);
         setEstado('empty');
         return;
       }
@@ -79,12 +96,18 @@ export function AdminEventosScreen() {
         <StateView
           state="empty"
           title={
-            sinPermiso ? t('admisionEvento.sinPermiso') : t('admisionEvento.colaVacia')
+            noDisponible
+              ? t('misEventos.noDisponible')
+              : sinPermiso
+                ? t('admisionEvento.sinPermiso')
+                : t('admisionEvento.colaVacia')
           }
           description={
-            sinPermiso
-              ? t('admisionEvento.sinPermisoCuerpo')
-              : t('admisionEvento.colaVaciaCuerpo')
+            noDisponible
+              ? t('misEventos.noDisponibleCuerpo')
+              : sinPermiso
+                ? t('admisionEvento.sinPermisoCuerpo')
+                : t('admisionEvento.colaVaciaCuerpo')
           }
         />
       ) : null}

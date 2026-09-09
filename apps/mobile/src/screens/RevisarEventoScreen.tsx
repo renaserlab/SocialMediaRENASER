@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
@@ -33,6 +34,7 @@ import {
   type DecisionDeAdmision,
   type ExpedienteDeEvento,
 } from '@/repositories/EventAdmissionRepository';
+import { ApiError } from '@/services/api';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
@@ -67,6 +69,8 @@ export function RevisarEventoScreen() {
   const [motivo, setMotivo] = useState('');
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState(false);
+  /** `null` = fallo de red. Con valor, lo que el servidor contestó. */
+  const [rechazo, setRechazo] = useState<'permiso' | 'noDisponible' | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const ocupadoRef = useRef(false);
 
@@ -88,9 +92,20 @@ export function RevisarEventoScreen() {
     if (!id) return;
     setCargando(true);
     setFallo(false);
+    setRechazo(null);
     try {
       aplicar(await EventAdmissionRepository.expediente(id));
-    } catch {
+    } catch (error) {
+      // Un `catch` ciego pintaba «no pudimos cargar» con un reintento tanto
+      // para un fallo de red como para un permiso denegado o una migración sin
+      // aplicar, que son dos cosas que reintentar no arregla.
+      if (error instanceof ApiError && error.status === 403) setRechazo('permiso');
+      else if (
+        error instanceof ApiError &&
+        error.code === 'events_workflow_not_available'
+      ) {
+        setRechazo('noDisponible');
+      }
       setFallo(true);
     } finally {
       setCargando(false);
@@ -143,11 +158,19 @@ export function RevisarEventoScreen() {
   };
 
   const decidir = async (decision: DecisionDeAdmision) => {
+    // CONTRA LO GUARDADO, no contra lo escrito. Subir los puntajes a 90 sin
+    // pulsar «Guardar evaluación» habilitaba «Aprobar», y el servidor —que
+    // compara con la evaluación persistida— respondía 409.
+    const guardada = expediente?.evaluacion ?? null;
     const falta = motivoParaNoDecidir(
       decision,
-      expediente?.evaluacion != null,
-      expediente?.evaluacion ? puntajes : null,
-      fallaCritica,
+      guardada != null,
+      guardada
+        ? (Object.fromEntries(
+            ORDEN_DE_CRITERIOS.map((c) => [c, guardada[c]]),
+          ) as Puntajes)
+        : null,
+      guardada?.falla_critica ?? false,
       motivo,
     );
     if (falta) {
@@ -207,11 +230,27 @@ export function RevisarEventoScreen() {
     return (
       <AppScreen>
         <AppHeader title={t('admisionEvento.ficha')} onBack={volver} />
-        <StateView
-          state="error"
-          description={t('common.loadFailed')}
-          onRetry={() => void cargar()}
-        />
+        {rechazo === null ? (
+          <StateView
+            state="error"
+            description={t('common.loadFailed')}
+            onRetry={() => void cargar()}
+          />
+        ) : (
+          <StateView
+            state="empty"
+            title={
+              rechazo === 'permiso'
+                ? t('admisionEvento.sinPermiso')
+                : t('misEventos.noDisponible')
+            }
+            description={
+              rechazo === 'permiso'
+                ? t('admisionEvento.sinPermisoCuerpo')
+                : t('misEventos.noDisponibleCuerpo')
+            }
+          />
+        )}
       </AppScreen>
     );
   }
@@ -221,6 +260,7 @@ export function RevisarEventoScreen() {
   const bloqueos = expediente.bloqueos_para_publicar;
 
   return (
+    <SinTecladoDelante>
     <AppScreen contentStyle={styles.contenido}>
       <AppHeader title={t('admisionEvento.ficha')} onBack={volver} />
 
@@ -404,6 +444,7 @@ export function RevisarEventoScreen() {
         </>
       ) : null}
     </AppScreen>
+    </SinTecladoDelante>
   );
 }
 
