@@ -54,11 +54,17 @@ test('Explorar pide un curso, que es el que enseña', () => {
 // ---------------------------------------------------------------------------
 
 test('el tope de eventos es opcional y por omisión pide lo de antes', () => {
+  // Los filtros que se añadieron después también son opcionales: quien no
+  // indique nada sigue recibiendo exactamente lo de antes.
   const catalogo = fuente('repositories/CatalogRepository.ts');
-  assert.match(
-    catalogo,
-    /listEvents\(cuando: GrupoDeEventos = 'all', limite = 50\)/,
+  assert.ok(
+    catalogo.includes("cuando: GrupoDeEventos = 'all',"),
     'la pantalla de Agenda los usa todos: sin indicar nada tiene que llegar lo mismo',
+  );
+  assert.ok(catalogo.includes('limite = 50,'));
+  assert.ok(
+    catalogo.includes('} = {},'),
+    'los filtros tienen que ser opcionales',
   );
 });
 

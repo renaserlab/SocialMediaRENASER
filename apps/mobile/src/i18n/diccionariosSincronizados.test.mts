@@ -96,6 +96,15 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
   ]),
   pt: new Set<string>([
+    // «Evento», «Organizador», «inscritos», «Cancelar reserva», «Reserva
+    // cancelada», «Presencial» y «Todas» se escriben igual en los dos idiomas.
+    'evento.titulo',
+    'evento.organizadorSinNombre',
+    'evento.inscritos',
+    'evento.cancelarConfirmar',
+    'evento.reservaCancelada',
+    'evento.modalidad.presencial',
+    'eventos.todasLasModalidades',
     // «Motivo» se escribe exactamente igual en los dos idiomas.
     'solicitud.motivo',
     // «Anterior», «Ver certificado», «Certificado», «Este documento certifica

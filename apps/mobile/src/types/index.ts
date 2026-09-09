@@ -319,6 +319,16 @@ export type EventItem = {
    * se sabe», y por eso las pantallas no agrupan cuando no hay backend.
    */
   timeState?: 'upcoming' | 'past' | 'undated';
+  /** Nombre y usuario de quien organiza. Pueden llegar vacíos: el servidor no
+   * inventa un nombre cuando el perfil no está. */
+  organizerName?: string;
+  organizerUsername?: string;
+  /** Cuántas personas se han inscrito. Es el conteo REAL, no un redondeo. */
+  registrationsCount?: number;
+  /** Aforo, si el organizador lo declaró. `null` cuando no hay límite puesto. */
+  capacity?: number | null;
+  /** Si ESTA persona ya reservó. `false` sin sesión: no hay a quién preguntar. */
+  reservedByMe?: boolean;
 };
 
 export type Course = {

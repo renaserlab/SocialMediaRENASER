@@ -21,6 +21,8 @@ export type EventDto = {
    * fechas REALES. Opcional porque una API todavía sin desplegar no lo manda.
    */
   time_state?: string | null;
+  organizer_name?: string | null;
+  organizer_username?: string | null;
 };
 
 /**
@@ -81,5 +83,13 @@ export function toEventItem(dto: EventDto): EventItem {
     location: dto.location ?? '',
     type: mapType(dto.event_type),
     timeState: mapTimeState(dto.time_state),
+    // Cadenas vacías si el servidor no las manda: la pantalla decide qué hacer
+    // con eso. Poner «Organizador» aquí sería inventarse un nombre.
+    organizerName: dto.organizer_name ?? '',
+    organizerUsername: dto.organizer_username ?? '',
+    registrationsCount: dto.registrations_count ?? 0,
+    // `?? null` y no `?? 0`: cero sería «aforo cero», que es otra cosa.
+    capacity: dto.capacity ?? null,
+    reservedByMe: dto.reserved_by_me === true,
   };
 }

@@ -658,7 +658,9 @@ export function ExploreScreen() {
                 />
               }
               rightIcon="chevron-right"
-              onPress={() => router.push('/events')}
+              /* A SU ficha, no al listado: tocar un evento concreto abría la
+                 lista entera, donde ese evento era una fila más. */
+              onPress={() => router.push(`/eventos/${event.id}` as never)}
             />
           ))
         )}

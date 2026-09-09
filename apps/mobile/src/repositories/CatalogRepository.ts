@@ -20,6 +20,9 @@ export type EventsPage = {
  * compara ninguna fecha: pedir el grupo es una consulta, no un filtro sobre lo
  * que ya se descargó.
  */
+/** Las tres modalidades que acepta el servidor. */
+export type ModalidadDeEvento = 'online' | 'presential' | 'live';
+
 export type GrupoDeEventos = 'upcoming' | 'past' | 'undated' | 'all';
 
 /**
@@ -54,9 +57,20 @@ export const CatalogRepository = {
    *   pide dos — medido, con la agenda llena el listado de 50 pesa 39 KB para
    *   rellenar dos filas.
    */
-  async listEvents(cuando: GrupoDeEventos = 'all', limite = 50): Promise<EventsPage> {
+  async listEvents(
+    cuando: GrupoDeEventos = 'all',
+    limite = 50,
+    filtros: { texto?: string; modalidad?: ModalidadDeEvento | null } = {},
+  ): Promise<EventsPage> {
+    // BUSCAR Y FILTRAR EN EL SERVIDOR. Hacerlo sobre la página ya descargada
+    // deja fuera todo lo que no cupo en ella, y el resultado depende de cuánto
+    // se haya bajado.
+    const partes = [`limit=${limite}`, `when=${cuando}`];
+    const texto = (filtros.texto ?? '').trim();
+    if (texto !== '') partes.push(`q=${encodeURIComponent(texto)}`);
+    if (filtros.modalidad) partes.push(`event_type=${filtros.modalidad}`);
     const dtos = await apiRequest<EventDto[]>(
-      `${API_V1}/catalog/events?limit=${limite}&when=${cuando}`,
+      `${API_V1}/catalog/events?${partes.join('&')}`,
     );
     const items = dtos.map(toEventItem);
     await attachCovers(items);
@@ -64,6 +78,24 @@ export const CatalogRepository = {
       items,
       reservedIds: dtos.filter((d) => d.reserved_by_me).map((d) => d.id),
     };
+  },
+
+  /**
+   * La ficha de UN evento.
+   *
+   * NO PIDE SESION: un evento publicado es publico, igual que el catalogo. Lo
+   * que cambia con sesion es `reservedByMe`. Un borrador o un evento que no
+   * existe responden 404 por igual: distinguirlos contaria que alguien esta
+   * preparando algo.
+   */
+  async getEvent(eventId: string): Promise<EventItem> {
+    const dto = await apiRequest<EventDto>(
+      `${API_V1}/catalog/events/${eventId}`,
+      { auth: false },
+    );
+    const item = toEventItem(dto);
+    await attachCovers([item]);
+    return item;
   },
 
   /**
