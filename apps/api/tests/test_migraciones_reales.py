@@ -169,7 +169,7 @@ def conexion():
 
 @pytest.fixture(scope="module")
 def aplicadas(conexion):
-    """Aplica el prologo y las 49 migraciones, cada una en su transaccion."""
+    """Aplica el prologo y TODAS las migraciones, cada una en su transaccion."""
     assert PROLOGO.exists(), f"falta el prologo en {PROLOGO}"
     with conexion.cursor() as cur:
         cur.execute(PROLOGO.read_text(encoding="utf-8"))
@@ -220,7 +220,7 @@ def test_la_ultima_migracion_es_la_que_dice_la_documentacion(aplicadas) -> None:
     # cambio ya traia la 0052: en verde aqui, porque el modulo entero se salta
     # sin PostgreSQL, y en rojo la primera vez que CI tuviera uno, que es
     # exactamente cuando se ejercitan por primera vez la 0051 y la 0052.
-    assert aplicadas[-1].startswith("0056_"), (
+    assert aplicadas[-1].startswith("0059_"), (
         f"la ultima migracion es {aplicadas[-1]}: actualiza los modelos, "
         "la documentacion y esta prueba en el mismo cambio"
     )

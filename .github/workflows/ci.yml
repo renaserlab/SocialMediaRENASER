@@ -69,4 +69,4 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
       - run: pip install 'psycopg[binary]'
-      - run: pytest tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py -v
+      - run: pytest tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py tests/test_migraciones_de_aprendizaje.py -v
