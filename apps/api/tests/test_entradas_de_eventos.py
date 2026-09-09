@@ -263,6 +263,44 @@ async def test_la_disponibilidad_se_calcula_desde_los_cupos(entorno):
 
 
 @pytest.mark.asyncio
+async def test_la_disponibilidad_publica_no_delata_los_borradores(entorno):
+    """`/availability` es ANÓNIMA y devolvía TODOS los tipos.
+
+    El organizador prepara «VIP» y «Prensa» en borrador para lanzarlos la
+    semana que viene, y una petición sin sesión devolvía sus identificadores y,
+    en un evento sin aforo, su cupo en crudo: justo el dato que el contrato
+    público se molesta en no llevar. Lo mismo con los retirados, que sí
+    desaparecen de `/ticket-types`.
+    """
+    http, _, _ = entorno
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert BORRADOR_DE_TIPO not in libre["por_tipo"]
+    assert set(libre["por_tipo"]) == {GENERAL, VIP}
+
+
+@pytest.mark.asyncio
+async def test_un_tipo_retirado_tampoco_sale_en_la_disponibilidad(entorno):
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    await http.delete(f"{EVENTOS}/{CON_ENTRADAS}/ticket-types/{GENERAL}")
+    identidad["uid"] = ANA
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert GENERAL not in libre["por_tipo"]
+
+
+@pytest.mark.asyncio
+async def test_el_organizador_si_ve_sus_borradores(entorno):
+    """La consola es otra cosa: ahí el cupo y el estado son suyos."""
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    tipos = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/ticket-types/manage")).json()
+    porid = {t["id"]: t for t in tipos}
+    assert BORRADOR_DE_TIPO in porid
+    assert porid[BORRADOR_DE_TIPO]["quota"] == 5
+    assert porid[BORRADOR_DE_TIPO]["status"] == "draft"
+
+
+@pytest.mark.asyncio
 async def test_lo_apartado_deja_de_estar_disponible(entorno):
     http, _, _ = entorno
     assert (await _apartar(http, GENERAL, 3, "k1")).status_code == 201
@@ -799,3 +837,284 @@ async def test_apagar_la_bandera_no_corrompe_las_reservas_existentes(entorno, mo
         hold = await db.get(EventTicketHold, creado["id"])
     assert hold.status == "ACTIVE"
     assert hold.subtotal_minor == 9800
+
+
+# --------------------------------------------------------------------------- #
+# El tope por operación DEL EVENTO, que ninguna prueba ejercía
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_el_tope_por_operacion_del_evento_se_explica(entorno):
+    """Pasarse del tope del EVENTO es un 409 explicado, no un 500.
+
+    La rama del tope por TIPO ya estaba cubierta; la del evento no la ejercía
+    nadie, y era la que leía `ajustes.max_per_order` DESPUÉS del `rollback`.
+    En SQLAlchemy asíncrono eso es una carga perezosa fuera del greenlet: la
+    persona pedía cuatro entradas y recibía un error del servidor.
+    """
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        ajustes = await db.get(EventTicketingSettings, CON_ENTRADAS)
+        ajustes.max_per_order = 3
+        await db.commit()
+
+    respuesta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticket-holds",
+        json=_pedido(**{GENERAL: 2, VIP: 2}),
+        headers={"Idempotency-Key": "tope-del-evento"},
+    )
+    assert respuesta.status_code == 409, respuesta.text
+    assert respuesta.json()["error"]["code"] == "ticket_limit_exceeded"
+    assert "3" in respuesta.json()["error"]["message"], "dice cuál es el tope"
+
+
+@pytest.mark.asyncio
+async def test_el_tope_del_evento_deja_pasar_lo_que_cabe(entorno):
+    """Y con el tope puesto, lo que cabe sigue cabiendo."""
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        ajustes = await db.get(EventTicketingSettings, CON_ENTRADAS)
+        ajustes.max_per_order = 3
+        await db.commit()
+
+    respuesta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticket-holds",
+        json=_pedido(**{GENERAL: 2, VIP: 1}),
+        headers={"Idempotency-Key": "cabe"},
+    )
+    assert respuesta.status_code == 201, respuesta.text
+    assert respuesta.json()["subtotal_minor"] == 4900 * 2 + 15000
+
+
+@pytest.mark.asyncio
+async def test_el_tope_del_evento_viaja_en_la_disponibilidad(entorno):
+    """La pantalla no puede respetar un tope que no conoce."""
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        ajustes = await db.get(EventTicketingSettings, CON_ENTRADAS)
+        ajustes.max_per_order = 3
+        await db.commit()
+
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert libre["max_per_order"] == 3
+
+
+# --------------------------------------------------------------------------- #
+# Dinero: lo que no se manda no se borra, y lo absurdo es un 422
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_cambiar_el_modo_no_borra_la_ventana_de_venta(entorno):
+    """La pantalla manda tres campos; los otros dos no son suyos para borrarlos.
+
+    Escenario: la venta está programada para dentro de un mes, el organizador
+    entra a confirmar el modo, y la venta quedaba abierta desde ese instante.
+    """
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    abre = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    cierra = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat()
+    puesta = await http.put(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticketing",
+        json={
+            "access_mode": "TICKETED",
+            "currency": "PEN",
+            "sales_open_at": abre,
+            "sales_close_at": cierra,
+        },
+    )
+    assert puesta.status_code == 200, puesta.text
+    assert puesta.json()["sales_open_at"] is not None
+
+    # Y ahora lo que manda la pantalla: modo, moneda y tope. Nada más.
+    otra = await http.put(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticketing",
+        json={"access_mode": "TICKETED", "currency": "PEN", "max_per_order": 6},
+    )
+    assert otra.status_code == 200, otra.text
+    assert otra.json()["sales_open_at"] is not None, "la ventana sigue puesta"
+    assert otra.json()["sales_close_at"] is not None
+    assert otra.json()["max_per_order"] == 6
+
+
+@pytest.mark.asyncio
+async def test_la_ventana_se_puede_quitar_diciendolo(entorno):
+    """Pero un `null` explícito sí la quita: no se manda lo que no se decide."""
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    abre = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    await http.put(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticketing",
+        json={"access_mode": "TICKETED", "currency": "PEN", "sales_open_at": abre},
+    )
+    quitada = await http.put(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticketing",
+        json={"access_mode": "TICKETED", "currency": "PEN", "sales_open_at": None},
+    )
+    assert quitada.status_code == 200, quitada.text
+    assert quitada.json()["sales_open_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_un_precio_que_desborda_es_un_422(entorno):
+    """`int4 * int4` desborda en PostgreSQL y llegaba como 500.
+
+    El contrato acota el precio muy por debajo del desbordamiento, y la columna
+    es `bigint` para que el eslabón corto no sea la base.
+    """
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    respuesta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticket-types",
+        json={"name": "Imposible", "price_minor": 2_147_483_647, "quota": 100},
+    )
+    assert respuesta.status_code == 422, respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_un_nulo_explicito_al_editar_es_un_422(entorno):
+    """`{"name": null}` es una petición mal formada, no un error del servidor."""
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    respuesta = await http.patch(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticket-types/{GENERAL}", json={"name": None}
+    )
+    assert respuesta.status_code == 422, respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_el_reintento_identico_vale_aunque_la_venta_ya_cerrara(entorno):
+    """Una misma petición no puede tener dos respuestas según el segundo.
+
+    Escenario real: la reserva se apartó a las 19:59:59 y la respuesta se
+    perdió; el cliente reintenta a las 20:00:01 con la misma clave. Si la
+    ventana se comprobara antes que la idempotencia, el reintento diría «la
+    venta cerró» sobre una reserva que existe y está apartada a su nombre.
+    """
+    http, identidad, sesiones = entorno
+    creada = await _apartar(http, GENERAL, 2, "justo-antes-del-cierre")
+    assert creada.status_code == 201, creada.text
+
+    async with sesiones() as db:
+        ajustes = await db.get(EventTicketingSettings, CON_ENTRADAS)
+        ajustes.sales_close_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        await db.commit()
+
+    reintento = await _apartar(http, GENERAL, 2, "justo-antes-del-cierre")
+    assert reintento.status_code == 201, reintento.text
+    assert reintento.json()["id"] == creada.json()["id"]
+
+    # Y con la venta cerrada, una reserva NUEVA sigue sin poder crearse.
+    identidad["uid"] = BRUNO
+    nueva = await _apartar(http, GENERAL, 1, "despues-del-cierre")
+    assert nueva.status_code == 409
+    assert nueva.json()["error"]["code"] == "event_sales_closed"
+
+
+@pytest.mark.asyncio
+async def test_el_precio_desde_no_anuncia_lo_agotado(entorno):
+    """«Desde S/ 10.00» de un tipo sin existencias es un reclamo falso."""
+    http, identidad, sesiones = entorno
+    barata = "ffffffff-2222-0000-0000-00000000000e"
+    async with sesiones() as db:
+        db.add(
+            EventTicketType(
+                id=barata,
+                event_id=CON_ENTRADAS,
+                name="Barata y agotada",
+                price_minor=1000,
+                currency="PEN",
+                quota=1,
+                status="on_sale",
+                sort_order=3,
+            )
+        )
+        await db.commit()
+
+    ficha = (await http.get(f"{CATALOGO}/events/{CON_ENTRADAS}")).json()
+    assert ficha["price_from_minor"] == 1000, "mientras queda, es el precio mínimo"
+
+    identidad["uid"] = BRUNO
+    apartada = await _apartar(http, barata, 1, "la-ultima-barata")
+    assert apartada.status_code == 201, apartada.text
+
+    ficha = (await http.get(f"{CATALOGO}/events/{CON_ENTRADAS}")).json()
+    assert ficha["price_from_minor"] == 4900, "agotada la barata, manda la siguiente"
+
+
+# --------------------------------------------------------------------------- #
+# Los dos flujos no conviven, y lo sostiene el servidor
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_un_evento_con_entradas_no_admite_reserva_gratuita(entorno):
+    """La aplicación nueva esconde «Reservar»; la instalada hace meses no.
+
+    Sin esta comprobación el servidor aceptaba la inscripción gratuita de una
+    versión antigua que no conoce el campo `access_mode`: alguien entraba gratis
+    a un evento de pago y ocupaba aforo que otro había apartado.
+    """
+    http, _, _ = entorno
+    respuesta = await http.post(f"{CATALOGO}/events/{CON_ENTRADAS}/reserve")
+    assert respuesta.status_code == 409, respuesta.text
+    assert respuesta.json()["error"]["code"] == "event_mode_conflict"
+
+    # Y el gratuito sigue exactamente igual.
+    assert (await http.post(f"{CATALOGO}/events/{GRATUITO}/reserve")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_quien_ya_estaba_inscrito_antes_no_pierde_su_plaza(entorno):
+    """Un evento que pasa a vender entradas no echa a quien ya estaba."""
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        db.add(
+            EventRegistration(
+                event_id=CON_ENTRADAS, user_id=ANA, status="confirmed"
+            )
+        )
+        await db.commit()
+
+    respuesta = await http.post(f"{CATALOGO}/events/{CON_ENTRADAS}/reserve")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["reserved_by_me"] is True
+
+
+@pytest.mark.asyncio
+async def test_apagar_la_bandera_no_regala_entradas(entorno, monkeypatch):
+    """EL INTERRUPTOR APAGA LA VENTA; no convierte un evento de pago en uno gratis.
+
+    Con la bandera apagada la venta no se ofrece —503— y la reserva gratuita
+    tampoco se abre: ese evento no vende y tampoco regala. Es lo que significa
+    apagarla, y es la razón de que el modo se mire aunque esté apagada.
+    """
+    http, _, _ = entorno
+    monkeypatch.setattr(get_settings(), "feature_event_ticketing", False, raising=False)
+
+    venta = await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")
+    assert venta.status_code == 503
+    assert venta.json()["error"]["code"] == "event_ticketing_not_available"
+
+    gratis = await http.post(f"{CATALOGO}/events/{CON_ENTRADAS}/reserve")
+    assert gratis.status_code == 409
+    assert gratis.json()["error"]["code"] == "event_mode_conflict"
+
+    # La ficha sigue diciendo la verdad sobre el evento: es de entradas.
+    ficha = (await http.get(f"{CATALOGO}/events/{CON_ENTRADAS}")).json()
+    assert ficha["access_mode"] == "TICKETED"
+
+
+@pytest.mark.asyncio
+async def test_sin_la_0061_la_reserva_gratuita_funciona_como_siempre(entorno):
+    """Sin la migración no hay tabla que mirar, y eso significa `FREE_RSVP`."""
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        conexion = await db.connection()
+        for tabla in (
+            "event_ticket_hold_items",
+            "event_ticket_holds",
+            "event_ticket_types",
+            "event_ticketing_settings",
+        ):
+            await conexion.exec_driver_sql(f"drop table if exists {tabla}")
+        await db.commit()
+    esquema.olvidar()
+
+    assert (await http.post(f"{CATALOGO}/events/{GRATUITO}/reserve")).status_code == 200

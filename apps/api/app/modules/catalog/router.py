@@ -607,8 +607,13 @@ async def get_event(
         ajustes = await entradas.configuracion(db, evento.id)
         ficha.access_mode = entradas.modo_de_acceso(ajustes)
         if entradas.vende_entradas(ajustes):
+            # CON LA DISPONIBILIDAD DELANTE. «Desde S/ 10» de un tipo del que no
+            # queda ni una entrada es un precio que nadie puede pagar: quien
+            # entra por ese reclamo se encuentra con el siguiente, más caro.
+            libre = await entradas.disponibilidad(db, evento)
             ficha.price_from_minor = entradas.precio_desde(
-                await entradas.tipos_de(db, evento.id, solo_a_la_venta=True)
+                await entradas.tipos_de(db, evento.id, solo_a_la_venta=True),
+                libre.por_tipo,
             )
     return ficha
 

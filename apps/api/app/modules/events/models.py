@@ -25,6 +25,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -432,7 +433,10 @@ class EventTicketType(Base):
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     #: Centavos. 4900 = S/ 49.00. Cero vale: una cortesía dentro de un evento
     #: con entradas es un caso real, y no es lo mismo que un evento gratuito.
-    price_minor: Mapped[int] = mapped_column(Integer)
+    #:
+    #: `BigInteger` porque el CHECK de las líneas multiplica precio por
+    #: cantidad, y en PostgreSQL `int4 * int4` desborda.
+    price_minor: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(3))
     quota: Mapped[int] = mapped_column(Integer)
     min_per_order: Mapped[int] = mapped_column(Integer, server_default=text("1"))
@@ -502,7 +506,7 @@ class EventTicketHold(Base):
     request_fingerprint: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(12), server_default=text("'ACTIVE'"))
     currency: Mapped[str] = mapped_column(String(3))
-    subtotal_minor: Mapped[int] = mapped_column(Integer)
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -550,8 +554,8 @@ class EventTicketHoldItem(Base):
     event_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
     ticket_type_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
     quantity: Mapped[int] = mapped_column(Integer)
-    unit_price_minor: Mapped[int] = mapped_column(Integer)
-    subtotal_minor: Mapped[int] = mapped_column(Integer)
+    unit_price_minor: Mapped[int] = mapped_column(BigInteger)
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger)
     ticket_type_name_snapshot: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

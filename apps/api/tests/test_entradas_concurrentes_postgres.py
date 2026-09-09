@@ -21,10 +21,12 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError
+from app.modules.catalog.models import Event
 from app.modules.events import esquema, ticketing
 from app.modules.events import models as _modelos_de_evento  # noqa: F401
 from app.modules.profiles import models as _modelos_de_perfil  # noqa: F401
@@ -75,6 +77,15 @@ def base_aplicada():
 async def motor(base_aplicada, monkeypatch):
     """Un motor POR PRUEBA, y la bandera encendida solo aquí."""
     monkeypatch.setattr(get_settings(), "feature_event_ticketing", True, raising=False)
+    # LA ESPERA, FIJADA. Varias pruebas de este fichero serializan diez
+    # transacciones sobre la misma fila y dan por hecho que ninguna se rinde por
+    # tiempo; con el valor de producción (5 s) eso es cierto en un portátil y
+    # deja de serlo en una integración continua cargada, y la prueba se volvía
+    # intermitente sin que el código cambiara. El tiempo límite tiene sus
+    # propias pruebas, en `test_aforo_concurrente_postgres.py`.
+    monkeypatch.setattr(
+        get_settings(), "inventory_lock_timeout_ms", 30000, raising=False
+    )
     motor = create_async_engine(_url_async(), pool_size=20, max_overflow=10)
     yield motor
     await motor.dispose()
@@ -376,7 +387,21 @@ async def test_la_limpieza_es_idempotente(motor, sesiones) -> None:
     async with sesiones() as db:
         segunda = await ticketing.vencer_holds(db)
 
+    # SOBRE ESTA RESERVA, no sobre el recuento. `vencer_holds` barre la base
+    # entera y el esquema es de ámbito módulo: `primera` cuenta también lo que
+    # dejaron otras pruebas, así que por sí solo no dice nada de esta.
     assert primera >= 1
+    async with motor.connect() as conexion:
+        estado = (
+            await conexion.execute(
+                text(
+                    "select status from public.event_ticket_holds "
+                    "where id = cast(:h as uuid)"
+                ),
+                {"h": hold.id},
+            )
+        ).scalar_one()
+    assert estado == "EXPIRED"
     assert segunda == 0, "correrla dos veces no cambia nada"
 
 
@@ -444,7 +469,9 @@ async def test_la_misma_clave_a_la_vez_no_aparta_el_doble(motor, sesiones) -> No
 
     # O todas devuelven la misma reserva, o las que pierden la carrera reciben
     # un conflicto explicado. Lo que NO puede pasar es que se aparte el doble.
-    assert len(ids) <= 1, resultados
+    # `<= 1` pasaba vacío si fallaban las tres. Una gana, siempre: la clave es
+    # la misma, así que las otras dos reciben esa misma reserva o un conflicto.
+    assert len(ids) == 1, resultados
     assert await _apartadas(motor, evento) == 2
 
 
@@ -553,3 +580,161 @@ async def test_la_suma_de_las_lineas_cuadra_con_la_cabecera(motor, sesiones) -> 
             )
         ).scalar_one()
     assert suma == hold.subtotal_minor
+
+    # Y AHORA EL DISPARADOR, DE VERDAD. Lo de arriba comprueba que la suma que
+    # `crear_hold` escribio es la suma que `crear_hold` calculo: sale verde con
+    # el disparador borrado. Lo que lo ejerce es intentar descuadrar la reserva
+    # que el codigo real acaba de crear y que la base se niegue AL CONFIRMAR.
+    with pytest.raises(IntegrityError):
+        async with motor.begin() as conexion:
+            await conexion.execute(
+                text(
+                    "update public.event_ticket_holds set subtotal_minor = 1 "
+                    "where id = cast(:h as uuid)"
+                ),
+                {"h": hold.id},
+            )
+
+    async with motor.connect() as conexion:
+        intacto = (
+            await conexion.execute(
+                text(
+                    "select subtotal_minor from public.event_ticket_holds "
+                    "where id = cast(:h as uuid)"
+                ),
+                {"h": hold.id},
+            )
+        ).scalar_one()
+    assert intacto == hold.subtotal_minor, "el rechazo no dejo la reserva a medias"
+
+
+async def test_bajar_el_cupo_mientras_alguien_aparta_no_se_cruza(motor, sesiones) -> None:
+    """La carrera del ORGANIZADOR, que no tenía prueba.
+
+    `editar_tipo` leía cuántas entradas hay apartadas y decidía con ese número
+    sin tomar la fila del evento. Entre la lectura y la escritura cabía una
+    reserva entera: el organizador bajaba el cupo a 2 sobre una lectura de cero
+    apartadas mientras alguien apartaba 4, y quedaban cuatro entradas apartadas
+    sobre un cupo de dos.
+
+    Con el cerrojo puesto en los dos caminos, una de las dos operaciones ve el
+    resultado de la otra: o la reserva no cabe, o el cupo no baja.
+    """
+    evento = await _evento_con_entradas(motor)
+    tipo = await _tipo(motor, evento, cupo=10)
+    persona = await _persona(motor, "aparta")
+    organizador = await _persona(motor, "organiza")
+
+    class _Usuario:
+        id = organizador
+
+    async def aparta():
+        async with sesiones() as db:
+            try:
+                await ticketing.crear_hold(
+                    db,
+                    evento_id=evento,
+                    usuario_id=persona,
+                    pedido=[(tipo, 4)],
+                    clave="carrera",
+                )
+                return "apartado"
+            except AppError as error:
+                return error
+
+    async def baja_el_cupo():
+        async with sesiones() as db:
+            evento_orm = await db.get(Event, evento)
+            try:
+                await ticketing.editar_tipo(
+                    db,
+                    evento=evento_orm,
+                    tipo_id=tipo,
+                    datos={"quota": 2},
+                    usuario=_Usuario(),
+                )
+                return "bajado"
+            except AppError as error:
+                await db.rollback()
+                return error
+
+    uno, dos = await asyncio.gather(aparta(), baja_el_cupo())
+
+    async with motor.connect() as conexion:
+        cupo = (
+            await conexion.execute(
+                text(
+                    "select quota from public.event_ticket_types "
+                    "where id = cast(:t as uuid)"
+                ),
+                {"t": tipo},
+            )
+        ).scalar_one()
+    apartadas = await _apartadas(motor, evento)
+
+    # NO SE AFIRMA QUIÉN GANA: eso lo decide el planificador. Se afirma lo que
+    # no puede quedar de ninguna de las dos formas.
+    assert apartadas <= cupo, (uno, dos, apartadas, cupo)
+    if uno == "apartado":
+        assert apartadas == 4
+    else:
+        assert apartadas == 0
+
+
+async def test_pasar_a_gratuito_mientras_alguien_aparta_no_se_cruza(
+    motor, sesiones
+) -> None:
+    """La misma carrera con el MODO: un evento gratuito con una reserva
+    temporal encima es el estado que el código declara imposible."""
+    evento = await _evento_con_entradas(motor)
+    tipo = await _tipo(motor, evento, cupo=10)
+    persona = await _persona(motor, "aparta-modo")
+    organizador = await _persona(motor, "organiza-modo")
+
+    class _Usuario:
+        id = organizador
+
+    async def aparta():
+        async with sesiones() as db:
+            try:
+                await ticketing.crear_hold(
+                    db,
+                    evento_id=evento,
+                    usuario_id=persona,
+                    pedido=[(tipo, 1)],
+                    clave="carrera-modo",
+                )
+                return "apartado"
+            except AppError as error:
+                return error
+
+    async def a_gratuito():
+        async with sesiones() as db:
+            evento_orm = await db.get(Event, evento)
+            try:
+                await ticketing.guardar_configuracion(
+                    db,
+                    evento=evento_orm,
+                    datos={"access_mode": "FREE_RSVP"},
+                    usuario=_Usuario(),
+                )
+                return "gratuito"
+            except AppError as error:
+                await db.rollback()
+                return error
+
+    uno, dos = await asyncio.gather(aparta(), a_gratuito())
+
+    async with motor.connect() as conexion:
+        modo = (
+            await conexion.execute(
+                text(
+                    "select access_mode from public.event_ticketing_settings "
+                    "where event_id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+    apartadas = await _apartadas(motor, evento)
+
+    assert not (modo == "FREE_RSVP" and apartadas > 0), (uno, dos, modo, apartadas)

@@ -256,7 +256,13 @@ class TicketTypeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=500)
     #: En unidad MENOR y entero. 4900 son S/ 49.00. Cero vale: una cortesía.
-    price_minor: int = Field(ge=0, le=100_000_000)
+    #:
+    #: EL TOPE NO ES ARBITRARIO. Las columnas son `bigint`, pero el tope del
+    #: contrato tiene que dejar sitio a la multiplicación: con 100 entradas por
+    #: operación y 20 líneas, un precio de mil millones desbordaría cualquier
+    #: entero. Diez millones de céntimos son cien mil soles por entrada, que es
+    #: mucho más de lo que cuesta cualquier evento real.
+    price_minor: int = Field(ge=0, le=10_000_000)
     quota: int = Field(ge=1, le=1_000_000)
     min_per_order: int = Field(default=1, ge=1, le=100)
     max_per_order: int = Field(default=10, ge=1, le=100)
@@ -271,7 +277,7 @@ class TicketTypeCreate(BaseModel):
 class TicketTypeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     description: str | None = Field(default=None, max_length=500)
-    price_minor: int | None = Field(default=None, ge=0, le=100_000_000)
+    price_minor: int | None = Field(default=None, ge=0, le=10_000_000)
     quota: int | None = Field(default=None, ge=1, le=1_000_000)
     min_per_order: int | None = Field(default=None, ge=1, le=100)
     max_per_order: int | None = Field(default=None, ge=1, le=100)
@@ -287,6 +293,13 @@ class DisponibilidadRead(BaseModel):
     #: `None` cuando el evento no tiene aforo: mandan solo los cupos por tipo.
     general: int | None = None
     por_tipo: dict[str, int] = Field(default_factory=dict)
+    #: El tope de entradas por operación del EVENTO. `None` si no hay uno propio.
+    #:
+    #: Viaja aquí porque sin él la pantalla dejaba pulsar «+» hasta agotar las
+    #: existencias y el servidor rechazaba la operación entera: un botón que
+    #: lleva a un callejón. No es inventario, es una regla que quien compra
+    #: necesita saber antes de elegir.
+    max_per_order: int | None = None
 
 
 class LineaPedida(BaseModel):

@@ -51,6 +51,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,7 +135,7 @@ class CerrojoOcupado(AppError):
     message = "Hay otra reserva en curso para este evento. Inténtalo otra vez."
 
 
-async def _limitar_la_espera(db: AsyncSession) -> None:
+async def limitar_la_espera(db: AsyncSession) -> None:
     """`SET LOCAL lock_timeout` para ESTA transacción.
 
     `LOCAL` importa: no cambia nada en la base ni en la sesión, se deshace al
@@ -148,6 +151,25 @@ async def _limitar_la_espera(db: AsyncSession) -> None:
     await db.execute(text(f"set local lock_timeout = '{int(ms)}ms'"))
 
 
+@asynccontextmanager
+async def espera_traducida(db: AsyncSession) -> AsyncIterator[None]:
+    """Convierte un 55P03 en `CerrojoOcupado`, no en un 500.
+
+    `set local lock_timeout` vale para TODA la transacción, no solo para el
+    `select ... for update`: cualquier `flush` posterior que espere una fila
+    ajena puede saltar con el mismo SQLSTATE. Ocurre de verdad —la limpieza
+    masiva de reservas vencidas bloquea cientos de filas y tarda— y sin esto
+    llegaba al cliente como un error del servidor sobre algo que se reintenta.
+    """
+    try:
+        yield
+    except DBAPIError as error:
+        if getattr(getattr(error, "orig", None), "sqlstate", None) != _CERROJO_AGOTADO:
+            raise
+        await db.rollback()
+        raise CerrojoOcupado from None
+
+
 async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
     """La fila del evento, bloqueada hasta que la transacción termine.
 
@@ -158,7 +180,7 @@ async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
     Y con TIEMPO LÍMITE: sin él, dos peticiones por el mismo evento esperan
     indefinidamente, cada una ocupando una conexión del pool.
     """
-    await _limitar_la_espera(db)
+    await limitar_la_espera(db)
     try:
         evento = await db.scalar(
             select(Event).where(Event.id == evento_id).with_for_update()
@@ -175,6 +197,10 @@ async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
         await db.rollback()
         raise CerrojoOcupado from None
     if evento is None:
+        # SE SUELTA LA TRANSACCIÓN. No hay ninguna fila bloqueada —el `select`
+        # no encontró nada— pero sí una transacción abierta que nadie va a
+        # cerrar antes de que la respuesta de error termine de escribirse.
+        await db.rollback()
         raise NotFoundError("Evento no encontrado.")
     return evento
 
@@ -199,6 +225,20 @@ async def _mia(db: AsyncSession, evento_id: str, usuario_id: str) -> EventRegist
             EventRegistration.user_id == usuario_id,
         )
     )
+
+
+async def _vende_entradas(db: AsyncSession, evento_id: str) -> bool:
+    """Si este evento se gestiona con entradas.
+
+    El import es local a propósito: `ticketing` importa este módulo para tomar
+    el cerrojo del evento, y al revés sería un ciclo. Sin la 0061 aplicada no
+    hay tabla que consultar y la respuesta es la de siempre, `FREE_RSVP`.
+    """
+    from app.modules.events import esquema, ticketing
+
+    if not await esquema.hay_entradas(db):
+        return False
+    return ticketing.vende_entradas(await ticketing.configuracion(db, evento_id))
 
 
 async def reservar(
@@ -229,6 +269,26 @@ async def reservar(
         # contestar «no admite reservas» ya cuenta que alguien prepara algo.
         await db.rollback()
         raise NotFoundError("Evento no encontrado.")
+
+    # LOS DOS FLUJOS NO CONVIVEN, Y LO DECIDE EL SERVIDOR. La aplicación
+    # nueva esconde «Reservar» cuando el evento vende entradas, pero una
+    # instalada hace meses no conoce el campo y sigue pintando el botón. Sin
+    # esta comprobación el servidor la aceptaba: inscripción gratuita en un
+    # evento de pago, ocupando aforo que alguien había pagado por ocupar.
+    #
+    # EL MODO ES UN DATO, NO UNA BANDERA. Se mira aunque `feature_event_
+    # ticketing` esté apagada: el interruptor apaga la VENTA, no convierte un
+    # evento de pago en uno gratuito. Con la bandera apagada ese evento no
+    # vende y tampoco regala; es exactamente lo que significa apagarla.
+    #
+    # Quien ya estaba inscrito antes de que el evento pasara a vender no pierde
+    # su plaza: esa rama sale antes, unas líneas más arriba.
+    if await _vende_entradas(db, evento_id):
+        await db.rollback()
+        raise ConflictError(
+            "Este evento se gestiona con entradas: elige las tuyas.",
+            code="event_mode_conflict",
+        )
 
     motivo = states.motivo_para_no_reservar(evento, momento, workflow)
     if motivo is not None:

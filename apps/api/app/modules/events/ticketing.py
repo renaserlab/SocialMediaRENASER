@@ -220,14 +220,23 @@ async def tipos_de(
     return list(await db.scalars(consulta))
 
 
-def precio_desde(tipos: list[EventTicketType]) -> int | None:
-    """El precio mínimo REAL de los tipos a la venta, o `None`.
+def precio_desde(
+    tipos: list[EventTicketType], disponibles: dict[str, int] | None = None
+) -> int | None:
+    """El precio mínimo REAL de los tipos a la venta QUE QUEDAN, o `None`.
 
-    `None` cuando no hay ninguno: entonces la ficha no escribe «Desde», que
-    sería un precio inventado sobre una lista vacía.
+    Con `disponibles` se descartan los agotados, y eso importa: «Desde S/ 49»
+    de un tipo del que no queda ninguna entrada es un precio que nadie puede
+    pagar. Sin el diccionario se mira solo el estado, que es lo que se puede
+    afirmar cuando no se ha calculado la disponibilidad.
+
+    `None` cuando no queda ninguno: entonces la ficha no escribe «Desde», que
+    sería un precio sobre una lista vacía.
     """
-    a_la_venta = [t for t in tipos if t.status == A_LA_VENTA]
-    return min((t.price_minor for t in a_la_venta), default=None)
+    candidatos = [t for t in tipos if t.status == A_LA_VENTA]
+    if disponibles is not None:
+        candidatos = [t for t in candidatos if disponibles.get(t.id, 0) > 0]
+    return min((t.price_minor for t in candidatos), default=None)
 
 
 # --------------------------------------------------------------------------- #
@@ -280,9 +289,24 @@ async def _reservas_gratuitas(db: AsyncSession, evento_id: str) -> int:
 
 
 async def disponibilidad(
-    db: AsyncSession, evento: Event, momento: datetime | None = None
+    db: AsyncSession,
+    evento: Event,
+    momento: datetime | None = None,
+    *,
+    solo_a_la_venta: bool = False,
 ) -> Disponibilidad:
-    """Cuánto queda. Se CALCULA; no hay ningún contador que mantener."""
+    """Cuánto queda. Se CALCULA; no hay ningún contador que mantener.
+
+    `solo_a_la_venta` es para la RUTA PÚBLICA, y no es cosmético: sin él,
+    `por_tipo` llevaba también los tipos en borrador, pausados y retirados. Una
+    petición sin sesión devolvía sus identificadores y, en un evento sin aforo,
+    su cupo en crudo —`quota` menos lo apartado—, que es justo el dato que el
+    contrato público se molesta en no llevar. Alguien preparando un tipo «VIP»
+    para lanzarlo la semana que viene lo tenía publicado sin saberlo.
+
+    Lo apartado se cuenta SIEMPRE contra todos los tipos: una entrada apartada
+    de un tipo que se pausó después sigue ocupando sitio en la sala.
+    """
     momento = momento or ahora()
     operacion = await db.get(EventOperations, evento.id)
     aforo = inventory.aforo_de(
@@ -301,7 +325,7 @@ async def disponibilidad(
         )
 
     por_tipo: dict[str, int] = {}
-    for tipo in await tipos_de(db, evento.id):
+    for tipo in await tipos_de(db, evento.id, solo_a_la_venta=solo_a_la_venta):
         queda = max(0, tipo.quota - apartado.get(tipo.id, 0))
         # Un tipo nunca ofrece más de lo que cabe en el evento entero.
         por_tipo[tipo.id] = queda if general is None else min(queda, general)
@@ -391,11 +415,19 @@ async def crear_hold(
     Los tipos se leen DESPUÉS y en orden de identificador, que es determinista:
     dos peticiones con los mismos tipos en distinto orden no se cruzan.
     """
-    momento = momento or ahora()
     if not pedido:
         raise CantidadInvalida("No pediste ninguna entrada.")
 
     evento = await inventory.bloquear_evento(db, evento_id)
+    # EL RELOJ, DESPUES DEL CERROJO. Esperar la fila del evento puede llevar
+    # segundos —es el punto donde se serializa todo el modulo—, y con la hora
+    # leida antes de entrar, una reserva propia que caduco durante esa espera no
+    # se marcaba vencida: la persona recibia «ya tienes una reserva» sobre una
+    # que ya estaba muerta, y la nueva nacia con menos de diez minutos reales.
+    #
+    # Quien pasa `momento` lo hace para fijar la hora en una prueba; en la ruta
+    # no se pasa.
+    momento = momento or ahora()
     operacion = await db.get(EventOperations, evento_id)
     workflow = operacion.workflow_status if operacion else None
     if not states.se_puede_saber_que_existe(workflow, evento.status):
@@ -409,17 +441,16 @@ async def crear_hold(
         raise ConflictError("Ese evento ya terminó.")
 
     ajustes = await configuracion(db, evento_id)
-    fallo = motivo_para_no_vender(ajustes, momento)
-    if fallo is not None:
-        await db.rollback()
-        raise fallo
-    assert ajustes is not None
-
     firma = huella(pedido)
 
-    # IDEMPOTENCIA. La misma clave devuelve la MISMA reserva; la misma clave con
-    # otra cosa dentro es un error del cliente y merece un conflicto, no una
-    # reserva que no pidió.
+    # IDEMPOTENCIA, Y ANTES DE MIRAR EL RELOJ DE LA VENTA. La misma clave
+    # devuelve la MISMA reserva; la misma clave con otra cosa dentro es un error
+    # del cliente y merece un conflicto, no una reserva que no pidió.
+    #
+    # El orden importa: si se comprobara después, un reintento de red del mismo
+    # pedido que llega justo pasado `sales_close_at` recibiría «la venta cerró»
+    # en vez de la reserva que ya tiene. El mismo pedido no puede dar dos
+    # respuestas distintas según el segundo en que llegue.
     ya = await db.scalar(
         select(EventTicketHold).where(
             EventTicketHold.event_id == evento_id,
@@ -434,8 +465,17 @@ async def crear_hold(
         await db.commit()
         return ya
 
+    fallo = motivo_para_no_vender(ajustes, momento)
+    if fallo is not None:
+        await db.rollback()
+        raise fallo
+    assert ajustes is not None
+
     await _vencer_los_mios(db, evento_id, usuario_id, momento)
-    await db.flush()
+    # AQUÍ SE PUEDE ESPERAR. Las reservas propias que caducaron pueden estar
+    # dentro del lote que la limpieza masiva tiene bloqueado en este instante.
+    async with inventory.espera_traducida(db):
+        await db.flush()
 
     # UNA RESERVA EN CURSO POR PERSONA Y EVENTO. Lo sostiene el índice parcial
     # de la 0061; se comprueba aquí para que llegue como un conflicto explicado
@@ -481,10 +521,14 @@ async def crear_hold(
     total_pedido = sum(c for _, c in pedido_normal)
 
     if ajustes.max_per_order is not None and total_pedido > ajustes.max_per_order:
+        # EL MENSAJE, ANTES DEL ROLLBACK. `rollback()` expira todos los objetos
+        # de la sesión, así que leer `ajustes.max_per_order` después dispara una
+        # recarga perezosa fuera del greenlet: `MissingGreenlet`, y la persona
+        # recibe un 500 en vez del 409 que explica el tope. Es la misma trampa
+        # que ya se esquiva veinte líneas más abajo con `aviso`.
+        aviso = f"Como mucho {ajustes.max_per_order} entradas por operación."
         await db.rollback()
-        raise LimiteSuperado(
-            f"Como mucho {ajustes.max_per_order} entradas por operación."
-        )
+        raise LimiteSuperado(aviso)
 
     lineas: list[EventTicketHoldItem] = []
     subtotal = 0
@@ -533,12 +577,12 @@ async def crear_hold(
         expires_at=momento + DURACION_DEL_HOLD,
     )
     db.add(hold)
-    await db.flush()
-    for linea in lineas:
-        linea.hold_id = hold.id
-        db.add(linea)
-
-    await db.commit()
+    async with inventory.espera_traducida(db):
+        await db.flush()
+        for linea in lineas:
+            linea.hold_id = hold.id
+            db.add(linea)
+        await db.commit()
     return hold
 
 
@@ -576,7 +620,11 @@ async def liberar_hold(
 
 
 async def vencer_holds(
-    db: AsyncSession, *, momento: datetime | None = None, lote: int = 500
+    db: AsyncSession,
+    *,
+    momento: datetime | None = None,
+    lote: int = 500,
+    usuario=None,
 ) -> int:
     """Pasa a `EXPIRED` los holds vencidos. Idempotente y por lotes.
 
@@ -599,10 +647,28 @@ async def vencer_holds(
             .limit(max(1, min(lote, 5000)))
         )
     )
+    # CON TIEMPO LÍMITE TAMBIÉN AQUÍ. Es la transacción más larga del módulo
+    # —hasta `lote` filas— y sin límite se queda esperando a una reserva que
+    # alguien está creando, ocupando una conexión del pool mientras tanto.
+    await inventory.limitar_la_espera(db)
     for hold in filas:
         hold.status = VENCIDO
         hold.updated_at = momento
     if filas:
+        # UNA OPERACIÓN MASIVA DEJA RASTRO, aunque no libere nada por sí sola:
+        # es la única forma de saber después si la limpieza corrió, cuándo y
+        # cuánto tocó. No se archiva qué reservas: son efímeras y sin dinero.
+        if usuario is not None:
+            from app.modules.gobernanza import auditoria
+
+            await auditoria.anotar(
+                db,
+                actor_id=usuario.id,
+                action="event.ticket_holds_expired",
+                entity_type="event_ticket_holds",
+                entity_id=filas[0].event_id,
+                payload={"procesados": len(filas), "lote": lote},
+            )
         await db.commit()
     return len(filas)
 
@@ -668,6 +734,13 @@ async def guardar_configuracion(
     """
     from app.modules.gobernanza import auditoria
 
+    # EL MISMO CERROJO QUE EL COMPRADOR, y por la misma razón. Todo lo que
+    # sigue es comprobar-y-luego-escribir sobre el inventario: sin la fila del
+    # evento tomada, una reserva que entra entremedias hace que la comprobación
+    # decida sobre un estado que ya no existe. Se pide primero, como en todos
+    # los demás caminos, que es lo que impide que dos se esperen en cruz.
+    await inventory.bloquear_evento(db, evento.id)
+
     modo = datos.get("access_mode", LIBRE)
     ajustes = await configuracion(db, evento.id)
     anterior = modo_de_acceso(ajustes)
@@ -705,9 +778,14 @@ async def guardar_configuracion(
             )
     ajustes.access_mode = modo
     ajustes.currency = nueva_moneda
-    ajustes.max_per_order = datos.get("max_per_order")
-    ajustes.sales_open_at = datos.get("sales_open_at")
-    ajustes.sales_close_at = datos.get("sales_close_at")
+    # LO QUE NO SE MANDA NO SE TOCA. Se escribían los cuatro campos siempre, así
+    # que pulsar el conmutador de modo desde la aplicación —que solo manda el
+    # modo, la moneda y el tope— BORRABA en silencio la ventana de venta que
+    # alguien hubiera configurado por API, y el evento se quedaba vendiendo sin
+    # fecha de cierre.
+    for campo in ("max_per_order", "sales_open_at", "sales_close_at"):
+        if campo in datos:
+            setattr(ajustes, campo, datos[campo])
     ajustes.updated_at = ahora()
 
     await auditoria.anotar(
@@ -752,6 +830,11 @@ async def crear_tipo(
     db: AsyncSession, *, evento: Event, datos: dict, usuario
 ) -> EventTicketType:
     from app.modules.gobernanza import auditoria
+
+    # EL CERROJO TAMBIEN AQUI: `_exigir_cupo_posible` suma los cupos de todos
+    # los tipos y los compara con el aforo. Dos creaciones a la vez leen la
+    # misma suma y las dos pasan, y el aforo aprobado queda repartido de mas.
+    await inventory.bloquear_evento(db, evento.id)
 
     ajustes = await _exigir_modo_con_entradas(db, evento)
     await _exigir_cupo_posible(db, evento, int(datos["quota"]))
@@ -818,6 +901,13 @@ async def editar_tipo(
     """
     from app.modules.gobernanza import auditoria
 
+    # EL MISMO CERROJO QUE EL COMPRADOR, y por la misma razón. Todo lo que
+    # sigue es comprobar-y-luego-escribir sobre el inventario: sin la fila del
+    # evento tomada, una reserva que entra entremedias hace que la comprobación
+    # decida sobre un estado que ya no existe. Se pide primero, como en todos
+    # los demás caminos, que es lo que impide que dos se esperen en cruz.
+    await inventory.bloquear_evento(db, evento.id)
+
     tipo = await _tipo_propio(db, evento, tipo_id)
     momento = ahora()
     apartadas = await _apartadas_de(db, tipo_id, momento)
@@ -870,6 +960,13 @@ async def retirar_tipo(
     clave ajena `on delete restrict` de las líneas dice lo mismo desde la base.
     """
     from app.modules.gobernanza import auditoria
+
+    # EL MISMO CERROJO QUE EL COMPRADOR, y por la misma razón. Todo lo que
+    # sigue es comprobar-y-luego-escribir sobre el inventario: sin la fila del
+    # evento tomada, una reserva que entra entremedias hace que la comprobación
+    # decida sobre un estado que ya no existe. Se pide primero, como en todos
+    # los demás caminos, que es lo que impide que dos se esperen en cruz.
+    await inventory.bloquear_evento(db, evento.id)
 
     tipo = await _tipo_propio(db, evento, tipo_id)
     tipo.status = "retired"
