@@ -168,7 +168,20 @@ export function MiEntradaScreen() {
           accessibilityRole="image"
           accessibilityLabel={t('miEntrada.qrAccesible')}
         >
-          <QRCode value={credencial.credential} size={220} backgroundColor="#FFFFFF" />
+          {/*
+            ZONA TRANQUILA. La norma pide cuatro modulos de margen blanco
+            alrededor del simbolo, y el valor por defecto de la libreria es
+            CERO: todo el margen lo ponia el relleno del recuadro, unos dos
+            modulos y medio. Los lectores tolerantes leian igual; los de puerta,
+            con poca luz o de refilon, fallaban de vez en cuando y no habia
+            forma de entender por que esa entrada «a veces no lee».
+          */}
+          <QRCode
+            value={credencial.credential}
+            size={220}
+            quietZone={16}
+            backgroundColor="#FFFFFF"
+          />
         </View>
       ) : null}
 

@@ -199,6 +199,13 @@ export function claveDeErrorDeEntradas(
     event_ticket_not_valid: 'errorDeEntradas.entradaNoValida',
     event_ticket_already_used: 'errorDeEntradas.entradaYaUsada',
     event_not_admitting: 'errorDeEntradas.eventoSinAdmision',
+    // NO INVITAN A REINTENTAR. Un 403 no se arregla volviendo a pulsar, y un
+    // 429 se arregla esperando: pintar los dos como «inténtalo de nuevo» pone
+    // a quien está en la puerta a repetir algo que no va a funcionar.
+    forbidden: 'errorDeEntradas.sinPermiso',
+    not_authorized: 'errorDeEntradas.sinPermiso',
+    rate_limited: 'errorDeEntradas.demasiadosIntentos',
+    too_many_requests: 'errorDeEntradas.demasiadosIntentos',
   };
   if (typeof codigo !== 'string') return null;
   return conocidos[codigo] ?? null;

@@ -10,7 +10,11 @@ import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
-import { claveDelEstadoDeEntrada, codigoTecleado } from '@/lib/pedidoDeEntradas';
+import {
+  LARGO_MINIMO_DE_BUSQUEDA,
+  busquedaUtil,
+  claveDelEstadoDeEntrada,
+} from '@/lib/pedidoDeEntradas';
 import {
   EventAdmissionRepository,
   type Asistente,
@@ -43,6 +47,7 @@ export function AsistentesScreen() {
   const [busqueda, setBusqueda] = useState('');
   const [cargando, setCargando] = useState(true);
   const [trayendoMas, setTrayendoMas] = useState(false);
+  const [avisoDeCarga, setAvisoDeCarga] = useState<string | null>(null);
   const [fallo, setFallo] = useState<
     'red' | 'sinConexion' | 'noEncontrado' | 'noDisponible' | null
   >(null);
@@ -55,7 +60,9 @@ export function AsistentesScreen() {
       try {
         const pagina = await EventAdmissionRepository.asistentes(id, {
           estado: filtro,
-          q: codigoTecleado(texto) || undefined,
+          // SOLO SI YA ES BUSCABLE. Mandar un prefijo corto es pedirle al
+          // servidor un 422 que aqui se pinta como un error de la aplicacion.
+          q: busquedaUtil(texto) ?? undefined,
         });
         setFilas(pagina.items);
         setCursor(pagina.next_cursor);
@@ -87,16 +94,20 @@ export function AsistentesScreen() {
   const traerMas = async () => {
     if (cursor === null || trayendoMas || !id) return;
     setTrayendoMas(true);
+    setAvisoDeCarga(null);
     try {
       const pagina = await EventAdmissionRepository.asistentes(id, {
         cursor,
         estado,
-        q: codigoTecleado(busqueda) || undefined,
+        q: busquedaUtil(busqueda) ?? undefined,
       });
       setFilas((previas) => [...previas, ...pagina.items]);
       setCursor(pagina.next_cursor);
     } catch {
-      // Se deja lo que ya se pudo leer.
+      // SE DEJA LO YA LEIDO, PERO SE DICE. Antes se callaba: el boton giraba,
+      // paraba, la lista no crecia y no aparecia nada. La persona lo pulsa una
+      // y otra vez sin entender que ha pasado.
+      setAvisoDeCarga(t('asistentes.noSePudoCargarMas'));
     } finally {
       setTrayendoMas(false);
     }
@@ -145,6 +156,16 @@ export function AsistentesScreen() {
           onSubmitEditing={() => void cargar(estado, busqueda)}
           returnKeyType="search"
         />
+        {busqueda.trim() !== '' && busquedaUtil(busqueda) === null ? (
+          <Text variant="caption" color={colors.textMuted}>
+            {t('asistentes.buscarMinimo', { minimo: LARGO_MINIMO_DE_BUSQUEDA })}
+          </Text>
+        ) : null}
+        {avisoDeCarga !== null ? (
+          <Text variant="caption" color={colors.danger}>
+            {avisoDeCarga}
+          </Text>
+        ) : null}
 
         <View style={styles.fichas}>
           {[null, ...ESTADOS].map((valor) => {

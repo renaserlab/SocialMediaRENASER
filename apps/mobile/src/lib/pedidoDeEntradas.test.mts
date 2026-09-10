@@ -22,6 +22,7 @@ import {
   claveDelEstadoDeEntrada,
   claveDelEstadoDePedido,
   claveDelResultado,
+  busquedaUtil,
   codigoLegible,
   codigoTecleado,
   cuantasEntradas,
@@ -272,7 +273,10 @@ describe('las pantallas no prometen lo que no hay', () => {
 
   it('dos toques no crean dos pedidos ni dos escaneos', () => {
     assert.ok(PEDIDO.includes('if (ocupadoRef.current || !id) return;'));
-    assert.ok(CHECKIN.includes('if (ocupadoRef.current || !id) return;'));
+    // En la puerta el cerrojo va solo: el evento se comprueba aparte, porque
+    // mezclarlos hacia que una ruta sin evento descartara en silencio todo lo
+    // que leia la camara y pareciera que funcionaba.
+    assert.ok(CHECKIN.includes('if (ocupadoRef.current) return;'));
   });
 
   it('el QR se dibuja con el valor del servidor y no se guarda', () => {
@@ -282,5 +286,113 @@ describe('las pantallas no prometen lo que no hay', () => {
 
   it('y solo si la entrada sirve', () => {
     assert.ok(ENTRADA.includes('entradaVigente(ficha.status)'));
+  });
+});
+
+describe('la puerta no se queda muerta', () => {
+  const CHECKIN = sinComentarios(fuente('CheckInScreen.tsx'));
+  const ENTRADA = sinComentarios(fuente('MiEntradaScreen.tsx'));
+  const ESTADO = sinComentarios(
+    readFileSync(join(AQUI, '..', 'components', 'StateView.tsx'), 'utf8'),
+  );
+
+  it('lo que falla se olvida, para poder volver a acercar el mismo QR', () => {
+    // Se marcaba el codigo como visto pasara lo que pasara. Un corte de red
+    // dejaba la camara viva tirandolo en silencio en cada fotograma: el
+    // escaner parecia roto y la unica salida eran dos toques que nadie deduce.
+    const cuerpo = CHECKIN.slice(CHECKIN.indexOf('const admitir'));
+    const catchIdx = cuerpo.indexOf('} catch (fallo)');
+    assert.ok(catchIdx > 0);
+    assert.ok(cuerpo.slice(catchIdx).includes("ultimoRef.current = '';"));
+  });
+
+  it('y la marca se pone DESPUES de pasar los guardianes', () => {
+    // Ponerla en el manejador de la camara quemaba codigos que nunca se
+    // llegaron a mandar: de dos personas que ensenan el movil a la vez, la
+    // segunda desaparecia sin dejar rastro.
+    const escaneado = CHECKIN.slice(CHECKIN.indexOf('const escaneado'));
+    assert.ok(!escaneado.slice(0, escaneado.indexOf('};')).includes('ultimoRef.current ='));
+    const admitir = CHECKIN.slice(CHECKIN.indexOf('const admitir'));
+    assert.ok(
+      admitir.indexOf('ocupadoRef.current = true') < admitir.indexOf('ultimoRef.current = limpia'),
+    );
+  });
+
+  it('un fallo de red pregunta si el check-in llego a cuajar', () => {
+    // `checkIn` escribe y no es idempotente: si se pierde la RESPUESTA, la
+    // entrada queda consumida y a quien tiene derecho a entrar se le rechaza.
+    // `verificar` no escribe nada y lo desambigua.
+    assert.ok(CHECKIN.includes('EventAdmissionRepository.verificar(id, limpia)'));
+    assert.ok(CHECKIN.includes("setError(t('checkin.sinConexion'))"));
+  });
+
+  it('sin evento se dice, en vez de encender la camara y no hacer nada', () => {
+    assert.ok(CHECKIN.includes("t('checkin.sinEvento')"));
+    assert.ok(CHECKIN.includes('if (!id) {'));
+  });
+
+  it('mientras no se sabe el permiso no se dice que no hay camara', () => {
+    assert.ok(CHECKIN.includes('if (permiso === null)'));
+  });
+
+  it('rechazado y bloqueado no son lo mismo, y bloqueado lleva a los ajustes', () => {
+    // Con `canAskAgain` en falso, pulsar «permitir» no abre ningun dialogo: la
+    // promesa se resuelve al instante en negativo y el boton parece roto.
+    assert.ok(CHECKIN.includes('permiso.canAskAgain === false'));
+    assert.ok(CHECKIN.includes('abrirAjustes'));
+    assert.ok(CHECKIN.includes("t('checkin.camaraBloqueada')"));
+  });
+
+  it('la camara se apaga cuando nadie mira', () => {
+    // Estar montado no es estar activo: una pantalla encima deja esta viva por
+    // debajo, con el piloto de la camara encendido.
+    assert.ok(CHECKIN.includes('useSeccionActiva'));
+    assert.ok(CHECKIN.includes('active={activa}'));
+  });
+
+  it('se ve que esta comprobando antes de que llegue el resultado', () => {
+    assert.ok(CHECKIN.includes("t('checkin.comprobando')"));
+  });
+
+  it('el veredicto se anuncia tambien en iOS', () => {
+    // `accessibilityLiveRegion` es solo Android, y al sustituirse la pantalla
+    // entera el foco del lector queda huerfano.
+    assert.ok(CHECKIN.includes('AccessibilityInfo.announceForAccessibility'));
+  });
+
+  it('seguir a la siguiente persona no reactiva olvidando el ultimo codigo', () => {
+    // Quien acaba de pasar sigue guardando el movil con su QR delante: volver
+    // a leerlo pinta un rojo «ya utilizada» que no es de nadie de la cola.
+    const siguiente = CHECKIN.slice(CHECKIN.indexOf('const siguiente'));
+    assert.ok(!siguiente.slice(0, siguiente.indexOf('};')).includes('ultimoRef'));
+  });
+
+  it('sin conexion tambien hay algo que pulsar', () => {
+    assert.ok(ESTADO.includes("(state === 'error' || state === 'offline') && onRetry"));
+  });
+
+  it('el QR lleva la zona tranquila que pide la norma', () => {
+    assert.ok(ENTRADA.includes('quietZone={16}'));
+  });
+});
+
+describe('la busqueda de la puerta no se recorre letra a letra', () => {
+  it('un prefijo corto no se manda', () => {
+    // El servidor lo rechaza con un 422, y sin minimo la lista se recorre
+    // caracter a caracter hasta reconstruir codigos que admiten por si solos.
+    for (const corto of ['', 'A', 'AB', 'ABC', 'ABCD', 'ABCDE']) {
+      assert.equal(busquedaUtil(corto), null, corto);
+    }
+  });
+
+  it('a partir de seis si, y normalizado', () => {
+    assert.equal(busquedaUtil('abcd 23'), 'ABCD23');
+    assert.equal(busquedaUtil('ABCD2345EFGH67'), 'ABCD2345EFGH67');
+  });
+
+  it('los espacios no cuentan como caracteres del codigo', () => {
+    // 'A B C' son cinco pulsaciones y tres caracteres: si contaran los
+    // espacios, el minimo se saltaria escribiendo separadores.
+    assert.equal(busquedaUtil('A B C'), null);
   });
 });

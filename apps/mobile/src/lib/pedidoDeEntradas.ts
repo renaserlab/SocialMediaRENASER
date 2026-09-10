@@ -143,6 +143,22 @@ export function codigoTecleado(texto: string): string {
  * NO VALIDA QUE EXISTA —eso solo lo sabe el servidor— sino que no se mande una
  * cadena vacía o media palabra: cada envío es un intento anotado en la puerta.
  */
+/**
+ * Lo minimo que hay que teclear para buscar por codigo en la puerta.
+ *
+ * EL SERVIDOR EXIGE LO MISMO Y RESPONDE 422 POR DEBAJO. Sin minimo, la lista
+ * de asistentes se recorre letra a letra hasta reconstruir los codigos, y un
+ * codigo admite por si solo. Aqui se refleja para no mandar una peticion que
+ * se sabe que va a fallar y para poder decirlo antes.
+ */
+export const LARGO_MINIMO_DE_BUSQUEDA = 6;
+
+/** El texto de busqueda que SI se puede mandar, o `null` si aun es corto. */
+export function busquedaUtil(texto: string): string | null {
+  const limpia = codigoTecleado(texto);
+  return limpia.length >= LARGO_MINIMO_DE_BUSQUEDA ? limpia : null;
+}
+
 export function pareceUnCodigo(texto: string): boolean {
   const limpio = codigoTecleado(texto);
   return limpio.length >= 10 && limpio.length <= 24;
