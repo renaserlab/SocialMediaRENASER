@@ -51,6 +51,7 @@ from app.modules.events.schemas import (
 )
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
+from app.shared.permissions import puede_mover_dinero
 
 router = APIRouter(prefix="/events", tags=["events-orders"])
 admin_router = APIRouter(prefix="/admin/events", tags=["events-orders"])
@@ -109,7 +110,14 @@ async def _orden_leida(
     )
 
 
-def _entrada_leida(entrada: EventTicket) -> EntradaRead:
+def _entrada_leida(entrada: EventTicket, *, con_codigo: bool = True) -> EntradaRead:
+    """La ficha de una entrada. El código SOLO para su dueño.
+
+    Quien revoca no es quien compró: es el organizador o la administración. El
+    código admite por sí solo —`_buscar` lo acepta como credencial—, así que
+    devolvérselo a alguien que no es el dueño es repartir una entrada que
+    todavía no tenía.
+    """
     return EntradaRead(
         id=entrada.id,
         event_id=entrada.event_id,
@@ -117,7 +125,7 @@ def _entrada_leida(entrada: EventTicket) -> EntradaRead:
         ticket_type_id=entrada.ticket_type_id,
         name=entrada.ticket_type_name_snapshot,
         status=entrada.status,
-        code=entrada.code,
+        code=entrada.code if con_codigo else None,
         issued_at=entrada.issued_at,
         checked_in_at=entrada.checked_in_at,
     )
@@ -348,8 +356,8 @@ async def _evento_de_la_puerta(
             raise NotFoundError("Evento no encontrado.")
 
     operacion = await db.get(EventOperations, evento.id)
-    workflow = operacion.workflow_status if operacion else "PUBLISHED"
-    if not states.es_publico(workflow):
+    workflow = operacion.workflow_status if operacion else None
+    if not states.es_publico_de_verdad(workflow, evento.status):
         raise NotFoundError("Evento no encontrado.")
 
     # UN EVENTO SIN VENTA NO TIENE PUERTA: no emite entradas, así que no hay
@@ -397,13 +405,49 @@ async def check_in(
     )
 
 
+async def _evento_de_las_ventas(
+    db: AsyncSession, evento_id: str, usuario: AuthUser
+) -> Event:
+    """Quien organiza el evento, o quien administra el dinero. NO la puerta.
+
+    POR QUÉ NO VALE EL MISMO PERMISO. Hoy dan lo mismo, porque el rol de
+    admisión es solo `admin`. Pero son dos capacidades distintas: dejar entrar
+    gente y ver cuánto se ha recaudado. Colgar las dos del mismo predicado
+    significa que el día que se cree un rol de acomodador —que es exactamente
+    para lo que existe `ROLES_ADMISION`— ese acomodador ve la recaudación del
+    evento sin que nadie haya tocado este endpoint ni se haya enterado.
+
+    `puede_mover_dinero` es el conjunto que el proyecto ya usa para esto, y
+    está separado de `is_admin` por esta misma razón.
+    """
+    ensure_uuid(evento_id, "Evento no encontrado.")
+    evento = await db.get(Event, evento_id)
+    if evento is None:
+        raise NotFoundError("Evento no encontrado.")
+    if not permissions.es_organizador(evento, usuario):
+        if not await puede_mover_dinero(db, usuario.id):
+            raise NotFoundError("Evento no encontrado.")
+
+    operacion = await db.get(EventOperations, evento.id)
+    workflow = operacion.workflow_status if operacion else None
+    if not states.es_publico_de_verdad(workflow, evento.status):
+        raise NotFoundError("Evento no encontrado.")
+
+    ajustes = await ticketing.configuracion(db, evento.id)
+    if not ticketing.vende_entradas(ajustes):
+        raise NotFoundError("Evento no encontrado.")
+    return evento
+
+
 @router.get("/{event_id}/attendees", response_model=PaginaDeAsistentes)
 async def asistentes(
     event_id: str,
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None),
     estado: str | None = Query(default=None, pattern="^(VALID|USED|REVOKED)$"),
-    q: str | None = Query(default=None, max_length=32),
+    # `min_length`: un prefijo corto convierte la lista en un recorrido del
+    # codigo letra a letra. Ver `emision.LARGO_MINIMO_DE_BUSQUEDA`.
+    q: str | None = Query(default=None, min_length=6, max_length=32),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PaginaDeAsistentes:
@@ -444,10 +488,13 @@ async def ventas(
 ) -> VentasRead:
     """El resumen del evento. `ingresos_brutos_minor` es BRUTO y lo dice."""
     await orders.exigir_ordenes_disponibles(db)
-    evento = await _evento_de_la_puerta(db, event_id, current_user)
+    evento = await _evento_de_las_ventas(db, event_id, current_user)
     resumen = await orders.resumen_de_ventas(db, evento.id)
     return VentasRead(
+        aforo=resumen.aforo,
+        entradas_apartadas=resumen.entradas_apartadas,
         entradas_emitidas=resumen.entradas_emitidas,
+        entradas_validas=resumen.entradas_validas,
         entradas_usadas=resumen.entradas_usadas,
         entradas_revocadas=resumen.entradas_revocadas,
         ordenes_pagadas=resumen.ordenes_pagadas,
@@ -483,7 +530,8 @@ async def revocar(
     entrada = await emision.revocar(
         db, entrada_id=ticket_id, usuario_id=current_user.id, motivo=payload.reason
     )
-    return _entrada_leida(entrada)
+    # SIN EL CODIGO: quien revoca no es quien compro.
+    return _entrada_leida(entrada, con_codigo=False)
 
 
 # --------------------------------------------------------------------------- #

@@ -52,6 +52,10 @@ FRAGMENTOS_PROHIBIDOS = (
     "header",
     "token",
     "secret",
+    # La credencial de una entrada. La red no la atrapaba porque su vocabulario
+    # es de otro dominio, y `payload` se sirve por el panel de auditoria.
+    "credencial",
+    "credential",
     "password",
     "passwd",
     "clave",

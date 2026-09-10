@@ -28,6 +28,7 @@ from app.main import app
 from app.modules.catalog.models import Event
 from app.modules.events import esquema, orders, ticketing
 from app.modules.events import tickets as emision
+from app.modules.gobernanza.models import AuditEvent
 from app.modules.events.models import (
     EventCheckin,
     EventOperations,
@@ -1725,3 +1726,374 @@ async def test_una_devolucion_ajena_sigue_yendo_a_cursos(entorno, pasarela):
         "una devolucion que no es de ninguna entrada la sigue atendiendo Cursos "
         "como siempre"
     )
+
+
+# --------------------------------------------------------------------------- #
+# La busqueda de la puerta no puede ser un extractor de codigos
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_los_comodines_no_extraen_codigos_posicion_a_posicion(
+    entorno,
+):
+    """`q = "___A%"` preguntaba «que entradas llevan una A en la cuarta letra».
+
+    Con 32 caracteres y 14 posiciones son 448 peticiones para reconstruir el
+    codigo COMPLETO de todas las entradas del evento a la vez. Y un codigo
+    admite por si solo: `_buscar` lo acepta como credencial. Es decir, quien
+    tiene la lista puede marcar como usadas las entradas de todo el mundo sin
+    que su dueno haya llegado a la puerta.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
+
+    identidad["uid"] = ORG
+    # El mismo ataque, tal cual: subrayados hasta la posicion y el caracter.
+    # Se sonda la posicion 7 para que la cadena pase del largo minimo y lo que
+    # se pruebe sea el ESCAPADO, no la longitud.
+    posicion = 7
+    sonda = "_" * posicion + codigo[posicion] + "%"
+    encontrados = (
+        await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees", params={"q": sonda})
+    ).json()
+    assert encontrados.get("items") == [], (
+        "el comodin `_` se esta interpretando: la lista dice que caracter hay "
+        "en cada posicion del codigo"
+    )
+
+
+@pytest.mark.asyncio
+async def test_el_porcentaje_tampoco_busca_por_dentro(entorno):
+    """`q = "%XY%"` era una busqueda por subcadena en cualquier posicion."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
+
+    identidad["uid"] = ORG
+    # EL `%` SE MANDA COMO PARAMETRO, no dentro de la URL: `%AB` en una cadena
+    # de consulta es un escape de porcentaje y lo decodifica el servidor antes
+    # de que la prueba pruebe nada.
+    sonda = "%" + codigo[6:10] + "%"
+    encontrados = (
+        await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees", params={"q": sonda})
+    ).json()
+    assert encontrados.get("items") == []
+
+
+@pytest.mark.asyncio
+async def test_un_prefijo_corto_no_se_admite(entorno):
+    """Sin longitud minima, el prefijo se recorre letra a letra.
+
+    Con seis caracteres hacen falta 32^6 sondas para encontrar uno que exista,
+    que es exactamente lo que hace inutil el recorrido.
+    """
+    http, identidad, sesiones = entorno
+    await _una_entrada(http, identidad, sesiones)
+    identidad["uid"] = ORG
+    respuesta = await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees?q=A")
+    assert respuesta.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_la_busqueda_por_codigo_entero_sigue_funcionando(entorno):
+    """LA PANTALLA DE RESPALDO NO SE ROMPE. Quien dicta su codigo se encuentra."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
+
+    identidad["uid"] = ORG
+    encontrados = (
+        await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees?q={codigo}")
+    ).json()
+    assert [f["ticket_id"] for f in encontrados["items"]] == [entrada["id"]]
+
+
+# --------------------------------------------------------------------------- #
+# La puerta de un evento sin ciclo operativo
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_un_evento_sin_ciclo_operativo_no_se_da_por_publicado(entorno):
+    """Sin fila en `event_operations` la puerta asumia PUBLISHED.
+
+    Falla en ABIERTO: un borrador sin ciclo operativo abria la puerta, y la
+    puerta es el oraculo de credenciales que `_evento_de_la_puerta` documenta
+    haber cerrado. El propio proyecto resuelve esto al reves en
+    `states.se_puede_saber_que_existe`: sin ciclo, manda el `status` del evento.
+    """
+    http, identidad, sesiones = entorno
+    borrador = "eeeeeeee-4444-0000-0000-0000000000c1"
+    identidad["uid"] = BRUNO
+    async with sesiones() as db:
+        db.add(
+            Event(
+                id=borrador,
+                organizer_id=BRUNO,
+                title="Sin ciclo operativo",
+                description="Una descripción suficientemente larga para revisarla.",
+                starts_at=datetime.now(timezone.utc) + timedelta(days=10),
+                event_type="presential",
+                location="Casa",
+                status="draft",
+                capacity=10,
+            )
+        )
+        # A PROPOSITO SIN `EventOperations`: es el estado que se da por bueno.
+        db.add(
+            EventTicketingSettings(
+                event_id=borrador, access_mode="TICKETED", currency="PEN"
+            )
+        )
+        await db.commit()
+
+    respuesta = await http.post(
+        f"{EVENTOS}/{borrador}/tickets/verify", json={"credential": "loquesea"}
+    )
+    assert respuesta.status_code == 404, (
+        "un borrador sin ciclo operativo esta abriendo la puerta"
+    )
+
+
+@pytest.mark.asyncio
+async def test_un_evento_publicado_sin_ciclo_operativo_si_tiene_puerta(entorno):
+    """EL ARREGLO NO PUEDE CERRAR LA PUERTA A QUIEN SI LA TIENE.
+
+    Sin esta prueba, «devolver siempre 404 cuando falta la fila» pasaria la de
+    arriba y dejaria fuera a cualquier evento anterior a la 0060.
+    """
+    http, identidad, sesiones = entorno
+    publicado = "eeeeeeee-4444-0000-0000-0000000000c2"
+    identidad["uid"] = BRUNO
+    async with sesiones() as db:
+        db.add(
+            Event(
+                id=publicado,
+                organizer_id=BRUNO,
+                title="Publicado a la antigua",
+                description="Una descripción suficientemente larga para revisarla.",
+                starts_at=datetime.now(timezone.utc) + timedelta(days=10),
+                event_type="presential",
+                location="Casa",
+                status="published",
+                capacity=10,
+            )
+        )
+        db.add(
+            EventTicketingSettings(
+                event_id=publicado, access_mode="TICKETED", currency="PEN"
+            )
+        )
+        await db.commit()
+
+    respuesta = await http.post(
+        f"{EVENTOS}/{publicado}/tickets/verify", json={"credential": "loquesea"}
+    )
+    assert respuesta.status_code == 200
+    assert respuesta.json()["result"] == "NOT_FOUND"
+
+
+# --------------------------------------------------------------------------- #
+# La auditoria de la puerta: canal, resultado real y actor
+# --------------------------------------------------------------------------- #
+async def _rastro(sesiones, accion):
+    async with sesiones() as db:
+        return list(
+            await db.scalars(select(AuditEvent).where(AuditEvent.action == accion))
+        )
+
+
+@pytest.mark.asyncio
+async def test_la_auditoria_distingue_la_camara_del_teclado(entorno):
+    """El camino tecleado es el debil y era el que no dejaba huella propia.
+
+    Doscientos check-ins a mano desde la trastienda eran, en el historico,
+    identicos a doscientos escaneos. La pregunta «cuantos de estos entraron por
+    teclado» no tenia respuesta posible.
+    """
+    http, identidad, sesiones = entorno
+    entrada, credencial = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
+
+    identidad["uid"] = ADMINISTRA
+    # Por el QR.
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
+    )
+    # Y por el codigo tecleado, sobre la MISMA entrada: el segundo es "ya usada".
+    await http.post(f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": codigo})
+
+    canales = [f.payload.get("canal") for f in await _rastro(sesiones, "event.checkin")]
+    assert canales == ["qr", "code"], canales
+
+
+@pytest.mark.asyncio
+async def test_el_canal_lo_decide_el_servidor_y_no_el_cliente(entorno):
+    """No hay ningun campo del cuerpo que diga «vengo de la camara».
+
+    Si lo declarara el cliente, quien teclea podria decir que escaneo, y el
+    rastro contaria la version del sospechoso.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
+
+    identidad["uid"] = ADMINISTRA
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins",
+        json={"credential": codigo, "canal": "qr", "channel": "qr"},
+    )
+    canales = [f.payload.get("canal") for f in await _rastro(sesiones, "event.checkin")]
+    assert canales == ["code"]
+
+
+@pytest.mark.asyncio
+async def test_un_intento_rechazado_no_se_archiva_como_correcto(entorno):
+    """Con `outcome` siempre en 'ok', una alerta de intentos rechazados por
+    operador no dispara nunca: es el patron de alguien probando codigos."""
+    http, identidad, sesiones = entorno
+    await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = ADMINISTRA
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": "NOEXISTE12345"}
+    )
+    filas = await _rastro(sesiones, "event.checkin")
+    assert [f.outcome for f in filas] == ["denied"]
+    assert [f.new_state for f in filas] == ["NOT_FOUND"]
+    # Y no es una persona del sistema: es un operador con nombre.
+    assert filas[0].actor_role == "user"
+    assert filas[0].actor_id == ADMINISTRA
+
+
+@pytest.mark.asyncio
+async def test_sin_entrada_el_rastro_no_dice_ser_de_una_entrada(entorno):
+    """Guardaba el id de un EVENTO bajo `entity_type='event_ticket'`.
+
+    Reconstruir la vida de una entrada consultando por ese identificador
+    devolvia los intentos fallidos de una puerta entera.
+    """
+    http, identidad, sesiones = entorno
+    await _una_entrada(http, identidad, sesiones)
+    identidad["uid"] = ADMINISTRA
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": "NOEXISTE12345"}
+    )
+    fila = (await _rastro(sesiones, "event.checkin"))[0]
+    assert fila.entity_type == "event"
+    assert fila.entity_id == CON_ENTRADAS
+
+
+@pytest.mark.asyncio
+async def test_rotar_la_credencial_deja_rastro_y_no_la_escribe(entorno):
+    """Rotar invalida el QR anterior: es destructivo para quien esta en la cola.
+
+    Una sesion robada que pida credencial nueva justo antes del evento deja a
+    quien compro con una entrada que ya no vale, y no dejaba ni una linea.
+    """
+    http, identidad, sesiones = entorno
+    entrada, credencial = await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = ANA
+    nueva = (await http.post(f"{EVENTOS}/tickets/{entrada['id']}/credential")).json()
+
+    filas = await _rastro(sesiones, "event.ticket.credential_rotated")
+    assert len(filas) >= 1
+    crudo = " ".join(str(f.payload) + str(f.new_state) for f in filas)
+    assert credencial not in crudo
+    assert nueva["credential"] not in crudo
+
+
+# --------------------------------------------------------------------------- #
+# Los siete numeros del aforo, separados
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_las_ventas_separan_apartado_de_vendido(entorno):
+    """Confundirlos es como un organizador cree que vendio lo que sigue en la
+    cesta de alguien."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    # Y una reserva VIVA que nadie ha comprado.
+    identidad["uid"] = BRUNO
+    await _apartar(http, GENERAL, 3, "hv")
+
+    identidad["uid"] = ORG
+    ventas = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/sales")).json()
+    assert ventas["entradas_apartadas"] == 3
+    assert ventas["entradas_emitidas"] == 1
+    assert ventas["entradas_validas"] == 1
+    assert ventas["entradas_usadas"] == 0
+    assert ventas["checkins"] == 0
+    assert ventas["aforo"] is not None
+
+
+@pytest.mark.asyncio
+async def test_los_asistentes_presentes_salen_de_los_check_ins(entorno):
+    """No de pedidos, ni de compradores, ni de una suma guardada a mano."""
+    http, identidad, sesiones = entorno
+    _, credencial = await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = ADMINISTRA
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
+    )
+    # El mismo QR otra vez: la puerta lo rechaza y NO suma otro asistente.
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
+    )
+
+    identidad["uid"] = ORG
+    ventas = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/sales")).json()
+    assert ventas["checkins"] == 1
+    assert ventas["entradas_usadas"] == 1
+    assert ventas["entradas_validas"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# La recaudacion no viene con el permiso de abrir la puerta
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_la_recaudacion_no_la_ve_quien_solo_abre_la_puerta(
+    entorno, monkeypatch
+):
+    """El dia que exista un rol de acomodador, no puede llevar la caja dentro.
+
+    Se anade ese rol a `ROLES_ADMISION` —que es exactamente para lo que la
+    constante existe— y se comprueba que la puerta se le abre y las ventas no.
+    """
+    from app.modules.events import permissions
+
+    monkeypatch.setattr(
+        permissions, "ROLES_ADMISION", {"admin", "moderator"}, raising=True
+    )
+    http, identidad, sesiones = entorno
+    await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = MODERA
+    puerta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/tickets/verify", json={"credential": "loquesea"}
+    )
+    assert puerta.status_code == 200, "el acomodador tiene que poder abrir la puerta"
+    ventas = await http.get(f"{EVENTOS}/{CON_ENTRADAS}/sales")
+    assert ventas.status_code == 404, "y NO tiene que ver la recaudacion"
+
+
+@pytest.mark.asyncio
+async def test_revocar_no_devuelve_el_codigo_de_una_entrada_ajena(entorno):
+    """Un codigo admite por si solo: devolverselo a quien revoca es repartir
+    una entrada que esa persona todavia no tenia."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
+
+    identidad["uid"] = ORG
+    respuesta = await http.post(
+        f"{EVENTOS}/tickets/{entrada['id']}/revoke", json={"reason": "duplicada"}
+    )
+    assert respuesta.status_code == 200
+    assert respuesta.json()["code"] is None
+    assert codigo not in respuesta.text

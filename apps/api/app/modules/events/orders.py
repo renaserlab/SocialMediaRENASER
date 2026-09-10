@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError
+from app.modules.catalog.models import Event
 from app.modules.events import esquema, inventory, states, ticketing
 from app.modules.events.models import (
     ENTRADA_VALIDA,
@@ -707,7 +708,14 @@ class ResumenDeVentas:
     decisiones que la empresa no ha tomado. La pantalla lo dice.
     """
 
+    #: `None` cuando el evento no tiene límite declarado.
+    aforo: int | None
+    #: Reservas VIVAS. Todavía no son de nadie.
+    entradas_apartadas: int
+    #: Todas las emitidas, en cualquier estado.
     entradas_emitidas: int
+    #: Las que siguen sirviendo para entrar.
+    entradas_validas: int
     entradas_usadas: int
     entradas_revocadas: int
     ordenes_pagadas: int
@@ -745,8 +753,24 @@ async def resumen_de_ventas(db: AsyncSession, evento_id: str) -> ResumenDeVentas
     pendientes = sum(ordenes.get(e, (0, 0))[0] for e in ORDEN_EN_CURSO)
     pagadas, ingresos = ordenes.get(ORDEN_PAGADA, (0, 0))
     ajustes = await ticketing.configuracion(db, evento_id)
+
+    # SIETE NÚMEROS QUE NO SIGNIFICAN LO MISMO. Aforo es lo que cabe; apartadas
+    # son reservas vivas que todavía no ha comprado nadie; emitidas son todas
+    # las que existen; válidas las que aún sirven; usadas las que ya entraron;
+    # revocadas las retiradas. Enseñar uno por otro es cómo un organizador cree
+    # que vendió lo que sigue en la cesta de alguien.
+    evento = await db.get(Event, evento_id)
+    operacion = await db.get(EventOperations, evento_id)
+    aforo = (
+        inventory.aforo_de(evento, operacion.approved_capacity if operacion else None)
+        if evento is not None
+        else None
+    )
     return ResumenDeVentas(
+        aforo=aforo,
+        entradas_apartadas=await ticketing.cuantas_apartadas(db, evento_id),
         entradas_emitidas=sum(por_estado.values()),
+        entradas_validas=por_estado.get("VALID", 0),
         entradas_usadas=por_estado.get("USED", 0),
         entradas_revocadas=por_estado.get("REVOKED", 0),
         ordenes_pagadas=pagadas,

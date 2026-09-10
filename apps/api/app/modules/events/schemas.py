@@ -412,7 +412,10 @@ class EntradaRead(BaseModel):
     #: `VALID`, `USED` o `REVOKED`.
     status: str
     #: El código que se teclea si la cámara falla. No es secuencial.
-    code: str
+    #:
+    #: `null` cuando quien pregunta NO es el dueño: el código admite por sí solo,
+    #: así que devolvérselo al organizador que revoca es repartir una entrada.
+    code: str | None = None
     issued_at: datetime
     checked_in_at: datetime | None = None
 
@@ -488,13 +491,18 @@ class VentasRead(BaseModel):
     esas palabras en vez de enseñar una cifra que parece un ingreso.
     """
 
+    #: `null` si el evento no declaró aforo.
+    aforo: int | None = None
+    entradas_apartadas: int = 0
     entradas_emitidas: int
+    entradas_validas: int = 0
     entradas_usadas: int
     entradas_revocadas: int
     ordenes_pagadas: int
     ordenes_pendientes: int
     ingresos_brutos_minor: int
     currency: str | None = None
+    #: Gente DENTRO: check-ins correctos distintos. No pedidos, no compradores.
     checkins: int = 0
 
 

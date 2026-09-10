@@ -109,6 +109,25 @@ def es_publico(workflow: str) -> bool:
     return workflow == PUBLICADO
 
 
+def es_publico_de_verdad(workflow: str | None, status: str) -> bool:
+    """Si este evento esta publicado, MIRE DONDE MIRE.
+
+    Manda el estado operativo cuando el evento lo tiene. Sin fila de ciclo
+    —un evento anterior a la 0060, o cualquier camino que no la escriba— manda
+    el `status` de siempre.
+
+    POR QUE NO VALE SUPONER `PUBLISHED`. Es lo que se hacia, y falla en
+    ABIERTO: un borrador sin ciclo operativo se daba por publicado y abria la
+    puerta del evento, que es justo el oraculo de credenciales que la puerta
+    existe para cerrar. La ausencia de un dato no puede leerse como el valor
+    mas permisivo, exactamente igual que un aviso de cobro sin importe no vale
+    como importe coincidente.
+    """
+    if workflow is not None:
+        return es_publico(workflow)
+    return status == "published"
+
+
 def admite_reservas(workflow: str) -> bool:
     """Solo lo publicado admite gente. Suspendido y cancelado, no."""
     return workflow == PUBLICADO

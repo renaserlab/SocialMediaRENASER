@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import distinct, false as sa_false, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError, NotFoundError
@@ -168,6 +168,22 @@ async def credencial_de(
     credencial = _credencial()
     entrada.credential_hash = resumir(credencial)
     entrada.code = _codigo()
+
+    # SE AUDITA, porque invalida el QR anterior. Una sesión robada que pida una
+    # credencial nueva justo antes del evento deja a quien compró en la puerta
+    # con una entrada que ya no vale, y hasta ahora eso no dejaba ni una línea.
+    # NI LA CREDENCIAL NI EL CÓDIGO ENTRAN AQUÍ: es un rastro consultable.
+    from app.modules.gobernanza import auditoria
+
+    await auditoria.anotar(
+        db,
+        actor_id=usuario_id,
+        actor_role="user",
+        action="event.ticket.credential_rotated",
+        entity_type="event_ticket",
+        entity_id=entrada.id,
+        payload={"evento": entrada.event_id},
+    )
     await db.commit()
     return entrada, credencial
 
@@ -201,23 +217,43 @@ class Veredicto:
     usada_a_las: datetime | None = None
 
 
-async def _buscar(db: AsyncSession, *, credencial: str) -> EventTicket | None:
+#: Por dónde entró la credencial. Lo decide el SERVIDOR, mirando cuál de las
+#: dos búsquedas encontró la fila; no lo declara el cliente.
+#:
+#: POR QUÉ IMPORTA. El camino tecleado es el débil —un código copiado de una
+#: pantalla admite igual que el QR— y es justo el que no dejaba huella
+#: distinguible: doscientos check-ins a mano desde la trastienda eran, en el
+#: histórico, idénticos a doscientos escaneos legítimos. La pregunta que se hace
+#: cuando algo va mal es «¿cuántos de estos entraron por teclado?», y no tenía
+#: respuesta posible.
+POR_QR = "qr"
+POR_CODIGO = "code"
+SIN_CANAL = "none"
+
+
+async def _buscar(
+    db: AsyncSession, *, credencial: str
+) -> tuple[EventTicket | None, str]:
     """Por el `sha256` de la credencial, o por el código tecleado.
 
     Los dos caminos llevan a la misma fila. El código existe para cuando la
     cámara no funciona, y tiene su propia entropía: no es un número de serie.
+
+    Devuelve TAMBIÉN por cuál de los dos entró, que es un dato del servidor y
+    no una declaración del cliente: quien teclea no puede decir que escaneó.
     """
     limpia = (credencial or "").strip()
     if not limpia:
-        return None
+        return None, SIN_CANAL
     entrada = await db.scalar(
         select(EventTicket).where(EventTicket.credential_hash == resumir(limpia))
     )
     if entrada is not None:
-        return entrada
-    return await db.scalar(
+        return entrada, POR_QR
+    tecleada = await db.scalar(
         select(EventTicket).where(EventTicket.code == limpia.upper())
     )
+    return tecleada, POR_CODIGO if tecleada is not None else SIN_CANAL
 
 
 async def verificar(
@@ -229,7 +265,7 @@ async def verificar(
     se puede hacer mil veces sin consecuencias, y «déjala pasar» solo una.
     """
     momento = momento or ahora()
-    entrada = await _buscar(db, credencial=credencial)
+    entrada, _canal = await _buscar(db, credencial=credencial)
     if entrada is None:
         return Veredicto(NO_EXISTE)
     if entrada.event_id != evento_id:
@@ -270,10 +306,10 @@ async def check_in(
     a la que entró, que es lo que la puerta necesita para decidir.
     """
     momento = momento or ahora()
-    entrada = await _buscar(db, credencial=credencial)
+    entrada, canal = await _buscar(db, credencial=credencial)
     if entrada is None:
         await _anotar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
-                      resultado=NO_EXISTE, momento=momento)
+                      resultado=NO_EXISTE, momento=momento, canal=canal)
         await db.commit()
         return Veredicto(NO_EXISTE)
 
@@ -283,14 +319,14 @@ async def check_in(
         # mezcla los historiales y acaba enseñando en la pantalla de un evento
         # identificadores que pertenecen a otro.
         await _anotar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
-                      resultado=OTRO_EVENTO, momento=momento)
+                      resultado=OTRO_EVENTO, momento=momento, canal=canal)
         await db.commit()
         return Veredicto(OTRO_EVENTO)
 
     if not await _admite_entrada(db, entrada.event_id, momento):
         suya = entrada.id
         await _anotar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
-                      resultado=SIN_ADMISION, momento=momento)
+                      resultado=SIN_ADMISION, momento=momento, canal=canal)
         await db.commit()
         return Veredicto(SIN_ADMISION, entrada_id=suya)
 
@@ -310,7 +346,7 @@ async def check_in(
 
     if resultado.rowcount == 1:
         await _anotar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
-                      resultado=OK, momento=momento)
+                      resultado=OK, momento=momento, canal=canal)
         await db.commit()
         return Veredicto(OK, entrada_id=identificador, tipo=nombre, usada_a_las=momento)
 
@@ -325,12 +361,12 @@ async def check_in(
 
     if estado == ENTRADA_REVOCADA:
         await _anotar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
-                      resultado=REVOCADA, momento=momento)
+                      resultado=REVOCADA, momento=momento, canal=canal)
         await db.commit()
         return Veredicto(REVOCADA, entrada_id=identificador, tipo=nombre)
 
     await _anotar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
-                  resultado=YA_USADA, momento=momento)
+                  resultado=YA_USADA, momento=momento, canal=canal)
     await db.commit()
     return Veredicto(
         YA_USADA, entrada_id=identificador, tipo=nombre, usada_a_las=entro_a_las
@@ -345,11 +381,19 @@ async def _anotar(
     operador_id: str,
     resultado: str,
     momento: datetime,
+    canal: str = SIN_CANAL,
 ) -> None:
     """Cada intento queda, el bueno y los malos.
 
     Un `OK` repetido chocaría con el índice único parcial de la 0062, que es
     justo la invariante: se registra a lo sumo un check-in correcto por entrada.
+
+    LO QUE DICE LA FILA, DICHO EN LOS CAMPOS QUE SE CONSULTAN. Antes todo se
+    archivaba con `outcome='ok'` y `actor_role='system'`, así que un intento
+    rechazado era indistinguible de uno correcto para cualquier consulta que no
+    leyera el texto libre: una alerta de «intentos rechazados por operador» no
+    disparaba nunca. Y cuando no hay entrada, la fila decía ser sobre una
+    entrada y llevaba el identificador de un evento.
     """
     db.add(
         EventCheckin(
@@ -365,11 +409,15 @@ async def _anotar(
     await auditoria.anotar(
         db,
         actor_id=operador_id,
+        actor_role="user",
         action="event.checkin",
-        entity_type="event_ticket",
+        # SIN ENTRADA, NO ES UNA ENTRADA. Una credencial inventada o de otro
+        # evento no tiene fila que señalar aquí.
+        entity_type="event_ticket" if entrada is not None else "event",
         entity_id=entrada.id if entrada is not None else evento_id,
+        outcome="ok" if resultado == OK else "denied",
         new_state=resultado,
-        payload={"evento": evento_id},
+        payload={"evento": evento_id, "canal": canal},
     )
 
 
@@ -383,8 +431,8 @@ async def _admite_entrada(db: AsyncSession, evento_id: str, momento: datetime) -
     if evento is None:
         return False
     operacion = await db.get(EventOperations, evento_id)
-    workflow = operacion.workflow_status if operacion else "PUBLISHED"
-    if not states.es_publico(workflow):
+    workflow = operacion.workflow_status if operacion else None
+    if not states.es_publico_de_verdad(workflow, evento.status):
         return False
     return not inventory.es_pasado(evento, momento)
 
@@ -471,6 +519,28 @@ async def leer_entrada(
     return entrada
 
 
+#: Lo minimo que hay que teclear para buscar por codigo.
+#:
+#: NO ES UNA MOLESTIA GRATUITA. Sin minimo, el prefijo se recorre letra a
+#: letra: 32 peticiones por posicion y el codigo entero sale en un rato. Con
+#: seis caracteres hay que acertar uno de 32^6 antes de poder empezar a
+#: alargarlo, y el recorrido deja de valer. El codigo tiene 14, asi que quien
+#: lo dicta en la puerta no nota nada.
+LARGO_MINIMO_DE_BUSQUEDA = 6
+
+
+def _literal(texto: str) -> str:
+    """El texto tal cual dentro de un `LIKE`, sin comodines.
+
+    `_` es «un caracter cualquiera» y `%` es «lo que sea». Colandolos en la
+    busqueda, la lista de asistentes contestaba «que entradas llevan una A en
+    la cuarta letra»: 448 peticiones y se tienen los codigos COMPLETOS de todo
+    el evento. Y un codigo admite por si solo, asi que con eso se marcan como
+    usadas las entradas de todo el mundo.
+    """
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 async def asistentes(
     db: AsyncSession,
     *,
@@ -490,8 +560,14 @@ async def asistentes(
         consulta = consulta.where(EventTicket.status == estado)
     if busqueda:
         limpia = busqueda.strip().upper()
-        if limpia:
-            consulta = consulta.where(EventTicket.code.like(f"{limpia}%"))
+        if len(limpia) >= LARGO_MINIMO_DE_BUSQUEDA:
+            consulta = consulta.where(
+                EventTicket.code.like(f"{_literal(limpia)}%", escape="\\")
+            )
+        elif limpia:
+            # Un prefijo mas corto no se busca: se devuelve vacio en vez de la
+            # lista entera, que es lo que haria pensar que la busqueda no filtro.
+            consulta = consulta.where(sa_false())
     if cursor:
         fecha, ident = _cursor_partido(cursor)
         consulta = consulta.where(
@@ -505,10 +581,23 @@ async def asistentes(
 
 
 async def cuantos_entraron(db: AsyncSession, evento_id: str) -> int:
+    """Cuánta gente hay dentro: check-ins correctos DISTINTOS.
+
+    Se cuentan entradas, no filas. El índice único parcial de la 0062 ya impide
+    dos `OK` sobre la misma entrada, pero solo cuando `ticket_id` no es nulo, y
+    en PostgreSQL un índice único no restringe los nulos: dos filas `OK` sin
+    entrada convivirían y sumarían dos asistentes que no existen.
+
+    Y NO SE DERIVA DE OTRA COSA. Ni de pedidos, ni de reservas, ni de
+    compradores, ni de una suma guardada a mano: quien entró es quien pasó por
+    la puerta.
+    """
     valor = await db.scalar(
-        select(func.count())
-        .select_from(EventCheckin)
-        .where(EventCheckin.event_id == evento_id, EventCheckin.result == OK)
+        select(func.count(distinct(EventCheckin.ticket_id))).where(
+            EventCheckin.event_id == evento_id,
+            EventCheckin.result == OK,
+            EventCheckin.ticket_id.is_not(None),
+        )
     )
     return valor or 0
 

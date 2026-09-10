@@ -260,6 +260,18 @@ class Disponibilidad:
     exceso: int = 0
 
 
+async def cuantas_apartadas(
+    db: AsyncSession, evento_id: str, momento: datetime | None = None
+) -> int:
+    """Entradas APARTADAS ahora: reservas vivas y sin vencer.
+
+    Es un número distinto de las vendidas y de las válidas, y mezclarlos es lo
+    que hace que un organizador crea que ya vendió lo que todavía está en la
+    cesta de alguien.
+    """
+    return sum((await _apartado_por_tipo(db, evento_id, momento or ahora())).values())
+
+
 async def _apartado_por_tipo(
     db: AsyncSession, evento_id: str, momento: datetime
 ) -> dict[str, int]:
