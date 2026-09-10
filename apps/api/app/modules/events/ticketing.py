@@ -42,6 +42,7 @@ from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.modules.catalog.models import Event
 from app.modules.events import esquema, inventory, states
 from app.modules.events.models import (
+    EventTicket,
     CON_ENTRADAS,
     LIBRE,
     EventOperations,
@@ -253,6 +254,10 @@ class Disponibilidad:
     #: `None` cuando el evento no tiene aforo: entonces solo mandan los cupos.
     general: int | None
     por_tipo: dict[str, int] = field(default_factory=dict)
+    #: Cuánto se pasa del aforo lo ya comprometido. Cero salvo que alguien haya
+    #: BAJADO el aforo aprobado con entradas ya apartadas o vendidas encima.
+    #: `general` no puede decirlo porque nunca baja de cero.
+    exceso: int = 0
 
 
 async def _apartado_por_tipo(
@@ -276,6 +281,39 @@ async def _apartado_por_tipo(
             EventTicketHold.expires_at > momento,
         )
         .group_by(EventTicketHoldItem.ticket_type_id)
+    )
+    return {fila[0]: int(fila[1]) for fila in filas.all()}
+
+
+async def _emitido_por_tipo(
+    db: AsyncSession, evento_id: str
+) -> dict[str, int]:
+    """Cuántas entradas EMITIDAS ocupan sitio, por tipo.
+
+    ESTE SUMANDO FALTABA, y era el agujero. Al pagar, la reserva pasa a
+    `CONSUMED` y deja de contar como apartada; si lo emitido tampoco cuenta, el
+    aforo vuelve entero al común y el siguiente comprador ve la sala vacía. Con
+    aforo 3 se vendían 3, y otras 3, y otras 3, sin límite y sin concurrencia.
+
+    `REVOKED` no cuenta: una entrada retirada deja de ocupar, o el aforo se iría
+    agotando con entradas que ya no existen. `USED` sí: quien ya entró ocupa el
+    sitio más que nadie.
+
+    Devuelve vacío sin la 0062 aplicada: entonces no hay ninguna entrada emitida
+    y la fórmula vale igual.
+    """
+    if not await esquema.hay_ordenes(db):
+        return {}
+    filas = await db.execute(
+        select(
+            EventTicket.ticket_type_id,
+            func.count(),
+        )
+        .where(
+            EventTicket.event_id == evento_id,
+            EventTicket.status.in_(("VALID", "USED")),
+        )
+        .group_by(EventTicket.ticket_type_id)
     )
     return {fila[0]: int(fila[1]) for fila in filas.all()}
 
@@ -316,22 +354,31 @@ async def disponibilidad(
     )
     apartado = await _apartado_por_tipo(db, evento.id, momento)
     apartado_total = sum(apartado.values())
+    emitido = await _emitido_por_tipo(db, evento.id)
+    emitido_total = sum(emitido.values())
 
     general: int | None = None
+    exceso = 0
     if aforo is not None:
-        # Las entradas VENDIDAS irían aquí. No hay ninguna tabla que las guarde
-        # todavía, así que el sumando vale cero y no se inventa una fila.
-        vendidas = 0
-        general = max(
-            0, aforo - await _reservas_gratuitas(db, evento.id) - apartado_total - vendidas
+        comprometido = (
+            await _reservas_gratuitas(db, evento.id) + apartado_total + emitido_total
         )
+        # DOS NÚMEROS, NO UNO. `general` es lo que se puede ofrecer y nunca baja
+        # de cero: un número negativo en una pantalla no significa nada. `exceso`
+        # es cuánto se pasa lo ya comprometido del aforo, y sí puede ser mayor
+        # que cero: es lo que pasa cuando alguien BAJA el aforo aprobado con
+        # entradas ya vendidas encima. Sin él, la recomprobación bajo cerrojo
+        # comparaba contra un valor recortado y no detectaba nada.
+        general = max(0, aforo - comprometido)
+        exceso = max(0, comprometido - aforo)
 
     por_tipo: dict[str, int] = {}
     for tipo in await tipos_de(db, evento.id, solo_a_la_venta=solo_a_la_venta):
-        queda = max(0, tipo.quota - apartado.get(tipo.id, 0))
+        ocupado = apartado.get(tipo.id, 0) + emitido.get(tipo.id, 0)
+        queda = max(0, tipo.quota - ocupado)
         # Un tipo nunca ofrece más de lo que cabe en el evento entero.
         por_tipo[tipo.id] = queda if general is None else min(queda, general)
-    return Disponibilidad(general=general, por_tipo=por_tipo)
+    return Disponibilidad(general=general, por_tipo=por_tipo, exceso=exceso)
 
 
 # --------------------------------------------------------------------------- #

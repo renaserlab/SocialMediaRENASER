@@ -29,6 +29,7 @@ from app.modules.catalog.models import Event
 from app.modules.events import esquema, orders, ticketing
 from app.modules.events import tickets as emision
 from app.modules.events.models import (
+    EventCheckin,
     EventOperations,
     EventOrder,
     EventTicket,
@@ -36,6 +37,7 @@ from app.modules.events.models import (
     EventTicketingSettings,
     EventTicketType,
 )
+from app.modules.commerce.models import PaymentEvent as ComercioPaymentEvent
 from app.modules.profiles.models import Profile
 from app.shared.database import Base, get_db
 
@@ -198,20 +200,44 @@ async def _pedir(http, hold_id, clave):
     )
 
 
-async def _confirmar(sesiones, orden_id, **cambios):
-    """Un aviso YA VERIFICADO, con los valores que la prueba quiera romper."""
+async def _abrir_cobro(sesiones, orden_id):
+    """Lo que hace `iniciar_pago` sin llamar a ninguna pasarela.
+
+    Una orden que nunca abrio un cobro no la confirma ningun aviso, asi que las
+    pruebas del camino de pago tienen que dejarla como la dejaria el checkout.
+    """
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden_id)
+        # SOLO SI TODAVIA ADMITE UN PAGO. Una orden ya pagada o cancelada no
+        # abre ningun cobro, y forzarle el estado rompe los CHECK que exigen que
+        # el estado y las fechas digan lo mismo, que es justo lo que protegen.
+        if orden.status != "PENDING_PAYMENT":
+            return
+        orden.provider = "stripe"
+        orden.environment = "sandbox"
+        orden.operation_ref = f"evt-ord-{orden_id}"
+        orden.status = "PAYMENT_PROCESSING"
+        await db.commit()
+
+
+async def _confirmar(sesiones, orden_id, importe, **cambios):
+    """Un aviso YA VERIFICADO, con los valores que la prueba quiera romper.
+
+    EL IMPORTE SE PASA A MANO Y NO SE LEE DE LA ORDEN. Leerlo de la propia fila
+    hacia que el aviso coincidiera SIEMPRE: si `crear_orden` calculase mal el
+    total, todas las pruebas del camino feliz seguirian en verde comparando el
+    error consigo mismo.
+    """
+    await _abrir_cobro(sesiones, orden_id)
     datos = {
         "provider": "stripe",
         "environment": "sandbox",
         "external_payment_id": f"pi_{orden_id[:8]}",
-        "amount_minor": None,
+        "amount_minor": importe,
         "currency": "PEN",
     }
     datos.update(cambios)
     async with sesiones() as db:
-        if datos["amount_minor"] is None and "amount_minor" not in cambios:
-            orden = await db.get(EventOrder, orden_id)
-            datos["amount_minor"] = orden.total_minor
         # EL `commit` LO HACE QUIEN LLAMA, igual que el webhook: `confirmar_pago`
         # corre dentro de un savepoint y no puede tocar la transaccion de fuera.
         try:
@@ -394,7 +420,7 @@ async def test_un_aviso_que_cuadra_confirma_y_emite(entorno):
     hold = await _apartar(http, GENERAL, 3, "h1")
     orden = (await _pedir(http, hold["id"], "o1")).json()
 
-    resultado = await _confirmar(sesiones, orden["id"])
+    resultado = await _confirmar(sesiones, orden["id"], 3 * 4900)
     assert resultado.estrenada is True
 
     async with sesiones() as db:
@@ -433,10 +459,13 @@ async def test_un_aviso_que_no_cuadra_no_emite_nada(entorno, cambio, por_que):
     orden = (await _pedir(http, hold["id"], "o1")).json()
 
     with pytest.raises(orders.PagoNoCuadra):
-        await _confirmar(sesiones, orden["id"], **cambio)
+        await _confirmar(sesiones, orden["id"], 2 * 4900, **cambio)
 
     async with sesiones() as db:
-        assert (await db.get(EventOrder, orden["id"])).status == "PENDING_PAYMENT"
+        # SIGUE ESPERANDO EL COBRO, no pagada. El cobro se abrio —eso es lo que
+        # hace `_confirmar`— y el aviso que llego no vale, asi que el pedido se
+        # queda donde estaba: sin entradas y con su reserva en pie.
+        assert (await db.get(EventOrder, orden["id"])).status == "PAYMENT_PROCESSING"
         assert list(await db.scalars(select(EventTicket))) == [], por_que
         assert (await db.get(EventTicketHold, hold["id"])).status == "ACTIVE"
 
@@ -448,8 +477,8 @@ async def test_el_mismo_aviso_dos_veces_no_emite_el_doble(entorno):
     hold = await _apartar(http, GENERAL, 2, "h1")
     orden = (await _pedir(http, hold["id"], "o1")).json()
 
-    primera = await _confirmar(sesiones, orden["id"])
-    segunda = await _confirmar(sesiones, orden["id"])
+    primera = await _confirmar(sesiones, orden["id"], 2 * 4900)
+    segunda = await _confirmar(sesiones, orden["id"], 2 * 4900)
     assert primera.estrenada is True
     assert segunda.estrenada is False
 
@@ -464,10 +493,12 @@ async def test_otro_cobro_sobre_un_pedido_ya_pagado_no_pasa(entorno):
     http, _, sesiones = entorno
     hold = await _apartar(http, GENERAL, 1, "h1")
     orden = (await _pedir(http, hold["id"], "o1")).json()
-    await _confirmar(sesiones, orden["id"])
+    await _confirmar(sesiones, orden["id"], 4900)
 
     with pytest.raises(orders.PagoNoCuadra):
-        await _confirmar(sesiones, orden["id"], external_payment_id="pi_otro_cobro")
+        await _confirmar(
+            sesiones, orden["id"], 4900, external_payment_id="pi_otro_cobro"
+        )
 
 
 @pytest.mark.asyncio
@@ -486,11 +517,11 @@ async def test_un_pago_tardio_no_concede_aforo(entorno):
         await db.commit()
 
     with pytest.raises(orders.PagoNoCuadra):
-        await _confirmar(sesiones, orden["id"])
+        await _confirmar(sesiones, orden["id"], 2 * 4900)
 
     async with sesiones() as db:
         assert list(await db.scalars(select(EventTicket))) == []
-        assert (await db.get(EventOrder, orden["id"])).status == "PENDING_PAYMENT"
+        assert (await db.get(EventOrder, orden["id"])).status == "PAYMENT_PROCESSING"
 
 
 @pytest.mark.asyncio
@@ -503,7 +534,7 @@ async def test_un_pedido_ya_cancelado_no_se_paga(entorno):
     assert cancelada.json()["status"] == "CANCELLED"
 
     with pytest.raises(orders.PagoNoCuadra):
-        await _confirmar(sesiones, orden["id"])
+        await _confirmar(sesiones, orden["id"], 4900)
     async with sesiones() as db:
         assert list(await db.scalars(select(EventTicket))) == []
 
@@ -563,7 +594,7 @@ async def test_apagar_los_pagos_no_impide_confirmar_lo_ya_iniciado(entorno, monk
     orden = (await _pedir(http, hold["id"], "o1")).json()
     monkeypatch.setattr(get_settings(), "feature_event_payments", False, raising=False)
 
-    resultado = await _confirmar(sesiones, orden["id"])
+    resultado = await _confirmar(sesiones, orden["id"], 4900)
     assert resultado.estrenada is True
     async with sesiones() as db:
         assert len(list(await db.scalars(select(EventTicket)))) == 1
@@ -700,13 +731,19 @@ async def test_el_check_in_deja_pasar_una_vez(entorno):
 
 @pytest.mark.asyncio
 async def test_el_codigo_tecleado_tambien_vale(entorno):
-    """Cuando la cámara no funciona hay que poder entrar igual."""
+    """Cuando la cámara no funciona hay que poder entrar igual.
+
+    EL CÓDIGO ACTUAL, no el que traía la lista: rota con la credencial, y por
+    eso hay que releerlo. Es justo lo que hace la pantalla de la entrada.
+    """
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        codigo = (await db.get(EventTicket, entrada["id"])).code
 
     identidad["uid"] = ORG
     respuesta = await http.post(
-        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": entrada["code"]}
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": codigo}
     )
     assert respuesta.json()["result"] == "OK"
 
@@ -794,13 +831,15 @@ async def test_verificar_no_gasta_la_entrada(entorno):
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_quien_compra_no_hace_check_in(entorno):
+    """404 Y NO 403. Un 403 le confirma a quien sondea que ese identificador es
+    un evento real; para quien no puede operar su puerta, no existe."""
     http, identidad, sesiones = entorno
     _, credencial = await _una_entrada(http, identidad, sesiones)
     identidad["uid"] = ANA
     respuesta = await http.post(
         f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
     )
-    assert respuesta.status_code == 403
+    assert respuesta.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -812,7 +851,7 @@ async def test_quien_solo_modera_contenido_no_hace_check_in(entorno):
     respuesta = await http.post(
         f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
     )
-    assert respuesta.status_code == 403
+    assert respuesta.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -850,7 +889,7 @@ async def test_los_asistentes_de_otro_evento_no_se_ven(entorno):
     await _una_entrada(http, identidad, sesiones)
     identidad["uid"] = ORG
     respuesta = await http.get(f"{EVENTOS}/{AJENO}/attendees")
-    assert respuesta.status_code == 403
+    assert respuesta.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -869,7 +908,7 @@ async def test_el_pedido_no_expone_la_referencia_del_proveedor(entorno):
     http, _, sesiones = entorno
     hold = await _apartar(http, GENERAL, 1, "h1")
     orden = (await _pedir(http, hold["id"], "o1")).json()
-    await _confirmar(sesiones, orden["id"])
+    await _confirmar(sesiones, orden["id"], 4900)
 
     crudo = (await http.get(f"{EVENTOS}/orders/{orden['id']}")).text
     assert "pi_" not in crudo, "la referencia del cobro no es del comprador"
@@ -885,7 +924,7 @@ async def test_el_resumen_de_ventas_cuenta_lo_que_hay(entorno):
     http, identidad, sesiones = entorno
     hold = await _apartar(http, GENERAL, 2, "h1")
     orden = (await _pedir(http, hold["id"], "o1")).json()
-    await _confirmar(sesiones, orden["id"])
+    await _confirmar(sesiones, orden["id"], 2 * 4900)
 
     identidad["uid"] = BRUNO
     otro = await _apartar(http, VIP, 1, "h2")
@@ -906,7 +945,7 @@ async def test_las_ventas_de_un_evento_ajeno_no_se_ven(entorno):
     http, identidad, _ = entorno
     identidad["uid"] = ORG
     respuesta = await http.get(f"{EVENTOS}/{AJENO}/sales")
-    assert respuesta.status_code == 403
+    assert respuesta.status_code == 404
 
 
 # --------------------------------------------------------------------------- #
@@ -976,3 +1015,521 @@ async def test_sin_la_migracion_0062_responde_503_y_lo_anterior_sigue(entorno):
         headers={"Idempotency-Key": "sin-0062"},
     )
     assert apartada.status_code == 201
+
+
+# --------------------------------------------------------------------------- #
+# La puerta de un evento no es de cualquiera
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_un_borrador_propio_no_es_una_puerta(entorno):
+    """Crear un evento es libre; ser la puerta de uno, no.
+
+    Sin esto, cualquiera con una cuenta crea un borrador —que no ve nadie— y
+    con su identificador puede preguntar por cualquier credencial de la
+    plataforma: la respuesta distingue «no existe» de «es de otro evento», que
+    es un oráculo de validez de entradas ajenas.
+    """
+    http, identidad, sesiones = entorno
+    _, credencial = await _una_entrada(http, identidad, sesiones)
+
+    borrador = "eeeeeeee-3333-0000-0000-0000000000b1"
+    identidad["uid"] = BRUNO
+    async with sesiones() as db:
+        db.add(
+            Event(
+                id=borrador,
+                organizer_id=BRUNO,
+                title="Mi borrador",
+                description="Una descripción suficientemente larga para revisarla.",
+                starts_at=datetime.now(timezone.utc) + timedelta(days=10),
+                event_type="presential",
+                location="Casa",
+                status="draft",
+                capacity=10,
+            )
+        )
+        db.add(
+            EventOperations(
+                event_id=borrador,
+                workflow_status="DRAFT",
+                selection_status="none",
+                origin="events_v2",
+            )
+        )
+        await db.commit()
+
+    respuesta = await http.post(
+        f"{EVENTOS}/{borrador}/tickets/verify", json={"credential": credencial}
+    )
+    assert respuesta.status_code == 404, respuesta.text
+
+
+@pytest.mark.asyncio
+async def test_un_evento_ajeno_no_existe_para_la_puerta(entorno):
+    """404 y no 403: un 403 confirma que ese identificador es un evento real."""
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    for ruta in (
+        f"{EVENTOS}/{AJENO}/attendees",
+        f"{EVENTOS}/{AJENO}/sales",
+    ):
+        respuesta = await http.get(ruta)
+        assert respuesta.status_code == 404, ruta
+
+
+@pytest.mark.asyncio
+async def test_un_evento_sin_venta_no_tiene_puerta(entorno):
+    """Un evento de reserva gratuita no emite entradas: no hay nada que admitir."""
+    http, identidad, _ = entorno
+    identidad["uid"] = ORG
+    respuesta = await http.post(
+        f"{EVENTOS}/{GRATIS}/tickets/verify", json={"credential": "lo-que-sea"}
+    )
+    assert respuesta.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# El código tecleado no sobrevive a la rotación
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_el_codigo_tambien_deja_de_valer_al_rotar(entorno):
+    """La rotación no sirve de nada si el otro camino de entrada no rota.
+
+    Escenario: alguien fotografía la pantalla de la entrada —el QR Y el código
+    escrito debajo—, la persona vuelve a abrir su entrada creyendo que eso
+    invalida lo fotografiado, y quien tiene la foto entra tecleando el código.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    codigo_viejo = entrada["code"]
+
+    identidad["uid"] = ANA
+    await http.post(f"{EVENTOS}/tickets/{entrada['id']}/credential")
+
+    identidad["uid"] = ORG
+    con_el_viejo = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/tickets/verify", json={"credential": codigo_viejo}
+    )
+    assert con_el_viejo.json()["result"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_la_lista_de_asistentes_no_reparte_codigos(entorno):
+    """Un código admite. Volcarlos todos en una lista es repartir entradas."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    identidad["uid"] = ORG
+    crudo = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees")).text
+    assert entrada["code"] not in crudo
+
+
+@pytest.mark.asyncio
+async def test_se_puede_buscar_por_codigo_aunque_no_se_devuelva(entorno):
+    """La pantalla de respaldo sigue funcionando: se busca, no se reparte."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    async with sesiones() as db:
+        fila = await db.get(EventTicket, entrada["id"])
+        codigo = fila.code
+
+    identidad["uid"] = ORG
+    encontrados = (
+        await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees?q={codigo}")
+    ).json()
+    assert [f["ticket_id"] for f in encontrados["items"]] == [entrada["id"]]
+
+
+# --------------------------------------------------------------------------- #
+# Revocar: primero quién eres, después qué existe
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_revocar_una_entrada_ajena_no_dice_si_existe(entorno):
+    """404 tanto si existe como si no: cargar y luego comprobar el rol
+    convierte la respuesta en un oráculo de identificadores."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = BRUNO
+    existe = await http.post(
+        f"{EVENTOS}/tickets/{entrada['id']}/revoke", json={"reason": "porque si"}
+    )
+    inventada = await http.post(
+        f"{EVENTOS}/tickets/ffffffff-3333-0000-0000-0000000000ff/revoke",
+        json={"reason": "porque si"},
+    )
+    assert existe.status_code == 404, existe.text
+    assert existe.status_code == inventada.status_code
+    assert existe.json()["error"]["code"] == inventada.json()["error"]["code"]
+
+
+@pytest.mark.asyncio
+async def test_quien_solo_modera_no_revoca(entorno):
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    identidad["uid"] = MODERA
+    respuesta = await http.post(
+        f"{EVENTOS}/tickets/{entrada['id']}/revoke", json={"reason": "porque si"}
+    )
+    assert respuesta.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# El registro de un evento no se llena con entradas de otro
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_una_entrada_de_otro_evento_no_ensucia_el_registro(entorno):
+    """`WRONG_EVENT` deja constancia del INTENTO, no del identificador ajeno."""
+    http, identidad, sesiones = entorno
+    entrada, credencial = await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = ADMINISTRA
+    respuesta = await http.post(
+        f"{EVENTOS}/{AJENO}/check-ins", json={"credential": credencial}
+    )
+    assert respuesta.json()["result"] == "WRONG_EVENT"
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(EventCheckin).where(EventCheckin.event_id == AJENO)
+            )
+        )
+    assert len(filas) == 1
+    assert filas[0].ticket_id is None, "la entrada es de otro evento: no se apunta"
+
+
+# --------------------------------------------------------------------------- #
+# Permisos que faltaban por probar
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_nadie_pide_la_credencial_de_una_entrada_ajena(entorno):
+    """Es el camino peligroso: devolvería un QR que funciona."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    identidad["uid"] = BRUNO
+    respuesta = await http.post(f"{EVENTOS}/tickets/{entrada['id']}/credential")
+    assert respuesta.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_nadie_cancela_ni_paga_el_pedido_de_otro(entorno):
+    http, identidad, _ = entorno
+    hold = await _apartar(http, GENERAL, 1, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    identidad["uid"] = BRUNO
+    assert (
+        await http.post(f"{EVENTOS}/orders/{orden['id']}/cancel")
+    ).status_code == 404
+    assert (
+        await http.post(f"{EVENTOS}/orders/{orden['id']}/payment")
+    ).status_code in (404, 503)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quien", [MODERA, ANA])
+async def test_la_limpieza_masiva_de_pedidos_exige_admision(entorno, quien):
+    http, identidad, _ = entorno
+    identidad["uid"] = quien
+    respuesta = await http.post(f"{ADMIN}/orders/expire")
+    assert respuesta.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Lo emitido SIGUE OCUPANDO SITIO
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_lo_ya_vendido_no_devuelve_el_aforo_al_comun(entorno):
+    """La segunda oleada, que es donde estaba el agujero.
+
+    Al pagar, la reserva pasa a `CONSUMED` y deja de contar como apartada. Si
+    las entradas emitidas tampoco cuentan, el aforo vuelve entero al común y el
+    siguiente comprador ve la sala vacía: seis entradas para tres asientos, y
+    otras seis en la ronda siguiente.
+
+    No hace falta concurrencia. Es secuencial y determinista.
+    """
+    http, identidad, sesiones = entorno
+    async with sesiones() as db:
+        evento = await db.get(Event, CON_ENTRADAS)
+        evento.capacity = 3
+        await db.commit()
+
+    identidad["uid"] = ANA
+    hold = await _apartar(http, CORTESIA, 2, "primera")
+    primera = await _pedir(http, hold["id"], "o1")
+    assert primera.status_code == 201
+    assert primera.json()["status"] == "PAID"
+
+    # AHORA QUEDA UNO. Con el aforo bien contado, pedir dos no cabe.
+    identidad["uid"] = BRUNO
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert libre["general"] == 1, f"quedan tres menos dos: {libre}"
+
+    respuesta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/ticket-holds",
+        json={"items": [{"ticket_type_id": CORTESIA, "quantity": 2}]},
+        headers={"Idempotency-Key": "segunda"},
+    )
+    assert respuesta.status_code == 409, respuesta.text
+    assert respuesta.json()["error"]["code"] == "event_capacity_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_lo_ya_vendido_tampoco_devuelve_el_cupo_del_tipo(entorno):
+    """Y lo mismo con el cupo de cada tipo, que tampoco se decrementa solo."""
+    http, identidad, sesiones = entorno
+    async with sesiones() as db:
+        tipo = await db.get(EventTicketType, CORTESIA)
+        tipo.quota = 3
+        await db.commit()
+
+    identidad["uid"] = ANA
+    hold = await _apartar(http, CORTESIA, 2, "primera")
+    assert (await _pedir(http, hold["id"], "o1")).json()["status"] == "PAID"
+
+    identidad["uid"] = BRUNO
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert libre["por_tipo"][CORTESIA] == 1, f"cupo tres menos dos: {libre}"
+
+
+@pytest.mark.asyncio
+async def test_una_entrada_revocada_libera_su_sitio(entorno):
+    """Revocar retira la entrada, y con ella lo que ocupaba.
+
+    Es la otra mitad: si lo emitido cuenta, lo revocado tiene que dejar de
+    contar, o el aforo se va agotando con entradas que ya no existen.
+    """
+    http, identidad, sesiones = entorno
+    async with sesiones() as db:
+        evento = await db.get(Event, CON_ENTRADAS)
+        evento.capacity = 2
+        await db.commit()
+
+    identidad["uid"] = ANA
+    hold = await _apartar(http, CORTESIA, 2, "primera")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    entradas = (await http.get(f"{EVENTOS}/me/tickets")).json()["items"]
+    assert len(entradas) == 2
+
+    identidad["uid"] = ORG
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert libre["general"] == 0
+
+    await http.post(
+        f"{EVENTOS}/tickets/{entradas[0]['id']}/revoke",
+        json={"reason": "Compra en disputa"},
+    )
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert libre["general"] == 1, "lo revocado deja de ocupar"
+
+
+@pytest.mark.asyncio
+async def test_una_entrada_usada_sigue_ocupando(entorno):
+    """Quien ya entró ocupa el sitio más que nadie."""
+    http, identidad, sesiones = entorno
+    async with sesiones() as db:
+        evento = await db.get(Event, CON_ENTRADAS)
+        evento.capacity = 2
+        await db.commit()
+
+    entrada, credencial = await _una_entrada(http, identidad, sesiones)
+    identidad["uid"] = ORG
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
+    )
+    libre = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/availability")).json()
+    assert libre["general"] == 1, "usada sigue contando"
+
+
+# --------------------------------------------------------------------------- #
+# El webhook, por HTTP y de punta a punta
+# --------------------------------------------------------------------------- #
+WEBHOOK = "/api/v1/payments/webhook/stripe"
+
+
+class _PasarelaDePrueba:
+    """Un proveedor que devuelve el aviso que la prueba quiera.
+
+    NO SIMULA UN COBRO. Simula lo único que el servidor puede comprobar: qué
+    llega YA VERIFICADO desde la pasarela. La firma se comprueba antes, en el
+    proveedor de verdad, y aquí se ejercita levantando la misma excepción.
+    """
+
+    name = "stripe"
+    dominio = "comercio"
+
+    def __init__(self):
+        self.aviso = None
+        self.firma_valida = True
+
+    async def create_checkout(self, request):  # pragma: no cover - no se usa
+        raise NotImplementedError
+
+    def verify_and_parse(self, *, body, headers):
+        from app.modules.payments.stripe_provider import StripeSignatureError
+
+        if not self.firma_valida:
+            raise StripeSignatureError("firma no valida")
+        return self.aviso
+
+
+@pytest_asyncio.fixture
+async def pasarela(monkeypatch):
+    from app.modules.payments import providers
+
+    falsa = _PasarelaDePrueba()
+    monkeypatch.setitem(providers.PROVIDERS, "stripe", falsa)
+    return falsa
+
+
+def _aviso(orden_id, *, importe, dominio="evento", evento_id="ev-1", **cambios):
+    from app.modules.payments.providers import PaymentEvent
+
+    datos = {
+        "purchase_id": orden_id,
+        "provider_transaction_id": f"pi_{orden_id[:8]}",
+        "status": "paid",
+        "amount_minor": importe,
+        "currency": "PEN",
+        "event_id": evento_id,
+        "event_type": "checkout.session.completed",
+        "environment": "sandbox",
+        "dominio": dominio,
+        "payload": {"id": evento_id},
+    }
+    datos.update(cambios)
+    return PaymentEvent(**datos)
+
+
+@pytest.mark.asyncio
+async def test_el_webhook_confirma_y_emite(entorno, pasarela):
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 2, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    pasarela.aviso = _aviso(orden["id"], importe=2 * 4900)
+    respuesta = await http.post(WEBHOOK, content=b"{}")
+    assert respuesta.status_code == 204, respuesta.text
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAID"
+        assert len(list(await db.scalars(select(EventTicket)))) == 2
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_sin_firma_no_tiene_efecto(entorno, pasarela):
+    """Sin verificar la firma, quien descubra la URL se regala entradas."""
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 1, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    pasarela.firma_valida = False
+    pasarela.aviso = _aviso(orden["id"], importe=4900)
+    respuesta = await http.post(WEBHOOK, content=b"{}")
+    assert respuesta.status_code == 422
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAYMENT_PROCESSING"
+        assert list(await db.scalars(select(EventTicket))) == []
+
+
+@pytest.mark.asyncio
+async def test_el_mismo_aviso_repetido_no_emite_el_doble(entorno, pasarela):
+    """LA BARRERA DE VERDAD, que es el índice único de `payment_events`.
+
+    La prueba del servicio ejercita el atajo «ya está pagada»; esta ejercita lo
+    que pasa antes: el mismo identificador de aviso no se procesa dos veces.
+    """
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 2, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    pasarela.aviso = _aviso(orden["id"], importe=2 * 4900, evento_id="evt_repetido")
+    for _ in range(3):
+        assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        assert len(list(await db.scalars(select(EventTicket)))) == 2
+        avisos = list(
+            await db.scalars(
+                select(ComercioPaymentEvent).where(
+                    ComercioPaymentEvent.external_event_id == "evt_repetido"
+                )
+            )
+        )
+    assert len(avisos) == 1, "tres avisos iguales, una fila"
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_de_otro_entorno_no_emite_nada(entorno, pasarela):
+    """Un cobro de pruebas no concede una entrada en producción, ni al revés."""
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 1, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    pasarela.aviso = _aviso(orden["id"], importe=4900, environment="production")
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAYMENT_PROCESSING"
+        assert list(await db.scalars(select(EventTicket))) == []
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_de_cursos_no_toca_un_pedido_de_entradas(entorno, pasarela):
+    """El reparto por dominio: sin él, un aviso legítimo de un dominio quedaría
+    registrado como «pedido inexistente» del otro."""
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 1, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    # Mismo identificador de pedido, pero SIN el dominio de eventos.
+    pasarela.aviso = _aviso(orden["id"], importe=4900, dominio="")
+    await http.post(WEBHOOK, content=b"{}")
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAYMENT_PROCESSING"
+        assert list(await db.scalars(select(EventTicket))) == []
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_que_no_cuadra_queda_anotado_y_no_reintenta(entorno, pasarela):
+    """204 Y CON RASTRO. Reintentar un aviso que no cuadra no lo arregla, y
+    devolver un error pone a la pasarela a repetirlo durante días."""
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 2, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    pasarela.aviso = _aviso(orden["id"], importe=1, evento_id="evt_descuadrado")
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        assert list(await db.scalars(select(EventTicket))) == []
+        aviso = await db.scalar(
+            select(ComercioPaymentEvent).where(
+                ComercioPaymentEvent.external_event_id == "evt_descuadrado"
+            )
+        )
+    assert aviso is not None, "el aviso queda para conciliar"
+    assert aviso.error
+
+
+@pytest.mark.asyncio
+async def test_la_bandera_de_cursos_no_bloquea_una_entrada(entorno, pasarela, monkeypatch):
+    """`STRIPE_PAYMENTS_ENABLED` gobierna la compra de un CURSO."""
+    http, _, sesiones = entorno
+    monkeypatch.setattr(get_settings(), "stripe_payments_enabled", False, raising=False)
+    hold = await _apartar(http, GENERAL, 1, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+
+    pasarela.aviso = _aviso(orden["id"], importe=4900)
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAID"

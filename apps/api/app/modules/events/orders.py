@@ -24,17 +24,15 @@ noticia es la forma de meter a 210 personas en una sala de 200.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError
-from app.modules.catalog.models import Event
 from app.modules.events import esquema, inventory, states, ticketing
 from app.modules.events.models import (
     ENTRADA_VALIDA,
@@ -43,7 +41,6 @@ from app.modules.events.models import (
     ORDEN_FALLIDA,
     ORDEN_PAGADA,
     ORDEN_PENDIENTE,
-    ORDEN_PROCESANDO,
     ORDEN_VENCIDA,
     EventOperations,
     EventOrder,
@@ -124,12 +121,6 @@ async def exigir_ordenes_disponibles(db: AsyncSession) -> None:
         raise OrdenesNoDisponibles()
 
 
-def huella(lineas: list[tuple[str, int]]) -> str:
-    """La huella del pedido, para distinguir un reintento de otra cosa."""
-    ordenado = sorted((str(t), int(c)) for t, c in lineas)
-    return hashlib.sha256(json.dumps(ordenado, sort_keys=True).encode()).hexdigest()
-
-
 # --------------------------------------------------------------------------- #
 # Crear la orden
 # --------------------------------------------------------------------------- #
@@ -171,9 +162,19 @@ async def crear_orden(
     evento = await inventory.bloquear_evento(db, evento_id)
     momento = momento or ahora()
 
-    hold = await db.scalar(
-        select(EventTicketHold).where(EventTicketHold.id == hold_id).with_for_update()
-    )
+    # `populate_existing`: SIN ESTO EL CERROJO NO SIRVE DE NADA. El objeto ya
+    # está en el mapa de identidad —se leyó unas líneas más arriba para saber de
+    # qué evento es—, y SQLAlchemy devuelve el que tiene sin refrescarlo. El
+    # `for update` toma la fila, sí, pero lo que se comprueba debajo es la foto
+    # anterior: una reserva liberada mientras se esperaba el cerrojo seguiría
+    # pareciendo `ACTIVE`.
+    async with inventory.espera_traducida(db):
+        hold = await db.scalar(
+            select(EventTicketHold)
+            .where(EventTicketHold.id == hold_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     if hold is None:
         await db.rollback()
         raise NotFoundError("Reserva no encontrada.", code="ticket_hold_not_found")
@@ -345,9 +346,25 @@ async def confirmar_pago(
     """
     momento = momento or ahora()
 
-    orden = await db.scalar(
-        select(EventOrder).where(EventOrder.id == orden_id).with_for_update()
-    )
+    # EL EVENTO PRIMERO, COMO EN TODOS LOS DEMÁS CAMINOS. Tomar antes la fila de
+    # la orden invertía el orden de bloqueo del módulo, y además ese `for update`
+    # corría sin tiempo límite —`set local lock_timeout` lo pone
+    # `bloquear_evento`—: un webhook podía quedarse esperando indefinidamente
+    # con una conexión del pool ocupada mientras la pasarela reintentaba.
+    #
+    # `deshacer=False`: esto corre dentro del savepoint del webhook.
+    cabecera = await db.get(EventOrder, orden_id)
+    if cabecera is None:
+        raise NotFoundError("Pedido no encontrado.", code="event_order_not_found")
+    evento = await inventory.bloquear_evento(db, cabecera.event_id, deshacer=False)
+
+    async with inventory.espera_traducida(db, deshacer=False):
+        orden = await db.scalar(
+            select(EventOrder)
+            .where(EventOrder.id == orden_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     if orden is None:
         raise NotFoundError("Pedido no encontrado.", code="event_order_not_found")
 
@@ -376,11 +393,15 @@ async def confirmar_pago(
     if fallo is not None:
         raise PagoNoCuadra(fallo)
 
-    # EL CERROJO DEL EVENTO, y el del hold, en el orden de siempre.
-    evento = await inventory.bloquear_evento(db, orden.event_id)
-    hold = await db.scalar(
-        select(EventTicketHold).where(EventTicketHold.id == orden.hold_id).with_for_update()
-    )
+    # El del hold, después del evento y de la orden. `populate_existing` por lo
+    # mismo que en `crear_orden`.
+    async with inventory.espera_traducida(db, deshacer=False):
+        hold = await db.scalar(
+            select(EventTicketHold)
+            .where(EventTicketHold.id == orden.hold_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     if hold is None:
         raise PagoNoCuadra("El pedido no tiene reserva que consumir.")
 
@@ -398,7 +419,13 @@ async def confirmar_pago(
     # se haya quedado sin sitio por otra vía —una reducción del aforo aprobado,
     # por ejemplo— entre apartar y pagar.
     libre = await ticketing.disponibilidad(db, evento, momento)
-    if libre.general is not None and libre.general < 0:
+    if libre.exceso > 0:
+        # `general < 0` era imposible: `disponibilidad` lo recorta a cero, así
+        # que la comprobación que había aquí no detectaba nada. `exceso` sí lo
+        # dice: es lo que ocurre cuando alguien baja el aforo aprobado con
+        # entradas ya apartadas o vendidas encima. Se falla en cerrado y lo
+        # resuelve una persona; emitir de todas formas es prometer un asiento
+        # que no existe.
         raise PagoNoCuadra("El evento ya no tiene sitio para ese pedido.")
 
     orden.provider = provider
@@ -421,7 +448,11 @@ def _por_que_no_cuadra(
     Cada comprobación es una forma conocida de que a alguien le regalen una
     entrada, y ninguna admite la ausencia del dato como equivalente.
     """
-    if orden.provider not in ("none", provider):
+    if orden.provider != provider:
+        # `none` NO CUENTA COMO COINCIDENCIA. Una orden con `provider = 'none'`
+        # es una que nunca pasó por `iniciar_pago`: no hay ningún cobro abierto
+        # a su nombre, así que ningún aviso puede ser suyo. Admitirlo dejaba
+        # confirmar con el aviso de otra cosa una orden que nadie inició.
         return "El cobro es de otra pasarela."
     if (orden.environment or "") != environment:
         # Un aviso de pruebas NO concede nada en producción, ni al revés.
@@ -455,9 +486,10 @@ async def vencer_ordenes(
     dejarla abierta es lo que hace que un pago tardío parezca aceptable.
     """
     momento = momento or ahora()
-    filas = list(
+    await inventory.limitar_la_espera(db)
+    candidatas = list(
         await db.scalars(
-            select(EventOrder)
+            select(EventOrder.id)
             .join(EventTicketHold, EventTicketHold.id == EventOrder.hold_id)
             .where(
                 EventOrder.status.in_(ORDEN_EN_CURSO),
@@ -468,16 +500,34 @@ async def vencer_ordenes(
             .limit(max(1, min(int(lote), 5000)))
         )
     )
-    if not filas:
+    if not candidatas:
         return 0
 
-    await inventory.limitar_la_espera(db)
-    for orden in filas:
-        orden.status = ORDEN_VENCIDA
-        orden.cancelled_at = momento
-        orden.updated_at = momento
+    # SE ESCRIBE CON CONDICIÓN, no sobre lo que se leyó. Entre el `select` y el
+    # `update` cabe un webhook que confirme una de estas órdenes: escribirle
+    # `EXPIRED` encima dejaba `paid_at` puesto, violaba el CHECK que exige que
+    # el estado y la fecha digan lo mismo, y tumbaba el LOTE ENTERO con un 500.
+    # Con el `where` en la propia escritura, esa fila simplemente no se toca.
+    primer_evento = None
+    async with inventory.espera_traducida(db):
+        resultado = await db.execute(
+            update(EventOrder)
+            .where(
+                EventOrder.id.in_(candidatas),
+                EventOrder.status.in_(ORDEN_EN_CURSO),
+            )
+            .values(status=ORDEN_VENCIDA, cancelled_at=momento, updated_at=momento)
+        )
+        cuantas = resultado.rowcount or 0
+        if cuantas:
+            primer_evento = await db.scalar(
+                select(EventOrder.event_id).where(EventOrder.id == candidatas[0])
+            )
+    if not cuantas:
+        await db.rollback()
+        return 0
 
-    if usuario is not None:
+    if usuario is not None and primer_evento is not None:
         from app.modules.gobernanza import auditoria
 
         await auditoria.anotar(
@@ -485,11 +535,13 @@ async def vencer_ordenes(
             actor_id=usuario.id,
             action="event.orders_expired",
             entity_type="event_orders",
-            entity_id=filas[0].event_id,
-            payload={"procesados": len(filas), "lote": lote},
+            # El evento de la PRIMERA del lote. Un lote puede abarcar varios, y
+            # el recuento del payload es lo que de verdad se investiga.
+            entity_id=primer_evento,
+            payload={"procesados": cuantas, "lote": lote},
         )
     await db.commit()
-    return len(filas)
+    return cuantas
 
 
 async def cancelar_orden(
@@ -568,6 +620,37 @@ async def lineas_de(db: AsyncSession, orden_id: str) -> list[EventOrderItem]:
     )
 
 
+async def lineas_de_varias(
+    db: AsyncSession, ordenes: list[str]
+) -> dict[str, list[EventOrderItem]]:
+    """Las líneas de VARIAS órdenes, en una consulta."""
+    if not ordenes:
+        return {}
+    filas = await db.scalars(
+        select(EventOrderItem)
+        .where(EventOrderItem.order_id.in_(ordenes))
+        .order_by(EventOrderItem.order_id.asc(), EventOrderItem.ticket_type_id.asc())
+    )
+    agrupadas: dict[str, list[EventOrderItem]] = {}
+    for linea in filas:
+        agrupadas.setdefault(linea.order_id, []).append(linea)
+    return agrupadas
+
+
+async def vencimientos_de(
+    db: AsyncSession, holds: list[str]
+) -> dict[str, datetime]:
+    """Cuándo vence cada reserva, en una consulta."""
+    if not holds:
+        return {}
+    filas = await db.execute(
+        select(EventTicketHold.id, EventTicketHold.expires_at).where(
+            EventTicketHold.id.in_(holds)
+        )
+    )
+    return {fila[0]: fila[1] for fila in filas.all()}
+
+
 async def mis_ordenes(
     db: AsyncSession, *, usuario_id: str, limite: int = 20, cursor: str | None = None
 ) -> list[EventOrder]:
@@ -595,9 +678,16 @@ def cursor_de(fecha: datetime, ident: str) -> str:
 
 
 def _cursor_partido(cursor: str) -> tuple[datetime, str]:
+    """La fecha Y el identificador. Los dos se validan.
+
+    El identificador va a una columna `uuid`: dejar pasar cualquier cosa hace que
+    la comparación falle dentro de la base, y eso llega como un 500 por un
+    parámetro mal escrito.
+    """
     fecha, _, ident = cursor.partition("|")
     try:
         momento = datetime.fromisoformat(fecha)
+        UUID(ident)
     except ValueError:
         raise NotFoundError("Cursor no válido.", code="invalid_cursor") from None
     if momento.tzinfo is None:
@@ -683,11 +773,12 @@ __all__ = [
     "crear_orden",
     "cursor_de",
     "exigir_ordenes_disponibles",
-    "huella",
     "leer_orden",
     "lineas_de",
+    "lineas_de_varias",
     "marcar_fallida",
     "mis_ordenes",
     "resumen_de_ventas",
+    "vencimientos_de",
     "vencer_ordenes",
 ]
