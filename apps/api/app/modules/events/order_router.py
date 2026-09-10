@@ -24,9 +24,10 @@ from app.core.config import get_settings
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user
 from app.modules.catalog.models import Event
-from app.modules.events import orders, pagos, permissions, ticketing
+from app.modules.events import orders, pagos, permissions, states, ticketing
 from app.modules.events import tickets as emision
 from app.modules.events.models import (
+    EventOperations,
     EventOrder,
     EventTicket,
     EventTicketHold,
@@ -58,16 +59,31 @@ admin_router = APIRouter(prefix="/admin/events", tags=["events-orders"])
 # --------------------------------------------------------------------------- #
 # Presentación
 # --------------------------------------------------------------------------- #
-async def _orden_leida(db: AsyncSession, orden: EventOrder) -> OrdenRead:
-    lineas = await orders.lineas_de(db, orden.id)
-    hold = await db.get(EventTicketHold, orden.hold_id)
+async def _orden_leida(
+    db: AsyncSession,
+    orden: EventOrder,
+    *,
+    lineas=None,
+    expira=None,
+) -> OrdenRead:
+    """Una orden, lista para responder.
+
+    `lineas` y `expira` se pueden pasar ya resueltos: la LISTA los trae de dos
+    consultas para toda la página. Sin eso eran dos consultas por fila —hasta
+    doscientas en una página de cien— para pintar lo mismo.
+    """
+    if lineas is None:
+        lineas = await orders.lineas_de(db, orden.id)
+    if expira is None:
+        hold = await db.get(EventTicketHold, orden.hold_id)
+        expira = hold.expires_at if hold is not None else None
     momento = orders.ahora()
     restantes = 0
-    if hold is not None:
+    if expira is not None:
         restantes = math.ceil(
             max(
                 0.0,
-                (ticketing._comparable(hold.expires_at, momento) - momento).total_seconds(),
+                (ticketing._comparable(expira, momento) - momento).total_seconds(),
             )
         )
     return OrdenRead(
@@ -171,7 +187,15 @@ async def mis_ordenes(
     filas = await orders.mis_ordenes(
         db, usuario_id=current_user.id, limite=limit, cursor=cursor
     )
-    items = [await _orden_leida(db, o) for o in filas]
+    # DOS CONSULTAS PARA TODA LA PÁGINA, no dos por fila.
+    lineas = await orders.lineas_de_varias(db, [o.id for o in filas])
+    vencen = await orders.vencimientos_de(db, [o.hold_id for o in filas])
+    items = [
+        await _orden_leida(
+            db, o, lineas=lineas.get(o.id, []), expira=vencen.get(o.hold_id)
+        )
+        for o in filas
+    ]
     siguiente = (
         orders.cursor_de(filas[-1].created_at, filas[-1].id)
         if len(filas) == limit
@@ -298,17 +322,41 @@ async def credencial(
 async def _evento_de_la_puerta(
     db: AsyncSession, evento_id: str, usuario: AuthUser
 ) -> Event:
-    """Quien organiza el evento, o el rol operativo de admisión.
+    """Quien organiza un evento QUE VENDE ENTRADAS, o el rol de admisión.
 
     NO VALE `require_admin`, que incluye `moderator`: ese rol existe para
     revisar contenido y esto es dejar entrar gente a un recinto.
+
+    Y NO BASTA CON SER EL ORGANIZADOR. Crear un evento es libre: cualquiera con
+    una cuenta abre un borrador que no ve nadie. Sin exigir que ese evento esté
+    publicado y venda entradas, su identificador servía para preguntar por
+    CUALQUIER credencial de la plataforma, y la respuesta distingue «no existe»
+    de «es de otro evento»: un oráculo de validez de entradas ajenas, abierto a
+    cualquier cuenta registrada.
+
+    404 Y NO 403, siempre y en los dos casos. Un 403 sobre un evento ajeno
+    confirma que ese identificador es un evento real que alguien está
+    preparando. Es la misma respuesta que da `permissions.exigir_organizador`.
     """
     ensure_uuid(evento_id, "Evento no encontrado.")
     evento = await db.get(Event, evento_id)
     if evento is None:
         raise NotFoundError("Evento no encontrado.")
+
     if not permissions.es_organizador(evento, usuario):
-        await permissions.exigir_rol_de_admision(db, usuario)
+        if not await permissions.es_admision(db, usuario.id):
+            raise NotFoundError("Evento no encontrado.")
+
+    operacion = await db.get(EventOperations, evento.id)
+    workflow = operacion.workflow_status if operacion else "PUBLISHED"
+    if not states.es_publico(workflow):
+        raise NotFoundError("Evento no encontrado.")
+
+    # UN EVENTO SIN VENTA NO TIENE PUERTA: no emite entradas, así que no hay
+    # nada que verificar ni nadie a quien dejar pasar.
+    ajustes = await ticketing.configuracion(db, evento.id)
+    if not ticketing.vende_entradas(ajustes):
+        raise NotFoundError("Evento no encontrado.")
     return evento
 
 
@@ -377,7 +425,6 @@ async def asistentes(
                 ticket_type_id=e.ticket_type_id,
                 name=e.ticket_type_name_snapshot,
                 status=e.status,
-                code=e.code,
                 checked_in_at=e.checked_in_at,
             )
             for e in filas
@@ -418,13 +465,21 @@ async def revocar(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EntradaRead:
-    """Retira una entrada, con motivo. Solo quien organiza o admisión."""
+    """Retira una entrada, con motivo. Solo quien organiza o admisión.
+
+    LA MISMA RESPUESTA EXISTA O NO. Cargar la entrada y comprobar el rol después
+    convertía la respuesta en un oráculo: un 404 significaba «no existe» y un
+    403, «existe y es de otro». Ahora las dos son 404 con el mismo código.
+    """
     await orders.exigir_ordenes_disponibles(db)
     ensure_uuid(ticket_id, "Entrada no encontrada.")
     entrada = await db.get(EventTicket, ticket_id)
     if entrada is None:
-        raise NotFoundError("Entrada no encontrada.", code="event_ticket_not_found")
-    await _evento_de_la_puerta(db, entrada.event_id, current_user)
+        raise emision.EntradaNoEncontrada()
+    try:
+        await _evento_de_la_puerta(db, entrada.event_id, current_user)
+    except NotFoundError:
+        raise emision.EntradaNoEncontrada() from None
     entrada = await emision.revocar(
         db, entrada_id=ticket_id, usuario_id=current_user.id, motivo=payload.reason
     )

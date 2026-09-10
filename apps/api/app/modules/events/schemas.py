@@ -464,13 +464,18 @@ class AsistenteRead(BaseModel):
     LLEVA EL TIPO Y EL ESTADO, NO AL COMPRADOR. Quién compró cada entrada no le
     hace falta a la puerta, y el organizador no necesita el correo de nadie para
     dejarle pasar.
+
+    Y NO LLEVA EL CÓDIGO. El código admite por sí solo, así que volcarlos todos
+    en una lista es repartir entradas: con ella se podría marcar como usada
+    cualquiera sin que la persona esté delante. Se sigue pudiendo BUSCAR por
+    código —el parámetro `q` filtra en la base—, que es lo que la pantalla de
+    respaldo necesita: se teclea el que la persona enseña.
     """
 
     ticket_id: str
     ticket_type_id: str
     name: str
     status: str
-    code: str
     checked_in_at: datetime | None = None
 
 

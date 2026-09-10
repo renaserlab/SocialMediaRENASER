@@ -20,6 +20,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,6 +146,11 @@ async def credencial_de(
     la aplicación reinstalada— genera una nueva y deja la anterior inservible.
     Es un efecto buscado: un QR fotografiado y compartido deja de valer en
     cuanto la persona abre su entrada de nuevo.
+
+    Y EL CÓDIGO ROTA CON ELLA. El código escrito debajo del QR también admite
+    —es el camino de cuando la cámara falla— y viaja en la misma pantalla: quien
+    fotografía la entrada se lleva los dos. Rotar solo el QR dejaba la defensa a
+    medias, y la migración prometía lo contrario.
     """
     entrada = await db.scalar(
         select(EventTicket).where(EventTicket.id == entrada_id).with_for_update()
@@ -161,6 +167,7 @@ async def credencial_de(
         )
     credencial = _credencial()
     entrada.credential_hash = resumir(credencial)
+    entrada.code = _codigo()
     await db.commit()
     return entrada, credencial
 
@@ -271,7 +278,11 @@ async def check_in(
         return Veredicto(NO_EXISTE)
 
     if entrada.event_id != evento_id:
-        await _anotar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
+        # SIN LA ENTRADA. Se deja constancia del INTENTO en el registro de ESTE
+        # evento, no del identificador de una entrada de otro: escribirlo aquí
+        # mezcla los historiales y acaba enseñando en la pantalla de un evento
+        # identificadores que pertenecen a otro.
+        await _anotar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
                       resultado=OTRO_EVENTO, momento=momento)
         await db.commit()
         return Veredicto(OTRO_EVENTO)
@@ -507,9 +518,16 @@ def cursor_de(fecha: datetime, ident: str) -> str:
 
 
 def _cursor_partido(cursor: str) -> tuple[datetime, str]:
+    """La fecha Y el identificador. Los dos se validan.
+
+    El identificador va a una columna `uuid`: dejar pasar cualquier cosa hace que
+    la comparación falle dentro de la base, y eso llega como un 500 por un
+    parámetro mal escrito.
+    """
     fecha, _, ident = cursor.partition("|")
     try:
         momento = datetime.fromisoformat(fecha)
+        UUID(ident)
     except ValueError:
         raise NotFoundError("Cursor no válido.", code="invalid_cursor") from None
     if momento.tzinfo is None:
