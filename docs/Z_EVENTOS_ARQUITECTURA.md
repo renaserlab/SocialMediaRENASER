@@ -811,6 +811,25 @@ Si se pierde la respuesta de un check-in —que escribe y no es idempotente— s
 pregunta con `verify`, que no escribe: sin eso, la entrada podía quedar
 consumida mientras la puerta decía «no dejes pasar todavía».
 
+### 32.7 El personal de puerta: la limitación, y por dónde se amplía
+
+**Hoy la admisión es un rol de CUENTA, no una relación con un evento.**
+`permissions.ROLES_ADMISION` es `{"admin"}`, así que quien lo tiene alcanza
+cualquier evento publicado que venda entradas. Para el organizador la puerta sí
+está acotada: solo administra los suyos.
+
+Eso significa que **no se puede dar la puerta de un concierto a una persona
+contratada sin darle además acceso a la puerta de todos los demás**. La decisión
+de si existe un rol de acomodador, quién lo asigna y con qué alcance no está
+tomada, y no me la invento.
+
+**El punto de extensión está en un solo sitio**: `_evento_de_la_puerta`, en
+`order_router.py`, es el único predicado por el que pasan `verify`, `check-ins`,
+`attendees` y `revoke`. El día que exista una asignación por evento, se añade
+ahí una tercera vía —«tiene asignación viva para ESTE evento»— y ninguna ruta
+cambia. `/sales` ya está fuera de ese predicado, precisamente para que ampliar
+la puerta no reparta la recaudación.
+
 ## 33. Lo que el Incremento 4 NO hace
 
 Devoluciones de entradas · cancelación de un evento con reembolso · rol de

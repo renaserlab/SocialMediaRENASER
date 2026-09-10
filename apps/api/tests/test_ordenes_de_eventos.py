@@ -2263,3 +2263,23 @@ async def test_la_busqueda_de_asistentes_es_exacta(entorno):
             )
         ).json()
         assert parcial["items"] == [], f"el prefijo de {corte} encontró algo"
+
+
+@pytest.mark.asyncio
+async def test_el_rastro_de_la_puerta_se_puede_correlacionar(entorno):
+    """Un intento tiene que poder seguirse desde el registro hasta el rastro.
+
+    Sin identificador de correlación, investigar «qué pasó con este escaneo»
+    obliga a cruzar por hora, que con una cola en la puerta no distingue nada.
+    Y la IP no llega en claro: lo que se guarda es su huella.
+    """
+    http, identidad, sesiones = entorno
+    await _una_entrada(http, identidad, sesiones)
+
+    identidad["uid"] = ADMINISTRA
+    await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": "NOEXISTE12345"}
+    )
+    fila = (await _rastro(sesiones, "event.checkin"))[0]
+    assert fila.request_id, "el intento no se puede correlacionar"
+    assert getattr(fila, "ip_address", None) is None

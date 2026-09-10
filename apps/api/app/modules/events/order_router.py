@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -50,6 +50,7 @@ from app.modules.events.schemas import (
     VeredictoRead,
 )
 from app.shared.database import get_db
+from app.modules.gobernanza.contexto import leer_origen
 from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import puede_mover_dinero
 
@@ -392,6 +393,7 @@ async def verificar(
 async def check_in(
     event_id: str,
     payload: CheckinRequest,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VeredictoRead:
@@ -404,6 +406,7 @@ async def check_in(
             evento_id=evento.id,
             credencial=payload.credential,
             operador_id=current_user.id,
+            origen=leer_origen(request),
         )
     )
 

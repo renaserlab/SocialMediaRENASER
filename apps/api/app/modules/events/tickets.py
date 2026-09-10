@@ -315,6 +315,7 @@ async def check_in(
     credencial: str,
     operador_id: str,
     momento: datetime | None = None,
+    origen=None,
 ) -> Veredicto:
     """Deja pasar, UNA vez. Idempotente y con rastro.
 
@@ -339,7 +340,7 @@ async def check_in(
     entrada, canal = await _buscar(db, credencial=credencial)
     if entrada is None:
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
-                      resultado=NO_EXISTE, momento=momento, canal=canal)
+                      resultado=NO_EXISTE, momento=momento, canal=canal, origen=origen)
         return Veredicto(NO_EXISTE)
 
     if entrada.event_id != evento_id:
@@ -348,13 +349,13 @@ async def check_in(
         # mezcla los historiales y acaba enseñando en la pantalla de un evento
         # identificadores que pertenecen a otro.
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
-                      resultado=OTRO_EVENTO, momento=momento, canal=canal)
+                      resultado=OTRO_EVENTO, momento=momento, canal=canal, origen=origen)
         return Veredicto(OTRO_EVENTO)
 
     if not await _admite_entrada(db, entrada.event_id, momento):
         suya = entrada.id
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
-                      resultado=SIN_ADMISION, momento=momento, canal=canal)
+                      resultado=SIN_ADMISION, momento=momento, canal=canal, origen=origen)
         return Veredicto(SIN_ADMISION, entrada_id=suya)
 
     # LA ESCRITURA CONDICIONAL. Aquí está la garantía, no en las comprobaciones
@@ -395,7 +396,7 @@ async def check_in(
 
     if resultado.rowcount == 1:
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
-                      resultado=OK, momento=momento, canal=canal)
+                      resultado=OK, momento=momento, canal=canal, origen=origen)
         return Veredicto(OK, entrada_id=identificador, tipo=nombre, usada_a_las=momento)
 
     # No se cambió ninguna fila: alguien llegó antes, la entrada está revocada,
@@ -421,7 +422,7 @@ async def check_in(
 
     if estado == ENTRADA_REVOCADA:
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
-                      resultado=REVOCADA, momento=momento, canal=canal)
+                      resultado=REVOCADA, momento=momento, canal=canal, origen=origen)
         return Veredicto(REVOCADA, entrada_id=identificador, tipo=nombre)
 
     if estado == ENTRADA_VALIDA:
@@ -430,11 +431,11 @@ async def check_in(
         # utilizada» —decirlo sería mentir sobre una entrada que nadie ha
         # usado— sino que este QR ya no vale.
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
-                      resultado=NO_EXISTE, momento=momento, canal=canal)
+                      resultado=NO_EXISTE, momento=momento, canal=canal, origen=origen)
         return Veredicto(NO_EXISTE)
 
     await _anotar_y_confirmar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
-                  resultado=YA_USADA, momento=momento, canal=canal)
+                  resultado=YA_USADA, momento=momento, canal=canal, origen=origen)
     return Veredicto(
         YA_USADA, entrada_id=identificador, tipo=nombre, usada_a_las=entro_a_las
     )
@@ -462,6 +463,7 @@ async def _anotar(
     resultado: str,
     momento: datetime,
     canal: str = SIN_CANAL,
+    origen=None,
 ) -> None:
     """Cada intento queda, el bueno y los malos.
 
@@ -496,8 +498,14 @@ async def _anotar(
         entity_type="event_ticket" if entrada is not None else "event",
         entity_id=entrada.id if entrada is not None else evento_id,
         outcome="ok" if resultado == OK else "denied",
+        # LA RAZÓN TÉCNICA, NORMALIZADA. Son los mismos seis valores que guarda
+        # `event_checkins.result`, no una frase: una consulta puede agruparlos.
         new_state=resultado,
         payload={"evento": evento_id, "canal": canal},
+        # EL IDENTIFICADOR DE CORRELACIÓN, para poder seguir un intento desde el
+        # registro de acceso hasta el rastro. Trae también la huella de la IP y
+        # la familia del agente; la IP en claro no llega hasta aquí.
+        origen=origen,
     )
 
 
