@@ -1577,3 +1577,151 @@ async def test_la_bandera_de_cursos_no_bloquea_una_entrada(entorno, pasarela, mo
     assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
     async with sesiones() as db:
         assert (await db.get(EventOrder, orden["id"])).status == "PAID"
+
+
+# --------------------------------------------------------------------------- #
+# Aislamiento entre dominios cuando llega una DEVOLUCION
+# --------------------------------------------------------------------------- #
+async def _pagada(http, sesiones, pasarela, *, cantidad=1, evento_id="ev-pago"):
+    """Un pedido de entradas PAGADO de verdad, con su referencia de cobro."""
+    hold = await _apartar(http, GENERAL, cantidad, "hd")
+    orden = (await _pedir(http, hold["id"], "od")).json()
+    await _abrir_cobro(sesiones, orden["id"])
+    pasarela.aviso = _aviso(orden["id"], importe=cantidad * 4900, evento_id=evento_id)
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+    async with sesiones() as db:
+        fresca = await db.get(EventOrder, orden["id"])
+        assert fresca.status == "PAID"
+        referencia = fresca.external_payment_id
+    assert referencia, "el pedido pagado tiene que llevar su referencia de cobro"
+    return orden, referencia
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_de_entradas_no_cae_en_la_rama_de_cursos(
+    entorno, pasarela
+):
+    """El objeto `refund` NO hereda la metadata del cobro: llega sin dominio.
+
+    Si el reparto se hace solo por `metadata.dominio`, este aviso se entrega a
+    Cursos, que no encuentra ningun pedido suyo, lo anota como «devolucion sin
+    compra apuntada» y lo marca procesado SIN error. Resultado: hay dinero
+    devuelto de un evento y ni un solo rastro de que haya que conciliarlo.
+    """
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",                      # como llega de verdad un `refund.*`
+        evento_id="evt_devolucion",
+        status="refunded",
+        event_type="refund.created",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        aviso = await db.scalar(
+            select(ComercioPaymentEvent).where(
+                ComercioPaymentEvent.external_event_id == "evt_devolucion"
+            )
+        )
+    assert aviso is not None, "el aviso se guarda siempre"
+    assert aviso.error, (
+        "una devolucion de entradas tiene que quedar PENDIENTE DE CONCILIACION, "
+        "no marcada como atendida"
+    )
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_de_entradas_no_revoca_ni_desapaga_nada(
+    entorno, pasarela
+):
+    """Sin politica de cancelacion aprobada, no se revoca por decision propia.
+
+    Devolver el dinero y retirar la entrada son dos decisiones distintas, y la
+    segunda es del Incremento 5. Automatizarla aqui seria inventarse una
+    politica comercial que nadie ha aprobado.
+    """
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela, cantidad=2)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=2 * 4900,
+        dominio="",
+        evento_id="evt_devolucion_2",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAID"
+        entradas = list(await db.scalars(select(EventTicket)))
+        assert len(entradas) == 2
+        assert {e.status for e in entradas} == {"VALID"}
+
+
+@pytest.mark.asyncio
+async def test_una_disputa_de_entradas_tampoco_toca_cursos(entorno, pasarela):
+    """El objeto `dispute` tampoco hereda la metadata del cobro."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_disputa",
+        status="disputa_abierta",
+        event_type="charge.dispute.created",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PAID"
+        aviso = await db.scalar(
+            select(ComercioPaymentEvent).where(
+                ComercioPaymentEvent.external_event_id == "evt_disputa"
+            )
+        )
+    assert aviso is not None and aviso.error, "queda para que una persona lo mire"
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_ajena_sigue_yendo_a_cursos(entorno, pasarela):
+    """EL AISLAMIENTO VA EN LOS DOS SENTIDOS.
+
+    Sin esta prueba, «mandarlo todo a Eventos» pasaria la de arriba y romperia
+    las devoluciones de Cursos sin que nada se pusiera en rojo.
+    """
+    http, _, sesiones = entorno
+    await _pagada(http, sesiones, pasarela)
+
+    pasarela.aviso = _aviso(
+        "00000000-0000-0000-0000-000000000000",
+        importe=19900,
+        dominio="",
+        evento_id="evt_de_cursos",
+        status="refunded",
+        event_type="refund.created",
+        provider_transaction_id="pi_de_un_curso",
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        aviso = await db.scalar(
+            select(ComercioPaymentEvent).where(
+                ComercioPaymentEvent.external_event_id == "evt_de_cursos"
+            )
+        )
+    assert aviso is not None
+    assert not aviso.error, (
+        "una devolucion que no es de ninguna entrada la sigue atendiendo Cursos "
+        "como siempre"
+    )

@@ -37,6 +37,25 @@ logger = logging.getLogger("renaser.events")
 #: que buscar el identificador en la tabla equivocada primero.
 DOMINIO = "evento"
 
+#: Estados de aviso que hablan de dinero que VUELVE. No emiten, no revocan y no
+#: cambian el pedido: se anotan para que una persona los concilie.
+#:
+#: Devolver el importe y retirar la entrada son DOS decisiones distintas, y la
+#: segunda no existe todavia: la politica de cancelacion de un evento —plazos,
+#: penalizacion, quien decide— es del Incremento 5 y nadie la ha aprobado.
+#: Revocar aqui por iniciativa propia seria inventarsela.
+DINERO_QUE_VUELVE = frozenset(
+    {
+        "refunded",
+        "refund_procesando",
+        "refund_parcial",
+        "refund_fallido",
+        "disputa_abierta",
+        "disputa_fondos_retirados",
+        "disputa_cerrada",
+    }
+)
+
 
 @dataclass(frozen=True)
 class IntentoDePago:
@@ -162,15 +181,51 @@ async def iniciar_pago(
     )
 
 
-async def atender_aviso(db: AsyncSession, evento) -> bool:
+async def es_de_entradas(db: AsyncSession, evento) -> bool:
+    """Si este cobro es de un pedido de entradas, MIRANDO NUESTRAS TABLAS.
+
+    POR QUE NO BASTA LA METADATA. Al abrir el checkout le adjuntamos
+    `dominio=evento`, y esa metadata sobrevive al `charge` porque tambien se
+    copia en el `payment_intent`. Pero un aviso de DEVOLUCION o de DISPUTA no
+    trae el cobro: trae el objeto `refund` o el objeto `dispute`, que tienen
+    metadata PROPIA —vacia si el reembolso se hizo desde el panel de Stripe—.
+    Ese aviso llegaba sin dominio, caia en la rama de Cursos, no encontraba
+    ningun pedido suyo y se marcaba como atendido: dinero devuelto de un evento
+    sin un solo rastro de que hubiera algo que conciliar.
+
+    La referencia del cobro SI sobrevive en los tres objetos, y es la que
+    guardamos en `external_payment_id` al confirmar. Preguntarselo a nuestra
+    propia tabla no depende de lo que Stripe decida propagar.
+    """
+    referencia = (getattr(evento, "provider_transaction_id", "") or "").strip()
+    if not referencia:
+        return False
+    # SIN LA 0062 NO HAY TABLA QUE MIRAR. Se responde que no y el aviso sigue
+    # su camino de siempre, en vez de reventar con un 500.
+    from app.modules.events import esquema
+
+    if not await esquema.hay_ordenes(db):
+        return False
+    return (
+        await db.scalar(
+            select(EventOrder.id).where(
+                EventOrder.external_payment_id == referencia,
+                EventOrder.environment == evento.environment,
+            )
+        )
+    ) is not None
+
+
+async def atender_aviso(db: AsyncSession, evento) -> str | None:
     """Entrega un aviso YA VERIFICADO a la orden que le corresponde.
 
     Quien llama —el webhook compartido— comprobó la firma, guardó el aviso en
     crudo contra el índice anti-repetición y abrió un savepoint. Aquí solo se
     decide si este aviso confirma, tumba o no significa nada para la orden.
 
-    Devuelve si el aviso tuvo efecto. No lanza por un aviso que no nos incumbe:
-    hacer fallar el webhook por eso lo pone a reintentar en bucle.
+    Devuelve una NOTA cuando el aviso necesita que lo mire una persona, o
+    `None` cuando queda cerrado. No lanza por un aviso que no nos incumbe: hacer
+    fallar el webhook por eso lo pone a reintentar en bucle.
     """
     if evento.status == "paid":
         try:
@@ -191,7 +246,8 @@ async def atender_aviso(db: AsyncSession, evento) -> bool:
                 evento.provider_transaction_id,
             )
             raise
-        return resultado.estrenada
+        _ = resultado.estrenada
+        return None
 
     if evento.status in ("failed", "cancelled"):
         # FALLO TERMINAL, y solo eso. Un timeout o un error de red no llegan
@@ -199,9 +255,26 @@ async def atender_aviso(db: AsyncSession, evento) -> bool:
         await orders.marcar_fallida(
             db, orden_id=evento.purchase_id, motivo=evento.event_type or evento.status
         )
-        return True
+        return None
 
-    # 'pendiente', 'refunded' y los estados de devolución. Ninguno emite una
-    # entrada, y devolver el dinero de un evento es un incremento posterior:
-    # decidirlo aquí sería inventarse una política de cancelación.
-    return False
+    if evento.status in DINERO_QUE_VUELVE:
+        # PENDIENTE DE CONCILIAR, y dicho en la tabla de avisos, que es la cola
+        # que ya existe para esto (`payment_events.error` = «esto hay que
+        # mirarlo»). NO se revoca ninguna entrada, NO se cambia el pedido y NO
+        # se marca el evento como devuelto: falla en cerrado hacia el lado que
+        # no destruye nada, y deja el rastro para el Incremento 5.
+        #
+        # Se anota el TIPO de aviso y la referencia del cobro. Ni el comprador,
+        # ni el correo, ni ninguna credencial.
+        logger.info(
+            "[eventos] devolucion o disputa pendiente de conciliar (%s): %s",
+            evento.event_type,
+            evento.provider_transaction_id,
+        )
+        return (
+            f"Devolucion o disputa de un pedido de entradas ({evento.event_type})."
+            " Pendiente de conciliar a mano: no se ha revocado ninguna entrada."
+        )
+
+    # 'pendiente' e 'ignorado'. Ninguno emite una entrada.
+    return None

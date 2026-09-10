@@ -765,7 +765,14 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
     # Cursos: `stripe_payments_enabled` gobierna la compra de un CURSO y no
     # tiene nada que decir sobre una entrada. El dominio sale de la metadata que
     # nosotros adjuntamos al abrir el cobro, no de un campo que Stripe rellene.
-    if evento.dominio == eventos_pagos.DOMINIO:
+    #
+    # Y SI NO VIENE EL DOMINIO, SE PREGUNTA A NUESTRAS TABLAS. Un `refund.*` o
+    # un `charge.dispute.*` traen el objeto reembolso o disputa, con metadata
+    # propia —vacia— en vez de la del cobro: sin esta segunda pregunta, la
+    # devolucion de una entrada caia aqui como si fuera de Cursos.
+    if evento.dominio == eventos_pagos.DOMINIO or await eventos_pagos.es_de_entradas(
+        db, evento
+    ):
         return await _webhook_de_eventos(db, evento)
 
     if not ajustes.stripe_payments_enabled and evento.status not in _ESTADOS_DE_DEVOLUCION:
@@ -877,7 +884,7 @@ async def _webhook_de_eventos(db: AsyncSession, evento) -> Response:
     id_del_aviso = _fila.id
     try:
         async with db.begin_nested():
-            await eventos_pagos.atender_aviso(db, evento)
+            nota = await eventos_pagos.atender_aviso(db, evento)
     except Exception as error:  # noqa: BLE001
         logger.exception("[eventos] no se pudo aplicar el aviso %s", evento.event_id)
         await comercio_service.marcar_evento_procesado(
@@ -890,7 +897,11 @@ async def _webhook_de_eventos(db: AsyncSession, evento) -> Response:
         # pondria a Stripe a repetirlo cada pocos minutos durante días.
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    await comercio_service.marcar_evento_procesado(db, event_id=id_del_aviso)
+    # CON LA NOTA, SI LA HAY. Un aviso de devolucion queda cerrado pero
+    # marcado: `error` es la cola de conciliacion que ya usa Cursos.
+    await comercio_service.marcar_evento_procesado(
+        db, event_id=id_del_aviso, error=nota
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
