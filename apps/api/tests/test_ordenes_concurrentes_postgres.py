@@ -794,3 +794,324 @@ async def test_ni_anon_ni_authenticated_tienen_permisos_por_columna(motor) -> No
             )
         ).scalar_one()
     assert cuantos == 0
+
+
+# --------------------------------------------------------------------------- #
+# La credencial, la revocacion y la suspension, todas a la vez
+# --------------------------------------------------------------------------- #
+async def test_dos_rotaciones_a_la_vez_dejan_una_credencial_coherente(
+    motor, sesiones
+) -> None:
+    """El hash y el codigo tienen que ser de la MISMA rotacion.
+
+    Si se cruzaran —el hash de una y el codigo de otra— quien pidio la primera
+    tendria un QR que no vale y un codigo que si, y a la inversa. Lo impide el
+    `with_for_update` sobre la fila: la segunda espera a que la primera confirme.
+    """
+    evento, entrada, _ = await _una_entrada(motor, sesiones)
+    async with motor.connect() as conexion:
+        dueno = (
+            await conexion.execute(
+                text(
+                    "select owner_id::text from public.event_tickets "
+                    "where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).scalar_one()
+
+    barrera = asyncio.Barrier(2)
+
+    async def rota():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                _, credencial = await emision.credencial_de(
+                    db, entrada_id=entrada, usuario_id=dueno
+                )
+                return credencial
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return error
+
+    una, otra = await asyncio.gather(rota(), rota())
+    credenciales = [c for c in (una, otra) if isinstance(c, str)]
+    assert len(credenciales) == 2, (una, otra)
+    assert credenciales[0] != credenciales[1], "cada rotacion genera la suya"
+
+    # La que vale es UNA de las dos, y el codigo que hay es el de esa misma.
+    evento_id = evento
+    operador = await _persona(motor, "puerta-rot")
+    veredictos = []
+    for credencial in credenciales:
+        async with sesiones() as db:
+            veredictos.append(
+                (
+                    await emision.verificar(
+                        db, evento_id=evento_id, credencial=credencial
+                    )
+                ).resultado
+            )
+    assert veredictos.count(emision.OK) == 1, veredictos
+    assert veredictos.count(emision.NO_EXISTE) == 1, veredictos
+
+    # Y el codigo guardado admite: es el de la rotacion que gano, no el de la
+    # otra. Si se hubieran cruzado, este check-in daria NOT_FOUND.
+    async with motor.connect() as conexion:
+        codigo = (
+            await conexion.execute(
+                text(
+                    "select code from public.event_tickets where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).scalar_one()
+    async with sesiones() as db:
+        final = await emision.check_in(
+            db, evento_id=evento_id, credencial=codigo, operador_id=operador
+        )
+    assert final.resultado == emision.OK
+
+
+async def test_rotar_mientras_alguien_escanea_la_credencial_vieja(
+    motor, sesiones
+) -> None:
+    """Gane quien gane, el resultado no puede ser contradictorio.
+
+    O la vieja llega antes y la entrada se usa, o llega despues y ya no vale.
+    Lo que NO puede pasar es que la entrada quede USED y la credencial vieja
+    siga admitiendo, ni que quede VALID habiendo dejado pasar a alguien.
+    """
+    evento, entrada, vieja = await _una_entrada(motor, sesiones)
+    async with motor.connect() as conexion:
+        dueno = (
+            await conexion.execute(
+                text(
+                    "select owner_id::text from public.event_tickets "
+                    "where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).scalar_one()
+    operador = await _persona(motor, "puerta-rot2")
+
+    barrera = asyncio.Barrier(2)
+
+    async def escanea():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                return await emision.check_in(
+                    db, evento_id=evento, credencial=vieja, operador_id=operador
+                )
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return error
+
+    async def rota():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                return await emision.credencial_de(
+                    db, entrada_id=entrada, usuario_id=dueno
+                )
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return error
+
+    paso, _rotacion = await asyncio.gather(escanea(), rota())
+
+    async with motor.connect() as conexion:
+        estado, correctos = (
+            await conexion.execute(
+                text(
+                    "select t.status, ("
+                    " select count(*) from public.event_checkins k"
+                    " where k.ticket_id = t.id and k.result = 'OK') "
+                    "from public.event_tickets t where t.id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).one()
+
+    if isinstance(paso, emision.Veredicto) and paso.resultado == emision.OK:
+        assert estado == "USED" and correctos == 1
+    else:
+        # No dejo pasar: entonces NO puede haber quedado usada por este camino.
+        assert correctos == 0, (paso, estado)
+
+
+async def test_revocar_y_hacer_check_in_a_la_vez_no_deja_las_dos_cosas(
+    motor, sesiones
+) -> None:
+    """USED y REVOKED son excluyentes, y sus fechas tambien.
+
+    Los dos CHECK de la 0062 —`(status='USED') = (checked_in_at is not null)` y
+    el gemelo de revocada— convierten cualquier cruce en una transaccion que no
+    confirma, no en una fila incoherente.
+    """
+    evento, entrada, credencial = await _una_entrada(motor, sesiones)
+    async with motor.connect() as conexion:
+        organizador = (
+            await conexion.execute(
+                text(
+                    "select organizer_id::text from public.events "
+                    "where id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+    operador = await _persona(motor, "puerta-rev")
+
+    barrera = asyncio.Barrier(2)
+
+    async def escanea():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                return await emision.check_in(
+                    db, evento_id=evento, credencial=credencial, operador_id=operador
+                )
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return error
+
+    async def revoca():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                return await emision.revocar(
+                    db, entrada_id=entrada, usuario_id=organizador, motivo="duplicada"
+                )
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return error
+
+    await asyncio.gather(escanea(), revoca())
+
+    async with motor.connect() as conexion:
+        estado, usada, revocada = (
+            await conexion.execute(
+                text(
+                    "select status, checked_in_at, revoked_at "
+                    "from public.event_tickets where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).one()
+    assert estado in ("USED", "REVOKED"), estado
+    # El estado y las fechas dicen lo mismo, sea cual sea el que gano.
+    assert (estado == "USED") == (usada is not None)
+    assert (estado == "REVOKED") == (revocada is not None)
+
+
+async def test_suspender_el_evento_mientras_alguien_entra(motor, sesiones) -> None:
+    """Suspender cierra la puerta, y lo que ya paso sigue pasado.
+
+    No puede quedar un check-in correcto de un evento suspendido Y la entrada
+    sin usar, ni al reves: o entro antes de la suspension, o no entro.
+    """
+    evento, entrada, credencial = await _una_entrada(motor, sesiones)
+    operador = await _persona(motor, "puerta-susp")
+
+    barrera = asyncio.Barrier(2)
+
+    async def escanea():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                return await emision.check_in(
+                    db, evento_id=evento, credencial=credencial, operador_id=operador
+                )
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return error
+
+    async def suspende():
+        async with motor.begin() as conexion:
+            await barrera.wait()
+            await conexion.execute(
+                text(
+                    "update public.event_operations set workflow_status = 'SUSPENDED' "
+                    "where event_id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+
+    veredicto, _ = await asyncio.gather(escanea(), suspende())
+
+    async with motor.connect() as conexion:
+        estado, correctos = (
+            await conexion.execute(
+                text(
+                    "select t.status, ("
+                    " select count(*) from public.event_checkins k"
+                    " where k.ticket_id = t.id and k.result = 'OK') "
+                    "from public.event_tickets t where t.id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).one()
+    assert isinstance(veredicto, emision.Veredicto), veredicto
+    if veredicto.resultado == emision.OK:
+        assert estado == "USED" and correctos == 1
+    else:
+        assert veredicto.resultado == emision.SIN_ADMISION
+        assert estado == "VALID" and correctos == 0
+
+    # Y a partir de aqui la puerta esta cerrada para todos.
+    async with sesiones() as db:
+        despues = await emision.verificar(
+            db, evento_id=evento, credencial=credencial
+        )
+    assert despues.resultado in (emision.SIN_ADMISION, emision.YA_USADA)
+
+
+async def test_un_fallo_de_auditoria_no_deja_pasar_a_medias(motor, sesiones) -> None:
+    """Si el rastro no se puede escribir, el check-in NO se confirma.
+
+    Es la unica salida que no miente: dejar pasar sin registro convierte la
+    puerta en algo que no se puede investigar despues, y confirmar la entrada
+    diciendo que fallo dejaria a la persona fuera con su entrada consumida.
+    """
+    evento, entrada, credencial = await _una_entrada(motor, sesiones)
+    operador = await _persona(motor, "puerta-aud")
+
+    from app.modules.gobernanza import auditoria
+
+    async def revienta(*_args, **_kwargs):
+        raise RuntimeError("la auditoria no esta disponible")
+
+    original = auditoria.anotar
+    auditoria.anotar = revienta
+    try:
+        async with sesiones() as db:
+            with pytest.raises(RuntimeError):
+                await emision.check_in(
+                    db, evento_id=evento, credencial=credencial, operador_id=operador
+                )
+            await db.rollback()
+    finally:
+        auditoria.anotar = original
+
+    async with motor.connect() as conexion:
+        estado, intentos = (
+            await conexion.execute(
+                text(
+                    "select t.status, ("
+                    " select count(*) from public.event_checkins k"
+                    " where k.ticket_id = t.id) "
+                    "from public.event_tickets t where t.id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).one()
+    assert estado == "VALID", "la entrada no se consume sin rastro"
+    assert intentos == 0, "y no queda un check-in huerfano"
+
+    # Y con la auditoria de vuelta, la entrada SIGUE sirviendo.
+    async with sesiones() as db:
+        veredicto = await emision.check_in(
+            db, evento_id=evento, credencial=credencial, operador_id=operador
+        )
+    assert veredicto.resultado == emision.OK
