@@ -576,6 +576,17 @@ export function EditarEventoScreen() {
         disabled={ocupado}
       />
 
+      {/* Y las ventas, aparte: configurar lo que se vende y mirar lo vendido
+          son dos tareas distintas y en momentos distintos. La pantalla explica
+          por si sola que un evento sin entradas no tiene ventas. */}
+      <Button
+        label={t('ventasDeEvento.titulo')}
+        variant="secondary"
+        icon="bar-chart-2"
+        onPress={() => router.push(`/ventas/${id}` as never)}
+        disabled={ocupado}
+      />
+
       {editable ? (
         <>
           <Button

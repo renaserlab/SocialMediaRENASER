@@ -15,9 +15,11 @@ import {
   claveDelEstadoDeReserva,
   esFalloDeRed,
   comoReloj,
+  pedidoQueEstorba,
   segundosRestantes,
   sigueEnPie,
 } from '@/lib/entradasDeEvento';
+import { EventOrderRepository } from '@/repositories/EventOrderRepository';
 import {
   EventTicketRepository,
   type ReservaTemporal,
@@ -62,6 +64,16 @@ export function ReservaDeEntradasScreen() {
   >(null);
   const [liberando, setLiberando] = useState(false);
   const liberandoRef = useRef(false);
+  const [pidiendo, setPidiendo] = useState(false);
+  const pidiendoRef = useRef(false);
+  /**
+   * La clave de idempotencia de ESTE pedido.
+   *
+   * Una por reserva, no una por pulsación: un reintento de la red sobre la misma
+   * reserva tiene que devolver el mismo pedido, no crear otro. La reserva ya es
+   * única, así que la clave puede colgar de ella.
+   */
+  const claveRef = useRef<string | null>(null);
   /** Para no volver a preguntar en bucle cuando el contador llega a cero. */
   const yaPreguntadoRef = useRef(false);
 
@@ -150,6 +162,44 @@ export function ReservaDeEntradasScreen() {
     } finally {
       liberandoRef.current = false;
       setLiberando(false);
+    }
+  };
+
+  const continuar = async () => {
+    // EL CERROJO ANTES DEL PRIMER `await`: dos toques no crean dos pedidos.
+    if (!id || pidiendoRef.current) return;
+    pidiendoRef.current = true;
+    setPidiendo(true);
+    try {
+      if (claveRef.current === null) {
+        claveRef.current = `${id}-${Date.now()}`;
+      }
+      const pedido = await EventOrderRepository.crearPedido(id, claveRef.current);
+      router.push(`/pedido/${pedido.id}` as never);
+    } catch (error) {
+      // YA HAY UN PEDIDO: se lleva a él en vez de dejar un error sin salida.
+      const suyo =
+        error instanceof ApiError && error.code === 'event_order_already_exists'
+          ? pedidoQueEstorba(error.details)
+          : null;
+      if (suyo !== null) {
+        router.replace(`/pedido/${suyo}` as never);
+        return;
+      }
+      const clave =
+        error instanceof ApiError ? claveDeErrorDeEntradas(error.code) : null;
+      notify(
+        t('common.saveFailed'),
+        clave !== null
+          ? t(clave as TranslationKey)
+          : error instanceof Error && error.message.trim() !== ''
+            ? error.message
+            : t('common.tryAgain'),
+      );
+      void cargar();
+    } finally {
+      pidiendoRef.current = false;
+      setPidiendo(false);
     }
   };
 
@@ -268,13 +318,21 @@ export function ReservaDeEntradasScreen() {
       </Text>
 
       {enPie ? (
-        <Button
-          label={t('reserva.liberar')}
-          variant="secondary"
-          onPress={() => void liberar()}
-          loading={liberando}
-          disabled={liberando}
-        />
+        <>
+          <Button
+            label={t('reserva.continuar')}
+            onPress={() => void continuar()}
+            loading={pidiendo}
+            disabled={pidiendo || liberando}
+          />
+          <Button
+            label={t('reserva.liberar')}
+            variant="secondary"
+            onPress={() => void liberar()}
+            loading={liberando}
+            disabled={liberando || pidiendo}
+          />
+        </>
       ) : (
         <Button
           label={t('reserva.volverAElegir')}

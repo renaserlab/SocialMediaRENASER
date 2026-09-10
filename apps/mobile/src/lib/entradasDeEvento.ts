@@ -187,6 +187,18 @@ export function claveDeErrorDeEntradas(
     ticket_quota_invalid: 'errorDeEntradas.cupoImposible',
     ticket_type_in_use: 'errorDeEntradas.tipoEnUso',
     inventory_lock_timeout: 'errorDeEntradas.otraEnCurso',
+    event_order_already_exists: 'errorDeEntradas.pedidoYaExiste',
+    ticket_hold_not_usable: 'errorDeEntradas.reservaNoUtilizable',
+    event_order_not_payable: 'errorDeEntradas.pedidoNoPagable',
+    event_payment_mismatch: 'errorDeEntradas.pagoNoCuadra',
+    event_order_not_found: 'errorDeEntradas.pedidoNoEncontrado',
+    event_orders_not_available: 'errorDeEntradas.pedidosNoDisponibles',
+    event_payments_not_available: 'errorDeEntradas.pagosNoDisponibles',
+    event_order_conflict: 'errorDeEntradas.claveDePedidoReutilizada',
+    event_ticket_not_found: 'errorDeEntradas.entradaNoEncontrada',
+    event_ticket_not_valid: 'errorDeEntradas.entradaNoValida',
+    event_ticket_already_used: 'errorDeEntradas.entradaYaUsada',
+    event_not_admitting: 'errorDeEntradas.eventoSinAdmision',
   };
   if (typeof codigo !== 'string') return null;
   return conocidos[codigo] ?? null;
@@ -212,8 +224,23 @@ export function esFalloDeRed(codigo: string | null | undefined): boolean {
  * puede hacer es esperar.
  */
 export function reservaQueEstorba(detalle: unknown): string | null {
+  return _delDetalle(detalle, 'hold_id');
+}
+
+/**
+ * El pedido que estorba, sacado del detalle de un 409.
+ *
+ * El servidor manda `{"order_id": ...}` con `event_order_already_exists`. Sin
+ * ese identificador, quien vuelve a una reserva que ya tiene pedido se queda
+ * mirando un error sin salida en vez de ir al pedido que ya existe.
+ */
+export function pedidoQueEstorba(detalle: unknown): string | null {
+  return _delDetalle(detalle, 'order_id');
+}
+
+function _delDetalle(detalle: unknown, campo: string): string | null {
   if (typeof detalle !== 'object' || detalle === null) return null;
-  const valor = (detalle as Record<string, unknown>).hold_id;
+  const valor = (detalle as Record<string, unknown>)[campo];
   return typeof valor === 'string' && valor.trim() !== '' ? valor : null;
 }
 

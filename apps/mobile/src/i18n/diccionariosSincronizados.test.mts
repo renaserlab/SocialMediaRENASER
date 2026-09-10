@@ -109,6 +109,11 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     // igual en los dos idiomas, y lo demas es el nombre que puso el organizador.
     'entradas.retirarTipo',
     'entradas.elegidasDe',
+    // «Codigo: …», «Buscar por codigo» y «Todos» se escriben exactamente igual
+    // en los dos idiomas.
+    'miEntrada.codigoAccesible',
+    'asistentes.buscar',
+    'asistentes.todos',
     'entradas.estado.retired',
     'entradas.subtotalDeTipo',
     'reserva.porUnidad',
