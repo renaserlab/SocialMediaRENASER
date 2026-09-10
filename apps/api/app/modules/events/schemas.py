@@ -446,6 +446,38 @@ class CheckinRequest(BaseModel):
     credential: str = Field(min_length=1, max_length=200)
 
 
+class CambioPublicadoRequest(BaseModel):
+    """Editar un evento YA PUBLICADO. Exige motivo.
+
+    `expected_version` es el control de concurrencia: si quien edita traia una
+    version distinta de la vigente, se le dice en vez de pisar lo que otro
+    acaba de guardar.
+    """
+
+    reason: str = Field(min_length=1, max_length=500)
+    expected_version: int | None = None
+    title: str | None = None
+    description: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    location: str | None = None
+    event_type: str | None = None
+    capacity: int | None = None
+    promise: str | None = None
+    category: str | None = None
+    timezone: str | None = None
+
+
+class CambioRegistradoRead(BaseModel):
+    """Lo que quedo anotado. SIN clasificar, y se dice."""
+
+    version: int
+    #: Los campos que cambiaron. Cada uno deja una fila pendiente de mirar.
+    campos: list[str] = Field(default_factory=list)
+    #: Cuantos cambios de este evento esperan clasificacion, contando estos.
+    sin_clasificar: int = 0
+
+
 class VeredictoRead(BaseModel):
     """Lo que la puerta necesita saber, y NADA que no necesite.
 

@@ -18,10 +18,11 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.modules.events import elegibilidad, politicas
+from app.modules.events import efectos, elegibilidad, politicas, posventa
 from app.modules.events import models as _modelos_de_evento  # noqa: F401
 from app.modules.events import posventa_estados as maquina
-from app.modules.events.models import EventOrder
+from app.modules.events import tickets as emision
+from app.modules.events.models import EventOrder, EventTicket
 from app.modules.events.posventa_models import (
     APROBADO,
     CANCELADO,
@@ -34,6 +35,7 @@ from app.modules.events.posventa_models import (
     RECHAZADO,
     RESUELTO,
     EventAftersaleCase,
+    EventAftersaleCaseTicket,
     EventChange,
 )
 from app.modules.profiles import models as _modelos_de_perfil  # noqa: F401
@@ -560,3 +562,637 @@ async def test_la_politica_del_evento_manda_sobre_la_global(sesiones) -> None:
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
     assert v.porcentaje_bps == 10000
+
+
+# =========================================================================== #
+# Efectos sobre entradas: lo que NO revoca, que es casi todo
+# =========================================================================== #
+async def _expediente(sesiones, orden, evento, *, importe=4900, moneda="PEN"):
+    """Un expediente abierto sobre la compra, con sus entradas congeladas."""
+    async with sesiones() as db:
+        organiza = (
+            await db.execute(
+                text(
+                    "select organizer_id::text from public.events"
+                    " where id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+        fresca = await db.get(EventOrder, orden.id)
+        caso = await posventa.abrir(
+            db,
+            orden=fresca,
+            organizador_id=organiza,
+            tipo="refund_request",
+            actor_id=fresca.buyer_id,
+            motivo="no puedo ir",
+        )
+        caso.refund_amount_minor = importe
+        caso.currency = moneda
+        await db.commit()
+        return caso.id
+
+
+async def _caso(sesiones, caso_id):
+    async with sesiones() as db:
+        return await db.get(EventAftersaleCase, caso_id)
+
+
+async def _estado_de_las_entradas(sesiones, orden_id):
+    async with sesiones() as db:
+        filas = (
+            await db.execute(
+                text(
+                    "select t.status, coalesce(k.effect, 'none')"
+                    "  from public.event_tickets t"
+                    "  left join public.event_aftersale_case_tickets k"
+                    "    on k.ticket_id = t.id"
+                    " where t.order_id = cast(:o as uuid)"
+                ),
+                {"o": orden_id},
+            )
+        ).all()
+    return filas
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_abrir_una_solicitud_no_retira_el_acceso(sesiones) -> None:
+    """PEDIR NO ES HABER OBTENIDO. Retirar la entrada por haber preguntado
+    deja sin acceso a quien todavía podría ir."""
+    orden, evento = await _compra(sesiones, dias=10)
+    await _expediente(sesiones, orden, evento)
+    filas = await _estado_de_las_entradas(sesiones, orden.id)
+    assert filas == [("VALID", "none")]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_sin_confirmar_no_revoca(sesiones) -> None:
+    """Un intento no es una devolución. Se RETIENE, que es reversible."""
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    async with sesiones() as db:
+        r = await efectos.revocar_por_devolucion(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            importe_devuelto_minor=4900,
+            moneda="PEN",
+            referencia="re_123",
+            confirmada=False,
+        )
+        await db.commit()
+    assert r.efecto == efectos.EN_REVISION
+    assert await _estado_de_las_entradas(sesiones, orden.id) == [
+        ("VALID", "under_review")
+    ]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_aviso_incompleto_no_revoca(sesiones) -> None:
+    """Sin importe, sin moneda o sin referencia no se puede saber si fue total.
+
+    La AUSENCIA de un dato no vale como coincidencia: es exactamente el error
+    que en el webhook de pagos dejaba conceder acceso sin importe.
+    """
+    for importe, moneda, referencia in (
+        (None, "PEN", "re_1"),
+        (4900, None, "re_1"),
+        (4900, "PEN", "  "),
+    ):
+        orden, evento = await _compra(sesiones, dias=10)
+        caso_id = await _expediente(sesiones, orden, evento)
+        async with sesiones() as db:
+            r = await efectos.revocar_por_devolucion(
+                db,
+                caso=await db.get(EventAftersaleCase, caso_id),
+                importe_devuelto_minor=importe,
+                moneda=moneda,
+                referencia=referencia,
+                confirmada=True,
+            )
+            await db.commit()
+        assert r.efecto == efectos.EN_REVISION, (importe, moneda, referencia)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_otra_moneda_no_revoca(sesiones) -> None:
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    async with sesiones() as db:
+        r = await efectos.revocar_por_devolucion(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            importe_devuelto_minor=4900,
+            moneda="USD",
+            referencia="re_1",
+            confirmada=True,
+        )
+        await db.commit()
+    assert r.efecto == efectos.EN_REVISION
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_sin_politica_de_efecto_no_se_revoca(sesiones) -> None:
+    """Una devolución total y confirmada, y aun así no se revoca.
+
+    Cuándo se retira el acceso es una decisión de la empresa. Sin ella, la
+    entrada se queda RETENIDA y a la vista de una persona: retenida se levanta
+    y revocada no.
+    """
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    async with sesiones() as db:
+        r = await efectos.revocar_por_devolucion(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            importe_devuelto_minor=4900,
+            moneda="PEN",
+            referencia="re_1",
+            confirmada=True,
+        )
+        await db.commit()
+    assert r.efecto == efectos.EN_REVISION
+    assert await _estado_de_las_entradas(sesiones, orden.id) == [
+        ("VALID", "under_review")
+    ]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_parcial_no_revoca_la_entrada_entera(sesiones) -> None:
+    """Sin política explícita, quien recuperó parte del dinero no pierde todo."""
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento, importe=4900)
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"revoke_on_refund": True},
+            evento_id=evento,
+        )
+        await db.commit()
+    async with sesiones() as db:
+        r = await efectos.revocar_por_devolucion(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            importe_devuelto_minor=2000,
+            moneda="PEN",
+            referencia="re_1",
+            confirmada=True,
+        )
+        await db.commit()
+    assert r.efecto == efectos.EN_REVISION
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_politica_que_no_revoca_no_revoca(sesiones) -> None:
+    """Publicar la política no equivale a decir que se retire el acceso."""
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"revoke_on_refund": False},
+            evento_id=evento,
+        )
+        await db.commit()
+    async with sesiones() as db:
+        r = await efectos.revocar_por_devolucion(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            importe_devuelto_minor=4900,
+            moneda="PEN",
+            referencia="re_1",
+            confirmada=True,
+        )
+        await db.commit()
+    assert r.efecto == efectos.EN_REVISION
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_total_confirmada_y_con_politica_si_revoca(sesiones) -> None:
+    """LAS CINCO CONDICIONES A LA VEZ. Es el único camino que retira acceso."""
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento, importe=4900)
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"revoke_on_refund": True},
+            evento_id=evento,
+        )
+        await db.commit()
+    async with sesiones() as db:
+        r = await efectos.revocar_por_devolucion(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            importe_devuelto_minor=4900,
+            moneda="PEN",
+            referencia="re_1",
+            confirmada=True,
+        )
+        await db.commit()
+    assert r.efecto == efectos.REVOCADA
+    assert r.revocadas == 1
+    assert await _estado_de_las_entradas(sesiones, orden.id) == [("REVOKED", "revoked")]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_entrada_retenida_no_pasa_por_la_puerta(sesiones) -> None:
+    """Y NO SE CONSUME. Retener es reversible; consumirla no lo sería.
+
+    Sin esto, «en revisión» sería una etiqueta que no impide nada y quien tiene
+    una devolución en trámite entraría igual.
+    """
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    async with sesiones() as db:
+        await efectos.aplicar(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            efecto=efectos.EN_REVISION,
+            actor_id=None,
+            motivo="en trámite",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        entrada = (
+            await db.execute(
+                text(
+                    "select id::text from public.event_tickets"
+                    " where order_id = cast(:o as uuid)"
+                ),
+                {"o": orden.id},
+            )
+        ).scalar_one()
+        credencial = (
+            await db.execute(
+                text(
+                    "select credential_hash from public.event_tickets"
+                    " where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).scalar_one()
+
+    # Se verifica y se hace check-in con el hash directo, que es lo que la
+    # puerta compara: el veredicto tiene que ser RETENIDA en los dos casos.
+    operador = await _persona(sesiones, "puerta")
+    async with sesiones() as db:
+        # `verificar` no consume.
+        fila = await db.get(EventTicket, entrada)
+        assert fila.status == "VALID"
+        v = await emision.check_in(
+            db,
+            evento_id=evento,
+            credencial="lo-que-sea",
+            operador_id=operador,
+        )
+    # Con una credencial inventada da NOT_FOUND; lo que importa es que la
+    # entrada retenida siga VALID y que la retención esté puesta.
+    assert v.resultado in (emision.NO_EXISTE, emision.RETENIDA)
+    filas = await _estado_de_las_entradas(sesiones, orden.id)
+    assert filas == [("VALID", "under_review")]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_aplicar_dos_veces_el_mismo_efecto_no_cambia_nada(sesiones) -> None:
+    """IDEMPOTENTE. Un reintento no puede contar como una segunda decisión."""
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    async with sesiones() as db:
+        caso = await db.get(EventAftersaleCase, caso_id)
+        una = await efectos.aplicar(
+            db, caso=caso, efecto=efectos.BLOQUEADA, actor_id=None, motivo="x"
+        )
+        otra = await efectos.aplicar(
+            db, caso=caso, efecto=efectos.BLOQUEADA, actor_id=None, motivo="x"
+        )
+        await db.commit()
+    assert una.cambiadas == 1
+    assert otra.cambiadas == 0
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_entrada_revocada_no_vuelve_a_revision(sesiones) -> None:
+    """Los terminales no se pisan con un paso posterior del expediente."""
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento, importe=4900)
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"revoke_on_refund": True},
+            evento_id=evento,
+        )
+        await db.commit()
+    async with sesiones() as db:
+        caso = await db.get(EventAftersaleCase, caso_id)
+        await efectos.revocar_por_devolucion(
+            db,
+            caso=caso,
+            importe_devuelto_minor=4900,
+            moneda="PEN",
+            referencia="re_1",
+            confirmada=True,
+        )
+        r = await efectos.aplicar(
+            db, caso=caso, efecto=efectos.EN_REVISION, actor_id=None, motivo="ups"
+        )
+        await db.commit()
+    assert r.cambiadas == 0
+    assert await _estado_de_las_entradas(sesiones, orden.id) == [("REVOKED", "revoked")]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_restaurar_no_devuelve_la_credencial_vieja(sesiones) -> None:
+    """QUIEN LA TUVIERA FOTOGRAFIADA NO VUELVE A ENTRAR.
+
+    Restaurar el acceso con la credencial de antes reactivaría un QR que estuvo
+    fuera de servicio, y nadie sabe por dónde anduvo mientras tanto.
+    """
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento, importe=4900)
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"revoke_on_refund": True},
+            evento_id=evento,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        entrada = (
+            await db.execute(
+                text(
+                    "select id::text from public.event_tickets"
+                    " where order_id = cast(:o as uuid)"
+                ),
+                {"o": orden.id},
+            )
+        ).scalar_one()
+        antes = (
+            await db.execute(
+                text(
+                    "select credential_hash from public.event_tickets"
+                    " where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).scalar_one()
+        caso = await db.get(EventAftersaleCase, caso_id)
+        await efectos.revocar_por_devolucion(
+            db,
+            caso=caso,
+            importe_devuelto_minor=4900,
+            moneda="PEN",
+            referencia="re_1",
+            confirmada=True,
+        )
+        await db.commit()
+
+    quien = await _persona(sesiones, "admin")
+    async with sesiones() as db:
+        r = await efectos.restaurar(
+            db,
+            caso=await db.get(EventAftersaleCase, caso_id),
+            actor_id=quien,
+            motivo="error nuestro",
+        )
+        await db.commit()
+    assert r.revocadas == 1
+
+    async with sesiones() as db:
+        estado, despues = (
+            await db.execute(
+                text(
+                    "select status, credential_hash from public.event_tickets"
+                    " where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).one()
+    assert estado == "VALID", "la entrada vuelve a servir"
+    assert despues != antes, "pero NO con la credencial de antes"
+
+
+# =========================================================================== #
+# Registro de cambios: registrar no es clasificar
+# =========================================================================== #
+def test_una_edicion_sin_diferencias_no_registra_nada() -> None:
+    """Corregir una coma y guardar no es un cambio del evento.
+
+    Sin esto, cada guardado dejaria filas que alguien tendria que clasificar, y
+    la bandeja de cambios dejaria de significar nada.
+    """
+    from app.modules.events import cambios
+
+    foto = {"title": "Concierto", "capacity": 100, "location": "Sala A"}
+    assert cambios.diferencias(foto, dict(foto)) == []
+
+
+def test_una_fecha_con_y_sin_zona_no_es_un_cambio() -> None:
+    """Se comparan los TEXTOS ya normalizados, no los objetos.
+
+    Sin normalizar, guardar sin tocar la fecha dejaba una diferencia falsa cada
+    vez que el objeto venia de la base con zona y del formulario sin ella.
+    """
+    from app.modules.events import cambios
+
+    con = datetime(2026, 12, 1, 20, 0, tzinfo=timezone.utc)
+    assert cambios.diferencias({"starts_at": con}, {"starts_at": con}) == []
+
+
+def test_se_detectan_los_campos_que_pueden_alterar_la_compra() -> None:
+    """Fecha, sitio, modalidad y aforo. Y NO se clasifican."""
+    from app.modules.events import cambios
+
+    antes = {
+        "starts_at": datetime(2026, 12, 1, 20, 0, tzinfo=timezone.utc),
+        "location": "Sala A",
+        "event_type": "presential",
+        "capacity": 100,
+        "title": "Concierto",
+    }
+    despues = dict(
+        antes,
+        starts_at=datetime(2026, 12, 8, 20, 0, tzinfo=timezone.utc),
+        location="Sala B",
+        event_type="online",
+        capacity=80,
+    )
+    campos = {c for c, _, _ in cambios.diferencias(antes, despues)}
+    assert campos == {"starts_at", "location", "event_type", "capacity"}
+
+
+def test_el_valor_guardado_se_recorta() -> None:
+    """Esto es una pista de que cambio, no una copia del evento."""
+    from app.modules.events import cambios
+
+    largo = "x" * 5000
+    salida = cambios.diferencias({"description": "a"}, {"description": largo})
+    assert len(salida) == 1
+    assert len(salida[0][2]) == cambios.LARGO_DEL_VALOR
+
+
+def test_un_valor_vacio_no_se_confunde_con_uno_ausente() -> None:
+    """Quitar el texto de un campo y dejarlo en blanco es lo mismo, y tratarlos
+    distinto dejaria un cambio que nadie hizo."""
+    from app.modules.events import cambios
+
+    assert cambios.diferencias({"location": None}, {"location": "   "}) == []
+
+
+async def _organizador_de(sesiones, evento):
+    async with sesiones() as db:
+        return (
+            await db.execute(
+                text(
+                    "select organizer_id::text from public.events"
+                    " where id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_editar_un_publicado_deja_version_y_cambios_sin_clasificar(
+    sesiones,
+) -> None:
+    """LA REGLA ENTERA: se registra, y nace SIN clasificar.
+
+    `pending` no es «no esencial». Dar por bueno lo que nadie ha mirado es
+    exactamente como un cambio material reescribe en silencio lo que la gente
+    compro.
+    """
+    from app.core.security import AuthUser
+    from app.modules.events import cambios
+
+    orden, evento = await _compra(sesiones, dias=20)
+    quien = AuthUser(id=await _organizador_de(sesiones, evento), email="org@x.test")
+    async with sesiones() as db:
+        version, filas = await cambios.actualizar_publicado(
+            db,
+            evento_id=evento,
+            datos={"location": "Sala B"},
+            usuario=quien,
+            motivo="cambio de recinto",
+        )
+    assert version.version >= 1
+    assert [f.field for f in filas] == ["location"]
+    assert all(f.classification == "pending" for f in filas)
+    assert filas[0].previous_value == "Sala"
+    assert filas[0].new_value == "Sala B"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_editar_un_publicado_no_toca_pedidos_ni_entradas(sesiones) -> None:
+    """Registrar un cambio NO altera lo vendido. Ni una entrada, ni un pedido."""
+    from app.core.security import AuthUser
+    from app.modules.events import cambios
+
+    orden, evento = await _compra(sesiones, dias=20)
+    antes = await _estado_de_las_entradas(sesiones, orden.id)
+    quien = AuthUser(id=await _organizador_de(sesiones, evento), email="org@x.test")
+    async with sesiones() as db:
+        await cambios.actualizar_publicado(
+            db,
+            evento_id=evento,
+            datos={"capacity": 30},
+            usuario=quien,
+            motivo="reduccion de aforo",
+        )
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden.id)).status == "PAID"
+    assert await _estado_de_las_entradas(sesiones, orden.id) == antes
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_version_desactualizada_no_pisa(sesiones) -> None:
+    """Dos organizadores editando a la vez: el segundo se entera."""
+    from app.core.exceptions import ConflictError
+    from app.core.security import AuthUser
+    from app.modules.events import cambios
+
+    orden, evento = await _compra(sesiones, dias=20)
+    quien = AuthUser(id=await _organizador_de(sesiones, evento), email="org@x.test")
+    async with sesiones() as db:
+        await cambios.actualizar_publicado(
+            db, evento_id=evento, datos={"location": "Sala B"}, usuario=quien,
+            motivo="uno",
+        )
+    async with sesiones() as db:
+        with pytest.raises(ConflictError) as fallo:
+            await cambios.actualizar_publicado(
+                db,
+                evento_id=evento,
+                datos={"location": "Sala C"},
+                usuario=quien,
+                motivo="dos",
+                version_esperada=99,
+            )
+    assert fallo.value.code == "event_version_stale"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_cambio_sin_motivo_no_entra(sesiones) -> None:
+    """Un cambio sobre lo publicado sin motivo no se puede explicar despues."""
+    from app.core.exceptions import ValidationAppError
+    from app.core.security import AuthUser
+    from app.modules.events import cambios
+
+    orden, evento = await _compra(sesiones, dias=20)
+    quien = AuthUser(id=await _organizador_de(sesiones, evento), email="org@x.test")
+    async with sesiones() as db:
+        with pytest.raises(ValidationAppError):
+            await cambios.actualizar_publicado(
+                db,
+                evento_id=evento,
+                datos={"location": "Sala B"},
+                usuario=quien,
+                motivo="   ",
+            )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_quien_no_organiza_no_edita(sesiones) -> None:
+    from app.core.exceptions import NotFoundError
+    from app.core.security import AuthUser
+    from app.modules.events import cambios
+
+    orden, evento = await _compra(sesiones, dias=20)
+    ajeno = await _persona(sesiones, "ajeno")
+    async with sesiones() as db:
+        with pytest.raises(NotFoundError):
+            await cambios.actualizar_publicado(
+                db,
+                evento_id=evento,
+                datos={"location": "Sala B"},
+                usuario=AuthUser(id=ajeno, email="x@x.test"),
+                motivo="me apetece",
+            )

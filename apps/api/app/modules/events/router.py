@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import AuthUser, get_current_user
-from app.modules.events import admission, esquema, permissions, service, states
+from app.modules.events import admission, cambios, esquema, permissions, service, states
 from app.modules.events.schemas import (
+    CambioPublicadoRequest,
+    CambioRegistradoRead,
     BorradorCreate,
     BorradorUpdate,
     DecisionCreate,
@@ -195,6 +197,38 @@ async def actualizar_borrador(
         usuario=current_user,
     )
     return _del_organizador(exp)
+
+
+@router.patch("/{evento_id}/published", response_model=CambioRegistradoRead)
+async def actualizar_publicado(
+    evento_id: str,
+    payload: CambioPublicadoRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CambioRegistradoRead:
+    """Cambia un evento publicado y DEJA CONSTANCIA de qué cambió.
+
+    No decide si el cambio es esencial ni avisa de ningún derecho: eso es una
+    decisión de la empresa. Cada diferencia queda pendiente de clasificar.
+    """
+    await esquema.exigir_eventos_v2(db)
+    ensure_uuid(evento_id, "Evento no encontrado.")
+    datos = payload.model_dump(exclude_unset=True)
+    datos.pop("reason", None)
+    version_esperada = datos.pop("expected_version", None)
+    version, filas = await cambios.actualizar_publicado(
+        db,
+        evento_id=evento_id,
+        datos=datos,
+        usuario=current_user,
+        motivo=payload.reason,
+        version_esperada=version_esperada,
+    )
+    return CambioRegistradoRead(
+        version=version.version,
+        campos=sorted(f.field for f in filas),
+        sin_clasificar=await cambios.sin_clasificar(db, evento_id=evento_id),
+    )
 
 
 @router.post("/{evento_id}/submit", response_model=EventoDelOrganizador)
