@@ -90,13 +90,22 @@ _TABLAS_DE_ORDENES = (
 
 
 async def hay_ordenes(db: AsyncSession) -> bool:
-    """Si la 0062 está aplicada: órdenes, entradas emitidas y check-in."""
+    """Si están la 0062 Y la 0063: órdenes, entradas, check-in y el resumen.
+
+    LAS DOS JUNTAS, y no una puerta por migración. Sin `code_hash` la puerta no
+    puede reconocer un código tecleado, así que responder 503 es lo mismo que
+    responder por la 0062 ausente: la función todavía no está desplegada. Una
+    puerta aparte solo añadiría un código de error que nadie sabría distinguir.
+    """
     if "ordenes" not in _cache:
         conexion = await db.connection()
 
         def _mirar(sync) -> bool:  # noqa: ANN001
             inspector = inspect(sync)
-            return all(inspector.has_table(t) for t in _TABLAS_DE_ORDENES)
+            if not all(inspector.has_table(t) for t in _TABLAS_DE_ORDENES):
+                return False
+            columnas = {c["name"] for c in inspector.get_columns("event_tickets")}
+            return "code_hash" in columnas
 
         _cache["ordenes"] = await conexion.run_sync(_mirar)
     return _cache["ordenes"]

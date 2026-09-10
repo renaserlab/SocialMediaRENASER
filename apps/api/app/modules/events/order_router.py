@@ -318,10 +318,13 @@ async def credencial(
     """
     await orders.exigir_ordenes_disponibles(db)
     ensure_uuid(ticket_id, "Entrada no encontrada.")
-    entrada, valor = await emision.credencial_de(
+    entrada, valor, codigo = await emision.credencial_de(
         db, entrada_id=ticket_id, usuario_id=current_user.id
     )
-    return CredencialRead(ticket_id=entrada.id, credential=valor, code=entrada.code)
+    # EL CÓDIGO SALE DE AQUÍ Y DE NINGÚN OTRO SITIO. Desde la 0063 la base
+    # guarda su resumen, así que esta respuesta es la única ocasión en que su
+    # dueño lo ve; ni el listado, ni la ficha, ni la revocación lo llevan.
+    return CredencialRead(ticket_id=entrada.id, credential=valor, code=codigo)
 
 
 # --------------------------------------------------------------------------- #

@@ -11,7 +11,6 @@ import { Text } from '@/components/Text';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import {
   claveDelEstadoDeEntrada,
-  codigoLegible,
   repartirEntradas,
 } from '@/lib/pedidoDeEntradas';
 import {
@@ -156,9 +155,6 @@ export function MisEntradasScreen() {
         </Text>
         <Text variant="caption" color={colors.textMuted}>
           {t(claveDelEstadoDeEntrada(entrada.status) as TranslationKey)}
-        </Text>
-        <Text variant="caption" color={colors.textMuted}>
-          {codigoLegible(entrada.code ?? '')}
         </Text>
       </View>
       <Feather name="chevron-right" size={18} color={colors.textMuted} />

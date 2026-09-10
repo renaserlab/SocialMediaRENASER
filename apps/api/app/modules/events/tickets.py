@@ -125,7 +125,8 @@ async def emitir(
                 owner_id=orden.buyer_id,
                 ticket_type_id=linea.ticket_type_id,
                 ticket_type_name_snapshot=linea.ticket_type_name_snapshot,
-                code=_codigo(),
+                code=None,
+            code_hash=resumir(_codigo()),
                 credential_hash=resumir(_credencial()),
                 status=ENTRADA_VALIDA,
                 issued_at=momento,
@@ -138,7 +139,7 @@ async def emitir(
 
 async def credencial_de(
     db: AsyncSession, *, entrada_id: str, usuario_id: str
-) -> tuple[EventTicket, str]:
+) -> tuple[EventTicket, str, str]:
     """Rota la credencial de una entrada y devuelve la nueva EN CLARO.
 
     POR QUÉ SE ROTA EN VEZ DE GUARDARLA. La credencial no está en la base, así
@@ -173,8 +174,12 @@ async def credencial_de(
             "Esa entrada ya no es válida.", code="event_ticket_not_valid"
         )
     credencial = _credencial()
+    codigo = _codigo()
     entrada.credential_hash = resumir(credencial)
-    entrada.code = _codigo()
+    entrada.code_hash = resumir(codigo)
+    # EL TEXTO LEGIBLE ANTERIOR SE VA. Una entrada de antes de la 0063 lo tenía
+    # guardado; en cuanto rota, deja de estar.
+    entrada.code = None
 
     # SE AUDITA, porque invalida el QR anterior. Una sesión robada que pida una
     # credencial nueva justo antes del evento deja a quien compró en la puerta
@@ -192,7 +197,7 @@ async def credencial_de(
         payload={"evento": entrada.event_id},
     )
     await db.commit()
-    return entrada, credencial
+    return entrada, credencial, codigo
 
 
 # --------------------------------------------------------------------------- #
@@ -258,8 +263,18 @@ async def _buscar(
     if entrada is not None:
         return entrada, POR_QR
     tecleada = await db.scalar(
-        select(EventTicket).where(EventTicket.code == limpia.upper())
+        select(EventTicket).where(EventTicket.code_hash == resumir(limpia.upper()))
     )
+    if tecleada is None:
+        # LEGADO, y acotado: el texto legible solo vale mientras esa fila no
+        # tenga resumen. Después de la 0063 no queda ninguna así, y una
+        # rotación borra el texto de las que venían de antes.
+        tecleada = await db.scalar(
+            select(EventTicket).where(
+                EventTicket.code == limpia.upper(),
+                EventTicket.code_hash.is_(None),
+            )
+        )
     return tecleada, POR_CODIGO if tecleada is not None else SIN_CANAL
 
 
@@ -351,6 +366,7 @@ async def check_in(
     # seguía dejando pasar, que es la promesa entera de rotar.
     huella = resumir((credencial or "").strip())
     tecleado = (credencial or "").strip().upper()
+    huella_tecleada = resumir(tecleado)
     async with inventory.espera_traducida(db):
         resultado = await db.execute(
             update(EventTicket)
@@ -358,7 +374,11 @@ async def check_in(
                 EventTicket.id == entrada.id,
                 EventTicket.status == ENTRADA_VALIDA,
                 (EventTicket.credential_hash == huella)
-                | (EventTicket.code == tecleado),
+                | (EventTicket.code_hash == huella_tecleada)
+                | (
+                    (EventTicket.code == tecleado)
+                    & EventTicket.code_hash.is_(None)
+                ),
             )
             .values(
                 status=ENTRADA_USADA,
@@ -590,26 +610,12 @@ async def leer_entrada(
     return entrada
 
 
-#: Lo minimo que hay que teclear para buscar por codigo.
+#: Lo mínimo que hay que teclear para buscar por código.
 #:
-#: NO ES UNA MOLESTIA GRATUITA. Sin minimo, el prefijo se recorre letra a
-#: letra: 32 peticiones por posicion y el codigo entero sale en un rato. Con
-#: seis caracteres hay que acertar uno de 32^6 antes de poder empezar a
-#: alargarlo, y el recorrido deja de valer. El codigo tiene 14, asi que quien
-#: lo dicta en la puerta no nota nada.
+#: La búsqueda es EXACTA desde la 0063 —se compara el resumen—, así que no hay
+#: prefijo que recorrer. El mínimo se queda como primera puerta: rechaza antes
+#: de tocar la base lo que no puede ser un código.
 LARGO_MINIMO_DE_BUSQUEDA = 6
-
-
-def _literal(texto: str) -> str:
-    """El texto tal cual dentro de un `LIKE`, sin comodines.
-
-    `_` es «un caracter cualquiera» y `%` es «lo que sea». Colandolos en la
-    busqueda, la lista de asistentes contestaba «que entradas llevan una A en
-    la cuarta letra»: 448 peticiones y se tienen los codigos COMPLETOS de todo
-    el evento. Y un codigo admite por si solo, asi que con eso se marcan como
-    usadas las entradas de todo el mundo.
-    """
-    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 async def asistentes(
@@ -632,12 +638,17 @@ async def asistentes(
     if busqueda:
         limpia = busqueda.strip().upper()
         if len(limpia) >= LARGO_MINIMO_DE_BUSQUEDA:
+            # EXACTA, POR EL RESUMEN. Un resumen no admite prefijos, y eso es lo
+            # que cierra del todo el recorrido letra a letra que antes dejaba
+            # reconstruir los códigos de todo el evento.
             consulta = consulta.where(
-                EventTicket.code.like(f"{_literal(limpia)}%", escape="\\")
+                (EventTicket.code_hash == resumir(limpia))
+                | (
+                    (EventTicket.code == limpia)
+                    & EventTicket.code_hash.is_(None)
+                )
             )
         elif limpia:
-            # Un prefijo mas corto no se busca: se devuelve vacio en vez de la
-            # lista entera, que es lo que haria pensar que la busqueda no filtro.
             consulta = consulta.where(sa_false())
     if cursor:
         fecha, ident = _cursor_partido(cursor)

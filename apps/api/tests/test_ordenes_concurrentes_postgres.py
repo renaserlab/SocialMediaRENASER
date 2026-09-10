@@ -430,7 +430,7 @@ async def _una_entrada(motor, sesiones) -> tuple[str, str, str]:
             )
         ).scalar_one()
     async with sesiones() as db:
-        _, credencial = await emision.credencial_de(
+        _, credencial, _codigo = await emision.credencial_de(
             db, entrada_id=entrada, usuario_id=persona
         )
     return evento, entrada, credencial
@@ -826,17 +826,18 @@ async def test_dos_rotaciones_a_la_vez_dejan_una_credencial_coherente(
         async with sesiones() as db:
             await barrera.wait()
             try:
-                _, credencial = await emision.credencial_de(
+                _, credencial, codigo = await emision.credencial_de(
                     db, entrada_id=entrada, usuario_id=dueno
                 )
-                return credencial
+                return credencial, codigo
             except Exception as error:  # noqa: BLE001
                 await db.rollback()
                 return error
 
     una, otra = await asyncio.gather(rota(), rota())
-    credenciales = [c for c in (una, otra) if isinstance(c, str)]
-    assert len(credenciales) == 2, (una, otra)
+    pares = [c for c in (una, otra) if isinstance(c, tuple)]
+    assert len(pares) == 2, (una, otra)
+    credenciales = [c for c, _ in pares]
     assert credenciales[0] != credenciales[1], "cada rotacion genera la suya"
 
     # La que vale es UNA de las dos, y el codigo que hay es el de esa misma.
@@ -855,20 +856,23 @@ async def test_dos_rotaciones_a_la_vez_dejan_una_credencial_coherente(
     assert veredictos.count(emision.OK) == 1, veredictos
     assert veredictos.count(emision.NO_EXISTE) == 1, veredictos
 
-    # Y el codigo guardado admite: es el de la rotacion que gano, no el de la
-    # otra. Si se hubieran cruzado, este check-in daria NOT_FOUND.
-    async with motor.connect() as conexion:
-        codigo = (
-            await conexion.execute(
-                text(
-                    "select code from public.event_tickets where id = cast(:t as uuid)"
-                ),
-                {"t": entrada},
-            )
-        ).scalar_one()
+    # Y EL CODIGO DE LA MISMA ROTACION QUE GANO, no el de la otra. Si el resumen
+    # de una y el codigo de otra se hubieran cruzado, aqui saldria NOT_FOUND:
+    # quien pidio esa rotacion tendria un QR que vale y un codigo que no.
+    # El codigo ya no se puede leer de la base: se guarda su resumen.
+    gano = veredictos.index(emision.OK)
+    async with sesiones() as db:
+        perdedor = await emision.verificar(
+            db, evento_id=evento_id, credencial=pares[1 - gano][1]
+        )
+    assert perdedor.resultado == emision.NO_EXISTE, "el codigo perdedor no admite"
+
     async with sesiones() as db:
         final = await emision.check_in(
-            db, evento_id=evento_id, credencial=codigo, operador_id=operador
+            db,
+            evento_id=evento_id,
+            credencial=pares[gano][1],
+            operador_id=operador,
         )
     assert final.resultado == emision.OK
 

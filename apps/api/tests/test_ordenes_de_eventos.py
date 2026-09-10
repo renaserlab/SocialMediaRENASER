@@ -699,10 +699,13 @@ async def _una_entrada(http, identidad, sesiones, quien=ANA):
     hold = await _apartar(http, CORTESIA, 1, f"h1-{quien[-4:]}")
     await _pedir(http, hold["id"], f"o1-{quien[-4:]}")
     entrada = (await http.get(f"{EVENTOS}/me/tickets")).json()["items"][0]
-    credencial = (
+    fresca = (
         await http.post(f"{EVENTOS}/tickets/{entrada['id']}/credential")
-    ).json()["credential"]
-    return entrada, credencial
+    ).json()
+    # LOS DOS DE LA MISMA ROTACIÓN. Pedirlos por separado invalida el primero,
+    # que es exactamente lo que la rotación promete.
+    entrada["code"] = fresca["code"]
+    return entrada, fresca["credential"]
 
 
 @pytest.mark.asyncio
@@ -739,8 +742,7 @@ async def test_el_codigo_tecleado_tambien_vale(entorno):
     """
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ORG
     respuesta = await http.post(
@@ -1138,9 +1140,7 @@ async def test_se_puede_buscar_por_codigo_aunque_no_se_devuelva(entorno):
     """La pantalla de respaldo sigue funcionando: se busca, no se reparte."""
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        fila = await db.get(EventTicket, entrada["id"])
-        codigo = fila.code
+    codigo = entrada["code"]
 
     identidad["uid"] = ORG
     encontrados = (
@@ -1745,8 +1745,7 @@ async def test_los_comodines_no_extraen_codigos_posicion_a_posicion(
     """
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ORG
     # El mismo ataque, tal cual: subrayados hasta la posicion y el caracter.
@@ -1768,8 +1767,7 @@ async def test_el_porcentaje_tampoco_busca_por_dentro(entorno):
     """`q = "%XY%"` era una busqueda por subcadena en cualquier posicion."""
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ORG
     # EL `%` SE MANDA COMO PARAMETRO, no dentro de la URL: `%AB` en una cadena
@@ -1801,8 +1799,7 @@ async def test_la_busqueda_por_codigo_entero_sigue_funcionando(entorno):
     """LA PANTALLA DE RESPALDO NO SE ROMPE. Quien dicta su codigo se encuentra."""
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ORG
     encontrados = (
@@ -1914,8 +1911,7 @@ async def test_la_auditoria_distingue_la_camara_del_teclado(entorno):
     """
     http, identidad, sesiones = entorno
     entrada, credencial = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ADMINISTRA
     # Por el QR.
@@ -1938,8 +1934,7 @@ async def test_el_canal_lo_decide_el_servidor_y_no_el_cliente(entorno):
     """
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ADMINISTRA
     await http.post(
@@ -2098,8 +2093,7 @@ async def test_revocar_no_devuelve_el_codigo_de_una_entrada_ajena(entorno):
     una entrada que esa persona todavia no tenia."""
     http, identidad, sesiones = entorno
     entrada, _ = await _una_entrada(http, identidad, sesiones)
-    async with sesiones() as db:
-        codigo = (await db.get(EventTicket, entrada["id"])).code
+    codigo = entrada["code"]
 
     identidad["uid"] = ORG
     respuesta = await http.post(
@@ -2108,3 +2102,164 @@ async def test_revocar_no_devuelve_el_codigo_de_una_entrada_ajena(entorno):
     assert respuesta.status_code == 200
     assert respuesta.json()["code"] is None
     assert codigo not in respuesta.text
+
+
+# --------------------------------------------------------------------------- #
+# El código de admisión ya no está en claro
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_un_volcado_de_la_tabla_no_entrega_codigos_utilizables(entorno):
+    """LA PRUEBA DEL VOLCADO. Todo lo que la fila guarda, contra la puerta.
+
+    El código admite por sí solo: `_buscar` lo acepta como credencial. Mientras
+    estuvo en texto legible, una copia de seguridad, una réplica de análisis o
+    una consulta de más entregaban un juego completo de entradas. Aquí se toma
+    TODO lo que la fila contiene y se intenta entrar con cada campo.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+
+    async with sesiones() as db:
+        fila = await db.get(EventTicket, entrada["id"])
+        volcado = {
+            c.name: getattr(fila, c.name) for c in EventTicket.__table__.columns
+        }
+    assert volcado["code"] is None, "el texto legible no se guarda"
+    assert volcado["code_hash"], "y su resumen sí"
+
+    identidad["uid"] = ADMINISTRA
+    for campo, valor in volcado.items():
+        if not isinstance(valor, str) or not valor.strip():
+            continue
+        respuesta = await http.post(
+            f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": valor}
+        )
+        assert respuesta.json()["result"] != "OK", (
+            f"el campo {campo} de la fila deja entrar por sí solo"
+        )
+
+    async with sesiones() as db:
+        assert (await db.get(EventTicket, entrada["id"])).status == "VALID"
+
+
+@pytest.mark.asyncio
+async def test_el_codigo_solo_se_entrega_al_rotar(entorno):
+    """Ni el listado, ni la ficha, ni la revocación lo llevan."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    codigo = entrada["code"]
+    assert codigo, "la rotación sí lo entrega"
+
+    identidad["uid"] = ANA
+    listado = await http.get(f"{EVENTOS}/me/tickets")
+    ficha = await http.get(f"{EVENTOS}/tickets/{entrada['id']}")
+    assert codigo not in listado.text
+    assert codigo not in ficha.text
+
+    identidad["uid"] = ORG
+    asistentes = await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees")
+    revocada = await http.post(
+        f"{EVENTOS}/tickets/{entrada['id']}/revoke", json={"reason": "duplicada"}
+    )
+    assert codigo not in asistentes.text
+    assert codigo not in revocada.text
+
+
+@pytest.mark.asyncio
+async def test_el_codigo_anterior_no_vuelve_a_valer(entorno):
+    """Rotar invalida el código igual que invalida el QR."""
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    viejo = entrada["code"]
+
+    identidad["uid"] = ANA
+    nuevo = (
+        await http.post(f"{EVENTOS}/tickets/{entrada['id']}/credential")
+    ).json()["code"]
+    assert nuevo != viejo
+
+    identidad["uid"] = ADMINISTRA
+    con_el_viejo = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": viejo}
+    )
+    assert con_el_viejo.json()["result"] == "NOT_FOUND"
+    con_el_nuevo = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": nuevo}
+    )
+    assert con_el_nuevo.json()["result"] == "OK"
+
+
+@pytest.mark.asyncio
+async def test_una_entrada_de_antes_de_la_migracion_sigue_admitiendo(entorno):
+    """LA ESTRATEGIA PARA LO ANTERIOR, ejercida.
+
+    Una entrada emitida antes de la 0063 tiene su código en texto legible y no
+    tiene resumen. Tiene que seguir dejando pasar, o la migración habría dejado
+    fuera a quien ya había comprado.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+
+    # Se recrea el estado anterior a la migración: texto legible, sin resumen.
+    async with sesiones() as db:
+        fila = await db.get(EventTicket, entrada["id"])
+        fila.code = "ANTIGUO1234567"
+        fila.code_hash = None
+        await db.commit()
+
+    identidad["uid"] = ADMINISTRA
+    respuesta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": "ANTIGUO1234567"}
+    )
+    assert respuesta.json()["result"] == "OK"
+
+
+@pytest.mark.asyncio
+async def test_el_texto_legible_deja_de_valer_en_cuanto_hay_resumen(entorno):
+    """Y ESE ES EL LÍMITE DEL LEGADO.
+
+    El texto legible solo se acepta mientras esa fila no tenga resumen. Si se
+    aceptara siempre, una rotación no invalidaría nada en las entradas que
+    vienen de antes: el código viejo seguiría en la columna y seguiría
+    admitiendo.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+
+    async with sesiones() as db:
+        fila = await db.get(EventTicket, entrada["id"])
+        # Texto legible Y resumen a la vez: manda el resumen.
+        fila.code = "ANTIGUO1234567"
+        await db.commit()
+
+    identidad["uid"] = ADMINISTRA
+    respuesta = await http.post(
+        f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": "ANTIGUO1234567"}
+    )
+    assert respuesta.json()["result"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_la_busqueda_de_asistentes_es_exacta(entorno):
+    """Sin prefijos no hay recorrido: un resumen no admite «empieza por».
+
+    Es lo que cierra del todo el extractor de códigos, en vez de encarecerlo.
+    """
+    http, identidad, sesiones = entorno
+    entrada, _ = await _una_entrada(http, identidad, sesiones)
+    codigo = entrada["code"]
+
+    identidad["uid"] = ORG
+    entero = (
+        await http.get(f"{EVENTOS}/{CON_ENTRADAS}/attendees", params={"q": codigo})
+    ).json()
+    assert [f["ticket_id"] for f in entero["items"]] == [entrada["id"]]
+
+    # Y ningún prefijo suyo encuentra nada, por largo que sea.
+    for corte in (6, 8, 10, 13):
+        parcial = (
+            await http.get(
+                f"{EVENTOS}/{CON_ENTRADAS}/attendees", params={"q": codigo[:corte]}
+            )
+        ).json()
+        assert parcial["items"] == [], f"el prefijo de {corte} encontró algo"

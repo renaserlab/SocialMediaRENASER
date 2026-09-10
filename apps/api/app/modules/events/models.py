@@ -818,7 +818,11 @@ class EventTicket(Base):
 
     #: El código que se TECLEA cuando la cámara no funciona. No sirve por sí
     #: solo para entrar: la credencial es la de abajo.
-    code: Mapped[str] = mapped_column(Text)
+    #: SOLO PARA ENTRADAS ANTERIORES A LA 0063. Desde ella se guarda el
+    #: resumen y esta columna se deja vacía: un volcado de la tabla ya no
+    #: entrega códigos que admitan.
+    code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     credential_hash: Mapped[str] = mapped_column(Text)
 
     status: Mapped[str] = mapped_column(
@@ -850,6 +854,15 @@ class EventTicket(Base):
         CheckConstraint(
             f"(status = '{ENTRADA_REVOCADA}') = (revoked_at is not null)",
             name="event_tickets_revocada_con_fecha",
+        ),
+        # Los CHECK de formato viven en la migración y no aquí: usan `~`, que
+        # SQLite no entiende, y el esquema de las pruebas sale de este modelo.
+        Index(
+            "event_tickets_codigo_resumido_unico",
+            "code_hash",
+            unique=True,
+            postgresql_where=text("code_hash is not null"),
+            sqlite_where=text("code_hash is not null"),
         ),
         ForeignKeyConstraint(
             ["owner_id"], ["profiles.id"], name="event_tickets_owner_id_fkey",

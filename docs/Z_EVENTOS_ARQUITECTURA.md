@@ -721,13 +721,24 @@ Y la rotación es atómica frente a la puerta: la escritura del check-in lleva l
 credencial en su condición, así que un QR rotado a mitad de escaneo **no
 admite**. Sin eso, el QR viejo seguía dejando pasar y rotar no prometía nada.
 
-**Lo que esta promesa NO cubre, y conviene decirlo:** `event_tickets.code` está
-en claro en la base. Es corto y legible a propósito —se dicta en la puerta
-cuando la cámara falla— y `_buscar` lo acepta como credencial. Un volcado de esa
-tabla entrega códigos admisibles. Resumirlo como la credencial exige ensanchar
-la columna y su CHECK, es decir una migración nueva, y devolver el código solo
-al rotar. Queda **propuesto y sin hacer**: es una decisión con coste que no
-tomo por mi cuenta.
+**Y el código tecleado recibe el mismo trato desde la 0063.** Era el agujero
+que quedaba: corto y legible a propósito —se dicta en la puerta cuando la cámara
+falla— y `_buscar` lo acepta como credencial, así que un volcado de la tabla
+entregaba un juego completo de entradas. Ahora la base guarda `code_hash` y la
+columna en claro se deja vacía; el valor lo ve su dueño una sola vez, al rotar.
+
+La 0063 es **aditiva y no destruye nada**: calcula el resumen a partir del
+código que ya existe —no inventa ninguno— y relaja la columna para que la
+aplicación pueda dejar de escribirla. Una entrada anterior a la migración sigue
+admitiendo con su texto legible, pero **solo mientras esa fila no tenga
+resumen**: en cuanto lo tiene, manda el resumen, así que una rotación invalida
+de verdad el código anterior aunque su texto siga en la columna. Purgar esos
+textos es un `UPDATE` escrito al final de la migración y **no se ejecuta ahí**:
+borrar datos lo decide una persona.
+
+Efecto lateral que cierra otra cosa: la búsqueda de asistentes pasa a ser
+**exacta**, porque un resumen no admite «empieza por». El recorrido letra a
+letra deja de ser caro y pasa a ser imposible.
 
 ### 32.2 Verificar y hacer check-in
 
