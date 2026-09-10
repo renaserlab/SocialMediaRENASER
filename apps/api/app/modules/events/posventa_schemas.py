@@ -107,6 +107,17 @@ class DecisionRequest(BaseModel):
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 
 
+class RetiroRequest(BaseModel):
+    """Retirar la propia solicitud. Solo el motivo.
+
+    Antes reutilizaba `DecisionRequest`, que publica en el contrato del
+    comprador campos que solo toca administración. El código los ignoraba, pero
+    el OpenAPI decía lo contrario.
+    """
+
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class PublicarPoliticaRequest(BaseModel):
     """Publicar una decisión de la empresa.
 
@@ -164,5 +175,6 @@ __all__ = [
     "PaginaDeExpedientes",
     "PoliticaRead",
     "PublicarPoliticaRequest",
+    "RetiroRequest",
     "VeredictoDePosventa",
 ]

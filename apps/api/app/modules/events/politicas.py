@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError, ServiceUnavailableError
+from app.core.exceptions import AppError, ServiceUnavailableError, ValidationAppError
 from app.modules.events.posventa_models import (
     BORRADOR,
     PUBLICADA,
@@ -128,6 +128,50 @@ async def exigir_vigente(
     return politica
 
 
+#: Lo que se sabe acotar. Una clave desconocida NO se rechaza —la empresa
+#: puede necesitar guardar algo que hoy no se lee— pero las conocidas tienen
+#: que ser posibles: un `refund_bps` de 9.999.999 llegaba tal cual a la
+#: pantalla del comprador como si fuera una decisión de la empresa.
+COTAS: dict[str, tuple[int, int]] = {
+    "refund_bps": (0, 10_000),
+    "cancelled_event_bps": (0, 10_000),
+    "reserve_bps": (0, 10_000),
+    "window_hours_before_event": (0, 24 * 365),
+    "hold_days": (0, 365),
+    "reserve_days": (0, 365),
+    "days_after_event": (0, 365),
+}
+
+#: Un objeto de política es una decisión, no un almacén. Sin tope, cada
+#: publicación se serializa entera para calcular su huella y se archiva.
+CLAVES_MAXIMAS = 50
+
+
+def _exigir_parametros_sensatos(params: dict[str, Any]) -> None:
+    """Las claves conocidas, dentro de lo posible. Falla en cerrado."""
+    if len(params) > CLAVES_MAXIMAS:
+        raise ValidationAppError(
+            "Una política no guarda tantos parámetros.",
+            code="event_policy_params_too_many",
+        )
+    for clave, (minimo, maximo) in COTAS.items():
+        if clave not in params:
+            continue
+        valor = params[clave]
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise ValidationAppError(
+                f"`{clave}` tiene que ser un número.",
+                code="event_policy_param_not_a_number",
+                details={"param": clave},
+            )
+        if not (minimo <= int(valor) <= maximo):
+            raise ValidationAppError(
+                f"`{clave}` está fuera de lo posible.",
+                code="event_policy_param_out_of_range",
+                details={"param": clave, "min": minimo, "max": maximo},
+            )
+
+
 async def publicar(
     db: AsyncSession,
     *,
@@ -150,9 +194,15 @@ async def publicar(
     IDEMPOTENTE: republicar la misma versión devuelve la que ya está.
     """
     if tipo not in TIPOS_DE_POLITICA:
-        raise ValueError(f"Tipo de política desconocido: {tipo}")
+        raise ValidationAppError(
+            "Ese tipo de política no existe.", code="event_policy_type_invalid"
+        )
     if not isinstance(params, dict):
-        raise ValueError("Los parámetros de una política son un objeto.")
+        raise ValidationAppError(
+            "Los parámetros de una política son un objeto.",
+            code="event_policy_params_invalid",
+        )
+    _exigir_parametros_sensatos(params)
 
     alcance = "event" if evento_id is not None else "global"
     ya = await db.scalar(

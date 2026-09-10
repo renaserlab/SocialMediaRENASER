@@ -1196,3 +1196,306 @@ async def test_quien_no_organiza_no_edita(sesiones) -> None:
                 usuario=AuthUser(id=ajeno, email="x@x.test"),
                 motivo="me apetece",
             )
+
+
+# =========================================================================== #
+# Carreras: dos personas decidiendo sobre el mismo dinero
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_revisores_no_resuelven_el_mismo_caso(sesiones) -> None:
+    """LA CARRERA REAL de una bandeja: dos personas con el caso abierto.
+
+    Las dos leen `submitted`, las dos pulsan. Lo que impide que las dos
+    escrituras cuenten no es el `if` de arriba sino el `where status = :desde`,
+    que la base resuelve fila a fila: una cambia una fila y la otra cero.
+    """
+    import asyncio
+
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    quien = await _persona(sesiones, "gestor")
+
+    barrera = asyncio.Barrier(2)
+
+    async def resuelve():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                m = await posventa.transicionar(
+                    db,
+                    expediente_id=caso_id,
+                    hasta="under_review",
+                    actor_id=quien,
+                    actor_rol="admin",
+                )
+                await db.commit()
+                return m.hasta
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    una, otra = await asyncio.gather(resuelve(), resuelve())
+    resultados = [una, otra]
+    assert resultados.count("under_review") == 1, resultados
+    assert "ExpedienteCambiado" in resultados, resultados
+
+    # Y una sola linea de historial para ese paso.
+    async with sesiones() as db:
+        cuantas = (
+            await db.execute(
+                text(
+                    "select count(*) from public.event_aftersale_case_events"
+                    " where case_id = cast(:c as uuid) and to_status = 'under_review'"
+                ),
+                {"c": caso_id},
+            )
+        ).scalar_one()
+    assert cuantas == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_solicitudes_a_la_vez_sobre_el_mismo_pedido(sesiones) -> None:
+    """Dos expedientes vivos sobre la misma compra acabarian en dos decisiones
+    distintas sobre el mismo dinero. Lo impide la BASE, no el servicio."""
+    import asyncio
+
+    orden, evento = await _compra(sesiones, dias=10)
+    organiza = await _organizador_de(sesiones, evento)
+
+    barrera = asyncio.Barrier(2)
+
+    async def pide():
+        async with sesiones() as db:
+            fresca = await db.get(EventOrder, orden.id)
+            await barrera.wait()
+            try:
+                caso = await posventa.abrir(
+                    db,
+                    orden=fresca,
+                    organizador_id=organiza,
+                    tipo="refund_request",
+                    actor_id=fresca.buyer_id,
+                )
+                await db.commit()
+                return caso.id
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    una, otra = await asyncio.gather(pide(), pide())
+    abiertos = [x for x in (una, otra) if x not in ("ExpedienteAbierto",)]
+    assert len(abiertos) == 1, (una, otra)
+
+    async with sesiones() as db:
+        vivos = (
+            await db.execute(
+                text(
+                    "select count(*) from public.event_aftersale_cases"
+                    " where order_id = cast(:o as uuid)"
+                ),
+                {"o": orden.id},
+            )
+        ).scalar_one()
+    assert vivos == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_retener_y_escanear_a_la_vez_no_deja_las_dos_cosas(sesiones) -> None:
+    """O entro antes de la retencion, o no entro. Nunca usada Y retenida."""
+    import asyncio
+
+    orden, evento = await _compra(sesiones, dias=10)
+    caso_id = await _expediente(sesiones, orden, evento)
+    operador = await _persona(sesiones, "puerta")
+
+    async with sesiones() as db:
+        entrada = (
+            await db.execute(
+                text(
+                    "select id::text from public.event_tickets"
+                    " where order_id = cast(:o as uuid)"
+                ),
+                {"o": orden.id},
+            )
+        ).scalar_one()
+        _, credencial, _codigo = await emision.credencial_de(
+            db, entrada_id=entrada, usuario_id=orden.buyer_id
+        )
+
+    barrera = asyncio.Barrier(2)
+
+    async def escanea():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                return (
+                    await emision.check_in(
+                        db,
+                        evento_id=evento,
+                        credencial=credencial,
+                        operador_id=operador,
+                    )
+                ).resultado
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    async def retiene():
+        async with sesiones() as db:
+            await barrera.wait()
+            try:
+                await efectos.aplicar(
+                    db,
+                    caso=await db.get(EventAftersaleCase, caso_id),
+                    efecto=efectos.EN_REVISION,
+                    actor_id=None,
+                    motivo="en tramite",
+                )
+                await db.commit()
+                return "retenida"
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    veredicto, _ = await asyncio.gather(escanea(), retiene())
+
+    async with sesiones() as db:
+        estado, efecto = (
+            await db.execute(
+                text(
+                    "select t.status, coalesce(k.effect, 'none')"
+                    "  from public.event_tickets t"
+                    "  left join public.event_aftersale_case_tickets k"
+                    "    on k.ticket_id = t.id"
+                    " where t.id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).one()
+
+    if veredicto == emision.OK:
+        # Entro antes: la entrada esta usada, y la retencion no la deshace.
+        assert estado == "USED"
+    else:
+        assert veredicto in (emision.RETENIDA, "CerrojoOcupado"), veredicto
+        assert estado == "VALID", "una entrada retenida NO se consume"
+
+
+# =========================================================================== #
+# Lo que encontro la revision independiente
+# =========================================================================== #
+def test_editar_un_publicado_valida_como_el_borrador() -> None:
+    """UN EVENTO YA VENDIDO NO PUEDE ADMITIR LO QUE EL BORRADOR PROHIBE.
+
+    El contrato del publicado no validaba nada: aforo negativo, modalidad fuera
+    del enum y textos sin limite pasaban, y un `null` en un campo obligatorio
+    salia como 500 desde la base.
+    """
+    from pydantic import ValidationError
+
+    from app.modules.events.schemas import CambioPublicadoRequest
+
+    for malo in (
+        {"reason": "x", "capacity": -5},
+        {"reason": "x", "capacity": 10_000_001},
+        {"reason": "x", "event_type": "regalado"},
+        {"reason": "x", "title": ""},
+        {"reason": "x", "title": "t" * 200},
+        {"reason": "x", "location": "l" * 300},
+        {"reason": "", "capacity": 10},
+    ):
+        with pytest.raises(ValidationError):
+            CambioPublicadoRequest(**malo)
+
+    # Y lo valido sigue pasando.
+    bueno = CambioPublicadoRequest(reason="cambio de sala", location="Sala B")
+    assert bueno.location == "Sala B"
+
+
+def test_una_politica_con_numeros_imposibles_no_se_publica() -> None:
+    """Un `refund_bps` de 9.999.999 llegaba tal cual a la pantalla del
+    comprador como si fuera una decision de la empresa."""
+    from app.core.exceptions import ValidationAppError
+    from app.modules.events import politicas
+
+    for malo in (
+        {"refund_bps": 9_999_999},
+        {"refund_bps": -1},
+        {"window_hours_before_event": -1},
+        {"reserve_bps": 20_000},
+        # Un booleano no es un numero: `True` vale 1 y un plazo de «un dia»
+        # que en realidad era un si es del mismo tipo de error.
+        {"hold_days": True},
+    ):
+        with pytest.raises(ValidationAppError):
+            politicas._exigir_parametros_sensatos(malo)
+
+    # Lo posible pasa, y una clave desconocida no se rechaza: la empresa puede
+    # necesitar guardar algo que hoy no se lee.
+    politicas._exigir_parametros_sensatos({"refund_bps": 10_000, "lo_que_sea": "x"})
+
+
+def test_una_politica_no_es_un_almacen() -> None:
+    from app.core.exceptions import ValidationAppError
+    from app.modules.events import politicas
+
+    with pytest.raises(ValidationAppError):
+        politicas._exigir_parametros_sensatos(
+            {f"k{i}": i for i in range(politicas.CLAVES_MAXIMAS + 1)}
+        )
+
+
+def test_el_contrato_de_retirar_no_publica_campos_de_administracion() -> None:
+    """`/withdraw` reutilizaba el esquema de decision, que expone `notes`,
+    `outcome` e importes. El codigo los ignoraba; el OpenAPI decia lo contrario.
+    """
+    from app.modules.events.posventa_schemas import RetiroRequest
+
+    campos = set(RetiroRequest.model_fields)
+    assert campos == {"reason"}, campos
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_cursor_ilegible_no_es_un_500(sesiones) -> None:
+    """Llega del cliente: es un 422, no un fallo del servidor."""
+    from app.core.exceptions import ValidationAppError
+
+    quien = await _persona(sesiones, "cur")
+    for malo in ("basura", "|", "2026-13-45|x", ""):
+        if malo == "":
+            continue
+        async with sesiones() as db:
+            with pytest.raises(ValidationAppError):
+                await posventa.mios(db, usuario_id=quien, cursor=malo)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_cursor_sin_zona_no_revienta_en_la_base(sesiones) -> None:
+    """Una fecha naive contra una columna con zona falla dentro de la base y
+    llega disfrazada de otra cosa."""
+    quien = await _persona(sesiones, "cur2")
+    async with sesiones() as db:
+        assert await posventa.mios(db, usuario_id=quien, cursor=f"2026-01-01T00:00:00|{uuid.uuid4()}") == []
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_tipo_de_expediente_inventado_es_un_422(sesiones) -> None:
+    from app.core.exceptions import ValidationAppError
+
+    orden, evento = await _compra(sesiones, dias=10)
+    organiza = await _organizador_de(sesiones, evento)
+    async with sesiones() as db:
+        with pytest.raises(ValidationAppError):
+            await posventa.abrir(
+                db,
+                orden=await db.get(EventOrder, orden.id),
+                organizador_id=organiza,
+                tipo="lo_que_sea",
+                actor_id=orden.buyer_id,
+            )

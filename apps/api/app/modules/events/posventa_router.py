@@ -51,6 +51,7 @@ from app.modules.events.posventa_schemas import (
     PaginaDeExpedientes,
     PoliticaRead,
     PublicarPoliticaRequest,
+    RetiroRequest,
     VeredictoDePosventa,
 )
 from app.shared.database import get_db
@@ -167,6 +168,10 @@ async def abrir_expediente(
         )
 
     evento = await db.get(Event, orden.event_id)
+    if evento is None:
+        # `event_orders.event_id` no tiene clave ajena a `events`, así que un
+        # pedido huérfano es posible. Sin esto salía como 500.
+        raise NotFoundError("Evento no encontrado.")
     caso = await posventa.abrir(
         db,
         orden=orden,
@@ -239,7 +244,7 @@ async def historial_del_expediente(
 @router.post("/aftersale-cases/{case_id}/withdraw", response_model=ExpedienteRead)
 async def retirar_expediente(
     case_id: str,
-    payload: DecisionRequest | None = None,
+    payload: RetiroRequest | None = None,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteRead:

@@ -456,16 +456,20 @@ class CambioPublicadoRequest(BaseModel):
 
     reason: str = Field(min_length=1, max_length=500)
     expected_version: int | None = None
-    title: str | None = None
-    description: str | None = None
+    # LAS MISMAS COTAS QUE `BorradorUpdate`, y no por simetria: sin ellas, un
+    # evento YA PUBLICADO Y VENDIDO admitia lo que el camino de borrador
+    # prohibe —aforo negativo, modalidad fuera del enum, textos sin limite— y
+    # un `null` en un campo obligatorio salia como 500.
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
     starts_at: datetime | None = None
     ends_at: datetime | None = None
-    location: str | None = None
-    event_type: str | None = None
-    capacity: int | None = None
-    promise: str | None = None
-    category: str | None = None
-    timezone: str | None = None
+    location: str | None = Field(default=None, max_length=200)
+    event_type: str | None = Field(default=None, pattern=MODALIDAD)
+    capacity: int | None = Field(default=None, ge=0, le=1_000_000)
+    promise: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=48)
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class CambioRegistradoRead(BaseModel):
