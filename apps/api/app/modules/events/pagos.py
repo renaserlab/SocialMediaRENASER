@@ -23,8 +23,10 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.core.config import get_settings
-from app.modules.events import orders
+from app.modules.events import inventory, orders
 from app.modules.events.models import ORDEN_EN_CURSO, ORDEN_PROCESANDO, EventOrder
 from app.modules.payments.providers import CheckoutRequest, get_provider
 
@@ -65,12 +67,17 @@ def exigir_pagos_disponibles() -> None:
 
 
 def referencia_de_operacion(orden: EventOrder) -> str:
-    """La clave de idempotencia que se le manda a la pasarela.
+    """La referencia interna del intento de cobro, para conciliar.
 
-    DETERMINISTA Y ATADA A LA ORDEN. Reintentar tras un timeout con la misma
-    clave hace que la pasarela devuelva el MISMO cobro en vez de abrir otro;
-    cambiarla porque «esta vez seguro que falló» es exactamente cómo se cobra
-    dos veces. Solo cambiaría si la orden cambiara, y una orden no cambia.
+    DETERMINISTA Y ATADA A LA ORDEN: se guarda en `operation_ref` y no cambia
+    entre reintentos, así que sirve para cruzar un cobro con su pedido cuando
+    algo hay que revisarlo a mano.
+
+    NO ES la clave de idempotencia que viaja a la pasarela. Esa la construye el
+    adaptador del proveedor a partir del pedido, el importe y la moneda, y es
+    igualmente determinista: reintentar tras un timeout devuelve el MISMO cobro
+    en vez de abrir otro. Cambiarla porque «esta vez seguro que falló» es
+    exactamente cómo se cobra dos veces.
     """
     return f"evt-ord-{orden.id}"
 
@@ -123,11 +130,29 @@ async def iniciar_pago(
         )
     )
 
-    orden.provider = nombre
-    orden.environment = ajustes.payments_environment
-    orden.operation_ref = referencia_de_operacion(orden)
-    orden.status = ORDEN_PROCESANDO
-    orden.updated_at = orders.ahora()
+    # BAJO CERROJO Y RECOMPROBANDO, porque entre leer la orden y llegar aquí ha
+    # habido una llamada HTTP a la pasarela que puede tardar segundos. Sin esto,
+    # quien cancelara el pedido en ese hueco se encontraba con
+    # `PAYMENT_PROCESSING` escrito encima de su `CANCELLED`, `cancelled_at`
+    # todavía puesto, el CHECK de la base rechazando la transacción y un 500.
+    async with inventory.espera_traducida(db):
+        fresca = await db.scalar(
+            select(EventOrder)
+            .where(EventOrder.id == orden.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    if fresca is None or fresca.status not in ORDEN_EN_CURSO:
+        await db.rollback()
+        raise orders.OrdenNoPagable(
+            "Ese pedido dejó de admitir un pago mientras se abría el cobro."
+        )
+
+    fresca.provider = nombre
+    fresca.environment = ajustes.payments_environment
+    fresca.operation_ref = referencia_de_operacion(fresca)
+    fresca.status = ORDEN_PROCESANDO
+    fresca.updated_at = orders.ahora()
     await db.commit()
 
     return IntentoDePago(

@@ -99,10 +99,6 @@ class Settings(BaseSettings):
     #: puede iniciar un pago, y decirlo es más honesto que fallar al llamar.
     event_payments_provider: str = "none"
 
-    #: Cuánto vive una orden pendiente de pago, en minutos. Nunca más que la
-    #: reserva que la sostiene: el inventario es del hold, y una orden que
-    #: sobreviviera a su reserva estaría prometiendo un aforo que ya se soltó.
-    event_order_ttl_minutes: int = 10
 
     # --- Pagos: nativo (RevenueCat) ---
     #: Verificacion servidor a servidor de las compras de las tiendas. APAGADA

@@ -152,7 +152,9 @@ async def limitar_la_espera(db: AsyncSession) -> None:
 
 
 @asynccontextmanager
-async def espera_traducida(db: AsyncSession) -> AsyncIterator[None]:
+async def espera_traducida(
+    db: AsyncSession, *, deshacer: bool = True
+) -> AsyncIterator[None]:
     """Convierte un 55P03 en `CerrojoOcupado`, no en un 500.
 
     `set local lock_timeout` vale para TODA la transacción, no solo para el
@@ -166,11 +168,17 @@ async def espera_traducida(db: AsyncSession) -> AsyncIterator[None]:
     except DBAPIError as error:
         if getattr(getattr(error, "orig", None), "sqlstate", None) != _CERROJO_AGOTADO:
             raise
-        await db.rollback()
+        # `deshacer=False` para quien corre DENTRO de un savepoint ajeno: allí
+        # un `rollback` no deshace el savepoint, deshace la transacción ENTERA,
+        # y se lleva por delante lo que el de fuera escribió antes de entrar.
+        if deshacer:
+            await db.rollback()
         raise CerrojoOcupado from None
 
 
-async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
+async def bloquear_evento(
+    db: AsyncSession, evento_id: str, *, deshacer: bool = True
+) -> Event:
     """La fila del evento, bloqueada hasta que la transacción termine.
 
     Este es el punto de serialización de todo el módulo. Todas las rutas que
@@ -194,13 +202,18 @@ async def bloquear_evento(db: AsyncSession, evento_id: str) -> Event:
         #
         # No se registra el SQL: llevaría el identificador del evento y el de
         # quien lo pedía a un sitio donde no hacen falta.
-        await db.rollback()
+        #
+        # `deshacer=False` para quien corre dentro de un savepoint ajeno: ver
+        # `espera_traducida`.
+        if deshacer:
+            await db.rollback()
         raise CerrojoOcupado from None
     if evento is None:
         # SE SUELTA LA TRANSACCIÓN. No hay ninguna fila bloqueada —el `select`
         # no encontró nada— pero sí una transacción abierta que nadie va a
         # cerrar antes de que la respuesta de error termine de escribirse.
-        await db.rollback()
+        if deshacer:
+            await db.rollback()
         raise NotFoundError("Evento no encontrado.")
     return evento
 

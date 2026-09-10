@@ -41,6 +41,7 @@
 -- filas aquí sería inventarse ventas.
 --
 -- ROLLBACK REALISTA:
+--   drop trigger if exists event_order_items_emitidas on public.event_order_items;
 --   drop trigger if exists event_tickets_emitidas on public.event_tickets;
 --   drop trigger if exists event_orders_emitidas on public.event_orders;
 --   drop trigger if exists event_order_items_cuadran on public.event_order_items;
@@ -494,6 +495,15 @@ $$;
 drop trigger if exists event_tickets_emitidas on public.event_tickets;
 create constraint trigger event_tickets_emitidas
 after insert or delete or update of order_id on public.event_tickets
+deferrable initially deferred
+for each row execute function public.exigir_las_entradas_emitidas();
+
+-- Y SOBRE LAS LÍNEAS. Cambiar la cantidad de una línea de una orden ya `PAID`
+-- movía lo comprado sin mover lo emitido, y en una orden gratuita el disparador
+-- del cuadre tampoco protestaba porque el subtotal no cambia.
+drop trigger if exists event_order_items_emitidas on public.event_order_items;
+create constraint trigger event_order_items_emitidas
+after insert or delete or update of quantity on public.event_order_items
 deferrable initially deferred
 for each row execute function public.exigir_las_entradas_emitidas();
 
