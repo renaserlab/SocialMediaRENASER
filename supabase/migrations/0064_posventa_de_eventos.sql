@@ -99,10 +99,15 @@ create table if not exists public.event_policies (
   constraint event_policies_alcance_coherente
     check ((scope = 'event') = (event_id is not null)),
 
-  -- PUBLICADA ES PUBLICADA. Sin fecha no se puede decir desde cuándo rige, y
-  -- sin saberlo no se puede reconstruir qué se le aplicó a un expediente.
+  -- PUBLICADA EXIGE FECHA. Sin ella no se puede decir desde cuándo rigió, y
+  -- sin eso no se puede reconstruir qué se le aplicó a un expediente.
+  --
+  -- NO ES UNA EQUIVALENCIA: una política SUPERADA conserva su `published_at`,
+  -- porque esa fecha es su historia. Escribirlo como «publicada si y solo si
+  -- tiene fecha» obligaba a borrarla al superarla, que es exactamente perder
+  -- el dato que hace falta para explicar un expediente antiguo.
   constraint event_policies_publicada_con_fecha
-    check ((status = 'published') = (published_at is not null)),
+    check (status <> 'published' or published_at is not null),
   constraint event_policies_vigencia
     check (effective_to is null or effective_from is null
            or effective_to > effective_from),

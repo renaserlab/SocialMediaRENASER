@@ -111,6 +111,37 @@ async def hay_ordenes(db: AsyncSession) -> bool:
     return _cache["ordenes"]
 
 
+_TABLAS_DE_POSVENTA = (
+    "event_policies",
+    "event_changes",
+    "event_aftersale_cases",
+    "event_aftersale_case_tickets",
+    "event_aftersale_case_events",
+)
+
+
+async def hay_posventa(db: AsyncSession) -> bool:
+    """Si la 0064 está aplicada: políticas, cambios y expedientes."""
+    if "posventa" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            return all(inspector.has_table(t) for t in _TABLAS_DE_POSVENTA)
+
+        _cache["posventa"] = await conexion.run_sync(_mirar)
+    return _cache["posventa"]
+
+
+async def exigir_posventa(db: AsyncSession) -> None:
+    """Sin la 0064, 503 con un código estable. No 404 ni 500."""
+    if not await hay_posventa(db):
+        raise ServiceUnavailableError(
+            "La posventa de eventos todavía no está disponible.",
+            code="event_aftersale_not_available",
+        )
+
+
 async def exigir_eventos_v2(db: AsyncSession) -> None:
     if not await hay_eventos_v2(db):
         raise ServiceUnavailableError(
