@@ -1056,6 +1056,15 @@ async def test_un_borrador_propio_no_es_una_puerta(entorno):
                 origin="events_v2",
             )
         )
+        # CONFIGURADO PARA VENDER, a propósito. Sin esto el borrador se
+        # rechazaría por no vender entradas y la prueba saldría verde aunque la
+        # comprobación de que esté PUBLICADO no existiera: diría estar probando
+        # una cosa y estaría probando otra.
+        db.add(
+            EventTicketingSettings(
+                event_id=borrador, access_mode="TICKETED", currency="PEN"
+            )
+        )
         await db.commit()
 
     respuesta = await http.post(
@@ -1471,11 +1480,46 @@ async def test_un_aviso_de_otro_entorno_no_emite_nada(entorno, pasarela):
     orden = (await _pedir(http, hold["id"], "o1")).json()
     await _abrir_cobro(sesiones, orden["id"])
 
-    pasarela.aviso = _aviso(orden["id"], importe=4900, environment="production")
+    pasarela.aviso = _aviso(
+        orden["id"], importe=4900, environment="production", evento_id="evt_de_otro"
+    )
     assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
 
     async with sesiones() as db:
         assert (await db.get(EventOrder, orden["id"])).status == "PAYMENT_PROCESSING"
+        assert list(await db.scalars(select(EventTicket))) == []
+        # SE CORTA ANTES DE REGISTRARLO, y eso es lo que distingue este corte de
+        # los de más abajo: un aviso de otro entorno no es nuestro, así que no
+        # ocupa sitio en la tabla anti-repetición. Sin esta comprobación, la
+        # prueba saldría verde solo porque el servicio también lo rechaza.
+        assert (
+            await db.scalar(
+                select(ComercioPaymentEvent).where(
+                    ComercioPaymentEvent.external_event_id == "evt_de_otro"
+                )
+            )
+        ) is None
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_no_confirma_un_pedido_que_nunca_abrio_un_cobro(
+    entorno, pasarela
+):
+    """Un pedido con `provider = 'none'` no tiene ningún cobro a su nombre.
+
+    Sin esto, el aviso de un cobro cualquiera podía confirmar un pedido que
+    nadie llegó a pagar: bastaba con que el importe y la moneda coincidieran.
+    """
+    http, _, sesiones = entorno
+    hold = await _apartar(http, GENERAL, 1, "h1")
+    orden = (await _pedir(http, hold["id"], "o1")).json()
+    # NO se llama a `_abrir_cobro`: el pedido nunca pasó por la pasarela.
+
+    pasarela.aviso = _aviso(orden["id"], importe=4900, evento_id="evt_sin_cobro")
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        assert (await db.get(EventOrder, orden["id"])).status == "PENDING_PAYMENT"
         assert list(await db.scalars(select(EventTicket))) == []
 
 
