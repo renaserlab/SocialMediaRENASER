@@ -200,6 +200,25 @@ async def credencial_de(
     return entrada, credencial, codigo
 
 
+async def invalidar_credencial(db: AsyncSession, *, entrada_id: str) -> bool:
+    """Deja la credencial y el código actuales sin efecto, SIN entregar nada.
+
+    Se usa al restaurar una entrada que estuvo retirada: si volviera con la
+    credencial de antes, quien la tuviera fotografiada volvería a poder entrar.
+    Aquí se genera una nueva y se descarta el valor en claro; su dueño recibe
+    uno que sirve la próxima vez que abra su entrada, que rota.
+
+    NO ES `credencial_de`: aquella exige ser el dueño y devuelve el valor. Esta
+    la llama administración y no devuelve ninguno.
+    """
+    hechas = await db.execute(
+        update(EventTicket)
+        .where(EventTicket.id == entrada_id)
+        .values(credential_hash=resumir(_credencial()), code_hash=resumir(_codigo()), code=None)
+    )
+    return (hechas.rowcount or 0) == 1
+
+
 # --------------------------------------------------------------------------- #
 # Verificación y check-in
 # --------------------------------------------------------------------------- #
@@ -212,6 +231,11 @@ REVOCADA = "REVOKED"
 NO_EXISTE = "NOT_FOUND"
 OTRO_EVENTO = "WRONG_EVENT"
 SIN_ADMISION = "NOT_ADMITTING"
+#: RETENIDA POR UN EXPEDIENTE. No es `REVOKED` —no se ha retirado nada— ni
+#: `NOT_ADMITTING`, que habla del evento entero: decirlo con cualquiera de los
+#: dos sería mentir sobre lo que pasó, y quien está en la puerta necesita saber
+#: que esto se puede levantar.
+RETENIDA = "ON_HOLD"
 
 
 @dataclass
@@ -305,6 +329,12 @@ async def verificar(
         )
     if not await _admite_entrada(db, entrada.event_id, momento):
         return Veredicto(SIN_ADMISION, entrada_id=entrada.id)
+    from app.modules.events import efectos
+
+    if await efectos.retencion_viva(db, entrada.id) is not None:
+        return Veredicto(
+            RETENIDA, entrada_id=entrada.id, tipo=entrada.ticket_type_name_snapshot
+        )
     return Veredicto(OK, entrada_id=entrada.id, tipo=entrada.ticket_type_name_snapshot)
 
 
@@ -357,6 +387,17 @@ async def check_in(
         await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
                       resultado=SIN_ADMISION, momento=momento, canal=canal, origen=origen)
         return Veredicto(SIN_ADMISION, entrada_id=suya)
+
+    # RETENIDA POR UN EXPEDIENTE. Se comprueba ANTES de escribir: una entrada
+    # retenida no se consume, porque retener es reversible y consumirla no.
+    from app.modules.events import efectos
+
+    if await efectos.retencion_viva(db, entrada.id) is not None:
+        suya = entrada.id
+        nombre_retenida = entrada.ticket_type_name_snapshot
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
+                      resultado=RETENIDA, momento=momento, canal=canal, origen=origen)
+        return Veredicto(RETENIDA, entrada_id=suya, tipo=nombre_retenida)
 
     # LA ESCRITURA CONDICIONAL. Aquí está la garantía, no en las comprobaciones
     # de arriba: `where status = 'VALID'` deja pasar exactamente a uno.

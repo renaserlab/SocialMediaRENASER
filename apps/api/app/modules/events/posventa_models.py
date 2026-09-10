@@ -394,8 +394,39 @@ class EventAftersaleCaseTicket(Base):
     #: Congelado: si la entrada se usa o se revoca después, sigue constando qué
     #: había cuando se pidió.
     status_at_open: Mapped[str] = mapped_column(String(16))
+
+    #: Qué se le hizo POR ESTE EXPEDIENTE. `none` es «nada todavía»; retener es
+    #: reversible y revocar no.
+    effect: Mapped[str] = mapped_column(String(16), server_default=text("'none'"))
+    effect_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effect_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    effect_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "effect in ('none', 'under_review', 'blocked', 'cancelled',"
+            " 'revoked', 'restored')",
+            name="event_aftersale_case_tickets_efecto",
+        ),
+        CheckConstraint(
+            "(effect = 'none') = (effect_at is null)",
+            name="event_aftersale_case_tickets_efecto_con_fecha",
+        ),
+        # UNA SOLA RETENCION POR ENTRADA. Dos a la vez serian dos motivos
+        # distintos para lo mismo y nadie sabria cual levantar.
+        Index(
+            "event_aftersale_case_tickets_retencion_unica",
+            "ticket_id",
+            unique=True,
+            postgresql_where=text("effect in ('under_review', 'blocked')"),
+            sqlite_where=text("effect in ('under_review', 'blocked')"),
+        ),
     )
 
 
