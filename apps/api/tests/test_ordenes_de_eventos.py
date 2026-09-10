@@ -694,10 +694,10 @@ async def test_pedir_la_credencial_otra_vez_invalida_la_anterior(entorno):
 # --------------------------------------------------------------------------- #
 # Check-in
 # --------------------------------------------------------------------------- #
-async def _una_entrada(http, identidad, sesiones):
-    identidad["uid"] = ANA
-    hold = await _apartar(http, CORTESIA, 1, "h1")
-    await _pedir(http, hold["id"], "o1")
+async def _una_entrada(http, identidad, sesiones, quien=ANA):
+    identidad["uid"] = quien
+    hold = await _apartar(http, CORTESIA, 1, f"h1-{quien[-4:]}")
+    await _pedir(http, hold["id"], f"o1-{quien[-4:]}")
     entrada = (await http.get(f"{EVENTOS}/me/tickets")).json()["items"][0]
     credencial = (
         await http.post(f"{EVENTOS}/tickets/{entrada['id']}/credential")
@@ -2034,7 +2034,15 @@ async def test_las_ventas_separan_apartado_de_vendido(entorno):
 async def test_los_asistentes_presentes_salen_de_los_check_ins(entorno):
     """No de pedidos, ni de compradores, ni de una suma guardada a mano."""
     http, identidad, sesiones = entorno
-    _, credencial = await _una_entrada(http, identidad, sesiones)
+    entrada, credencial = await _una_entrada(http, identidad, sesiones)
+    # UNA SEGUNDA ENTRADA, DE OTRA PERSONA, QUE NO VA A PASAR. Sin ella, el
+    # unico intento rechazado seria sobre la misma entrada que si paso y
+    # contarlo o no daria el mismo numero: la prueba diria estar comprobando el
+    # filtro y no estaria comprobando nada.
+    identidad["uid"] = BRUNO
+    otra, suya = await _una_entrada(http, identidad, sesiones, quien=BRUNO)
+    identidad["uid"] = ORG
+    await http.post(f"{EVENTOS}/tickets/{otra['id']}/revoke", json={"reason": "no va"})
 
     identidad["uid"] = ADMINISTRA
     await http.post(
@@ -2044,12 +2052,15 @@ async def test_los_asistentes_presentes_salen_de_los_check_ins(entorno):
     await http.post(
         f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": credencial}
     )
+    # Y la entrada anulada, que deja un intento REVOKED sobre OTRA entrada.
+    await http.post(f"{EVENTOS}/{CON_ENTRADAS}/check-ins", json={"credential": suya})
 
     identidad["uid"] = ORG
     ventas = (await http.get(f"{EVENTOS}/{CON_ENTRADAS}/sales")).json()
     assert ventas["checkins"] == 1
     assert ventas["entradas_usadas"] == 1
     assert ventas["entradas_validas"] == 0
+    assert ventas["entradas_revocadas"] == 1
 
 
 # --------------------------------------------------------------------------- #

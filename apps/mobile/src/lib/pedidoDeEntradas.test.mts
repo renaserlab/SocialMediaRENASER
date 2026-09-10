@@ -302,8 +302,18 @@ describe('la puerta no se queda muerta', () => {
     // escaner parecia roto y la unica salida eran dos toques que nadie deduce.
     const cuerpo = CHECKIN.slice(CHECKIN.indexOf('const admitir'));
     const catchIdx = cuerpo.indexOf('} catch (fallo)');
-    assert.ok(catchIdx > 0);
-    assert.ok(cuerpo.slice(catchIdx).includes("ultimoRef.current = '';"));
+    const finIdx = cuerpo.indexOf('} finally {', catchIdx);
+    assert.ok(catchIdx > 0 && finIdx > catchIdx);
+    // SOLO EL BLOQUE `catch`. Mas abajo hay otro olvido legitimo, el de
+    // cambiar de modo, y buscarlo en todo el fichero tapaba la ausencia de
+    // este: la prueba pasaba sin la proteccion que dice comprobar.
+    assert.ok(cuerpo.slice(catchIdx, finIdx).includes("ultimoRef.current = '';"));
+  });
+
+  it('el mismo codigo no se manda dos veces seguidas', () => {
+    // La camara lo ve en cada fotograma mientras este delante: sin este
+    // guardian, un QR sostenido manda decenas de peticiones.
+    assert.ok(CHECKIN.includes('if (data === ultimoRef.current) return;'));
   });
 
   it('y la marca se pone DESPUES de pasar los guardianes', () => {
