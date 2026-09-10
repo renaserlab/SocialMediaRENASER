@@ -264,3 +264,98 @@ comprobar con dispositivos reales y, para el check-in, con dos a la vez.
 - [ ] Con las entradas encendidas y **`FEATURE_EVENT_PAYMENTS` apagada**: se
       puede pedir y no se puede pagar, y una cortesía de precio cero **sí** se
       confirma y emite su entrada.
+
+
+## Incremento 4 — la puerta, en un teléfono de verdad
+
+**Nada de esto se ha ejecutado.** No hay dispositivos en este entorno, y una
+prueba automática no puede responder a ninguna de las dos preguntas que de
+verdad importan aquí: si un lector lee el QR, y qué pasa cuando dos teléfonos
+escanean el mismo código a la vez.
+
+### Android real
+
+- [ ] Permiso **concedido**: al abrir el control de acceso aparece el visor sin
+      pasar por ningún aviso de «sin cámara», ni siquiera un parpadeo.
+- [ ] Permiso **rechazado**: el aviso explica y el botón abre el diálogo del
+      sistema.
+- [ ] Permiso **bloqueado** (rechazado dos veces): el texto dice que el
+      teléfono ya no va a preguntar, y el botón abre **los ajustes de la
+      aplicación**. Al volver de los ajustes con el permiso dado, el visor
+      aparece sin reiniciar la aplicación.
+- [ ] Con el permiso bloqueado se puede escribir el código a mano y admitir.
+
+### El QR, de un teléfono a otro
+
+- [ ] Entrada abierta en un teléfono, escaneada desde otro: **admite a la
+      primera**.
+- [ ] Brillo del teléfono que enseña al **mínimo**: ¿lee? Anotar a qué
+      distancia.
+- [ ] Brillo al **máximo** y pantalla en modo oscuro: el recuadro del QR sigue
+      siendo blanco con margen.
+- [ ] Con protector de pantalla mate o grasa, y con el teléfono ligeramente
+      inclinado.
+- [ ] **Captura de pantalla** del QR, enseñada desde la galería: admite igual
+      que la pantalla viva. (Es lo esperado: la defensa contra compartir no es
+      que no se pueda fotografiar, es la rotación.)
+- [ ] Tras **volver a abrir la entrada**, la captura anterior **ya no admite**.
+      Esta es la prueba de que la rotación sirve para algo.
+- [ ] El **código tecleado** de la captura anterior tampoco admite.
+
+### Dos teléfonos a la vez
+
+- [ ] Dos operadores escanean el **mismo** QR en el mismo segundo: uno ve verde
+      y el otro «ya utilizada» con la hora. Nunca dos verdes.
+- [ ] Repetirlo cinco veces con entradas distintas.
+- [ ] Comprobar en la base: exactamente **un** `event_checkins` con
+      `result = 'OK'` por entrada.
+
+### Mientras la puerta trabaja
+
+- [ ] Alguien compra una entrada del mismo evento mientras se escanea: los
+      escaneos siguen respondiendo, y si alguno se cruza dice «vuelve a
+      intentarlo», no se queda colgado ni da un error del servidor.
+- [ ] Escanear el QR de **otro evento**: dice que no es de este evento y **no**
+      revela cuál.
+- [ ] Escanear una entrada **anulada**.
+- [ ] Escanear algo que no es una entrada (un QR de una web cualquiera).
+
+### Sin conexión, y volviendo
+
+- [ ] En modo avión, escanear: sale «no dejes pasar todavía», **nunca** verde.
+- [ ] Quitar el modo avión y **volver a acercar el mismo QR**: se manda y
+      responde. (Antes se descartaba en silencio para siempre.)
+- [ ] Cortar la red **justo después** de escanear, cuando la respuesta ya
+      viajaba: al recuperar, la puerta dice el estado real de la entrada, no
+      «sin conexión».
+- [ ] En la pantalla de la entrada, sin conexión: hay un botón para reintentar.
+
+### Ciclo de vida
+
+- [ ] Con el visor abierto, irse al escritorio: el **piloto de la cámara se
+      apaga**. Al volver, el visor sigue funcionando.
+- [ ] Con el visor abierto, atender una llamada.
+- [ ] Navegar a otra pantalla desde el control de acceso y volver.
+- [ ] Cerrar la aplicación por completo y reabrirla en la entrada.
+- [ ] Girar el teléfono con el visor abierto.
+
+### Cómo se ve
+
+- [ ] Modo claro y modo oscuro, en las seis pantallas.
+- [ ] **Fuente del sistema al máximo**: el resultado del check-in sigue
+      cabiendo y el código de la entrada no se parte.
+- [ ] Con lector de pantalla (TalkBack): al escanear, el resultado **se
+      anuncia solo**. Es el dato más importante de la pantalla.
+- [ ] El visor de la cámara se anuncia y dice qué hay que encuadrar.
+- [ ] Verde y rojo se distinguen también sin color: icono y texto.
+
+### La lista y los números
+
+- [ ] Buscar por código completo encuentra a la persona.
+- [ ] Escribir menos de seis caracteres: la pantalla lo dice **antes** de
+      mandar nada.
+- [ ] «Traer más» con la red cortada: lo ya leído se queda y se avisa.
+- [ ] El número de **presentes** sube al hacer check-in y **no** vuelve a subir
+      al escanear la misma entrada otra vez.
+- [ ] Apartadas, emitidas, válidas, usadas y presentes se leen como cinco cosas
+      distintas y ninguna miente.

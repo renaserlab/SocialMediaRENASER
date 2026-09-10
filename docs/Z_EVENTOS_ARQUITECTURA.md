@@ -674,9 +674,15 @@ Qué mirar cuando esto esté encendido:
 
 * Órdenes en `PAYMENT_PROCESSING` con la reserva vencida: las cierra
   `POST /admin/events/orders/expire`, que audita el lote.
-* Filas de `payment_events` con `error` no vacío y `dominio = evento`: son los
-  avisos que no cuadraron. **Cada una es un cobro sin entrada** y hay que
-  mirarla a mano.
+* Filas de `payment_events` con `error` no vacío y `dominio = evento`: la cola
+  de conciliación. Hay **dos clases distintas** y conviene no confundirlas:
+  * las que no cuadraron —importe distinto, reserva vencida, pedido
+    cancelado—: **cada una es un cobro sin entrada**;
+  * las que empiezan por «Devolución o disputa de un pedido de entradas»:
+    **es dinero que vuelve**, lo contrario. No se ha revocado ninguna entrada
+    ni se ha tocado el pedido, porque retirar la entrada es una decisión
+    comercial —plazos, penalización, quién decide— que nadie ha aprobado
+    todavía. Se anotan para que las mire una persona.
 * Órdenes `PAID` sin entradas: no deberían existir —lo impide el disparador
   diferido— y si aparecen, es que alguien escribió por fuera del servicio.
 * `event_checkins` con `result <> 'OK'` agrupado por evento: una puerta con
@@ -692,3 +698,112 @@ mapa de asientos · descuentos · cupones · impuestos · factura o boleta ·
 comisión de plataforma · liquidación al organizador · devolución de entradas ·
 cancelación masiva con reembolso · eventos recurrentes · varias monedas en un
 evento · `INVITATION_ONLY` · pagos reales.
+
+
+## 32. El Incremento 4: la puerta
+
+No hay migración nueva. La 0062 ya sostiene todo lo que la puerta necesita, y
+lo que faltaba estaba en el código, no en el esquema.
+
+### 32.1 La credencial
+
+`secrets.token_urlsafe(32)` —256 bits, opaca, sin estructura, sin nada de la
+persona ni del precio—. **La base guarda su `sha256`, no ella.** El valor en
+claro se entrega una vez a quien compró, viaja dentro del QR y no vuelve a
+existir en el servidor.
+
+Pedirla otra vez **rota**: se genera una nueva, la anterior deja de valer, y
+**el código escrito debajo rota con ella**, porque quien fotografía la pantalla
+se lleva los dos. Rotar deja rastro en auditoría —invalida el QR que alguien ya
+tiene guardado— y ni la credencial ni el código entran en ese rastro.
+
+Y la rotación es atómica frente a la puerta: la escritura del check-in lleva la
+credencial en su condición, así que un QR rotado a mitad de escaneo **no
+admite**. Sin eso, el QR viejo seguía dejando pasar y rotar no prometía nada.
+
+**Lo que esta promesa NO cubre, y conviene decirlo:** `event_tickets.code` está
+en claro en la base. Es corto y legible a propósito —se dicta en la puerta
+cuando la cámara falla— y `_buscar` lo acepta como credencial. Un volcado de esa
+tabla entrega códigos admisibles. Resumirlo como la credencial exige ensanchar
+la columna y su CHECK, es decir una migración nueva, y devolver el código solo
+al rotar. Queda **propuesto y sin hacer**: es una decisión con coste que no
+tomo por mi cuenta.
+
+### 32.2 Verificar y hacer check-in
+
+Dos preguntas distintas. `verify` mira y no escribe; se puede hacer mil veces.
+`check-ins` deja pasar **una vez**, y lo que lo garantiza no es un `if` sino un
+`UPDATE ... WHERE status = 'VALID'` y su `rowcount`, con el índice único parcial
+de la 0062 por debajo.
+
+Seis respuestas: `OK`, `ALREADY_USED`, `REVOKED`, `NOT_FOUND`, `WRONG_EVENT`,
+`NOT_ADMITTING`. Una entrada cuya credencial acaba de rotar responde
+`NOT_FOUND`, **no** `ALREADY_USED`: decir lo segundo sería mentir sobre una
+entrada que nadie ha usado.
+
+**El camino tecleado y el de la cámara son el mismo.** Un solo endpoint, una
+sola implementación, las mismas reglas. Lo único que los distingue es el rastro.
+
+### 32.3 La espera acotada, que no es un detalle
+
+Registrar un intento inserta en `event_checkins`, y su clave ajena a `events`
+pide un `for key share` sobre la fila del evento. Eso **choca** con el
+`for update` que toma cualquier compra, confirmación de pago o cambio de
+ajustes. Sin límite de espera, cada escaneo se queda parado hasta que la otra
+transacción termine, ocupando una conexión: con el tamaño del pool, diez
+escaneos parados no paran esa puerta, paran la API.
+
+Por eso la puerta usa el mismo `limitar_la_espera` + `espera_traducida` que el
+resto del módulo, y el choque sale como un 409 reintentable con nombre.
+
+### 32.4 El rastro
+
+Cada intento deja dos cosas: la fila operativa en `event_checkins` y la línea
+de auditoría. La línea identifica **actor, evento, entrada, resultado, fecha y
+canal**, y el canal —`qr` o `code`— **lo decide el servidor**, mirando cuál de
+las dos búsquedas encontró la fila. No lo declara el cliente: quien teclea no
+puede decir que escaneó.
+
+Importa porque el camino tecleado es el débil. Doscientos check-ins a mano desde
+la trastienda eran, en el histórico, idénticos a doscientos escaneos.
+
+`outcome` distingue `ok` de `denied`, y cuando no hay entrada la línea dice ser
+de un **evento**, no de una entrada que no existe.
+
+Si la auditoría no se puede escribir, **el check-in no se confirma**: la entrada
+no se consume y se puede volver a escanear. Es la única salida que no miente.
+
+### 32.5 Los siete números
+
+Aforo · apartadas · emitidas · válidas · usadas · revocadas · **presentes**.
+
+No significan lo mismo y enseñar uno por otro es cómo un organizador cree que
+vendió lo que sigue en la cesta de alguien. Los **presentes** salen de
+check-ins correctos distintos: ni de pedidos, ni de reservas, ni de compradores,
+ni de una suma guardada a mano.
+
+### 32.6 El escáner
+
+`expo-camera`, que el proyecto ya usaba. **Ninguna dependencia nueva.**
+
+El permiso se pide solo al entrar. Se distinguen los cuatro estados —sin
+resolver, concedido, rechazado y **bloqueado**—, y el bloqueado lleva a los
+ajustes del sistema en vez de a un botón que no hace nada. En la web se empieza
+a mano, porque el navegador puede no tener cámara.
+
+La cámara se apaga cuando nadie mira (`useSeccionActiva`). Un QR sostenido
+delante del objetivo manda **una** petición. Se ve que está comprobando antes
+de que llegue el resultado. Y **lo que falla se puede reintentar**: el código
+descartado solo se recuerda mientras haya un veredicto en pantalla.
+
+Si se pierde la respuesta de un check-in —que escribe y no es idempotente— se
+pregunta con `verify`, que no escribe: sin eso, la entrada podía quedar
+consumida mientras la puerta decía «no dejes pasar todavía».
+
+## 33. Lo que el Incremento 4 NO hace
+
+Devoluciones de entradas · cancelación de un evento con reembolso · rol de
+acomodador atado a un evento concreto (hoy la admisión es un rol de cuenta y
+alcanza a cualquier evento publicado con venta) · check-in sin conexión ·
+lectura de códigos de barras que no sean QR · resumen del código en la base ·
+transferencia de una entrada a otra persona.

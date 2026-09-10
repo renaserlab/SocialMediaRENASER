@@ -168,13 +168,38 @@ Cada omisión es una decisión, no un olvido:
 **Admisión** (organizador del evento o rol de admisión; el evento tiene que
 estar publicado y vender entradas)
 
+«Publicado» sale del ciclo operativo cuando el evento lo tiene y, si no lo
+tiene, del `status` del propio evento. **Nunca se supone publicado**: suponerlo
+abría la puerta de un borrador, y la puerta es el oráculo de credenciales que
+la puerta existe para cerrar.
+
 | Método y ruta | Qué hace |
 |---|---|
 | `POST /events/{event_id}/tickets/verify` | ¿Vale? No escribe nada |
 | `POST /events/{event_id}/check-ins` | Deja pasar, una vez |
-| `GET /events/{event_id}/attendees` | La lista de la puerta. Sin comprador y sin códigos |
+| `GET /events/{event_id}/attendees` | La lista de la puerta. Sin comprador y sin códigos. `q` exige **6 caracteres** y los comodines van escapados |
+| `POST /events/tickets/{ticket_id}/revoke` | Retira una entrada, con motivo. **La respuesta no lleva el código** |
+
+**Recaudación** (organizador del evento o quien administra el dinero,
+`puede_mover_dinero`; el evento tiene que estar publicado y vender entradas)
+
+| Método y ruta | Qué hace |
+|---|---|
 | `GET /events/{event_id}/sales` | Resumen. `ingresos_brutos_minor` es BRUTO |
-| `POST /events/tickets/{ticket_id}/revoke` | Retira una entrada, con motivo |
+
+Va aparte de la puerta **a propósito**. Hoy los dos conjuntos coinciden porque
+el rol de admisión es solo `admin`, pero dejar entrar gente y ver cuánto se ha
+recaudado son dos capacidades distintas: colgarlas del mismo permiso significa
+que el día que se cree un rol de acomodador —que es para lo que existe
+`ROLES_ADMISION`— ese acomodador vería la recaudación sin que nadie tocara este
+endpoint ni se enterara.
+
+**Por qué `q` exige seis caracteres.** El filtro busca por código, y un código
+admite por sí solo. Sin mínimo, la lista se recorre letra a letra: 32
+peticiones por posición y se tienen los códigos completos de todo el evento.
+Los comodines `_` y `%` se escapan por la misma razón: sin escapar, `q =
+"___A%"` contestaba «qué entradas llevan una A en la cuarta letra». Quien dicta
+su código entero en la puerta no nota el mínimo.
 
 **Mantenimiento**
 
@@ -182,8 +207,17 @@ estar publicado y vender entradas)
 |---|---|
 | `POST /admin/events/orders/expire` | Cierra los pedidos cuya reserva murió |
 
-**Proveedor**: `/payments/webhook/stripe`, compartido con Cursos y repartido por
-`metadata.dominio`.
+**Proveedor**: `/payments/webhook/stripe`, compartido con Cursos y repartido
+por `metadata.dominio` **y, cuando ese dato no viene, por la referencia del
+cobro**.
+
+La segunda pregunta no sobra. La metadata se adjunta al abrir el checkout y
+sobrevive al `charge` porque también se copia en el `payment_intent`, pero un
+aviso de DEVOLUCIÓN o de DISPUTA no trae el cobro: trae el objeto `refund` o el
+objeto `dispute`, que llevan metadata propia —vacía si el reembolso se hizo
+desde el panel—. Ese aviso llegaba sin dominio, se entregaba a Cursos, no
+encontraba ningún pedido suyo y se marcaba como procesado sin error: dinero
+devuelto de un evento y ni un rastro de que hubiera algo que conciliar.
 
 ### Códigos de error estables
 
