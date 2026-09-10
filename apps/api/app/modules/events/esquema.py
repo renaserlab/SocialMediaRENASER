@@ -121,13 +121,27 @@ _TABLAS_DE_POSVENTA = (
 
 
 async def hay_posventa(db: AsyncSession) -> bool:
-    """Si la 0064 está aplicada: políticas, cambios y expedientes."""
+    """Si están la 0064 Y la 0065: políticas, cambios, expedientes y efectos.
+
+    LAS DOS, Y NO SOLO LAS TABLAS. Mirar solo las cinco tablas dejaba pasar el
+    estado intermedio —0064 aplicada, 0065 no— en el que la PUERTA consulta la
+    columna `effect` para saber si una entrada está retenida y se encuentra con
+    que no existe: 500 en cada escaneo, y sin dejar ni rastro del intento. Es el
+    mismo motivo por el que `hay_ordenes` comprueba la columna `code_hash` y no
+    solo sus cuatro tablas.
+    """
     if "posventa" not in _cache:
         conexion = await db.connection()
 
         def _mirar(sync) -> bool:  # noqa: ANN001
             inspector = inspect(sync)
-            return all(inspector.has_table(t) for t in _TABLAS_DE_POSVENTA)
+            if not all(inspector.has_table(t) for t in _TABLAS_DE_POSVENTA):
+                return False
+            columnas = {
+                c["name"]
+                for c in inspector.get_columns("event_aftersale_case_tickets")
+            }
+            return "effect" in columnas
 
         _cache["posventa"] = await conexion.run_sync(_mirar)
     return _cache["posventa"]

@@ -39,7 +39,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.modules.events import esquema, politicas
 from app.modules.events import tickets as emision
-from app.modules.events.models import ENTRADA_REVOCADA, ENTRADA_VALIDA, EventTicket
+from app.modules.events.models import (
+    ENTRADA_REVOCADA,
+    ENTRADA_USADA,
+    ENTRADA_VALIDA,
+    EventOrder,
+    EventTicket,
+)
 from app.modules.events.posventa_models import (
     POLITICA_EFECTO_ENTRADA,
     EventAftersaleCase,
@@ -197,9 +203,18 @@ async def revocar_por_devolucion(
         return await _retener(
             db, caso=caso, motivo="aviso incompleto", actor_id=actor_id, momento=momento
         )
-    if (caso.currency or "").strip().upper() and (
-        moneda.strip().upper() != (caso.currency or "").strip().upper()
-    ):
+    # CONTRA EL PEDIDO, NO CONTRA LO QUE TECLEÓ QUIEN REVISA. El importe y la
+    # moneda del expediente los escribe administración al aprobar; usarlos como
+    # patrón hacía que una devolución parcial aprobada de 30 sobre un pedido de
+    # 100 se leyera como TOTAL, y que un expediente sin moneda se saltara la
+    # comparación entera.
+    pedido = await db.get(EventOrder, caso.order_id)
+    if pedido is None:
+        return await _retener(
+            db, caso=caso, motivo="pedido no encontrado", actor_id=actor_id,
+            momento=momento,
+        )
+    if moneda.strip().upper() != (pedido.currency or "").strip().upper():
         return await _retener(
             db, caso=caso, motivo="moneda distinta", actor_id=actor_id, momento=momento
         )
@@ -213,10 +228,11 @@ async def revocar_por_devolucion(
             momento=momento,
         )
 
-    total = (
-        caso.refund_amount_minor is not None
-        and int(importe_devuelto_minor) >= int(caso.refund_amount_minor)
-    )
+    # TOTAL ES LO QUE SE PAGÓ. Y cero no es total: `refund_amount_minor` admite
+    # 0, y comparado consigo mismo cualquier importe —incluido cero— pasaba por
+    # devolución completa y revocaba.
+    cobrado = int(pedido.total_minor or 0)
+    total = cobrado > 0 and int(importe_devuelto_minor) >= cobrado
     if not total and not politicas.bandera(politica, "revoke_on_partial_refund"):
         return await _retener(
             db, caso=caso, motivo="devolución parcial", actor_id=actor_id,
@@ -297,11 +313,13 @@ async def _revocar(
             effect_by=actor_id,
         )
     )
+    # LO QUE DE VERDAD CAMBIÓ, no cuántas entradas tenía el caso. Un rastro que
+    # dice «3» cuando tocó cero filas no sirve para investigar nada.
     await _anotar(
-        db, caso=caso, efecto=REVOCADA, cambiadas=len(entradas), actor_id=actor_id,
+        db, caso=caso, efecto=REVOCADA, cambiadas=revocadas, actor_id=actor_id,
         motivo=motivo,
     )
-    return Resultado(efecto=REVOCADA, cambiadas=len(entradas), revocadas=revocadas)
+    return Resultado(efecto=REVOCADA, cambiadas=revocadas, revocadas=revocadas)
 
 
 async def restaurar(

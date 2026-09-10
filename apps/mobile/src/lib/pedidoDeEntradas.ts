@@ -39,6 +39,7 @@ export const RESULTADOS_DE_ADMISION = [
   'NOT_FOUND',
   'WRONG_EVENT',
   'NOT_ADMITTING',
+  'ON_HOLD',
 ] as const;
 export type ResultadoDeAdmision = (typeof RESULTADOS_DE_ADMISION)[number];
 

@@ -200,13 +200,37 @@ begin
     raise exception 'La 0065 no dejó el índice de retención única';
   end if;
 
-  -- El veredicto nuevo tiene que caber, y los seis anteriores seguir cabiendo.
-  begin
-    insert into public.event_checkins (event_id, result)
-    select id, 'ON_HOLD' from public.events limit 0;
-  exception when others then
+  -- EL VEREDICTO NUEVO TIENE QUE CABER, y se comprueba LEYENDO la restricción,
+  -- no intentando una inserción vacía: `limit 0` no inserta ninguna fila, así
+  -- que la restricción no llegaba a evaluarse y el bloque pasaba siempre,
+  -- incluso si el CHECK no se hubiera ampliado. Daba confianza falsa justo
+  -- sobre el cambio más delicado de esta migración.
+  if not exists (
+    select 1 from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    where n.nspname = 'public'
+      and t.relname = 'event_checkins'
+      and c.conname = 'event_checkins_resultado'
+      and pg_get_constraintdef(c.oid) like '%ON_HOLD%'
+  ) then
     raise exception 'La 0065 no amplió el CHECK de event_checkins.result';
-  end;
+  end if;
+
+  -- Y LOS SEIS ANTERIORES SIGUEN CABIENDO: si el `add constraint` se hubiera
+  -- escrito mal y solo admitiera el nuevo, esto lo veria.
+  if not exists (
+    select 1 from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    where n.nspname = 'public'
+      and t.relname = 'event_checkins'
+      and c.conname = 'event_checkins_resultado'
+      and pg_get_constraintdef(c.oid) like '%ALREADY_USED%'
+      and pg_get_constraintdef(c.oid) like '%NOT_ADMITTING%'
+  ) then
+    raise exception 'La 0065 dejó fuera alguno de los veredictos anteriores';
+  end if;
 
   select count(*) into permisos
     from information_schema.table_privileges

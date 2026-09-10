@@ -2362,6 +2362,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'checkin.resultado.NOT_FOUND': 'Não é um ingresso válido',
   'checkin.resultado.WRONG_EVENT': 'Não é deste evento',
   'checkin.resultado.NOT_ADMITTING': 'Este evento não está admitindo agora',
+  'checkin.resultado.ON_HOLD': 'Retido: há uma solicitação em andamento',
   'checkin.resultado.desconocido': 'Resposta não reconhecida',
 
   'errorDeEntradas.pedidoYaExiste': 'Esta reserva já tem um pedido em andamento.',

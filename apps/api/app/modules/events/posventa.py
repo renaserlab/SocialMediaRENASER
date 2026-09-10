@@ -5,8 +5,17 @@ pasarela es otra cosa y está apagada. Aprobar una solicitud no es afirmar que e
 dinero llegó, y la máquina de estados lo impone: a `resolved` desde
 `refund_processing` solo se llega con un aviso verificado del proveedor.
 
-TRANSACCIONALMENTE NEUTRO: no hace `commit` ni `rollback`. Quien llama decide
-cuándo, para que el expediente viva o muera con lo que lo rodea.
+NO HACE `commit`: quien llama decide cuándo, para que el expediente viva o
+muera con lo que lo rodea.
+
+SÍ HACE `rollback` EN DOS SITIOS, y hay que saberlo. `abrir` lo hace cuando el
+índice parcial rechaza un segundo expediente vivo, y `transicionar` cuando el
+UPDATE condicional no encuentra su fila. El segundo es imprescindible: el
+`update()` del ORM sincroniza evaluando el criterio contra el mapa de
+identidad, así que el objeto en memoria queda con el estado nuevo aunque
+`rowcount` sea 0. Consecuencia: **estas dos funciones no se pueden llamar
+dentro de un savepoint ajeno**, porque `Session.rollback()` deshace la
+transacción entera y no el savepoint.
 """
 
 from __future__ import annotations
@@ -18,7 +27,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError, NotFoundError
+from app.core.exceptions import AppError, NotFoundError, ValidationAppError
 from app.modules.events import posventa_estados as maquina
 from app.modules.events.models import EventOrder, EventTicket
 from app.modules.events.posventa_models import (
@@ -106,20 +115,33 @@ async def abrir(
     el punto que diga la política, y normalmente cuando el dinero ya volvió.
     """
     if tipo not in TIPOS_DE_EXPEDIENTE:
-        raise ValueError(f"Tipo de expediente desconocido: {tipo}")
+        # 422 Y NO 500: el tipo llega del cliente.
+        raise ValidationAppError(
+            "Ese tipo de solicitud no existe.", code="event_case_kind_invalid"
+        )
     momento = momento or ahora()
 
+    # LOS IDENTIFICADORES, EN VARIABLES, ANTES DE TOCAR NADA. `orden` es un
+    # objeto del ORM: en cuanto la transacción se deshace queda caducado, y
+    # leerle un atributo dispara una recarga perezosa que en asíncrono revienta
+    # con `MissingGreenlet`. Abajo hay un `rollback` en el camino del choque.
+    pedido_id = orden.id
+    evento_id = orden.event_id
+    comprador_id = orden.buyer_id
+    proveedor = orden.provider
+    entorno = orden.environment
+
     expediente = EventAftersaleCase(
-        event_id=orden.event_id,
-        order_id=orden.id,
-        buyer_id=orden.buyer_id,
+        event_id=evento_id,
+        order_id=pedido_id,
+        buyer_id=comprador_id,
         organizer_id=organizador_id,
         kind=tipo,
         status=ENVIADO,
         origin=origen,
         buyer_reason=(motivo or "").strip()[:1000] or None,
-        provider=orden.provider,
-        environment=orden.environment,
+        provider=proveedor,
+        environment=entorno,
         created_at=momento,
         updated_at=momento,
     )
@@ -132,7 +154,7 @@ async def abrir(
         await db.rollback()
         vivo = await db.scalar(
             select(EventAftersaleCase).where(
-                EventAftersaleCase.order_id == orden.id,
+                EventAftersaleCase.order_id == pedido_id,
                 EventAftersaleCase.status.in_(EXPEDIENTES_VIVOS),
             )
         )
@@ -144,7 +166,7 @@ async def abrir(
     # LAS ENTRADAS, CONGELADAS. Si después se usan o se revocan, sigue
     # constando qué había cuando se pidió.
     entradas = list(
-        await db.scalars(select(EventTicket).where(EventTicket.order_id == orden.id))
+        await db.scalars(select(EventTicket).where(EventTicket.order_id == pedido_id))
     )
     for entrada in entradas:
         db.add(
@@ -202,7 +224,9 @@ async def transicionar(
     maquina.exigir(desde, hasta, actor_rol)
 
     if resultado is not None and resultado not in RESULTADOS:
-        raise ValueError(f"Resultado desconocido: {resultado}")
+        raise ValidationAppError(
+            "Ese resultado no existe.", code="event_case_outcome_invalid"
+        )
     # SIN POLÍTICA NO HAY RESULTADO, y lo exige también la base. Aquí se dice
     # antes para que el error sea comprensible en vez de una violación de CHECK.
     if resultado is not None and politica_id is None and expediente.policy_id is None:
@@ -247,6 +271,22 @@ async def transicionar(
         )
 
     await db.refresh(expediente)
+
+    # AL CERRAR SIN REVOCAR, SE LEVANTA LA RETENCIÓN. Sin esto, a quien pidió y
+    # se le denegó le quedaba la entrada «en revisión» para siempre: pagó, no
+    # se le devolvió nada y el día del evento la puerta le decía que no. Y el
+    # siguiente expediente sobre ese pedido chocaba con el índice único.
+    if hasta in (RESUELTO, RECHAZADO, CANCELADO):
+        from app.modules.events import efectos
+
+        await efectos.aplicar(
+            db,
+            caso=expediente,
+            efecto=efectos.NINGUNO,
+            actor_id=actor_id,
+            momento=momento,
+        )
+
     await _anotar(
         db,
         expediente=expediente,
@@ -353,8 +393,20 @@ async def mios(
         EventAftersaleCase.buyer_id == usuario_id
     )
     if cursor:
+        # UN CURSOR ILEGIBLE NO ES UN FALLO DEL SERVIDOR. Llega del cliente, y
+        # `fromisoformat` sobre basura lanzaba un `ValueError` que nadie captura:
+        # 500 por un parametro mal escrito.
         fecha, _, ident = cursor.partition("|")
-        momento = datetime.fromisoformat(fecha)
+        try:
+            momento = datetime.fromisoformat(fecha)
+        except ValueError:
+            raise ValidationAppError(
+                "Ese cursor no es valido.", code="event_case_cursor_invalid"
+            ) from None
+        if momento.tzinfo is None:
+            # Sin zona, la comparacion contra una columna `timestamptz` falla
+            # dentro de la base y llega disfrazada de otra cosa.
+            momento = momento.replace(tzinfo=timezone.utc)
         consulta = consulta.where(
             (EventAftersaleCase.created_at < momento)
             | (

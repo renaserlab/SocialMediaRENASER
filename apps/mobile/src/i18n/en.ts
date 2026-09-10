@@ -2358,6 +2358,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'checkin.resultado.NOT_FOUND': 'Not a valid ticket',
   'checkin.resultado.WRONG_EVENT': 'Not for this event',
   'checkin.resultado.NOT_ADMITTING': 'This event is not admitting right now',
+  'checkin.resultado.ON_HOLD': 'On hold: there is a request in progress',
   'checkin.resultado.desconocido': 'Unrecognised answer',
 
   'errorDeEntradas.pedidoYaExiste': 'This hold already has an order in progress.',

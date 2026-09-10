@@ -200,6 +200,22 @@ async def credencial_de(
     return entrada, credencial, codigo
 
 
+def _hay_retencion(entrada_id: str):
+    """Subconsulta: ¿un expediente retiene esta entrada?
+
+    Se construye aquí y no en `efectos` para no importar el modelo de posventa
+    en el camino caliente de la puerta cuando no hace falta.
+    """
+    from sqlalchemy import exists
+
+    from app.modules.events.posventa_models import EventAftersaleCaseTicket
+
+    return exists().where(
+        EventAftersaleCaseTicket.ticket_id == entrada_id,
+        EventAftersaleCaseTicket.effect.in_(("under_review", "blocked")),
+    )
+
+
 async def invalidar_credencial(db: AsyncSession, *, entrada_id: str) -> bool:
     """Deja la credencial y el código actuales sin efecto, SIN entregar nada.
 
@@ -388,6 +404,18 @@ async def check_in(
                       resultado=SIN_ADMISION, momento=momento, canal=canal, origen=origen)
         return Veredicto(SIN_ADMISION, entrada_id=suya)
 
+    # LO QUE LE PASA A LA ENTRADA, ANTES QUE LA RETENCION. Si alguien ya entro
+    # con este QR, eso es lo que la puerta necesita saber: contestar «retenida»
+    # taparia justo el dato que importa cuando se presentan dos personas con el
+    # mismo codigo. Y es el mismo orden que sigue `verificar`, que si no daba
+    # dos veredictos distintos sobre la misma entrada.
+    if entrada.status == ENTRADA_REVOCADA:
+        suya = entrada.id
+        nombre_revocada = entrada.ticket_type_name_snapshot
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
+                      resultado=REVOCADA, momento=momento, canal=canal, origen=origen)
+        return Veredicto(REVOCADA, entrada_id=suya, tipo=nombre_revocada)
+
     # RETENIDA POR UN EXPEDIENTE. Se comprueba ANTES de escribir: una entrada
     # retenida no se consume, porque retener es reversible y consumirla no.
     from app.modules.events import efectos
@@ -421,6 +449,12 @@ async def check_in(
                     (EventTicket.code == tecleado)
                     & EventTicket.code_hash.is_(None)
                 ),
+                # Y SIN RETENCION VIVA, comprobado AQUI. La comprobacion de
+                # arriba deja una ventana: entre leerla y escribir, un
+                # expediente puede retener la entrada y la persona pasaria
+                # igual. Bajarla al `where` la cierra hasta donde llega el
+                # cerrojo de fila, que es donde se resuelven las demas.
+                ~_hay_retencion(entrada.id),
             )
             .values(
                 status=ENTRADA_USADA,

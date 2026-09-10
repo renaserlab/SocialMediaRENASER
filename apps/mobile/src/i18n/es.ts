@@ -2461,6 +2461,7 @@ export const es = {
   'checkin.resultado.NOT_FOUND': 'No es una entrada válida',
   'checkin.resultado.WRONG_EVENT': 'No es de este evento',
   'checkin.resultado.NOT_ADMITTING': 'Este evento no admite entradas ahora',
+  'checkin.resultado.ON_HOLD': 'Retenida: hay una solicitud en curso',
   'checkin.resultado.desconocido': 'Respuesta no reconocida',
 
   'errorDeEntradas.pedidoYaExiste': 'Esta reserva ya tiene un pedido en curso.',

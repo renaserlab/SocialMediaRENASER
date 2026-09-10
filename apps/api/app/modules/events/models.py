@@ -939,7 +939,7 @@ class EventCheckin(Base):
     __table_args__ = (
         CheckConstraint(
             "result in ('OK', 'ALREADY_USED', 'REVOKED', 'NOT_FOUND',"
-            " 'WRONG_EVENT', 'NOT_ADMITTING')",
+            " 'WRONG_EVENT', 'NOT_ADMITTING', 'ON_HOLD')",
             name="event_checkins_resultado",
         ),
         # UNA ENTRADA SE USA UNA VEZ, y lo dice la base. Dos lectores escaneando
