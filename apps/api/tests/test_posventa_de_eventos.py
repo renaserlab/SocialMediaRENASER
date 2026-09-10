@@ -7,6 +7,7 @@ en vez de resolverse solo hacia el lado cómodo.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -245,11 +246,30 @@ async def _compra(sesiones, *, dias=10, estado_entrada="VALID", pagada=True):
         )
         await db.execute(
             text(
-                "insert into public.event_ticket_holds (id, event_id, user_id, status,"
-                " currency, subtotal_minor, expires_at) values (cast(:h as uuid),"
-                " cast(:e as uuid), cast(:u as uuid), 'CONSUMED', 'PEN', 4900, :x)"
+                "insert into public.event_ticket_holds (id, event_id, user_id,"
+                " idempotency_key, request_fingerprint, status, currency,"
+                " subtotal_minor, expires_at) values (cast(:h as uuid),"
+                " cast(:e as uuid), cast(:u as uuid), :k, '', 'CONSUMED', 'PEN',"
+                " 4900, :x)"
             ),
-            {"h": hold, "e": evento, "u": compra, "x": momento + timedelta(minutes=15)},
+            {
+                "h": hold,
+                "e": evento,
+                "u": compra,
+                "k": f"h-{hold[:8]}",
+                "x": momento + timedelta(minutes=15),
+            },
+        )
+        # LA RESERVA TIENE QUE APARTAR ALGO: un disparador diferido de la 0061
+        # rechaza una reserva sin lineas, y con razon.
+        await db.execute(
+            text(
+                "insert into public.event_ticket_hold_items (hold_id, event_id,"
+                " ticket_type_id, quantity, unit_price_minor, subtotal_minor,"
+                " ticket_type_name_snapshot) values (cast(:h as uuid),"
+                " cast(:e as uuid), cast(:t as uuid), 1, 4900, 4900, 'General')"
+            ),
+            {"h": hold, "e": evento, "t": tipo},
         )
         await db.execute(
             text(
@@ -298,8 +318,11 @@ async def _compra(sesiones, *, dias=10, estado_entrada="VALID", pagada=True):
                     "l": linea,
                     "u": compra,
                     "t": tipo,
-                    "ch": "a" * 64,
-                    "cr": "b" * 64,
+                    # UNICOS POR ENTRADA. La 0062 exige que no se repitan, y
+                    # con razon: dos entradas con la misma credencial son la
+                    # misma entrada dos veces.
+                    "ch": hashlib.sha256(f"c-{entrada}".encode()).hexdigest(),
+                    "cr": hashlib.sha256(f"q-{entrada}".encode()).hexdigest(),
                     "st": estado_entrada,
                     "usada": momento if estado_entrada == "USED" else None,
                     "rev": momento if estado_entrada == "REVOKED" else None,

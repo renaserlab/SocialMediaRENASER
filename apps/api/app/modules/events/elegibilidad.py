@@ -251,7 +251,13 @@ async def evaluar(
             return Veredicto(NO_ELEGIBLE, (YA_ENTRO,), *marca, hechos=hechos)
         revision.append(YA_ENTRO)
 
-    if hechos.entradas_validas == 0:
+    # ¿QUEDA ALGO SOBRE LO QUE ACTUAR? Las revocadas ya no; las válidas sí, y
+    # las USADAS también cuando se ha llegado hasta aquí, porque eso significa
+    # que la política permite expresamente el caso de quien ya entró. Mirar
+    # solo las válidas descartaba justo ese caso un paso después de haberlo
+    # admitido, y devolvía «no» donde tocaba «a revisión».
+    accionables = hechos.entradas_validas + hechos.entradas_usadas
+    if accionables == 0:
         return Veredicto(NO_ELEGIBLE, (ENTRADA_NO_VALIDA,), *marca, hechos=hechos)
 
     if hechos.cambios_sin_clasificar > 0:
