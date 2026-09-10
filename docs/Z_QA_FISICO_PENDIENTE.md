@@ -197,3 +197,70 @@ encendida.** Mientras estén como se entregan, la comprobación que toca es la
       funcionan igual, y las pantallas de entradas dicen que la función todavía
       no está disponible.
 - [ ] Con la 0061 aplicada y la **bandera apagada**: lo mismo.
+
+---
+
+## Incremento 3 · pedido, QR y control de acceso
+
+Nada de esto se ha probado en un teléfono. Lo que sigue **solo** se puede
+comprobar con dispositivos reales y, para el check-in, con dos a la vez.
+
+### El pedido
+
+- [ ] De la reserva al pedido: el resumen enseña lo mismo que se apartó, con los
+      precios congelados.
+- [ ] La cuenta atrás del pedido corre y, al llegar a cero, el pedido deja de
+      ofrecer pagar.
+- [ ] **Doble toque** en «Ir a pagar»: no se abren dos cobros.
+- [ ] Cancelar el pedido y volver: no se puede pagar uno cancelado.
+- [ ] El texto dice que **no es una factura ni una boleta**.
+
+### El QR, que es lo que solo se ve en un teléfono
+
+- [ ] El QR se dibuja y **lo lee un lector de verdad**. Esto es lo único que no
+      se puede dar por bueno desde una prueba automática.
+- [ ] En **modo oscuro**: el QR sigue sobre fondo blanco y se lee.
+- [ ] Con **brillo bajo** y con la pantalla sucia.
+- [ ] El código escrito debajo se puede **dictar por teléfono** y teclear sin
+      equivocarse.
+- [ ] Abrir la entrada otra vez: el QR **cambia**, y el anterior —fotografiado
+      antes— ya no vale.
+- [ ] Una entrada usada o anulada **no enseña QR**.
+
+### El check-in, con dos teléfonos
+
+- [ ] Escanear una entrada válida: verde, y ocupa la pantalla.
+- [ ] Escanearla otra vez: «ya utilizada», con la hora a la que entró.
+- [ ] **Dos teléfonos escaneando el mismo QR a la vez**: uno pasa y el otro dice
+      «ya utilizada». Ninguno de los dos se queda cargando.
+- [ ] Dejar el QR delante de la cámara diez segundos: **no se manda una petición
+      por fotograma**.
+- [ ] Escribir el código a mano cuando la cámara falla.
+- [ ] Un QR de otro evento: «no es de este evento», sin decir de cuál.
+- [ ] **Poner el teléfono en modo avión** y escanear: dice que no se pudo
+      comprobar y **no** deja pasar.
+- [ ] Sin permiso de cámara: se explica y se ofrece escribir el código.
+
+### El organizador
+
+- [ ] Las ventas dicen «ingreso bruto» y explican que no es lo que va a cobrar.
+- [ ] Sin ventas todavía: no se escribe ningún importe.
+- [ ] La lista de asistentes **no enseña quién compró** ni ningún código.
+- [ ] Buscar por el código que enseña una persona lo encuentra.
+
+### Idiomas, modo oscuro y accesibilidad
+
+- [ ] Las seis pantallas nuevas en **es / en / pt**.
+- [ ] Con **fuente grande** del sistema: nada se corta ni se solapa.
+- [ ] Con lector de pantalla: el resultado del check-in se anuncia solo, y el
+      código de la entrada se lee carácter a carácter.
+
+### Con todo apagado, que es como se entrega
+
+- [ ] Con la 0062 **sin aplicar**: pedidos y entradas dicen que la función
+      todavía no está, y el catálogo, la ficha, la reserva gratuita y las
+      reservas temporales funcionan igual.
+- [ ] Con la 0062 aplicada y **`FEATURE_EVENT_TICKETING` apagada**: lo mismo.
+- [ ] Con las entradas encendidas y **`FEATURE_EVENT_PAYMENTS` apagada**: se
+      puede pedir y no se puede pagar, y una cortesía de precio cero **sí** se
+      confirma y emite su entrada.

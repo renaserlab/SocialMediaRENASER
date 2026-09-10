@@ -481,3 +481,214 @@ comprobantes, texto jurídico de protección y reembolso, garantías y permisos 
 categoría, **porcentaje de comisión**, SLA de soporte y fondo de reserva.
 
 Mientras no estén cerrados no hay cobro, y por eso el subtotal se llama subtotal.
+
+
+---
+
+# Eventos · Incremento 3
+
+Hold vigente → orden → intento de pago → aviso verificado → entrada → check-in.
+
+**NO SE COBRA NADA TODAVÍA.** `FEATURE_EVENT_PAYMENTS` nace apagada y
+`EVENT_PAYMENTS_PROVIDER` nace en `none`. No hay credenciales en el repositorio,
+no se llama a ninguna pasarela y ninguna prueba simula un cobro real. Lo único
+que se confirma solo es una orden de total CERO —una cortesía dentro de un
+evento con entradas—, y no porque se salte nada: es que no hay dinero que
+confirmar.
+
+## 22. La migración 0062
+
+Cuatro tablas, ninguna columna sobre las anteriores, sin backfill y detrás de
+las mismas puertas de capacidad que el resto del módulo.
+
+| Tabla | Qué guarda |
+|---|---|
+| `event_orders` | La intención comercial nacida de una reserva vigente |
+| `event_order_items` | Copia comercial de las líneas: nombre y precio congelados |
+| `event_tickets` | Una fila por entrada emitida, con el `sha256` de su credencial |
+| `event_checkins` | Cada intento de admisión, el bueno y los malos |
+
+Lo que sostiene la base, y no un `if`:
+
+* **Una orden por reserva.** `unique (hold_id)`.
+* **La orden y su reserva son del mismo evento, comprador y moneda.** Una sola
+  clave ajena compuesta de cuatro columnas contra `event_ticket_holds`. La 0062
+  añade —de forma aditiva, sin tocar la 0061— la pareja única que necesita.
+* **Una referencia del proveedor no confirma dos órdenes.** Índice único parcial
+  sobre `(provider, environment, external_payment_id)`.
+* **Una orden pagada con pasarela tiene evidencia.** `PAID` con proveedor y sin
+  identificador externo no entra.
+* **El total cuadra con sus líneas y la orden tiene al menos una.** Disparador
+  diferido sobre las dos tablas, comprobado al confirmar.
+* **Se emiten exactamente las entradas compradas**, y solo cuando la orden está
+  `PAID`. También diferido, y también sobre las líneas: cambiar una cantidad de
+  una orden ya pagada movería lo comprado sin mover lo emitido.
+* **Una entrada se usa una vez.** Índice único parcial sobre el check-in
+  correcto, `where result = 'OK'`.
+* **El estado y las fechas dicen lo mismo.** `PAID` sin `paid_at`, `USED` sin
+  hora de entrada o `REVOKED` sin fecha no entran.
+
+RLS en las cuatro, `revoke all` y **ninguna política**. Aquí menos que en
+ninguna otra tabla del módulo: esto es dinero y es acceso a un recinto, y una
+política `for select` pondría el histórico de compras de otras personas a un
+`select` de distancia desde el teléfono. El móvil no lee estas tablas: pregunta
+por la API, que además de comprobar quién pregunta decide qué campos devuelve.
+
+## 23. El flujo, y dónde se corta
+
+**El inventario sigue siendo del hold.** Crear la orden NO consume la reserva:
+la reserva sigue apartando las entradas mientras se prepara el pago, y si vence,
+vence con la orden dentro. Consumirla al crear la orden dejaría entradas
+apartadas por una orden que puede no pagarse nunca.
+
+**Quien decide que hubo un cobro es el aviso verificado del proveedor**, y nadie
+más: ni que el navegador vuelva de la pasarela, ni que el móvil lo diga, ni que
+la orden lleve un rato en `PAYMENT_PROCESSING`.
+
+**Un pago tardío no concede aforo.** Si la reserva venció mientras se pagaba, el
+aforo volvió al común y puede estar vendido: se falla en cerrado y el caso queda
+conciliable por administración. Inventar capacidad para no dar una mala noticia
+es como se meten 210 personas en una sala de 200.
+
+Cada comprobación de `_por_que_no_cuadra` es una forma conocida de regalar una
+entrada: sin importe, importe cero, pago parcial, importe de más, sin moneda,
+otra moneda, otro entorno, otra pasarela, y una orden que nunca abrió un cobro.
+**La ausencia del dato no vale como coincidencia**: sustituirla por el valor
+esperado —un `or`, un `coalesce`— convierte un aviso incompleto en una entrada
+regalada.
+
+## 24. Lo emitido ocupa sitio
+
+La disponibilidad resta cuatro cosas del aforo aprobado: reservas gratuitas,
+entradas apartadas en holds vivos, **entradas emitidas** y nada más.
+
+Ese tercer sumando faltaba, y era el fallo más grave de este incremento: al
+pagar, la reserva pasa a `CONSUMED` y deja de contar como apartada; si lo
+emitido tampoco contaba, el aforo volvía entero al común. Con aforo 3 se vendían
+3, y otras 3, y otras 3, sin límite y sin concurrencia. Lo encontraron dos
+revisores independientes por separado y uno lo reprodujo empíricamente.
+
+`REVOKED` no cuenta —una entrada retirada deja de ocupar, o el aforo se iría
+agotando con entradas que ya no existen— y `USED` sí, que quien ya entró ocupa
+el sitio más que nadie.
+
+La disponibilidad devuelve además `exceso`: cuánto se pasa del aforo lo ya
+comprometido. `general` no puede decirlo porque nunca baja de cero, y por eso la
+recomprobación bajo cerrojo de `confirmar_pago` era código muerto.
+
+## 25. Orden de bloqueo
+
+**Evento → orden → hold**, y ese orden no cambia en ninguna función. El cerrojo
+de la fila de `events` sigue siendo el punto de serialización del módulo entero:
+reserva gratuita, hold, orden y confirmación pasan todos por él y en el mismo
+orden, así que no hay dos órdenes de bloqueo que puedan invertirse.
+
+Dos cosas que aprendimos aquí y no son evidentes:
+
+1. **`with_for_update()` sobre un objeto que ya está en la sesión no lo
+   refresca.** El cerrojo se toma, sí, pero lo que se comprueba debajo es la
+   foto anterior. Todas las relecturas bajo cerrojo llevan
+   `populate_existing=True`.
+2. **Un `rollback` dentro de un savepoint ajeno deshace la transacción
+   entera.** En el camino del webhook eso se llevaba por delante la fila
+   anti-repetición del aviso: cobro hecho, sin entrada, sin rastro y con un 204
+   que le dice a la pasarela que no reintente. `bloquear_evento` y
+   `espera_traducida` aceptan `deshacer=False` para quien corre dentro de uno.
+
+## 26. QR y check-in
+
+**La credencial no se guarda: se guarda su `sha256`.** El valor en claro se
+entrega una vez, viaja dentro del QR y no vuelve a existir en el servidor. Quien
+lea la tabla —una copia de seguridad, un volcado, una consulta de más— no puede
+fabricar un QR con lo que ve.
+
+**Rota al pedirla**, y con ella rota el código que se teclea. Los dos admiten y
+los dos viajan en la misma pantalla: rotar solo el QR dejaba la defensa a medias
+y quien fotografiara la entrada entraba tecleando el código. Por lo mismo, la
+lista de asistentes no devuelve códigos: se BUSCA por el que la persona enseña.
+
+**Dentro del QR va un token opaco y nada más**: ni nombre, ni correo, ni precio,
+ni el identificador de la entrada.
+
+**El check-in lo decide un `UPDATE ... WHERE status = 'VALID'`**, no un `if`: dos
+lectores escaneando el mismo QR en el mismo segundo leen los dos `VALID`. Un
+segundo escaneo devuelve «ya utilizada» con la hora a la que entró, sin volver a
+escribir. Por debajo, el índice único parcial de la 0062.
+
+**La puerta de un evento no es de cualquiera.** Crear un evento es libre, así que
+bastar con ser su organizador convertía el identificador de un borrador propio en
+un oráculo de validez de entradas ajenas: la respuesta distingue «no existe» de
+«es de otro evento». Se exige además que el evento esté publicado y venda
+entradas, y todas las rutas de la puerta responden 404 —nunca 403— sobre lo que
+no se puede operar.
+
+## 27. Banderas
+
+| Bandera | Qué gobierna | Nace |
+|---|---|---|
+| `FEATURE_EVENT_TICKETING` | Tipos, disponibilidad, reservas y **pedidos** | apagada |
+| `FEATURE_EVENT_PAYMENTS` | Abrir un cobro | apagada |
+| `EVENT_PAYMENTS_PROVIDER` | Qué pasarela cobra | `none` |
+
+Separadas a propósito. Apagar `FEATURE_EVENT_PAYMENTS` detiene la VENTA y deja
+intacto el inventario; **no impide confirmar lo ya iniciado**, porque quien pagó
+no puede quedarse sin su entrada, y no convierte un evento de pago en uno
+gratuito. `STRIPE_PAYMENTS_ENABLED` es de Cursos y no tiene nada que decir sobre
+una entrada: el reparto por dominio ocurre antes de mirarla.
+
+## 28. Integración futura con Stripe
+
+El puerto ya existe y es el de Cursos: `PaymentProvider` con `create_checkout` y
+`verify_and_parse`. Eventos no conoce Stripe; habla con esa interfaz.
+
+Lo que falta para cobrar de verdad, y ninguna de las dos es código:
+
+1. Cuenta de Stripe habilitada, claves y secreto del webhook en el entorno
+   —**nunca en el repositorio**— y `EVENT_PAYMENTS_PROVIDER=stripe`.
+2. Las decisiones del capítulo 24 del blueprint, que siguen abiertas.
+
+El webhook comparte endpoint con Cursos (`/payments/webhook/stripe`) y reparte
+por `metadata.dominio`, que fijamos nosotros al abrir el cobro. Las garantías son
+las mismas: firma verificada antes de cualquier efecto, aviso guardado en crudo
+contra el índice anti-repetición, savepoint para que un fallo no se lleve ese
+registro, y el error anotado **sin propagar** —reintentar un aviso que no cuadra
+no lo arregla y pone a la pasarela a repetirlo durante días.
+
+## 29. Rollback y despliegue progresivo
+
+La 0062 se deshace con los `drop` que lleva escritos en su cabecera, y deshacerla
+devuelve la base al estado de la 0061 sin perder un evento, una reserva ni una
+decisión de admisión.
+
+Segura en los dos órdenes: **código antes que esquema**, las rutas nuevas
+responden 503 `event_orders_not_available` y todo lo anterior funciona igual;
+**esquema antes que código**, cuatro tablas que nadie lee y sin una sola fila.
+
+Orden recomendado para encender: aplicar la 0062 → `FEATURE_EVENT_TICKETING` en
+un evento de prueba → comprobar el camino de total cero, que no necesita
+pasarela → configurar Stripe → `FEATURE_EVENT_PAYMENTS`.
+
+## 30. Monitoreo y conciliación
+
+Qué mirar cuando esto esté encendido:
+
+* Órdenes en `PAYMENT_PROCESSING` con la reserva vencida: las cierra
+  `POST /admin/events/orders/expire`, que audita el lote.
+* Filas de `payment_events` con `error` no vacío y `dominio = evento`: son los
+  avisos que no cuadraron. **Cada una es un cobro sin entrada** y hay que
+  mirarla a mano.
+* Órdenes `PAID` sin entradas: no deberían existir —lo impide el disparador
+  diferido— y si aparecen, es que alguien escribió por fuera del servicio.
+* `event_checkins` con `result <> 'OK'` agrupado por evento: una puerta con
+  muchos `NOT_FOUND` suele ser un lector mal configurado, no fraude.
+
+## 31. Lo que el Incremento 3 NO hace
+
+Nada de esto está a medias ni apagado: no existe, y documentarlo es lo que
+impide que alguien lo dé por hecho.
+
+Reventa · transferencia entre personas · lista de espera · asiento numerado ·
+mapa de asientos · descuentos · cupones · impuestos · factura o boleta ·
+comisión de plataforma · liquidación al organizador · devolución de entradas ·
+cancelación masiva con reembolso · eventos recurrentes · varias monedas en un
+evento · `INVITATION_ONLY` · pagos reales.

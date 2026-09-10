@@ -144,3 +144,79 @@ Cada omisión es una decisión, no un olvido:
 | **Geolocalización** | (a) sin distancia; (b) lat/long por evento; (c) ciudad como texto | (c) primero: barata y suficiente para filtrar | Medio | «Cerca de ti», mapa, filtro de ciudad |
 | **Estados del evento** | (a) `content_status` actual; (b) los doce del blueprint | (b) cuando haya venta: `CANCELLED` sin devoluciones no sirve de nada | Alto | Cambios, cancelación, reembolso |
 | **Aforo y lista de espera** | (a) solo `capacity`; (b) `waitlist` real | (a) hasta que haya venta | Bajo | `SOLD_OUT` |
+
+
+---
+
+## 12. Incremento 3 · contrato
+
+### Endpoints
+
+**Comprador**
+
+| Método y ruta | Qué hace |
+|---|---|
+| `POST /events/ticket-holds/{hold_id}/orders` | Crea el pedido. `Idempotency-Key` obligatoria. No cobra |
+| `GET /events/orders/{order_id}` | El pedido, con los segundos que le quedan a su reserva |
+| `GET /events/me/orders` | Mis pedidos, paginados por cursor |
+| `POST /events/orders/{order_id}/cancel` | Cancela antes de pagar. No libera la reserva |
+| `POST /events/orders/{order_id}/payment` | Abre el cobro. **El importe no viaja en la petición** |
+| `GET /events/me/tickets` | Mis entradas, paginadas por cursor |
+| `GET /events/tickets/{ticket_id}` | Una entrada, sin credencial |
+| `POST /events/tickets/{ticket_id}/credential` | El valor del QR. Se entrega una vez y ROTA |
+
+**Admisión** (organizador del evento o rol de admisión; el evento tiene que
+estar publicado y vender entradas)
+
+| Método y ruta | Qué hace |
+|---|---|
+| `POST /events/{event_id}/tickets/verify` | ¿Vale? No escribe nada |
+| `POST /events/{event_id}/check-ins` | Deja pasar, una vez |
+| `GET /events/{event_id}/attendees` | La lista de la puerta. Sin comprador y sin códigos |
+| `GET /events/{event_id}/sales` | Resumen. `ingresos_brutos_minor` es BRUTO |
+| `POST /events/tickets/{ticket_id}/revoke` | Retira una entrada, con motivo |
+
+**Mantenimiento**
+
+| Método y ruta | Qué hace |
+|---|---|
+| `POST /admin/events/orders/expire` | Cierra los pedidos cuya reserva murió |
+
+**Proveedor**: `/payments/webhook/stripe`, compartido con Cursos y repartido por
+`metadata.dominio`.
+
+### Códigos de error estables
+
+`event_order_already_exists` (lleva `details.order_id`) · `event_order_conflict` ·
+`event_order_not_found` · `event_order_not_payable` · `event_payment_mismatch` ·
+`ticket_hold_not_usable` · `event_orders_not_available` ·
+`event_payments_not_available` · `event_ticket_not_found` ·
+`event_ticket_not_valid` · `event_ticket_already_used` · `event_not_admitting`.
+
+La pantalla se ramifica por el código, nunca por el texto: el texto está en
+español y cambia; el código es el contrato.
+
+### Estados
+
+**Orden**: `PENDING_PAYMENT` → `PAYMENT_PROCESSING` → `PAID`, con
+`PAYMENT_FAILED`, `EXPIRED` y `CANCELLED` como salidas. Ninguno está «por si
+acaso»: cada uno tiene una transición real que lo escribe.
+
+**Entrada**: `VALID` → `USED` (check-in) o `REVOKED` (administración). Una usada
+no vuelve a `VALID` y no se revoca: la persona ya entró.
+
+### Vistas
+
+Asistente: resumen del pedido con su estado de pago · mis entradas en tres
+montones · una entrada con su QR.
+Organizador: ventas del evento · asistentes · control de acceso.
+
+### Decisiones que siguen bloqueadas
+
+Las del capítulo 24 del blueprint, ninguna resuelta y ninguna inventada:
+vendedor de registro, Stripe Connect por país, tratamiento tributario y
+comprobantes, texto jurídico de protección y reembolso, garantías por categoría,
+**porcentaje de comisión**, SLA de soporte y fondo de reserva.
+
+Mientras no estén cerradas no hay cobro, y por eso el total del pedido es igual
+a su subtotal y la pantalla dice que no es una factura.
