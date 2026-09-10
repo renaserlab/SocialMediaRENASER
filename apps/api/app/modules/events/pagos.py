@@ -209,6 +209,12 @@ async def es_de_entradas(db: AsyncSession, evento) -> bool:
     return (
         await db.scalar(
             select(EventOrder.id).where(
+                # `provider` PRIMERO, y no por gusto: el unico indice que sirve
+                # esta consulta es `(provider, environment, external_payment_id)`
+                # y sin su primera columna PostgreSQL no puede buscar, solo
+                # recorrer. Ademas es cierto: se esta atendiendo un aviso de
+                # esta pasarela.
+                EventOrder.provider == "stripe",
                 EventOrder.external_payment_id == referencia,
                 EventOrder.environment == evento.environment,
             )

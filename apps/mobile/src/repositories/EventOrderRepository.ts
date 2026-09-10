@@ -59,7 +59,13 @@ export type Entrada = {
   /** `VALID`, `USED` o `REVOKED`. */
   status: string;
   /** El código que se teclea si la cámara falla. Rota con la credencial. */
-  code: string;
+  /**
+   * El codigo que se teclea si la camara falla.
+   *
+   * `null` cuando quien pregunta NO es el dueno: al revocar, el servidor no
+   * lo devuelve, porque el codigo admite por si solo.
+   */
+  code: string | null;
   issued_at: string;
   checked_in_at: string | null;
 };

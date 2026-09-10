@@ -158,7 +158,7 @@ export function MisEntradasScreen() {
           {t(claveDelEstadoDeEntrada(entrada.status) as TranslationKey)}
         </Text>
         <Text variant="caption" color={colors.textMuted}>
-          {codigoLegible(entrada.code)}
+          {codigoLegible(entrada.code ?? '')}
         </Text>
       </View>
       <Feather name="chevron-right" size={18} color={colors.textMuted} />

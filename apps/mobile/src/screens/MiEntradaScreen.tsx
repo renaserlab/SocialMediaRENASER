@@ -136,7 +136,10 @@ export function MiEntradaScreen() {
   }
 
   const vigente = entradaVigente(entrada.status);
-  const codigo = credencial?.code ?? entrada.code;
+  // `?? ''` porque el servidor solo manda el codigo a su dueno: en cualquier
+  // otra respuesta viene nulo. Aqui SIEMPRE somos el dueno, pero el tipo dice
+  // la verdad y el recuadro de abajo se esconde si no hay nada que ensenar.
+  const codigo = credencial?.code ?? entrada.code ?? '';
 
   return (
     <AppScreen contentStyle={styles.contenido}>
@@ -185,6 +188,7 @@ export function MiEntradaScreen() {
         </View>
       ) : null}
 
+      {codigo !== '' ? (
       <View style={[styles.codigo, { borderColor: colors.border }]}>
         <Text variant="caption" color={colors.textMuted}>
           {t('miEntrada.codigo')}
@@ -198,6 +202,7 @@ export function MiEntradaScreen() {
           {codigoLegible(codigo)}
         </Text>
       </View>
+      ) : null}
 
       <Text variant="caption" color={colors.textMuted}>
         {vigente ? t('miEntrada.instrucciones') : t('miEntrada.yaNoSirve')}

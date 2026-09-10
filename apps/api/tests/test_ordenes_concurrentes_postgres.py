@@ -1115,3 +1115,227 @@ async def test_un_fallo_de_auditoria_no_deja_pasar_a_medias(motor, sesiones) -> 
             db, evento_id=evento, credencial=credencial, operador_id=operador
         )
     assert veredicto.resultado == emision.OK
+
+
+# --------------------------------------------------------------------------- #
+# Lo que la revision independiente encontro
+# --------------------------------------------------------------------------- #
+async def test_revocar_tras_haber_leido_la_entrada_no_revienta(motor, sesiones) -> None:
+    """LA RUTA REAL LEE LA ENTRADA ANTES DE REVOCARLA.
+
+    `order_router` hace `db.get(EventTicket, ...)` para saber de que evento es
+    y comprobar permisos, y despues llama a `revocar`, que la vuelve a leer con
+    `with_for_update`. Pero un `for update` NO refresca un objeto que ya esta en
+    el mapa de identidad: el cerrojo se toma sobre una fila que entretanto puede
+    haber cambiado, y el codigo decide mirando la foto vieja.
+
+    Si mientras tanto alguien paso por la puerta, `revocar` no ve el `USED`,
+    escribe `REVOKED` encima y deja `checked_in_at` puesto: el CHECK de la 0062
+    rechaza la transaccion y quien revoca recibe un 500 en vez de un 409.
+    """
+    evento, entrada, credencial = await _una_entrada(motor, sesiones)
+    async with motor.connect() as conexion:
+        organizador = (
+            await conexion.execute(
+                text(
+                    "select organizer_id::text from public.events "
+                    "where id = cast(:e as uuid)"
+                ),
+                {"e": evento},
+            )
+        ).scalar_one()
+    operador = await _persona(motor, "puerta-rancia")
+
+    # SIN `sleep`: se espera a que la puerta HAYA terminado, no a que pase un
+    # tiempo. Una carrera resuelta con el reloj es una apuesta sobre lo rapida
+    # que sea la maquina, y una apuesta que sale bien no prueba nada.
+    leida = asyncio.Event()
+    entro = asyncio.Event()
+
+    async def revoca_como_la_ruta():
+        async with sesiones() as db:
+            # LO QUE HACE LA RUTA, en la misma sesion y antes de nada: la lee
+            # para saber de que evento es, y SE QUEDA CON ELLA mientras
+            # comprueba permisos. Retenerla importa: el mapa de identidad de
+            # SQLAlchemy guarda referencias debiles, asi que soltar el objeto lo
+            # deja recolectar y la siguiente consulta lo traeria fresco. La ruta
+            # no lo suelta, y por eso la lectura de `revocar` cae sobre la foto
+            # vieja.
+            precargada = await db.get(emision.EventTicket, entrada)
+            assert precargada is not None
+            leida.set()
+            await asyncio.wait_for(entro.wait(), timeout=30)
+            try:
+                await emision.revocar(
+                    db, entrada_id=entrada, usuario_id=organizador, motivo="duplicada"
+                )
+                return "revocada"
+            except AppError as esperado:
+                await db.rollback()
+                return esperado.code or "AppError"
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+            finally:
+                del precargada
+
+    async def escanea():
+        await asyncio.wait_for(leida.wait(), timeout=30)
+        async with sesiones() as db:
+            try:
+                return await emision.check_in(
+                    db, evento_id=evento, credencial=credencial, operador_id=operador
+                )
+            finally:
+                entro.set()
+
+    resultado, veredicto = await asyncio.gather(revoca_como_la_ruta(), escanea())
+    assert veredicto.resultado == emision.OK
+    assert resultado == "event_ticket_already_used", (
+        f"revocar sobre una entrada ya usada devolvio {resultado!r}: "
+        "la lectura previa dejo el objeto rancio"
+    )
+
+
+async def test_una_credencial_ya_rotada_no_admite(motor, sesiones) -> None:
+    """La escritura del check-in no volvia a comprobar la credencial.
+
+    Su `where` era solo `id` y `status = 'VALID'`. Entre encontrar la entrada
+    por su credencial y escribir «usada» no habia cerrojo, asi que una rotacion
+    que entrara justo en medio no impedia nada: el QR viejo —el fotografiado,
+    el compartido— seguia dejando pasar. Era la promesa entera de rotar.
+    """
+    evento, entrada, vieja = await _una_entrada(motor, sesiones)
+    async with motor.connect() as conexion:
+        dueno = (
+            await conexion.execute(
+                text(
+                    "select owner_id::text from public.event_tickets "
+                    "where id = cast(:t as uuid)"
+                ),
+                {"t": entrada},
+            )
+        ).scalar_one()
+    operador = await _persona(motor, "puerta-vieja")
+
+    barrera = asyncio.Barrier(2)
+    original = emision._admite_entrada
+
+    rotada = asyncio.Event()
+
+    async def espera_en_medio(db, evento_id, momento):
+        # EL HUECO EXACTO: ya se encontro la entrada por la credencial vieja y
+        # todavia no se ha escrito nada. Se espera a que la rotacion HAYA
+        # confirmado, no a que pase un tiempo.
+        await barrera.wait()
+        await asyncio.wait_for(rotada.wait(), timeout=30)
+        return await original(db, evento_id, momento)
+
+    emision._admite_entrada = espera_en_medio
+    try:
+
+        async def escanea():
+            async with sesiones() as db:
+                return await emision.check_in(
+                    db, evento_id=evento, credencial=vieja, operador_id=operador
+                )
+
+        async def rota():
+            async with sesiones() as db:
+                await barrera.wait()
+                try:
+                    return await emision.credencial_de(
+                        db, entrada_id=entrada, usuario_id=dueno
+                    )
+                finally:
+                    rotada.set()
+
+        veredicto, _ = await asyncio.gather(escanea(), rota())
+    finally:
+        emision._admite_entrada = original
+
+    assert veredicto.resultado != emision.OK, (
+        "una credencial ya rotada ha dejado pasar"
+    )
+
+    async with motor.connect() as conexion:
+        estado = (
+            await conexion.execute(
+                text("select status from public.event_tickets where id = cast(:t as uuid)"),
+                {"t": entrada},
+            )
+        ).scalar_one()
+    assert estado == "VALID", "y no se ha consumido"
+
+
+async def test_la_puerta_no_se_queda_colgada_detras_de_una_compra(
+    motor, sesiones, monkeypatch
+) -> None:
+    """EL CERROJO DEL EVENTO PARA LA PUERTA ENTERA.
+
+    Registrar un check-in inserta en `event_checkins`, que tiene clave ajena a
+    `events`: ese insert pide `for key share` sobre la fila del evento, y eso
+    choca con el `for update` que toma cualquier compra, confirmacion de pago o
+    cambio de ajustes. Sin limite de espera, cada escaneo se queda parado hasta
+    que la otra transaccion termine; con el pool de conexiones que hay, diez
+    escaneos parados no paran esa puerta: paran la API.
+
+    Tiene que fallar RAPIDO y de forma reintentable, no esperar.
+    """
+    evento, entrada, credencial = await _una_entrada(motor, sesiones)
+    operador = await _persona(motor, "puerta-cola")
+    # LA FIXTURE DE ESTE MODULO SUBE LA ESPERA A 30 SEGUNDOS a proposito, para
+    # que las carreras que serializan sobre la misma fila no se rindan por
+    # tiempo. Aqui se prueba justo lo contrario, asi que se baja.
+    monkeypatch.setattr(
+        get_settings(), "inventory_lock_timeout_ms", 1000, raising=False
+    )
+
+    tomado = asyncio.Event()
+    soltar = asyncio.Event()
+
+    async def sostiene_el_evento():
+        async with sesiones() as db:
+            await db.execute(
+                text(
+                    "select id from public.events where id = cast(:e as uuid) for update"
+                ),
+                {"e": evento},
+            )
+            tomado.set()
+            await asyncio.wait_for(soltar.wait(), timeout=30)
+            await db.rollback()
+
+    async def escanea():
+        await asyncio.wait_for(tomado.wait(), timeout=30)
+        async with sesiones() as db:
+            comienzo = asyncio.get_running_loop().time()
+            try:
+                await emision.check_in(
+                    db, evento_id=evento, credencial=credencial, operador_id=operador
+                )
+                return "paso", asyncio.get_running_loop().time() - comienzo
+            except AppError as error:
+                await db.rollback()
+                return error.code or "AppError", (
+                    asyncio.get_running_loop().time() - comienzo
+                )
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__, (
+                    asyncio.get_running_loop().time() - comienzo
+                )
+            finally:
+                soltar.set()
+
+    ajustes = get_settings()
+    limite = ajustes.inventory_lock_timeout_ms / 1000
+    _, (resultado, tardanza) = await asyncio.gather(sostiene_el_evento(), escanea())
+
+    assert tardanza < limite + 5, (
+        f"el escaneo tardo {tardanza:.1f}s: se quedo esperando el cerrojo del evento"
+    )
+    assert resultado == "inventory_lock_timeout", (
+        f"el escaneo termino con {resultado!r}: tiene que ser un fallo "
+        "reintentable y con nombre, no una espera eterna ni un 500"
+    )

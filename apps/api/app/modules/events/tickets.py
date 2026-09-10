@@ -152,8 +152,15 @@ async def credencial_de(
     fotografía la entrada se lleva los dos. Rotar solo el QR dejaba la defensa a
     medias, y la migración prometía lo contrario.
     """
+    await inventory.limitar_la_espera(db)
     entrada = await db.scalar(
-        select(EventTicket).where(EventTicket.id == entrada_id).with_for_update()
+        select(EventTicket)
+        .where(EventTicket.id == entrada_id)
+        .with_for_update()
+        # `populate_existing`: un `for update` NO refresca un objeto que ya
+        # esté en el mapa de identidad. Sin esto el cerrojo se toma sobre una
+        # fila que puede haber cambiado y se decide mirando la foto vieja.
+        .execution_options(populate_existing=True)
     )
     if entrada is None or entrada.owner_id != usuario_id:
         await db.rollback()
@@ -306,11 +313,18 @@ async def check_in(
     a la que entró, que es lo que la puerta necesita para decidir.
     """
     momento = momento or ahora()
+    # CON TIEMPO LIMITE, Y NO POR EL `select`. Registrar un intento inserta en
+    # `event_checkins`, que tiene clave ajena a `events`: ese `insert` pide un
+    # `for key share` sobre la fila del evento, y eso choca con el `for update`
+    # que toma cualquier compra, confirmacion de pago o cambio de ajustes. Sin
+    # limite, cada escaneo se queda parado hasta que la otra transaccion
+    # termine, ocupando una conexion. Con el tamano del pool, diez escaneos
+    # parados no paran esa puerta: paran la API.
+    await inventory.limitar_la_espera(db)
     entrada, canal = await _buscar(db, credencial=credencial)
     if entrada is None:
-        await _anotar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
                       resultado=NO_EXISTE, momento=momento, canal=canal)
-        await db.commit()
         return Veredicto(NO_EXISTE)
 
     if entrada.event_id != evento_id:
@@ -318,25 +332,40 @@ async def check_in(
         # evento, no del identificador de una entrada de otro: escribirlo aquí
         # mezcla los historiales y acaba enseñando en la pantalla de un evento
         # identificadores que pertenecen a otro.
-        await _anotar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
                       resultado=OTRO_EVENTO, momento=momento, canal=canal)
-        await db.commit()
         return Veredicto(OTRO_EVENTO)
 
     if not await _admite_entrada(db, entrada.event_id, momento):
         suya = entrada.id
-        await _anotar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
                       resultado=SIN_ADMISION, momento=momento, canal=canal)
-        await db.commit()
         return Veredicto(SIN_ADMISION, entrada_id=suya)
 
     # LA ESCRITURA CONDICIONAL. Aquí está la garantía, no en las comprobaciones
     # de arriba: `where status = 'VALID'` deja pasar exactamente a uno.
-    resultado = await db.execute(
-        update(EventTicket)
-        .where(EventTicket.id == entrada.id, EventTicket.status == ENTRADA_VALIDA)
-        .values(status=ENTRADA_USADA, checked_in_at=momento, checked_in_by=operador_id)
-    )
+    #
+    # Y LA CREDENCIAL VUELVE A COMPROBARSE AQUÍ. Entre encontrar la entrada y
+    # escribir «usada» no hay cerrojo, así que una rotación que entre justo en
+    # medio no impedía nada: el QR viejo —el fotografiado, el compartido—
+    # seguía dejando pasar, que es la promesa entera de rotar.
+    huella = resumir((credencial or "").strip())
+    tecleado = (credencial or "").strip().upper()
+    async with inventory.espera_traducida(db):
+        resultado = await db.execute(
+            update(EventTicket)
+            .where(
+                EventTicket.id == entrada.id,
+                EventTicket.status == ENTRADA_VALIDA,
+                (EventTicket.credential_hash == huella)
+                | (EventTicket.code == tecleado),
+            )
+            .values(
+                status=ENTRADA_USADA,
+                checked_in_at=momento,
+                checked_in_by=operador_id,
+            )
+        )
     # EL VEREDICTO SE ARMA ANTES DEL `commit`. Confirmar expira los objetos de
     # la sesión, y leerles un atributo después dispara una carga perezosa que en
     # asíncrono revienta con `MissingGreenlet`: la puerta recibiría un 500 sobre
@@ -345,13 +374,24 @@ async def check_in(
     nombre = entrada.ticket_type_name_snapshot
 
     if resultado.rowcount == 1:
-        await _anotar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=entrada, operador_id=operador_id,
                       resultado=OK, momento=momento, canal=canal)
-        await db.commit()
         return Veredicto(OK, entrada_id=identificador, tipo=nombre, usada_a_las=momento)
 
-    # No se cambió ninguna fila: alguien llegó antes, o la entrada está
-    # revocada. Se vuelve a leer para decir cuál de las dos cosas es.
+    # No se cambió ninguna fila: alguien llegó antes, la entrada está revocada,
+    # o la credencial ya no es la suya. Se vuelve a leer para decir cuál.
+    #
+    # EL `rollback` NO ES SOLO SOLTAR LA TRANSACCIÓN, y quitarlo rompe esto en
+    # silencio: `update()` del ORM sincroniza la sesión evaluando el criterio
+    # contra el mapa de identidad, no contra las filas que la base tocó de
+    # verdad. El objeto en memoria sigue diciendo `VALID`, así que casa, y
+    # SQLAlchemy le escribe `USED` y la hora AUNQUE `rowcount` sea 0. Sin
+    # deshacer, la relectura de abajo devolvería ese objeto envenenado: la hora
+    # sería la de este escáner y la rama de revocada no se tomaría nunca.
+    #
+    # Y POR ESO ESTA FUNCIÓN NO SE PUEDE LLAMAR DENTRO DE UN SAVEPOINT AJENO:
+    # `Session.rollback()` deshace la transacción entera, no el savepoint. Las
+    # rutas la llaman en la raíz.
     await db.rollback()
     fresca = await db.get(EventTicket, identificador)
     estado = fresca.status if fresca is not None else None
@@ -360,17 +400,37 @@ async def check_in(
         nombre = fresca.ticket_type_name_snapshot
 
     if estado == ENTRADA_REVOCADA:
-        await _anotar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
                       resultado=REVOCADA, momento=momento, canal=canal)
-        await db.commit()
         return Veredicto(REVOCADA, entrada_id=identificador, tipo=nombre)
 
-    await _anotar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
+    if estado == ENTRADA_VALIDA:
+        # SIGUE VÁLIDA Y AUN ASÍ NO SE ESCRIBIÓ: lo que no cuadra es la
+        # credencial, que se ha rotado mientras esto ocurría. NO es «ya
+        # utilizada» —decirlo sería mentir sobre una entrada que nadie ha
+        # usado— sino que este QR ya no vale.
+        await _anotar_y_confirmar(db, evento_id=evento_id, entrada=None, operador_id=operador_id,
+                      resultado=NO_EXISTE, momento=momento, canal=canal)
+        return Veredicto(NO_EXISTE)
+
+    await _anotar_y_confirmar(db, evento_id=evento_id, entrada=fresca, operador_id=operador_id,
                   resultado=YA_USADA, momento=momento, canal=canal)
-    await db.commit()
     return Veredicto(
         YA_USADA, entrada_id=identificador, tipo=nombre, usada_a_las=entro_a_las
     )
+
+
+async def _anotar_y_confirmar(db: AsyncSession, **datos) -> None:
+    """Deja el rastro y lo confirma, con la misma espera acotada que todo.
+
+    EL `insert` EN `event_checkins` NO ES INOCENTE: su clave ajena a `events`
+    pide un `for key share` sobre la fila del evento, y eso choca con el
+    `for update` que toma cualquier compra o confirmación de pago. Sin traducir,
+    ese choque llegaba a la puerta como un 500 sobre algo que se reintenta.
+    """
+    async with inventory.espera_traducida(db):
+        await _anotar(db, **datos)
+        await db.commit()
 
 
 async def _anotar(
@@ -454,8 +514,19 @@ async def revocar(
     después convierte el histórico en algo que no se puede usar para nada.
     """
     momento = momento or ahora()
+    await inventory.limitar_la_espera(db)
     entrada = await db.scalar(
-        select(EventTicket).where(EventTicket.id == entrada_id).with_for_update()
+        select(EventTicket)
+        .where(EventTicket.id == entrada_id)
+        .with_for_update()
+        # SIN ESTO SE DECIDÍA SOBRE UNA FOTO VIEJA. La ruta lee la entrada para
+        # saber de qué evento es y se queda con ella mientras comprueba
+        # permisos; un `for update` toma el cerrojo pero no refresca lo ya
+        # cargado. Si entretanto alguien pasó por la puerta, aquí se veía
+        # `VALID`, se escribía `REVOKED` encima dejando `checked_in_at` puesto,
+        # y el CHECK de la 0062 rechazaba la transacción: quien revoca recibía
+        # un 500 en vez de «esa entrada ya se usó».
+        .execution_options(populate_existing=True)
     )
     if entrada is None:
         await db.rollback()
