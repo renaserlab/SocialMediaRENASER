@@ -6,9 +6,14 @@ transferencias, que ya no mencionan cursos por ninguna parte. Lo único que
 había que generalizar eran dos columnas, y lo hace la 0068.
 
 QUÉ SE CONGELA AL VENDER. El evento, el ORGANIZADOR BENEFICIARIO, el pedido, el
-bruto, la moneda, la comisión, el neto, la versión de reglas, el proveedor y el
-entorno. Cambiar después el organizador del evento no redirige dinero ya
-vendido: el saldo apunta a quien lo era cuando se cobró.
+bruto, la moneda, la comisión, el neto y la versión de reglas. Cambiar después
+el organizador del evento no redirige dinero ya vendido: el saldo apunta a quien
+lo era cuando se cobró.
+
+EL ENTORNO NO SE GUARDA EN EL SALDO: llega por la cuenta de cobro, que sí lo
+tiene, y la cuenta se elige con el entorno DEL PEDIDO y no con el del proceso.
+Elegirla con el del proceso hacía que un pedido de pruebas confirmado en una
+réplica de producción apuntara a la cuenta de cobro real del organizador.
 
 SIN COMISIÓN CONFIGURADA NO HAY SALDO. `platform_fee_bps = -1` significa que
 nadie ha decidido el número; suponer 0 % transferiría el bruto y ninguna prueba
@@ -25,9 +30,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import logging
 
 from app.core.exceptions import AppError
 from app.modules.catalog.models import Event
@@ -56,6 +63,16 @@ RESERVA_VIVA = "reserve_held"
 EXPEDIENTE_ABIERTO = "aftersale_case_open"
 DISPUTA_ABIERTA = "dispute_open"
 RETENCION_EN_CURSO = "hold_open"
+#: El saldo ya no está en la cola: se canceló, se congeló o ya salió. La
+#: pregunta «por qué no se libera» no se contesta con `None` para un saldo
+#: cancelado por una devolución, porque `None` significa «nada lo impide».
+SALDO_NO_PENDIENTE = "balance_not_pending"
+#: La cuenta existe pero no sirve todavía: alta a medias, cobros apagados, o de
+#: otra persona. Tenerla apuntada no es poder pagar en ella.
+CUENTA_SIN_ALTA = "payout_account_not_ready"
+
+
+logger = logging.getLogger(__name__)
 
 
 class FinanzasNoDisponibles(AppError):
@@ -65,6 +82,14 @@ class FinanzasNoDisponibles(AppError):
 
 def ahora() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _OwnerPayoutAccount():  # noqa: N802
+    """La clase, importada tarde. Comercio ya la define y duplicarla aquí sería
+    tener dos verdades sobre la misma tabla."""
+    from app.modules.commerce.models import OwnerPayoutAccount
+
+    return OwnerPayoutAccount
 
 
 async def exigir_disponible(db: AsyncSession) -> None:
@@ -107,7 +132,7 @@ async def registrar_venta(
         # SIN COMISIÓN CONFIGURADA NO SE INVENTA UN REPARTO.
         return None
 
-    cuenta = await _cuenta_de(db, evento.organizer_id)
+    cuenta = await _cuenta_de(db, evento.organizer_id, entorno=orden.environment)
     saldo = OwnerSaleBalance(
         event_id=orden.event_id,
         event_order_id=orden.id,
@@ -142,16 +167,24 @@ async def registrar_venta(
     return saldo
 
 
-async def _cuenta_de(db: AsyncSession, owner_id: str):
-    """La cuenta de cobro del organizador, si la tiene. Nunca se inventa."""
-    from app.core.config import get_settings
+async def _cuenta_de(db: AsyncSession, owner_id: str, *, entorno: str | None):
+    """La cuenta de cobro del organizador EN EL ENTORNO DEL PEDIDO.
+
+    No en el del proceso. Un pedido de pruebas confirmado por una réplica
+    configurada como producción apuntaba a la cuenta de cobro real, y el saldo
+    no guarda entorno: después no había forma de distinguirlos.
+
+    Sin entorno en el pedido no se adivina ninguno: se devuelve `None` y el
+    saldo nace sin cuenta, que es un bloqueo con su código.
+    """
     from app.modules.commerce.models import OwnerPayoutAccount
 
-    ajustes = get_settings()
+    if not entorno:
+        return None
     return await db.scalar(
         select(OwnerPayoutAccount).where(
             OwnerPayoutAccount.owner_id == owner_id,
-            OwnerPayoutAccount.environment == ajustes.payments_environment,
+            OwnerPayoutAccount.environment == entorno,
         )
     )
 
@@ -176,11 +209,16 @@ async def _disponible_desde(
     desde_el_evento = politicas.bandera(politica, "hold_from_event")
     base = momento
     if desde_el_evento:
+        # DESDE QUE TERMINA, no desde que empieza. En un festival de tres días
+        # la diferencia son tres días de reloj corriendo mientras el evento
+        # todavía está pasando y todavía puede pasar cualquier cosa.
         evento = await db.get(Event, orden.event_id)
-        empieza = getattr(evento, "starts_at", None)
-        if empieza is None:
+        cuando = getattr(evento, "ends_at", None) or getattr(
+            evento, "starts_at", None
+        )
+        if cuando is None:
             return None
-        base = empieza if empieza.tzinfo else empieza.replace(tzinfo=timezone.utc)
+        base = cuando if cuando.tzinfo else cuando.replace(tzinfo=timezone.utc)
     return base + timedelta(days=int(dias))
 
 
@@ -193,23 +231,48 @@ class Bloqueo:
 
 
 async def por_que_no_se_libera(
-    db: AsyncSession, *, saldo: OwnerSaleBalance, momento: datetime | None = None
+    db: AsyncSession,
+    *,
+    saldo: OwnerSaleBalance,
+    reservado: int | None = None,
+    momento: datetime | None = None,
 ) -> Bloqueo | None:
     """La primera razón por la que este saldo sigue bloqueado, o `None`.
 
     SE COMPRUEBAN TODAS Y SE DEVUELVE LA PRIMERA, en orden de «lo que más
     claramente falta»: al organizador hay que decirle una cosa concreta, no
     siete a la vez.
+
+    `reservado` se puede pasar ya calculado cuando quien llama lo tiene de una
+    consulta agrupada; así una lista de doscientos saldos no hace doscientas
+    sumas.
     """
     momento = momento or ahora()
     from app.core.config import get_settings
 
     if not get_settings().comision_configurada:
         return Bloqueo(SIN_COMISION)
+    # EL ESTADO DEL PROPIO SALDO, LO PRIMERO. Un saldo cancelado por una
+    # devolución ya no está en la cola, y contestar `None` —«nada lo impide»—
+    # sobre dinero que ya se le devolvió al comprador era la peor respuesta
+    # posible de esta función.
+    if saldo.status not in (PENDIENTE, ELEGIBLE):
+        return Bloqueo(SALDO_NO_PENDIENTE, saldo.status)
     if not saldo.owner_id:
         return Bloqueo(SIN_ORGANIZADOR)
     if saldo.payout_account_id is None:
         return Bloqueo(SIN_CUENTA)
+    # TENER UNA CUENTA APUNTADA NO ES PODER PAGAR EN ELLA. Un alta a medias,
+    # los cobros apagados o una cuenta de otra persona pasaban por «nada lo
+    # impide»; el camino de Cursos sí lo exige y este no.
+    cuenta = await db.get(_OwnerPayoutAccount(), saldo.payout_account_id)
+    if (
+        cuenta is None
+        or not cuenta.payouts_enabled
+        or (cuenta.onboarding_status or "") != "active"
+        or cuenta.owner_id != saldo.owner_id
+    ):
+        return Bloqueo(CUENTA_SIN_ALTA)
     if saldo.available_at is None:
         return Bloqueo(SIN_POLITICA_DE_RETENCION)
 
@@ -219,15 +282,26 @@ async def por_que_no_se_libera(
     if disponible > momento:
         return Bloqueo(RETENCION_EN_CURSO, disponible.isoformat())
 
-    reservado = await reservado_de(db, saldo_id=saldo.id)
+    if reservado is None:
+        reservado = await reservado_de(db, saldo_id=saldo.id)
     if reservado > 0:
         return Bloqueo(RESERVA_VIVA, str(reservado))
 
+    # POR SALDO O POR PEDIDO. Una disputa abierta antes de que existiera el
+    # saldo se queda con `balance_id` nulo —y hoy, sin comisión configurada, no
+    # existe ningún saldo, así que son todas—: filtrando solo por `balance_id`
+    # no bloqueaban nada.
     abierta = await db.scalar(
         select(func.count())
         .select_from(EventDispute)
         .where(
-            EventDispute.balance_id == saldo.id,
+            or_(
+                EventDispute.balance_id == saldo.id,
+                and_(
+                    EventDispute.order_id.is_not(None),
+                    EventDispute.order_id == saldo.event_order_id,
+                ),
+            ),
             EventDispute.status.in_(("open", "needs_response", "under_review")),
         )
     )
@@ -305,9 +379,19 @@ async def liberar_reserva(
     reserva_id: str,
     motivo: str,
     consumida: bool = False,
+    actor_id: str | None = None,
     momento: datetime | None = None,
 ) -> bool:
-    """Suelta o consume una reserva. UPDATE condicional."""
+    """Suelta o consume una reserva. UPDATE condicional.
+
+    NO MUEVE DINERO: deja de retenerlo. `consumida` significa que ese importe
+    ya se fue por fuera —una disputa perdida— y no vuelve a la cola.
+
+    Se guarda QUIÉN la soltó. Levantar una retención sobre dinero de otra
+    persona sin dejar nombre no se puede auditar después; las que suelta el
+    sistema al resolverse una disputa lo dejan nulo, que es su manera de decir
+    que no lo decidió nadie.
+    """
     momento = momento or ahora()
     hechas = await db.execute(
         update(OwnerSaleReserve)
@@ -315,6 +399,7 @@ async def liberar_reserva(
         .values(
             status="consumed" if consumida else "released",
             released_at=momento,
+            released_by=actor_id,
             release_reason=(motivo or "").strip()[:500] or None,
         )
     )
@@ -330,6 +415,92 @@ async def reservado_de(db: AsyncSession, *, saldo_id: str) -> int:
         )
     )
     return int(valor or 0)
+
+
+# --------------------------------------------------------------------------- #
+# El dinero que vuelve
+# --------------------------------------------------------------------------- #
+async def atender_devolucion(
+    db: AsyncSession,
+    *,
+    orden: EventOrder,
+    importe_devuelto_minor: int | None,
+    moneda: str | None,
+    confirmada: bool,
+    referencia: str | None = None,
+    momento: datetime | None = None,
+) -> str | None:
+    """Mueve el saldo del evento cuando su cobro vuelve. Devuelve qué hizo.
+
+    ESTO NO EXISTÍA, Y ES EL AGUJERO MÁS GRAVE QUE HABÍA. `liquidacion.cancelar`
+    y sus hermanas filtran por `OwnerSaleBalance.order_id`, que en un saldo de
+    evento es NULO, así que ninguna lo tocaba: una venta reembolsada, con las
+    entradas ya revocadas y el expediente cerrado, volvía a estar «sin nada que
+    lo impida» en cuanto vencía la retención.
+
+    DOS CAMINOS, Y NINGUNO INVENTA UN NÚMERO:
+
+      * devolución CONFIRMADA y TOTAL → el saldo se cancela. No hay nada que
+        pagarle a nadie.
+      * cualquier otra —parcial, o todavía sin confirmar— → se RETIENE el
+        importe que dice el aviso, con el mecanismo de reservas que ya existe.
+        Cuánto se le queda al organizador de una devolución parcial es una
+        política que nadie ha publicado; bloquear lo devuelto es un hecho, y una
+        persona lo suelta cuando haya decisión.
+
+    Un saldo ya transferido NO se toca: recuperar dinero pagado a un tercero es
+    una decisión de empresa, no algo que resuelva un webhook de madrugada.
+    """
+    momento = momento or ahora()
+    if not await esquema.hay_finanzas(db):
+        return None
+
+    saldo = await db.scalar(
+        select(OwnerSaleBalance).where(OwnerSaleBalance.event_order_id == orden.id)
+    )
+    if saldo is None:
+        # Sin comisión configurada no hay saldo. No es un fallo: es que no se
+        # creó nada que cancelar.
+        return None
+    if saldo.status in (EN_TRANSFERENCIA, TRANSFERIDO):
+        logger.error(
+            "[finanzas] el pedido de evento %s se devolvio con el saldo YA en %s. "
+            "Queda para conciliacion manual: no se genera ninguna devolucion "
+            "automatica contra el organizador.",
+            orden.id,
+            saldo.status,
+        )
+        return "already_transferred"
+    if saldo.status == CANCELADO:
+        return CANCELADO
+
+    cobrado = int(orden.total_minor or 0)
+    devuelto = int(importe_devuelto_minor or 0)
+    misma_moneda = (moneda or "").strip().upper() == (
+        orden.currency or ""
+    ).strip().upper()
+    # TOTAL ES LO QUE SE PAGÓ, y cero no es total.
+    total = confirmada and misma_moneda and cobrado > 0 and devuelto >= cobrado
+
+    if total:
+        saldo.status = CANCELADO
+        saldo.updated_at = momento
+        await db.flush()
+        return CANCELADO
+
+    if devuelto > 0 and misma_moneda:
+        await reservar(
+            db,
+            saldo=saldo,
+            importe_minor=devuelto,
+            motivo="refund",
+            momento=momento,
+        )
+        return "reserved"
+
+    # Sin importe utilizable se bloquea igual, por el expediente vivo que el
+    # aviso acaba de abrir. Aquí no se escribe un número que no se sabe.
+    return None
 
 
 async def politica_de_reserva(db: AsyncSession, *, evento_id: str):
@@ -369,12 +540,34 @@ async def abrir_o_actualizar_disputa(
         )
     )
     if existente is not None:
+        # EL SALDO, SI YA EXISTE. Una disputa abierta antes de que hubiera saldo
+        # —y hoy, sin comisión configurada, son todas— se quedaba con
+        # `balance_id` nulo PARA SIEMPRE: nunca se reintentaba, y el día que la
+        # comisión se configure esa disputa no bloquearía nada.
+        if existente.balance_id is None and orden is not None:
+            aparecido = await db.scalar(
+                select(OwnerSaleBalance).where(
+                    OwnerSaleBalance.event_order_id == orden.id
+                )
+            )
+            if aparecido is not None:
+                existente.balance_id = aparecido.id
+                await _bloquear_lo_reclamado(
+                    db, saldo=aparecido, disputa=existente, momento=momento
+                )
         desde = existente.status
         if desde != estado:
             existente.status = estado
             existente.updated_at = momento
             if estado in ("won", "lost", "closed"):
                 existente.resolved_at = momento
+                # Y SE SUELTA LO BLOQUEADO. Sin esto la reserva vivía para
+                # siempre: `liberar_reserva` no tenía ni un solo llamante, así
+                # que ganar la disputa dejaba el saldo con `reserve_held` hasta
+                # que alguien lo arreglara con SQL a mano.
+                await _soltar_lo_reclamado(
+                    db, disputa=existente, estado=estado, momento=momento
+                )
             db.add(
                 EventDisputeEvent(
                     dispute_id=existente.id,
@@ -441,19 +634,69 @@ async def abrir_o_actualizar_disputa(
     # BLOQUEA EL IMPORTE. No descuenta nada de ningún otro saldo: quién asume
     # la pérdida no está decidido.
     if saldo is not None:
-        await reservar(
-            db,
-            saldo=saldo,
-            importe_minor=int(importe_minor or saldo.net_amount_minor),
-            motivo="dispute",
-            momento=momento,
+        await _bloquear_lo_reclamado(
+            db, saldo=saldo, disputa=disputa, momento=momento
         )
     await db.flush()
     return disputa
 
 
+async def _bloquear_lo_reclamado(
+    db: AsyncSession, *, saldo: OwnerSaleBalance, disputa: EventDispute, momento: datetime
+) -> None:
+    """Retiene lo que el banco reclama, si se puede expresar en ese saldo.
+
+    LA MONEDA TIENE QUE SER LA MISMA. La reserva se guarda con la moneda DEL
+    SALDO; escribir en ella el importe de una disputa en otra divisa sería un
+    número de una moneda etiquetado con otra, que es peor que no tenerlo. En ese
+    caso no se reserva nada y el bloqueo lo pone la disputa misma, que
+    `por_que_no_se_libera` ya mira por pedido.
+    """
+    reclamado = int(disputa.amount_minor or 0)
+    moneda = (disputa.currency or "").strip().upper()
+    if reclamado <= 0 or (moneda and moneda != (saldo.currency or "").strip().upper()):
+        return
+    await reservar(
+        db,
+        saldo=saldo,
+        importe_minor=reclamado,
+        motivo="dispute",
+        momento=momento,
+    )
+
+
+async def _soltar_lo_reclamado(
+    db: AsyncSession, *, disputa: EventDispute, estado: str, momento: datetime
+) -> None:
+    """Suelta —o da por consumida— la reserva de una disputa que terminó.
+
+    GANADA o CERRADA: se suelta, el dinero vuelve a la cola del organizador.
+    PERDIDA: se marca consumida, porque ese importe se fue de verdad. Ni una ni
+    otra mueven un céntimo por su cuenta: solo dejan de retener.
+    """
+    if disputa.balance_id is None:
+        return
+    reserva = await db.scalar(
+        select(OwnerSaleReserve).where(
+            OwnerSaleReserve.balance_id == disputa.balance_id,
+            OwnerSaleReserve.reason == "dispute",
+            OwnerSaleReserve.status == "held",
+        )
+    )
+    if reserva is None:
+        return
+    await liberar_reserva(
+        db,
+        reserva_id=reserva.id,
+        motivo=f"disputa {estado}",
+        consumida=(estado == "lost"),
+        momento=momento,
+    )
+
+
 __all__ = [
     "Bloqueo",
+    "CUENTA_SIN_ALTA",
     "DISPUTA_ABIERTA",
     "EXPEDIENTE_ABIERTO",
     "FinanzasNoDisponibles",
@@ -462,8 +705,10 @@ __all__ = [
     "SIN_COMISION",
     "SIN_CUENTA",
     "SIN_ORGANIZADOR",
+    "SALDO_NO_PENDIENTE",
     "SIN_POLITICA_DE_RETENCION",
     "abrir_o_actualizar_disputa",
+    "atender_devolucion",
     "exigir_disponible",
     "liberar_reserva",
     "politica_de_reserva",

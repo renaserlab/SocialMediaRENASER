@@ -167,10 +167,12 @@ begin
     raise exception 'La 0066 no dejó el índice de suceso único';
   end if;
 
-  select count(*) into cuantas from public.notification_deliveries;
-  if cuantas > 0 then
-    raise exception 'La 0066 no escribe ninguna fila y hay %', cuantas;
-  end if;
+  -- ESTE FICHERO NO ESCRIBE NINGUNA FILA, y se comprueba leyéndolo: aquí no
+  -- hay ningún `insert`. Antes esta verificación contaba las filas y abortaba
+  -- si había alguna, lo cual convertía la migración en NO RE-EJECUTABLE: en
+  -- cuanto existiera una entrega, volver a aplicar el fichero —cosa que hacen
+  -- el editor de Supabase y cualquier runner que reaplique— fallaba con una
+  -- excepción que no significaba nada malo.
 
   select count(*) into permisos
     from information_schema.table_privileges

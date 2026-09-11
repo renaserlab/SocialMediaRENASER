@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -114,11 +115,18 @@ async def puede_resenar(
         # Nadie valora lo suyo.
         return False, "own_event", None
 
-    empieza = getattr(evento, "starts_at", None)
-    if empieza is not None:
-        cuando = empieza if empieza.tzinfo else empieza.replace(tzinfo=timezone.utc)
-        if cuando > momento:
-            return False, "event_not_finished", None
+    # CUÁNDO TERMINA, no cuándo empieza. En un festival de tres días la
+    # diferencia son tres días de opinar sobre algo que sigue pasando. Se usa
+    # `ends_at` y solo se cae a `starts_at` cuando no hay fin declarado.
+    #
+    # Y SIN FECHA NINGUNA NO SE RESEÑA. Saltarse la comprobación porque el dato
+    # falta es dar por terminado un evento del que no se sabe nada.
+    termina = getattr(evento, "ends_at", None) or getattr(evento, "starts_at", None)
+    if termina is None:
+        return False, "event_not_finished", None
+    cuando = termina if termina.tzinfo else termina.replace(tzinfo=timezone.utc)
+    if cuando > momento:
+        return False, "event_not_finished", None
 
     # EL SELLO: un check-in correcto, de una entrada de ESTA persona, en ESTE
     # evento. Los tres a la vez, y por clave ajena real.
@@ -374,6 +382,15 @@ async def listar(
         try:
             momento = datetime.fromisoformat(fecha)
         except ValueError:
+            raise ValidationAppError(
+                "Ese cursor no es válido.", code="event_review_cursor_invalid"
+            ) from None
+        # LA SEGUNDA MITAD TAMBIÉN SE VALIDA. Es un `uuid` y va a una columna
+        # `uuid`: un cursor sin `|` deja la cadena vacía, que SQLite acepta y
+        # PostgreSQL rechaza con un 500. Y esta ruta es ANÓNIMA.
+        try:
+            UUID(ident)
+        except (ValueError, AttributeError, TypeError):
             raise ValidationAppError(
                 "Ese cursor no es válido.", code="event_review_cursor_invalid"
             ) from None

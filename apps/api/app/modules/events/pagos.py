@@ -374,6 +374,24 @@ async def _atender_dinero_que_vuelve(db: AsyncSession, evento) -> str | None:
 
     # Una devolucion. `refunded` es la unica CONFIRMADA y total; las demas son
     # avances del expediente que no confirman nada.
+    #
+    # EL SALDO SE MUEVE PRIMERO, Y APARTE DEL EFECTO SOBRE LA ENTRADA. Son dos
+    # decisiones distintas: que la politica de entradas diga «retener» no
+    # significa que el dinero siga siendo del organizador. Antes no lo movia
+    # NADIE —las funciones de Cursos filtran por `order_id`, nulo en un saldo de
+    # evento— y una venta reembolsada volvia a estar disponible al vencer la
+    # retencion.
+    from app.modules.events import finanzas as _finanzas
+
+    await _finanzas.atender_devolucion(
+        db,
+        orden=pedido,
+        importe_devuelto_minor=evento.amount_minor,
+        moneda=evento.currency,
+        confirmada=evento.status == "refunded",
+        referencia=referencia,
+    )
+
     resultado = await efectos.revocar_por_devolucion(
         db,
         caso=caso,

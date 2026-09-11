@@ -227,19 +227,25 @@ async def casos_de_mi_evento(
 
     # EL RECUENTO DE ENTRADAS, EN UNA CONSULTA para todos: una por caso sería
     # N+1, y una bandeja de cincuenta haría cincuenta viajes.
-    cuantas = dict(
-        (
-            await db.execute(
-                select(
-                    EventAftersaleCaseTicket.case_id,
-                    func.count(),
+    # SIN CASOS NO SE CONSULTA: `in_(lista or [""])` manda la cadena vacía
+    # contra una columna `uuid` y PostgreSQL la rechaza.
+    cuantas = (
+        dict(
+            (
+                await db.execute(
+                    select(
+                        EventAftersaleCaseTicket.case_id,
+                        func.count(),
+                    )
+                    .where(
+                        EventAftersaleCaseTicket.case_id.in_([c.id for c in casos])
+                    )
+                    .group_by(EventAftersaleCaseTicket.case_id)
                 )
-                .where(
-                    EventAftersaleCaseTicket.case_id.in_([c.id for c in casos] or [""])
-                )
-                .group_by(EventAftersaleCaseTicket.case_id)
-            )
-        ).all()
+            ).all()
+        )
+        if casos
+        else {}
     )
     return [
         ExpedienteDelOrganizador(

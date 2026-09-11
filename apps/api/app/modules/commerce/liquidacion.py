@@ -316,18 +316,27 @@ async def cancelar(db: AsyncSession, *, order_id: str) -> bool:
 
 
 async def liberar_vencidos(db: AsyncSession, *, limite: int = 200) -> int:
-    """Pasa a `eligible` los saldos cuya garantía ya venció sin reclamación.
+    """Pasa a `eligible` los saldos DE CURSO cuya garantía venció sin reclamación.
 
     IDEMPOTENTE Y REINTENTABLE. Solo toca `pending` con fecha pasada, así que
     ejecutarlo dos veces seguidas no mueve nada la segunda. Es el mecanismo más
     simple que sirve: una consulta acotada que se puede llamar desde donde haga
     falta, sin cola de trabajos ni infraestructura nueva.
+
+    SOLO CURSOS, Y ESO ES NUEVO. Desde la 0068 esta tabla también guarda los
+    saldos de las ventas de entradas, que tienen `course_id` nulo y sus propias
+    puertas: reserva viva, disputa abierta, expediente de posventa abierto. Sin
+    este filtro, este trabajo los pasaba a `eligible` saltándoselas TODAS, y
+    además copaban el turno de pago de los creadores de cursos —que quedan
+    `eligible` para siempre y omitidos para siempre—. Los saldos de evento los
+    libera `events.finanzas`, con `por_que_no_se_libera` delante.
     """
     ahora = datetime.now(timezone.utc)
     ids = list(
         await db.scalars(
             select(OwnerSaleBalance.id)
             .where(
+                OwnerSaleBalance.course_id.is_not(None),
                 OwnerSaleBalance.status == "pending",
                 OwnerSaleBalance.available_at.is_not(None),
                 OwnerSaleBalance.available_at <= ahora,
@@ -350,6 +359,7 @@ async def liberar_vencidos(db: AsyncSession, *, limite: int = 200) -> int:
         update(OwnerSaleBalance)
         .where(
             OwnerSaleBalance.id.in_(ids),
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "pending",
         )
         .values(status="eligible", updated_at=ahora)
@@ -388,6 +398,11 @@ async def puede_transferirse(db: AsyncSession, saldo: OwnerSaleBalance) -> str |
         return "fee_not_configured"
     if saldo.status != "eligible":
         return "not_eligible"
+    # ESTE CAMINO ES EL DE CURSOS. Un saldo de evento tiene `order_id` nulo y
+    # llegaba hasta `db.get(Order, None)`, que contesta `None` y lo rechazaba
+    # por el motivo equivocado. Se dice lo que pasa de verdad.
+    if saldo.course_id is None or saldo.order_id is None:
+        return "not_a_course_balance"
     if saldo.net_amount_minor <= 0:
         return "nothing_to_transfer"
 

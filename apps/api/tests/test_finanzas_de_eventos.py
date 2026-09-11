@@ -744,3 +744,631 @@ async def test_dos_avisos_de_disputa_a_la_vez_no_abren_dos(
             )
         )
     assert cuantas == 1, (una, otra)
+
+
+# =========================================================================== #
+# Lo que la revisión independiente encontró
+#
+# Cada prueba de aquí abajo defiende un agujero que existía porque NADA lo
+# miraba. No son casos raros: son los caminos normales del dinero.
+# =========================================================================== #
+async def _cuenta_de_cobro(
+    sesiones,
+    organiza: str,
+    *,
+    entorno: str = "sandbox",
+    alta: str = "active",
+    cobros: bool = True,
+) -> str:
+    """Una cuenta de cobro del organizador. Por defecto, una que sirve."""
+    ident = str(uuid.uuid4())
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "insert into public.owner_payout_accounts (id, owner_id, provider,"
+                " environment, external_account_id, onboarding_status,"
+                " charges_enabled, payouts_enabled) values (cast(:i as uuid),"
+                " cast(:o as uuid), 'stripe', :e, :x, :a, true, :p)"
+            ),
+            {"i": ident, "o": organiza, "e": entorno, "x": f"acct_{ident[:8]}",
+             "a": alta, "p": cobros},
+        )
+        await db.commit()
+    return ident
+
+
+async def _retencion(sesiones, evento: str, dias: int, *, desde_el_evento=False):
+    """Una política de retención publicada, con su plazo."""
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="settlement_hold",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"hold_days": dias, "hold_from_event": desde_el_evento},
+            evento_id=evento,
+        )
+        await db.commit()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_saldo_reembolsado_deja_de_estar_disponible(
+    sesiones, con_comision
+) -> None:
+    """EL AGUJERO MÁS GRAVE QUE HABÍA.
+
+    `liquidacion.cancelar` y sus hermanas filtran por `OwnerSaleBalance.order_id`,
+    que en un saldo de EVENTO es nulo, así que ninguna lo tocaba. La secuencia
+    completa era: se vende, el comprador pide devolución, la pasarela la
+    confirma, se revocan las entradas, el expediente se cierra —y `resolved` no
+    está entre los vivos—, vence la retención, y `por_que_no_se_libera` contesta
+    `None`: «no hay nada que lo impida» sobre cien que ya se devolvieron.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    # Antes de la devolución no hay nada que lo impida: la retención venció.
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        assert await finanzas.por_que_no_se_libera(db, saldo=saldo) is None
+
+    # Llega la devolución CONFIRMADA y TOTAL.
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        hecho = await finanzas.atender_devolucion(
+            db,
+            orden=orden,
+            importe_devuelto_minor=10000,
+            moneda="PEN",
+            confirmada=True,
+        )
+        await db.commit()
+    assert hecho == finanzas.CANCELADO
+
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        assert saldo.status == finanzas.CANCELADO
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+        assert bloqueo is not None
+        assert bloqueo.motivo == finanzas.SALDO_NO_PENDIENTE
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_parcial_bloquea_lo_devuelto(
+    sesiones, con_comision
+) -> None:
+    """CUÁNTO SE QUEDA EL ORGANIZADOR DE UNA PARCIAL ES UNA POLÍTICA que nadie
+    ha publicado. Bloquear lo devuelto es un hecho; restarlo del neto sería
+    inventar el reparto.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id, neto = saldo.id, saldo.net_amount_minor
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        hecho = await finanzas.atender_devolucion(
+            db,
+            orden=orden,
+            importe_devuelto_minor=3000,
+            moneda="PEN",
+            confirmada=True,
+        )
+        await db.commit()
+    assert hecho == "reserved"
+
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        # El saldo NO se cancela y su neto NO se toca.
+        assert saldo.status == finanzas.PENDIENTE
+        assert saldo.net_amount_minor == neto
+        assert await finanzas.reservado_de(db, saldo_id=saldo_id) == 3000
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+        assert bloqueo is not None and bloqueo.motivo == finanzas.RESERVA_VIVA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_motor_de_cursos_no_recoge_los_saldos_de_evento(
+    sesiones, con_comision
+) -> None:
+    """LA 0068 MEZCLA LAS DOS COSAS EN UNA TABLA, y el trabajo que libera
+    vencidos de Cursos no filtraba: pasaba a `eligible` saldos de evento
+    saltándose reserva, disputa y expediente, y después los omitía uno por uno
+    copando el turno de pago de los creadores de cursos.
+    """
+    from app.modules.commerce import liquidacion
+
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    async with sesiones() as db:
+        movidos = await liquidacion.liberar_vencidos(db, limite=500)
+        await db.commit()
+
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        assert saldo.status == finanzas.PENDIENTE, (
+            "el motor de Cursos movió un saldo de evento"
+        )
+        # Y si llegara a `eligible` por otra vía, el camino de transferencia de
+        # Cursos lo rechaza diciendo lo que pasa de verdad.
+        saldo.status = "eligible"
+        await db.flush()
+        assert (
+            await liquidacion.puede_transferirse(db, saldo)
+        ) in ("transfers_disabled", "connect_disabled", "not_a_course_balance")
+        await db.rollback()
+    assert movidos == 0
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_cuenta_de_cobro_sale_del_entorno_del_pedido(
+    sesiones, con_comision
+) -> None:
+    """NO DEL ENTORNO DEL PROCESO.
+
+    El organizador tiene las DOS cuentas, la de pruebas y la de verdad. El
+    pedido es `sandbox`, así que le toca la de pruebas —pase lo que pase con la
+    configuración de la réplica que atiende el webhook—. Eligiéndola con el
+    entorno del proceso, un pedido de pruebas confirmado por una réplica de
+    producción apuntaba a la cuenta de cobro REAL, y el saldo no guarda entorno:
+    después no había forma de distinguirlos.
+    """
+    import inspect
+
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    de_pruebas = await _cuenta_de_cobro(sesiones, organiza, entorno="sandbox")
+    de_verdad = await _cuenta_de_cobro(sesiones, organiza, entorno="production")
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        assert orden.environment == "sandbox"
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+
+    assert saldo.payout_account_id == de_pruebas
+    assert saldo.payout_account_id != de_verdad
+    # Y LA CONFIGURACIÓN DEL PROCESO NO PARTICIPA. `payments_environment` es una
+    # propiedad derivada del despliegue; que no se lea aquí es justamente el
+    # arreglo, y por eso se comprueba sobre la fuente.
+    fuente = inspect.getsource(finanzas._cuenta_de)
+    assert "payments_environment" not in fuente
+    assert "entorno" in fuente
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_cuenta_a_medias_no_es_una_cuenta(sesiones, con_comision) -> None:
+    """TENERLA APUNTADA NO ES PODER PAGAR EN ELLA. Un alta sin terminar o los
+    cobros apagados pasaban por «nada lo impide»; el camino de Cursos sí lo
+    exige y este no lo miraba.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza, alta="pending", cobros=False)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        assert saldo.payout_account_id is not None
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+    assert bloqueo is not None
+    assert bloqueo.motivo == finanzas.CUENTA_SIN_ALTA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_disputa_sin_saldo_todavia_bloquea_cuando_el_saldo_llega(
+    sesiones, con_comision
+) -> None:
+    """HOY TODAS LAS DISPUTAS SON ASÍ. Sin comisión configurada no existe ningún
+    saldo, así que la disputa nace con `balance_id` nulo; filtrando el bloqueo
+    solo por `balance_id`, no impedía nada el día que la comisión se decidiera.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    # La disputa llega ANTES de que exista el saldo.
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        disputa = await finanzas.abrir_o_actualizar_disputa(
+            db,
+            externa=f"dp_{orden.id[:8]}",
+            entorno="sandbox",
+            estado="open",
+            orden=orden,
+            importe_minor=10000,
+            moneda="PEN",
+        )
+        await db.commit()
+        disputa_id = disputa.id
+        assert disputa.balance_id is None
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    # Aunque la disputa no apunte al saldo, bloquea: se compara por pedido.
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+    assert bloqueo is not None and bloqueo.motivo == finanzas.DISPUTA_ABIERTA
+
+    # Y el siguiente aviso de la misma disputa SÍ rellena el saldo y retiene.
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        await finanzas.abrir_o_actualizar_disputa(
+            db,
+            externa=f"dp_{orden.id[:8]}",
+            entorno="sandbox",
+            estado="under_review",
+            orden=orden,
+            importe_minor=10000,
+            moneda="PEN",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        disputa = await db.get(EventDispute, disputa_id)
+        assert disputa.balance_id == saldo_id
+        assert await finanzas.reservado_de(db, saldo_id=saldo_id) == 10000
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_ganar_la_disputa_suelta_lo_bloqueado(sesiones, con_comision) -> None:
+    """`liberar_reserva` NO TENÍA NI UN LLAMANTE. La reserva que abría una
+    disputa no se soltaba jamás —ni ganándola—: el saldo se quedaba con
+    `reserve_held` para siempre y solo salía de ahí con SQL a mano.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    referencia = f"dw_{orden.id[:8]}"
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        await finanzas.abrir_o_actualizar_disputa(
+            db, externa=referencia, entorno="sandbox", estado="open",
+            orden=orden, importe_minor=4000, moneda="PEN",
+        )
+        await db.commit()
+    async with sesiones() as db:
+        assert await finanzas.reservado_de(db, saldo_id=saldo_id) == 4000
+
+    async with sesiones() as db:
+        await finanzas.abrir_o_actualizar_disputa(
+            db, externa=referencia, entorno="sandbox", estado="won",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        assert await finanzas.reservado_de(db, saldo_id=saldo_id) == 0
+        reserva = await db.scalar(
+            select(OwnerSaleReserve).where(OwnerSaleReserve.balance_id == saldo_id)
+        )
+        assert reserva.status == "released"
+        # La suelta el sistema: no lleva nombre, porque no lo decidió nadie.
+        assert reserva.released_by is None
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        assert await finanzas.por_que_no_se_libera(db, saldo=saldo) is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_perder_la_disputa_da_la_reserva_por_consumida(
+    sesiones, con_comision
+) -> None:
+    """PERDERLA NO ES SOLTARLA. Ese importe se fue de verdad; marcarlo
+    `released` lo devolvería a la cola del organizador."""
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    referencia = f"dl_{orden.id[:8]}"
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        await finanzas.abrir_o_actualizar_disputa(
+            db, externa=referencia, entorno="sandbox", estado="open",
+            orden=orden, importe_minor=4000, moneda="PEN",
+        )
+        await db.commit()
+    async with sesiones() as db:
+        await finanzas.abrir_o_actualizar_disputa(
+            db, externa=referencia, entorno="sandbox", estado="lost",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        reserva = await db.scalar(
+            select(OwnerSaleReserve).where(OwnerSaleReserve.balance_id == saldo_id)
+        )
+    assert reserva.status == "consumed"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_disputa_en_otra_moneda_no_escribe_un_numero_mal_etiquetado(
+    sesiones, con_comision
+) -> None:
+    """LA RESERVA SE GUARDA CON LA MONEDA DEL SALDO. Meterle el importe de una
+    disputa en otra divisa sería un número de una moneda etiquetado con otra,
+    que es peor que no tenerlo. El bloqueo lo pone la disputa misma.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+        assert saldo.currency == "PEN"
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        await finanzas.abrir_o_actualizar_disputa(
+            db, externa=f"dx_{orden.id[:8]}", entorno="sandbox", estado="open",
+            orden=orden, importe_minor=2500, moneda="USD",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        assert await finanzas.reservado_de(db, saldo_id=saldo_id) == 0
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+    # Bloqueado igual, y por el motivo correcto.
+    assert bloqueo is not None and bloqueo.motivo == finanzas.DISPUTA_ABIERTA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_retencion_cuenta_desde_que_el_evento_TERMINA(
+    sesiones, con_comision
+) -> None:
+    """EN UN FESTIVAL DE TRES DÍAS la diferencia entre empezar y terminar son
+    tres días de reloj corriendo mientras el evento todavía está pasando."""
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "update public.events set ends_at = starts_at + interval '3 days'"
+                " where id = cast(:i as uuid)"
+            ),
+            {"i": evento},
+        )
+        await db.commit()
+    await _retencion(sesiones, evento, 7, desde_el_evento=True)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        evento_fila = await db.execute(
+            text("select starts_at, ends_at from public.events where id = cast(:i as uuid)"),
+            {"i": evento},
+        )
+        empieza, termina = evento_fila.one()
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+
+    disponible = saldo.available_at
+    if disponible.tzinfo is None:
+        disponible = disponible.replace(tzinfo=timezone.utc)
+    assert disponible == termina + timedelta(days=7)
+    assert disponible != empieza + timedelta(days=7)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_bruto_admite_un_pedido_grande(sesiones, con_comision) -> None:
+    """EL TOPE DE `integer` ERAN 21 474 836,47 y `event_orders.total_minor` ya
+    era `bigint`: un pedido corporativo por encima reventaba el INSERT del saldo
+    con un error que nadie captura, DENTRO del savepoint del webhook de cobro.
+    Cobro hecho y entradas sin emitir.
+    """
+    grande = 3_000_000_000  # 30 000 000,00: por encima del tope de `integer`.
+    orden, _, organiza = await _venta(sesiones, total=grande)
+    await _cuenta_de_cobro(sesiones, organiza)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+    assert saldo is not None
+    assert saldo.gross_amount_minor == grande
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_soltar_una_reserva_a_mano_deja_nombre(sesiones, con_comision) -> None:
+    """LEVANTAR UNA RETENCIÓN sobre dinero de otra persona sin dejar nombre no
+    se puede auditar después."""
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    quien = await _persona(sesiones, "adm")
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        reserva = await finanzas.reservar(
+            db, saldo=saldo, importe_minor=500, motivo="operational_risk"
+        )
+        await db.commit()
+        reserva_id = reserva.id
+
+    async with sesiones() as db:
+        assert await finanzas.liberar_reserva(
+            db, reserva_id=reserva_id, motivo="lo revisó operaciones", actor_id=quien
+        )
+        await db.commit()
+    # La segunda vez ya no hay nada que soltar.
+    async with sesiones() as db:
+        assert not await finanzas.liberar_reserva(
+            db, reserva_id=reserva_id, motivo="otra vez", actor_id=quien
+        )
+        fila = await db.get(OwnerSaleReserve, reserva_id)
+    assert fila.status == "released"
+    assert fila.released_by == quien
+    assert fila.release_reason == "lo revisó operaciones"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_evento_sin_saldos_no_revienta_en_postgres(sesiones) -> None:
+    """`in_(lista or [""])` MANDA LA CADENA VACÍA contra una columna `uuid`.
+
+    SQLite la acepta y PostgreSQL contesta 500, así que el fallo solo aparecía
+    en producción. Y hoy, sin comisión configurada, no hay ningún saldo: era el
+    caso de TODOS los eventos, en el panel que el organizador abre primero.
+
+    Se comprueban las dos mitades: que PostgreSQL DE VERDAD lo rechaza —si
+    dejara de hacerlo, esta prueba avisa de que la guarda ya no hace falta— y
+    que las dos rutas que lo tenían salen antes de consultar.
+    """
+    import inspect
+
+    from app.modules.events import finanzas_router, posventa_router
+
+    async with sesiones() as db:
+        with pytest.raises(Exception):
+            await db.execute(
+                select(OwnerSaleReserve.id).where(
+                    OwnerSaleReserve.balance_id.in_([""])
+                )
+            )
+        await db.rollback()
+
+    def _sin_comentarios(funcion) -> str:
+        """Solo el código. Los comentarios SÍ nombran el idioma prohibido, y es
+        justo donde queda explicado por qué no se usa."""
+        return "\n".join(
+            linea
+            for linea in inspect.getsource(funcion).splitlines()
+            if not linea.lstrip().startswith("#")
+        )
+
+    detalle = _sin_comentarios(finanzas_router.saldos_del_evento)
+    assert 'or [""]' not in detalle
+    assert "if not filas:" in detalle
+
+    casos = _sin_comentarios(posventa_router.casos_de_mi_evento)
+    assert 'or [""]' not in casos
+    assert "if casos" in casos
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_conciliacion_cuenta_las_ventas_sin_saldo(sesiones) -> None:
+    """ES EL DESCUADRE QUE EXISTE AHORA MISMO EN MASA: sin comisión configurada
+    no se crea ningún saldo, y nada lo contaba."""
+    from app.modules.events import conciliacion
+
+    orden, _, _ = await _venta(sesiones, total=10000)
+    async with sesiones() as db:
+        hallazgos = await conciliacion.conciliar_ventas(db, limite=500)
+    codigos = {h.codigo for h in hallazgos}
+    assert conciliacion.PEDIDO_SIN_SALDO in codigos
+    # Y NO SE HA CORREGIDO NADA.
+    async with sesiones() as db:
+        cuantos = len(
+            list(
+                await db.scalars(
+                    select(OwnerSaleBalance).where(
+                        OwnerSaleBalance.event_order_id == orden.id
+                    )
+                )
+            )
+        )
+    assert cuantos == 0
+
+
+def test_todos_los_codigos_de_conciliacion_se_emiten() -> None:
+    """UN PANEL QUE CONTESTA CERO de un código que ninguna consulta produce
+    parece haber comprobado algo. Había cuatro así."""
+    import inspect
+
+    from app.modules.events import conciliacion
+
+    fuente = inspect.getsource(conciliacion.conciliar_ventas)
+    declarados = [
+        nombre
+        for nombre in conciliacion.__all__
+        if nombre.isupper() or (nombre.replace("_", "").isupper() and nombre != "Hallazgo")
+    ]
+    for nombre in declarados:
+        assert f"Hallazgo({nombre}" in fuente, nombre
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_las_tres_migraciones_se_reaplican_CON_datos(
+    sesiones, con_comision
+) -> None:
+    """RE-EJECUTABLES TAMBIÉN EN USO, y no solo sobre tablas vacías.
+
+    `test_las_que_prometen_reejecucion_la_cumplen` las reaplica sobre una base
+    recién montada, donde todo está vacío. Las tres verificaban «este fichero no
+    escribe ninguna fila» CONTANDO las filas de las tablas nuevas, así que
+    pasaban esa prueba y abortaban en cuanto existiera una entrega, una reseña o
+    una reserva: justo cuando alguien vuelve a pegar el fichero en el editor de
+    Supabase para terminar de aplicarlo.
+    """
+    import psycopg
+
+    orden, _, _ = await _venta(sesiones, total=10000)
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await finanzas.reservar(
+            db, saldo=saldo, importe_minor=100, motivo="operational_risk"
+        )
+        await db.commit()
+
+    with psycopg.connect(URL, autocommit=True) as conexion:
+        with conexion.cursor() as cur:
+            cur.execute("select count(*) from public.owner_sale_reserves")
+            assert cur.fetchone()[0] > 0, "hace falta al menos una fila"
+        for nombre in (
+            "0066_entrega_de_avisos_con_reintento.sql",
+            "0067_resenas_verificadas_de_eventos.sql",
+            "0068_finanzas_de_eventos.sql",
+        ):
+            with conexion.cursor() as cur:
+                cur.execute((MIGRACIONES / nombre).read_text(encoding="utf-8"))

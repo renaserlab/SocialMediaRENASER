@@ -26,6 +26,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -563,12 +564,16 @@ class OwnerSaleBalance(Base):
         nullable=True,
     )
 
-    gross_amount_minor: Mapped[int] = mapped_column(Integer)
-    platform_fee_minor: Mapped[int] = mapped_column(Integer)
+    # `BigInteger` desde la 0068. Con `Integer` el tope eran 21 474 836,47 en
+    # una moneda de dos decimales, y `event_orders.total_minor` ya era `bigint`:
+    # un pedido por encima reventaba el INSERT con un error que nadie captura,
+    # dentro del savepoint del webhook de cobro.
+    gross_amount_minor: Mapped[int] = mapped_column(BigInteger)
+    platform_fee_minor: Mapped[int] = mapped_column(BigInteger)
     provider_fee_minor: Mapped[int] = mapped_column(
-        Integer, default=0, server_default="0"
+        BigInteger, default=0, server_default="0"
     )
-    net_amount_minor: Mapped[int] = mapped_column(Integer)
+    net_amount_minor: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(3))
     #: Que reglas de comision se aplicaron. Cambiarlas no reescribe lo anterior.
     fee_rules_version: Mapped[str] = mapped_column(String(32))

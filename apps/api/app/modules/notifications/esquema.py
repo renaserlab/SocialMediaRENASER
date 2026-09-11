@@ -64,14 +64,25 @@ _cache_entregas: dict[str, bool] = {}
 
 
 async def hay_entregas(db) -> bool:
-    """Si la 0066 está aplicada: la cola de entregas con reintento."""
+    """Si la 0066 está aplicada: la cola de entregas con reintento.
+
+    SE MIRA TAMBIÉN `device_tokens.locale`, y no solo que la tabla exista. La
+    0066 trae las dos cosas y el encolado lee esa columna para saber en qué
+    idioma componer; con media migración aplicada la puerta decía que sí, la
+    lectura lanzaba, PostgreSQL dejaba la transacción inservible y el `commit`
+    de quien provocó el aviso —una devolución ya confirmada— se deshacía.
+    """
     if "entregas" not in _cache_entregas:
         from sqlalchemy import inspect
 
         conexion = await db.connection()
 
         def _mirar(sync) -> bool:  # noqa: ANN001
-            return inspect(sync).has_table("notification_deliveries")
+            inspector = inspect(sync)
+            if not inspector.has_table("notification_deliveries"):
+                return False
+            columnas = {c["name"] for c in inspector.get_columns("device_tokens")}
+            return "locale" in columnas
 
         _cache_entregas["entregas"] = await conexion.run_sync(_mirar)
     return _cache_entregas["entregas"]

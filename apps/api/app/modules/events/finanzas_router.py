@@ -99,7 +99,13 @@ def _saldo_leido(
 
 
 async def _evento_propio(db: AsyncSession, evento_id: str, usuario: AuthUser) -> Event:
-    """El evento de quien pregunta. 404 para el ajeno, nunca 403."""
+    """El evento de quien pregunta. 404 para el ajeno, nunca 403.
+
+    ABRE LA PUERTA, y no elige el dinero. Quién ve QUÉ saldos se decide con
+    `OwnerSaleBalance.owner_id`, que se congela al vender: si algún día un
+    evento cambia de organizador, el nuevo no puede ver —ni cobrar— las ventas
+    que son dinero del anterior.
+    """
     ensure_uuid(evento_id, "Evento no encontrado.")
     evento = await db.get(Event, evento_id)
     if evento is None or evento.organizer_id != usuario.id:
@@ -133,7 +139,10 @@ async def finanzas_del_evento(
                 func.coalesce(func.sum(OwnerSaleBalance.net_amount_minor), 0),
                 func.min(OwnerSaleBalance.currency),
             )
-            .where(OwnerSaleBalance.event_id == event_id)
+            .where(
+                OwnerSaleBalance.event_id == event_id,
+                OwnerSaleBalance.owner_id == current_user.id,
+            )
             .group_by(OwnerSaleBalance.status)
         )
     ).all()
@@ -154,6 +163,7 @@ async def finanzas_del_evento(
             )
             .where(
                 OwnerSaleBalance.event_id == event_id,
+                OwnerSaleBalance.owner_id == current_user.id,
                 OwnerSaleReserve.status == "held",
             )
         )
@@ -173,6 +183,7 @@ async def finanzas_del_evento(
             .select_from(OwnerSaleBalance)
             .where(
                 OwnerSaleBalance.event_id == event_id,
+                OwnerSaleBalance.owner_id == current_user.id,
                 OwnerSaleBalance.available_at.is_(None),
                 OwnerSaleBalance.status == finanzas.PENDIENTE,
             )
@@ -212,11 +223,21 @@ async def saldos_del_evento(
     filas = list(
         await db.scalars(
             select(OwnerSaleBalance)
-            .where(OwnerSaleBalance.event_id == event_id)
+            .where(
+                OwnerSaleBalance.event_id == event_id,
+                OwnerSaleBalance.owner_id == current_user.id,
+            )
             .order_by(OwnerSaleBalance.created_at.desc(), OwnerSaleBalance.id.desc())
             .limit(limit)
         )
     )
+    if not filas:
+        # LISTA VACÍA = NO SE CONSULTA. El `in_(lista or [""])` que se suele
+        # escribir aquí manda la cadena vacía contra una columna `uuid`: SQLite
+        # la acepta y PostgreSQL la rechaza, así que el 500 solo aparece en
+        # producción. Y sin comisión configurada no hay ningún saldo: hoy este
+        # es el caso de TODOS los eventos.
+        return []
     salida: list[SaldoRead] = []
     # Los reservados, EN UNA CONSULTA para todos: uno por saldo sería N+1.
     reservas = dict(
@@ -227,7 +248,7 @@ async def saldos_del_evento(
                     func.coalesce(func.sum(OwnerSaleReserve.amount_minor), 0),
                 )
                 .where(
-                    OwnerSaleReserve.balance_id.in_([f.id for f in filas] or [""]),
+                    OwnerSaleReserve.balance_id.in_([f.id for f in filas]),
                     OwnerSaleReserve.status == "held",
                 )
                 .group_by(OwnerSaleReserve.balance_id)
@@ -235,11 +256,17 @@ async def saldos_del_evento(
         ).all()
     )
     for saldo in filas:
-        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+        # EL RESERVADO YA ESTÁ CALCULADO. Sin pasárselo, cada vuelta volvía a
+        # sumarlo: con doscientos saldos eran doscientas sumas de más, debajo
+        # del comentario que dice que el N+1 se había evitado.
+        reservado = int(reservas.get(saldo.id, 0))
+        bloqueo = await finanzas.por_que_no_se_libera(
+            db, saldo=saldo, reservado=reservado
+        )
         salida.append(
             _saldo_leido(
                 saldo,
-                reservado=int(reservas.get(saldo.id, 0)),
+                reservado=reservado,
                 bloqueo=bloqueo.motivo if bloqueo else None,
             )
         )
@@ -289,6 +316,48 @@ async def conciliar(
             for h in hallazgos
         ],
     }
+
+
+class SoltarReservaRequest(BaseModel):
+    """Por qué se suelta. Obligatorio: una retención que se levanta sin motivo
+    escrito no se puede auditar después."""
+
+    motivo: str = Field(min_length=3, max_length=500)
+    #: `true` cuando el dinero se fue de verdad —una disputa perdida—. No mueve
+    #: nada: solo deja de retener y anota que ya no vuelve.
+    consumida: bool = False
+
+
+@admin_router.post("/reserves/{reserve_id}/release")
+async def soltar_reserva(
+    reserve_id: str,
+    cuerpo: SoltarReservaRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Levanta una retención sobre un saldo. NO MUEVE DINERO.
+
+    LA PUERTA DE SALIDA QUE FALTABA. Una reserva se abría desde el webhook de
+    disputa y desde una devolución parcial, y no había ninguna forma de
+    soltarla: el saldo se quedaba con `reserve_held` para siempre y solo salía
+    de ahí con SQL a mano. Las de disputa se sueltan solas cuando la pasarela
+    dice cómo acabó; las demás las suelta una persona, aquí.
+    """
+    await _exigir_finanzas(db, current_user)
+    await finanzas.exigir_disponible(db)
+    ensure_uuid(reserve_id, "Retención no encontrada.")
+    reserva = await db.get(OwnerSaleReserve, reserve_id)
+    if reserva is None:
+        raise NotFoundError("Retención no encontrada.")
+    soltada = await finanzas.liberar_reserva(
+        db,
+        reserva_id=reserve_id,
+        motivo=cuerpo.motivo,
+        consumida=cuerpo.consumida,
+        actor_id=current_user.id,
+    )
+    await db.commit()
+    return {"soltada": soltada, "id": reserve_id}
 
 
 @admin_router.get("/disputes")

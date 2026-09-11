@@ -53,6 +53,22 @@ alter table public.owner_sale_balances
 alter table public.owner_sale_balances
   alter column order_id drop not null;
 
+-- EL DINERO CABE. Estas cuatro columnas son `integer` desde la 0049, y el tope
+-- de `integer` son 2 147 483 647 unidades menores: 21 474 836,47 en cualquier
+-- moneda de dos decimales. `event_orders.total_minor` es `bigint`, así que un
+-- pedido corporativo por encima de ese tope reventaba el INSERT del saldo con
+-- un `DataError` que nadie captura, y se llevaba por delante el savepoint del
+-- webhook: cobro hecho y entradas sin emitir.
+--
+-- Ensanchar es seguro en los dos sentidos: `integer` cabe en `bigint` sin
+-- reescribir ninguna fila —PostgreSQL 11 en adelante no reescribe la tabla al
+-- ampliar un entero— y el código no distingue.
+alter table public.owner_sale_balances
+  alter column gross_amount_minor type bigint,
+  alter column platform_fee_minor type bigint,
+  alter column provider_fee_minor type bigint,
+  alter column net_amount_minor type bigint;
+
 do $$
 begin
   if not exists (
@@ -146,6 +162,9 @@ create table if not exists public.owner_sale_reserves (
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   released_at timestamptz,
+  -- QUIÉN LA SOLTÓ. Nulo cuando la soltó el sistema al resolverse la disputa:
+  -- eso no lo decidió nadie, y poner ahí un nombre sería mentir.
+  released_by uuid references public.profiles(id) on delete set null,
   release_reason text
     constraint owner_sale_reserves_motivo_de_liberacion
     check (release_reason is null or length(release_reason) <= 500),
@@ -317,14 +336,11 @@ begin
     raise exception 'Hay % saldos sin origen', huerfanos;
   end if;
 
-  select
-      (select count(*) from public.owner_sale_reserves)
-    + (select count(*) from public.event_disputes)
-    + (select count(*) from public.event_dispute_events)
-  into cuantas;
-  if cuantas > 0 then
-    raise exception 'La 0068 no escribe ninguna fila y hay %', cuantas;
-  end if;
+  -- ESTE FICHERO NO ESCRIBE NINGUNA FILA EN LAS TABLAS NUEVAS, y se comprueba
+  -- leyéndolo: aquí no hay ningún `insert`. La verificación que SÍ importa —que
+  -- ningún saldo se quede sin origen— está justo arriba y esa sí se vuelve a
+  -- correr sin problema. Contar las filas de las tablas nuevas y abortar hacía
+  -- que la migración dejara de ser re-ejecutable en cuanto hubiera una reserva.
 
   if not exists (
     select 1 from pg_indexes

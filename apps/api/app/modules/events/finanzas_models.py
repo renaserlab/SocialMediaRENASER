@@ -65,6 +65,9 @@ class OwnerSaleReserve(Base):
     released_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    #: Quién la soltó. Nulo cuando la soltó el sistema al resolverse la disputa:
+    #: eso no lo decidió nadie.
+    released_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
     release_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (

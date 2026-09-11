@@ -28,18 +28,21 @@ from app.modules.events.posventa_models import EXPEDIENTES_VIVOS, EventAftersale
 
 #: Cada hallazgo es un CÓDIGO, no una frase. La pantalla lo traduce y una
 #: consulta los agrupa; un motivo en prosa no se puede contar.
-PAGO_SIN_PEDIDO = "payment_without_order"
+#:
+#: TODOS SE EMITEN. Había cuatro declarados que ninguna consulta producía
+#: —`payment_without_order`, `refund_without_case`, `stalled_transfer` y un
+#: `environment_mismatch` que no se podía calcular—, y un panel que contesta
+#: cero de un código que nadie mira parece haber comprobado algo.
 PEDIDO_SIN_ENTRADAS = "paid_order_without_tickets"
 ENTRADA_SIN_PAGO = "ticket_without_payment"
+PEDIDO_SIN_SALDO = "paid_order_without_balance"
 SALDO_SIN_PEDIDO = "balance_without_order"
 SALDO_DUPLICADO = "duplicate_balance"
 IMPORTE_DISTINTO = "amount_mismatch"
 MONEDA_DISTINTA = "currency_mismatch"
-PROVEEDOR_DISTINTO = "provider_mismatch"
+EVENTO_DISTINTO = "event_mismatch"
 ENTORNO_DISTINTO = "environment_mismatch"
-DEVOLUCION_SIN_EXPEDIENTE = "refund_without_case"
 TRANSFERIDO_CON_RESERVA = "transferred_with_reserve"
-TRANSFERENCIA_ESTANCADA = "stalled_transfer"
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,7 @@ async def conciliar_ventas(
                 .where(EventTicket.order_id == EventOrder.id)
                 .exists(),
             )
+            .order_by(EventOrder.id)
             .limit(tope)
         )
     ).scalars().all()
@@ -93,6 +97,7 @@ async def conciliar_ventas(
             select(EventTicket.id)
             .join(EventOrder, EventOrder.id == EventTicket.order_id)
             .where(EventOrder.status != "PAID", EventTicket.status != "REVOKED")
+            .order_by(EventTicket.id)
             .limit(tope)
         )
     ).scalars().all()
@@ -100,10 +105,29 @@ async def conciliar_ventas(
         Hallazgo(ENTRADA_SIN_PAGO, "event_ticket", str(t)) for t in sin_pago
     ]
 
-    # 3. PAGO SIN PEDIDO. Una referencia de cobro que no apunta a ningún pedido
-    #    vivo. Se mira solo si las finanzas están desplegadas.
     if not await esquema.hay_finanzas(db):
         return hallazgos
+
+    # 3. PEDIDO PAGADO SIN SALDO. Es el descuadre que existe AHORA MISMO en
+    #    masa: sin comisión configurada no se crea ningún saldo, y hasta que
+    #    alguien decida el número cada venta pagada es una fila que falta. No se
+    #    arregla solo ni se reprocesa: se cuenta, para saber cuántas hay.
+    sin_saldo = (
+        await db.execute(
+            select(EventOrder.id)
+            .where(
+                EventOrder.status == "PAID",
+                ~select(OwnerSaleBalance.id)
+                .where(OwnerSaleBalance.event_order_id == EventOrder.id)
+                .exists(),
+            )
+            .order_by(EventOrder.id)
+            .limit(tope)
+        )
+    ).scalars().all()
+    hallazgos += [
+        Hallazgo(PEDIDO_SIN_SALDO, "event_order", str(o)) for o in sin_saldo
+    ]
 
     # 4. SALDO SIN PEDIDO, y saldo duplicado por pedido.
     huerfanos = (
@@ -115,6 +139,7 @@ async def conciliar_ventas(
                 .where(EventOrder.id == OwnerSaleBalance.event_order_id)
                 .exists(),
             )
+            .order_by(OwnerSaleBalance.id)
             .limit(tope)
         )
     ).scalars().all()
@@ -128,6 +153,7 @@ async def conciliar_ventas(
             .where(OwnerSaleBalance.event_order_id.is_not(None))
             .group_by(OwnerSaleBalance.event_order_id)
             .having(func.count() > 1)
+            .order_by(OwnerSaleBalance.event_order_id)
             .limit(tope)
         )
     ).all()
@@ -157,6 +183,7 @@ async def conciliar_ventas(
                     OwnerSaleBalance.event_id != EventOrder.event_id,
                 )
             )
+            .order_by(OwnerSaleBalance.id)
             .limit(tope)
         )
     ).all()
@@ -173,12 +200,38 @@ async def conciliar_ventas(
                          f"{moneda} vs {moneda_pedido}")
             )
         if str(evento_saldo) != str(evento_pedido):
+            # SU PROPIO CÓDIGO. Esto se reportaba como `provider_mismatch`, que
+            # no tiene nada que ver con apuntar a otro evento.
             hallazgos.append(
-                Hallazgo(PROVEEDOR_DISTINTO, "owner_sale_balance", str(saldo_id),
+                Hallazgo(EVENTO_DISTINTO, "owner_sale_balance", str(saldo_id),
                          "el saldo apunta a otro evento")
             )
 
-    # 6. TRANSFERIDO CON RESERVA VIVA. Se pagó dinero que estaba retenido.
+    # 6. ENTORNO DISTINTO. El saldo no guarda entorno, pero su cuenta de cobro
+    #    sí, y el pedido también: una venta de pruebas apuntando a la cuenta de
+    #    producción del organizador se ve comparando esas dos.
+    from app.modules.commerce.models import OwnerPayoutAccount
+
+    entornos = (
+        await db.execute(
+            select(OwnerSaleBalance.id, OwnerPayoutAccount.environment,
+                   EventOrder.environment)
+            .join(EventOrder, EventOrder.id == OwnerSaleBalance.event_order_id)
+            .join(
+                OwnerPayoutAccount,
+                OwnerPayoutAccount.id == OwnerSaleBalance.payout_account_id,
+            )
+            .where(OwnerPayoutAccount.environment != EventOrder.environment)
+            .order_by(OwnerSaleBalance.id)
+            .limit(tope)
+        )
+    ).all()
+    hallazgos += [
+        Hallazgo(ENTORNO_DISTINTO, "owner_sale_balance", str(s), f"{cuenta} vs {pedido}")
+        for s, cuenta, pedido in entornos
+    ]
+
+    # 7. TRANSFERIDO CON RESERVA VIVA. Se pagó dinero que estaba retenido.
     con_reserva = (
         await db.execute(
             select(OwnerSaleBalance.id)
@@ -192,6 +245,7 @@ async def conciliar_ventas(
                 )
                 .exists(),
             )
+            .order_by(OwnerSaleBalance.id)
             .limit(tope)
         )
     ).scalars().all()
@@ -285,18 +339,16 @@ async def salud(db: AsyncSession) -> dict[str, int]:
 
 
 __all__ = [
-    "DEVOLUCION_SIN_EXPEDIENTE",
     "ENTORNO_DISTINTO",
     "ENTRADA_SIN_PAGO",
+    "EVENTO_DISTINTO",
     "Hallazgo",
     "IMPORTE_DISTINTO",
     "MONEDA_DISTINTA",
-    "PAGO_SIN_PEDIDO",
     "PEDIDO_SIN_ENTRADAS",
-    "PROVEEDOR_DISTINTO",
+    "PEDIDO_SIN_SALDO",
     "SALDO_DUPLICADO",
     "SALDO_SIN_PEDIDO",
-    "TRANSFERENCIA_ESTANCADA",
     "TRANSFERIDO_CON_RESERVA",
     "conciliar_ventas",
     "salud",

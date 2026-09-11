@@ -275,7 +275,9 @@ async def salud_de_los_saldos(
             OwnerSaleBalance.status,
             func.count(OwnerSaleBalance.id),
             func.coalesce(func.sum(OwnerSaleBalance.net_amount_minor), 0),
-        ).group_by(OwnerSaleBalance.status)
+        )
+        .where(OwnerSaleBalance.course_id.is_not(None))
+        .group_by(OwnerSaleBalance.status)
     )
     por_estado = _saldos_en_cero()
     for estado, cuantos, importe in filas:
@@ -287,14 +289,20 @@ async def salud_de_los_saldos(
     # LA SEÑAL QUE IMPORTA: `pending` sin fecha de vencimiento. Significa que la
     # persona compró y no ha entrado nunca, así que la garantía no ha arrancado
     # y el dinero no tiene cuándo liberarse.
+    #
+    # Y SOLO CURSOS: desde la 0068 los saldos de entradas comparten tabla, y
+    # todos nacen sin fecha porque la política de retención no está publicada.
+    # Sin filtrar, la señal de alarma de Cursos se llenaba de ruido de eventos.
     sin_fecha = await db.scalar(
         select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "pending",
             OwnerSaleBalance.available_at.is_(None),
         )
     )
     sin_fecha_antiguos = await db.scalar(
         select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "pending",
             OwnerSaleBalance.available_at.is_(None),
             OwnerSaleBalance.created_at <= corte,
@@ -303,6 +311,7 @@ async def salud_de_los_saldos(
     # Y los congelados que nadie resuelve: expedientes abiertos, o una disputa.
     congelados = await db.scalar(
         select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "frozen",
             OwnerSaleBalance.updated_at <= corte,
         )
@@ -403,7 +412,14 @@ async def liquidar(
     identificadores = list(
         await db.scalars(
             select(OwnerSaleBalance.id)
-            .where(OwnerSaleBalance.status == "eligible")
+            .where(
+                # SOLO CURSOS. Los saldos de evento comparten tabla desde la
+                # 0068 y este turno no sabe evaluarlos: entrarían, serían
+                # omitidos siempre, y copar el `limite` deja a los creadores de
+                # cursos sin cobrar. Las entradas se pagan por su propio camino.
+                OwnerSaleBalance.course_id.is_not(None),
+                OwnerSaleBalance.status == "eligible",
+            )
             .order_by(OwnerSaleBalance.available_at)
             .limit(limite)
         )

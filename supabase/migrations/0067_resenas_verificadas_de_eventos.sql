@@ -214,14 +214,9 @@ declare
   cuantas bigint;
   permisos bigint;
 begin
-  select
-      (select count(*) from public.event_reviews)
-    + (select count(*) from public.event_review_replies)
-    + (select count(*) from public.event_review_moderation)
-  into cuantas;
-  if cuantas > 0 then
-    raise exception 'La 0067 no escribe ninguna fila y hay %', cuantas;
-  end if;
+  -- ESTE FICHERO NO ESCRIBE NINGUNA FILA, y se comprueba leyéndolo: aquí no
+  -- hay ningún `insert`. Contarlas y abortar hacía que la migración dejara de
+  -- ser re-ejecutable en cuanto existiera una reseña.
 
   if not exists (
     select 1 from pg_constraint c

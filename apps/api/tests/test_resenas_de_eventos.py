@@ -536,3 +536,41 @@ async def test_las_resenas_no_las_lee_nadie_desde_el_movil(sesiones) -> None:
             )
         ).all()
     assert filas == [], filas
+
+
+# =========================================================================== #
+# Lo que la revisión independiente encontró
+# =========================================================================== #
+def test_el_cursor_valida_las_dos_mitades() -> None:
+    """LA RUTA ES ANÓNIMA, y la segunda mitad del cursor va a una columna
+    `uuid`. Un cursor sin `|` dejaba ahí la cadena vacía: SQLite la acepta y
+    PostgreSQL contesta 500. Cualquiera podía provocarlo sin sesión.
+    """
+    import inspect
+
+    fuente = inspect.getsource(resenas.listar)
+    # Las dos mitades se validan, y el identificador como UUID.
+    assert "datetime.fromisoformat" in fuente
+    assert "UUID(ident)" in fuente
+    # Y la excepción es la misma en los dos casos: un 400 con su código, no un
+    # 500 con la traza de la base.
+    assert fuente.count("event_review_cursor_invalid") == 2
+
+
+def test_la_ventana_mira_el_FIN_del_evento_y_no_se_salta_sin_fecha() -> None:
+    """DOS COSAS A LA VEZ.
+
+    La comprobación se llamaba `event_not_finished` y miraba `starts_at`: en un
+    festival de tres días se podía opinar a los cinco minutos de entrar. Y
+    `starts_at` es anulable, así que con la fecha ausente el `getattr` saltaba
+    la comprobación ENTERA y se podía reseñar un evento del que no se sabe ni
+    cuándo es.
+    """
+    import inspect
+
+    fuente = inspect.getsource(resenas.puede_resenar)
+    assert "ends_at" in fuente
+    # Sin ninguna fecha, se bloquea. No se da por terminado lo desconocido.
+    assert "if termina is None:" in fuente
+    indice = fuente.index("if termina is None:")
+    assert "event_not_finished" in fuente[indice : indice + 120]

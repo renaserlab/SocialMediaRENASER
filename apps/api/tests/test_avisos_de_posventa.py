@@ -341,8 +341,220 @@ async def test_dos_procesos_no_envian_el_mismo_aviso(sesiones) -> None:
     async with sesiones() as db:
         segundo = await entregas.tomar(db, entrega_id=identificador)
         await db.commit()
-    assert primero is True
-    assert segundo is False
+    # El primero se lleva el turno y su número de intento; el segundo, nada.
+    assert primero == 1
+    assert segundo is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_turno_aparta_la_fila_mas_de_un_minuto(sesiones) -> None:
+    """UN MINUTO NO BASTA. El envío llama a Expo en lotes de cien con diez
+    segundos de margen cada uno: pasar del minuto es normal, y al minuto y un
+    segundo otra réplica cogía la misma fila y el teléfono sonaba dos veces.
+    """
+    quien = await _persona(sesiones)
+    async with sesiones() as db:
+        fila = await entregas.encolar(
+            db, usuario_id=quien, tipo="event_case_taken", entidad_id="turno1"
+        )
+        await db.commit()
+        identificador = fila.id
+        momento = fila.next_attempt_at
+
+    async with sesiones() as db:
+        assert await entregas.tomar(db, entrega_id=identificador, momento=momento) == 1
+        await db.commit()
+
+    # Un minuto después la cola NO la ofrece: sigue arrendada.
+    async with sesiones() as db:
+        pendientes = await entregas.pendientes(
+            db, momento=momento + timedelta(minutes=1, seconds=1)
+        )
+        assert identificador not in [p.id for p in pendientes]
+    assert entregas.ARRENDAMIENTO > entregas.ESPERAS[0]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_relevo_no_pisa_el_resultado(sesiones) -> None:
+    """LA PRENDA DEL TURNO. Una réplica que tardó más que el arrendamiento
+    vuelve con su resultado cuando otra ya cerró la entrega. Sin el número de
+    intento, esa vuelta reescribía lo que la segunda había decidido: `failed`
+    con fecha de envío, que la base ni siquiera admite.
+    """
+    quien = await _persona(sesiones)
+    async with sesiones() as db:
+        fila = await entregas.encolar(
+            db, usuario_id=quien, tipo="event_case_taken", entidad_id="relevo"
+        )
+        await db.commit()
+        identificador = fila.id
+        momento = fila.next_attempt_at
+
+    # A coge el turno 1 y se queda colgada.
+    async with sesiones() as db:
+        turno_de_a = await entregas.tomar(
+            db, entrega_id=identificador, momento=momento
+        )
+        await db.commit()
+
+    # Vence el arrendamiento y B la releva: turno 2, y acaba bien.
+    despues = momento + entregas.ARRENDAMIENTO + timedelta(seconds=1)
+    async with sesiones() as db:
+        turno_de_b = await entregas.tomar(db, entrega_id=identificador, momento=despues)
+        assert turno_de_b == turno_de_a + 1
+        assert await entregas.marcar_enviada(
+            db, entrega_id=identificador, intento=turno_de_b, momento=despues
+        )
+        await db.commit()
+
+    # A vuelve con su fallo. NO ESCRIBE NADA: ni siquiera llega a violar el
+    # CHECK, porque la fila ya no está en su turno.
+    async with sesiones() as db:
+        await entregas.marcar_fallo(
+            db,
+            entrega_id=identificador,
+            error="se acabo el tiempo",
+            intento=turno_de_a,
+            momento=despues,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        final = await db.get(NotificationDelivery, identificador)
+        assert final.status == entregas.ENVIADA
+        assert final.sent_at is not None
+        assert final.last_error is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_fallo_borra_la_fecha_de_envio(sesiones) -> None:
+    """«Fallida con fecha de envío» no existe, y la 0066 lo impone con un
+    CHECK. Si el fallo no limpia la fecha, el `commit` revienta entero y se
+    queda sin procesar el resto del lote."""
+    quien = await _persona(sesiones)
+    async with sesiones() as db:
+        fila = await entregas.encolar(
+            db, usuario_id=quien, tipo="event_case_taken", entidad_id="fecha"
+        )
+        await db.commit()
+        identificador = fila.id
+        momento = fila.next_attempt_at
+
+    async with sesiones() as db:
+        turno = await entregas.tomar(db, entrega_id=identificador, momento=momento)
+        await entregas.marcar_enviada(
+            db, entrega_id=identificador, intento=turno, momento=momento
+        )
+        await db.commit()
+
+    # Se devuelve a pendiente a mano, con la fecha de envío puesta: es el estado
+    # en el que quedaba la fila cuando el relevo iba al revés.
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "update public.notification_deliveries set status = 'pending', "
+                "sent_at = null, next_attempt_at = now() where id = cast(:i as uuid)"
+            ),
+            {"i": identificador},
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        turno = await entregas.tomar(db, entrega_id=identificador)
+        await entregas.marcar_fallo(
+            db, entrega_id=identificador, error="no salio", intento=turno
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        final = await db.get(NotificationDelivery, identificador)
+        assert final.sent_at is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_sin_donde_mandarla_no_se_cuenta_como_enviada(sesiones) -> None:
+    """EL CONTADOR DE SALUD NO MIENTE. Una entrega de alguien sin ningún
+    aparato registrado se cierra —reintentar no hace aparecer un teléfono— pero
+    no es un envío, y contarla como tal esconde que el push no está llegando.
+    """
+    quien = await _persona(sesiones)
+    async with sesiones() as db:
+        await entregas.encolar(
+            db, usuario_id=quien, tipo="event_case_taken", entidad_id="sindestino"
+        )
+        await db.commit()
+
+    async def _sin_destino(db, *, usuario_id, tipo, locale):
+        return False
+
+    async with sesiones() as db:
+        cuenta = await entregas.procesar(db, enviar=_sin_destino, limite=200)
+    assert cuenta["sin_destino"] >= 1
+
+
+def test_un_doscientos_con_errores_dentro_es_un_fallo() -> None:
+    """Expo contesta 200 y mete el resultado de cada mensaje en el cuerpo: un
+    token que ya no existe llega como `error` dentro de una respuesta correcta.
+    Mirar solo el código HTTP marcaba como enviada una entrega rechazada."""
+    from app.modules.notifications.push import EnvioRechazado, _exigir_recibos
+
+    class _Respuesta:
+        def __init__(self, cuerpo):
+            self._cuerpo = cuerpo
+
+        def json(self):
+            return self._cuerpo
+
+    _exigir_recibos(_Respuesta({"data": [{"status": "ok"}]}))
+    with pytest.raises(EnvioRechazado):
+        _exigir_recibos(
+            _Respuesta(
+                {
+                    "data": [
+                        {"status": "ok"},
+                        {
+                            "status": "error",
+                            "message": "DeviceNotRegistered",
+                            "details": {"error": "DeviceNotRegistered"},
+                        },
+                    ]
+                }
+            )
+        )
+
+    # Un cuerpo que no se entiende no es un fallo de envío: la petición salió.
+    class _Roto:
+        def json(self):
+            raise ValueError("no es json")
+
+    _exigir_recibos(_Roto())
+
+
+def test_el_error_no_lleva_el_token_ni_el_cuerpo_entero() -> None:
+    """El motivo que se guarda es el recuento y el primer mensaje. Nunca el
+    token del aparato ni la respuesta completa."""
+    from app.modules.notifications.push import EnvioRechazado, _exigir_recibos
+
+    class _Respuesta:
+        def json(self):
+            return {
+                "data": [
+                    {
+                        "status": "error",
+                        "message": "DeviceNotRegistered",
+                        "details": {"expoPushToken": "ExponentPushToken[SECRETO]"},
+                    }
+                ]
+            }
+
+    with pytest.raises(EnvioRechazado) as fallo:
+        _exigir_recibos(_Respuesta())
+    assert "SECRETO" not in str(fallo.value)
+    assert len(str(fallo.value)) <= 400
 
 
 @SIN_POSTGRES
@@ -381,3 +593,25 @@ async def test_la_cola_no_la_lee_nadie_desde_el_movil(sesiones) -> None:
             )
         ).all()
     assert filas == [], filas
+
+
+def test_la_puerta_de_los_avisos_mira_la_COLUMNA_y_no_solo_la_tabla() -> None:
+    """MEDIA MIGRACIÓN APLICADA ERA PEOR QUE NINGUNA.
+
+    La 0066 trae dos cosas: la tabla de la cola y `device_tokens.locale`. La
+    puerta solo miraba la tabla, así que con la columna ausente contestaba que
+    sí, el encolado la leía, PostgreSQL dejaba la transacción inservible, el
+    fallo se tragaba —el encolado no debe tumbar nada— y el `commit` de quien
+    provocó el aviso, una devolución ya confirmada, se deshacía.
+
+    El mismo patrón ya estaba aplicado en `hay_ordenes`, `hay_posventa` y
+    `hay_finanzas`; aquí faltaba.
+    """
+    import inspect
+
+    from app.modules.notifications import esquema as esquema_avisos
+
+    fuente = inspect.getsource(esquema_avisos.hay_entregas)
+    assert "notification_deliveries" in fuente
+    assert "device_tokens" in fuente
+    assert "locale" in fuente

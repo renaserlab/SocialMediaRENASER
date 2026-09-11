@@ -40,6 +40,17 @@ FALLIDA = "failed"
 ESPERAS = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=30),
            timedelta(hours=2), timedelta(hours=12))
 
+#: CUÁNTO DURA EL TURNO de quien coge una entrega. No es una espera de
+#: reintento: es el tiempo que esa fila queda apartada de la cola mientras se
+#: intenta enviarla.
+#:
+#: Apartarla solo `ESPERAS[0]` —un minuto— no bastaba. El envío llama a Expo en
+#: lotes de cien con diez segundos de margen cada uno, así que pasar del minuto
+#: es normal; al minuto y un segundo otra réplica cogía la misma fila y el
+#: teléfono sonaba dos veces. El índice único de la clave de suceso no protege
+#: de esto: protege el ENCOLADO, no el ENVÍO.
+ARRENDAMIENTO = timedelta(minutes=15)
+
 #: Cuánto del error se guarda. Lo justo para investigar; no el cuerpo de la
 #: respuesta, que puede traer cualquier cosa.
 LARGO_DEL_ERROR = 500
@@ -125,11 +136,15 @@ async def pendientes(
 
 async def tomar(
     db: AsyncSession, *, entrega_id: str, momento: datetime | None = None
-) -> bool:
-    """Reserva una entrega para intentarla. UPDATE CONDICIONAL.
+) -> int | None:
+    """Coge el turno de una entrega. UPDATE CONDICIONAL.
 
-    Dos procesos vaciando la cola a la vez: uno cambia una fila y el otro cero.
-    Sin esto, el mismo aviso se enviaría dos veces.
+    Devuelve EL NÚMERO DE INTENTO que acaba de escribir, o `None` si otro
+    proceso se la llevó. Ese número es la prenda del turno: `marcar_enviada` y
+    `marcar_fallo` solo escriben si la fila sigue en él, así que una réplica
+    lenta no puede pisar el resultado de la que la relevó.
+
+    La fila queda apartada `ARRENDAMIENTO`, y no una espera de reintento.
     """
     momento = momento or ahora()
     hechas = await db.execute(
@@ -141,25 +156,49 @@ async def tomar(
         )
         .values(
             attempts=NotificationDelivery.attempts + 1,
-            # Se aparta lo bastante para que otro proceso no la coja mientras
-            # esta la intenta. Si el envío sale bien se marca `sent` enseguida.
-            next_attempt_at=momento + ESPERAS[0],
+            next_attempt_at=momento + ARRENDAMIENTO,
             updated_at=momento,
         )
     )
-    return (hechas.rowcount or 0) == 1
+    if (hechas.rowcount or 0) != 1:
+        return None
+    return int(
+        await db.scalar(
+            select(NotificationDelivery.attempts).where(
+                NotificationDelivery.id == entrega_id
+            )
+        )
+        or 0
+    )
 
 
 async def marcar_enviada(
-    db: AsyncSession, *, entrega_id: str, momento: datetime | None = None
-) -> None:
-    """Enviada, y solo DESPUÉS de que el envío haya terminado bien."""
+    db: AsyncSession,
+    *,
+    entrega_id: str,
+    intento: int | None = None,
+    momento: datetime | None = None,
+) -> bool:
+    """Enviada, y solo DESPUÉS de que el envío haya terminado bien.
+
+    CONDICIONAL AL TURNO. Sin el `intento` que devolvió `tomar`, un proceso que
+    tardó más que el arrendamiento reescribía el resultado del que lo relevó:
+    una entrega ya `failed` volvía a `sent`, o al revés —y al revés viola el
+    CHECK de la base, porque `failed` con fecha de envío no existe—.
+    """
     momento = momento or ahora()
-    await db.execute(
+    condiciones = [
+        NotificationDelivery.id == entrega_id,
+        NotificationDelivery.status == PENDIENTE,
+    ]
+    if intento is not None:
+        condiciones.append(NotificationDelivery.attempts == int(intento))
+    hechas = await db.execute(
         update(NotificationDelivery)
-        .where(NotificationDelivery.id == entrega_id)
+        .where(*condiciones)
         .values(status=ENVIADA, sent_at=momento, last_error=None, updated_at=momento)
     )
+    return (hechas.rowcount or 0) == 1
 
 
 async def marcar_fallo(
@@ -167,6 +206,7 @@ async def marcar_fallo(
     *,
     entrega_id: str,
     error: str | None,
+    intento: int | None = None,
     momento: datetime | None = None,
 ) -> str:
     """Anota el fallo y decide si queda otro intento.
@@ -181,13 +221,25 @@ async def marcar_fallo(
         return FALLIDA
 
     intentos = int(fila.attempts or 0)
+    # EL MISMO TURNO que en `marcar_enviada`: la fila tiene que seguir en el
+    # intento que se cogió, y tiene que seguir pendiente.
+    condiciones = [
+        NotificationDelivery.id == entrega_id,
+        NotificationDelivery.status == PENDIENTE,
+    ]
+    if intento is not None:
+        condiciones.append(NotificationDelivery.attempts == int(intento))
+
     if intentos >= int(fila.max_attempts or len(ESPERAS)):
         await db.execute(
             update(NotificationDelivery)
-            .where(NotificationDelivery.id == entrega_id)
+            .where(*condiciones)
             .values(
                 status=FALLIDA,
                 next_attempt_at=None,
+                # SE LIMPIA LA FECHA DE ENVÍO. «Fallida con fecha de envío» no
+                # existe, y la base lo impone con un CHECK.
+                sent_at=None,
                 last_error=_saneado(error),
                 updated_at=momento,
             )
@@ -197,10 +249,11 @@ async def marcar_fallo(
     espera = ESPERAS[min(intentos, len(ESPERAS) - 1)]
     await db.execute(
         update(NotificationDelivery)
-        .where(NotificationDelivery.id == entrega_id)
+        .where(*condiciones)
         .values(
             status=PENDIENTE,
             next_attempt_at=momento + espera,
+            sent_at=None,
             last_error=_saneado(error),
             updated_at=momento,
         )
@@ -224,32 +277,48 @@ async def procesar(
     dos anteriores ya están marcadas: reprocesar no las repite.
     """
     momento = momento or ahora()
-    cuenta = {"intentadas": 0, "enviadas": 0, "reintentables": 0, "fallidas": 0}
+    cuenta = {
+        "intentadas": 0,
+        "enviadas": 0,
+        "sin_destino": 0,
+        "reintentables": 0,
+        "fallidas": 0,
+    }
 
     for fila in await pendientes(db, limite=limite, momento=momento):
         identificador = fila.id
         usuario = fila.user_id
         tipo = fila.type
         idioma = fila.locale
-        if not await tomar(db, entrega_id=identificador, momento=momento):
+        intento = await tomar(db, entrega_id=identificador, momento=momento)
+        if intento is None:
             # Otro proceso la cogió. No es un fallo.
             continue
         await db.commit()
         cuenta["intentadas"] += 1
 
         try:
-            await enviar(db, usuario_id=usuario, tipo=tipo, locale=idioma)
+            salio = await enviar(db, usuario_id=usuario, tipo=tipo, locale=idioma)
         except Exception as error:  # noqa: BLE001
             estado = await marcar_fallo(
-                db, entrega_id=identificador, error=str(error), momento=momento
+                db,
+                entrega_id=identificador,
+                error=str(error),
+                intento=intento,
+                momento=momento,
             )
             await db.commit()
             cuenta["fallidas" if estado == FALLIDA else "reintentables"] += 1
             continue
 
-        await marcar_enviada(db, entrega_id=identificador, momento=momento)
+        await marcar_enviada(
+            db, entrega_id=identificador, intento=intento, momento=momento
+        )
         await db.commit()
-        cuenta["enviadas"] += 1
+        # SALIÓ, O NO HABÍA A DÓNDE. Las dos cierran la entrega —reintentar no
+        # hace aparecer un teléfono— pero contarlas juntas hacía que el panel
+        # dijera «enviadas» de avisos que no salieron de aquí.
+        cuenta["enviadas" if salio is not False else "sin_destino"] += 1
 
     return cuenta
 
@@ -269,6 +338,7 @@ async def resumen(db: AsyncSession) -> dict[str, int]:
 
 
 __all__ = [
+    "ARRENDAMIENTO",
     "ENVIADA",
     "ESPERAS",
     "FALLIDA",
