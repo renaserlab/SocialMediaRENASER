@@ -71,6 +71,77 @@ Todas las rutas llevan el prefijo `/api/v1`. Fuentes de verdad del estado actual
 | Detalle del evento («Seleccionado por Z», aforo verificado, organizador verificado, agenda por horas) | p07 | | x | | `GET /catalog/events` (título, descripción, `starts_at`/`ends_at`, `location`, `capacity`, `registrations_count`, `event_type`) | **«Seleccionado por Z»**: no hay curaduría ni estado de admisión. **«Aforo verificado · 420 personas»**: `capacity` es un número escrito por quien crea el evento, sin documento ni validación. **«Organizador verificado»** y **«Plan de seguridad validado»**: no existen. **«Lo que vivirás» (agenda por franjas)**: no hay entidad programa. **«Desde S/ 180»**: los eventos **no tienen precio** en el modelo | documentar y no tocar | Eventos v2: admisión, curaduría, versión del evento |
 | Elige tus entradas (tipos, cantidades, «Quedan 18», «Agotado», máximo por persona) | p08 | | | x | `POST /catalog/events/{id}/reserve` reserva **una plaza sin precio ni tipo** | Entidades **tipo de entrada** (nombre, descripción, precio, cupo) e **inventario transaccional**. Reserva atómica sin sobreventa y retención de 10 min (§Eventos v2). Tope por persona | documentar y no tocar | Eventos v2 |
 
+
+---
+
+## 3 bis. Eventos: estado real tras los Incrementos 1–5
+
+**Esta sección sustituye a lo que la sección 3 decía sobre Eventos.** Aquella se
+escribió en la fase de Cursos, cuando un evento no tenía entradas ni puerta; hoy
+trece de esas filas están construidas y la tabla seguía diciendo que no existían.
+
+Las categorías son cinco y significan cosas distintas:
+
+- **terminada** — ruta, pantalla y datos del servidor, con carga, vacío, error y
+  sin conexión.
+- **parcial** — existe y pinta datos reales, pero le falta algo que sí se puede
+  construir hoy.
+- **no implementada** — no hay ruta ni pantalla.
+- **bloqueada por decisión** — el backend está, y lo que falta es que la empresa
+  decida. Construir la pantalla ahora obligaría a inventar el dato.
+- **fuera del alcance** — necesita contrato que no existe (geolocalización,
+  recinto, wallet).
+
+### Comprador
+
+| Vista | Ruta | Endpoint | Estado | Carga/error/vacío | Brecha frente a las capturas |
+|---|---|---|---|---|---|
+| Portada de Eventos | `/eventos` | `GET /catalog/events` | terminada | sí | distancia, mapa y «porque sigues a X»: **fuera del alcance**, no hay coordenadas |
+| Detalle del evento | `/eventos/[id]` | `GET /catalog/events` | terminada | sí | «Seleccionado por Z» y «aforo verificado» existen ya vía admisión; agenda por franjas: fuera del alcance |
+| Elegir entradas | `/entradas/[id]` | `GET /events/{id}/ticket-types` | terminada | sí | — |
+| Reserva temporal | `/reserva/[id]` | `POST /events/{id}/ticket-holds` | terminada | sí | — |
+| Pedido de entradas | `/pedido/[id]` | `POST /events/ticket-holds/{id}/orders` | terminada | sí | el importe se dice BRUTO y se explica; no es factura, y lo dice |
+| Mis entradas | `/mis-entradas` | `GET /events/me/tickets` | terminada | sí | — |
+| Mi entrada (QR) | `/mi-entrada/[id]` | `POST /events/tickets/{id}/credential` | terminada | sí | Apple Wallet y «cómo llegar»: fuera del alcance |
+| **Elegibilidad de posventa** | — | `GET /events/orders/{id}/aftersale-eligibility` | **no implementada** | — | el backend está y contesta las cuatro respuestas |
+| **Solicitar cancelación** | — | `POST /events/aftersale-cases` | **no implementada** | — | el backend está |
+| **Mis solicitudes** | — | `GET /events/me/aftersale-cases` | **no implementada** | — | el backend está |
+| **Detalle y línea de tiempo** | — | `GET /events/aftersale-cases/{id}` + `/history` | **no implementada** | — | el backend está, sin notas internas |
+| **Responder información** | — | `POST /events/aftersale-cases/{id}/respond` | **no implementada** | — | el backend está |
+| **Reseña verificada** | — | no existe | **no implementada** | — | falta backend **y** política de plazo |
+
+### Organizador
+
+| Vista | Ruta | Endpoint | Estado | Carga/error/vacío | Brecha |
+|---|---|---|---|---|---|
+| Mis eventos | `/mis-eventos` | `GET /events/mine` | terminada | sí | — |
+| Editar evento | `/editar-evento/[id]` | `PATCH /events/{id}` | terminada | sí | — |
+| Configurar entradas | `/configurar-entradas/[id]` | `GET/POST /events/{id}/ticket-types` | terminada | sí | — |
+| Ventas del evento | `/ventas/[id]` | `GET /events/{id}/sales` | parcial | sí | enseña bruto y lo llama bruto; **no** hay comisión ni neto porque `platform_fee_bps = -1` |
+| Asistentes | `/asistentes/[id]` | `GET /events/{id}/attendees` | terminada | sí | la búsqueda es exacta desde la 0063, y es a propósito |
+| Control de acceso | `/check-in/[id]` | `POST /events/{id}/check-ins` | terminada | sí | **pendiente de QA físico**: cámara real y dos teléfonos |
+| **Cambios sin clasificar** | — | `GET /admin/events/changes` | **no implementada** | — | hoy solo lo ve administración |
+| **Casos de mis eventos** | — | no existe | **no implementada** | — | falta el endpoint del organizador |
+| **Ventas y saldo** | — | no existe | **bloqueada por decisión** | — | sin comisión configurada no hay neto que enseñar |
+
+### Administración
+
+| Vista | Ruta | Endpoint | Estado | Brecha |
+|---|---|---|---|---|
+| Admisión de eventos | `/admin/eventos` | `GET /admin/events/admission` | terminada | — |
+| Revisar evento | `/admin/revisar-evento/[id]` | `POST /admin/events/{id}/decision` | terminada | — |
+| **Bandeja de posventa** | — | `GET /admin/events/aftersale-cases` | **no implementada** | el backend está, con filtros |
+| **Detalle y acciones** | — | `.../review`, `/approve`, `/reject` | **no implementada** | el backend está |
+| **Clasificar cambios** | — | `POST /admin/events/changes/{id}/classify` | **no implementada** | el backend está |
+| **Publicar política** | — | `POST /admin/events/policies` | **no implementada** | el backend está; es la pantalla que desbloquea todo lo demás |
+| **Panel financiero** | — | no existe | **no implementada** | falta el Incremento 6 entero |
+
+### Lo que esta matriz dice, en una frase
+
+De posventa hay **doce endpoints y ninguna pantalla**. La pantalla que más
+desbloquea no es ninguna del comprador: es **publicar una política**, porque sin
+ella las otras once solo saben decir «pendiente de configuración».
+
 ## 4. Servicios
 
 | Vista de referencia | Captura | Existe | Parcial | No existe | Backend disponible | Contrato faltante | Acción de esta fase | Fase posterior |
