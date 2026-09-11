@@ -1647,3 +1647,56 @@ def test_responder_es_un_paso_del_comprador_y_lo_devuelve_a_revision() -> None:
     for destino in (APROBADO, RECHAZADO):
         with pytest.raises((m.SaltoNoPermitido, m.SaltoInexistente)):
             m.exigir(ESPERANDO, destino, m.COMPRADOR)
+
+
+# =========================================================================== #
+# Lo que ve el organizador, y lo que NO
+# =========================================================================== #
+def test_el_organizador_ve_un_subconjunto_y_es_una_clase_aparte() -> None:
+    """NO es `ExpedienteRead` con campos vacios: es otra clase.
+
+    Asi, anadir un campo al contrato del comprador no se lo regala al
+    organizador por descuido, que es exactamente como se filtra un dato.
+    """
+    from app.modules.events.posventa_schemas import (
+        ExpedienteDelOrganizador,
+        ExpedienteRead,
+    )
+
+    assert not issubclass(ExpedienteDelOrganizador, ExpedienteRead)
+    campos = set(ExpedienteDelOrganizador.model_fields)
+    for prohibido in (
+        "buyer_id",
+        "reason",
+        "internal_notes",
+        "policy_id",
+        "provider",
+        "environment",
+        "assignee_id",
+        "refund_amount_minor",
+    ):
+        assert prohibido not in campos, prohibido
+    assert campos == {
+        "id",
+        "event_id",
+        "kind",
+        "status",
+        "entradas",
+        "created_at",
+        "updated_at",
+    }
+
+
+def test_la_nota_interna_solo_la_puebla_administracion() -> None:
+    """`notes` existe en la linea de historial, pero las rutas del comprador la
+    construyen campo a campo y nunca la pasan."""
+    import inspect
+
+    from app.modules.events import posventa_router
+    from app.modules.events.posventa_schemas import LineaDeHistorial
+
+    assert "notes" in LineaDeHistorial.model_fields
+    fuente = inspect.getsource(posventa_router.historial_del_expediente)
+    assert "notes=" not in fuente, "la ruta del comprador no puebla la nota"
+    fuente_admin = inspect.getsource(posventa_router.historial_de_administracion)
+    assert "notes=linea.notes" in fuente_admin

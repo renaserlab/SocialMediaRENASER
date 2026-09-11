@@ -42,12 +42,18 @@ class AbrirExpedienteRequest(BaseModel):
 
 
 class LineaDeHistorial(BaseModel):
-    """Un paso del expediente. SIN la nota interna."""
+    """Un paso del expediente.
+
+    `notes` es la anotación INTERNA y solo la puebla la ruta de administración.
+    Las del comprador construyen la línea campo a campo y no la pasan nunca, así
+    que no puede colarse por descuido.
+    """
 
     from_status: str | None = None
     to_status: str
     actor_role: str
     reason: str | None = None
+    notes: str | None = None
     created_at: datetime
 
 
@@ -86,6 +92,29 @@ class ExpedienteDeAdministracion(ExpedienteRead):
     policy_id: str | None = None
     provider: str
     environment: str
+
+
+class ExpedienteDelOrganizador(BaseModel):
+    """Lo que el organizador puede ver de un caso de SU evento.
+
+    ES UN SUBCONJUNTO Y POR ESO ES UNA CLASE APARTE, no `ExpedienteRead` con
+    campos vacíos: así añadir un campo al contrato del comprador no se lo
+    regala al organizador por descuido.
+
+    NO LLEVA: el identificador del comprador, el motivo que escribió, las notas
+    internas, la política, el proveedor ni el entorno. Para atender a alguien en
+    la puerta hace falta saber que hay un caso abierto y qué entradas toca, no
+    quién es ni qué dijo.
+    """
+
+    id: str
+    event_id: str
+    kind: str
+    status: str
+    #: Cuántas entradas del evento toca. El número, no cuáles de quién.
+    entradas: int = 0
+    created_at: datetime
+    updated_at: datetime
 
 
 class PaginaDeExpedientes(BaseModel):
@@ -207,6 +236,7 @@ __all__ = [
     "ClasificarCambioRequest",
     "DecisionRequest",
     "ExpedienteDeAdministracion",
+    "ExpedienteDelOrganizador",
     "ExpedienteRead",
     "LineaDeHistorial",
     "PaginaDeExpedientes",

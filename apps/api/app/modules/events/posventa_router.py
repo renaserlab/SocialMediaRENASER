@@ -14,7 +14,7 @@ dinero, y ese conjunto está separado en el proyecto precisamente para esto.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -47,6 +47,7 @@ from app.modules.events.posventa_schemas import (
     ClasificarCambioRequest,
     DecisionRequest,
     ExpedienteDeAdministracion,
+    ExpedienteDelOrganizador,
     ExpedienteRead,
     LineaDeHistorial,
     PaginaDeExpedientes,
@@ -189,6 +190,71 @@ async def abrir_expediente(
     return _leido(caso, actor=maquina.COMPRADOR)
 
 
+@router.get(
+    "/{event_id}/aftersale-cases", response_model=list[ExpedienteDelOrganizador]
+)
+async def casos_de_mi_evento(
+    event_id: str,
+    estado: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExpedienteDelOrganizador]:
+    """Los casos de UN evento propio, para quien lo organiza.
+
+    UN SUBCONJUNTO: sin comprador, sin su motivo, sin notas internas, sin
+    política y sin proveedor. El organizador necesita saber que hay un caso
+    abierto y cuántas entradas toca para poder atender a alguien; no necesita
+    saber quién lo abrió ni qué escribió.
+
+    404 para un evento ajeno, nunca 403.
+    """
+    await esquema.exigir_posventa(db)
+    ensure_uuid(event_id, "Evento no encontrado.")
+    evento = await db.get(Event, event_id)
+    if evento is None or evento.organizer_id != current_user.id:
+        raise NotFoundError("Evento no encontrado.")
+
+    consulta = select(EventAftersaleCase).where(
+        EventAftersaleCase.event_id == event_id
+    )
+    if estado:
+        consulta = consulta.where(EventAftersaleCase.status == estado)
+    consulta = consulta.order_by(
+        EventAftersaleCase.created_at.desc(), EventAftersaleCase.id.desc()
+    ).limit(limit)
+    casos = list(await db.scalars(consulta))
+
+    # EL RECUENTO DE ENTRADAS, EN UNA CONSULTA para todos: una por caso sería
+    # N+1, y una bandeja de cincuenta haría cincuenta viajes.
+    cuantas = dict(
+        (
+            await db.execute(
+                select(
+                    EventAftersaleCaseTicket.case_id,
+                    func.count(),
+                )
+                .where(
+                    EventAftersaleCaseTicket.case_id.in_([c.id for c in casos] or [""])
+                )
+                .group_by(EventAftersaleCaseTicket.case_id)
+            )
+        ).all()
+    )
+    return [
+        ExpedienteDelOrganizador(
+            id=c.id,
+            event_id=c.event_id,
+            kind=c.kind,
+            status=c.status,
+            entradas=int(cuantas.get(c.id, 0)),
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+        )
+        for c in casos
+    ]
+
+
 @router.get("/me/aftersale-cases", response_model=PaginaDeExpedientes)
 async def mis_expedientes(
     limit: int = Query(default=20, ge=1, le=100),
@@ -288,6 +354,13 @@ async def entradas_afectadas(
     await esquema.exigir_posventa(db)
     ensure_uuid(case_id, "Expediente no encontrado.")
     await posventa.leer(db, expediente_id=case_id, usuario_id=current_user.id)
+    return await _entradas_del_caso(db, case_id)
+
+
+async def _entradas_del_caso(
+    db: AsyncSession, case_id: str
+) -> list[EntradaAfectadaRead]:
+    """Las entradas de un expediente. Una consulta, con su unión."""
     filas = (
         await db.execute(
             select(
@@ -394,6 +467,64 @@ async def bandeja(
         EventAftersaleCase.created_at.desc(), EventAftersaleCase.id.desc()
     ).limit(limit)
     return [_para_administracion(c) for c in await db.scalars(consulta)]
+
+
+@admin_router.get(
+    "/aftersale-cases/{case_id}", response_model=ExpedienteDeAdministracion
+)
+async def detalle_de_administracion(
+    case_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpedienteDeAdministracion:
+    """El expediente entero, con sus notas internas."""
+    await esquema.exigir_posventa(db)
+    await _exigir_gestor(db, current_user)
+    ensure_uuid(case_id, "Expediente no encontrado.")
+    return _para_administracion(await posventa.leer(db, expediente_id=case_id))
+
+
+@admin_router.get(
+    "/aftersale-cases/{case_id}/history", response_model=list[LineaDeHistorial]
+)
+async def historial_de_administracion(
+    case_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LineaDeHistorial]:
+    """La línea de tiempo. Aquí SÍ con las notas internas de cada paso."""
+    await esquema.exigir_posventa(db)
+    await _exigir_gestor(db, current_user)
+    ensure_uuid(case_id, "Expediente no encontrado.")
+    await posventa.leer(db, expediente_id=case_id)
+    return [
+        LineaDeHistorial(
+            from_status=linea.from_status,
+            to_status=linea.to_status,
+            actor_role=linea.actor_role,
+            reason=linea.reason,
+            notes=linea.notes,
+            created_at=linea.created_at,
+        )
+        for linea in await posventa.historial(db, expediente_id=case_id)
+    ]
+
+
+@admin_router.get(
+    "/aftersale-cases/{case_id}/tickets", response_model=list[EntradaAfectadaRead]
+)
+async def entradas_de_administracion(
+    case_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[EntradaAfectadaRead]:
+    """Las entradas del expediente. SIN credencial y SIN código, igual que al
+    comprador: administrar un caso no exige poder abrir una puerta."""
+    await esquema.exigir_posventa(db)
+    await _exigir_gestor(db, current_user)
+    ensure_uuid(case_id, "Expediente no encontrado.")
+    await posventa.leer(db, expediente_id=case_id)
+    return await _entradas_del_caso(db, case_id)
 
 
 @admin_router.post(
