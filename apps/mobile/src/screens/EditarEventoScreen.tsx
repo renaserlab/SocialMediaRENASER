@@ -587,6 +587,17 @@ export function EditarEventoScreen() {
         disabled={ocupado}
       />
 
+      {/* Y la posventa, que es lo que pasa DESPUÉS de vender: qué cambió del
+          evento y qué se hizo con las solicitudes de quien compró. Solo para
+          mirar: quien organiza no decide sobre el dinero de otra persona. */}
+      <Button
+        label={t('posventaAdmin.enlaceDesdeElEvento')}
+        variant="secondary"
+        icon="life-buoy"
+        onPress={() => router.push(`/posventa-evento/${id}` as never)}
+        disabled={ocupado}
+      />
+
       {editable ? (
         <>
           <Button
