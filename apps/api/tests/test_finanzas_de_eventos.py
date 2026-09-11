@@ -556,3 +556,102 @@ async def test_las_finanzas_no_las_escribe_nadie_desde_el_movil(sesiones) -> Non
             )
         ).all()
     assert filas == [], filas
+
+
+# =========================================================================== #
+# Conciliacion y contratos
+# =========================================================================== #
+def test_el_saldo_no_ensena_comision_si_no_esta_configurada() -> None:
+    """ENSENAR CERO SERIA DECIR QUE Z NO COBRA NADA, y eso es una decision que
+    nadie ha tomado. `null` y la pantalla escribe «pendiente de configuracion».
+    """
+    from app.modules.events.finanzas_router import ResumenFinancieroRead, SaldoRead
+
+    assert SaldoRead.model_fields["platform_fee_minor"].default is None
+    assert SaldoRead.model_fields["net_amount_minor"].default is None
+    assert ResumenFinancieroRead.model_fields["comision_minor"].default is None
+    # Y el bruto NO es opcional: eso si se sabe siempre.
+    assert ResumenFinancieroRead.model_fields["bruto_minor"].is_required()
+
+
+def test_el_saldo_no_ensena_la_cuenta_de_cobro() -> None:
+    """Ni al organizador ni a nadie: es un dato bancario."""
+    from app.modules.events.finanzas_router import SaldoRead
+
+    campos = set(SaldoRead.model_fields)
+    assert "payout_account_id" not in campos
+    assert "owner_id" not in campos
+
+
+def test_los_hallazgos_son_codigos_y_no_frases() -> None:
+    """La pantalla los traduce y una consulta los agrupa. Un motivo en prosa no
+    se puede contar."""
+    from app.modules.events import conciliacion
+
+    for codigo in (
+        conciliacion.PEDIDO_SIN_ENTRADAS,
+        conciliacion.ENTRADA_SIN_PAGO,
+        conciliacion.SALDO_SIN_PEDIDO,
+        conciliacion.SALDO_DUPLICADO,
+        conciliacion.IMPORTE_DISTINTO,
+        conciliacion.MONEDA_DISTINTA,
+        conciliacion.TRANSFERIDO_CON_RESERVA,
+    ):
+        assert codigo == codigo.lower()
+        assert " " not in codigo
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_conciliacion_no_corrige_nada(sesiones, con_comision) -> None:
+    """Una diferencia de dinero no se arregla escribiendo el numero que falta:
+    eso no concilia, tapa."""
+    from app.modules.events import conciliacion
+
+    orden, _, _ = await _venta(sesiones)
+    async with sesiones() as db:
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        identificador = saldo.id
+        bruto_antes = saldo.gross_amount_minor
+
+    # Se descuadra el saldo a proposito.
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "update public.owner_sale_balances set gross_amount_minor = 1,"
+                " platform_fee_minor = 0, provider_fee_minor = 0,"
+                " net_amount_minor = 1 where id = cast(:i as uuid)"
+            ),
+            {"i": identificador},
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        hallazgos = await conciliacion.conciliar_ventas(db)
+    assert any(
+        h.codigo == conciliacion.IMPORTE_DISTINTO and h.identificador == identificador
+        for h in hallazgos
+    ), [h.codigo for h in hallazgos]
+
+    # Y NO lo ha tocado.
+    async with sesiones() as db:
+        fresco = await db.get(OwnerSaleBalance, identificador)
+    assert fresco.gross_amount_minor == 1, "la conciliacion no reescribe dinero"
+    assert bruto_antes != 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_salud_cuenta_los_saldos_sin_fecha(sesiones, con_comision) -> None:
+    """Es el numero que dice cuanto dinero esta esperando una decision."""
+    from app.modules.events import conciliacion
+
+    orden, _, _ = await _venta(sesiones)
+    async with sesiones() as db:
+        await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+
+    async with sesiones() as db:
+        numeros = await conciliacion.salud(db)
+    assert numeros["saldos_sin_fecha"] >= 1
