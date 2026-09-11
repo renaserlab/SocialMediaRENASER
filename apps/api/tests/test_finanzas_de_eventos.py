@@ -655,3 +655,92 @@ async def test_la_salud_cuenta_los_saldos_sin_fecha(sesiones, con_comision) -> N
     async with sesiones() as db:
         numeros = await conciliacion.salud(db)
     assert numeros["saldos_sin_fecha"] >= 1
+
+
+# =========================================================================== #
+# Carreras: dos procesos sobre el mismo dinero
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_webhooks_a_la_vez_no_crean_dos_saldos(sesiones, con_comision) -> None:
+    """EL INDICE, NO EL `if`. La comprobacion previa la pasan los dos; por el
+    indice unico parcial pasa uno."""
+    import asyncio
+
+    orden, _, _ = await _venta(sesiones)
+    barrera = asyncio.Barrier(2)
+
+    async def registra():
+        async with sesiones() as db:
+            fresca = await db.get(EventOrder, orden.id)
+            await barrera.wait()
+            try:
+                saldo = await finanzas.registrar_venta(db, orden=fresca)
+                await db.commit()
+                return saldo.id if saldo is not None else None
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    una, otra = await asyncio.gather(registra(), registra())
+
+    async with sesiones() as db:
+        cuantos = len(
+            list(
+                await db.scalars(
+                    select(OwnerSaleBalance).where(
+                        OwnerSaleBalance.event_order_id == orden.id
+                    )
+                )
+            )
+        )
+    assert cuantos == 1, (una, otra)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_avisos_de_disputa_a_la_vez_no_abren_dos(
+    sesiones, con_comision
+) -> None:
+    """La pasarela reintenta, y dos reintentos pueden solaparse."""
+    import asyncio
+
+    orden, _, _ = await _venta(sesiones)
+    async with sesiones() as db:
+        await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+
+    referencia = f"dp_{uuid.uuid4().hex[:8]}"
+    barrera = asyncio.Barrier(2)
+
+    async def abre():
+        async with sesiones() as db:
+            fresca = await db.get(EventOrder, orden.id)
+            await barrera.wait()
+            try:
+                d = await finanzas.abrir_o_actualizar_disputa(
+                    db,
+                    externa=referencia,
+                    entorno="sandbox",
+                    estado="open",
+                    orden=fresca,
+                    importe_minor=1000,
+                    moneda="PEN",
+                )
+                await db.commit()
+                return d.id if d is not None else None
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    una, otra = await asyncio.gather(abre(), abre())
+
+    async with sesiones() as db:
+        cuantas = len(
+            list(
+                await db.scalars(
+                    select(EventDispute).where(EventDispute.external_id == referencia)
+                )
+            )
+        )
+    assert cuantas == 1, (una, otra)
