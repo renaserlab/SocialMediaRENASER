@@ -594,6 +594,20 @@ async def _expediente(sesiones, orden, evento, *, importe=4900, moneda="PEN"):
         return caso.id
 
 
+async def _politica_que_revoca(sesiones, evento):
+    """La politica que SI retira el acceso. Para que las pruebas de «no revoca»
+    prueben su propio motivo y no la ausencia de politica."""
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params={"revoke_on_refund": True, "revoke_on_partial_refund": True},
+            evento_id=evento,
+        )
+        await db.commit()
+
+
 async def _caso(sesiones, caso_id):
     async with sesiones() as db:
         return await db.get(EventAftersaleCase, caso_id)
@@ -633,6 +647,10 @@ async def test_una_devolucion_sin_confirmar_no_revoca(sesiones) -> None:
     """Un intento no es una devolución. Se RETIENE, que es reversible."""
     orden, evento = await _compra(sesiones, dias=10)
     caso_id = await _expediente(sesiones, orden, evento)
+    # CON LA POLITICA QUE SI REVOCARIA. Sin ella, esta prueba pasaria porque no
+    # hay politica y no porque el aviso este sin confirmar: diria estar
+    # probando una cosa y estaria probando otra.
+    await _politica_que_revoca(sesiones, evento)
     async with sesiones() as db:
         r = await efectos.revocar_por_devolucion(
             db,
@@ -682,6 +700,8 @@ async def test_un_aviso_incompleto_no_revoca(sesiones) -> None:
 async def test_otra_moneda_no_revoca(sesiones) -> None:
     orden, evento = await _compra(sesiones, dias=10)
     caso_id = await _expediente(sesiones, orden, evento)
+    # CON LA POLITICA QUE SI REVOCARIA: lo unico que lo impide es la moneda.
+    await _politica_que_revoca(sesiones, evento)
     async with sesiones() as db:
         r = await efectos.revocar_por_devolucion(
             db,
@@ -1499,3 +1519,67 @@ async def test_un_tipo_de_expediente_inventado_es_un_422(sesiones) -> None:
                 tipo="lo_que_sea",
                 actor_id=orden.buyer_id,
             )
+
+
+# =========================================================================== #
+# El estado a medio migrar, que es el que rompia la puerta
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_con_la_0064_puesta_y_la_0065_no_la_puerta_sigue_funcionando() -> None:
+    """EL ORDEN NATURAL DE DESPLIEGUE PASA POR AQUI: se aplica la 0064, se
+    prueba, y luego la 0065.
+
+    En esa ventana existen las cinco tablas de posventa pero NO la columna
+    `effect`, y la puerta la consulta en cada escaneo para saber si una entrada
+    esta retenida. Comprobar solo las tablas dejaba pasar ese estado y cada
+    escaneo respondia 500, sin dejar ni rastro del intento.
+
+    Se monta una base a medio migrar de verdad, porque es la unica forma de
+    ejercer esto: en una base completa la columna existe y la proteccion no se
+    puede distinguir de su ausencia.
+    """
+    import psycopg
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.modules.events import esquema
+
+    base = "renaser_media_migracion"
+    servidor = URL.rsplit("/", 1)[0]
+    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as cn:
+        with cn.cursor() as cur:
+            cur.execute(f"drop database if exists {base}")
+            cur.execute(f"create database {base}")
+
+    with psycopg.connect(f"{servidor}/{base}", autocommit=True) as cn:
+        with cn.cursor() as cur:
+            cur.execute(PROLOGO.read_text(encoding="utf-8"))
+        for ruta in sorted(MIGRACIONES.glob("*.sql")):
+            # HASTA LA 0064, y ni una mas.
+            if ruta.name >= "0065":
+                break
+            with cn.cursor() as cur:
+                cur.execute(ruta.read_text(encoding="utf-8"))
+
+    motor = create_async_engine(
+        f"{servidor}/{base}".replace("postgresql://", "postgresql+asyncpg://", 1)
+    )
+    try:
+        esquema.olvidar()
+        async with motor.connect() as cx:
+            from sqlalchemy.ext.asyncio import AsyncSession
+
+            async with AsyncSession(bind=cx) as db:
+                # Las cinco tablas ESTAN...
+                assert await db.scalar(
+                    text("select to_regclass('public.event_aftersale_case_tickets')")
+                ) is not None
+                # ...y aun asi la posventa se declara NO disponible, porque le
+                # falta la columna que la puerta consulta.
+                assert await esquema.hay_posventa(db) is False
+    finally:
+        await motor.dispose()
+        esquema.olvidar()
+        with psycopg.connect(f"{servidor}/postgres", autocommit=True) as cn:
+            with cn.cursor() as cur:
+                cur.execute(f"drop database if exists {base}")
