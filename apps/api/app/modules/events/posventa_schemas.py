@@ -107,6 +107,43 @@ class DecisionRequest(BaseModel):
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 
 
+class ResponderRequest(BaseModel):
+    """La explicación que el comprador manda cuando se le pide información."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class EntradaAfectadaRead(BaseModel):
+    """Una entrada del expediente. SIN credencial y SIN código.
+
+    El comprador ya sabe cuáles son sus entradas; lo que necesita aquí es
+    saber en qué estado quedó cada una, y eso no exige repartir nada que
+    admita en una puerta.
+    """
+
+    ticket_id: str
+    name: str
+    #: `VALID`, `USED` o `REVOKED`.
+    status: str
+    #: Cómo estaba al abrirse el expediente. Congelado.
+    status_at_open: str
+    #: `none`, `under_review`, `blocked`, `cancelled`, `revoked` o `restored`.
+    effect: str
+
+
+class PoliticaAplicadaRead(BaseModel):
+    """Con qué reglas se resolvió, para poder explicarlo después.
+
+    NO LLEVA `params`. Los números son de administración; al comprador le
+    corresponde saber qué versión se le aplicó y qué texto la acompañaba.
+    """
+
+    policy_type: str
+    version: str
+    published_at: datetime | None = None
+    body: str | None = None
+
+
 class RetiroRequest(BaseModel):
     """Retirar la propia solicitud. Solo el motivo.
 
@@ -174,7 +211,10 @@ __all__ = [
     "LineaDeHistorial",
     "PaginaDeExpedientes",
     "PoliticaRead",
+    "EntradaAfectadaRead",
+    "PoliticaAplicadaRead",
     "PublicarPoliticaRequest",
+    "ResponderRequest",
     "RetiroRequest",
     "VeredictoDePosventa",
 ]

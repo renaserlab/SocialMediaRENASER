@@ -1598,3 +1598,52 @@ async def test_con_la_0064_puesta_y_la_0065_no_la_puerta_sigue_funcionando() -> 
         with psycopg.connect(f"{servidor}/postgres", autocommit=True) as cn:
             with cn.cursor() as cur:
                 cur.execute(f"drop database if exists {base}")
+
+
+# =========================================================================== #
+# Los endpoints que le faltaban al comprador
+# =========================================================================== #
+def test_las_entradas_afectadas_no_llevan_credencial_ni_codigo() -> None:
+    """LOS DOS ADMITEN POR SI SOLOS. Para saber en que estado quedo una entrada
+    no hace falta repartir nada que abra una puerta."""
+    from app.modules.events.posventa_schemas import EntradaAfectadaRead
+
+    campos = set(EntradaAfectadaRead.model_fields)
+    assert "code" not in campos
+    assert "credential" not in campos
+    assert "credential_hash" not in campos
+    assert campos == {"ticket_id", "name", "status", "status_at_open", "effect"}
+
+
+def test_la_politica_aplicada_no_lleva_sus_numeros() -> None:
+    """Los parametros son de administracion. Al comprador le toca saber QUE
+    version se le aplico, no con que porcentajes se calculo."""
+    from app.modules.events.posventa_schemas import PoliticaAplicadaRead
+
+    campos = set(PoliticaAplicadaRead.model_fields)
+    assert "params" not in campos
+    assert "params_sha256" not in campos
+    assert campos == {"policy_type", "version", "published_at", "body"}
+
+
+def test_responder_exige_un_texto() -> None:
+    """Contestar «» a una peticion de informacion no es contestar."""
+    from pydantic import ValidationError
+
+    from app.modules.events.posventa_schemas import ResponderRequest
+
+    with pytest.raises(ValidationError):
+        ResponderRequest(reason="")
+    with pytest.raises(ValidationError):
+        ResponderRequest(reason="x" * 1001)
+    assert ResponderRequest(reason="se me cruzo un viaje").reason
+
+
+def test_responder_es_un_paso_del_comprador_y_lo_devuelve_a_revision() -> None:
+    """Y NO lo aprueba: contestar no decide nada."""
+    from app.modules.events import posventa_estados as m
+
+    m.exigir(ESPERANDO, EN_REVISION, m.COMPRADOR)
+    for destino in (APROBADO, RECHAZADO):
+        with pytest.raises((m.SaltoNoPermitido, m.SaltoInexistente)):
+            m.exigir(ESPERANDO, destino, m.COMPRADOR)

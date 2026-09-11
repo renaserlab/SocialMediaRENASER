@@ -27,7 +27,7 @@ from app.core.security import AuthUser, get_current_user
 from app.modules.catalog.models import Event
 from app.modules.events import elegibilidad, esquema, politicas, posventa
 from app.modules.events import posventa_estados as maquina
-from app.modules.events.models import EventOrder
+from app.modules.events.models import EventOrder, EventTicket
 from app.modules.events.posventa_models import (
     CANCELADO,
     EN_REVISION,
@@ -35,6 +35,7 @@ from app.modules.events.posventa_models import (
     APROBADO,
     RECHAZADO,
     EventAftersaleCase,
+    EventAftersaleCaseTicket,
     EventChange,
     EventPolicy,
     SIN_CLASIFICAR,
@@ -50,7 +51,10 @@ from app.modules.events.posventa_schemas import (
     LineaDeHistorial,
     PaginaDeExpedientes,
     PoliticaRead,
+    EntradaAfectadaRead,
+    PoliticaAplicadaRead,
     PublicarPoliticaRequest,
+    ResponderRequest,
     RetiroRequest,
     VeredictoDePosventa,
 )
@@ -239,6 +243,108 @@ async def historial_del_expediente(
         )
         for linea in await posventa.historial(db, expediente_id=case_id)
     ]
+
+
+@router.post("/aftersale-cases/{case_id}/respond", response_model=ExpedienteRead)
+async def responder_informacion(
+    case_id: str,
+    payload: ResponderRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpedienteRead:
+    """El comprador contesta a una petición de información.
+
+    Devuelve el expediente a revisión. Su texto se guarda como MOTIVO de ese
+    paso, no como nota interna: es suyo y lo puede volver a leer.
+    """
+    await esquema.exigir_posventa(db)
+    ensure_uuid(case_id, "Expediente no encontrado.")
+    await posventa.leer(db, expediente_id=case_id, usuario_id=current_user.id)
+    movimiento = await posventa.transicionar(
+        db,
+        expediente_id=case_id,
+        hasta=EN_REVISION,
+        actor_id=current_user.id,
+        actor_rol=maquina.COMPRADOR,
+        motivo=payload.reason,
+    )
+    await db.commit()
+    return _leido(movimiento.expediente, actor=maquina.COMPRADOR)
+
+
+@router.get(
+    "/aftersale-cases/{case_id}/tickets", response_model=list[EntradaAfectadaRead]
+)
+async def entradas_afectadas(
+    case_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[EntradaAfectadaRead]:
+    """Qué entradas toca el expediente y cómo quedó cada una.
+
+    SIN CREDENCIAL Y SIN CÓDIGO: los dos admiten por sí solos, y para saber en
+    qué estado quedó una entrada no hace falta ninguno.
+    """
+    await esquema.exigir_posventa(db)
+    ensure_uuid(case_id, "Expediente no encontrado.")
+    await posventa.leer(db, expediente_id=case_id, usuario_id=current_user.id)
+    filas = (
+        await db.execute(
+            select(
+                EventAftersaleCaseTicket.ticket_id,
+                EventAftersaleCaseTicket.status_at_open,
+                EventAftersaleCaseTicket.effect,
+                EventTicket.status,
+                EventTicket.ticket_type_name_snapshot,
+            )
+            .join(EventTicket, EventTicket.id == EventAftersaleCaseTicket.ticket_id)
+            .where(EventAftersaleCaseTicket.case_id == case_id)
+            .order_by(EventTicket.issued_at, EventTicket.id)
+        )
+    ).all()
+    return [
+        EntradaAfectadaRead(
+            ticket_id=f[0],
+            status_at_open=f[1],
+            effect=f[2],
+            status=f[3],
+            name=f[4],
+        )
+        for f in filas
+    ]
+
+
+@router.get(
+    "/aftersale-cases/{case_id}/policy", response_model=PoliticaAplicadaRead
+)
+async def politica_aplicada(
+    case_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PoliticaAplicadaRead:
+    """Con qué reglas se resolvió. 404 mientras no haya decisión.
+
+    Que no haya política aplicada no es un error: es que nadie ha decidido
+    todavía, y decirlo con un 404 lo distingue de un expediente inexistente
+    tanto como hace falta aquí, porque el expediente ya se comprobó como suyo.
+    """
+    await esquema.exigir_posventa(db)
+    ensure_uuid(case_id, "Expediente no encontrado.")
+    caso = await posventa.leer(db, expediente_id=case_id, usuario_id=current_user.id)
+    if caso.policy_id is None:
+        raise NotFoundError(
+            "Todavía no hay una política aplicada a este expediente.",
+            code="event_case_policy_not_applied",
+        )
+    politica = await db.get(EventPolicy, caso.policy_id)
+    if politica is None:
+        raise NotFoundError("Política no encontrada.")
+    return PoliticaAplicadaRead(
+        policy_type=politica.policy_type,
+        version=politica.version,
+        published_at=politica.published_at,
+        body=politica.body,
+    )
 
 
 @router.post("/aftersale-cases/{case_id}/withdraw", response_model=ExpedienteRead)
