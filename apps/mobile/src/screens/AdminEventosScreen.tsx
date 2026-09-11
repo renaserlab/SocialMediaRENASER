@@ -176,6 +176,13 @@ export function AdminEventosScreen() {
           disabled={trayendoMas}
         />
       ) : null}
+
+      {/* Moderar reseñas es otra cola, y se llega desde aquí. */}
+      <Button
+        label={t('moderacionResenas.tituloPanel' as TranslationKey)}
+        variant="secondary"
+        onPress={() => router.push('/admin/resenas' as never)}
+      />
     </AppScreen>
   );
 }

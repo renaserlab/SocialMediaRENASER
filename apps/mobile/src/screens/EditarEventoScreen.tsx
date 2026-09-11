@@ -598,6 +598,17 @@ export function EditarEventoScreen() {
         disabled={ocupado}
       />
 
+      {/* Y las condiciones que le prometes a quien compra: hasta cuándo se puede
+          pedir un cambio o una devolución y qué pasa con la entrada. Ahí se
+          escriben, se publican por versiones y se cancela el evento entero. */}
+      <Button
+        label={t('politicasEvento.enlaceDesdeElEvento' as TranslationKey)}
+        variant="secondary"
+        icon="file-text"
+        onPress={() => router.push(`/politicas/${id}` as never)}
+        disabled={ocupado}
+      />
+
       {/* Y el dinero de este evento: lo vendido, lo retenido y por qué. No se
           mueve nada desde ahí; se mira. */}
       <Button

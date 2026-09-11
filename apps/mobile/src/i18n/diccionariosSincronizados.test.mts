@@ -99,8 +99,52 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'category.audiosOne',
     // Formato puro: un numero, un punto medio y un texto ya traducido.
     'finanzasEvento.hallazgoContado',
+    // «No» y «Visible» se escriben igual en los dos idiomas.
+    'politicasEvento.ternario.no',
+    'politicasAdmin.valor.no',
+    'moderacionResenas.estado.visible',
+    // Formato puro: una flecha entre dos huecos, y un número con su unidad.
+    'politicasAdmin.antesAhora',
+    'politicasAdmin.valor.horas',
   ]),
   pt: new Set<string>([
+    // Políticas y moderación: palabras que se escriben exactamente igual en
+    // portugués —«Publicar», «Descartar», «Igual», «Publicada», «Evento»,
+    // «Aplicar», «Estado», «Organizador», «Publicadas», «Saldo negativo»,
+    // «Ocultar», «Oculta», «Todas», «Confirmar», «Motivo», «Ocultada»,
+    // «Avisos enviados», «caracteres», «Políticas de eventos», «Tipo»— y tres
+    // de formato puro.
+    'politicasEvento.accion.publicar',
+    'politicasEvento.cancelar.avisos',
+    'politicasEvento.descartarBoton',
+    'politicasEvento.publicarBoton',
+    'politicasAdmin.antesAhora',
+    'politicasAdmin.cambio.igual',
+    'politicasAdmin.estado.published',
+    'politicasAdmin.eventoRef',
+    'politicasAdmin.filtroAplicar',
+    'politicasAdmin.filtroEstado',
+    'politicasAdmin.filtroEvento',
+    'politicasAdmin.filtroOrganizador',
+    'politicasAdmin.filtroTipo',
+    'politicasAdmin.organizador',
+    'politicasAdmin.pestana.publicadas',
+    'politicasAdmin.sinPoliticaResumen',
+    'politicasAdmin.tipo.negative_balance',
+    'politicasAdmin.tituloPanel',
+    'politicasAdmin.valor.horas',
+    'moderacionResenas.accion.ocultar',
+    'moderacionResenas.estado.hidden',
+    'moderacionResenas.eventoRef',
+    'moderacionResenas.filtroAplicar',
+    'moderacionResenas.filtroEstado',
+    'moderacionResenas.filtroEvento',
+    'moderacionResenas.filtroTodas',
+    'moderacionResenas.mandar',
+    'moderacionResenas.motivoContador',
+    'moderacionResenas.motivoOpcional',
+    'moderacionResenas.ocultadaPor',
+    'moderacionResenas.pasoMotivo',
     // Finanzas: once palabras que se escriben exactamente igual en portugues
     // —«Vendido», «Transferido», «Cancelado», «Perdida», «Disputas», «Todas»,
     // «Motivo», «Contadores», «Saldos transferidos»— y una de formato puro.

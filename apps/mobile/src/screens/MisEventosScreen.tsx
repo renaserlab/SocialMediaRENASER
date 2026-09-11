@@ -280,6 +280,20 @@ export function MisEventosScreen() {
           {t('finanzasEvento.tituloPanel')}
         </Text>
       </Pressable>
+
+      {/* La supervision de politicas: SOLO MIRAR. Quien no administra recibe un
+          403 y la pantalla lo dice, igual que las tres de arriba. */}
+      <Pressable
+        onPress={() => router.push('/admin/politicas' as never)}
+        style={styles.cola}
+        accessibilityRole="button"
+        accessibilityLabel={t('politicasAdmin.tituloPanel' as TranslationKey)}
+      >
+        <Feather name="file-text" size={16} color={colors.textMuted} />
+        <Text variant="caption" color={colors.textMuted}>
+          {t('politicasAdmin.tituloPanel' as TranslationKey)}
+        </Text>
+      </Pressable>
     </AppScreen>
   );
 }
