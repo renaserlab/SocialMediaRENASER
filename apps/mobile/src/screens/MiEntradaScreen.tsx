@@ -220,6 +220,33 @@ export function MiEntradaScreen() {
           onPress={() => void cargar()}
         />
       ) : null}
+
+      {/*
+        EL ACCESO A LA POSVENTA, DESDE LA ENTRADA. Aquí es donde alguien mira
+        cuando algo va mal con su compra, así que aquí tiene que estar la
+        salida. Va al final y en su propia tarjeta: no compite con el QR, que
+        es para lo que se abre esta pantalla el noventa y nueve por ciento de
+        las veces.
+
+        NO PROMETE NADA. Dice que una persona lo revisará, que es lo único que
+        se puede afirmar antes de preguntarle al servidor si esta compra admite
+        siquiera una solicitud.
+      */}
+      <View style={[styles.ayuda, { borderColor: colors.border }]}>
+        <Text variant="secondary" weight="700">
+          {t('posventa.ayudaTitulo')}
+        </Text>
+        <Text variant="caption" color={colors.textMuted}>
+          {t('posventa.ayudaCuerpo')}
+        </Text>
+        <Button
+          label={t('posventa.ayudaBoton')}
+          variant="secondary"
+          onPress={() =>
+            router.push(`/posventa/nueva/${entrada.order_id}` as never)
+          }
+        />
+      </View>
     </AppScreen>
   );
 }
@@ -242,6 +269,12 @@ const styles = StyleSheet.create({
   codigo: {
     alignItems: 'center',
     gap: 4,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+  },
+  ayuda: {
+    gap: spacing.sm,
     borderWidth: 1,
     borderRadius: radius.lg,
     padding: spacing.lg,
