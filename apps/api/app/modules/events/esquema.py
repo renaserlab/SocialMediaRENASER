@@ -156,6 +156,26 @@ async def exigir_posventa(db: AsyncSession) -> None:
         )
 
 
+_TABLAS_DE_RESENAS = (
+    "event_reviews",
+    "event_review_replies",
+    "event_review_moderation",
+)
+
+
+async def hay_resenas(db: AsyncSession) -> bool:
+    """Si la 0067 está aplicada: reseñas, respuestas y su moderación."""
+    if "resenas" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            return all(inspector.has_table(t) for t in _TABLAS_DE_RESENAS)
+
+        _cache["resenas"] = await conexion.run_sync(_mirar)
+    return _cache["resenas"]
+
+
 async def exigir_eventos_v2(db: AsyncSession) -> None:
     if not await hay_eventos_v2(db):
         raise ServiceUnavailableError(
