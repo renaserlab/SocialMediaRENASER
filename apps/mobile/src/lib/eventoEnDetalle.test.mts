@@ -72,7 +72,15 @@ describe('el aforo', () => {
 });
 
 describe('la fecha larga', () => {
-  const inicio = new Date('2026-09-18T18:00:00Z');
+  // EN HORA LOCAL, no en UTC. `fechaLargaDelEvento` formatea con la zona del
+  // aparato, asi que un instante UTC cae en un dia u otro segun donde se
+  // ejecute: en UTC+5 las 18:00Z del 18 son las 23:00 del 18, y las 21:00Z
+  // son las 02:00 del 19. Construyendolas con componentes locales, «el mismo
+  // dia» y «otro dia» significan lo mismo en cualquier zona.
+  //
+  // NO se fija una zona global: eso arreglaria esta prueba y cambiaria otras.
+  // Y no se inventa la zona del evento, que el dominio todavia no guarda.
+  const inicio = new Date(2026, 8, 18, 18, 0);
 
   it('sin fecha no se escribe nada', () => {
     assert.equal(fechaLargaDelEvento({}), '');
@@ -88,18 +96,24 @@ describe('la fecha larga', () => {
   it('con fin el mismo día, un rango de horas', () => {
     const texto = fechaLargaDelEvento({
       startsAtDate: inicio,
-      endsAtDate: new Date('2026-09-18T21:00:00Z'),
+      endsAtDate: new Date(2026, 8, 18, 21, 0),
     });
     assert.ok(texto.includes('–'));
+    // Y la fecha NO se repite: es lo que distingue un rango de horas de dos
+    // fechas completas, y es la regla que la prueba de abajo comprueba al
+    // reves. Sin esto, las dos pasarian con cualquier formato.
+    const [antes, despues] = texto.split('–');
+    assert.ok(!/\d{1,2}/.test(despues.replace(/\d{1,2}:\d{2}/g, '')));
+    assert.ok(/18/.test(antes));
   });
 
   it('con fin en otro día, las dos fechas completas', () => {
     const texto = fechaLargaDelEvento({
       startsAtDate: inicio,
-      endsAtDate: new Date('2026-09-20T21:00:00Z'),
+      endsAtDate: new Date(2026, 8, 20, 21, 0),
     });
     assert.ok(texto.includes('–'));
-    // Dos días distintos: aparecen los dos números de día.
+    // Dos dias distintos: aparecen los dos numeros de dia.
     assert.ok(/18/.test(texto) && /20/.test(texto));
   });
 
