@@ -598,6 +598,16 @@ export function EditarEventoScreen() {
         disabled={ocupado}
       />
 
+      {/* Y el dinero de este evento: lo vendido, lo retenido y por qué. No se
+          mueve nada desde ahí; se mira. */}
+      <Button
+        label={t('finanzasEvento.tituloOrganizador')}
+        variant="secondary"
+        icon="dollar-sign"
+        onPress={() => router.push(`/finanzas/${id}` as never)}
+        disabled={ocupado}
+      />
+
       {editable ? (
         <>
           <Button

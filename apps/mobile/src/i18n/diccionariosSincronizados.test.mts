@@ -97,8 +97,24 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'circle.tabFeed',
     'circle.tabChat',
     'category.audiosOne',
+    // Formato puro: un numero, un punto medio y un texto ya traducido.
+    'finanzasEvento.hallazgoContado',
   ]),
   pt: new Set<string>([
+    // Finanzas: once palabras que se escriben exactamente igual en portugues
+    // —«Vendido», «Transferido», «Cancelado», «Perdida», «Disputas», «Todas»,
+    // «Motivo», «Contadores», «Saldos transferidos»— y una de formato puro.
+    'finanzasEvento.bruto',
+    'finanzasEvento.contador.saldos_transferred',
+    'finanzasEvento.disputa.lost',
+    'finanzasEvento.disputasTitulo',
+    'finanzasEvento.estadoSaldo.cancelled',
+    'finanzasEvento.estadoSaldo.transferred',
+    'finanzasEvento.filtroTodas',
+    'finanzasEvento.hallazgoContado',
+    'finanzasEvento.motivoEtiqueta',
+    'finanzasEvento.saludTitulo',
+    'finanzasEvento.transferido',
     // Entradas: «Desde», «Reserva gratuita», «Retirar» y «Retirado» se
     // escriben exactamente igual en los dos idiomas; las dos ultimas son
     // formato puro.

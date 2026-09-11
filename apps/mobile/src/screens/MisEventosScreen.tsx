@@ -253,6 +253,33 @@ export function MisEventosScreen() {
           {t('admisionEvento.cola')}
         </Text>
       </Pressable>
+
+      {/* Las otras dos bandejas de plataforma, con la misma regla: se ofrecen y
+          el servidor contesta. La de posventa la puede abrir quien gestiona
+          casos; la financiera, solo quien puede mover dinero. */}
+      <Pressable
+        onPress={() => router.push('/admin/posventa' as never)}
+        style={styles.cola}
+        accessibilityRole="button"
+        accessibilityLabel={t('posventaAdmin.tituloBandeja')}
+      >
+        <Feather name="life-buoy" size={16} color={colors.textMuted} />
+        <Text variant="caption" color={colors.textMuted}>
+          {t('posventaAdmin.tituloBandeja')}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={() => router.push('/admin/finanzas' as never)}
+        style={styles.cola}
+        accessibilityRole="button"
+        accessibilityLabel={t('finanzasEvento.tituloPanel')}
+      >
+        <Feather name="dollar-sign" size={16} color={colors.textMuted} />
+        <Text variant="caption" color={colors.textMuted}>
+          {t('finanzasEvento.tituloPanel')}
+        </Text>
+      </Pressable>
     </AppScreen>
   );
 }

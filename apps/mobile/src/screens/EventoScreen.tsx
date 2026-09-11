@@ -298,6 +298,15 @@ export function EventoScreen() {
           </Text>
         </View>
       )}
+
+      {/* LAS RESEÑAS, para todo el mundo. Quién puede escribir una lo decide el
+          servidor ahí dentro; esconder el enlace dejaría sin puerta a quien
+          asistió, y la lista es pública. */}
+      <Button
+        label={t('resenas.verTodas')}
+        variant="secondary"
+        onPress={() => router.push(`/resenas/${evento.id}` as never)}
+      />
     </AppScreen>
   );
 }
