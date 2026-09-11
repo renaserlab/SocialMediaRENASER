@@ -2290,8 +2290,16 @@ async def test_el_rastro_de_la_puerta_se_puede_correlacionar(entorno):
 # --------------------------------------------------------------------------- #
 # El aviso de devolucion, conectado al expediente y a sus efectos
 # --------------------------------------------------------------------------- #
-async def _politica_de_efecto(sesiones, evento_id, **params):
-    from app.modules.events import politicas
+async def _politica_de_efecto(sesiones, evento_id, orden_id=None, **params):
+    """Publica la política y, con el pedido, ANOTA QUE ESA COMPRA LA ACEPTÓ.
+
+    En producción la política se publica antes de vender y `crear_orden`
+    congela la aceptación. Aquí los pedidos se crean por otro camino, así que
+    hay que decirlo: sin esa fila, la compra no tiene condiciones que aplicar y
+    el efecto sobre la entrada no se decide —que es lo correcto—.
+    """
+    from app.modules.events import aceptacion, politicas
+    from app.modules.events.models import EventOrder
 
     async with sesiones() as db:
         await politicas.publicar(
@@ -2302,6 +2310,16 @@ async def _politica_de_efecto(sesiones, evento_id, **params):
             evento_id=evento_id,
         )
         await db.commit()
+    if orden_id is not None:
+        async with sesiones() as db:
+            orden = await db.get(EventOrder, orden_id)
+            await aceptacion.registrar(
+                db,
+                orden_id=orden.id,
+                evento_id=orden.event_id,
+                usuario_id=orden.buyer_id,
+            )
+            await db.commit()
 
 
 async def _estado_de_todo(sesiones, orden_id):
@@ -2346,7 +2364,9 @@ async def test_una_devolucion_total_confirmada_con_politica_revoca(entorno, pasa
     orden, referencia = await _pagada(http, sesiones, pasarela)
     async with sesiones() as db:
         evento_id = (await db.get(EventOrder, orden["id"])).event_id
-    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+    await _politica_de_efecto(
+        sesiones, evento_id, orden_id=orden["id"], revoke_on_refund=True
+    )
 
     pasarela.aviso = _aviso(
         orden["id"],
@@ -2398,7 +2418,9 @@ async def test_una_devolucion_parcial_no_revoca_por_el_camino_real(entorno, pasa
     orden, referencia = await _pagada(http, sesiones, pasarela, cantidad=2)
     async with sesiones() as db:
         evento_id = (await db.get(EventOrder, orden["id"])).event_id
-    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+    await _politica_de_efecto(
+        sesiones, evento_id, orden_id=orden["id"], revoke_on_refund=True
+    )
 
     pasarela.aviso = _aviso(
         orden["id"],
@@ -2423,7 +2445,9 @@ async def test_un_reembolso_en_tramite_no_revoca(entorno, pasarela):
     orden, referencia = await _pagada(http, sesiones, pasarela)
     async with sesiones() as db:
         evento_id = (await db.get(EventOrder, orden["id"])).event_id
-    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+    await _politica_de_efecto(
+        sesiones, evento_id, orden_id=orden["id"], revoke_on_refund=True
+    )
 
     pasarela.aviso = _aviso(
         orden["id"],
@@ -2448,7 +2472,9 @@ async def test_una_disputa_bloquea_pero_no_revoca(entorno, pasarela):
     orden, referencia = await _pagada(http, sesiones, pasarela)
     async with sesiones() as db:
         evento_id = (await db.get(EventOrder, orden["id"])).event_id
-    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+    await _politica_de_efecto(
+        sesiones, evento_id, orden_id=orden["id"], revoke_on_refund=True
+    )
 
     pasarela.aviso = _aviso(
         orden["id"],
@@ -2476,7 +2502,9 @@ async def test_el_mismo_aviso_de_devolucion_dos_veces_no_hace_el_doble(
     orden, referencia = await _pagada(http, sesiones, pasarela)
     async with sesiones() as db:
         evento_id = (await db.get(EventOrder, orden["id"])).event_id
-    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+    await _politica_de_efecto(
+        sesiones, evento_id, orden_id=orden["id"], revoke_on_refund=True
+    )
 
     pasarela.aviso = _aviso(
         orden["id"],

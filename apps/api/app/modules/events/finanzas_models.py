@@ -148,6 +148,13 @@ class EventDispute(Base):
             "liability is null or policy_id is not null",
             name="event_disputes_responsable_con_politica",
         ),
+        # RESUELTA ES RESUELTA. Estaba en la 0068 y NO aquí, así que las pruebas
+        # —que montan SQLite desde estos modelos— no veían que un estado que
+        # vuelve atrás con `resolved_at` puesto revienta en producción.
+        CheckConstraint(
+            "(status in ('won', 'lost', 'closed')) = (resolved_at is not null)",
+            name="event_disputes_resuelta_con_fecha",
+        ),
         UniqueConstraint(
             "provider", "environment", "external_id", name="event_disputes_referencia_unica"
         ),

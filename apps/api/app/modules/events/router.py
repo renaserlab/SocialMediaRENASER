@@ -263,6 +263,11 @@ class CancelacionRead(BaseModel):
     #: Pedidos pagados sin saldo que bloquear. Sin comisión configurada, todos.
     sin_saldo: int
     avisos: int
+    #: Compras pagadas que quedan por atender. Mayor que cero significa que hay
+    #: que volver a llamar: el evento YA está cancelado y lo vendido se atiende
+    #: por tandas, porque un evento de quinientas compras no cabe en una sola
+    #: petición sin agotar el tiempo y deshacerlo todo.
+    pendientes: int = 0
 
 
 @router.post("/{evento_id}/cancel", response_model=CancelacionRead)
@@ -296,6 +301,7 @@ async def cancelar_evento(
         saldos_bloqueados=resultado.saldos_bloqueados,
         sin_saldo=resultado.sin_saldo,
         avisos=resultado.avisos,
+        pendientes=resultado.pendientes,
     )
 
 

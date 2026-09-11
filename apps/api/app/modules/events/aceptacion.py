@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.events import esquema, politicas
 from app.modules.events.aceptacion_models import EventOrderPolicyAcceptance
+from app.modules.events.models import EventOrder
 from app.modules.events.posventa_models import (
     POLITICA_EFECTO_ENTRADA,
     POLITICA_ELEGIBILIDAD,
@@ -144,7 +145,31 @@ async def la_que_rige(
     return await db.get(EventPolicy, fila.policy_id)
 
 
+async def para_decidir(
+    db: AsyncSession, *, orden: EventOrder, tipo: str
+) -> EventPolicy | None:
+    """La política con la que se resuelve ESTA compra. NUNCA la de hoy.
+
+    ES LA DIFERENCIA ENTRE CUMPLIR Y REESCRIBIR, y es la única puerta por la que
+    deben entrar los tres sitios donde se decide: elegibilidad, efecto sobre la
+    entrada, y el sellado del expediente al aprobar.
+
+    SIN ACEPTACIÓN NO SE CAE A LA VIGENTE. A quien no se le enseñó nada no se le
+    aplica lo que se publicó después: quien llama recibe `None` y lo trata como
+    «sin política configurada», que manda el caso a una persona. Caer a la de
+    hoy sería exactamente la retroactividad que esto existe para impedir.
+
+    LA EXCEPCIÓN ES EL DESPLIEGUE. Sin la 0069 no hay dónde guardar
+    aceptaciones, así que se usa la vigente: es el comportamiento anterior, sin
+    cambios, y desplegar el código antes que el esquema no rompe nada.
+    """
+    if not await esquema.hay_aceptaciones(db):
+        return await politicas.vigente(db, tipo=tipo, evento_id=orden.event_id)
+    return await la_que_rige(db, orden_id=orden.id, tipo=tipo)
+
+
 __all__ = [
+    "para_decidir",
     "TIPOS_QUE_SE_ACEPTAN",
     "aplicables",
     "de_la_orden",

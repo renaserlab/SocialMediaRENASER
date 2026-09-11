@@ -217,8 +217,12 @@ async def evaluar(
     # cerraría la ventana para todo el mundo y un porcentaje ausente leído
     # como cero regalaría el importe entero: las dos cosas cuadran.
     # ---------------------------------------------------------------- #
-    politica = await politicas.vigente(
-        db, tipo=POLITICA_ELEGIBILIDAD, evento_id=orden.event_id
+    # LA QUE ACEPTÓ ESTA COMPRA, no la de hoy. Publicar una versión nueva no
+    # puede cerrarle la ventana a quien ya pagó bajo otra.
+    from app.modules.events import aceptacion
+
+    politica = await aceptacion.para_decidir(
+        db, orden=orden, tipo=POLITICA_ELEGIBILIDAD
     )
     if politica is None:
         return Veredicto(POLITICA_NO_CONFIGURADA, (SIN_POLITICA,), hechos=hechos)

@@ -172,8 +172,12 @@ async def procesar_entregas(
             code="notification_deliveries_not_available",
         )
 
-    async def _enviar(sesion, *, usuario_id: str, tipo: str, locale: str) -> None:
-        await push.enviar_de_la_cola(
+    async def _enviar(sesion, *, usuario_id: str, tipo: str, locale: str) -> bool:
+        # SE DEVUELVE LO QUE CONTESTA. Sin este `return`, `procesar` recibía
+        # `None`, y `None is not False` es cierto: todo se contaba como enviado
+        # y `sin_destino` no se incrementaba jamás. El defecto que el envío
+        # decía haber corregido volvía por el envoltorio.
+        return await push.enviar_de_la_cola(
             sesion, usuario_id=usuario_id, tipo=tipo, locale=locale
         )
 

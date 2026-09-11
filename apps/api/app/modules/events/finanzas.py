@@ -66,6 +66,9 @@ RETENCION_EN_CURSO = "hold_open"
 #: pregunta «por qué no se libera» no se contesta con `None` para un saldo
 #: cancelado por una devolución, porque `None` significa «nada lo impide».
 SALDO_NO_PENDIENTE = "balance_not_pending"
+#: Los estados en los que una disputa está resuelta. La base exige que
+#: `resolved_at` esté puesto exactamente en estos, y en ningún otro.
+RESUELTAS = ("won", "lost", "closed")
 #: La cuenta existe pero no sirve todavía: alta a medias, cobros apagados, o de
 #: otra persona. Tenerla apuntada no es poder pagar en ella.
 CUENTA_SIN_ALTA = "payout_account_not_ready"
@@ -369,12 +372,50 @@ async def liberar_vencidos(
         # COMPARAR Y ESCRIBIR EN LA MISMA SENTENCIA. Entre mirar las puertas y
         # escribir cabe un webhook de disputa; filtrando solo por `id`, este
         # UPDATE lo pisaría.
+        # LAS PUERTAS, OTRA VEZ Y DENTRO DE LA MISMA SENTENCIA. Comparar el
+        # estado no bastaba: un webhook de disputa, una devolución parcial y la
+        # cancelación de un evento NO cambian `status`, solo insertan una
+        # reserva. Entre la comprobación de arriba y este UPDATE cabía
+        # cualquiera de los tres, y el saldo salía `eligible` con el banco
+        # reclamándolo.
+        from app.modules.events.posventa_models import (
+            EXPEDIENTES_VIVOS,
+            EventAftersaleCase,
+        )
+
         hechas = await db.execute(
             update(OwnerSaleBalance)
             .where(
                 OwnerSaleBalance.id == saldo.id,
                 OwnerSaleBalance.status == PENDIENTE,
                 OwnerSaleBalance.event_order_id.is_not(None),
+                ~select(OwnerSaleReserve.id)
+                .where(
+                    OwnerSaleReserve.balance_id == OwnerSaleBalance.id,
+                    OwnerSaleReserve.status == "held",
+                )
+                .exists(),
+                ~select(EventDispute.id)
+                .where(
+                    or_(
+                        EventDispute.balance_id == OwnerSaleBalance.id,
+                        and_(
+                            EventDispute.order_id.is_not(None),
+                            EventDispute.order_id
+                            == OwnerSaleBalance.event_order_id,
+                        ),
+                    ),
+                    EventDispute.status.in_(
+                        ("open", "needs_response", "under_review")
+                    ),
+                )
+                .exists(),
+                ~select(EventAftersaleCase.id)
+                .where(
+                    EventAftersaleCase.order_id == OwnerSaleBalance.event_order_id,
+                    EventAftersaleCase.status.in_(EXPEDIENTES_VIVOS),
+                )
+                .exists(),
             )
             .values(status=ELEGIBLE, updated_at=momento)
         )
@@ -551,14 +592,35 @@ async def atender_devolucion(
         return CANCELADO
 
     if devuelto > 0 and misma_moneda:
-        await reservar(
+        # SE ACUMULA. Toda parcial usa el motivo `refund`, y `reservar` es
+        # idempotente por saldo y motivo: la segunda chocaba contra el índice
+        # único, devolvía `None` y esto contestaba «reserved» igual. La reserva
+        # seguía diciendo lo de la primera mientras se había devuelto más, y
+        # quien la soltara liberaría dinero ya devuelto.
+        viva = await db.scalar(
+            select(OwnerSaleReserve).where(
+                OwnerSaleReserve.balance_id == saldo.id,
+                OwnerSaleReserve.reason == "refund",
+                OwnerSaleReserve.status == "held",
+            )
+        )
+        if viva is not None:
+            # NO SE SUMA A CIEGAS: se retiene lo MAYOR entre lo que ya había y
+            # lo que dice este aviso. Sumar daría de más cuando el proveedor
+            # reenvía el acumulado, y quedarse con lo nuevo daría de menos
+            # cuando manda solo el último tramo.
+            if devuelto > int(viva.amount_minor or 0):
+                viva.amount_minor = devuelto
+                await db.flush()
+            return "reserved"
+        reserva = await reservar(
             db,
             saldo=saldo,
             importe_minor=devuelto,
             motivo="refund",
             momento=momento,
         )
-        return "reserved"
+        return "reserved" if reserva is not None else "not_reserved"
 
     # Sin importe utilizable se bloquea igual, por el expediente vivo que el
     # aviso acaba de abrir. Aquí no se escribe un número que no se sabe.
@@ -621,7 +683,7 @@ async def abrir_o_actualizar_disputa(
         if desde != estado:
             existente.status = estado
             existente.updated_at = momento
-            if estado in ("won", "lost", "closed"):
+            if estado in RESUELTAS:
                 existente.resolved_at = momento
                 # Y SE SUELTA LO BLOQUEADO. Sin esto la reserva vivía para
                 # siempre: `liberar_reserva` no tenía ni un solo llamante, así
@@ -630,6 +692,27 @@ async def abrir_o_actualizar_disputa(
                 await _soltar_lo_reclamado(
                     db, disputa=existente, estado=estado, momento=momento
                 )
+            else:
+                # SE LIMPIA AL VOLVER ATRÁS. Stripe no garantiza el orden de
+                # entrega: un `closed` seguido de un `needs_response` dejaba
+                # `resolved_at` puesto sobre un estado sin resolver, la base lo
+                # rechaza con su CHECK, el webhook devuelve 500 y Stripe
+                # reintenta hasta deshabilitar el endpoint —y con él dejan de
+                # llegar las compras—.
+                existente.resolved_at = None
+                # Y SE VUELVE A BLOQUEAR. La reserva se soltó al cerrarla; una
+                # disputa reabierta es dinero otra vez en discusión.
+                if existente.balance_id is not None:
+                    reabierto = await db.get(
+                        OwnerSaleBalance, existente.balance_id
+                    )
+                    if reabierto is not None:
+                        await _bloquear_lo_reclamado(
+                            db,
+                            saldo=reabierto,
+                            disputa=existente,
+                            momento=momento,
+                        )
             db.add(
                 EventDisputeEvent(
                     dispute_id=existente.id,
@@ -667,7 +750,7 @@ async def abrir_o_actualizar_disputa(
         status=estado,
         created_at=momento,
         updated_at=momento,
-        resolved_at=momento if estado in ("won", "lost", "closed") else None,
+        resolved_at=momento if estado in RESUELTAS else None,
     )
     try:
         async with db.begin_nested():

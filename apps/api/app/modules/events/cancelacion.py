@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.catalog.models import Event
@@ -56,6 +56,20 @@ MOTIVO_DE_RESERVA = "cancellation"
 #: Lo que se le dice a quien revisa. Un código, no una frase.
 PENDIENTE_DE_DECISION = "pending_business_decision"
 
+#: CUÁNTOS PEDIDOS SE ATIENDEN POR LLAMADA.
+#:
+#: Atender cada pedido cuesta una docena de viajes a la base —expediente,
+#: política aceptada, saldo, reserva y dos avisos— y todo esto corre con la fila
+#: del evento bloqueada. Sin cota, un evento de quinientas compras se convertía
+#: en cinco mil idas y vueltas en una sola petición: agotaba el tiempo, se
+#: deshacía entero, y reintentar volvía a empezar desde cero. Justo el evento que
+#: más importa cancelar bien era el único que no se podía cancelar.
+#:
+#: Con cota, la primera llamada deja el evento CANCELADO —eso siempre pasa— y
+#: devuelve cuántos quedan. Es reanudable porque abrir un expediente y retener
+#: un importe son las dos idempotentes.
+POR_TANDA = 100
+
 
 def ahora() -> datetime:
     return datetime.now(timezone.utc)
@@ -74,6 +88,10 @@ class Resultado:
     #: y no es un fallo: es que no había nada que bloquear.
     sin_saldo: int
     avisos: int
+    #: Pedidos pagados que quedan por atender. Mayor que cero significa que hay
+    #: que volver a llamar: el evento YA está cancelado y lo vendido se atiende
+    #: por tandas.
+    pendientes: int = 0
 
 
 def regla_vigente() -> str:
@@ -89,6 +107,7 @@ async def cancelar_evento(
     evento_id: str,
     actor_id: str | None,
     motivo: str,
+    limite: int = POR_TANDA,
     momento: datetime | None = None,
 ) -> Resultado:
     """Cancela el evento y deja todo lo vendido BLOQUEADO y a la vista.
@@ -109,17 +128,38 @@ async def cancelar_evento(
     momento = momento or ahora()
     regla = regla_vigente()
     if not await esquema.hay_ordenes(db):
-        return Resultado(regla, 0, 0, 0, 0)
+        return Resultado(regla, 0, 0, 0, 0, 0)
 
+    # LOS QUE TODAVÍA NO TIENEN EXPEDIENTE VIVO, y solo una tanda. Los que ya lo
+    # tienen están atendidos: abrir otro sería partir su caso en dos.
+    sin_atender = select(EventOrder).where(
+        EventOrder.event_id == evento_id,
+        EventOrder.status == "PAID",
+    )
+    if await esquema.hay_posventa(db):
+        sin_atender = sin_atender.where(
+            ~select(EventAftersaleCase.id)
+            .where(
+                EventAftersaleCase.order_id == EventOrder.id,
+                EventAftersaleCase.status.in_(EXPEDIENTES_VIVOS),
+            )
+            .exists()
+        )
+    quedan = int(
+        await db.scalar(
+            select(func.count()).select_from(sin_atender.subquery())
+        )
+        or 0
+    )
     pedidos = list(
         await db.scalars(
-            select(EventOrder).where(
-                EventOrder.event_id == evento_id, EventOrder.status == "PAID"
+            sin_atender.order_by(EventOrder.created_at, EventOrder.id).limit(
+                max(1, min(int(limite), 500))
             )
         )
     )
     if not pedidos:
-        return Resultado(regla, 0, 0, 0, 0)
+        return Resultado(regla, 0, 0, 0, 0, 0)
 
     expedientes = 0
     bloqueados = 0
@@ -157,7 +197,9 @@ async def cancelar_evento(
         bloqueados,
         sin_saldo,
     )
-    return Resultado(regla, expedientes, bloqueados, sin_saldo, avisos)
+    return Resultado(
+        regla, expedientes, bloqueados, sin_saldo, avisos, max(0, quedan - len(pedidos))
+    )
 
 
 async def _expediente_de(
@@ -295,16 +337,25 @@ async def _avisar(
     from app.modules.events import avisos
 
     cuantos = 0
-    for destinatario, tipo in (
-        (caso.buyer_id, "event_cancelled_under_review"),
-        (caso.organizer_id, "event_cancelled_organizer_notice"),
+    # AL COMPRADOR, POR SU EXPEDIENTE: uno por persona y por compra.
+    if caso.buyer_id and await avisos.encolar(
+        db,
+        usuario_id=caso.buyer_id,
+        tipo="event_cancelled_under_review",
+        entidad_id=caso.id,
     ):
-        if not destinatario:
-            continue
-        if await avisos.encolar(
-            db, usuario_id=destinatario, tipo=tipo, entidad_id=caso.id
-        ):
-            cuantos += 1
+        cuantos += 1
+    # A QUIEN ORGANIZA, POR EL EVENTO. Con el identificador del expediente, la
+    # clave anti-duplicado era distinta en cada pedido y el mismo teléfono
+    # recibía quinientas veces «cancelaste el evento». Canceló uno, no
+    # quinientos.
+    if caso.organizer_id and await avisos.encolar(
+        db,
+        usuario_id=caso.organizer_id,
+        tipo="event_cancelled_organizer_notice",
+        entidad_id=caso.event_id,
+    ):
+        cuantos += 1
     return cuantos
 
 

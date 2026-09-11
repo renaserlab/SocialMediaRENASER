@@ -562,12 +562,31 @@ def test_un_doscientos_con_errores_dentro_es_un_fallo() -> None:
             return self._cuerpo
 
     _exigir_recibos(_Respuesta({"data": [{"status": "ok"}]}))
+
+    # SI ALGUNO SALIÓ, LA ENTREGA SALIÓ. Un móvil viejo desinstalado hacía
+    # fallar el lote entero, y el reintento repetía el aviso en los aparatos
+    # que sí lo habían recibido: hasta cinco veces, una por espera.
+    _exigir_recibos(
+        _Respuesta(
+            {
+                "data": [
+                    {"status": "ok"},
+                    {
+                        "status": "error",
+                        "message": "DeviceNotRegistered",
+                        "details": {"error": "DeviceNotRegistered"},
+                    },
+                ]
+            }
+        )
+    )
+
+    # Cuando NO salió a ninguno, sí es un fallo de envío.
     with pytest.raises(EnvioRechazado):
         _exigir_recibos(
             _Respuesta(
                 {
                     "data": [
-                        {"status": "ok"},
                         {
                             "status": "error",
                             "message": "DeviceNotRegistered",

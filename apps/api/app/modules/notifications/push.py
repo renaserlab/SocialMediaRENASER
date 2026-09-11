@@ -318,6 +318,18 @@ def _exigir_recibos(respuesta) -> None:
         for r in recibos
         if isinstance(r, dict) and r.get("status") == "error"
     ]
+    # SI ALGUNO SALIÓ, LA ENTREGA SALIÓ. Un móvil viejo desinstalado hacía
+    # fallar el lote entero, y el reintento repetía el aviso en los aparatos
+    # que sí lo habían recibido: hasta cinco veces, por las cinco esperas.
+    # Reintentar no va a resucitar un token que ya no existe.
+    if fallos and len(fallos) < len(recibos):
+        logger.warning(
+            "[push] %s de %s destinos rechazados: %s",
+            len(fallos),
+            len(recibos),
+            fallos[0][:200],
+        )
+        return
     if fallos:
         # SIN EL TOKEN NI EL CUERPO ENTERO: solo cuántos y el primer motivo.
         raise EnvioRechazado(f"{len(fallos)} de {len(recibos)}: {fallos[0]}"[:400])

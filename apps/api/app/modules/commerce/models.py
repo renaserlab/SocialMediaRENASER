@@ -601,6 +601,25 @@ class OwnerSaleBalance(Base):
             "'transferred', 'cancelled', 'failed')",
             name="owner_sale_balances_status",
         ),
+        # UN ORIGEN, EXACTAMENTE UNO. Estaba en la 0068 y no aquí: las pruebas
+        # podían crear un saldo sin origen o con los dos y no enterarse.
+        CheckConstraint(
+            "(course_id is not null and order_id is not null "
+            " and event_id is null and event_order_id is null) "
+            "or (event_id is not null and event_order_id is not null "
+            " and course_id is null and order_id is null)",
+            name="owner_sale_balances_un_origen",
+        ),
+        # UN SALDO POR PEDIDO DE EVENTO. Es lo único que protege de dos saldos
+        # para la misma venta bajo concurrencia, y sin él en el modelo el camino
+        # del `IntegrityError` no se ejercitaba nunca en pruebas.
+        Index(
+            "owner_sale_balances_pedido_de_evento_unico",
+            "event_order_id",
+            unique=True,
+            postgresql_where=text("event_order_id is not null"),
+            sqlite_where=text("event_order_id is not null"),
+        ),
         CheckConstraint(
             "gross_amount_minor >= 0 and platform_fee_minor >= 0 "
             "and provider_fee_minor >= 0 and net_amount_minor >= 0",

@@ -352,17 +352,71 @@ async def _compra(sesiones, *, dias=10, estado_entrada="VALID", pagada=True):
         return await db.get(EventOrder, orden), evento
 
 
-async def _publicar(sesiones, params, evento_id=None):
+async def _publicar(sesiones, params, evento_id=None, orden=None, tipo=None):
+    """Publica una política y, si se le da el pedido, ANOTA QUE LA ACEPTÓ.
+
+    En el mundo real la política se publica antes de vender y `crear_orden`
+    congela la aceptación. Aquí los pedidos se insertan con SQL, así que hay que
+    decirlo a mano: sin esa fila, la compra no tiene condiciones que aplicar y
+    todo contesta «sin política configurada», que es justo lo correcto.
+    """
     async with sesiones() as db:
         p = await politicas.publicar(
             db,
-            tipo="aftersale_eligibility",
+            tipo=tipo or "aftersale_eligibility",
             version=f"v{uuid.uuid4().hex[:8]}",
             params=params,
             evento_id=evento_id,
         )
         await db.commit()
-        return p
+    if orden is not None:
+        await _acepta(sesiones, orden)
+    return p
+
+
+async def _reacepta(sesiones, orden):
+    """Rehace la aceptación como si la compra se hubiera hecho AHORA.
+
+    SOLO PARA PRUEBAS, y se salta el disparador a propósito: en producción una
+    aceptación no se reescribe ni se borra. Aquí sirve para escribir el caso
+    «esta persona compró bajo ESTA versión» sin montar una segunda compra.
+    """
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "alter table public.event_order_policy_acceptances"
+                " disable trigger event_order_policy_acceptances_inmutable"
+            )
+        )
+        await db.execute(
+            text(
+                "delete from public.event_order_policy_acceptances"
+                " where order_id = cast(:o as uuid)"
+            ),
+            {"o": orden.id},
+        )
+        await db.execute(
+            text(
+                "alter table public.event_order_policy_acceptances"
+                " enable trigger event_order_policy_acceptances_inmutable"
+            )
+        )
+        await db.commit()
+    await _acepta(sesiones, orden)
+
+
+async def _acepta(sesiones, orden):
+    """Lo que esa compra aceptó, tal como lo congelaría `crear_orden`."""
+    from app.modules.events import aceptacion
+
+    async with sesiones() as db:
+        await aceptacion.registrar(
+            db,
+            orden_id=orden.id,
+            evento_id=orden.event_id,
+            usuario_id=orden.buyer_id,
+        )
+        await db.commit()
 
 
 @SIN_POSTGRES
@@ -387,7 +441,7 @@ async def test_sin_politica_no_dice_ni_si_ni_no(sesiones) -> None:
 async def test_una_politica_sin_plazo_no_supone_ninguno(sesiones) -> None:
     """La política existe, pero no trae el número. No se inventa: va a revisión."""
     orden, evento = await _compra(sesiones)
-    await _publicar(sesiones, {"refund_bps": 10000}, evento_id=evento)
+    await _publicar(sesiones, {"refund_bps": 10000}, evento_id=evento, orden=orden)
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
     assert v.resultado == elegibilidad.REQUIERE_REVISION
@@ -402,6 +456,7 @@ async def test_con_plazo_y_dentro_de_el_es_elegible(sesiones) -> None:
         sesiones,
         {"window_hours_before_event": 48, "refund_bps": 10000},
         evento_id=evento,
+        orden=orden,
     )
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
@@ -418,6 +473,7 @@ async def test_fuera_del_plazo_no_lo_es(sesiones) -> None:
         sesiones,
         {"window_hours_before_event": 48, "refund_bps": 10000},
         evento_id=evento,
+        orden=orden,
     )
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
@@ -434,7 +490,9 @@ async def test_el_porcentaje_ausente_no_vale_cero(sesiones) -> None:
     enseñaría al comprador como una cifra decidida.
     """
     orden, evento = await _compra(sesiones, dias=10)
-    await _publicar(sesiones, {"window_hours_before_event": 48}, evento_id=evento)
+    await _publicar(
+        sesiones, {"window_hours_before_event": 48}, evento_id=evento, orden=orden
+    )
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
     assert v.resultado == elegibilidad.ELEGIBLE
@@ -450,7 +508,12 @@ async def test_si_ya_entro_no_se_decide_solo(sesiones) -> None:
     a «sí»—, porque cuánto corresponde sigue sin estar decidido.
     """
     orden, evento = await _compra(sesiones, dias=10, estado_entrada="USED")
-    await _publicar(sesiones, {"window_hours_before_event": 48}, evento_id=evento)
+    await _publicar(
+        sesiones, {"window_hours_before_event": 48}, evento_id=evento, orden=orden
+    )
+    # LA SEGUNDA VERSIÓN SE PUBLICA Y SE ACEPTA, porque lo que se prueba es qué
+    # hace esa bandera. Aceptar la primera y publicar la segunda sería probar la
+    # retroactividad, que es justamente lo que ya no ocurre.
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
     assert v.resultado == elegibilidad.NO_ELEGIBLE
@@ -461,6 +524,7 @@ async def test_si_ya_entro_no_se_decide_solo(sesiones) -> None:
         {"window_hours_before_event": 48, "allow_after_check_in": True},
         evento_id=evento,
     )
+    await _reacepta(sesiones, orden)
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
     assert v.resultado == elegibilidad.REQUIERE_REVISION
@@ -477,6 +541,7 @@ async def test_un_cambio_sin_clasificar_manda_a_revision(sesiones) -> None:
         sesiones,
         {"window_hours_before_event": 48, "refund_bps": 10000},
         evento_id=evento,
+        orden=orden,
     )
     async with sesiones() as db:
         db.add(
@@ -498,7 +563,9 @@ async def test_un_cambio_sin_clasificar_manda_a_revision(sesiones) -> None:
 async def test_un_evento_cancelado_no_se_resuelve_solo_sin_permiso(sesiones) -> None:
     """El caso de mayor impacto colectivo. Automático solo si la empresa lo dijo."""
     orden, evento = await _compra(sesiones, dias=10)
-    await _publicar(sesiones, {"window_hours_before_event": 48}, evento_id=evento)
+    await _publicar(
+        sesiones, {"window_hours_before_event": 48}, evento_id=evento, orden=orden
+    )
     async with sesiones() as db:
         await db.execute(
             text(
@@ -512,12 +579,16 @@ async def test_un_evento_cancelado_no_se_resuelve_solo_sin_permiso(sesiones) -> 
     assert v.resultado == elegibilidad.REQUIERE_REVISION
     assert v.motivos == (elegibilidad.EVENTO_CANCELADO,)
 
+    # LA SEGUNDA VERSIÓN, y la compra pasa a estar bajo ella: lo que se prueba
+    # es qué hace esa bandera, no si una publicación posterior reescribe lo ya
+    # vendido —que ya no lo hace—.
     await _publicar(
         sesiones,
         {"window_hours_before_event": 48, "organizer_cancellation_auto": True,
          "cancelled_event_bps": 10000},
         evento_id=evento,
     )
+    await _reacepta(sesiones, orden)
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
     assert v.resultado == elegibilidad.ELEGIBLE
@@ -568,11 +639,14 @@ async def test_con_un_expediente_abierto_no_se_abre_otro(sesiones) -> None:
 @pytest.mark.asyncio
 async def test_la_politica_del_evento_manda_sobre_la_global(sesiones) -> None:
     orden, evento = await _compra(sesiones, dias=10)
-    await _publicar(sesiones, {"window_hours_before_event": 48, "refund_bps": 5000})
+    await _publicar(
+        sesiones, {"window_hours_before_event": 48, "refund_bps": 5000}
+    )
     await _publicar(
         sesiones,
         {"window_hours_before_event": 48, "refund_bps": 10000},
         evento_id=evento,
+        orden=orden,
     )
     async with sesiones() as db:
         v = await elegibilidad.evaluar(db, orden=orden)
@@ -609,7 +683,7 @@ async def _expediente(sesiones, orden, evento, *, importe=4900, moneda="PEN"):
         return caso.id
 
 
-async def _politica_que_revoca(sesiones, evento):
+async def _politica_que_revoca(sesiones, evento, orden=None):
     """La politica que SI retira el acceso. Para que las pruebas de «no revoca»
     prueben su propio motivo y no la ausencia de politica."""
     async with sesiones() as db:
@@ -621,6 +695,8 @@ async def _politica_que_revoca(sesiones, evento):
             evento_id=evento,
         )
         await db.commit()
+    if orden is not None:
+        await _acepta(sesiones, orden)
 
 
 async def _caso(sesiones, caso_id):
@@ -665,7 +741,7 @@ async def test_una_devolucion_sin_confirmar_no_revoca(sesiones) -> None:
     # CON LA POLITICA QUE SI REVOCARIA. Sin ella, esta prueba pasaria porque no
     # hay politica y no porque el aviso este sin confirmar: diria estar
     # probando una cosa y estaria probando otra.
-    await _politica_que_revoca(sesiones, evento)
+    await _politica_que_revoca(sesiones, evento, orden)
     async with sesiones() as db:
         r = await efectos.revocar_por_devolucion(
             db,
@@ -716,7 +792,7 @@ async def test_otra_moneda_no_revoca(sesiones) -> None:
     orden, evento = await _compra(sesiones, dias=10)
     caso_id = await _expediente(sesiones, orden, evento)
     # CON LA POLITICA QUE SI REVOCARIA: lo unico que lo impide es la moneda.
-    await _politica_que_revoca(sesiones, evento)
+    await _politica_que_revoca(sesiones, evento, orden)
     async with sesiones() as db:
         r = await efectos.revocar_por_devolucion(
             db,
@@ -772,6 +848,7 @@ async def test_una_devolucion_parcial_no_revoca_la_entrada_entera(sesiones) -> N
             evento_id=evento,
         )
         await db.commit()
+    await _acepta(sesiones, orden)
     async with sesiones() as db:
         r = await efectos.revocar_por_devolucion(
             db,
@@ -828,6 +905,7 @@ async def test_total_confirmada_y_con_politica_si_revoca(sesiones) -> None:
             evento_id=evento,
         )
         await db.commit()
+    await _acepta(sesiones, orden)
     async with sesiones() as db:
         r = await efectos.revocar_por_devolucion(
             db,
@@ -937,6 +1015,7 @@ async def test_una_entrada_revocada_no_vuelve_a_revision(sesiones) -> None:
             evento_id=evento,
         )
         await db.commit()
+    await _acepta(sesiones, orden)
     async with sesiones() as db:
         caso = await db.get(EventAftersaleCase, caso_id)
         await efectos.revocar_por_devolucion(
@@ -974,6 +1053,7 @@ async def test_restaurar_no_devuelve_la_credencial_vieja(sesiones) -> None:
             evento_id=evento,
         )
         await db.commit()
+    await _acepta(sesiones, orden)
 
     async with sesiones() as db:
         entrada = (

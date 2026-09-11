@@ -43,6 +43,11 @@ MONEDA_DISTINTA = "currency_mismatch"
 EVENTO_DISTINTO = "event_mismatch"
 ENTORNO_DISTINTO = "environment_mismatch"
 TRANSFERIDO_CON_RESERVA = "transferred_with_reserve"
+#: TODAS LAS ENTRADAS REVOCADAS Y EL SALDO VIVO. Es lo que queda cuando un aviso
+#: de devolución llega ANTES que el de cobro: el primero no encuentra pedido
+#: —`external_payment_id` se escribe al confirmar— y el segundo crea un saldo
+#: limpio sin expediente, sin reserva y sin disputa.
+DEVUELTO_CON_SALDO_VIVO = "refunded_with_live_balance"
 
 
 @dataclass(frozen=True)
@@ -207,7 +212,40 @@ async def conciliar_ventas(
                          "el saldo apunta a otro evento")
             )
 
-    # 6. ENTORNO DISTINTO. El saldo no guarda entorno, pero su cuenta de cobro
+    # 6. DEVUELTO CON EL SALDO VIVO. Un pedido cuyas entradas están TODAS
+    #    revocadas y cuyo saldo sigue en la cola. Nadie tiene que pagarle eso a
+    #    nadie, y ningún otro camino lo encuentra.
+    devueltos = (
+        await db.execute(
+            select(OwnerSaleBalance.id, OwnerSaleBalance.event_order_id)
+            .where(
+                OwnerSaleBalance.event_order_id.is_not(None),
+                OwnerSaleBalance.status.in_(("pending", "eligible")),
+                select(EventTicket.id)
+                .where(EventTicket.order_id == OwnerSaleBalance.event_order_id)
+                .exists(),
+                ~select(EventTicket.id)
+                .where(
+                    EventTicket.order_id == OwnerSaleBalance.event_order_id,
+                    EventTicket.status != "REVOKED",
+                )
+                .exists(),
+            )
+            .order_by(OwnerSaleBalance.id)
+            .limit(tope)
+        )
+    ).all()
+    hallazgos += [
+        Hallazgo(
+            DEVUELTO_CON_SALDO_VIVO,
+            "owner_sale_balance",
+            str(s),
+            f"pedido {o}",
+        )
+        for s, o in devueltos
+    ]
+
+    # 7. ENTORNO DISTINTO. El saldo no guarda entorno, pero su cuenta de cobro
     #    sí, y el pedido también: una venta de pruebas apuntando a la cuenta de
     #    producción del organizador se ve comparando esas dos.
     from app.modules.commerce.models import OwnerPayoutAccount
@@ -231,7 +269,7 @@ async def conciliar_ventas(
         for s, cuenta, pedido in entornos
     ]
 
-    # 7. TRANSFERIDO CON RESERVA VIVA. Se pagó dinero que estaba retenido.
+    # 8. TRANSFERIDO CON RESERVA VIVA. Se pagó dinero que estaba retenido.
     con_reserva = (
         await db.execute(
             select(OwnerSaleBalance.id)
@@ -339,6 +377,7 @@ async def salud(db: AsyncSession) -> dict[str, int]:
 
 
 __all__ = [
+    "DEVUELTO_CON_SALDO_VIVO",
     "ENTORNO_DISTINTO",
     "ENTRADA_SIN_PAGO",
     "EVENTO_DISTINTO",

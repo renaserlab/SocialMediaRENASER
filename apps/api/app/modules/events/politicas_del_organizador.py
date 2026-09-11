@@ -260,6 +260,7 @@ async def descartar_borrador(
     await _evento_del_organizador(
         db, evento_id=politica.event_id, usuario_id=usuario_id
     )
+    _exigir_tipo_del_organizador(politica.policy_type)
     if politica.status != BORRADOR:
         raise PoliticaNoEditable(
             "Una política publicada no se borra: se publica otra versión."

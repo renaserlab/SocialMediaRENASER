@@ -306,11 +306,19 @@ async def supervisar_politicas(
     convertir cada publicación en un trámite manual pararía a todo el mundo.
     Esto sirve para mirar, comparar y encontrar quién no tiene ninguna.
     """
-    await esquema.exigir_posventa(db)
+    # EL ROL ANTES QUE EL ESQUEMA. Al revés, quien no tiene permiso distingue
+    # un 503 de un 403 y con eso averigua qué migraciones están aplicadas.
     if not await is_admin(db, current_user.id):
         raise ForbiddenError("Solo administración.")
+    await esquema.exigir_posventa(db)
 
-    consulta = select(EventPolicy)
+    # SOLO LAS DE VENTA. `is_admin` incluye a moderación de contenido, y las
+    # de plataforma —retención, reserva, quién asume una disputa, saldo
+    # negativo— son dinero: viven detrás de `puede_mover_dinero` en su propio
+    # panel. Moderar contenido no es administrar dinero, tampoco para leerlo.
+    consulta = select(EventPolicy).where(
+        EventPolicy.policy_type.in_(propias.TIPOS_DEL_ORGANIZADOR)
+    )
     if event_id:
         ensure_uuid(event_id, "Evento no encontrado.")
         consulta = consulta.where(EventPolicy.event_id == event_id)
@@ -430,7 +438,9 @@ async def detalle_de_politica(
         raise ForbiddenError("Solo administración.")
     ensure_uuid(policy_id, "Política no encontrada.")
     politica = await db.get(EventPolicy, policy_id)
-    if politica is None:
+    if politica is None or politica.policy_type not in propias.TIPOS_DEL_ORGANIZADOR:
+        # 404 y no 403: una política de dinero no se le confirma a moderación
+        # ni por su existencia.
         raise NotFoundError("Política no encontrada.")
     return _leida(politica)
 

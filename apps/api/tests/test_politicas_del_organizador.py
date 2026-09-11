@@ -884,3 +884,263 @@ async def test_los_avisos_de_cancelacion_no_prometen_nada() -> None:
         for idioma, (titulo, cuerpo) in textos.TEXTOS[tipo].items():
             assert not prohibido.search(titulo), (tipo, idioma, titulo)
             assert not prohibido.search(cuerpo), (tipo, idioma, cuerpo)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_publicar_despues_de_vender_no_cierra_la_ventana_de_quien_ya_pago(
+    sesiones,
+) -> None:
+    """EL AGUJERO QUE LA 0069 SE ESCRIBIO PARA CERRAR, y que no cerraba.
+
+    La tabla de aceptaciones, la huella y los disparadores estaban perfectos, y
+    los tres sitios donde SE DECIDE leian `politicas.vigente`, es decir la
+    publicada HOY. El organizador podia cobrar bajo unas condiciones y publicar
+    otras al dia siguiente.
+    """
+    from app.modules.events import elegibilidad
+
+    organiza = await _persona(sesiones, "org")
+    compra = await _persona(sesiones, "com")
+    evento = await _evento(sesiones, organiza)
+
+    # Se vende con la ventana ABIERTA de par en par.
+    async with sesiones() as db:
+        v1 = await propias.guardar_borrador(
+            db, evento_id=evento, usuario_id=organiza, tipo=POLITICA_ELEGIBILIDAD,
+            version="v1",
+            params={
+                "allow_buyer_cancellation": True,
+                "window_hours_before_event": 0,
+                "refund_bps": 10000,
+            },
+            body="Puedes cancelar hasta el comienzo, y se devuelve todo.",
+        )
+        await propias.publicar_borrador(db, politica_id=v1.id, usuario_id=organiza)
+        await db.commit()
+
+    orden = await _venta(sesiones, evento, compra)
+    async with sesiones() as db:
+        await aceptacion.registrar(
+            db, orden_id=orden, evento_id=evento, usuario_id=compra
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        fila = await db.get(EventOrder, orden)
+        antes = await elegibilidad.evaluar(db, orden=fila)
+    assert antes.resultado == elegibilidad.ELEGIBLE
+    assert antes.porcentaje_bps == 10000
+
+    # Y AHORA EL ORGANIZADOR CAMBIA LAS REGLAS, despues de haber cobrado.
+    async with sesiones() as db:
+        v2 = await propias.guardar_borrador(
+            db, evento_id=evento, usuario_id=organiza, tipo=POLITICA_ELEGIBILIDAD,
+            version="v2",
+            params={
+                "allow_buyer_cancellation": True,
+                "window_hours_before_event": 8760,
+                "refund_bps": 0,
+            },
+            body="Ya no se devuelve nada.",
+        )
+        await propias.publicar_borrador(db, politica_id=v2.id, usuario_id=organiza)
+        await db.commit()
+
+    async with sesiones() as db:
+        fila = await db.get(EventOrder, orden)
+        despues = await elegibilidad.evaluar(db, orden=fila)
+
+    # LO QUE ESA PERSONA COMPRO SIGUE VALIENDO.
+    assert despues.resultado == elegibilidad.ELEGIBLE, (
+        "publicar una version nueva le cerro la ventana a quien ya habia pagado"
+    )
+    assert despues.porcentaje_bps == 10000
+    assert despues.politica_version == antes.politica_version
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_publicar_despues_no_revoca_la_entrada_de_quien_acepto_otra_cosa(
+    sesiones,
+) -> None:
+    """LA VARIANTE PEOR. Publicar `revoke_on_partial_refund` despues de vender
+    anulaba la entrada entera de alguien que acepto lo contrario."""
+    from app.modules.events import efectos
+
+    organiza = await _persona(sesiones, "org")
+    compra = await _persona(sesiones, "com")
+    evento = await _evento(sesiones, organiza)
+
+    async with sesiones() as db:
+        suave = await propias.guardar_borrador(
+            db, evento_id=evento, usuario_id=organiza, tipo=POLITICA_EFECTO_ENTRADA,
+            version="v1",
+            params={"revoke_on_refund": True, "revoke_on_partial_refund": False},
+        )
+        await propias.publicar_borrador(db, politica_id=suave.id, usuario_id=organiza)
+        await db.commit()
+
+    orden = await _venta(sesiones, evento, compra, total=10000)
+    async with sesiones() as db:
+        await aceptacion.registrar(
+            db, orden_id=orden, evento_id=evento, usuario_id=compra
+        )
+        await db.commit()
+
+    # Ahora el organizador endurece la regla.
+    async with sesiones() as db:
+        dura = await propias.guardar_borrador(
+            db, evento_id=evento, usuario_id=organiza, tipo=POLITICA_EFECTO_ENTRADA,
+            version="v2",
+            params={"revoke_on_refund": True, "revoke_on_partial_refund": True},
+        )
+        await propias.publicar_borrador(db, politica_id=dura.id, usuario_id=organiza)
+        await db.commit()
+
+    # Y llega una devolucion PARCIAL confirmada.
+    async with sesiones() as db:
+        fila = await db.get(EventOrder, orden)
+        caso = await cancelacion._expediente_de(
+            db, pedido=fila, actor_id=None, motivo="prueba",
+            momento=cancelacion.ahora(),
+        )
+        await db.commit()
+        caso_id = caso.id
+
+    async with sesiones() as db:
+        caso = await db.get(EventAftersaleCase, caso_id)
+        resultado = await efectos.revocar_por_devolucion(
+            db,
+            caso=caso,
+            importe_devuelto_minor=3000,
+            moneda="PEN",
+            referencia="re_123",
+            confirmada=True,
+        )
+        await db.commit()
+
+    assert resultado.efecto != efectos.REVOCADA, (
+        "la version publicada despues de vender revoco una entrada"
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_cancelar_un_evento_grande_va_por_tandas(sesiones) -> None:
+    """UN EVENTO DE MUCHAS COMPRAS NO CABE EN UNA PETICION.
+
+    Atender cada pedido cuesta una docena de viajes a la base y todo corre con
+    la fila del evento bloqueada. Sin cota, el evento que mas importa cancelar
+    bien era el unico que no se podia cancelar: agotaba el tiempo y se deshacia
+    entero, incluida la cancelacion.
+    """
+    organiza = await _persona(sesiones, "org")
+    evento = await _evento(sesiones, organiza)
+    ordenes = []
+    for _ in range(3):
+        compra = await _persona(sesiones, "com")
+        ordenes.append(await _venta(sesiones, evento, compra))
+
+    async with sesiones() as db:
+        primera = await cancelacion.cancelar_evento(
+            db, evento_id=evento, actor_id=organiza, motivo="motivo", limite=2
+        )
+        await db.commit()
+    assert primera.expedientes == 2
+    assert primera.pendientes == 1
+
+    # REANUDABLE: la segunda tanda atiende lo que queda y no repite lo hecho.
+    async with sesiones() as db:
+        segunda = await cancelacion.cancelar_evento(
+            db, evento_id=evento, actor_id=organiza, motivo="motivo", limite=2
+        )
+        await db.commit()
+    assert segunda.expedientes == 1
+    assert segunda.pendientes == 0
+
+    async with sesiones() as db:
+        cuantos = len(
+            list(
+                await db.scalars(
+                    select(EventAftersaleCase).where(
+                        EventAftersaleCase.event_id == evento
+                    )
+                )
+            )
+        )
+    assert cuantos == 3, "una tanda repitio un expediente o se salto uno"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_al_organizador_se_le_avisa_UNA_vez(sesiones) -> None:
+    """CANCELO UN EVENTO, NO QUINIENTOS.
+
+    La clave anti-duplicado lleva el identificador de la entidad, y con el del
+    expediente era distinta en cada pedido: el mismo telefono recibia una
+    notificacion identica por cada compra.
+    """
+    from app.modules.notifications.models import NotificationDelivery
+
+    organiza = await _persona(sesiones, "org")
+    evento = await _evento(sesiones, organiza)
+    compradores = []
+    for _ in range(3):
+        compra = await _persona(sesiones, "com")
+        compradores.append(compra)
+        await _venta(sesiones, evento, compra)
+
+    async with sesiones() as db:
+        await cancelacion.cancelar_evento(
+            db, evento_id=evento, actor_id=organiza, motivo="motivo", limite=10
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        del_organizador = list(
+            await db.scalars(
+                select(NotificationDelivery).where(
+                    NotificationDelivery.user_id == organiza,
+                    NotificationDelivery.type
+                    == "event_cancelled_organizer_notice",
+                )
+            )
+        )
+        de_compradores = list(
+            await db.scalars(
+                select(NotificationDelivery).where(
+                    NotificationDelivery.type == "event_cancelled_under_review",
+                    NotificationDelivery.user_id.in_(compradores),
+                )
+            )
+        )
+    assert len(del_organizador) == 1, "al organizador se le aviso una vez por pedido"
+    # Y a cada comprador SI le toca el suyo: es su compra.
+    assert len(de_compradores) == 3
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_borrador_por_evento_y_tipo_lo_impone_la_base(sesiones) -> None:
+    """Entre mirar si hay borrador y escribirlo cabe la otra peticion. El
+    servicio lee con `scalar()`, asi que el segundo quedaba huerfano y visible
+    en el historial."""
+    organiza = await _persona(sesiones, "org")
+    evento = await _evento(sesiones, organiza)
+    async with sesiones() as db:
+        await propias.guardar_borrador(
+            db, evento_id=evento, usuario_id=organiza, tipo=POLITICA_ELEGIBILIDAD,
+            version="v1", params=REGLAS,
+        )
+        await db.commit()
+
+    with psycopg.connect(URL, autocommit=True) as cx, cx.cursor() as cur:
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            cur.execute(
+                "insert into public.event_policies (policy_type, scope, event_id,"
+                " jurisdiction, locale, version, status, params, params_sha256)"
+                " values ('aftersale_eligibility', 'event', %s, 'PE', 'es', 'v9',"
+                " 'draft', '{}'::jsonb, %s)",
+                (evento, "0" * 64),
+            )

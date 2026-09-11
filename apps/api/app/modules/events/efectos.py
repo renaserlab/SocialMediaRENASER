@@ -223,8 +223,12 @@ async def revocar_por_devolucion(
             db, caso=caso, motivo="moneda distinta", actor_id=actor_id, momento=momento
         )
 
-    politica = await politicas.vigente(
-        db, tipo=POLITICA_EFECTO_ENTRADA, evento_id=caso.event_id
+    # LA QUE ACEPTÓ ESTA COMPRA. Publicar `revoke_on_partial_refund` después de
+    # vender anularía la entrada de quien aceptó lo contrario.
+    from app.modules.events import aceptacion
+
+    politica = await aceptacion.para_decidir(
+        db, orden=pedido, tipo=POLITICA_EFECTO_ENTRADA
     )
     if politica is None:
         return await _retener(

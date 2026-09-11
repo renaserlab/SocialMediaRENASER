@@ -1345,7 +1345,10 @@ def test_todos_los_codigos_de_conciliacion_se_emiten() -> None:
 
     from app.modules.events import conciliacion
 
-    fuente = inspect.getsource(conciliacion.conciliar_ventas)
+    # SIN SALTOS NI ESPACIOS: una llamada repartida en varias líneas emite el
+    # código igual, y la comprobación no puede depender de cómo esté formateada.
+    fuente = " ".join(inspect.getsource(conciliacion.conciliar_ventas).split())
+    fuente = fuente.replace("Hallazgo( ", "Hallazgo(")
     declarados = [
         nombre
         for nombre in conciliacion.__all__
@@ -1522,3 +1525,95 @@ async def test_un_saldo_con_expediente_abierto_tampoco(
         actual = await db.get(OwnerSaleBalance, saldo_id)
     assert cuenta["liberados"] == 0
     assert actual.status == finanzas.PENDIENTE
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_liberacion_de_eventos_no_toca_los_saldos_de_cursos(
+    sesiones, con_comision
+) -> None:
+    """EL ESPEJO DEL FALLO QUE SE ARREGLÓ, y en el otro sentido.
+
+    Compartir tabla no es compartir reglas. El camino de Eventos evalúa reserva,
+    disputa y expediente; el de Cursos evalúa una orden, una solicitud de
+    devolución y una garantía. Pasar un saldo de curso por las puertas de
+    Eventos lo liberaría saltándose las suyas.
+    """
+    autor = await _persona(sesiones, "aut")
+    curso = str(uuid.uuid4())
+    producto = str(uuid.uuid4())
+    pedido = str(uuid.uuid4())
+    saldo_de_curso = str(uuid.uuid4())
+    ayer = datetime.now(timezone.utc) - timedelta(days=1)
+
+    # CON CUENTA DE COBRO EN REGLA, y eso es lo que hace la prueba útil: sin
+    # ella, `por_que_no_se_libera` lo frenaría por «sin cuenta» y el filtro
+    # parecería innecesario. Con ella, todas las puertas de EVENTOS están
+    # abiertas para un saldo que no es de eventos.
+    cuenta_del_autor = await _cuenta_de_cobro(sesiones, autor, entorno="sandbox")
+
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "insert into public.courses (id, author_id, title) values"
+                " (cast(:i as uuid), cast(:a as uuid), 'Un curso')"
+            ),
+            {"i": curso, "a": autor},
+        )
+        await db.execute(
+            text(
+                "insert into public.commerce_products (id, course_id, kind)"
+                " values (cast(:p as uuid), cast(:c as uuid), 'course_lifetime')"
+            ),
+            {"p": producto, "c": curso},
+        )
+        await db.execute(
+            text(
+                "insert into public.orders (id, user_id, commerce_product_id,"
+                " provider, channel, status, amount_minor, currency) values"
+                " (cast(:o as uuid), cast(:u as uuid), cast(:p as uuid), 'stripe',"
+                " 'web', 'paid', 5000, 'PEN')"
+            ),
+            {"o": pedido, "u": autor, "p": producto},
+        )
+        # UN SALDO DE CURSO VENCIDO: el candidato perfecto para que el motor
+        # equivocado se lo lleve.
+        await db.execute(
+            text(
+                "insert into public.owner_sale_balances (id, course_id, order_id,"
+                " owner_id, payout_account_id, gross_amount_minor,"
+                " platform_fee_minor, provider_fee_minor, net_amount_minor,"
+                " currency, fee_rules_version, status, available_at) values"
+                " (cast(:s as uuid), cast(:c as uuid), cast(:o as uuid),"
+                " cast(:u as uuid), cast(:pa as uuid), 5000, 500, 0, 4500, 'PEN',"
+                " 'v1', 'pending', :av)"
+            ),
+            {"s": saldo_de_curso, "c": curso, "o": pedido, "u": autor,
+             "pa": cuenta_del_autor, "av": ayer},
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        cuenta = await finanzas.liberar_vencidos(db, limite=500)
+        await db.commit()
+
+    async with sesiones() as db:
+        fila = await db.get(OwnerSaleBalance, saldo_de_curso)
+    assert fila.status == "pending", (
+        "el camino de Eventos se llevó un saldo de Cursos"
+    )
+    # Y NO ESTUVO NI ENTRE LOS CANDIDATOS. Comprobar solo el estado final
+    # dejaría pasar un filtro que lo mira y lo descarta por otra razón: el día
+    # que esa otra razón cambie, se lo lleva.
+    assert cuenta["mirados"] == cuenta["liberados"] + cuenta["bloqueados"]
+    async with sesiones() as db:
+        candidatos = list(
+            await db.scalars(
+                select(OwnerSaleBalance.id).where(
+                    OwnerSaleBalance.event_order_id.is_not(None),
+                    OwnerSaleBalance.status == finanzas.PENDIENTE,
+                    OwnerSaleBalance.available_at.is_not(None),
+                )
+            )
+        )
+    assert saldo_de_curso not in [str(c) for c in candidatos]

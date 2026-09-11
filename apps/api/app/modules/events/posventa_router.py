@@ -607,9 +607,25 @@ async def aprobar(
     await _exigir_gestor(db, current_user)
     ensure_uuid(case_id, "Expediente no encontrado.")
     caso = await posventa.leer(db, expediente_id=case_id)
-    politica = await politicas.exigir_vigente(
-        db, tipo="aftersale_eligibility", evento_id=caso.event_id
+    # LA QUE ACEPTÓ ESA COMPRA. El expediente se sella con el identificador de
+    # la política, y sellarlo con la de hoy es decir dentro de un año que se
+    # aplicaron unas reglas que esa persona nunca vio.
+    from app.modules.events import aceptacion
+    from app.modules.events.models import EventOrder
+
+    orden = await db.get(EventOrder, caso.order_id)
+    politica = (
+        await aceptacion.para_decidir(
+            db, orden=orden, tipo="aftersale_eligibility"
+        )
+        if orden is not None
+        else None
     )
+    if politica is None:
+        raise politicas.PoliticaAusente(
+            "Esta compra no tiene condiciones aceptadas que aplicar.",
+            details={"policy_type": "aftersale_eligibility"},
+        )
     movimiento = await posventa.transicionar(
         db,
         expediente_id=case_id,

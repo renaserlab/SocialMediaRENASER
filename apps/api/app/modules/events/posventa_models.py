@@ -157,6 +157,18 @@ class EventPolicy(Base):
                 "status = 'published' and effective_to is null and scope = 'global'"
             ),
         ),
+        # UN BORRADOR POR EVENTO Y TIPO (0069). Dos peticiones a la vez creaban
+        # dos, y el servicio leía una con `scalar()`: la otra quedaba huérfana.
+        Index(
+            "event_policies_un_borrador_de_evento",
+            "policy_type",
+            "event_id",
+            "jurisdiction",
+            "locale",
+            unique=True,
+            postgresql_where=text("status = 'draft' and scope = 'event'"),
+            sqlite_where=text("status = 'draft' and scope = 'event'"),
+        ),
         Index(
             "event_policies_vigente_de_evento",
             "policy_type",
