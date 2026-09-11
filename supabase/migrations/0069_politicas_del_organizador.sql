@@ -115,6 +115,15 @@ create trigger event_policies_no_se_borra
   for each row
   execute function public.event_policies_publicada_no_se_borra();
 
+-- UN BORRADOR POR EVENTO Y TIPO. Dos `PUT` simultáneos creaban dos filas
+-- `draft`; el servicio lee una con `scalar()` —la primera que devuelva la base—
+-- y la otra quedaba huérfana y visible en el historial. Esto no lo puede
+-- resolver una comprobación en Python: entre mirar y escribir cabe la otra
+-- petición.
+create unique index if not exists event_policies_un_borrador_de_evento
+  on public.event_policies (policy_type, event_id, jurisdiction, locale)
+  where status = 'draft' and scope = 'event';
+
 -- ------------------------------------------------------------------------- --
 -- 2. Qué aceptó cada compra.
 -- ------------------------------------------------------------------------- --
