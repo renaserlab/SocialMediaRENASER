@@ -449,3 +449,54 @@ comprobar hoy contra la API.
 - [ ] Dos administradores resolviendo el mismo expediente: el segundo ve el
       conflicto, se recarga y puede reintentar.
 - [ ] Una entrada retenida: el escáner dice «retenida» y **no** la consume.
+
+## Lo que añadieron los Incrementos 5 y 6, ya con pantalla
+
+Estas no se podían escribir antes porque las pantallas no existían.
+
+### Reseñas, en el teléfono
+
+- [ ] Desde la ficha del evento se llega a las reseñas en un toque.
+- [ ] Sin `review_window` publicada, la pantalla dice **por qué** no se puede
+      opinar todavía, y no ofrece un botón que vaya a fallar.
+- [ ] Con la política publicada y sin check-in: dice que solo opina quien pasó
+      el control de acceso.
+- [ ] La puntuación general y los cinco ejes se pueden poner con el pulgar, sin
+      zoom, y el objetivo táctil llega a 44 puntos.
+- [ ] Editar la reseña propia la recupera tal como se escribió, comentario
+      incluido.
+- [ ] Una reseña escondida por moderación **la sigue viendo su autor**, y dice
+      que está escondida.
+- [ ] Quien organiza ve la caja de responder; quien no, no la ve.
+- [ ] Sin `organizer_reply` publicada, responder falla diciendo exactamente eso
+      —no «ha ocurrido un error»—.
+- [ ] La respuesta del organizador se lee debajo de su reseña, no en otra parte.
+- [ ] Con el teléfono en inglés y en portugués: ningún texto sale en español.
+
+### Finanzas, en el teléfono
+
+- [ ] Desde la pantalla de quien organiza se llega a «Ventas y saldo».
+- [ ] Un evento **sin ninguna venta** enseña el estado vacío y **no** «0,00».
+- [ ] Con `platform_fee_bps = -1`: bruto sí, comisión y neto dicen «pendiente de
+      configuración». En ningún sitio aparece un cero ni un `-1`.
+- [ ] El motivo de bloqueo se lee como frase; **el código crudo no aparece**.
+- [ ] Sin las migraciones 0066–0068 aplicadas: la pantalla dice «todavía no está
+      disponible», no un error.
+- [ ] Desde «Mis eventos» se llega a las dos bandejas de plataforma, y quien no
+      tiene permiso ve el mensaje de permiso —no una lista vacía—.
+- [ ] En el panel financiero, **ningún botón promete pagar**. El de
+      transferencias dice que hoy no mueve nada y enumera qué falta.
+- [ ] Soltar una retención dice, antes de confirmar, que **no mueve dinero**.
+- [ ] Conciliar devuelve hallazgos agrupados y **no corrige nada**: se ejecuta
+      dos veces y el resultado es el mismo.
+
+### Avisos, con el teléfono de verdad
+
+- [ ] El aviso llega en el idioma del **dispositivo**, no del servidor.
+- [ ] Con dos teléfonos de la misma persona: llega a los dos, **una vez cada
+      uno**.
+- [ ] Ningún aviso promete un plazo ni dice un importe.
+- [ ] Con el proceso de la cola ejecutado dos veces seguidas: el teléfono
+      **no** suena dos veces.
+- [ ] Desinstalando la aplicación y vaciando la cola: la entrega acaba en
+      `failed` con su motivo, y no se queda reintentando para siempre.

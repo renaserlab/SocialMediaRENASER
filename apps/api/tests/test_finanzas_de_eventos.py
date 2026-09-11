@@ -1391,3 +1391,33 @@ async def test_las_tres_migraciones_se_reaplican_CON_datos(
         ):
             with conexion.cursor() as cur:
                 cur.execute((MIGRACIONES / nombre).read_text(encoding="utf-8"))
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_puerta_de_salida_se_puede_encontrar(sesiones, con_comision) -> None:
+    """UNA SALIDA QUE NADIE PUEDE ENCONTRAR es la misma retención eterna con
+    otro nombre.
+
+    La ruta que suelta una reserva existía y no había ninguna que las listara:
+    el resumen del organizador solo manda cuánto hay retenido en total, así que
+    el panel no tenía de dónde sacar el identificador.
+    """
+    import inspect
+
+    from app.modules.events import finanzas_router
+
+    fuente = inspect.getsource(finanzas_router.retenciones)
+    # Solo saldos de evento: los de Cursos tienen su propio camino.
+    assert "OwnerSaleBalance.event_order_id.is_not(None)" in fuente
+    # Y devuelve el identificador que la otra ruta necesita.
+    assert '"id": reserva.id' in fuente
+
+    salida = inspect.getsource(finanzas_router.soltar_reserva)
+    assert "liberar_reserva" in salida
+    assert "actor_id=current_user.id" in salida
+
+    # EL TURNO DE PAGO EXIGE EL ESQUEMA. Contestaba 200 con su lista de
+    # bloqueos aunque las tablas no existieran.
+    turno = inspect.getsource(finanzas_router.ejecutar_transferencias)
+    assert "exigir_disponible" in turno

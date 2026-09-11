@@ -1061,3 +1061,199 @@ decida:
 - `POST /api/v1/admin/events/finance/reconcile` — conciliar y reportar.
 - `POST /api/v1/admin/events/finance/transfers/run` — hoy devuelve cero y la
   lista de bloqueos.
+
+
+## 36. Lo que encontró la revisión independiente
+
+Todo lo del capítulo 35 pasaba sus pruebas. Una revisión hecha aparte, sobre el
+código ya escrito y sin ver cómo se había escrito, encontró seis agujeros de
+dinero y de avisos. **Ninguno lo veía una prueba, y casi ninguno lo veía
+SQLite.** Están arreglados; esto cuenta qué eran, porque el patrón importa más
+que el parche.
+
+### 36.1 Un saldo reembolsado volvía a estar disponible
+
+El peor de los seis, y el más fácil de no ver.
+
+`liquidacion.congelar`, `descongelar` y `cancelar` filtran todas por
+`OwnerSaleBalance.order_id`. En un saldo de EVENTO esa columna es **nula** —el
+origen es `event_order_id`—, así que ninguna de las tres tocaba nunca un saldo
+de entradas. Y `efectos` y `posventa` no tocan la tabla del dinero en absoluto.
+
+La secuencia completa: se vende cien; el comprador pide devolución y el
+expediente abierto bloquea; la pasarela confirma el reembolso, se revocan las
+entradas y el expediente pasa a `resolved` —que **no** está entre los vivos—;
+vence la retención; y `por_que_no_se_libera` contesta `None`. «No hay nada que
+lo impida», sobre cien que ya se le devolvieron al comprador.
+
+Ahora `finanzas.atender_devolucion` lo mueve, y lo llama el mismo webhook que
+revoca las entradas —**antes** de revocarlas y aparte de ellas, porque son dos
+decisiones distintas: que la política de entradas diga «retener» no significa
+que el dinero siga siendo del organizador—:
+
+- confirmada y **total** → el saldo se cancela. No hay nada que pagarle a nadie.
+- **parcial**, o todavía sin confirmar → se **retiene** el importe que dice el
+  aviso, con el mecanismo de reservas que ya existía. Cuánto se queda el
+  organizador de una parcial es una política que nadie ha publicado; bloquear lo
+  devuelto es un hecho, restarlo del neto sería inventar el reparto.
+
+Y `por_que_no_se_libera` mira **el estado del propio saldo** como primera
+puerta. Contestar `None` sobre un saldo cancelado era la peor respuesta posible
+de esa función.
+
+### 36.2 El motor de Cursos se comía los saldos de Eventos
+
+Segunda consecuencia de compartir tabla, y en dirección contraria.
+
+`liquidacion.liberar_vencidos` seleccionaba `pending` con fecha pasada **sin
+restringir a Cursos**. Tras la 0068 eso incluye los saldos de entradas, que
+tienen sus propias puertas —reserva viva, disputa abierta, expediente abierto— y
+las estaba saltando **todas**.
+
+Después, el mismo endpoint lista los `eligible` sin filtrar y los pasa por
+`puede_transferirse`, que hacía `db.get(Order, None)` y devolvía
+`order_not_payable`. No salía dinero, eso sí; pero eran saldos permanentemente
+`eligible` y permanentemente omitidos, **copando el `limite` del turno de pago
+de los creadores de cursos**. La inanición que el docstring de ese endpoint
+describe, provocada por la migración que decía «Cursos no cambia en nada».
+
+Cursos vuelve a mirar solo lo suyo en las cuatro consultas, y
+`puede_transferirse` rechaza un saldo que no es de curso diciendo lo que pasa de
+verdad.
+
+### 36.3 Dos 500 que SQLite esconde
+
+`columna_uuid.in_(lista or [""])`. Con la lista vacía manda la cadena vacía
+contra una columna `uuid`: **SQLite la acepta y PostgreSQL la rechaza.** El
+repositorio ya tenía esa advertencia escrita en seis sitios, y aun así estaba en
+dos:
+
+- el panel financiero del organizador, que hoy es el caso de **todos** los
+  eventos, porque sin comisión configurada no existe ningún saldo;
+- el cursor de la lista de reseñas, que es una ruta **anónima**: cualquiera
+  podía provocar el 500 sin sesión, mandando un cursor sin `|`.
+
+La regla es la misma de siempre: **lista vacía = no se consulta**, y si la
+segunda mitad de un cursor va a una columna `uuid`, se valida como `uuid`.
+
+### 36.4 La cola mandaba el mismo aviso dos veces
+
+`tomar` apartaba la fila `ESPERAS[0]` —un minuto— y la dejaba en `pending`. Un
+envío a Expo va en lotes de cien con diez segundos de margen cada uno: pasar del
+minuto es normal. Al minuto y un segundo, otra réplica cogía la misma fila y el
+teléfono sonaba dos veces. **El índice único de la clave de suceso no protege de
+esto: protege el ENCOLADO, no el ENVÍO.**
+
+Y lo que venía después era peor. La réplica lenta volvía con su resultado cuando
+la que la relevó ya había cerrado la entrega, y `marcar_enviada` y `marcar_fallo`
+escribían sin mirar el estado: una entrega `failed` volvía a `sent`, o una `sent`
+pasaba a `failed` **con la fecha de envío puesta**, que viola el CHECK de la
+0066 y tumbaba el `commit` del lote entero fuera de todo `try`.
+
+El arreglo no necesitó estado nuevo ni tocar la migración: el turno dura quince
+minutos, y **el número de intento es la prenda**. `tomar` lo devuelve; las dos
+funciones que cierran exigen que la fila siga en ese intento y siga pendiente.
+
+### 36.5 La cuenta de cobro salía del entorno del proceso
+
+`_cuenta_de` filtraba por `get_settings().payments_environment`, pero el pedido
+tiene **su propio** `environment` y `confirmar_pago` lo valida. Un pedido de
+pruebas confirmado por una réplica configurada como producción apuntaba a la
+cuenta de cobro **real** del organizador. Y `owner_sale_balances` no guarda
+entorno ni proveedor, así que después no había forma de distinguirlos.
+
+La cuenta se elige con el entorno del pedido. La cabecera del módulo ya no
+afirma que se congele el entorno, porque no se congela: llega por la cuenta, que
+sí lo tiene. La conciliación compara esas dos, que es la comprobación que el
+código declaraba y no sabía hacer.
+
+También se comprueba que la cuenta **sirva**: `payout_account_id is not None` no
+es lo mismo que poder pagar en ella. Un alta a medias, los cobros apagados o una
+cuenta de otra persona pasaban por «nada lo impide». El camino de Cursos sí lo
+exigía; este no.
+
+### 36.6 La reserva de una disputa no se soltaba nunca
+
+`liberar_reserva` estaba escrita, probada y exportada, y **no tenía ni un solo
+llamante**. La reserva que abre una disputa no se soltaba jamás: ni ganándola
+—el estado pasaba a `won` y nadie tocaba la retención—, ni con una ruta, ni de
+ninguna otra forma que no fuera SQL a mano.
+
+Ahora se suelta al ganarla o cerrarla, se da por **consumida** al perderla
+—ese importe se fue de verdad, y marcarlo «liberado» lo devolvería a la cola del
+organizador— y hay una ruta de administración para las demás, que deja nombre.
+
+Y la ruta que las suelta necesitaba otra que las **listara**: el resumen del
+organizador solo manda cuánto hay retenido en total. Una puerta de salida que
+nadie puede encontrar es la misma retención eterna con otro nombre.
+
+### 36.7 Lo demás
+
+- **Una disputa bloquea por saldo O por pedido.** Abierta antes de que exista el
+  saldo se quedaba con `balance_id` nulo para siempre —y hoy, sin comisión
+  configurada, son **todas**—, así que el día que se configurara no habría
+  bloqueado nada. Además se rellena en cuanto el saldo aparece.
+- **La moneda de una reserva es la del saldo.** Un importe en otra divisa
+  etiquetado con la del saldo es peor que no tenerlo: no se reserva, y el
+  bloqueo lo pone la disputa misma.
+- **La retención y la ventana de reseña cuentan desde que el evento TERMINA.**
+  Con `starts_at`, en un festival de tres días el reloj corría mientras el evento
+  seguía pasando, y se podía opinar a los cinco minutos de entrar. Y sin ninguna
+  fecha **no** se pasa por alto la comprobación: dar por terminado un evento del
+  que no se sabe nada es lo contrario de comprobarlo.
+- **La puerta de los avisos mira `device_tokens.locale`**, no solo la tabla. Con
+  media 0066 aplicada contestaba que sí, el encolado leía la columna ausente,
+  PostgreSQL dejaba la transacción inservible, el fallo se tragaba —el encolado
+  no debe tumbar nada— y el `commit` de la devolución ya confirmada se deshacía.
+  El patrón ya estaba en `hay_ordenes`, `hay_posventa` y `hay_finanzas`.
+- **El bruto es `bigint`.** Era `integer`: 21 474 836,47 en una moneda de dos
+  decimales, con `event_orders.total_minor` ya en `bigint`. Un pedido
+  corporativo por encima reventaba el INSERT dentro del savepoint del webhook.
+- **Expo contesta 200 con los errores dentro.** `raise_for_status()` solo mira el
+  HTTP; un token que ya no existe llega como `error` en una respuesta correcta y
+  se marcaba como enviada. Y una entrega sin ningún aparato al que mandarla se
+  cierra, pero **no se cuenta como enviada**: el contador de salud mentía.
+- **La conciliación solo declara códigos que emite.** Había cuatro que ninguna
+  consulta producía, y un panel que contesta cero de un código que nadie mira
+  parece haber comprobado algo. Se añadió el descuadre que existe **hoy en
+  masa**: pedido pagado sin saldo.
+- **Las tres migraciones se reaplican con datos dentro.** Verificaban «este
+  fichero no escribe ninguna fila» **contando** las filas, así que abortaban en
+  cuanto hubiera una entrega, una reseña o una reserva: justo cuando alguien
+  vuelve a pegar el fichero en el editor para terminar de aplicarlo.
+
+### 36.8 Lo que esto enseña
+
+Cuarenta y nueve mutaciones se detectaban antes de la revisión. Ninguna de las
+que fallaban aquí era una mutación posible: no eran ramas sin probar, eran
+**preguntas que nadie había hecho**. Mutar el código dice si las pruebas miran lo
+que hay; no dice nada de lo que falta.
+
+Las tres formas que tomaron:
+
+1. **Una tabla compartida por dos dominios**, donde cada uno da por hecho que
+   todas las filas son suyas. La 0068 relajó dos columnas y eso bastó para que
+   seis consultas de Cursos empezaran a ver eventos, en las dos direcciones.
+2. **Una base de pruebas más permisiva que la de verdad.** SQLite acepta `''`
+   donde PostgreSQL quiere un `uuid`; las dos veces, el 500 solo existía en
+   producción.
+3. **Una función escrita, probada y sin llamar.** `efectos` ya había estado así
+   —el capítulo 35.1 lo cuenta— y `liberar_reserva` lo estaba otra vez. Una
+   prueba unitaria verde no dice que el código forme parte de ningún camino.
+
+### 36.9 Las vistas, y lo que queda
+
+Las pantallas de reseñas y las financieras están construidas y **enlazadas**:
+las reseñas desde la ficha del evento, «Ventas y saldo» desde la pantalla de
+quien organiza, y las dos bandejas de plataforma desde «Mis eventos», con la
+misma regla que la cola de revisión de al lado —se ofrecen y el servidor
+contesta—. Una ruta alcanzable solo tecleando la URL no existe.
+
+`null` no es cero en ninguna de las cuatro: un evento sin reseñas no tiene
+promedio; sin comisión configurada no se escribe ninguna cifra de comisión ni de
+neto, **aunque llegara un número**; sin moneda no hay «0,00», hay estado vacío.
+
+Queda **una** pantalla de Eventos sin construir que importe: **publicar una
+política**. Sin ella, nueve funciones terminadas solo saben contestar «pendiente
+de configuración», y eso no es un fallo: es la decisión que la empresa no ha
+tomado, dicha en voz alta.

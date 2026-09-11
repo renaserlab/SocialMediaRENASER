@@ -318,6 +318,58 @@ async def conciliar(
     }
 
 
+@admin_router.get("/reserves")
+async def retenciones(
+    estado: str = Query(default="held"),
+    event_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Las retenciones vivas sobre saldos de evento.
+
+    SIN ESTO LA RUTA QUE SUELTA UNA ERA INALCANZABLE: el resumen del
+    organizador solo manda cuánto hay retenido, y el panel no tenía de dónde
+    sacar el identificador. Una puerta de salida que nadie puede encontrar es
+    la misma retención eterna con otro nombre.
+    """
+    await _exigir_finanzas(db, current_user)
+    if not await esquema.hay_finanzas(db):
+        return []
+    consulta = (
+        select(OwnerSaleReserve, OwnerSaleBalance.event_id)
+        .join(OwnerSaleBalance, OwnerSaleBalance.id == OwnerSaleReserve.balance_id)
+        .where(OwnerSaleBalance.event_order_id.is_not(None))
+    )
+    if estado:
+        consulta = consulta.where(OwnerSaleReserve.status == estado)
+    if event_id:
+        ensure_uuid(event_id, "Evento no encontrado.")
+        consulta = consulta.where(OwnerSaleBalance.event_id == event_id)
+    consulta = consulta.order_by(
+        OwnerSaleReserve.created_at.desc(), OwnerSaleReserve.id.desc()
+    ).limit(limit)
+    return [
+        {
+            "id": reserva.id,
+            "balance_id": reserva.balance_id,
+            "event_id": evento_id,
+            "amount_minor": reserva.amount_minor,
+            "currency": reserva.currency,
+            "reason": reserva.reason,
+            "status": reserva.status,
+            "case_id": reserva.case_id,
+            # NULA MIENTRAS NO HAYA POLÍTICA: una retención que nadie decidió.
+            "policy_id": reserva.policy_id,
+            "created_at": reserva.created_at,
+            "released_at": reserva.released_at,
+            "released_by": reserva.released_by,
+            "release_reason": reserva.release_reason,
+        }
+        for reserva, evento_id in (await db.execute(consulta)).all()
+    ]
+
+
 class SoltarReservaRequest(BaseModel):
     """Por qué se suelta. Obligatorio: una retención que se levanta sin motivo
     escrito no se puede auditar después."""
@@ -407,6 +459,10 @@ async def ejecutar_transferencias(
     que la empresa decida no haya que escribir el circuito con prisa.
     """
     await _exigir_finanzas(db, current_user)
+    # EL ESQUEMA, TAMBIÉN AQUÍ. Contestaba 200 con su lista de bloqueos aunque
+    # las finanzas no estuvieran desplegadas, que es decir «solo faltan estas
+    # tres cosas» cuando falta la tabla entera.
+    await finanzas.exigir_disponible(db)
     ajustes = get_settings()
     bloqueos: list[str] = []
     if not ajustes.creator_transfers_enabled:
