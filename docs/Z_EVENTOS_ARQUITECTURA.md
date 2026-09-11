@@ -830,6 +830,94 @@ ahí una tercera vía —«tiene asignación viva para ESTE evento»— y ningun
 cambia. `/sales` ya está fuera de ese predicado, precisamente para que ampliar
 la puerta no reparta la recaudación.
 
+## 34. Incremento 5 — Posventa: lo que hay, y por qué está apagado
+
+### 34.1 La idea entera en un párrafo
+
+La empresa todavía no ha decidido plazos, porcentajes, quién aprueba ni cuándo
+se retira una entrada. Este incremento construye el sitio donde esas decisiones
+van a vivir —`event_policies`, versionadas y publicadas— y hace que **todo lo
+demás se bloquee mientras no existan**. No hay ni un plazo escrito en el código,
+ni un porcentaje, ni una aprobación automática.
+
+### 34.2 Por qué «no configurado» es una cuarta respuesta
+
+La elegibilidad contesta cuatro cosas: `eligible`, `not_eligible`,
+`needs_review` y `policy_not_configured`. La cuarta no es un fallo: es el estado
+de fábrica, y existe para que «todavía no lo hemos decidido» no se convierta en
+«no» —ni en «sí»— por descuido.
+
+El mismo cuidado, abajo: `politicas.numero()` devuelve `None` cuando el
+parámetro no está, **y no cero**; `politicas.bandera()` devuelve `False`. Un
+plazo ausente leído como cero cierra la ventana para todo el mundo; un
+porcentaje ausente leído como cero regala el importe entero. **Las dos cosas
+cuadran**, así que ninguna prueba de resultado las delata: hay pruebas
+explícitas de que el dato ausente no se sustituye, y una de que un booleano no
+se lee como número, porque `True` vale 1.
+
+### 34.3 Aprobar no es haber pagado
+
+Es la regla que más importa de todo el incremento, y la impone la máquina de
+estados: a `resolved` desde `refund_processing` **solo se llega con el rol
+`system`**, es decir, con un aviso verificado del proveedor. Ni un
+administrador puede declarar «devuelto» a mano.
+
+Y los actores van **por transición, no por destino**: a `resolved` también se
+llega desde `approved`, cuando no hay dinero que mover, y eso sí lo cierra quien
+administra. Una tabla por destino no sabría distinguir los dos caminos, y
+aprobar acabaría pudiendo declarar «devuelto».
+
+### 34.4 Lo que NO revoca, que es casi todo
+
+`efectos.py` es el único sitio donde vive «retirar el acceso». No revocan: abrir
+una solicitud, pasarla a revisión, aprobarla, un intento de cobro sin confirmar,
+un timeout, una respuesta ilegible, un aviso sin importe / moneda / referencia,
+una devolución **parcial** sin política que lo diga, ni cancelar el evento.
+
+Lo único que revoca es una devolución **total, confirmada, del pedido correcto**
+y con la política publicada diciéndolo. Cinco condiciones; si falla cualquiera,
+la entrada se queda **retenida** en vez de revocada. La diferencia es la que
+importa: **retener es reversible y revocar no**.
+
+«Total» se mide contra el total del **pedido**, no contra el importe que tecleó
+quien revisa —medirlo contra sí mismo hacía que una parcial aprobada de 30 sobre
+un pedido de 100 pasara por completa—, y **cero no es total**.
+
+### 34.5 La puerta aprende «retenida»
+
+`ON_HOLD` no es `REVOKED` —no se ha retirado nada— ni `NOT_ADMITTING`, que habla
+del evento entero. Se comprueba **antes** de escribir, así que una entrada
+retenida no se consume; y la condición baja además al `where` del `UPDATE`, para
+cerrar la ventana entre leerla y escribir.
+
+Pero **el estado de la entrada se mira primero**: si alguien ya entró con ese
+QR, eso es lo que la puerta necesita saber. Contestar «retenida» taparía justo
+el dato que importa cuando se presentan dos personas con el mismo código.
+
+### 34.6 Registrar un cambio no es clasificarlo
+
+`PATCH /events/{id}/published` permite corregir un evento ya publicado —una sala
+que cambia el mismo día no espera a curaduría— y escribe **una fila por
+diferencia**, con su valor anterior y el nuevo, en `event_changes`. Todo en una
+transacción: una versión sin sus cambios diría que algo se editó sin decir qué.
+
+Las filas nacen en `pending`, que **no** es «no esencial», y nadie recibe aviso
+de ningún derecho. Si un cambio es esencial lo decide una persona, desde
+`/admin/events/changes/{id}/classify`.
+
+### 34.7 Restaurar no devuelve la credencial vieja
+
+Reactivar un QR que estuvo fuera de servicio deja entrar a quien lo tuviera
+fotografiado. Se invalida —`tickets.invalidar_credencial`, que genera y descarta
+sin entregar nada— y su dueño recibe uno nuevo al abrir su entrada.
+
+### 34.8 Lo que el Incremento 5 NO hace todavía
+
+Vistas móviles de posventa · notificaciones (el módulo existente solo tiene
+plantillas en español y no tiene reintentos, y las dos cosas hay que arreglarlas
+antes de depender de él) · reseñas verificadas · respuesta del organizador ·
+ejecución del reembolso contra la pasarela.
+
 ## 33. Lo que el Incremento 4 NO hace
 
 Devoluciones de entradas · cancelación de un evento con reembolso · rol de

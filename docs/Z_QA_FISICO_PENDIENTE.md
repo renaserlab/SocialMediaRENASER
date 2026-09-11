@@ -359,3 +359,55 @@ escanean el mismo código a la vez.
       al escanear la misma entrada otra vez.
 - [ ] Apartadas, emitidas, válidas, usadas y presentes se leen como cinco cosas
       distintas y ninguna miente.
+
+
+## Incremento 5 — Posventa
+
+**NADA DE ESTO SE HA PROBADO EN UN DISPOSITIVO.** Y una parte ni siquiera se
+puede probar todavía: las vistas móviles de posventa no existen. Lo que sigue
+separa lo que se podrá comprobar en cuanto existan de lo que ya se puede
+comprobar hoy contra la API.
+
+### Se puede comprobar HOY, contra la API
+
+- [ ] Con la 0064 y la 0065 aplicadas, un escaneo normal sigue dando `OK`.
+- [ ] **Con la 0064 aplicada y la 0065 NO**, un escaneo sigue funcionando y no
+      devuelve 500. Es el orden natural de despliegue y es donde estaba el
+      agujero.
+- [ ] Sin ninguna política publicada, pedir la elegibilidad de un pedido
+      responde `policy_not_configured` —no «no»—.
+- [ ] Sin política, aprobar un expediente responde 409
+      `event_policy_not_configured`, no un 500.
+- [ ] Publicar una política con `refund_bps: 9999999` se rechaza.
+- [ ] Un moderador de contenido recibe 403 en todas las rutas de
+      `/admin/events/`.
+- [ ] Un comprador que pide el expediente de otra persona recibe **404**, no 403.
+- [ ] La respuesta del expediente al comprador **no** trae `internal_notes`.
+
+### Cuando existan las vistas
+
+- [ ] Solicitar una cancelación desde la entrada y desde el historial.
+- [ ] La pantalla dice **por qué** el botón está apagado cuando la política no
+      está definida, en vez de esconderlo sin explicación.
+- [ ] Doble pulsación en «enviar solicitud»: un solo expediente.
+- [ ] Seguimiento: número de expediente, estado, línea de tiempo y fecha de
+      última actualización.
+- [ ] Un expediente `approved` **no** dice «devuelto» en ninguna parte.
+- [ ] Retirar la solicitud desde el móvil y ver el estado cambiar.
+- [ ] La línea de tiempo **no** muestra notas internas.
+- [ ] es / en / pt en todas las pantallas nuevas, incluido el veredicto
+      `ON_HOLD`.
+- [ ] Lector de pantalla sobre la línea de tiempo.
+- [ ] Modo claro y modo oscuro.
+- [ ] Sin conexión: la pantalla lo dice y no inventa un estado.
+
+### Con dos dispositivos
+
+- [ ] Una entrada **retenida** por un expediente: el escáner dice «retenida» y
+      **no** la consume. Comprobar después que sigue `VALID`.
+- [ ] Retener la entrada desde administración **mientras** alguien la escanea:
+      o entra antes, o no entra. Nunca las dos cosas.
+- [ ] Dos administradores resolviendo el mismo expediente a la vez: uno lo
+      mueve, el otro recibe «alguien lo movió, vuelve a mirarlo».
+- [ ] Una entrada restaurada **no** admite con el QR de antes: hay que reabrir
+      la entrada para obtener uno nuevo.
