@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import ForbiddenError, ValidationAppError
 from app.core.security import AuthUser, get_current_user
 from app.modules.events import resenas
 from app.modules.events.resenas_models import EventReview
@@ -23,6 +23,7 @@ from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import is_admin
 
 router = APIRouter(prefix="/events", tags=["events-reviews"])
+admin_router = APIRouter(prefix="/admin/events", tags=["events-reviews-admin"])
 
 
 class EjesRequest(BaseModel):
@@ -265,6 +266,107 @@ async def responder_resena(
     return {"id": respuesta.id, "status": respuesta.status}
 
 
+class ResenaParaModerar(BaseModel):
+    """Lo que moderación necesita para decidir, y nada más.
+
+    LLEVA EL ESTADO Y EL MOTIVO, que la lista pública no trae porque las
+    escondidas ni siquiera salen ahí. NO lleva la entrada ni el check-in: atar a
+    una persona con un acceso concreto no hace falta para moderar un texto.
+    """
+
+    id: str
+    event_id: str
+    #: La referencia interna de quien escribió. Sirve para investigar; la
+    #: pantalla pública no la enseña.
+    author_id: str
+    overall: int
+    comment: str | None = None
+    status: str
+    moderation_reason: str | None = None
+    moderated_by: str | None = None
+    moderated_at: datetime | None = None
+    created_at: datetime
+
+
+class PasoDeModeracion(BaseModel):
+    """Un paso del historial. DE DÓNDE A DÓNDE, que es lo que la tabla guarda.
+
+    No hay ningún campo `action`: la acción ES el destino —`hidden` o
+    `visible`— y derivarla aparte sería una segunda verdad sobre lo mismo.
+    """
+
+    from_status: str | None = None
+    to_status: str
+    reason: str | None = None
+    actor_id: str | None = None
+    created_at: datetime
+
+
+@admin_router.get("/reviews", response_model=list[ResenaParaModerar])
+async def resenas_para_moderar(
+    event_id: str | None = Query(default=None),
+    estado: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ResenaParaModerar]:
+    """Las visibles Y LAS ESCONDIDAS. Sin esto, restaurar era imposible."""
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo moderación.")
+    # SIN ESQUEMA NO ES «no hay reseñas». `para_moderar` devolvía lista vacía y
+    # las dos cosas se leían igual.
+    await resenas.exigir_disponible(db)
+    if event_id:
+        ensure_uuid(event_id, "Evento no encontrado.")
+    if estado is not None and estado not in ("visible", "hidden"):
+        raise ValidationAppError(
+            "Ese estado no existe.", code="event_review_status_invalid"
+        )
+    filas = await resenas.para_moderar(
+        db, evento_id=event_id, estado=estado, limite=limit
+    )
+    return [
+        ResenaParaModerar(
+            id=r.id,
+            event_id=r.event_id,
+            author_id=r.author_id,
+            overall=r.overall,
+            comment=r.comment,
+            status=r.status,
+            moderation_reason=r.moderation_reason,
+            moderated_by=r.moderated_by,
+            moderated_at=r.moderated_at,
+            created_at=r.created_at,
+        )
+        for r in filas
+    ]
+
+
+@admin_router.get(
+    "/reviews/{review_id}/moderation", response_model=list[PasoDeModeracion]
+)
+async def historial_de_moderacion(
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PasoDeModeracion]:
+    """Qué se hizo con esta reseña y por qué. Solo se añade."""
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo moderación.")
+    await resenas.exigir_disponible(db)
+    ensure_uuid(review_id, "Reseña no encontrada.")
+    return [
+        PasoDeModeracion(
+            from_status=p.from_status,
+            to_status=p.to_status,
+            reason=p.reason,
+            actor_id=p.actor_id,
+            created_at=p.created_at,
+        )
+        for p in await resenas.historial_de_moderacion(db, resena_id=review_id)
+    ]
+
+
 @router.post("/reviews/{review_id}/moderate", response_model=ResenaRead)
 async def moderar_resena(
     review_id: str,
@@ -289,4 +391,6 @@ async def moderar_resena(
         motivo=payload.reason,
     )
     await db.commit()
-    return _leida(resena)
+    # CON EL ESTADO: quien modera necesita saber cómo quedó, y sin esto la
+    # respuesta llegaba con `status` nulo y no servía para repintar nada.
+    return _leida(resena, con_estado=True)

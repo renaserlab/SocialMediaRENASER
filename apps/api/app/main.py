@@ -30,6 +30,9 @@ from app.modules.events.order_router import admin_router as orders_admin_router
 from app.modules.events.order_router import router as orders_router
 from app.modules.events.finanzas_router import admin_router as finanzas_admin_router
 from app.modules.events.finanzas_router import router as finanzas_router
+from app.modules.events.politicas_router import admin_router as politicas_admin_router
+from app.modules.events.politicas_router import router as politicas_router
+from app.modules.events.resenas_router import admin_router as resenas_admin_router
 from app.modules.events.resenas_router import router as resenas_router
 from app.modules.events.posventa_router import admin_router as posventa_admin_router
 from app.modules.events.posventa_router import router as posventa_router
@@ -182,6 +185,9 @@ def create_app() -> FastAPI:
     app.include_router(posventa_admin_router, prefix=prefix)
     app.include_router(orders_router, prefix=prefix)
     app.include_router(resenas_router, prefix=prefix)
+    app.include_router(resenas_admin_router, prefix=prefix)
+    app.include_router(politicas_router, prefix=prefix)
+    app.include_router(politicas_admin_router, prefix=prefix)
     app.include_router(finanzas_router, prefix=prefix)
     app.include_router(finanzas_admin_router, prefix=prefix)
     app.include_router(orders_admin_router, prefix=prefix)

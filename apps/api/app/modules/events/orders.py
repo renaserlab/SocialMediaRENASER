@@ -264,6 +264,15 @@ async def crear_orden(
     )
     db.add(orden)
     await db.flush()
+    # QUÉ CONDICIONES ACEPTA ESTA COMPRA, congeladas aquí. Publicar después una
+    # versión nueva no puede cambiarle las reglas a quien ya pagó, y sin esta
+    # fila esa promesa no tendría con qué demostrarse.
+    from app.modules.events import aceptacion
+
+    await aceptacion.registrar(
+        db, orden_id=orden.id, evento_id=evento_id, usuario_id=usuario_id
+    )
+    await db.flush()
 
     for linea in lineas:
         db.add(

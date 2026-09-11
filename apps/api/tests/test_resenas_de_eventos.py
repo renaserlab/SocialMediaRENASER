@@ -612,3 +612,89 @@ def test_la_resena_propia_se_puede_leer_aunque_este_escondida() -> None:
     ruta = inspect.getsource(resenas_router.mi_resena)
     assert "current_user.id" in ruta
     assert "con_estado=True" in ruta
+
+
+def test_moderacion_ve_las_escondidas_y_no_puede_borrar_ninguna() -> None:
+    """SIN VER LO ESCONDIDO, RESTAURAR ES IMPOSIBLE.
+
+    La lista pública solo trae las visibles, con razón. Moderación necesita las
+    dos, y por eso hay una ruta aparte. Lo que NO hay, y no debe haber, es
+    ninguna forma de borrar: esconder no es borrar.
+    """
+    import inspect
+
+    from app.modules.events import resenas_router
+
+    listar = inspect.getsource(resenas.para_moderar)
+    # No filtra por estado salvo que se lo pidan: las escondidas también salen.
+    assert "EventReview.status == VISIBLE" not in listar
+
+    modulo = inspect.getsource(resenas_router)
+    assert "admin_router.get" in modulo
+    # Ninguna ruta de borrado, ni aquí ni en el servicio.
+    assert ".delete(" not in modulo
+    assert "db.delete" not in inspect.getsource(resenas)
+
+
+def test_moderar_nunca_toca_autor_ni_puntuacion() -> None:
+    """Es moderación de CONTENIDO. Cambiar la puntuación sería falsificar una
+    opinión, y cambiar el autor, atribuírsela a otra persona."""
+    import inspect
+
+    fuente = inspect.getsource(resenas.moderar)
+    for prohibido in ("author_id=", "overall=", ".author_id =", ".overall ="):
+        assert prohibido not in fuente, prohibido
+    # Lo que sí escribe: estado, motivo, quién y cuándo.
+    assert "status=" in fuente
+    assert "moderation_reason=" in fuente
+
+
+def test_el_contrato_de_moderacion_no_ensena_la_entrada_ni_el_checkin() -> None:
+    """Atar a una persona con un acceso concreto no hace falta para moderar un
+    texto. El identificador interno del autor sí: es con lo que se investiga."""
+    from app.modules.events.resenas_router import ResenaParaModerar
+
+    campos = set(ResenaParaModerar.model_fields)
+    assert "author_id" in campos
+    for prohibido in ("ticket_id", "checkin_id"):
+        assert prohibido not in campos, prohibido
+
+
+def test_el_historial_de_moderacion_dice_de_donde_a_donde() -> None:
+    """NO HAY NINGÚN CAMPO `action`: la tabla guarda `from_status` y
+    `to_status`, y la acción ES el destino. Derivarla aparte sería una segunda
+    verdad sobre lo mismo —y el contrato la pedía, así que reventaba en cada
+    llamada con un `AttributeError`—."""
+    from app.modules.events.resenas_models import EventReviewModeration
+    from app.modules.events.resenas_router import PasoDeModeracion
+
+    columnas = set(EventReviewModeration.__table__.columns.keys())
+    assert "action" not in columnas
+    assert {"from_status", "to_status"} <= columnas
+
+    campos = set(PasoDeModeracion.model_fields)
+    assert "action" not in campos
+    assert {"from_status", "to_status"} <= campos
+
+
+def test_moderar_devuelve_como_quedo() -> None:
+    """Sin el estado, la respuesta llegaba con `status` nulo y no servía para
+    repintar la fila: había que recargar la lista entera."""
+    import inspect
+
+    from app.modules.events import resenas_router
+
+    fuente = inspect.getsource(resenas_router.moderar_resena)
+    assert "con_estado=True" in fuente
+
+
+def test_la_bandeja_de_moderacion_distingue_vacio_de_no_desplegado() -> None:
+    """Lista vacía y esquema ausente se leían igual, y no son lo mismo."""
+    import inspect
+
+    from app.modules.events import resenas_router
+
+    fuente = inspect.getsource(resenas_router.resenas_para_moderar)
+    assert "exigir_disponible" in fuente
+    # Y un estado inventado no devuelve «no hay ninguna» en silencio.
+    assert "event_review_status_invalid" in fuente

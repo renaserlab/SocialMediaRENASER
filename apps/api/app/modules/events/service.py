@@ -63,7 +63,13 @@ def _destino(accion: str, actual: str) -> str:
     try:
         return states.destino(accion, actual)
     except states.TransicionInvalida as error:
-        raise ConflictError(str(error)) from error
+        # CON CÓDIGO: sin él, cancelar un evento que ya no está publicado
+        # llegaba como un 409 indistinguible de cualquier otro conflicto.
+        raise ConflictError(
+            str(error),
+            code="event_transition_invalid",
+            details={"action": accion, "from": actual},
+        ) from error
 
 
 @dataclass
@@ -693,6 +699,60 @@ async def cambiar_visibilidad(
     )
     await db.commit()
     return await expediente(db, evento_id)
+
+
+async def cancelar(
+    db: AsyncSession, *, evento_id: str, motivo: str, usuario: AuthUser
+):
+    """Cancela el evento entero y deja lo vendido retenido y en revisión.
+
+    QUÉ PASA CON EL DINERO NO SE DECIDE AQUÍ. Lo decide `cancelacion.py`, que es
+    el único sitio donde vive la regla, y hoy contesta «pendiente de decisión
+    empresarial»: ni se devuelve, ni se rechaza, ni se libera, ni se transfiere.
+
+    EN UNA SOLA TRANSACCIÓN. Un evento cancelado sin sus expedientes sería gente
+    con la entrada muerta y sin ningún caso abierto.
+    """
+    from app.modules.events import cancelacion
+
+    if not motivo.strip():
+        raise ValidationAppError("Cancelar un evento necesita un motivo.")
+
+    evento = await _exigir_evento(db, evento_id)
+    operacion = await _tomar_el_turno(db, evento_id)
+    anterior = operacion.workflow_status
+    destino = _destino("cancel", anterior)
+
+    operacion.workflow_status = destino
+    operacion.updated_at = ahora()
+    # SALE DEL CATÁLOGO, y el estado de verdad vive en `workflow_status`.
+    # `content_status` no tiene `cancelled` y añadirlo al enum por esto sería
+    # tocar un tipo que usa media plataforma; `hidden` dice lo que hace falta:
+    # ya no se ve. Ni `draft` —nunca fue un borrador— ni `deleted`.
+    evento.status = "hidden"
+
+    resultado = await cancelacion.cancelar_evento(
+        db, evento_id=evento_id, actor_id=usuario.id, motivo=motivo.strip()
+    )
+
+    await auditoria.anotar(
+        db,
+        actor_id=usuario.id,
+        action="event.cancel",
+        entity_type="event",
+        entity_id=evento_id,
+        previous_state=anterior,
+        new_state=destino,
+        reason=motivo.strip()[:500],
+        payload={
+            "regla": resultado.regla,
+            "expedientes": resultado.expedientes,
+            "saldos_bloqueados": resultado.saldos_bloqueados,
+            "sin_saldo": resultado.sin_saldo,
+        },
+    )
+    await db.commit()
+    return await expediente(db, evento_id), resultado
 
 
 async def guardar_documento(

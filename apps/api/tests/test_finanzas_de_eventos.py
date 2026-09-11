@@ -1421,3 +1421,104 @@ async def test_la_puerta_de_salida_se_puede_encontrar(sesiones, con_comision) ->
     # bloqueos aunque las tablas no existieran.
     turno = inspect.getsource(finanzas_router.ejecutar_transferencias)
     assert "exigir_disponible" in turno
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_los_saldos_de_evento_tienen_su_propio_camino_de_liberacion(
+    sesiones, con_comision
+) -> None:
+    """AL SACAR EVENTOS DEL MOTOR DE CURSOS SE QUEDABAN SIN NINGUNO.
+
+    El de Cursos mira una orden, una solicitud de devolución y una garantía que
+    aquí no existen. Este pasa cada saldo por `por_que_no_se_libera`, que es
+    donde viven las puertas de Eventos.
+    """
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    async with sesiones() as db:
+        cuenta = await finanzas.liberar_vencidos(db, limite=500)
+        await db.commit()
+    assert cuenta["liberados"] >= 1
+
+    async with sesiones() as db:
+        actual = await db.get(OwnerSaleBalance, saldo_id)
+    assert actual.status == finanzas.ELEGIBLE
+
+    # Y ES IDEMPOTENTE: la segunda vez no mueve nada.
+    async with sesiones() as db:
+        otra = await finanzas.liberar_vencidos(db, limite=500)
+        await db.commit()
+    assert otra["liberados"] == 0
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_saldo_reservado_no_se_libera_por_vencimiento(
+    sesiones, con_comision
+) -> None:
+    """LA PUERTA QUE EL MOTOR DE CURSOS SE SALTABA. Vencer la retención no es
+    lo mismo que no tener nada pendiente."""
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await finanzas.reservar(
+            db, saldo=saldo, importe_minor=100, motivo="operational_risk"
+        )
+        await db.commit()
+        saldo_id = saldo.id
+
+    async with sesiones() as db:
+        cuenta = await finanzas.liberar_vencidos(db, limite=500)
+        await db.commit()
+    assert cuenta["liberados"] == 0
+    assert cuenta["bloqueados"] >= 1
+
+    async with sesiones() as db:
+        actual = await db.get(OwnerSaleBalance, saldo_id)
+    assert actual.status == finanzas.PENDIENTE
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_saldo_con_expediente_abierto_tampoco(
+    sesiones, con_comision
+) -> None:
+    """Un caso de posventa vivo es dinero en discusión."""
+    from app.modules.events import cancelacion
+
+    orden, evento, organiza = await _venta(sesiones, total=10000)
+    await _cuenta_de_cobro(sesiones, organiza)
+    await _retencion(sesiones, evento, 0)
+
+    async with sesiones() as db:
+        orden = await db.get(EventOrder, orden.id)
+        saldo = await finanzas.registrar_venta(db, orden=orden)
+        await db.commit()
+        saldo_id = saldo.id
+
+    # Cancelar el evento abre expediente Y retiene: las dos puertas.
+    async with sesiones() as db:
+        await cancelacion.cancelar_evento(
+            db, evento_id=evento, actor_id=organiza, motivo="se cayó el recinto"
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        cuenta = await finanzas.liberar_vencidos(db, limite=500)
+        await db.commit()
+        actual = await db.get(OwnerSaleBalance, saldo_id)
+    assert cuenta["liberados"] == 0
+    assert actual.status == finanzas.PENDIENTE

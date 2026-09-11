@@ -27,14 +27,13 @@ dice por qué.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import logging
 
 from app.core.exceptions import AppError
 from app.modules.catalog.models import Event
@@ -326,6 +325,69 @@ async def por_que_no_se_libera(
             return Bloqueo(EXPEDIENTE_ABIERTO)
 
     return None
+
+
+async def liberar_vencidos(
+    db: AsyncSession, *, limite: int = 200, momento: datetime | None = None
+) -> dict[str, int]:
+    """Pasa a `eligible` los saldos DE EVENTO que ya no tiene nada que impida.
+
+    SU PROPIO CAMINO, Y NO EL DE CURSOS. El de Cursos mira una orden, una
+    solicitud de devolución y una garantía que aquí no existen; usarlo saltaba
+    reserva, disputa y expediente. Este pasa cada saldo por
+    `por_que_no_se_libera`, que es donde viven las puertas.
+
+    IDEMPOTENTE Y ACOTADO. Lo invoca un planificador EXTERNO: dentro de la API
+    no hay temporizador, porque hay varias réplicas.
+
+    NO TRANSFIERE NADA. `eligible` significa «nada lo impide», no «pagado».
+    """
+    momento = momento or ahora()
+    if not await esquema.hay_finanzas(db):
+        return {"mirados": 0, "liberados": 0, "bloqueados": 0}
+
+    candidatos = list(
+        await db.scalars(
+            select(OwnerSaleBalance)
+            .where(
+                OwnerSaleBalance.event_order_id.is_not(None),
+                OwnerSaleBalance.status == PENDIENTE,
+                OwnerSaleBalance.available_at.is_not(None),
+                OwnerSaleBalance.available_at <= momento,
+            )
+            .order_by(OwnerSaleBalance.available_at, OwnerSaleBalance.id)
+            .limit(max(1, min(int(limite), 1000)))
+        )
+    )
+    liberados = 0
+    bloqueados = 0
+    for saldo in candidatos:
+        bloqueo = await por_que_no_se_libera(db, saldo=saldo, momento=momento)
+        if bloqueo is not None:
+            bloqueados += 1
+            continue
+        # COMPARAR Y ESCRIBIR EN LA MISMA SENTENCIA. Entre mirar las puertas y
+        # escribir cabe un webhook de disputa; filtrando solo por `id`, este
+        # UPDATE lo pisaría.
+        hechas = await db.execute(
+            update(OwnerSaleBalance)
+            .where(
+                OwnerSaleBalance.id == saldo.id,
+                OwnerSaleBalance.status == PENDIENTE,
+                OwnerSaleBalance.event_order_id.is_not(None),
+            )
+            .values(status=ELEGIBLE, updated_at=momento)
+        )
+        if (hechas.rowcount or 0) == 1:
+            liberados += 1
+        else:
+            bloqueados += 1
+    await db.flush()
+    return {
+        "mirados": len(candidatos),
+        "liberados": liberados,
+        "bloqueados": bloqueados,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -709,6 +771,7 @@ __all__ = [
     "SIN_POLITICA_DE_RETENCION",
     "abrir_o_actualizar_disputa",
     "atender_devolucion",
+    "liberar_vencidos",
     "exigir_disponible",
     "liberar_reserva",
     "politica_de_reserva",

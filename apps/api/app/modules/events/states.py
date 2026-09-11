@@ -58,11 +58,17 @@ AGOTADO = "SOLD_OUT"
 EN_CURSO = "IN_PROGRESS"
 PENDIENTE_DE_CIERRE = "COMPLETED_PENDING"
 
-#: Las transiciones del Incremento 1, por la acción que las provoca.
+#: Las transiciones por la acción que las provoca.
 #:
-#: `cancel` NO está: cancelar abre el flujo de devoluciones, y este incremento
-#: no cobra entradas ni las devuelve. Un `CANCELLED` sin devolución detrás sería
-#: prometer una gestión que no existe. Para detener las ventas está `suspend`.
+#: `cancel` SÍ está desde el Incremento 5. Antes no, porque cancelar abre el
+#: flujo de devoluciones y no había ninguno: un `CANCELLED` sin gestión detrás
+#: prometía algo que no existía. Ahora la gestión existe —expediente por cada
+#: compra, importe retenido y revisión manual— y lo que sigue sin existir es la
+#: decisión de si Z exige devolución total. Eso vive en `cancelacion.py`.
+#:
+#: NO SE VUELVE DE CANCELADO. Reanudar un evento cuyas compras ya están en
+#: expediente dejaría a esa gente con un caso abierto sobre algo que vuelve a
+#: pasar; si hay que revivirlo, se publica otro.
 TRANSICIONES: dict[str, tuple[tuple[str, ...], str]] = {
     "submit": ((BORRADOR, CONDICIONAL), ENVIADO),
     "request_changes": ((ENVIADO, CONDICIONAL), BORRADOR),
@@ -72,6 +78,7 @@ TRANSICIONES: dict[str, tuple[tuple[str, ...], str]] = {
     "publish": ((APROBADO,), PUBLICADO),
     "suspend": ((PUBLICADO,), SUSPENDIDO),
     "resume": ((SUSPENDIDO,), PUBLICADO),
+    "cancel": ((PUBLICADO, SUSPENDIDO), CANCELADO),
 }
 
 

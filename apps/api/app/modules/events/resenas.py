@@ -406,6 +406,50 @@ async def listar(
     return list(await db.scalars(consulta))
 
 
+async def para_moderar(
+    db: AsyncSession,
+    *,
+    evento_id: str | None = None,
+    estado: str | None = None,
+    limite: int = 50,
+) -> list[EventReview]:
+    """Las reseñas que ve moderación: las visibles Y LAS ESCONDIDAS.
+
+    La lista pública solo trae las visibles, con razón. Moderar exige ver lo
+    escondido: si no, restaurar algo es imposible y nadie puede comprobar qué se
+    escondió ni por qué.
+    """
+    if not await esquema.hay_resenas(db):
+        return []
+    consulta = select(EventReview)
+    if evento_id:
+        consulta = consulta.where(EventReview.event_id == evento_id)
+    if estado:
+        consulta = consulta.where(EventReview.status == estado)
+    return list(
+        await db.scalars(
+            consulta.order_by(
+                EventReview.created_at.desc(), EventReview.id.desc()
+            ).limit(max(1, min(int(limite), 200)))
+        )
+    )
+
+
+async def historial_de_moderacion(
+    db: AsyncSession, *, resena_id: str
+) -> list[EventReviewModeration]:
+    """Qué se hizo con esta reseña y por qué. Solo se añade, nunca se reescribe."""
+    if not await esquema.hay_resenas(db):
+        return []
+    return list(
+        await db.scalars(
+            select(EventReviewModeration)
+            .where(EventReviewModeration.review_id == resena_id)
+            .order_by(EventReviewModeration.created_at, EventReviewModeration.id)
+        )
+    )
+
+
 async def respuestas_de(
     db: AsyncSession, *, resenas_ids: list[str]
 ) -> dict[str, EventReviewReply]:
@@ -519,7 +563,9 @@ async def responder(
 
 
 __all__ = [
+    "historial_de_moderacion",
     "mia",
+    "para_moderar",
     "respuestas_de",
     "EJES",
     "ESCONDIDA",

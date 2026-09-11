@@ -30,6 +30,36 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("Request received", "We are reviewing your request."),
         "pt": ("Solicitação recebida", "Estamos analisando sua solicitação."),
     },
+    # LA CANCELACIÓN TOTAL. Los dos dicen que está EN EVALUACIÓN, que es un
+    # hecho; ninguno promete una devolución, porque nadie la ha decidido.
+    "event_cancelled_under_review": {
+        "es": (
+            "El evento se canceló",
+            "Tu compra está en evaluación. Te avisaremos del resultado.",
+        ),
+        "en": (
+            "The event was cancelled",
+            "Your purchase is under review. We will let you know the outcome.",
+        ),
+        "pt": (
+            "O evento foi cancelado",
+            "Sua compra está em análise. Avisaremos sobre o resultado.",
+        ),
+    },
+    "event_cancelled_organizer_notice": {
+        "es": (
+            "Cancelaste el evento",
+            "Lo vendido queda retenido y en revisión.",
+        ),
+        "en": (
+            "You cancelled the event",
+            "Sales are on hold and under review.",
+        ),
+        "pt": (
+            "Você cancelou o evento",
+            "As vendas ficam retidas e em análise.",
+        ),
+    },
     "event_case_taken": {
         "es": ("Solicitud en revisión", "Alguien está mirando tu solicitud."),
         "en": ("Request under review", "Someone is looking at your request."),

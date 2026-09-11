@@ -202,6 +202,33 @@ async def hay_finanzas(db: AsyncSession) -> bool:
     return _cache["finanzas"]
 
 
+async def hay_aceptaciones(db: AsyncSession) -> bool:
+    """Si la 0069 está aplicada: qué política aceptó cada compra."""
+    if "aceptaciones" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            if not inspector.has_table("event_order_policy_acceptances"):
+                return False
+            columnas = {
+                c["name"]
+                for c in inspector.get_columns("event_order_policy_acceptances")
+            }
+            return "params_sha256" in columnas
+
+        _cache["aceptaciones"] = await conexion.run_sync(_mirar)
+    return _cache["aceptaciones"]
+
+
+async def exigir_aceptaciones(db: AsyncSession) -> None:
+    if not await hay_aceptaciones(db):
+        raise ServiceUnavailableError(
+            "Las políticas del organizador todavía no están disponibles.",
+            code="event_policies_not_available",
+        )
+
+
 async def exigir_eventos_v2(db: AsyncSession) -> None:
     if not await hay_eventos_v2(db):
         raise ServiceUnavailableError(

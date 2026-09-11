@@ -318,6 +318,27 @@ async def conciliar(
     }
 
 
+@admin_router.post("/balances/release-due")
+async def liberar_vencidos(
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Marca elegibles los saldos de evento que ya no tienen nada que lo impida.
+
+    NO PAGA NADA. `eligible` significa «ninguna puerta cerrada», y cada saldo
+    pasa por `por_que_no_se_libera` antes: reserva viva, disputa abierta o
+    expediente abierto lo dejan donde está.
+
+    Idempotente. Lo invoca un planificador EXTERNO, igual que la conciliación.
+    """
+    await _exigir_finanzas(db, current_user)
+    await finanzas.exigir_disponible(db)
+    resultado = await finanzas.liberar_vencidos(db, limite=limit)
+    await db.commit()
+    return resultado
+
+
 @admin_router.get("/reserves")
 async def retenciones(
     estado: str = Query(default="held"),

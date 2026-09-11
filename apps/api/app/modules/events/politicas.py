@@ -142,6 +142,23 @@ COTAS: dict[str, tuple[int, int]] = {
     "days_after_event": (0, 365),
 }
 
+#: Las que tienen que ser SÍ o NO de verdad.
+#:
+#: `bandera()` lee con `is True`, así que `"quizá"` o `3` acaban significando
+#: «no». Publicado, eso es una promesa que dice lo contrario de lo que quien
+#: organiza escribió, y ninguna prueba lo delataba porque el resultado cuadra.
+BANDERAS = (
+    "hold_from_event",
+    "revoke_on_refund",
+    "revoke_on_partial_refund",
+    "restore_on_rejected_refund",
+    "hold_on_dispute",
+    "allow_buyer_cancellation",
+    "allow_exchange",
+    "allow_reply",
+    "auto_approve",
+)
+
 #: Un objeto de política es una decisión, no un almacén. Sin tope, cada
 #: publicación se serializa entera para calcular su huella y se archiva.
 CLAVES_MAXIMAS = 50
@@ -169,6 +186,15 @@ def _exigir_parametros_sensatos(params: dict[str, Any]) -> None:
                 f"`{clave}` está fuera de lo posible.",
                 code="event_policy_param_out_of_range",
                 details={"param": clave, "min": minimo, "max": maximo},
+            )
+    for clave in BANDERAS:
+        if clave not in params:
+            continue
+        if not isinstance(params[clave], bool):
+            raise ValidationAppError(
+                f"`{clave}` tiene que ser sí o no.",
+                code="event_policy_param_not_a_flag",
+                details={"param": clave},
             )
 
 
@@ -280,6 +306,7 @@ def bandera(politica: EventPolicy, clave: str) -> bool:
 
 
 __all__ = [
+    "BANDERAS",
     "BORRADOR",
     "PUBLICADA",
     "SUPERADA",

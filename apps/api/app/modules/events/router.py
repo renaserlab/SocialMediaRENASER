@@ -14,6 +14,7 @@ CADA TRANSICIÓN, UNA ACCIÓN CON NOMBRE. No hay ningún `PATCH` que acepte
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
@@ -245,6 +246,57 @@ async def enviar_a_revision(
         db, evento_id=evento_id, usuario=current_user, motivo=payload.motivo
     )
     return _del_organizador(exp)
+
+
+class CancelacionRead(BaseModel):
+    """Qué pasó al cancelar. NINGÚN IMPORTE SE MOVIÓ.
+
+    `regla` dice qué se aplicó. Hoy es siempre `pending_business_decision`:
+    la empresa no ha contestado si Z exige devolución total, y hasta entonces
+    se retiene y se revisa a mano.
+    """
+
+    evento: EventoDelOrganizador
+    regla: str
+    expedientes: int
+    saldos_bloqueados: int
+    #: Pedidos pagados sin saldo que bloquear. Sin comisión configurada, todos.
+    sin_saldo: int
+    avisos: int
+
+
+@router.post("/{evento_id}/cancel", response_model=CancelacionRead)
+async def cancelar_evento(
+    evento_id: str,
+    payload: MotivoObligatorio,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CancelacionRead:
+    """Cancela el evento entero. Lo vendido queda RETENIDO y en revisión.
+
+    NO DEVUELVE NADA Y NO RECHAZA NADA. Abre un expediente por cada compra
+    pagada, retiene el importe del saldo y avisa a las dos partes de que está en
+    evaluación. Si Z exige devolución total pase lo que pase es una decisión que
+    la empresa no ha tomado, y adelantarla en cualquiera de los dos sentidos
+    sería tomarla por ella.
+    """
+    await esquema.exigir_eventos_v2(db)
+    ensure_uuid(evento_id, "Evento no encontrado.")
+    exp = await service.expediente(db, evento_id)
+    # SOLO QUIEN ORGANIZA. 404 para el ajeno, nunca 403.
+    if exp.evento.organizer_id != current_user.id:
+        raise NotFoundError("Evento no encontrado.")
+    actualizado, resultado = await service.cancelar(
+        db, evento_id=evento_id, motivo=payload.motivo, usuario=current_user
+    )
+    return CancelacionRead(
+        evento=_del_organizador(actualizado),
+        regla=resultado.regla,
+        expedientes=resultado.expedientes,
+        saldos_bloqueados=resultado.saldos_bloqueados,
+        sin_saldo=resultado.sin_saldo,
+        avisos=resultado.avisos,
+    )
 
 
 @router.get("/{evento_id}/versions", response_model=list[VersionRead])

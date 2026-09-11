@@ -1257,3 +1257,134 @@ Queda **una** pantalla de Eventos sin construir que importe: **publicar una
 política**. Sin ella, nueve funciones terminadas solo saben contestar «pendiente
 de configuración», y eso no es un fallo: es la decisión que la empresa no ha
 tomado, dicha en voz alta.
+
+
+## 37. Cada organizador escribe sus propias reglas
+
+La empresa decidió: **cada organizador define sus políticas de cambios,
+cancelaciones y devoluciones**. Esto cuenta cómo se implementó sin romper nada
+de lo versionado que ya existía, y qué sigue esperando una respuesta.
+
+### 37.1 No hizo falta un modelo nuevo
+
+`event_policies` (0064) ya tenía todo lo que la decisión pide: el evento
+(`scope='event'` + `event_id`), el tipo, la versión, el estado, el texto que lee
+quien compra (`body`), las reglas estructuradas (`params`), quién la creó, quién
+la publicó, cuándo, y la huella `params_sha256`.
+
+**El dueño no se duplica en una columna.** Una política de evento pertenece a
+quien organiza ese evento, y eso ya lo dice `events.organizer_id`. Copiarlo
+crearía una segunda verdad que puede desincronizarse. Quién la escribió y quién
+la publicó sí se guardan, porque eso es historia, no pertenencia.
+
+Lo que faltaba eran dos cosas, y las trae la **0069**.
+
+### 37.2 Nada impedía reescribir una política publicada
+
+El estado estaba, la huella estaba, y un `update` cambiaba los parámetros sin
+dejar rastro: justo lo que la huella existe para impedir. Ahora lo impone un
+**disparador**, no una convención del código, y hay una prueba que lo intenta
+desde `psycopg` —fuera del ORM— y comprueba que la base dice que no.
+
+La única modificación que sigue permitida es la que hace publicar al superseder:
+pasar de `published` a `superseded` y poner fecha de fin. Cualquier otra cosa,
+incluidos los parámetros, el texto y la versión, está cerrada. Borrar una
+publicada, también.
+
+Un borrador sí se edita. Para eso es un borrador.
+
+### 37.3 Nada ataba una compra a la versión que aceptó
+
+Sin eso, «las compras existentes conservan la versión aceptada» era una promesa
+sin respaldo: publicar una versión nueva cambiaba en silencio las reglas de todo
+lo ya vendido, y nadie podía demostrar después qué se prometió.
+
+`event_order_policy_acceptances` congela el identificador de la política **y su
+huella** en el momento de crear el pedido. `aceptacion.la_que_rige()` devuelve
+la versión que esa compra aceptó, no la vigente hoy, y **no cae a la vigente por
+su cuenta**: caer sería justo lo que esto evita.
+
+**No se inventa ninguna aceptación.** Un pedido anterior a que existiera
+política no tiene fila, y eso es un hecho: a esa persona no se le enseñó nada
+porque no había nada publicado. Rellenarlo hacia atrás sería falsificar un
+consentimiento.
+
+### 37.4 Qué puede decidir un organizador, y qué no
+
+Decide **lo que le promete a quien compra**: cuándo se puede pedir un cambio o
+una devolución (`aftersale_eligibility`) y qué pasa con la entrada
+(`ticket_effect`).
+
+NO decide cómo se mueve el dinero de la plataforma: ejecución del reembolso,
+retención, reserva, quién asume una disputa, saldo negativo. Dejárselo sería
+exactamente autoconcederse una excepción sobre dinero de terceros, que es lo que
+`TIPOS_DEL_ORGANIZADOR` cierra con una lista de dos elementos.
+
+Tampoco `review_window` ni `organizer_reply`: son reglas de producto de la
+plataforma, no condiciones de venta.
+
+### 37.5 Lo que no se publica
+
+Dos cosas se rechazan, y ninguna es un juicio sobre el negocio:
+
+* **Una política que no decide nada.** Un texto bonito con `params` vacío se
+  publica como si configurara algo y no configura nada.
+* **Una que se contradice.** Revocar con una devolución parcial pero no con la
+  total es imposible de sostener: lo menos implica lo más. Permitir cancelar sin
+  decir hasta cuándo, igual.
+
+Aquí no se opina sobre si un plazo es corto o un porcentaje es bajo. Eso lo
+decide quien organiza.
+
+### 37.6 La cancelación total: la decisión que falta
+
+    Si el organizador cancela completamente el evento, ¿Z exige SIEMPRE la
+    devolución total, independientemente de la política particular?
+
+La empresa no ha contestado. `cancelacion.DEVOLUCION_TOTAL_OBLIGATORIA` vale
+`None`, que **no es «no» ni «sí»: es «sin decidir»**. No se pone `False`
+mientras tanto, porque `False` es una respuesta y nadie la ha dado.
+
+Mientras tanto, cancelar un evento:
+
+1. lo saca del catálogo y deja `workflow_status = CANCELLED`;
+2. abre —o recupera— un expediente `event_cancelled` por cada compra pagada;
+3. **retiene el neto entero** del saldo de cada una, con el mecanismo de
+   reservas que ya existía;
+4. avisa a quien compró y a quien organiza de que está **en evaluación**;
+5. anota la causa y **la política que regía para esa compra**, no la de hoy.
+
+Y no hace nada más: ni devuelve, ni rechaza, ni libera, ni transfiere, ni revoca
+ninguna entrada. Hay una prueba que lo comprueba campo por campo.
+
+**Se retiene el neto entero y no un porcentaje** porque cuánto le corresponde al
+organizador de un evento cancelado es justo la decisión que falta. Retener todo
+es la única postura que no la adelanta, y es reversible; pagar no lo es.
+
+**La regla vive en un solo sitio**, y hay una prueba que recorre el árbol y
+comprueba que ningún otro fichero nombra esa constante. Repartida entre el
+endpoint, la pantalla y el webhook, cambiarla significaría encontrar todos los
+sitios y alguno se quedaría con la respuesta vieja.
+
+### 37.7 Los saldos de evento se liberan por su propio camino
+
+Al sacar Eventos del motor de Cursos —capítulo 36.2— los saldos de entradas se
+quedaron sin ninguna forma de pasar a `eligible`. Ahora la tienen:
+`finanzas.liberar_vencidos` pasa cada uno por `por_que_no_se_libera`, que es
+donde viven las puertas de Eventos: reserva viva, disputa abierta, expediente
+abierto, cuenta sin alta, retención en curso.
+
+El de Cursos mira una orden, una solicitud de devolución y una garantía que aquí
+no existen. Compartir tabla no es compartir reglas.
+
+### 37.8 Qué sigue esperando a una persona
+
+| Qué | Quién |
+|---|---|
+| Si una cancelación total obliga a devolver todo | la empresa |
+| Las siete políticas de plataforma sin publicar | la empresa |
+| La comisión (`platform_fee_bps = -1`) | la empresa |
+| Cómo se identifica públicamente a quien opina | la empresa |
+| Aplicar la 0069 en la base gestionada | operación |
+
+Todo lo demás de los Incrementos 5 y 6 está construido, conectado y probado.

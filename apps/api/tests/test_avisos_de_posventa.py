@@ -674,3 +674,102 @@ def test_la_puerta_de_los_avisos_mira_la_COLUMNA_y_no_solo_la_tabla() -> None:
     assert "notification_deliveries" in cuerpo
     assert "device_tokens" in cuerpo
     assert "locale" in cuerpo
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_entrega_que_revienta_no_derriba_el_lote(sesiones) -> None:
+    """CADA UNA CON SU PROPIO `commit`.
+
+    Si la tercera revienta, las dos anteriores ya están marcadas y las
+    siguientes se intentan igual. Sin eso, un token roto de una persona dejaba
+    sin aviso a todas las demás del lote, y reprocesar repetía las que sí
+    habían salido.
+    """
+    quienes = [await _persona(sesiones) for _ in range(4)]
+    async with sesiones() as db:
+        for i, quien in enumerate(quienes):
+            await entregas.encolar(
+                db, usuario_id=quien, tipo="event_case_taken", entidad_id=f"lote{i}"
+            )
+        await db.commit()
+
+    revienta = quienes[2]
+    intentadas: list[str] = []
+
+    async def _enviar(db, *, usuario_id, tipo, locale):
+        intentadas.append(usuario_id)
+        if usuario_id == revienta:
+            raise RuntimeError("el token ya no existe")
+        return True
+
+    async with sesiones() as db:
+        cuenta = await entregas.procesar(db, enviar=_enviar, limite=200)
+
+    # SE INTENTARON TODAS, no solo hasta la que falló.
+    for quien in quienes:
+        assert quien in intentadas
+    assert cuenta["enviadas"] >= 3
+    assert cuenta["fallidas"] + cuenta["reintentables"] >= 1
+
+    # Y la que falló queda con su motivo, saneado.
+    async with sesiones() as db:
+        fila = await db.scalar(
+            select(NotificationDelivery).where(
+                NotificationDelivery.user_id == revienta
+            )
+        )
+    assert fila.status in (entregas.PENDIENTE, entregas.FALLIDA)
+    assert "el token ya no existe" in (fila.last_error or "")
+    assert "\n" not in (fila.last_error or "")
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_procesar_dos_veces_no_repite_lo_ya_enviado(sesiones) -> None:
+    """IDEMPOTENTE: lo invoca un planificador externo, que puede solaparse."""
+    quien = await _persona(sesiones)
+    async with sesiones() as db:
+        await entregas.encolar(
+            db, usuario_id=quien, tipo="event_case_taken", entidad_id="idem"
+        )
+        await db.commit()
+
+    salidas: list[str] = []
+
+    async def _enviar(db, *, usuario_id, tipo, locale):
+        salidas.append(usuario_id)
+        return True
+
+    async with sesiones() as db:
+        await entregas.procesar(db, enviar=_enviar, limite=200)
+    antes = list(salidas)
+    async with sesiones() as db:
+        await entregas.procesar(db, enviar=_enviar, limite=200)
+    assert salidas.count(quien) == antes.count(quien) == 1
+
+
+def test_el_endpoint_que_vacia_la_cola_es_idempotente_y_cerrado() -> None:
+    """LO INVOCA UN PLANIFICADOR EXTERNO, y dentro de la API no hay ningún
+    temporizador: hay varias réplicas y cada una dispararía el suyo."""
+    import inspect
+    from pathlib import Path as _Path
+
+    from app.modules.notifications import router as router_avisos
+
+    fuente = inspect.getsource(router_avisos)
+    assert "deliveries/process" in fuente
+    # Pide permiso, y no de cualquiera.
+    assert "get_current_user" in fuente
+
+    # Y NINGÚN TEMPORIZADOR DENTRO DE LA API.
+    raiz = _Path(inspect.getfile(router_avisos)).parents[2]
+    culpables = []
+    for ruta in raiz.rglob("*.py"):
+        if "__pycache__" in str(ruta):
+            continue
+        texto = ruta.read_text(encoding="utf-8")
+        for patron in ("asyncio.create_task", "BackgroundScheduler", "repeat_every"):
+            if patron in texto and "notification" in str(ruta):
+                culpables.append(f"{ruta.name}: {patron}")
+    assert culpables == [], culpables
