@@ -411,3 +411,41 @@ comprobar hoy contra la API.
       mueve, el otro recibe «alguien lo movió, vuelve a mirarlo».
 - [ ] Una entrada restaurada **no** admite con el QR de antes: hay que reabrir
       la entrada para obtener uno nuevo.
+
+## Incrementos 5 y 6 — lo que exige dispositivo
+
+**NADA DE ESTO SE HA PROBADO EN UN TELÉFONO.**
+
+### Posventa del comprador
+
+- [ ] Desde «Tu entrada», la tarjeta «¿Necesitas ayuda?» abre la solicitud.
+- [ ] Sin política publicada: el botón se ve **desactivado con la explicación
+      al lado**, no escondido.
+- [ ] Doble pulsación en «enviar»: un solo expediente.
+- [ ] La línea de tiempo **no** muestra notas internas.
+- [ ] Un expediente `approved` **no** dice en ninguna parte que el dinero volvió.
+- [ ] Ninguna pantalla enseña una fecha de devolución.
+- [ ] Responder a una petición de información y ver el estado cambiar.
+- [ ] es / en / pt en las tres pantallas nuevas.
+- [ ] Modo claro y oscuro, fuente ampliada, lector de pantalla.
+- [ ] Sin conexión: lo dice y no inventa un estado.
+
+### Reseñas
+
+- [ ] Solo aparece el formulario a quien tiene check-in en ese evento.
+- [ ] El sello «asistencia verificada» se ve y no se puede tocar.
+- [ ] Un evento sin reseñas **no** muestra `0.0` ni estrellas vacías.
+- [ ] Los cinco ejes se pueden dejar en blanco.
+
+### Finanzas del organizador
+
+- [ ] Con `platform_fee_bps = -1`: la pantalla dice «pendiente de
+      configuración» y **no** `S/ 0.00`, ni `-1`, ni un porcentaje.
+- [ ] El motivo por el que un saldo no está disponible se lee y se entiende.
+- [ ] No aparece la cuenta de cobro por ninguna parte.
+
+### Con dos dispositivos
+
+- [ ] Dos administradores resolviendo el mismo expediente: el segundo ve el
+      conflicto, se recarga y puede reintentar.
+- [ ] Una entrada retenida: el escáner dice «retenida» y **no** la consume.

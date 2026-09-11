@@ -925,3 +925,139 @@ acomodador atado a un evento concreto (hoy la admisión es un rol de cuenta y
 alcanza a cualquier evento publicado con venta) · check-in sin conexión ·
 lectura de códigos de barras que no sean QR · resumen del código en la base ·
 transferencia de una entrada a otra persona.
+
+
+## 35. Incremento 5 y 6 — lo que se construyó, y lo que sigue cerrado
+
+### 35.1 El aviso verificado llega hasta la entrada
+
+`efectos.py` existía y estaba probado, pero **nadie lo llamaba**: un
+`charge.refunded` de un pedido de entradas se anotaba para conciliar y ahí se
+quedaba. Ahora el webhook —repartido a Eventos por la **referencia del cobro**,
+porque el objeto `refund` no hereda la metadata del `charge`— localiza el
+pedido, abre o recupera su expediente y le entrega el aviso.
+
+Las condiciones no se duplican: siguen una sola vez en
+`efectos.revocar_por_devolucion`, y este camino no puede saltárselas.
+
+**Una disputa no es una devolución.** La abre el banco del titular, todavía se
+puede ganar, y quién asume la pérdida no está decidido: abre su expediente,
+bloquea el importe con una reserva y **no revoca nada**.
+
+### 35.2 Dos defectos que esto destapó
+
+`abrir` y `transicionar` hacían `Session.rollback()`, y el webhook los llama
+**dentro del savepoint que protege la fila anti-repetición**. Ese rollback
+deshace la transacción entera y se lleva justo el registro que impide procesar
+el aviso dos veces. Ahora cada uno deshace dentro de su propio savepoint, con el
+`add` dentro —deshacerlo no saca el objeto de la sesión, y el siguiente flush lo
+reintentaba—.
+
+Y la máquina de estados no dejaba cerrar un expediente recién abierto: un
+reembolso hecho desde el panel de la pasarela dejaba el caso diciendo «enviado»
+sobre una compra ya devuelta. Tres saltos nuevos hacia la ejecución, **solo para
+el sistema**: registran lo que pasó, no aprueban nada.
+
+### 35.3 Avisos: tres idiomas y una cola
+
+El módulo tenía dos huecos que había que tapar antes de depender de él:
+plantillas solo en español, y un envío que fallaba se registraba en un log y
+desaparecía.
+
+**El idioma vive en el dispositivo** (`device_tokens.locale`, 0066). No hay
+columna de idioma en el perfil, y añadirla obligaría a inventar una preferencia
+que nadie ha elegido. El teléfono sí sabe en qué idioma está.
+
+**La cola es una tabla, no un sistema.** Una entrega por suceso de negocio
+—índice único—, reintentos con tope y espera creciente, último error saneado,
+identificador de correlación, y `sent` solo después de que el envío termine
+bien. `tomar` es un `UPDATE` condicional: dos procesos vaciando la cola, uno
+cambia una fila y el otro cero.
+
+**Dentro de la API no hay temporizador**: hay varias réplicas y cada una
+dispararía el suyo. La vacía `POST /admin/notifications/deliveries/process`, que
+invoca un planificador externo.
+
+Ningún texto promete un plazo ni un importe, y hay una prueba que lo comprueba
+con una expresión regular sobre los cuarenta y cinco textos.
+
+### 35.4 Reseñas: el sello se deriva
+
+«Asistencia verificada» **no es una columna que alguien pueda escribir**. Una
+reseña apunta a su `checkin_id`, y esa fila solo existe si esa persona entró; la
+clave ajena lo impone y hay una prueba de que el modelo no tiene ninguna columna
+que se le parezca.
+
+Cinco ejes de 1 a 5 —contenido, organización, recinto, seguridad, valor— y una
+puntuación general **aparte**, que responde a otra pregunta y por eso no es su
+media: promediarlas exigiría decidir cuánto pesa cada eje.
+
+**Un evento sin reseñas no tiene promedio cero: no tiene promedio.** `null`, y
+el contrato lo dice. Lo mismo con el porcentaje de recomendación: un porcentaje
+sobre cero respuestas no es cero por ciento, es ninguno.
+
+Moderar **esconde**, no borra, y nunca toca autor ni puntuación. La respuesta
+del organizador nace apagada: exige una política que nadie ha aprobado, y una
+sola visible por reseña —varias serían una forma de hostigar a quien opinó—.
+
+### 35.5 Finanzas: una columna, no un módulo nuevo
+
+`owner_sale_balances` ya guardaba bruto, comisión y neto con su versión de
+reglas; `owner_payout_accounts` y `owner_transfers` ya colgaban del perfil. Lo
+único que ataba todo eso a Cursos eran **dos columnas NOT NULL**.
+
+La 0068 las relaja, añade `event_id` y `event_order_id`, y un CHECK obliga a que
+un saldo tenga **exactamente un origen**. No se usa un par `(tipo, id)`
+polimórfico: eso renuncia a la integridad referencial justo en la tabla del
+dinero. **Los saldos existentes no se tocan.**
+
+**Sin comisión configurada no se crea ningún saldo.** `platform_fee_bps = -1`
+significa que nadie decidió el número; suponer 0 % transferiría el bruto entero
+y ninguna prueba lo delataría, porque el resultado cuadra.
+
+**El organizador queda congelado.** Cambiar después el organizador del evento no
+redirige dinero ya vendido.
+
+**Nada se libera solo.** `available_at` sale de una política de retención
+publicada; sin ella es nulo y `por_que_no_se_libera` devuelve un código
+concreto: sin comisión, sin cuenta, sin política, retención en curso, reserva
+viva, disputa abierta o expediente abierto. La primera que falte, para decirle
+al organizador **una** cosa y no siete.
+
+### 35.6 Conciliar es comparar, no corregir
+
+Una diferencia de dinero no se arregla escribiendo el número que falta: eso no
+concilia, tapa. Hay una prueba que descuadra un saldo, comprueba que la
+conciliación lo encuentra, y comprueba que **no lo ha tocado**.
+
+### 35.7 Qué sigue apagado, y por qué
+
+| Bandera | Valor | Qué impide |
+|---|---|---|
+| `FEATURE_EVENT_TICKETING` | `false` | vender entradas |
+| `FEATURE_EVENT_PAYMENTS` | `false` | abrir cobros |
+| `EVENT_PAYMENTS_PROVIDER` | `none` | pasarela |
+| `platform_fee_bps` | **`-1`** | crear saldos, y con ellos todo lo financiero |
+| `stripe_connect_enabled` | `false` | cuentas de cobro |
+| `creator_transfers_enabled` | `false` | transferir |
+
+Y por encima de las banderas, **nueve políticas sin publicar**. Sin ellas la
+elegibilidad contesta `policy_not_configured`, no se revoca ninguna entrada, no
+se libera ningún saldo, no se puede reseñar y no se puede responder
+públicamente. Publicar una política es lo que enciende cada cosa, y es una
+decisión de la empresa.
+
+### 35.8 El orden de despliegue
+
+Las migraciones **0066, 0067 y 0068 están escritas y sin aplicar**. Se aplican
+en ese orden; cada una es aditiva y segura en los dos sentidos (código antes que
+esquema, y al revés). Las rutas nuevas responden 503 con un código estable
+mientras falte su esquema, así que desplegar el código primero no rompe nada.
+
+Tras aplicarlas, el planificador externo debe invocar, con la frecuencia que se
+decida:
+
+- `POST /api/v1/admin/notifications/deliveries/process` — vaciar la cola de avisos.
+- `POST /api/v1/admin/events/finance/reconcile` — conciliar y reportar.
+- `POST /api/v1/admin/events/finance/transfers/run` — hoy devuelve cero y la
+  lista de bloqueos.
