@@ -176,6 +176,32 @@ async def hay_resenas(db: AsyncSession) -> bool:
     return _cache["resenas"]
 
 
+_TABLAS_DE_FINANZAS = ("owner_sale_reserves", "event_disputes", "event_dispute_events")
+
+
+async def hay_finanzas(db: AsyncSession) -> bool:
+    """Si la 0068 está aplicada: reserva, disputa y el saldo generalizado.
+
+    SE COMPRUEBA TAMBIÉN LA COLUMNA. Las tablas nuevas pueden estar y el saldo
+    seguir sin `event_order_id`; entonces crear uno reventaría en vez de
+    responder que la función no está desplegada.
+    """
+    if "finanzas" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            if not all(inspector.has_table(t) for t in _TABLAS_DE_FINANZAS):
+                return False
+            if not inspector.has_table("owner_sale_balances"):
+                return False
+            columnas = {c["name"] for c in inspector.get_columns("owner_sale_balances")}
+            return "event_order_id" in columnas and "event_id" in columnas
+
+        _cache["finanzas"] = await conexion.run_sync(_mirar)
+    return _cache["finanzas"]
+
+
 async def exigir_eventos_v2(db: AsyncSession) -> None:
     if not await hay_eventos_v2(db):
         raise ServiceUnavailableError(

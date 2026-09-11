@@ -63,6 +63,15 @@ ESTADOS_DE_DISPUTA = frozenset(
     {"disputa_abierta", "disputa_fondos_retirados", "disputa_cerrada"}
 )
 
+#: Cómo se llama cada uno en el expediente. `disputa_cerrada` es `closed` y NO
+#: «ganada» ni «perdida»: la pasarela avisa igual de las dos, y decidir cuál fue
+#: mirando el nombre del aviso sería inventárselo.
+_ESTADO_DE_DISPUTA = {
+    "disputa_abierta": "open",
+    "disputa_fondos_retirados": "needs_response",
+    "disputa_cerrada": "closed",
+}
+
 
 @dataclass(frozen=True)
 class IntentoDePago:
@@ -259,6 +268,14 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:
                 evento.provider_transaction_id,
             )
             raise
+        # EL SALDO DE LA VENTA. Idempotente por pedido, y devuelve `None` sin
+        # ruido cuando falta la comision o el esquema: eso no es un fallo del
+        # cobro, es una decision que la empresa no ha tomado.
+        from app.modules.events import finanzas
+
+        orden = await db.get(EventOrder, evento.purchase_id)
+        if orden is not None:
+            await finanzas.registrar_venta(db, orden=orden)
         _ = resultado.estrenada
         return None
 
@@ -328,8 +345,21 @@ async def _atender_dinero_que_vuelve(db: AsyncSession, evento) -> str | None:
     )
 
     if evento.status in ESTADOS_DE_DISPUTA:
-        # BLOQUEA Y AVISA. Quien asume la perdida es una decision de la empresa
-        # que nadie ha tomado, asi que no se descuenta nada y no se revoca.
+        # EXPEDIENTE DE DISPUTA PROPIO, y el importe bloqueado. Quien asume la
+        # perdida es una decision que nadie ha tomado: no se descuenta nada de
+        # ningun otro saldo y no se revoca ninguna entrada.
+        from app.modules.events import finanzas
+
+        await finanzas.abrir_o_actualizar_disputa(
+            db,
+            externa=referencia,
+            entorno=evento.environment,
+            estado=_ESTADO_DE_DISPUTA.get(evento.status, "open"),
+            orden=pedido,
+            importe_minor=evento.amount_minor,
+            moneda=evento.currency,
+            motivo=evento.event_type,
+        )
         await efectos.aplicar(
             db,
             caso=caso,

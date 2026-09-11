@@ -532,11 +532,25 @@ class OwnerSaleBalance(Base):
     __tablename__ = "owner_sale_balances"
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
-    order_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("orders.id", ondelete="RESTRICT")
+    #: UN ORIGEN, EXACTAMENTE UNO (0068): o curso, o evento. Un CHECK de la base
+    #: lo impone; aquí los cuatro son anulables porque cada venta llena su par.
+    #: Los saldos anteriores siguen con `order_id` y `course_id`, sin tocar.
+    order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("orders.id", ondelete="RESTRICT"), nullable=True
     )
-    course_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="RESTRICT"), index=True
+    course_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("courses.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=True,
+    )
+    event_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("events.id", ondelete="RESTRICT"), nullable=True
+    )
+    event_order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("event_orders.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     owner_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT"), index=True
