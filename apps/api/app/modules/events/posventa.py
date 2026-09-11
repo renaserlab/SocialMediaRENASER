@@ -29,8 +29,12 @@ from app.core.exceptions import AppError, NotFoundError, ValidationAppError
 from app.modules.events import posventa_estados as maquina
 from app.modules.events.models import EventOrder, EventTicket
 from app.modules.events.posventa_models import (
+    APROBADO,
     CANCELADO,
+    DEVOLUCION_EN_CURSO,
+    EN_REVISION,
     ENVIADO,
+    ESPERANDO,
     EXPEDIENTES_VIVOS,
     RECHAZADO,
     RESUELTO,
@@ -196,6 +200,14 @@ async def abrir(
         motivo=motivo,
         momento=momento,
     )
+    from app.modules.events import avisos
+
+    await avisos.encolar(
+        db,
+        usuario_id=comprador_id,
+        tipo="event_case_submitted",
+        entidad_id=expediente.id,
+    )
     await db.flush()
     return expediente
 
@@ -351,8 +363,38 @@ async def transicionar(
         referencia=referencia,
         momento=momento,
     )
+    await _avisar_del_paso(db, expediente=expediente, hasta=hasta)
     await db.flush()
     return Movimiento(expediente=expediente, desde=desde, hasta=hasta)
+
+
+#: Qué aviso corresponde a cada paso. Los que no están aquí no avisan: un
+#: aviso por cada cambio técnico convierte la bandeja en ruido.
+AVISO_POR_ESTADO = {
+    EN_REVISION: "event_case_taken",
+    ESPERANDO: "event_case_info_requested",
+    APROBADO: "event_case_approved",
+    RECHAZADO: "event_case_rejected",
+    DEVOLUCION_EN_CURSO: "event_refund_started",
+    RESUELTO: "event_refund_confirmed",
+}
+
+
+async def _avisar_del_paso(
+    db: AsyncSession, *, expediente: EventAftersaleCase, hasta: str
+) -> None:
+    """El aviso de este paso, si lo tiene. Nunca lanza."""
+    tipo = AVISO_POR_ESTADO.get(hasta)
+    if tipo is None:
+        return
+    from app.modules.events import avisos
+
+    await avisos.encolar(
+        db,
+        usuario_id=expediente.buyer_id,
+        tipo=tipo,
+        entidad_id=expediente.id,
+    )
 
 
 async def _anotar(

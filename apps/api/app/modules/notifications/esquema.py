@@ -58,3 +58,24 @@ async def hay_clave_de_deduplicacion(db: AsyncSession) -> bool:
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema sondeado por otro."""
     _cache.clear()
+
+
+_cache_entregas: dict[str, bool] = {}
+
+
+async def hay_entregas(db) -> bool:
+    """Si la 0066 está aplicada: la cola de entregas con reintento."""
+    if "entregas" not in _cache_entregas:
+        from sqlalchemy import inspect
+
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            return inspect(sync).has_table("notification_deliveries")
+
+        _cache_entregas["entregas"] = await conexion.run_sync(_mirar)
+    return _cache_entregas["entregas"]
+
+
+def olvidar_entregas() -> None:
+    _cache_entregas.clear()

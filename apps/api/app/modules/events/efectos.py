@@ -166,6 +166,10 @@ async def aplicar(
         actor_id=actor_id,
         motivo=motivo,
     )
+    # SOLO SI ALGO CAMBIO DE VERDAD. Aplicar el mismo efecto dos veces no
+    # puede hacer sonar el telefono dos veces.
+    if (hechas.rowcount or 0) > 0 and efecto in RETIENEN:
+        await _avisar(db, caso=caso, tipo="event_ticket_held")
     return Resultado(efecto=efecto, cambiadas=hechas.rowcount or 0)
 
 
@@ -319,6 +323,8 @@ async def _revocar(
         db, caso=caso, efecto=REVOCADA, cambiadas=revocadas, actor_id=actor_id,
         motivo=motivo,
     )
+    if revocadas > 0:
+        await _avisar(db, caso=caso, tipo="event_ticket_revoked")
     return Resultado(efecto=REVOCADA, cambiadas=revocadas, revocadas=revocadas)
 
 
@@ -374,7 +380,18 @@ async def restaurar(
         db, caso=caso, efecto=RESTAURADA, cambiadas=len(entradas), actor_id=actor_id,
         motivo=motivo,
     )
+    if devueltas > 0:
+        await _avisar(db, caso=caso, tipo="event_ticket_restored")
     return Resultado(efecto=RESTAURADA, cambiadas=len(entradas), revocadas=devueltas)
+
+
+async def _avisar(db: AsyncSession, *, caso: EventAftersaleCase, tipo: str) -> None:
+    """El aviso del efecto, a quien compro. Nunca lanza."""
+    from app.modules.events import avisos
+
+    await avisos.encolar(
+        db, usuario_id=caso.buyer_id, tipo=tipo, entidad_id=caso.id
+    )
 
 
 async def _anotar(

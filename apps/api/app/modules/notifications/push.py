@@ -233,3 +233,51 @@ def encolar_push(
         actor_name,
         data,
     )
+
+
+async def enviar_de_la_cola(
+    db: AsyncSession, *, usuario_id: str, tipo: str, locale: str
+) -> None:
+    """Envía un aviso de la cola, con el texto en el idioma que se guardó.
+
+    LANZA SI NO SE PUDO. Quien llama es `entregas.procesar`, que traduce la
+    excepción en un reintento: tragársela aquí marcaría como enviada una
+    notificación que no salió.
+    """
+    from app.modules.notifications import textos
+
+    par = textos.texto(tipo, locale=locale)
+    if par is None:
+        # Un tipo sin texto no es un fallo de envío: no hay nada que mandar.
+        return
+    titulo, cuerpo = par
+
+    tokens = list(
+        await db.scalars(
+            select(DeviceToken.token).where(DeviceToken.user_id == usuario_id)
+        )
+    )
+    if not tokens:
+        # Sin aparato registrado no hay push. Tampoco es un fallo: el aviso
+        # in-app ya está, y reintentar no va a hacer aparecer un teléfono.
+        return
+
+    mensajes = [
+        {
+            "to": token,
+            "title": titulo,
+            "body": cuerpo,
+            "sound": "default",
+            "channelId": textos.CANALES.get(tipo, "contenido"),
+        }
+        for token in tokens
+    ]
+    # NO SE USA EL ENVIO DE SIEMPRE: aquel se traga el error a proposito —es
+    # «mejor esfuerzo»— y aqui hace falta lo contrario. Si esto no lanza, la
+    # entrega se marca enviada sin haber salido.
+    for inicio in range(0, len(mensajes), BATCH_SIZE):
+        async with httpx.AsyncClient(timeout=10) as cliente:
+            respuesta = await cliente.post(
+                EXPO_PUSH_URL, json=mensajes[inicio : inicio + BATCH_SIZE]
+            )
+            respuesta.raise_for_status()

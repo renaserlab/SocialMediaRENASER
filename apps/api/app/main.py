@@ -37,6 +37,7 @@ from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
 from app.modules.messaging.router import router as messaging_router
 from app.modules.moderation.router import router as moderation_router
+from app.modules.notifications.router import admin_router as notifications_admin_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.payments.router import router as payments_router
 from app.modules.refunds.router import admin_router as refunds_admin_router
@@ -186,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(learning_router, prefix=prefix)
     app.include_router(live_router, prefix=prefix)
     app.include_router(notifications_router, prefix=prefix)
+    app.include_router(notifications_admin_router, prefix=prefix)
     app.include_router(moderation_router, prefix=prefix)
     app.include_router(bookings_router, prefix=prefix)
     # Resenas entre personas. Se monta siempre: sin la migracion 0030 los

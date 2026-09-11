@@ -14,6 +14,7 @@ from app.shared.database import get_db
 from app.shared.pagination import Page, pagination_params
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+admin_router = APIRouter(prefix="/admin/notifications", tags=["notifications-admin"])
 
 
 @router.get("", response_model=list[NotificationRead])
@@ -142,3 +143,55 @@ async def mark_all_read(
         .values(read_at=func.now())
     )
     await db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# La cola de entregas. La vacía un planificador EXTERNO.
+# --------------------------------------------------------------------------- #
+@admin_router.post("/deliveries/process")
+async def procesar_entregas(
+    limit: int = 50,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Intenta las entregas que tocan ahora. Idempotente y acotado.
+
+    DENTRO DE LA API NO HAY TEMPORIZADOR: hay varias réplicas y cada una
+    dispararía el suyo. Esto lo invoca un planificador externo; el documento de
+    despliegue dice con qué frecuencia.
+    """
+    from app.core.exceptions import ForbiddenError, ServiceUnavailableError
+    from app.modules.notifications import entregas, esquema, push
+    from app.shared.permissions import is_admin
+
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo administración procesa la cola de avisos.")
+    if not await esquema.hay_entregas(db):
+        raise ServiceUnavailableError(
+            "La cola de avisos todavía no está desplegada.",
+            code="notification_deliveries_not_available",
+        )
+
+    async def _enviar(sesion, *, usuario_id: str, tipo: str, locale: str) -> None:
+        await push.enviar_de_la_cola(
+            sesion, usuario_id=usuario_id, tipo=tipo, locale=locale
+        )
+
+    return await entregas.procesar(db, enviar=_enviar, limite=limit)
+
+
+@admin_router.get("/deliveries/health")
+async def salud_de_entregas(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Cuántas entregas hay en cada estado."""
+    from app.core.exceptions import ForbiddenError
+    from app.modules.notifications import entregas, esquema
+    from app.shared.permissions import is_admin
+
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo administración ve la cola de avisos.")
+    if not await esquema.hay_entregas(db):
+        return {"disponible": False}
+    return {"disponible": True, **await entregas.resumen(db)}

@@ -217,8 +217,35 @@ async def actualizar_publicado(
         # convertiría el rastro en una copia del evento.
         payload={"campos": sorted(c.field for c in cambios)},
     )
+    if cambios:
+        await _avisar_a_quien_compro(db, evento_id=evento_id)
     await db.commit()
     return version, cambios
+
+
+async def _avisar_a_quien_compro(db: AsyncSession, *, evento_id: str) -> None:
+    """Un aviso por comprador con entradas vivas. NO PROMETE NADA.
+
+    Dice que el evento cambio y que lo revise. Si ese cambio da derecho a algo
+    lo decide una persona despues, al clasificarlo.
+    """
+    from sqlalchemy import distinct
+
+    from app.modules.events import avisos
+    from app.modules.events.models import ENTRADA_VALIDA, EventTicket
+
+    compradores = list(
+        await db.scalars(
+            select(distinct(EventTicket.owner_id)).where(
+                EventTicket.event_id == evento_id,
+                EventTicket.status == ENTRADA_VALIDA,
+            )
+        )
+    )
+    for quien in compradores:
+        await avisos.encolar(
+            db, usuario_id=quien, tipo="event_changed", entidad_id=evento_id
+        )
 
 
 async def sin_clasificar(db: AsyncSession, *, evento_id: str) -> int:
