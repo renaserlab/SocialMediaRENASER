@@ -1388,3 +1388,57 @@ no existen. Compartir tabla no es compartir reglas.
 | Aplicar la 0069 en la base gestionada | operación |
 
 Todo lo demás de los Incrementos 5 y 6 está construido, conectado y probado.
+
+
+### 37.9 Lo que la revisión independiente encontró sobre esto mismo
+
+Todo lo anterior pasaba sus pruebas. Una revisión hecha aparte encontró **un
+bloqueante y diez más**, y el bloqueante era justo el agujero que la 0069 se
+escribió para cerrar.
+
+**`la_que_rige` tenía un solo llamante.** La tabla de aceptaciones, la huella y
+los dos disparadores de inmutabilidad estaban perfectos, y los tres sitios donde
+DE VERDAD SE DECIDE —elegibilidad, efecto sobre la entrada, y el sellado del
+expediente al aprobar— leían `politicas.vigente`, es decir la publicada hoy. El
+organizador podía cobrar con la ventana abierta y publicar al día siguiente una
+que la cierra. La promesa «lo ya vendido no cambia» tenía respaldo en la base y
+no en el código.
+
+Ahora hay **una sola puerta**, `aceptacion.para_decidir`, y sin aceptación **no
+se cae a la vigente**: se contesta «sin política configurada», que manda el caso
+a una persona. Caer sería exactamente la retroactividad.
+
+El resto, en una línea cada uno:
+
+* Una **disputa que vuelve atrás** dejaba `resolved_at` sobre un estado sin
+  resolver: la base lo rechaza con su CHECK, el webhook devuelve 500 y Stripe
+  reintenta hasta deshabilitar el endpoint —y con él dejan de llegar las
+  compras—. Además, reabrirla no volvía a bloquear el importe.
+* `liberar_vencidos` **comprobaba las puertas y las escribía en sentencias
+  distintas**. Un webhook de disputa no cambia el estado del saldo: solo inserta
+  una reserva. Las tres puertas van ahora dentro del `UPDATE`.
+* **Devoluciones parciales sucesivas**: solo se retenía la primera, y se
+  contestaba «reserved» igual. Quien soltara esa reserva liberaría dinero ya
+  devuelto.
+* **Cancelar un evento de quinientas compras** no cabía en una petición: agotaba
+  el tiempo y se deshacía entero, cancelación incluida. El evento que más
+  importa cancelar bien era el único que no se podía cancelar. Va por tandas.
+* Una **devolución que llega antes que el aviso de cobro** dejaba un saldo limpio
+  sobre dinero ya devuelto, y ningún código de conciliación lo contaba.
+* Faltaba un `return` y **el panel decía «enviadas»** de avisos que no salieron.
+* **Un token caducado** hacía fallar el lote entero y repetía el aviso hasta
+  cinco veces en los móviles que sí lo habían recibido.
+* Al organizador se le avisaba **una vez por pedido**: canceló un evento, no
+  quinientos.
+* **Moderación de contenido podía leer** las políticas de dinero de la
+  plataforma. No podía moverlas —eso siempre estuvo separado— pero leerlas
+  tampoco es suyo.
+* El **ORM no declaraba tres restricciones** que la base sí impone, y por eso la
+  suite no veía lo de la disputa: las pruebas montan SQLite desde los modelos,
+  no desde los ficheros `.sql`.
+
+**Lo que esto enseña, otra vez.** Las tres formas del capítulo 36 se repitieron,
+y apareció una cuarta: *una función escrita, probada y con un solo llamante que
+no es el que importa*. `efectos` ya lo estuvo, `liberar_reserva` lo estuvo, y
+`la_que_rige` lo estaba. Una prueba unitaria verde no dice que el código forme
+parte del camino donde se decide.

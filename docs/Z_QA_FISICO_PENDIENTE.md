@@ -500,3 +500,62 @@ Estas no se podían escribir antes porque las pantallas no existían.
       **no** suena dos veces.
 - [ ] Desinstalando la aplicación y vaciando la cola: la entrega acaba en
       `failed` con su motivo, y no se queda reintentando para siempre.
+
+## Políticas del organizador, cancelación y moderación
+
+### Políticas, en el teléfono
+
+- [ ] Desde la pantalla del evento se llega a «Mis políticas» en un toque.
+- [ ] Un evento sin políticas propias lo dice como «todavía no has definido tus
+      condiciones», **nunca** como «no se devuelve nada».
+- [ ] Ningún campo del formulario nace con un valor puesto: los sí/no empiezan
+      sin decidir y los números en blanco.
+- [ ] Un borrador se edita; una publicada **no ofrece editar** por ningún lado.
+- [ ] Publicar pide confirmación y el texto dice que las compras anteriores
+      conservan la versión que aceptaron.
+- [ ] Crear una versión nueva copia los parámetros y deja el nombre **vacío**.
+- [ ] La previsualización coincide, palabra por palabra, con lo que devuelve
+      `/policies/terms`.
+- [ ] Publicar algo contradictorio —revocar en parcial y no en total— se rechaza
+      con su motivo concreto, no con un error genérico.
+- [ ] El historial se lee y no se puede tocar.
+- [ ] Con el teléfono en inglés y en portugués: ningún texto sale en español.
+
+### Cancelar un evento
+
+- [ ] Pide motivo escrito y una confirmación aparte.
+- [ ] El aviso dice: deja de venderse, se abre un caso por compra, el importe
+      queda **retenido y en revisión**, y **no se devuelve nada
+      automáticamente**.
+- [ ] Después de cancelar, la pantalla enseña cuántos casos se abrieron y
+      cuántos importes se retuvieron, con los números del servidor.
+- [ ] Con muchas compras: la pantalla dice cuántas quedan por atender y deja
+      continuar. El evento ya figura cancelado desde la primera vez.
+- [ ] Cancelar dos veces seguidas no abre dos casos ni avisa dos veces.
+- [ ] El comprador recibe **un** aviso; quien organiza recibe **uno**, no uno
+      por compra.
+- [ ] Ningún aviso menciona un importe, un plazo ni una devolución.
+
+### Moderar reseñas
+
+- [ ] Desde la cola de revisión se llega a la moderación en un toque.
+- [ ] Se ven las visibles **y las ocultas**, y se pueden filtrar.
+- [ ] Ocultar sin motivo no deja continuar, y el rechazo ocurre antes de llamar
+      al servidor.
+- [ ] El texto dice que ocultar **no borra**.
+- [ ] No hay ninguna acción de borrado en ninguna parte de la pantalla.
+- [ ] La puntuación y el autor se ven y no se pueden editar.
+- [ ] Restaurar vuelve a mostrarla y deja rastro en el historial.
+- [ ] Doble toque en ocultar no ejecuta la acción dos veces.
+- [ ] Sin permiso: mensaje de permiso, no una lista vacía.
+
+### Supervisión de políticas
+
+- [ ] Desde «Mis eventos» se llega al panel.
+- [ ] La pestaña de «sin política» enseña los eventos publicados que venden sin
+      condiciones escritas, y se puede abrir el evento.
+- [ ] No hay ningún botón de aprobar, rechazar, suspender, editar o borrar.
+- [ ] Una clave de parámetro desconocida se ve tal cual y no rompe la pantalla.
+- [ ] Un porcentaje de `0` se lee como «0 %», no como «sin definir».
+- [ ] Moderación de contenido **no** ve las políticas de dinero de la
+      plataforma.

@@ -110,6 +110,8 @@ la URL no existe para quien usa la aplicación, y esta matriz lo cuenta como tal
 | Responder información | `/posventa/[id]` | `POST …/{id}/respond` | terminada | sí | — |
 | Escribir reseña | `/resenas/nueva/[eventId]` | `GET …/can-review` + `POST …/reviews` | terminada | sí | **apagada por política**: sin `review_window` publicada dice por qué |
 | Reseñas del evento | `/resenas/[eventId]` | `…/reviews` + `/summary` + `/mine` | terminada | sí | no se enseña el nombre de quien opina: el contrato solo trae el identificador, y **quién aparece es una decisión de privacidad sin tomar** |
+| Condiciones antes de pagar | `/pedido/[id]` | `GET /events/{id}/policies/terms` | **no implementada** | el backend está y es anónimo; la pantalla de pedido todavía no las enseña |
+| Qué aceptó mi compra | — | `GET /events/orders/{id}/policies` | **no implementada** | el backend está |
 
 ### Organizador
 
@@ -122,6 +124,8 @@ la URL no existe para quien usa la aplicación, y esta matriz lo cuenta como tal
 | **Ventas y saldo** | `/finanzas/[eventId]` | `GET /events/{id}/finance` + `/balances` | terminada | sí | con la comisión sin decidir escribe «pendiente de configuración», nunca un cero |
 | Posventa de mi evento | `/posventa-evento/[id]` | `GET /events/{id}/aftersale-cases` | terminada | sí | subconjunto a propósito: sin comprador, sin motivo, sin notas internas |
 | Responder una reseña | `/resenas/[eventId]` | `POST /events/reviews/{id}/reply` | terminada | sí | **apagada por política**: sin `organizer_reply` publicada el servidor lo rechaza con su código y la pantalla lo dice |
+| **Mis políticas** | `/politicas/[eventId]` | `GET/PUT /events/{id}/policies…` | terminada | sí | decide lo que le promete a quien compra; **no** cómo se mueve el dinero de la plataforma |
+| **Cancelar el evento** | `/politicas/[eventId]` | `POST /events/{id}/cancel` | terminada | sí | retiene y abre expediente; **no devuelve nada**, porque esa decisión no está tomada |
 | Asistentes | `/asistentes/[id]` | `GET /events/{id}/attendees` | terminada | sí | la búsqueda es exacta desde la 0063, y es a propósito |
 | Control de acceso | `/check-in/[id]` | `POST /events/{id}/check-ins` | terminada | sí | **pendiente de QA físico**: cámara real y dos teléfonos |
 
@@ -135,15 +139,19 @@ la URL no existe para quien usa la aplicación, y esta matriz lo cuenta como tal
 | Expediente y acciones | `/admin/posventa/[id]` | `.../review`, `/approve`, `/reject`, `/history`, `/tickets` | terminada | aprobar **no** es haber pagado, y solo el sistema cierra con el aviso del proveedor |
 | Clasificar cambios | `/admin/posventa/[id]` | `POST /admin/events/changes/{id}/classify` | terminada | vive dentro del expediente, que es donde se necesita |
 | **Panel financiero** | `/admin/finanzas` | `/health`, `/reconcile`, `/disputes`, `/reserves`, `/transfers/run` | terminada | desde ahí **no se mueve dinero**, y los textos lo dicen |
-| Moderar una reseña | — | `POST /events/reviews/{id}/moderate` | **no implementada** | el backend está; esconder no borra y no toca autor ni puntuación |
-| **Publicar política** | — | `POST /admin/events/policies` | **no implementada** | el backend está. Es la pantalla que desbloquea todo lo demás, y la única que queda |
+| **Moderar reseñas** | `/admin/resenas` | `GET /admin/events/reviews` + `/moderate` | terminada | esconder no borra, y no toca autor ni puntuación |
+| **Supervisar políticas** | `/admin/politicas` | `/admin/events/policies/{overview,missing}` | terminada | supervisión y trazabilidad, **no** aprobación: ni un botón que escriba |
+| Publicar política de plataforma | — | `POST /admin/events/policies` | **no implementada** | las siete de dinero —retención, reserva, disputa, saldo negativo, ejecución, ventana de reseña, respuesta— siguen sin pantalla. Es lo único que queda |
 
 ### Lo que esta matriz dice, en una frase
 
-De las veinticuatro vistas de Eventos quedan **dos sin construir**, y la que más
-desbloquea no es de nadie que compre ni organice: es **publicar una política**,
-porque sin ella nueve funciones terminadas solo saben contestar «pendiente de
-configuración».
+Quien organiza ya puede escribir sus propias condiciones y cancelar su evento, y
+administración ya puede moderar y supervisar. Lo que queda es de plataforma:
+**publicar las siete políticas de dinero**, sin las cuales la retención, la
+reserva, la responsabilidad de una disputa y la ventana de reseñas siguen
+contestando «pendiente de configuración». Y dos pantallas del comprador que solo
+LEEN lo que el servidor ya sabe decir: las condiciones antes de pagar y lo que su
+compra aceptó.
 
 ## 4. Servicios
 
