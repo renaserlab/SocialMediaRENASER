@@ -56,6 +56,13 @@ DINERO_QUE_VUELVE = frozenset(
     }
 )
 
+#: UNA DISPUTA NO ES UNA DEVOLUCIÓN. La abre el banco del titular, el dinero se
+#: retira fuera de nuestro circuito y todavía se puede ganar. Bloquea el saldo y
+#: avisa; no retira el acceso de nadie.
+ESTADOS_DE_DISPUTA = frozenset(
+    {"disputa_abierta", "disputa_fondos_retirados", "disputa_cerrada"}
+)
+
 
 @dataclass(frozen=True)
 class IntentoDePago:
@@ -264,23 +271,130 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:
         return None
 
     if evento.status in DINERO_QUE_VUELVE:
-        # PENDIENTE DE CONCILIAR, y dicho en la tabla de avisos, que es la cola
-        # que ya existe para esto (`payment_events.error` = «esto hay que
-        # mirarlo»). NO se revoca ninguna entrada, NO se cambia el pedido y NO
-        # se marca el evento como devuelto: falla en cerrado hacia el lado que
-        # no destruye nada, y deja el rastro para el Incremento 5.
-        #
-        # Se anota el TIPO de aviso y la referencia del cobro. Ni el comprador,
-        # ni el correo, ni ninguna credencial.
-        logger.info(
-            "[eventos] devolucion o disputa pendiente de conciliar (%s): %s",
-            evento.event_type,
-            evento.provider_transaction_id,
-        )
-        return (
-            f"Devolucion o disputa de un pedido de entradas ({evento.event_type})."
-            " Pendiente de conciliar a mano: no se ha revocado ninguna entrada."
-        )
+        return await _atender_dinero_que_vuelve(db, evento)
 
     # 'pendiente' e 'ignorado'. Ninguno emite una entrada.
     return None
+
+
+async def _atender_dinero_que_vuelve(db: AsyncSession, evento) -> str | None:
+    """Un aviso de devolucion o de disputa, ya verificado y ya repartido aqui.
+
+    LO QUE DECIDE ESTO Y LO QUE NO. Aqui se localiza el pedido, se abre o se
+    recupera su expediente y se le entrega el aviso al servicio de efectos.
+    Las condiciones de si se retira el acceso NO estan aqui: estan en
+    `efectos.revocar_por_devolucion`, una sola vez, y esta funcion no puede
+    saltarselas.
+
+    UNA DISPUTA NO ES UNA DEVOLUCION. La abre el banco del titular, el dinero
+    se retira fuera de nuestro circuito y ganarla es posible: bloquea, no
+    revoca, y nunca llama al camino que retira el acceso.
+    """
+    from app.modules.events import efectos, esquema, posventa
+
+    referencia = (evento.provider_transaction_id or "").strip()
+
+    if not await esquema.hay_posventa(db):
+        # Sin la 0064/0065 no hay donde abrir un expediente. Se anota para
+        # conciliar a mano, que es lo que se hacia antes de que existieran.
+        logger.info(
+            "[eventos] devolucion sin esquema de posventa (%s): %s",
+            evento.event_type,
+            referencia,
+        )
+        return (
+            f"Devolucion o disputa de un pedido de entradas ({evento.event_type})."
+            " Sin el esquema de posventa: pendiente de conciliar a mano."
+        )
+
+    pedido = await db.scalar(
+        select(EventOrder).where(
+            EventOrder.provider == "stripe",
+            EventOrder.external_payment_id == referencia,
+            EventOrder.environment == evento.environment,
+        )
+    )
+    if pedido is None:
+        # Llego repartido aqui por la referencia, asi que esto solo pasa si el
+        # pedido desaparecio entre medias. No se inventa ninguno.
+        logger.warning("[eventos] devolucion sin pedido: %s", referencia)
+        return (
+            f"Devolucion de un cobro de entradas sin pedido ({evento.event_type})."
+            " Pendiente de conciliar a mano."
+        )
+
+    caso = await posventa.para_el_aviso(
+        db, orden=pedido, tipo_de_aviso=evento.event_type or evento.status
+    )
+
+    if evento.status in ESTADOS_DE_DISPUTA:
+        # BLOQUEA Y AVISA. Quien asume la perdida es una decision de la empresa
+        # que nadie ha tomado, asi que no se descuenta nada y no se revoca.
+        await efectos.aplicar(
+            db,
+            caso=caso,
+            efecto=efectos.BLOQUEADA,
+            actor_id=None,
+            motivo=f"disputa: {evento.event_type}",
+        )
+        return (
+            f"Disputa sobre un pedido de entradas ({evento.event_type})."
+            " Importe bloqueado; quien asume la perdida no esta decidido."
+        )
+
+    # Una devolucion. `refunded` es la unica CONFIRMADA y total; las demas son
+    # avances del expediente que no confirman nada.
+    resultado = await efectos.revocar_por_devolucion(
+        db,
+        caso=caso,
+        importe_devuelto_minor=evento.amount_minor,
+        moneda=evento.currency,
+        referencia=referencia,
+        confirmada=evento.status == "refunded",
+    )
+
+    if resultado.efecto == efectos.REVOCADA:
+        await _cerrar_expediente(db, caso=caso, referencia=referencia)
+        return None
+
+    return (
+        f"Devolucion de un pedido de entradas ({evento.event_type})."
+        f" Las entradas quedan {resultado.efecto}: pendiente de revisar."
+    )
+
+
+async def _cerrar_expediente(db: AsyncSession, *, caso, referencia: str) -> None:
+    """Lleva el expediente hasta `resolved`, y solo el SISTEMA puede hacerlo.
+
+    Aprobar no es haber pagado: el unico que puede declarar el dinero devuelto
+    es este camino, que llega desde un aviso verificado del proveedor.
+    """
+    from app.modules.events import posventa
+    from app.modules.events import posventa_estados as maquina
+    from app.modules.events.posventa_models import (
+        DEVOLUCION_EN_CURSO,
+        DEVOLUCION_PENDIENTE,
+        RESUELTO,
+    )
+
+    camino = {
+        maquina.ENVIADO: [DEVOLUCION_EN_CURSO],
+    }
+    # Se avanza paso a paso por la maquina; los saltos que no existen se
+    # saltan en silencio porque el expediente puede venir de cualquier estado.
+    for destino in (DEVOLUCION_PENDIENTE, DEVOLUCION_EN_CURSO, RESUELTO):
+        if not maquina.existe(caso.status, destino):
+            continue
+        if maquina.SISTEMA not in maquina.quienes(caso.status, destino):
+            # Un paso que exige a una persona no lo da el webhook.
+            continue
+        movimiento = await posventa.transicionar(
+            db,
+            expediente_id=caso.id,
+            hasta=destino,
+            actor_id=None,
+            actor_rol=maquina.SISTEMA,
+            motivo="devolucion confirmada por el proveedor",
+            referencia=referencia,
+        )
+        caso = movimiento.expediente

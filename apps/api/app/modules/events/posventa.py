@@ -8,14 +8,12 @@ dinero llegó, y la máquina de estados lo impone: a `resolved` desde
 NO HACE `commit`: quien llama decide cuándo, para que el expediente viva o
 muera con lo que lo rodea.
 
-SÍ HACE `rollback` EN DOS SITIOS, y hay que saberlo. `abrir` lo hace cuando el
-índice parcial rechaza un segundo expediente vivo, y `transicionar` cuando el
-UPDATE condicional no encuentra su fila. El segundo es imprescindible: el
-`update()` del ORM sincroniza evaluando el criterio contra el mapa de
-identidad, así que el objeto en memoria queda con el estado nuevo aunque
-`rowcount` sea 0. Consecuencia: **estas dos funciones no se pueden llamar
-dentro de un savepoint ajeno**, porque `Session.rollback()` deshace la
-transacción entera y no el savepoint.
+Y TAMPOCO HACE `rollback`. Los dos sitios que necesitan deshacer algo —el
+choque del índice parcial al abrir, y el UPDATE condicional que no encuentra su
+fila— lo hacen dentro de su PROPIO savepoint. Así se pueden llamar desde el
+webhook, que ya corre dentro de uno: un `Session.rollback()` ahí deshace la
+transacción entera y se lleva la fila anti-repetición que impide procesar el
+mismo aviso dos veces.
 """
 
 from __future__ import annotations
@@ -99,7 +97,7 @@ async def abrir(
     orden: EventOrder,
     organizador_id: str,
     tipo: str,
-    actor_id: str,
+    actor_id: str | None,
     actor_rol: str = maquina.COMPRADOR,
     motivo: str | None = None,
     origen: str = "buyer",
@@ -145,13 +143,23 @@ async def abrir(
         created_at=momento,
         updated_at=momento,
     )
-    db.add(expediente)
+    # SAVEPOINT PROPIO, NO `rollback`. Esto se llama también desde el webhook,
+    # dentro del savepoint que protege la fila anti-repetición de `payment_events`:
+    # un `Session.rollback()` ahí deshace la transacción ENTERA y se lleva por
+    # delante justo el registro que impide procesar el aviso dos veces.
     try:
-        await db.flush()
+        async with db.begin_nested():
+            # EL `add` VA DENTRO. Deshacer el savepoint no saca el objeto de la
+            # sesión: si se añade fuera, el siguiente `flush` reintenta la misma
+            # inserción y la transacción queda inservible.
+            db.add(expediente)
+            await db.flush()
     except IntegrityError:
-        # El índice parcial lo rechazó: ya hay uno vivo. Se busca cuál para
-        # poder llevar a la persona hasta él.
-        await db.rollback()
+        # El índice parcial lo rechazó: ya hay uno vivo. Se saca el intento de
+        # la sesión —si deshacer el savepoint no lo sacó ya— y se busca cuál,
+        # para poder llevar a la persona hasta él.
+        if expediente in db:
+            db.expunge(expediente)
         vivo = await db.scalar(
             select(EventAftersaleCase).where(
                 EventAftersaleCase.order_id == pedido_id,
@@ -190,6 +198,44 @@ async def abrir(
     )
     await db.flush()
     return expediente
+
+
+async def para_el_aviso(
+    db: AsyncSession, *, orden: EventOrder, tipo_de_aviso: str
+) -> EventAftersaleCase:
+    """El expediente al que pertenece un aviso del proveedor.
+
+    Si ya hay uno vivo sobre ese pedido, ese. Si no lo hay, se abre uno de
+    origen `system`: un reembolso hecho desde el panel de la pasarela no tiene
+    solicitud detrás, y sin expediente no habría dónde registrar qué le pasó a
+    las entradas ni quién tiene que mirarlo.
+
+    NO DECIDE NADA sobre el dinero ni sobre el acceso: eso es de `efectos`.
+    """
+    vivo = await db.scalar(
+        select(EventAftersaleCase)
+        .where(
+            EventAftersaleCase.order_id == orden.id,
+            EventAftersaleCase.status.in_(EXPEDIENTES_VIVOS),
+        )
+        .order_by(EventAftersaleCase.created_at.desc())
+    )
+    if vivo is not None:
+        return vivo
+
+    from app.modules.catalog.models import Event
+
+    evento = await db.get(Event, orden.event_id)
+    return await abrir(
+        db,
+        orden=orden,
+        organizador_id=evento.organizer_id if evento is not None else orden.buyer_id,
+        tipo="exception",
+        actor_id=None,
+        actor_rol=maquina.SISTEMA,
+        motivo=None,
+        origen="system",
+    )
 
 
 async def transicionar(
@@ -255,16 +301,22 @@ async def transicionar(
     if hasta in (RESUELTO, RECHAZADO, CANCELADO):
         valores["resolved_at"] = momento
 
-    cambiadas = await db.execute(
-        update(EventAftersaleCase)
-        .where(
-            EventAftersaleCase.id == expediente_id,
-            EventAftersaleCase.status == desde,
+    # EN SAVEPOINT, por lo mismo: `update()` sincroniza evaluando el criterio
+    # contra el mapa de identidad, así que el objeto en memoria queda con el
+    # estado nuevo aunque `rowcount` sea 0 y hay que deshacerlo. Hacerlo con un
+    # `rollback` suelto deshacía también lo que hubiera escrito quien llama.
+    async with db.begin_nested() as punto:
+        cambiadas = await db.execute(
+            update(EventAftersaleCase)
+            .where(
+                EventAftersaleCase.id == expediente_id,
+                EventAftersaleCase.status == desde,
+            )
+            .values(**valores)
         )
-        .values(**valores)
-    )
+        if cambiadas.rowcount != 1:
+            await punto.rollback()
     if cambiadas.rowcount != 1:
-        await db.rollback()
         raise ExpedienteCambiado(
             "Alguien movió este expediente mientras decidías. Vuelve a mirarlo.",
             details={"expected": desde},

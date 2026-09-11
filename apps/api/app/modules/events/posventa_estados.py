@@ -60,6 +60,16 @@ TRANSICIONES: dict[tuple[str, str], frozenset[str]] = {
     (ESPERANDO, EN_REVISION): frozenset({COMPRADOR, SOPORTE, ADMINISTRACION}),
     (ESPERANDO, RECHAZADO): frozenset({ADMINISTRACION}),
     (ESPERANDO, CANCELADO): frozenset({COMPRADOR, ADMINISTRACION}),
+    # EL PROVEEDOR SE ADELANTÓ. Un reembolso hecho desde el panel de la pasarela
+    # —o un aviso que llega antes de que nadie revise— es un hecho consumado: el
+    # dinero ya volvió. El expediente tiene que poder reflejarlo desde donde
+    # esté, o quedaría diciendo «enviado» sobre una compra ya devuelta.
+    #
+    # SOLO EL SISTEMA, y solo hacia la ejecución: esto registra lo que pasó, no
+    # aprueba nada. Ninguna persona puede dar estos pasos.
+    (ENVIADO, DEVOLUCION_EN_CURSO): frozenset({SISTEMA}),
+    (EN_REVISION, DEVOLUCION_EN_CURSO): frozenset({SISTEMA}),
+    (ESPERANDO, DEVOLUCION_EN_CURSO): frozenset({SISTEMA}),
     # Decisión
     (APROBADO, DEVOLUCION_PENDIENTE): frozenset({ADMINISTRACION}),
     # SIN DINERO QUE MOVER. Se decidió que la entrada se queda, o que no

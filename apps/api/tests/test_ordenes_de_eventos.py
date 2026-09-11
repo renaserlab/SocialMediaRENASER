@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import uuid
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -2283,3 +2285,273 @@ async def test_el_rastro_de_la_puerta_se_puede_correlacionar(entorno):
     fila = (await _rastro(sesiones, "event.checkin"))[0]
     assert fila.request_id, "el intento no se puede correlacionar"
     assert getattr(fila, "ip_address", None) is None
+
+
+# --------------------------------------------------------------------------- #
+# El aviso de devolucion, conectado al expediente y a sus efectos
+# --------------------------------------------------------------------------- #
+async def _politica_de_efecto(sesiones, evento_id, **params):
+    from app.modules.events import politicas
+
+    async with sesiones() as db:
+        await politicas.publicar(
+            db,
+            tipo="ticket_effect",
+            version=f"v{uuid.uuid4().hex[:8]}",
+            params=params,
+            evento_id=evento_id,
+        )
+        await db.commit()
+
+
+async def _estado_de_todo(sesiones, orden_id):
+    """Estado de las entradas, su efecto y el expediente. Sin nada personal."""
+    from app.modules.events.posventa_models import (
+        EventAftersaleCase,
+        EventAftersaleCaseTicket,
+    )
+
+    async with sesiones() as db:
+        entradas = (
+            await db.execute(
+                select(EventTicket.status).where(EventTicket.order_id == orden_id)
+            )
+        ).scalars().all()
+        caso = await db.scalar(
+            select(EventAftersaleCase).where(EventAftersaleCase.order_id == orden_id)
+        )
+        efectos_ = (
+            await db.execute(
+                select(EventAftersaleCaseTicket.effect)
+                .join(
+                    EventTicket,
+                    EventTicket.id == EventAftersaleCaseTicket.ticket_id,
+                )
+                .where(EventTicket.order_id == orden_id)
+            )
+        ).scalars().all()
+    return {
+        "entradas": sorted(entradas),
+        "efectos": sorted(efectos_),
+        "caso": caso.status if caso else None,
+        "resultado": caso.outcome if caso else None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_total_confirmada_con_politica_revoca(entorno, pasarela):
+    """LAS CINCO CONDICIONES, POR EL CAMINO REAL: aviso firmado -> expediente
+    -> efecto. Es el unico recorrido que retira el acceso."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+    async with sesiones() as db:
+        evento_id = (await db.get(EventOrder, orden["id"])).event_id
+    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_dev_total",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    estado = await _estado_de_todo(sesiones, orden["id"])
+    assert estado["entradas"] == ["REVOKED"]
+    assert estado["efectos"] == ["revoked"]
+    assert estado["caso"] == "resolved", estado
+
+
+@pytest.mark.asyncio
+async def test_sin_politica_de_efecto_la_entrada_se_retiene_no_se_revoca(
+    entorno, pasarela
+):
+    """Devolucion total y confirmada, y aun asi NO se revoca: cuando se retira
+    el acceso es una decision de la empresa. Retener es reversible."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_dev_sin_politica",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    estado = await _estado_de_todo(sesiones, orden["id"])
+    assert estado["entradas"] == ["VALID"]
+    assert estado["efectos"] == ["under_review"]
+    assert estado["caso"] != "resolved"
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_parcial_no_revoca_por_el_camino_real(entorno, pasarela):
+    """Con la politica que SI revoca, y aun asi una parcial no retira nada."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela, cantidad=2)
+    async with sesiones() as db:
+        evento_id = (await db.get(EventOrder, orden["id"])).event_id
+    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=2000,  # menos que el total del pedido
+        dominio="",
+        evento_id="evt_dev_parcial",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    estado = await _estado_de_todo(sesiones, orden["id"])
+    assert estado["entradas"] == ["VALID", "VALID"]
+    assert estado["efectos"] == ["under_review", "under_review"]
+
+
+@pytest.mark.asyncio
+async def test_un_reembolso_en_tramite_no_revoca(entorno, pasarela):
+    """`refund_procesando` no es una devolucion: es un expediente avanzando."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+    async with sesiones() as db:
+        evento_id = (await db.get(EventOrder, orden["id"])).event_id
+    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_dev_tramite",
+        status="refund_procesando",
+        event_type="refund.created",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    estado = await _estado_de_todo(sesiones, orden["id"])
+    assert estado["entradas"] == ["VALID"]
+
+
+@pytest.mark.asyncio
+async def test_una_disputa_bloquea_pero_no_revoca(entorno, pasarela):
+    """UNA DISPUTA NO ES UNA DEVOLUCION. La abre el banco, todavia se puede
+    ganar, y quien asume la perdida no esta decidido."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+    async with sesiones() as db:
+        evento_id = (await db.get(EventOrder, orden["id"])).event_id
+    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_disputa_real",
+        status="disputa_abierta",
+        event_type="charge.dispute.created",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    estado = await _estado_de_todo(sesiones, orden["id"])
+    assert estado["entradas"] == ["VALID"], "una disputa no retira el acceso"
+    assert estado["efectos"] == ["blocked"]
+
+
+@pytest.mark.asyncio
+async def test_el_mismo_aviso_de_devolucion_dos_veces_no_hace_el_doble(
+    entorno, pasarela
+):
+    """La barrera anti-repeticion esta ANTES, y sigue estandolo con el
+    expediente de por medio."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+    async with sesiones() as db:
+        evento_id = (await db.get(EventOrder, orden["id"])).event_id
+    await _politica_de_efecto(sesiones, evento_id, revoke_on_refund=True)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_dev_repetida",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    from app.modules.events.posventa_models import EventAftersaleCase
+
+    async with sesiones() as db:
+        expedientes = (
+            await db.execute(
+                select(EventAftersaleCase).where(
+                    EventAftersaleCase.order_id == orden["id"]
+                )
+            )
+        ).scalars().all()
+    assert len(expedientes) == 1, "un aviso repetido no abre un segundo expediente"
+    estado = await _estado_de_todo(sesiones, orden["id"])
+    assert estado["entradas"] == ["REVOKED"]
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_sin_pedido_no_inventa_ninguno(entorno, pasarela):
+    """Una referencia que no es de ninguna entrada sigue su camino de siempre."""
+    http, _, sesiones = entorno
+    await _pagada(http, sesiones, pasarela)
+
+    pasarela.aviso = _aviso(
+        "00000000-0000-0000-0000-000000000000",
+        importe=19900,
+        dominio="",
+        evento_id="evt_dev_ajena",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id="pi_de_un_curso",
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    from app.modules.events.posventa_models import EventAftersaleCase
+
+    async with sesiones() as db:
+        cuantos = await db.scalar(
+            select(func.count()).select_from(EventAftersaleCase)
+        )
+    assert cuantos == 0, "no se abre expediente por un cobro que no es nuestro"
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_que_no_cuadra_queda_anotada(entorno, pasarela):
+    """Y con rastro: `payment_events.error` es la cola que ya existe."""
+    http, _, sesiones = entorno
+    orden, referencia = await _pagada(http, sesiones, pasarela)
+
+    pasarela.aviso = _aviso(
+        orden["id"],
+        importe=4900,
+        dominio="",
+        evento_id="evt_dev_anotada",
+        status="refunded",
+        event_type="charge.refunded",
+        provider_transaction_id=referencia,
+    )
+    assert (await http.post(WEBHOOK, content=b"{}")).status_code == 204
+
+    async with sesiones() as db:
+        aviso = await db.scalar(
+            select(ComercioPaymentEvent).where(
+                ComercioPaymentEvent.external_event_id == "evt_dev_anotada"
+            )
+        )
+    assert aviso is not None and aviso.error, "queda para que una persona lo mire"

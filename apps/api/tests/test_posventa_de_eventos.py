@@ -88,9 +88,24 @@ def test_un_salto_que_no_existe_no_es_un_problema_de_permisos() -> None:
     Contestarlas igual hace que un fallo de permisos parezca del servidor.
     """
     with pytest.raises(maquina.SaltoInexistente):
-        maquina.exigir(ENVIADO, DEVOLUCION_EN_CURSO, maquina.ADMINISTRACION)
+        maquina.exigir(ENVIADO, DEVOLUCION_PENDIENTE, maquina.ADMINISTRACION)
     with pytest.raises(maquina.SaltoNoPermitido):
         maquina.exigir(ENVIADO, RECHAZADO, maquina.COMPRADOR)
+
+
+def test_solo_el_sistema_registra_lo_que_el_proveedor_ya_hizo() -> None:
+    """Un reembolso hecho desde el panel de la pasarela llega como un hecho
+    consumado: el expediente tiene que poder reflejarlo desde donde este.
+
+    Y SOLO EL SISTEMA. Si una persona pudiera dar este paso, aprobar y «el
+    dinero ya volvio» volverian a ser lo mismo, que es lo que toda esta maquina
+    existe para impedir.
+    """
+    for desde in (ENVIADO, EN_REVISION, ESPERANDO):
+        maquina.exigir(desde, DEVOLUCION_EN_CURSO, maquina.SISTEMA)
+        for quien in (maquina.ADMINISTRACION, maquina.SOPORTE, maquina.COMPRADOR):
+            with pytest.raises(maquina.SaltoNoPermitido):
+                maquina.exigir(desde, DEVOLUCION_EN_CURSO, quien)
 
 
 def test_el_comprador_retira_lo_suyo_y_nada_mas() -> None:
