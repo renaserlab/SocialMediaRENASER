@@ -430,6 +430,58 @@ async def test_el_relevo_no_pisa_el_resultado(sesiones) -> None:
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
+async def test_el_que_triunfa_tarde_no_resucita_una_fallida(sesiones) -> None:
+    """EL RELEVO EN EL OTRO SENTIDO, y es el peor.
+
+    A se cuelga; vence el turno; B la releva, agota los intentos y la deja
+    `failed`. Entonces A vuelve diciendo que sí salió. Sin la prenda del turno,
+    `marcar_enviada` reescribía `sent` sobre una entrega que ya estaba cerrada
+    en fallo, y el panel de operación decía que todo va bien.
+    """
+    quien = await _persona(sesiones)
+    async with sesiones() as db:
+        fila = await entregas.encolar(
+            db, usuario_id=quien, tipo="event_case_taken", entidad_id="tarde"
+        )
+        # Un solo intento: el primer fallo la cierra.
+        fila.max_attempts = 1
+        await db.commit()
+        identificador = fila.id
+        momento = fila.next_attempt_at
+
+    async with sesiones() as db:
+        turno_de_a = await entregas.tomar(
+            db, entrega_id=identificador, momento=momento
+        )
+        await db.commit()
+
+    despues = momento + entregas.ARRENDAMIENTO + timedelta(seconds=1)
+    async with sesiones() as db:
+        turno_de_b = await entregas.tomar(db, entrega_id=identificador, momento=despues)
+        assert await entregas.marcar_fallo(
+            db,
+            entrega_id=identificador,
+            error="no salio",
+            intento=turno_de_b,
+            momento=despues,
+        ) == entregas.FALLIDA
+        await db.commit()
+
+    # A vuelve tarde con su éxito. NO reabre nada.
+    async with sesiones() as db:
+        assert not await entregas.marcar_enviada(
+            db, entrega_id=identificador, intento=turno_de_a, momento=despues
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        final = await db.get(NotificationDelivery, identificador)
+    assert final.status == entregas.FALLIDA
+    assert final.sent_at is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
 async def test_un_fallo_borra_la_fecha_de_envio(sesiones) -> None:
     """«Fallida con fecha de envío» no existe, y la 0066 lo impone con un
     CHECK. Si el fallo no limpia la fecha, el `commit` revienta entero y se
@@ -607,11 +659,18 @@ def test_la_puerta_de_los_avisos_mira_la_COLUMNA_y_no_solo_la_tabla() -> None:
     El mismo patrón ya estaba aplicado en `hay_ordenes`, `hay_posventa` y
     `hay_finanzas`; aquí faltaba.
     """
-    import inspect
-
     from app.modules.notifications import esquema as esquema_avisos
 
-    fuente = inspect.getsource(esquema_avisos.hay_entregas)
-    assert "notification_deliveries" in fuente
-    assert "device_tokens" in fuente
-    assert "locale" in fuente
+    # SE LEE EL FICHERO, no `inspect.getsource`: aquella lee de una caché de
+    # líneas que puede quedarse con la versión anterior, y una comprobación que
+    # mira una copia vieja no comprueba nada.
+    ruta = Path(esquema_avisos.__file__)
+    fuente = ruta.read_text(encoding="utf-8")
+    inicio = fuente.index("async def hay_entregas")
+    entera = fuente[inicio : fuente.index("def olvidar_entregas", inicio)]
+    # SIN EL DOCSTRING. Ahí los tres nombres aparecen explicados, y una
+    # comprobación que se conforma con eso pasa aunque el código no mire nada.
+    cuerpo = entera[entera.index('"""', entera.index('"""') + 3) + 3 :]
+    assert "notification_deliveries" in cuerpo
+    assert "device_tokens" in cuerpo
+    assert "locale" in cuerpo

@@ -93,7 +93,7 @@ async def _persona(sesiones, etiqueta="f") -> str:
     return ident
 
 
-async def _venta(sesiones, *, total=10000):
+async def _venta(sesiones, *, total=10000, entorno="sandbox"):
     """Un pedido de entradas PAGADO. Devuelve (orden, evento, organizador)."""
     organiza = await _persona(sesiones, "org")
     compra = await _persona(sesiones, "com")
@@ -165,10 +165,10 @@ async def _venta(sesiones, *, total=10000):
                 " provider, environment, external_payment_id, paid_at) values"
                 " (cast(:o as uuid), cast(:e as uuid), cast(:u as uuid),"
                 " cast(:h as uuid), 'PAID', 'PEN', :p, :p, :k, 'stripe',"
-                " 'sandbox', :ref, :pa)"
+                " :env, :ref, :pa)"
             ),
             {"o": orden, "e": evento, "u": compra, "h": hold, "k": f"k{orden[:8]}",
-             "p": total, "ref": f"pi_{orden[:8]}", "pa": momento},
+             "p": total, "ref": f"pi_{orden[:8]}", "pa": momento, "env": entorno},
         )
         await db.execute(
             text(
@@ -884,7 +884,7 @@ async def test_una_devolucion_parcial_bloquea_lo_devuelto(
 @SIN_POSTGRES
 @pytest.mark.asyncio
 async def test_el_motor_de_cursos_no_recoge_los_saldos_de_evento(
-    sesiones, con_comision
+    sesiones, con_comision, monkeypatch
 ) -> None:
     """LA 0068 MEZCLA LAS DOS COSAS EN UNA TABLA, y el trabajo que libera
     vencidos de Cursos no filtraba: pasaba a `eligible` saldos de evento
@@ -912,15 +912,27 @@ async def test_el_motor_de_cursos_no_recoge_los_saldos_de_evento(
         assert saldo.status == finanzas.PENDIENTE, (
             "el motor de Cursos movió un saldo de evento"
         )
-        # Y si llegara a `eligible` por otra vía, el camino de transferencia de
-        # Cursos lo rechaza diciendo lo que pasa de verdad.
+    assert movidos == 0
+
+    # Y SI LLEGARA A `eligible` POR OTRA VÍA —alguien escribe el estado a mano—
+    # el camino de transferencia de Cursos lo rechaza diciendo lo que pasa de
+    # verdad. Se encienden las dos banderas A PROPÓSITO para llegar hasta esa
+    # comprobación: sin ellas, la función corta antes y esta prueba no
+    # comprobaría nada. NO SE MUEVE DINERO: `puede_transferirse` solo lee.
+    monkeypatch.setattr(
+        get_settings(), "creator_transfers_enabled", True, raising=False
+    )
+    monkeypatch.setattr(
+        get_settings(), "stripe_connect_enabled", True, raising=False
+    )
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
         saldo.status = "eligible"
         await db.flush()
         assert (
-            await liquidacion.puede_transferirse(db, saldo)
-        ) in ("transfers_disabled", "connect_disabled", "not_a_course_balance")
+            await liquidacion.puede_transferirse(db, saldo) == "not_a_course_balance"
+        )
         await db.rollback()
-    assert movidos == 0
 
 
 @SIN_POSTGRES
@@ -939,18 +951,25 @@ async def test_la_cuenta_de_cobro_sale_del_entorno_del_pedido(
     """
     import inspect
 
-    orden, evento, organiza = await _venta(sesiones, total=10000)
+    # EL PEDIDO ES DE PRODUCCIÓN y la réplica que lo atiende está configurada
+    # como pruebas —`payments_environment` se deriva del despliegue y aquí vale
+    # `sandbox`—. Eligiendo la cuenta con el entorno del proceso, este pedido
+    # real acabaría apuntando a la cuenta DE JUGUETE. Con el del pedido, no.
+    assert get_settings().payments_environment == "sandbox"
+    orden, evento, organiza = await _venta(
+        sesiones, total=10000, entorno="production"
+    )
     de_pruebas = await _cuenta_de_cobro(sesiones, organiza, entorno="sandbox")
     de_verdad = await _cuenta_de_cobro(sesiones, organiza, entorno="production")
 
     async with sesiones() as db:
         orden = await db.get(EventOrder, orden.id)
-        assert orden.environment == "sandbox"
+        assert orden.environment == "production"
         saldo = await finanzas.registrar_venta(db, orden=orden)
         await db.commit()
 
-    assert saldo.payout_account_id == de_pruebas
-    assert saldo.payout_account_id != de_verdad
+    assert saldo.payout_account_id == de_verdad
+    assert saldo.payout_account_id != de_pruebas
     # Y LA CONFIGURACIÓN DEL PROCESO NO PARTICIPA. `payments_environment` es una
     # propiedad derivada del despliegue; que no se lea aquí es justamente el
     # arreglo, y por eso se comprueba sobre la fuente.

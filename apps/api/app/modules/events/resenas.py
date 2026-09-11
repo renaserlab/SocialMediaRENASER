@@ -406,6 +406,47 @@ async def listar(
     return list(await db.scalars(consulta))
 
 
+async def respuestas_de(
+    db: AsyncSession, *, resenas_ids: list[str]
+) -> dict[str, EventReviewReply]:
+    """Las respuestas VISIBLES de un lote de reseñas. Una consulta para todas.
+
+    UNA POR RESEÑA, y lo impone un índice único parcial: varias respuestas del
+    organizador debajo de una opinión serían una forma de hostigar a quien la
+    escribió.
+
+    Lista vacía = no se consulta. `in_([])` con la cadena vacía de relleno
+    revienta contra una columna `uuid` en PostgreSQL.
+    """
+    if not resenas_ids or not await esquema.hay_resenas(db):
+        return {}
+    filas = await db.scalars(
+        select(EventReviewReply).where(
+            EventReviewReply.review_id.in_(resenas_ids),
+            EventReviewReply.status == VISIBLE,
+        )
+    )
+    return {fila.review_id: fila for fila in filas}
+
+
+async def mia(
+    db: AsyncSession, *, evento_id: str, usuario_id: str
+) -> EventReview | None:
+    """La reseña que esta persona escribió de este evento, si la hay.
+
+    Incluye la ESCONDIDA por moderación: su autor tiene que poder ver lo que
+    escribió. Quien la lea es solo esa persona.
+    """
+    if not await esquema.hay_resenas(db):
+        return None
+    return await db.scalar(
+        select(EventReview).where(
+            EventReview.event_id == evento_id,
+            EventReview.author_id == usuario_id,
+        )
+    )
+
+
 # --------------------------------------------------------------------------- #
 # La respuesta del organizador. NACE APAGADA.
 # --------------------------------------------------------------------------- #
@@ -478,6 +519,8 @@ async def responder(
 
 
 __all__ = [
+    "mia",
+    "respuestas_de",
     "EJES",
     "ESCONDIDA",
     "Resumen",

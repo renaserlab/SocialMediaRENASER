@@ -43,6 +43,15 @@ class CrearResenaRequest(BaseModel):
     comment: str | None = Field(default=None, max_length=1000)
 
 
+class RespuestaRead(BaseModel):
+    """La respuesta del organizador, tal como se lee debajo de la reseña."""
+
+    id: str
+    author_id: str
+    body: str
+    created_at: datetime
+
+
 class ResenaRead(BaseModel):
     """Una reseña publicada. SIN la entrada ni el check-in que la respaldan.
 
@@ -64,6 +73,12 @@ class ResenaRead(BaseModel):
     #: Siempre `True`: una reseña existe porque hubo check-in. Va explícito
     #: para que la pantalla no tenga que deducirlo.
     asistencia_verificada: bool = True
+    #: La respuesta del organizador, si la hay. UNA como mucho, y solo si está
+    #: visible: una escondida por moderación no se lee.
+    respuesta: RespuestaRead | None = None
+    #: Estado de la reseña. Solo viaja en la reseña PROPIA: en la lista pública
+    #: no hace falta, porque las escondidas ni siquiera salen.
+    status: str | None = None
     created_at: datetime
 
 
@@ -98,7 +113,7 @@ class ModerarRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
-def _leida(r: EventReview) -> ResenaRead:
+def _leida(r: EventReview, respuesta=None, *, con_estado: bool = False) -> ResenaRead:
     return ResenaRead(
         id=r.id,
         event_id=r.event_id,
@@ -111,6 +126,17 @@ def _leida(r: EventReview) -> ResenaRead:
         value=r.value,
         recommends=r.recommends,
         comment=r.comment,
+        respuesta=(
+            RespuestaRead(
+                id=respuesta.id,
+                author_id=respuesta.author_id,
+                body=respuesta.body,
+                created_at=respuesta.created_at,
+            )
+            if respuesta is not None
+            else None
+        ),
+        status=r.status if con_estado else None,
         created_at=r.created_at,
     )
 
@@ -140,7 +166,29 @@ async def listar_resenas(
 ) -> list[ResenaRead]:
     ensure_uuid(event_id, "Evento no encontrado.")
     filas = await resenas.listar(db, evento_id=event_id, limite=limit, cursor=cursor)
-    return [_leida(r) for r in filas]
+    # LAS RESPUESTAS, EN UNA CONSULTA para todas: una por reseña sería N+1 en la
+    # pantalla que más se abre.
+    respuestas = await resenas.respuestas_de(db, resenas_ids=[r.id for r in filas])
+    return [_leida(r, respuestas.get(r.id)) for r in filas]
+
+
+@router.get("/{event_id}/reviews/mine", response_model=ResenaRead | None)
+async def mi_resena(
+    event_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead | None:
+    """La reseña propia de este evento, para poder editarla.
+
+    Incluye la ESCONDIDA por moderación —con su estado— porque su autor tiene
+    que poder ver lo que escribió. `null` si no ha escrito ninguna.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    fila = await resenas.mia(db, evento_id=event_id, usuario_id=current_user.id)
+    if fila is None:
+        return None
+    respuestas = await resenas.respuestas_de(db, resenas_ids=[fila.id])
+    return _leida(fila, respuestas.get(fila.id), con_estado=True)
 
 
 @router.get("/{event_id}/reviews/can-review", response_model=PuedeResenarRead)

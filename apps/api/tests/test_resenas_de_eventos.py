@@ -574,3 +574,41 @@ def test_la_ventana_mira_el_FIN_del_evento_y_no_se_salta_sin_fecha() -> None:
     assert "if termina is None:" in fuente
     indice = fuente.index("if termina is None:")
     assert "event_not_finished" in fuente[indice : indice + 120]
+
+
+def test_la_respuesta_del_organizador_viaja_con_su_resena() -> None:
+    """SIN N+1 Y SOLO LA VISIBLE.
+
+    La lista pública no traía la respuesta, así que la pantalla no tenía de
+    dónde sacarla; pedirla reseña a reseña habría sido veinte viajes en la
+    pantalla que más se abre. Y una respuesta escondida por moderación no se
+    lee: esconder es esconder.
+    """
+    import inspect
+
+    fuente = inspect.getsource(resenas.respuestas_de)
+    assert "EventReviewReply.status == VISIBLE" in fuente
+    # Lista vacía = no se consulta: `in_([])` con relleno revienta en Postgres.
+    assert "if not resenas_ids" in fuente
+
+    from app.modules.events import resenas_router
+
+    listar = inspect.getsource(resenas_router.listar_resenas)
+    assert "respuestas_de" in listar
+    assert listar.count("respuestas_de") == 1
+
+
+def test_la_resena_propia_se_puede_leer_aunque_este_escondida() -> None:
+    """SU AUTOR TIENE QUE PODER VER LO QUE ESCRIBIÓ. Moderar esconde para los
+    demás; borrarlo de la vista de quien lo escribió es otra cosa."""
+    import inspect
+
+    fuente = inspect.getsource(resenas.mia)
+    # No filtra por estado: la escondida también sale.
+    assert "status" not in fuente
+
+    from app.modules.events import resenas_router
+
+    ruta = inspect.getsource(resenas_router.mi_resena)
+    assert "current_user.id" in ruta
+    assert "con_estado=True" in ruta
