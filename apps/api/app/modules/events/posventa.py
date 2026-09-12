@@ -25,7 +25,12 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError, NotFoundError, ValidationAppError
+from app.core.exceptions import (
+    AppError,
+    ConflictError,
+    NotFoundError,
+    ValidationAppError,
+)
 from app.modules.events import posventa_estados as maquina
 from app.modules.events.models import EventOrder, EventTicket
 from app.modules.events.posventa_models import (
@@ -288,16 +293,14 @@ async def transicionar(
     # SIN POLÍTICA NO HAY RESULTADO, y lo exige también la base. Aquí se dice
     # antes para que el error sea comprensible en vez de una violación de CHECK.
     if resultado is not None and politica_id is None and expediente.policy_id is None:
-        raise AppError(
+        raise ConflictError(
             "No se puede cerrar un expediente sin decir con qué reglas se decidió.",
             code="event_case_outcome_without_policy",
-            status_code=409,
         )
     if (importe_minor is None) != (moneda is None):
-        raise AppError(
+        raise ConflictError(
             "Un importe sin moneda no es un importe.",
             code="event_case_amount_without_currency",
-            status_code=409,
         )
 
     valores: dict[str, object] = {"status": hasta, "updated_at": momento}

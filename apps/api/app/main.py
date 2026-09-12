@@ -39,6 +39,8 @@ from app.modules.events.posventa_router import router as posventa_router
 from app.modules.events.ticket_router import admin_router as tickets_admin_router
 from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
+from app.modules.products.router import admin_router as products_admin_router
+from app.modules.products.router import router as products_router
 from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
 from app.modules.messaging.router import router as messaging_router
@@ -194,6 +196,11 @@ def create_app() -> FastAPI:
     app.include_router(tickets_router, prefix=prefix)
     app.include_router(tickets_admin_router, prefix=prefix)
     app.include_router(events_router, prefix=prefix)
+    # PRODUCTOS. El de administracion primero: `/admin/products` no choca con
+    # `/products/{id}`, pero declararlo antes deja el orden igual que en el
+    # resto del fichero y no hay que pensarlo dos veces.
+    app.include_router(products_admin_router, prefix=prefix)
+    app.include_router(products_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

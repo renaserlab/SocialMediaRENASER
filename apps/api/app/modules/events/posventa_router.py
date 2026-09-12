@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     AppError,
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ValidationAppError,
@@ -165,10 +166,9 @@ async def abrir_expediente(
         # Un hecho duro —no pagado, ya devuelto, expediente abierto— o una
         # negativa de la política. Se dice con su código y con los motivos, no
         # con una frase: la aplicación los traduce y una consulta los agrupa.
-        raise AppError(
+        raise ConflictError(
             "No se puede abrir una solicitud sobre esta compra.",
             code=f"event_case_{veredicto.resultado}",
-            status_code=409,
             details={"motivos": list(veredicto.motivos)},
         )
 
@@ -629,10 +629,9 @@ async def aprobar(
 
     bajo_mandato = orden is not None and await cancelacion.aplica_a(db, orden=orden)
     if bajo_mandato and payload.outcome in ("no_refund", "partial_refund"):
-        raise AppError(
+        raise ConflictError(
             "El evento se canceló: corresponde devolver el 100 % de lo pagado.",
             code="event_cancelled_full_refund_required",
-            status_code=409,
         )
     if politica is None and not bajo_mandato:
         raise politicas.PoliticaAusente(

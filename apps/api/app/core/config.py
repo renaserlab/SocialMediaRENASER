@@ -167,6 +167,24 @@ class Settings(BaseSettings):
     # Transmisiones en vivo
     # ----------------------------------------------------------------- #
 
+    #: PRODUCTOS FISICOS. Encendida, el catalogo se puede mirar: portada,
+    #: busqueda, categorias y ficha. NO habilita comprar nada.
+    #:
+    #: Nace ENCENDIDA porque un catalogo de solo lectura no promete nada: lo que
+    #: promete es el boton de comprar, y ese esta en la otra bandera. Y si no
+    #: hay migraciones aplicadas la portada contesta `disponible: false` sola.
+    feature_products: bool = True
+
+    #: VENDER UN PRODUCTO FISICO. APAGADA, y no hay codigo detras: no existen
+    #: carrito, pedido, existencias, envio ni devolucion de productos.
+    #:
+    #: SEPARADA DE `feature_products` a proposito. Ademas de que falta el
+    #: codigo, faltan decisiones de la empresa sin las cuales no se puede
+    #: vender: entidad legal que emite el comprobante, paises, impuestos,
+    #: transportista, cobertura, tarifas de envio y moneda. Encenderla no haria
+    #: que se pudiera comprar; solo dejaria de ser verdad que no se puede.
+    feature_product_sales: bool = False
+
     #: Interruptor general de los directos CON VIDEO. Apagado, el modulo entero
     #: sigue funcionando —sala, chat, reacciones, moderacion— y lo unico que no
     #: hay es imagen: es exactamente el estado en el que lleva viviendo el
