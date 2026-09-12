@@ -90,9 +90,23 @@ export type Condicion = {
   params: Record<string, unknown>;
 };
 
+/**
+ * Una regla de Z que PREVALECE sobre lo que diga la condición publicada.
+ *
+ * Viaja siempre que rija, incluso cuando ninguna condición la contradice: el
+ * texto libre puede prometer «sin devolución» y el servidor no puede leerlo.
+ */
+export type Mandato = {
+  code: string;
+  refund_bps: number;
+  /** Los parámetros publicados que quedan sin efecto. Se tachan, no se esconden. */
+  overrides: string[];
+};
+
 /** `GET /events/{id}/policies/terms`: EXACTAMENTE lo que verá quien compra. */
 export type Condiciones = {
   configurada: boolean;
+  mandato?: Mandato | null;
   condiciones: Condicion[];
 };
 
@@ -110,6 +124,15 @@ export type ResultadoDeCancelacion = {
   saldos_bloqueados: number;
   sin_saldo: number;
   avisos: number;
+  /**
+   * Expedientes en los que se DECIDIÓ que corresponde devolver el 100 %.
+   *
+   * No hay contador de «devuelto» porque no se devuelve nada aquí: que el
+   * dinero volvió lo dice después un aviso verificado del proveedor.
+   */
+  devoluciones_decididas?: number;
+  /** Compras que quedan por atender. Mayor que cero: hay que volver a llamar. */
+  pendientes?: number;
 };
 
 /**
@@ -155,6 +178,16 @@ export const COTAS: Record<string, readonly [number, number]> = {
   reserve_days: [0, 365],
   days_after_event: [0, 365],
 };
+
+/**
+ * `cancelacion.MANDATO` y `cancelacion.BPS_DEL_MANDATO`.
+ *
+ * SI EL ORGANIZADOR CANCELA, Z DEVUELVE EL 100 %. Está aquí para poder avisar
+ * mientras se escribe, un paso antes de que el servidor conteste
+ * `event_policy_contradicts_mandatory_refund` al publicar.
+ */
+export const MANDATO = 'z_mandatory_full_refund';
+export const BPS_DEL_MANDATO = 10_000;
 
 /** `politicas.CLAVES_MAXIMAS`: una política es una decisión, no un almacén. */
 export const CLAVES_MAXIMAS = 50;
@@ -430,6 +463,18 @@ export function detectarContradicciones(
     }
   }
 
+  // Prometer menos de lo que Z devuelve cuando el organizador cancela. No es
+  // una opinión sobre su negocio: publicada, quien compra leería lo contrario
+  // de lo que va a pasar.
+  const prometido = params.cancelled_event_bps;
+  if (typeof prometido === 'number' && Number.isFinite(prometido) && prometido < BPS_DEL_MANDATO) {
+    fallos.push({
+      campo: 'cancelled_event_bps',
+      codigo: 'event_policy_contradicts_mandatory_refund',
+      claves: ['cancelled_event_bps'],
+    });
+  }
+
   // Y una que no habilita nada pero se publica como si habilitara.
   const conSentido = clavesDelTipo(tipo);
   if (
@@ -686,6 +731,21 @@ export function hayCondiciones(condiciones: Condiciones | null): boolean {
   return (condiciones?.condiciones.length ?? 0) > 0;
 }
 
+/**
+ * La regla obligatoria que acompaña a las condiciones, si rige.
+ *
+ * `null` no es «no hay devolución»: es que el servidor no manda ninguna regla
+ * por encima de lo publicado.
+ */
+export function mandatoDe(condiciones: Condiciones | null): Mandato | null {
+  return condiciones?.mandato ?? null;
+}
+
+/** Si ese parámetro publicado quedó sin efecto por el mandato. */
+export function anuladoPorElMandato(condiciones: Condiciones | null, clave: string): boolean {
+  return (mandatoDe(condiciones)?.overrides ?? []).includes(clave);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Cancelar el evento                                                          */
 /* -------------------------------------------------------------------------- */
@@ -717,19 +777,35 @@ export function motivoDeCancelacionUtil(texto: string | null | undefined): strin
 /**
  * Lo que el servidor dice que hizo, contado tal cual.
  *
- * CUATRO CONTADORES Y NINGUNA CONCLUSIÓN. No hay una fila de «devuelto» porque
- * no se devolvió nada: se abrieron expedientes y se retuvo saldo. `sin_saldo`
- * son los pedidos pagados que no tenían nada que retener, y no es un fallo.
+ * NINGUNA CONCLUSIÓN, Y NINGUNA FILA DE «DEVUELTO». Se abrieron expedientes, se
+ * retuvo saldo y se DECIDIÓ que corresponde devolver: que el dinero volvió lo
+ * dirá después un aviso verificado del proveedor, y hasta entonces decirlo aquí
+ * sería mentir con un número. `sin_saldo` son los pedidos pagados que no tenían
+ * nada que retener, y no es un fallo.
+ *
+ * `pendientes` solo aparece cuando lo hay: en un evento pequeño siempre es cero
+ * y una fila que siempre dice cero se deja de leer.
  */
 export function filasDelResultado(
   resultado: ResultadoDeCancelacion,
 ): Array<{ clave: ClaveDeTraduccion; valor: number }> {
-  return [
+  const filas: Array<{ clave: ClaveDeTraduccion; valor: number }> = [
     { clave: 'politicasEvento.cancelar.expedientes', valor: resultado.expedientes },
+    {
+      clave: 'politicasEvento.cancelar.devolucionesDecididas',
+      valor: resultado.devoluciones_decididas ?? 0,
+    },
     { clave: 'politicasEvento.cancelar.saldosBloqueados', valor: resultado.saldos_bloqueados },
     { clave: 'politicasEvento.cancelar.sinSaldo', valor: resultado.sin_saldo },
     { clave: 'politicasEvento.cancelar.avisos', valor: resultado.avisos },
   ];
+  if ((resultado.pendientes ?? 0) > 0) {
+    filas.push({
+      clave: 'politicasEvento.cancelar.pendientes',
+      valor: resultado.pendientes ?? 0,
+    });
+  }
+  return filas;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -748,6 +824,7 @@ export function claveDeErrorDePolitica(
   const conocidos: Record<string, string> = {
     event_policy_empty: 'politicasEvento.error.vacia',
     event_policy_contradictory: 'politicasEvento.error.contradictoria',
+    event_policy_contradicts_mandatory_refund: 'politicasEvento.error.contraElMandato',
     event_policy_param_out_of_range: 'politicasEvento.error.fueraDeRango',
     event_policy_param_not_a_number: 'politicasEvento.error.noEsNumero',
     event_policy_params_too_many: 'politicasEvento.error.demasiadosParametros',

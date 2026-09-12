@@ -704,11 +704,11 @@ async def cambiar_visibilidad(
 async def cancelar(
     db: AsyncSession, *, evento_id: str, motivo: str, usuario: AuthUser
 ):
-    """Cancela el evento entero y deja lo vendido retenido y en revisión.
+    """Cancela el evento entero y deja lo vendido retenido y con devolución debida.
 
     QUÉ PASA CON EL DINERO NO SE DECIDE AQUÍ. Lo decide `cancelacion.py`, que es
-    el único sitio donde vive la regla, y hoy contesta «pendiente de decisión
-    empresarial»: ni se devuelve, ni se rechaza, ni se libera, ni se transfiere.
+    el único sitio donde vive la regla, y hoy contesta que Z exige devolver el
+    100 %. Lo que NO pasa aquí ni allí: ejecutar, liberar o transferir.
 
     EN UNA SOLA TRANSACCIÓN. Un evento cancelado sin sus expedientes sería gente
     con la entrada muerta y sin ningún caso abierto.
@@ -749,6 +749,10 @@ async def cancelar(
             "expedientes": resultado.expedientes,
             "saldos_bloqueados": resultado.saldos_bloqueados,
             "sin_saldo": resultado.sin_saldo,
+            # DECIDIDAS, no pagadas. La auditoría tiene que poder distinguir
+            # «Z debe este dinero» de «este dinero volvió».
+            "devoluciones_decididas": resultado.devoluciones_decididas,
+            "pendientes": resultado.pendientes,
         },
     )
     await db.commit()

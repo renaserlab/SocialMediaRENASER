@@ -5,6 +5,11 @@ evento: alcance, tipo, versión, borrador o publicada, texto para quien compra,
 parámetros y huella. Lo que faltaba era el CICLO DE VIDA —nadie creaba
 borradores, `publicar()` iba directo a publicada— y la puerta de propiedad.
 
+LO QUE NI PUBLICANDO PUEDE PROMETER. Si cancela totalmente el evento, Z
+devuelve el 100 % de lo pagado: una condición que prometa menos no se publica.
+No es una opinión sobre su negocio —aquí nunca se juzga si un plazo es corto—,
+es que publicada dejaría al comprador leyendo lo contrario de lo que va a pasar.
+
 QUÉ PUEDE DECIDIR UN ORGANIZADOR, Y QUÉ NO. Decide lo que le PROMETE a quien
 compra: cuándo se puede pedir un cambio o una devolución, y qué pasa con la
 entrada. NO decide cómo se mueve el dinero de la plataforma —ejecución del
@@ -292,6 +297,7 @@ async def publicar_borrador(
 
     params = dict(politica.params or {})
     politicas._exigir_parametros_sensatos(params)
+    politicas.exigir_compatible_con_el_mandato(params)
     _validar_contradicciones(politica.policy_type, params)
     if not params and not (politica.body or "").strip():
         raise ValidationAppError(

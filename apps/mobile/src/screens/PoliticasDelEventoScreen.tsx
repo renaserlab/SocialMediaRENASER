@@ -23,6 +23,7 @@ import {
   claveDeErrorDePolitica,
   claveDeErrorPorEstado,
   claveDeFallo,
+  anuladoPorElMandato,
   claveDeRegla,
   claveDelCuerpoDeLaRegla,
   claveDelCuerpoDelResumen,
@@ -39,6 +40,7 @@ import {
   formularioDesde,
   formularioVacio,
   hayCondiciones,
+  mandatoDe,
   hayQueRecargar,
   historialDelTipo,
   momentoLegible,
@@ -797,6 +799,16 @@ export function PoliticasDelEventoScreen() {
           onPress={previsualizar}
           disabled={ocupado}
         />
+        {verPrevisualizacion && condiciones !== null && mandatoDe(condiciones) !== null ? (
+          <View style={[styles.tarjeta, { borderColor: colors.danger }]}>
+            <Text variant="caption" weight="700">
+              {f('politicasEvento.mandato.titulo')}
+            </Text>
+            <Text variant="caption" color={colors.textMuted}>
+              {f('politicasEvento.mandato.cuerpo')}
+            </Text>
+          </View>
+        ) : null}
         {verPrevisualizacion && condiciones !== null ? (
           hayCondiciones(condiciones) ? (
             condiciones.condiciones.map((condicion) => (
@@ -816,7 +828,9 @@ export function PoliticasDelEventoScreen() {
                 )}
                 {paresDeParametros(condicion.params ?? {}).map(([clave, valor]) => (
                   <Text key={clave} variant="caption" color={colors.textMuted}>
-                    {`${clave}: ${valor}`}
+                    {anuladoPorElMandato(condiciones, clave)
+                      ? f('politicasEvento.mandato.anulado', { clave: `${clave}: ${valor}` })
+                      : `${clave}: ${valor}`}
                   </Text>
                 ))}
               </View>

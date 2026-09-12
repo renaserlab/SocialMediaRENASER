@@ -208,10 +208,50 @@ class CondicionRead(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class MandatoRead(BaseModel):
+    """Una regla de Z que PREVALECE sobre lo que diga la condición publicada.
+
+    VIAJA SIEMPRE QUE RIJA, incluso cuando ninguna condición la contradice. Es
+    lo que impide que quien compra lea «sin devolución» —escrito en el texto
+    libre, donde el servidor no puede detectarlo— y se lo crea.
+    """
+
+    #: El código de la regla, para poder contarla y traducirla.
+    code: str
+    #: Cuánto se devuelve, en puntos básicos. La misma unidad que la condición.
+    refund_bps: int
+    #: Los parámetros PUBLICADOS que quedan sin efecto. Se dicen uno a uno para
+    #: que la pantalla pueda tacharlos en vez de esconderlos: esconderlos haría
+    #: imposible entender qué se había prometido.
+    overrides: list[str] = Field(default_factory=list)
+
+
 class CondicionesRead(BaseModel):
     #: `false` significa SIN POLÍTICA CONFIGURADA. No es «no hay devolución».
     configurada: bool
+    #: No nulo = hay una regla obligatoria de Z por encima de estas condiciones.
+    mandato: MandatoRead | None = None
     condiciones: list[CondicionRead] = Field(default_factory=list)
+
+
+def _mandato_sobre(vigentes: list[EventPolicy]) -> MandatoRead | None:
+    """La regla de Z y qué parámetros publicados deja sin efecto."""
+    from app.modules.events import cancelacion
+
+    if not cancelacion.rige_el_mandato():
+        return None
+    contradicen: list[str] = []
+    for p in vigentes:
+        prometido = (p.params or {}).get("cancelled_event_bps")
+        if isinstance(prometido, bool) or not isinstance(prometido, (int, float)):
+            continue
+        if int(prometido) < cancelacion.BPS_DEL_MANDATO:
+            contradicen.append("cancelled_event_bps")
+    return MandatoRead(
+        code=cancelacion.MANDATO,
+        refund_bps=cancelacion.BPS_DEL_MANDATO,
+        overrides=sorted(set(contradicen)),
+    )
 
 
 @router.get("/{event_id}/policies/terms", response_model=CondicionesRead)
@@ -230,6 +270,7 @@ async def condiciones_del_evento(
     vigentes = await aceptacion.aplicables(db, evento_id=event_id)
     return CondicionesRead(
         configurada=bool(vigentes),
+        mandato=_mandato_sobre(vigentes),
         condiciones=[
             CondicionRead(
                 policy_type=p.policy_type,

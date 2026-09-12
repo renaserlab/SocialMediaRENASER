@@ -87,10 +87,17 @@ def test_un_salto_que_no_existe_no_es_un_problema_de_permisos() -> None:
 
     Contestarlas igual hace que un fallo de permisos parezca del servidor.
     """
+    # `submitted -> resolved` no existe: cerrar como resuelto exige haber
+    # ejecutado, y de la ejecucion solo sale un aviso verificado.
     with pytest.raises(maquina.SaltoInexistente):
-        maquina.exigir(ENVIADO, DEVOLUCION_PENDIENTE, maquina.ADMINISTRACION)
+        maquina.exigir(ENVIADO, RESUELTO, maquina.ADMINISTRACION)
     with pytest.raises(maquina.SaltoNoPermitido):
         maquina.exigir(ENVIADO, RECHAZADO, maquina.COMPRADOR)
+    # Y el salto del mandato SI existe, pero no es de nadie que pulse botones:
+    # que corresponde devolver el 100 % lo decide la regla, no quien revisa.
+    with pytest.raises(maquina.SaltoNoPermitido):
+        maquina.exigir(ENVIADO, DEVOLUCION_PENDIENTE, maquina.ADMINISTRACION)
+    maquina.exigir(ENVIADO, DEVOLUCION_PENDIENTE, maquina.SISTEMA)
 
 
 def test_solo_el_sistema_registra_lo_que_el_proveedor_ya_hizo() -> None:
@@ -124,9 +131,12 @@ def test_moderar_contenido_no_mueve_dinero() -> None:
     for destino in (APROBADO, RECHAZADO):
         with pytest.raises(maquina.SaltoNoPermitido):
             maquina.exigir(EN_REVISION, destino, maquina.SOPORTE)
-    # Y a la ejecucion no llega ni siquiera el camino: hay que aprobar antes.
-    with pytest.raises(maquina.SaltoInexistente):
-        maquina.exigir(EN_REVISION, DEVOLUCION_PENDIENTE, maquina.ADMINISTRACION)
+    # Y a la decision del dinero no llega: ni soporte ni administracion se
+    # saltan la aprobacion. El unico que cruza ahi es el SISTEMA, y solo porque
+    # el mandato de Z decide sin que nadie apruebe.
+    for quien in (maquina.SOPORTE, maquina.ADMINISTRACION):
+        with pytest.raises(maquina.SaltoNoPermitido):
+            maquina.exigir(EN_REVISION, DEVOLUCION_PENDIENTE, quien)
 
 
 def test_un_expediente_cerrado_no_se_reabre_por_una_transicion() -> None:
@@ -560,8 +570,17 @@ async def test_un_cambio_sin_clasificar_manda_a_revision(sesiones) -> None:
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
-async def test_un_evento_cancelado_no_se_resuelve_solo_sin_permiso(sesiones) -> None:
-    """El caso de mayor impacto colectivo. Automático solo si la empresa lo dijo."""
+async def test_un_evento_cancelado_devuelve_el_100_por_mandato(
+    sesiones, monkeypatch
+) -> None:
+    """EL CASO DE MAYOR IMPACTO COLECTIVO, y lo decide Z.
+
+    La política que aceptó esa compra no dice nada de cancelaciones, y da igual:
+    si el organizador cancela, corresponde el 100 %. Lo contrario —esperar a que
+    una persona lo mire— era lo que se hacía mientras la empresa no contestaba.
+    """
+    from app.modules.events import cancelacion
+
     orden, evento = await _compra(sesiones, dias=10)
     await _publicar(
         sesiones, {"window_hours_before_event": 48}, evento_id=evento, orden=orden
@@ -576,12 +595,22 @@ async def test_un_evento_cancelado_no_se_resuelve_solo_sin_permiso(sesiones) -> 
         )
         await db.commit()
         v = await elegibilidad.evaluar(db, orden=orden)
-    assert v.resultado == elegibilidad.REQUIERE_REVISION
-    assert v.motivos == (elegibilidad.EVENTO_CANCELADO,)
+    assert v.resultado == elegibilidad.ELEGIBLE
+    assert v.porcentaje_bps == cancelacion.BPS_DEL_MANDATO
+    assert v.motivos == (elegibilidad.EVENTO_CANCELADO, elegibilidad.MANDATO_DE_Z)
+    # Y se conserva de qué versión se está haciendo la excepción.
+    assert v.politica_id is not None
 
-    # LA SEGUNDA VERSIÓN, y la compra pasa a estar bajo ella: lo que se prueba
-    # es qué hace esa bandera, no si una publicación posterior reescribe lo ya
-    # vendido —que ya no lo hace—.
+    # SI LA EMPRESA VOLVIERA A NO TENER REGLA, esta rama sigue viva y hace lo de
+    # antes: un evento cancelado no se decide solo. Se comprueba aquí para que no
+    # quede código sin verificar esperando el día en que vuelva a hacer falta.
+    monkeypatch.setattr(cancelacion, "DEVOLUCION_TOTAL_OBLIGATORIA", None)
+    async with sesiones() as db:
+        sin_regla = await elegibilidad.evaluar(db, orden=orden)
+    assert sin_regla.resultado == elegibilidad.REQUIERE_REVISION
+    assert sin_regla.motivos == (elegibilidad.EVENTO_CANCELADO,)
+
+    # Y con la bandera de la política, esa rama sí resuelve con SU porcentaje.
     await _publicar(
         sesiones,
         {"window_hours_before_event": 48, "organizer_cancellation_auto": True,

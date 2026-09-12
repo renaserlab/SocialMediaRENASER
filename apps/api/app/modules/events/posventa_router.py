@@ -621,7 +621,20 @@ async def aprobar(
         if orden is not None
         else None
     )
-    if politica is None:
+    # EL MANDATO DE Z NO SE APRUEBA NI SE CONTRADICE. Si el organizador canceló
+    # totalmente el evento, corresponde el 100 % y eso ya está decidido: no hace
+    # falta una política aceptada para aplicarlo, y ningún resultado que prometa
+    # menos se admite aquí.
+    from app.modules.events import cancelacion
+
+    bajo_mandato = orden is not None and await cancelacion.aplica_a(db, orden=orden)
+    if bajo_mandato and payload.outcome in ("no_refund", "partial_refund"):
+        raise AppError(
+            "El evento se canceló: corresponde devolver el 100 % de lo pagado.",
+            code="event_cancelled_full_refund_required",
+            status_code=409,
+        )
+    if politica is None and not bajo_mandato:
         raise politicas.PoliticaAusente(
             "Esta compra no tiene condiciones aceptadas que aplicar.",
             details={"policy_type": "aftersale_eligibility"},
@@ -634,7 +647,7 @@ async def aprobar(
         actor_rol=maquina.ADMINISTRACION,
         motivo=payload.reason,
         notas=payload.notes,
-        politica_id=politica.id,
+        politica_id=politica.id if politica is not None else None,
         resultado=payload.outcome,
         importe_minor=payload.refund_amount_minor,
         moneda=payload.currency,

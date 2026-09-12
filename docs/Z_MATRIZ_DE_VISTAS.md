@@ -110,7 +110,7 @@ la URL no existe para quien usa la aplicación, y esta matriz lo cuenta como tal
 | Responder información | `/posventa/[id]` | `POST …/{id}/respond` | terminada | sí | — |
 | Escribir reseña | `/resenas/nueva/[eventId]` | `GET …/can-review` + `POST …/reviews` | terminada | sí | **apagada por política**: sin `review_window` publicada dice por qué |
 | Reseñas del evento | `/resenas/[eventId]` | `…/reviews` + `/summary` + `/mine` | terminada | sí | no se enseña el nombre de quien opina: el contrato solo trae el identificador, y **quién aparece es una decisión de privacidad sin tomar** |
-| Condiciones antes de pagar | `/pedido/[id]` | `GET /events/{id}/policies/terms` | **no implementada** | el backend está y es anónimo; la pantalla de pedido todavía no las enseña |
+| Condiciones antes de pagar | `/pedido/[id]` | `GET /events/{id}/policies/terms` | **no implementada** | el backend está, es anónimo y ya manda el `mandato` de Z con lo que queda sin efecto; la pantalla de pedido todavía no las enseña |
 | Qué aceptó mi compra | — | `GET /events/orders/{id}/policies` | **no implementada** | el backend está |
 
 ### Organizador
@@ -125,7 +125,7 @@ la URL no existe para quien usa la aplicación, y esta matriz lo cuenta como tal
 | Posventa de mi evento | `/posventa-evento/[id]` | `GET /events/{id}/aftersale-cases` | terminada | sí | subconjunto a propósito: sin comprador, sin motivo, sin notas internas |
 | Responder una reseña | `/resenas/[eventId]` | `POST /events/reviews/{id}/reply` | terminada | sí | **apagada por política**: sin `organizer_reply` publicada el servidor lo rechaza con su código y la pantalla lo dice |
 | **Mis políticas** | `/politicas/[eventId]` | `GET/PUT /events/{id}/policies…` | terminada | sí | decide lo que le promete a quien compra; **no** cómo se mueve el dinero de la plataforma |
-| **Cancelar el evento** | `/politicas/[eventId]` | `POST /events/{id}/cancel` | terminada | sí | retiene y abre expediente; **no devuelve nada**, porque esa decisión no está tomada |
+| **Cancelar el evento** | `/politicas/[eventId]` | `POST /events/{id}/cancel` | terminada | sí | retiene, abre expediente y **deja decidido el 100 %** por mandato de Z. Decidido no es pagado: eso lo confirma el proveedor |
 | Asistentes | `/asistentes/[id]` | `GET /events/{id}/attendees` | terminada | sí | la búsqueda es exacta desde la 0063, y es a propósito |
 | Control de acceso | `/check-in/[id]` | `POST /events/{id}/check-ins` | terminada | sí | **pendiente de QA físico**: cámara real y dos teléfonos |
 

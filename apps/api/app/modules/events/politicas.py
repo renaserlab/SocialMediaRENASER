@@ -198,6 +198,36 @@ def _exigir_parametros_sensatos(params: dict[str, Any]) -> None:
             )
 
 
+def exigir_compatible_con_el_mandato(params: dict[str, Any]) -> None:
+    """Ninguna política promete menos de lo que Z exige al cancelarse el evento.
+
+    LA REGLA NO SE COPIA AQUÍ: se pregunta a `cancelacion`, que es donde vive.
+    Copiar el 100 % en esta validación es cómo una condición publicada acabaría
+    contradiciendo al código que la aplica.
+
+    SE COMPRUEBA AL PUBLICAR, no al guardar un borrador: un borrador a medias es
+    lo normal mientras se escribe, y quien escribe tiene que poder dejarlo así.
+    """
+    from app.modules.events import cancelacion
+
+    if not cancelacion.rige_el_mandato():
+        return
+    prometido = params.get("cancelled_event_bps")
+    if isinstance(prometido, bool) or not isinstance(prometido, (int, float)):
+        return
+    if int(prometido) < cancelacion.BPS_DEL_MANDATO:
+        raise ValidationAppError(
+            "Si el organizador cancela el evento, Z devuelve el 100 %: una "
+            "condición no puede prometer menos.",
+            code="event_policy_contradicts_mandatory_refund",
+            details={
+                "param": "cancelled_event_bps",
+                "min": cancelacion.BPS_DEL_MANDATO,
+                "rule": cancelacion.MANDATO,
+            },
+        )
+
+
 async def publicar(
     db: AsyncSession,
     *,
@@ -229,6 +259,7 @@ async def publicar(
             code="event_policy_params_invalid",
         )
     _exigir_parametros_sensatos(params)
+    exigir_compatible_con_el_mandato(params)
 
     alcance = "event" if evento_id is not None else "global"
     ya = await db.scalar(
@@ -312,6 +343,7 @@ __all__ = [
     "SUPERADA",
     "PoliticaAusente",
     "bandera",
+    "exigir_compatible_con_el_mandato",
     "exigir_vigente",
     "huella",
     "numero",

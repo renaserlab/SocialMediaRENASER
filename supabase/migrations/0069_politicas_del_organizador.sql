@@ -1,6 +1,10 @@
 -- 0069 · La política publicada es inmutable, y la aceptación vive en el pedido.
 --
--- SIN APLICAR.
+-- APLICADA Y VERIFICADA en la base gestionada el 12/09/2026, en una sesión de
+-- solo lectura: tabla, ocho columnas, cuatro restricciones, tres claves ajenas,
+-- tres índices, los tres disparadores con su cuerpo idéntico a este fichero,
+-- RLS activa, cero políticas de acceso y cero privilegios para `anon` y
+-- `authenticated`. Sin divergencias.
 --
 -- POR QUÉ NO HAY TABLA NUEVA DE POLÍTICAS. `event_policies` (0064) ya tiene
 -- todo lo que la decisión de la empresa pide: el evento (`scope='event'` +

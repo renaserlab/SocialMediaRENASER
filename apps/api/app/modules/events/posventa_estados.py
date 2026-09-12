@@ -70,8 +70,23 @@ TRANSICIONES: dict[tuple[str, str], frozenset[str]] = {
     (ENVIADO, DEVOLUCION_EN_CURSO): frozenset({SISTEMA}),
     (EN_REVISION, DEVOLUCION_EN_CURSO): frozenset({SISTEMA}),
     (ESPERANDO, DEVOLUCION_EN_CURSO): frozenset({SISTEMA}),
+    # EL MANDATO DE Z DECIDE SIN QUE NADIE APRUEBE. Cuando el organizador
+    # cancela totalmente el evento, que corresponde devolver el 100 % no es un
+    # criterio de quien revisa: es una regla de la empresa. El expediente pasa a
+    # «hay que devolver» desde donde esté, y quien lo mueve es el SISTEMA.
+    #
+    # NO ES UNA APROBACIÓN. No pasa por `approved` a propósito: `approved`
+    # significa que una persona lo revisó, y decir eso de un salto automático
+    # falsearía quién decidió.
+    #
+    # Y NO LLEGA A `resolved`. De `refund_pending` solo se sale ejecutando, y de
+    # la ejecución solo con un aviso verificado del proveedor: el mandato decide
+    # que se debe el dinero, nunca que ya se pagó.
+    (ENVIADO, DEVOLUCION_PENDIENTE): frozenset({SISTEMA}),
+    (EN_REVISION, DEVOLUCION_PENDIENTE): frozenset({SISTEMA}),
+    (ESPERANDO, DEVOLUCION_PENDIENTE): frozenset({SISTEMA}),
     # Decisión
-    (APROBADO, DEVOLUCION_PENDIENTE): frozenset({ADMINISTRACION}),
+    (APROBADO, DEVOLUCION_PENDIENTE): frozenset({ADMINISTRACION, SISTEMA}),
     # SIN DINERO QUE MOVER. Se decidió que la entrada se queda, o que no
     # corresponde devolución: eso lo cierra quien administra.
     (APROBADO, RESUELTO): frozenset({ADMINISTRACION}),

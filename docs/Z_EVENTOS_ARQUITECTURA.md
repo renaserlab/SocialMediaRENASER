@@ -1336,35 +1336,65 @@ Dos cosas se rechazan, y ninguna es un juicio sobre el negocio:
 Aquí no se opina sobre si un plazo es corto o un porcentaje es bajo. Eso lo
 decide quien organiza.
 
-### 37.6 La cancelación total: la decisión que falta
+### 37.6 La cancelación total: la regla obligatoria de Z
 
-    Si el organizador cancela completamente el evento, ¿Z exige SIEMPRE la
-    devolución total, independientemente de la política particular?
+    Si el organizador cancela totalmente un evento que no se realizará,
+    corresponde devolver al comprador el 100 % de lo pagado por la entrada,
+    aunque su política particular diga otra cosa.
 
-La empresa no ha contestado. `cancelacion.DEVOLUCION_TOTAL_OBLIGATORIA` vale
-`None`, que **no es «no» ni «sí»: es «sin decidir»**. No se pone `False`
-mientras tanto, porque `False` es una respuesta y nadie la ha dado.
+Contestada el 12/09/2026. `cancelacion.DEVOLUCION_TOTAL_OBLIGATORIA = True`, y
+`regla_vigente()` devuelve `full_refund_required`.
 
-Mientras tanto, cancelar un evento:
+**DECIDIR NO ES HABER PAGADO.** Es la distinción que sostiene todo lo demás, y
+la máquina de estados la impone. Cancelar un evento:
 
 1. lo saca del catálogo y deja `workflow_status = CANCELLED`;
 2. abre —o recupera— un expediente `event_cancelled` por cada compra pagada;
 3. **retiene el neto entero** del saldo de cada una, con el mecanismo de
    reservas que ya existía;
-4. avisa a quien compró y a quien organiza de que está **en evaluación**;
-5. anota la causa y **la política que regía para esa compra**, no la de hoy.
+4. deja el expediente en `refund_pending` con el importe y la moneda, y el
+   historial dice que lo decidió el **sistema por mandato de Z**, no una
+   persona y no la política del organizador;
+5. avisa a las dos partes de que corresponde el 100 %, **sin prometer cuándo**;
+6. anota la causa y la política que regía para esa compra, no la de hoy.
 
-Y no hace nada más: ni devuelve, ni rechaza, ni libera, ni transfiere, ni revoca
-ninguna entrada. Hay una prueba que lo comprueba campo por campo.
+Y no hace nada más: **no ejecuta, no marca nada como pagado, no libera, no
+transfiere y no revoca ninguna entrada**. Que el dinero volvió solo lo dice
+`refund_processing → resolved`, un salto que solo puede dar un aviso verificado
+del proveedor: ni el sistema ni quien administra pueden declararlo.
 
-**Se retiene el neto entero y no un porcentaje** porque cuánto le corresponde al
-organizador de un evento cancelado es justo la decisión que falta. Retener todo
-es la única postura que no la adelanta, y es reversible; pagar no lo es.
+**Cuánto.** El 100 % de `event_orders.total_minor` **menos lo que ya volvió** —
+expedientes `resolved` con resultado de devolución—. Deberlo dos veces sería
+pagar dos veces. Un expediente que ya pasó de la decisión no se toca: en
+`refund_processing` el dinero va de camino y rearmarlo abriría la puerta a
+ejecutarlo dos veces; en `failed` hace falta una persona.
+
+**El saldo se retiene entero** porque Z debe el importe completo a quien compró:
+del cobro del organizador no se suelta nada.
+
+**Una solicitud que ya existía se ELEVA, no se duplica.** Quien había pedido una
+devolución tiene su expediente en `submitted`; filtrarlo dejaba justo a esa
+persona sin la devolución que Z le debe.
+
+**Lo que ya no se puede prometer.** Una condición con `cancelled_event_bps` por
+debajo de 10 000 no se publica —ni por el organizador ni por la plataforma—, y
+el código es `event_policy_contradicts_mandatory_refund`. Una política
+**histórica** que sí lo diga **no se reescribe**: su versión aceptada es
+intocable porque es lo que esa persona leyó. Lo que se hace es aplicar la regla
+al resolver y **enseñar la excepción**: `/policies/terms` manda un bloque
+`mandato` con el código, el porcentaje y qué parámetros publicados quedan sin
+efecto, y la pantalla los tacha en vez de esconderlos.
+
+**Sin política configurada la regla rige igual.** El mandato se evalúa ANTES de
+buscar la política: si fuera después, una compra que no aceptó ninguna
+contestaría `policy_not_configured` y la pantalla apagaría el botón. La regla es
+de Z, no del organizador, así que no necesita que nadie haya publicado nada.
 
 **La regla vive en un solo sitio**, y hay una prueba que recorre el árbol y
-comprueba que ningún otro fichero nombra esa constante. Repartida entre el
-endpoint, la pantalla y el webhook, cambiarla significaría encontrar todos los
-sitios y alguno se quedaría con la respuesta vieja.
+comprueba que ningún otro fichero nombra esa constante. Los tres sitios que
+necesitan saber si rige —la cancelación, la elegibilidad y la aprobación— lo
+PREGUNTAN a `cancelacion.rige_el_mandato()`; una cuarta copia sería una
+respuesta vieja esperando a que alguien cambie la de aquí.
 
 ### 37.7 Los saldos de evento se liberan por su propio camino
 
@@ -1381,13 +1411,14 @@ no existen. Compartir tabla no es compartir reglas.
 
 | Qué | Quién |
 |---|---|
-| Si una cancelación total obliga a devolver todo | la empresa |
 | Las siete políticas de plataforma sin publicar | la empresa |
 | La comisión (`platform_fee_bps = -1`) | la empresa |
 | Cómo se identifica públicamente a quien opina | la empresa |
-| Aplicar la 0069 en la base gestionada | operación |
+| Publicar las condiciones de venta de la plataforma | la empresa |
 
-Todo lo demás de los Incrementos 5 y 6 está construido, conectado y probado.
+Todo lo demás de los Incrementos 5 y 6 está construido, conectado y probado. La
+cancelación total **ya está contestada** (37.6) y la 0069 **está aplicada y
+verificada** en la base gestionada.
 
 
 ### 37.9 Lo que la revisión independiente encontró sobre esto mismo

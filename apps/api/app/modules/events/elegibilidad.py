@@ -63,6 +63,10 @@ YA_ENTRO = "checked_in"
 ENTRADA_NO_VALIDA = "ticket_not_valid"
 CAMBIO_SIN_CLASIFICAR = "change_unclassified"
 EVENTO_CANCELADO = "event_cancelled"
+#: Se devuelve el 100 % porque lo exige Z, no porque lo diga la política del
+#: organizador. La pantalla lo enseña como excepción para que se entienda que la
+#: condición publicada quedó sin efecto.
+MANDATO_DE_Z = "z_mandatory_full_refund"
 
 
 @dataclass(frozen=True)
@@ -211,7 +215,34 @@ async def evaluar(
         return Veredicto(NO_ELEGIBLE, tuple(duros), hechos=hechos)
 
     # ---------------------------------------------------------------- #
-    # 2. La política. Sin ella no se sigue.
+    # 2. EL MANDATO DE Z, ANTES DE LA POLÍTICA.
+    #
+    # El orden importa: si esto fuera después, un evento cancelado cuya compra
+    # no aceptó ninguna política contestaría «sin política configurada» y la
+    # pantalla apagaría el botón. La regla es de Z, no del organizador, así que
+    # no necesita que nadie haya publicado nada.
+    #
+    # Se conserva la identidad de la política que sí regía, cuando la hay: sirve
+    # para explicar después qué condiciones se dejaron sin efecto.
+    # ---------------------------------------------------------------- #
+    from app.modules.events import cancelacion
+
+    if hechos.evento_cancelado and cancelacion.rige_el_mandato():
+        from app.modules.events import aceptacion as _aceptacion
+
+        regia = await _aceptacion.para_decidir(
+            db, orden=orden, tipo=POLITICA_ELEGIBILIDAD
+        )
+        return Veredicto(
+            ELEGIBLE,
+            (EVENTO_CANCELADO, MANDATO_DE_Z),
+            *(_identidad(regia) if regia is not None else (None, None)),
+            porcentaje_bps=cancelacion.BPS_DEL_MANDATO,
+            hechos=hechos,
+        )
+
+    # ---------------------------------------------------------------- #
+    # 3. La política. Sin ella no se sigue.
     #
     # NO SE CONTINÚA CON VALORES SUPUESTOS. Un plazo ausente leído como cero
     # cerraría la ventana para todo el mundo y un porcentaje ausente leído
@@ -230,12 +261,14 @@ async def evaluar(
     marca = _identidad(politica)
 
     # ---------------------------------------------------------------- #
-    # 3. Lo que la política SÍ resuelve.
+    # 4. Lo que la política SÍ resuelve.
     # ---------------------------------------------------------------- #
     if hechos.evento_cancelado:
-        # El evento cancelado es el caso de mayor impacto y su tratamiento es
-        # una decisión aparte: si la política de elegibilidad no dice
-        # expresamente qué hacer, va a revisión, no a «sí» ni a «no».
+        # AQUÍ SOLO SE LLEGA SI EL MANDATO NO RIGE. Con el mandato activo este
+        # caso ya se contestó arriba; esta rama es la que quedaría si la empresa
+        # volviera a `False` o a `None`, y entonces un evento cancelado no se
+        # decide solo: va a revisión salvo que la política diga expresamente qué
+        # hacer.
         if politicas.bandera(politica, "organizer_cancellation_auto"):
             return Veredicto(
                 ELEGIBLE,
@@ -301,6 +334,7 @@ def _identidad(politica: EventPolicy) -> tuple[str, str]:
 
 __all__ = [
     "ELEGIBLE",
+    "MANDATO_DE_Z",
     "NO_ELEGIBLE",
     "POLITICA_NO_CONFIGURADA",
     "REQUIERE_REVISION",

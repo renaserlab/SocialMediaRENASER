@@ -46,6 +46,41 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
             "Sua compra está em análise. Avisaremos sobre o resultado.",
         ),
     },
+    # BAJO EL MANDATO DE Z. Aquí sí se dice que corresponde la devolución
+    # total, porque es una decisión tomada. Lo que sigue sin decirse es CUÁNDO
+    # llega el dinero: el plazo bancario no lo decidimos nosotros, y «ya te lo
+    # devolvimos» sería falso hasta que lo confirme el proveedor.
+    "event_cancelled_full_refund": {
+        "es": (
+            "El evento se canceló",
+            "Te corresponde el 100 % de lo que pagaste. Te avisaremos cuando "
+            "el dinero esté de vuelta.",
+        ),
+        "en": (
+            "The event was cancelled",
+            "You are owed 100% of what you paid. We will let you know when the "
+            "money is back.",
+        ),
+        "pt": (
+            "O evento foi cancelado",
+            "Você tem direito a 100 % do que pagou. Avisaremos quando o "
+            "dinheiro voltar.",
+        ),
+    },
+    "event_cancelled_organizer_full_refund": {
+        "es": (
+            "Cancelaste el evento",
+            "Lo vendido queda retenido: a quien compró le corresponde el 100 %.",
+        ),
+        "en": (
+            "You cancelled the event",
+            "Sales are on hold: buyers are owed 100% of what they paid.",
+        ),
+        "pt": (
+            "Você cancelou o evento",
+            "As vendas ficam retidas: quem comprou tem direito a 100 %.",
+        ),
+    },
     "event_cancelled_organizer_notice": {
         "es": (
             "Cancelaste el evento",

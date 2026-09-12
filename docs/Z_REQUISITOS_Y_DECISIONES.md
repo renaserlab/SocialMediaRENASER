@@ -543,3 +543,60 @@ externo dejaría el evento agotado con la sala vacía.
   estén apagadas.
 - **El móvil ya no edita el contenido del curso por PostgREST.** Las doce
   escrituras directas pasan por la API, que versiona y audita.
+
+## 11. La cancelación total de un evento (12/09/2026)
+
+**D42 · Si el organizador cancela, Z devuelve el 100 %.**
+
+Confirmado por la empresa:
+
+> Si el organizador cancela totalmente un evento que no se realizará,
+> corresponde devolver al comprador el 100 % de lo pagado por la entrada, aunque
+> su política particular diga otra cosa.
+
+Es una **regla obligatoria de Z** y prevalece sobre condiciones contradictorias
+del organizador. Vive en `cancelacion.DEVOLUCION_TOTAL_OBLIGATORIA = True`, un
+solo valor en un solo fichero, con una prueba que recorre el árbol para
+comprobar que ningún otro lo nombra.
+
+**D43 · Decidir que procede la devolución no es haber pagado.**
+
+La cancelación deja el expediente en `refund_pending` con el importe: eso
+significa «Z debe este dinero». Que el dinero volvió solo lo dice
+`refund_processing → resolved`, un salto reservado a un aviso verificado del
+proveedor. Ni el sistema ni quien administra pueden declararlo, y por eso el
+resultado de cancelar tiene un contador de `devoluciones_decididas` y ninguno de
+«devuelto».
+
+Consecuencias que se sostienen aunque incomoden:
+
+- **No se revoca ninguna entrada** al cancelar. Revocar no es reversible y no
+  hace falta: el evento ya no existe.
+- **No se libera ni se transfiere ningún saldo.** Se retiene el neto entero,
+  porque Z debe el importe completo.
+- **Lo ya devuelto no se debe dos veces.** El importe es el total menos lo que
+  volvió de verdad, contando solo expedientes `resolved`.
+- **Una devolución en curso no se pisa.** En `refund_processing` el dinero va de
+  camino; rearmarlo abriría la puerta a ejecutarlo dos veces. En `failed` hace
+  falta una persona.
+
+**D44 · Una política histórica no se reescribe; se muestra la excepción.**
+
+Una condición publicada antes de esta decisión puede decir «sin devolución». Su
+versión aceptada es intocable: es lo que esa persona leyó, y cambiarla
+falsificaría su consentimiento. Lo que se hace:
+
+- **Hacia adelante**, `cancelled_event_bps` por debajo de 10 000 no se publica
+  —ni por el organizador ni por la plataforma— con el código
+  `event_policy_contradicts_mandatory_refund`.
+- **Hacia atrás**, `GET /events/{id}/policies/terms` manda un bloque `mandato`
+  con la regla, el 100 % y qué parámetros publicados quedan sin efecto. La
+  pantalla los tacha; esconderlos haría imposible entender qué se prometió.
+- **Al resolver**, manda la regla de Z.
+
+**D45 · Sin política configurada la regla rige igual.**
+
+El mandato se evalúa antes de buscar la política aceptada. Si fuera después, una
+compra que no aceptó ninguna contestaría `policy_not_configured` y quien pagó por
+un evento que no se hará se quedaría sin nada porque nadie publicó un plazo. La
+regla es de Z, no del organizador.

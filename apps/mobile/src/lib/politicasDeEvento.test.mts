@@ -62,6 +62,9 @@ import {
   claveDelResumen,
   claveDelTipo,
   cotaDe,
+  BPS_DEL_MANDATO,
+  MANDATO,
+  anuladoPorElMandato,
   detectarContradicciones,
   esClaveBooleana,
   esClaveNumerica,
@@ -74,6 +77,7 @@ import {
   formularioDesde,
   formularioVacio,
   hayCondiciones,
+  mandatoDe,
   hayQueRecargar,
   historialDelTipo,
   momentoLegible,
@@ -113,6 +117,8 @@ function sinComentarios(texto: string): string {
 }
 
 const ELEGIBILIDAD = 'aftersale_eligibility';
+/** Lo mínimo para que la política decida algo y no falle por vacía. */
+const REGLAS_MINIMAS = { allow_buyer_cancellation: true, window_hours_before_event: 48 };
 const EFECTO = 'ticket_effect';
 
 function politica(campos: Partial<Politica> & { policy_type: string; status: string }): Politica {
@@ -890,12 +896,12 @@ describe('cancelar el evento no devuelve nada', () => {
   });
 
   it('se cuenta lo que el servidor mandó, tal cual y sin sumar nada', () => {
-    const filas = filasDelResultado(resultado);
+    const filas = filasDelResultado({ ...resultado, devoluciones_decididas: 12 });
     assert.deepEqual(
       filas.map((x) => x.valor),
-      [12, 9, 3, 24],
+      [12, 12, 9, 3, 24],
     );
-    assert.equal(new Set(filas.map((x) => x.clave)).size, 4);
+    assert.equal(new Set(filas.map((x) => x.clave)).size, 5);
   });
 
   it('un cero se enseña como cero: no hay filas que desaparezcan', () => {
@@ -906,8 +912,38 @@ describe('cancelar el evento no devuelve nada', () => {
       sin_saldo: 0,
       avisos: 0,
     });
-    assert.equal(filas.length, 4);
+    assert.equal(filas.length, 5);
     assert.ok(filas.every((x) => x.valor === 0));
+  });
+
+  it('DECIDIDA no es PAGADA: la fila cuenta la decisión y nada más', () => {
+    // El servidor no manda ningún contador de dinero devuelto, y esta pantalla
+    // no puede inventarse uno sumando lo decidido.
+    const filas = filasDelResultado({ ...resultado, devoluciones_decididas: 7 });
+    const decididas = filas.find(
+      (x) => x.clave === 'politicasEvento.cancelar.devolucionesDecididas',
+    );
+    assert.equal(decididas?.valor, 7);
+    // Un servidor viejo que no la mande no puede hacer aparecer un `undefined`.
+    const sinCampo = filasDelResultado(resultado);
+    assert.equal(
+      sinCampo.find((x) => x.clave === 'politicasEvento.cancelar.devolucionesDecididas')
+        ?.valor,
+      0,
+    );
+  });
+
+  it('la fila de pendientes solo aparece cuando quedan compras por atender', () => {
+    assert.ok(
+      !filasDelResultado(resultado).some(
+        (x) => x.clave === 'politicasEvento.cancelar.pendientes',
+      ),
+    );
+    const conCola = filasDelResultado({ ...resultado, pendientes: 400 });
+    assert.equal(
+      conCola.find((x) => x.clave === 'politicasEvento.cancelar.pendientes')?.valor,
+      400,
+    );
   });
 
   it('sin motivo escrito no se cancela', () => {
@@ -947,6 +983,70 @@ describe('la previsualización es literal', () => {
 
   it('un objeto de parámetros vacío no produce ninguna línea inventada', () => {
     assert.deepEqual(paresDeParametros({}), []);
+  });
+
+  it('prometer menos del 100 % al cancelar es una contradicción', () => {
+    // La misma puerta que el servidor, un paso antes: publicada, quien compra
+    // leería lo contrario de lo que va a pasar.
+    for (const prometido of [0, 1, 5_000, 9_999]) {
+      const fallos = detectarContradicciones(ELEGIBILIDAD, {
+        ...REGLAS_MINIMAS,
+        cancelled_event_bps: prometido,
+      });
+      assert.ok(
+        fallos.some((x) => x.codigo === 'event_policy_contradicts_mandatory_refund'),
+        String(prometido),
+      );
+    }
+    // El 100 % sí, y no decir nada tampoco es una contradicción: el mandato
+    // rige igual, y la condición simplemente no habla de esto.
+    assert.ok(
+      !detectarContradicciones(ELEGIBILIDAD, {
+        ...REGLAS_MINIMAS,
+        cancelled_event_bps: BPS_DEL_MANDATO,
+      }).some((x) => x.codigo === 'event_policy_contradicts_mandatory_refund'),
+    );
+    assert.ok(
+      !detectarContradicciones(ELEGIBILIDAD, REGLAS_MINIMAS).some(
+        (x) => x.codigo === 'event_policy_contradicts_mandatory_refund',
+      ),
+    );
+  });
+
+  it('el mandato viaja con las condiciones y dice qué queda sin efecto', () => {
+    const condiciones = {
+      configurada: true,
+      mandato: {
+        code: MANDATO,
+        refund_bps: BPS_DEL_MANDATO,
+        overrides: ['cancelled_event_bps'],
+      },
+      condiciones: [
+        {
+          policy_type: ELEGIBILIDAD,
+          version: 'v1',
+          body: 'Si cancelamos no se devuelve.',
+          params: { cancelled_event_bps: 0 },
+        },
+      ],
+    };
+    assert.equal(mandatoDe(condiciones)?.code, MANDATO);
+    assert.equal(anuladoPorElMandato(condiciones, 'cancelled_event_bps'), true);
+    assert.equal(anuladoPorElMandato(condiciones, 'refund_bps'), false);
+  });
+
+  it('sin mandato no se inventa ninguno, y eso NO es «no hay devolución»', () => {
+    assert.equal(mandatoDe(null), null);
+    assert.equal(mandatoDe({ configurada: true, condiciones: [] }), null);
+    assert.equal(anuladoPorElMandato(null, 'cancelled_event_bps'), false);
+  });
+
+  it('el código del mandato es el del servidor, letra por letra', () => {
+    // `cancelacion.MANDATO` y `cancelacion.BPS_DEL_MANDATO`. Si se separan, la
+    // pantalla tacha un parámetro que el servidor no anuló, o al revés.
+    assert.equal(MANDATO, 'z_mandatory_full_refund');
+    assert.equal(BPS_DEL_MANDATO, 10_000);
+    assert.equal(BPS_DEL_MANDATO, COTAS.cancelled_event_bps[1]);
   });
 
   it('sin condiciones no hay nada que enseñar, y no es un error', () => {

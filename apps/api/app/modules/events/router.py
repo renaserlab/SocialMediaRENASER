@@ -251,9 +251,13 @@ async def enviar_a_revision(
 class CancelacionRead(BaseModel):
     """Qué pasó al cancelar. NINGÚN IMPORTE SE MOVIÓ.
 
-    `regla` dice qué se aplicó. Hoy es siempre `pending_business_decision`:
-    la empresa no ha contestado si Z exige devolución total, y hasta entonces
-    se retiene y se revisa a mano.
+    `regla` dice qué se aplicó. Hoy es `full_refund_required`: Z exige devolver
+    el 100 % de lo pagado, así que cada expediente queda en «hay que devolver»
+    con su importe.
+
+    DECIDIDO NO ES PAGADO, y por eso hay un contador para lo uno y ninguno para
+    lo otro: que el dinero volvió solo lo dice después un aviso verificado del
+    proveedor.
     """
 
     evento: EventoDelOrganizador
@@ -263,6 +267,8 @@ class CancelacionRead(BaseModel):
     #: Pedidos pagados sin saldo que bloquear. Sin comisión configurada, todos.
     sin_saldo: int
     avisos: int
+    #: Expedientes en los que se decidió que corresponde la devolución total.
+    devoluciones_decididas: int = 0
     #: Compras pagadas que quedan por atender. Mayor que cero significa que hay
     #: que volver a llamar: el evento YA está cancelado y lo vendido se atiende
     #: por tandas, porque un evento de quinientas compras no cabe en una sola
@@ -277,13 +283,17 @@ async def cancelar_evento(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CancelacionRead:
-    """Cancela el evento entero. Lo vendido queda RETENIDO y en revisión.
+    """Cancela el evento entero. Lo vendido queda RETENIDO, y se DECIDE devolver.
 
-    NO DEVUELVE NADA Y NO RECHAZA NADA. Abre un expediente por cada compra
-    pagada, retiene el importe del saldo y avisa a las dos partes de que está en
-    evaluación. Si Z exige devolución total pase lo que pase es una decisión que
-    la empresa no ha tomado, y adelantarla en cualquiera de los dos sentidos
-    sería tomarla por ella.
+    QUÉ HACE. Abre un expediente por cada compra pagada, retiene el importe del
+    saldo del organizador y deja constancia de que corresponde devolver el
+    100 % de lo pagado, porque eso lo exige Z aunque la política del organizador
+    diga otra cosa. Avisa a las dos partes.
+
+    QUÉ NO HACE. No ejecuta ninguna devolución, no marca nada como pagado, no
+    revoca entradas y no libera ni transfiere ningún saldo. Ni un céntimo se
+    mueve por aquí: que el dinero volvió solo lo dice un aviso verificado del
+    proveedor, y la ejecución contra la pasarela está apagada por configuración.
     """
     await esquema.exigir_eventos_v2(db)
     ensure_uuid(evento_id, "Evento no encontrado.")
@@ -301,6 +311,7 @@ async def cancelar_evento(
         saldos_bloqueados=resultado.saldos_bloqueados,
         sin_saldo=resultado.sin_saldo,
         avisos=resultado.avisos,
+        devoluciones_decididas=resultado.devoluciones_decididas,
         pendientes=resultado.pendientes,
     )
 

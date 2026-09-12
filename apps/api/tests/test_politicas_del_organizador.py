@@ -30,10 +30,12 @@ from app.modules.events import models as _modelos  # noqa: F401
 from app.modules.events.aceptacion_models import EventOrderPolicyAcceptance
 from app.modules.events.models import EventOrder
 from app.modules.events.posventa_models import (
+    DEVOLUCION_PENDIENTE,
     EXPEDIENTES_VIVOS,
     POLITICA_EFECTO_ENTRADA,
     POLITICA_ELEGIBILIDAD,
     EventAftersaleCase,
+    EventAftersaleCaseEvent,
     EventPolicy,
 )
 from app.modules.profiles import models as _perfiles  # noqa: F401
@@ -684,17 +686,21 @@ async def test_sin_politica_publicada_no_se_inventa_ninguna_aceptacion(
 # La cancelación total
 # =========================================================================== #
 def test_la_regla_de_cancelacion_vive_en_un_solo_sitio() -> None:
-    """CUANDO LA EMPRESA CONTESTE, se cambia UN valor.
+    """LA EMPRESA CONTESTÓ, y se cambió UN valor.
 
     Repartida entre el endpoint, la pantalla y el webhook, cambiarla
     significaría encontrar todos los sitios y alguno se quedaría con la
-    respuesta vieja.
+    respuesta vieja. Esta prueba es la que garantiza que sigue habiendo uno.
     """
     import inspect
     from pathlib import Path as _Path
 
-    assert cancelacion.DEVOLUCION_TOTAL_OBLIGATORIA is None
-    assert cancelacion.regla_vigente() == cancelacion.PENDIENTE_DE_DECISION
+    assert cancelacion.DEVOLUCION_TOTAL_OBLIGATORIA is True
+    assert cancelacion.regla_vigente() == "full_refund_required"
+    assert cancelacion.rige_el_mandato() is True
+    # El 100 % en la misma unidad que `cancelled_event_bps`, para poder
+    # comparar lo que promete una política con lo que Z exige.
+    assert cancelacion.BPS_DEL_MANDATO == 10_000
 
     # Y NADIE MÁS DECIDE ESTO. Solo `cancelacion.py` la nombra.
     raiz = _Path(inspect.getfile(cancelacion)).parents[2]
@@ -736,17 +742,18 @@ async def test_cancelar_bloquea_y_no_mueve_ni_un_centimo(
         )
         await db.commit()
 
-    assert resultado.regla == cancelacion.PENDIENTE_DE_DECISION
+    assert resultado.regla == "full_refund_required"
     assert resultado.expedientes == 1
     assert resultado.saldos_bloqueados == 1
+    assert resultado.devoluciones_decididas == 1
 
     async with sesiones() as db:
         # El saldo NO se canceló, NO se liberó, y su neto no se tocó.
         actual = await db.get(OwnerSaleBalance, saldo_id)
         assert actual.status == finanzas.PENDIENTE
         assert actual.net_amount_minor == neto
-        # Está retenido ENTERO: cuánto le toca al organizador es la decisión
-        # que falta, y retener todo es lo único que no la adelanta.
+        # Está retenido ENTERO. Z debe el 100 % a quien compró, así que del
+        # cobro del organizador no se suelta nada.
         assert await finanzas.reservado_de(db, saldo_id=saldo_id) == neto
         bloqueo = await finanzas.por_que_no_se_libera(db, saldo=actual)
         assert bloqueo is not None
@@ -760,11 +767,32 @@ async def test_cancelar_bloquea_y_no_mueve_ni_un_centimo(
         )
         assert caso is not None
         assert caso.kind == cancelacion.TIPO_DE_EXPEDIENTE
-        assert cancelacion.PENDIENTE_DE_DECISION in (caso.internal_notes or "")
+        assert "full_refund_required" in (caso.internal_notes or "")
         assert "se cayó el recinto" in (caso.internal_notes or "")
-        # NADA DE DEVOLUCIÓN DECIDIDA: ni importe, ni resultado.
-        assert caso.refund_amount_minor is None
+
+        # DECIDIDO, NO PAGADO. El expediente dice que hay que devolver el
+        # 100 % de lo pagado, y no dice en ningún sitio que se haya devuelto:
+        # `resolved` solo lo alcanza un aviso verificado del proveedor, y
+        # `outcome` sigue vacío porque nada se ha cerrado.
+        pedido = await db.get(EventOrder, orden)
+        assert caso.status == DEVOLUCION_PENDIENTE
+        assert caso.refund_amount_minor == pedido.total_minor
+        assert caso.currency == pedido.currency
         assert caso.outcome is None
+        assert caso.resolved_at is None
+        assert caso.external_refund_id is None
+
+        # QUIÉN LO DECIDIÓ CONSTA: el sistema, por mandato de Z. No una
+        # persona, y no la política del organizador.
+        paso = await db.scalar(
+            select(EventAftersaleCaseEvent).where(
+                EventAftersaleCaseEvent.case_id == caso.id,
+                EventAftersaleCaseEvent.to_status == DEVOLUCION_PENDIENTE,
+            )
+        )
+        assert paso is not None
+        assert paso.actor_role == "system"
+        assert paso.reason == cancelacion.MANDATO
 
         # Y la entrada NO se revocó: cancelar no revoca.
         entradas = (
@@ -1103,14 +1131,14 @@ async def test_al_organizador_se_le_avisa_UNA_vez(sesiones) -> None:
                 select(NotificationDelivery).where(
                     NotificationDelivery.user_id == organiza,
                     NotificationDelivery.type
-                    == "event_cancelled_organizer_notice",
+                    == "event_cancelled_organizer_full_refund",
                 )
             )
         )
         de_compradores = list(
             await db.scalars(
                 select(NotificationDelivery).where(
-                    NotificationDelivery.type == "event_cancelled_under_review",
+                    NotificationDelivery.type == "event_cancelled_full_refund",
                     NotificationDelivery.user_id.in_(compradores),
                 )
             )
