@@ -106,6 +106,18 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     // Formato puro: una flecha entre dos huecos, y un número con su unidad.
     'politicasAdmin.antesAhora',
     'politicasAdmin.valor.horas',
+    // Formato puro: el tipo de evidencia y su dimensión, ya traducidos, con un
+    // punto medio en medio.
+    'productosAdmin.evidenciaEtiqueta',
+    // Formato puro: el contador de la galeria, «{i}/{n}».
+    'productos.ficha.galeriaContador',
+    // Proveedor de productos. Dos de formato puro —«{tipo} · {detalle}» y
+    // «{nombre}, {estado}», donde lo de dentro ya viene traducido—, «SKU», que
+    // es la misma sigla en los tres idiomas, y un numero de ejemplo.
+    'proveedorProductos.postular.documentoContado',
+    'proveedorProductos.productos.tarjeta',
+    'proveedorProductos.editar.skuEtiqueta',
+    'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
     // Políticas y moderación: palabras que se escriben exactamente igual en
@@ -380,6 +392,55 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'valoracion.distribucionA11y',
     'valoracion.compraVerificada',
     'valoracion.retirarConfirmar',
+    // Productos Z: palabras y frases que el portugues escribe exactamente
+    // igual que el español —«Guardado», «Guardar», «Variantes», «De {nombre}»,
+    // «Fabricante: …», «Lote», «Documento», «Entra para guardar»— mas dos de
+    // formato puro: «{n} guardados» y el SEPARADOR DECIMAL, que en los dos
+    // idiomas es la coma (el ingles si cambia: usa el punto).
+    'productos.bolsaContador',
+    'productos.guardado',
+    'productos.separadorDecimal',
+    'productos.accion.guardar',
+    'productos.bloque.variantes',
+    'productos.ficha.creadorEs',
+    'productos.ficha.fabricante',
+    'productos.evidencia.batch',
+    'productos.evidencia.document',
+    'productos.error.sinSesion',
+    // Formato puro: el contador de la galeria, «{i}/{n}».
+    'productos.ficha.galeriaContador',
+    // Administración de productos: palabras que el portugues escribe
+    // exactamente igual que el español —«Filtrar por estado», «Todos»,
+    // «Publicar», «Suspender», «Motivo (opcional)», «Notas internas
+    // (opcional)», «Decidir», «Publicado», «Retirado», «Retirada», «Lote»,
+    // «Documento» y «Fabricante»— y tres de formato puro: «Nota: …»,
+    // «{n} de {max} caracteres» y el tipo de evidencia con su dimension.
+    'productosAdmin.filtroEstado',
+    'productosAdmin.filtroTodos',
+    'productosAdmin.publicar',
+    'productosAdmin.suspender',
+    'productosAdmin.documentoNota',
+    'productosAdmin.motivoOpcional',
+    'productosAdmin.motivoContador',
+    'productosAdmin.notasEtiqueta',
+    'productosAdmin.evidenciaEtiqueta',
+    'productosAdmin.decidir',
+    'productosAdmin.estado.published',
+    'productosAdmin.estado.removed',
+    'productosAdmin.postulacion.withdrawn',
+    'productosAdmin.evidencia.batch',
+    'productosAdmin.evidencia.document',
+    'productosAdmin.documento.manufacturer',
+    // Proveedor de productos: «Tipo de documento», «Nota», «Fabricante»,
+    // «Variantes» y «Texto alternativo» se escriben exactamente igual en
+    // portugues, y `opcionValorAyuda` es un numero de ejemplo.
+    'proveedorProductos.postular.tipoDeDocumento',
+    'proveedorProductos.postular.notaEtiqueta',
+    'proveedorProductos.documento.manufacturer',
+    'proveedorProductos.editar.fabricanteEtiqueta',
+    'proveedorProductos.editar.variantes',
+    'proveedorProductos.editar.alternativoEtiqueta',
+    'proveedorProductos.editar.opcionValorAyuda',
   ]),
 };
 

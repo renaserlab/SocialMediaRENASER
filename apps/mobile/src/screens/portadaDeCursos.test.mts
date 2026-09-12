@@ -120,10 +120,18 @@ describe('la búsqueda y el filtro van al servidor', () => {
 describe('los accesos a las verticales', () => {
   it('las que no existen lo dicen, en vez de llevar a ninguna parte', () => {
     assert.ok(ACCESOS.includes("{ clave: 'servicios', icono: 'briefcase', ruta: null }"));
-    assert.ok(ACCESOS.includes("{ clave: 'productos', icono: 'shopping-bag', ruta: null }"));
     assert.ok(
       ACCESOS.includes('alTocarNoDisponible(nombre)'),
       'tocar una vertical que no existe tiene que avisar, no navegar.',
+    );
+  });
+
+  it('Productos ya lleva a su catálogo: tiene pantalla y API', () => {
+    // Dejó de ser una vertical sin pantalla: `/productos` existe y llama a
+    // `/products`. Su portada resuelve sola el caso de las migraciones sin
+    // aplicar (`disponible: false`), así que no hace falta apagar el acceso.
+    assert.ok(
+      ACCESOS.includes("{ clave: 'productos', icono: 'shopping-bag', ruta: '/productos' }"),
     );
   });
 

@@ -240,7 +240,26 @@ fichero vacío hoy es una capa que hay que mantener sin que haga nada.
 falta ahí es **quién escribe el producto y su versión**, y eso no es catálogo ni
 admisión.
 
-## 13. Lo que sigue esperando a una persona
+## 13. El bloqueo que hay que saber: no se ven las fotos
+
+`product_media` guarda la **ruta** del almacenamiento y la aplicación la firma.
+El problema es que **no existe ningún depósito de productos**: los que hay son
+`avatars`, `post-media`, `course-media` y `message-media`, y la 0070 no crea
+otro a propósito, porque quién puede subir, con qué tipos y con qué tope son
+decisiones que van con el camino de subida, y ese camino es de un incremento
+posterior.
+
+Consecuencia, dicha sin adornos: **el catálogo se recorre entero, pero las
+imágenes salen como marcador** con su texto alternativo real. La aplicación lo
+sabe y no lo disimula: `productos.IMAGENES_FIRMABLES` vale `false`, y el día que
+exista el depósito basta ponerlo en `true`.
+
+Lo que hace falta, y en este orden: un depósito con sus reglas de acceso, un
+camino de subida para quien vende, y la aprobación de la foto por parte de quien
+evalúa. Hoy quien vende escribe la ruta a mano, que es suficiente para probar el
+recorrido y no lo es para enseñarle un producto a nadie.
+
+## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
 |---|---|
@@ -255,10 +274,28 @@ admisión.
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
 | Fuente del promedio de categoría | la empresa |
-| Fila de cuatro chips en Explorar (Cursos · Eventos · Servicios · Productos) | producto |
+| **Depósito de almacenamiento y camino de subida de fotos** | operación y producto |
+| Título editorial de «Selección Z» (campo nuevo + decisión) | producto |
+| Enlace web de un producto, para poder compartirlo | producto |
+| El acceso de **Servicios**, el único chip que no lleva a ninguna parte | producto |
 
-**Sobre el mazo de capturas:** de sus catorce páginas, ninguna es de Productos.
-Cubre Cursos, Eventos y Servicios. Lo único que dice de Productos es **dónde va
-el acceso**: una fila de cuatro chips bajo el buscador de Explorar. Para la
-portada y la ficha la única referencia es el texto del blueprint, y es el que se
-siguió.
+## 15. Lo que el mazo de capturas pide y no se pintó
+
+Las capturas 5 (portada) y 6 (ficha) son la referencia visual, y se siguieron
+bloque por bloque. Estas cinco diferencias son deliberadas:
+
+| Lo que enseña la captura | Qué se pintó | Por qué |
+|---|---|---|
+| Un título editorial sobre la imagen de «Selección Z» | el rótulo y las tarjetas | no existe el campo |
+| «98 % lo recomienda» / «Garantía 3 años» | el origen | los otros necesitan reseñas o condiciones aprobadas |
+| «Valoración real 4,8 · 184 compras verificadas» | el bloque, fuera | no hay reseñas de productos |
+| «Compra protegida · 3 días para reportar» | el bloque, fuera | no hay entrega ni condiciones |
+| Barra fija con «Comprar» | el precio y guardar | **no existe la compra física** |
+
+La última es la diferencia más visible de todas, y es la que no se disimula: un
+botón que prometa comprar sin que haya compra cuesta más confianza que su
+ausencia.
+
+Y el chip de Explorar ya existía: `AccesosAVerticales` pintaba los cuatro
+—Cursos, Eventos, Servicios y Productos— con Productos apagado. Lo único que
+hizo falta fue encenderlo.

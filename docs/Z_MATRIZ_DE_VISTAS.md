@@ -171,11 +171,51 @@ compra aceptó.
 
 ## 5. Productos
 
-| Vista de referencia | Captura | Existe | Parcial | No existe | Backend disponible | Contrato faltante | Acción de esta fase | Fase posterior |
-|---|---|:--:|:--:|:--:|---|---|---|---|
-| Productos Z · portada (manifiesto, Selección Z, Elegidos para ti, Creadores de excelencia) | p05 | | | x | no existe (**vertical entera ausente**) | Entidades producto, variante, vendedor, evaluación. «Aprobado por Z», «98 % lo recomienda», «Garantía 3 años»: ninguno tiene columna | documentar y no tocar | Productos v1 |
-| Productos Z · buscador y bolsa | p05 | | | x | no existe | Carrito, pedido y línea de pedido | documentar y no tocar | Productos v1 |
-| Detalle del producto (galería, sello Z, razones de aprobación, valoración real, compra protegida) | p06 | | | x | no existe | Orden de bloques del blueprint §4. «Valoración real 4.8 · 184 compras verificadas» con desglose Calidad/Fidelidad/Valor exige reseña de producto con compra verificada. «Garantía de 12 meses» y «3 días para reportar incidencia» exigen política por jurisdicción: **sin política aprobada no se vende** (§Productos v1) | documentar y no tocar | Productos v1 |
+Reescrita el 12/09/2026, tras los Incrementos 1–3 de Productos. La vertical
+existe: hay dominio, admisión con evaluación y catálogo. Lo que no hay es
+COMPRAR.
+
+### Comprador
+
+| Vista | Ruta | Backend | Estado | Qué falta |
+|---|---|---|---|---|
+| Portada de Productos Z | `/productos` | `GET /products` | terminada | el **título editorial** de «Selección Z» no tiene campo ni decisión: el bloque se pinta con el rótulo y las tarjetas, sin título inventado |
+| Buscador y filtros | `/productos/buscar` | `GET /products/search` | terminada | nada. Filtra en el servidor y pagina por cursor |
+| Categorías | dentro del buscador | `GET /products/categories` | terminada | **la tabla nace vacía**: las categorías iniciales las decide la empresa |
+| Ficha del producto | `/productos/[productId]` | `GET /products/{id}` | terminada | tres bloques de la captura 6 quedan FUERA por no tener datos: valoración real, compra protegida y la barra de comprar |
+| Informe de evaluación | `/productos/[productId]/evaluacion` | `GET /products/{id}/evaluation` | terminada | nada. El sello lo abre, y enseña la evidencia por dimensión sin la nota interna |
+| Guardados | `/productos/guardados` | `GET /products/saved` + `POST/DELETE .../save` | terminada | nada. Guardar es idempotente y **no es un carrito** |
+| Bolsa con contador | encabezado | `GET /products/saved` | terminada | la bolsa lleva a GUARDADOS. El carrito es de un incremento posterior |
+| Valoración real (4,8 · 184 compras verificadas) | — | — | **no existe** | reseñas de producto por línea de pedido entregada. Incremento 8 |
+| Compra protegida y plazos | — | — | **no existe** | transportista, cobertura y condiciones aprobadas. Incrementos 5–7 |
+| Barra fija de compra | — | — | **no existe** | carrito, pedido y pago. `purchasable: false` |
+
+### Proveedor
+
+| Vista | Ruta | Backend | Estado | Qué falta |
+|---|---|---|---|---|
+| Postular como proveedor | `/proveedor/postular` | `GET/PUT /products/seller/application` + `submit`/`withdraw` | terminada | qué documentación exige la empresa: los tipos están, el requisito no |
+| Mis productos | `/proveedor/productos` | `GET /products/seller/products` | terminada | nada |
+| Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | nada. Solo se edita en borrador |
+| Inventario, pedidos, incidencias, saldos | — | — | **no existen** | incrementos 4 a 7. No hay pantalla vacía que los simule |
+
+### Administración
+
+| Vista | Ruta | Backend | Estado | Qué falta |
+|---|---|---|---|---|
+| Bandeja de postulaciones | `/admin/productos/admision` | `GET /admin/products/applications` + `take`/`decide` | terminada | nada. Aceptar crea la capacidad comercial en la misma transacción |
+| Evaluar un producto | `/admin/productos/evaluar/[evaluationId]` | siete rutas de `/admin/products/evaluations` | terminada | nada. Seis dimensiones, evidencia por dimensión y tres razones respaldadas |
+| Listado y permanencia | `/admin/productos` | `GET /admin/products` + `transition`/`publish`/`suspend` | terminada | las condiciones de una **aprobación condicionada**: sin ellas ese estado no publica |
+
+### Lo que esta matriz dice, en una frase
+
+El recorrido está completo en las dos direcciones: **Explorar → Productos →
+buscar → ficha de un producto aprobado**, y **el proveedor postula → Z evalúa →
+Z publica**. Lo que queda fuera no es una pantalla sin conectar: son tres
+bloques de la ficha que no tienen datos porque el contrato que los sostiene
+—reseñas, entrega, compra— es de incrementos posteriores, y **el acceso de
+Servicios**, que sigue siendo el único de los cuatro chips que no lleva a
+ninguna parte.
 
 ## 6. Alumno / comprador
 

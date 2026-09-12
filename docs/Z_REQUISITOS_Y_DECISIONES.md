@@ -600,3 +600,75 @@ El mandato se evalúa antes de buscar la política aceptada. Si fuera después, 
 compra que no aceptó ninguna contestaría `policy_not_configured` y quien pagó por
 un evento que no se hará se quedaría sin nada porque nadie publicó un plazo. La
 regla es de Z, no del organizador.
+
+## 12. Productos, Incrementos 1–3 (12/09/2026)
+
+**D46 · `commerce_products` no se convierte en catálogo físico.**
+
+Esa tabla representa el derecho digital que se compra para acceder a un curso.
+Mezclarla con productos físicos uniría dos cosas que no comparten ciclo de vida,
+ni entrega, ni devolución, y rompería el acceso de quien ya compró un curso.
+Productos tiene sus propias trece tablas y reutiliza perfiles, permisos,
+auditoría, almacenamiento y avisos.
+
+**D47 · Un creador es un perfil con capacidad comercial.**
+
+No hay tabla de «creador». Una tabla aparte crearía una segunda identidad que se
+desincroniza del perfil: dos nombres, dos fotos y dos verdades sobre quién es esa
+persona. `product_sellers` es la capacidad, y nace `pending`.
+
+**D48 · Las variantes y la galería cuelgan de la versión, no del producto.**
+
+Lo que se publica es una versión inmutable, y «lo publicado» incluye las fotos
+aprobadas y las opciones ofrecidas. Colgándolas del producto, cambiar una foto
+reescribiría en silencio lo que se evaluó. Una versión nueva copia las filas que
+conserva; el archivo no se vuelve a subir.
+
+**D49 · Nulo no es gratis, y vacío no es cero.**
+
+`price_minor` y `currency` nulos significan «sin precio configurado»;
+`product_categories` vacía significa que la empresa no ha definido las
+categorías; `rating: null` significa que no hay reseñas. Ninguno de los tres se
+rellena con un valor razonable, y hay pruebas que lo comprueban.
+
+**D50 · El veredicto de una evaluación lo escribe el sistema.**
+
+Que un producto esté aprobado es consecuencia de una puntuación con evidencia,
+no de que alguien pulse «aprobar». La máquina de estados solo admite
+`evaluation → approved` al actor `system`, y publicar exige además las tres
+razones y una foto.
+
+**D51 · Evaluar es curaduría; publicar es administración.**
+
+Se reutiliza la separación de Eventos (D34) en vez de inventar roles: `is_admin`
+evalúa, solo `admin` publica, retira y suspende. Quién puede ser «Evaluador Z»
+con un rol propio es una decisión abierta, y añadir valores a `profiles.role`
+por esto exigiría una migración sobre una tabla que usa media plataforma.
+
+**D52 · Una aprobación condicionada no publica.**
+
+Qué condiciones exactas se le exigen no está definido, así que no hay salto a
+`published` desde ahí. Falla en cerrado: publicarlo «mientras tanto» sería
+ponerle el sello de Z a algo que nadie autorizó del todo.
+
+**D53 · Una evaluación rechazada devuelve el producto a borrador.**
+
+La cadena del blueprint no tiene estado «rechazado». Dejarlo parado en
+`evaluation` sería un producto atascado para siempre; volver a borrador es lo
+único que le permite corregir lo que falló. Retirarlo es una decisión aparte.
+
+**D54 · «Selección Z» se ordena por la evaluación, y «para ti» no está
+personalizado.**
+
+La selección sale de la puntuación de la evaluación aprobada, que es un dato
+verificado; una lista a dedo sería una decisión que nadie ha tomado. Y no hay
+recomendador de productos, así que el contrato manda `personalized: false` para
+que la pantalla no ponga un título que miente. El **título editorial** de la
+selección que enseña la captura 5 no tiene campo: es un hueco declarado, no un
+olvido.
+
+**D55 · El único indicador de confianza es el origen.**
+
+El blueprint §3.1 admite cuatro —recomendación, garantía, origen o compras
+verificadas— y solo uno por tarjeta. Hoy solo el origen se puede demostrar: los
+otros tres necesitan reseñas, pedidos o condiciones aprobadas.

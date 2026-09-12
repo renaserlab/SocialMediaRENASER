@@ -183,6 +183,20 @@ export function AdminEventosScreen() {
         variant="secondary"
         onPress={() => router.push('/admin/resenas' as never)}
       />
+
+      {/* Productos: el panel del ciclo y la bandeja de postulaciones de proveedor.
+          Son dos colas distintas —una mueve productos, la otra da capacidad
+          comercial— y por eso son dos entradas y no un menú. */}
+      <Button
+        label={t('productosAdmin.tituloPanel' as TranslationKey)}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos' as never)}
+      />
+      <Button
+        label={t('productosAdmin.tituloAdmision' as TranslationKey)}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos/admision' as never)}
+      />
     </AppScreen>
   );
 }

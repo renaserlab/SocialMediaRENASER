@@ -588,13 +588,19 @@ async def test_una_falla_critica_rechaza_aunque_la_puntuacion_sea_perfecta(
     assert producto.status == BORRADOR
 
     # Y LA BASE NO ADMITE una falla crítica con «aprobado».
+    #
+    # SE EXIGE EL NOMBRE DEL CHECK. Sin eso la prueba se contentaba con
+    # cualquier violación, y al retirar el que importa saltaba el de «aprobar
+    # exige puntuación»: verde por el motivo equivocado. La puntuación se
+    # rellena justo para que ese otro no pueda disparar.
     with psycopg.connect(URL, autocommit=True) as cx, cx.cursor() as cur:
-        with pytest.raises(psycopg.errors.CheckViolation):
+        with pytest.raises(psycopg.errors.CheckViolation) as violado:
             cur.execute(
-                "update public.product_evaluations set decision = 'approved'"
-                " where id = cast(%s as uuid)",
+                "update public.product_evaluations set decision = 'approved',"
+                " score_total = 10000 where id = cast(%s as uuid)",
                 (ident,),
             )
+    assert "product_evaluations_falla_rechaza" in str(violado.value)
 
 
 @SIN_POSTGRES

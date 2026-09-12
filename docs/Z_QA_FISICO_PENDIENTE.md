@@ -559,3 +559,55 @@ Estas no se podían escribir antes porque las pantallas no existían.
 - [ ] Un porcentaje de `0` se lee como «0 %», no como «sin definir».
 - [ ] Moderación de contenido **no** ve las políticas de dinero de la
       plataforma.
+
+## Productos, Incrementos 1–3 (12/09/2026)
+
+Nada de esto se puede comprobar sin un teléfono real y sin las migraciones 0070,
+0071 y 0072 aplicadas. **Ninguna de estas casillas está marcada.**
+
+### El recorrido del comprador
+
+- [ ] Explorar enseña el chip de **Productos** con la bolsa, y lleva a `/productos`.
+- [ ] La portada carga con las migraciones SIN aplicar y dice que no está disponible, en vez de fallar.
+- [ ] El manifiesto se lee centrado y no parece un banner.
+- [ ] Las tarjetas caben a dos columnas en un teléfono estrecho, sin que el nombre se corte a mitad de palabra.
+- [ ] El precio se escribe con la moneda que manda el servidor, y un producto sin precio dice «sin precio configurado» en vez de «0».
+- [ ] La bolsa NO enseña contador con cero guardados, y sí lo enseña con uno.
+- [ ] El corazón de la tarjeta guarda y quita, y sobrevive a cerrar y abrir la aplicación.
+- [ ] El buscador no busca con una sola letra, y lo dice.
+- [ ] Al volver Atrás desde una ficha, la búsqueda conserva el texto y la posición del desplazamiento.
+- [ ] La paginación por cursor no repite ni se salta productos al bajar tres páginas.
+- [ ] Las categorías se enseñan vacías sin parecer un error.
+- [ ] La ficha respeta el orden de la captura 6: galería, creador, nombre, precio, sello, «Por qué está en Z», variantes, descripción, materiales y origen.
+- [ ] La galería enseña el contador «1/5» y se desliza sin quedarse a medias.
+- [ ] El sello abre el informe de evaluación.
+- [ ] Las tres razones llevan el icono que corresponde a su dimensión.
+- [ ] NO aparece ninguna valoración, ni estrellas, ni «compras verificadas».
+- [ ] NO aparece ningún plazo de entrega ni de devolución.
+- [ ] NO aparece ningún botón de comprar, ni una barra fija con precio.
+- [ ] El informe escribe la puntuación con coma (90,00) y no en centésimas (9000).
+- [ ] Un producto suspendido deja de abrirse por enlace directo.
+
+### El recorrido del proveedor
+
+- [ ] Quien no es proveedor ve el acceso a postular, y quien ya lo es ve sus productos.
+- [ ] El formulario de postulación nace VACÍO, sin ningún valor precargado.
+- [ ] Una propuesta corta se señala antes de mandarla.
+- [ ] Una postulación enviada deja de ser editable y la pantalla lo dice.
+- [ ] Un rechazo enseña su motivo a quien postuló.
+- [ ] Crear un producto con precio y sin moneda se rechaza en la pantalla, no en el servidor.
+- [ ] Dos variantes con el mismo SKU se señalan antes de mandarlas.
+- [ ] Un producto enviado a admisión deja de tener botón de editar.
+- [ ] La galería rechaza una URL pegada a mano.
+
+### El recorrido del evaluador
+
+- [ ] Un moderador puede evaluar y NO ve botón de publicar.
+- [ ] Nadie evalúa su propio producto, y el mensaje lo dice con claridad.
+- [ ] La pantalla enseña qué dimensiones faltan por puntuar y cuáles no tienen evidencia.
+- [ ] Con cinco dimensiones puntuadas NO aparece ninguna puntuación total.
+- [ ] Las tres razones solo se pueden elegir de la evidencia registrada.
+- [ ] Marcar una falla crítica deja claro que el resultado será rechazo.
+- [ ] Un 86 deja el producto en «aprobado con condiciones» y la pantalla explica por qué no se puede publicar.
+- [ ] Publicar con dos razones se rechaza y dice que faltan tres.
+- [ ] Suspender exige motivo, y el motivo llega al proveedor.
