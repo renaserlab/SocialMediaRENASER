@@ -1756,12 +1756,12 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
     // Incremento 4 traduce lo suyo, y el del catálogo además conoce las puertas
     // de esquema, que se pueden ver desde cualquier sitio.
     //
-    // Los tres nuevos se leen DEL CÓDIGO y no se importan: `carrito.ts` importa
+    // Los cuatro nuevos se leen DEL CÓDIGO y no se importan: `carrito.ts` importa
     // valores por el alias `@/`, que el ejecutor de Node no resuelve. Leer el
     // fichero comprueba lo mismo —que el código está en su tabla— sin arrastrar
     // un resolutor a esta prueba.
     const enLosNuevos = new Set<string>();
-    for (const modulo of ['carrito.ts', 'inventario.ts', 'fotosDeProducto.ts']) {
+    for (const modulo of ['carrito.ts', 'inventario.ts', 'fotosDeProducto.ts', 'pedidos.ts']) {
       for (const m of fuente('lib', modulo).matchAll(
         /^\s{2}([a-z_0-9]+):\s*'[^']+',$/gm,
       )) {

@@ -6,6 +6,7 @@ import { Image as ExpoImage } from 'expo-image';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
@@ -25,6 +26,7 @@ import {
   lineaBloqueada,
   precioAnterior,
   precioDeLaLinea,
+  sePuedeComprar,
   sePuedeRestar,
   sePuedeSumar,
   subtotalDelCarrito,
@@ -490,9 +492,40 @@ export function CarritoScreen() {
             {subtotal.configurado ? subtotal.texto : f(CLAVE_SIN_IMPORTE)}
           </Text>
         </View>
-        <Text variant="caption" color={colors.textMuted}>
-          {f(CLAVE_TODAVIA_NO_SE_COMPRA)}
-        </Text>
+        {/*
+          EL BOTON SOLO SI HAY RECORRIDO DETRAS. `purchasable` lo escribe la
+          ruta, y para escribir `true` hacen falta cinco banderas encendidas y
+          una politica publicada. Mientras no las haya, en vez del boton va la
+          verdad: en Z todavia no se compran productos.
+
+          Y NO DICE «PAGAR»: dice continuar, porque lo siguiente es revisar la
+          direccion y leer las condiciones. Pagar ocurre despues y fuera.
+        */}
+        {sePuedeComprar(leido) ? (
+          <Button
+            label={f('carrito.accion.continuar')}
+            onPress={() => router.push('/productos/checkout' as never)}
+            disabled={ocupado}
+            icon="arrow-right"
+          />
+        ) : (
+          <Text variant="caption" color={colors.textMuted}>
+            {f(CLAVE_TODAVIA_NO_SE_COMPRA)}
+          </Text>
+        )}
+        {/* SIEMPRE, haya o no algo que comprar: quien ya pidio algo tiene que
+            poder llegar a su pedido desde aqui, no solo escribiendo la URL. */}
+        <Pressable
+          onPress={() => router.push('/productos/pedidos' as never)}
+          accessibilityRole="button"
+          accessibilityLabel={f('pedidoDeProducto.accion.verPedidos')}
+          style={({ pressed }) => [styles.vaciar, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <Feather name="package" size={14} color={colors.text} />
+          <Text variant="caption" weight="700">
+            {f('pedidoDeProducto.accion.verPedidos')}
+          </Text>
+        </Pressable>
       </View>
     </AppScreen>
   );

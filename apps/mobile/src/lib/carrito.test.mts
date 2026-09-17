@@ -407,7 +407,7 @@ describe('DOS CONTADORES, y son dos funciones distintas', () => {
 });
 
 /* ========================================================================== */
-describe('NINGÚN BOTÓN DE COMPRAR', () => {
+describe('EL BOTÓN SOLO CON PERMISO DEL SERVIDOR', () => {
   it('con `purchasable: false` no se puede comprar', () => {
     assert.equal(sePuedeComprar(carrito()), false);
   });
@@ -565,22 +565,34 @@ describe('lo que la pantalla de la bolsa tiene escrito', () => {
       .join('');
 
   it('LA BOLSA NO PINTA NINGÚN BOTÓN DE PAGAR NI DE COMPRAR', () => {
-    const bajo = sinLosNombresPermitidos(carritoSrc);
+    // Desde el Incremento 5 la bolsa SÍ lleva a algún sitio, pero ese sitio no
+    // es un cobro: es revisar la dirección y leer las condiciones. Las palabras
+    // que siguen prohibidas son las que prometen dinero.
+    const bajo = sinLosNombresPermitidos(carritoSrc)
+      .split('pedidodeproducto')
+      .join('')
+      .split('/productos/pedidos')
+      .join('');
     for (const prohibido of [
       'comprar',
-      'checkout',
       'pagar',
-      'pago',
-      'pedido',
       'finalizar',
-      'continuar',
       'tarjeta de credito',
+      'paypal',
     ]) {
       assert.ok(!bajo.includes(prohibido), `la bolsa dice «${prohibido}»`);
     }
   });
 
-  it('y dice en el pie que todavía no se compra', () => {
+  it('el botón solo existe si el servidor dice que hay algo que comprar', () => {
+    // La condición se lee del carrito que devolvió el servidor, y ese campo lo
+    // escribe la ruta: para que llegue en `true` hacen falta cinco banderas y
+    // una política publicada. La pantalla no lo decide por su cuenta.
+    assert.ok(carritoSrc.includes('sePuedeComprar(leido)'));
+    assert.ok(carritoSrc.includes("carrito.accion.continuar"));
+  });
+
+  it('y cuando no lo hay, sigue diciendo en el pie que todavía no se compra', () => {
     assert.ok(carritoSrc.includes('CLAVE_TODAVIA_NO_SE_COMPRA'));
   });
 

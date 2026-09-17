@@ -73,6 +73,9 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Incremento 5 de Productos: se escriben igual en espanol y en ingles.
+    'pedidoDeProducto.checkout.subtotal', // «Subtotal» es la misma palabra.
+    'pedidoDeProducto.checkout.total',    // «Total», tambien.
     // Incremento 4: se escriben igual en español y en inglés.
     'carrito.subtotal',     // «Subtotal» es la misma palabra.
     'inventario.sku',       // «SKU» es una sigla inglesa.
@@ -124,6 +127,17 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 5 de Productos: el portugues las escribe igual.
+    'pedidoDeProducto.estado.CANCELLED',      // «Cancelado».
+    'pedidoDeProducto.falta.desconocido',     // «Falta algo por configurar.»
+    'pedidoDeProducto.direccion.postal_code', // «Codigo postal (opcional)».
+    'pedidoDeProducto.condiciones.horas',     // «{n} horas».
+    'pedidoDeProducto.checkout.titulo',       // «Comprar».
+    'pedidoDeProducto.checkout.subtotal',     // «Subtotal».
+    'pedidoDeProducto.checkout.total',        // «Total».
+    'pedidoDeProducto.checkout.unidades',     // «{n} unidades».
+    'pedidoDeProducto.pagar.titulo',          // «Pagar».
+    'pedidoDeProducto.detalle.entrega',       // «Entrega».
     // Incremento 4: español y portugués comparten estas palabras enteras. No
     // son traducciones olvidadas; escribirlas distintas sería escribirlas mal.
     'carrito.subtotal',
