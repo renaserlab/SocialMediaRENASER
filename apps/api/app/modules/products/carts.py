@@ -160,7 +160,10 @@ class Carrito:
     units: int = 0
     lines: int = 0
     blocked_lines: int = 0
-    #: HOY SIEMPRE FALSE. No existe la compra física.
+    #: SI HAY ALGO QUE COMPRAR EN ESTA BOLSA: al menos una línea comprable y
+    #: una sola moneda. NO DICE QUE LA COMPRA ESTÉ HABILITADA —eso son cinco
+    #: banderas y una política publicada, y lo contesta `pedidos.preparar`—:
+    #: dice que el carrito, por su parte, no lo impide.
     purchasable: bool = False
 
 
@@ -344,7 +347,10 @@ async def leer(db: AsyncSession, *, usuario_id: str, firmar=None) -> Carrito:
         units=sum(l.quantity for l in lineas),
         lines=len(lineas),
         blocked_lines=sum(1 for l in lineas if not l.purchasable),
-        purchasable=False,
+        #: UNA SOLA MONEDA, ADEMÁS DE HABER ALGO COMPRABLE. Dos monedas no se
+        #: suman, así que una bolsa mezclada no tiene un total que cobrar.
+        purchasable=bool(comprables)
+        and len({l.currency for l in comprables if l.currency}) == 1,
     )
 
 

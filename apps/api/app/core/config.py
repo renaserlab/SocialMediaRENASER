@@ -185,6 +185,17 @@ class Settings(BaseSettings):
     #: que se pudiera comprar; solo dejaria de ser verdad que no se puede.
     feature_product_sales: bool = False
 
+    #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
+    #:
+    #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay
+    #: numero de fabrica a proposito: cuanto tiempo se le guarda a alguien la
+    #: ultima unidad mientras paga es una decision comercial —afecta a cuantas
+    #: ventas se pierden y a cuanto stock queda congelado— y escribir aqui «15»
+    #: seria tomarla en nombre de la empresa, en silencio y para siempre.
+    #:
+    #: Las pruebas lo fijan explicitamente. Un despliegue tiene que ponerlo.
+    product_reservation_minutes: int = 0
+
     #: Interruptor general de los directos CON VIDEO. Apagado, el modulo entero
     #: sigue funcionando —sala, chat, reacciones, moderacion— y lo unico que no
     #: hay es imagen: es exactamente el estado en el que lleva viviendo el
@@ -232,6 +243,32 @@ class Settings(BaseSettings):
             (self.hms_app_access_key or "").strip()
             and (self.hms_app_secret or "").strip()
             and (self.hms_template_id or "").strip()
+        )
+
+    @property
+    def reserva_de_productos_configurada(self) -> bool:
+        """Si la duracion de la reserva esta decidida. Sin ella no se vende.
+
+        El tope de arriba no es una regla comercial: esta para que un despiste
+        —un valor en segundos, o en dias— no deje inventario apartado durante
+        semanas sin que nadie se entere.
+        """
+        return 1 <= self.product_reservation_minutes <= 1440
+
+    @property
+    def venta_de_productos_habilitada(self) -> bool:
+        """Si HOY se puede cobrar un producto fisico. Todas, no una.
+
+        CINCO CONDICIONES, Y ENCENDER UNA NO BASTA. Estan escritas juntas aqui
+        para que nadie pueda habilitar la venta tocando un solo interruptor, y
+        para que la razon por la que no se puede se pueda contar entera.
+        """
+        return bool(
+            self.feature_product_sales
+            and self.payments_enabled
+            and self.stripe_payments_enabled
+            and self.reserva_de_productos_configurada
+            and (self.stripe_secret_key or "").strip()
         )
 
     @property

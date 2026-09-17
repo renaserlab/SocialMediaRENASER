@@ -61,6 +61,7 @@ from app.modules.catalog import esquema as esquema_catalogo
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce import service as comercio_service
 from app.modules.events import pagos as eventos_pagos
+from app.modules.products import pagos as productos_pagos
 from app.modules.payments import nativo, service
 from app.modules.payments.providers import CheckoutRequest, get_provider
 from app.modules.payments.revenuecat import RevenueCatClient, RevenueCatError
@@ -775,6 +776,15 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
     ):
         return await _webhook_de_eventos(db, evento)
 
+    # LOS AVISOS DE PRODUCTOS SE ENTREGAN A PRODUCTOS, por lo mismo y con la
+    # misma segunda pregunta: un `refund.*` o un `charge.dispute.*` llegan sin
+    # dominio, y sin mirar nuestra propia tabla la devolucion de un producto
+    # caeria aqui como si fuera de Cursos.
+    if evento.dominio == productos_pagos.DOMINIO or await productos_pagos.es_de_productos(
+        db, evento
+    ):
+        return await _webhook_de_productos(db, evento)
+
     if not ajustes.stripe_payments_enabled and evento.status not in _ESTADOS_DE_DEVOLUCION:
         # Firma valida, pero es un aviso de COMPRA y las compras estan
         # apagadas. Sigue bloqueado, igual que antes.
@@ -843,6 +853,62 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
     # vez, cuando la operación entera ha salido bien. Al revés, un webhook que
     # concede el derecho y luego falla al marcar la orden dejaría las dos cosas
     # a medias.
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _webhook_de_productos(db: AsyncSession, evento) -> Response:
+    """Un aviso de un pedido de productos, ya verificado. Mismas garantias.
+
+    LA BANDERA DE VENTA NO SE MIRA AQUI. Apagar `feature_product_sales` impide
+    ABRIR cobros nuevos; rechazar el aviso de uno que ya se abrio dejaria a
+    quien pago sin su pedido y a Stripe reintentando en bucle.
+
+    NI SE DUPLICA LA VERIFICACION DE FIRMA NI LA BARRERA ANTI-REPETICION: las
+    dos son las de arriba, y son las mismas que usan Cursos y Eventos.
+    """
+    ajustes = get_settings()
+
+    if not await esquema_comercio.hay_comercio(db):
+        # Sin la 0035 no hay donde anotar el aviso, y sin anotarlo no se puede
+        # garantizar que no se procese dos veces. Se falla en cerrado.
+        logger.error("[productos] aviso de Stripe sin la migracion 0035 aplicada")
+        raise ServiceUnavailableError("El módulo de compras aún no está desplegado.")
+
+    if evento.environment != ajustes.payments_environment:
+        # Un aviso de pruebas NO entrega un producto en produccion, ni al reves.
+        logger.info("[productos] aviso de otro entorno: %s", evento.environment)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    _fila, es_nuevo = await comercio_service.registrar_evento(
+        db,
+        provider="stripe",
+        external_event_id=evento.event_id,
+        event_type=evento.event_type,
+        environment=evento.environment,
+        payload=dict(evento.payload),
+    )
+    if not es_nuevo:
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    id_del_aviso = _fila.id
+    try:
+        async with db.begin_nested():
+            nota = await productos_pagos.atender_aviso(db, evento)
+    except Exception as error:  # noqa: BLE001
+        logger.exception("[productos] no se pudo aplicar el aviso %s", evento.event_id)
+        await comercio_service.marcar_evento_procesado(
+            db, event_id=id_del_aviso, error=str(error)[:500]
+        )
+        await db.commit()
+        # NO SE PROPAGA. Un aviso que no cuadra no se arregla reintentandolo:
+        # queda anotado con su error para que una persona lo concilie.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await comercio_service.marcar_evento_procesado(
+        db, event_id=id_del_aviso, error=nota
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
