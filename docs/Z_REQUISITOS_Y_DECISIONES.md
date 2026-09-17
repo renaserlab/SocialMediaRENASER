@@ -815,3 +815,147 @@ No hay checkout, ni pedido, ni pago, ni dirección, ni transportista.
 un campo copiado: encender la compra tiene que pasar por ese fichero.
 `feature_product_sales` sigue apagada y sin código detrás. La pantalla del
 carrito **no tiene botón de pagar**, y lo dice con palabras en el pie.
+
+## 14. Productos, Incremento 5 — pedido y compra protegida (17/09/2026)
+
+**D72 · Sin política aprobada para la jurisdicción, no se vende.**
+
+Lo dice el blueprint —«Si `withdrawalDays` es null, la venta se bloquea en esa
+jurisdicción hasta aprobación legal»— y la 0077 lo convierte en una regla de la
+base: el CHECK `product_policies_publicada_esta_completa` impide que exista una
+política publicada sin plazo de desistimiento, sin plazo de incidencias, sin
+plazo de devolución y sin decir quién paga cada porte. No es una comprobación
+del servidor que alguien pueda saltarse: es la tabla.
+
+**D73 · La política se versiona por país, y el pedido congela cuál aceptó.**
+
+Guarda identificador, versión y **huella del texto**. Publicar la versión
+siguiente no le cambia las reglas a quien ya compró. Y aceptar un texto que
+dejó de regir entre que se leyó y se pulsó comprar no vale como aceptación: el
+servidor lo nota y para con `product_policy_changed`.
+
+La huella se calcula sobre el texto **normalizado**: CRLF y LF son el mismo
+párrafo, y sin normalizar, pegar el texto desde otro editor cambiaría la huella
+sin cambiar una palabra y todos los pedidos anteriores parecerían citar algo
+distinto.
+
+**D74 · La duración de la reserva no tiene número de fábrica.**
+
+`PRODUCT_RESERVATION_MINUTES` nace en **0**, y cero significa «sin configurar».
+Cuánto tiempo se le guarda a alguien la última unidad mientras paga afecta a
+cuántas ventas se pierden y a cuánto stock queda congelado: escribir «15» aquí
+sería tomar esa decisión en nombre de la empresa, en silencio y para siempre.
+Sin ella no se vende, y la pantalla lo dice.
+
+**D75 · Encender una bandera nunca basta.**
+
+Cinco condiciones a la vez: `feature_product_sales`, `payments_enabled`,
+`stripe_payments_enabled`, la duración de la reserva y una clave de Stripe. Más
+una política publicada y vigente. Viven juntas en
+`venta_de_productos_habilitada` y en `por_que_no_se_puede_vender`, que devuelve
+**todas** las que faltan y no la primera: una a una, quien configura enciende
+una, prueba, vuelve a fallar y no sabe cuántas quedan.
+
+**D76 · Un pedido, un proveedor.**
+
+El blueprint no define checkout conjunto de varios proveedores, y repartir un
+cobro entre varios sin que nadie lo haya decidido es inventarse la liquidación.
+Si el carrito mezcla, el servidor **pide elegir**. Es la decisión segura y
+explícita que pedía el encargo; cambiarla es una decisión de la empresa.
+
+**D77 · La reserva empieza con el pedido, no con el carrito.**
+
+Tener algo en la bolsa no se lo quita a nadie. La reserva nace al confirmar el
+pedido, aparta con `select ... for update` en **orden estable por (producto,
+SKU)** y es **todo o nada**: si falta una unidad no se reserva ninguna.
+
+**D78 · Liberar ocurre exactamente una vez, y en dos capas.**
+
+Arriba, `reservation_settled_at` bajo el cerrojo de la fila del pedido: quien
+llega segundo ve que ya se decidió. Abajo, la clave de idempotencia del
+movimiento de inventario, que es un índice único de la base y aguanta aunque dos
+procesos se colaran a la vez por la primera capa. Una sola capa no bastaría: la
+de arriba no protege entre réplicas y la de abajo no sabe cambiar el estado.
+
+**D79 · Pagar consume la reserva; no la suelta ni la despacha.**
+
+Las unidades quedan comprometidas hasta que salgan del almacén, que es del
+Incremento 6. El pedido deja de estar sujeto al vencimiento. Despachar ahora
+diría que algo salió cuando sigue en la caja.
+
+**D80 · Un cobro fallido no suelta la reserva.**
+
+La tarjeta puede reintentarse mientras la reserva siga viva, y soltar al primer
+rechazo le quitaría a quien lo intenta la última unidad que estaba a punto de
+pagar. Si no vuelve a intentarlo, el vencimiento la suelta sola.
+
+**D81 · El pago que llega tarde no se cobra en silencio ni se niega en silencio.**
+
+Si el aviso verificado llega cuando la reserva ya venció, el pedido pasa a
+`UNDER_REVIEW` con su motivo y lo resuelve una persona. Inventarse unidades para
+no dar una mala noticia es prometer un producto que otra persona ya compró; y
+darlo por bueno sin entregarlo es quedarse el dinero.
+
+**D82 · El vencimiento no es un temporizador dentro de la aplicación.**
+
+La API puede correr con varias réplicas, y un temporizador por réplica es el
+mismo barrido ejecutándose tantas veces como procesos haya. Hay una ruta
+administrativa idempotente preparada para un planificador externo.
+
+**D83 · Una devolución se anota y no deshace nada.**
+
+Devolver el importe y deshacer la venta son dos decisiones distintas, y la
+segunda no existe: devolución, reembolso y garantía son de los Incrementos 8 y
+9, y ninguna política los ha fijado. Soltar el inventario por iniciativa propia
+sería inventarse la política.
+
+**D84 · Impuestos y envío no se enseñan como cero.**
+
+No están decididos: no hay entidad fiscal, ni transportista, ni tarifas. «Envío:
+0,00» es una promesa de envío gratuito que nadie ha hecho y «Impuestos: 0,00»
+es una afirmación fiscal. El checkout lo dice con palabras.
+
+**D85 · No se dice «compra protegida» sin plazo de incidencias.**
+
+Sin él no hay ninguna protección que ofrecer, y decirlo igualmente es lo que
+hace que alguien compre creyendo que tiene un recurso que no tiene.
+
+**D86 · La vuelta del navegador no confirma dinero.**
+
+Solo un aviso verificado de la pasarela marca un pedido como pagado. La
+pantalla de retorno pregunta el estado al servidor; el parámetro de la URL solo
+elige las palabras del aviso, porque un parámetro lo escribe cualquiera.
+
+**D87 · La dirección no guarda ubicación exacta.**
+
+Ni latitud, ni longitud, ni documento de identidad. Para entregar un paquete
+basta la dirección escrita; guardar lo que no hace falta es guardar lo que se
+puede filtrar. Y el distrito es obligatorio donde la dirección no se entiende
+sin él —Perú— y no donde ese nivel no existe, porque exigirlo obligaría a
+inventárselo.
+
+**D88 · El proveedor ve sus pedidos pagados y nada más.**
+
+Ni el cobro, ni quién compró, ni las direcciones de otros proveedores. Lo que
+hace falta para preparar un paquete es qué mandar y a dónde.
+
+**D89 · Ni el historial ni la auditoría guardan datos personales.**
+
+El historial de estados se lee para auditar un estado, no para recomponer a
+quién se le mandó qué. La auditoría del almacén guarda SKU y cantidades.
+
+**D90 · No hay un segundo cliente de Stripe.**
+
+Se reutiliza el adaptador compartido, su verificación de firma, su tolerancia de
+reloj y `payment_events` como barrera anti-repetición. Duplicarlo sería duplicar
+también el sitio donde se olvida arreglar un fallo. El reparto es por
+`metadata.dominio = 'producto'` y, cuando el aviso no la trae —un `refund.*` o
+un `charge.dispute.*` llevan metadata propia, vacía—, preguntando a nuestra
+propia tabla por la referencia del cobro.
+
+**D91 · Ningún administrador puede escribir «pagado».**
+
+Lo impide el CHECK `product_orders_pagada_con_cobro`: sin fecha de pago, sin
+referencia externa y sin pasarela, esa fila no existe. Y las líneas de un pedido
+no se pueden editar: lo impone un disparador, porque un importe que se puede
+cambiar después de cobrarlo no es un importe.

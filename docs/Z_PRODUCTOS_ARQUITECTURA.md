@@ -1,8 +1,15 @@
-# Productos de Excelencia Z · Incrementos 1 a 4
+# Productos de Excelencia Z · Incrementos 1 a 5
 
 Qué se construyó, qué se decidió en cerrado y qué sigue esperando a una
-persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4:
-fotografías reales, inventario y carrito.
+persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4
+—fotografías reales, inventario y carrito— y el mismo día con el Incremento 5:
+política por jurisdicción, pedido físico y reserva.
+
+**Estado de las migraciones al 17/09/2026.** La 0070 a la 0075 están
+**aplicadas y verificadas** contra la base gestionada. La 0076, la 0077 y la
+0078 se entregan escritas, probadas en PostgreSQL desechable y **SIN APLICAR**:
+las aplica una persona, en ese orden, y **hay que reiniciar la API después** de
+la 0077 y la 0078.
 
 ## 1. Lo que NO es
 
@@ -334,6 +341,133 @@ al crear el pedido.
 el molde de la respuesta —no un campo copiado— y la pantalla lo dice con
 palabras en el pie.
 
+## 13.3. El pedido, la reserva y por qué todavía no se cobra
+
+**SIN POLÍTICA APROBADA PARA LA JURISDICCIÓN, NO SE VENDE.** No es prudencia
+nuestra: el blueprint lo dice —«Si `withdrawalDays` es null, la venta se bloquea
+en esa jurisdicción hasta aprobación legal»— y es lo razonable. Una tienda que
+cobra sin haber publicado su plazo de desistimiento es una tienda que no puede
+cumplirlo. La 0077 lo convierte en una regla de la base: el CHECK
+`product_policies_publicada_esta_completa` impide que exista una política
+publicada sin plazo de desistimiento, sin plazo de incidencias, sin plazo de
+devolución y sin decir quién paga cada porte.
+
+**La política se versiona por país y el pedido la congela.** Guarda el
+identificador, la versión y la **huella** del texto: con el identificador se lee
+entera, con la huella se demuestra que no se tocó por debajo. Publicar la
+versión siguiente no le cambia las reglas a quien ya compró, y aceptar un texto
+que dejó de regir entre que se leyó y se pulsó comprar **no vale como
+aceptación**: el servidor lo nota y para.
+
+### Qué orden sigue una compra, y por qué ese
+
+1. se bloquea el carrito —es la fila que ordena todo lo de esa persona—;
+2. se relee producto, versión, variante, precio, moneda y publicación;
+3. se comprueba la jurisdicción y que su política esté publicada y **vigente**;
+4. se crea el pedido con TODO copiado: nombres, precios y condiciones;
+5. se bloquean las filas de inventario **en orden estable** y se reserva;
+6. se confirma la transacción entera;
+7. **y solo entonces** se intenta abrir el cobro en la pasarela.
+
+El paso 7 va fuera a propósito: abrir el checkout es una llamada HTTP que puede
+tardar segundos, y hacerla dentro dejaría las filas de inventario bloqueadas
+esperando a un tercero. Si falla, el pedido existe y sigue pendiente de pago,
+que es la verdad; no se queda fingiendo que hay un cobro abierto.
+
+El **orden estable** del paso 5 no es estética. Dos compras que tocan las mismas
+dos unidades en orden distinto se abrazan: la primera tiene A y quiere B, la
+segunda tiene B y quiere A. Ordenar por `(producto, SKU)` hace que ese abrazo no
+pueda formarse. Y se suma por `(producto, SKU)` y no por línea, porque dos
+variantes pueden compartir la caja del almacén: reservarlas por separado usaría
+la misma clave de idempotencia dos veces y la segunda se tragaría como si fuera
+un reintento.
+
+### Todo o nada
+
+Si a la tercera línea le falta una unidad, **no se reserva ninguna**: la
+transacción entera se deshace. Medio pedido reservado es inventario apartado por
+una compra que nadie va a completar.
+
+### La reserva vive en el pedido, no en una tabla de «holds»
+
+Eventos necesita un hold aparte porque se aparta aforo **antes** de existir el
+pedido; aquí el carrito no reserva nada y la reserva nace exactamente con el
+pedido. Lo que aparta de verdad es `product_inventory.reserved`, con su
+movimiento en `inventory_movements` y su clave de idempotencia.
+
+`reserved_until` dice **hasta cuándo**. `reservation_settled_at` dice **que ya
+se decidió**, y es lo que hace que liberar ocurra **exactamente una vez** aunque
+lleguen a la vez el vencimiento y una cancelación. Dos capas, y las dos hacen
+falta: arriba la marca bajo el cerrojo de la fila del pedido; abajo la clave de
+idempotencia del movimiento, que es un índice único de la base y aguanta aunque
+dos procesos se colaran a la vez por el primero.
+
+**Pagar no suelta la reserva: la consume.** Las unidades siguen comprometidas
+hasta que salgan del almacén —eso es del Incremento 6— y el pedido deja de estar
+sujeto al vencimiento.
+
+### La duración de la reserva es una decisión que nadie ha tomado
+
+`PRODUCT_RESERVATION_MINUTES` nace en **0**, y cero significa «sin configurar».
+No hay número de fábrica a propósito: cuánto tiempo se le guarda a alguien la
+última unidad mientras paga afecta a cuántas ventas se pierden y a cuánto stock
+queda congelado, y escribir aquí «15» sería tomar esa decisión en nombre de la
+empresa, en silencio y para siempre.
+
+### Un pedido, un proveedor
+
+El blueprint no define checkout conjunto de varios proveedores, y repartir un
+cobro entre varios sin que nadie lo haya decidido es inventarse la liquidación.
+`seller_id` es `not null` y no hay ninguna columna que admita dos: si el carrito
+mezcla, el servidor **pide elegir**.
+
+### El vencimiento no es un temporizador
+
+No hay ningún temporizador dentro de FastAPI, y no es un olvido: la API puede
+correr con varias réplicas y un temporizador por réplica es el mismo barrido
+ejecutándose tantas veces como procesos haya. Hay una ruta de administración
+idempotente —`POST /admin/products/orders/expire`— preparada para un
+planificador externo.
+
+### El pago que llega tarde
+
+Ni se cobra en silencio ni se niega en silencio. Si el aviso verificado llega
+cuando la reserva ya venció, el pedido pasa a `UNDER_REVIEW` con su motivo y lo
+resuelve una persona por `GET /admin/products/orders/review`. Inventarse
+unidades para no dar una mala noticia es prometer un producto que otra persona
+ya compró.
+
+### Lo que NO se hizo, y es deliberado
+
+Un aviso de devolución o de disputa **se anota y no deshace nada**. Devolver el
+importe y deshacer la venta son dos decisiones distintas, y la segunda no existe
+todavía: devolución, reembolso y garantía son de los Incrementos 8 y 9, y
+ninguna política los ha fijado. Soltar el inventario por iniciativa propia sería
+inventarse la política.
+
+Tampoco hay transportista, guía, seguimiento, entrega, conformidad de 72 horas,
+incidencia, reseña, saldo del proveedor, comisión ni transferencia. Una columna
+vacía «para luego» es una columna que alguien rellena con un cero.
+
+### Cinco defensas, y encender una no basta
+
+Para que un producto se pueda cobrar tienen que darse **a la vez**:
+`feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`,
+`PRODUCT_RESERVATION_MINUTES` configurado y una clave de Stripe presente. Más
+una política publicada y vigente para el país de entrega. Las cinco viven juntas
+en `venta_de_productos_habilitada` y en `pedidos.por_que_no_se_puede_vender`,
+que devuelve **todas** las que faltan y no la primera: una a una, quien configura
+enciende una bandera, lo prueba, vuelve a fallar y no sabe cuántas quedan.
+
+### Qué se reutilizó de pagos, y qué no se duplicó
+
+El adaptador de Stripe, la verificación de firma, la tolerancia de reloj, la
+barrera anti-repetición (`payment_events`) y `payment_events.error` como cola de
+conciliación. **No hay un segundo cliente de Stripe**, y el webhook compartido
+reparte por `metadata.dominio = 'producto'` y, cuando el aviso no lo trae —un
+`refund.*` o un `charge.dispute.*` llevan metadata propia, vacía—, preguntando a
+nuestra propia tabla por la referencia del cobro.
+
 ## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
@@ -348,7 +482,11 @@ palabras en el pie.
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
 | Fuente del promedio de categoría | la empresa |
-| **Aplicar 0073, 0074 y 0075 en la base gestionada, en ese orden** | operación |
+| **Aplicar 0076, 0077 y 0078 en la base gestionada, en ese orden** | operación |
+| **Publicar la política de venta de cada país** (sin ella no se vende) | la empresa + abogado |
+| **Cuántos minutos aparta un pedido su inventario** (`PRODUCT_RESERVATION_MINUTES`) | la empresa |
+| Si un carrito con varios proveedores se puede pagar de una vez | la empresa |
+| Credenciales de Stripe del entorno que vaya a cobrar | operación |
 | Cuántas fotografías admite una versión (hoy cinco, de la captura 6) | producto |
 | Cuándo avisar de que quedan pocas unidades | la empresa |
 | Título editorial de «Selección Z» (campo nuevo + decisión) | producto |

@@ -675,3 +675,95 @@ puede hacer una prueba automática.
 - [ ] En español, inglés y portugués: ninguna clave cruda en pantalla.
 - [ ] Con el texto del sistema ampliado al máximo, ningún botón queda fuera de alcance.
 - [ ] Todas las áreas táctiles llegan a 44×44.
+
+---
+
+## Productos, Incremento 5 (17/09/2026)
+
+**Nada de esta lista esta comprobado.** Son las cosas del pedido que ninguna
+prueba automatica puede ver: el teclado tapando un campo, el navegador que se
+abre y vuelve, el doble toque de verdad y lo que pasa cuando alguien deja el
+checkout a medias.
+
+**Antes de empezar:** la 0076, la 0077 y la 0078 tienen que estar aplicadas, la
+API reiniciada despues, y tiene que haber una politica de venta publicada para
+el pais con el que se pruebe. Sin eso, lo unico que se puede comprobar es que
+las pantallas lo dicen, que tambien esta en esta lista.
+
+### Lo que falta, dicho con palabras
+
+- [ ] Con la venta apagada, el checkout enseña **la lista de lo que falta** y no
+      un error: se leen las cinco condiciones, cada una con su frase.
+- [ ] Sin politica publicada para ese pais, el checkout lo dice y **no** deja
+      seguir.
+- [ ] Con la 0078 sin aplicar, el checkout y «Mis pedidos» dicen que todavia no
+      estan disponibles, y el catalogo, las fotografias, el inventario y la
+      bolsa se siguen usando enteros.
+- [ ] En ninguna de las tres pantallas aparece «Envio: 0,00» ni «Impuestos:
+      0,00».
+- [ ] Sin plazo de incidencias en la politica, **no** aparece «compra
+      protegida».
+
+### El formulario de la direccion
+
+- [ ] Con el teclado abierto se puede llegar a todos los campos y al boton.
+- [ ] El teclado del telefono sale numerico en el campo de telefono.
+- [ ] Faltando varios campos, el pie los nombra **todos**, no el primero.
+- [ ] En Peru, sin distrito no deja seguir; en un pais sin ese nivel, si.
+- [ ] Cambiar el pais borra la aceptacion de las condiciones y vuelve a
+      pedirlas.
+- [ ] Girar el telefono a medias no borra lo escrito.
+- [ ] En ningun sitio se pide la ubicacion, ni se abre un mapa, ni se piden
+      documentos de identidad.
+
+### Las condiciones
+
+- [ ] «Leer las condiciones completas» abre el texto entero y se puede
+      desplazar.
+- [ ] Sin marcar la casilla, el boton de reservar esta desactivado.
+- [ ] Con el lector de pantalla, la casilla se anuncia como casilla y dice si
+      esta marcada.
+
+### Reservar
+
+- [ ] **Doble toque real** en «Reservar y continuar»: se crea **un** pedido, y
+      el inventario baja **una** vez.
+- [ ] Con dos telefonos y una sola unidad: uno reserva y el otro recibe un
+      mensaje que se entiende.
+- [ ] Con un pedido ya abierto, el segundo intento dice cual es y deja ir a el.
+- [ ] Matar la aplicacion justo despues de reservar y volver a entrar: el pedido
+      esta en «Mis pedidos» y el inventario cuadra.
+
+### Pagar, volver y cancelar
+
+- [ ] «Ir a pagar» abre el **navegador del sistema**, no una vista dentro de la
+      aplicacion.
+- [ ] Volver del navegador **sin haber pagado** no deja el pedido como pagado.
+- [ ] Volver con la ruta de cancelacion enseña el aviso de cancelado y el estado
+      real debajo.
+- [ ] Sin conexion, «Ir a pagar» falla con un mensaje que se entiende y el
+      pedido no cambia de estado.
+- [ ] Cancelar pregunta antes, y cancelar dos veces seguidas no da error.
+- [ ] Tras cancelar, las unidades vuelven a estar disponibles en la ficha.
+- [ ] En un pedido pagado **no hay** boton de cancelar.
+
+### La reserva y su reloj
+
+- [ ] Los minutos que quedan bajan al volver a la pantalla, y en cero el boton
+      de pagar se apaga.
+- [ ] Con el reloj del telefono adelantado una hora, la pantalla no marca nada
+      como vencido por su cuenta: quien vence es el servidor.
+
+### Lo que NO puede aparecer
+
+- [ ] En ninguna pantalla hay campo de tarjeta, CVV, caducidad ni PayPal.
+- [ ] En ninguna pantalla se promete correo de confirmacion.
+- [ ] El detalle del pedido no promete transportista ni seguimiento: lo dice.
+
+### En las cuatro anchuras y los tres idiomas
+
+- [ ] Checkout, «Mis pedidos» y detalle a 320, 375, 390 y 768 px, sin desbordes.
+- [ ] En claro y en oscuro.
+- [ ] En español, ingles y portugues: ninguna clave cruda en pantalla.
+- [ ] Atras funciona en las tres y ninguna deja atrapado.
+- [ ] Todas las areas tactiles llegan a 44x44.

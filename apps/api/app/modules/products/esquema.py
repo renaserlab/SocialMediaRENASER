@@ -1,15 +1,17 @@
 """Si las migraciones de Productos están aplicadas en ESTA base.
 
 Misma regla que en Eventos y por la misma razón cara: desplegar código no puede
-exigir que una migración concreta ya esté puesta. La 0070, la 0071 y la 0072 ya
-están aplicadas y verificadas; la 0073, la 0074 y la 0075 se entregan escritas y
-SIN aplicar.
+exigir que una migración concreta ya esté puesta. De la 0070 a la 0075 están
+aplicadas y verificadas; la 0076, la 0077 y la 0078 se entregan escritas y SIN
+aplicar.
 
 QUÉ PASA SIN ELLAS. Cada ruta contesta **503 con su propio código**, y no 404
 —que haría pensar que la ruta está mal escrita— ni 500 —que haría pensar que
 algo se rompió—. Una puerta por migración y no una sola, porque se aplican en
 orden: con la 0074 puesta el inventario ya funciona aunque el carrito no esté, y
-quien vende puede seguir cargando existencias mientras tanto.
+quien vende puede seguir cargando existencias mientras tanto. Lo mismo vale para
+las dos últimas: con la 0077 puesta se pueden leer y publicar las condiciones de
+venta aunque no exista todavía la tabla de pedidos.
 
 LA DE LAS FOTOGRAFÍAS MIRA UNA COLUMNA, no una tabla. La 0073 no crea ninguna:
 le añade estado y medidas a `product_media`, así que preguntar por la tabla

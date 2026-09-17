@@ -171,10 +171,16 @@ compra aceptó.
 
 ## 5. Productos
 
-Reescrita el 12/09/2026 y ampliada el 17/09/2026 con el Incremento 4. La
+Reescrita el 12/09/2026 y ampliada el 17/09/2026 con los Incrementos 4 y 5. La
 vertical existe: hay dominio, admisión con evaluación, catálogo con
-**fotografías reales**, **inventario** y **bolsa**. Lo que sigue sin haber es
-COMPRAR.
+**fotografías reales**, **inventario**, **bolsa**, **condiciones de venta por
+jurisdicción** y **pedido con reserva**.
+
+Lo que sigue sin haber es **cobrar de verdad**: el recorrido llega hasta la
+puerta de la pasarela y ahí se para, porque hacen falta cinco banderas
+encendidas, una clave de Stripe y una política publicada, y ninguna de esas
+decisiones la toma el código. La pantalla no lo disimula: dice con palabras qué
+falta.
 
 ### Comprador
 
@@ -187,10 +193,16 @@ COMPRAR.
 | Informe de evaluación | `/productos/[productId]/evaluacion` | `GET /products/{id}/evaluation` | terminada | nada. El sello lo abre, y enseña la evidencia por dimensión sin la nota interna |
 | Guardados | `/productos/guardados` | `GET /products/saved` + `POST/DELETE .../save` | terminada | nada. Guardar es idempotente y **no es un carrito** |
 | Bolsa con contador | encabezado | `GET /products/counts` | terminada | **la bolsa lleva al CARRITO** y cuenta unidades; guardados tiene su propio acceso al lado y cuenta productos marcados |
-| Tu bolsa | `/productos/carrito` | `GET/DELETE /products/cart`, `POST /products/cart/items`, `PUT/DELETE .../items/{id}` | terminada | nada de este incremento. **No hay botón de pagar**, y el pie lo dice con palabras |
+| Tu bolsa | `/productos/carrito` | `GET/DELETE /products/cart`, `POST /products/cart/items`, `PUT/DELETE .../items/{id}` | terminada | el botón de continuar **solo aparece si el servidor dice que se puede**; si no, el pie sigue diciendo con palabras que todavía no se compra |
+| Comprar (revisar, dirección y condiciones) | `/productos/checkout` | `GET /products/checkout/preparation`, `GET /products/policies`, `POST /products/orders` | terminada | **no cobra**: reserva y deja el pedido esperando pago. Sin política publicada enseña qué falta |
+| Mis pedidos | `/productos/pedidos` | `GET /products/orders` | terminada | nada |
+| Detalle del pedido y vuelta del pago | `/productos/pedidos/[orderId]` | `GET /products/orders/{id}`, `POST .../checkout`, `POST .../cancel` | terminada | **la vuelta del navegador no confirma dinero**: la pantalla pregunta el estado al servidor |
 | Valoración real (4,8 · 184 compras verificadas) | — | — | **no existe** | reseñas de producto por línea de pedido entregada. Incremento 8 |
-| Compra protegida y plazos | — | — | **no existe** | transportista, cobertura y condiciones aprobadas. Incrementos 5–7 |
-| Barra fija de compra | — | — | **no existe** | pedido y pago. En la ficha hay «Añadir a la bolsa», que NO es comprar; `purchasable` sigue en `false` |
+| Compra protegida y plazos | dentro del checkout y del pedido | `GET /products/policies` | **parcial** | los plazos salen de la política publicada. **Sin plazo de incidencias NO se dice «compra protegida»**: se dice que esa jurisdicción todavía no lo fija |
+| Barra fija de compra | — | — | **no existe** | en la ficha hay «Añadir a la bolsa», que NO es comprar. Comprar vive en la bolsa y lleva al checkout |
+| Impuestos y envío | — | — | **no existen** | entidad fiscal, transportista y tarifas. **No se pintan como cero**: el checkout dice con palabras que están sin decidir |
+| Transportista y seguimiento | — | — | **no existen** | Incrementos 6 y 7. El detalle del pedido lo dice con palabras |
+| Devolución, reembolso y garantía | — | — | **no existen** | Incrementos 8 y 9. Un aviso de devolución se anota para conciliar y **no deshace nada** |
 
 ### Proveedor
 
@@ -201,7 +213,8 @@ COMPRAR.
 | Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | el borrador **ya no lleva galería**: las fotos tienen su pantalla |
 | Fotografías del producto | `/proveedor/productos/[productId]/fotos` | `GET/POST .../media`, `PUT .../media/order`, `DELETE .../media/{id}` | terminada | **el archivo lo sube la API**, no el móvil; nace pendiente de aprobación |
 | Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar, liberar y despachar existen en el servidor y **no las llama ninguna ruta**: son del checkout |
-| Pedidos, incidencias, saldos | — | — | **no existen** | incrementos 5 a 7. No hay pantalla vacía que los simule |
+| Pedidos pagados de mi tienda | — (ruta de API) | `GET /products/seller/orders`, `GET .../orders/{id}` | **backend terminado, sin pantalla** | la pantalla es del Incremento 6, cuando haya algo que hacer con el pedido: hoy solo se podría mirar. **Solo los PAGADOS, y sin el cobro ni el comprador** |
+| Incidencias y saldos | — | — | **no existen** | Incrementos 7 a 9. No hay pantalla vacía que los simule |
 
 ### Administración
 
@@ -212,19 +225,24 @@ COMPRAR.
 | Listado y permanencia | `/admin/productos` | `GET /admin/products` + `transition`/`publish`/`suspend` | terminada | las condiciones de una **aprobación condicionada**: sin ellas ese estado no publica |
 | Fotografías pendientes | `/admin/productos/fotos` | `GET /admin/products/media/pending`, `POST .../media/{id}/decide` | terminada | nada. Un rechazo exige motivo, y nadie aprueba la foto de su propio producto |
 | Intervenir el inventario | dentro del listado | `GET/POST /admin/products/{id}/inventory[/adjust]` | terminada | solo `admin`, con motivo y con rastro. Moderación no mueve inventario |
+| Publicar las condiciones de venta de un país | — (ruta de API) | `GET/POST /admin/products/policies`, `POST .../policies/{id}/retire` | **backend terminado, sin pantalla** | el texto legal lo escribe una persona con su abogado; una pantalla para redactarlo invitaría a improvisarlo. **Sin política publicada no se vende** |
+| Pedidos que necesitan una persona | — (ruta de API) | `GET /admin/products/orders/review` | **backend terminado, sin pantalla** | hoy solo caen ahí los pagos tardíos, y no hay ninguno: la venta está apagada |
+| Vencer reservas caducadas | — (planificador externo) | `POST /admin/products/orders/expire` | terminada | **no es un temporizador dentro de FastAPI**: la API puede tener varias réplicas. Lo llama un planificador de fuera |
 
 ### Lo que esta matriz dice, en una frase
 
 El recorrido está completo en las dos direcciones: **Explorar → Productos →
-buscar → ficha de un producto aprobado → añadir a la bolsa → ver la bolsa**, y
-**el proveedor postula → sube fotos → Z las aprueba → Z evalúa → Z publica →
-el proveedor carga existencias**.
+buscar → ficha de un producto aprobado → añadir a la bolsa → ver la bolsa →
+comprar → dirección y condiciones → pedido reservado → mis pedidos**, y **el
+proveedor postula → sube fotos → Z las aprueba → Z evalúa → Z publica → el
+proveedor carga existencias**.
 
-Lo que queda fuera no es una pantalla sin conectar: son dos bloques de la ficha
-que no tienen datos porque el contrato que los sostiene —reseñas y entrega— es
-de incrementos posteriores; **pagar**, que no existe y por eso no hay botón; y
-**el acceso de Servicios**, que sigue siendo el único de los cuatro chips que no
-lleva a ninguna parte, a propósito y avisando.
+Lo que queda fuera no es una pantalla sin conectar. Son: la valoración real, que
+necesita reseñas del Incremento 8; **el cobro**, que llega hasta la puerta de la
+pasarela y ahí se para porque faltan cinco banderas, una clave y una política, y
+la pantalla lo dice; **la entrega**, que es del Incremento 6; y **el acceso de
+Servicios**, que sigue siendo el único de los cuatro chips que no lleva a ninguna
+parte, a propósito y avisando.
 
 ## 6. Alumno / comprador
 
