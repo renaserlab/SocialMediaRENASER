@@ -434,6 +434,45 @@ async def sembrar(url: str, cuenta: str | None, *, limpiar: bool = False) -> Non
             creados += 1
             print(f"  publicado: {datos['name']}")
 
+    # ------------------------------------------------------------------ #
+    # Las condiciones de venta, PARA PODER RECORRER EL CHECKOUT EN LOCAL
+    # ------------------------------------------------------------------ #
+    # ESTE TEXTO NO ES UNA POLÍTICA DE VERDAD, y lo dice en su primera línea.
+    # Existe para que las pantallas del Incremento 5 se puedan ver funcionando
+    # en la base local; la política real la escribe una persona y la publica
+    # administración por su ruta, con los plazos que decida la empresa.
+    #
+    # NO SE PUEDE APLICAR A LA BASE GESTIONADA: el guardián de arriba solo
+    # admite `localhost`, y además rechaza la URL del `.env`.
+    from app.modules.products import politicas as _politicas
+
+    async with Sesion() as db:
+        if await _politicas.vigente(db, pais="PE") is None:
+            await _politicas.publicar(
+                db,
+                pais="PE",
+                entidad="ENTIDAD DE PRUEBA LOCAL (no es la vendedora real)",
+                moneda="PEN",
+                texto=(
+                    "CONDICIONES DE PRUEBA PARA REVISAR LA APLICACIÓN EN LOCAL. "
+                    "No son las condiciones de venta de Z y no obligan a nadie. "
+                    "Los plazos que aparecen abajo están puestos para que las "
+                    "pantallas tengan algo que enseñar; los de verdad los decide "
+                    "la empresa con su abogado y se publican por la ruta de "
+                    "administración."
+                ),
+                incident_report_hours=72,
+                return_shipment_days=7,
+                withdrawal_days=7,
+                buyer_pays_return_for_remorse=True,
+                seller_pays_return_for_defect=True,
+                warranty_rules_url=None,
+                effective_at=None,
+                actor_id=None,
+            )
+            await db.commit()
+            print("  condiciones de venta de PRUEBA publicadas para PE")
+
     await motor.dispose()
     print(f"\n{creados} productos publicados en la base local.")
     print("Ninguna valoración, ninguna compra verificada y ningún plazo: no existen.")
