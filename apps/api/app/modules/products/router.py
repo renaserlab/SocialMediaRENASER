@@ -20,27 +20,47 @@ from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ServiceUnavailableError
+from app.core.exceptions import NotFoundError, ServiceUnavailableError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.gobernanza import auditoria
 from app.modules.products import applications, carts, catalog, esquema, evaluations
 from app.modules.products import inventory as almacen
 from app.modules.products import media as fotos
+from app.modules.products import pagos as cobros
+from app.modules.products import pedidos
+from app.modules.products import politicas
 from app.modules.products import permissions as permisos
 from app.modules.products import service
 from app.modules.products import states as maquina
 from app.modules.products.models import (
     ACTOR_ADMINISTRACION,
+    PEDIDO_PAGADO,
     ACTOR_PROVEEDOR,
     DIMENSIONES,
     MAXIMO_BYTES_DE_LA_FOTO,
     MAXIMO_DE_FOTOS,
     Product,
     ProductMedia,
+    ProductOrder,
+    ProductPolicy,
     ProductSeller,
     ProductVersion,
 )
 from app.modules.products.schemas import (
+    CheckoutProductoRead,
+    CondicionesRead,
+    DireccionRead,
+    EventoDelPedido,
+    GrupoDelCarrito,
+    LineaDelPedido,
+    PedidoDelProveedor,
+    PedidoRead,
+    PedidoRequest,
+    PedidoResumen,
+    PoliticaRead,
+    PreparacionRead,
+    PublicarPolitica,
+    VencimientoRead,
     AjusteRequest,
     AnadirAlCarrito,
     BusquedaRead,
@@ -110,10 +130,97 @@ def _carrito(c: carts.Carrito) -> CarritoRead:
         units=c.units,
         lines=c.lines,
         blocked_lines=c.blocked_lines,
-        #: NO SE LEE DE `c`: se escribe aquí para que encender la compra tenga
-        #: que pasar por este fichero y no por un campo que alguien copie.
-        purchasable=False,
+        #: SE ESCRIBE AQUÍ, y las dos condiciones a la vez: que la bolsa
+        #: tenga algo comprable Y que la venta esté habilitada de verdad. La
+        #: segunda son cinco banderas y no se lee de `c`: encenderla tiene que
+        #: pasar por este fichero, no por un campo que alguien copie.
+        purchasable=bool(c.purchasable) and not pedidos.por_que_no_se_puede_vender(),
         disponible=c.disponible,
+    )
+
+
+def _condiciones(politica) -> CondicionesRead:
+    return CondicionesRead(**politicas.condiciones_de(politica).__dict__)
+
+
+def _politica(politica) -> PoliticaRead:
+    return PoliticaRead(
+        **politicas.condiciones_de(politica).__dict__,
+        status=politica.status,
+        published_at=politica.published_at,
+    )
+
+
+def _linea_del_pedido(linea) -> LineaDelPedido:
+    return LineaDelPedido(
+        id=linea.id,
+        product_id=linea.product_id,
+        version_id=linea.version_id,
+        variant_id=linea.variant_id,
+        sku=linea.sku,
+        name=linea.name_snapshot,
+        variant_name=linea.variant_name_snapshot,
+        unit_price_minor=int(linea.unit_price_minor),
+        quantity=int(linea.quantity),
+        subtotal_minor=int(linea.subtotal_minor),
+    )
+
+
+def _direccion(fila) -> DireccionRead | None:
+    if fila is None:
+        return None
+    return DireccionRead(
+        recipient_name=fila.recipient_name,
+        phone=fila.phone,
+        country_code=fila.country_code,
+        region=fila.region,
+        city=fila.city,
+        district=fila.district,
+        address_line=fila.address_line,
+        reference=fila.reference,
+        postal_code=fila.postal_code,
+        instructions=fila.instructions,
+    )
+
+
+async def _pedido(db: AsyncSession, orden) -> PedidoRead:
+    """El pedido entero, para quien lo hizo."""
+    lineas = await pedidos.lineas_de(db, orden.id)
+    direccion = await pedidos.direccion_de(db, orden.id)
+    historial = await pedidos.historial_de(db, orden.id)
+    vendedor = await db.get(ProductSeller, orden.seller_id)
+    politica = await db.get(ProductPolicy, orden.policy_id)
+    return PedidoRead(
+        id=orden.id,
+        status=orden.status,
+        seller_id=orden.seller_id,
+        seller_name=vendedor.display_name if vendedor is not None else None,
+        currency=orden.currency,
+        subtotal_minor=int(orden.subtotal_minor),
+        total_minor=int(orden.total_minor),
+        reserved_until=orden.reserved_until,
+        paid_at=orden.paid_at,
+        cancelled_at=orden.cancelled_at,
+        expired_at=orden.expired_at,
+        failed_at=orden.failed_at,
+        review_reason=orden.review_reason,
+        #: LA POLITICA QUE ACEPTO, leida por su identificador. Si alguien la
+        #: retirase, el pedido sigue diciendo cual fue: por eso la fila no se
+        #: borra nunca.
+        policy=_condiciones(politica) if politica is not None else None,
+        address=_direccion(direccion),
+        items=[_linea_del_pedido(l) for l in lineas],
+        history=[
+            EventoDelPedido(
+                from_status=e.from_status,
+                to_status=e.to_status,
+                actor_role=e.actor_role,
+                reason=e.reason,
+                created_at=e.created_at,
+            )
+            for e in historial
+        ],
+        created_at=orden.created_at,
     )
 
 
@@ -892,6 +999,223 @@ async def contadores(
 
 
 # --------------------------------------------------------------------------- #
+# Condiciones de venta y pedido (Incremento 5)
+#
+# TODAS ANTES DE `/{product_id}`: si fueran despues, FastAPI resolveria
+# `orders` como un identificador de producto y la pantalla recibiria un 404 sin
+# saber por que.
+# --------------------------------------------------------------------------- #
+@router.get("/policies", response_model=CondicionesRead)
+async def condiciones_de_venta(
+    country: str = Query(min_length=2, max_length=2),
+    db: AsyncSession = Depends(get_db),
+) -> CondicionesRead:
+    """Las condiciones que rigen HOY en ese pais.
+
+    SIN POLITICA PUBLICADA CONTESTA 409 con `product_policy_not_configured`, y
+    no 404: la ruta existe y el pais puede estar bien escrito; lo que falta es
+    una decision de la empresa. Esta ruta es publica a proposito: las
+    condiciones de venta se leen antes de tener una sesion.
+    """
+    await esquema.exigir_politicas(db)
+    return _condiciones(await politicas.exigir_vigente(db, pais=country))
+
+
+@router.get("/checkout/preparation", response_model=PreparacionRead)
+async def preparacion_del_checkout(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PreparacionRead:
+    """Si hoy se puede comprar, y QUE FALTA si no.
+
+    NO FALLA CON 503 CUANDO LA VENTA ESTA APAGADA, y es deliberado: esta ruta
+    existe justamente para contar por que. Un 503 dejaria a la pantalla sin
+    poder explicar nada.
+    """
+    p = await pedidos.preparar(db, usuario_id=current_user.id)
+    return PreparacionRead(
+        disponible=p.disponible,
+        pending_configuration=p.pending_configuration,
+        countries_with_policy=p.countries_with_policy,
+        groups=[GrupoDelCarrito(**g.__dict__) for g in p.groups],
+        open_order_id=p.open_order_id,
+    )
+
+
+@router.get("/orders", response_model=list[PedidoResumen])
+async def mis_pedidos(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PedidoResumen]:
+    """Mis pedidos, los mas nuevos primero."""
+    ordenes = await pedidos.mis_pedidos(db, usuario_id=current_user.id)
+    salida: list[PedidoResumen] = []
+    for orden in ordenes:
+        lineas = await pedidos.lineas_de(db, orden.id)
+        vendedor = await db.get(ProductSeller, orden.seller_id)
+        salida.append(
+            PedidoResumen(
+                id=orden.id,
+                status=orden.status,
+                seller_name=vendedor.display_name if vendedor is not None else None,
+                currency=orden.currency,
+                total_minor=int(orden.total_minor),
+                units=sum(int(l.quantity) for l in lineas),
+                reserved_until=orden.reserved_until,
+                created_at=orden.created_at,
+            )
+        )
+    return salida
+
+
+@router.post("/orders", response_model=PedidoRead, status_code=201)
+async def crear_pedido(
+    cuerpo: PedidoRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", max_length=200
+    ),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoRead:
+    """Convierte lo que hay en la bolsa de UN proveedor en un pedido reservado.
+
+    NO COBRA NADA. Reserva las unidades y deja el pedido esperando pago; abrir
+    el cobro es la ruta siguiente, y a proposito: es una llamada a un tercero
+    que no puede ocurrir con las filas del almacen bloqueadas.
+
+    LA MISMA `Idempotency-Key` NO CREA DOS PEDIDOS, y reutilizarla con otro
+    cuerpo es un conflicto: quien reintenta con otro contenido no reintenta.
+    """
+    ensure_uuid(cuerpo.seller_id, "Proveedor no encontrado.")
+    ensure_uuid(cuerpo.policy_id, "Condiciones de venta no encontradas.")
+    creado = await pedidos.crear(
+        db,
+        usuario_id=current_user.id,
+        seller_id=cuerpo.seller_id,
+        direccion=cuerpo.address.model_dump(),
+        policy_id=cuerpo.policy_id,
+        policy_terms_sha256=cuerpo.policy_terms_sha256,
+        clave=idempotency_key or "",
+    )
+    return await _pedido(db, creado.orden)
+
+
+@router.get("/orders/{order_id}", response_model=PedidoRead)
+async def mi_pedido(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoRead:
+    """Un pedido mio. EL AJENO ES UN 404, nunca un 403.
+
+    ES TAMBIEN LA RUTA DE LA VUELTA DEL NAVEGADOR: quien regresa de Stripe
+    pregunta aqui, porque un parametro en la URL no confirma dinero.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden = await pedidos.leer(db, orden_id=order_id, usuario_id=current_user.id)
+    return await _pedido(db, orden)
+
+
+@router.post("/orders/{order_id}/checkout", response_model=CheckoutProductoRead)
+async def iniciar_el_pago(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CheckoutProductoRead:
+    """Abre el cobro en la pasarela. NO MARCA NADA COMO PAGADO."""
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden = await pedidos.leer(db, orden_id=order_id, usuario_id=current_user.id)
+    intento = await cobros.iniciar_pago(
+        db, orden=orden, correo=current_user.email or ""
+    )
+    return CheckoutProductoRead(
+        order_id=orden.id,
+        checkout_url=intento.checkout_url,
+        provider=intento.provider,
+        amount_minor=int(orden.total_minor),
+        currency=orden.currency,
+    )
+
+
+@router.post("/orders/{order_id}/cancel", response_model=PedidoRead)
+async def cancelar_el_pedido(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoRead:
+    """Cancela un pedido ANTES de pagarlo y suelta lo que apartaba.
+
+    CANCELAR LO YA CANCELADO NO ES UN ERROR: devuelve lo mismo.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden = await pedidos.cancelar(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    return await _pedido(db, orden)
+
+
+# --------------------------------------------------------------------------- #
+# Lo del proveedor
+# --------------------------------------------------------------------------- #
+@router.get("/seller/orders", response_model=list[PedidoDelProveedor])
+async def pedidos_del_proveedor(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PedidoDelProveedor]:
+    """Los pedidos PAGADOS de mi tienda, y solo los mios.
+
+    NI COBROS NI COMPRADORES. Lo que hace falta para preparar un paquete es que
+    mandar y a donde; con quien pago y con que tarjeta no se prepara nada.
+    """
+    vendedor = await permisos.exigir_vendedor_activo(db, current_user.id)
+    ordenes = await pedidos.del_proveedor(db, seller_id=vendedor.id)
+    salida: list[PedidoDelProveedor] = []
+    for orden in ordenes:
+        salida.append(
+            PedidoDelProveedor(
+                id=orden.id,
+                status=orden.status,
+                currency=orden.currency,
+                total_minor=int(orden.total_minor),
+                paid_at=orden.paid_at,
+                address=_direccion(await pedidos.direccion_de(db, orden.id)),
+                items=[
+                    _linea_del_pedido(l) for l in await pedidos.lineas_de(db, orden.id)
+                ],
+                created_at=orden.created_at,
+            )
+        )
+    return salida
+
+
+@router.get("/seller/orders/{order_id}", response_model=PedidoDelProveedor)
+async def pedido_del_proveedor(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedor:
+    """Uno de mis pedidos pagados. EL DE OTRO PROVEEDOR ES UN 404."""
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    vendedor = await permisos.exigir_vendedor_activo(db, current_user.id)
+    await esquema.exigir_pedidos(db)
+    orden = await db.get(ProductOrder, order_id)
+    #: LA DIRECCION SOLO CUANDO HAY QUE ATENDERLO. Un pedido sin pagar no le
+    #: ensena a nadie donde vive quien lo intento.
+    if orden is None or orden.seller_id != vendedor.id or orden.status != PEDIDO_PAGADO:
+        raise NotFoundError("Pedido no encontrado.", code="product_order_not_found")
+    return PedidoDelProveedor(
+        id=orden.id,
+        status=orden.status,
+        currency=orden.currency,
+        total_minor=int(orden.total_minor),
+        paid_at=orden.paid_at,
+        address=_direccion(await pedidos.direccion_de(db, orden.id)),
+        items=[_linea_del_pedido(l) for l in await pedidos.lineas_de(db, orden.id)],
+        created_at=orden.created_at,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # La ficha. AL FINAL, para no comerse las rutas estáticas.
 # --------------------------------------------------------------------------- #
 @router.get("/{product_id}", response_model=FichaRead)
@@ -1282,6 +1606,136 @@ async def listar(
             )
         )
     return salida
+
+
+# --------------------------------------------------------------------------- #
+# Condiciones de venta y conciliacion (Incremento 5)
+#
+# EL ROL VA ANTES DE LA PUERTA DE ESQUEMA, como en el resto: si fuera al reves,
+# una cuenta sin permisos distinguiria un 503 de un 403 y averiguaria que
+# migraciones estan aplicadas en produccion.
+# --------------------------------------------------------------------------- #
+@admin_router.get("/policies", response_model=list[PoliticaRead])
+async def politicas_de_un_pais(
+    country: str = Query(min_length=2, max_length=2),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PoliticaRead]:
+    """Todas las versiones de un pais, las mas nuevas primero."""
+    await permisos.exigir_publicador(db, current_user.id)
+    await esquema.exigir_politicas(db)
+    return [_politica(p) for p in await politicas.historial(db, pais=country)]
+
+
+@admin_router.post("/policies", response_model=PoliticaRead, status_code=201)
+async def publicar_politica(
+    cuerpo: PublicarPolitica,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PoliticaRead:
+    """Publica la version siguiente de un pais.
+
+    ES LO QUE HABILITA LA VENTA EN ESA JURISDICCION, y por eso lo hace
+    administracion y no curaduria: es el mismo permiso que poner el sello de Z
+    en el catalogo.
+
+    LA VERSION LA PONE EL SERVIDOR. Dejarla al cliente permitiria publicar la 7
+    antes que la 6, y un pedido que dice «version 6» apuntaria a la que se
+    escribio despues.
+    """
+    await permisos.exigir_publicador(db, current_user.id)
+    await esquema.exigir_politicas(db)
+    politica = await politicas.publicar(
+        db,
+        pais=cuerpo.country_code,
+        entidad=cuerpo.seller_entity,
+        moneda=cuerpo.currency,
+        texto=cuerpo.terms,
+        incident_report_hours=cuerpo.incident_report_hours,
+        return_shipment_days=cuerpo.return_shipment_days,
+        withdrawal_days=cuerpo.withdrawal_days,
+        buyer_pays_return_for_remorse=cuerpo.buyer_pays_return_for_remorse,
+        seller_pays_return_for_defect=cuerpo.seller_pays_return_for_defect,
+        warranty_rules_url=cuerpo.warranty_rules_url,
+        effective_at=cuerpo.effective_at,
+        actor_id=current_user.id,
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role="admin",
+        action="product_policy.publish",
+        entity_type="product_policy",
+        entity_id=politica.id,
+        payload={
+            "country": politica.country_code,
+            "version": int(politica.version),
+            "terms_sha256": politica.terms_sha256,
+        },
+    )
+    await db.commit()
+    return _politica(politica)
+
+
+@admin_router.post("/policies/{policy_id}/retire", response_model=PoliticaRead)
+async def retirar_politica(
+    policy_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PoliticaRead:
+    """Deja de vender bajo esa version. NO TOCA NINGUN PEDIDO."""
+    await permisos.exigir_publicador(db, current_user.id)
+    await esquema.exigir_politicas(db)
+    ensure_uuid(policy_id, "Condiciones de venta no encontradas.")
+    politica = await politicas.retirar(
+        db, politica_id=policy_id, actor_id=current_user.id
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role="admin",
+        action="product_policy.retire",
+        entity_type="product_policy",
+        entity_id=politica.id,
+        payload={"country": politica.country_code, "version": int(politica.version)},
+    )
+    await db.commit()
+    return _politica(politica)
+
+
+@admin_router.get("/orders/review", response_model=list[PedidoRead])
+async def pedidos_en_revision(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PedidoRead]:
+    """Los pedidos que necesitan que los mire una persona.
+
+    HOY SON LOS PAGOS QUE LLEGARON TARDE: el dinero entro y la reserva ya no
+    estaba. Ni se cobra en silencio ni se niega en silencio.
+    """
+    await permisos.exigir_evaluador(db, current_user.id)
+    await esquema.exigir_pedidos(db)
+    return [await _pedido(db, o) for o in await pedidos.en_revision(db)]
+
+
+@admin_router.post("/orders/expire", response_model=VencimientoRead)
+async def vencer_pedidos(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VencimientoRead:
+    """Suelta lo que apartaban los pedidos cuya reserva ya expiro.
+
+    NO HAY NINGUN TEMPORIZADOR DENTRO DE FASTAPI, y no es un olvido: la API
+    puede correr con varias replicas y un temporizador por replica es el mismo
+    barrido ejecutandose tantas veces como procesos haya. Esta ruta la llama un
+    planificador de fuera.
+
+    IDEMPOTENTE: llamarla dos veces seguidas devuelve cero la segunda porque ya
+    no queda nada que vencer.
+    """
+    await permisos.exigir_publicador(db, current_user.id)
+    await esquema.exigir_pedidos(db)
+    return VencimientoRead(expired=await pedidos.vencer(db))
 
 
 @admin_router.post("/{product_id}/transition", response_model=ProductoDelProveedor)

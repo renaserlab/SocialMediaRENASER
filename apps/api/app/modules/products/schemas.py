@@ -641,3 +641,229 @@ class ContadoresRead(BaseModel):
 
     cart_units: int = 0
     saved_products: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# Condiciones de venta (0077)
+# --------------------------------------------------------------------------- #
+class CondicionesRead(BaseModel):
+    """Lo que se le ensena a quien compra ANTES de pagar.
+
+    LOS PLAZOS VIAJAN NULOS cuando nadie los ha decidido. Un cero en
+    `withdrawal_days` diria que no hay derecho a desistir, que es una afirmacion
+    legal; un nulo dice lo que pasa de verdad: que falta decidirlo.
+    """
+
+    policy_id: str
+    country_code: str
+    version: int
+    seller_entity: str
+    currency: str
+    terms: str
+    terms_sha256: str
+    incident_report_hours: int | None = None
+    return_shipment_days: int | None = None
+    withdrawal_days: int | None = None
+    buyer_pays_return_for_remorse: bool | None = None
+    seller_pays_return_for_defect: bool | None = None
+    warranty_rules_url: str | None = None
+    effective_at: datetime | None = None
+
+
+class PoliticaRead(CondicionesRead):
+    """La misma, con lo que solo ve administracion."""
+
+    status: str
+    published_at: datetime | None = None
+
+
+class PublicarPolitica(BaseModel):
+    """Publicar la version siguiente de un pais. NADA TIENE VALOR POR DEFECTO.
+
+    Los cinco plazos y banderas son obligatorios porque el CHECK de la base
+    tampoco deja publicar sin ellos: una politica a medias no puede regir una
+    venta. La VERSION no esta aqui: la pone el servidor.
+    """
+
+    country_code: str = Field(min_length=2, max_length=2)
+    seller_entity: str = Field(min_length=2, max_length=200)
+    currency: str = Field(min_length=3, max_length=3)
+    terms: str = Field(min_length=50)
+    incident_report_hours: int = Field(ge=1, le=8760)
+    return_shipment_days: int = Field(ge=1, le=365)
+    withdrawal_days: int = Field(ge=0, le=365)
+    buyer_pays_return_for_remorse: bool
+    seller_pays_return_for_defect: bool
+    warranty_rules_url: str | None = None
+    effective_at: datetime | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Preparacion del checkout
+# --------------------------------------------------------------------------- #
+class GrupoDelCarrito(BaseModel):
+    """Lo del carrito que es de un mismo proveedor. UN PEDIDO, UN PROVEEDOR."""
+
+    seller_id: str
+    seller_name: str
+    item_ids: list[str] = Field(default_factory=list)
+    units: int = 0
+    currency: str | None = None
+    subtotal_minor: int | None = None
+    purchasable: bool = False
+    issues: list[str] = Field(default_factory=list)
+
+
+class PreparacionRead(BaseModel):
+    """Si hoy se puede comprar, y QUE FALTA si no.
+
+    `pending_configuration` no es un detalle tecnico que se oculte: es la
+    respuesta honesta a «por que no puedo comprar». La pantalla dice «pendiente
+    de configuracion» en vez de pintar un boton que no lleva a ningun sitio.
+    """
+
+    disponible: bool = False
+    pending_configuration: list[str] = Field(default_factory=list)
+    countries_with_policy: list[str] = Field(default_factory=list)
+    groups: list[GrupoDelCarrito] = Field(default_factory=list)
+    open_order_id: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# El pedido (0078)
+# --------------------------------------------------------------------------- #
+class DireccionRequest(BaseModel):
+    """La direccion de ESTE envio. NI COORDENADAS NI DOCUMENTO DE IDENTIDAD."""
+
+    recipient_name: str = Field(min_length=2, max_length=150)
+    phone: str = Field(min_length=5, max_length=30)
+    country_code: str = Field(min_length=2, max_length=2)
+    region: str = Field(min_length=1, max_length=120)
+    city: str = Field(min_length=1, max_length=120)
+    district: str | None = Field(default=None, max_length=120)
+    address_line: str = Field(min_length=5, max_length=300)
+    reference: str | None = Field(default=None, max_length=300)
+    postal_code: str | None = Field(default=None, max_length=20)
+    instructions: str | None = Field(default=None, max_length=500)
+
+
+class DireccionRead(DireccionRequest):
+    pass
+
+
+class PedidoRequest(BaseModel):
+    """Crear el pedido. NO LLEVA IMPORTES, y es deliberado.
+
+    El subtotal y el total los calcula el servidor con los precios de ahora. Un
+    campo `total` aqui seria el cliente diciendo cuanto paga.
+
+    LA ACEPTACION VIAJA CON LA HUELLA del texto que se ensenó: si entre leerlo y
+    pulsar comprar se publico otra version, el servidor lo nota y para.
+    """
+
+    seller_id: str
+    address: DireccionRequest
+    policy_id: str
+    policy_terms_sha256: str = Field(min_length=64, max_length=64)
+
+
+class LineaDelPedido(BaseModel):
+    """Una linea COMPRADA. Todo copiado: releerlo haria que un pedido de hace
+    un mes cambiara de contenido cuando el proveedor republica."""
+
+    id: str
+    product_id: str
+    version_id: str
+    variant_id: str
+    sku: str
+    name: str
+    variant_name: str | None = None
+    unit_price_minor: int
+    quantity: int
+    subtotal_minor: int
+
+
+class EventoDelPedido(BaseModel):
+    """Un cambio de estado. SIN DATOS PERSONALES."""
+
+    from_status: str | None = None
+    to_status: str
+    actor_role: str
+    reason: str | None = None
+    created_at: datetime
+
+
+class PedidoRead(BaseModel):
+    """El pedido entero, para quien lo hizo."""
+
+    id: str
+    status: str
+    seller_id: str
+    seller_name: str | None = None
+    currency: str
+    subtotal_minor: int
+    total_minor: int
+    #: NULOS mientras no haya pasado. `null` es «todavia no», no cero.
+    reserved_until: datetime | None = None
+    paid_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    expired_at: datetime | None = None
+    failed_at: datetime | None = None
+    review_reason: str | None = None
+    policy: CondicionesRead | None = None
+    address: DireccionRead | None = None
+    items: list[LineaDelPedido] = Field(default_factory=list)
+    history: list[EventoDelPedido] = Field(default_factory=list)
+    created_at: datetime
+
+
+class PedidoResumen(BaseModel):
+    """Una fila de «Mis pedidos»."""
+
+    id: str
+    status: str
+    seller_name: str | None = None
+    currency: str
+    total_minor: int
+    units: int = 0
+    reserved_until: datetime | None = None
+    created_at: datetime
+
+
+class PedidoDelProveedor(BaseModel):
+    """Lo MINIMO que necesita quien tiene que preparar el paquete.
+
+    NO LLEVA NI EL COBRO NI EL COMPRADOR. Un proveedor no necesita saber con
+    que tarjeta se pago ni quien es la persona que compro: necesita saber que
+    mandar y a donde.
+    """
+
+    id: str
+    status: str
+    currency: str
+    total_minor: int
+    paid_at: datetime | None = None
+    address: DireccionRead | None = None
+    items: list[LineaDelPedido] = Field(default_factory=list)
+    created_at: datetime
+
+
+class CheckoutProductoRead(BaseModel):
+    """A donde mandar a quien paga.
+
+    LA VUELTA DEL NAVEGADOR NO CONFIRMA DINERO: quien vuelva por `return_url`
+    tiene que preguntarle el estado al servidor.
+    """
+
+    order_id: str
+    checkout_url: str
+    provider: str
+    amount_minor: int
+    currency: str
+
+
+class VencimientoRead(BaseModel):
+    """Cuantos pedidos solto el barrido. Idempotente: llamarlo dos veces
+    seguidas devuelve cero la segunda porque ya no queda nada que vencer."""
+
+    expired: int = 0
