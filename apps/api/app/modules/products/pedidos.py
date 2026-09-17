@@ -68,6 +68,7 @@ from app.modules.products.models import (
     PEDIDO_PAGADO,
     PEDIDO_PENDIENTE,
     PEDIDO_PROCESANDO,
+    PEDIDO_RETIENE,
     PEDIDO_VENCIDO,
     ProductCartItem,
     ProductOrder,
@@ -352,11 +353,13 @@ async def preparar(db: AsyncSession, *, usuario_id: str) -> Preparacion:
         )
     grupos.sort(key=lambda g: g.seller_name.lower())
 
+    #: EL MISMO CRITERIO QUE EL CANDADO DE `crear`: el que todavía aparta.
     abierto = await db.scalar(
         select(ProductOrder.id)
         .where(
             ProductOrder.buyer_id == usuario_id,
-            ProductOrder.status.in_(PEDIDO_EN_CURSO),
+            ProductOrder.status.in_(PEDIDO_RETIENE),
+            ProductOrder.reservation_settled_at.is_(None),
         )
         .order_by(ProductOrder.created_at.desc())
         .limit(1)
@@ -498,10 +501,17 @@ async def crear(
     #: NO ES UNA REGLA COMERCIAL, ES UNA PROTECCIÓN DEL ALMACÉN. Abrir pedidos
     #: sin pagar ninguno apartaría existencias sin límite mientras la reserva
     #: siga viva. Se dice cuál es para poder ir a terminarlo o cancelarlo.
+    #:
+    #: SE MIRA SI TODAVÍA APARTA, no si todavía se puede pagar. Con
+    #: `PEDIDO_EN_CURSO` un pedido fallido no contaba, y el mismo comprador
+    #: podía encadenar intentos apartando cada vez más existencias. En cuanto
+    #: la reserva se suelta —al cancelar, al vencer— el candado se levanta
+    #: solo, porque lo que lo cierra es `reservation_settled_at`.
     abierto = await db.scalar(
         select(ProductOrder).where(
             ProductOrder.buyer_id == usuario_id,
-            ProductOrder.status.in_(PEDIDO_EN_CURSO),
+            ProductOrder.status.in_(PEDIDO_RETIENE),
+            ProductOrder.reservation_settled_at.is_(None),
         )
     )
     if abierto is not None:
@@ -533,9 +543,14 @@ async def crear(
         await db.rollback()
         raise VariosProveedores("Elige de qué proveedor quieres comprar.")
 
-    bloqueadas = sorted(
-        {i for l in mias for i in l.issues if i in carts.BLOQUEANTES}
-    )
+    #: UNA VERSIÓN REPUBLICADA BLOQUEA LA COMPRA, aunque en la bolsa solo
+    #: avise. La línea del carrito apunta a la versión con la que se metió, y
+    #: `precio_de` lee el precio DE ESA VERSIÓN: si el proveedor republicó, el
+    #: pedido se congelaría al precio de una versión que ya no está en catálogo
+    #: —ni el que se ofrece hoy ni el que nadie acepta— y el cobro saldría por
+    #: ese importe. En la bolsa basta con avisar; para cobrar, no.
+    bloqueantes = set(carts.BLOQUEANTES) | {carts.VERSION_CAMBIO}
+    bloqueadas = sorted({i for l in mias for i in l.issues if i in bloqueantes})
     if bloqueadas:
         detalle = {"issues": bloqueadas}
         await db.rollback()
@@ -670,13 +685,22 @@ async def crear(
                 "Hay algo en tu bolsa sin unidad de almacén.",
                 details={"product_id": product_id},
             )
+        #: SIN EL IDENTIFICADOR DE QUIEN COMPRA. Firmar el movimiento con su
+        #: cuenta lo dejaba a la vista del proveedor: la ruta de movimientos de
+        #: un SKU es suya, y devolvía `actor_id`. Con eso sabía quién apartó
+        #: qué y cuándo, incluso de pedidos que nunca se pagaron —justo lo que
+        #: `del_proveedor` evita al entregar solo los pagados—.
+        #:
+        #: QUIEN MUEVE ES EL SISTEMA, y es lo que de verdad pasó: nadie tecleó
+        #: esta reserva, la hizo el checkout. Quién compró está en el pedido,
+        #: que es donde tiene que estar.
         await inventory.reservar(
             db,
             product_id=product_id,
             sku=sku,
             cantidad=cantidad,
             clave=CLAVE_DE_RESERVA + orden.id,
-            actor_id=usuario_id,
+            actor_id=None,
         )
 
     await _anotar(
@@ -695,7 +719,7 @@ async def crear(
 # Soltar lo apartado. UNA VEZ.
 # --------------------------------------------------------------------------- #
 async def _liberar_reserva(
-    db: AsyncSession, *, orden: ProductOrder, momento: datetime, actor_id: str | None
+    db: AsyncSession, *, orden: ProductOrder, momento: datetime
 ) -> None:
     """Devuelve al común lo que este pedido apartaba. EXACTAMENTE UNA VEZ.
 
@@ -713,13 +737,14 @@ async def _liberar_reserva(
         )
     )
     for product_id, sku, cantidad in _por_unidad_de_almacen(lineas):
+        #: SIN IDENTIFICADOR, por lo mismo que la reserva.
         await inventory.liberar(
             db,
             product_id=product_id,
             sku=sku,
             cantidad=cantidad,
             clave=CLAVE_DE_LIBERACION + orden.id,
-            actor_id=actor_id,
+            actor_id=None,
         )
     orden.reservation_settled_at = momento
     orden.reserved_until = None
@@ -759,15 +784,19 @@ async def cancelar(
         await db.commit()
         return orden
     if orden.status not in PEDIDO_EN_CURSO:
-        detalle = {"status": orden.status}
+        #: EL MENSAJE SE COMPONE ANTES DEL `rollback`. Deshacer la transacción
+        #: caduca los objetos del ORM, y leer `orden.status` después dispara una
+        #: recarga perezosa que en asíncrono revienta con `MissingGreenlet`:
+        #: quien pulsaba «cancelar» sobre un pedido ya vencido recibía un 500 en
+        #: vez del 409 que la ruta promete.
+        estado = orden.status
+        detalle = {"status": estado}
+        mensaje = f"Ese pedido ya no se puede cancelar: está {estado}."
         await db.rollback()
-        raise PedidoNoPagable(
-            f"Ese pedido ya no se puede cancelar: está {orden.status}.",
-            details=detalle,
-        )
+        raise PedidoNoPagable(mensaje, details=detalle)
 
     anterior = orden.status
-    await _liberar_reserva(db, orden=orden, momento=momento, actor_id=usuario_id)
+    await _liberar_reserva(db, orden=orden, momento=momento)
     orden.status = PEDIDO_CANCELADO
     orden.cancelled_at = momento
     orden.updated_at = momento
@@ -798,12 +827,20 @@ async def vencer(
     """
     await esquema.exigir_pedidos(db)
     momento = momento or ahora()
+    #: SE BUSCA POR LA RESERVA, NO POR EL ESTADO. Buscar por `PEDIDO_EN_CURSO`
+    #: dejaba fuera los pedidos fallidos y los que esperan a una persona, que
+    #: son exactamente los que se quedaban con las unidades apartadas para
+    #: siempre. Lo que hay que soltar es toda reserva vencida que no se haya
+    #: decidido ya, sea cual sea el estado del pedido.
+    #:
+    #: `PAID` no entra: al cobrar, la reserva se consume y `settled` queda
+    #: puesto, así que no aparecería igualmente; excluirlo lo dice en voz alta.
     candidatos = list(
         await db.scalars(
             select(ProductOrder.id)
             .where(
-                ProductOrder.status.in_(PEDIDO_EN_CURSO),
                 ProductOrder.reservation_settled_at.is_(None),
+                ProductOrder.status != PEDIDO_PAGADO,
                 ProductOrder.reserved_until.is_not(None),
                 ProductOrder.reserved_until <= momento,
             )
@@ -819,7 +856,7 @@ async def vencer(
         #: RECOMPROBADO BAJO EL CERROJO. Entre la lista y el cerrojo puede
         #: haberse pagado, y vencer un pedido pagado le quitaría a alguien lo
         #: que acaba de comprar.
-        if orden.status not in PEDIDO_EN_CURSO:
+        if orden.status == PEDIDO_PAGADO:
             continue
         if orden.reservation_settled_at is not None:
             continue
@@ -827,15 +864,20 @@ async def vencer(
         if limite is None or limite > momento:
             continue
         anterior = orden.status
-        await _liberar_reserva(db, orden=orden, momento=momento, actor_id=None)
-        orden.status = PEDIDO_VENCIDO
-        orden.expired_at = momento
+        await _liberar_reserva(db, orden=orden, momento=momento)
+        #: UN PEDIDO EN REVISIÓN SUELTA LO QUE APARTABA Y SIGUE EN REVISIÓN.
+        #: Ahí hay un cobro que no cuadra y una persona tiene que mirarlo:
+        #: marcarlo «vencido» lo sacaría de la cola y haría desaparecer el
+        #: problema de la vista sin haberlo resuelto.
+        if anterior != PEDIDO_EN_REVISION:
+            orden.status = PEDIDO_VENCIDO
+            orden.expired_at = momento
         orden.updated_at = momento
         await _anotar(
             db,
             orden=orden,
             desde=anterior,
-            hasta=PEDIDO_VENCIDO,
+            hasta=orden.status,
             actor_id=None,
             actor_rol="system",
             motivo="reservation_expired",

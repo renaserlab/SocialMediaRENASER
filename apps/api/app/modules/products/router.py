@@ -183,10 +183,14 @@ def _direccion(fila) -> DireccionRead | None:
     )
 
 
-async def _pedido(db: AsyncSession, orden) -> PedidoRead:
-    """El pedido entero, para quien lo hizo."""
+async def _pedido(db: AsyncSession, orden, *, con_direccion: bool = True) -> PedidoRead:
+    """El pedido entero, para quien lo hizo.
+
+    `con_direccion=False` para la cola de conciliacion: cuadrar un cobro no
+    necesita saber donde vive nadie.
+    """
     lineas = await pedidos.lineas_de(db, orden.id)
-    direccion = await pedidos.direccion_de(db, orden.id)
+    direccion = await pedidos.direccion_de(db, orden.id) if con_direccion else None
     historial = await pedidos.historial_de(db, orden.id)
     vendedor = await db.get(ProductSeller, orden.seller_id)
     politica = await db.get(ProductPolicy, orden.policy_id)
@@ -1712,10 +1716,36 @@ async def pedidos_en_revision(
 
     HOY SON LOS PAGOS QUE LLEGARON TARDE: el dinero entro y la reserva ya no
     estaba. Ni se cobra en silencio ni se niega en silencio.
+
+    SIN NINGUNA DIRECCION, y por eso no usa el molde completo. Conciliar un
+    cobro es cuadrar importe, moneda, entorno y referencia; para eso no hace
+    falta saber donde vive nadie. La 0078 justifica no poner politicas de
+    lectura sobre estas tablas diciendo que las direcciones solo las ven quien
+    compra, quien tiene que entregar y una revision AUDITADA: esta ruta
+    entregaba la lista entera de domicilios a cualquier cuenta de curaduria y
+    sin dejar rastro de quien la miro.
+
+    Y SOLO `admin`. Publicar o retirar una politica ya exigia el rol estrecho;
+    leer una cola de pedidos con dinero de por medio no puede exigir menos.
     """
-    await permisos.exigir_evaluador(db, current_user.id)
+    await permisos.exigir_publicador(db, current_user.id)
     await esquema.exigir_pedidos(db)
-    return [await _pedido(db, o) for o in await pedidos.en_revision(db)]
+    ordenes = await pedidos.en_revision(db)
+    #: EL ACCESO DEJA RASTRO, Y UNA FILA POR PEDIDO. Una sola fila diria «miro
+    #: la cola» y no cuales; con una por pedido se puede contestar «quien vio
+    #: este expediente y cuando», que es lo que de verdad se pregunta despues.
+    for orden in ordenes:
+        await auditoria.anotar(
+            db,
+            actor_id=current_user.id,
+            actor_role="admin",
+            action="product_order.review_queue",
+            entity_type="product_order",
+            entity_id=orden.id,
+            reason=orden.review_reason,
+        )
+    await db.commit()
+    return [await _pedido(db, o, con_direccion=False) for o in ordenes]
 
 
 @admin_router.post("/orders/expire", response_model=VencimientoRead)

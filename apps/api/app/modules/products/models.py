@@ -1193,6 +1193,26 @@ ESTADOS_DE_PEDIDO = (
 #: Los que todavia pueden pagarse, y por tanto los que siguen apartando.
 PEDIDO_EN_CURSO = (PEDIDO_PENDIENTE, PEDIDO_PROCESANDO)
 
+#: Los que TODAVIA APARTAN UNIDADES, que no es lo mismo.
+#:
+#: LA REVISION INDEPENDIENTE ENCONTRO AQUI EL PEOR DEFECTO DEL INCREMENTO. El
+#: barrido de vencimiento miraba `PEDIDO_EN_CURSO`, asi que un pedido que caia
+#: en `PAYMENT_FAILED` —lo provoca cualquier tarjeta rechazada— o en
+#: `UNDER_REVIEW` salia de esa lista con la reserva puesta y YA NO LA SOLTABA
+#: NADIE, NUNCA: ni el barrido, que no lo veia; ni cancelar, que lo rechazaba;
+#: ni el reintento, que exige que la reserva siga viva. Las unidades se quedaban
+#: apartadas para siempre, y el mismo comprador podia repetirlo.
+#:
+#: Por eso hay DOS listas y no una. `PEDIDO_EN_CURSO` es «todavia se puede
+#: pagar»; esta es «todavia tiene unidades apartadas», y es la que gobierna el
+#: vencimiento y el candado de un pedido vivo a la vez.
+PEDIDO_RETIENE = (
+    PEDIDO_PENDIENTE,
+    PEDIDO_PROCESANDO,
+    PEDIDO_FALLIDO,
+    PEDIDO_EN_REVISION,
+)
+
 #: EL ULTIMO ENTERO QUE JAVASCRIPT REPRESENTA SIN PERDER PRECISION. Estos
 #: importes viajan en un JSON que lee JavaScript: por encima, el cliente veria
 #: otro numero.
@@ -1333,17 +1353,16 @@ class ProductOrder(Base):
             postgresql_where=text("status = 'PAID'"),
             sqlite_where=text("status = 'PAID'"),
         ),
+        #: POR LA RESERVA Y NO POR EL ESTADO: ver la 0078.
         Index(
             "product_orders_por_vencer",
             "reserved_until",
             "id",
             postgresql_where=text(
-                "status in ('PENDING_PAYMENT', 'PAYMENT_PROCESSING')"
-                " and reservation_settled_at is null"
+                "reservation_settled_at is null and status <> 'PAID'"
             ),
             sqlite_where=text(
-                "status in ('PENDING_PAYMENT', 'PAYMENT_PROCESSING')"
-                " and reservation_settled_at is null"
+                "reservation_settled_at is null and status <> 'PAID'"
             ),
         ),
         Index(
@@ -1531,6 +1550,7 @@ __all__ = [
     "PEDIDO_PAGADO",
     "PEDIDO_PENDIENTE",
     "PEDIDO_PROCESANDO",
+    "PEDIDO_RETIENE",
     "PEDIDO_VENCIDO",
     "POLITICA_BORRADOR",
     "POLITICA_PUBLICADA",

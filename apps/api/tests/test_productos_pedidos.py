@@ -1447,3 +1447,896 @@ async def test_preparar_cuenta_lo_que_falta_sin_reventar(sesiones) -> None:
     assert len(p.groups) == 1
     assert p.groups[0].seller_id == seller_id
     assert p.groups[0].units == 2
+
+
+# =========================================================================== #
+# 11. Lo que encontro la revision independiente
+#
+# Los seis defectos, cada uno reproducido ANTES de corregirlo. Ninguna de estas
+# pruebas existia: la suite de arriba pasaba entera con los seis dentro.
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_pedido_fallido_suelta_su_reserva_al_vencer(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL PEOR DEFECTO DEL INCREMENTO, y no liberaba dos veces: no liberaba nunca.
+
+    El barrido buscaba por `PEDIDO_EN_CURSO`, asi que un pedido que caia en
+    `PAYMENT_FAILED` —lo provoca cualquier tarjeta rechazada— salia de esa lista
+    con las unidades apartadas y ya no las soltaba nadie: ni el barrido, que no
+    lo veia; ni cancelar, que lo rechaza; ni el reintento, que exige que la
+    reserva siga viva.
+    """
+    producto_id, variantes, _, orden_id = await con_cobro_abierto(sesiones, monkeypatch)
+    async with sesiones() as db:
+        await pagos.atender_aviso(
+            db,
+            AvisoDeMentira(
+                purchase_id=orden_id, status="failed", event_type="payment_failed"
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    assert orden.status == PEDIDO_FALLIDO
+    #: Sigue apartando: se puede reintentar mientras la reserva viva.
+    assert hay.reserved == 2
+
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        await pedidos.vencer(db, momento=despues)
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+        liberaciones = await db.scalar(
+            select(func.count())
+            .select_from(InventoryMovement)
+            .where(
+                InventoryMovement.product_id == producto_id,
+                InventoryMovement.kind == "release",
+            )
+        )
+    assert orden.status == PEDIDO_VENCIDO
+    assert orden.reservation_settled_at is not None
+    assert hay.reserved == 0, "el pedido fallido se quedo con las unidades"
+    assert liberaciones == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_pedido_en_revision_suelta_la_reserva_y_sigue_en_revision(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """SUELTA LO QUE APARTABA Y NO SE MUEVE DE LA COLA.
+
+    Ahi hay un cobro que no cuadra y una persona tiene que mirarlo: marcarlo
+    «vencido» lo sacaria de la cola y haria desaparecer el problema de la vista
+    sin haberlo resuelto.
+    """
+    producto_id, variantes, _, orden_id = await con_cobro_abierto(sesiones, monkeypatch)
+    async with sesiones() as db:
+        await pagos.atender_aviso(
+            db, AvisoDeMentira(purchase_id=orden_id, amount_minor=1)
+        )
+        await db.commit()
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    assert orden.status == PEDIDO_EN_REVISION
+    assert hay.reserved == 2
+
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        await pedidos.vencer(db, momento=despues)
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    assert hay.reserved == 0, "el pedido en revision se quedo con las unidades"
+    assert orden.reservation_settled_at is not None
+    assert orden.status == PEDIDO_EN_REVISION, "salio de la cola sin que nadie lo mirara"
+    assert orden.expired_at is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_pedido_fallido_impide_abrir_otro_hasta_que_suelta(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL CANDADO MIRA SI TODAVIA APARTA, no si todavia se puede pagar.
+
+    Con el criterio anterior, un pedido fallido no contaba: el mismo comprador
+    encadenaba intentos y cada uno apartaba mas existencias, para siempre.
+    """
+    producto_id, variantes, comprador, orden_id = await con_cobro_abierto(
+        sesiones, monkeypatch, unidades=20, en_la_bolsa=2
+    )
+    politica_id = await politica_publicada(sesiones)
+    async with sesiones() as db:
+        await pagos.atender_aviso(
+            db,
+            AvisoDeMentira(
+                purchase_id=orden_id, status="failed", event_type="payment_failed"
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        bolsa = await carts.leer(db, usuario_id=comprador)
+    seller_id = (await _pedido_de(sesiones, orden_id)).seller_id
+
+    with pytest.raises(AppError) as fallo:
+        await crear_pedido(
+            sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+        )
+    assert fallo.value.code == "product_order_already_open"
+
+    #: Y EN CUANTO SUELTA, SE PUEDE. El candado lo cierra la reserva, no el
+    #: estado: cuando el barrido la suelta, se levanta solo.
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        await pedidos.vencer(db, momento=despues)
+    async with sesiones() as db:
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    assert hay.reserved == 0
+    _ = bolsa
+
+
+async def _pedido_de(sesiones, orden_id):
+    async with sesiones() as db:
+        return await db.get(ProductOrder, orden_id)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_cancelar_un_pedido_que_ya_no_se_puede_cancelar_da_409_y_no_500(
+    sesiones, venta_encendida
+) -> None:
+    """EL MENSAJE SE COMPONE ANTES DEL `rollback`.
+
+    Deshacer la transaccion caduca los objetos del ORM, y leer `orden.status`
+    despues disparaba una recarga perezosa que en asincrono revienta con
+    `MissingGreenlet`: quien pulsaba «cancelar» sobre un pedido ya vencido
+    recibia un 500 en vez del 409 que la ruta promete.
+    """
+    _, _, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        await pedidos.vencer(db, momento=despues)
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await pedidos.cancelar(
+                db, orden_id=creado.orden.id, usuario_id=comprador
+            )
+    assert fallo.value.code == "product_order_not_payable"
+    assert fallo.value.status_code == 409
+    assert "EXPIRED" in str(fallo.value)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_no_se_puede_cancelar_un_pedido_pagado(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """CANCELAR UN PEDIDO PAGADO SERIA UN REEMBOLSO, y no existe."""
+    producto_id, variantes, comprador, orden_id = await con_cobro_abierto(
+        sesiones, monkeypatch
+    )
+    async with sesiones() as db:
+        await pagos.atender_aviso(
+            db, AvisoDeMentira(purchase_id=orden_id, amount_minor=36_000)
+        )
+        await db.commit()
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await pedidos.cancelar(db, orden_id=orden_id, usuario_id=comprador)
+    assert fallo.value.code == "product_order_not_payable"
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    assert orden.status == PEDIDO_PAGADO
+    assert hay.reserved == 2, "cancelar solto las unidades de una venta hecha"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_version_republicada_bloquea_la_compra(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """NO SE COMPRA AL PRECIO DE UNA VERSION RETIRADA.
+
+    La linea del carrito apunta a la version con la que se metio, y el precio
+    sale DE ESA VERSION: si el proveedor republico, el pedido se congelaba al
+    precio de una version que ya no esta en catalogo —ni el que se ofrece hoy ni
+    el que nadie acepta— y el cobro salia por ese importe. En la bolsa basta con
+    avisar; para cobrar, no.
+
+    El carrito marca esa linea con `version_changed` y `purchasable: True`,
+    porque en la bolsa republicar no impide nada. Esa es exactamente la forma
+    que se construye aqui.
+    """
+    fallo = await _crear_con_bolsa_falsa(
+        sesiones,
+        monkeypatch,
+        [_linea_falsa(issues=["version_changed"], purchasable=True)],
+    )
+    assert fallo.code == "product_cart_not_purchasable"
+    assert "version_changed" in (fallo.details or {}).get("issues", [])
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_movimiento_de_la_reserva_no_lleva_el_id_de_quien_compra(
+    sesiones, venta_encendida
+) -> None:
+    """EL PROVEEDOR NO TIENE POR QUE SABER QUIEN APARTO QUE.
+
+    La ruta de movimientos de un SKU es suya y devuelve `actor_id`. Firmando la
+    reserva con la cuenta del comprador, el proveedor sabia quien aparto que y
+    cuando, incluso de pedidos que nunca se pagaron: justo lo que
+    `del_proveedor` evita al entregar solo los pagados.
+    """
+    producto_id, variantes, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    async with sesiones() as db:
+        await pedidos.cancelar(db, orden_id=creado.orden.id, usuario_id=comprador)
+
+    async with sesiones() as db:
+        movimientos = list(
+            await db.scalars(
+                select(InventoryMovement).where(
+                    InventoryMovement.product_id == producto_id,
+                    InventoryMovement.kind.in_(("reservation", "release")),
+                )
+            )
+        )
+    assert movimientos
+    for movimiento in movimientos:
+        assert movimiento.actor_id is None, (
+            f"el movimiento {movimiento.kind} lleva un identificador de persona"
+        )
+        assert movimiento.actor_role == "system"
+
+    #: Y LA AUDITORIA TAMPOCO. Una fila que dice «system» y lleva el
+    #: identificador de una persona no es auditable en ninguna direccion.
+    from app.modules.gobernanza.models import AuditEvent
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.action.in_(
+                        ("product_inventory.reservation", "product_inventory.release")
+                    )
+                )
+            )
+        )
+    for fila in filas:
+        assert fila.actor_id != comprador
+
+
+# =========================================================================== #
+# 12. Lo que dejaron al descubierto las mutaciones
+# =========================================================================== #
+def _linea_falsa(**campos):
+    """Una linea de carrito construida a mano, para poder llegar a guardias que
+    el camino normal ya no deja alcanzar."""
+    base = dict(
+        item_id="i-1",
+        product_id=str(uuid.uuid4()),
+        version_id=str(uuid.uuid4()),
+        variant_id=str(uuid.uuid4()),
+        name="Algo",
+        variant_name=None,
+        sku="SKU-1",
+        seller_id="v-1",
+        seller_name="Tienda",
+        image_path=None,
+        image_url=None,
+        alt_text=None,
+        quantity=1,
+        unit_price_minor=1000,
+        currency="PEN",
+        line_total_minor=1000,
+        seen_price_minor=1000,
+        seen_currency="PEN",
+        available=10,
+        issues=[],
+        purchasable=True,
+        added_at=None,
+    )
+    base.update(campos)
+    return carts.Linea(**base)
+
+
+async def _crear_con_bolsa_falsa(sesiones, monkeypatch, lineas):
+    """Llama a `crear` con un carrito inventado. Devuelve el fallo.
+
+    EL PROVEEDOR ES REAL: `crear` lo busca en la base antes de leer el carrito,
+    y una ficha inventada no llegaria a la guardia que se quiere probar.
+    """
+    politica_id = await politica_publicada(sesiones)
+    comprador = await persona(sesiones, "falsa")
+    duena = await persona(sesiones, "provfalsa")
+    seller_id = await vendedor(sesiones, duena)
+    lineas = [
+        carts.Linea(**{**linea.__dict__, "seller_id": seller_id}) for linea in lineas
+    ]
+
+    async def _leer(db, *, usuario_id, firmar=None):
+        return carts.Carrito(items=list(lineas), currency="PEN", disponible=True)
+
+    monkeypatch.setattr(carts, "leer", _leer)
+    async with sesiones() as db:
+        #: El carrito TIENE que existir: `crear` lo bloquea antes de leerlo.
+        await carts._carrito_bloqueado(db, usuario_id=comprador, crear=True)
+        await db.commit()
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await pedidos.crear(
+                db,
+                usuario_id=comprador,
+                seller_id=seller_id,
+                direccion=dict(DIRECCION),
+                policy_id=politica_id,
+                policy_terms_sha256=(
+                    await politicas.exigir_vigente(db, pais="PE")
+                ).terms_sha256,
+                clave="k-" + uuid.uuid4().hex[:8],
+            )
+    return fallo.value
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_linea_bloqueada_no_compra_aunque_venga_marcada_comprable(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """DOS CAPAS, Y SE COMPRUEBAN LAS DOS. `purchasable` y la lista de avisos
+    dicen lo mismo por dos caminos; una linea que llegue con las dos en
+    desacuerdo no se compra."""
+    fallo = await _crear_con_bolsa_falsa(
+        sesiones,
+        monkeypatch,
+        [_linea_falsa(issues=["insufficient_stock"], purchasable=True)],
+    )
+    assert fallo.code == "product_cart_not_purchasable"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_monedas_en_la_misma_bolsa_no_se_suman(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """SUMAR SOLES CON EUROS DA UN NUMERO QUE NO ES DINERO.
+
+    `anadir` ya lo impide, asi que este estado no se alcanza por el camino
+    normal. La guardia existe igual porque de aqui sale el importe que se cobra.
+    """
+    fallo = await _crear_con_bolsa_falsa(
+        sesiones,
+        monkeypatch,
+        [
+            _linea_falsa(item_id="a", currency="PEN"),
+            _linea_falsa(item_id="b", currency="USD"),
+        ],
+    )
+    assert fallo.code == "product_cart_currency_mismatch"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_linea_sin_precio_no_se_convierte_en_cero(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """`None` NO ES GRATIS. Un `or 0` aqui regala el producto."""
+    #: CON OTRA LINEA CON PRECIO AL LADO, a proposito. Sola, un `or 0` dejaba
+    #: el subtotal en cero y saltaba la guardia de «un importe de cero no se
+    #: cobra»: la prueba fallaba igual y no medía lo que dice medir.
+    fallo = await _crear_con_bolsa_falsa(
+        sesiones,
+        monkeypatch,
+        [
+            _linea_falsa(item_id="a", unit_price_minor=1_000, line_total_minor=1_000),
+            _linea_falsa(item_id="b", unit_price_minor=None, line_total_minor=None),
+        ],
+    )
+    assert fallo.code == "product_cart_not_purchasable"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_importe_fuera_del_rango_seguro_de_javascript_no_se_cobra(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """POR ENCIMA DE 2^53-1, EL CLIENTE VE OTRO NUMERO.
+
+    Estos importes viajan en un JSON que lee JavaScript: cobrar uno que el
+    cliente no puede representar es cobrar algo que nadie ha visto.
+    """
+    from app.modules.products.models import MAXIMO_SEGURO_EN_JS
+
+    fallo = await _crear_con_bolsa_falsa(
+        sesiones,
+        monkeypatch,
+        [
+            _linea_falsa(
+                unit_price_minor=MAXIMO_SEGURO_EN_JS,
+                line_total_minor=MAXIMO_SEGURO_EN_JS + 1,
+            )
+        ],
+    )
+    assert fallo.code == "product_cart_not_purchasable"
+    assert (fallo.details or {}).get("subtotal_minor") == MAXIMO_SEGURO_EN_JS + 1
+
+
+@SIN_POSTGRES
+def test_la_reserva_se_suma_por_unidad_de_almacen_y_en_orden_estable() -> None:
+    """DOS VARIANTES PUEDEN COMPARTIR LA CAJA DEL ALMACEN.
+
+    Reservarlas por separado usaria la misma clave de idempotencia sobre la
+    misma unidad, y la segunda se tragaria como si fuera un reintento: unidades
+    vendidas que nunca se apartaron. Y el orden estable es lo que impide que dos
+    compras sobre las mismas dos unidades se abracen.
+    """
+
+    class _L:
+        def __init__(self, product_id, sku, quantity):
+            self.product_id = product_id
+            self.sku = sku
+            self.quantity = quantity
+
+    lineas = [
+        _L("p2", "B", 1),
+        _L("p1", "B", 3),
+        _L("p1", "A", 2),
+        _L("p1", "B", 4),
+    ]
+    salida = pedidos._por_unidad_de_almacen(lineas)
+    assert salida == [("p1", "A", 2), ("p1", "B", 7), ("p2", "B", 1)]
+    assert salida == sorted(salida), "el orden de bloqueo no es estable"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_liberar_dos_veces_la_misma_reserva_suelta_una_sola_vez(
+    sesiones, venta_encendida
+) -> None:
+    """LA CAPA DE ABAJO, PROBADA SOLA.
+
+    `cancelar` y `vencer` ya no dejan llegar aqui dos veces, asi que la guardia
+    interna solo se ejercita llamandola a mano. Es la que aguanta si dos
+    procesos se colaran a la vez por la de arriba.
+    """
+    producto_id, variantes, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    momento = datetime.now(timezone.utc)
+    async with sesiones() as db:
+        orden = await pedidos._bloqueado(db, creado.orden.id)
+        await pedidos._liberar_reserva(db, orden=orden, momento=momento)
+        await pedidos._liberar_reserva(db, orden=orden, momento=momento)
+        await db.commit()
+    async with sesiones() as db:
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+        liberaciones = await db.scalar(
+            select(func.count())
+            .select_from(InventoryMovement)
+            .where(
+                InventoryMovement.product_id == producto_id,
+                InventoryMovement.kind == "release",
+            )
+        )
+    assert hay.reserved == 0
+    assert liberaciones == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_barridos_a_la_vez_sueltan_una_sola_vez(
+    sesiones, motor, venta_encendida
+) -> None:
+    """EL BARRIDO RECOMPRUEBA BAJO EL CERROJO.
+
+    Dos planificadores —o dos replicas— pueden llamarlo a la vez. Quien llega
+    segundo se encuentra la fila bloqueada, espera, y al leerla ve que la
+    reserva ya se decidio.
+    """
+    producto_id, variantes, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    Sesion = async_sessionmaker(motor, expire_on_commit=False)
+
+    async def barrer():
+        async with Sesion() as db:
+            return await pedidos.vencer(db, momento=despues)
+
+    await asyncio.gather(barrer(), barrer(), return_exceptions=True)
+
+    async with sesiones() as db:
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+        liberaciones = await db.scalar(
+            select(func.count())
+            .select_from(InventoryMovement)
+            .where(
+                InventoryMovement.product_id == producto_id,
+                InventoryMovement.kind == "release",
+            )
+        )
+    assert hay.reserved == 0
+    assert liberaciones == 1, "dos barridos soltaron dos veces"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_cobro_que_llega_con_la_reserva_ya_vencida_no_confirma(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """LA VENTANA ENTRE QUE LA RESERVA VENCE Y EL BARRIDO PASA.
+
+    El pedido sigue en `PAYMENT_PROCESSING` —nadie lo ha vencido todavia— pero
+    su reserva ya caduco. Confirmar ahi seria vender unidades que el barrido va
+    a soltar en cuanto corra.
+    """
+    _, _, _, orden_id = await con_cobro_abierto(sesiones, monkeypatch)
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await pedidos.confirmar_pago(
+                db,
+                orden_id=orden_id,
+                provider="stripe",
+                environment="sandbox",
+                external_payment_id="pi_tarde",
+                amount_minor=36_000,
+                currency="PEN",
+                momento=despues,
+            )
+        await db.rollback()
+    assert fallo.value.code == "product_order_payment_mismatch"
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+    assert orden.status == PEDIDO_PROCESANDO
+    assert orden.paid_at is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_otro_cobro_sobre_un_pedido_ya_pagado_no_lo_vuelve_a_pagar(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """DOS COBROS DISTINTOS SOBRE EL MISMO PEDIDO ES CONCILIACION, no una
+    confirmacion. Y no se pisa la referencia del que si pago."""
+    _, _, _, orden_id = await con_cobro_abierto(sesiones, monkeypatch)
+    async with sesiones() as db:
+        await pagos.atender_aviso(
+            db,
+            AvisoDeMentira(
+                purchase_id=orden_id, amount_minor=36_000, transaction="pi_bueno"
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        nota = await pagos.atender_aviso(
+            db,
+            AvisoDeMentira(
+                purchase_id=orden_id, amount_minor=36_000, transaction="pi_otro"
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        pagados = await db.scalar(
+            select(func.count())
+            .select_from(ProductOrderEvent)
+            .where(
+                ProductOrderEvent.order_id == orden_id,
+                ProductOrderEvent.to_status == PEDIDO_PAGADO,
+            )
+        )
+    assert orden.status == PEDIDO_PAGADO
+    assert orden.external_payment_id == "pi_bueno", "se piso la referencia del cobro"
+    assert pagados == 1
+    assert nota is not None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_no_se_abre_un_cobro_de_un_pedido_vencido(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    _, _, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        await pedidos.vencer(db, momento=despues)
+    monkeypatch.setattr(pagos, "get_provider", lambda _n: PasarelaDeMentira())
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, creado.orden.id)
+        with pytest.raises(AppError) as fallo:
+            await pagos.iniciar_pago(db, orden=orden, correo="x@y.test")
+    assert fallo.value.code == "product_order_not_payable"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_cancelar_mientras_se_abre_el_cobro_no_deja_el_pedido_procesando(
+    sesiones, venta_encendida, monkeypatch, motor
+) -> None:
+    """LA VENTANA DE LA LLAMADA HTTP.
+
+    Entre leer el pedido y volver de la pasarela hay una llamada que puede
+    tardar segundos. Quien cancele en ese hueco se encontraba
+    `PAYMENT_PROCESSING` escrito encima de su `CANCELLED` —y el CHECK de la base
+    rechazando la transaccion con un 500—. Aqui la pasarela cancela el pedido
+    desde dentro, que es como se reproduce ese hueco sin depender del reloj.
+    """
+    producto_id, variantes, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    Sesion = async_sessionmaker(motor, expire_on_commit=False)
+
+    class PasarelaQueTarda(PasarelaDeMentira):
+        async def create_checkout(self, request):
+            async with Sesion() as otra:
+                await pedidos.cancelar(
+                    otra, orden_id=creado.orden.id, usuario_id=comprador
+                )
+            return await super().create_checkout(request)
+
+    monkeypatch.setattr(pagos, "get_provider", lambda _n: PasarelaQueTarda())
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, creado.orden.id)
+        with pytest.raises(AppError) as fallo:
+            await pagos.iniciar_pago(db, orden=orden, correo="x@y.test")
+    assert fallo.value.code == "product_order_not_payable"
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, creado.orden.id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    assert orden.status == PEDIDO_CANCELADO
+    assert orden.provider == "none"
+    assert hay.reserved == 0
+
+
+@SIN_POSTGRES
+def test_la_cola_de_conciliacion_no_reparte_direcciones() -> None:
+    """LA REVISION ES AUDITADA Y NO LLEVA DOMICILIOS.
+
+    La 0078 justifica no poner ninguna politica de lectura sobre estas tablas
+    diciendo que las direcciones solo las ven quien compra, quien tiene que
+    entregar y una revision AUDITADA. La revision existia; la auditoria, no. Y
+    la ruta pedia el rol ANCHO —curaduria— para una cola con dinero dentro.
+
+    Se comprueba sobre el CODIGO de la ruta porque es donde vive la tentacion:
+    devolver el molde completo es una linea mas corta que devolverlo sin
+    direccion.
+    """
+    from pathlib import Path
+
+    fuente = Path(__file__).resolve().parents[1] / "app" / "modules" / "products"
+    texto = (fuente / "router.py").read_text(encoding="utf-8")
+    trozo = texto[texto.index("async def pedidos_en_revision") :]
+    trozo = trozo[: trozo.index("@admin_router.post")]
+
+    assert "exigir_publicador" in trozo, "la cola pide el rol ancho"
+    assert "exigir_evaluador" not in trozo
+    assert "con_direccion=False" in trozo, "la cola devuelve direcciones"
+    assert "auditoria.anotar" in trozo, "mirar la cola no deja rastro"
+    assert 'action="product_order.review_queue"' in trozo
+    #: Y QUE EL RASTRO SEA DE LO QUE SE MIRO. Dejar la llamada escrita pero
+    #: recorrer otra cosa —una lista vacia— pasaria la comprobacion de arriba y
+    #: no anotaria nada.
+    assert "for orden in ordenes:" in trozo
+    assert "entity_id=orden.id" in trozo
+
+
+@SIN_POSTGRES
+def test_el_molde_del_pedido_sabe_devolver_uno_sin_direccion() -> None:
+    """Y la puerta de verdad esta en el molde, no en la ruta."""
+    import inspect
+
+    from app.modules.products.router import _pedido
+
+    firma = inspect.signature(_pedido)
+    assert "con_direccion" in firma.parameters
+    assert firma.parameters["con_direccion"].default is True
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_no_se_abre_un_cobro_de_un_pedido_en_revision(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL UNICO ESTADO NO PAGABLE CON LA RESERVA TODAVIA VIVA.
+
+    Cancelar y vencer sueltan la reserva, asi que ahi la guardia del estado
+    queda tapada por la de la reserva. `UNDER_REVIEW` no: el pedido sigue
+    apartando mientras una persona lo mira, y abrir un cobro nuevo encima de un
+    expediente abierto es exactamente lo que no puede pasar.
+    """
+    _, _, _, orden_id = await con_cobro_abierto(sesiones, monkeypatch)
+    async with sesiones() as db:
+        await pagos.atender_aviso(
+            db, AvisoDeMentira(purchase_id=orden_id, amount_minor=1)
+        )
+        await db.commit()
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+    assert orden.status == PEDIDO_EN_REVISION
+    assert orden.reservation_settled_at is None
+    assert orden.reserved_until is not None
+
+    monkeypatch.setattr(pagos, "get_provider", lambda _n: PasarelaDeMentira())
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        with pytest.raises(AppError) as fallo:
+            await pagos.iniciar_pago(db, orden=orden, correo="x@y.test")
+    assert fallo.value.code == "product_order_not_payable"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_barrido_no_vence_un_pedido_que_se_pago_mientras_esperaba(
+    sesiones, motor, venta_encendida
+) -> None:
+    """LA RECOMPROBACION BAJO EL CERROJO, con el orden fijado a mano.
+
+    Entre que el barrido hace la lista y toma la fila puede llegar el aviso de
+    Stripe. Sin esta segunda lectura, el barrido venceria un pedido que acaba de
+    pagarse y le quitaria a alguien lo que acaba de comprar.
+
+    La carrera se fija a mano: otra sesion toma la fila y no la suelta, el
+    barrido se queda esperando, y solo entonces el pedido pasa a pagado.
+    """
+    producto_id, variantes, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    Sesion = async_sessionmaker(motor, expire_on_commit=False)
+    tomada = asyncio.Event()
+    suelta = asyncio.Event()
+
+    async def retener_y_pagar():
+        async with Sesion() as db:
+            orden = await pedidos._bloqueado(db, creado.orden.id)
+            tomada.set()
+            await suelta.wait()
+            #: Se paga A MANO porque lo que se esta probando es el barrido, no
+            #: el cobro: `confirmar_pago` ya tiene sus propias pruebas.
+            orden.status = PEDIDO_PAGADO
+            orden.paid_at = despues
+            orden.provider = "stripe"
+            orden.external_payment_id = "pi_de_la_carrera"
+            orden.reservation_settled_at = despues
+            orden.reserved_until = None
+            await db.commit()
+
+    async def barrer():
+        async with Sesion() as db:
+            return await pedidos.vencer(db, momento=despues)
+
+    retencion = asyncio.create_task(retener_y_pagar())
+    await tomada.wait()
+    barrido = asyncio.create_task(barrer())
+    await asyncio.sleep(0.5)
+    assert not barrido.done(), "el barrido no se quedo esperando el cerrojo"
+    suelta.set()
+    await retencion
+    await barrido
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, creado.orden.id)
+        hay = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+        #: SOBRE ESTE PEDIDO, no sobre el numero que devuelve el barrido: la
+        #: base es de modulo y ahi dentro hay pendientes de otras pruebas que
+        #: este barrido tambien vence, con toda la razon.
+        vencimientos = await db.scalar(
+            select(func.count())
+            .select_from(ProductOrderEvent)
+            .where(
+                ProductOrderEvent.order_id == creado.orden.id,
+                ProductOrderEvent.reason == "reservation_expired",
+            )
+        )
+    assert vencimientos == 0, "el barrido vencio un pedido que ya estaba pagado"
+    assert orden.status == PEDIDO_PAGADO
+    assert orden.expired_at is None
+    assert hay.reserved == 2, "el barrido solto las unidades de una venta hecha"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_barrido_no_suelta_una_reserva_que_ya_solto_otro(
+    sesiones, motor, venta_encendida
+) -> None:
+    """LA OTRA RECOMPROBACION BAJO EL CERROJO, tambien con el orden fijado.
+
+    Dos planificadores —o dos replicas— pueden hacer la lista a la vez. El
+    segundo tiene que ver, al tomar la fila, que la reserva ya se decidio: si no
+    la mira, vuelve a contar como suyo un pedido que otro ya cerro.
+    """
+    _, _, comprador, seller_id = await bolsa_con(sesiones)
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    Sesion = async_sessionmaker(motor, expire_on_commit=False)
+    tomada = asyncio.Event()
+    suelta = asyncio.Event()
+
+    async def retener_y_cancelar():
+        async with Sesion() as db:
+            await pedidos._bloqueado(db, creado.orden.id)
+            tomada.set()
+            await suelta.wait()
+            await pedidos.cancelar(
+                db, orden_id=creado.orden.id, usuario_id=comprador
+            )
+
+    async def barrer():
+        async with Sesion() as db:
+            return await pedidos.vencer(db, momento=despues)
+
+    retencion = asyncio.create_task(retener_y_cancelar())
+    await tomada.wait()
+    barrido = asyncio.create_task(barrer())
+    await asyncio.sleep(0.5)
+    assert not barrido.done(), "el barrido no se quedo esperando el cerrojo"
+    suelta.set()
+    await retencion
+    await barrido
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, creado.orden.id)
+        #: SOBRE ESTE PEDIDO, por lo mismo que arriba.
+        vencimientos = await db.scalar(
+            select(func.count())
+            .select_from(ProductOrderEvent)
+            .where(
+                ProductOrderEvent.order_id == creado.orden.id,
+                ProductOrderEvent.reason == "reservation_expired",
+            )
+        )
+    assert vencimientos == 0, "el barrido conto un pedido que otro ya habia cerrado"
+    assert orden.status == PEDIDO_CANCELADO, "el barrido piso la cancelacion"

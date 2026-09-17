@@ -199,12 +199,16 @@ create index if not exists product_orders_del_proveedor
   on public.product_orders (seller_id, created_at desc, id desc)
   where status = 'PAID';
 
--- LO QUE BUSCA EL VENCIMIENTO: pedidos vivos cuya reserva ya expiró. Parcial,
--- porque el barrido no tiene nada que hacer con los cerrados.
+-- LO QUE BUSCA EL VENCIMIENTO: toda reserva que no se haya decidido todavía.
+--
+-- POR LA RESERVA Y NO POR EL ESTADO. Restringirlo a los dos estados «en curso»
+-- dejaba fuera los pedidos fallidos y los que esperan a una persona, que son
+-- exactamente los que se quedaban con las unidades apartadas sin que nadie las
+-- soltara nunca. `PAID` sí se excluye: al cobrar, la reserva se consume y
+-- `reservation_settled_at` queda puesto, así que no aparecería igualmente.
 create index if not exists product_orders_por_vencer
   on public.product_orders (reserved_until, id)
-  where status in ('PENDING_PAYMENT', 'PAYMENT_PROCESSING')
-    and reservation_settled_at is null;
+  where reservation_settled_at is null and status <> 'PAID';
 
 -- CRUZAR UN AVISO DE STRIPE CON SU PEDIDO. `provider` primero porque es la
 -- primera columna del índice y sin ella PostgreSQL no puede buscar.
