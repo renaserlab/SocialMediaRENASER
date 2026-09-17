@@ -1,6 +1,7 @@
 -- 0072 · Productos guardados.
 --
--- SIN APLICAR. Requiere la 0070.
+-- APLICADA Y VERIFICADA contra la base gestionada el 17/09/2026.
+-- CERO DIVERGENCIAS.
 --
 -- ES LO ÚNICO QUE EL CATÁLOGO NECESITA ESCRIBIR. Portada, búsqueda, categorías,
 -- selección y ficha solo LEEN; guardar es la única acción del catálogo que deja

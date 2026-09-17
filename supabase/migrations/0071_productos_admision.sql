@@ -1,7 +1,9 @@
 -- 0071 · Admisión y evaluación de productos: postulación, evidencia, matriz y
 --        razones de aprobación.
 --
--- SIN APLICAR. Requiere la 0070.
+-- APLICADA Y VERIFICADA contra la base gestionada el 17/09/2026, junto con la
+-- 0070 y la 0072. El cuerpo del disparador `product_evaluations_no_es_propio`
+-- se comparo caracter a caracter con el de este fichero. CERO DIVERGENCIAS.
 --
 -- QUÉ GARANTIZA ESTO, Y NO EL CÓDIGO:
 --

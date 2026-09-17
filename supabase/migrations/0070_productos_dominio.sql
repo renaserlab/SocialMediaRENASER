@@ -1,7 +1,10 @@
 -- 0070 · Productos físicos: responsable comercial, producto, versión, variantes
 --        y galería.
 --
--- SIN APLICAR.
+-- APLICADA Y VERIFICADA contra la base gestionada el 17/09/2026, en una
+-- sesion de solo lectura comprobada: tablas, columnas, tipos, nulabilidad,
+-- claves, restricciones, indices con su parcialidad, RLS, ausencia de
+-- politicas y de permisos para `anon`/`authenticated`. CERO DIVERGENCIAS.
 --
 -- POR QUÉ NO SE REUTILIZA `commerce_products`. Esa tabla NO representa un
 -- producto físico: representa el DERECHO DIGITAL que se compra para acceder a
