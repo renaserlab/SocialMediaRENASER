@@ -2,8 +2,9 @@
 
 LO QUE DEFIENDEN ESTAS PRUEBAS:
 
-  1. TODAVÍA NO SE COMPRA. `purchasable` es `false` SIEMPRE, y no hay ninguna
-     ruta de checkout, pedido ni pago.
+  1. EL CARRITO NO COMPRA. `purchasable` dice si la bolsa tiene algo que
+     comprar, no que se pueda: eso son cinco banderas y una política publicada,
+     y vive en el Incremento 5 (`test_productos_pedidos.py`).
   2. EL CARRITO NO RESERVA NADA. Meter algo en la bolsa no mueve el inventario
      ni una unidad: se comprueba contando los movimientos.
   3. LOS IMPORTES LOS CALCULA EL SERVIDOR. El cliente manda qué y cuántas.
@@ -842,9 +843,21 @@ async def test_una_bolsa_vaciada_POR_CASCADA_no_se_queda_con_su_moneda(
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
-async def test_el_carrito_nunca_dice_que_se_puede_comprar(sesiones) -> None:
-    """NO EXISTE LA COMPRA FÍSICA: ni checkout, ni pedido, ni pago."""
+async def test_el_carrito_dice_si_tiene_algo_que_comprar(sesiones) -> None:
+    """QUE LA BOLSA TENGA ALGO COMPRABLE NO ES QUE SE PUEDA COMPRAR.
+
+    Hasta el Incremento 5 este campo era `false` siempre porque no existia la
+    compra fisica. Ahora dice lo que de verdad significa: que el carrito, por
+    su parte, no lo impide. Si la venta esta habilitada son otras cinco cosas y
+    una politica, y eso lo contesta `pedidos.preparar` y lo escribe la ruta.
+    """
     producto_id, _, variantes, comprador = await bolsa_lista(sesiones)
+    async with sesiones() as db:
+        bolsa = await carts.leer(db, usuario_id=comprador)
+    #: BOLSA VACIA: nada que comprar.
+    assert bolsa.purchasable is False
+    assert bolsa.subtotal_minor is None
+
     async with sesiones() as db:
         await carts.anadir(
             db, usuario_id=comprador, producto_id=producto_id,
@@ -853,7 +866,15 @@ async def test_el_carrito_nunca_dice_que_se_puede_comprar(sesiones) -> None:
         await db.commit()
     async with sesiones() as db:
         bolsa = await carts.leer(db, usuario_id=comprador)
-    assert bolsa.purchasable is False
+    assert bolsa.purchasable is True
+
+    #: Y LA RUTA SIGUE DICIENDO QUE NO, porque la venta esta apagada.
+    import os
+
+    os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    from app.modules.products.router import _carrito
+
+    assert _carrito(bolsa).purchasable is False
 
 
 def test_el_molde_de_la_respuesta_escribe_false_pase_lo_que_pase() -> None:
@@ -873,23 +894,56 @@ def test_el_molde_de_la_respuesta_escribe_false_pase_lo_que_pase() -> None:
     from app.modules.products.router import _carrito
 
     mentiroso = carts.Carrito(items=[], purchasable=True, disponible=True)
+    #: CON LA VENTA APAGADA —que es como nace— la respuesta dice que no aunque
+    #: el carrito diga que si. Es la capa de la ruta, y existe para que
+    #: encender la compra tenga que pasar por el router.
     assert _carrito(mentiroso).purchasable is False
 
 
-def test_no_hay_ninguna_ruta_de_compra() -> None:
-    """NI SIQUIERA UNA QUE DEVUELVA 501: eso ya sería una promesa."""
+def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
+    """EL INCREMENTO 5 LAS TRAE, y siguen sin mover dinero.
+
+    Esta prueba decia antes que NO existia ninguna ruta de compra, y era cierto
+    hasta el Incremento 5. Lo que hay que sostener ahora es otra cosa y es mas
+    dificil: que existan, que lleven a un recorrido real y que aun asi no se
+    pueda cobrar nada sin que la empresa termine de configurar la venta.
+
+    Y NINGUNA RUTA DE LAS QUE ESTE INCREMENTO NO IMPLEMENTA. Transportista,
+    seguimiento, devolucion, reembolso y transferencia son de los Incrementos 6
+    a 9: una ruta vacia que devolviera 501 ya seria una promesa.
+    """
     import os
 
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    from app.core.config import get_settings
     from app.main import create_app
+    from app.modules.products import pedidos
 
-    rutas = list(create_app().openapi()["paths"])
-    prohibidas = ("checkout", "/orders", "payment", "/pay", "transfer")
+    rutas = [r for r in create_app().openapi()["paths"] if "/products" in r]
+
+    esperadas = (
+        "/api/v1/products/orders",
+        "/api/v1/products/orders/{order_id}/checkout",
+        "/api/v1/products/orders/{order_id}/cancel",
+        "/api/v1/products/checkout/preparation",
+        "/api/v1/products/policies",
+    )
+    for ruta in esperadas:
+        assert ruta in rutas, ruta
+
+    prohibidas = ("shipment", "tracking", "/return", "refund", "transfer", "payout")
     for ruta in rutas:
-        if "/products" not in ruta:
-            continue
         for prohibida in prohibidas:
             assert prohibida not in ruta, ruta
+
+    #: Y LO QUE DE VERDAD IMPORTA: con la configuracion de fabrica no se puede
+    #: cobrar, y faltan CINCO cosas, no una.
+    faltan = pedidos.por_que_no_se_puede_vender()
+    assert "feature_product_sales" in faltan
+    assert "payments_enabled" in faltan
+    assert "stripe_payments_enabled" in faltan
+    assert "product_reservation_minutes" in faltan
+    assert get_settings().product_reservation_minutes == 0
 
 
 def test_la_bandera_de_venta_sigue_apagada() -> None:
