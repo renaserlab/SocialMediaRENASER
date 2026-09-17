@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -42,12 +43,19 @@ import {
   type BloqueDeLaFicha,
   type Ficha,
 } from '@/lib/productos';
+import {
+  claveDeErrorDelCarrito,
+  claveDeLaPulsacion,
+  contadorDeLaBolsa,
+  esCarritoApagado,
+} from '@/lib/carrito';
+import { ProductCartRepository } from '@/repositories/ProductCartRepository';
 import { ProductCatalogRepository } from '@/repositories/ProductCatalogRepository';
 import { CuadriculaDeProductos, useClaveDeProductos } from '@/screens/ProductosScreen';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
-import { ApiError } from '@/services/api';
+import { ApiError, haySesion } from '@/services/api';
 
 /**
  * La ficha de un producto, EN EL ORDEN INALTERABLE del blueprint §4.
@@ -64,9 +72,17 @@ import { ApiError } from '@/services/api';
  * verdadera; rellenarlos con «4,8 ★», «llega en 3-5 días» o «30 días para
  * devolver» sería inventarse lo que la empresa todavía no ha decidido.
  *
- * NINGÚN BOTÓN QUE PROMETA COMPRAR. No hay carrito ni checkout en la API, y la
- * barra fija de abajo lleva lo único que se puede hacer de verdad: guardar
- * —que NO reserva nada— y abrir el informe.
+ * SE PUEDE AÑADIR A LA BOLSA, QUE NO ES PAGAR. Desde la 0075 hay bolsa con
+ * cantidades y variantes, y la barra fija lo ofrece; sigue sin haber checkout,
+ * ni pedido, ni cobro, así que el botón dice «Añadir a la bolsa» y no otra cosa
+ * en ninguno de los tres idiomas. Solo aparece cuando la ficha tiene al menos
+ * una variante Y un precio configurado: sin variante no se sabe qué se mete, y
+ * sin precio la bolsa no podría sumar nada. Cuando no aparece NO SE EXPLICA
+ * NADA, porque no es un error: es un producto que todavía no se puede pedir.
+ *
+ * HAY QUE ELEGIR VARIANTE ANTES. El servidor añade por `variant_id`, no por
+ * producto: elegir una por nuestra cuenta —la primera, la más barata— sería
+ * meter en la bolsa algo que nadie pidió.
  *
  * EL SELLO LO ESCRIBE EL SERVIDOR (`seal`) y ABRE EL INFORME. Un sello que no
  * se puede comprobar es un adorno, así que cuando no hay informe —la admisión
@@ -91,6 +107,36 @@ export function ProductoScreen() {
   const ocupadoRef = useRef(false);
   /** Qué imagen de la galería se está viendo. El contador cuenta ESTO. */
   const [enLaGaleria, setEnLaGaleria] = useState(0);
+  /** Qué variante se ha elegido. `null` = todavía ninguna, y no se supone. */
+  const [varianteElegida, setVarianteElegida] = useState<string | null>(null);
+  /** Unidades en la bolsa. `null` = no hay contador que enseñar. */
+  const [enLaBolsa, setEnLaBolsa] = useState<number | null>(null);
+  /**
+   * La clave de idempotencia de la pulsación que está en curso.
+   *
+   * Se genera UNA VEZ y se reenvía si hay que reintentar: es lo que distingue
+   * un doble toque —que no debe sumar dos— de dos toques, que sí. Se suelta al
+   * terminar bien, para que la siguiente pulsación sí cuente.
+   */
+  const claveDeAnadirRef = useRef<{ varianteId: string; clave: string } | null>(null);
+
+  /**
+   * El contador de la bolsa, en UNA llamada y SOLO CON SESIÓN.
+   *
+   * Es un adorno, no el contenido: si falla —401 sin sesión, 503 con la 0075
+   * sin aplicar— no se enseña ningún número y tampoco un error.
+   */
+  const leerContadores = useCallback(async () => {
+    if (!(await haySesion())) {
+      setEnLaBolsa(null);
+      return;
+    }
+    try {
+      setEnLaBolsa(contadorDeLaBolsa((await ProductCartRepository.contadores()).cart_units));
+    } catch {
+      setEnLaBolsa(null);
+    }
+  }, []);
 
   const cargar = useCallback(async () => {
     if (!productId) return;
@@ -98,6 +144,7 @@ export function ProductoScreen() {
     setFallo(null);
     try {
       setFicha(await ProductCatalogRepository.ficha(productId));
+      void leerContadores();
     } catch (error) {
       if (error instanceof ApiError && esProductosApagado(error.code)) setFallo('noDisponible');
       else if (error instanceof ApiError && error.status === 404) setFallo('noEncontrado');
@@ -106,7 +153,7 @@ export function ProductoScreen() {
     } finally {
       setCargando(false);
     }
-  }, [productId]);
+  }, [productId, leerContadores]);
 
   useEffect(() => {
     void cargar();
@@ -147,6 +194,62 @@ export function ProductoScreen() {
           );
         } else {
           notify(f('productos.noSePudo'), textoDelError(error));
+        }
+      } finally {
+        ocupadoRef.current = false;
+        setOcupado(false);
+      }
+    })();
+  };
+
+  /**
+   * Añadir una unidad de la variante elegida a la bolsa. NO ES COMPRAR.
+   *
+   * La clave de idempotencia se genera una vez por pulsación y se reenvía tal
+   * cual si hay que reintentar: así un doble toque —o un reintento tras un
+   * fallo de red que sí llegó— ajusta la línea en vez de duplicarla.
+   */
+  const anadirALaBolsa = () => {
+    if (ficha === null || ocupadoRef.current) return;
+    const actual = ficha;
+    const varianteId = varianteElegida;
+    if (varianteId === null) {
+      notify(f('carrito.elegirVariante'), f('carrito.elegirVarianteCuerpo'));
+      return;
+    }
+    const enCurso = claveDeAnadirRef.current;
+    const clave =
+      enCurso !== null && enCurso.varianteId === varianteId
+        ? enCurso.clave
+        : claveDeLaPulsacion(actual.product_id, varianteId, Date.now());
+    claveDeAnadirRef.current = { varianteId, clave };
+    ocupadoRef.current = true;
+    setOcupado(true);
+    void (async () => {
+      try {
+        const bolsa = await ProductCartRepository.anadir({
+          productoId: actual.product_id,
+          varianteId,
+          cantidad: 1,
+          clave,
+        });
+        // El contador sale de la bolsa que acaba de contestar: es la misma que
+        // se acaba de escribir, así que no hace falta volver a preguntar.
+        setEnLaBolsa(contadorDeLaBolsa(bolsa.units));
+        claveDeAnadirRef.current = null;
+        toast(f('carrito.anadido'));
+      } catch (error) {
+        if (error instanceof ApiError && esFaltaDeSesion(error.status)) {
+          notify(f('productos.error.sinSesion'), f('productos.error.sinSesionCuerpo'));
+        } else if (error instanceof ApiError && esCarritoApagado(error.code)) {
+          notify(f('carrito.error.noDisponible'), f('carrito.error.noDisponibleCuerpo'));
+        } else {
+          const deLaBolsa =
+            error instanceof ApiError ? claveDeErrorDelCarrito(error.code) : null;
+          notify(
+            f('productos.noSePudo'),
+            deLaBolsa !== null ? f(deLaBolsa) : textoDelError(error),
+          );
         }
       } finally {
         ocupadoRef.current = false;
@@ -200,6 +303,15 @@ export function ProductoScreen() {
 
   const leida = ficha;
   const precio = precioLegible(leida.price_minor, leida.currency);
+  /**
+   * Si esta ficha se puede añadir a la bolsa.
+   *
+   * Las dos condiciones son del contrato, no de gusto: sin variante el servidor
+   * no sabe qué línea crear (`variant_id` es obligatorio) y sin precio la bolsa
+   * no podría sumar nada. Cuando falta alguna, el botón NO SE PINTA y no se
+   * escribe ninguna disculpa.
+   */
+  const sePuedeAnadir = leida.variants.length > 0 && precio.configurado;
 
   /** El título de un bloque, si ese bloque lleva uno. */
   const tituloDelBloque = (cual: BloqueDeLaFicha) => {
@@ -244,14 +356,31 @@ export function ProductoScreen() {
                     style={[styles.imagen, { borderColor: colors.border }]}
                     accessibilityLabel={media.alt_text ?? f('productos.ficha.imagenSinTexto')}
                   >
-                    {/* La ruta no se puede firmar todavía: se enseña el texto
-                        alternativo, que sí es un dato real. */}
-                    {sePuedeMostrarLaImagen(media.storage_path) ? null : (
-                      <Feather name="image" size={26} color={colors.textMuted} />
+                    {/* LA FOTOGRAFÍA APROBADA. Si el servidor no pudo firmarla
+                        se enseña el texto alternativo, que sí es un dato real,
+                        y no un hueco. */}
+                    {sePuedeMostrarLaImagen(media.url) ? (
+                      <ExpoImage
+                        source={{
+                          uri: media.url as string,
+                          cacheKey: media.storage_path,
+                        }}
+                        style={styles.imagenFoto}
+                        contentFit="cover"
+                        transition={120}
+                        recyclingKey={media.storage_path}
+                        accessibilityLabel={
+                          media.alt_text ?? f('productos.ficha.imagenSinTexto')
+                        }
+                      />
+                    ) : (
+                      <>
+                        <Feather name="image" size={26} color={colors.textMuted} />
+                        <Text variant="caption" color={colors.textMuted} numberOfLines={2}>
+                          {media.alt_text ?? f('productos.ficha.imagenNoDisponible')}
+                        </Text>
+                      </>
                     )}
-                    <Text variant="caption" color={colors.textMuted} numberOfLines={2}>
-                      {media.alt_text ?? f('productos.ficha.imagenNoDisponible')}
-                    </Text>
                   </View>
                 ))}
               </ScrollView>
@@ -394,16 +523,39 @@ export function ProductoScreen() {
         return (
           <View key={cual} style={styles.grupo}>
             {tituloDelBloque(cual)}
+            {/* CADA VARIANTE SE PUEDE ELEGIR, y elegir no mete nada en ninguna
+                parte: solo dice cuál es la que se añadiría. Lo elegido se marca
+                con un icono de comprobación Y con el borde, nunca con el color
+                a solas. */}
             {leida.variants.map((variante) => {
               const delta = deltaDeLaVariante(leida, variante);
+              const elegida = varianteElegida === variante.id;
               return (
-                <View
+                <Pressable
                   key={variante.id}
-                  style={[styles.tarjeta, { borderColor: colors.border }]}
+                  onPress={() => setVarianteElegida(elegida ? null : variante.id)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: elegida }}
+                  accessibilityLabel={variante.name}
+                  style={({ pressed }) => [
+                    styles.tarjeta,
+                    {
+                      borderColor: elegida ? colors.text : colors.border,
+                      borderWidth: elegida ? 2 : 1,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
                 >
-                  <Text variant="secondary" weight="700">
-                    {variante.name}
-                  </Text>
+                  <View style={styles.linea}>
+                    <Text variant="secondary" weight="700" style={styles.nombre}>
+                      {variante.name}
+                    </Text>
+                    <Feather
+                      name={elegida ? 'check-circle' : 'circle'}
+                      size={18}
+                      color={elegida ? colors.text : colors.textMuted}
+                    />
+                  </View>
                   <Text variant="caption" color={colors.textMuted}>
                     {f('productos.ficha.sku', { sku: variante.sku })}
                   </Text>
@@ -417,7 +569,7 @@ export function ProductoScreen() {
                       {f('productos.ficha.varianteDelta', { texto: delta.texto })}
                     </Text>
                   ) : null}
-                </View>
+                </Pressable>
               );
             })}
           </View>
@@ -504,7 +656,8 @@ export function ProductoScreen() {
         title={f('productos.ficha.titulo')}
         onBack={volver}
         rightIcon="shopping-bag"
-        onRightPress={() => router.push('/productos/guardados' as never)}
+        onRightPress={() => router.push('/productos/carrito' as never)}
+        rightBadge={enLaBolsa !== null}
       />
       <ScrollView contentContainerStyle={styles.contenido} showsVerticalScrollIndicator={false}>
         {BLOQUES_DE_LA_FICHA.map((cual) => bloque(cual))}
@@ -514,9 +667,9 @@ export function ProductoScreen() {
         La barra fija: el precio a la izquierda y, donde la referencia pone
         «Comprar», lo único que hoy se puede hacer de verdad.
 
-        NO VENDE NADA. `purchasable` es `false` y no hay carrito, ni checkout,
-        ni pedido en la API: un botón de comprar aquí sería la promesa más
-        visible y la más imposible de cumplir de toda la pantalla.
+        AÑADIR A LA BOLSA NO ES PAGAR, y el texto no lo insinúa en ninguno de
+        los tres idiomas: no hay checkout, ni pedido, ni cobro en la API, y la
+        línea de debajo del precio lo sigue diciendo.
       */}
       <View style={[styles.barraFija, { borderColor: colors.border }]}>
         <View style={styles.linea}>
@@ -537,6 +690,21 @@ export function ProductoScreen() {
             disabled={ocupado}
           />
         </View>
+        {/* SIN VARIANTES O SIN PRECIO, NO HAY BOTÓN Y NO SE EXPLICA NADA: no es
+            un error, es un producto que todavía no se puede pedir. */}
+        {sePuedeAnadir ? (
+          <Button
+            label={f('carrito.anadir')}
+            icon="shopping-bag"
+            onPress={anadirALaBolsa}
+            disabled={ocupado}
+          />
+        ) : null}
+        {sePuedeAnadir && varianteElegida === null ? (
+          <Text variant="caption" color={colors.textMuted}>
+            {f('carrito.elegirVariante')}
+          </Text>
+        ) : null}
       </View>
     </AppScreen>
   );
@@ -553,6 +721,7 @@ const styles = StyleSheet.create({
   },
   nombre: { flex: 1 },
   galeria: { gap: spacing.xs },
+  imagenFoto: { width: '100%', height: '100%' },
   imagen: {
     // Una por pantalla: el ancho lo pone el contenedor del scroll horizontal.
     width: 280,

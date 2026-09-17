@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -20,7 +21,6 @@ import {
   claveDeErrorPorEstado,
   claveDelBloquePersonal,
   claveDelCuerpoDelBloquePersonal,
-  contadorDeLaBolsa,
   conGuardado,
   esFaltaDeSesion,
   esGuardadosApagado,
@@ -33,6 +33,10 @@ import {
   type Portada,
   type TarjetaDeProducto,
 } from '@/lib/productos';
+// LOS DOS CONTADORES SON DOS FUNCIONES DISTINTAS, y viven en el módulo de la
+// bolsa: uno cuenta UNIDADES del carrito y el otro PRODUCTOS marcados.
+import { contadorDeGuardados, contadorDeLaBolsa } from '@/lib/carrito';
+import { ProductCartRepository } from '@/repositories/ProductCartRepository';
 import { ProductCatalogRepository } from '@/repositories/ProductCatalogRepository';
 import { pedirPerfil } from '@/services/cachePerfil';
 import { radius, spacing } from '@/theme/tokens';
@@ -98,14 +102,29 @@ export function TarjetaDeProductoEnLista({
         accessibilityLabel={tarjeta.name}
         style={styles.tarjetaCuerpo}
       >
-        {/* La imagen no se puede firmar todavía: se dice, no se finge. */}
+        {/* LA FOTOGRAFÍA APROBADA, con la URL que firmó el servidor. Si no
+            llega ninguna no se finge: se enseña el marcador y el texto
+            alternativo queda como etiqueta accesible. La caché se indexa por
+            la RUTA y no por la URL, que cambia en cada firma. */}
         <View
           style={[
             styles.miniatura,
             { backgroundColor: colors.surface, borderColor: colors.border },
           ]}
         >
-          {sePuedeMostrarLaImagen(tarjeta.image_path) ? null : (
+          {sePuedeMostrarLaImagen(tarjeta.image_url) ? (
+            <ExpoImage
+              source={{
+                uri: tarjeta.image_url as string,
+                cacheKey: tarjeta.image_path ?? undefined,
+              }}
+              style={styles.miniaturaImagen}
+              contentFit="cover"
+              transition={120}
+              recyclingKey={tarjeta.image_path ?? undefined}
+              accessibilityLabel={tarjeta.image_alt ?? tarjeta.name}
+            />
+          ) : (
             <Feather name="image" size={22} color={colors.textMuted} />
           )}
         </View>
@@ -206,8 +225,16 @@ export function CuadriculaDeProductos({
  * con el título. El día que exista, el servidor dirá `true` y el título
  * cambiará solo.
  *
- * LA BOLSA LLEVA A LOS GUARDADOS, no a un carrito, y su contador aparece SOLO
- * cuando hay uno o más: un «0» colgando del icono parece un error.
+ * LA BOLSA Y LOS GUARDADOS SON DOS ACCESOS DISTINTOS, con dos contadores
+ * distintos. La bolsa lleva al carrito y cuenta UNIDADES; el marcador lleva a
+ * lo guardado y cuenta PRODUCTOS. Antes eran el mismo icono, y juntarlos hacía
+ * que el número no quisiera decir nada concreto: «3» podía ser tres unidades de
+ * una silla o tres productos marcados. Cada contador aparece SOLO cuando hay
+ * uno o más: un «0» colgando del icono parece un error.
+ *
+ * LOS CONTADORES SON UN ADORNO, NO EL CONTENIDO. Salen de UNA sola llamada
+ * (`GET /products/counts`) y, si falla —sin sesión, o con la 0075 sin aplicar—,
+ * no se enseña ninguno y tampoco un error: la portada se mira igual.
  *
  * LA FOTO DE CADA CREADOR NO VIENE EN `CreadorRead`, pero sí su `profile_id`:
  * se resuelve con la caché de perfiles que ya usa el resto de la aplicación, y
@@ -224,7 +251,8 @@ export function ProductosScreen() {
   const f = useClaveDeProductos();
 
   const [portada, setPortada] = useState<Portada | null>(null);
-  const [contador, setContador] = useState<number | null>(null);
+  const [enLaBolsa, setEnLaBolsa] = useState<number | null>(null);
+  const [guardados, setGuardados] = useState<number | null>(null);
   const [fotos, setFotos] = useState<Record<string, string>>({});
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState<'red' | 'sinConexion' | 'noDisponible' | null>(null);
@@ -249,19 +277,24 @@ export function ProductosScreen() {
         );
         setFotos((actuales) => ({ ...actuales, ...encontradas }));
       })();
-      // EL CONTADOR SOLO CON SESIÓN. `GET /products/saved` exige entrar, y
-      // pedirlo sin sesión dejaría un 401 en el registro cada vez que alguien
-      // abre el catálogo desde fuera.
+      // LOS DOS CONTADORES, EN UNA SOLA LLAMADA, y SOLO CON SESIÓN: `GET
+      // /products/counts` exige entrar, y pedirlo sin sesión dejaría un 401 en
+      // el registro cada vez que alguien abre el catálogo desde fuera.
       if (await haySesion()) {
         try {
-          setContador(contadorDeLaBolsa((await ProductCatalogRepository.guardados()).length));
+          const cuentas = await ProductCartRepository.contadores();
+          setEnLaBolsa(contadorDeLaBolsa(cuentas.cart_units));
+          setGuardados(contadorDeGuardados(cuentas.saved_products));
         } catch {
-          // Sin contador se sigue entrando a la bolsa: no es un error de la
-          // portada y no se cuenta como tal.
-          setContador(null);
+          // Sin contadores se sigue entrando a las dos pantallas: son un adorno
+          // y no el contenido, así que ni se enseña error ni cuenta como fallo
+          // de la portada. Un 503 aquí es la 0075 sin aplicar.
+          setEnLaBolsa(null);
+          setGuardados(null);
         }
       } else {
-        setContador(null);
+        setEnLaBolsa(null);
+        setGuardados(null);
       }
     } catch (error) {
       if (error instanceof ApiError && esProductosApagado(error.code)) {
@@ -302,7 +335,8 @@ export function ProductosScreen() {
         const resultado = tarjeta.saved
           ? await ProductCatalogRepository.quitar(tarjeta.product_id)
           : await ProductCatalogRepository.guardar(tarjeta.product_id);
-        setContador(contadorDeLaBolsa(resultado.count));
+        // `count` son PRODUCTOS GUARDADOS: no toca el contador de la bolsa.
+        setGuardados(contadorDeGuardados(resultado.count));
         setPortada((actual) =>
           actual === null
             ? actual
@@ -333,7 +367,9 @@ export function ProductosScreen() {
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
   const abrir = (productoId: string) => router.push(`/productos/${productoId}` as never);
-  const irALaBolsa = () => router.push('/productos/guardados' as never);
+  // LA BOLSA ES EL CARRITO. Los guardados tienen su propio acceso, al lado.
+  const irALaBolsa = () => router.push('/productos/carrito' as never);
+  const irAGuardados = () => router.push('/productos/guardados' as never);
   const irAlBuscador = () => router.push('/productos/buscar' as never);
 
   const encabezado = (
@@ -342,8 +378,60 @@ export function ProductosScreen() {
       onBack={volver}
       rightIcon="shopping-bag"
       onRightPress={irALaBolsa}
-      rightBadge={contador !== null}
+      rightBadge={enLaBolsa !== null}
     />
+  );
+
+  /**
+   * Los dos accesos del encabezado, con etiquetas accesibles DISTINTAS.
+   *
+   * Van en una fila propia justo debajo de `AppHeader` porque el encabezado
+   * compartido solo admite UN icono a la derecha, y tocarlo cambiaría todas las
+   * pantallas de la aplicación. Cada uno lleva su icono, su número y su nombre:
+   * el contador nunca va suelto, que es cuando deja de saberse qué cuenta.
+   */
+  const accesos = (
+    <View style={styles.accesos}>
+      <Pressable
+        onPress={irAGuardados}
+        accessibilityRole="button"
+        accessibilityLabel={
+          guardados !== null
+            ? f('carrito.guardadosContador', { n: guardados })
+            : f('carrito.acceso.guardados')
+        }
+        style={({ pressed }) => [
+          styles.acceso,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name="bookmark" size={16} color={colors.text} />
+        <Text variant="caption" weight="700">
+          {guardados !== null
+            ? f('carrito.guardadosContador', { n: guardados })
+            : f('carrito.acceso.guardados')}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={irALaBolsa}
+        accessibilityRole="button"
+        accessibilityLabel={
+          enLaBolsa !== null
+            ? f('carrito.contador', { n: enLaBolsa })
+            : f('carrito.acceso.bolsa')
+        }
+        style={({ pressed }) => [
+          styles.acceso,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name="shopping-bag" size={16} color={colors.text} />
+        <Text variant="caption" weight="700">
+          {enLaBolsa !== null ? f('carrito.contador', { n: enLaBolsa }) : f('carrito.acceso.bolsa')}
+        </Text>
+      </Pressable>
+    </View>
   );
 
   /** Un título de sección con su enlace a la derecha, como la referencia. */
@@ -402,23 +490,7 @@ export function ProductosScreen() {
     <AppScreen contentStyle={styles.contenido}>
       {encabezado}
 
-      {/* El contador de la bolsa: SOLO si hay algo guardado. */}
-      {contador !== null ? (
-        <Pressable
-          onPress={irALaBolsa}
-          accessibilityRole="button"
-          accessibilityLabel={f('productos.bolsaContador', { n: contador })}
-          style={({ pressed }) => [
-            styles.bolsa,
-            { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Feather name="heart" size={14} color={colors.text} />
-          <Text variant="caption" weight="700">
-            {f('productos.bolsaContador', { n: contador })}
-          </Text>
-        </Pressable>
-      ) : null}
+      {accesos}
 
       {/* El buscador. Lo que filtra lo filtra el servidor, en su pantalla. */}
       <Pressable
@@ -540,6 +612,7 @@ const styles = StyleSheet.create({
   celda: { flexBasis: '47%', flexGrow: 1, maxWidth: '50%' },
   tarjeta: { gap: spacing.xs },
   tarjetaCuerpo: { gap: spacing.xs },
+  miniaturaImagen: { width: '100%', height: '100%' },
   miniatura: {
     // Cuadrada, como la referencia.
     aspectRatio: 1,
@@ -571,15 +644,17 @@ const styles = StyleSheet.create({
   },
   verTodo: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 44, paddingLeft: spacing.sm },
   manifiesto: { textAlign: 'center' },
-  bolsa: {
+  accesos: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  acceso: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-end',
     gap: spacing.xs,
     borderWidth: 1,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
-    minHeight: 32,
+    // Área táctil mínima de 44×44, también con el texto corto.
+    minWidth: 44,
+    minHeight: 44,
   },
   buscador: {
     flexDirection: 'row',

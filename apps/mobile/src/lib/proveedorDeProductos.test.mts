@@ -1700,12 +1700,19 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
   it('NINGUNA pantalla de existencias, envíos, pedidos, incidencias ni saldos', () => {
     // No existen en la API. Una pantalla vacía que los simulara prometería una
     // operación que no hay.
+    //
+    // «inventario» SALIÓ DE ESTA LISTA con el incremento 4: el inventario por
+    // SKU existe de verdad en el servidor —`/products/seller/products/{id}/
+    // inventory`, la 0074— y tiene su propia pantalla. Lo que sigue prohibido
+    // aquí es lo que sigue sin existir, y también que ESTAS tres pantallas
+    // escriban un número de existencias: los números viven en
+    // `InventarioDeProductoScreen`, que es la única que los lee del contrato,
+    // y por eso «stock» y «existencias» se quedan.
     const todo = [postular, productos, editar, repositorio].join('\n');
     // Con límites de palabra: `borderColor` contiene «order» y no es un pedido.
     for (const prohibido of [
       'stock',
       'existencias',
-      'inventario',
       'envio',
       'envío',
       'shipping',

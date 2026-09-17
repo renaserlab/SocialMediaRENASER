@@ -1731,6 +1731,11 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       'esquema.py',
       'router.py',
       'catalog.py',
+      // Los tres del Incremento 4. Sin ellos, un código nuevo de fotografías,
+      // inventario o carrito podría salir a producción sin texto.
+      'media.py',
+      'inventory.py',
+      'carts.py',
     ]) {
       let texto = '';
       try {
@@ -1746,8 +1751,27 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       }
     }
     assert.ok(codigos.size > 40, `solo se leyeron ${codigos.size} códigos`);
+    // CUALQUIERA DE LOS CUATRO TRADUCTORES vale: lo que no puede pasar es que
+    // un código llegue a una pantalla sin ningún texto detrás. Cada módulo del
+    // Incremento 4 traduce lo suyo, y el del catálogo además conoce las puertas
+    // de esquema, que se pueden ver desde cualquier sitio.
+    //
+    // Los tres nuevos se leen DEL CÓDIGO y no se importan: `carrito.ts` importa
+    // valores por el alias `@/`, que el ejecutor de Node no resuelve. Leer el
+    // fichero comprueba lo mismo —que el código está en su tabla— sin arrastrar
+    // un resolutor a esta prueba.
+    const enLosNuevos = new Set<string>();
+    for (const modulo of ['carrito.ts', 'inventario.ts', 'fotosDeProducto.ts']) {
+      for (const m of fuente('lib', modulo).matchAll(
+        /^\s{2}([a-z_0-9]+):\s*'[^']+',$/gm,
+      )) {
+        enLosNuevos.add(m[1] as string);
+      }
+    }
+    assert.ok(enLosNuevos.size > 15, `solo ${enLosNuevos.size} en los nuevos`);
     const sinTraducir = [...codigos].filter(
-      (codigo) => claveDeErrorDeProductos(codigo) === null,
+      (codigo) =>
+        claveDeErrorDeProductos(codigo) === null && !enLosNuevos.has(codigo),
     );
     assert.deepEqual(
       sinTraducir,

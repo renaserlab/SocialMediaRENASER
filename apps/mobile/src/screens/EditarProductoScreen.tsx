@@ -589,6 +589,27 @@ export function EditarProductoScreen() {
         )}
       </View>
 
+      {/*
+        Las fotografías de verdad viven en su propia pantalla, y solo existen
+        cuando el producto ya está creado: hasta entonces no hay versión a la
+        que colgarlas. Subir NO ES PUBLICAR —nacen pendientes de aprobación— y
+        eso se cuenta allí, junto al botón que sube.
+      */}
+      {!esNuevo && typeof productId === 'string' ? (
+        <>
+          <Button
+            label={f('fotos.acceso')}
+            variant="secondary"
+            icon="camera"
+            onPress={() => router.push(`/proveedor/productos/${productId}/fotos` as never)}
+            disabled={ocupado}
+          />
+          <Text variant="caption" color={colors.textMuted}>
+            {f('fotos.accesoCuerpo')}
+          </Text>
+        </>
+      ) : null}
+
       {/* La galería: RUTAS DEL ALMACENAMIENTO, nunca enlaces. */}
       <View style={[styles.tarjeta, { borderColor: colors.border }]}>
         <Text variant="secondary" weight="700">

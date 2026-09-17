@@ -73,6 +73,10 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Incremento 4: se escriben igual en español y en inglés.
+    'carrito.subtotal',     // «Subtotal» es la misma palabra.
+    'inventario.sku',       // «SKU» es una sigla inglesa.
+    'fotos.bandeja.peso',   // Un número y «KB».
     // Formato puro: un numero, un separador y un importe ya formateado.
     'entradas.subtotalDeTipo',
     'reserva.porUnidad',
@@ -120,6 +124,22 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 4: español y portugués comparten estas palabras enteras. No
+    // son traducciones olvidadas; escribirlas distintas sería escribirlas mal.
+    'carrito.subtotal',
+    'carrito.proveedor',            // «De {nombre}».
+    'carrito.precioAnterior',       // «Antes: …».
+    'carrito.guardadosContador',    // «{n} guardados».
+    'inventario.sku',
+    'inventario.comprometidas',
+    'inventario.ajustar',
+    'inventario.ajusteHecho',       // «Ajuste registrado».
+    'inventario.motivoDelMovimiento',
+    'inventario.movimiento.intake',       // «Entrada».
+    'inventario.movimiento.adjustment',   // «Ajuste».
+    'inventario.movimiento.reservation',  // «Reserva».
+    'fotos.bandeja.alternativo',    // «Texto alternativo: …».
+    'fotos.bandeja.peso',
     // Políticas y moderación: palabras que se escriben exactamente igual en
     // portugués —«Publicar», «Descartar», «Igual», «Publicada», «Evento»,
     // «Aplicar», «Estado», «Organizador», «Publicadas», «Saldo negativo»,

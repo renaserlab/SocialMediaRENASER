@@ -63,6 +63,13 @@ export type TarjetaDeProducto = {
   currency: string | null;
   /** La RUTA en el almacenamiento, no una URL. */
   image_path: string | null;
+  /**
+   * La URL FIRMADA, emitida por el servidor al servir esta respuesta y con
+   * vencimiento. `null` cuando no hay fotografía aprobada o el almacenamiento
+   * no contestó: entonces se enseña `image_alt`, que es la verdad.
+   */
+  image_url: string | null;
+  image_alt: string | null;
   /** UNO SOLO. Hoy solo puede ser `origin`. */
   trust: string | null;
   trust_value: string | null;
@@ -117,6 +124,10 @@ export type Media = {
   kind: string;
   storage_path: string;
   alt_text: string | null;
+  /** Firmada ahora y con vencimiento. `null` si no se pudo firmar. */
+  url: string | null;
+  width: number | null;
+  height: number | null;
 };
 
 /** `VarianteRead`. El delta se suma al precio de la versión. */
@@ -301,21 +312,20 @@ export const BLOQUES_DE_LA_FICHA = [
 export type BloqueDeLaFicha = (typeof BLOQUES_DE_LA_FICHA)[number];
 
 /**
- * Las imágenes de producto TODAVÍA NO SE PUEDEN PINTAR, y esto lo dice.
+ * Si hay una fotografía que pintar. LO DECIDE EL SERVIDOR, no una bandera.
  *
- * El contrato manda `storage_path` —una ruta— y deja firmarla a la aplicación,
- * pero en el almacenamiento no existe ningún depósito de productos: la
- * aplicación sabe firmar `post-media`, `course-media` y `avatars`, y la 0070 no
- * crea ninguno más. Firmar la ruta contra un depósito ajeno produciría una URL
- * que falla, así que se enseña el texto alternativo y se dice que la imagen no
- * está disponible. Cuando exista el depósito, esto pasa a `true` y la galería
- * se pinta sin tocar nada más.
+ * Antes esto era una constante apagada, porque no existía ningún depósito de
+ * productos y firmar la ruta contra otro habría dado una URL rota. Desde la
+ * 0073 el depósito existe, es PRIVADO y NO TIENE POLÍTICAS: la aplicación no
+ * puede firmar nada por su cuenta, y por eso la URL llega ya firmada en el
+ * contrato, emitida al servir la respuesta y con vencimiento.
+ *
+ * QUE LLEGUE NULA NO ES UN ERROR. Significa que esa versión no tiene ninguna
+ * fotografía APROBADA, o que el almacenamiento no contestó. En los dos casos se
+ * enseña el texto alternativo, que es lo que hay, y no un hueco.
  */
-export const IMAGENES_FIRMABLES = false;
-
-/** Si esa ruta de imagen se puede convertir hoy en algo que se vea. */
-export function sePuedeMostrarLaImagen(ruta: string | null | undefined): boolean {
-  return IMAGENES_FIRMABLES && typeof ruta === 'string' && ruta.trim() !== '';
+export function sePuedeMostrarLaImagen(url: string | null | undefined): boolean {
+  return typeof url === 'string' && url.trim() !== '';
 }
 
 function conocido(valores: readonly string[], valor: string, prefijo: string): string {
@@ -932,6 +942,12 @@ export function claveDeErrorDeProductos(
     product_saves_not_available: 'productos.error.guardadosNoDisponibles',
     product_evaluation_not_available: 'productos.error.informeNoDisponible',
     product_not_found: 'productos.error.noEncontrado',
+    // Las tres puertas del Incremento 4. Están aquí, y no solo en sus módulos,
+    // porque cualquier pantalla del catálogo puede toparse con ellas.
+    product_media_not_available: 'productos.error.product_media_not_available',
+    product_inventory_not_available:
+      'productos.error.product_inventory_not_available',
+    product_cart_not_available: 'productos.error.product_cart_not_available',
   };
   if (typeof codigo !== 'string') return null;
   return conocidos[codigo] ?? null;

@@ -123,8 +123,18 @@ export async function apiRequest<T>(
 
     Un GET sin cuerpo no necesita declarar el formato de algo que no manda.
   */
+  /*
+    Y NUNCA sobre un `FormData`. Ese cuerpo se manda como `multipart/form-data`
+    con un separador que genera el propio `fetch`; escribir aqui el tipo lo
+    dejaria sin separador y el servidor no encontraria ninguna parte. Es lo que
+    necesita la subida de fotografias de producto, que manda el archivo.
+  */
+  const esFormulario =
+    typeof FormData !== 'undefined' && init.body instanceof FormData;
   const finalHeaders: Record<string, string> = {
-    ...(init.body != null ? { 'Content-Type': 'application/json' } : {}),
+    ...(init.body != null && !esFormulario
+      ? { 'Content-Type': 'application/json' }
+      : {}),
     ...(headers as Record<string, string> | undefined),
   };
 

@@ -46,7 +46,6 @@ import {
   CONFIANZAS_CONOCIDAS,
   DECISIONES,
   DIMENSIONES,
-  IMAGENES_FIRMABLES,
   LARGO_MINIMO_DE_LA_BUSQUEDA,
   MANIFIESTO,
   ORDEN_DE_DIMENSIONES,
@@ -602,12 +601,17 @@ describe('lo que no existe SE DEJA FUERA, no se rellena', () => {
     assert.equal(seDejaFuera(ficha({ manufacturer: 'Taller' }), 'materialesYOrigen'), false);
   });
 
-  it('las imágenes todavía no se pueden firmar, y eso se dice', () => {
-    // No hay depósito de productos en el almacenamiento: firmar la ruta contra
-    // uno ajeno daría una URL que falla.
-    assert.equal(IMAGENES_FIRMABLES, false);
-    assert.equal(sePuedeMostrarLaImagen('productos/silla.jpg'), false);
+  it('la imagen la decide el servidor, no una bandera de la aplicación', () => {
+    // ANTES esto era una constante apagada, porque no existía ningún depósito
+    // de productos. Desde la 0073 el depósito existe, es privado y NO TIENE
+    // POLÍTICAS: la aplicación no puede firmar nada, así que la URL llega ya
+    // firmada del servidor. Que llegue nula no es un error: es que esa versión
+    // no tiene ninguna fotografía APROBADA, y entonces se enseña el texto
+    // alternativo.
+    assert.equal(sePuedeMostrarLaImagen('https://x.test/f.jpg?firma=1'), true);
     assert.equal(sePuedeMostrarLaImagen(null), false);
+    assert.equal(sePuedeMostrarLaImagen(undefined), false);
+    assert.equal(sePuedeMostrarLaImagen('   '), false);
   });
 });
 
@@ -615,7 +619,10 @@ describe('lo que no existe SE DEJA FUERA, no se rellena', () => {
 describe('NINGÚN BOTÓN DE COMPRAR', () => {
   it('las acciones de la ficha no incluyen comprar, y no pueden', () => {
     for (const accion of ACCIONES_DE_LA_FICHA) {
-      for (const prohibida of ['comprar', 'buy', 'carrito', 'cart', 'checkout', 'pagar', 'pay']) {
+      // `carrito` YA NO ESTÁ PROHIBIDO, y es el cambio del Incremento 4: la
+      // bolsa existe. Lo que sigue prohibido es lo que PROMETE UNA COMPRA, que
+      // es lo que de verdad protegía esta lista.
+      for (const prohibida of ['comprar', 'buy', 'checkout', 'pagar', 'pay']) {
         assert.ok(!accion.toLowerCase().includes(prohibida), `${accion} / ${prohibida}`);
       }
     }
@@ -1098,15 +1105,17 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
       // `sinComprar` es justo lo contrario —la línea que dice que en Z todavía
       // no se compra— así que se quita antes de buscar «comprar» suelto.
       const bajo = codigo.toLowerCase().split('sincomprar').join('');
+      // MISMA CORRECCIÓN: la bolsa existe desde el Incremento 4, y las
+      // pantallas la nombran y empujan a `/productos/carrito`. Lo que NO puede
+      // aparecer en ninguna es un botón que prometa pagar, ni un `purchasable`
+      // leído para encender algo: la compra física no existe.
       for (const prohibido of [
         'comprar',
-        'carrito',
         'checkout',
-        'addtocart',
-        'añadiralcarrito',
         'pagar(',
         'purchase(',
         'purchasable ?',
+        'purchasable &&',
       ]) {
         assert.ok(!bajo.includes(prohibido), `${nombre} dice «${prohibido}»`);
       }
@@ -1163,10 +1172,20 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     assert.ok(!portadaSrc.includes("flexBasis: '31%'"));
   });
 
-  it('el contador de la bolsa solo se pinta cuando hay algo', () => {
+  it('los DOS contadores se pintan solo cuando hay algo, y son dos', () => {
+    // DESDE EL INCREMENTO 4 SON DOS NÚMEROS DISTINTOS: la bolsa cuenta
+    // UNIDADES del carrito y el marcador cuenta PRODUCTOS guardados. Juntarlos
+    // haría que ninguno quisiera decir nada concreto.
     assert.ok(portadaSrc.includes('contadorDeLaBolsa('));
-    assert.ok(portadaSrc.includes('contador !== null'));
-    assert.ok(!portadaSrc.includes('contador ?? 0'));
+    assert.ok(portadaSrc.includes('contadorDeGuardados('));
+    // Y NI UNO NI OTRO SE CONVIERTEN EN CERO: un «0» colgando de un icono es
+    // ruido, y encima parece un error.
+    assert.ok(portadaSrc.includes('enLaBolsa !== null'));
+    assert.ok(portadaSrc.includes('guardados !== null'));
+    assert.ok(!portadaSrc.includes('?? 0'));
+    // LOS DOS ACCESOS VAN A SITIOS DISTINTOS.
+    assert.ok(portadaSrc.includes("'/productos/carrito'"));
+    assert.ok(portadaSrc.includes("'/productos/guardados'"));
   });
 
   it('el título del bloque personal sale del módulo, no está escrito', () => {

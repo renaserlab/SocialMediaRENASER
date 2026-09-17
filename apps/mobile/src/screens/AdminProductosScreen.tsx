@@ -375,6 +375,18 @@ export function AdminProductosScreen() {
         disabled={ocupado}
       />
 
+      {/*
+        Y las fotografías son una TERCERA bandeja. Aprobar un producto no aprueba
+        las imágenes que le añadan después: cada una se mira aparte, y el motivo
+        del rechazo es lo único que le permite corregirla a quien la subió.
+      */}
+      <Button
+        label={f('fotos.bandeja.acceso')}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos/fotos' as never)}
+        disabled={ocupado}
+      />
+
       {conflicto ? (
         <View style={[styles.recuadro, { borderColor: colors.danger }]}>
           <Text variant="secondary" weight="700" color={colors.danger}>

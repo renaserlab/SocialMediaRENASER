@@ -341,6 +341,23 @@ export function MisProductosScreen() {
           </Text>
         )}
 
+        {/*
+          EL INVENTARIO SE LLEVA AUNQUE EL PRODUCTO YA NO SE EDITE. Las
+          existencias son de la variante, no del borrador: un producto publicado
+          es justo el que más necesita que se puedan cargar y ajustar. Por eso el
+          acceso está aquí y no en el editor, que se cierra en cuanto el producto
+          sale de borrador.
+        */}
+        <Button
+          label={f('inventario.acceso')}
+          variant="secondary"
+          icon="layers"
+          onPress={() =>
+            router.push(`/proveedor/productos/${producto.id}/inventario` as never)
+          }
+          disabled={ocupado}
+        />
+
         {acciones.includes('submitted') ? (
           <Button
             label={f(claveDeAccionDeProducto('submitted'))}
