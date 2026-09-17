@@ -611,3 +611,67 @@ Nada de esto se puede comprobar sin un teléfono real y sin las migraciones 0070
 - [ ] Un 86 deja el producto en «aprobado con condiciones» y la pantalla explica por qué no se puede publicar.
 - [ ] Publicar con dos razones se rechaza y dice que faltan tres.
 - [ ] Suspender exige motivo, y el motivo llega al proveedor.
+
+## Productos, Incremento 4 (17/09/2026)
+
+**NADA DE ESTO SE HA MARCADO.** Son las comprobaciones que un teléfono de verdad
+tiene que hacer sobre las fotografías, el inventario y la bolsa, y ninguna la
+puede hacer una prueba automática.
+
+### Fotografías, con la cámara y el carrete de verdad
+
+- [ ] Subir una foto desde el carrete en iOS deja ver el selector: no se queda la pantalla congelada.
+- [ ] Subir desde la cámara en Android funciona igual.
+- [ ] Una foto de 12 MP del teléfono se sube o se rechaza por peso con un mensaje que se entiende; no se queda colgada.
+- [ ] Con la red cortada a mitad de una subida, el error dice qué pasó y se puede reintentar.
+- [ ] Reintentar la misma subida NO deja dos fotografías iguales.
+- [ ] Renombrar un vídeo a `.jpg` y subirlo lo rechaza el servidor, no solo la pantalla.
+- [ ] El texto alternativo es obligatorio y el teclado no tapa el campo.
+- [ ] Una fotografía pendiente se distingue de una aprobada SIN mirar el color: hay icono y texto.
+- [ ] Una rechazada enseña el motivo escrito por quien la rechazó.
+- [ ] Reordenar las fotografías se ve reflejado en la ficha pública tras publicar.
+- [ ] Quitar una fotografía pide confirmación y no se lleva ninguna otra.
+- [ ] Con VoiceOver / TalkBack, cada fotografía se anuncia con su texto alternativo.
+- [ ] El catálogo NO enseña ninguna fotografía pendiente ni rechazada.
+- [ ] Una URL firmada caducada no deja la tarjeta rota: se vuelve a firmar al recargar.
+
+### Inventario, en el teléfono de quien vende
+
+- [ ] Una variante sin existencias cargadas dice «sin existencias cargadas», NUNCA «agotado» ni «0».
+- [ ] Cargar una entrada con doble toque rápido carga UNA vez, no dos.
+- [ ] Un ajuste sin motivo tiene el botón apagado, y se ve por qué.
+- [ ] Un ajuste que dejaría la existencia negativa se rechaza con un mensaje que dice cuánto hay.
+- [ ] El historial se lee de arriba abajo y se entiende sin explicación.
+- [ ] El historial no ofrece editar ni borrar ninguna línea.
+- [ ] Con el teclado abierto, el campo de cantidad sigue visible.
+- [ ] Los tres números —disponible, en existencia y comprometidas— caben a 320 px sin cortarse.
+
+### La bolsa
+
+- [ ] La bolsa vacía NO enseña «0.00» ni ningún importe.
+- [ ] El contador de la bolsa y el de guardados son dos números distintos y se entiende cuál es cuál.
+- [ ] Guardar un producto NO cambia el contador de la bolsa.
+- [ ] Añadir dos veces el mismo producto ajusta la cantidad; no aparecen dos líneas.
+- [ ] Doble toque rápido en «Añadir a la bolsa» suma UNA unidad.
+- [ ] El «+» está apagado cuando no quedan más unidades, y se explica.
+- [ ] Bajar de 1 quita la línea y la pantalla lo dice antes o lo deshace.
+- [ ] Un producto suspendido sigue siendo identificable en la bolsa y no se puede comprar.
+- [ ] Un precio que cambió se ve tachado junto al nuevo, sin que la línea se bloquee.
+- [ ] **NO HAY NINGÚN BOTÓN DE PAGAR, COMPRAR NI CONTINUAR** en toda la pantalla.
+- [ ] El pie dice con palabras que la compra todavía no está habilitada.
+- [ ] Con la red cortada, la bolsa dice «sin conexión» y ofrece reintentar; no se vacía.
+- [ ] Cerrar la aplicación y volver a entrar conserva la bolsa entera.
+
+### Las tres migraciones sin aplicar
+
+- [ ] Con la 0073 sin aplicar, la pantalla de fotografías dice que no está disponible; no revienta.
+- [ ] Con la 0074 sin aplicar, la de inventario dice lo mismo.
+- [ ] Con la 0075 sin aplicar, la bolsa dice lo mismo y el catálogo se sigue recorriendo entero.
+
+### En las cuatro anchuras y los tres idiomas
+
+- [ ] La bolsa, el inventario y las fotografías a 320, 375, 390 y 768 px, sin desbordes.
+- [ ] En claro y en oscuro.
+- [ ] En español, inglés y portugués: ninguna clave cruda en pantalla.
+- [ ] Con el texto del sistema ampliado al máximo, ningún botón queda fuera de alcance.
+- [ ] Todas las áreas táctiles llegan a 44×44.

@@ -672,3 +672,146 @@ olvido.
 El blueprint §3.1 admite cuatro —recomendación, garantía, origen o compras
 verificadas— y solo uno por tarjeta. Hoy solo el origen se puede demostrar: los
 otros tres necesitan reseñas, pedidos o condiciones aprobadas.
+
+**D56 · La fotografía no la sube el móvil: la sube la API.**
+
+El depósito `product-media` (0073) es privado y **no tiene ninguna política de
+almacenamiento**, al revés que `message-media`, donde la aplicación escribe
+directamente y las políticas deciden quién puede. Aquí el archivo viaja a la
+API, que comprueba de quién es el borrador, **mira los bytes**, genera el nombre
+y solo entonces escribe con la clave de servicio. Sin políticas, `anon` y
+`authenticated` no pueden ni leer ni listar: la única puerta es la API, que es
+la única que sabe qué fotografías están aprobadas.
+
+Y **ya no se acepta una ruta pegada**. Antes quien vendía mandaba en el borrador
+una lista de rutas de almacenamiento, lo que permitía apuntar a un archivo ajeno
+—o a ninguno— y la ficha enseñaba lo que dijera esa cadena. `PUT .../draft` ya
+no lleva galería.
+
+**D57 · Subir no es publicar: una fotografía nace pendiente.**
+
+`product_media.status` nace `pending`. Quien evalúa la aprueba o la rechaza **con
+motivo**, y el catálogo solo firma las aprobadas. Sin ese estado, aprobar un
+producto aprobaría también cualquier imagen que le añadieran después.
+
+Publicar exige ahora **al menos una fotografía aprobada**, y «hay fotos y
+ninguna aprobada» tiene su propio código —`product_media_not_approved`— porque
+no es el mismo problema que no haber subido ninguna: no falta subir nada, falta
+que alguien las mire.
+
+**D58 · La extensión no decide nada, y el `Content-Type` tampoco.**
+
+El tipo se deduce de los **primeros bytes** y después se **abre la imagen de
+verdad**: una cabecera de JPEG se puede pegar delante de cualquier cosa. El
+depósito declara tres tipos —`image/jpeg`, `image/png`, `image/webp`— y no
+`image/*`, que dejaría pasar SVG: un SVG es un documento con scripts, no una
+fotografía. El nombre del archivo **lo genera el servidor**, porque el que trae
+quien sube puede llevar `../`.
+
+**D59 · Un archivo que otra fila sigue nombrando no se borra.**
+
+Una versión nueva copia la galería con **la misma ruta**, sin volver a subir los
+bytes. Borrar el objeto al quitar una de esas filas dejaría a la otra apuntando
+al vacío, y la versión publicada perdería su fotografía.
+
+**D60 · Cuántas fotografías caben lo dice la referencia visual, no el
+blueprint.**
+
+El blueprint no fija el número. La captura 6 enseña una galería «1/5», así que
+cinco es lo que la referencia sostiene. Se cuenta **en el servidor**, porque un
+CHECK no cuenta filas y un disparador que lo hiciera bloquearía la tabla en cada
+inserción para defender un número que la empresa todavía puede cambiar.
+
+**D61 · La unidad de almacén es el SKU, no la fila de la variante.**
+
+Una variante cuelga de una **versión inmutable**: publicar la siguiente crea
+filas de variante nuevas, con identificadores nuevos, para las mismas cajas del
+mismo almacén. Si el inventario colgara de esas filas, cada publicación lo
+dejaría huérfano y el producto aparecería agotado sin que nadie hubiera vendido
+nada. Y guardar el número en la variante tiene el problema contrario: guardar el
+borrador rehace esas filas.
+
+El SKU es, literalmente, la unidad de almacén —*stock keeping unit*—, y es lo
+único estable entre una versión y la siguiente. Por eso `product_inventory`
+tiene clave `(product_id, sku)` y **ninguna clave ajena a `product_variants`**.
+
+**D62 · Lo disponible se calcula; no se guarda.**
+
+`available = on_hand - reserved`. Guardarlo además crearía dos verdades que
+divergen la primera vez que alguien escriba una y olvide la otra. La 0074 no
+tiene esa columna, y hay una prueba que lo comprueba. El día que la resta pese,
+será una vista o un índice, no una columna.
+
+**D63 · La concurrencia la resuelve PostgreSQL, no el proceso.**
+
+Reservar bloquea la fila con `select ... for update` y decide con el número ya
+bloqueado. **No hay ningún `asyncio.Lock`**: hay más de un proceso, y un candado
+en la memoria de uno no ordena nada entre ellos. Se prueba con el orden fijado a
+mano —A bloquea, B espera, A se lleva la última, B despierta y ve que no
+queda— porque una prueba que lance N peticiones y mire el resultado puede
+serializarse sola y pasar sin el bloqueo puesto.
+
+**D64 · Sin inventario cargado no es «agotado».**
+
+Un SKU sin fila no tiene cero unidades: tiene un inventario que nadie ha
+cargado. Son dos cosas distintas y se contestan distinto
+—`product_inventory_not_configured` frente a `product_inventory_insufficient`—
+porque decir «agotado» de algo que nunca se inventarió manda a quien vende a
+buscar un problema que no existe. La pantalla lo escribe con esas palabras y no
+pinta un cero.
+
+**D65 · El historial de inventario solo se añade.**
+
+Un disparador de la 0074 rechaza `update` y `delete` sobre
+`inventory_movements`. Una rectificación es un movimiento nuevo con su motivo,
+nunca una edición del anterior: si una fila se puede editar, «cuántas había el
+martes» deja de tener respuesta. Es lo que el blueprint §14.1 exige para los
+registros financieros, aplicado aquí.
+
+El **ajuste** es el único movimiento que exige motivo, porque es el único que
+cambia el número sin que haya ocurrido nada fuera del sistema.
+
+**D66 · El carrito no reserva existencias.**
+
+Tener algo en la bolsa no se lo quita a nadie: una reserva sin caducidad
+convertiría un carrito olvidado en un producto agotado. Reservar es del
+checkout. `carts.py` **lee** el inventario y no lo mueve nunca, y hay una prueba
+que cuenta los movimientos para demostrarlo.
+
+`reservar`, `liberar` y `despachar` existen, funcionan y están probadas, pero
+**no las llama ninguna ruta**: son del Incremento 5.
+
+**D67 · El precio de la línea del carrito no es el precio.**
+
+`seen_price_minor` es lo que se veía al añadir y existe para **avisar** de que
+cambió. El total lo calcula el servidor con el precio de ahora, porque congelar
+el precio ocurre al crear el pedido: congelarlo en la bolsa haría que un carrito
+de hace tres semanas pagara un importe que ya no existe. Y un precio que subió
+**sigue siendo comprable**: lo que hay que hacer es decirlo, no bloquear la
+línea.
+
+**D68 · Un carrito vacío no enseña «0.00».**
+
+`subtotal_minor` viaja nulo cuando no hay ninguna línea comprable. Un cero con
+moneda se lee como una compra de cero soles.
+
+**D69 · Monedas incompatibles no se suman.**
+
+El carrito guarda la moneda de su primera línea y rechaza una en otra distinta.
+Al vaciarse, la olvida: dejarla puesta impediría meter algo en otra moneda en
+una bolsa que ya no tiene nada, y el error diría que hay algo dentro que no hay.
+
+**D70 · La bolsa y los guardados son dos contadores distintos.**
+
+La bolsa cuenta **unidades del carrito**; guardados cuenta **productos
+marcados**. Juntarlos haría que el número del encabezado no quisiera decir nada
+concreto. Guardar sigue siendo un marcador: no tiene cantidad, no tiene variante
+y no lleva a pagar.
+
+**D71 · Sigue sin haber ninguna ruta de compra.**
+
+No hay checkout, ni pedido, ni pago, ni dirección, ni transportista.
+`purchasable` viaja siempre en `false` y lo escribe el molde de la respuesta, no
+un campo copiado: encender la compra tiene que pasar por ese fichero.
+`feature_product_sales` sigue apagada y sin código detrás. La pantalla del
+carrito **no tiene botón de pagar**, y lo dice con palabras en el pie.

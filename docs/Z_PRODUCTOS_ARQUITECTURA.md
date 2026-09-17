@@ -1,7 +1,8 @@
-# Productos de Excelencia Z · Incrementos 1 a 3
+# Productos de Excelencia Z · Incrementos 1 a 4
 
 Qué se construyó, qué se decidió en cerrado y qué sigue esperando a una
-persona. Escrito el 12/09/2026.
+persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4:
+fotografías reales, inventario y carrito.
 
 ## 1. Lo que NO es
 
@@ -11,10 +12,11 @@ sirve el servidor: la aplicación no decide qué cuenta como publicado. Si lo
 decidiera ella, bastaría una versión vieja instalada en un teléfono para que
 apareciera algo que Z retiró.
 
-Y **no vende**. No hay carrito, ni pedido, ni existencias, ni envío, ni
-devolución, ni transferencia. `feature_product_sales` nace apagada y **no hay
-código detrás**: encenderla no haría que se pudiera comprar, solo dejaría de ser
-verdad que no se puede.
+Y **sigue sin vender**. Desde el Incremento 4 hay existencias y hay bolsa, pero
+**no hay pedido, ni pago, ni dirección, ni envío, ni devolución, ni
+transferencia**. `feature_product_sales` sigue apagada y **sin código detrás**:
+encenderla no haría que se pudiera comprar, solo dejaría de ser verdad que no se
+puede. La pantalla del carrito no tiene botón de pagar, y lo dice con palabras.
 
 ## 2. Por qué no se reutilizó `commerce_products`
 
@@ -41,19 +43,36 @@ verdades sobre quién es esa persona.
 | `0070_productos_dominio.sql` | `product_sellers`, `product_categories`, `products`, `product_versions`, `product_variants`, `product_media` |
 | `0071_productos_admision.sql` | `seller_applications`, `seller_application_documents`, `product_evaluations`, `product_evaluation_scores`, `product_evaluation_evidence`, `product_approval_reasons` |
 | `0072_productos_guardados.sql` | `saved_products` |
+| `0073_productos_fotografias.sql` | el depósito `product-media` y nueve columnas de `product_media` |
+| `0074_productos_inventario.sql` | `product_inventory`, `inventory_movements` |
+| `0075_productos_carrito.sql` | `product_carts`, `product_cart_items` |
 
-**ENTREGADAS SIN APLICAR.** Las tres se escribieron y se probaron en PostgreSQL
+**LAS TRES PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se
+comprobaron contra la base gestionada en una sesión de solo lectura demostrada
+—una escritura fue rechazada antes de la primera consulta—: tablas, columnas
+contra el ORM, tipos, nulabilidad, claves primarias y ajenas con su `ON DELETE`,
+restricciones, índices con su unicidad y su parcialidad, el disparador con su
+cuerpo comparado carácter a carácter, RLS activa, cero políticas y cero
+permisos para `anon` y `authenticated`. **Cero divergencias.**
+
+**LAS TRES ÚLTIMAS SE ENTREGAN SIN APLICAR.** Escritas y probadas en PostgreSQL
 16 desechable, incluida su reejecución. Ninguna se aplicó a la base gestionada.
 
 Sin ellas, cada ruta contesta **503 con su propio código** —`products_not_available`,
-`product_admission_not_available`, `product_saves_not_available`— y no 404, que
-haría pensar que la ruta está mal escrita, ni 500, que haría pensar que algo se
-rompió. La portada es la excepción: contesta `disponible: false` con los bloques
+`product_admission_not_available`, `product_saves_not_available`,
+`product_media_not_available`, `product_inventory_not_available`,
+`product_cart_not_available`— y no 404, que haría pensar que la ruta está mal
+escrita, ni 500, que haría pensar que algo se rompió.
+
+La puerta de las **fotografías mira una columna**, no una tabla: la 0073 no crea
+ninguna, le añade estado y medidas a `product_media`, y preguntar por la tabla
+diría que sí sin que exista nada de lo que hace falta. La portada es la excepción: contesta `disponible: false` con los bloques
 vacíos, porque es la puerta de entrada y un error ahí parecería que la
 aplicación está rota.
 
-**Tres puertas y no una** porque las migraciones se aplican en orden: con la
-0070 puesta el dominio ya funciona aunque la admisión no esté.
+**Una puerta por migración y no una sola** porque se aplican en orden: con la
+0074 puesta el inventario ya funciona aunque el carrito no esté, y quien vende
+puede seguir cargando existencias mientras tanto.
 
 ## 4. Por qué las variantes y la galería cuelgan de la versión
 
@@ -228,42 +247,97 @@ Se crearon **solo los que tienen lógica usada en este incremento**:
     products/applications.py  la postulación del proveedor
     products/evaluations.py   la matriz, la evidencia y las razones
     products/catalog.py       portada, búsqueda, ficha y guardados
+    products/media.py         las fotografías: subir, ordenar, quitar, aprobar
+    products/inventory.py     existencias, movimientos y concurrencia
+    products/carts.py         la bolsa
     products/schemas.py       los contratos
-    products/router.py        29 rutas
+    products/router.py        44 rutas
 
-**No existen** `inventory.py`, `carts.py`, `orders.py`, `shipments.py`,
-`incidents.py`, `returns.py`, `warranties.py`, `reviews.py`, `performance.py` ni
-`finance.py`. La arquitectura los propone para incrementos posteriores, y un
-fichero vacío hoy es una capa que hay que mantener sin que haga nada.
+**No existen** `orders.py`, `shipments.py`, `incidents.py`, `returns.py`,
+`warranties.py`, `reviews.py`, `performance.py` ni `finance.py`. La arquitectura
+los propone para incrementos posteriores, y un fichero vacío hoy es una capa que
+hay que mantener sin que haga nada.
+
+`media.py` tampoco está en la lista de la arquitectura: lo que faltaba ahí era
+**quién recibe el archivo**, y eso no es catálogo, ni admisión, ni ciclo.
 
 `service.py` no está en la lista de la arquitectura y sí en el árbol: lo que
 falta ahí es **quién escribe el producto y su versión**, y eso no es catálogo ni
 admisión.
 
-## 13. El bloqueo que hay que saber: no se ven las fotos
+## 13. Las fotografías, que ya se ven
 
-`product_media` guarda la **ruta** del almacenamiento y la aplicación la firma.
-El problema es que **no existe ningún depósito de productos**: los que hay son
-`avatars`, `post-media`, `course-media` y `message-media`, y la 0070 no crea
-otro a propósito, porque quién puede subir, con qué tipos y con qué tope son
-decisiones que van con el camino de subida, y ese camino es de un incremento
-posterior.
+**Este era el bloqueo del incremento anterior y está cerrado.** Antes no existía
+ningún depósito de productos y quien vendía escribía la ruta a mano: el catálogo
+se recorría entero y las imágenes salían como marcador.
 
-Consecuencia, dicha sin adornos: **el catálogo se recorre entero, pero las
-imágenes salen como marcador** con su texto alternativo real. La aplicación lo
-sabe y no lo disimula: `productos.IMAGENES_FIRMABLES` vale `false`, y el día que
-exista el depósito basta ponerlo en `true`.
+Ahora hay un depósito, `product-media` (0073), **privado y sin ninguna política
+de almacenamiento**. Al revés que `message-media` —donde la aplicación sube
+directamente y las políticas deciden quién puede—, aquí `anon` y `authenticated`
+no pueden ni leer ni listar. La única puerta es la API.
 
-Lo que hace falta, y en este orden: un depósito con sus reglas de acceso, un
-camino de subida para quien vende, y la aprobación de la foto por parte de quien
-evalúa. Hoy quien vende escribe la ruta a mano, que es suficiente para probar el
-recorrido y no lo es para enseñarle un producto a nadie.
+**El camino completo, y ninguno de los pasos se salta:**
+
+1. El archivo viaja a la API, no al almacenamiento.
+2. Se comprueba de quién es el borrador, y que siga siendo borrador.
+3. **Se miran los bytes**: los primeros para descartar barato, y después se abre
+   la imagen de verdad, porque una cabecera de JPEG se puede pegar delante de
+   cualquier cosa. Tres tipos y ninguno más —JPEG, PNG y WebP—, sin `image/*`,
+   que dejaría pasar SVG, que es un documento con scripts.
+4. **El nombre lo genera el servidor**: `proveedor/producto/versión/id.ext`. El
+   que trae quien sube puede llevar `../`.
+5. La fila nace **pendiente**. Subir no es publicar.
+6. Quien evalúa aprueba o **rechaza con motivo**.
+7. El catálogo firma **solo las aprobadas**, en el momento y con vencimiento.
+
+**Y publicar exige una aprobada.** «Hay fotos y ninguna aprobada» tiene su
+propio código —`product_media_not_approved`— porque no es el mismo problema que
+no haber subido ninguna: no falta subir nada, falta que alguien las mire.
+
+**Lo que queda por hacer, y no es del servidor:** el depósito solo existe donde
+la 0073 esté aplicada. Mientras no lo esté, la subida contesta 503 con su código
+y el catálogo se recorre igual, con el texto alternativo donde iría la foto.
+
+## 13.1. El inventario, y por qué cuelga del SKU
+
+`product_inventory` tiene clave `(product_id, sku)` y **ninguna clave ajena a
+`product_variants`**. Una variante pertenece a una versión inmutable: publicar la
+siguiente crea filas nuevas para las mismas cajas del mismo almacén, y un
+inventario colgado de esas filas quedaría huérfano en cada publicación, dejando
+el producto agotado sin que nadie hubiera vendido nada. Guardar el número en la
+variante tiene el problema contrario: guardar el borrador rehace esas filas.
+
+**Lo disponible no se guarda**: es `on_hand - reserved`. La 0074 no tiene esa
+columna, y hay una prueba que lo comprueba.
+
+**La concurrencia la resuelve PostgreSQL.** `select ... for update` sobre la
+fila, y la decisión con el número ya bloqueado. No hay ningún `asyncio.Lock`:
+hay más de un proceso. Se prueba con el orden fijado a mano —A bloquea, B
+espera, A se lleva la última, B despierta y ve que no queda—, porque una prueba
+que lance N peticiones puede serializarse sola y pasar sin el bloqueo puesto.
+
+**Y sin fila no es cero.** Un SKU que nadie cargó se contesta con
+`product_inventory_not_configured`, no con «agotado».
+
+## 13.2. La bolsa, que no es una compra
+
+`reservar`, `liberar` y `despachar` existen, funcionan y están probadas, **y no
+las llama ninguna ruta**: son del checkout. El carrito tampoco las llama, y eso
+es una decisión: tener algo en la bolsa no se lo quita a nadie, y una reserva sin
+caducidad convierte un carrito olvidado en un producto agotado.
+
+**Los importes los calcula el servidor**, con el precio de AHORA. Lo que se veía
+al añadir se guarda solo para **avisar** de que cambió; congelar el precio ocurre
+al crear el pedido.
+
+**Y no hay botón de pagar.** `purchasable` viaja siempre en `false`, lo escribe
+el molde de la respuesta —no un campo copiado— y la pantalla lo dice con
+palabras en el pie.
 
 ## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
 |---|---|
-| Aplicar 0070, 0071 y 0072 en la base gestionada, en ese orden | operación |
 | Entidad legal que vende y emite comprobante | la empresa |
 | Países, jurisdicciones, impuestos y comprobantes | la empresa |
 | Moneda inicial, y si habrá varias | la empresa |
@@ -274,7 +348,9 @@ recorrido y no lo es para enseñarle un producto a nadie.
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
 | Fuente del promedio de categoría | la empresa |
-| **Depósito de almacenamiento y camino de subida de fotos** | operación y producto |
+| **Aplicar 0073, 0074 y 0075 en la base gestionada, en ese orden** | operación |
+| Cuántas fotografías admite una versión (hoy cinco, de la captura 6) | producto |
+| Cuándo avisar de que quedan pocas unidades | la empresa |
 | Título editorial de «Selección Z» (campo nuevo + decisión) | producto |
 | Enlace web de un producto, para poder compartirlo | producto |
 | El acceso de **Servicios**, el único chip que no lleva a ninguna parte | producto |
@@ -290,11 +366,18 @@ bloque por bloque. Estas cinco diferencias son deliberadas:
 | «98 % lo recomienda» / «Garantía 3 años» | el origen | los otros necesitan reseñas o condiciones aprobadas |
 | «Valoración real 4,8 · 184 compras verificadas» | el bloque, fuera | no hay reseñas de productos |
 | «Compra protegida · 3 días para reportar» | el bloque, fuera | no hay entrega ni condiciones |
-| Barra fija con «Comprar» | el precio y guardar | **no existe la compra física** |
+| Barra fija con «Comprar» | el precio, guardar y **añadir a la bolsa** | existe la bolsa; **no existe la compra** |
 
-La última es la diferencia más visible de todas, y es la que no se disimula: un
-botón que prometa comprar sin que haya compra cuesta más confianza que su
-ausencia.
+La última es la diferencia más visible de todas, y es la que no se disimula. Con
+el Incremento 4 la bolsa existe, así que la ficha ofrece **«Añadir a la bolsa»**
+—que no dice comprar, ni pagar, ni adquirir en ninguno de los tres idiomas— y la
+bolsa termina en un pie que dice con palabras que la compra todavía no está
+habilitada. Un botón que prometa pagar sin recorrido detrás cuesta más confianza
+que su ausencia.
+
+Y las fotografías **ya no son un marcador**: la primera diferencia con la
+captura que se ha cerrado del todo. Lo que sigue faltando ahí es el título
+editorial de «Selección Z», que no tiene campo.
 
 Y el chip de Explorar ya existía: `AccesosAVerticales` pintaba los cuatro
 —Cursos, Eventos, Servicios y Productos— con Productos apagado. Lo único que

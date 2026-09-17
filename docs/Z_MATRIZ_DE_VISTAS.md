@@ -171,8 +171,9 @@ compra aceptó.
 
 ## 5. Productos
 
-Reescrita el 12/09/2026, tras los Incrementos 1–3 de Productos. La vertical
-existe: hay dominio, admisión con evaluación y catálogo. Lo que no hay es
+Reescrita el 12/09/2026 y ampliada el 17/09/2026 con el Incremento 4. La
+vertical existe: hay dominio, admisión con evaluación, catálogo con
+**fotografías reales**, **inventario** y **bolsa**. Lo que sigue sin haber es
 COMPRAR.
 
 ### Comprador
@@ -185,10 +186,11 @@ COMPRAR.
 | Ficha del producto | `/productos/[productId]` | `GET /products/{id}` | terminada | tres bloques de la captura 6 quedan FUERA por no tener datos: valoración real, compra protegida y la barra de comprar |
 | Informe de evaluación | `/productos/[productId]/evaluacion` | `GET /products/{id}/evaluation` | terminada | nada. El sello lo abre, y enseña la evidencia por dimensión sin la nota interna |
 | Guardados | `/productos/guardados` | `GET /products/saved` + `POST/DELETE .../save` | terminada | nada. Guardar es idempotente y **no es un carrito** |
-| Bolsa con contador | encabezado | `GET /products/saved` | terminada | la bolsa lleva a GUARDADOS. El carrito es de un incremento posterior |
+| Bolsa con contador | encabezado | `GET /products/counts` | terminada | **la bolsa lleva al CARRITO** y cuenta unidades; guardados tiene su propio acceso al lado y cuenta productos marcados |
+| Tu bolsa | `/productos/carrito` | `GET/DELETE /products/cart`, `POST /products/cart/items`, `PUT/DELETE .../items/{id}` | terminada | nada de este incremento. **No hay botón de pagar**, y el pie lo dice con palabras |
 | Valoración real (4,8 · 184 compras verificadas) | — | — | **no existe** | reseñas de producto por línea de pedido entregada. Incremento 8 |
 | Compra protegida y plazos | — | — | **no existe** | transportista, cobertura y condiciones aprobadas. Incrementos 5–7 |
-| Barra fija de compra | — | — | **no existe** | carrito, pedido y pago. `purchasable: false` |
+| Barra fija de compra | — | — | **no existe** | pedido y pago. En la ficha hay «Añadir a la bolsa», que NO es comprar; `purchasable` sigue en `false` |
 
 ### Proveedor
 
@@ -196,8 +198,10 @@ COMPRAR.
 |---|---|---|---|---|
 | Postular como proveedor | `/proveedor/postular` | `GET/PUT /products/seller/application` + `submit`/`withdraw` | terminada | qué documentación exige la empresa: los tipos están, el requisito no |
 | Mis productos | `/proveedor/productos` | `GET /products/seller/products` | terminada | nada |
-| Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | nada. Solo se edita en borrador |
-| Inventario, pedidos, incidencias, saldos | — | — | **no existen** | incrementos 4 a 7. No hay pantalla vacía que los simule |
+| Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | el borrador **ya no lleva galería**: las fotos tienen su pantalla |
+| Fotografías del producto | `/proveedor/productos/[productId]/fotos` | `GET/POST .../media`, `PUT .../media/order`, `DELETE .../media/{id}` | terminada | **el archivo lo sube la API**, no el móvil; nace pendiente de aprobación |
+| Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar, liberar y despachar existen en el servidor y **no las llama ninguna ruta**: son del checkout |
+| Pedidos, incidencias, saldos | — | — | **no existen** | incrementos 5 a 7. No hay pantalla vacía que los simule |
 
 ### Administración
 
@@ -206,16 +210,21 @@ COMPRAR.
 | Bandeja de postulaciones | `/admin/productos/admision` | `GET /admin/products/applications` + `take`/`decide` | terminada | nada. Aceptar crea la capacidad comercial en la misma transacción |
 | Evaluar un producto | `/admin/productos/evaluar/[evaluationId]` | siete rutas de `/admin/products/evaluations` | terminada | nada. Seis dimensiones, evidencia por dimensión y tres razones respaldadas |
 | Listado y permanencia | `/admin/productos` | `GET /admin/products` + `transition`/`publish`/`suspend` | terminada | las condiciones de una **aprobación condicionada**: sin ellas ese estado no publica |
+| Fotografías pendientes | `/admin/productos/fotos` | `GET /admin/products/media/pending`, `POST .../media/{id}/decide` | terminada | nada. Un rechazo exige motivo, y nadie aprueba la foto de su propio producto |
+| Intervenir el inventario | dentro del listado | `GET/POST /admin/products/{id}/inventory[/adjust]` | terminada | solo `admin`, con motivo y con rastro. Moderación no mueve inventario |
 
 ### Lo que esta matriz dice, en una frase
 
 El recorrido está completo en las dos direcciones: **Explorar → Productos →
-buscar → ficha de un producto aprobado**, y **el proveedor postula → Z evalúa →
-Z publica**. Lo que queda fuera no es una pantalla sin conectar: son tres
-bloques de la ficha que no tienen datos porque el contrato que los sostiene
-—reseñas, entrega, compra— es de incrementos posteriores, y **el acceso de
-Servicios**, que sigue siendo el único de los cuatro chips que no lleva a
-ninguna parte.
+buscar → ficha de un producto aprobado → añadir a la bolsa → ver la bolsa**, y
+**el proveedor postula → sube fotos → Z las aprueba → Z evalúa → Z publica →
+el proveedor carga existencias**.
+
+Lo que queda fuera no es una pantalla sin conectar: son dos bloques de la ficha
+que no tienen datos porque el contrato que los sostiene —reseñas y entrega— es
+de incrementos posteriores; **pagar**, que no existe y por eso no hay botón; y
+**el acceso de Servicios**, que sigue siendo el único de los cuatro chips que no
+lleva a ninguna parte, a propósito y avisando.
 
 ## 6. Alumno / comprador
 
