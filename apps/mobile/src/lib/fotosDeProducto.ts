@@ -228,6 +228,14 @@ const ERRORES: Record<string, ClaveDeTraduccion> = {
   product_media_required: 'fotos.error.ninguna',
   product_not_editable: 'fotos.error.noEditable',
   product_version_missing: 'fotos.error.sinBorrador',
+  /*
+    SUBIR, ORDENAR Y QUITAR EXIGEN CAPACIDAD COMERCIAL ACTIVA
+    (`exigir_vendedor_activo`), así que este 403 llega por estas rutas. Sin
+    traducir, quien tenga la capacidad suspendida veía el mensaje crudo del
+    servidor y no la única frase que le sirve: que no es un fallo de la
+    fotografía, sino de su cuenta.
+  */
+  product_seller_not_active: 'fotos.error.sinCapacidadComercial',
 };
 
 export function claveDeErrorDeFotos(

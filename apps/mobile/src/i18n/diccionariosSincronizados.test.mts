@@ -451,15 +451,18 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'productosAdmin.evidencia.batch',
     'productosAdmin.evidencia.document',
     'productosAdmin.documento.manufacturer',
-    // Proveedor de productos: «Tipo de documento», «Nota», «Fabricante»,
-    // «Variantes» y «Texto alternativo» se escriben exactamente igual en
-    // portugues, y `opcionValorAyuda` es un numero de ejemplo.
+    // Proveedor de productos: «Tipo de documento», «Nota», «Fabricante» y
+    // «Variantes» se escriben exactamente igual en portugues, y
+    // `opcionValorAyuda` es un numero de ejemplo.
+    //
+    // «Texto alternativo» SALIO DE ESTA LISTA con el editor de galeria de
+    // `EditarProductoScreen`: la clave ya no existe en ningun diccionario,
+    // porque las fotografias ya no se escriben a mano.
     'proveedorProductos.postular.tipoDeDocumento',
     'proveedorProductos.postular.notaEtiqueta',
     'proveedorProductos.documento.manufacturer',
     'proveedorProductos.editar.fabricanteEtiqueta',
     'proveedorProductos.editar.variantes',
-    'proveedorProductos.editar.alternativoEtiqueta',
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
 };

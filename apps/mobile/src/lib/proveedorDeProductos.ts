@@ -35,9 +35,17 @@
  *      ninguna ruta suya que lo haga, así que pintarlo sería un botón que no
  *      puede funcionar.
  *
- *   5. LA GALERÍA GUARDA RUTAS, NUNCA URLS. Una URL firmada caduca, y guardarla
- *      haría que la galería dejara de cargar sin que nadie tocara nada. Igual
- *      que en los documentos de la postulación.
+ *   5. LA GALERÍA NO SE ESCRIBE DESDE AQUÍ. Este módulo llegó a construir un
+ *      `gallery` con rutas del almacenamiento TECLEADAS en la pantalla. Desde
+ *      la 0073 no existe: `VersionRequest` no tiene `gallery` —Pydantic
+ *      descartaba la clave sin error, así que aquello se guardaba con un 200 y
+ *      no llegaba a ninguna parte— y una ruta escrita a mano podía apuntar al
+ *      archivo de otra persona o a ninguno. Las fotografías se SUBEN en
+ *      `fotosDeProducto.ts`: la API mira los bytes y genera el nombre. Aquí la
+ *      galería solo se LEE, para enseñar cuántas hay y en qué estado están.
+ *
+ *      Los documentos de la postulación siguen llevando ruta escrita, porque
+ *      esa otra ruta del servidor todavía la pide: no es lo mismo.
  *
  *   6. `bloqueo` ES UN CÓDIGO, NO UNA FRASE. Dice por qué ese producto todavía
  *      no puede llevar el sello, y se traduce; inventar el motivo aquí sería
@@ -48,8 +56,10 @@
  * los simulara prometería una operación que no hay.
  *
  * Sin importaciones en tiempo de ejecución: el ejecutor de pruebas de Node no
- * resuelve el alias `@/`.
+ * resuelve el alias `@/`. La única que hay es `import type`, que desaparece al
+ * compilar y al quitar los tipos, así que no llega a ejecutarse nada.
  */
+import type { FotoDelProveedor } from '@/lib/fotosDeProducto';
 
 /** Una clave del diccionario. La pantalla la convierte al traducir. */
 export type ClaveDeTraduccion = string;
@@ -106,14 +116,6 @@ export type Variante = {
   price_delta_minor: number;
 };
 
-/** Una foto de la galería, tal como la manda `MediaRead`. */
-export type Media = {
-  id: string;
-  kind: string;
-  storage_path: string;
-  alt_text: string | null;
-};
-
 /** Una versión, tal como la manda `VersionRead`. */
 export type Version = {
   id: string;
@@ -134,7 +136,16 @@ export type Version = {
   published_at: string | null;
   effective_to: string | null;
   variants: Variante[];
-  gallery: Media[];
+  /*
+    LA GALERÍA DE QUIEN VENDE, CON SU ESTADO. `VersionRead.gallery` es
+    `list[FotoDelProveedor]`, no `MediaRead`: trae `status` y
+    `rejection_reason`, que son su razón de existir —quien vende necesita saber
+    cuáles están pendientes y por qué le rechazaron una—. Aquí se reusa ese
+    mismo tipo en vez de copiar un molde de cuatro campos que se quedaba corto y
+    hacía creer que esa información no venía. SOLO SE LEE: escribirla es cosa de
+    `fotosDeProducto.ts`.
+  */
+  gallery: FotoDelProveedor[];
 };
 
 /** El producto como lo ve quien lo vende: `ProductoDelProveedor`. */
@@ -243,7 +254,13 @@ export const LARGO_DE_LA_PROPUESTA = [20, 4_000] as const;
 export const MAXIMO_DE_DOCUMENTOS = 30;
 /** `DocumentoRequest.note`. */
 export const LARGO_DE_LA_NOTA = 2_000;
-/** `DocumentoRequest.storage_path` y `MediaRequest.storage_path`. */
+/**
+ * `DocumentoRequest.storage_path`.
+ *
+ * SOLO PARA LOS DOCUMENTOS de la postulación, que son los únicos que todavía
+ * llevan una ruta escrita a mano. Las fotografías no: su ruta la genera el
+ * servidor, y el tope de su texto alternativo vive en `fotosDeProducto.ts`.
+ */
 export const LARGO_DE_LA_RUTA = [3, 512] as const;
 
 /** `service.LARGOS['name']`. */
@@ -260,12 +277,15 @@ export const LARGO_DEL_FABRICANTE = [2, 160] as const;
 export const LARGO_DE_LA_VERSION = 32;
 /** `service.MAXIMO_DE_VARIANTES`. */
 export const MAXIMO_DE_VARIANTES = 50;
-/** `service.MAXIMO_DE_FOTOS`. */
-export const MAXIMO_DE_FOTOS = 12;
 /** `VarianteRequest.name`, y el CHECK `product_variants_nombre`. */
 export const LARGO_DEL_NOMBRE_DE_VARIANTE = [1, 80] as const;
-/** `MediaRequest.alt_text`. */
-export const LARGO_DEL_ALTERNATIVO = 300;
+/*
+  AQUÍ ESTABAN `MAXIMO_DE_FOTOS` y `LARGO_DEL_ALTERNATIVO`, copiados de un
+  `MediaRequest` que el servidor ya no tiene. Los topes de las fotografías viven
+  en `fotosDeProducto.ts` —`MAXIMO_DE_FOTOS` es 5, no 12— y allí son los de la
+  ruta que de verdad sube archivos. Tener dos números distintos con el mismo
+  nombre es peor que no tener ninguno.
+*/
 
 /** El CHECK `product_variants_sku` de la 0070, letra por letra. */
 export const FORMATO_DEL_SKU = /^[A-Za-z0-9._-]{2,48}$/;
@@ -713,8 +733,11 @@ export type VarianteEscrita = {
   diferencia: string;
 };
 
-/** Una foto escrita en la pantalla. RUTA, nunca una URL. */
-export type FotoEscrita = { ruta: string; alternativo: string };
+/*
+  AQUÍ ESTABA `FotoEscrita`, una foto TECLEADA: `{ ruta, alternativo }`. Se ha
+  ido con el editor de galería de `EditarProductoScreen`. Una fotografía no se
+  escribe: se sube, y de eso se ocupa `fotosDeProducto.ts`.
+*/
 
 /** Lo que hay escrito en la pantalla de un producto. Todo texto. */
 export type FormularioDeProducto = {
@@ -729,7 +752,6 @@ export type FormularioDeProducto = {
   precio: string;
   moneda: string;
   variantes: VarianteEscrita[];
-  galeria: FotoEscrita[];
 };
 
 /**
@@ -750,18 +772,12 @@ export function formularioDeProductoVacio(): FormularioDeProducto {
     precio: '',
     moneda: '',
     variantes: [],
-    galeria: [],
   };
 }
 
 /** Una variante nueva, vacía. La diferencia de precio también. */
 export function varianteVacia(): VarianteEscrita {
   return { sku: '', nombre: '', opciones: [], diferencia: '' };
-}
-
-/** Una foto nueva, vacía. */
-export function fotoVacia(): FotoEscrita {
-  return { ruta: '', alternativo: '' };
 }
 
 /** Una opción nueva, vacía. */
@@ -813,10 +829,9 @@ export function formularioDeProductoDesde(version: Version): FormularioDeProduct
           ? ''
           : String(v.price_delta_minor),
     })),
-    galeria: (version.gallery ?? []).map((m) => ({
-      ruta: m.storage_path ?? '',
-      alternativo: m.alt_text ?? '',
-    })),
+    // `version.gallery` NO SE COPIA AL FORMULARIO. Se lee para enseñar cuántas
+    // fotografías hay y en qué estado están, pero no hay ningún campo que las
+    // escriba: traerlas aquí solo serviría para volver a mandarlas.
   };
 }
 
@@ -828,12 +843,10 @@ export type PeticionDeVariante = {
   price_delta_minor: number;
 };
 
-/** Lo que viaja en una foto. */
-export type PeticionDeMedia = {
-  storage_path: string;
-  kind: string;
-  alt_text?: string;
-};
+/*
+  AQUÍ ESTABA `PeticionDeMedia`, lo que viajaba en `gallery`. El servidor ya no
+  lee ese campo: se ha ido con él.
+*/
 
 /**
  * Lo que viaja a `POST /products/seller/products` y a
@@ -853,7 +866,11 @@ export type PeticionDeVersion = {
   price_minor?: number;
   currency?: string;
   variants?: PeticionDeVariante[];
-  gallery?: PeticionDeMedia[];
+  /*
+    SIN `gallery`. `VersionRequest` no lo tiene desde la 0073, y Pydantic
+    descarta las claves que le sobran SIN ERROR: mandarlo devolvía un 200 que no
+    guardaba nada. Las fotografías se suben por su propia ruta.
+  */
 };
 
 /** Un texto listo para viajar, o `null` si no se escribió nada. */
@@ -1000,42 +1017,13 @@ export function validarProducto(formulario: FormularioDeProducto): Fallo[] {
     }
   });
 
-  const galeria = formulario.galeria ?? [];
-  if (galeria.length > MAXIMO_DE_FOTOS) {
-    fallos.push({
-      campo: 'producto',
-      codigo: 'product_media_too_many',
-      max: MAXIMO_DE_FOTOS,
-    });
-  }
-  const rutas = new Set<string>();
-  galeria.forEach((foto, indice) => {
-    const ruta = (foto.ruta ?? '').trim();
-    const [rutaMin, rutaMax] = LARGO_DE_LA_RUTA;
-    if (ruta.length < rutaMin || ruta.length > rutaMax || ruta.includes('://')) {
-      fallos.push({
-        campo: 'foto',
-        codigo: 'product_media_path_invalid',
-        indice,
-        min: rutaMin,
-        max: rutaMax,
-      });
-    } else {
-      if (rutas.has(ruta)) {
-        fallos.push({ campo: 'foto', codigo: 'product_media_repeated', indice });
-      }
-      rutas.add(ruta);
-    }
-    const alternativo = (foto.alternativo ?? '').trim();
-    if (alternativo.length > LARGO_DEL_ALTERNATIVO) {
-      fallos.push({
-        campo: 'foto',
-        codigo: 'product_media_alt_too_long',
-        indice,
-        max: LARGO_DEL_ALTERNATIVO,
-      });
-    }
-  });
+  /*
+    AQUÍ SE VALIDABA LA GALERÍA: el tope de fotos, la ruta, las repetidas y el
+    texto alternativo. Ya no hay nada que validar, porque ya no hay nada que
+    escribir. Lo que se sube de verdad lo comprueba `porQueNoSePuedeSubir` en
+    `fotosDeProducto.ts` —tipo, peso y texto alternativo— y luego el servidor,
+    que abre la imagen y mira los bytes.
+  */
 
   return fallos;
 }
@@ -1108,18 +1096,8 @@ export function peticionDeVersion(formulario: FormularioDeProducto): {
   });
   if (variantes.length > 0) peticion.variants = variantes;
 
-  const galeria = (formulario.galeria ?? []).map((foto) => {
-    const fila: PeticionDeMedia = {
-      storage_path: (foto.ruta ?? '').trim(),
-      // El único tipo que esta pantalla escribe. `video` existe en el contrato,
-      // pero no hay forma de subir uno todavía.
-      kind: 'image',
-    };
-    const alternativo = util(foto.alternativo);
-    if (alternativo !== null) fila.alt_text = alternativo;
-    return fila;
-  });
-  if (galeria.length > 0) peticion.gallery = galeria;
+  // NO SE AÑADE `gallery`. El servidor no lo lee, y mandarlo hacía que guardar
+  // devolviera un 200 sobre unas rutas que se perdían por el camino.
 
   return { peticion, fallos: [] };
 }
@@ -1148,7 +1126,9 @@ export function hayAlgoEscrito(formulario: FormularioDeProducto): boolean {
     formulario.moneda,
   ];
   if (textos.some((texto) => (texto ?? '').trim() !== '')) return true;
-  return (formulario.variantes ?? []).length > 0 || (formulario.galeria ?? []).length > 0;
+  // Las fotografías NO cuentan: no se escriben en este formulario, viven en su
+  // propia pantalla y no se pierden si aquí no hay nada.
+  return (formulario.variantes ?? []).length > 0;
 }
 
 /** Una ruta del almacenamiento, y nunca una URL. */
@@ -1200,11 +1180,11 @@ export function claveDeErrorDeProveedor(
     product_variant_sku_repeated: 'proveedorProductos.error.skuRepetido',
     product_variant_options_invalid: 'proveedorProductos.error.opcionesInvalidas',
     product_variant_delta_invalid: 'proveedorProductos.error.diferenciaInvalida',
-    product_media_too_many: 'proveedorProductos.error.demasiadasFotos',
-    product_media_path_invalid: 'proveedorProductos.error.rutaDeFotoInvalida',
-    product_media_repeated: 'proveedorProductos.error.fotoRepetida',
-    product_media_kind_invalid: 'proveedorProductos.error.tipoDeFotoInvalido',
-    product_media_alt_too_long: 'proveedorProductos.error.alternativoLargo',
+    // LOS CINCO CODIGOS DE LA GALERIA PEGADA A MANO SE FUERON CON ELLA. El
+    // servidor ya no produce ninguno —se marcharon con `_exigir_galeria` en la
+    // 0073— y dejarlos aqui hace creer a quien lea este mapa que todavia puede
+    // llegar uno. Lo que puede fallar al subir una fotografia lo traduce
+    // `lib/fotosDeProducto.ts`, que es quien la sube.
     product_category_invalid: 'proveedorProductos.error.categoriaInvalida',
     product_not_editable: 'proveedorProductos.error.noEditable',
     product_version_taken: 'proveedorProductos.error.versionTomada',

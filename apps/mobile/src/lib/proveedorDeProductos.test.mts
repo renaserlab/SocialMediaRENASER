@@ -20,10 +20,17 @@
  *  4. UN VALIDADOR QUE NO COINCIDE CON EL SERVIDOR. Si aquí se acepta lo que
  *     allí se rechaza, el formulario vuelve rechazado; si aquí se rechaza lo que
  *     allí se acepta, nos hemos inventado una regla de negocio. La tabla está
- *     transcrita de `_exigir_textos`, `_exigir_variantes`, `_exigir_galeria` y
- *     `_exigir_documentos`.
- *  5. UNA URL EN LA GALERÍA. Una firmada caduca, y guardarla hace que la ficha
- *     deje de cargar sin que nadie toque nada.
+ *     transcrita de `_exigir_textos`, `_exigir_variantes` y
+ *     `_exigir_documentos`. `_exigir_galeria` YA NO ESTÁ en ninguno de los dos
+ *     lados: ver el punto 5.
+ *  5. UNA FOTOGRAFÍA QUE SE TECLEA. La pantalla tuvo un editor donde se
+ *     escribía A MANO la ruta del almacenamiento de cada foto, y se mandaba en
+ *     `gallery`. `VersionRequest` ya no tiene ese campo: Pydantic descartaba la
+ *     clave SIN ERROR, así que quien vendía recibía un 200 y no se guardaba
+ *     nada; y una ruta escrita a mano podía apuntar a un archivo ajeno o a
+ *     ninguno, que es justo lo que vino a cerrar la 0073. Aquí se comprueba, YA
+ *     EJECUTANDO Y SOBRE EL CÓDIGO DE LA PANTALLA, que ni el campo ni `gallery`
+ *     vuelven.
  *  6. UN BOTÓN SIN RUTA. La máquina permite `(draft, removed)` al proveedor,
  *     pero no hay ninguna ruta suya que lo haga: pintarlo sería una promesa.
  *  7. EL LENGUAJE DEL BLUEPRINT. Las cinco frases obligatorias tienen que estar
@@ -62,7 +69,6 @@ import {
   LARGO_DE_LA_VERSION,
   LARGO_DE_LOS_MATERIALES,
   MAXIMO_DE_DOCUMENTOS,
-  MAXIMO_DE_FOTOS,
   MAXIMO_DE_VARIANTES,
   POSTULACIONES_VIVAS,
   PRODUCTOS_EDITABLES,
@@ -90,7 +96,6 @@ import {
   formularioDePostulacionVacio,
   formularioDeProductoDesde,
   formularioDeProductoVacio,
-  fotoVacia,
   hayAlgoEscrito,
   hayQueRecargar,
   motivoDeLaDecision,
@@ -233,7 +238,9 @@ describe('los formularios nacen vacíos', () => {
     assert.equal(vacio.pais, '');
     assert.equal(vacio.fabricante, '');
     assert.deepEqual(vacio.variantes, []);
-    assert.deepEqual(vacio.galeria, []);
+    // SIN `galeria`: ya no es un campo del formulario. Que la clave no exista
+    // es lo que impide que alguien vuelva a rellenarla sin darse cuenta.
+    assert.ok(!('galeria' in vacio));
   });
 
   it('NINGÚN campo del producto nace con un cero escrito', () => {
@@ -247,9 +254,10 @@ describe('los formularios nacen vacíos', () => {
     }
   });
 
-  it('una variante nueva y una foto nueva también nacen vacías', () => {
+  it('una variante nueva y un documento nuevo también nacen vacíos', () => {
+    // `fotoVacia()` SALIÓ DE AQUÍ con el editor de galería: una fotografía ya
+    // no se escribe en este formulario, se sube en su propia pantalla.
     assert.deepEqual(varianteVacia(), { sku: '', nombre: '', opciones: [], diferencia: '' });
-    assert.deepEqual(fotoVacia(), { ruta: '', alternativo: '' });
     assert.deepEqual(opcionVacia(), { clave: '', valor: '' });
     assert.deepEqual(documentoVacio(), { kind: '', ruta: '', nota: '' });
   });
@@ -331,9 +339,10 @@ describe('lo que no se escribió no viaja', () => {
     }
   });
 
-  it('las listas vacías tampoco viajan', () => {
+  it('las listas vacías tampoco viajan, y `gallery` no viaja nunca', () => {
     const { peticion } = peticionDeVersion(conNombre());
     assert.ok(!('variants' in (peticion ?? {})));
+    // `gallery` NO ES UNA LISTA VACÍA: es una clave que el servidor ya no lee.
     assert.ok(!('gallery' in (peticion ?? {})));
   });
 
@@ -419,14 +428,26 @@ describe('lo que no se escribió no viaja', () => {
     assert.equal(peticion?.variants?.[0]?.price_delta_minor, 0);
   });
 
-  it('una foto viaja como imagen y sin texto alternativo inventado', () => {
-    const { peticion } = peticionDeVersion({
+  /*
+    ESTA PRUEBA DECÍA LO CONTRARIO. Comprobaba que una foto tecleada viajaba
+    como `{ storage_path, kind: 'image' }`. Se ha dado la vuelta en vez de
+    borrarla: lo que antes era el comportamiento correcto es hoy el defecto, y
+    una prueba que solo desaparece no impide que el defecto vuelva.
+
+    Se fuerza a propósito un formulario con `galeria` —el tipo ya no la tiene,
+    de ahí el molde— porque lo que hay que asegurar es que NI SIQUIERA ASÍ se
+    construye `gallery`: el servidor no lee ese campo y mandarlo devolvía un 200
+    sobre unas rutas que se perdían por el camino.
+  */
+  it('una foto NO viaja: `gallery` no se construye nunca', () => {
+    const conGaleria = {
       ...conNombre(),
-      galeria: [{ ruta: 'productos/tinaja.jpg', alternativo: '' }],
-    });
-    assert.deepEqual(peticion?.gallery, [
-      { storage_path: 'productos/tinaja.jpg', kind: 'image' },
-    ]);
+      galeria: [{ ruta: 'productos/tinaja.jpg', alternativo: 'Una tinaja.' }],
+    } as unknown as FormularioDeProducto;
+    const { peticion, fallos } = peticionDeVersion(conGaleria);
+    assert.deepEqual(fallos, []);
+    assert.ok(!('gallery' in (peticion ?? {})));
+    assert.deepEqual(peticion, { name: 'Tinaja de barro' });
   });
 });
 
@@ -678,38 +699,27 @@ describe('el validador del producto dice lo mismo que el servidor', () => {
     assert.equal(MAXIMO_DE_VARIANTES, 50);
   });
 
-  it('más fotografías de las que caben también', () => {
-    const muchas = Array.from({ length: MAXIMO_DE_FOTOS + 1 }, (_, i) => ({
-      ruta: `productos/foto-${i}.jpg`,
-      alternativo: '',
-    }));
-    const fallo = validarProducto({ ...conNombre(), galeria: muchas }).find(
-      (x) => x.codigo === 'product_media_too_many',
-    );
-    assert.equal(fallo?.max, MAXIMO_DE_FOTOS);
-    assert.equal(MAXIMO_DE_FOTOS, 12);
-  });
+  /*
+    AQUÍ HABÍA TRES PRUEBAS DE LA GALERÍA: el tope de fotos, la repetida y el
+    texto alternativo largo. No se borran, se dan la vuelta: el validador ya no
+    mira la galería porque el formulario ya no la tiene, y lo que hay que dejar
+    clavado es que NO SE INVENTA UN FALLO sobre un campo que no existe. Si
+    alguien devolviera la validación sin devolver la pantalla, quien vende vería
+    un error sobre algo que no puede tocar.
 
-  it('la misma fotografía dos veces se rechaza', () => {
-    const fallos = validarProducto({
+    Los topes de verdad de las fotografías viven en `fotosDeProducto.ts` —cinco
+    por versión, tipo y peso— y se prueban allí, junto a la ruta que las sube.
+  */
+  it('el validador YA NO opina de la galería: no es un campo suyo', () => {
+    const conGaleria = {
       ...conNombre(),
       galeria: [
-        { ruta: 'productos/tinaja.jpg', alternativo: '' },
-        { ruta: 'productos/tinaja.jpg', alternativo: '' },
+        { ruta: 'https://cdn.z/foto.jpg', alternativo: 'x'.repeat(301) },
+        { ruta: 'https://cdn.z/foto.jpg', alternativo: '' },
       ],
-    });
-    assert.ok(fallos.some((x) => x.codigo === 'product_media_repeated'));
-  });
-
-  it('un texto alternativo demasiado largo se avisa aquí', () => {
-    assert.ok(
-      codigosDe(
-        validarProducto({
-          ...conNombre(),
-          galeria: [{ ruta: 'productos/tinaja.jpg', alternativo: 'x'.repeat(301) }],
-        }),
-      ).includes('product_media_alt_too_long'),
-    );
+    } as unknown as FormularioDeProducto;
+    assert.deepEqual(validarProducto(conGaleria), []);
+    assert.equal(sePuedeGuardarProducto(conGaleria), true);
   });
 
   it('con todo escrito, se puede guardar', () => {
@@ -731,17 +741,25 @@ describe('el validador del producto dice lo mismo que el servidor', () => {
           diferencia: '0',
         },
       ],
-      galeria: [{ ruta: 'productos/tinaja.jpg', alternativo: 'Una tinaja de barro.' }],
     };
     assert.equal(sePuedeGuardarProducto(formulario), true);
     const { peticion } = peticionDeVersion(formulario);
     assert.equal(peticion?.variants?.[0]?.options.capacidad, '5 litros');
-    assert.equal(peticion?.gallery?.[0]?.alt_text, 'Una tinaja de barro.');
+    // Con TODO escrito sigue sin haber `gallery`: las fotografías no son parte
+    // de este formulario ni de esta petición.
+    assert.ok(!('gallery' in (peticion ?? {})));
   });
 });
 
 /* ========================================================================== */
-describe('la galería guarda rutas, nunca URLs', () => {
+/*
+  ESTE BLOQUE ERA «la galería guarda rutas, nunca URLs». La galería ya no guarda
+  nada desde aquí, pero LOS DOCUMENTOS DE LA POSTULACIÓN SÍ: esa otra ruta del
+  servidor sigue pidiendo `storage_path` escrito. Las pruebas se quedan, con su
+  dueño corregido, porque la regla que protegen —una URL firmada caduca y lo
+  guardado deja de cargar sin que nadie toque nada— sigue viva ahí.
+*/
+describe('un documento guarda su ruta, nunca una URL', () => {
   it('cualquier cosa con `://` se rechaza', () => {
     for (const url of [
       'https://cdn.z/foto.jpg',
@@ -752,8 +770,12 @@ describe('la galería guarda rutas, nunca URLs', () => {
       assert.equal(esRutaDeAlmacenamiento(url), false, url);
       assert.ok(
         codigosDe(
-          validarProducto({ ...conNombre(), galeria: [{ ruta: url, alternativo: '' }] }),
-        ).includes('product_media_path_invalid'),
+          validarPostulacion({
+            nombre: 'Taller Ayacucho',
+            propuesta: PROPUESTA,
+            documentos: [{ kind: 'identity', ruta: url, nota: '' }],
+          }),
+        ).includes('seller_application_document_path_invalid'),
         url,
       );
     }
@@ -1287,11 +1309,11 @@ describe('cuando algo sale mal', () => {
     'product_variant_sku_repeated',
     'product_variant_options_invalid',
     'product_variant_delta_invalid',
-    'product_media_too_many',
-    'product_media_path_invalid',
-    'product_media_repeated',
-    'product_media_kind_invalid',
-    'product_media_alt_too_long',
+    // LOS CINCO DE LA GALERIA PEGADA A MANO SE FUERON CON ELLA. El servidor
+    // ya no los produce —se marcharon con `_exigir_galeria` en la 0073— y
+    // seguir exigiendoles texto obligaba a mantener cinco frases que nadie
+    // puede ver. Lo que puede fallar al SUBIR una fotografia lo cubre
+    // `fotosDeProducto.test.mts`, que es donde vive ese camino.
     'product_category_invalid',
     'product_not_editable',
     'product_version_taken',
@@ -1383,7 +1405,6 @@ describe('cuando algo sale mal', () => {
       { ...conNombre(), pais: 'peru' },
       { ...conNombre(), fabricante: 'x' },
       { ...conNombre(), version: 'x'.repeat(40) },
-      { ...conNombre(), galeria: [{ ruta: 'https://x/y.jpg', alternativo: '' }] },
       {
         ...conNombre(),
         variantes: [{ sku: 'a', nombre: '', opciones: [], diferencia: 'x' }],
@@ -1424,8 +1445,21 @@ describe('el formato no añade nada que no se escribiera', () => {
     assert.equal(hayAlgoEscrito(formularioDeProductoVacio()), false);
     assert.equal(hayAlgoEscrito(conNombre()), true);
     assert.equal(
-      hayAlgoEscrito({ ...formularioDeProductoVacio(), galeria: [fotoVacia()] }),
+      hayAlgoEscrito({
+        ...formularioDeProductoVacio(),
+        variantes: [varianteVacia()],
+      }),
       true,
+    );
+    // UNA GALERÍA NO CUENTA COMO «ALGO ESCRITO». Las fotografías viven en su
+    // propia pantalla: si aquí solo hubiera fotos, no habría nada que perder al
+    // salir, y avisar de lo contrario sería un aviso falso.
+    assert.equal(
+      hayAlgoEscrito({
+        ...formularioDeProductoVacio(),
+        galeria: [{ ruta: 'productos/tinaja.jpg', alternativo: '' }],
+      } as unknown as FormularioDeProducto),
+      false,
     );
   });
 });
@@ -1731,12 +1765,45 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     }
   });
 
-  it('la galería de la pantalla habla de rutas, no de enlaces', () => {
-    assert.ok(editar.includes('proveedorProductos.editar.galeriaCuerpo'));
-    assert.ok(editar.includes('proveedorProductos.editar.rutaEtiqueta'));
+  /*
+    ESTA PRUEBA EXIGÍA EL EDITOR DE GALERÍA: comprobaba que la pantalla pintara
+    `rutaEtiqueta` y `galeriaCuerpo`. Exigía, por tanto, el defecto. Se da la
+    vuelta en vez de borrarla, porque lo que hace falta es justo lo contrario:
+    que NADIE pueda volver a poner un campo donde se teclee una ruta del
+    almacenamiento. Se mira el código SIN COMENTARIOS, así que la explicación
+    que hay en la pantalla no la satisface ni la rompe.
+  */
+  it('NINGÚN campo donde se teclee una ruta del almacenamiento', () => {
+    for (const prohibido of [
+      // Las claves del editor viejo. Ya no están en ningún diccionario.
+      'rutaEtiqueta',
+      'rutaAyuda',
+      'anadirFoto',
+      'quitarFoto',
+      'galeriaCuerpo',
+      // El nombre del campo del contrato, en cualquiera de sus dos formas.
+      'storage_path',
+      'LARGO_DE_LA_RUTA',
+      // Y el campo del formulario que lo alimentaba.
+      'galeria',
+      'fotoVacia',
+    ]) {
+      assert.ok(
+        !editar.includes(prohibido),
+        `EditarProductoScreen vuelve a escribir rutas: «${prohibido}»`,
+      );
+    }
+    // Ni enlaces, que era la otra mitad de la regla vieja.
     for (const prohibido of ['https://', 'http://']) {
       assert.ok(!editar.includes(prohibido), prohibido);
     }
+  });
+
+  it('el único camino a las fotografías es la pantalla que SUBE el archivo', () => {
+    // Quitar el editor sin dejar el camino bueno sería quitar la función
+    // entera: esto comprueba que el botón sigue ahí y a dónde lleva.
+    assert.ok(editar.includes('/fotos'));
+    assert.ok(editar.includes("f('fotos.acceso')"));
   });
 
   it('las tres pantallas tienen los estados completos, incluido el 503', () => {

@@ -12,16 +12,13 @@ import { confirm, notify } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import { toast } from '@/lib/toast';
 import {
-  LARGO_DEL_ALTERNATIVO,
   LARGO_DEL_FABRICANTE,
   LARGO_DEL_NOMBRE_DEL_PRODUCTO,
   LARGO_DEL_NOMBRE_DE_VARIANTE,
   LARGO_DEL_RESUMEN,
   LARGO_DE_LA_DESCRIPCION,
-  LARGO_DE_LA_RUTA,
   LARGO_DE_LA_VERSION,
   LARGO_DE_LOS_MATERIALES,
-  MAXIMO_DE_FOTOS,
   MAXIMO_DE_VARIANTES,
   accionesOfrecidas,
   claveDeErrorDeProveedor,
@@ -29,7 +26,6 @@ import {
   claveDeFallo,
   claveDelEstadoDeProducto,
   esProductosApagado,
-  fotoVacia,
   formularioDeProductoDesde,
   formularioDeProductoVacio,
   hayAlgoEscrito,
@@ -67,9 +63,14 @@ import { ApiError } from '@/services/api';
  * MENORES, que es la unidad del contrato: convertirlo aquí exigiría saber
  * cuántos decimales tiene cada moneda, y eso el servidor no lo manda.
  *
- * LA GALERÍA GUARDA RUTAS DEL ALMACENAMIENTO, NUNCA ENLACES. Una URL firmada
- * caduca, y guardarla haría que la ficha dejara de cargar sin que nadie tocara
- * nada. Se rechaza aquí cualquier cosa con `://`, igual que en el servidor.
+ * AQUÍ NO SE ESCRIBE NINGUNA FOTOGRAFÍA. Esta pantalla llegó a tener un editor
+ * de galería donde se TECLEABA la ruta del almacenamiento de cada foto. Desde
+ * la 0073 eso ya no existe: el archivo se sube de verdad en
+ * `/proveedor/productos/{id}/fotos`, lo recibe la API, mira los bytes y GENERA
+ * el nombre. Una ruta escrita a mano podía apuntar a un archivo ajeno o a
+ * ninguno, y además `VersionRequest` ya no tiene `gallery`, así que lo que se
+ * tecleara se guardaría con un 200 y no llegaría a ninguna parte. El botón
+ * «Fotografías» es el único camino, y no vuelve a haber otro.
  *
  * SOLO EL BORRADOR SE EDITA. Si el producto ya salió de borrador la pantalla no
  * ofrece campos: lo dice y deja leer. Editar lo que alguien está evaluando
@@ -304,7 +305,6 @@ export function EditarProductoScreen() {
   };
 
   const variantes = formulario.variantes;
-  const galeria = formulario.galeria;
   const sePuedePostular =
     producto !== null && accionesOfrecidas(producto).includes('submitted');
 
@@ -610,72 +610,27 @@ export function EditarProductoScreen() {
         </>
       ) : null}
 
-      {/* La galería: RUTAS DEL ALMACENAMIENTO, nunca enlaces. */}
-      <View style={[styles.tarjeta, { borderColor: colors.border }]}>
-        <Text variant="secondary" weight="700">
-          {f('proveedorProductos.editar.galeria')}
-        </Text>
-        <Text variant="caption" color={colors.textMuted}>
-          {f('proveedorProductos.editar.galeriaCuerpo')}
-        </Text>
+      {/*
+        AQUÍ HABÍA UN EDITOR DE GALERÍA, Y NO VUELVE.
 
-        {galeria.map((foto, indice) => (
-          <View key={`foto-${indice}`} style={[styles.tarjeta, { borderColor: colors.border }]}>
-            <Input
-              label={f('proveedorProductos.editar.rutaEtiqueta')}
-              placeholder={f('proveedorProductos.editar.rutaAyuda')}
-              value={foto.ruta}
-              onChangeText={(ruta) => {
-                const copia = [...galeria];
-                copia[indice] = { ...foto, ruta };
-                setFormulario({ ...formulario, galeria: copia });
-              }}
-              error={mensajeDe('foto', indice)}
-              maxLength={LARGO_DE_LA_RUTA[1]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!ocupado}
-            />
-            <Input
-              label={f('proveedorProductos.editar.alternativoEtiqueta')}
-              placeholder={f('proveedorProductos.editar.alternativoAyuda')}
-              value={foto.alternativo}
-              onChangeText={(alternativo) => {
-                const copia = [...galeria];
-                copia[indice] = { ...foto, alternativo };
-                setFormulario({ ...formulario, galeria: copia });
-              }}
-              maxLength={LARGO_DEL_ALTERNATIVO}
-              editable={!ocupado}
-            />
-            <Button
-              label={f('proveedorProductos.editar.quitarFoto')}
-              variant="ghost"
-              onPress={() =>
-                setFormulario({
-                  ...formulario,
-                  galeria: galeria.filter((_, otro) => otro !== indice),
-                })
-              }
-              disabled={ocupado}
-            />
-          </View>
-        ))}
+        Se tecleaba a mano la RUTA del almacenamiento de cada fotografía y se
+        mandaba en `gallery`. Se ha quitado por dos razones, y las dos bastan
+        por sí solas:
 
-        {galeria.length < MAXIMO_DE_FOTOS ? (
-          <Button
-            label={f('proveedorProductos.editar.anadirFoto')}
-            variant="secondary"
-            icon="plus"
-            onPress={() => setFormulario({ ...formulario, galeria: [...galeria, fotoVacia()] })}
-            disabled={ocupado}
-          />
-        ) : (
-          <Text variant="caption" color={colors.textMuted}>
-            {f('proveedorProductos.error.demasiadasFotos', { max: MAXIMO_DE_FOTOS, min: 0 })}
-          </Text>
-        )}
-      </View>
+          1. NO GUARDABA NADA. `VersionRequest` ya no tiene `gallery`; Pydantic
+             descarta la clave SIN ERROR, así que quien vendía escribía las
+             rutas, pulsaba guardar, recibía un 200 y no había pasado nada.
+
+          2. ES EL AGUJERO QUE CERRÓ LA 0073. Una ruta escrita a mano puede
+             apuntar al archivo de otra persona o a ninguno: nadie comprobaba
+             que existiera, ni que fuera suya, ni que fuera una imagen. Ahora el
+             archivo se sube de verdad, LA API MIRA LOS BYTES y ES EL SERVIDOR
+             QUIEN GENERA EL NOMBRE, así que no hay ruta que teclear.
+
+        El camino bueno es el botón «Fotografías» de aquí arriba, que lleva a
+        `/proveedor/productos/{id}/fotos`. Si alguien echa de menos esto,
+        lo que echa de menos es un formulario que mentía.
+      */}
 
       {/* Lo que afecta a todo el formulario se dice aquí, no al ser rechazado. */}
       {fallos

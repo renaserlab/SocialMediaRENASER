@@ -239,8 +239,19 @@ const ERRORES: Record<string, ClaveDeTraduccion> = {
   product_inventory_not_available: 'inventario.error.noDisponible',
   product_inventory_not_configured: 'inventario.error.sinCargar',
   product_inventory_insufficient: 'inventario.error.noAlcanza',
+  // UNA CLAVE SIGNIFICA UNA OPERACION. Repetirla con otra cosa no es un
+  // reintento: sin este texto, quien vende veria un error sin explicacion
+  // justo cuando su cliente reusa la cadena «1» para todo.
+  product_inventory_key_reused: 'inventario.error.claveReutilizada',
   product_inventory_movement_invalid: 'inventario.error.movimientoInvalido',
   product_variant_not_found: 'inventario.error.varianteNoEncontrada',
+  /*
+    CARGAR Y AJUSTAR EXISTENCIAS EXIGEN CAPACIDAD COMERCIAL ACTIVA
+    (`exigir_vendedor_activo`), así que este 403 llega por estas rutas. Sin
+    traducir parecía un fallo del movimiento, cuando lo que está parado es la
+    cuenta: quien lo lea tiene que saber que reintentar no arregla nada.
+  */
+  product_seller_not_active: 'inventario.error.sinCapacidadComercial',
 };
 
 export function claveDeErrorDeInventario(
