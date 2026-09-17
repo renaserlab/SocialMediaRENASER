@@ -1,5 +1,9 @@
 -- 0075 · El carrito de Productos: persistente, del servidor y sin compra.
 --
+-- AL APLICARLA, REINICIAR LA API. La puerta de esquema cachea tambien el «no»
+-- en la memoria del proceso: sin reiniciar, las rutas siguen contestando 503
+-- aunque las tablas ya esten.
+--
 -- SIN APLICAR. Requiere la 0070 y la 0074.
 --
 -- NO ES «GUARDADOS», Y POR ESO ES OTRA TABLA. Guardar (0072) es un marcador:

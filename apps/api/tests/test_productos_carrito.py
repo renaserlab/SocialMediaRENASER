@@ -714,6 +714,134 @@ async def test_cuatro_toques_a_la_vez_con_la_misma_clave_suman_uno(
 # =========================================================================== #
 @SIN_POSTGRES
 @pytest.mark.asyncio
+async def test_CUATRO_PRIMEROS_TOQUES_A_LA_VEZ_no_pierden_ninguno(
+    sesiones, motor
+) -> None:
+    """LO ENCONTRO LA REVISION INDEPENDIENTE, y la prueba de mas abajo lo
+    esquivaba a proposito.
+
+    `select ... for update` sobre CERO filas no bloquea nada: cuatro primeros
+    toques simultaneos de una persona SIN carrito llegaban los cuatro al
+    `insert` y tres se estrellaban contra la clave primaria con un 500,
+    perdiendo tres unidades. Ahora la creacion usa `on conflict do nothing` y
+    una relectura bloqueada, igual que el inventario.
+    """
+    producto_id, _, variantes, _ = await bolsa_lista(sesiones, cuantas=20)
+    #: SIN CARRITO PREVIO: crearlo es justo la carrera que se prueba.
+    comprador = await persona(sesiones, "sincarro")
+    Dos = async_sessionmaker(motor, expire_on_commit=False)
+
+    async def toque(n: int):
+        async with Dos() as db:
+            try:
+                await carts.anadir(
+                    db, usuario_id=comprador, producto_id=producto_id,
+                    variante_id=variantes[0].id, cantidad=1, clave=f"t{n}",
+                )
+                await db.commit()
+                return "ok"
+            except Exception as error:  # noqa: BLE001
+                await db.rollback()
+                return type(error).__name__
+
+    resultados = await asyncio.gather(*[toque(n) for n in range(4)])
+    assert all(r == "ok" for r in resultados), resultados
+
+    async with sesiones() as db:
+        assert await carts.cuantas_unidades(db, usuario_id=comprador) == 4
+        cuantos = await db.scalar(
+            select(func.count())
+            .select_from(ProductCart)
+            .where(ProductCart.user_id == comprador)
+        )
+    assert cuantos == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_recargo_NO_puede_dejar_el_precio_negativo(sesiones) -> None:
+    """TAMBIEN DE LA REVISION. Un recargo mayor que el precio de la version
+    dejaba el efectivo en negativo, y como no era `None` pasaba el guardian de
+    «sin precio» y se estrellaba contra el CHECK de la base con un 500.
+
+    Un precio negativo no es un precio: la linea se marca como sin precio, que
+    es lo que de verdad le pasa.
+    """
+    producto_id, version_id, variantes, comprador = await bolsa_lista(sesiones)
+    async with sesiones() as db:
+        version = await db.get(ProductVersion, version_id)
+        precio = int(version.price_minor)
+        await db.execute(
+            text(
+                "update public.product_variants set price_delta_minor = :d"
+                " where id = cast(:v as uuid)"
+            ),
+            {"d": -(precio + 1_000), "v": variantes[0].id},
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        version = await db.get(ProductVersion, version_id)
+        variante = await db.get(ProductVariant, variantes[0].id)
+        assert carts.precio_de(version, variante) is None
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await carts.anadir(
+                db, usuario_id=comprador, producto_id=producto_id,
+                variante_id=variantes[0].id, cantidad=1,
+            )
+    assert fallo.value.code == "product_price_not_configured"
+
+    # Y EL RECARGO NI SIQUIERA SE PUEDE ESCRIBIR ASI DE GRANDE: el tope existe
+    # tambien por arriba, porque un total que no cabe en el `double` con el que
+    # JavaScript lee el JSON deja de ser el que calculo el servidor.
+    from app.modules.products.service import MAXIMO_DEL_RECARGO
+
+    assert MAXIMO_DEL_RECARGO * 1_000 < 2**53
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_bolsa_vaciada_POR_CASCADA_no_se_queda_con_su_moneda(
+    sesiones,
+) -> None:
+    """TAMBIEN DE LA REVISION, como riesgo. Las lineas pueden irse por cascada
+    —al borrar una version o una variante— sin pasar por `quitar`, y entonces
+    la moneda guardada rechazaba todo sobre una bolsa donde no hay nada."""
+    producto_id, _, variantes, comprador = await bolsa_lista(sesiones)
+    async with sesiones() as db:
+        await carts.anadir(
+            db, usuario_id=comprador, producto_id=producto_id,
+            variante_id=variantes[0].id, cantidad=1,
+        )
+        await db.commit()
+
+    #: Se borran las lineas POR DEBAJO, como haria una cascada.
+    async with sesiones() as db:
+        await db.execute(
+            text("delete from public.product_cart_items where user_id = cast(:u as uuid)"),
+            {"u": comprador},
+        )
+        await db.commit()
+    async with sesiones() as db:
+        carrito = await db.get(ProductCart, comprador)
+        assert carrito.currency == "PEN", "la moneda sigue puesta, como se esperaba"
+
+    #: Y aun asi se puede volver a meter algo, en cualquier moneda.
+    async with sesiones() as db:
+        await carts.anadir(
+            db, usuario_id=comprador, producto_id=producto_id,
+            variante_id=variantes[0].id, cantidad=1,
+        )
+        await db.commit()
+    async with sesiones() as db:
+        bolsa = await carts.leer(db, usuario_id=comprador)
+    assert bolsa.units == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
 async def test_el_carrito_nunca_dice_que_se_puede_comprar(sesiones) -> None:
     """NO EXISTE LA COMPRA FÍSICA: ni checkout, ni pedido, ni pago."""
     producto_id, _, variantes, comprador = await bolsa_lista(sesiones)

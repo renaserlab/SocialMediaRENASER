@@ -113,6 +113,17 @@ class MovimientoInvalido(ValidationAppError):
     code = "product_inventory_movement_invalid"
 
 
+class ClaveReutilizada(ConflictError):
+    """Esa clave ya se usó para OTRA operación sobre esta misma unidad.
+
+    No es un reintento: un reintento repite la misma petición. Devolver el
+    movimiento anterior con un 200 haría que quien pidió el ajuste viera
+    «hecho» sobre un almacén que no se movió, y sin rastro del intento.
+    """
+
+    code = "product_inventory_key_reused"
+
+
 @dataclass(frozen=True)
 class Existencias:
     """Lo que hay. `available` SE CALCULA: no existe esa columna."""
@@ -136,20 +147,19 @@ def _leido(fila: ProductInventory) -> Existencias:
     )
 
 
-def id_del_movimiento(
-    product_id: str, sku: str, actor_id: str | None, clave: str
-) -> str:
+def id_del_movimiento(product_id: str, sku: str, clave: str) -> str:
     """El identificador que le toca a este movimiento.
 
-    EL PRODUCTO, EL SKU Y EL ACTOR ENTRAN EN LA HUELLA. Sin el producto, la
-    misma clave reusada en otro devolvería el movimiento del primero. Sin el
-    actor, una administración y quien vende mandando por casualidad la misma
-    cadena —«1», que es lo que manda un cliente mal escrito— se pisarían el
-    ajuste.
+    LA HUELLA ES (PRODUCTO, SKU, CLAVE), Y NADA MÁS, porque eso es exactamente
+    lo que declara única la 0074. El actor estuvo aquí y era un error: el
+    identificador no chocaba pero la restricción de la base sí, y el resultado
+    era un 500 en vez de un conflicto que se entiende.
+
+    Sin el producto, la misma clave reusada en otro devolvería el movimiento del
+    primero. Con él, una clave significa UNA operación sobre UNA unidad de
+    almacén, venga de quien venga.
     """
-    return str(
-        uuid.uuid5(_ESPACIO, f"{product_id}:{sku}:{actor_id or '-'}:{clave.strip()}")
-    )
+    return str(uuid.uuid5(_ESPACIO, f"{product_id}:{sku}:{clave.strip()}"))
 
 
 # --------------------------------------------------------------------------- #
@@ -336,6 +346,28 @@ async def mover(
     if await db.get(Product, product_id) is None:
         raise UnidadNoEncontrada("Producto no encontrado.")
 
+    #: Y EL SKU TIENE QUE SER EL DE UNA VARIANTE DE ESE PRODUCTO. Sin esto, una
+    #: errata de mayúsculas —`cuch-20` por `CUCH-20`— creaba una fila de
+    #: inventario que ninguna pantalla enseña nunca: siete unidades pagadas
+    #: invisibles, y la variante diciendo «sin cargar» para siempre. Solo se
+    #: inventaría lo que se ofrece.
+    #:
+    #: Se mira en TODAS las versiones del producto, no solo en la publicada: el
+    #: almacén existe antes de publicar y sigue existiendo después.
+    from app.modules.products.models import ProductVersion as _Version
+
+    existe = await db.scalar(
+        select(func.count())
+        .select_from(ProductVariant)
+        .join(_Version, _Version.id == ProductVariant.version_id)
+        .where(_Version.product_id == product_id, ProductVariant.sku == sku)
+    )
+    if not existe:
+        raise UnidadNoEncontrada(
+            "Ese SKU no es el de ninguna variante de este producto.",
+            details={"product_id": product_id, "sku": sku},
+        )
+
     #: SOLO LA ENTRADA CREA LA FILA. Ajustar, reservar o despachar sobre un SKU
     #: que nadie inventarió no es «cero»: es que falta cargarlo.
     fila = await _bloqueada(
@@ -362,7 +394,7 @@ async def mover(
     if reserved > on_hand:
         raise NoAlcanza("No queda bastante disponible.", details=detalles)
 
-    identificador = id_del_movimiento(product_id, sku, actor_id, clave)
+    identificador = id_del_movimiento(product_id, sku, clave)
     movimiento = InventoryMovement(
         id=identificador,
         product_id=product_id,
@@ -381,11 +413,30 @@ async def mover(
             db.add(movimiento)
             await db.flush()
     except IntegrityError:
-        #: LA MISMA CLAVE OTRA VEZ. No se movió nada: se devuelve lo que ya
-        #: había, que es exactamente lo que pedía quien reintentó.
+        #: LA MISMA CLAVE OTRA VEZ. Puede ser un REINTENTO —la misma petición,
+        #: que no debe mover nada dos veces— o una clave REUTILIZADA para otra
+        #: cosa, que es un error de quien llama y no puede contestarse con un
+        #: «hecho» sobre un almacén que no se movió.
         anterior = await db.get(InventoryMovement, identificador)
         if anterior is None:
             raise
+        mismo = (
+            anterior.kind == kind
+            and int(anterior.quantity) == cantidad
+            and (anterior.reason or "") == ((motivo or "").strip() or "")
+        )
+        if not mismo:
+            raise ClaveReutilizada(
+                "Esa clave ya se usó para otra operación sobre esta unidad.",
+                details={
+                    "sku": sku,
+                    "idempotency_key": clave.strip(),
+                    "previous_kind": anterior.kind,
+                    "previous_quantity": int(anterior.quantity),
+                    "requested_kind": kind,
+                    "requested_quantity": cantidad,
+                },
+            ) from None
         actual = await db.get(ProductInventory, (product_id, sku))
         return _leido(actual), anterior
 
@@ -569,6 +620,7 @@ __all__ = [
     "NoAlcanza",
     "ROL_DE_AUDITORIA",
     "SinInventario",
+    "ClaveReutilizada",
     "UnidadNoEncontrada",
     "ajustar",
     "de_la_unidad",

@@ -293,7 +293,10 @@ class VarianteRequest(BaseModel):
     sku: str = Field(min_length=2, max_length=48)
     name: str = Field(min_length=1, max_length=80)
     options: dict[str, Any] = Field(default_factory=dict)
-    price_delta_minor: int = 0
+    #: CON TOPE POR LOS DOS LADOS. Sin el de abajo el precio efectivo sale
+    #: negativo; sin el de arriba el total deja de caber en el `double` con el
+    #: que JavaScript lee el JSON.
+    price_delta_minor: int = Field(default=0, ge=-10_000_000, le=10_000_000)
 
 
 class VersionRequest(BaseModel):

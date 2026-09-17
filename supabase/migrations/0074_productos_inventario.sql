@@ -1,5 +1,9 @@
 -- 0074 · Inventario físico por SKU: existencias, reservas y movimientos.
 --
+-- AL APLICARLA, REINICIAR LA API. La puerta de esquema cachea tambien el «no»
+-- en la memoria del proceso: sin reiniciar, las rutas siguen contestando 503
+-- aunque las tablas ya esten.
+--
 -- SIN APLICAR. Requiere la 0070.
 --
 -- POR QUÉ LA EXISTENCIA SE GUARDA POR (PRODUCTO, SKU) Y NO POR VARIANTE. Una
@@ -93,8 +97,12 @@ create index if not exists product_inventory_disponible
 create table if not exists public.inventory_movements (
   id uuid primary key,
 
+  -- `restrict` Y NO `cascade`, porque el disparador de mas abajo rechaza los
+  -- `delete` sobre esta tabla: un `cascade` que no puede ejecutarse no protege
+  -- nada y ademas convierte el borrado del producto en un error incomprensible.
+  -- Con `restrict`, borrar un producto con historial de almacen dice justo eso.
   product_id uuid not null
-    references public.products(id) on delete cascade,
+    references public.products(id) on delete restrict,
   sku text not null
     constraint inventory_movements_sku
     check (length(trim(sku)) between 1 and 48),
@@ -130,7 +138,11 @@ create table if not exists public.inventory_movements (
       or (reason is not null and length(trim(reason)) >= 3)
     ),
 
-  actor_id uuid references public.profiles(id) on delete set null,
+  -- SIN CLAVE AJENA, y a proposito: `on delete set null` exige un `update`
+  -- sobre esta tabla, y el disparador lo rechaza. Quien firmo un movimiento es
+  -- un hecho del pasado; si esa cuenta desaparece, el hecho sigue siendo cierto
+  -- y el identificador se queda escrito.
+  actor_id uuid,
   actor_role text not null
     constraint inventory_movements_actor
     check (actor_role in ('seller', 'admin', 'system')),

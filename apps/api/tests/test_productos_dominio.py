@@ -70,6 +70,19 @@ SIN_POSTGRES = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def base_aplicada():
+    """Las 75 migraciones desde cero, una vez por módulo.
+
+    UNA SOLA EJECUCIÓN A LA VEZ POR BASE. Esto hace `drop schema public cascade`
+    antes de migrar, así que DOS pasadas de pytest contra la misma
+    `MIGRACIONES_DATABASE_URL` se destruyen entre ellas: lo que se ve son
+    `InvalidSchemaName: schema "public" does not exist` y algún interbloqueo
+    entre el DDL de esta fixture y una sesión que aún no cerró.
+
+    Parece una suite que no repite y no lo es: seis pasadas seguidas en
+    solitario dan el mismo número. Si hace falta correr dos a la vez, cada una
+    necesita SU PROPIA BASE —`create database ...` y otra URL—, no otro
+    proceso sobre la misma.
+    """
     if not URL:
         pytest.skip("sin PostgreSQL desechable")
     exigir_url_desechable(URL, os.environ.get("DATABASE_URL", ""))

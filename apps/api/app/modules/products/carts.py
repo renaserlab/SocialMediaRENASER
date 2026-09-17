@@ -176,7 +176,12 @@ def precio_de(version: ProductVersion, variante: ProductVariant) -> int | None:
     """
     if version.price_minor is None or version.currency is None:
         return None
-    return int(version.price_minor) + int(variante.price_delta_minor or 0)
+    efectivo = int(version.price_minor) + int(variante.price_delta_minor or 0)
+    #: UN PRECIO NEGATIVO NO ES UN PRECIO. Un recargo por debajo del precio de
+    #: la versión lo dejaba en negativo, y como no era `None` pasaba el guardián
+    #: de «sin precio» y se estrellaba contra el CHECK de la base con un 500.
+    #: La línea se marca como sin precio, que es lo que de verdad le pasa.
+    return efectivo if efectivo >= 0 else None
 
 
 def _en_catalogo():
@@ -197,7 +202,22 @@ async def _carrito_bloqueado(
     )
     if fila is not None or not crear:
         return fila
-    db.add(ProductCart(user_id=usuario_id))
+
+    #: LA CREACIÓN TAMBIÉN ES UNA CARRERA, y esta se escapaba. Un
+    #: `select ... for update` sobre CERO filas no bloquea nada, así que cuatro
+    #: primeros toques simultáneos llegaban los cuatro al `insert` y tres se
+    #: estrellaban contra la clave primaria con un 500, perdiendo tres unidades.
+    #: Es la misma solución que ya usaba el inventario.
+    from sqlalchemy.dialects.postgresql import insert as insert_pg
+    from sqlalchemy.dialects.sqlite import insert as insert_sqlite
+
+    dialecto = db.bind.dialect.name if db.bind is not None else ""
+    constructor = insert_pg if dialecto == "postgresql" else insert_sqlite
+    await db.execute(
+        constructor(ProductCart.__table__)
+        .values(user_id=usuario_id)
+        .on_conflict_do_nothing(index_elements=["user_id"])
+    )
     await db.flush()
     return await db.scalar(
         select(ProductCart)
@@ -398,6 +418,17 @@ async def anadir(
 
     #: MONEDAS INCOMPATIBLES NO SE SUMAN. Sumar soles con euros da un número que
     #: no es dinero, y el carrito prefiere no dejar meter la segunda.
+    #:
+    #: PERO UNA BOLSA VACÍA NO TIENE MONEDA, aunque la columna la conserve: las
+    #: líneas pueden irse por cascada —al borrar un producto o una versión— sin
+    #: pasar por `quitar`, y entonces la moneda guardada rechazaría todo sobre
+    #: una bolsa donde no hay nada.
+    if carrito.currency and not await db.scalar(
+        select(func.count())
+        .select_from(ProductCartItem)
+        .where(ProductCartItem.user_id == usuario_id)
+    ):
+        carrito.currency = None
     if carrito.currency and carrito.currency != version.currency:
         raise MonedaIncompatible(
             "Tu bolsa está en otra moneda.",

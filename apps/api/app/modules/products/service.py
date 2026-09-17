@@ -82,6 +82,13 @@ LARGOS = {
     "manufacturer": (2, 160),
 }
 
+#: Tope del recargo de una variante, en la unidad menor: diez millones, que en
+#: soles son cien mil. NO ES UNA REGLA COMERCIAL: es que por debajo de cero el
+#: precio efectivo deja de ser un precio, y por arriba el número deja de caber
+#: en el `double` con el que JavaScript lee el JSON —2^53— y el total que pinta
+#: la pantalla deja de ser el que calculó el servidor.
+MAXIMO_DEL_RECARGO = 10_000_000
+
 #: Cuántas variantes caben. No es una regla de negocio: es que una versión es
 #: una ficha, no un almacén, y su huella se calcula entera.
 #:
@@ -208,6 +215,17 @@ def _exigir_variantes(crudas: list[dict] | None) -> list[dict]:
             raise ValidationAppError(
                 "La diferencia de precio es un número entero.",
                 code="product_variant_delta_invalid",
+            )
+        # Y CON TOPE, POR ARRIBA Y POR ABAJO. Sin el de abajo, un recargo mayor
+        # que el precio de la versión deja el precio efectivo negativo; sin el
+        # de arriba, `bigint` admite números que al llegar al móvil como JSON se
+        # leen como `double` y pierden dígitos: el total que se pinta deja de ser
+        # el que calculó el servidor.
+        if abs(delta) > MAXIMO_DEL_RECARGO:
+            raise ValidationAppError(
+                "La diferencia de precio de una variante está fuera de lo posible.",
+                code="product_variant_delta_invalid",
+                details={"max": MAXIMO_DEL_RECARGO},
             )
         limpias.append(
             {

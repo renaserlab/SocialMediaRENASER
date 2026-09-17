@@ -599,6 +599,9 @@ async def ordenar_fotos(
 ) -> list[FotoDelProveedor]:
     """Deja la galería en ese orden. TODAS o ninguna."""
     ensure_uuid(product_id, "Producto no encontrado.")
+    #: MISMA PUERTA QUE SUBIR. Quien tiene la capacidad comercial suspendida no
+    #: sube fotos; tampoco debería reordenarlas ni quitarlas.
+    await permisos.exigir_vendedor_activo(db, current_user.id)
     producto = await permisos.exigir_mio(
         db, producto_id=product_id, user_id=current_user.id
     )
@@ -617,6 +620,7 @@ async def quitar_foto(
     """Quita una fotografía. El archivo solo se borra si nadie más lo nombra."""
     ensure_uuid(product_id, "Producto no encontrado.")
     ensure_uuid(media_id, "Fotografía no encontrada.")
+    await permisos.exigir_vendedor_activo(db, current_user.id)
     producto = await permisos.exigir_mio(
         db, producto_id=product_id, user_id=current_user.id
     )
@@ -1410,6 +1414,13 @@ async def decidir_foto(
     igual que con la evaluación: si se comprobara después, un administrador
     dueño del producto recibiría un 403 genérico en vez del motivo real.
     """
+    #: EL ROL, LO PRIMERO. Si fuera después, cualquier cuenta autenticada
+    #: distinguiría por el código de respuesta si la 0073 está aplicada en
+    #: producción y si un identificador de fotografía existe. Es la regla que
+    #: este fichero se puso a sí mismo en la cabecera.
+    if not await permisos.puede_evaluar(db, current_user.id):
+        await permisos.exigir_evaluador(db, current_user.id)
+
     ensure_uuid(media_id, "Fotografía no encontrada.")
     await esquema.exigir_fotografias(db)
     fila = await db.get(ProductMedia, media_id)
@@ -1417,8 +1428,10 @@ async def decidir_foto(
         raise fotos.FotoNoEncontrada("Fotografía no encontrada.")
     version = await db.get(ProductVersion, fila.version_id)
     producto = await db.get(Product, version.product_id)
+    #: Y LA COMPROBACIÓN DE «NO ES TUYO» SIGUE YENDO ANTES QUE NADA MÁS sobre
+    #: el producto: un administrador dueño del producto recibe el motivo real y
+    #: no un 403 genérico.
     await permisos.exigir_ajeno(db, producto=producto, user_id=current_user.id)
-    await permisos.exigir_evaluador(db, current_user.id)
 
     decidida = await fotos.decidir(
         db,

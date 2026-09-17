@@ -1,5 +1,9 @@
 -- 0073 · Fotografías de producto: depósito privado y aprobación de la imagen.
 --
+-- AL APLICARLA, REINICIAR LA API. La puerta de esquema cachea tambien el «no»
+-- en la memoria del proceso: sin reiniciar, las rutas siguen contestando 503
+-- aunque las tablas ya esten.
+--
 -- SIN APLICAR. Requiere la 0070.
 --
 -- QUÉ CIERRA. Hasta hoy `product_media` guardaba una ruta que escribía a mano

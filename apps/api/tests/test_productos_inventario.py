@@ -103,15 +103,27 @@ def test_lo_disponible_se_calcula_y_no_se_guarda() -> None:
 
 
 def test_el_identificador_del_movimiento_depende_de_todo_lo_que_toca() -> None:
-    """SIN EL PRODUCTO, la misma clave reusada en otro devolvería el movimiento
-    del primero. SIN EL ACTOR, dos personas mandando «1» se pisarían."""
-    base = inventory.id_del_movimiento("p1", "S1", "a1", "k")
-    assert base != inventory.id_del_movimiento("p2", "S1", "a1", "k")
-    assert base != inventory.id_del_movimiento("p1", "S2", "a1", "k")
-    assert base != inventory.id_del_movimiento("p1", "S1", "a2", "k")
-    assert base != inventory.id_del_movimiento("p1", "S1", "a1", "otra")
+    """LA HUELLA ES (PRODUCTO, SKU, CLAVE), y eso es EXACTAMENTE lo que la 0074
+    declara único.
+
+    El actor estuvo en la huella y era un error: el identificador no chocaba
+    pero la restricción de la base sí, y el resultado era un 500. Si alguien lo
+    vuelve a meter, esta prueba se pone roja.
+    """
+    base = inventory.id_del_movimiento("p1", "S1", "k")
+    assert base != inventory.id_del_movimiento("p2", "S1", "k")
+    assert base != inventory.id_del_movimiento("p1", "S2", "k")
+    assert base != inventory.id_del_movimiento("p1", "S1", "otra")
     # Y LA MISMA CLAVE DA SIEMPRE EL MISMO. Si no, el reintento crearía otro.
-    assert base == inventory.id_del_movimiento("p1", "S1", "a1", " k ")
+    assert base == inventory.id_del_movimiento("p1", "S1", " k ")
+    # LA HUELLA NO PUEDE LLEVAR NADA MÁS: tres argumentos, ni uno más.
+    import inspect as _inspect
+
+    assert list(_inspect.signature(inventory.id_del_movimiento).parameters) == [
+        "product_id",
+        "sku",
+        "clave",
+    ]
 
 
 # =========================================================================== #
@@ -289,6 +301,110 @@ async def test_la_misma_clave_no_carga_dos_veces(sesiones) -> None:
             )
         )
     assert cuantos == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_misma_clave_para_OTRA_operacion_es_un_conflicto(sesiones) -> None:
+    """LO ENCONTRO LA REVISION INDEPENDIENTE, y era el peor de los ocho.
+
+    La huella no llevaba el tipo ni la cantidad, asi que reusar la clave de una
+    entrada para un ajuste recuperaba la entrada y devolvia los numeros de
+    ahora COMO SI EL AJUSTE HUBIERA SALIDO BIEN. Quien vende veia «hecho», el
+    almacen no se movia, y el historial no registraba ni el intento.
+
+    Una clave significa UNA operacion. Repetirla con otra cosa no es un
+    reintento: es un error de quien llama, y se dice.
+    """
+    quien, producto_id = await con_inventario(sesiones, cuantas=0)
+    async with sesiones() as db:
+        await inventory.entrada(
+            db, product_id=producto_id, sku=SKU, cantidad=10, clave="1",
+            actor_id=quien,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await inventory.ajustar(
+                db, product_id=producto_id, sku=SKU, cantidad=-4,
+                motivo="Rotura en el almacen", clave="1", actor_id=quien,
+            )
+    assert fallo.value.code == "product_inventory_key_reused"
+    assert fallo.value.details["previous_kind"] == ENTRADA
+    assert fallo.value.details["requested_kind"] == AJUSTE
+
+    # Y EL ALMACEN NO SE MOVIO.
+    async with sesiones() as db:
+        hay = await inventory.de_la_unidad(db, product_id=producto_id, sku=SKU)
+    assert hay.on_hand == 10
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_misma_clave_desde_OTRO_ACTOR_no_revienta(sesiones) -> None:
+    """TAMBIEN DE LA REVISION. El identificador llevaba el actor y la
+    restriccion de la base no: el id no chocaba, la restriccion si, y el
+    resultado era un 500 en vez de un conflicto que se entiende.
+
+    Ahora la huella es (producto, SKU, clave), que es exactamente lo que la
+    0074 declara unico.
+    """
+    quien, producto_id = await con_inventario(sesiones, cuantas=0)
+    otro = await persona(sesiones, "adm", rol="admin")
+    async with sesiones() as db:
+        await inventory.entrada(
+            db, product_id=producto_id, sku=SKU, cantidad=5, clave="1",
+            actor_id=quien,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await inventory.ajustar(
+                db, product_id=producto_id, sku=SKU, cantidad=-1,
+                motivo="Ajuste de administracion", clave="1", actor_id=otro,
+                actor_rol="admin",
+            )
+    assert fallo.value.code == "product_inventory_key_reused"
+    assert fallo.value.status_code == 409
+
+    # Y LA HUELLA NO DEPENDE DEL ACTOR: es lo que la alinea con la base.
+    assert inventory.id_del_movimiento("p", "S", "k") == inventory.id_del_movimiento(
+        "p", "S", " k "
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_no_se_carga_inventario_en_un_SKU_QUE_NO_EXISTE(sesiones) -> None:
+    """TAMBIEN DE LA REVISION, y es el que mas caro sale.
+
+    El SKU no estaba atado a ninguna variante: una errata de mayusculas
+    —`cuch-20` por `CUCH-20`— creaba una fila de inventario que NINGUNA PANTALLA
+    ENSENA NUNCA. Siete unidades pagadas invisibles, y la variante diciendo
+    «sin cargar» para siempre.
+    """
+    quien, producto_id = await con_inventario(sesiones, cuantas=0)
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await inventory.entrada(
+                db, product_id=producto_id, sku=SKU.lower(), cantidad=7,
+                clave="minusculas", actor_id=quien,
+            )
+    assert fallo.value.code == "product_variant_not_found"
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await inventory.entrada(
+                db, product_id=producto_id, sku="NO-EXISTE", cantidad=1,
+                clave="inventado", actor_id=quien,
+            )
+    assert fallo.value.code == "product_variant_not_found"
+
+    # Y NO QUEDO NINGUNA FILA suelta de ninguno de los dos.
+    async with sesiones() as db:
+        assert await inventory.del_producto(db, product_id=producto_id) == {}
 
 
 @SIN_POSTGRES

@@ -928,7 +928,7 @@ class InventoryMovement(Base):
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     product_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("products.id", ondelete="CASCADE")
+        Uuid(as_uuid=False), ForeignKey("products.id", ondelete="RESTRICT")
     )
     sku: Mapped[str] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(Text)
@@ -936,9 +936,10 @@ class InventoryMovement(Base):
     on_hand_after: Mapped[int] = mapped_column(BigInteger)
     reserved_after: Mapped[int] = mapped_column(BigInteger)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    actor_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
-    )
+    #: SIN CLAVE AJENA: `on delete set null` exige un `update` sobre esta tabla
+    #: y el disparador de la 0074 lo rechaza. Quien firmó un movimiento es un
+    #: hecho del pasado, y sigue siendo cierto aunque esa cuenta desaparezca.
+    actor_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
     actor_role: Mapped[str] = mapped_column(Text)
     idempotency_key: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
