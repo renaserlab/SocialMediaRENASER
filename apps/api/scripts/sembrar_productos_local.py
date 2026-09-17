@@ -1,0 +1,459 @@
+# -*- coding: utf-8 -*-
+"""Datos de muestra de Productos para una base LOCAL. Nunca para producción.
+
+PARA QUÉ. Para poder mirar las pantallas de Productos con algo dentro sin tocar
+la base gestionada. Crea proveedores, productos, evaluaciones, fotografías,
+inventario y —si se pide— un carrito, todo por el CAMINO REAL del servidor:
+postular, evaluar, publicar. Escribir las filas a mano no probaría nada y
+además dejaría estados que el código nunca produce.
+
+TRES GUARDIAS, Y NINGUNO ES OPCIONAL:
+
+  1. LA URL TIENE QUE SER LOCAL. Solo `localhost` o `127.0.0.1`. Si apunta a
+     cualquier otra cosa, se para antes de abrir la conexión.
+  2. NO PUEDE SER LA DE `apps/api/.env`. Aunque alguien pusiera un túnel local
+     hacia la base gestionada, la cadena coincidiría y esto se niega.
+  3. `ENVIRONMENT` NO PUEDE SER `production`.
+
+LO QUE NO INVENTA. Ninguna valoración, ninguna compra verificada, ningún plazo
+de entrega, ninguna garantía y ningún descuento: esos datos no existen en el
+sistema, y sembrarlos aquí los haría aparecer en pantalla como si existieran.
+Los productos llevan precio y existencias porque el precio y el inventario SÍ
+son columnas reales.
+
+    python scripts/sembrar_productos_local.py --cuenta <uuid del perfil>
+
+`--cuenta` mete ese identificador en `auth.users` para poder entrar en la
+aplicación local con una sesión de Supabase real contra datos locales.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import io
+import os
+import re
+import sys
+import uuid
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RAIZ))
+
+
+def url_del_env() -> str:
+    fichero = RAIZ / ".env"
+    if not fichero.exists():
+        return ""
+    for linea in io.open(fichero, encoding="utf-8", errors="replace").read().splitlines():
+        if linea.strip().startswith("DATABASE_URL="):
+            return linea.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def exigir_local(url: str) -> str:
+    """Se para si esto no es, sin lugar a dudas, una base local."""
+    if not url:
+        raise SystemExit("define DATABASE_URL apuntando a la base local")
+    sin_credenciales = re.sub(r"//[^@]*@", "//", url)
+    if not re.search(r"@(localhost|127\.0\.0\.1)[:/]", url):
+        raise SystemExit(f"esto solo siembra en local; recibí {sin_credenciales}")
+    gestionada = url_del_env()
+    if gestionada and url.split("?")[0] == gestionada.split("?")[0]:
+        raise SystemExit("esa es la cadena de apps/api/.env: NO se siembra ahí")
+    if os.environ.get("ENVIRONMENT", "").lower() == "production":
+        raise SystemExit("ENVIRONMENT=production: no se siembra")
+    return url
+
+
+CATEGORIAS = [
+    ("escritorio", "Escritorio", 0),
+    ("cocina", "Cocina", 1),
+    ("taller", "Taller", 2),
+]
+
+#: Cada uno con su proveedor, su precio real y sus variantes. Los textos
+#: describen objetos; ninguno promete plazos, garantías ni valoraciones.
+CATALOGO = [
+    {
+        "vendedor": "Estudio Origen",
+        "propuesta": "Objetos para una vida más consciente.",
+        "productos": [
+            {
+                "name": "Planner Atemporal",
+                "summary": "Cuaderno de planificación sin fechas impresas.",
+                "description": (
+                    "Cuaderno cosido de 208 páginas, papel de 120 g y tapa dura "
+                    "forrada en tela. Sin fechas impresas: se empieza el día que "
+                    "se abra."
+                ),
+                "materials": "Papel de 120 g, tapa de cartón forrada en tela de algodón.",
+                "origin_country": "PE",
+                "manufacturer": "Estudio Origen",
+                "price_minor": 28_900,
+                "currency": "PEN",
+                "categoria": "escritorio",
+                "nota": 94,
+                "variantes": [
+                    {"sku": "PLAN-NEG", "name": "Negro", "options": {"color": "negro"}},
+                    {
+                        "sku": "PLAN-ARE",
+                        "name": "Arena",
+                        "options": {"color": "arena"},
+                        "price_delta_minor": 1_000,
+                    },
+                ],
+                "existencias": {"PLAN-NEG": 14, "PLAN-ARE": 3},
+            }
+        ],
+    },
+    {
+        "vendedor": "Noma Diseño",
+        "propuesta": "Luz que acompaña el trabajo.",
+        "productos": [
+            {
+                "name": "Luz Noma",
+                "summary": "Lámpara de escritorio de brazo articulado.",
+                "description": (
+                    "Lámpara de escritorio con brazo articulado y base de acero. "
+                    "Temperatura de color regulable en tres pasos."
+                ),
+                "materials": "Acero, aluminio anodizado y difusor de policarbonato.",
+                "origin_country": "PE",
+                "manufacturer": "Noma Diseño",
+                "price_minor": 69_000,
+                "currency": "PEN",
+                "categoria": "escritorio",
+                "nota": 91,
+                "variantes": [
+                    {"sku": "NOMA-GRA", "name": "Grafito", "options": {"color": "grafito"}},
+                ],
+                #: A PROPÓSITO SIN EXISTENCIAS CARGADAS: es lo que hace visible
+                #: que «sin inventario» no se pinta como «agotado».
+                "existencias": {},
+            }
+        ],
+    },
+    {
+        "vendedor": "Forja Andina",
+        "propuesta": "Herramienta de cocina hecha para durar.",
+        "productos": [
+            {
+                "name": "Cuchillo de cocina forjado",
+                "summary": "Hoja forjada en una pieza, mango de madera estabilizada.",
+                "description": (
+                    "Cuchillo de cocina forjado en una sola pieza. Mango de madera "
+                    "estabilizada remachado en tres puntos."
+                ),
+                "materials": "Acero al carbono 1075 y madera de nogal estabilizada.",
+                "origin_country": "PE",
+                "manufacturer": "Forja Andina",
+                "price_minor": 32_000,
+                "currency": "PEN",
+                "categoria": "cocina",
+                "nota": 92,
+                "variantes": [
+                    {"sku": "CUCH-20", "name": "20 cm", "options": {"largo": "20 cm"}},
+                    {
+                        "sku": "CUCH-24",
+                        "name": "24 cm",
+                        "options": {"largo": "24 cm"},
+                        "price_delta_minor": 3_000,
+                    },
+                ],
+                "existencias": {"CUCH-20": 6, "CUCH-24": 1},
+            }
+        ],
+    },
+]
+
+
+async def sembrar(url: str, cuenta: str | None, *, limpiar: bool = False) -> None:
+    from sqlalchemy import select, text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.modules.products import evaluations, service
+    from app.modules.products import states as maquina
+    from app.modules.products.models import (
+        DIMENSIONES,
+        FOTO_APROBADA,
+        VENDEDOR_ACTIVO,
+        ProductCategory,
+        ProductMedia,
+        ProductSeller,
+    )
+    from app.modules.products import inventory as almacen
+
+    motor = create_async_engine(
+        url.replace("postgresql://", "postgresql+asyncpg://", 1), echo=False
+    )
+    Sesion = async_sessionmaker(motor, expire_on_commit=False)
+
+    if limpiar:
+        # SOLO LAS DE PRODUCTOS, y solo en local: el guardia de arriba ya
+        # comprobó que esta base no es la gestionada.
+        async with Sesion() as db:
+            await db.execute(
+                text(
+                    "truncate table public.product_cart_items, public.product_carts,"
+                    " public.inventory_movements, public.product_inventory,"
+                    " public.saved_products, public.product_approval_reasons,"
+                    " public.product_evaluation_evidence,"
+                    " public.product_evaluation_scores, public.product_evaluations,"
+                    " public.seller_application_documents, public.seller_applications,"
+                    " public.product_media, public.product_variants,"
+                    " public.product_versions, public.products,"
+                    " public.product_sellers, public.product_categories cascade"
+                )
+            )
+            await db.commit()
+        print("tablas de Productos vaciadas en la base local")
+
+    async def persona(etiqueta: str, *, rol: str | None = None) -> str:
+        ident = str(uuid.uuid4())
+        async with Sesion() as db:
+            await db.execute(
+                text(
+                    "insert into auth.users (id, email, raw_user_meta_data) values "
+                    "(cast(:i as uuid), cast(:e as text), "
+                    " jsonb_build_object('full_name', cast(:n as text),"
+                    "                    'username', cast(:u as text)))"
+                ),
+                {
+                    "i": ident,
+                    "e": f"{etiqueta}-{ident[:8]}@local.test",
+                    "n": etiqueta,
+                    "u": f"{etiqueta.lower().replace(' ', '')}{ident[:6]}",
+                },
+            )
+            if rol:
+                await db.execute(
+                    text("update public.profiles set role=:r where id=cast(:i as uuid)"),
+                    {"r": rol, "i": ident},
+                )
+            await db.commit()
+        return ident
+
+    # ------------------------------------------------------------------ #
+    # La cuenta con la que se va a entrar, si se pidió
+    # ------------------------------------------------------------------ #
+    if cuenta:
+        async with Sesion() as db:
+            existe = await db.scalar(
+                text("select 1 from auth.users where id = cast(:i as uuid)"),
+                {"i": cuenta},
+            )
+            if not existe:
+                await db.execute(
+                    text(
+                        "insert into auth.users (id, email, raw_user_meta_data) values "
+                        "(cast(:i as uuid), 'tu-cuenta@local.test', "
+                        " jsonb_build_object('full_name','Tu cuenta','username','tucuenta'))"
+                    ),
+                    {"i": cuenta},
+                )
+            await db.execute(
+                text("update public.profiles set role='admin' where id=cast(:i as uuid)"),
+                {"i": cuenta},
+            )
+            await db.commit()
+        print(f"cuenta local lista con rol admin: {cuenta}")
+
+    curador = await persona("Curaduria Z", rol="admin")
+
+    # ------------------------------------------------------------------ #
+    # Categorías. Son de muestra LOCAL: las de verdad las decide la empresa.
+    # ------------------------------------------------------------------ #
+    por_slug: dict[str, str] = {}
+    async with Sesion() as db:
+        for slug, nombre, posicion in CATEGORIAS:
+            fila = await db.scalar(
+                select(ProductCategory).where(ProductCategory.slug == slug)
+            )
+            if fila is None:
+                fila = ProductCategory(slug=slug, name=nombre, position=posicion)
+                db.add(fila)
+                await db.flush()
+            por_slug[slug] = fila.id
+        await db.commit()
+
+    creados = 0
+    for casa in CATALOGO:
+        dueno = await persona(casa["vendedor"])
+        async with Sesion() as db:
+            db.add(
+                ProductSeller(
+                    profile_id=dueno,
+                    display_name=casa["vendedor"],
+                    status=VENDEDOR_ACTIVO,
+                    activated_at=service.ahora(),
+                    activated_by=curador,
+                )
+            )
+            await db.commit()
+
+        for datos in casa["productos"]:
+            variantes = datos.pop("variantes")
+            existencias = datos.pop("existencias")
+            nota = datos.pop("nota")
+            categoria = por_slug[datos.pop("categoria")]
+
+            async with Sesion() as db:
+                producto, version = await service.crear(
+                    db,
+                    usuario_id=dueno,
+                    datos=datos,
+                    category_id=categoria,
+                    variantes=variantes,
+                )
+                await db.commit()
+                producto_id, version_id = producto.id, version.id
+
+            # LA FOTOGRAFÍA. En local no hay depósito de almacenamiento, así que
+            # la fila queda aprobada y SIN archivo detrás no se podría aprobar:
+            # se le ponen sus medidas y su tipo, que es lo que deja el camino
+            # real. La pantalla enseñará el texto alternativo porque la URL
+            # firmada no se puede emitir sin credenciales de Storage.
+            async with Sesion() as db:
+                identificador = str(uuid.uuid4())
+                db.add(
+                    ProductMedia(
+                        id=identificador,
+                        version_id=version_id,
+                        kind="image",
+                        storage_path=f"local/{producto_id}/{version_id}/{identificador}.jpg",
+                        alt_text=datos["summary"],
+                        position=0,
+                        status=FOTO_APROBADA,
+                        content_type="image/jpeg",
+                        byte_size=120_000,
+                        width=1400,
+                        height=1400,
+                        reviewed_at=service.ahora(),
+                        reviewed_by=curador,
+                    )
+                )
+                await db.commit()
+
+            # EL CAMINO REAL: postular, admitir, evaluar, publicar.
+            async with Sesion() as db:
+                for hasta, rol in (
+                    ("submitted", maquina.PROVEEDOR),
+                    ("document_review", maquina.EVALUADOR),
+                    ("evaluation", maquina.EVALUADOR),
+                ):
+                    await service.transicionar(
+                        db,
+                        producto_id=producto_id,
+                        hasta=hasta,
+                        actor_id=dueno if rol == maquina.PROVEEDOR else curador,
+                        actor_rol=rol,
+                    )
+                await db.commit()
+
+            async with Sesion() as db:
+                evaluacion = await evaluations.abrir(
+                    db, version_id=version_id, usuario_id=curador
+                )
+                await db.commit()
+                evaluacion_id = evaluacion.id
+
+            async with Sesion() as db:
+                evidencias = {}
+                for dimension in DIMENSIONES:
+                    fila = await evaluations.registrar_evidencia(
+                        db,
+                        evaluacion_id=evaluacion_id,
+                        usuario_id=curador,
+                        dimension=dimension,
+                        kind="inspection",
+                        summary=(
+                            f"Inspección de {dimension} realizada sobre la muestra."
+                        ),
+                    )
+                    evidencias[dimension] = fila.id
+                    await evaluations.puntuar(
+                        db,
+                        evaluacion_id=evaluacion_id,
+                        usuario_id=curador,
+                        dimension=dimension,
+                        score=nota,
+                    )
+                await db.commit()
+
+            async with Sesion() as db:
+                await evaluations.elegir_razones(
+                    db,
+                    evaluacion_id=evaluacion_id,
+                    usuario_id=curador,
+                    razones=[
+                        {
+                            "text": texto,
+                            "evidence_id": evidencias[dimension],
+                        }
+                        for texto, dimension in (
+                            ("Materiales de alta duración", "durability"),
+                            ("Origen y creador verificados", "origin"),
+                            ("Funciona como promete", "quality"),
+                        )
+                    ],
+                )
+                await db.commit()
+
+            async with Sesion() as db:
+                await evaluations.decidir(
+                    db, evaluacion_id=evaluacion_id, usuario_id=curador
+                )
+                await db.commit()
+
+            async with Sesion() as db:
+                from app.modules.products.models import Product as _P
+
+                bloqueo = await service.por_que_no_se_publica(
+                    db, producto=await db.get(_P, producto_id)
+                )
+                if bloqueo is not None:
+                    raise SystemExit(f"no se puede publicar {datos['name']}: {bloqueo}")
+                await service.publicar(
+                    db, producto_id=producto_id, usuario_id=curador
+                )
+                await db.commit()
+
+            # EL INVENTARIO, por el camino real: una entrada con su clave.
+            async with Sesion() as db:
+                for sku, cuantas in existencias.items():
+                    await almacen.entrada(
+                        db,
+                        product_id=producto_id,
+                        sku=sku,
+                        cantidad=cuantas,
+                        clave=f"siembra-{producto_id}-{sku}",
+                        actor_id=dueno,
+                    )
+                await db.commit()
+            creados += 1
+            print(f"  publicado: {datos['name']}")
+
+    await motor.dispose()
+    print(f"\n{creados} productos publicados en la base local.")
+    print("Ninguna valoración, ninguna compra verificada y ningún plazo: no existen.")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cuenta", default=None, help="uuid del perfil con el que entrarás")
+    parser.add_argument(
+        "--limpiar",
+        action="store_true",
+        help="vacía antes las tablas de Productos de la base LOCAL",
+    )
+    args = parser.parse_args()
+    url = exigir_local(
+        os.environ.get("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://")
+    )
+    asyncio.run(sembrar(url, args.cuenta, limpiar=args.limpiar))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
