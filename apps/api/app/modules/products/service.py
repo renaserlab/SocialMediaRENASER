@@ -37,6 +37,7 @@ from app.modules.products.models import (
     BORRADOR,
     DECISION_APROBADO,
     EVALUACION_DECIDIDA,
+    FOTO_APROBADA,
     PUBLICADO,
     RAZONES_EXIGIDAS,
     RETIRADO,
@@ -81,10 +82,12 @@ LARGOS = {
     "manufacturer": (2, 160),
 }
 
-#: Cuántas variantes y cuántas fotos caben. No es una regla de negocio: es que
-#: una versión es una ficha, no un almacén, y su huella se calcula entera.
+#: Cuántas variantes caben. No es una regla de negocio: es que una versión es
+#: una ficha, no un almacén, y su huella se calcula entera.
+#:
+#: El tope de FOTOGRAFÍAS vive ahora en `products/media.py`, que es quien las
+#: recibe: aquí sería un número que ya no aplica nadie.
 MAXIMO_DE_VARIANTES = 50
-MAXIMO_DE_FOTOS = 12
 
 
 def ahora() -> datetime:
@@ -218,62 +221,16 @@ def _exigir_variantes(crudas: list[dict] | None) -> list[dict]:
     return limpias
 
 
-def _exigir_galeria(crudas: list[dict] | None) -> list[dict]:
-    if not crudas:
-        return []
-    if len(crudas) > MAXIMO_DE_FOTOS:
-        raise ValidationAppError(
-            "Demasiadas imágenes para una sola versión.",
-            code="product_media_too_many",
-            details={"max": MAXIMO_DE_FOTOS},
-        )
-    vistas: set[str] = set()
-    limpias: list[dict] = []
-    for posicion, m in enumerate(crudas):
-        ruta = str(m.get("storage_path") or "").strip()
-        if len(ruta) < 3 or len(ruta) > 512:
-            raise ValidationAppError(
-                "La ruta de la imagen no es válida.",
-                code="product_media_path_invalid",
-            )
-        # NUNCA UNA URL. Una firmada caduca, y guardarla haría que la galería
-        # dejara de cargar sin que nadie tocara nada.
-        if "://" in ruta:
-            raise ValidationAppError(
-                "La galería guarda la ruta del almacenamiento, no una URL.",
-                code="product_media_path_invalid",
-            )
-        if ruta in vistas:
-            raise ValidationAppError(
-                "La misma imagen dos veces.", code="product_media_repeated"
-            )
-        vistas.add(ruta)
-        tipo = str(m.get("kind") or "image").strip()
-        if tipo not in ("image", "video"):
-            raise ValidationAppError(
-                "Una galería lleva imágenes o vídeos.",
-                code="product_media_kind_invalid",
-            )
-        alternativo = (m.get("alt_text") or "").strip() or None
-        if alternativo is not None and len(alternativo) > 300:
-            raise ValidationAppError(
-                "El texto alternativo es demasiado largo.",
-                code="product_media_alt_too_long",
-            )
-        limpias.append(
-            {
-                "storage_path": ruta,
-                "kind": tipo,
-                "alt_text": alternativo,
-                "position": posicion,
-            }
-        )
-    return limpias
-
-
-# --------------------------------------------------------------------------- #
-# Crear y editar
-# --------------------------------------------------------------------------- #
+# LA GALERÍA YA NO SE ESCRIBE AQUÍ, y es el cambio de este incremento.
+#
+# Antes, quien vendía mandaba en el borrador una lista de rutas de
+# almacenamiento. Eso permitía apuntar a un archivo ajeno —o a ninguno— y la
+# ficha enseñaba lo que dijera esa cadena. Desde la 0073 el archivo viaja a la
+# API, que mira los bytes y GENERA la ruta: ver `products/media.py`.
+#
+# Y guardar el borrador YA NO TOCA LAS FOTOS. Si las reescribiera, editar la
+# descripción borraría las fotografías que alguien acababa de subir y de
+# aprobar.
 async def crear(
     db: AsyncSession,
     *,
@@ -281,7 +238,6 @@ async def crear(
     datos: dict[str, Any],
     category_id: str | None = None,
     variantes: list[dict] | None = None,
-    galeria: list[dict] | None = None,
 ) -> tuple[Product, ProductVersion]:
     """Un producto nuevo nace BORRADOR, con su primera versión borrador.
 
@@ -302,7 +258,6 @@ async def crear(
 
     limpio = _exigir_textos(datos)
     limpias = _exigir_variantes(variantes)
-    fotos = _exigir_galeria(galeria)
 
     producto = Product(
         seller_id=vendedor.id,
@@ -323,7 +278,7 @@ async def crear(
     )
     db.add(version)
     await db.flush()
-    await _reemplazar_hijos(db, version=version, variantes=limpias, galeria=fotos)
+    await _reemplazar_variantes(db, version=version, variantes=limpias)
 
     await auditoria.anotar(
         db,
@@ -365,7 +320,6 @@ async def guardar_borrador(
     usuario_id: str,
     datos: dict[str, Any],
     variantes: list[dict] | None = None,
-    galeria: list[dict] | None = None,
 ) -> ProductVersion:
     """Reescribe el borrador, o abre uno nuevo sobre lo publicado.
 
@@ -387,7 +341,6 @@ async def guardar_borrador(
 
     limpio = _exigir_textos(datos)
     limpias = _exigir_variantes(variantes)
-    fotos = _exigir_galeria(galeria)
     nombre_de_la_version = str(datos.get("version") or "").strip()[:32] or None
 
     borrador = await borrador_de(db, producto_id=producto_id)
@@ -425,7 +378,7 @@ async def guardar_borrador(
         borrador.content_sha256 = huella(limpio, variantes=limpias)
         await db.flush()
 
-    await _reemplazar_hijos(db, version=borrador, variantes=limpias, galeria=fotos)
+    await _reemplazar_variantes(db, version=borrador, variantes=limpias)
     producto.updated_at = ahora()
     await db.flush()
     return borrador
@@ -441,17 +394,21 @@ def _siguiente_version(vigente: ProductVersion | None) -> str:
         return f"{vigente.version}-2"
 
 
-async def _reemplazar_hijos(
+async def _reemplazar_variantes(
     db: AsyncSession,
     *,
     version: ProductVersion,
     variantes: list[dict],
-    galeria: list[dict],
 ) -> None:
-    """Las variantes y la galería de un BORRADOR se reemplazan enteras.
+    """Las variantes de un BORRADOR se reemplazan enteras.
 
     Es lo que hace que guardar sea idempotente: mandar la misma lista dos veces
     deja lo mismo. Sobre una versión publicada esto no se llama nunca.
+
+    LA GALERÍA NO SE TOCA. Vive fuera de este camino desde la 0073: si se
+    reemplazara aquí, guardar la descripción borraría las fotografías que
+    alguien acababa de subir. Y el INVENTARIO tampoco se pierde al rehacer una
+    variante, porque cuelga del SKU y no de la fila.
     """
     if version.status != VERSION_BORRADOR:  # pragma: no cover - defensa
         raise ConflictError(
@@ -462,15 +419,9 @@ async def _reemplazar_hijos(
         select(ProductVariant).where(ProductVariant.version_id == version.id)
     ):
         await db.delete(fila)
-    for fila in await db.scalars(
-        select(ProductMedia).where(ProductMedia.version_id == version.id)
-    ):
-        await db.delete(fila)
     await db.flush()
     for v in variantes:
         db.add(ProductVariant(version_id=version.id, **v))
-    for m in galeria:
-        db.add(ProductMedia(version_id=version.id, created_by=version.created_by, **m))
     await db.flush()
 
 
@@ -586,15 +537,40 @@ async def por_que_no_se_publica(
     if borrador is None:
         return "product_version_missing", {}
 
-    fotos = await db.scalar(
-        select(func.count())
-        .select_from(ProductMedia)
-        .where(ProductMedia.version_id == borrador.id)
-    )
-    if not fotos:
-        # FOTOGRAFÍA REAL APROBADA (blueprint §3.1). Una ficha sin imagen no es
-        # una tarjeta de producto, es un hueco.
-        return "product_media_required", {}
+    # FOTOGRAFÍA REAL APROBADA (blueprint §3.1). Una ficha sin imagen no es una
+    # tarjeta de producto, es un hueco.
+    #
+    # Y «APROBADA» ES LITERAL DESDE LA 0073: no basta con que haya una fila. El
+    # catálogo solo firma las aprobadas, así que publicar con todas pendientes
+    # dejaría una ficha sin una sola imagen que enseñar.
+    if await esquema.hay_fotografias(db):
+        aprobadas = await db.scalar(
+            select(func.count())
+            .select_from(ProductMedia)
+            .where(
+                ProductMedia.version_id == borrador.id,
+                ProductMedia.status == FOTO_APROBADA,
+            )
+        )
+        if not aprobadas:
+            hay_alguna = await db.scalar(
+                select(func.count())
+                .select_from(ProductMedia)
+                .where(ProductMedia.version_id == borrador.id)
+            )
+            if hay_alguna:
+                # HAY FOTOS Y NINGUNA APROBADA. Es otro problema y otro arreglo:
+                # aquí no falta subir nada, falta que alguien las mire.
+                return "product_media_not_approved", {"pending": int(hay_alguna)}
+            return "product_media_required", {}
+    else:
+        fotos = await db.scalar(
+            select(func.count())
+            .select_from(ProductMedia)
+            .where(ProductMedia.version_id == borrador.id)
+        )
+        if not fotos:
+            return "product_media_required", {}
 
     if not await esquema.hay_admision(db):
         # SIN LA 0071 NO HAY DÓNDE MIRAR LA EVALUACIÓN, y publicar sin poder
@@ -728,7 +704,6 @@ async def responsable_de(db: AsyncSession, *, producto: Product) -> ProductSelle
 
 __all__ = [
     "CAMPOS_DE_LA_HUELLA",
-    "MAXIMO_DE_FOTOS",
     "MAXIMO_DE_VARIANTES",
     "borrador_de",
     "crear",

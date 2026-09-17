@@ -322,8 +322,42 @@ class ProductVariant(Base):
     )
 
 
+#: El estado de una fotografía (0073). SUBIR NO ES PUBLICAR: nace pendiente.
+FOTO_PENDIENTE = "pending"
+FOTO_APROBADA = "approved"
+FOTO_RECHAZADA = "rejected"
+ESTADOS_DE_FOTO = (FOTO_PENDIENTE, FOTO_APROBADA, FOTO_RECHAZADA)
+
+#: Los tres tipos que admite el depósito `product-media`. LISTA CERRADA, y sin
+#: `image/svg+xml`: un SVG es un documento con scripts, no una fotografía.
+TIPOS_DE_IMAGEN = ("image/jpeg", "image/png", "image/webp")
+
+#: Qué extensión le pone el servidor a cada tipo. El nombre lo genera él: el que
+#: trae quien sube puede llevar rutas, puntos y cosas que el almacenamiento
+#: interpreta.
+EXTENSION_DE_LA_IMAGEN = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+
+#: Tope por archivo, el mismo que el depósito declara en la 0073.
+MAXIMO_BYTES_DE_LA_FOTO = 10 * 1024 * 1024
+
+#: Cuántas fotos admite una versión. EL BLUEPRINT NO FIJA EL NÚMERO: la captura
+#: 6 enseña una galería «1/5», así que cinco es lo que la referencia visual
+#: sostiene. Se cuenta en el servidor porque un CHECK no cuenta filas.
+MAXIMO_DE_FOTOS = 5
+
+
 class ProductMedia(Base):
-    """La galería aprobada. Guarda la RUTA, nunca una URL firmada."""
+    """La galería. Guarda la RUTA, nunca una URL firmada.
+
+    SUBIR NO ES PUBLICAR (0073). Una foto nace `pending`, quien evalúa la
+    aprueba o la rechaza con motivo, y el catálogo SOLO firma las aprobadas.
+    Sin este estado, aprobar un producto aprobaría también cualquier fotografía
+    que le añadieran después.
+    """
 
     __tablename__ = "product_media"
 
@@ -340,10 +374,69 @@ class ProductMedia(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text(f"'{FOTO_PENDIENTE}'")
+    )
+    #: LO QUE MIDIÓ EL SERVIDOR al recibir los bytes, no lo que declaró quien
+    #: sube: un `Content-Type` lo escribe el cliente.
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    byte_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     __table_args__ = (
         CheckConstraint("kind in ('image', 'video')", name="product_media_tipo"),
+        CheckConstraint(
+            f"status in ({', '.join(repr(e) for e in ESTADOS_DE_FOTO)})",
+            name="product_media_estado",
+        ),
+        CheckConstraint(
+            f"status = '{FOTO_PENDIENTE}' or reviewed_at is not null",
+            name="product_media_decidida_con_fecha",
+        ),
+        CheckConstraint(
+            f"status <> '{FOTO_RECHAZADA}' or "
+            "(rejection_reason is not null and length(trim(rejection_reason)) >= 3)",
+            name="product_media_rechazo_con_motivo",
+        ),
+        CheckConstraint(
+            f"status <> '{FOTO_APROBADA}' or "
+            "(content_type is not null and byte_size is not null and byte_size > 0)",
+            name="product_media_aprobada_con_archivo",
+        ),
+        CheckConstraint(
+            "content_type is null or content_type in "
+            f"({', '.join(repr(t) for t in TIPOS_DE_IMAGEN)})",
+            name="product_media_tipo_de_archivo",
+        ),
+        CheckConstraint(
+            "(width is null or width > 0) and (height is null or height > 0) "
+            "and (byte_size is null or byte_size > 0)",
+            name="product_media_medidas",
+        ),
+        CheckConstraint(
+            "storage_path not like '%://%' and storage_path not like '/%'",
+            name="product_media_ruta_no_es_url",
+        ),
         UniqueConstraint("version_id", "storage_path", name="product_media_ruta_unica"),
         Index("product_media_de_la_version", "version_id", "position", "id"),
+        Index(
+            "product_media_aprobadas",
+            "version_id",
+            "position",
+            "id",
+            postgresql_where=text(f"status = '{FOTO_APROBADA}'"),
+            sqlite_where=text(f"status = '{FOTO_APROBADA}'"),
+        ),
+        Index("product_media_por_ruta", "storage_path"),
     )
 
 
@@ -752,7 +845,241 @@ class SavedProduct(Base):
     __table_args__ = (Index("saved_products_mios", "user_id", text("created_at desc")),)
 
 
+# --------------------------------------------------------------------------- #
+# Inventario (0074)
+# --------------------------------------------------------------------------- #
+#: Los cinco movimientos, y ninguno más.
+ENTRADA = "intake"
+AJUSTE = "adjustment"
+RESERVA = "reservation"
+LIBERACION = "release"
+SALIDA = "dispatch"
+MOVIMIENTOS = (ENTRADA, AJUSTE, RESERVA, LIBERACION, SALIDA)
+
+#: Quién puede firmar un movimiento. `system` queda para el checkout.
+ACTOR_PROVEEDOR = "seller"
+ACTOR_ADMINISTRACION = "admin"
+ACTOR_SISTEMA = "system"
+ACTORES_DE_INVENTARIO = (ACTOR_PROVEEDOR, ACTOR_ADMINISTRACION, ACTOR_SISTEMA)
+
+#: Tope técnico de un movimiento. No es una regla comercial: está para que un
+#: cliente roto no mande un número que desborde la columna.
+MAXIMO_DEL_MOVIMIENTO = 1_000_000
+
+
+class ProductInventory(Base):
+    """Cuántas hay y cuántas están comprometidas. UNA FILA POR (PRODUCTO, SKU).
+
+    NO CUELGA DE LA VARIANTE. Una variante pertenece a una versión inmutable:
+    publicar otra crearía filas nuevas para las mismas cajas del mismo almacén,
+    y el inventario quedaría huérfano en cada publicación. El SKU es,
+    literalmente, la unidad de almacén, y es lo único estable entre versiones.
+
+    SIN COLUMNA `available`, y es la decisión que más pesa: lo disponible es
+    `on_hand - reserved`, se calcula, y guardarlo además crearía dos verdades
+    que divergen la primera vez que alguien escriba una y olvide la otra.
+    """
+
+    __tablename__ = "product_inventory"
+
+    product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sku: Mapped[str] = mapped_column(Text, primary_key=True)
+    on_hand: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    reserved: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("on_hand >= 0", name="product_inventory_existencia"),
+        CheckConstraint("reserved >= 0", name="product_inventory_reservado"),
+        #: NO SE COMPROMETE LO QUE NO HAY. Es lo que impide que lo disponible
+        #: salga negativo sin necesidad de guardarlo.
+        CheckConstraint(
+            "reserved <= on_hand", name="product_inventory_reservado_cabe"
+        ),
+        CheckConstraint(
+            "length(trim(sku)) between 1 and 48", name="product_inventory_sku"
+        ),
+    )
+
+    @property
+    def available(self) -> int:
+        """Lo que se puede vender ahora mismo. SE CALCULA, no se guarda."""
+        return int(self.on_hand) - int(self.reserved)
+
+
+class InventoryMovement(Base):
+    """El historial. SOLO SE AÑADE: un disparador rechaza `update` y `delete`.
+
+    El identificador SE DERIVA de la clave de idempotencia, así que la segunda
+    petición con la misma clave choca contra la clave primaria antes de mover
+    nada.
+    """
+
+    __tablename__ = "inventory_movements"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("products.id", ondelete="CASCADE")
+    )
+    sku: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    quantity: Mapped[int] = mapped_column(BigInteger)
+    on_hand_after: Mapped[int] = mapped_column(BigInteger)
+    reserved_after: Mapped[int] = mapped_column(BigInteger)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_role: Mapped[str] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"kind in ({', '.join(repr(k) for k in MOVIMIENTOS)})",
+            name="inventory_movements_tipo",
+        ),
+        CheckConstraint(
+            f"quantity <> 0 and abs(quantity) <= {MAXIMO_DEL_MOVIMIENTO}",
+            name="inventory_movements_cantidad",
+        ),
+        CheckConstraint(
+            f"kind = '{AJUSTE}' or quantity > 0",
+            name="inventory_movements_solo_el_ajuste_resta",
+        ),
+        CheckConstraint(
+            "on_hand_after >= 0", name="inventory_movements_existencia_despues"
+        ),
+        CheckConstraint(
+            "reserved_after >= 0", name="inventory_movements_reservado_despues"
+        ),
+        CheckConstraint(
+            f"kind <> '{AJUSTE}' or "
+            "(reason is not null and length(trim(reason)) >= 3)",
+            name="inventory_movements_ajuste_con_motivo",
+        ),
+        CheckConstraint(
+            f"actor_role in ({', '.join(repr(a) for a in ACTORES_DE_INVENTARIO)})",
+            name="inventory_movements_actor",
+        ),
+        CheckConstraint(
+            "length(trim(sku)) between 1 and 48", name="inventory_movements_sku"
+        ),
+        UniqueConstraint(
+            "product_id",
+            "sku",
+            "idempotency_key",
+            name="inventory_movements_clave_unica",
+        ),
+        Index(
+            "inventory_movements_de_la_unidad",
+            "product_id",
+            "sku",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Carrito (0075)
+# --------------------------------------------------------------------------- #
+#: Tope técnico de una línea. Lo que de verdad limita es la disponibilidad.
+MAXIMO_POR_LINEA = 1000
+
+
+class ProductCart(Base):
+    """UNA PERSONA, UN CARRITO. Y es la fila que se bloquea para ordenar
+    cualquier cambio: es lo que hace que un doble toque no sume dos."""
+
+    __tablename__ = "product_carts"
+
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    #: La de la primera línea. NULA mientras esté vacío, y nula no es una
+    #: moneda por defecto: sumar soles con euros da un número que no es dinero.
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ProductCartItem(Base):
+    """Una línea: producto, versión y variante. NO RESERVA NADA."""
+
+    __tablename__ = "product_cart_items"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_carts.user_id", ondelete="CASCADE")
+    )
+    product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("products.id", ondelete="CASCADE")
+    )
+    version_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_versions.id", ondelete="CASCADE")
+    )
+    variant_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_variants.id", ondelete="CASCADE")
+    )
+    quantity: Mapped[int] = mapped_column(Integer)
+    #: LO QUE SE VEÍA AL AÑADIR. Sirve para AVISAR de que cambió, no para
+    #: cobrarlo: congelar el precio ocurre al crear el pedido.
+    seen_price_minor: Mapped[int] = mapped_column(BigInteger)
+    seen_currency: Mapped[str] = mapped_column(String(3))
+    #: La última operación aplicada a esta línea. Un reintento con la misma
+    #: clave no vuelve a sumar.
+    last_operation_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"quantity >= 1 and quantity <= {MAXIMO_POR_LINEA}",
+            name="product_cart_items_cantidad",
+        ),
+        CheckConstraint(
+            "seen_price_minor >= 0", name="product_cart_items_precio"
+        ),
+        UniqueConstraint(
+            "user_id",
+            "product_id",
+            "version_id",
+            "variant_id",
+            name="product_cart_items_una_linea",
+        ),
+        Index("product_cart_items_del_carrito", "user_id", "created_at", "id"),
+        Index("product_cart_items_del_producto", "product_id"),
+    )
+
+
 __all__ = [
+    "ACTORES_DE_INVENTARIO",
+    "ACTOR_ADMINISTRACION",
+    "ACTOR_PROVEEDOR",
+    "ACTOR_SISTEMA",
+    "AJUSTE",
     "APROBADO",
     "APROBADO_CON_CONDICIONES",
     "BORRADOR",
@@ -762,7 +1089,9 @@ __all__ = [
     "DECISION_RECHAZADO",
     "DIMENSIONES",
     "DOCUMENTOS",
+    "ENTRADA",
     "ENVIADO",
+    "ESTADOS_DE_FOTO",
     "ESTADOS_DE_POSTULACION",
     "ESTADOS_DE_PRODUCTO",
     "ESTADOS_DE_VENDEDOR",
@@ -770,34 +1099,51 @@ __all__ = [
     "EVALUACION",
     "EVALUACION_BORRADOR",
     "EVALUACION_DECIDIDA",
+    "EXTENSION_DE_LA_IMAGEN",
     "FALLAS_CRITICAS",
+    "FOTO_APROBADA",
+    "FOTO_PENDIENTE",
+    "FOTO_RECHAZADA",
+    "LIBERACION",
+    "MAXIMO_BYTES_DE_LA_FOTO",
+    "MAXIMO_DEL_MOVIMIENTO",
+    "MAXIMO_DE_FOTOS",
+    "MAXIMO_POR_LINEA",
+    "MOVIMIENTOS",
     "MUESTRA_PEDIDA",
     "OBSERVACION",
     "POSTULACIONES_VIVAS",
     "POSTULACION_ACEPTADA",
     "POSTULACION_BORRADOR",
-    "POSTULACION_EN_REVISION",
     "POSTULACION_ENVIADA",
+    "POSTULACION_EN_REVISION",
     "POSTULACION_RECHAZADA",
     "POSTULACION_RETIRADA",
     "PUBLICADO",
     "RAZONES_EXIGIDAS",
+    "RESERVA",
     "RETIRADO",
     "REVISION_DOCUMENTAL",
+    "SALIDA",
     "SUSPENDIDO",
     "TIPOS_DE_EVIDENCIA",
+    "TIPOS_DE_IMAGEN",
     "VENDEDOR_ACTIVO",
     "VENDEDOR_PENDIENTE",
     "VENDEDOR_SUSPENDIDO",
     "VERSION_BORRADOR",
     "VERSION_PUBLICADA",
     "VERSION_SUPERADA",
+    "InventoryMovement",
     "Product",
     "ProductApprovalReason",
+    "ProductCart",
+    "ProductCartItem",
     "ProductCategory",
     "ProductEvaluation",
     "ProductEvaluationEvidence",
     "ProductEvaluationScore",
+    "ProductInventory",
     "ProductMedia",
     "ProductSeller",
     "ProductVariant",

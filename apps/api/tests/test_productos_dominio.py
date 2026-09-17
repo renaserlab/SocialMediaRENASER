@@ -20,6 +20,7 @@ LO QUE DEFIENDEN ESTAS PRUEBAS:
 
 from __future__ import annotations
 
+import inspect
 import os
 import uuid
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ import psycopg
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.exceptions import AppError
@@ -43,6 +45,7 @@ from app.modules.products.models import (
     VERSION_BORRADOR,
     Product,
     ProductCategory,
+    FOTO_APROBADA,
     ProductMedia,
     ProductSeller,
     ProductVariant,
@@ -164,20 +167,52 @@ VARIANTES = [
      "price_delta_minor": 3_000},
 ]
 
-GALERIA = [{"storage_path": "productos/cuch/1.jpg", "alt_text": "Cuchillo"}]
+#: Una fotografía COMO LA DEJA EL CAMINO REAL: con su tipo, su peso, sus
+#: medidas y su huella. Escribirla sin nada de eso pasaría los CHECK de la 0073
+#: por casualidad y dejaría sin probar que aprobar exige un archivo detrás.
+async def foto_aprobada(
+    sesiones, version_id: str, *, quien: str | None = None, ruta: str | None = None
+) -> str:
+    """Deja una foto APROBADA en esa versión y devuelve su identificador."""
+    identificador = str(uuid.uuid4())
+    async with sesiones() as db:
+        db.add(
+            ProductMedia(
+                id=identificador,
+                version_id=version_id,
+                kind="image",
+                storage_path=ruta or f"vend/prod/{version_id}/{identificador}.jpg",
+                alt_text="Cuchillo de cocina forjado sobre una tabla",
+                position=0,
+                status=FOTO_APROBADA,
+                content_type="image/jpeg",
+                byte_size=48_120,
+                width=1200,
+                height=900,
+                checksum_sha256="a" * 64,
+                reviewed_at=ahora(),
+                reviewed_by=quien,
+            )
+        )
+        await db.commit()
+    return identificador
 
 
-async def producto_en_borrador(sesiones, perfil: str, **extra) -> tuple[str, str]:
+async def producto_en_borrador(
+    sesiones, perfil: str, *, con_foto: bool = True, **extra
+) -> tuple[str, str]:
     async with sesiones() as db:
         producto, version = await service.crear(
             db,
             usuario_id=perfil,
             datos={**DATOS, **extra},
             variantes=VARIANTES,
-            galeria=GALERIA,
         )
         await db.commit()
-        return producto.id, version.id
+        producto_id, version_id = producto.id, version.id
+    if con_foto:
+        await foto_aprobada(sesiones, version_id)
+    return producto_id, version_id
 
 
 # =========================================================================== #
@@ -360,7 +395,6 @@ async def test_guardar_reemplaza_las_variantes_y_no_las_acumula(sesiones) -> Non
                 usuario_id=quien,
                 datos=DATOS,
                 variantes=VARIANTES,
-                galeria=GALERIA,
             )
             await db.commit()
 
@@ -388,7 +422,6 @@ async def test_guardar_reemplaza_las_variantes_y_no_las_acumula(sesiones) -> Non
             usuario_id=quien,
             datos=DATOS,
             variantes=[VARIANTES[0]],
-            galeria=GALERIA,
         )
         await db.commit()
     async with sesiones() as db:
@@ -406,18 +439,31 @@ async def test_guardar_reemplaza_las_variantes_y_no_las_acumula(sesiones) -> Non
 @pytest.mark.asyncio
 async def test_la_galeria_guarda_rutas_y_no_urls(sesiones) -> None:
     """UNA URL FIRMADA CADUCA. Guardarla haría que la galería dejara de cargar
-    sin que nadie tocara nada."""
+    sin que nadie tocara nada.
+
+    Y DESDE LA 0073 NO HAY FORMA DE PEGAR UNA: el borrador ya no acepta rutas
+    —`service.crear` no tiene parámetro de galería— y la ruta la genera el
+    servidor. Lo que queda por comprobar es que la BASE también lo rechaza, para
+    el día que alguien escriba por otra vía.
+    """
     quien = await persona(sesiones, "org")
     await vendedor(sesiones, quien)
+    _, version_id = await producto_en_borrador(sesiones, quien, con_foto=False)
+
+    assert "galeria" not in inspect.signature(service.crear).parameters
+    assert "galeria" not in inspect.signature(service.guardar_borrador).parameters
+
     async with sesiones() as db:
-        with pytest.raises(AppError) as fallo:
-            await service.crear(
-                db,
-                usuario_id=quien,
-                datos=DATOS,
-                galeria=[{"storage_path": "https://cdn.example/1.jpg?firma=x"}],
+        db.add(
+            ProductMedia(
+                version_id=version_id,
+                storage_path="https://cdn.example/1.jpg?firma=x",
+                alt_text="una URL donde iba una ruta",
             )
-    assert fallo.value.code == "product_media_path_invalid"
+        )
+        with pytest.raises(IntegrityError) as violado:
+            await db.commit()
+    assert "product_media_ruta_no_es_url" in str(violado.value)
 
 
 @SIN_POSTGRES
@@ -537,10 +583,20 @@ async def test_las_tablas_de_productos_no_las_lee_la_aplicacion(sesiones) -> Non
             " join pg_namespace n on n.oid = c.relnamespace"
             " where n.nspname = 'public' and c.relkind = 'r'"
             " and (c.relname like 'product%' or c.relname like 'seller%'"
-            "      or c.relname = 'saved_products')"
+            "      or c.relname in ('saved_products', 'inventory_movements'))"
         )
         tablas = dict(cur.fetchall())
-        assert len(tablas) == 13, tablas
+        # LAS TRECE DE LOS INCREMENTOS 1-3 MÁS LAS CUATRO DEL 4. El número se
+        # escribe entero a propósito: si mañana aparece una tabla de Productos
+        # sin RLS, esta prueba se pone roja antes de que nadie la despliegue.
+        assert len(tablas) == 17, sorted(tablas)
+        for nueva in (
+            "product_inventory",
+            "inventory_movements",
+            "product_carts",
+            "product_cart_items",
+        ):
+            assert nueva in tablas, nueva
         sin_rls = sorted(t for t, activa in tablas.items() if not activa)
         assert sin_rls == [], sin_rls
 
@@ -548,7 +604,7 @@ async def test_las_tablas_de_productos_no_las_lee_la_aplicacion(sesiones) -> Non
             "select table_name, grantee from information_schema.table_privileges"
             " where table_schema = 'public' and grantee in ('anon','authenticated')"
             " and (table_name like 'product%' or table_name like 'seller%'"
-            "      or table_name = 'saved_products')"
+            "      or table_name in ('saved_products', 'inventory_movements'))"
         )
         assert cur.fetchall() == []
 

@@ -38,7 +38,7 @@ from app.modules.products.models import (
 from tests.test_productos_admision import evaluar_completo, hasta_evaluacion
 from tests.test_productos_dominio import (  # noqa: F401
     DATOS,
-    GALERIA,
+    foto_aprobada,
     SIN_POSTGRES,
     URL,
     VARIANTES,
@@ -70,10 +70,13 @@ async def publicado(
             datos={**DATOS, "name": nombre},
             category_id=categoria_id,
             variantes=VARIANTES,
-            galeria=GALERIA,
         )
         await db.commit()
         producto_id, version_id = producto.id, version.id
+
+    # LA FOTO, POR SU CAMINO. Desde la 0073 el borrador ya no lleva galería: se
+    # sube aparte y alguien la aprueba, y sin una aprobada no se publica.
+    await foto_aprobada(sesiones, version_id, quien=evaluador)
 
     async with sesiones() as db:
         for hasta, rol in (
@@ -205,9 +208,13 @@ async def test_el_indicador_de_confianza_es_uno_y_es_demostrable(sesiones) -> No
     tarjeta = next(t for t in p.para_ti if t.product_id == producto_id)
     assert tarjeta.trust == "origin"
     assert tarjeta.trust_value == "PE"
-    # Y LA PRIMERA IMAGEN sale de la galería aprobada, como ruta.
-    assert tarjeta.image_path == "productos/cuch/1.jpg"
-    assert "://" not in (tarjeta.image_path or "")
+    # Y LA PRIMERA IMAGEN sale de la galería APROBADA, como ruta. Cuál es la
+    # ruta lo decide el servidor (0073); lo que se comprueba es que es una ruta.
+    assert tarjeta.image_path and "://" not in tarjeta.image_path
+    # SIN ALMACENAMIENTO CONFIGURADO no se inventa ninguna URL: viaja nula y la
+    # pantalla enseña el texto alternativo.
+    assert tarjeta.image_url is None
+    assert tarjeta.image_alt
 
 
 @SIN_POSTGRES

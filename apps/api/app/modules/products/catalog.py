@@ -43,6 +43,7 @@ from app.modules.products import esquema
 from app.modules.products.models import (
     DECISION_APROBADO,
     EVALUACION_DECIDIDA,
+    FOTO_APROBADA,
     Product,
     ProductApprovalReason,
     ProductCategory,
@@ -54,6 +55,7 @@ from app.modules.products.models import (
     ProductVersion,
     SavedProduct,
 )
+from app.modules.products import media as fotos
 from app.modules.products.states import EN_CATALOGO
 
 #: EL TEXTO EXACTO del blueprint §4.1. Está aquí y no en la aplicación porque es
@@ -94,6 +96,11 @@ class Tarjeta:
     trust: str | None
     trust_value: str | None
     saved: bool = False
+    #: LA URL FIRMADA, emitida en el momento y con vencimiento. `null` cuando
+    #: no hay foto aprobada o el almacenamiento no contesta: la pantalla enseña
+    #: entonces el texto alternativo, que es la verdad y no un hueco.
+    image_url: str | None = None
+    image_alt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,26 +188,42 @@ async def _tarjetas(
 ) -> list[Tarjeta]:
     """Monta las tarjetas de una lista de `(producto, version, vendedor)`.
 
-    LA PRIMERA IMAGEN EN UNA SOLA CONSULTA. Una por tarjeta serían nueve viajes
-    para pintar una portada.
+    LA PRIMERA IMAGEN APROBADA, EN UNA SOLA CONSULTA. Una por tarjeta serían
+    nueve viajes para pintar una portada.
+
+    SOLO LAS APROBADAS (0073). Una fotografía pendiente o rechazada no se firma
+    y no se enseña: si se enseñara, aprobar el producto aprobaría también
+    cualquier imagen que le añadieran después.
     """
     if not filas:
         return []
     versiones = [v.id for _, v, _ in filas]
-    primeras: dict[str, str] = {}
+    primeras: dict[str, tuple[str, str | None]] = {}
     if versiones:
-        for version_id, ruta in (
+        for version_id, ruta, alt in (
             await db.execute(
-                select(ProductMedia.version_id, ProductMedia.storage_path)
-                .where(ProductMedia.version_id.in_(versiones))
+                select(
+                    ProductMedia.version_id,
+                    ProductMedia.storage_path,
+                    ProductMedia.alt_text,
+                )
+                .where(
+                    ProductMedia.version_id.in_(versiones),
+                    ProductMedia.status == FOTO_APROBADA,
+                )
                 .order_by(ProductMedia.version_id, ProductMedia.position, ProductMedia.id)
             )
         ).all():
-            primeras.setdefault(version_id, ruta)
+            primeras.setdefault(version_id, (ruta, alt))
+
+    #: UNA SOLA FIRMA PARA TODA LA LISTA. Y si el almacenamiento no contesta,
+    #: `firmar` devuelve un diccionario vacío en vez de tumbar la portada.
+    firmadas = await fotos.firmar([r for r, _ in primeras.values()])
 
     tarjetas: list[Tarjeta] = []
     for producto, version, vendedor in filas:
         clase, valor = _confianza(version)
+        ruta, alt = primeras.get(version.id, (None, None))
         tarjetas.append(
             Tarjeta(
                 product_id=producto.id,
@@ -209,10 +232,12 @@ async def _tarjetas(
                 seller_name=vendedor.display_name,
                 price_minor=version.price_minor,
                 currency=version.currency,
-                image_path=primeras.get(version.id),
+                image_path=ruta,
                 trust=clase,
                 trust_value=valor,
                 saved=producto.id in guardados,
+                image_url=firmadas.get(ruta) if ruta else None,
+                image_alt=alt,
             )
         )
     return tarjetas
@@ -425,18 +450,30 @@ async def ficha(
         raise NotFoundError("Producto no encontrado.", code="product_not_found")
     producto, version, vendedor = fila
 
+    aprobadas = list(
+        await db.scalars(
+            select(ProductMedia)
+            .where(
+                ProductMedia.version_id == version.id,
+                ProductMedia.status == FOTO_APROBADA,
+            )
+            .order_by(ProductMedia.position, ProductMedia.id)
+        )
+    )
+    firmadas = await fotos.firmar([m.storage_path for m in aprobadas])
     galeria = [
         {
             "id": m.id,
             "kind": m.kind,
             "storage_path": m.storage_path,
             "alt_text": m.alt_text,
+            # LA URL SE EMITE AHORA Y CADUCA. Guardarla haría que la galería
+            # dejara de cargar sin que nadie tocara nada.
+            "url": firmadas.get(m.storage_path),
+            "width": m.width,
+            "height": m.height,
         }
-        for m in await db.scalars(
-            select(ProductMedia)
-            .where(ProductMedia.version_id == version.id)
-            .order_by(ProductMedia.position, ProductMedia.id)
-        )
+        for m in aprobadas
     ]
     variantes = [
         {

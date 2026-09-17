@@ -54,7 +54,7 @@ from app.modules.products.models import (
 )
 from tests.test_productos_dominio import (  # noqa: F401
     DATOS,
-    GALERIA,
+    foto_aprobada,
     SIN_POSTGRES,
     URL,
     VARIANTES,
