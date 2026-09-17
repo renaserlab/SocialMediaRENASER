@@ -1075,6 +1075,414 @@ class ProductCartItem(Base):
     )
 
 
+# --------------------------------------------------------------------------- #
+# La politica de venta por jurisdiccion (0077)
+# --------------------------------------------------------------------------- #
+#: SIN POLITICA APROBADA PARA LA JURISDICCION, NO SE VENDE. Una en borrador
+#: existe para poder revisarla; solo la publicada y vigente habilita un pedido.
+POLITICA_BORRADOR = "draft"
+POLITICA_PUBLICADA = "published"
+POLITICA_RETIRADA = "retired"
+ESTADOS_DE_POLITICA = (POLITICA_BORRADOR, POLITICA_PUBLICADA, POLITICA_RETIRADA)
+
+
+class ProductPolicy(Base):
+    """Las condiciones de venta de un pais, en una version concreta.
+
+    LO QUE CONGELA UN PEDIDO ES ESTA FILA. Publicar la siguiente version no le
+    cambia las reglas a quien ya compro: su pedido guarda el identificador, la
+    version y la huella del texto.
+    """
+
+    __tablename__ = "product_policies"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    country_code: Mapped[str] = mapped_column(String(2))
+    seller_entity: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    #: LA UNICA MONEDA en la que se puede cobrar en ese pais.
+    currency: Mapped[str] = mapped_column(String(3))
+    terms: Mapped[str] = mapped_column(Text)
+    terms_sha256: Mapped[str] = mapped_column(Text)
+
+    #: LOS PLAZOS. Nulos mientras nadie los decida, y NULO NO ES CERO: cero
+    #: horas para reportar una incidencia seria no tener derecho a reportarla.
+    incident_report_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    return_shipment_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    withdrawal_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    buyer_pays_return_for_remorse: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
+    )
+    seller_pays_return_for_defect: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
+    )
+    warranty_rules_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(Text, default=POLITICA_BORRADOR)
+    effective_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Sin clave ajena: quien publico una politica es un hecho del pasado.
+    published_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('draft', 'published', 'retired')",
+            name="product_policies_estado",
+        ),
+        CheckConstraint("version >= 1", name="product_policies_version"),
+        #: PUBLICAR EXIGE ESTAR COMPLETA. Es el CHECK que convierte «sin
+        #: politica aprobada no se vende» en una regla de la base.
+        CheckConstraint(
+            "status <> 'published' or ("
+            " effective_at is not null and published_at is not null"
+            " and withdrawal_days is not null"
+            " and incident_report_hours is not null"
+            " and return_shipment_days is not null"
+            " and buyer_pays_return_for_remorse is not null"
+            " and seller_pays_return_for_defect is not null)",
+            name="product_policies_publicada_esta_completa",
+        ),
+        UniqueConstraint(
+            "country_code", "version", name="product_policies_una_version"
+        ),
+        Index(
+            "product_policies_vigente",
+            "country_code",
+            text("effective_at desc"),
+            text("version desc"),
+            postgresql_where=text("status = 'published'"),
+            sqlite_where=text("status = 'published'"),
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# El pedido fisico (0078)
+# --------------------------------------------------------------------------- #
+PEDIDO_PENDIENTE = "PENDING_PAYMENT"
+PEDIDO_PROCESANDO = "PAYMENT_PROCESSING"
+PEDIDO_PAGADO = "PAID"
+PEDIDO_FALLIDO = "PAYMENT_FAILED"
+PEDIDO_VENCIDO = "EXPIRED"
+PEDIDO_CANCELADO = "CANCELLED"
+#: EL PAGO QUE LLEGO TARDE. Ni se cobra en silencio ni se niega en silencio:
+#: queda explicito y lo mira una persona.
+PEDIDO_EN_REVISION = "UNDER_REVIEW"
+
+ESTADOS_DE_PEDIDO = (
+    PEDIDO_PENDIENTE,
+    PEDIDO_PROCESANDO,
+    PEDIDO_PAGADO,
+    PEDIDO_FALLIDO,
+    PEDIDO_VENCIDO,
+    PEDIDO_CANCELADO,
+    PEDIDO_EN_REVISION,
+)
+
+#: Los que todavia pueden pagarse, y por tanto los que siguen apartando.
+PEDIDO_EN_CURSO = (PEDIDO_PENDIENTE, PEDIDO_PROCESANDO)
+
+#: EL ULTIMO ENTERO QUE JAVASCRIPT REPRESENTA SIN PERDER PRECISION. Estos
+#: importes viajan en un JSON que lee JavaScript: por encima, el cliente veria
+#: otro numero.
+MAXIMO_SEGURO_EN_JS = 9_007_199_254_740_991
+
+
+class ProductOrder(Base):
+    """Un pedido fisico. UN PEDIDO, UN PROVEEDOR."""
+
+    __tablename__ = "product_orders"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    buyer_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT")
+    )
+    seller_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_sellers.id", ondelete="RESTRICT")
+    )
+
+    status: Mapped[str] = mapped_column(Text, default=PEDIDO_PENDIENTE)
+    currency: Mapped[str] = mapped_column(String(3))
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger)
+    total_minor: Mapped[int] = mapped_column(BigInteger)
+
+    provider: Mapped[str] = mapped_column(Text, default="none")
+    environment: Mapped[str] = mapped_column(Text)
+    external_payment_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    operation_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    request_fingerprint: Mapped[str] = mapped_column(Text)
+
+    #: QUE POLITICA ACEPTO, con su huella. Es lo que permite demostrar despues
+    #: que a esa persona se le enseno exactamente ese texto.
+    policy_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_policies.id", ondelete="RESTRICT")
+    )
+    policy_version: Mapped[int] = mapped_column(Integer)
+    policy_terms_sha256: Mapped[str] = mapped_column(Text)
+    policy_country: Mapped[str] = mapped_column(String(2))
+    policy_accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    #: HASTA CUANDO APARTA, y cuando dejo de apartar. La segunda es la marca
+    #: que hace que liberar ocurra UNA VEZ.
+    reserved_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reservation_settled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('PENDING_PAYMENT', 'PAYMENT_PROCESSING', 'PAID',"
+            " 'PAYMENT_FAILED', 'EXPIRED', 'CANCELLED', 'UNDER_REVIEW')",
+            name="product_orders_estado",
+        ),
+        CheckConstraint(
+            f"subtotal_minor >= 0 and subtotal_minor <= {MAXIMO_SEGURO_EN_JS}",
+            name="product_orders_subtotal",
+        ),
+        CheckConstraint(
+            f"total_minor >= 0 and total_minor <= {MAXIMO_SEGURO_EN_JS}",
+            name="product_orders_total",
+        ),
+        #: HOY `total = subtotal`. Impuestos, envio y comision no estan
+        #: decididos: un total distinto seria un cargo inventado.
+        CheckConstraint(
+            "total_minor = subtotal_minor",
+            name="product_orders_total_es_el_subtotal",
+        ),
+        CheckConstraint(
+            "provider in ('none', 'stripe')", name="product_orders_pasarela"
+        ),
+        CheckConstraint(
+            "environment in ('sandbox', 'production')", name="product_orders_entorno"
+        ),
+        CheckConstraint("policy_version >= 1", name="product_orders_politica_version"),
+        #: UN PEDIDO PAGADO TIENE CON QUE DEMOSTRARLO.
+        CheckConstraint(
+            "status <> 'PAID' or (paid_at is not null"
+            " and external_payment_id is not null and provider <> 'none')",
+            name="product_orders_pagada_con_cobro",
+        ),
+        CheckConstraint(
+            "status <> 'CANCELLED' or cancelled_at is not null",
+            name="product_orders_cancelada_con_fecha",
+        ),
+        CheckConstraint(
+            "status <> 'EXPIRED' or expired_at is not null",
+            name="product_orders_vencida_con_fecha",
+        ),
+        CheckConstraint(
+            "status <> 'PAYMENT_FAILED' or failed_at is not null",
+            name="product_orders_fallida_con_fecha",
+        ),
+        CheckConstraint(
+            "status <> 'UNDER_REVIEW' or review_reason is not null",
+            name="product_orders_revision_con_motivo",
+        ),
+        UniqueConstraint(
+            "buyer_id", "idempotency_key", name="product_orders_una_clave"
+        ),
+        Index(
+            "product_orders_del_comprador",
+            "buyer_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "product_orders_del_proveedor",
+            "seller_id",
+            text("created_at desc"),
+            text("id desc"),
+            postgresql_where=text("status = 'PAID'"),
+            sqlite_where=text("status = 'PAID'"),
+        ),
+        Index(
+            "product_orders_por_vencer",
+            "reserved_until",
+            "id",
+            postgresql_where=text(
+                "status in ('PENDING_PAYMENT', 'PAYMENT_PROCESSING')"
+                " and reservation_settled_at is null"
+            ),
+            sqlite_where=text(
+                "status in ('PENDING_PAYMENT', 'PAYMENT_PROCESSING')"
+                " and reservation_settled_at is null"
+            ),
+        ),
+        Index(
+            "product_orders_por_cobro",
+            "provider",
+            "environment",
+            "external_payment_id",
+            postgresql_where=text("external_payment_id is not null"),
+            sqlite_where=text("external_payment_id is not null"),
+        ),
+        Index(
+            "product_orders_en_revision",
+            text("created_at desc"),
+            text("id desc"),
+            postgresql_where=text("status = 'UNDER_REVIEW'"),
+            sqlite_where=text("status = 'UNDER_REVIEW'"),
+        ),
+    )
+
+
+class ProductOrderItem(Base):
+    """Una linea comprada. SOLO SE ANADE: lo impone un disparador."""
+
+    __tablename__ = "product_order_items"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_orders.id", ondelete="CASCADE")
+    )
+    product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("products.id", ondelete="RESTRICT")
+    )
+    version_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_versions.id", ondelete="RESTRICT")
+    )
+    variant_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_variants.id", ondelete="RESTRICT")
+    )
+    #: EL SKU ES LA UNIDAD DE ALMACEN, y por eso se copia: es con lo que se
+    #: reserva y con lo que se despacha.
+    sku: Mapped[str] = mapped_column(Text)
+
+    name_snapshot: Mapped[str] = mapped_column(Text)
+    variant_name_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    unit_price_minor: Mapped[int] = mapped_column(BigInteger)
+    quantity: Mapped[int] = mapped_column(Integer)
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(sku)) between 1 and 48", name="product_order_items_sku"
+        ),
+        CheckConstraint(
+            f"unit_price_minor >= 0 and unit_price_minor <= {MAXIMO_SEGURO_EN_JS}",
+            name="product_order_items_precio",
+        ),
+        CheckConstraint(
+            f"quantity >= 1 and quantity <= {MAXIMO_POR_LINEA}",
+            name="product_order_items_cantidad",
+        ),
+        CheckConstraint(
+            f"subtotal_minor >= 0 and subtotal_minor <= {MAXIMO_SEGURO_EN_JS}",
+            name="product_order_items_subtotal",
+        ),
+        UniqueConstraint(
+            "order_id",
+            "product_id",
+            "version_id",
+            "variant_id",
+            name="product_order_items_una_linea",
+        ),
+        Index("product_order_items_del_pedido", "order_id", "created_at", "id"),
+        Index("product_order_items_de_la_unidad", "product_id", "sku"),
+    )
+
+
+class ProductOrderAddress(Base):
+    """La direccion de ESTE envio, congelada. No es una libreta.
+
+    NI LATITUD NI LONGITUD. Una coordenada es la ubicacion exacta de la casa de
+    alguien; para entregar un paquete basta la direccion escrita.
+    """
+
+    __tablename__ = "product_order_addresses"
+
+    order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_orders.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    recipient_name: Mapped[str] = mapped_column(Text)
+    phone: Mapped[str] = mapped_column(Text)
+    country_code: Mapped[str] = mapped_column(String(2))
+    region: Mapped[str] = mapped_column(Text)
+    city: Mapped[str] = mapped_column(Text)
+    district: Mapped[str | None] = mapped_column(Text, nullable=True)
+    address_line: Mapped[str] = mapped_column(Text)
+    reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ProductOrderEvent(Base):
+    """Un cambio de estado. SOLO SE ANADE, y sin datos personales."""
+
+    __tablename__ = "product_order_events"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_orders.id", ondelete="RESTRICT")
+    )
+    from_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_status: Mapped[str] = mapped_column(Text)
+    #: Sin clave ajena: quien movio un pedido es un hecho del pasado.
+    actor_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    actor_role: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "actor_role in ('buyer', 'seller', 'admin', 'system')",
+            name="product_order_events_rol",
+        ),
+        Index("product_order_events_del_pedido", "order_id", "created_at", "id"),
+    )
+
+
+
 __all__ = [
     "ACTORES_DE_INVENTARIO",
     "ACTOR_ADMINISTRACION",
@@ -1093,6 +1501,8 @@ __all__ = [
     "ENTRADA",
     "ENVIADO",
     "ESTADOS_DE_FOTO",
+    "ESTADOS_DE_PEDIDO",
+    "ESTADOS_DE_POLITICA",
     "ESTADOS_DE_POSTULACION",
     "ESTADOS_DE_PRODUCTO",
     "ESTADOS_DE_VENDEDOR",
@@ -1110,9 +1520,21 @@ __all__ = [
     "MAXIMO_DEL_MOVIMIENTO",
     "MAXIMO_DE_FOTOS",
     "MAXIMO_POR_LINEA",
+    "MAXIMO_SEGURO_EN_JS",
     "MOVIMIENTOS",
     "MUESTRA_PEDIDA",
     "OBSERVACION",
+    "PEDIDO_CANCELADO",
+    "PEDIDO_EN_CURSO",
+    "PEDIDO_EN_REVISION",
+    "PEDIDO_FALLIDO",
+    "PEDIDO_PAGADO",
+    "PEDIDO_PENDIENTE",
+    "PEDIDO_PROCESANDO",
+    "PEDIDO_VENCIDO",
+    "POLITICA_BORRADOR",
+    "POLITICA_PUBLICADA",
+    "POLITICA_RETIRADA",
     "POSTULACIONES_VIVAS",
     "POSTULACION_ACEPTADA",
     "POSTULACION_BORRADOR",
@@ -1146,6 +1568,11 @@ __all__ = [
     "ProductEvaluationScore",
     "ProductInventory",
     "ProductMedia",
+    "ProductOrder",
+    "ProductOrderAddress",
+    "ProductOrderEvent",
+    "ProductOrderItem",
+    "ProductPolicy",
     "ProductSeller",
     "ProductVariant",
     "ProductVersion",

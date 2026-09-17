@@ -63,6 +63,18 @@ _INVENTARIO = ("product_inventory", "inventory_movements")
 #: Las dos de la 0075.
 _CARRITO = ("product_carts", "product_cart_items")
 
+#: La de la 0077.
+_POLITICAS = ("product_policies",)
+
+#: Las cuatro de la 0078. Se comprueban TODAS: un pedido sin su direccion seria
+#: un envio sin a donde, y sin su historial no habria como auditar un estado.
+_PEDIDOS = (
+    "product_orders",
+    "product_order_items",
+    "product_order_addresses",
+    "product_order_events",
+)
+
 #: Lo que la 0073 le añade a `product_media`. Se comprueban TODAS: una tabla con
 #: `status` pero sin `content_type` sería una migración aplicada a medias, y el
 #: catálogo firmaría rutas de archivos que nadie midió.
@@ -142,6 +154,16 @@ async def hay_carrito(db: AsyncSession) -> bool:
     return await _hay(db, "carrito", _CARRITO)
 
 
+async def hay_politicas(db: AsyncSession) -> bool:
+    """Si la 0077 esta aplicada: la politica de venta por jurisdiccion."""
+    return await _hay(db, "politicas", _POLITICAS)
+
+
+async def hay_pedidos(db: AsyncSession) -> bool:
+    """Si la 0078 esta aplicada: pedido, lineas, direccion e historial."""
+    return await _hay(db, "pedidos", _PEDIDOS)
+
+
 async def exigir_dominio(db: AsyncSession) -> None:
     if not await hay_dominio(db):
         raise ServiceUnavailableError(
@@ -190,6 +212,22 @@ async def exigir_carrito(db: AsyncSession) -> None:
         )
 
 
+async def exigir_politicas(db: AsyncSession) -> None:
+    if not await hay_politicas(db):
+        raise ServiceUnavailableError(
+            "Las condiciones de venta todavia no estan disponibles.",
+            code="product_policies_not_available",
+        )
+
+
+async def exigir_pedidos(db: AsyncSession) -> None:
+    if not await hay_pedidos(db):
+        raise ServiceUnavailableError(
+            "Los pedidos de productos todavia no estan disponibles.",
+            code="product_orders_not_available",
+        )
+
+
 def olvidar() -> None:
     """Tira la caché. Para las pruebas, que montan y tiran esquemas."""
     _cache.clear()
@@ -202,11 +240,15 @@ __all__ = [
     "exigir_fotografias",
     "exigir_guardados",
     "exigir_inventario",
+    "exigir_pedidos",
+    "exigir_politicas",
     "hay_admision",
     "hay_carrito",
     "hay_dominio",
     "hay_fotografias",
     "hay_guardados",
     "hay_inventario",
+    "hay_pedidos",
+    "hay_politicas",
     "olvidar",
 ]
