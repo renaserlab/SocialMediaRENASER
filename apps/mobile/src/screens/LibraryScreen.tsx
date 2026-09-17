@@ -53,6 +53,17 @@ export function LibraryScreen() {
 
   const currentUserId = useAppStore((state) => state.user?.id);
 
+  /**
+   * LA SALIDA, que tampoco estaba.
+   *
+   * `/library` vive fuera de `app/(tabs)/`: no hay barra inferior, así que el
+   * encabezado es el único camino de vuelta. Se llega desde el icono de la
+   * portada de Cursos, y por eso el respaldo sin historial es `/cursos`: es el
+   * sitio del que se viene, no un inicio inventado.
+   */
+  const volver = () =>
+    router.canGoBack() ? router.back() : router.replace('/cursos' as never);
+
   const [pestana, setPestana] = useState(0);
   /** Cual de los tres estados se esta mirando dentro de «Mis cursos». */
   const [estadoElegido, setEstadoElegido] = useState(0);
@@ -188,7 +199,7 @@ export function LibraryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title={t('library.title')} />
+      <AppHeader title={t('library.title')} onBack={volver} />
       <View style={styles.header}>
         <SegmentedControl
           options={[t('library.myCourses'), t('library.myAudios')]}

@@ -331,6 +331,16 @@ export function AsistenteDeCursoScreen() {
    * tecla Atras: dos pulsaciones rapidas apilaban dos dialogos y, aceptando los
    * dos, subian la portada dos veces y guardaban el curso dos veces.
    */
+  /**
+   * La salida de los estados en los que NO hay borrador (cargando y error).
+   *
+   * Se separa de `salir()` a proposito: aquella pregunta si se guarda antes de
+   * irse, y preguntarlo cuando no se ha llegado a cargar nada seria ofrecer
+   * guardar el vacio.
+   */
+  const volverSinBorrador = () =>
+    router.canGoBack() ? router.back() : router.replace('/');
+
   const salir = () =>
     enSerie(async () => {
       const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
@@ -372,7 +382,13 @@ export function AsistenteDeCursoScreen() {
   if (cargando) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title={t('catalog.editCourse')} />
+        {/*
+          ATRAS TAMBIEN MIENTRAS CARGA. Esta pantalla vive fuera de `(tabs)`:
+          sin barra inferior, el encabezado es la unica salida, y sin el una
+          carga que no termina deja encerrado. Aqui no se pregunta «¿guardo
+          antes de salir?» porque todavia no hay borrador que guardar.
+        */}
+        <AppHeader title={t('catalog.editCourse')} onBack={volverSinBorrador} />
         <StateView state="loading" />
       </View>
     );
@@ -381,7 +397,8 @@ export function AsistenteDeCursoScreen() {
   if (fallo) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title={t('catalog.editCourse')} />
+        {/* Y en el error con mas razon: nada que guardar y nada que ver. */}
+        <AppHeader title={t('catalog.editCourse')} onBack={volverSinBorrador} />
         <StateView state="error" description={fallo} onRetry={() => void cargar()} />
       </View>
     );
@@ -407,6 +424,14 @@ export function AsistenteDeCursoScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.pasos}
           keyboardShouldPersistTaps="handled"
+          /*
+            QUE NO CREZCA. Un `ScrollView` trae `flexGrow: 1` de serie y aqui es
+            hermano del cuerpo, que ocupa `flex: 1`: los dos se repartian el alto
+            libre y los pasos salian como columnas en vez de pildoras. Es el
+            mismo defecto arreglado en `AccesosAVerticales` y en la portada de
+            Cursos.
+          */
+          style={styles.carrilDePasos}
         >
           {PASOS.map((p, i) => {
             const activo = p.id === paso;
@@ -757,7 +782,17 @@ export function AsistenteDeCursoScreen() {
 }
 
 const styles = StyleSheet.create({
-  pasos: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  carrilDePasos: { flexGrow: 0 },
+  pasos: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    // Y que no se estiren: en una fila el eje cruzado es el vertical, y sin
+    // esto cada paso crece hasta el alto del carril. El `minHeight: 40` de
+    // `paso` es entonces el que manda, que es lo que se queria.
+    alignItems: 'flex-start',
+  },
   paso: {
     flexDirection: 'row',
     alignItems: 'center',

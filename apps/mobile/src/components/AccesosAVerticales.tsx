@@ -73,6 +73,13 @@ export function AccesosAVerticales({
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.fila}
+        /*
+          QUE NO CREZCA. Un `ScrollView` horizontal ocupa todo el alto que le
+          den, y sus hijos se estiran con él: en web, dentro de una columna
+          alta, cada acceso salía como una columna de medio metro. Con
+          `flexGrow: 0` la fila mide lo que miden los accesos.
+        */
+        style={styles.carril}
         nestedScrollEnabled
       >
       {VERTICALES.map((vertical) => {
@@ -124,12 +131,26 @@ export function AccesosAVerticales({
 }
 
 const styles = StyleSheet.create({
-  fila: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  carril: { flexGrow: 0 },
+  fila: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    /*
+      Y QUE NO SE ESTIREN. En una fila horizontal el eje cruzado es el vertical:
+      sin esto, cada acceso se estira hasta el alto del carril. Es lo que hacía
+      que las cuatro casillas salieran alargadas y feas.
+    */
+    alignItems: 'flex-start',
+  },
   acceso: {
     minWidth: 96,
+    // El área táctil mínima, que antes dependía de cuánto se estirara la caja.
+    minHeight: 72,
+    justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,

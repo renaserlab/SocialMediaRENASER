@@ -42,9 +42,28 @@ const ACCESOS = fuente('components/AccesosAVerticales.tsx');
  */
 describe('lo que la portada de Cursos NO enseña', () => {
   it('no pinta valoración de ninguna forma', () => {
-    for (const rastro of ['star', 'rating', 'valoracion', 'Valoración', '★']) {
+    /*
+      ACTUALIZADA: «star» ya no se busca como un trozo de texto cualquiera.
+      Buscándolo suelto, `alignItems: 'flex-start'` lo contiene, y la prueba se
+      ponía roja al arreglar la fila de filtros —que no tiene nada que ver con
+      pintar estrellas—. Era una falsa alarma del cerrojo, no un hallazgo.
+
+      El patrón exige inicio de palabra y descarta lo que sigue con «t»
+      («flex-start», «startTime»). Sigue cazando lo que de verdad importa:
+      `name="star"`, `star-outline`, `starRating` o `stars`.
+    */
+    const rastros: readonly (string | RegExp)[] = [
+      /\bstar(?!t)/i,
+      'rating',
+      'valoracion',
+      'Valoración',
+      '★',
+    ];
+    for (const rastro of rastros) {
+      const aparece =
+        typeof rastro === 'string' ? PORTADA.includes(rastro) : rastro.test(PORTADA);
       assert.ok(
-        !PORTADA.includes(rastro),
+        !aparece,
         `«${rastro}» en la portada: no hay puntuación en el modelo, así que ` +
           'cualquier estrella sería inventada.',
       );
@@ -114,6 +133,56 @@ describe('la búsqueda y el filtro van al servidor', () => {
         `se ofrece filtrar por ${inexistente} y el servidor no sabe hacerlo.`,
       );
     }
+  });
+});
+
+describe('la fila de filtros son píldoras, no columnas', () => {
+  /*
+    LO QUE SE REPORTÓ. «Las casillas de filtro salen alargadas»: «Todos»,
+    «Principiante», «Intermedio» y «Avanzado» se veían como cuatro columnas
+    altísimas. Es el mismo defecto ya arreglado en `AccesosAVerticales`: un
+    `ScrollView` trae `flexGrow: 1` de serie, aquí es hermano del contenido
+    dentro de una columna con alto libre (`AppScreen` pone `flexGrow: 1` en su
+    contenedor) y los dos se repartían el hueco; y en una fila el eje cruzado
+    es el vertical, así que cada filtro se estiraba con el carril.
+  */
+  it('el carril no crece con el hueco que le sobra a la pantalla', () => {
+    assert.ok(
+      /carrilDeNiveles:\s*\{\s*flexGrow:\s*0\s*\}/.test(PORTADA_ENTERA),
+      'sin `flexGrow: 0` el carril se queda con la mitad del alto libre.',
+    );
+    assert.ok(
+      /style=\{styles\.carrilDeNiveles\}/.test(PORTADA_ENTERA),
+      'y el estilo tiene que estar puesto en el ScrollView, no solo declarado.',
+    );
+  });
+
+  it('y los filtros no se estiran con él', () => {
+    const niveles = PORTADA_ENTERA.match(/niveles:\s*\{[\s\S]*?\n {2}\}/);
+    assert.ok(niveles, 'no se encuentra el estilo del contenido de la fila de filtros.');
+    assert.match(
+      niveles[0],
+      /alignItems:\s*'flex-start'/,
+      'sin `alignItems` en el contenedor del contenido, cada filtro crece hasta ' +
+        'el alto del carril: eso es lo que los convertía en columnas.',
+    );
+  });
+
+  it('el área táctil se declara en vez de depender de cuánto se estire', () => {
+    const nivel = PORTADA_ENTERA.match(/\n {2}nivel:\s*\{[\s\S]*?\n {2}\}/);
+    assert.ok(nivel, 'no se encuentra el estilo de la píldora de filtro.');
+    assert.match(
+      nivel[0],
+      /minHeight:\s*(\d+)/,
+      'una píldora que ya no se estira necesita su propia altura mínima, o el ' +
+        'objetivo táctil queda a merced del relleno.',
+    );
+    // Los 44 del mínimo táctil: 40 de caja más el hitSlop vertical de cada una.
+    assert.match(
+      PORTADA_ENTERA,
+      /hitSlop=\{\{\s*top:\s*6,\s*bottom:\s*6\s*\}\}/,
+      'sin el hitSlop la caja de 40 se queda por debajo del mínimo de 44.',
+    );
   });
 });
 

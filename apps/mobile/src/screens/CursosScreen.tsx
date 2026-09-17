@@ -73,6 +73,22 @@ export function CursosScreen() {
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState<string | null>(null);
 
+  /**
+   * LA SALIDA DE LA PANTALLA, que antes no existía.
+   *
+   * `/cursos` vive FUERA de `app/(tabs)/`, así que aquí no hay barra inferior
+   * —es una pantalla completa, y eso es a propósito—. Pero entonces el único
+   * camino de vuelta es el encabezado: sin «Atrás» quien entraba desde los
+   * accesos de Explorar se quedaba encerrado, sin pestañas y sin salida.
+   *
+   * El respaldo es `/explore` PORQUE ES DE DONDE SE VIENE: el acceso a esta
+   * vertical está en Explorar. Sin historial —un enlace directo, un recargar
+   * en web— `back()` no hace nada, y mandar a otro sitio sería inventarse un
+   * origen que la persona nunca visitó.
+   */
+  const volver = () =>
+    router.canGoBack() ? router.back() : router.replace('/explore' as never);
+
   // Medio segundo de calma antes de preguntar. Se cancela al teclear otra vez.
   useEffect(() => {
     const espera = setTimeout(() => setTextoAplicado(texto), 500);
@@ -151,7 +167,9 @@ export function CursosScreen() {
   if (cargando) {
     return (
       <AppScreen>
-        <AppHeader title={t('verticales.cursos')} />
+        {/* También cargando: si la petición se eterniza, la salida tiene que
+            estar ahí desde el primer momento. */}
+        <AppHeader title={t('verticales.cursos')} onBack={volver} />
         <StateView state="loading" />
       </AppScreen>
     );
@@ -160,7 +178,9 @@ export function CursosScreen() {
   if (fallo !== null) {
     return (
       <AppScreen>
-        <AppHeader title={t('verticales.cursos')} />
+        {/* Y en el error con más razón: quedarse encerrado en una pantalla que
+            además no enseña nada es lo peor de los tres casos. */}
+        <AppHeader title={t('verticales.cursos')} onBack={volver} />
         <StateView state="error" description={fallo} onRetry={() => void cargar()} />
       </AppScreen>
     );
@@ -176,6 +196,7 @@ export function CursosScreen() {
       */}
       <AppHeader
         title={t('verticales.cursos')}
+        onBack={volver}
         rightIcon="book-open"
         onRightPress={() => router.push('/library' as never)}
       />
@@ -213,6 +234,15 @@ export function CursosScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.niveles}
+          /*
+            QUE NO CREZCA. Un `ScrollView` trae `flexGrow: 1` de serie, y esta
+            fila es hermana del contenido dentro de una columna que sí tiene
+            alto libre (`AppScreen` pone `flexGrow: 1` en su contenedor): el
+            hueco sobrante se repartía entre las dos y los cuatro filtros
+            salían como columnas altísimas en vez de píldoras. Es el mismo
+            defecto ya arreglado en `AccesosAVerticales`.
+          */
+          style={styles.carrilDeNiveles}
         >
           {([undefined, 'beginner', 'intermediate', 'advanced'] as const).map((cual) => {
             const activo = nivel === cual;
@@ -220,6 +250,8 @@ export function CursosScreen() {
               <Pressable
                 key={cual ?? 'todos'}
                 onPress={() => setNivel(cual)}
+                // Con la caja a 40 de alto, el dedo sigue teniendo sus 44.
+                hitSlop={{ top: 6, bottom: 6 }}
                 style={[
                   styles.nivel,
                   {
@@ -397,8 +429,27 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   entrada: { flex: 1, fontSize: 15, padding: 0 },
-  niveles: { gap: spacing.xs, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  carrilDeNiveles: { flexGrow: 0 },
+  niveles: {
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    /*
+      Y QUE NO SE ESTIREN. En una fila horizontal el eje cruzado es el vertical:
+      sin esto cada filtro se estira hasta el alto del carril, que es lo que
+      convertía las píldoras en cuatro columnas.
+    */
+    alignItems: 'flex-start',
+  },
   nivel: {
+    /*
+      El área táctil deja de depender de cuánto se estire la caja: se declara.
+      40 es la altura de las píldoras de Eventos, la vertical hermana, para que
+      las dos portadas no se vean distintas; los 44 del mínimo táctil los
+      completa el `hitSlop` vertical de cada filtro.
+    */
+    minHeight: 40,
+    justifyContent: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
     borderWidth: StyleSheet.hairlineWidth,
