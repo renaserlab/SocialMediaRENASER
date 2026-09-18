@@ -5,11 +5,16 @@ persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4
 —fotografías reales, inventario y carrito— y el mismo día con el Incremento 5:
 política por jurisdicción, pedido físico y reserva.
 
-**Estado de las migraciones al 17/09/2026.** La 0070 a la 0075 están
-**aplicadas y verificadas** contra la base gestionada. La 0076, la 0077 y la
-0078 se entregan escritas, probadas en PostgreSQL desechable y **SIN APLICAR**:
-las aplica una persona, en ese orden, y **hay que reiniciar la API después** de
-la 0077 y la 0078.
+**Estado de las migraciones al 18/09/2026.** De la 0070 a la 0078 están
+**aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura
+y con cero divergencias. Las cabeceras de los `.sql` siguen diciendo «SIN
+APLICAR» a propósito: una migración aplicada no se reescribe, y el estado vive
+en esta documentación.
+
+Lo que la verificación del 18/09 confirma: el índice del vencimiento quedó en su
+versión corregida —por la reserva y no por el estado—, `inventory_movements` ya
+no tiene clave ajena a `profiles`, y `product_policies` está **vacía**. Esto
+último no es un fallo: es la regla. Sin política publicada no se vende.
 
 ## 1. Lo que NO es
 
@@ -482,7 +487,6 @@ nuestra propia tabla por la referencia del cobro.
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
 | Fuente del promedio de categoría | la empresa |
-| **Aplicar 0076, 0077 y 0078 en la base gestionada, en ese orden** | operación |
 | **Publicar la política de venta de cada país** (sin ella no se vende) | la empresa + abogado |
 | **Cuántos minutos aparta un pedido su inventario** (`PRODUCT_RESERVATION_MINUTES`) | la empresa |
 | Si un carrito con varios proveedores se puede pagar de una vez | la empresa |
