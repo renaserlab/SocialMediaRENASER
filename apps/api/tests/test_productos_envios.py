@@ -1788,7 +1788,7 @@ async def test_quien_empaqueta_puede_corregir_hacia_abajo_antes_de_despachar(
     Y BAJAR LA CUENTA VUELVE A CERRAR LA PUERTA: con una unidad de menos, el
     paquete deja de poder cerrarse.
     """
-    _, _, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    producto_id, _, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
     quien = await duenno_de(sesiones, orden_id)
 
     async with sesiones() as db:
@@ -1844,11 +1844,20 @@ async def test_quien_empaqueta_puede_corregir_hacia_abajo_antes_de_despachar(
 
     #: NINGUNA DE LAS CORRECCIONES TOCO EL ALMACEN. Las unidades salen al
     #: despachar y solo entonces.
+    #:
+    #: FILTRADO POR ESTE PRODUCTO, y no por el tipo a secas: `base_aplicada` es
+    #: de modulo y no vacia nada, asi que contar todas las salidas de la base
+    #: cuenta las de los otros cuarenta y cuatro casos. Escrito sin el filtro,
+    #: este `== 0` solo habria pasado si esta fuera la primera prueba del
+    #: fichero en despachar: no comprobaba lo que dice comprobar.
     async with sesiones() as db:
         salidas = await db.scalar(
             select(func.count())
             .select_from(InventoryMovement)
-            .where(InventoryMovement.kind == "dispatch")
+            .where(
+                InventoryMovement.product_id == producto_id,
+                InventoryMovement.kind == "dispatch",
+            )
         )
     assert salidas == 0, "corregir la cuenta movio el almacen"
 
@@ -1897,10 +1906,15 @@ async def test_despachar_sin_existencias_da_un_error_controlado(
     #: Y EL ENVIO NO SE QUEDO A MEDIAS: ni despachado ni con movimiento.
     async with sesiones() as db:
         envio = await db.get(ProductShipment, orden_id)
+        #: POR ESTE PRODUCTO, por lo mismo que arriba: la base la comparten
+        #: las cuarenta y cinco pruebas del fichero.
         salidas = await db.scalar(
             select(func.count())
             .select_from(InventoryMovement)
-            .where(InventoryMovement.kind == "dispatch")
+            .where(
+                InventoryMovement.product_id == producto_id,
+                InventoryMovement.kind == "dispatch",
+            )
         )
     assert envio.status == estados_de_envio.LISTO, envio.status
     assert envio.dispatched_at is None
