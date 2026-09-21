@@ -29,6 +29,15 @@ jobs:
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
+      # psycopg NO es una dependencia de la aplicacion —la API habla con la base
+      # por asyncpg— sino del ARNES de las migraciones, que abre la base
+      # desechable con el. Seis ficheros de pruebas lo importan arriba del todo,
+      # asi que sin el aqui la recoleccion revienta y trece ficheros no llegan a
+      # ejecutarse: no es que fallen, es que no se recogen. Los casos que
+      # necesitan PostgreSQL se siguen saltando por MIGRACIONES_DATABASE_URL,
+      # que aqui no esta puesta a proposito; lo que hace falta es poder
+      # RECOGERLOS. El trabajo de migraciones lo instala por lo mismo.
+      - run: pip install 'psycopg[binary]'
       - run: pytest
 
   # Las migraciones, EJECUTADAS. La suite de arriba construye el esquema desde
