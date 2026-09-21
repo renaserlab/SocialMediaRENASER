@@ -4455,4 +4455,9 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'incidencia.error.faltaNota': 'That step needs an explanation: write at least three characters.',
   'envio.error.casoAbierto': 'There is an open claim on this order.',
 
+  // El «entra para verlo» NEUTRO. El de la bolsa dice «tu bolsa», y en
+  // una pantalla de reclamaciones eso habla de otra cosa.
+  'sesion.entraParaVerlo': 'Sign in to see it',
+  'sesion.entraParaVerloCuerpo': 'This is yours, so you need to be signed in to read it.',
+
 };

@@ -4572,4 +4572,9 @@ export const es = {
   'incidencia.error.faltaNota': 'Ese paso lleva explicación: escribe al menos tres caracteres.',
   'envio.error.casoAbierto': 'Hay una reclamación abierta sobre este pedido.',
 
+  // El «entra para verlo» NEUTRO. El de la bolsa dice «tu bolsa», y en
+  // una pantalla de reclamaciones eso habla de otra cosa.
+  'sesion.entraParaVerlo': 'Entra para verlo',
+  'sesion.entraParaVerloCuerpo': 'Esto es tuyo, así que hace falta haber entrado para leerlo.',
+
 } as const;

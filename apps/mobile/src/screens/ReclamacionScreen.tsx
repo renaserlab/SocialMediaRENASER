@@ -260,8 +260,8 @@ export function ReclamacionScreen() {
           <StateView
             state="empty"
             icon="lock"
-            title={f('carrito.error.sinSesion')}
-            description={f('carrito.error.sinSesionCuerpo')}
+            title={f('sesion.entraParaVerlo')}
+            description={f('sesion.entraParaVerloCuerpo')}
           />
         ) : fallo === 'noDisponible' ? (
           <StateView

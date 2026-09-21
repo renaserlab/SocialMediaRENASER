@@ -4460,4 +4460,9 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'incidencia.error.faltaNota': 'Esse passo precisa de explicação: escreva pelo menos três caracteres.',
   'envio.error.casoAbierto': 'Há uma reclamação aberta neste pedido.',
 
+  // El «entra para verlo» NEUTRO. El de la bolsa dice «tu bolsa», y en
+  // una pantalla de reclamaciones eso habla de otra cosa.
+  'sesion.entraParaVerlo': 'Entre para ver',
+  'sesion.entraParaVerloCuerpo': 'Isto é seu, então é preciso entrar para ler.',
+
 };

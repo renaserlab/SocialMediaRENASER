@@ -174,6 +174,7 @@ async def sembrar(
     *,
     limpiar: bool = False,
     pedido_pagado: bool = False,
+    pedido_entregado: bool = False,
 ) -> None:
     from sqlalchemy import select, text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -190,6 +191,11 @@ async def sembrar(
     )
     from app.modules.products import inventory as almacen
 
+    #: ENTREGAR IMPLICA PAGAR. No hay forma de despachar un pedido que nadie
+    #: cobro, y pedir las dos banderas por separado solo daria un error mas
+    #: tarde y mas raro.
+    pedido_pagado = pedido_pagado or pedido_entregado
+
     motor = create_async_engine(
         url.replace("postgresql://", "postgresql+asyncpg://", 1), echo=False
     )
@@ -201,7 +207,9 @@ async def sembrar(
         async with Sesion() as db:
             await db.execute(
                 text(
-                    "truncate table public.product_shipment_events,"
+                    "truncate table public.product_incident_events,"
+                    " public.product_incident_evidence, public.product_incidents,"
+                    " public.product_shipment_events,"
                     " public.product_shipment_items, public.product_shipments,"
                     " public.product_order_events, public.product_order_addresses,"
                     " public.product_order_items, public.product_orders,"
@@ -618,15 +626,85 @@ async def sembrar(
         if estado != "PAID":
             raise SystemExit(f"el pedido de muestra quedó en {estado}, no en PAID")
 
-        print("\nUn pedido PAGADO listo para preparar (pasarela falsa, sin dinero):")
-        print(f"  pedido:      {orden_id}")
-        print(f"  compra:      {comprador}")
-        print(f"               -> /productos/pedidos/{orden_id}")
-        print(f"  proveedor:   {dueno_del_pedido}")
-        print("               -> /proveedor/pedidos")
-        print("  administra:  la cuenta de --cuenta")
-        print("               -> /admin/productos/envios")
-        print("  el envío nace en «pendiente de preparación»: nadie lo ha tocado.")
+        if not pedido_entregado:
+            print("\nUn pedido PAGADO listo para preparar (pasarela falsa, sin dinero):")
+            print(f"  pedido:      {orden_id}")
+            print(f"  compra:      {comprador}")
+            print(f"               -> /productos/pedidos/{orden_id}")
+            print(f"  proveedor:   {dueno_del_pedido}")
+            print("               -> /proveedor/pedidos")
+            print("  administra:  la cuenta de --cuenta")
+            print("               -> /admin/productos/envios")
+            print("  el envío nace en «pendiente de preparación»: nadie lo ha tocado.")
+
+        # ------------------------------------------------------------- #
+        # Y el paquete, hasta la puerta
+        # ------------------------------------------------------------- #
+        #
+        # POR EL CAMINO REAL, paso a paso: apuntar lo que va en la caja,
+        # cerrarla, despachar —que es donde salen las unidades del almacén de
+        # verdad, con su movimiento y su clave de idempotencia— y registrar la
+        # entrega. Escribir «DELIVERED» a mano dejaría un estado que el código
+        # nunca produce, sin movimiento de inventario y sin historial, y las
+        # pantallas lo enseñarían como si fuera real.
+        #
+        # PARA QUÉ HACE FALTA: no se reclama sobre un paquete que no consta
+        # entregado, así que sin esto las pantallas del Incremento 7 no se
+        # pueden mirar en local.
+        if pedido_entregado:
+            from app.modules.products import envios as _envios
+            from app.modules.products import estados_de_envio as _maquina_envio
+
+            async with Sesion() as db:
+                lineas = await _pedidos.lineas_de(db, orden_id)
+                cuantas = {l.id: int(l.quantity) for l in lineas}
+            async with Sesion() as db:
+                orden = await db.get(_Pedido, orden_id)
+                await _envios.anotar_preparado(
+                    db, orden=orden, cantidades=cuantas, actor_id=dueno_del_pedido
+                )
+                await db.commit()
+
+            async with Sesion() as db:
+                orden = await db.get(_Pedido, orden_id)
+                await _envios.marcar_listo(db, orden=orden, actor_id=dueno_del_pedido)
+                await db.commit()
+
+            async with Sesion() as db:
+                orden = await db.get(_Pedido, orden_id)
+                #: SIN TRANSPORTISTA NI REFERENCIA, a propósito: la empresa no
+                #: ha elegido ninguno, y sembrar uno inventado lo pintaría en
+                #: pantalla como si existiera.
+                await _envios.despachar(db, orden=orden, actor_id=dueno_del_pedido)
+                await db.commit()
+
+            async with Sesion() as db:
+                orden = await db.get(_Pedido, orden_id)
+                envio = await _envios.registrar_entrega(
+                    db,
+                    orden=orden,
+                    actor_id=dueno_del_pedido,
+                    actor_rol=_maquina_envio.PROVEEDOR,
+                )
+                await db.commit()
+                estado_del_envio = envio.status
+            if estado_del_envio != "DELIVERED":
+                raise SystemExit(
+                    f"el envío quedó en {estado_del_envio}, no en DELIVERED"
+                )
+
+            print("")
+            print("Un pedido ENTREGADO, listo para reclamar (sin dinero de por medio):")
+            print(f"  pedido:      {orden_id}")
+            print(f"  compra:      {comprador}")
+            print(f"               -> /productos/pedidos/{orden_id}")
+            print("               -> ahí abajo: «Reportar un problema»")
+            print(f"  proveedor:   {dueno_del_pedido}")
+            print("               -> /proveedor/reclamaciones")
+            print("  administra:  la cuenta de --cuenta")
+            print("               -> /admin/productos/reclamaciones")
+            print("  las unidades YA SALIERON del almacén: el despacho las consumió.")
+            print("  ninguna reclamación sembrada: abrirla es parte de lo que se revisa.")
 
     await motor.dispose()
     print(f"\n{creados} productos publicados en la base local.")
@@ -651,6 +729,17 @@ def main() -> int:
             "pasarela y en local no hay ninguna"
         ),
     )
+    parser.add_argument(
+        "--pedido-entregado",
+        action="store_true",
+        help=(
+            "lleva ese pedido hasta ENTREGADO por el camino real —preparar, "
+            "cerrar, despachar y registrar la entrega—. Implica "
+            "--pedido-pagado. Sin esto no hay forma de ver las pantallas de "
+            "las reclamaciones, porque no se reclama sobre algo que no consta "
+            "entregado"
+        ),
+    )
     args = parser.parse_args()
     url = exigir_local(
         os.environ.get("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://")
@@ -661,6 +750,7 @@ def main() -> int:
             args.cuenta,
             limpiar=args.limpiar,
             pedido_pagado=args.pedido_pagado,
+            pedido_entregado=args.pedido_entregado,
         )
     )
     return 0
