@@ -1748,6 +1748,11 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     // 0079— y tienen su pantalla. Lo único que «Mis productos» puede hacer con
     // ellos es LLEVAR allí, y eso se comprueba aparte, igual que se comprueba
     // aparte que ni el repositorio ni las otras dos pantallas los mencionen.
+    //
+    // «incidencia» SALE CON EL INCREMENTO 7 y por el mismo motivo exacto: las
+    // reclamaciones existen de verdad —la 0080— y tienen sus dos pantallas. Lo
+    // único que «Mis productos» hace con ellas es LLEVAR allí, y también se
+    // comprueba aparte.
     const todo = [postular, productos, editar, repositorio].join('\n');
     // Con límites de palabra: `borderColor` contiene «order» y no es un pedido.
     for (const prohibido of [
@@ -1755,7 +1760,6 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
       'existencias',
       'shipping',
       'orders?',
-      'incidencia',
       'saldo',
       'payout',
       'checkout',
@@ -1764,6 +1768,43 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     ]) {
       const patron = new RegExp(`\\b${prohibido}\\b`, 'i');
       assert.ok(!patron.test(todo), `aparece «${prohibido}»`);
+    }
+  });
+
+  it('«Mis productos» LLEVA a las reclamaciones, y solo eso', () => {
+    // UNA RUTA QUE SOLO FUNCIONA ESCRIBIENDO LA URL NO ESTÁ TERMINADA.
+    assert.ok(
+      productos.includes("'/proveedor/reclamaciones'"),
+      'falta el acceso a las reclamaciones de la tienda',
+    );
+    // Y NADA MÁS QUE LLEVAR. Ni un estado de caso, ni una salida, ni una
+    // propuesta: todo eso se lee del contrato en la pantalla que lo pide, y
+    // escribirlo aquí significaría estar deduciéndolo de otra cosa.
+    for (const prohibido of [
+      'MEDIATION',
+      'RESOLVED',
+      'SELLER_RESPONDED',
+      'REJECT_CLAIM',
+      'PARTIAL_REFUND',
+      'seller_proposal',
+      'financial_effect',
+      'resolution',
+      'refund',
+    ]) {
+      assert.ok(!productos.includes(prohibido), `aparece «${prohibido}»`);
+    }
+  });
+
+  it('postular, editar y el repositorio siguen sin saber de reclamaciones', () => {
+    // LAS OTRAS TRES SIGUEN SIN MENCIONARLAS. Un producto no es una disputa: si
+    // el repositorio del proveedor creciera un método de reclamaciones habría
+    // dos sitios desde donde responderlas, y uno de los dos acabaría sin la
+    // comprobación de a quién le toca.
+    for (const fuente of [postular, editar, repositorio]) {
+      for (const prohibido of ['incidencia', 'incident', 'reclamacion', 'reclamación']) {
+        const patron = new RegExp(`\b${prohibido}\b`, 'i');
+        assert.ok(!patron.test(fuente), `aparece «${prohibido}»`);
+      }
     }
   });
 

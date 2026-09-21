@@ -1736,6 +1736,14 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       'media.py',
       'inventory.py',
       'carts.py',
+      // Los del Incremento 6, que faltaban: sin ellos un codigo nuevo de
+      // envios podia salir sin texto aunque `envios.ts` ya se leyera abajo.
+      'envios.py',
+      'estados_de_envio.py',
+      // Los del Incremento 7. `estados_de_incidencia.py` va aparte porque los
+      // tres codigos de transicion viven en la maquina, no en el servicio.
+      'incidencias.py',
+      'estados_de_incidencia.py',
     ]) {
       let texto = '';
       try {
@@ -1767,6 +1775,7 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       'fotosDeProducto.ts',
       'pedidos.ts',
       'envios.ts',
+      'incidencias.ts',
     ]) {
       for (const m of fuente('lib', modulo).matchAll(
         /^\s{2}([a-z_0-9]+):\s*'[^']+',$/gm,

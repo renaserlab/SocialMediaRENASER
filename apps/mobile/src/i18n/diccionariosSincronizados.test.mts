@@ -127,6 +127,14 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 7 de Productos: el portugues escribe estas EXACTAMENTE igual
+    // que el espanol. Escribirlas distintas seria escribirlas mal.
+    'incidencia.estado.APPEALED',   // «Apelado».
+    'incidencia.estado.WITHDRAWN',  // «Retirado».
+    'incidencia.abrir.contador',    // «{n} de {min} caracteres».
+    'incidencia.abrir.continuar',   // «Continuar».
+    'incidencia.detalle.apelar',    // «Apelar».
+    'incidencia.detalle.retirar',   // «Retirar».
     // Incremento 6 de Productos: el portugues escribe estas EXACTAMENTE igual
     // que el espanol. No son traducciones olvidadas; escribirlas distintas
     // seria escribirlas mal.
