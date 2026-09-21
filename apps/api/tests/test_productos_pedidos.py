@@ -1912,7 +1912,7 @@ def test_la_reserva_se_suma_por_unidad_de_almacen_y_en_orden_estable() -> None:
         _L("p1", "A", 2),
         _L("p1", "B", 4),
     ]
-    salida = pedidos._por_unidad_de_almacen(lineas)
+    salida = pedidos.por_unidad_de_almacen(lineas)
     assert salida == [("p1", "A", 2), ("p1", "B", 7), ("p2", "B", 1)]
     assert salida == sorted(salida), "el orden de bloqueo no es estable"
 

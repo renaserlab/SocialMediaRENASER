@@ -908,9 +908,15 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
     dificil: que existan, que lleven a un recorrido real y que aun asi no se
     pueda cobrar nada sin que la empresa termine de configurar la venta.
 
-    Y NINGUNA RUTA DE LAS QUE ESTE INCREMENTO NO IMPLEMENTA. Transportista,
-    seguimiento, devolucion, reembolso y transferencia son de los Incrementos 6
-    a 9: una ruta vacia que devolviera 501 ya seria una promesa.
+    Y NINGUNA RUTA DE LAS QUE NO ESTA IMPLEMENTADO. Devolucion, reembolso,
+    garantia, resena y transferencia son de los Incrementos 7 a 9: una ruta
+    vacia que devolviera 501 ya seria una promesa.
+
+    EL DESPACHO SI ESTA, DESDE EL INCREMENTO 6, y por eso `shipment` salio de la
+    lista de prohibidas y entro en la de esperadas. Cambiar una prueba para que
+    deje de mirar algo es como se pierde una proteccion: lo que antes prohibia
+    ahora lo EXIGE, y ademas exige que administracion no tenga ruta para
+    despachar ni para fabricar una entrega.
     """
     import os
 
@@ -927,14 +933,36 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
         "/api/v1/products/orders/{order_id}/cancel",
         "/api/v1/products/checkout/preparation",
         "/api/v1/products/policies",
+        # Incremento 6: el recorrido de la entrega, entero y alcanzable.
+        "/api/v1/products/orders/{order_id}/shipment/confirm-receipt",
+        "/api/v1/products/seller/orders/{order_id}/shipment/prepare",
+        "/api/v1/products/seller/orders/{order_id}/shipment/ready",
+        "/api/v1/products/seller/orders/{order_id}/shipment/dispatch",
+        "/api/v1/products/seller/orders/{order_id}/shipment/delivered",
+        "/api/v1/products/seller/orders/{order_id}/shipment/failed",
+        "/api/v1/admin/products/shipments",
     )
     for ruta in esperadas:
         assert ruta in rutas, ruta
 
-    prohibidas = ("shipment", "tracking", "/return", "refund", "transfer", "payout")
+    #: LO QUE NO PUEDE EXISTIR TODAVIA. `/return` lleva barra delante a
+    #: proposito: es una palabra corta y no quiero que aparezca dentro de otra.
+    prohibidas = ("/return", "refund", "transfer", "payout", "warranty", "incident")
     for ruta in rutas:
         for prohibida in prohibidas:
             assert prohibida not in ruta, ruta
+
+    #: NI UNA SOLA RESENA DE PRODUCTO. `/orders/review` es la cola de
+    #: conciliacion del Incremento 5 y se llama asi desde entonces; lo que no
+    #: puede existir es una ruta de resenas, que es del Incremento 8.
+    for ruta in rutas:
+        assert "/reviews" not in ruta, ruta
+
+    #: Y ADMINISTRACION NO TIENE RUTA PARA DESPACHAR NI PARA ENTREGAR. Lo que
+    #: puede mover lo decide la maquina de estados, pero que no exista una URL
+    #: con ese nombre es la primera puerta y la mas facil de leer.
+    for ruta in rutas:
+        assert not ruta.startswith("/api/v1/admin/products/shipments/{order_id}/d")
 
     #: Y LO QUE DE VERDAD IMPORTA: con la configuracion de fabrica no se puede
     #: cobrar, y faltan CINCO cosas, no una.
