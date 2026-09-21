@@ -401,6 +401,19 @@ export function AdminProductosScreen() {
         disabled={ocupado}
       />
 
+      {/*
+        Y LAS RECLAMACIONES QUE ESPERAN UNA DECISIÓN. Esta sí es una bandeja de
+        trabajo: es el único sitio donde se registra qué se acordó sobre un
+        pedido que llegó mal. REGISTRARLO NO ES EJECUTARLO: no mueve dinero ni
+        devuelve nada al almacén, y la pantalla lo dice antes de pulsar.
+      */}
+      <Button
+        label={f('incidencia.admin.acceso')}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos/reclamaciones' as never)}
+        disabled={ocupado}
+      />
+
       {conflicto ? (
         <View style={[styles.recuadro, { borderColor: colors.danger }]}>
           <Text variant="secondary" weight="700" color={colors.danger}>

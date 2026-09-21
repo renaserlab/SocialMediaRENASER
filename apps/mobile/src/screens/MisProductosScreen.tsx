@@ -417,6 +417,18 @@ export function MisProductosScreen() {
         disabled={ocupado}
       />
 
+      {/* Y LAS RECLAMACIONES, AL LADO DE LOS PEDIDOS. Por lo mismo: una
+          reclamación puede ser de cualquier producto, y se enseña siempre
+          aunque no haya ninguna. Lo que se hace ahí es RESPONDER, no resolver:
+          la decisión la registra Z. */}
+      <Button
+        label={f('incidencia.proveedor.acceso')}
+        icon="alert-circle"
+        variant="secondary"
+        onPress={() => router.push('/proveedor/reclamaciones' as never)}
+        disabled={ocupado}
+      />
+
       {productos.length === 0 ? (
         <StateView
           state="empty"

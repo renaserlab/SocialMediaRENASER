@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -21,6 +21,11 @@ import {
   yaLlego,
   yaSalio,
 } from '@/lib/envios';
+import {
+  claveDelEstadoDeIncidencia,
+  claveDelMotivo,
+  iconoDelEstadoDeIncidencia,
+} from '@/lib/incidencias';
 import {
   claveDeErrorDePedidos,
   claveDelEstado,
@@ -537,6 +542,62 @@ export function PedidoDeProductoScreen() {
             </View>
           );
         })()}
+
+        {/*
+          LAS RECLAMACIONES DE ESTE PEDIDO, Y DESDE AQUI SE ABRE UNA.
+          Este es el sitio: quien tuvo un problema con un pedido lo busca en el
+          pedido, no en una lista aparte. Y el acceso SE ENSENA SIEMPRE una vez
+          entregado, tambien cuando no hay ninguna reclamacion: una ruta que
+          solo funciona escribiendo la URL no esta terminada.
+
+          ABRIR NO ES APROBAR, y eso se dice entero en la pantalla de reportar,
+          que es donde alguien esta a punto de contar lo que le paso.
+
+          NINGUN IMPORTE JUNTO AL BOTON. Un numero ahi se lee como lo que te van
+          a devolver, y cuanto se devuelve no lo ha decidido nadie.
+        */}
+        <View style={[styles.bloque, { borderColor: colors.border }]}>
+          <Text variant="titleMedium">{f('incidencia.enElPedido.titulo')}</Text>
+          {pedido.incidents.map((caso) => (
+            <Pressable
+              key={caso.id}
+              onPress={() =>
+                router.push(`/productos/reclamaciones/${caso.id}` as never)
+              }
+              accessibilityRole="button"
+              accessibilityLabel={f('incidencia.enElPedido.ver')}
+              style={styles.fila}
+            >
+              <Feather
+                name={(iconoDelEstadoDeIncidencia(caso.status) ?? 'alert-circle') as never}
+                size={14}
+                color={colors.textMuted}
+              />
+              <View style={styles.crece}>
+                <Text variant="caption">{f(claveDelMotivo(caso.reason))}</Text>
+                <Text variant="caption" color={colors.textMuted}>
+                  {f(claveDelEstadoDeIncidencia(caso.status))}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={14} color={colors.textMuted} />
+            </Pressable>
+          ))}
+          {yaLlego(pedido.shipment) ? (
+            <Button
+              label={f('incidencia.enElPedido.reportar')}
+              variant="secondary"
+              icon="alert-circle"
+              onPress={() =>
+                router.push(`/productos/pedidos/${pedido.id}/reportar` as never)
+              }
+              disabled={ocupado}
+            />
+          ) : (
+            <Text variant="caption" color={colors.textMuted}>
+              {f('incidencia.enElPedido.soloEntregado')}
+            </Text>
+          )}
+        </View>
       </ScrollView>
 
       {/*
