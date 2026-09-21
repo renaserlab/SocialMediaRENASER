@@ -19,10 +19,18 @@ import type { Incidencia, ResumenDeIncidencia } from '@/lib/incidencias';
  * de verdad y guarda.
  */
 export const ProductIncidentRepository = {
-  /** Mis casos, los más nuevos primero. SIN LA DESCRIPCIÓN. */
-  async mios(): Promise<ResumenDeIncidencia[]> {
-    return apiRequest<ResumenDeIncidencia[]>(`${API_V1}/products/incidents`);
-  },
+  /*
+   * NO HAY `mios()`, Y NO ES UN OLVIDO. La ruta `GET /products/incidents`
+   * existe en el servidor y está probada, pero NO TIENE PANTALLA: a un caso se
+   * llega desde el pedido del que habla, que es donde quien reclamó lo busca.
+   * Una lista suelta de «mis reclamaciones» sería una pantalla más que enseña
+   * lo mismo desde otro sitio, y nadie ha decidido que haga falta.
+   *
+   * UN MÉTODO AQUÍ SIN PANTALLA DETRÁS ES CÓDIGO MUERTO QUE PARECE UNA
+   * FUNCIÓN. Lo señaló la revisión independiente, y es la misma regla que se
+   * aplicó en el Incremento 6 al `mover()` de administración. Cuando esa
+   * pantalla exista, se añaden las dos juntas.
+   */
 
   /** Uno de mis casos, entero. */
   async leer(incidentId: string): Promise<Incidencia> {

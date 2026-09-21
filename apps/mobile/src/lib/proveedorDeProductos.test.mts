@@ -1802,7 +1802,9 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     // comprobación de a quién le toca.
     for (const fuente of [postular, editar, repositorio]) {
       for (const prohibido of ['incidencia', 'incident', 'reclamacion', 'reclamación']) {
-        const patron = new RegExp(`\b${prohibido}\b`, 'i');
+        // CON LAS BARRAS DOBLADAS: dentro de una plantilla `\b` es el carácter
+        // de retroceso, no el límite de palabra, y el patrón no coincide nunca.
+        const patron = new RegExp(`\\b${prohibido}\\b`, 'i');
         assert.ok(!patron.test(fuente), `aparece «${prohibido}»`);
       }
     }

@@ -505,8 +505,13 @@ describe('el plazo del proveedor es un hecho, no una acusación', () => {
       'atrasado',
       'overdue',
     ]) {
-      // CON LÍMITES DE PALABRA: «useTranslation» contiene «sla» y no es un SLA.
-      const patron = new RegExp(`\b${prohibido}`, 'i');
+      // CON LÍMITE DE PALABRA: «useTranslation» contiene «sla» y no es un SLA.
+      //
+      // Y CON LA BARRA DOBLADA. Dentro de una plantilla, `\b` NO es el límite
+      // de palabra: es el carácter de retroceso, U+0008. Un patrón así no
+      // coincide con nada y la comprobación es cierta siempre. Lo encontró la
+      // revisión independiente, y es el mismo defecto que ya costó una vez.
+      const patron = new RegExp(`\\b${prohibido}`, 'i');
       assert.ok(!patron.test(textos), `aparece «${prohibido}»`);
     }
   });
@@ -814,5 +819,41 @@ describe('las seis rutas existen y apuntan a su pantalla', () => {
         "'/admin/productos/reclamaciones'",
       ),
     );
+  });
+});
+
+/* ========================================================================== */
+/* 13. Lo que encontró la revisión independiente                              */
+/* ========================================================================== */
+describe('el contrato con el servidor, donde la revisión lo encontró roto', () => {
+  const repositorio = fuente('repositories', 'ProductIncidentRepository.ts');
+
+  it('escalar y aportar MANDAN su explicación, que el servidor ahora exige', () => {
+    // LA PANTALLA LA EXIGE —bloquea el botón por debajo de tres caracteres— y
+    // durante un tiempo el servidor la descartaba porque la ruta no declaraba
+    // cuerpo. Quien la escribía creía que la había mandado. Ahora la ruta la
+    // pide, así que un repositorio que no la mande recibiría un 422.
+    const sinComentar = sinComentarios(repositorio);
+    for (const metodo of ['responder', 'escalar', 'apelar', 'retirar']) {
+      const desde = sinComentar.indexOf(`async ${metodo}(`);
+      assert.ok(desde > 0, `no encontré ${metodo}`);
+      const bloque = sinComentar.slice(desde, desde + 400);
+      assert.ok(
+        bloque.includes("JSON.stringify({ note })"),
+        `${metodo} no manda la explicación`,
+      );
+    }
+  });
+
+  it('NO HAY `mios()`: una ruta sin pantalla detrás no se ofrece', () => {
+    // `GET /products/incidents` existe y está probada, pero a un caso se llega
+    // desde el pedido del que habla. Un método de cliente sin pantalla es
+    // código muerto que parece una función; misma regla que el Incremento 6.
+    const bloque = repositorio.slice(
+      repositorio.indexOf('export const ProductIncidentRepository'),
+      repositorio.indexOf('ProductIncidentSellerRepository'),
+    );
+    assert.ok(bloque.length > 100, 'no encontré el repositorio de quien compra');
+    assert.ok(!sinComentarios(bloque).includes('async mios('));
   });
 });
