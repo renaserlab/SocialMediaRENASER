@@ -1768,3 +1768,142 @@ async def test_administracion_no_puede_cerrar_un_paquete_vacio(
     async with sesiones() as db:
         envio = await db.get(ProductShipment, orden_id)
         assert envio.status == estados_de_envio.PREPARANDO
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_quien_empaqueta_puede_corregir_hacia_abajo_antes_de_despachar(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """QUIEN EMPAQUETA SE EQUIVOCA, SACA UNA UNIDAD Y LA VUELVE A METER.
+
+    El conteo de la caja NO es un historial: es una lista de comprobacion que
+    se corrige. Obligar a que cada correccion fuera un hecho inmutable
+    convertiria la lista en un expediente, y dejaria cerrar un paquete con una
+    cuenta que quien lo prepara sabe que esta mal.
+
+    LO QUE SI ES HISTORIAL —cada cambio de ESTADO, con su actor y su motivo—
+    vive en `product_shipment_events`, y ese solo se anade.
+
+    Y BAJAR LA CUENTA VUELVE A CERRAR LA PUERTA: con una unidad de menos, el
+    paquete deja de poder cerrarse.
+    """
+    _, _, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    quien = await duenno_de(sesiones, orden_id)
+
+    async with sesiones() as db:
+        lineas = await pedidos.lineas_de(db, orden_id)
+        linea_id, pedidas = lineas[0].id, int(lineas[0].quantity)
+    assert pedidas >= 2, "el montaje necesita una linea de dos o mas"
+
+    #: Se meten todas y el paquete se puede cerrar.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        envio = await envios.anotar_preparado(
+            db, orden=orden, cantidades={linea_id: pedidas}, actor_id=quien
+        )
+        await db.commit()
+    assert [l.prepared_quantity for l in envio.items] == [pedidas]
+
+    #: SE SACA UNA. Corregir hacia abajo tiene que poder hacerse.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        envio = await envios.anotar_preparado(
+            db, orden=orden, cantidades={linea_id: pedidas - 1}, actor_id=quien
+        )
+        await db.commit()
+    assert [l.prepared_quantity for l in envio.items] == [pedidas - 1], (
+        "no se pudo corregir la cuenta hacia abajo"
+    )
+
+    #: Y CON UNA DE MENOS, EL PAQUETE NO SE CIERRA.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        with pytest.raises(envios.PreparacionIncompleta):
+            await envios.marcar_listo(db, orden=orden, actor_id=quien)
+        await db.rollback()
+
+    #: HASTA CERO, que es «me equivoque de caja entera».
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        envio = await envios.anotar_preparado(
+            db, orden=orden, cantidades={linea_id: 0}, actor_id=quien
+        )
+        await db.commit()
+    assert [l.prepared_quantity for l in envio.items] == [0]
+
+    #: Y AL VOLVER A METERLAS TODAS, se cierra.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.anotar_preparado(
+            db, orden=orden, cantidades={linea_id: pedidas}, actor_id=quien
+        )
+        envio = await envios.marcar_listo(db, orden=orden, actor_id=quien)
+        await db.commit()
+    assert envio.status == estados_de_envio.LISTO
+
+    #: NINGUNA DE LAS CORRECCIONES TOCO EL ALMACEN. Las unidades salen al
+    #: despachar y solo entonces.
+    async with sesiones() as db:
+        salidas = await db.scalar(
+            select(func.count())
+            .select_from(InventoryMovement)
+            .where(InventoryMovement.kind == "dispatch")
+        )
+    assert salidas == 0, "corregir la cuenta movio el almacen"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_despachar_sin_existencias_da_un_error_controlado(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """SI EL ALMACEN NO CUADRA, SE PARA CON SU CODIGO Y NO SE ESTRELLA.
+
+    No deberia pasar —reservar es lo que aparta las unidades—, pero el almacen
+    lo puede tocar administracion con un ajuste, y entre la reserva y el
+    despacho cabe un ajuste mal hecho. Lo que NO puede ocurrir es que salga un
+    500 sin nombre, ni que el envio quede a medias: DESPACHADO sin movimiento
+    de salida seria el peor estado posible, porque el pedido diria que salio y
+    el almacen no se habria enterado.
+    """
+    producto_id, variantes, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    quien = await duenno_de(sesiones, orden_id)
+    await preparar_entero(sesiones, orden_id, quien)
+
+    #: EL ALMACEN SE QUEDA SIN LO COMPROMETIDO, por un ajuste de administracion.
+    async with sesiones() as db:
+        antes = await inventory.de_la_unidad(
+            db, product_id=producto_id, sku=variantes[0].sku
+        )
+    async with sesiones() as db:
+        await db.execute(
+            text(
+                "update public.product_inventory set on_hand = 0, reserved = 0"
+                " where product_id = cast(:p as uuid) and sku = :s"
+            ),
+            {"p": producto_id, "s": variantes[0].sku},
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        with pytest.raises(AppError) as fallo:
+            await envios.despachar(db, orden=orden, actor_id=quien)
+        await db.rollback()
+    assert fallo.value.status_code == 409, fallo.value.status_code
+    assert fallo.value.code == "product_inventory_insufficient"
+
+    #: Y EL ENVIO NO SE QUEDO A MEDIAS: ni despachado ni con movimiento.
+    async with sesiones() as db:
+        envio = await db.get(ProductShipment, orden_id)
+        salidas = await db.scalar(
+            select(func.count())
+            .select_from(InventoryMovement)
+            .where(InventoryMovement.kind == "dispatch")
+        )
+    assert envio.status == estados_de_envio.LISTO, envio.status
+    assert envio.dispatched_at is None
+    assert envio.dispatch_settled_at is None
+    assert salidas == 0, "salio una unidad de un almacen que no la tenia"
+    assert antes.on_hand > 0, "el montaje no llego a apartar nada"
