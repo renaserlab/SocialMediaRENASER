@@ -767,3 +767,118 @@ las pantallas lo dicen, que tambien esta en esta lista.
 - [ ] En español, ingles y portugues: ninguna clave cruda en pantalla.
 - [ ] Atras funciona en las tres y ninguna deja atrapado.
 - [ ] Todas las areas tactiles llegan a 44x44.
+## Productos, Incremento 6 — la entrega (21/09/2026)
+
+**Nada de esta lista esta comprobado.** Son las cosas de la preparacion, el
+despacho y la entrega que ninguna prueba automatica puede ver: el conteo de una
+caja con el teclado delante, el doble toque de verdad sobre un boton que saca
+unidades del almacen, y los dos telefonos a la vez.
+
+**Antes de empezar:** la 0079 tiene que estar aplicada y **la API reiniciada
+despues** —la puerta de esquema guarda el «no» en memoria del proceso—, y tiene
+que haber un pedido **pagado** de verdad. Sin pasarela encendida no hay forma de
+llegar a uno desde la aplicacion: el unico camino honesto para probar esto en
+aparato es sembrar el pedido pagado desde el servidor.
+
+**Dos cuentas distintas y dos telefonos.** La mitad de esta lista no se puede
+comprobar con una sola sesion: quien vende y quien compra tienen que ser dos
+personas en dos aparatos.
+
+### El recorrido de quien vende, en el telefono
+
+- [ ] «Mis productos» lleva a los pedidos de la tienda, y la lista vacia explica
+      que todavia no hay nada que preparar en vez de parecer rota.
+- [ ] Un pedido pagado aparece como pendiente de preparacion.
+- [ ] Los botones de sumar y restar unidades llegan a 44x44 y se aciertan con el
+      pulgar, sin ampliar.
+- [ ] Con el teclado abierto, el conteo de la caja sigue viendose.
+- [ ] Meter y sacar unidades actualiza el avance sin recargar la pantalla entera.
+- [ ] Con una linea a medias, **cerrar el paquete esta apagado** y se lee por que.
+- [ ] Cerrado el paquete, reabrirlo **pide motivo** y no deja seguir sin el.
+- [ ] Despachar **pregunta antes** y el dialogo dice que las unidades saldran del
+      almacen y que no se deshace.
+- [ ] **Doble toque de verdad** sobre «Despachar»: dos pulsaciones rapidas dejan
+      UNA sola salida. Comprobar despues el inventario del producto.
+- [ ] Transportista y referencia se pueden dejar **vacios**, y al volver a entrar
+      la pantalla dice que no se indicaron, **no** «N/A» ni un hueco.
+- [ ] Con transportista escrito, se ve en el seguimiento de quien compro.
+- [ ] Registrar una entrega fallida **pide motivo**.
+- [ ] Reintentar la entrega no devuelve nada al almacen: comprobarlo en la ficha
+      del producto.
+
+### El recorrido de quien compra, en el otro telefono
+
+- [ ] «Mis pedidos» lleva al detalle, y el detalle trae el seguimiento **dentro**,
+      sin un segundo salto ni un parpadeo con el pedido a medio pintar.
+- [ ] El estado del envio cambia en el telefono de quien compro **despues** de
+      que quien vende lo mueva en el suyo, al recargar.
+- [ ] La linea de tiempo mezcla el pago y el envio en orden, y se entiende de que
+      habla cada paso.
+- [ ] **No aparece ninguna fecha de llegada**, ningun enlace de seguimiento,
+      ningun coste de envio y ningun impuesto.
+- [ ] Sin transportista escrito, se dice que quien despacho no lo indico.
+- [ ] Con el paquete despachado, «Confirmo que lo recibi» aparece.
+- [ ] **Con el paquete ya entregado por quien vende, «Confirmo que lo recibi»
+      sigue apareciendo** —hasta que se pulsa— y despues ya no.
+- [ ] El texto bajo ese boton dice que confirmar **no** es dar la conformidad y
+      que no libera ningun pago.
+- [ ] Doble toque sobre confirmar: se guarda una sola vez y no sale error.
+
+### Administracion
+
+- [ ] El acceso esta en la administracion de Productos y la cola se abre.
+- [ ] En la cola **no** hay direccion, ni nombre de quien compro, ni importe, ni
+      el motivo de una entrega fallida.
+- [ ] El tiempo transcurrido se lee como un hecho: **en ningun sitio pone
+      «atrasado»** ni nada parecido.
+- [ ] Un pedido entregado **desaparece** de la cola.
+
+### Los dos telefonos a la vez
+
+- [ ] Quien vende despacha mientras quien compra tiene el pedido abierto: al
+      recargar, quien compra ve el cambio.
+- [ ] Quien vende y quien compra registran la entrega **casi a la vez**: no sale
+      error en ninguno de los dos y el historial guarda **quien la afirmo
+      primero**.
+- [ ] Con la conexion cortada a mitad de un despacho, al recuperarla el pedido
+      **no** aparece despachado dos veces y el inventario cuadra.
+
+### Atras, teclado y lo que solo falla en aparato
+
+- [ ] El Atras de Android funciona en las cinco pantallas y ninguna deja
+      atrapado.
+- [ ] Salir del detalle del pedido y volver no pierde el estado del envio.
+- [ ] Con la aplicacion en segundo plano un rato y de vuelta, no se queda una
+      pantalla en blanco.
+- [ ] Con conexion lenta o intermitente: la pantalla dice que esta cargando, y al
+      fallar ofrece reintentar en vez de quedarse vacia.
+
+### Accesibilidad
+
+- [ ] Con el lector de pantalla: cada estado del envio se **lee**, no se deduce
+      del color. Los botones de sumar y restar se anuncian con lo que hacen.
+- [ ] Con la fuente del sistema al maximo, el conteo de la caja y el avance
+      siguen leyendose y nada se solapa.
+- [ ] Ningun estado se distingue **solo** por color: siempre icono y texto.
+
+### Avisos
+
+- [ ] Al despachar, a quien compro le llega el aviso dentro de la aplicacion.
+- [ ] Al registrar la entrega, igual.
+- [ ] **Limitacion conocida:** un segundo intento de entrega fallido del mismo
+      pedido **no** vuelve a sonar. Es deliberado (ver D108); comprobar que el
+      estado del pedido si lo cuenta entero al abrirlo.
+
+### En las cuatro anchuras y los tres idiomas
+
+- [ ] Las cinco pantallas a 320, 375, 390 y 768 px, sin desbordes.
+- [ ] En claro y en oscuro.
+- [ ] En espanol, ingles y portugues: ninguna clave cruda en pantalla.
+- [ ] Todas las areas tactiles llegan a 44x44.
+
+### Con la 0079 SIN aplicar, que es como se entrega
+
+- [ ] Las pantallas de la entrega dicen que **todavia no esta desplegada**, con
+      esas palabras, y no un error.
+- [ ] El catalogo, las fotografias, el inventario, la bolsa y el pedido siguen
+      funcionando.
