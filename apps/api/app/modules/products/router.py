@@ -213,11 +213,21 @@ def _direccion(fila) -> DireccionRead | None:
     )
 
 
-async def _pedido(db: AsyncSession, orden, *, con_direccion: bool = True) -> PedidoRead:
+async def _pedido(
+    db: AsyncSession,
+    orden,
+    *,
+    con_direccion: bool = True,
+    con_incidencias: bool = True,
+) -> PedidoRead:
     """El pedido entero, para quien lo hizo.
 
     `con_direccion=False` para la cola de conciliacion: cuadrar un cobro no
     necesita saber donde vive nadie.
+
+    `con_incidencias=False` por lo mismo y ademas por lo otro: esa cola devuelve
+    VARIOS pedidos, y leer los casos de cada uno seria una consulta por fila.
+    La ficha de un pedido, que es de uno solo, si los trae.
     """
     lineas = await pedidos.lineas_de(db, orden.id)
     direccion = await pedidos.direccion_de(db, orden.id) if con_direccion else None
@@ -264,9 +274,14 @@ async def _pedido(db: AsyncSession, orden, *, con_direccion: bool = True) -> Ped
         ),
         #: LOS CASOS, POR LO MISMO. Y solo el resumen: lo que hace falta aqui
         #: es saber que hay uno abierto y poder entrar, no releer la disputa.
-        incidents=[
-            _resumen_del_caso(c) for c in await incidencias.del_pedido(db, orden_id=orden.id)
-        ],
+        incidents=(
+            [
+                _resumen_del_caso(c)
+                for c in await incidencias.del_pedido(db, orden_id=orden.id)
+            ]
+            if con_incidencias
+            else []
+        ),
         created_at=orden.created_at,
     )
 
@@ -2597,7 +2612,10 @@ async def pedidos_en_revision(
             reason=orden.review_reason,
         )
     await db.commit()
-    return [await _pedido(db, o, con_direccion=False) for o in ordenes]
+    return [
+        await _pedido(db, o, con_direccion=False, con_incidencias=False)
+        for o in ordenes
+    ]
 
 
 @admin_router.post("/orders/expire", response_model=VencimientoRead)

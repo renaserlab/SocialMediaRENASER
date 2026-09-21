@@ -52,6 +52,7 @@ from tests.test_productos_incidencias import (  # noqa: F401
 )
 from tests.test_productos_pedidos import (  # noqa: F401
     AvisoDeMentira,
+    con_cobro_abierto,
     PasarelaDeMentira,
     bolsa_con,
     crear_pedido,
@@ -514,3 +515,82 @@ async def test_pasado_el_plazo_de_la_politica_la_ruta_contesta_409(
     )
     assert tarde.status_code == 409, tarde.text
     assert tarde.json()["error"]["code"] == "product_incident_report_window_closed"
+
+
+@pytest.mark.asyncio
+async def test_la_cola_de_conciliacion_no_lee_los_casos_de_cada_pedido(
+    cliente, sesiones, venta_encendida, monkeypatch
+) -> None:
+    """UNA CONSULTA POR FILA ES UNA CONSULTA POR FILA.
+
+    Meter el resumen de los casos dentro de `PedidoRead` fue lo correcto para
+    LA FICHA de un pedido, que es una sola. Pero esa misma funcion la usa la
+    cola de conciliacion, que devuelve VARIOS: ahi cada pedido habria traido
+    su propia consulta a `product_incidents`. Cuadrar un cobro no necesita
+    saber si hay una disputa abierta, igual que no necesita saber donde vive
+    nadie —por eso la direccion tampoco viaja—.
+
+    LOS PEDIDOS LLEGAN A LA COLA POR SU CAMINO REAL: un pago que entra despues
+    de que la reserva venciera. Escribir el estado a mano dejaria una fila que
+    el codigo nunca produce.
+
+    SE CUENTAN LAS CONSULTAS A ESA TABLA, no el tiempo: un umbral de
+    milisegundos convierte la prueba en una apuesta sobre la maquina.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import event
+
+    from app.modules.products import pagos, pedidos as _pedidos
+    from app.modules.products.models import PEDIDO_EN_REVISION, ProductOrder
+
+    http, quien = cliente
+
+    #: DOS PEDIDOS, porque con uno solo un N+1 no se distingue de la consulta
+    #: unica que si seria correcta.
+    ids: list[str] = []
+    for _ in range(2):
+        _, _, _, orden_id = await con_cobro_abierto(sesiones, monkeypatch)
+        ids.append(orden_id)
+
+    despues = datetime.now(timezone.utc) + timedelta(hours=2)
+    async with sesiones() as db:
+        await _pedidos.vencer(db, momento=despues)
+    for orden_id in ids:
+        async with sesiones() as db:
+            await pagos.atender_aviso(
+                db, AvisoDeMentira(purchase_id=orden_id, amount_minor=36_000)
+            )
+            await db.commit()
+    async with sesiones() as db:
+        for orden_id in ids:
+            orden = await db.get(ProductOrder, orden_id)
+            assert orden.status == PEDIDO_EN_REVISION, orden.status
+
+    administra = await persona(sesiones, "colahttp")
+    await _rol(sesiones, administra, "admin")
+    quien["uid"] = administra
+
+    consultas: list[str] = []
+    async with sesiones() as db:
+        motor_sincrono = (await db.connection()).sync_engine
+
+    def _apuntar(conn, cursor, sentencia, parametros, contexto, muchas):
+        if "product_incidents" in sentencia:
+            consultas.append(sentencia)
+
+    event.listen(motor_sincrono, "before_cursor_execute", _apuntar)
+    try:
+        respuesta = await http.get(f"{ADMIN}/orders/review")
+    finally:
+        event.remove(motor_sincrono, "before_cursor_execute", _apuntar)
+
+    assert respuesta.status_code == 200, respuesta.text
+    devueltos = {f["id"] for f in respuesta.json()}
+    assert set(ids) <= devueltos, "la cola tiene que traer los dos pedidos"
+    assert consultas == [], (
+        f"{len(consultas)} consultas a product_incidents desde la cola"
+    )
+    #: Y NINGUN CASO EN EL MOLDE: vacio, no ausente.
+    for fila in respuesta.json():
+        assert fila["incidents"] == []
