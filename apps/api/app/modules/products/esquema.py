@@ -78,6 +78,14 @@ _PEDIDOS = (
     "product_order_events",
 )
 
+#: Las tres de la 0079. Se comprueban TODAS: un envio sin su historial no se
+#: podria auditar, y sin sus lineas preparadas no se sabria que lleva la caja.
+_ENVIOS = (
+    "product_shipments",
+    "product_shipment_items",
+    "product_shipment_events",
+)
+
 #: Lo que la 0073 le añade a `product_media`. Se comprueban TODAS: una tabla con
 #: `status` pero sin `content_type` sería una migración aplicada a medias, y el
 #: catálogo firmaría rutas de archivos que nadie midió.
@@ -167,6 +175,11 @@ async def hay_pedidos(db: AsyncSession) -> bool:
     return await _hay(db, "pedidos", _PEDIDOS)
 
 
+async def hay_envios(db: AsyncSession) -> bool:
+    """Si la 0079 esta aplicada: envio, lineas preparadas e historial."""
+    return await _hay(db, "envios", _ENVIOS)
+
+
 async def exigir_dominio(db: AsyncSession) -> None:
     if not await hay_dominio(db):
         raise ServiceUnavailableError(
@@ -231,6 +244,14 @@ async def exigir_pedidos(db: AsyncSession) -> None:
         )
 
 
+async def exigir_envios(db: AsyncSession) -> None:
+    if not await hay_envios(db):
+        raise ServiceUnavailableError(
+            "La entrega de productos todavia no esta disponible.",
+            code="product_shipments_not_available",
+        )
+
+
 def olvidar() -> None:
     """Tira la caché. Para las pruebas, que montan y tiran esquemas."""
     _cache.clear()
@@ -240,6 +261,7 @@ __all__ = [
     "exigir_admision",
     "exigir_carrito",
     "exigir_dominio",
+    "exigir_envios",
     "exigir_fotografias",
     "exigir_guardados",
     "exigir_inventario",
@@ -248,6 +270,7 @@ __all__ = [
     "hay_admision",
     "hay_carrito",
     "hay_dominio",
+    "hay_envios",
     "hay_fotografias",
     "hay_guardados",
     "hay_inventario",

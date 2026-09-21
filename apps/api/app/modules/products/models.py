@@ -1,4 +1,4 @@
-"""Las tablas de Productos (migraciones 0070, 0071 y 0072).
+"""Las tablas de Productos (migraciones 0070 a 0079).
 
 LO QUE DECLARA EL ORM TIENE QUE DECLARARLO TAMBIÉN LA BASE, y al revés. Las
 pruebas montan SQLite desde `Base.metadata`, así que un CHECK o un índice
@@ -1501,6 +1501,295 @@ class ProductOrderEvent(Base):
     )
 
 
+# --------------------------------------------------------------------------- #
+# El envio del pedido pagado (0079)
+# --------------------------------------------------------------------------- #
+#: Pedido pagado que todavia no ha tocado nadie. NO ES UNA FILA: es lo que se
+#: contesta mientras no exista. Ver `envios.del_pedido`.
+ENVIO_PENDIENTE = "PENDING"
+ENVIO_PREPARANDO = "PREPARING"
+ENVIO_LISTO = "READY"
+ENVIO_DESPACHADO = "DISPATCHED"
+ENVIO_ENTREGADO = "DELIVERED"
+ENVIO_FALLIDO = "DELIVERY_FAILED"
+ENVIO_CANCELADO = "CANCELLED"
+
+ESTADOS_DE_ENVIO = (
+    ENVIO_PENDIENTE,
+    ENVIO_PREPARANDO,
+    ENVIO_LISTO,
+    ENVIO_DESPACHADO,
+    ENVIO_ENTREGADO,
+    ENVIO_FALLIDO,
+    ENVIO_CANCELADO,
+)
+
+#: Los que todavia apartan unidades: no han salido del almacen.
+ENVIO_ANTES_DE_SALIR = (ENVIO_PENDIENTE, ENVIO_PREPARANDO, ENVIO_LISTO)
+
+#: QUIEN AFIRMA QUE LLEGO. Administracion no aparece: no tiene como saberlo, y
+#: escribirlo seria fabricar una entrega.
+ENTREGA_LA_DICE_EL_PROVEEDOR = "seller"
+ENTREGA_LA_DICE_EL_COMPRADOR = "buyer"
+ORIGENES_DE_LA_ENTREGA = (
+    ENTREGA_LA_DICE_EL_PROVEEDOR,
+    ENTREGA_LA_DICE_EL_COMPRADOR,
+)
+
+#: Lo mismo que una linea de pedido, y por la misma razon.
+MAXIMO_PREPARADO = 1000
+
+
+class ProductShipment(Base):
+    """El envio de UN pedido. UN PEDIDO, UN PAQUETE.
+
+    NO HAY ENVIOS PARCIALES. Repartir un pedido en dos paquetes obliga a
+    decidir quien paga el segundo porte y que pasa con lo que no salio, y
+    ninguna politica publicada lo dice: un paquete sale entero o no sale.
+
+    LA FILA NACE TARDE. No se crea al cobrar, sino con la primera accion sobre
+    el envio; un pedido pagado sin fila se lee como `PENDING`, que es
+    exactamente lo que es.
+    """
+
+    __tablename__ = "product_shipments"
+
+    order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_orders.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+    status: Mapped[str] = mapped_column(Text, default=ENVIO_PENDIENTE)
+
+    #: TEXTO LIBRE Y OPCIONAL, mientras la empresa no elija transportista.
+    #: NULO ES «NO LO DIJERON», nunca «no hay» ni «N/A».
+    carrier_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tracking_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    prepared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ready_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    delivered_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: LA CONFIRMACION DE QUIEN COMPRA, APARTE. Y NO ES CONFORMIDAD: confirmar
+    #: que llego no es decir que esta bien. Lo segundo libera dinero y es del
+    #: Incremento 9.
+    buyer_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: LAS DOS MARCAS QUE HACEN QUE EL INVENTARIO SE TOQUE UNA SOLA VEZ, y son
+    #: excluyentes: un envio o sale o se suelta.
+    dispatch_settled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    release_settled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('PENDING', 'PREPARING', 'READY', 'DISPATCHED',"
+            " 'DELIVERED', 'DELIVERY_FAILED', 'CANCELLED')",
+            name="product_shipments_estado",
+        ),
+        CheckConstraint(
+            "carrier_name is null or length(trim(carrier_name)) between 1 and 120",
+            name="product_shipments_transportista",
+        ),
+        CheckConstraint(
+            "tracking_reference is null"
+            " or length(trim(tracking_reference)) between 1 and 120",
+            name="product_shipments_referencia",
+        ),
+        CheckConstraint(
+            "delivered_source is null or delivered_source in ('seller', 'buyer')",
+            name="product_shipments_origen_de_la_entrega",
+        ),
+        CheckConstraint(
+            "failure_reason is null"
+            " or length(trim(failure_reason)) between 3 and 500",
+            name="product_shipments_motivo_del_fallo",
+        ),
+        CheckConstraint(
+            "cancellation_reason is null"
+            " or length(trim(cancellation_reason)) between 3 and 500",
+            name="product_shipments_motivo_de_la_cancelacion",
+        ),
+        #: UN ENVIO QUE SALIO TIENE CON QUE DEMOSTRARLO.
+        CheckConstraint(
+            "status not in ('DISPATCHED', 'DELIVERED', 'DELIVERY_FAILED')"
+            " or (dispatched_at is not null and dispatch_settled_at is not null)",
+            name="product_shipments_despachado_con_salida",
+        ),
+        CheckConstraint(
+            "status <> 'DELIVERED' or delivered_at is not null",
+            name="product_shipments_entregado_con_fecha",
+        ),
+        #: UNA ENTREGA SIEMPRE DICE QUIEN LA AFIRMA.
+        CheckConstraint(
+            "delivered_at is null or delivered_source is not null",
+            name="product_shipments_entrega_con_origen",
+        ),
+        CheckConstraint(
+            "status <> 'DELIVERY_FAILED'"
+            " or (failed_at is not null and failure_reason is not null)",
+            name="product_shipments_fallo_con_motivo",
+        ),
+        CheckConstraint(
+            "status <> 'CANCELLED' or (cancelled_at is not null"
+            " and cancellation_reason is not null"
+            " and release_settled_at is not null)",
+            name="product_shipments_cancelado_completo",
+        ),
+        #: NO SE PUEDE HABER SOLTADO Y CONSUMIDO LO MISMO.
+        CheckConstraint(
+            "dispatch_settled_at is null or release_settled_at is null",
+            name="product_shipments_o_sale_o_se_suelta",
+        ),
+        CheckConstraint(
+            "dispatch_settled_at is null or dispatched_at is not null",
+            name="product_shipments_salida_con_fecha",
+        ),
+        CheckConstraint(
+            "release_settled_at is null or status = 'CANCELLED'",
+            name="product_shipments_soltado_esta_cancelado",
+        ),
+        Index(
+            "product_shipments_sin_cerrar",
+            "created_at",
+            "order_id",
+            postgresql_where=text("status not in ('DELIVERED', 'CANCELLED')"),
+            sqlite_where=text("status not in ('DELIVERED', 'CANCELLED')"),
+        ),
+        Index(
+            "product_shipments_antes_de_salir",
+            "status",
+            "order_id",
+            postgresql_where=text(
+                "dispatch_settled_at is null and release_settled_at is null"
+            ),
+            sqlite_where=text(
+                "dispatch_settled_at is null and release_settled_at is null"
+            ),
+        ),
+    )
+
+
+class ProductShipmentItem(Base):
+    """Cuantas unidades de una linea se han metido ya en la caja.
+
+    NO ES UN HISTORIAL Y NO PRETENDE SERLO: es la lista de comprobacion de
+    quien empaqueta, y se corrige tantas veces como haga falta. Lo que si es
+    historial esta en `ProductShipmentEvent`, y ese solo se anade.
+
+    VIVE APARTE DE `ProductOrderItem` PORQUE ESA TABLA ES INMUTABLE: la 0078 le
+    puso un disparador que rechaza cualquier `update`.
+    """
+
+    __tablename__ = "product_shipment_items"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    shipment_order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_shipments.order_id", ondelete="CASCADE"),
+    )
+    order_item_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_order_items.id", ondelete="RESTRICT"),
+    )
+    #: CERO ES LEGITIMO: es «empezado y todavia ninguna». Que no pase de lo
+    #: comprado lo comprueba el servidor, que tiene delante la linea del pedido.
+    prepared_quantity: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"prepared_quantity >= 0 and prepared_quantity <= {MAXIMO_PREPARADO}",
+            name="product_shipment_items_cantidad",
+        ),
+        UniqueConstraint(
+            "shipment_order_id",
+            "order_item_id",
+            name="product_shipment_items_una_linea",
+        ),
+        Index(
+            "product_shipment_items_del_envio",
+            "shipment_order_id",
+            "order_item_id",
+        ),
+    )
+
+
+class ProductShipmentEvent(Base):
+    """Un cambio de estado del envio. SOLO SE ANADE, y sin datos personales."""
+
+    __tablename__ = "product_shipment_events"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    shipment_order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_shipments.order_id", ondelete="RESTRICT"),
+    )
+    from_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_status: Mapped[str] = mapped_column(Text)
+    #: Sin clave ajena: quien movio un envio es un hecho del pasado.
+    actor_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    actor_role: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "actor_role in ('buyer', 'seller', 'admin', 'system')",
+            name="product_shipment_events_rol",
+        ),
+        CheckConstraint(
+            "reason is null or length(trim(reason)) between 3 and 500",
+            name="product_shipment_events_motivo",
+        ),
+        Index(
+            "product_shipment_events_del_envio",
+            "shipment_order_id",
+            "created_at",
+            "id",
+        ),
+    )
+
 
 __all__ = [
     "ACTORES_DE_INVENTARIO",
@@ -1518,7 +1807,18 @@ __all__ = [
     "DIMENSIONES",
     "DOCUMENTOS",
     "ENTRADA",
+    "ENTREGA_LA_DICE_EL_COMPRADOR",
+    "ENTREGA_LA_DICE_EL_PROVEEDOR",
     "ENVIADO",
+    "ENVIO_ANTES_DE_SALIR",
+    "ENVIO_CANCELADO",
+    "ENVIO_DESPACHADO",
+    "ENVIO_ENTREGADO",
+    "ENVIO_FALLIDO",
+    "ENVIO_LISTO",
+    "ENVIO_PENDIENTE",
+    "ENVIO_PREPARANDO",
+    "ESTADOS_DE_ENVIO",
     "ESTADOS_DE_FOTO",
     "ESTADOS_DE_PEDIDO",
     "ESTADOS_DE_POLITICA",
@@ -1539,10 +1839,12 @@ __all__ = [
     "MAXIMO_DEL_MOVIMIENTO",
     "MAXIMO_DE_FOTOS",
     "MAXIMO_POR_LINEA",
+    "MAXIMO_PREPARADO",
     "MAXIMO_SEGURO_EN_JS",
     "MOVIMIENTOS",
     "MUESTRA_PEDIDA",
     "OBSERVACION",
+    "ORIGENES_DE_LA_ENTREGA",
     "PEDIDO_CANCELADO",
     "PEDIDO_EN_CURSO",
     "PEDIDO_EN_REVISION",
@@ -1594,6 +1896,9 @@ __all__ = [
     "ProductOrderItem",
     "ProductPolicy",
     "ProductSeller",
+    "ProductShipment",
+    "ProductShipmentEvent",
+    "ProductShipmentItem",
     "ProductVariant",
     "ProductVersion",
     "SavedProduct",
