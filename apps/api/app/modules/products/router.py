@@ -10,8 +10,15 @@ producto y el rol de quien llama, y en las de administración el ROL VA ANTES DE
 LA PUERTA DE ESQUEMA: si fuera al revés, una cuenta sin permisos distinguiría un
 503 de un 403 y averiguaría qué migraciones están aplicadas en producción.
 
-Y NINGUNA RUTA DE COMPRA. No hay carrito, ni checkout, ni pedido: eso es de
-incrementos posteriores, y una ruta vacía que devolviera 501 ya sería una promesa.
+HAY RUTAS DE COMPRA Y NO HAY RUTA DE COBRO. Carrito, checkout, pedido, reserva y
+envío existen; lo que no existe es mover dinero de verdad, y por eso el checkout
+contesta 503 con la lista de lo que falta —cinco banderas, una clave de la
+pasarela y una política publicada— en vez de fingir que la compra no está. Un
+501 vacío ya sería una promesa; un 503 que dice qué falta es la verdad.
+
+Y NINGUNA RUTA FABRICA UNA ENTREGA. Administración puede reabrir un paquete y
+registrar que la entrega falló, pero no puede escribir «entregado»: no tiene
+cómo saberlo, y escribirlo arrancaría plazos de posventa que nadie ha cumplido.
 """
 
 from __future__ import annotations
@@ -24,6 +31,8 @@ from app.core.exceptions import NotFoundError, ServiceUnavailableError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.gobernanza import auditoria
 from app.modules.products import applications, carts, catalog, esquema, evaluations
+from app.modules.products import envios
+from app.modules.products import estados_de_envio
 from app.modules.products import inventory as almacen
 from app.modules.products import media as fotos
 from app.modules.products import pagos as cobros
@@ -48,6 +57,14 @@ from app.modules.products.models import (
 )
 from app.modules.products.schemas import (
     CheckoutProductoRead,
+    DespacharRequest,
+    EnvioPendienteRead,
+    EnvioRead,
+    LineaPreparadaRead,
+    MotivoRequest,
+    PedidoDelProveedorConEnvio,
+    PrepararRequest,
+    TransicionDeEnvioRequest,
     CondicionesRead,
     DireccionRead,
     EventoDelPedido,
@@ -224,7 +241,76 @@ async def _pedido(db: AsyncSession, orden, *, con_direccion: bool = True) -> Ped
             )
             for e in historial
         ],
+        #: EL SEGUIMIENTO VIAJA CON EL PEDIDO. Quien compra ve su paquete en la
+        #: misma ficha, y `available_transitions` se calcula para `buyer`: lo
+        #: unico que puede hacer es confirmar que lo recibio.
+        shipment=await _envio(
+            db, await envios.del_pedido(db, orden=orden), actor="buyer"
+        ),
         created_at=orden.created_at,
+    )
+
+
+async def _envio(
+    db: AsyncSession,
+    envio: envios.Envio | None,
+    *,
+    actor: str | None = None,
+    con_historial: bool = True,
+) -> EnvioRead | None:
+    """El envío tal como lo lee una pantalla.
+
+    `actor` decide qué botones puede pintar el cliente, y NO decide nada más:
+    quien decide de verdad es el servidor con la fila bloqueada delante. Una
+    lista vacía aquí no es una puerta; es que no hay nada que ofrecer.
+    """
+    if envio is None:
+        return None
+    historial = (
+        await envios.historial(db, orden_id=envio.order_id) if con_historial else []
+    )
+    return EnvioRead(
+        order_id=envio.order_id,
+        status=envio.status,
+        exists=envio.existe,
+        carrier_name=envio.carrier_name,
+        tracking_reference=envio.tracking_reference,
+        prepared_at=envio.prepared_at,
+        ready_at=envio.ready_at,
+        dispatched_at=envio.dispatched_at,
+        delivered_at=envio.delivered_at,
+        failed_at=envio.failed_at,
+        cancelled_at=envio.cancelled_at,
+        delivered_source=envio.delivered_source,
+        buyer_confirmed_at=envio.buyer_confirmed_at,
+        failure_reason=envio.failure_reason,
+        cancellation_reason=envio.cancellation_reason,
+        items=[
+            LineaPreparadaRead(
+                order_item_id=l.order_item_id,
+                sku=l.sku,
+                name=l.name,
+                variant_name=l.variant_name,
+                ordered_quantity=l.ordered_quantity,
+                prepared_quantity=l.prepared_quantity,
+            )
+            for l in envio.items
+        ],
+        history=[
+            EventoDelPedido(
+                from_status=e.from_status,
+                to_status=e.to_status,
+                actor_role=e.actor_role,
+                reason=e.reason,
+                created_at=e.created_at,
+            )
+            for e in historial
+        ],
+        available_transitions=(
+            list(estados_de_envio.siguientes(envio.status, actor))
+            if actor is not None
+            else []
+        ),
     )
 
 
@@ -1158,25 +1244,70 @@ async def cancelar_el_pedido(
     return await _pedido(db, orden)
 
 
+@router.post("/orders/{order_id}/shipment/confirm-receipt", response_model=PedidoRead)
+async def confirmar_que_llego(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoRead:
+    """Confirmo que recibi mi pedido. NO ES DAR LA CONFORMIDAD.
+
+    LA DIFERENCIA IMPORTA Y NO ES SUTIL. Confirmar que llego es un hecho de
+    logistica; dar la conformidad es decir que el producto esta bien, y en el
+    blueprint eso LIBERA EL DINERO al proveedor. Lo segundo no existe todavia:
+    no hay transferencias, ni comision, ni plazo aprobado. Aqui no se mueve ni
+    un centimo, y la pantalla lo dice con palabras.
+
+    Y NO PIERDE NINGUN DERECHO. Los plazos para reportar una incidencia son del
+    Incremento 7 y salen de la politica publicada; confirmar que algo llego no
+    renuncia a nada, porque no hay nada a lo que renunciar todavia.
+
+    IDEMPOTENTE. Confirmarlo dos veces no cambia nada ni vuelve a escribir en el
+    historial: el hecho ya estaba anotado.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden = await envios.pedido_del_comprador(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    await envios.registrar_entrega(
+        db,
+        orden=orden,
+        actor_id=current_user.id,
+        actor_rol=estados_de_envio.COMPRADOR,
+    )
+    #: SIN AVISO. Contarle a quien acaba de escribirlo que su pedido figura
+    #: entregado es contarle lo que acaba de hacer.
+    await db.commit()
+    return await _pedido(db, orden)
+
+
 # --------------------------------------------------------------------------- #
-# Lo del proveedor
+# Lo del proveedor: los pedidos de mi tienda y su envio
+#
+# TODO LO DE AQUI ES DE UN PEDIDO PAGADO Y MIO. `envios.pedido_del_proveedor`
+# comprueba las dos cosas a la vez y contesta 404 cuando falla cualquiera de
+# ellas: decir «existe pero no es tuyo» contaria que alguien compro eso, y
+# distinguir «no es tuyo» de «no esta pagado» contaria cuantos intentos hubo.
 # --------------------------------------------------------------------------- #
-@router.get("/seller/orders", response_model=list[PedidoDelProveedor])
+@router.get("/seller/orders", response_model=list[PedidoDelProveedorConEnvio])
 async def pedidos_del_proveedor(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[PedidoDelProveedor]:
+) -> list[PedidoDelProveedorConEnvio]:
     """Los pedidos PAGADOS de mi tienda, y solo los mios.
 
     NI COBROS NI COMPRADORES. Lo que hace falta para preparar un paquete es que
     mandar y a donde; con quien pago y con que tarjeta no se prepara nada.
+
+    EL ENVIO VIENE SIN HISTORIAL. En una lista no se lee el historial de nadie,
+    y traerlo serian tantas consultas como pedidos.
     """
     vendedor = await permisos.exigir_vendedor_activo(db, current_user.id)
     ordenes = await pedidos.del_proveedor(db, seller_id=vendedor.id)
-    salida: list[PedidoDelProveedor] = []
+    salida: list[PedidoDelProveedorConEnvio] = []
     for orden in ordenes:
         salida.append(
-            PedidoDelProveedor(
+            PedidoDelProveedorConEnvio(
                 id=orden.id,
                 status=orden.status,
                 currency=orden.currency,
@@ -1186,28 +1317,23 @@ async def pedidos_del_proveedor(
                 items=[
                     _linea_del_pedido(l) for l in await pedidos.lineas_de(db, orden.id)
                 ],
+                shipment=await _envio(
+                    db,
+                    await envios.del_pedido(db, orden=orden),
+                    actor="seller",
+                    con_historial=False,
+                ),
                 created_at=orden.created_at,
             )
         )
     return salida
 
 
-@router.get("/seller/orders/{order_id}", response_model=PedidoDelProveedor)
-async def pedido_del_proveedor(
-    order_id: str,
-    current_user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> PedidoDelProveedor:
-    """Uno de mis pedidos pagados. EL DE OTRO PROVEEDOR ES UN 404."""
-    ensure_uuid(order_id, "Pedido no encontrado.")
-    vendedor = await permisos.exigir_vendedor_activo(db, current_user.id)
-    await esquema.exigir_pedidos(db)
-    orden = await db.get(ProductOrder, order_id)
-    #: LA DIRECCION SOLO CUANDO HAY QUE ATENDERLO. Un pedido sin pagar no le
-    #: ensena a nadie donde vive quien lo intento.
-    if orden is None or orden.seller_id != vendedor.id or orden.status != PEDIDO_PAGADO:
-        raise NotFoundError("Pedido no encontrado.", code="product_order_not_found")
-    return PedidoDelProveedor(
+async def _del_proveedor(
+    db: AsyncSession, *, orden, con_historial: bool = True
+) -> PedidoDelProveedorConEnvio:
+    """El pedido como lo ve quien tiene que preparar el paquete."""
+    return PedidoDelProveedorConEnvio(
         id=orden.id,
         status=orden.status,
         currency=orden.currency,
@@ -1215,8 +1341,272 @@ async def pedido_del_proveedor(
         paid_at=orden.paid_at,
         address=_direccion(await pedidos.direccion_de(db, orden.id)),
         items=[_linea_del_pedido(l) for l in await pedidos.lineas_de(db, orden.id)],
+        shipment=await _envio(
+            db,
+            await envios.del_pedido(db, orden=orden),
+            actor="seller",
+            con_historial=con_historial,
+        ),
         created_at=orden.created_at,
     )
+
+
+@router.get("/seller/orders/{order_id}", response_model=PedidoDelProveedorConEnvio)
+async def pedido_del_proveedor(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """Uno de mis pedidos pagados, con lo que hace falta para prepararlo.
+
+    EL DE OTRO PROVEEDOR ES UN 404, y el que no esta pagado tambien: un pedido
+    sin pagar no le ensena a nadie donde vive quien lo intento.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/prepare",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def preparar_el_paquete(
+    order_id: str,
+    cuerpo: PrepararRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """Apunta cuantas unidades de cada linea llevas metidas en la caja.
+
+    ES UNA LISTA DE COMPROBACION Y SE CORRIGE. Quien empaqueta saca una unidad
+    y la vuelve a meter; obligar a que cada correccion fuera un hecho inmutable
+    convertiria la lista en un expediente. Lo que si es historial —cada cambio
+    de ESTADO, con actor y motivo— no se puede reescribir.
+
+    ENTRAR AQUI ARRANCA LA PREPARACION: la primera anotacion mueve el envio de
+    pendiente a preparando, porque eso es exactamente lo que acaba de pasar.
+
+    NO MUEVE INVENTARIO. Contar lo que va en la caja no saca nada del almacen:
+    eso pasa al despachar, y solo entonces.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    for linea in cuerpo.items:
+        ensure_uuid(linea.order_item_id, "Linea no encontrada.")
+    await envios.anotar_preparado(
+        db,
+        orden=orden,
+        cantidades={l.order_item_id: l.prepared_quantity for l in cuerpo.items},
+        actor_id=current_user.id,
+    )
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/ready",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def cerrar_el_paquete(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """Cierra el paquete. EXIGE QUE ESTE TODO DENTRO.
+
+    UN PAQUETE SALE ENTERO O NO SALE. Cerrarlo a medias obliga a decidir que
+    pasa con lo que se quedo fuera —segundo envio, devolucion parcial, quien
+    paga el porte— y ninguna politica publicada lo dice. El 409 lleva en los
+    detalles que linea falta y cuanto.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    await envios.marcar_listo(db, orden=orden, actor_id=current_user.id)
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/reopen",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def reabrir_el_paquete(
+    order_id: str,
+    cuerpo: MotivoRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """Vuelve a abrir un paquete cerrado. SOLO ANTES DE QUE SALGA, y con motivo.
+
+    Es el unico paso atras de esta maquina, y se permite porque nada ha salido
+    del almacen y nada se ha consumido. Prohibirlo dejaria un paquete atascado
+    en «listo» cuando se rompe algo al embalar, y un estado atascado se acaba
+    resolviendo mintiendo en el siguiente.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    await envios.reabrir(
+        db,
+        orden=orden,
+        actor_id=current_user.id,
+        actor_rol=estados_de_envio.PROVEEDOR,
+        motivo=cuerpo.reason,
+    )
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/dispatch",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def despachar_el_paquete(
+    order_id: str,
+    cuerpo: DespacharRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """Saca el paquete del almacen. AQUI SE CONSUME LA RESERVA, UNA SOLA VEZ.
+
+    ES EL UNICO SITIO DE PRODUCTOS DONDE SALEN UNIDADES. Ni el cobro ni la
+    entrega tocan el almacen: al cobrar las unidades siguen en la caja, y al
+    entregar ya salieron hace rato.
+
+    REPETIR LA LLAMADA NO DESPACHA DOS VECES. Un envio ya despachado se
+    devuelve tal cual, sin tocar el inventario y sin pisar el transportista que
+    ya tenia: un POST que se perdio por el camino y se reintenta no es un
+    despacho nuevo.
+
+    Y SOLO EL PROVEEDOR. Administracion no puede despachar: es el unico que
+    puede afirmar que la caja salio de su almacen.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    antes = await envios.del_pedido(db, orden=orden)
+    envio = await envios.despachar(
+        db,
+        orden=orden,
+        actor_id=current_user.id,
+        carrier_name=cuerpo.carrier_name,
+        tracking_reference=cuerpo.tracking_reference,
+    )
+    #: EL AVISO SOLO CUANDO ACABA DE PASAR. Un reintento no vuelve a avisar, y
+    #: se encola DENTRO de la transaccion: asi no anuncia algo que no llego a
+    #: ocurrir.
+    if antes is not None and antes.status != envio.status:
+        await envios.avisar(db, orden=orden, estado=envio.status)
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/delivered",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def registrar_la_entrega(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """Deja constancia de que el paquete llego, segun quien vende.
+
+    SE GUARDA QUIEN LO AFIRMA. El blueprint contempla que el transportista
+    marque la entrega y quien compro la niegue; sin saber quien lo dijo, esa
+    discusion —que es del Incremento 7— no se puede tener.
+
+    Y SE AVISA A QUIEN COMPRO. No para darle una buena noticia: para que pueda
+    desmentirlo si no es verdad.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    antes = await envios.del_pedido(db, orden=orden)
+    envio = await envios.registrar_entrega(
+        db,
+        orden=orden,
+        actor_id=current_user.id,
+        actor_rol=estados_de_envio.PROVEEDOR,
+    )
+    if antes is not None and antes.status != envio.status:
+        await envios.avisar(db, orden=orden, estado=envio.status)
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/failed",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def registrar_el_fallo(
+    order_id: str,
+    cuerpo: MotivoRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """El intento de entrega no salio. CON MOTIVO, siempre.
+
+    EL PAQUETE NO VUELVE AL ALMACEN. Una entrega fallida no repone nada: donde
+    esta esa unidad y que se hace con ella es inspeccion de posventa, y es de
+    los Incrementos 7 a 9. Reponerla aqui la pondria a la venta estando en un
+    camion.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    envio = await envios.registrar_fallo(
+        db,
+        orden=orden,
+        actor_id=current_user.id,
+        actor_rol=estados_de_envio.PROVEEDOR,
+        motivo=cuerpo.reason,
+    )
+    await envios.avisar(db, orden=orden, estado=envio.status)
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
+
+
+@router.post(
+    "/seller/orders/{order_id}/shipment/retry",
+    response_model=PedidoDelProveedorConEnvio,
+)
+async def reintentar_la_entrega(
+    order_id: str,
+    cuerpo: MotivoRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PedidoDelProveedorConEnvio:
+    """El transportista vuelve a intentarlo. NO ES MARCHA ATRAS.
+
+    El paquete no vuelve al almacen y el inventario no se toca: sigue fuera. Es
+    un intento nuevo, y lleva motivo para que se pueda leer por que fallo el
+    anterior.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden, _ = await envios.pedido_del_proveedor(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    await envios.reintentar_entrega(
+        db,
+        orden=orden,
+        actor_id=current_user.id,
+        actor_rol=estados_de_envio.PROVEEDOR,
+        motivo=cuerpo.reason,
+    )
+    await db.commit()
+    return await _del_proveedor(db, orden=orden)
 
 
 # --------------------------------------------------------------------------- #
@@ -1766,6 +2156,92 @@ async def vencer_pedidos(
     await permisos.exigir_publicador(db, current_user.id)
     await esquema.exigir_pedidos(db)
     return VencimientoRead(expired=await pedidos.vencer(db))
+
+
+@admin_router.get("/shipments", response_model=list[EnvioPendienteRead])
+async def envios_pendientes(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[EnvioPendienteRead]:
+    """Los pedidos pagados cuyo paquete todavia no ha llegado.
+
+    LOS QUE MAS LLEVAN ESPERANDO, PRIMERO. Y NO SE MARCA NINGUNO COMO
+    «ATRASADO»: ninguna politica publicada fija un plazo de despacho, y
+    llamarle tarde a algo sin plazo es inventarse el plazo. Lo que se da es el
+    tiempo transcurrido, que es un hecho; quien mira decide.
+
+    SIN NINGUN DATO PERSONAL. Ni direccion, ni nombre de quien compro, ni
+    importe: para saber si un paquete esta parado hace falta de quien es, en
+    que estado esta y cuanto lleva asi. Por eso esta cola NO usa el molde del
+    pedido, y por eso —a diferencia de la de conciliacion— la puede leer
+    curaduria sin que eso reparta domicilios.
+
+    INCLUYE LOS QUE NADIE HA TOCADO. Son precisamente los mas importantes de
+    esta lista, y un `join` normal los dejaria fuera.
+    """
+    await permisos.exigir_evaluador(db, current_user.id)
+    await esquema.exigir_pedidos(db)
+    return [
+        EnvioPendienteRead(**fila.__dict__)
+        for fila in await envios.para_administracion(db)
+    ]
+
+
+@admin_router.post("/shipments/{order_id}/transition", response_model=EnvioRead)
+async def intervenir_el_envio(
+    order_id: str,
+    cuerpo: TransicionDeEnvioRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EnvioRead:
+    """Mueve un envio parado. SIEMPRE CON MOTIVO Y SIEMPRE CON RASTRO.
+
+    LO QUE ADMINISTRACION PUEDE HACER AQUI ES ESTRECHO A PROPOSITO:
+
+      * reabrir un paquete cerrado que no ha salido;
+      * registrar que la entrega fallo —eso se lo cuenta el transportista—;
+      * registrar que el transportista vuelve a intentarlo.
+
+    LO QUE NO PUEDE, Y LO IMPIDE LA MAQUINA:
+
+      * DESPACHAR. Sacar unidades del almacen es del proveedor: es el unico que
+        puede afirmar que la caja salio.
+      * ESCRIBIR «ENTREGADO». No tiene como saberlo, y fabricar una entrega
+        arrancaria plazos de posventa que nadie ha cumplido.
+      * CANCELAR un pedido ya pagado. El salto existe en la maquina, pero
+        devolver el dinero exige una politica que nadie ha publicado: el
+        servicio lo para con su propio codigo y dice que falta.
+
+    Y MODERACION NO ENTRA. Un envio mueve inventario, y mover inventario no es
+    moderar: la puerta es `admin`, la misma que ya guarda el ajuste de
+    existencias.
+    """
+    await envios.exigir_interventor(db, current_user.id)
+    await esquema.exigir_pedidos(db)
+    await esquema.exigir_envios(db)
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden = await db.get(ProductOrder, order_id)
+    if orden is None:
+        raise NotFoundError("Pedido no encontrado.", code="product_order_not_found")
+
+    if cuerpo.to == estados_de_envio.CANCELADO:
+        #: SE PARA ANTES DE TOCAR NADA. `envios.cancelar` explica por que.
+        await envios.cancelar(
+            db, orden=orden, actor_id=current_user.id, motivo=cuerpo.reason
+        )
+
+    envio = await envios.mover(
+        db,
+        orden=orden,
+        hasta=cuerpo.to,
+        actor_id=current_user.id,
+        actor_rol=estados_de_envio.ADMINISTRACION,
+        motivo=cuerpo.reason,
+    )
+    if envio.status == estados_de_envio.ENTREGA_FALLIDA:
+        await envios.avisar(db, orden=orden, estado=envio.status)
+    await db.commit()
+    return await _envio(db, envio, actor=estados_de_envio.ADMINISTRACION)
 
 
 @admin_router.post("/{product_id}/transition", response_model=ProductoDelProveedor)

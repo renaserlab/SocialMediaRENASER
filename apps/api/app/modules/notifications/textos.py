@@ -172,6 +172,30 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("Organizer replied", "Someone replied to your review."),
         "pt": ("Resposta do organizador", "Responderam à sua avaliação."),
     },
+    # ------------------------------------------------------------------ #
+    # Envíos de Productos
+    #
+    # NINGUNO DICE CUÁNDO LLEGARÁ. No hay transportista elegido, ni cobertura,
+    # ni plazo aprobado: una fecha aquí sería una promesa que nadie ha hecho y
+    # que se lee como un compromiso. Dicen qué pasó y dónde mirarlo.
+    # ------------------------------------------------------------------ #
+    "product_shipment_dispatched": {
+        "es": ("Tu pedido salió", "Abre el pedido para ver el seguimiento."),
+        "en": ("Your order shipped", "Open the order to see its tracking."),
+        "pt": ("Seu pedido saiu", "Abra o pedido para ver o acompanhamento."),
+    },
+    # SE AVISA AUNQUE LO HAYA DICHO QUIEN VENDE, y es justo por eso: es la
+    # única forma de que quien compró pueda desmentirlo si no es verdad.
+    "product_shipment_delivered": {
+        "es": ("Tu pedido figura entregado", "Ábrelo si no lo has recibido."),
+        "en": ("Your order is marked delivered", "Open it if it has not arrived."),
+        "pt": ("Seu pedido consta como entregue", "Abra-o se não o recebeu."),
+    },
+    "product_shipment_failed": {
+        "es": ("No se pudo entregar", "Abre el pedido para ver el motivo."),
+        "en": ("Delivery did not succeed", "Open the order to see why."),
+        "pt": ("Não foi possível entregar", "Abra o pedido para ver o motivo."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

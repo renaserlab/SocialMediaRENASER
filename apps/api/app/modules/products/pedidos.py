@@ -155,10 +155,13 @@ def ahora() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _comparable(fecha: datetime | None, referencia: datetime) -> datetime | None:
+def comparable(fecha: datetime | None, referencia: datetime) -> datetime | None:
     """La fecha con zona. SQLite las devuelve sin ella aunque la columna la
     declare, y comparar una con zona contra otra sin ella revienta en medio de
-    una compra."""
+    una compra.
+
+    PÚBLICA porque el envío tiene el mismo problema con las mismas columnas:
+    dos copias de esta corrección son dos sitios donde olvidarla."""
     if fecha is None:
         return None
     if fecha.tzinfo is None:
@@ -409,8 +412,14 @@ async def _anotar(
     )
 
 
-def _por_unidad_de_almacen(lineas) -> list[tuple[str, str, int]]:
+def por_unidad_de_almacen(lineas) -> list[tuple[str, str, int]]:
     """`(producto, SKU, cantidad)` sumado y EN ORDEN ESTABLE.
+
+    PUBLICA, Y NO POR COMODIDAD. El despacho del Incremento 6 tiene que repartir
+    exactamente igual que la reserva: si sumara por línea en vez de por unidad
+    de almacén, o si ordenara distinto, sacaría del almacén un reparto que no es
+    el que se apartó. Dos copias de esta regla es exactamente cómo se duplica el
+    fallo, así que hay una sola y la usan los dos.
 
     SE SUMA POR (PRODUCTO, SKU) Y NO POR LÍNEA. Dos variantes distintas pueden
     compartir la caja del almacén; reservarlas por separado usaría la misma
@@ -678,7 +687,7 @@ async def crear(
     await db.flush()
 
     # --- La reserva, en orden estable ------------------------------------- #
-    for product_id, sku, cantidad in _por_unidad_de_almacen(mias):
+    for product_id, sku, cantidad in por_unidad_de_almacen(mias):
         if not sku:
             await db.rollback()
             raise CarritoNoComprable(
@@ -736,7 +745,7 @@ async def _liberar_reserva(
             select(ProductOrderItem).where(ProductOrderItem.order_id == orden.id)
         )
     )
-    for product_id, sku, cantidad in _por_unidad_de_almacen(lineas):
+    for product_id, sku, cantidad in por_unidad_de_almacen(lineas):
         #: SIN IDENTIFICADOR, por lo mismo que la reserva.
         await inventory.liberar(
             db,
@@ -860,7 +869,7 @@ async def vencer(
             continue
         if orden.reservation_settled_at is not None:
             continue
-        limite = _comparable(orden.reserved_until, momento)
+        limite = comparable(orden.reserved_until, momento)
         if limite is None or limite > momento:
             continue
         anterior = orden.status
@@ -926,7 +935,7 @@ async def reintentar(
     """Devuelve a `PENDING_PAYMENT` un pedido cuyo cobro falló, si aún aparta."""
     if orden.status != PEDIDO_FALLIDO:
         return
-    limite = _comparable(orden.reserved_until, momento)
+    limite = comparable(orden.reserved_until, momento)
     if orden.reservation_settled_at is not None or limite is None or limite <= momento:
         raise PedidoNoPagable("La reserva de ese pedido ya venció.")
     orden.status = PEDIDO_PENDIENTE
@@ -1023,7 +1032,7 @@ async def confirmar_pago(
     if fallo is not None:
         raise PagoNoCuadra(fallo)
 
-    limite = _comparable(orden.reserved_until, momento)
+    limite = comparable(orden.reserved_until, momento)
     if orden.reservation_settled_at is not None or limite is None or limite <= momento:
         raise PagoNoCuadra("La reserva venció antes de que llegara el cobro.")
 
@@ -1243,6 +1252,7 @@ __all__ = [
     "YaHayPedido",
     "ahora",
     "cancelar",
+    "comparable",
     "confirmar_pago",
     "crear",
     "cuantos_en_revision",
@@ -1259,6 +1269,7 @@ __all__ = [
     "mis_pedidos",
     "por_cobro",
     "por_que_no_se_puede_vender",
+    "por_unidad_de_almacen",
     "preparar",
     "reintentar",
     "validar_direccion",

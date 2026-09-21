@@ -130,7 +130,7 @@ async def iniciar_pago(
         #: —`crear` lo rechaza— y si llegó aquí, abrir un checkout no lo arregla.
         raise pedidos.PedidoNoPagable("Ese pedido no tiene nada que cobrar.")
 
-    limite = pedidos._comparable(orden.reserved_until, momento)
+    limite = pedidos.comparable(orden.reserved_until, momento)
     if orden.reservation_settled_at is not None or limite is None or limite <= momento:
         raise pedidos.PedidoNoPagable(
             "La reserva de ese pedido ya venció.",

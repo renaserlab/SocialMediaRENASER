@@ -793,6 +793,59 @@ class EventoDelPedido(BaseModel):
     created_at: datetime
 
 
+class LineaPreparadaRead(BaseModel):
+    """Una linea del pedido con lo que lleva metido en la caja.
+
+    `ordered_quantity` es lo que se compro y NO CAMBIA NUNCA; `prepared_quantity`
+    es lo que quien empaqueta lleva contado, y empieza en cero. Cero aqui es
+    «todavia ninguna», no «no hay»: la linea existe y hay que meterla.
+    """
+
+    order_item_id: str
+    sku: str
+    name: str
+    variant_name: str | None = None
+    ordered_quantity: int
+    prepared_quantity: int = 0
+
+
+class EnvioRead(BaseModel):
+    """El envio de un pedido pagado.
+
+    `exists = false` SIGNIFICA QUE NADIE LO HA TOCADO, no que falte nada: la
+    fila nace con la primera accion y hasta entonces el envio esta pendiente de
+    preparacion, que es exactamente lo que se contesta.
+
+    NI FECHA PREVISTA, NI COSTE, NI ENLACE DE SEGUIMIENTO. No hay transportista
+    elegido: `carrier_name` y `tracking_reference` son lo que escribio quien
+    despacho, y NULO significa que no lo dijo.
+    """
+
+    order_id: str
+    status: str
+    exists: bool = False
+    carrier_name: str | None = None
+    tracking_reference: str | None = None
+    prepared_at: datetime | None = None
+    ready_at: datetime | None = None
+    dispatched_at: datetime | None = None
+    delivered_at: datetime | None = None
+    failed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    #: QUIEN AFIRMA QUE LLEGO: `seller` o `buyer`. Administracion no puede.
+    delivered_source: str | None = None
+    #: CONFIRMAR QUE LLEGO NO ES DAR LA CONFORMIDAD. Lo segundo libera dinero y
+    #: no existe todavia.
+    buyer_confirmed_at: datetime | None = None
+    failure_reason: str | None = None
+    cancellation_reason: str | None = None
+    items: list[LineaPreparadaRead] = Field(default_factory=list)
+    history: list[EventoDelPedido] = Field(default_factory=list)
+    #: LO QUE ESTE ACTOR PUEDE HACER AHORA. Para pintar botones, nunca para
+    #: decidir: quien decide es el servidor con la fila delante.
+    available_transitions: list[str] = Field(default_factory=list)
+
+
 class PedidoRead(BaseModel):
     """El pedido entero, para quien lo hizo."""
 
@@ -814,6 +867,14 @@ class PedidoRead(BaseModel):
     address: DireccionRead | None = None
     items: list[LineaDelPedido] = Field(default_factory=list)
     history: list[EventoDelPedido] = Field(default_factory=list)
+    #: EL SEGUIMIENTO, DENTRO DEL PEDIDO. Una ruta aparte obligaria a la
+    #: pantalla a dos viajes para pintar una sola ficha, y a ensenar el pedido
+    #: sin su estado de envio mientras llega el segundo.
+    #:
+    #: NULO CUANDO NO HAY NADA QUE ENVIAR: un pedido sin pagar, vencido o
+    #: cancelado no tiene envio, y contestar «pendiente de preparacion» ahi
+    #: haria creer que va a salir algo.
+    shipment: EnvioRead | None = None
     created_at: datetime
 
 
@@ -867,3 +928,81 @@ class VencimientoRead(BaseModel):
     seguidas devuelve cero la segunda porque ya no queda nada que vencer."""
 
     expired: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# El envio (0079)
+# --------------------------------------------------------------------------- #
+class LineaPreparadaRequest(BaseModel):
+    """Cuantas unidades de una linea se han metido ya."""
+
+    order_item_id: str
+    prepared_quantity: int = Field(ge=0, le=1000)
+
+
+class PrepararRequest(BaseModel):
+    """La lista de comprobacion de quien empaqueta.
+
+    SE PUEDE MANDAR PARCIAL: solo las lineas que cambiaron. Las que no vengan se
+    quedan como estaban, porque quien empaqueta cuenta una caja cada vez.
+    """
+
+    items: list[LineaPreparadaRequest] = Field(default_factory=list, max_length=200)
+
+
+class DespacharRequest(BaseModel):
+    """Los datos del despacho. LOS DOS SON OPCIONALES.
+
+    Mientras la empresa no elija transportista, lo unico honesto es dejar que
+    quien despacha escriba lo que tenga, y que si no tiene nada no escriba nada.
+    Un valor por defecto se acabaria leyendo como el nombre de la empresa de
+    transporte.
+    """
+
+    carrier_name: str | None = Field(default=None, max_length=120)
+    tracking_reference: str | None = Field(default=None, max_length=120)
+
+
+class MotivoRequest(BaseModel):
+    """Los saltos que deshacen trabajo o cuentan una mala noticia llevan motivo.
+
+    Sin el porque, el historial no sirve para nada: ni a quien compro, que no
+    sabe si volver a estar en casa, ni a quien vende, que no sabe si reintentar.
+    """
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class TransicionDeEnvioRequest(MotivoRequest):
+    """Lo que administracion puede mover, y SIEMPRE con motivo."""
+
+    to: str
+
+
+class PedidoDelProveedorConEnvio(PedidoDelProveedor):
+    """El pedido del proveedor con el estado de su paquete."""
+
+    shipment: EnvioRead | None = None
+
+
+class EnvioPendienteRead(BaseModel):
+    """Una fila de la cola de administracion. SIN DATOS PERSONALES.
+
+    Ni direccion, ni nombre de quien compro, ni importe. Lo que hace falta para
+    saber si un paquete esta parado es de quien es, en que estado esta y cuanto
+    lleva asi.
+
+    `waiting_hours` ES UN HECHO, NO UN JUICIO. Ninguna politica publicada fija
+    un plazo de despacho, asi que esto NO dice «atrasado»: dice cuanto tiempo ha
+    pasado, y quien mira decide.
+    """
+
+    order_id: str
+    seller_id: str
+    seller_name: str | None = None
+    status: str
+    paid_at: datetime | None = None
+    dispatched_at: datetime | None = None
+    failure_reason: str | None = None
+    units: int = 0
+    waiting_hours: int | None = None
