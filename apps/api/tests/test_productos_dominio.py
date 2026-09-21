@@ -599,11 +599,11 @@ async def test_las_tablas_de_productos_no_las_lee_la_aplicacion(sesiones) -> Non
             "      or c.relname in ('saved_products', 'inventory_movements'))"
         )
         tablas = dict(cur.fetchall())
-        # LAS TRECE DE LOS INCREMENTOS 1-3, LAS CUATRO DEL 4, LAS CINCO DEL 5
-        # Y LAS TRES DEL 6. El número se escribe entero a propósito: si mañana
-        # aparece una tabla de Productos sin RLS, esta prueba se pone roja
-        # antes de que nadie la despliegue.
-        assert len(tablas) == 25, sorted(tablas)
+        # LAS TRECE DE LOS INCREMENTOS 1-3, LAS CUATRO DEL 4, LAS CINCO DEL 5,
+        # LAS TRES DEL 6 Y LAS TRES DEL 7. El número se escribe entero a
+        # propósito: si mañana aparece una tabla de Productos sin RLS, esta
+        # prueba se pone roja antes de que nadie la despliegue.
+        assert len(tablas) == 28, sorted(tablas)
         for nueva in (
             "product_inventory",
             "inventory_movements",
@@ -617,6 +617,9 @@ async def test_las_tablas_de_productos_no_las_lee_la_aplicacion(sesiones) -> Non
             "product_shipments",
             "product_shipment_items",
             "product_shipment_events",
+            "product_incidents",
+            "product_incident_evidence",
+            "product_incident_events",
         ):
             assert nueva in tablas, nueva
         sin_rls = sorted(t for t, activa in tablas.items() if not activa)

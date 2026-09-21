@@ -944,13 +944,25 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
         "/api/v1/products/seller/orders/{order_id}/shipment/retry",
         "/api/v1/admin/products/shipments",
         "/api/v1/admin/products/shipments/{order_id}/transition",
+        # Incremento 7: el expediente de una incidencia, entero.
+        "/api/v1/products/orders/{order_id}/incidents",
+        "/api/v1/products/incidents/{incident_id}",
+        "/api/v1/products/incidents/{incident_id}/evidence",
+        "/api/v1/products/incidents/{incident_id}/submit",
+        "/api/v1/products/incidents/{incident_id}/appeal",
+        "/api/v1/products/seller/incidents/{incident_id}/respond",
+        "/api/v1/admin/products/incidents",
+        "/api/v1/admin/products/incidents/{incident_id}/resolve",
     )
     for ruta in esperadas:
         assert ruta in rutas, ruta
 
     #: LO QUE NO PUEDE EXISTIR TODAVIA. `/return` lleva barra delante a
     #: proposito: es una palabra corta y no quiero que aparezca dentro de otra.
-    prohibidas = ("/return", "refund", "transfer", "payout", "warranty", "incident")
+    #: `incident` SALIO DE AQUI con el Incremento 7, y entro en `esperadas`:
+    #: cambiar una prueba para que deje de mirar algo es como se pierde una
+    #: proteccion, asi que lo que antes prohibia ahora lo EXIGE.
+    prohibidas = ("/return", "refund", "transfer", "payout", "warranty")
     for ruta in rutas:
         for prohibida in prohibidas:
             assert prohibida not in ruta, ruta
@@ -966,6 +978,13 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
     #: con ese nombre es la primera puerta y la mas facil de leer.
     for ruta in rutas:
         assert not ruta.startswith("/api/v1/admin/products/shipments/{order_id}/d")
+
+    #: Y EL PROVEEDOR NO TIENE RUTA PARA RESOLVER SU PROPIO CASO. Las cinco
+    #: salidas mueven dinero, mueven mercancia o niegan la reclamacion, y
+    #: ninguna la decide en solitario quien tiene el conflicto.
+    for ruta in rutas:
+        if "/seller/incidents" in ruta:
+            assert not ruta.endswith("/resolve"), ruta
 
     #: Y LO QUE DE VERDAD IMPORTA: con la configuracion de fabrica no se puede
     #: cobrar, y faltan CINCO cosas, no una.
