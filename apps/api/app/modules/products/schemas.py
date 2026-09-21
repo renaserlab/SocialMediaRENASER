@@ -973,18 +973,32 @@ class DespacharRequest(BaseModel):
     tracking_reference: str | None = Field(default=None, max_length=120)
 
 
-class MotivoRequest(BaseModel):
+class MotivoDelEnvio(BaseModel):
     """Los saltos que deshacen trabajo o cuentan una mala noticia llevan motivo.
 
     Sin el porque, el historial no sirve para nada: ni a quien compro, que no
     sabe si volver a estar en casa, ni a quien vende, que no sabe si reintentar.
+
+    SE LLAMABA `MotivoRequest`, Y ESE NOMBRE YA ESTABA COGIDO 600 LINEAS MAS
+    ARRIBA. Python rebindea el nombre sin avisar: el router importaba
+    `MotivoRequest` y se quedaba con este, asi que `/admin/products/{id}/suspend`
+    —que es de otro incremento y lee `cuerpo.motivo`— paso a exigir `reason` y
+    dejo de funcionar por completo. Lo encontro la revision independiente.
+
+    El campo se llama distinto que el del otro (`reason` frente a `motivo`) y
+    aqui es OBLIGATORIO, asi que no son intercambiables ni por casualidad.
     """
 
     reason: str = Field(min_length=3, max_length=500)
 
 
-class TransicionDeEnvioRequest(MotivoRequest):
-    """Lo que administracion puede mover, y SIEMPRE con motivo."""
+class TransicionDeEnvioRequest(MotivoDelEnvio):
+    """Lo que administracion puede mover, y SIEMPRE con motivo.
+
+    HEREDA DEL MOLDE DEL ENVIO, que es el que lleva `reason` y lo exige. Antes
+    heredaba de `MotivoRequest` y funcionaba por accidente: el nombre estaba
+    definido dos veces en este fichero y aqui resolvia al de mas abajo.
+    """
 
     to: str
 

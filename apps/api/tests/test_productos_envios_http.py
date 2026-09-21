@@ -619,3 +619,94 @@ async def test_quien_compro_puede_confirmar_una_entrega_que_registro_el_proveedo
     quien["uid"] = proveedor
     suyo = await http.get(f"{PRODUCTOS}/seller/orders/{orden_id}")
     assert "DELIVERED" not in (suyo.json()["shipment"]["available_transitions"])
+
+
+@pytest.mark.asyncio
+async def test_el_motivo_del_envio_no_pisa_el_de_suspender_un_producto(
+    sesiones, cliente, venta_encendida, monkeypatch
+) -> None:
+    """DOS CLASES CON EL MISMO NOMBRE, Y LA SEGUNDA GANA EN SILENCIO.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE. El Incremento 6 anadio un
+    `MotivoRequest` con campo `reason` al final de `schemas.py`, donde ya habia
+    otro con campo `motivo`. Python rebindea el nombre: el router importa
+    `MotivoRequest` y se queda con el ultimo, asi que
+    `/admin/products/{id}/suspend` —que es del Incremento 3 y lee
+    `cuerpo.motivo`— paso a exigir `reason`.
+
+    Consecuencia: el movil manda `{"motivo": ...}` y recibe 422, y quien
+    mandara `{"reason": ...}` llegaria a `cuerpo.motivo` y reventaria con un
+    500. Retirar del catalogo un producto reportado es un control de
+    moderacion, y no funcionaba por ninguna via.
+
+    NO LO VEIA NADIE porque ninguna prueba tocaba esa ruta por HTTP.
+
+    SE COMPRUEBA EL MOLDE, que es donde vive el defecto: los dos nombres tienen
+    que resolver a moldes DISTINTOS, cada uno con su campo.
+    """
+    from app.modules.products import schemas
+
+    #: EL MOLDE DEL ENVIO lleva `reason` y es obligatorio.
+    assert "reason" in schemas.MotivoDelEnvio.model_fields
+    assert "motivo" not in schemas.MotivoDelEnvio.model_fields
+
+    #: EL MOLDE DE SUSPENDER lleva `motivo` y es opcional, como siempre fue.
+    assert "motivo" in schemas.MotivoRequest.model_fields
+    assert "reason" not in schemas.MotivoRequest.model_fields
+    assert schemas.MotivoRequest is not schemas.MotivoDelEnvio
+
+    #: Y NINGUN NOMBRE DE NIVEL SUPERIOR ESTA DEFINIDO DOS VECES, ni en los
+    #: moldes ni en el router. ES LA CAUSA, NO EL SINTOMA.
+    #:
+    #: Buscando esto aparecio una SEGUNDA colision que la revision no vio:
+    #: `_del_proveedor` tambien estaba dos veces —una para el producto y otra,
+    #: del Incremento 6, para el pedido—, asi que suspender daba 500 ademas de
+    #: 422. Dos defectos del mismo origen: anadir al final de un fichero sin
+    #: mirar si el nombre ya existia.
+    import ast
+    import io as _io
+    from pathlib import Path
+
+    from app.modules.products import router as router_de_productos
+
+    for modulo in (schemas, router_de_productos):
+        fuente = _io.open(Path(modulo.__file__), encoding="utf-8").read()
+        definidos = [
+            n.name
+            for n in ast.parse(fuente).body
+            if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        repetidos = sorted({d for d in definidos if definidos.count(d) > 1})
+        assert repetidos == [], (
+            f"nombres definidos dos veces en {Path(modulo.__file__).name}:"
+            f" {repetidos}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_suspender_un_producto_acepta_el_cuerpo_que_manda_el_movil(
+    sesiones, cliente, venta_encendida, monkeypatch
+) -> None:
+    """LA RUTA, EJECUTADA, con el cuerpo exacto que manda el repositorio movil.
+
+    `ProductAdmissionRepository.suspender` manda `{"motivo": ...}`. Comprobar
+    solo el molde dejaria pasar el dia que alguien cambie la ruta y no el
+    molde; esto ejecuta la suspension de verdad y mira el estado del producto.
+    """
+    from app.modules.products.models import Product
+
+    http, quien = cliente
+    producto_id, _, _, _ = await pedido_pagado(sesiones, monkeypatch)
+    manda = await persona(sesiones, "suspende")
+    await _rol(sesiones, manda, "admin")
+    quien["uid"] = manda
+
+    respuesta = await http.post(
+        f"{ADMIN}/{producto_id}/suspend",
+        json={"motivo": "Retirado del catalogo por un reporte."},
+    )
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["status"] == "suspended"
+
+    async with sesiones() as db:
+        assert (await db.get(Product, producto_id)).status == "suspended"

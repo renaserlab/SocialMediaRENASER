@@ -75,7 +75,7 @@ from app.modules.products.schemas import (
     EnvioPendienteRead,
     EnvioRead,
     LineaPreparadaRead,
-    MotivoRequest,
+    MotivoDelEnvio,
     PedidoDelProveedorConEnvio,
     PrepararRequest,
     TransicionDeEnvioRequest,
@@ -1398,7 +1398,7 @@ async def pedidos_del_proveedor(
     return salida
 
 
-async def _del_proveedor(
+async def _pedido_del_proveedor(
     db: AsyncSession, *, orden, con_historial: bool = True
 ) -> PedidoDelProveedorConEnvio:
     """El pedido como lo ve quien tiene que preparar el paquete."""
@@ -1436,7 +1436,7 @@ async def pedido_del_proveedor(
     orden, _ = await envios.pedido_del_proveedor(
         db, orden_id=order_id, usuario_id=current_user.id
     )
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1475,7 +1475,7 @@ async def preparar_el_paquete(
         actor_id=current_user.id,
     )
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1500,7 +1500,7 @@ async def cerrar_el_paquete(
     )
     await envios.marcar_listo(db, orden=orden, actor_id=current_user.id)
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1509,7 +1509,7 @@ async def cerrar_el_paquete(
 )
 async def reabrir_el_paquete(
     order_id: str,
-    cuerpo: MotivoRequest,
+    cuerpo: MotivoDelEnvio,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PedidoDelProveedorConEnvio:
@@ -1532,7 +1532,7 @@ async def reabrir_el_paquete(
         motivo=cuerpo.reason,
     )
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1577,7 +1577,7 @@ async def despachar_el_paquete(
     if antes is not None and antes.status != envio.status:
         await envios.avisar(db, orden=orden, estado=envio.status)
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1612,7 +1612,7 @@ async def registrar_la_entrega(
     if antes is not None and antes.status != envio.status:
         await envios.avisar(db, orden=orden, estado=envio.status)
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1621,7 +1621,7 @@ async def registrar_la_entrega(
 )
 async def registrar_el_fallo(
     order_id: str,
-    cuerpo: MotivoRequest,
+    cuerpo: MotivoDelEnvio,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PedidoDelProveedorConEnvio:
@@ -1645,7 +1645,7 @@ async def registrar_el_fallo(
     )
     await envios.avisar(db, orden=orden, estado=envio.status)
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 @router.post(
@@ -1654,7 +1654,7 @@ async def registrar_el_fallo(
 )
 async def reintentar_la_entrega(
     order_id: str,
-    cuerpo: MotivoRequest,
+    cuerpo: MotivoDelEnvio,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PedidoDelProveedorConEnvio:
@@ -1676,7 +1676,7 @@ async def reintentar_la_entrega(
         motivo=cuerpo.reason,
     )
     await db.commit()
-    return await _del_proveedor(db, orden=orden)
+    return await _pedido_del_proveedor(db, orden=orden)
 
 
 
