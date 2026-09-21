@@ -1102,3 +1102,161 @@ La barrera anti-repetición deduplica por `(persona, tipo, pedido)`. Aflojarla
 haría que un webhook reintentado avisara dos veces del mismo hecho y rompería el
 enlace del aviso al pedido. Entre callar una repetición y gritar dos veces lo
 mismo, se calla. Es una limitación conocida, no un olvido.
+## 16. Productos, Incremento 7 — reclamaciones posventa (21/09/2026)
+
+**D109 · La incidencia tiene su propia máquina, y ni el pedido ni el envío ganan
+un valor.**
+
+Es la misma regla de [D92] una tabla más abajo, y aquí importa más: un caso vivo
+tiene que poder bloquear acciones del envío sin que escribir el estado del caso
+pueda perder el del paquete. El bloque de verificación de la 0080 falla si algún
+estado de incidencia aparece en los CHECK de `product_orders` o
+`product_shipments`.
+
+**D110 · Abrir no es aprobar, y resolver no es pagar.**
+
+Son dos frases distintas y las dos están escritas en las pantallas, no solo en
+los comentarios. Abrir un caso solo anota que alguien dice que algo llegó mal.
+Resolverlo dice **qué se decidió**, y deja `financial_effect` en `PENDING`:
+nadie lo ejecuta. No hay ninguna línea que llame a un adaptador de reembolsos,
+porque ese adaptador es del Incremento 9 y no existe. Una prueba comprueba que
+ninguna de las seis pantallas escriba un importe, y otra que el molde del
+servidor tampoco lo traiga: si alguien lo añade, se pone roja y hace falta una
+decisión, en vez de que el número aparezca solo.
+
+**D111 · Este módulo no importa `inventory`, y se ejecuta.**
+
+Dónde está una unidad dañada lo decide una persona. Reponerla al resolver la
+pondría a la venta estando en casa de alguien, y descontarla al abrir el caso
+castigaría a quien todavía no ha hecho nada mal. Una prueba recorre el árbol de
+sintaxis de `incidencias.py` y falla si aparece el import; otra lo comprueba
+desde el lado del móvil.
+
+**D112 · El proveedor propone; resolver es solo de Z, y de `admin`, no de
+`is_admin`.**
+
+Las cinco salidas del blueprint §10.1 mueven dinero, mueven mercancía o niegan
+la reclamación, y ninguna de las tres la decide en solitario quien tiene el
+conflicto. No hay ninguna ruta de proveedor que escriba `resolution` —hay una
+prueba que recorre las rutas y comprueba que ninguna termine en `/resolve`— ni
+ningún método en su repositorio del móvil. Y quien resuelve es `FINANCE_ROLES`,
+el mismo conjunto estrecho que ya ajusta existencias: moderación cura contenido
+y recibe 403, comprobado por HTTP.
+
+**D113 · Pedir más pruebas no es una resolución: es un paso.**
+
+Un expediente al que se le piden más pruebas no está resuelto, y contarlo como
+resuelto daría un número falso de casos cerrados. `REQUEST_MORE_EVIDENCE` está
+en lo que el proveedor puede **proponer** y fuera de `RESOLUCIONES`; el servidor
+lo rechaza con su propio código si alguien lo manda como decisión.
+
+**D114 · El caso nace sin pruebas y sin plazo corriendo.**
+
+El blueprint pide 2–6 fotografías. Exigirlas al abrir obligaría a subirlas antes
+de que exista el caso del que cuelgan. Así que se abre, se le añaden y **se
+envía**: ahí se comprueba el mínimo y ahí empiezan a correr las 48 horas del
+proveedor, que el blueprint cuenta «desde la notificación».
+
+**D115 · La entrega negada no puede pedir fotografías ni línea del pedido.**
+
+A quien dice que no le llegó nada no se le puede pedir la foto de lo que no
+tiene: exigírselas cerraría el único caso que solo él puede abrir. Y habla del
+pedido entero, no de un artículo, porque no hay una línea concreta de la que
+quejarse. Lo impone también un CHECK de la base.
+
+**D116 · El reloj del proveedor corre solo mientras la pelota es suya.**
+
+Si pidió más pruebas, `seller_response_due_at` viaja nulo. Eso **no** es «sin
+plazo» ni «vencido»: es «ahora no le toca a él». Cobrarle el tiempo que pasa
+esperando lo que él mismo pidió sería cobrarle el tiempo de la otra parte. El
+móvil lo pinta como un hecho —lo que queda, o que pasó— y **nunca** como un
+incumplimiento: lo que ocurre pasado el plazo es que el caso va a revisión.
+
+**D117 · El silencio no cierra nada: escala a mediación.**
+
+Un caso que el proveedor deja sin responder pasa a revisión de Z, no a
+rechazado. Cerrarlo en contra de quien reclama por el silencio de la otra parte
+sería castigarle por algo que no hizo.
+
+**D118 · La escalada por silencio no es un temporizador dentro de FastAPI.**
+
+La API puede correr con varias réplicas y un temporizador se ejecutaría una vez
+por cada una. Hay una ruta de administración **idempotente** —llamarla dos veces
+seguidas devuelve cero la segunda—, igual que el vencimiento de reservas, y
+hasta que exista un planificador externo se lanza desde la pantalla de
+administración. Queda pendiente para una persona: ver §5.
+
+**D119 · No hay fecha límite para la decisión de Z, y se dice por qué.**
+
+El blueprint habla de «tres días hábiles». «Hábil» depende de un calendario de
+festivos y de jornada que nadie ha definido, y calcularlo a ojo sería inventarse
+el plazo. El caso se enseña «en revisión» y la pantalla explica que no damos
+fecha. Ninguna columna `decision_due_at` existe, y el bloque de verificación de
+la 0080 la rechaza si alguien la añade.
+
+**D120 · Una sola apelación, en plazo y con pruebas NUEVAS.**
+
+«Nueva» es posterior a la resolución, comprobado contra la fecha. Sin esa
+condición, apelar sería repetir la misma frase más alto. El móvil tampoco ofrece
+el botón cuando `appeals_used` ya es 1, aunque el servidor lo ofreciera: es
+defensa en profundidad, no una decisión del cliente.
+
+**D121 · El plazo para reclamar es el de la política congelada en el pedido.**
+
+`incident_report_hours` es obligatorio en toda política publicada —lo impone
+`product_policies_publicada_esta_completa`, de la 0077—, y el pedido apunta a su
+versión exacta. Se cuenta desde la entrega, o desde que se supo que el paquete
+no iba a llegar, que son los dos únicos momentos en que quien compró puede saber
+que tiene algo que reclamar. **No es un plazo inventado: es el que la empresa
+publicó.** Se lee la política del pedido y no la vigente hoy: acortársela
+después con una política nueva le quitaría un derecho que ya tenía.
+
+Y si la fila no trae horas —solo una **sin publicar** puede—, no se cierra la
+puerta: negar el derecho a reclamar por un dato que falta sería inventarse el
+plazo al revés.
+
+**D122 · Un caso vivo bloquea confirmar la recepción.**
+
+Quien dice que no le llegó el paquete no puede a la vez confirmar que lo
+recibió. Lo comprueba el envío antes de escribir la entrega, con su propio
+código.
+
+**D123 · Ni el historial ni las pruebas se pueden reescribir, y lo imponen
+disparadores.**
+
+Aquí pesa más que en ningún otro sitio, porque esto es lo que se mira cuando dos
+personas cuentan lo mismo de dos maneras. **Ni siquiera quien subió una
+fotografía puede quitarla después**: retirarla cuando la otra parte ya la vio es
+reescribir lo que se discutió. Por eso no hay método `borrarPrueba()` en el
+móvil y por eso el disparador cubre `update` y `delete`.
+
+**D124 · Un solo caso vivo por línea y por pedido, con dos índices únicos
+parciales.**
+
+En PostgreSQL los nulos no chocan entre sí, así que un único índice sobre
+`(order_id, order_item_id)` no habría impedido dos entregas negadas sobre el
+mismo pedido. Son dos índices: uno para las líneas y otro para los casos sin
+línea. Lo impone la base y no un `if` nuestro: dos toques a la vez se pasarían
+por delante de cualquier comprobación previa.
+
+**D125 · El texto libre no sale del expediente.**
+
+La descripción la escribe quien reclama y suele llevar dentro dónde vive y qué
+le pasó. Viaja en el expediente —que leen las tres personas que ya conocen el
+caso— y **no** en ninguna lista: ni en la del comprador, ni en la del proveedor,
+ni en la cola de Z. Es la misma corrección que la revisión independiente del
+Incremento 6 encontró en el motivo de una entrega fallida, aplicada antes de que
+volviera a pasar.
+
+**D126 · Las pruebas viven en su propio depósito privado.**
+
+`product-incidents`, separado de `product-media`: aquel se firma para cualquiera
+que mire un producto, y esto son las fotos del salón de quien compró. Lista de
+tipos cerrada, sin `image/*` —que dejaría pasar SVG, que es un documento con
+scripts—, el servidor decide el nombre y mira los bytes de verdad, y las URL se
+firman al pintar y no se guardan.
+
+**D127 · Deshacer la 0080 no borra las pruebas.**
+
+El rollback documentado falla a propósito si el depósito tiene archivos dentro:
+son las pruebas de una disputa y no se tiran sin que alguien lo decida.

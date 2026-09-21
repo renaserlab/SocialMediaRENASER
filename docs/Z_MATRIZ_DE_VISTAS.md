@@ -210,7 +210,12 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Seguimiento del pedido | dentro de `/productos/pedidos/[orderId]` | `GET /products/orders/{id}` (campo `shipment`) | terminada | viaja **dentro del pedido**: una ruta aparte obligaría a dos viajes para pintar una ficha. Enseña el estado, lo que escribió quien despachó y una línea de tiempo que mezcla pago y envío **solo al pintar** |
 | Confirmar que llegó | dentro del detalle del pedido | `POST .../shipment/confirm-receipt` | terminada | **NO es dar la conformidad**, y el texto bajo el botón lo dice: eso liberaría el dinero al proveedor y no existe. Solo se ofrece sobre algo que ya salió y que esa persona no ha confirmado |
 | Transportista y fecha de llegada | — | — | **no existen** | la empresa no ha elegido transportista ni hay plazos acordados. El campo del transportista es texto libre y **nulo se dice con palabras**; no hay enlace de seguimiento ni fecha prevista |
-| Devolución, reembolso y garantía | — | — | **no existen** | Incrementos 8 y 9. Un aviso de devolución se anota para conciliar y **no deshace nada** |
+| Reclamaciones de este pedido | dentro de `/productos/pedidos/[orderId]` | `GET /products/orders/{id}` (campo `incidents`) | terminada | viajan **dentro del pedido**, como el seguimiento: quien reclamó tiene que ver su caso donde está el pedido del que habla. **Solo el resumen**: la descripción se lee entrando |
+| Reportar un problema | `/productos/pedidos/[orderId]/reportar` | `POST /products/orders/{id}/incidents` | terminada | **abrir no es que te den la razón**, y lo dice arriba del formulario. Ocho motivos; «consta entregado y no lo recibí» habla del pedido entero y no pide artículo. Ningún importe junto al botón |
+| El expediente | `/productos/reclamaciones/[incidentId]` | `GET /products/incidents/{id}` + `evidence`/`submit`/`reply`/`escalate`/`appeal`/`withdraw` | terminada | de 2 a 6 fotografías, y **una vez añadida no se quita**: la otra parte ya la vio. El plazo del proveedor se dice como un hecho y **nunca** como un incumplimiento; nulo es «ahora no le toca a él» |
+| Cuánto se devuelve, y cuándo | — | — | **no existe** | una decisión registrada dice QUÉ se acordó, no CUÁNTO. El efecto queda `PENDING` y **nadie lo ejecuta**: Incremento 9 |
+| Fecha de la decisión de Z | — | — | **no existe** | el blueprint dice «tres días hábiles» y «hábil» depende de un calendario que nadie definió. Se dice «en revisión», y la pantalla explica por qué no hay fecha |
+| Devolución, reembolso y garantía ejecutados | — | — | **no existen** | Incrementos 8 y 9. Un aviso de devolución se anota para conciliar y **no deshace nada** |
 
 ### Proveedor
 
@@ -220,10 +225,12 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Mis productos | `/proveedor/productos` | `GET /products/seller/products` | terminada | nada |
 | Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | el borrador **ya no lleva galería**: las fotos tienen su pantalla |
 | Fotografías del producto | `/proveedor/productos/[productId]/fotos` | `GET/POST .../media`, `PUT .../media/order`, `DELETE .../media/{id}` | terminada | **el archivo lo sube la API**, no el móvil; nace pendiente de aprobación |
-| Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar y liberar ya los llama el pedido; **despachar sigue sin llamarlo nadie**: sacar del almacén es del Incremento 6 |
+| Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar y liberar los llama el pedido, y **despachar lo llama el envío** desde el Incremento 6: el único salto que saca unidades es `READY → DISPATCHED` |
 | Pedidos de mi tienda | `/proveedor/pedidos` | `GET /products/seller/orders` | terminada | **solo los PAGADOS, y sin el cobro ni el comprador**. Se llega desde «Mis productos», y se enseña siempre: la lista vacía explica que todavía no hay nada que preparar |
 | Preparar y despachar | `/proveedor/pedidos/[orderId]` | `GET/POST .../seller/orders/{id}/shipment/*` | terminada | es la **única pantalla de Productos donde salen unidades del almacén**, y por eso despachar pregunta antes. Transportista y referencia son opcionales |
-| Incidencias y saldos | — | — | **no existen** | Incrementos 7 a 9. No hay pantalla vacía que los simule |
+| Reclamaciones de mi tienda | `/proveedor/reclamaciones` | `GET /products/seller/incidents` | terminada | **sin la descripción**: ese texto lo escribe quien reclama y suele llevar dentro dónde vive. Se llega desde «Mis productos» y se enseña siempre |
+| Responder una reclamación | `/proveedor/reclamaciones/[incidentId]` | `GET .../seller/incidents/{id}`, `POST .../respond`, `POST .../request-evidence` | terminada | **propone, no resuelve**, y no existe ruta ni botón que resuelva: las cinco salidas mueven dinero o mercancía. Pedir más pruebas **para su reloj**. Ni un dato de quien compró |
+| Saldos del proveedor | — | — | **no existen** | Incremento 9. No hay pantalla vacía que los simule |
 
 ### Administración
 
@@ -238,6 +245,9 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Pedidos que necesitan una persona | — (ruta de API) | `GET /admin/products/orders/review` | **backend terminado, sin pantalla** | hoy solo caen ahí los pagos tardíos, y no hay ninguno: la venta está apagada |
 | Vencer reservas caducadas | — (planificador externo) | `POST /admin/products/orders/expire` | terminada | **no es un temporizador dentro de FastAPI**: la API puede tener varias réplicas. Lo llama un planificador de fuera |
 | Envíos sin cerrar | `/admin/productos/envios` | `GET /admin/products/shipments` | terminada | **ni un dato personal**: ni dirección, ni nombre, ni importe, ni el motivo de un fallo —que es texto libre y suele llevar la calle dentro—. **No marca nada como atrasado**: ninguna política publica un plazo de despacho, así que da el tiempo transcurrido |
+| Reclamaciones por revisar | `/admin/productos/reclamaciones` | `GET /admin/products/incidents` | terminada | **solo `admin`, no `is_admin`**: moderación recibe 403 y la pantalla lo dice. Ni un dato personal en la cola |
+| Decidir una reclamación | `/admin/productos/reclamaciones/[incidentId]` | `GET /admin/products/incidents/{id}`, `POST .../resolve` | terminada | **registrar no es ejecutar**: no mueve dinero ni devuelve nada al almacén, y lo dice antes de pulsar. La explicación es obligatoria y el expediente no se reescribe |
+| Escalar las reclamaciones vencidas | dentro de esa cola | `POST /admin/products/incidents/escalate-overdue` | terminada | **idempotente**, y se lanza a mano: un temporizador dentro de FastAPI se ejecutaría una vez por réplica. Espera un planificador externo, como el vencimiento de reservas |
 | Intervenir un envío parado | — (ruta de API) | `POST /admin/products/shipments/{id}/transition` | **backend terminado, sin pantalla** | lo único que permite —reabrir, registrar un fallo, registrar un reintento— también lo hace quien vende desde la suya, y **cuándo escala una cosa a la otra es una decisión operativa que nadie ha tomado**. No puede despachar ni escribir «entregado» |
 
 ### Lo que esta matriz dice, en una frase
@@ -253,12 +263,18 @@ en su tienda → mete lo que va en la caja → cierra el paquete → lo despacha
 ahí salen las unidades → registra que llegó o que no se pudo → quien compró lo
 ve en su pedido y confirma que lo recibió**.
 
+Y desde el Incremento 7 tiene su ramal de posventa: **algo llegó mal → se
+reporta desde el pedido → se le cuelgan las fotografías → se envía y arranca el
+plazo del proveedor → el proveedor propone o pide más pruebas → Z registra qué
+se decidió**. Ahí se para, y se para diciéndolo: **el dinero de vuelta no
+existe**. Una decisión registrada deja el efecto `PENDING` y nadie lo ejecuta.
+
 Lo que queda fuera no es una pantalla sin conectar. Son: la valoración real, que
 necesita reseñas del Incremento 8; **el cobro**, que llega hasta la puerta de la
 pasarela y ahí se para porque faltan cinco banderas, una clave y una política, y
-la pantalla lo dice; **las incidencias**, que son del Incremento 7; y **el
-acceso de Servicios**, que sigue siendo el único de los cuatro chips que no
-lleva a ninguna parte, a propósito y avisando.
+la pantalla lo dice; **la ejecución del reembolso y los saldos**, que son del
+Incremento 9; y **el acceso de Servicios**, que sigue siendo el único de los
+cuatro chips que no lleva a ninguna parte, a propósito y avisando.
 
 ## 6. Alumno / comprador
 

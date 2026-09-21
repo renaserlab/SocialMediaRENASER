@@ -92,14 +92,15 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. La última escrita es la
-**0079** (envíos de Productos) y se entrega **sin aplicar**; la última aplicada
-a la base gestionada es la **0078**. De la 0070 en adelante son la vertical de
+antes de usarla, y sigue funcionando cuando no lo está. Las dos últimas
+escritas son la **0079** (envíos de Productos) y la **0080** (reclamaciones
+posventa), y se entregan **sin aplicar y en ese orden**; la última aplicada a la
+base gestionada es la **0078**. De la 0070 en adelante son la vertical de
 Productos.
 
 La suite general construye el esquema desde los modelos de SQLAlchemy, no desde
 el SQL. Eso ya no queda sin vigilar: hay una comprobación estática que corre
-siempre y otra que **ejecuta las setenta y nueve migraciones** sobre un PostgreSQL
+siempre y otra que **ejecuta las ochenta migraciones** sobre un PostgreSQL
 desechable —en CI, o con Docker en local—. Ver
 [`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md` §8](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md).
 

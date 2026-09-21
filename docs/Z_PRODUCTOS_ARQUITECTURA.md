@@ -1,20 +1,22 @@
-# Productos de Excelencia Z · Incrementos 1 a 6
+# Productos de Excelencia Z · Incrementos 1 a 7
 
 Qué se construyó, qué se decidió en cerrado y qué sigue esperando a una
 persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4
 —fotografías reales, inventario y carrito— y el mismo día con el Incremento 5
-—política por jurisdicción, pedido físico y reserva—, y el 21/09/2026 con el
-Incremento 6: preparación, despacho y entrega.
+—política por jurisdicción, pedido físico y reserva—, el 21/09/2026 con el
+Incremento 6 —preparación, despacho y entrega— y el mismo día con el
+Incremento 7: las reclamaciones posventa.
 
-## Estado, en cinco líneas (21/09/2026)
+## Estado, en seis líneas (21/09/2026)
 
 | | |
 |---|---|
-| **Incrementos 1 a 6** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva y **entrega** |
+| **Incrementos 1 a 7** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva, entrega y **reclamaciones** |
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
-| **Migración 0079** | **escrita y SIN APLICAR.** Probada y reejecutada contra PostgreSQL 16 desechable. La aplica una persona; ver §16 |
+| **Migraciones 0079 y 0080** | **escritas y SIN APLICAR, en ese orden.** Probadas y reejecutadas contra PostgreSQL 16 desechable. Las aplica una persona; ver §16 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
-| **Siguiente incremento** | **el 7: seguimiento e incidencias.** Reportar un producto dañado, incorrecto, incompleto o faltante, con evidencias y sin devolver nada automáticamente |
+| **Dinero de vuelta** | **no existe.** Una reclamación resuelta dice QUÉ se decidió y deja el efecto en `PENDING`. Nadie lo ejecuta: eso es el Incremento 9 |
+| **Siguiente incremento** | **el 8 y el 9**, y antes hay que cruzar el blueprint con las capturas: el reparto entre devoluciones, garantías, reseñas y saldos no está decidido |
 
 Lo que la verificación del 18/09 confirma: el índice del vencimiento quedó en su
 versión corregida —por la reserva y no por el estado—, `inventory_movements` ya
@@ -58,7 +60,7 @@ comercial añadida, y eso es `product_sellers`. Una tabla aparte crearía una
 segunda identidad que se desincroniza del perfil: dos nombres, dos fotos y dos
 verdades sobre quién es esa persona.
 
-## 3. Las nueve migraciones, y en este orden
+## 3. Las once migraciones, y en este orden
 
 | Fichero | Qué trae |
 |---|---|
@@ -72,6 +74,7 @@ verdades sobre quién es esa persona.
 | `0077_productos_politicas.sql` | `product_policies` |
 | `0078_productos_pedidos.sql` | `product_orders`, `product_order_items`, `product_order_addresses`, `product_order_events` |
 | `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **SIN APLICAR** |
+| `0080_productos_incidencias.sql` | el depósito `product-incidents`, `product_incidents`, `product_incident_evidence`, `product_incident_events` · **SIN APLICAR** |
 
 **LAS NUEVE PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
 seis primeras contra la base gestionada en una sesión de solo lectura demostrada
@@ -648,6 +651,148 @@ que un webhook reintentado avisara dos veces del mismo hecho y rompería el
 enlace del aviso al pedido. Entre callar una repetición y gritar dos veces lo
 mismo, se calla; el estado del pedido lo dice entero cuando se abre.
 
+## 13.5. La reclamación: qué llegó mal, y quién decide (Incremento 7, 0080)
+
+Alguien recibe el paquete y algo no está bien. Esto es el expediente de eso.
+
+**Dos frases lo gobiernan todo, y están escritas en las pantallas, no solo
+aquí:**
+
+* **Abrir no es aprobar.** Abrir un caso anota que alguien *dice* que algo llegó
+  mal. No le da la razón, no descuenta nada y no avisa a nadie todavía.
+* **Resolver no es pagar.** Una resolución dice **qué se decidió**. El efecto
+  financiero nace `PENDING` y **nadie lo ejecuta**: no hay ni una línea que
+  llame a un adaptador de reembolsos, porque ese adaptador es del Incremento 9.
+
+### Las tres tablas
+
+| Tabla | Qué guarda |
+|---|---|
+| `product_incidents` | el caso: de qué pedido y de qué línea, por qué, la descripción, el estado, los plazos, la propuesta del proveedor y la decisión de Z |
+| `product_incident_evidence` | las fotografías, por su ruta privada y su huella. **Solo se añaden** |
+| `product_incident_events` | el historial. **Solo se añade** |
+
+Los dos «solo se añade» los imponen disparadores, no la buena voluntad del
+código. Aquí pesa más que en ningún otro sitio: esto es lo que se mira cuando
+dos personas cuentan lo mismo de dos maneras.
+
+### El recorrido
+
+1. **Se abre.** Uno de ocho motivos —siete del blueprint §10 más «consta
+   entregado y no lo recibí»—, una descripción de 20 caracteres como mínimo y,
+   salvo en ese último motivo, la línea del pedido de la que se habla.
+2. **Se le cuelgan las pruebas.** De 2 a 6 fotografías. El archivo viaja a la
+   API, que mira los bytes de verdad y decide el nombre.
+3. **Se envía.** Aquí —y no al abrir— el proveedor recibe el aviso y empiezan a
+   correr sus 48 horas, que el blueprint cuenta «desde la notificación».
+4. **El proveedor responde**: propone una de las cinco salidas, o pide más
+   pruebas, lo que **para su reloj** mientras espera.
+5. **Z decide.** Registra la resolución con su explicación. El efecto queda
+   pendiente.
+6. **Se puede apelar una vez**, dentro de 48 horas y con pruebas **nuevas**
+   —posteriores a la resolución—.
+
+Y el silencio **no cierra nada**: pasa a mediación, no a rechazado.
+
+### Los siete estados, y por qué son suyos
+
+`OPEN`, `MORE_EVIDENCE_REQUESTED`, `SELLER_RESPONDED`, `MEDIATION`, `RESOLVED`,
+`APPEALED`, `WITHDRAWN`. Es la cuarta máquina del pedido, y no un valor más de
+las anteriores: un caso vivo tiene que poder bloquear acciones del envío sin que
+escribir el estado del caso pueda perder el del paquete. El bloque de
+verificación de la 0080 falla si algún estado de incidencia aparece en los CHECK
+de `product_orders` o `product_shipments`.
+
+### Quién puede qué
+
+| | Comprador | Proveedor | `admin` | Moderación |
+|---|---|---|---|---|
+| Abrir, probar, enviar, retirar | **sí** | no | no | no |
+| Proponer una salida, pedir más pruebas | no | **sí** | no | no |
+| Pedir que lo mire Z | **sí** | no | **sí** | no |
+| **Registrar la decisión** | no | no | **sí** | **no: 403** |
+
+**El proveedor propone; resolver es solo de Z.** Las cinco salidas mueven
+dinero, mueven mercancía o niegan la reclamación, y ninguna la decide en
+solitario quien tiene el conflicto. No existe ninguna ruta de proveedor que
+escriba `resolution`, y hay una prueba que recorre las rutas para que siga sin
+existir. Y quien resuelve es `FINANCE_ROLES` —`admin` a secas—, no `is_admin`:
+moderación cura contenido y aquí recibe 403.
+
+### Lo que este módulo NO hace, y se ejecuta
+
+**No importa `inventory`.** Dónde está una unidad dañada lo decide una persona:
+reponerla al resolver la pondría a la venta estando en casa de alguien. Una
+prueba recorre el árbol de sintaxis de `incidencias.py` y falla si aparece el
+import.
+
+**No mueve dinero ni guarda un importe.** Ni cuánto se devuelve ni cuánto se
+pagó: el molde del servidor no trae ninguna cifra, y una prueba lo comprueba
+para que si alguien la añade haga falta una decisión en vez de que aparezca
+sola.
+
+**No da fecha para la decisión de Z.** El blueprint dice «tres días hábiles», y
+«hábil» depende de un calendario de festivos que nadie ha definido. El caso se
+enseña «en revisión» y la pantalla explica por qué no hay fecha.
+
+**No deja confirmar una recepción mientras hay un caso vivo.** Quien dice que no
+le llegó el paquete no puede a la vez decir que sí.
+
+### El plazo para reclamar, que sí existe
+
+`incident_report_hours` de la política publicada que quien compra aceptó,
+congelada en el pedido por su `policy_id` y su versión. Se cuenta desde la
+entrega —o desde que se supo que el paquete no iba a llegar—. **No es un plazo
+inventado: es el que la empresa publicó**, y el CHECK de la 0077 no deja
+publicar una política sin él. Se lee la del pedido y no la vigente hoy:
+acortársela después le quitaría un derecho que ya tenía.
+
+### Un solo caso vivo, con dos índices
+
+En PostgreSQL los nulos no chocan entre sí, así que un único índice sobre
+`(order_id, order_item_id)` no habría impedido dos «no me llegó» sobre el mismo
+pedido. Son dos índices únicos parciales: uno por línea y otro por pedido.
+
+### Las pruebas, en su propio depósito
+
+`product-incidents`, separado de `product-media`. Aquel se firma para cualquiera
+que mire un producto; esto son las fotos del salón de quien compró. Lista de
+tipos cerrada —sin `image/*`, que dejaría pasar SVG—, el servidor decide el
+nombre, mira los bytes abriendo la imagen, y las URL se firman al pintar y no se
+guardan. **Ni siquiera quien la subió puede quitarla después.**
+
+### El texto libre no sale del expediente
+
+La descripción la escribe quien reclama y suele llevar dentro dónde vive.
+Aparece en el expediente —que leen las tres personas que ya conocen el caso— y
+en ninguna lista: ni en la del comprador, ni en la del proveedor, ni en la cola
+de Z. Es la misma corrección que la revisión del Incremento 6 encontró en el
+motivo de una entrega fallida, aplicada antes de que volviera a pasar.
+
+### La escalada por silencio se lanza a mano, y es a propósito
+
+No hay temporizador dentro de FastAPI: la API puede correr con varias réplicas y
+se ejecutaría una vez por cada una. Hay una ruta de administración
+**idempotente** —dos llamadas seguidas devuelven cero la segunda—, igual que el
+vencimiento de reservas, y se lanza desde la pantalla de administración hasta
+que exista un planificador externo. Eso sigue esperando a una persona: ver §14.
+
+### Las seis pantallas, y desde dónde se llega
+
+| Pantalla | Ruta | Se llega desde |
+|---|---|---|
+| Reportar un problema | `/productos/pedidos/[orderId]/reportar` | la ficha del pedido, una vez entregado |
+| El expediente | `/productos/reclamaciones/[incidentId]` | la ficha del pedido, que pinta sus casos |
+| Reclamaciones de mi tienda | `/proveedor/reclamaciones` | «Mis productos» |
+| Responder una | `/proveedor/reclamaciones/[incidentId]` | esa bandeja |
+| Reclamaciones por revisar | `/admin/productos/reclamaciones` | administración de productos |
+| Decidir una | `/admin/productos/reclamaciones/[incidentId]` | esa cola |
+
+**Ninguna funciona solo escribiendo la URL**, y hay pruebas que lo comprueban.
+El resumen de los casos viaja **dentro del pedido**, por lo mismo que ya viajaba
+el envío: quien reclamó tiene que ver su caso donde está el pedido del que
+habla.
+
 ## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
@@ -664,6 +809,9 @@ mismo, se calla; el estado del pedido lo dice entero cuando se abre.
 | **Quién paga el porte de vuelta** de una cancelación o devolución | la empresa |
 | **Cuándo vuelve al almacén** una unidad no entregada, dañada o devuelta | la empresa |
 | Si administración debe poder intervenir un envío desde una pantalla, y cuándo escala | operación |
+| **Planificador externo** que llame al barrido de reclamaciones vencidas (hoy se lanza a mano) | operación |
+| **Qué significa «tres días hábiles»**: calendario de festivos y jornada | la empresa |
+| **Cuánto se devuelve** en cada una de las cinco salidas, y quién ejecuta el pago | la empresa + Incremento 9 |
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
 | Fuente del promedio de categoría | la empresa |
@@ -707,9 +855,9 @@ hizo falta fue encenderlo.
 
 ## 16. Qué hay que aplicar a mano, y en qué orden
 
-**Una sola migración, la 0079,** y no la aplica el código: no hay herramienta de
-migración en este proyecto y ninguna se aplica a una base gestionada sin que una
-persona lo decida.
+**Dos migraciones, la 0079 y la 0080, en ese orden,** y no las aplica el
+código: no hay herramienta de migración en este proyecto y ninguna se aplica a
+una base gestionada sin que una persona lo decida.
 
 ### El orden
 
@@ -723,22 +871,42 @@ persona lo decida.
 3. **REINICIAR LA API.** No es opcional. La puerta de esquema cachea también el
    «no» en la memoria del proceso: sin reiniciar, las rutas de la entrega siguen
    contestando `503 product_shipments_not_available` aunque las tablas ya estén.
+4. **Pegar `supabase/migrations/0080_productos_incidencias.sql` entero.**
+   **Después de la 0079 y no antes**: la 0080 referencia `product_shipments`.
+   Crea además el depósito privado `product-incidents`.
+5. **REINICIAR LA API OTRA VEZ**, por lo mismo: sin reiniciar, las rutas de las
+   reclamaciones siguen contestando `503 product_incidents_not_available`.
 
 ### Qué comprobar después
 
-Lo hace el propio script, pero por si alguien lo trocea: las tres tablas
-existen, el disparador que congela el historial está puesto, están los dos CHECK
-que impiden un despacho sin salida de almacén y soltar lo ya salido,
-`product_orders_estado` **no** ha ganado ningún valor de envío, no hay columnas
-de coste, impuestos, fecha prevista ni URL de seguimiento, y `anon` y
-`authenticated` tienen **cero** permisos sobre las tres tablas.
+Lo hace cada script, pero por si alguien los trocea.
+
+**De la 0079:** las tres tablas existen, el disparador que congela el historial
+está puesto, están los dos CHECK que impiden un despacho sin salida de almacén y
+soltar lo ya salido, `product_orders_estado` **no** ha ganado ningún valor de
+envío, no hay columnas de coste, impuestos, fecha prevista ni URL de
+seguimiento, y `anon` y `authenticated` tienen **cero** permisos sobre las tres
+tablas.
+
+**De la 0080:** las tres tablas existen, el depósito `product-incidents` es
+privado y con su lista de tipos cerrada, el disparador cubre **tanto** el
+historial **como** las pruebas y **tanto** `update` **como** `delete`, están los
+**dos** índices únicos parciales —uno por línea y otro por pedido, porque los
+nulos no chocan entre sí—, no hay columnas de importe devuelto, referencia,
+fecha de devolución ni plazo de decisión, ningún estado de incidencia se ha
+colado en los CHECK del pedido ni del envío, y `anon` y `authenticated` siguen
+con **cero** permisos.
 
 ### Qué NO hace falta encender
 
-Nada. La 0079 no enciende ninguna venta: sin las cinco banderas y sin política
-publicada no se puede crear un pedido, y sin pedido pagado no hay nada que
-preparar. Aplicarla solo hace que las rutas de la entrega dejen de contestar
-503; el recorrido sigue sin poder empezar.
+Nada. Ninguna de las dos enciende una venta: sin las cinco banderas y sin
+política publicada no se puede crear un pedido, sin pedido pagado no hay nada
+que preparar, y sin paquete entregado no hay nada que reclamar. Aplicarlas solo
+hace que esas rutas dejen de contestar 503; el recorrido sigue sin poder
+empezar.
+
+Y la 0080 **no enciende ningún reembolso**, porque no existe ninguno: resolver
+una reclamación registra qué se decidió y deja el efecto pendiente.
 
 ### El rollback, y su límite
 
@@ -752,3 +920,14 @@ estuvo puesta.** El movimiento de salida vive en `inventory_movements`, que es
 de la 0074 y solo se añade: un paquete que salió, salió. Quien revierta tiene
 que decidir a mano qué hace con esas unidades, y tiene el historial de
 movimientos para saber cuáles son.
+
+Y el de la 0080, que hay que deshacer **antes** que el de la 0079:
+
+    drop table public.product_incident_events;
+    drop table public.product_incident_evidence;
+    drop table public.product_incidents;
+    drop function public.product_incident_solo_se_anade();
+    -- delete from storage.buckets where id = 'product-incidents';  -- si está vacío
+
+**Borrar el depósito con archivos dentro falla a propósito.** Son las pruebas de
+una disputa y no se tiran sin que alguien lo decida.
