@@ -608,8 +608,8 @@ regla es de Z, no del organizador.
 Esa tabla representa el derecho digital que se compra para acceder a un curso.
 Mezclarla con productos físicos uniría dos cosas que no comparten ciclo de vida,
 ni entrega, ni devolución, y rompería el acceso de quien ya compró un curso.
-Productos tiene sus propias trece tablas y reutiliza perfiles, permisos,
-auditoría, almacenamiento y avisos.
+Productos tiene sus propias tablas —trece en los Incrementos 1–3, veintidós tras
+el 5— y reutiliza perfiles, permisos, auditoría, almacenamiento y avisos.
 
 **D47 · Un creador es un perfil con capacidad comercial.**
 
@@ -781,6 +781,11 @@ que cuenta los movimientos para demostrarlo.
 `reservar`, `liberar` y `despachar` existen, funcionan y están probadas, pero
 **no las llama ninguna ruta**: son del Incremento 5.
 
+> *Al 21/09/2026:* la decisión sigue en pie —el carrito no reserva— pero esa
+> última frase ya no. El Incremento 5 llegó: el pedido llama a `reservar` al
+> crearse y a `liberar` al cancelarse o al vencer. `despachar` es lo único que
+> sigue sin llamar nadie, y es del Incremento 6.
+
 **D67 · El precio de la línea del carrito no es el precio.**
 
 `seen_price_minor` es lo que se veía al añadir y existe para **avisar** de que
@@ -815,6 +820,15 @@ No hay checkout, ni pedido, ni pago, ni dirección, ni transportista.
 un campo copiado: encender la compra tiene que pasar por ese fichero.
 `feature_product_sales` sigue apagada y sin código detrás. La pantalla del
 carrito **no tiene botón de pagar**, y lo dice con palabras en el pie.
+
+> *Superada por el Incremento 5 (17/09/2026), salvo en dos cosas que siguen
+> siendo verdad.* Ya hay checkout, pedido, dirección y condiciones, y
+> `feature_product_sales` **sí tiene código detrás**: apagada, el checkout
+> contesta 503 con la lista de lo que falta. Lo que se mantiene: `purchasable`
+> de la **ficha** sigue viajando en `false` —comprar se hace desde la bolsa, no
+> desde la ficha— y **no hay transportista**, que es del Incremento 6. Y el
+> botón de la bolsa dice «continuar», no «pagar», y solo aparece cuando el
+> servidor dice que se puede.
 
 ## 14. Productos, Incremento 5 — pedido y compra protegida (17/09/2026)
 

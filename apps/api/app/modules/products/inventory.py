@@ -43,10 +43,16 @@ LO QUE NO HAY, Y ES DELIBERADO:
     trazar el origen, no para saber cuántas quedan, y hoy no lo consulta nadie.
   * NINGÚN UMBRAL DE «POCAS UNIDADES». Cuándo avisar es una decisión comercial
     que la empresa no ha tomado, y elegir un número aquí sería tomarla.
-  * NINGUNA VENTA. `reservar`, `liberar` y `despachar` existen, funcionan y
-    están probadas, PERO NO LAS LLAMA NINGUNA RUTA: reservar es del checkout, y
-    el checkout es del Incremento 5. Tampoco las llama el carrito, y eso es una
-    decisión, no un olvido: tener algo en la bolsa no se lo quita a nadie.
+QUIÉN LLAMA A CADA MOVIMIENTO, Y QUIÉN NO:
+
+  * `entrada` y `ajustar` los llama quien vende, y `ajustar` también
+    administración, desde la pantalla de inventario.
+  * `reservar` y `liberar` los llama el pedido (Incremento 5): reservar al
+    crearlo, liberar al cancelarlo o al vencer su reserva. NUNCA LOS LLAMA EL
+    CARRITO, y eso es una decisión, no un olvido: tener algo en la bolsa no se
+    lo quita a nadie.
+  * `despachar` no lo llama todavía nadie: sacar del almacén es del Incremento
+    6, y hacerlo al cobrar diría que algo salió cuando sigue en la caja.
 """
 
 from __future__ import annotations

@@ -46,6 +46,9 @@ apps/api/app/
     content, stories, communities      lo que se publica
     messaging, notifications           lo que se comunica
     catalog, learning                  cursos: ficha, revisión, temario, progreso
+    events                             eventos: admisión, entradas, posventa, finanzas
+    products                           productos físicos: admisión, catálogo,
+                                       inventario, bolsa, políticas y pedidos
     commerce                           orden, derecho, saldo, transferencia
     payments                           Stripe, RevenueCat, webhooks
     refunds                            garantía, solicitud, expediente, reembolso
@@ -88,11 +91,12 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. La última es la **0050**.
+antes de usarla, y sigue funcionando cuando no lo está. La última es la **0078**
+(pedidos de Productos); de la 0070 a la 0078 son la vertical de Productos.
 
 La suite general construye el esquema desde los modelos de SQLAlchemy, no desde
 el SQL. Eso ya no queda sin vigilar: hay una comprobación estática que corre
-siempre y otra que **ejecuta las cincuenta migraciones** sobre un PostgreSQL
+siempre y otra que **ejecuta las setenta y ocho migraciones** sobre un PostgreSQL
 desechable —en CI, o con Docker en local—. Ver
 [`Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md` §8](Z_VERSIONADO_POLITICAS_Y_AUDITORIA.md).
 
@@ -133,6 +137,10 @@ Todas nacen apagadas y se encienden por entorno.
 | `stripe_connect_enabled` | Cuentas conectadas de los propietarios. |
 | `creator_transfers_enabled` | Transferir de verdad al propietario. |
 | `platform_fee_bps` | La comisión. `-1` significa **sin configurar**, y bloquea. |
+| `feature_event_ticketing` | Entradas de eventos. |
+| `feature_event_payments` | Cobrar una entrada. Separada de la anterior a propósito. |
+| `feature_product_sales` | Comprar un producto físico. **Encenderla sola no basta**: ver `pedidos.por_que_no_se_puede_vender`. |
+| `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
 | `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |

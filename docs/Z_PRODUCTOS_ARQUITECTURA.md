@@ -5,11 +5,14 @@ persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4
 —fotografías reales, inventario y carrito— y el mismo día con el Incremento 5:
 política por jurisdicción, pedido físico y reserva.
 
-**Estado de las migraciones al 18/09/2026.** De la 0070 a la 0078 están
-**aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura
-y con cero divergencias. Las cabeceras de los `.sql` siguen diciendo «SIN
-APLICAR» a propósito: una migración aplicada no se reescribe, y el estado vive
-en esta documentación.
+## Estado, en cuatro líneas (21/09/2026)
+
+| | |
+|---|---|
+| **Incrementos 1 a 5** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta y pedido con reserva |
+| **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
+| **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
+| **Siguiente incremento** | **el 6: entrega.** Preparación, despacho y entrega del pedido pagado. Es donde `inventory.despachar` deja de ser código sin llamar |
 
 Lo que la verificación del 18/09 confirma: el índice del vencimiento quedó en su
 versión corregida —por la reserva y no por el estado—, `inventory_movements` ya
@@ -24,11 +27,16 @@ sirve el servidor: la aplicación no decide qué cuenta como publicado. Si lo
 decidiera ella, bastaría una versión vieja instalada en un teléfono para que
 apareciera algo que Z retiró.
 
-Y **sigue sin vender**. Desde el Incremento 4 hay existencias y hay bolsa, pero
-**no hay pedido, ni pago, ni dirección, ni envío, ni devolución, ni
-transferencia**. `feature_product_sales` sigue apagada y **sin código detrás**:
-encenderla no haría que se pudiera comprar, solo dejaría de ser verdad que no se
-puede. La pantalla del carrito no tiene botón de pagar, y lo dice con palabras.
+Y **sigue sin cobrar**. Desde el Incremento 5 hay condiciones de venta por
+jurisdicción, pedido, dirección congelada y reserva de inventario; lo que no hay
+es **dinero, envío, entrega, incidencia, devolución ni transferencia**.
+
+`feature_product_sales` sigue apagada, y **ya tiene código detrás**: apagada, el
+checkout contesta 503 con la lista de lo que falta en vez de fingir que la
+compra no existe. Encenderla sola tampoco bastaría —hacen falta cinco banderas,
+una clave de la pasarela y una política publicada y vigente para el país de
+entrega—, y la pantalla del carrito enseña el botón de continuar **solo cuando
+el servidor dice que se puede**; si no, el pie lo dice con palabras.
 
 ## 2. Por qué no se reutilizó `commerce_products`
 
@@ -48,7 +56,7 @@ comercial añadida, y eso es `product_sellers`. Una tabla aparte crearía una
 segunda identidad que se desincroniza del perfil: dos nombres, dos fotos y dos
 verdades sobre quién es esa persona.
 
-## 3. Las tres migraciones, y en este orden
+## 3. Las nueve migraciones, y en este orden
 
 | Fichero | Qué trae |
 |---|---|
@@ -58,22 +66,30 @@ verdades sobre quién es esa persona.
 | `0073_productos_fotografias.sql` | el depósito `product-media` y nueve columnas de `product_media` |
 | `0074_productos_inventario.sql` | `product_inventory`, `inventory_movements` |
 | `0075_productos_carrito.sql` | `product_carts`, `product_cart_items` |
+| `0076_productos_inventario_claves.sql` | quita dos claves ajenas que dejaban una cuenta sin poder borrarse |
+| `0077_productos_politicas.sql` | `product_policies` |
+| `0078_productos_pedidos.sql` | `product_orders`, `product_order_items`, `product_order_addresses`, `product_order_events` |
 
-**LAS TRES PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se
-comprobaron contra la base gestionada en una sesión de solo lectura demostrada
+**LAS NUEVE ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
+seis primeras contra la base gestionada en una sesión de solo lectura demostrada
 —una escritura fue rechazada antes de la primera consulta—: tablas, columnas
 contra el ORM, tipos, nulabilidad, claves primarias y ajenas con su `ON DELETE`,
 restricciones, índices con su unicidad y su parcialidad, el disparador con su
 cuerpo comparado carácter a carácter, RLS activa, cero políticas y cero
-permisos para `anon` y `authenticated`. **Cero divergencias.**
+permisos para `anon` y `authenticated`. El 18/09/2026 se repitió la misma
+verificación sobre las tres últimas. **Cero divergencias en las dos rondas.**
 
-**LAS TRES ÚLTIMAS SE ENTREGAN SIN APLICAR.** Escritas y probadas en PostgreSQL
-16 desechable, incluida su reejecución. Ninguna se aplicó a la base gestionada.
+Las cabeceras de los `.sql` siguen diciendo «SIN APLICAR» a propósito: una
+migración aplicada no se reescribe, y el estado vive en esta documentación.
 
-Sin ellas, cada ruta contesta **503 con su propio código** —`products_not_available`,
+**Y LAS PUERTAS DE ESQUEMA SIGUEN HACIENDO FALTA.** Que la base gestionada las
+tenga no significa que las tenga la de al lado: una local, una de pruebas o la
+de quien acaba de clonar pueden no tenerlas. Sin ellas, cada ruta contesta
+**503 con su propio código** —`products_not_available`,
 `product_admission_not_available`, `product_saves_not_available`,
 `product_media_not_available`, `product_inventory_not_available`,
-`product_cart_not_available`— y no 404, que haría pensar que la ruta está mal
+`product_cart_not_available`, `product_policies_not_available`,
+`product_orders_not_available`— y no 404, que haría pensar que la ruta está mal
 escrita, ni 500, que haría pensar que algo se rompió.
 
 La puerta de las **fotografías mira una columna**, no una tabla: la 0073 no crea
@@ -251,7 +267,7 @@ si cada pantalla lo escribiera, tres pantallas dirían tres cosas parecidas.
 Se crearon **solo los que tienen lógica usada en este incremento**:
 
     products/__init__.py      qué es y qué no
-    products/models.py        las trece tablas
+    products/models.py        las veintidós tablas
     products/states.py        el ciclo, lógica pura
     products/permissions.py   quién puede qué
     products/esquema.py       las tres puertas de migración
@@ -262,13 +278,19 @@ Se crearon **solo los que tienen lógica usada en este incremento**:
     products/media.py         las fotografías: subir, ordenar, quitar, aprobar
     products/inventory.py     existencias, movimientos y concurrencia
     products/carts.py         la bolsa
+    products/politicas.py     las condiciones de venta por jurisdicción
+    products/pedidos.py       el pedido, la reserva y la conciliación
+    products/pagos.py         el puerto compartido de cobro, para Productos
     products/schemas.py       los contratos
-    products/router.py        44 rutas
+    products/router.py        64 rutas (41 públicas y 23 de administración)
 
-**No existen** `orders.py`, `shipments.py`, `incidents.py`, `returns.py`,
-`warranties.py`, `reviews.py`, `performance.py` ni `finance.py`. La arquitectura
-los propone para incrementos posteriores, y un fichero vacío hoy es una capa que
-hay que mantener sin que haga nada.
+**No existen** `shipments.py`, `incidents.py`, `returns.py`, `warranties.py`,
+`reviews.py`, `performance.py` ni `finance.py`. La arquitectura los propone para
+incrementos posteriores, y un fichero vacío hoy es una capa que hay que mantener
+sin que haga nada.
+
+`orders.py` tampoco existe **con ese nombre**: lo que la arquitectura llama así
+es `pedidos.py`, en español como el resto del código.
 
 `media.py` tampoco está en la lista de la arquitectura: lo que faltaba ahí era
 **quién recibe el archivo**, y eso no es catálogo, ni admisión, ni ciclo.

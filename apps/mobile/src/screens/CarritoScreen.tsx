@@ -51,11 +51,13 @@ import { ApiError } from '@/services/api';
 /**
  * Tu bolsa: lo que has ido metiendo, con sus cantidades y su subtotal.
  *
- * AQUÍ NO SE COMPRA, Y LA PANTALLA LO DICE EN EL PIE. No hay botón de pagar, ni
- * de finalizar, ni de nada que lo parezca: el servidor manda `purchasable` en
- * `false` porque no existe checkout, ni pedido, ni cobro. Un botón que prometa
- * pagar sin recorrido detrás cuesta más confianza que su ausencia, y este es el
- * sitio de toda la aplicación donde más se nota.
+ * AQUÍ NO SE PAGA, Y EL BOTÓN NO LO DICE. Lo que hay es «continuar», que lleva
+ * a revisar la dirección y las condiciones; cobrar ocurre después y fuera. Y
+ * ese botón SOLO APARECE SI EL SERVIDOR DICE QUE SE PUEDE: cuando la venta está
+ * apagada —cinco banderas, una clave de la pasarela y una política publicada—
+ * el pie lo dice con palabras en vez de ofrecer un camino que termina en un
+ * error. Un botón que prometa pagar sin recorrido detrás cuesta más confianza
+ * que su ausencia, y este es el sitio de toda la aplicación donde más se nota.
  *
  * NINGÚN IMPORTE SE CALCULA AQUÍ. Ni el de una línea, ni el subtotal: vienen
  * calculados y esto solo los escribe. Si el cliente multiplicara cantidad por

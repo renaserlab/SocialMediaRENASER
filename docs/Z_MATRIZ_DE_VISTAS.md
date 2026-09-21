@@ -212,7 +212,7 @@ falta.
 | Mis productos | `/proveedor/productos` | `GET /products/seller/products` | terminada | nada |
 | Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | el borrador **ya no lleva galería**: las fotos tienen su pantalla |
 | Fotografías del producto | `/proveedor/productos/[productId]/fotos` | `GET/POST .../media`, `PUT .../media/order`, `DELETE .../media/{id}` | terminada | **el archivo lo sube la API**, no el móvil; nace pendiente de aprobación |
-| Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar, liberar y despachar existen en el servidor y **no las llama ninguna ruta**: son del checkout |
+| Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar y liberar ya los llama el pedido; **despachar sigue sin llamarlo nadie**: sacar del almacén es del Incremento 6 |
 | Pedidos pagados de mi tienda | — (ruta de API) | `GET /products/seller/orders`, `GET .../orders/{id}` | **backend terminado, sin pantalla** | la pantalla es del Incremento 6, cuando haya algo que hacer con el pedido: hoy solo se podría mirar. **Solo los PAGADOS, y sin el cobro ni el comprador** |
 | Incidencias y saldos | — | — | **no existen** | Incrementos 7 a 9. No hay pantalla vacía que los simule |
 
