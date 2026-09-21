@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -13,6 +12,12 @@ import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
+import {
+  PermisoNegado,
+  elegirEnNativo,
+  elegirEnWeb,
+  type ImagenElegida,
+} from '@/lib/elegirImagen';
 import {
   LARGO_MAXIMO_DEL_ALTERNATIVO,
   MAXIMO_DE_FOTOS,
@@ -65,111 +70,6 @@ import { ApiError } from '@/services/api';
  * tarjeta de la propia pantalla, así que no hay ningún Modal en medio y no hace
  * falta esperar a nada.
  */
-
-/** Un archivo ya elegido, con lo que hace falta para comprobarlo antes de subir. */
-type Elegido = {
-  archivo: Blob;
-  nombre: string;
-  tipo: string | null;
-  bytes: number | null;
-};
-
-/** Quien dijo que no a las fotos del teléfono. No es una avería. */
-class PermisoNegado extends Error {}
-
-/**
- * El tipo deducido de la extensión, y SOLO si es uno de los tres admitidos.
- *
- * `expo-image-picker` casi siempre manda `mimeType`, pero no está garantizado.
- * Sin esto, un JPEG perfectamente válido se rechazaría aquí por «tipo no
- * admitido» sin haber salido del teléfono. No se adivina nada más: lo que no
- * cuadra con la lista cerrada vuelve nulo y lo decide el servidor, que mira los
- * bytes de verdad.
- */
-function tipoPorExtension(uri: string): string | null {
-  const limpio = uri.split('?')[0] ?? '';
-  const punto = limpio.lastIndexOf('.');
-  if (punto === -1) return null;
-  const extension = limpio.slice(punto + 1).toLowerCase();
-  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
-  if (extension === 'png') return 'image/png';
-  if (extension === 'webp') return 'image/webp';
-  return null;
-}
-
-/**
- * El selector del navegador: un `<input type="file">` oculto.
- *
- * Se crea, se pulsa y se quita. React Native Web no pinta elementos del DOM
- * desde el JSX, así que el campo no puede vivir en el árbol de componentes.
- */
-function elegirEnWeb(): Promise<Elegido | null> {
-  return new Promise((resolver) => {
-    if (typeof document === 'undefined') {
-      resolver(null);
-      return;
-    }
-    const entrada = document.createElement('input');
-    entrada.type = 'file';
-    entrada.accept = TIPOS_ADMITIDOS.join(',');
-    entrada.style.display = 'none';
-    const terminar = (elegido: Elegido | null) => {
-      entrada.remove();
-      resolver(elegido);
-    };
-    entrada.addEventListener('change', () => {
-      const archivo = entrada.files?.[0];
-      if (archivo === undefined) {
-        terminar(null);
-        return;
-      }
-      terminar({
-        archivo,
-        nombre: archivo.name,
-        tipo: archivo.type === '' ? tipoPorExtension(archivo.name) : archivo.type,
-        bytes: archivo.size,
-      });
-    });
-    // Cerrar el diálogo sin elegir nada tiene que soltar la promesa igual.
-    entrada.addEventListener('cancel', () => terminar(null));
-    document.body.appendChild(entrada);
-    entrada.click();
-  });
-}
-
-/**
- * El selector del teléfono.
- *
- * EL ARCHIVO VIAJA COMO `{uri, name, type}`, que es lo que el `FormData` de
- * React Native sabe leer. Un `Blob` sacado de `fetch(uri).blob()` informa bien
- * el tamaño pero VIAJA VACÍO —la trampa ya pagada que cuenta `CLAUDE.md`—:
- * subiría cero bytes diciendo que son dos megas.
- */
-async function elegirEnNativo(): Promise<Elegido | null> {
-  const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permiso.granted) throw new PermisoNegado();
-
-  const resultado = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
-    allowsMultipleSelection: false,
-  });
-  if (resultado.canceled) return null;
-  const elegida = resultado.assets?.[0];
-  if (elegida === undefined) return null;
-
-  const tipo = elegida.mimeType ?? tipoPorExtension(elegida.uri);
-  const nombre = elegida.fileName ?? `${Date.now()}`;
-  return {
-    archivo: {
-      uri: elegida.uri,
-      name: nombre,
-      type: tipo ?? undefined,
-    } as unknown as Blob,
-    nombre,
-    tipo,
-    bytes: typeof elegida.fileSize === 'number' ? elegida.fileSize : null,
-  };
-}
 
 export function FotosDeProductoScreen() {
   const { t } = useTranslation();
