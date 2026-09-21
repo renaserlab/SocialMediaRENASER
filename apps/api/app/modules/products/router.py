@@ -371,6 +371,13 @@ def _lo_que_puede_con_el_paquete(envio, actor: str | None) -> list[str]:
     if actor is None:
         return []
     posibles = list(estados_de_envio.siguientes(envio.status, actor))
+
+    #: CANCELAR NO SE ANUNCIA MIENTRAS NO HAYA POLITICA. La maquina lo declara
+    #: para administracion, pero `envios.cancelar` se para siempre: ofrecerlo
+    #: seria prometer un boton que devuelve 409 sin excepcion.
+    if not envios.HAY_POLITICA_DE_CANCELACION:
+        posibles = [p for p in posibles if p != estados_de_envio.CANCELADO]
+
     if (
         actor == estados_de_envio.COMPRADOR
         and envio.status == estados_de_envio.ENTREGADO

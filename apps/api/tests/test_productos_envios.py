@@ -1921,3 +1921,76 @@ async def test_despachar_sin_existencias_da_un_error_controlado(
     assert envio.dispatch_settled_at is None
     assert salidas == 0, "salio una unidad de un almacen que no la tenia"
     assert antes.on_hand > 0, "el montaje no llego a apartar nada"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_pedido_sin_preparar_no_se_cae_de_la_lista_del_proveedor(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """LA LISTA ES LA UNICA PUERTA A LA PREPARACION, Y TENIA FONDO.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE. `del_proveedor` trae los mas
+    recientes POR FECHA, incluidos los ya entregados, y al detalle solo se
+    llega pulsando una de esas tarjetas. Un proveedor que deje un pedido sin
+    preparar lo pierde de vista en cuanto entren mas nuevos que quepan en la
+    lista: deja de existir para el, y es justo el que sale en la cola de
+    administracion como «lleva trescientas horas esperando». Esa cola es de
+    solo lectura y tampoco lleva a ningun sitio.
+
+    LO QUE NECESITA ATENCION VA PRIMERO. No se pagina —no hace falta— ni se
+    esconde nada: se ordena por si el paquete esta cerrado o no, y dentro de
+    cada grupo por fecha.
+
+    SE PRUEBA CON UN LIMITE PEQUENO, que es el mismo mecanismo con veinte: el
+    tope es un parametro, y hacer veintiun cobros completos para demostrar lo
+    mismo solo haria la prueba lenta.
+    """
+    from app.modules.products import pedidos as _pedidos
+    from app.modules.products.models import ProductSeller
+
+    #: EL QUE SE QUEDA SIN PREPARAR, y es el MAS VIEJO de los tres.
+    _, _, _, atrasado = await pedido_pagado(sesiones, monkeypatch)
+    quien = await duenno_de(sesiones, atrasado)
+    async with sesiones() as db:
+        vendedor_id = (await db.get(ProductOrder, atrasado)).seller_id
+
+    #: DOS MAS NUEVOS Y ENTREGADOS. Se crean por el camino real y despues se
+    #: reasignan a este proveedor: `pedido_pagado` abre uno nuevo cada vez, y
+    #: montar tres tiendas no es lo que se prueba aqui.
+    nuevos = []
+    for _ in range(2):
+        _, _, _, otro = await pedido_pagado(sesiones, monkeypatch)
+        suyo = await duenno_de(sesiones, otro)
+        await preparar_entero(sesiones, otro, suyo)
+        async with sesiones() as db:
+            orden = await db.get(ProductOrder, otro)
+            await envios.despachar(db, orden=orden, actor_id=suyo)
+            await db.commit()
+        async with sesiones() as db:
+            orden = await db.get(ProductOrder, otro)
+            await envios.registrar_entrega(
+                db, orden=orden, actor_id=suyo, actor_rol=estados_de_envio.PROVEEDOR
+            )
+            await db.commit()
+        async with sesiones() as db:
+            orden = await db.get(ProductOrder, otro)
+            orden.seller_id = vendedor_id
+            await db.commit()
+        nuevos.append(otro)
+
+    #: CON HUECO PARA DOS, el que necesita atencion tiene que estar.
+    async with sesiones() as db:
+        lista = await _pedidos.del_proveedor(db, seller_id=vendedor_id, limite=2)
+    ids = [o.id for o in lista]
+    assert atrasado in ids, (
+        "el pedido sin preparar se cayo de la lista: no hay forma de llegar a el"
+    )
+    assert ids[0] == atrasado, f"lo que necesita atencion no va primero: {ids}"
+
+    #: Y LOS ENTREGADOS SIGUEN SALIENDO cuando hay sitio: no se esconden.
+    async with sesiones() as db:
+        completa = await _pedidos.del_proveedor(db, seller_id=vendedor_id)
+    todos = [o.id for o in completa]
+    assert set(nuevos) <= set(todos), "los entregados desaparecieron de la lista"
+    assert todos[0] == atrasado

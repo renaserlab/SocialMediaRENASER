@@ -710,3 +710,79 @@ async def test_suspender_un_producto_acepta_el_cuerpo_que_manda_el_movil(
 
     async with sesiones() as db:
         assert (await db.get(Product, producto_id)).status == "suspended"
+
+
+@pytest.mark.asyncio
+async def test_no_se_anuncia_cancelar_mientras_no_haya_politica(
+    sesiones, cliente, venta_encendida, monkeypatch
+) -> None:
+    """LO QUE SE ANUNCIA TIENE QUE PODER PULSARSE.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE. La maquina declara el salto a
+    CANCELLED para administracion, pero `envios.cancelar` se para SIEMPRE:
+    `product_policies` no dice con que plazo, en que casos, quien paga el porte
+    de vuelta ni cuando se repone el stock. Anunciarlo era prometer un boton
+    que devuelve 409 sin excepcion, y es la misma mentira —al reves— que
+    costaba el boton de confirmar la recepcion.
+
+    SE MIRA LA VISTA DE ADMINISTRACION, que es la unica que tenia el defecto, y
+    la unica ruta que la expone es la respuesta de su propia intervencion. Una
+    version anterior de esta prueba leia por descuido las transiciones del
+    PROVEEDOR, que nunca llevaron CANCELLED: pasaba sin demostrar nada, y la
+    mutacion que tenia que ponerla roja la dejaba verde.
+    """
+    from app.modules.products import envios as servicio_de_envios
+
+    assert servicio_de_envios.HAY_POLITICA_DE_CANCELACION is False, (
+        "si esto cambia, esta prueba tiene que cambiar con ello"
+    )
+
+    http, quien = cliente
+    _, _, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    proveedor = await _duenno(sesiones, orden_id)
+    manda = await persona(sesiones, "nocancela")
+    await _rol(sesiones, manda, "admin")
+
+    #: El proveedor cierra el paquete, que es el estado desde el que la maquina
+    #: SI le declara a administracion el salto a CANCELLED.
+    quien["uid"] = proveedor
+    detalle = (await http.get(f"{PRODUCTOS}/seller/orders/{orden_id}")).json()
+    await http.post(
+        f"{PRODUCTOS}/seller/orders/{orden_id}/shipment/prepare",
+        json={
+            "items": [
+                {"order_item_id": l["id"], "prepared_quantity": l["quantity"]}
+                for l in detalle["items"]
+            ]
+        },
+    )
+    await http.post(f"{PRODUCTOS}/seller/orders/{orden_id}/shipment/ready")
+
+    #: ADMINISTRACION INTERVIENE DE VERDAD —reabrir es lo que si puede— y en SU
+    #: respuesta se mira lo que se le ofrece.
+    quien["uid"] = manda
+    reabierto = await http.post(
+        f"{ADMIN}/shipments/{orden_id}/transition",
+        json={"to": "PREPARING", "reason": "faltaba una pieza en la caja"},
+    )
+    assert reabierto.status_code == 200, reabierto.text
+    ofrecidos = reabierto.json()["available_transitions"]
+
+    #: LO QUE SI PUEDE SE SIGUE OFRECIENDO: la correccion no apaga la ruta.
+    assert "READY" in ofrecidos, ofrecidos
+    #: Y LO QUE NO, NO.
+    assert "CANCELLED" not in ofrecidos, ofrecidos
+    assert "DISPATCHED" not in ofrecidos, "administracion no despacha"
+    assert "DELIVERED" not in ofrecidos, "administracion no fabrica una entrega"
+
+    #: Y SI ALGUIEN LO INTENTA IGUAL, el servidor lo dice con su codigo y no se
+    #: estrella: la puerta de verdad sigue siendo el servicio.
+    intento = await http.post(
+        f"{ADMIN}/shipments/{orden_id}/transition",
+        json={"to": "CANCELLED", "reason": "quiero cancelarlo"},
+    )
+    assert intento.status_code == 409, intento.text
+    assert (
+        intento.json()["error"]["code"]
+        == "product_shipment_cancellation_not_configured"
+    )

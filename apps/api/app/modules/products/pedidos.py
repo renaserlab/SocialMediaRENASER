@@ -48,7 +48,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1179,19 +1179,56 @@ async def del_proveedor(
     db: AsyncSession, *, seller_id: str, limite: int = 20
 ) -> list[ProductOrder]:
     """SOLO LOS PAGADOS. Un proveedor no tiene por qué ver quién abandonó un
-    carrito, ni cuántos lo intentaron: eso no le hace falta para atender."""
+    carrito, ni cuántos lo intentaron: eso no le hace falta para atender.
+
+    LO QUE NECESITA ATENCIÓN VA PRIMERO, y no es una comodidad: esta lista es la
+    ÚNICA puerta a la pantalla de preparación —al detalle solo se llega pulsando
+    una de estas tarjetas—, y tiene tope. Ordenada solo por fecha, un pedido que
+    alguien deje sin preparar se cae por abajo en cuanto entren otros más
+    nuevos, y deja de existir para quien tiene que prepararlo. Es justo el que
+    aparece en la cola de administración como «lleva trescientas horas
+    esperando», y esa cola es de solo lectura: tampoco lleva a ninguna parte.
+    Lo encontró la revisión independiente.
+
+    NO SE ESCONDE NADA Y NO SE PAGINA. Los entregados siguen saliendo, detrás.
+
+    Y SE ORDENA ASÍ SOLO SI LA 0079 ESTÁ PUESTA. Sin ella no hay tabla de envíos
+    que mirar, y preguntar por una columna que no existe tumbaría la lista
+    entera de quien vende: sin envíos, el orden por fecha es el que había y
+    sigue siendo correcto, porque no hay nada que preparar todavía.
+    """
     await esquema.exigir_pedidos(db)
-    return list(
-        await db.scalars(
-            select(ProductOrder)
-            .where(
-                ProductOrder.seller_id == seller_id,
-                ProductOrder.status == PEDIDO_PAGADO,
-            )
-            .order_by(ProductOrder.created_at.desc(), ProductOrder.id.desc())
-            .limit(max(1, min(limite, 100)))
-        )
+    consulta = select(ProductOrder).where(
+        ProductOrder.seller_id == seller_id,
+        ProductOrder.status == PEDIDO_PAGADO,
     )
+    if await esquema.hay_envios(db):
+        #: DENTRO, para no atar este modulo al del envio: `envios` ya importa
+        #: `pedidos`, y hacerlo arriba cerraria el circulo.
+        from app.modules.products import estados_de_envio
+        from app.modules.products.models import ProductShipment
+
+        #: CERRADO = entregado o cancelado. Lo demás espera a alguien, incluido
+        #: el pedido que todavía no tiene fila de envío porque nadie lo tocó:
+        #: ese es precisamente el caso que se estaba perdiendo, y un `left join`
+        #: lo deja con `status` nulo, que NO está en la lista de cerrados.
+        cerrado = case(
+            (
+                ProductShipment.status.in_(
+                    [estados_de_envio.ENTREGADO, estados_de_envio.CANCELADO]
+                ),
+                1,
+            ),
+            else_=0,
+        )
+        consulta = consulta.outerjoin(
+            ProductShipment, ProductShipment.order_id == ProductOrder.id
+        ).order_by(cerrado, ProductOrder.created_at.desc(), ProductOrder.id.desc())
+    else:
+        consulta = consulta.order_by(
+            ProductOrder.created_at.desc(), ProductOrder.id.desc()
+        )
+    return list(await db.scalars(consulta.limit(max(1, min(limite, 100)))))
 
 
 async def en_revision(db: AsyncSession, *, limite: int = 50) -> list[ProductOrder]:

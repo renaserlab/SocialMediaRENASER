@@ -1025,6 +1025,23 @@ async def reabrir(
     )
 
 
+#: SI SE PUEDE CANCELAR UN PEDIDO YA PAGADO. Hoy NO, y no por prudencia
+#: nuestra: `product_policies` no tiene ninguna columna que diga con que plazo,
+#: en que casos, quien paga el porte de vuelta ni cuando se repone el stock.
+#:
+#: ESCRITO EN UN SOLO SITIO PORQUE LO LEEN DOS. Lo lee `cancelar`, que se para,
+#: y lo lee el serializador para NO anunciar el salto: `available_transitions`
+#: promete «esto el servidor te lo va a aceptar», y ofrecer un `CANCELLED` que
+#: siempre devuelve 409 es la misma mentira que costo el boton de confirmar la
+#: recepcion. Lo encontro la revision independiente.
+#:
+#: EL DIA QUE ESA DECISION LLEGUE, lo que falta es poner esto en `True`; el
+#: salto ya esta declarado en la maquina con su actor, la liberacion escrita
+#: con su marca y su clave, y el CHECK de la base exige que cancelar y soltar
+#: vayan juntos.
+HAY_POLITICA_DE_CANCELACION = False
+
+
 async def cancelar(
     db: AsyncSession,
     *,
