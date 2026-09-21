@@ -127,6 +127,19 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 6 de Productos: el portugues escribe estas EXACTAMENTE igual
+    // que el espanol. No son traducciones olvidadas; escribirlas distintas
+    // seria escribirlas mal.
+    'envio.estado.DISPATCHED',        // «Despachado».
+    'envio.motivo.etiqueta',          // «Motivo».
+    'envio.proveedor.pedido',         // «Pedido».
+    'envio.proveedor.unidades',       // «{n} unidades».
+    'envio.preparar.contadas',        // «{hechas} de {total}»: formato puro.
+    'envio.preparar.reabrir',         // «Reabrir».
+    'envio.preparar.despachoTitulo',  // «Despachar».
+    'envio.preparar.despachar',       // «Despachar».
+    'envio.detalle.transporte',       // «Transporte».
+    'envio.detalle.motivoDelFallo',   // «Motivo: {motivo}».
     // Incremento 5 de Productos: el portugues las escribe igual.
     'pedidoDeProducto.estado.CANCELLED',      // «Cancelado».
     'pedidoDeProducto.falta.desconocido',     // «Falta algo por configurar.»

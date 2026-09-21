@@ -1731,7 +1731,7 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     }
   });
 
-  it('NINGUNA pantalla de existencias, envíos, pedidos, incidencias ni saldos', () => {
+  it('NINGUNA pantalla de existencias, incidencias ni saldos', () => {
     // No existen en la API. Una pantalla vacía que los simulara prometería una
     // operación que no hay.
     //
@@ -1742,16 +1742,18 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     // escriban un número de existencias: los números viven en
     // `InventarioDeProductoScreen`, que es la única que los lee del contrato,
     // y por eso «stock» y «existencias» se quedan.
+    //
+    // «envio» y «pedido» SALEN AHORA, con el Incremento 6, y SOLO de esta
+    // comprobación conjunta: los pedidos de la tienda existen de verdad —la
+    // 0079— y tienen su pantalla. Lo único que «Mis productos» puede hacer con
+    // ellos es LLEVAR allí, y eso se comprueba aparte, igual que se comprueba
+    // aparte que ni el repositorio ni las otras dos pantallas los mencionen.
     const todo = [postular, productos, editar, repositorio].join('\n');
     // Con límites de palabra: `borderColor` contiene «order» y no es un pedido.
     for (const prohibido of [
       'stock',
       'existencias',
-      'envio',
-      'envío',
       'shipping',
-      'pedido',
-      'pedidos',
       'orders?',
       'incidencia',
       'saldo',
@@ -1762,6 +1764,51 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     ]) {
       const patron = new RegExp(`\\b${prohibido}\\b`, 'i');
       assert.ok(!patron.test(todo), `aparece «${prohibido}»`);
+    }
+  });
+
+  it('el repositorio del proveedor no aprende a enviar', () => {
+    // QUIEN ENVÍA ES `ProductShipmentRepository`, y tiene que seguir siéndolo.
+    // Si este repositorio creciera un método de despacho habría dos sitios
+    // desde donde sacar unidades del almacén, y uno de los dos acabaría sin su
+    // clave de idempotencia.
+    for (const prohibido of ['envio', 'envío', 'shipment', 'pedido', 'despach', 'dispatch']) {
+      const patron = new RegExp(prohibido, 'i');
+      assert.ok(!patron.test(repositorio), `aparece «${prohibido}»`);
+    }
+  });
+
+  it('postular y editar siguen sin hablar de envíos ni de pedidos', () => {
+    // Un producto no es un pedido. Que estas dos pantallas escribieran un
+    // estado de envío significaría que lo están deduciendo de algo que no es
+    // el contrato del envío.
+    for (const pantalla of [postular, editar]) {
+      for (const prohibido of ['envio', 'envío', 'pedido', 'shipment']) {
+        const patron = new RegExp(`\\b${prohibido}\\b`, 'i');
+        assert.ok(!patron.test(pantalla), `aparece «${prohibido}»`);
+      }
+    }
+  });
+
+  it('«Mis productos» LLEVA a los pedidos de la tienda, y solo eso', () => {
+    // UNA RUTA QUE SOLO FUNCIONA ESCRIBIENDO LA URL NO ESTÁ TERMINADA. Esta es
+    // la comprobación de que se puede llegar.
+    assert.ok(
+      productos.includes("'/proveedor/pedidos'"),
+      'falta el acceso a los pedidos de la tienda',
+    );
+    // Y NADA MÁS QUE LLEVAR: ni estados de envío, ni cantidades preparadas, ni
+    // transportistas. Todo eso se lee del contrato en la pantalla que lo pide.
+    for (const prohibido of [
+      'DISPATCHED',
+      'DELIVERED',
+      'PREPARING',
+      'prepared_quantity',
+      'carrier',
+      'tracking',
+      'shipment',
+    ]) {
+      assert.ok(!productos.includes(prohibido), `aparece «${prohibido}»`);
     }
   });
 
