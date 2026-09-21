@@ -251,6 +251,24 @@ export function ofrece(envio: Envio | null, salto: string): boolean {
 /* La preparación                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Si todavía se puede contar la caja.
+ *
+ * EL SERVIDOR SOLO ACEPTA APUNTAR CANTIDADES MIENTRAS SE PREPARA. Con el
+ * paquete ya cerrado contesta 409 `product_shipment_not_preparing`, y con el
+ * paquete fuera ni eso.
+ *
+ * LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE: la pantalla escondía los controles
+ * solo cuando el paquete YA HABÍA SALIDO, así que en «listo» seguía pintando el
+ * botón de quitar una unidad —activo— sobre una llamada que siempre falla. El
+ * camino correcto, reabrir con motivo, estaba en la misma pantalla; el botón
+ * que se ofrecía primero era el que no funciona.
+ */
+export function sePuedeContarLaCaja(envio: Envio | null): boolean {
+  if (envio === null) return false;
+  return envio.status === 'PENDING' || envio.status === 'PREPARING';
+}
+
 /** Cuántas unidades faltan por meter en la caja de una línea. */
 export function faltanDeLaLinea(linea: LineaPreparada): number {
   return Math.max(0, linea.ordered_quantity - linea.prepared_quantity);

@@ -64,6 +64,7 @@ const {
   numeroDeLaEspera,
   ofrece,
   sePuedeCerrar,
+  sePuedeContarLaCaja,
   sePuedeConfirmarRecepcion,
   yaLlego,
   yaSalio,
@@ -558,5 +559,112 @@ describe('las pantallas del envío', () => {
     assert.ok(misProductos.includes("'/proveedor/pedidos'"), 'pedidos de mi tienda');
     assert.ok(tienda.includes('/proveedor/pedidos/'), 'el detalle del pedido');
     assert.ok(adminProductos.includes("'/admin/productos/envios'"), 'la bandeja');
+  });
+});
+
+/* ========================================================================== */
+/* 11. Lo que encontró la revisión independiente del Incremento 6             */
+/* ========================================================================== */
+describe('la pantalla no ofrece lo que el servidor rechaza, ni esconde lo que acepta', () => {
+  it('contar la caja SOLO mientras el servidor lo acepta', () => {
+    // Con el paquete cerrado el servidor contesta 409
+    // `product_shipment_not_preparing`. La pantalla escondía los controles solo
+    // cuando ya había SALIDO, así que en «listo» seguía pintando el botón de
+    // quitar una unidad, activo, sobre una llamada que siempre falla.
+    assert.equal(sePuedeContarLaCaja(envio({ status: 'PENDING' })), true);
+    assert.equal(sePuedeContarLaCaja(envio({ status: 'PREPARING' })), true);
+    assert.equal(sePuedeContarLaCaja(envio({ status: 'READY' })), false);
+    assert.equal(sePuedeContarLaCaja(envio({ status: 'DISPATCHED' })), false);
+    assert.equal(sePuedeContarLaCaja(envio({ status: 'DELIVERED' })), false);
+    assert.equal(sePuedeContarLaCaja(envio({ status: 'CANCELLED' })), false);
+    assert.equal(sePuedeContarLaCaja(null), false);
+  });
+
+  it('los dos estados que cuentan son los que el servidor acepta', () => {
+    // LEÍDO DEL SERVIDOR, no copiado: `anotar_preparado` exige que el envío
+    // esté en uno de esos dos, y si mañana admite otro, esto se entera.
+    const servicio = delServidor('envios.py');
+    const bloque = servicio.slice(servicio.indexOf('async def anotar_preparado'));
+    const corte = bloque.indexOf('async def ', 10);
+    const cuerpo = bloque.slice(0, corte > 0 ? corte : undefined);
+    assert.ok(
+      cuerpo.includes('estados_de_envio.PENDIENTE')
+        && cuerpo.includes('estados_de_envio.PREPARANDO'),
+      'el servidor ya no acepta contar en esos dos estados',
+    );
+  });
+
+  it('la pantalla usa el predicado, y NO «ya salió», para los controles', () => {
+    const pantalla = sinComentarios(fuente('screens', 'PrepararPedidoScreen.tsx'));
+    assert.ok(
+      pantalla.includes('!sePuedeContarLaCaja(envio)'),
+      'los controles no consultan si el servidor acepta contar',
+    );
+  });
+
+  it('registrar la entrega se ofrece según `available_transitions`', () => {
+    // Desde una entrega fallida el servidor SÍ la acepta —el transportista no
+    // encontró a nadie y al día siguiente la lleva en mano—, y la pantalla lo
+    // condicionaba a DISPATCHED. Quien vende tenía que inventarse un reintento
+    // para poder marcarla: dos renglones falsos en un historial inmutable.
+    const pantalla = sinComentarios(fuente('screens', 'PrepararPedidoScreen.tsx'));
+    assert.ok(
+      pantalla.includes("ofrece(envio, 'DELIVERED')"),
+      'el botón de entrega no consulta lo que el servidor ofrece',
+    );
+    assert.ok(
+      !pantalla.includes("{estado === 'DISPATCHED' ? ("),
+      'sigue habiendo un botón condicionado al estado en vez de a la oferta',
+    );
+  });
+
+  it('y el servidor la acepta desde una entrega fallida, leído de su máquina', () => {
+    const maquina = delServidor('estados_de_envio.py');
+    assert.ok(
+      /\(ENTREGA_FALLIDA, ENTREGADO\): frozenset\(\{PROVEEDOR/.test(maquina),
+      'el servidor ya no acepta entregar desde una entrega fallida',
+    );
+  });
+});
+
+describe('los códigos que despachar hereda del almacén tienen texto', () => {
+  it('los cuatro se traducen, y es `inventario.ts` quien los tiene', async () => {
+    // LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE. `POST /shipment/dispatch` es lo
+    // único de esa pantalla que llama a `inventory`, así que hereda códigos que
+    // NO están en `envios.py` y por tanto no estaban en la tabla de `envios.ts`.
+    // Quien vende leía el mensaje crudo del servidor —«No hay tantas
+    // unidades.»— en castellano, fuera cual fuera su idioma.
+    const { claveDeErrorDeInventario } = await import('./inventario.ts');
+    for (const codigo of [
+      'product_inventory_insufficient',
+      'product_inventory_not_configured',
+      'product_inventory_key_reused',
+    ]) {
+      assert.ok(
+        claveDeErrorDeInventario(codigo) !== null,
+        `«${codigo}» no tiene texto`,
+      );
+    }
+  });
+
+  it('y la pantalla de preparar CONSULTA ese traductor', () => {
+    // Tenerlos traducidos no sirve de nada si la pantalla no pregunta.
+    const pantalla = sinComentarios(fuente('screens', 'PrepararPedidoScreen.tsx'));
+    assert.ok(
+      pantalla.includes('claveDeErrorDeInventario(e.code)'),
+      'la pantalla no consulta los textos del almacén',
+    );
+  });
+
+  it('el servidor sigue devolviendo esos códigos desde `inventory`', () => {
+    // LEÍDO DEL SERVIDOR: si alguien los renombra, esto se entera.
+    const almacen = delServidor('inventory.py');
+    for (const codigo of [
+      'product_inventory_insufficient',
+      'product_inventory_not_configured',
+      'product_inventory_key_reused',
+    ]) {
+      assert.ok(almacen.includes(`"${codigo}"`), `el servidor ya no usa ${codigo}`);
+    }
   });
 });

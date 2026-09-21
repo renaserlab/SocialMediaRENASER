@@ -23,10 +23,12 @@ import {
   lineaCompleta,
   ofrece,
   sePuedeCerrar,
+  sePuedeContarLaCaja,
   yaSalio,
   type LineaPreparada,
   type PedidoDelProveedor,
 } from '@/lib/envios';
+import { claveDeErrorDeInventario } from '@/lib/inventario';
 import { esPedidoApagado } from '@/lib/pedidos';
 import {
   claveDeErrorDeProductos,
@@ -119,6 +121,14 @@ export function PrepararPedidoScreen() {
     if (e instanceof ApiError) {
       const deEnvios = claveDeErrorDeEnvios(e.code);
       if (deEnvios !== null) return f(deEnvios);
+      //: Y LOS DEL ALMACEN. Despachar es lo unico de esta pantalla que llama a
+      //: `inventory`, asi que hereda sus codigos —no alcanza, sin cargar,
+      //: clave reutilizada, variante desconocida— y ninguno es de `envios.py`.
+      //: Sin esto, quien vende leia el mensaje crudo del servidor, en
+      //: castellano, fuera cual fuera su idioma. Lo encontro la revision
+      //: independiente.
+      const delAlmacen = claveDeErrorDeInventario(e.code);
+      if (delAlmacen !== null) return f(delAlmacen);
       const deProductos = claveDeErrorDeProductos(e.code);
       if (deProductos !== null) return f(deProductos);
       const porEstado = claveDeErrorPorEstado(e.status);
@@ -400,7 +410,7 @@ export function PrepararPedidoScreen() {
               <Text variant="caption" color={colors.textMuted}>
                 {f('envio.preparar.sku', { sku: linea.sku })}
               </Text>
-              {salio ? (
+              {!sePuedeContarLaCaja(envio) ? (
                 <Text variant="secondary">
                   {f('envio.preparar.contadas', {
                     hechas: linea.prepared_quantity,
@@ -545,7 +555,12 @@ export function PrepararPedidoScreen() {
           </View>
         ) : null}
 
-        {estado === 'DISPATCHED' ? (
+        {/* SEGUN LO QUE EL SERVIDOR OFRECE, y no segun el estado: desde una
+            entrega fallida tambien la acepta, y es el caso de quien la lleva
+            en mano al dia siguiente. Condicionarlo a DISPATCHED le obligaba a
+            inventarse un reintento para poder marcarla: dos renglones falsos
+            en un historial que no se puede reescribir. */}
+        {ofrece(envio, 'DELIVERED') ? (
           <View style={styles.acciones}>
             <Button
               label={f('envio.preparar.registrarEntrega')}
