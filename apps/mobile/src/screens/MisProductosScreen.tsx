@@ -400,6 +400,23 @@ export function MisProductosScreen() {
         disabled={ocupado}
       />
 
+      {/* LOS PEDIDOS DE MI TIENDA, DESDE AQUÍ.
+          El acceso va en esta pantalla y no dentro de un producto porque un
+          pedido puede llevar varios: colgarlo de uno haría que el mismo pedido
+          apareciera dos veces y que quien tiene un producto nuevo sin vender no
+          encontrara nunca la lista.
+
+          Y SE ENSEÑA SIEMPRE, también sin pedidos: una ruta que solo funciona
+          escribiendo la URL no está terminada, y la pantalla vacía explica que
+          todavía no hay nada que preparar. */}
+      <Button
+        label={f('envio.proveedor.acceso')}
+        icon="truck"
+        variant="secondary"
+        onPress={() => router.push('/proveedor/pedidos' as never)}
+        disabled={ocupado}
+      />
+
       {productos.length === 0 ? (
         <StateView
           state="empty"

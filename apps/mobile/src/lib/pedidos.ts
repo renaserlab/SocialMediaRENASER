@@ -1,3 +1,4 @@
+import type { Envio } from '@/lib/envios';
 import { precioLegible, type ClaveDeTraduccion, type Precio } from '@/lib/productos';
 
 /*
@@ -121,6 +122,16 @@ export type Pedido = {
   address: Direccion | null;
   items: LineaDelPedido[];
   history: EventoDelPedido[];
+  /**
+   * EL SEGUIMIENTO, DENTRO DEL PEDIDO. Viaja con la ficha para que la pantalla
+   * no tenga que pedirlo aparte y enseñe el pedido sin su estado de envío
+   * mientras llega el segundo viaje.
+   *
+   * NULO CUANDO NO HAY NADA QUE ENVIAR: un pedido sin pagar, vencido o
+   * cancelado no tiene envío, y contestar «pendiente de preparación» ahí haría
+   * creer que va a salir algo.
+   */
+  shipment: Envio | null;
   created_at: string;
 };
 

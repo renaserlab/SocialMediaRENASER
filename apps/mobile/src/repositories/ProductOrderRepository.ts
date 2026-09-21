@@ -95,4 +95,23 @@ export const ProductOrderRepository = {
       method: 'POST',
     });
   },
+
+  /**
+   * Confirmo que recibí mi pedido. NO ES DAR LA CONFORMIDAD.
+   *
+   * La diferencia importa y no es sutil: confirmar que llegó es un hecho de
+   * logística; dar la conformidad es decir que el producto está bien, y eso
+   * libera el dinero al proveedor. Lo segundo no existe todavía —no hay
+   * transferencias, ni comisión, ni plazo aprobado— y esta llamada no mueve
+   * ni un céntimo.
+   *
+   * IDEMPOTENTE: confirmarlo dos veces no cambia nada ni vuelve a escribir en
+   * el historial.
+   */
+  async confirmarRecepcion(orderId: string): Promise<Pedido> {
+    return apiRequest<Pedido>(
+      `${API_V1}/products/orders/${orderId}/shipment/confirm-receipt`,
+      { method: 'POST' },
+    );
+  },
 };

@@ -12,6 +12,16 @@ import { confirm, notify } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import { CLAVE_SIN_IMPORTE } from '@/lib/carrito';
 import {
+  claveDeErrorDeEnvios,
+  claveDelEstadoDeEnvio,
+  hayDatosDeTransporte,
+  iconoDelEstadoDeEnvio,
+  lineaDeTiempo,
+  sePuedeConfirmarRecepcion,
+  yaLlego,
+  yaSalio,
+} from '@/lib/envios';
+import {
   claveDeErrorDePedidos,
   claveDelEstado,
   direccionEnUnaLinea,
@@ -56,8 +66,17 @@ import { ApiError } from '@/services/api';
  * tiene sus plazos y todavía no existe. Un botón de cancelar sobre un pedido
  * pagado prometería un reembolso que nadie ha definido.
  *
- * NI TRANSPORTISTA NI SEGUIMIENTO, y se dice con palabras en vez de dejar un
- * hueco: eso llega en una entrega posterior.
+ * EL SEGUIMIENTO VIVE AQUI, desde el Incremento 6, y viaja con el pedido para
+ * no pintar la ficha sin su estado de envio mientras llega un segundo viaje.
+ *
+ * LO QUE EL SEGUIMIENTO NO DICE, Y ES LA MITAD DEL TRABAJO: ninguna fecha de
+ * llegada —no hay transportista elegido ni plazos acordados—, ningun enlace de
+ * seguimiento —construirlo exige saber el transportista— y ningun transportista
+ * por defecto: si quien despacho no lo escribio, se dice que no lo indico.
+ *
+ * Y CONFIRMAR QUE LLEGO NO ES DAR LA CONFORMIDAD. Lo segundo libera el dinero al
+ * proveedor y no existe todavia; el texto bajo el boton lo dice sin rodeos, para
+ * que nadie confirme creyendo que renuncia a algo o que ha pagado a alguien.
  */
 export function PedidoDeProductoScreen() {
   const { t } = useTranslation();
@@ -103,6 +122,8 @@ export function PedidoDeProductoScreen() {
 
   const textoDelError = (error: unknown) => {
     if (error instanceof ApiError) {
+      const deEnvios = claveDeErrorDeEnvios(error.code);
+      if (deEnvios !== null) return f(deEnvios);
       const dePedidos = claveDeErrorDePedidos(error.code);
       if (dePedidos !== null) return f(dePedidos);
       const porCodigo = claveDeErrorDeProductos(error.code);
@@ -152,6 +173,30 @@ export function PedidoDeProductoScreen() {
         setPedido(await ProductOrderRepository.cancelar(pedido.id));
       } catch (error) {
         notify(f('carrito.noSePudo'), textoDelError(error));
+      } finally {
+        ocupadoRef.current = false;
+        setOcupado(false);
+      }
+    })();
+  };
+
+  /**
+   * Confirmo que recibi mi pedido.
+   *
+   * NO SE PREGUNTA ANTES, y es deliberado: no es una accion peligrosa ni
+   * irreversible para quien la hace —no renuncia a nada, no mueve dinero y no
+   * cierra ningun plazo— y un dialogo delante la haria parecer lo contrario.
+   */
+  const confirmarRecepcion = () => {
+    if (ocupadoRef.current || pedido === null) return;
+    ocupadoRef.current = true;
+    setOcupado(true);
+    void (async () => {
+      try {
+        setPedido(await ProductOrderRepository.confirmarRecepcion(pedido.id));
+      } catch (error) {
+        notify(f('envio.detalle.confirmarRecepcion'), textoDelError(error));
+        void cargar();
       } finally {
         ocupadoRef.current = false;
         setOcupado(false);
@@ -326,10 +371,87 @@ export function PedidoDeProductoScreen() {
               ) : null}
             </>
           )}
-          <Text variant="caption" color={colors.textMuted}>
-            {f('pedidoDeProducto.detalle.sinTransportista')}
-          </Text>
         </View>
+
+        {/*
+          EL SEGUIMIENTO. Solo cuando hay algo que enviar: un pedido sin pagar,
+          vencido o cancelado no tiene envio, y el servidor manda `shipment` en
+          nulo. Ensenar «pendiente de preparacion» ahi haria creer que va a
+          salir algo.
+
+          NI FECHA PREVISTA, NI ENLACE DE SEGUIMIENTO, NI MAPA. No hay
+          transportista elegido: calcular una fecha exige plazos que nadie ha
+          fijado, y un enlace construido con un transportista inventado seria un
+          enlace roto dentro de un pedido pagado.
+        */}
+        {pedido.shipment !== null ? (
+          <View style={[styles.bloque, { borderColor: colors.border }]}>
+            <Text variant="titleMedium">{f('envio.detalle.titulo')}</Text>
+            <View style={styles.fila}>
+              {iconoDelEstadoDeEnvio(pedido.shipment.status) !== null ? (
+                <Feather
+                  name={iconoDelEstadoDeEnvio(pedido.shipment.status) as never}
+                  size={16}
+                  color={colors.text}
+                />
+              ) : null}
+              <Text variant="secondary" weight="700" style={styles.crece}>
+                {f(claveDelEstadoDeEnvio(pedido.shipment.status))}
+              </Text>
+            </View>
+
+            {/* Lo que escribio quien despacho. NULO SE DICE con palabras. */}
+            {yaSalio(pedido.shipment) ? (
+              hayDatosDeTransporte(pedido.shipment) ? (
+                <>
+                  {pedido.shipment.carrier_name !== null ? (
+                    <Text variant="caption" color={colors.textMuted}>
+                      {pedido.shipment.carrier_name}
+                    </Text>
+                  ) : null}
+                  {pedido.shipment.tracking_reference !== null ? (
+                    <Text variant="caption" color={colors.textMuted}>
+                      {f('envio.detalle.referencia', {
+                        referencia: pedido.shipment.tracking_reference,
+                      })}
+                    </Text>
+                  ) : null}
+                </>
+              ) : (
+                <Text variant="caption" color={colors.textMuted}>
+                  {f('envio.detalle.sinTransportista')}
+                </Text>
+              )
+            ) : (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('envio.detalle.todaviaEnElAlmacen')}
+              </Text>
+            )}
+
+            {pedido.shipment.failure_reason !== null ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('envio.detalle.motivoDelFallo', {
+                  motivo: pedido.shipment.failure_reason,
+                })}
+              </Text>
+            ) : null}
+
+            {/* QUIEN AFIRMA QUE LLEGO. No es un detalle: si lo dijo quien vende
+                y no es verdad, esto es lo que permite darse cuenta. */}
+            {yaLlego(pedido.shipment) ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {pedido.shipment.delivered_source === 'buyer'
+                  ? f('envio.detalle.loDijisteTu')
+                  : f('envio.detalle.loDijoElProveedor')}
+              </Text>
+            ) : null}
+
+            {/* NO SE DICE CUANDO LLEGARA. */}
+            <Text variant="caption" color={colors.textMuted}>
+              {f('envio.detalle.sinFechaPrevista')}
+            </Text>
+          </View>
+        ) : null}
 
         {/* QUÉ ACEPTASTE. La versión y los plazos, congelados con el pedido. */}
         <View style={[styles.bloque, { borderColor: colors.border }]}>
@@ -372,25 +494,81 @@ export function PedidoDeProductoScreen() {
           )}
         </View>
 
-        {/* EL HISTORIAL. Sin datos personales: se lee para auditar un estado. */}
-        {pedido.history.length > 0 ? (
-          <View style={[styles.bloque, { borderColor: colors.border }]}>
-            <Text variant="titleMedium">{f('pedidoDeProducto.detalle.historial')}</Text>
-            {pedido.history.map((evento, indice) => (
-              <View key={`${evento.to_status}-${indice}`} style={styles.fila}>
-                <Feather name="chevron-right" size={14} color={colors.textMuted} />
-                <Text variant="caption" color={colors.textMuted} style={styles.crece}>
-                  {f(claveDelEstado(evento.to_status))}
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
+        {/*
+          LA LINEA DE TIEMPO. El historial del pago y el del envio, mezclados
+          SOLO AL PINTAR: en la base siguen separados, y tienen que seguirlo,
+          porque escribir un estado de envio no puede perder el del pago.
+
+          SIN DATOS PERSONALES: se lee para entender que paso con el pedido, no
+          para recomponer a quien se le mando que.
+        */}
+        {(() => {
+          const pasos = lineaDeTiempo(pedido.history, pedido.shipment);
+          if (pasos.length === 0) return null;
+          return (
+            <View style={[styles.bloque, { borderColor: colors.border }]}>
+              <Text variant="titleMedium">
+                {f('pedidoDeProducto.detalle.historial')}
+              </Text>
+              {pasos.map((paso, indice) => (
+                <View key={`${paso.origen}-${paso.fecha}-${indice}`} style={styles.fila}>
+                  <Feather
+                    name={(paso.icono ?? 'chevron-right') as never}
+                    size={14}
+                    color={colors.textMuted}
+                  />
+                  <Text variant="caption" color={colors.textMuted} style={styles.crece}>
+                    {f(paso.clave)}
+                  </Text>
+                </View>
+              ))}
+              {/* EL MOTIVO DE LO QUE SALIO MAL, si lo hubo. */}
+              {pasos
+                .filter((p) => p.motivo !== null)
+                .map((paso, indice) => (
+                  <Text
+                    key={`motivo-${indice}`}
+                    variant="caption"
+                    color={colors.textMuted}
+                  >
+                    {paso.motivo}
+                  </Text>
+                ))}
+            </View>
+          );
+        })()}
       </ScrollView>
 
-      {/* EL PIE. Pagar solo si se puede pagar; cancelar solo antes de pagar. */}
-      {sePuedePagar(pedido) || sePuedeCancelar(pedido) ? (
+      {/*
+        EL PIE. Pagar solo si se puede pagar; cancelar solo antes de pagar; y
+        confirmar la recepcion solo sobre algo que ya salio y que esta persona
+        no ha confirmado todavia.
+      */}
+      {sePuedePagar(pedido) ||
+      sePuedeCancelar(pedido) ||
+      sePuedeConfirmarRecepcion(pedido.shipment) ? (
         <View style={[styles.pie, { borderColor: colors.border }]}>
+          {/*
+            CONFIRMAR QUE LLEGO NO ES DAR LA CONFORMIDAD, y el texto de debajo
+            lo dice sin rodeos. Lo segundo libera el dinero al proveedor y no
+            existe: no hay transferencias, ni comision, ni plazo aprobado. Si
+            esta pantalla lo insinuara, alguien confirmaria creyendo que renuncia
+            a algo, o creyendo que ha pagado a alguien.
+          */}
+          {sePuedeConfirmarRecepcion(pedido.shipment) ? (
+            <>
+              <Button
+                label={f('envio.detalle.confirmarRecepcion')}
+                onPress={confirmarRecepcion}
+                disabled={ocupado}
+                loading={ocupado}
+                icon="check-circle"
+              />
+              <Text variant="caption" color={colors.textMuted}>
+                {f('envio.detalle.confirmarNoEsConformidad')}
+              </Text>
+            </>
+          ) : null}
           {sePuedePagar(pedido) ? (
             <>
               <Text variant="caption" color={colors.textMuted}>

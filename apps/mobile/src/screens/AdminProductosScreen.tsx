@@ -387,6 +387,20 @@ export function AdminProductosScreen() {
         disabled={ocupado}
       />
 
+      {/*
+        Y LOS PAQUETES QUE TODAVÍA NO HAN LLEGADO. Es una bandeja de vigilancia,
+        no de trabajo: ahí no se despacha ni se escribe «entregado», porque
+        ninguna de las dos cosas se pueden saber desde una oficina. Lo que se ve
+        es cuánto lleva esperando cada uno, que es un hecho, y NO se marca
+        ninguno como atrasado: ninguna política publica un plazo de despacho.
+      */}
+      <Button
+        label={f('envio.admin.acceso')}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos/envios' as never)}
+        disabled={ocupado}
+      />
+
       {conflicto ? (
         <View style={[styles.recuadro, { borderColor: colors.danger }]}>
           <Text variant="secondary" weight="700" color={colors.danger}>
