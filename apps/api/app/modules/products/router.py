@@ -245,7 +245,9 @@ async def _pedido(db: AsyncSession, orden, *, con_direccion: bool = True) -> Ped
         #: misma ficha, y `available_transitions` se calcula para `buyer`: lo
         #: unico que puede hacer es confirmar que lo recibio.
         shipment=await _envio(
-            db, await envios.del_pedido(db, orden=orden), actor="buyer"
+            db,
+            await envios.del_pedido(db, orden=orden, lineas=lineas),
+            actor="buyer",
         ),
         created_at=orden.created_at,
     )
@@ -1306,6 +1308,10 @@ async def pedidos_del_proveedor(
     ordenes = await pedidos.del_proveedor(db, seller_id=vendedor.id)
     salida: list[PedidoDelProveedorConEnvio] = []
     for orden in ordenes:
+        #: LAS LINEAS, UNA SOLA VEZ POR PEDIDO. Se leen para el albaran y se
+        #: le pasan hechas al envio; sin esto se leian dos veces cada una, y
+        #: lo conto la revision independiente.
+        lineas = await pedidos.lineas_de(db, orden.id)
         salida.append(
             PedidoDelProveedorConEnvio(
                 id=orden.id,
@@ -1314,12 +1320,10 @@ async def pedidos_del_proveedor(
                 total_minor=int(orden.total_minor),
                 paid_at=orden.paid_at,
                 address=_direccion(await pedidos.direccion_de(db, orden.id)),
-                items=[
-                    _linea_del_pedido(l) for l in await pedidos.lineas_de(db, orden.id)
-                ],
+                items=[_linea_del_pedido(l) for l in lineas],
                 shipment=await _envio(
                     db,
-                    await envios.del_pedido(db, orden=orden),
+                    await envios.del_pedido(db, orden=orden, lineas=lineas),
                     actor="seller",
                     con_historial=False,
                 ),
@@ -1333,6 +1337,7 @@ async def _del_proveedor(
     db: AsyncSession, *, orden, con_historial: bool = True
 ) -> PedidoDelProveedorConEnvio:
     """El pedido como lo ve quien tiene que preparar el paquete."""
+    lineas = await pedidos.lineas_de(db, orden.id)
     return PedidoDelProveedorConEnvio(
         id=orden.id,
         status=orden.status,
@@ -1340,10 +1345,10 @@ async def _del_proveedor(
         total_minor=int(orden.total_minor),
         paid_at=orden.paid_at,
         address=_direccion(await pedidos.direccion_de(db, orden.id)),
-        items=[_linea_del_pedido(l) for l in await pedidos.lineas_de(db, orden.id)],
+        items=[_linea_del_pedido(l) for l in lineas],
         shipment=await _envio(
             db,
-            await envios.del_pedido(db, orden=orden),
+            await envios.del_pedido(db, orden=orden, lineas=lineas),
             actor="seller",
             con_historial=con_historial,
         ),

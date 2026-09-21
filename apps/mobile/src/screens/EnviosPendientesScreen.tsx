@@ -197,11 +197,6 @@ export function EnviosPendientesScreen() {
               <Text variant="caption" color={colors.textMuted}>
                 {f('envio.proveedor.unidades', { n: fila.units })}
               </Text>
-              {fila.failure_reason !== null ? (
-                <Text variant="caption" color={colors.textMuted}>
-                  {f('envio.detalle.motivoDelFallo', { motivo: fila.failure_reason })}
-                </Text>
-              ) : null}
             </View>
           );
         })}

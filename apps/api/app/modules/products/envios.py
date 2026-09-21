@@ -334,14 +334,23 @@ def _sin_fila(orden_id: str, lineas: list[LineaPreparada]) -> Envio:
 
 
 async def _lineas_con_preparado(
-    db: AsyncSession, *, orden_id: str, hay_envios: bool
+    db: AsyncSession,
+    *,
+    orden_id: str,
+    hay_envios: bool,
+    lineas=None,
 ) -> list[LineaPreparada]:
     """Las líneas del pedido con lo que llevan preparado. UNA consulta cada una.
 
     Y NO UNA POR LÍNEA. Preguntar el preparado de cada línea por separado es el
     N+1 que convierte un pedido de doce líneas en trece viajes a la base.
+
+    `lineas` SE PUEDE PASAR HECHO, y no es un adorno: quien pinta el pedido del
+    proveedor ya las ha leído para el albarán, y sin esto se leían otra vez.
+    Lo encontró la revisión independiente contando consultas por pedido.
     """
-    lineas = await pedidos.lineas_de(db, orden_id)
+    if lineas is None:
+        lineas = await pedidos.lineas_de(db, orden_id)
     preparado: dict[str, int] = {}
     if hay_envios and lineas:
         filas = await db.execute(
@@ -364,17 +373,24 @@ async def _lineas_con_preparado(
     ]
 
 
-async def del_pedido(db: AsyncSession, *, orden: ProductOrder) -> Envio | None:
+async def del_pedido(
+    db: AsyncSession, *, orden: ProductOrder, lineas=None
+) -> Envio | None:
     """El envío de ese pedido, o `None` si ese pedido no tiene envío.
 
     `None` SOLO PARA UN PEDIDO QUE NO SE PAGÓ. Un pedido pendiente, vencido o
     cancelado no tiene nada que enviar, y contestar «pendiente de preparación»
     ahí haría creer que va a salir algo.
+
+    `lineas` SE PUEDE PASAR HECHO cuando quien llama ya las tiene delante. Ver
+    `_lineas_con_preparado`.
     """
     if orden.status != PEDIDO_PAGADO:
         return None
     hay = await esquema.hay_envios(db)
-    lineas = await _lineas_con_preparado(db, orden_id=orden.id, hay_envios=hay)
+    lineas = await _lineas_con_preparado(
+        db, orden_id=orden.id, hay_envios=hay, lineas=lineas
+    )
     if not hay:
         return _sin_fila(orden.id, lineas)
     fila = await db.get(ProductShipment, orden.id)
@@ -578,6 +594,23 @@ async def mover(
     desde = envio.status
     limpio = estados_de_envio.exigir(desde, hasta, actor_rol, motivo)
 
+    # --- Un paquete se cierra ENTERO, venga el paso de donde venga --------- #
+    # ESTO ESTABA EN `marcar_listo` Y SE PODÍA RODEAR. La ruta de intervención
+    # de administración llama aquí directamente, y la máquina le admite el salto
+    # a «listo»: el resultado era un paquete cerrado con la caja vacía, y
+    # después un despacho que sacaba del almacén unas unidades que nadie había
+    # contado. Lo encontró la revisión independiente.
+    #
+    # Una invariante comprobada en la puerta y no en el paso es una invariante
+    # que se rodea el día que alguien añade una puerta nueva. Aquí solo hay un
+    # paso, y por eso la comprobación vive aquí.
+    if hasta == estados_de_envio.LISTO:
+        faltan = await lo_que_falta(db, orden_id=orden.id)
+        if faltan:
+            raise PreparacionIncompleta(
+                "Falta meter unidades en la caja.", details={"missing": faltan}
+            )
+
     # --- El inventario, antes de escribir el estado ----------------------- #
     # PRIMERO EL ALMACÉN Y DESPUÉS EL ESTADO. Si el almacén no cuadra, el
     # estado no debe haberse escrito: un envío «despachado» cuyo movimiento
@@ -637,10 +670,20 @@ async def mover(
         action=f"product_shipment.{hasta.lower()}",
         entity_type="product_order",
         entity_id=orden.id,
-        reason=limpio,
-        #: NI DIRECCIÓN, NI NOMBRE, NI TELÉFONO. Lo que hace falta para auditar
-        #: un envío es de dónde a dónde se movió y quién lo movió.
-        payload={"from": desde, "to": hasta},
+        #: EL MOTIVO NO VIAJA A LA AUDITORÍA COMPARTIDA, y esto costó
+        #: encontrarlo: es TEXTO LIBRE que escribe quien vende, y lo primero
+        #: que escribe cualquiera al reportar una entrega fallida es dónde fue
+        #: y a quién buscaba. `audit_events` la leen otros módulos y otras
+        #: personas, y la regla de la plataforma es que ahí no hay direcciones.
+        #:
+        #: EL PORQUÉ NO SE PIERDE: vive en `product_shipment_events`, que es de
+        #: ESTE pedido y lo leen quien compró y quien vende, que ya conocen esa
+        #: dirección porque es la suya. Está a un `join` de distancia de este
+        #: rastro, que es lo que hace falta para investigar.
+        #:
+        #: NI DIRECCIÓN, NI NOMBRE, NI TELÉFONO EN LA CARGA. Lo que hace falta
+        #: para auditar un envío es de dónde a dónde se movió y quién lo movió.
+        payload={"from": desde, "to": hasta, "had_reason": limpio is not None},
     )
 
     lineas = await _lineas_con_preparado(db, orden_id=orden.id, hay_envios=True)
@@ -784,13 +827,12 @@ async def marcar_listo(
     pasa con lo que se quedó fuera —¿segundo envío?, ¿devolución parcial?,
     ¿quién paga el porte?— y ninguna política publicada lo dice. Mientras esa
     decisión no exista, lo honesto es no dejar cerrar.
+
+    QUIEN LO EXIGE ES `mover`, no esta función. Estaba aquí y se podía rodear
+    por la ruta de intervención de administración; ahora vive en el único paso
+    por el que se llega a «listo», venga de donde venga. Esta función sigue
+    existiendo porque es el nombre que usa quien prepara.
     """
-    await esquema.exigir_envios(db)
-    faltan = await lo_que_falta(db, orden_id=orden.id)
-    if faltan:
-        raise PreparacionIncompleta(
-            "Falta meter unidades en la caja.", details={"missing": faltan}
-        )
     return await mover(
         db,
         orden=orden,
@@ -990,6 +1032,15 @@ async def avisar(db: AsyncSession, *, orden: ProductOrder, estado: str) -> None:
     NO AVISA DE LO QUE ESA PERSONA ACABA DE HACER. Si confirmó ella misma la
     recepción, mandarle «tu pedido figura entregado» es contarle lo que acaba
     de escribir. La ruta decide; aquí solo está el reparto por estado.
+
+    UNA LIMITACIÓN CONOCIDA, Y SE PREFIERE A LA CONTRARIA. La barrera
+    anti-repetición de avisos deduplica por `(persona, tipo, entidad)`, así que
+    un SEGUNDO intento de entrega fallido del mismo pedido no vuelve a sonar.
+    Aflojarla —metiendo el número de intento en la entidad— haría que un
+    webhook reintentado avisara dos veces del mismo hecho, y romper el enlace
+    del aviso al pedido. Entre callar una repetición y gritar dos veces lo
+    mismo, se calla: el estado del pedido lo dice entero cuando se abre, y la
+    pantalla lo enseña. Está anotado en las decisiones pendientes.
     """
     tipo = {
         estados_de_envio.DESPACHADO: avisos.DESPACHADO,
@@ -1013,6 +1064,20 @@ class PendienteDeAtencion:
     Ni dirección, ni nombre de quien compró, ni importe. Lo que hace falta para
     saber si un paquete está parado es de quién es, en qué estado está y cuánto
     lleva así.
+
+    Y NI EL MOTIVO DE UNA ENTREGA FALLIDA, que es lo que encontró la revisión
+    independiente. Ese motivo es TEXTO LIBRE que escribe quien vende, y lo
+    primero que escribe cualquiera al reportar una entrega fallida es dónde fue
+    y a quién buscaba: «Nadie en <la calle>; <el nombre> no contesta al
+    <teléfono>». Traerlo aquí convertía esta cola en un reparto de domicilios
+    —justo lo que esta clase prometía que no era— y encima la lee curaduría,
+    que es un conjunto más ancho que administración.
+
+    QUE LA ENTREGA FALLÓ SE SABE POR `status`, que es lo que hace falta para
+    decidir si ese paquete necesita a alguien. Para leer el porqué hay que
+    entrar al pedido, y esa ruta todavía no existe para administración: cuando
+    exista tendrá que exigir `admin` y dejar rastro por pedido, como ya hace la
+    cola de conciliación desde que se endureció por esto mismo.
     """
 
     order_id: str
@@ -1021,7 +1086,6 @@ class PendienteDeAtencion:
     status: str
     paid_at: datetime | None
     dispatched_at: datetime | None
-    failure_reason: str | None
     units: int
     #: CUÁNTO LLEVA ESPERANDO, EN HORAS. Es un HECHO, no un juicio: no hay
     #: ningún plazo de despacho publicado contra el que compararlo, así que
@@ -1029,6 +1093,11 @@ class PendienteDeAtencion:
     waiting_hours: int | None
 
 
+#: NO HAY CONTADOR DE ESTA BANDEJA, y es a propósito. Uno escrito sobre esta
+#: misma consulta habría tenido que traerse las filas para contarlas, y con el
+#: tope puesto diría «200» habiendo setecientas: un número redondo y falso en
+#: un sitio donde se mira para decidir si algo está parado. El día que haga
+#: falta, se escribe un `count` de verdad, sin tope y sin traerse las filas.
 async def para_administracion(
     db: AsyncSession, *, limite: int = 50
 ) -> list[PendienteDeAtencion]:
@@ -1112,9 +1181,7 @@ async def para_administracion(
                 dispatched_at=(
                     envio.dispatched_at if isinstance(envio, ProductShipment) else None
                 ),
-                failure_reason=(
-                    envio.failure_reason if isinstance(envio, ProductShipment) else None
-                ),
+                #: EL MOTIVO DEL FALLO NO VIAJA. Ver la cabecera de la clase.
                 units=unidades.get(orden.id, 0),
                 waiting_hours=(
                     int((momento - pagado).total_seconds() // 3600)
@@ -1124,13 +1191,6 @@ async def para_administracion(
             )
         )
     return salida
-
-
-async def cuantos_esperan(db: AsyncSession) -> int:
-    """Cuántos pedidos pagados siguen sin llegar. Para el contador de la bandeja."""
-    if not await esquema.hay_pedidos(db):
-        return 0
-    return len(await para_administracion(db, limite=200))
 
 
 __all__ = [
@@ -1150,7 +1210,6 @@ __all__ = [
     "anotar_preparado",
     "avisar",
     "cancelar",
-    "cuantos_esperan",
     "del_pedido",
     "despachar",
     "exigir_interventor",

@@ -992,6 +992,11 @@ class EnvioPendienteRead(BaseModel):
     saber si un paquete esta parado es de quien es, en que estado esta y cuanto
     lleva asi.
 
+    NI EL MOTIVO DE UNA ENTREGA FALLIDA. Es texto libre que escribe quien
+    vende, y lo primero que escribe cualquiera al reportar una entrega fallida
+    es donde fue y a quien buscaba. Que la entrega fallo se sabe por `status`,
+    que es lo que hace falta para decidir si ese paquete necesita a alguien.
+
     `waiting_hours` ES UN HECHO, NO UN JUICIO. Ninguna politica publicada fija
     un plazo de despacho, asi que esto NO dice «atrasado»: dice cuanto tiempo ha
     pasado, y quien mira decide.
@@ -1003,6 +1008,5 @@ class EnvioPendienteRead(BaseModel):
     status: str
     paid_at: datetime | None = None
     dispatched_at: datetime | None = None
-    failure_reason: str | None = None
     units: int = 0
     waiting_hours: int | None = None

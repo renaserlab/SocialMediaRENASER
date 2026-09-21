@@ -1778,6 +1778,17 @@ class ProductShipmentEvent(Base):
             "actor_role in ('buyer', 'seller', 'admin', 'system')",
             name="product_shipment_events_rol",
         ),
+        #: LOS DOS DEL LARGO DEL ESTADO. Estaban solo en el `.sql` y por tanto
+        #: no los veia la suite, que monta SQLite desde estos modelos: la
+        #: proteccion existia en produccion y ninguna prueba la miraba. Lo
+        #: encontro la revision independiente comparando los dos esquemas.
+        CheckConstraint(
+            "from_status is null or length(from_status) <= 40",
+            name="product_shipment_events_desde",
+        ),
+        CheckConstraint(
+            "length(to_status) <= 40", name="product_shipment_events_hasta"
+        ),
         CheckConstraint(
             "reason is null or length(trim(reason)) between 3 and 500",
             name="product_shipment_events_motivo",

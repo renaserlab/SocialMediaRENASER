@@ -116,30 +116,26 @@ export const ProductShipmentRepository = {
 };
 
 /**
- * Lo que administración puede mirar y mover de un envío.
+ * Lo que administración puede MIRAR de los envíos.
  *
  * LA COLA NO LLEVA DATOS PERSONALES. Ni dirección, ni nombre de quien compró,
- * ni importe: para saber si un paquete está parado hace falta de quién es, en
- * qué estado está y cuánto lleva así.
+ * ni importe, ni el motivo de una entrega fallida —que es texto libre y suele
+ * llevar la calle dentro—: para saber si un paquete está parado hace falta de
+ * quién es, en qué estado está y cuánto lleva así.
+ *
+ * NO HAY `mover()`, Y NO ES UN OLVIDO. La ruta de intervención existe en el
+ * servidor, está probada y exige motivo, pero NO TIENE PANTALLA todavía: lo
+ * único que administración puede hacer con ella —reabrir un paquete que no ha
+ * salido, registrar que la entrega falló, registrar un reintento— también lo
+ * hace quien vende desde la suya, y cuándo escala una cosa a la otra es una
+ * decisión operativa que nadie ha tomado.
+ *
+ * UN MÉTODO AQUÍ SIN PANTALLA DETRÁS ES CÓDIGO MUERTO que parece una función.
+ * Cuando esa decisión exista, se añaden la pantalla y el método juntos.
  */
 export const ProductShipmentAdminRepository = {
   /** Los pedidos pagados cuyo paquete todavía no ha llegado. */
   async pendientes(): Promise<EnvioPendiente[]> {
     return apiRequest<EnvioPendiente[]>(`${API_V1}/admin/products/shipments`);
-  },
-
-  /**
-   * Mueve un envío parado. SIEMPRE CON MOTIVO.
-   *
-   * Lo que administración puede hacer es estrecho y lo decide el servidor:
-   * reabrir un paquete que no ha salido, registrar que la entrega falló y
-   * registrar que el transportista vuelve a intentarlo. Despachar y escribir
-   * «entregado» no están, y el servidor los rechaza.
-   */
-  async mover(orderId: string, to: string, reason: string) {
-    return apiRequest(
-      `${API_V1}/admin/products/shipments/${orderId}/transition`,
-      { method: 'POST', body: JSON.stringify({ to, reason }) },
-    );
   },
 };

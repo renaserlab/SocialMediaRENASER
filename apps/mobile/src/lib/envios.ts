@@ -127,6 +127,15 @@ export type LineaComprada = {
   subtotal_minor: number;
 };
 
+/**
+ * Una fila de la cola de administración. SIN NINGÚN DATO PERSONAL.
+ *
+ * NI EL MOTIVO DE UNA ENTREGA FALLIDA, y lo encontró la revisión independiente:
+ * ese motivo es texto libre que escribe quien vende, y lo primero que escribe
+ * cualquiera al reportar una entrega fallida es dónde fue y a quién buscaba.
+ * Que la entrega falló se sabe por `status`, que es lo que hace falta para
+ * decidir si ese paquete necesita a alguien.
+ */
 export type EnvioPendiente = {
   order_id: string;
   seller_id: string;
@@ -134,7 +143,6 @@ export type EnvioPendiente = {
   status: string;
   paid_at: string | null;
   dispatched_at: string | null;
-  failure_reason: string | null;
   units: number;
   /** HORAS TRANSCURRIDAS. Es un hecho, no un juicio: no hay plazo que incumplir. */
   waiting_hours: number | null;
