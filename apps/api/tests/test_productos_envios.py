@@ -1135,6 +1135,16 @@ async def test_el_historial_no_guarda_datos_personales(
 
     El historial se lee para auditar un estado, no para recomponer a quien se
     le mando que. La direccion vive congelada y en un solo sitio.
+
+    SE ESCRIBE UN MOTIVO CON LOS TRES DATOS DENTRO, A PROPOSITO. Esta prueba
+    era TAUTOLOGICA: preparaba y despachaba, y los tres renglones que dejaba
+    tenian el motivo nulo, asi que la cadena que examinaba no contenia ningun
+    texto libre y la afirmacion era cierta por construccion. Lo encontro la
+    revision independiente. Ahora el caso incluye una entrega fallida cuyo
+    motivo lleva la calle, el nombre y el telefono, que es lo que escribe
+    cualquiera: el historial SI guarda ese motivo —y debe, porque es de este
+    pedido y lo leen quien compra y quien vende—, y lo que se comprueba es
+    que la AUDITORIA compartida no se lo lleve, porque esa la leen otros.
     """
     from app.modules.gobernanza.models import AuditEvent
 
@@ -1148,6 +1158,21 @@ async def test_el_historial_no_guarda_datos_personales(
 
     async with sesiones() as db:
         direccion = await pedidos.direccion_de(db, orden_id)
+        con_datos = (
+            f"Nadie en {direccion.address_line}; {direccion.recipient_name} "
+            f"no contesta al {direccion.phone}"
+        )
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.registrar_fallo(
+            db,
+            orden=orden,
+            actor_id=quien,
+            actor_rol=estados_de_envio.PROVEEDOR,
+            motivo=con_datos,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
         renglones = await envios.historial(db, orden_id=orden_id)
         rastro = list(
             await db.scalars(
@@ -1164,17 +1189,47 @@ async def test_el_historial_no_guarda_datos_personales(
         direccion.address_line,
         direccion.city,
     ]
-    texto_historial = " ".join(
-        f"{r.from_status} {r.to_status} {r.reason or ''}" for r in renglones
-    )
-    for dato in prohibidos:
-        assert dato not in texto_historial, dato
 
+    #: LOS RENGLONES QUE NO SON EL DEL FALLO no tienen ningun texto libre: el
+    #: historial no compone frases, solo copia el motivo que le dan.
+    sin_motivo = [r for r in renglones if r.to_status != estados_de_envio.ENTREGA_FALLIDA]
+    assert sin_motivo, "tiene que haber renglones ademas del fallo"
+    texto = " ".join(f"{r.from_status} {r.to_status} {r.reason or ''}" for r in sin_motivo)
+    for dato in prohibidos:
+        assert dato not in texto, dato
+
+    #: EL DEL FALLO SI LO GUARDA, y tiene que guardarlo: es de este pedido, y
+    #: quien compra necesita leer por que no le llego. Que ese texto NO salga
+    #: de aqui —a la cola de administracion, por ejemplo— se comprueba aparte.
+    del_fallo = next(
+        r for r in renglones if r.to_status == estados_de_envio.ENTREGA_FALLIDA
+    )
+    assert direccion.address_line in (del_fallo.reason or "")
+
+    #: Y LA AUDITORIA COMPARTIDA NO SE LO LLEVA, NI EN LA CARGA NI EN EL MOTIVO.
+    #:
+    #: ESTE ERA EL SEGUNDO SITIO POR EL QUE SE ESCAPABA. `auditoria.anotar`
+    #: recibia el motivo entero, y `audit_events` la leen otros modulos y otras
+    #: personas: la regla de la plataforma es que ahi no hay direcciones. Se
+    #: mira el evento COMPLETO —carga, motivo y referencia externa— y no solo
+    #: la carga, porque mirar solo una parte fue justamente el fallo.
     assert rastro, "el despacho tiene que dejar rastro"
     for evento in rastro:
-        contenido = str(evento.payload or {}) + str(evento.reason or "")
+        completo = " ".join(
+            str(x or "")
+            for x in (evento.payload, evento.reason, evento.external_reference)
+        )
         for dato in prohibidos:
-            assert dato not in contenido, f"{dato} en la auditoria"
+            assert dato not in completo, f"{dato} en la auditoria compartida"
+
+    #: LO QUE SI QUEDA ANOTADO es QUE hubo un motivo, sin decir cual: es lo que
+    #: permite saber desde el rastro que ese salto hay que ir a leerlo al
+    #: historial del pedido.
+    del_fallo_auditado = [
+        e for e in rastro if e.action == "product_shipment.delivery_failed"
+    ]
+    assert del_fallo_auditado, "el fallo tiene que dejar rastro"
+    assert del_fallo_auditado[0].payload.get("had_reason") is True
 
 
 # =========================================================================== #
@@ -1607,3 +1662,109 @@ def test_el_estado_del_pedido_no_habla_de_envios() -> None:
             #: pedido, que no se llego a pagar; en el envio, que no va a salir.
             continue
         assert estado not in ESTADOS_DE_PEDIDO, estado
+
+
+# =========================================================================== #
+# 13. Lo que encontro la revision independiente
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_cola_no_reparte_el_domicilio_en_el_motivo_del_fallo(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL HALLAZGO MAS GRAVE DE LA REVISION, y el mas facil de no ver.
+
+    `failure_reason` es TEXTO LIBRE que escribe quien vende, y lo primero que
+    escribe cualquiera al reportar una entrega fallida es donde fue y a quien
+    buscaba: «Nadie en <la calle>; <el nombre> no contesta al <telefono>». Si
+    ese texto viaja en la cola de administracion, la cola reparte domicilios
+    —justo lo que su documentacion promete que no hace— y ademas la puede leer
+    curaduria, que es un conjunto mas ancho que administracion.
+
+    LA PRUEBA ANTERIOR NO LO VEIA porque el envio de su caso nunca fallaba: los
+    tres renglones de su historial tenian el motivo nulo, asi que la cadena que
+    examinaba no contenia texto libre y la afirmacion era cierta por
+    construccion. Esta escribe el motivo a proposito.
+    """
+    _, _, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    quien = await duenno_de(sesiones, orden_id)
+    await preparar_entero(sesiones, orden_id, quien)
+
+    async with sesiones() as db:
+        direccion = await pedidos.direccion_de(db, orden_id)
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.despachar(db, orden=orden, actor_id=quien)
+        await db.commit()
+
+    #: EL MOTIVO QUE ESCRIBIRIA CUALQUIERA, con los tres datos dentro.
+    motivo = (
+        f"Nadie en {direccion.address_line}; {direccion.recipient_name} "
+        f"no contesta al {direccion.phone}"
+    )
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.registrar_fallo(
+            db,
+            orden=orden,
+            actor_id=quien,
+            actor_rol=estados_de_envio.PROVEEDOR,
+            motivo=motivo,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        cola = await envios.para_administracion(db, limite=200)
+    fila = next(f for f in cola if f.order_id == orden_id)
+
+    texto = str(fila.__dict__)
+    for dato in (
+        direccion.address_line,
+        direccion.recipient_name,
+        direccion.phone,
+    ):
+        assert dato not in texto, f"la cola de administracion filtra «{dato}»"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_administracion_no_puede_cerrar_un_paquete_vacio(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """«UN PAQUETE SALE ENTERO O NO SALE» TIENE QUE VALER POR TODOS LOS CAMINOS.
+
+    La comprobacion vivia dentro de `marcar_listo`, que es la ruta de quien
+    vende. La de administracion llamaba a `mover` directamente, y la maquina
+    admite `(PREPARING, READY)` para administracion: el resultado era un envio
+    LISTO con cero unidades metidas, y despues un despacho que sacaba del
+    almacen dos unidades que nadie habia contado.
+
+    Una invariante comprobada en la puerta y no en el paso es una invariante
+    que se rodea el dia que alguien anade una puerta nueva.
+    """
+    _, _, _, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    quien = await duenno_de(sesiones, orden_id)
+    manda = await persona(sesiones, "mandavacio")
+
+    #: Se arranca la preparacion sin meter nada en la caja.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.anotar_preparado(db, orden=orden, cantidades={}, actor_id=quien)
+        await db.commit()
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        with pytest.raises(envios.PreparacionIncompleta) as fallo:
+            await envios.mover(
+                db,
+                orden=orden,
+                hasta=estados_de_envio.LISTO,
+                actor_id=manda,
+                actor_rol=estados_de_envio.ADMINISTRACION,
+            )
+        await db.rollback()
+    assert fallo.value.details["missing"][0]["prepared_quantity"] == 0
+
+    #: Y SIGUE SIN PODER SALIR.
+    async with sesiones() as db:
+        envio = await db.get(ProductShipment, orden_id)
+        assert envio.status == estados_de_envio.PREPARANDO

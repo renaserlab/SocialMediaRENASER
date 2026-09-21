@@ -940,7 +940,10 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
         "/api/v1/products/seller/orders/{order_id}/shipment/dispatch",
         "/api/v1/products/seller/orders/{order_id}/shipment/delivered",
         "/api/v1/products/seller/orders/{order_id}/shipment/failed",
+        "/api/v1/products/seller/orders/{order_id}/shipment/reopen",
+        "/api/v1/products/seller/orders/{order_id}/shipment/retry",
         "/api/v1/admin/products/shipments",
+        "/api/v1/admin/products/shipments/{order_id}/transition",
     )
     for ruta in esperadas:
         assert ruta in rutas, ruta
