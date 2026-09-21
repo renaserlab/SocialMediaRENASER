@@ -86,10 +86,17 @@ permisos para `anon` y `authenticated`. El 18/09/2026 se repitió la misma
 verificación sobre la 0076, la 0077 y la 0078. **Cero divergencias en las dos
 rondas.**
 
-**LA 0079 SE ENTREGA SIN APLICAR.** Escrita y probada contra PostgreSQL 16
-desechable, incluida su reejecución y una comparación del esquema real contra
-los modelos del ORM —columnas, CHECK, índices parciales con su condición, claves
-ajenas y el disparador—. No se aplicó a la base gestionada; ver §16.
+**LA 0079 Y LA 0080 SE ENTREGAN SIN APLICAR**, y en ese orden. Escritas y
+probadas contra PostgreSQL 16 desechable, incluida su reejecución y una
+comparación del esquema real contra los modelos del ORM —columnas, CHECK,
+índices parciales con su condición, claves ajenas y los disparadores—. No se
+aplicaron a la base gestionada; ver §16.
+
+La 0080 sí está aplicada **en el PostgreSQL local de demostración**, que es
+donde se comprobó que su bloque de verificación pasa, que las tres tablas
+quedan con RLS y sin una sola política, que `anon` y `authenticated` no tienen
+ni un permiso, y que el depósito `product-incidents` es privado, con tope de
+diez megas y lista de tipos cerrada.
 
 Las cabeceras de los `.sql` ya aplicados siguen diciendo «SIN APLICAR» a
 propósito: una migración aplicada no se reescribe, y el estado vive en esta
@@ -102,7 +109,8 @@ de quien acaba de clonar pueden no tenerlas. Sin ellas, cada ruta contesta
 `product_admission_not_available`, `product_saves_not_available`,
 `product_media_not_available`, `product_inventory_not_available`,
 `product_cart_not_available`, `product_policies_not_available`,
-`product_orders_not_available`, `product_shipments_not_available`— y no 404, que haría pensar que la ruta está mal
+`product_orders_not_available`, `product_shipments_not_available`,
+`product_incidents_not_available`— y no 404, que haría pensar que la ruta está mal
 escrita, ni 500, que haría pensar que algo se rompió.
 
 La puerta de las **fotografías mira una columna**, no una tabla: la 0073 no crea
@@ -684,15 +692,29 @@ dos personas cuentan lo mismo de dos maneras.
 2. **Se le cuelgan las pruebas.** De 2 a 6 fotografías. El archivo viaja a la
    API, que mira los bytes de verdad y decide el nombre.
 3. **Se envía.** Aquí —y no al abrir— el proveedor recibe el aviso y empiezan a
-   correr sus 48 horas, que el blueprint cuenta «desde la notificación».
+   correr sus 48 horas, que el blueprint cuenta «desde la notificación». Antes
+   de esto **el proveedor no ve el caso**: un borrador no es suyo todavía, y su
+   descripción cuenta lo que le pasó a alguien en su casa.
 4. **El proveedor responde**: propone una de las cinco salidas, o pide más
    pruebas, lo que **para su reloj** mientras espera.
 5. **Z decide.** Registra la resolución con su explicación. El efecto queda
    pendiente.
 6. **Se puede apelar una vez**, dentro de 48 horas y con pruebas **nuevas**
-   —posteriores a la resolución—.
+   —posteriores a la resolución—. Si alguien gastó las seis fotografías antes de
+   que se resolviera su caso, las dos reglas del blueprint chocan y el salto
+   **deja de ofrecerse** en vez de prometerse y fallar: si el tope de seis
+   cuenta el expediente entero o solo la reclamación inicial es una decisión que
+   nadie ha tomado. Ver D131 y §14.
 
-Y el silencio **no cierra nada**: pasa a mediación, no a rechazado.
+Y el silencio **no cierra nada**: pasa a mediación, no a rechazado. Cuando eso
+ocurre **se avisa a las dos partes**, porque es el único paso del expediente que
+sucede sin que nadie lo pida.
+
+**UN CASO NO SALE DE `OPEN` SIN SUS FOTOGRAFÍAS**, y la comprobación vive en
+`mover`, que es la única puerta. Tenerla solo dentro de `enviar` dejaba
+esquivarla pidiendo mediación —lo encontró la revisión independiente, D128—.
+Retirar el propio borrador sí se puede: obligar a documentar una reclamación que
+ya no se quiere hacer no protege a nadie.
 
 ### Los siete estados, y por qué son suyos
 
@@ -811,6 +833,7 @@ habla.
 | Si administración debe poder intervenir un envío desde una pantalla, y cuándo escala | operación |
 | **Planificador externo** que llame al barrido de reclamaciones vencidas (hoy se lanza a mano) | operación |
 | **Qué significa «tres días hábiles»**: calendario de festivos y jornada | la empresa |
+| **Si el tope de seis fotografías cuenta el expediente entero o solo la reclamación inicial** (hoy cierra la apelación a quien las gastó) | la empresa |
 | **Cuánto se devuelve** en cada una de las cinco salidas, y quién ejecuta el pago | la empresa + Incremento 9 |
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |

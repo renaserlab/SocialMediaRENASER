@@ -1260,3 +1260,117 @@ firman al pintar y no se guardan.
 
 El rollback documentado falla a propósito si el depósito tiene archivos dentro:
 son las pruebas de una disputa y no se tiran sin que alguien lo decida.
+### Lo que cambió la revisión independiente del Incremento 7
+
+Siete defectos reales, todos reproducidos con una prueba que se puso roja antes
+de tocar el código. No se aceptó ninguno sin ejecutarlo.
+
+**D128 · Un caso no sale de `OPEN` sin sus fotografías, y la puerta está en
+`mover`.**  ·  *era ALTO*
+
+El mínimo de 2–6 del blueprint vivía **solo** dentro de `enviar`, así que se
+esquivaba entero pidiendo mediación: la pantalla pintaba deshabilitado el botón
+de enviar y **habilitado** el de «que lo mire Z», porque el servidor ofrecía ese
+salto desde `OPEN`. Quien no quisiera subir fotos tenía un botón activo para
+saltárselas, y la persona de Z acababa decidiendo sobre un expediente vacío.
+Había un segundo camino por el mismo agujero: el proveedor pidiendo más
+evidencia sobre un caso sin fotos le arrancaba su propio plazo.
+
+La comprobación está ahora en `mover`, que es la única puerta —repartirla entre
+las rutas es como se vuelve a abrir el día que alguien añade un camino—. Se
+exceptúa **retirar**: obligar a documentar una reclamación que ya no se quiere
+hacer no protege a nadie. Y la entrega negada sigue exigiendo cero, porque lo
+que se cuenta es `fotos_exigidas(motivo)` y no un dos fijo.
+
+**D129 · El proveedor no ve un borrador que todavía no le han enviado.**  ·
+*era MEDIO*
+
+Un caso recién abierto aparecía en su lista **con la descripción entera dentro**,
+y podía además sacarlo de `OPEN` antes de que existiera de verdad. [D125] dice
+que ese texto no sale del expediente y §13.5 dice que el proveedor se entera al
+enviarse el caso; lo leía desde que se abría.
+
+Se deduce, y se puede deducir: `enviar` es lo único que pone el plazo, y desde
+[D128] un caso no sale de `OPEN` sin sus fotografías. Así que con plazo puesto
+se envió, y cualquier estado que no sea `OPEN` ni `WITHDRAWN` solo se alcanza
+pasando esa puerta. **404 y no 403**, por lo de siempre.
+
+**D130 · Apelar comprueba que hay sitio antes de escribir, y no se lo deja al
+índice.**  ·  *era MEDIO*
+
+`RESOLVED` no está entre los estados vivos, así que sobre una línea con un caso
+resuelto se puede abrir otro —y eso es correcto—. Pero `APPEALED` **sí** lo
+está: apelar el resuelto metía una segunda fila viva en la misma clave del
+índice único parcial y salía un `IntegrityError` sin envolver, es decir un 500
+sin texto en el móvil, que además **gastaba la única apelación** de quien
+reclama por un choque que no era suyo.
+
+Se pregunta antes de escribir. No se envolvió el `flush` en un punto de guardado
+porque un fallo de `flush` deja la sesión entera inservible aunque el savepoint
+se deshaga, y con ella se perdería el renglón del historial. El índice sigue de
+último recurso.
+
+**D131 · No se anuncia un salto que el servidor va a rechazar siempre.**  ·
+*era MEDIO*  ·  **y deja una decisión pendiente**
+
+Dos reglas del blueprint chocan en el borde: el tope de **seis** fotografías y
+la exigencia de evidencia **posterior a la resolución** para apelar. Quien aportó
+las seis que el blueprint permite antes de que se resolviera su caso no puede
+subir una séptima ni puede apelar sin ella. Y el servidor seguía ofreciendo
+`APPEALED` en `available_transitions`, que promete justamente que lo que sale
+ahí se puede pulsar.
+
+**Si el tope de seis cuenta el expediente entero o solo la reclamación inicial
+es una decisión que nadie ha tomado, y no se inventa aquí.** Lo que sí se
+arregla sin inventar nada es la mentira: en ese caso concreto el salto deja de
+anunciarse. Con sitio para otra prueba se sigue ofreciendo, y hay una prueba de
+cada lado para que la corrección no apague la apelación de todo el mundo.
+
+**D132 · La explicación que la pantalla exige escribir llega al expediente.**  ·
+*era MEDIO*
+
+Ni `/escalate` ni `/reply` declaraban cuerpo, así que FastAPI **descartaba** el
+`note` que el móvil sí obligaba a rellenar —bloquea el botón por debajo de tres
+caracteres— y el renglón del historial quedaba con la nota en nulo. Quien lo
+escribía creía que lo había mandado. El motivo por el que quien compró rechaza
+la propuesta del proveedor es precisamente lo primero que lee quien media.
+
+**D133 · Pasar a mediación se avisa, y a las dos partes.**  ·  *era MEDIO*
+
+`product_incident_mediation` tenía sus textos en los tres idiomas y era **código
+muerto**: ni el barrido ni la ruta avisaban. El escalado por silencio es el
+único paso que ocurre **sin que nadie lo pida**, y era justo el que no se
+comunicaba: quien reclama no sabía que su caso había cambiado de manos y el
+proveedor no sabía que había perdido el turno.
+
+Sigue en pie «a quien no lo hizo»: cuando lo pide quien compra, el aviso es solo
+para el proveedor.
+
+**D134 · Tres arreglos pequeños del mismo repaso.**  ·  *eran BAJO*
+
+* **La fila del envío se bloquea antes de preguntar si hay un caso vivo.**
+  Preguntar antes dejaba una ventana en la que confirmar la recepción y abrir un
+  «no me llegó» pasaban las dos comprobaciones, y el pedido acababa con
+  `buyer_confirmed_at` **y** un caso vivo encima: justo la contradicción que ese
+  bloque existe para impedir.
+* **El tope de seis fotografías se cuenta con la fila del caso bloqueada.** Era
+  un preconteo sin cerrojo: dos subidas a la vez veían cinco y metían siete. La
+  huella única solo impide repetir el **mismo** archivo.
+* **`_dentro_del_plazo` compara por `pedidos.comparable`**, como el resto del
+  módulo. Era la única comparación de fechas que no lo hacía, y es el sitio
+  donde una fecha ingenua cerraría el derecho a reclamar de alguien.
+
+**D135 · Y una prueba que no podía fallar.**
+
+Una barra sola dentro de una plantilla de JavaScript —`` `\bpalabra` ``— **no**
+es el límite de palabra de las expresiones regulares: `\b` ahí es el carácter
+de retroceso,
+U+0008, y el patrón no coincide con nada. Dos centinelas del móvil —el que
+vigila que ninguna pantalla diga «incumplió» y el que vigila que «Mis productos»
+no hable de reclamaciones— eran ciertos siempre. Corregidos, y cada uno probado
+con una mutación que ahora sí los pone rojos.
+
+Es la misma clase de defecto que costó una prueba tautológica en el Incremento
+6. También salió de aquí una tercera: al esconder los borradores al proveedor,
+la prueba de «la lista no lleva la descripción» pasó a comprobarlo sobre una
+lista **vacía**, que es cierto sin demostrar nada; ahora envía el caso primero.
