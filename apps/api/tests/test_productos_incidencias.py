@@ -42,6 +42,7 @@ from app.modules.products.models import (
     ProductIncidentEvidence,
     ProductOrder,
     ProductPolicy,
+    ProductSeller,
     ProductShipment,
 )
 from tests.test_productos_dominio import (  # noqa: F401
@@ -1308,3 +1309,416 @@ async def test_una_fila_sin_plazo_no_quita_el_derecho_a_reclamar(
         )
         await db.commit()
         assert caso.status == maquina.ABIERTA
+
+
+# =========================================================================== #
+# Lo que encontro la revision independiente del Incremento 7
+# =========================================================================== #
+@pytest.mark.asyncio
+async def test_un_caso_sin_fotografias_no_sale_de_abierto(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL MINIMO DE FOTOGRAFIAS NO SE ESQUIVA PIDIENDO MEDIACION.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE, y era el camino que ofrecia la
+    pantalla: el boton de enviar sale deshabilitado mientras faltan fotos, y
+    justo debajo el de «que lo mire Z» salia habilitado, porque el servidor
+    ofrecia ese salto desde ABIERTA. Quien no quisiera subir fotos tenia un
+    boton activo para saltarselas, y la persona de Z acababa decidiendo sobre
+    un expediente vacio.
+
+    LA COMPROBACION VIVE EN `mover`, que es la unica puerta. Ponerla en cada
+    ruta es como se vuelve a abrir el agujero el dia que alguien anade un
+    camino nuevo.
+    """
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+
+    async with sesiones() as db:
+        caso = await incidencias.abrir(
+            db,
+            orden_id=orden_id,
+            usuario_id=comprador,
+            motivo=maquina.DANADO,
+            descripcion=DESCRIPCION,
+            order_item_id=linea,
+        )
+        await db.commit()
+        caso_id = caso.id
+
+    #: NI EL COMPRADOR PIDIENDO MEDIACION...
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await incidencias.mover(
+                db,
+                incidencia_id=caso_id,
+                hasta=maquina.MEDIACION,
+                actor_id=comprador,
+                actor_rol=maquina.COMPRADOR,
+                nota="quiero que lo mire Z",
+            )
+        await db.rollback()
+    assert fallo.value.code == "product_incident_evidence_required"
+
+    #: ...NI EL PROVEEDOR ADELANTANDOSE sobre un borrador que no ha visto.
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await incidencias.mover(
+                db,
+                incidencia_id=caso_id,
+                hasta=maquina.MAS_EVIDENCIA,
+                actor_id=proveedor,
+                actor_rol=maquina.PROVEEDOR,
+                nota="mandame mas fotos",
+            )
+        await db.rollback()
+    assert fallo.value.code == "product_incident_evidence_required"
+
+    #: PERO RETIRAR EL PROPIO BORRADOR SIEMPRE SE PUEDE. Exigir fotografias
+    #: para abandonar algo que nadie ha visto seria obligar a documentar una
+    #: reclamacion que quien la abrio ya no quiere hacer.
+    async with sesiones() as db:
+        retirado = await incidencias.mover(
+            db,
+            incidencia_id=caso_id,
+            hasta=maquina.RETIRADA,
+            actor_id=comprador,
+            actor_rol=maquina.COMPRADOR,
+            nota="me equivoque de pedido",
+        )
+        await db.commit()
+        assert retirado.status == maquina.RETIRADA
+
+
+@pytest.mark.asyncio
+async def test_la_entrega_negada_si_sale_de_abierto_sin_fotografias(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """Y LA EXCEPCION SIGUE EN PIE, que es lo que hace correcta a la regla.
+
+    A quien dice que no le llego nada no se le pueden pedir fotografias de lo
+    que no tiene. La puerta nueva cuenta lo que ese motivo exige, que es cero,
+    y no un dos fijo.
+    """
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+
+    async with sesiones() as db:
+        caso = await incidencias.abrir(
+            db,
+            orden_id=orden_id,
+            usuario_id=comprador,
+            motivo=maquina.ENTREGA_NEGADA,
+            descripcion=DESCRIPCION,
+        )
+        await db.commit()
+        caso_id = caso.id
+
+    async with sesiones() as db:
+        fila = await db.get(ProductIncident, caso_id)
+        await incidencias.enviar(db, caso=fila, usuario_id=comprador)
+        await db.commit()
+
+    async with sesiones() as db:
+        movido = await incidencias.mover(
+            db,
+            incidencia_id=caso_id,
+            hasta=maquina.MEDIACION,
+            actor_id=comprador,
+            actor_rol=maquina.COMPRADOR,
+            nota="sigo sin recibirlo",
+        )
+        await db.commit()
+        assert movido.status == maquina.MEDIACION
+
+
+@pytest.mark.asyncio
+async def test_el_proveedor_no_ve_un_borrador_que_no_le_han_enviado(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """UN BORRADOR NO ES SUYO TODAVIA, Y SU TEXTO CUENTA LO QUE PASO EN UNA CASA.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE: un caso recien abierto —sin fotos y
+    sin aviso— aparecia en la lista del proveedor con la descripcion entera
+    dentro. La documentacion dice que el proveedor se entera al enviarse el
+    caso; lo leia desde que se abria.
+
+    404 Y NO 403: decir «existe pero no puedes» ya contaria que alguien esta
+    preparando una reclamacion contra el.
+    """
+    from app.modules.products import media as fotos
+
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+    async with sesiones() as db:
+        vendedor_id = (await db.get(ProductOrder, orden_id)).seller_id
+
+    async with sesiones() as db:
+        caso = await incidencias.abrir(
+            db,
+            orden_id=orden_id,
+            usuario_id=comprador,
+            motivo=maquina.DANADO,
+            descripcion=DESCRIPCION,
+            order_item_id=linea,
+        )
+        await db.commit()
+        caso_id = caso.id
+
+    #: EL BORRADOR NO ESTA NI EN LA LISTA NI SE PUEDE ABRIR.
+    async with sesiones() as db:
+        assert await incidencias.de_mi_tienda(db, seller_id=vendedor_id) == []
+        with pytest.raises(AppError) as fallo:
+            await incidencias.de_quien_vende(
+                db, incidencia_id=caso_id, usuario_id=proveedor
+            )
+    assert fallo.value.status_code == 404
+
+    #: Y EN CUANTO SE ENVIA, SI.
+    for tono in (180, 220):
+        async with sesiones() as db:
+            fila = await db.get(ProductIncident, caso_id)
+            await incidencias.anadir_prueba(
+                db,
+                caso=fila,
+                medida=fotos.medir(imagen(tono)),
+                actor_id=comprador,
+                actor_rol="buyer",
+            )
+            await db.commit()
+    async with sesiones() as db:
+        fila = await db.get(ProductIncident, caso_id)
+        await incidencias.enviar(db, caso=fila, usuario_id=comprador)
+        await db.commit()
+
+    async with sesiones() as db:
+        suyos = await incidencias.de_mi_tienda(db, seller_id=vendedor_id)
+        assert [c.id for c in suyos] == [caso_id]
+        visto = await incidencias.de_quien_vende(
+            db, incidencia_id=caso_id, usuario_id=proveedor
+        )
+        assert visto.id == caso_id
+
+    #: Y SIGUE VIENDOLO CUANDO EL RELOJ SE PARA, que es lo que pasa en cuanto
+    #: el mismo pide mas evidencia: el plazo nulo no puede esconderle el caso.
+    async with sesiones() as db:
+        await incidencias.mover(
+            db,
+            incidencia_id=caso_id,
+            hasta=maquina.MAS_EVIDENCIA,
+            actor_id=proveedor,
+            actor_rol=maquina.PROVEEDOR,
+            nota="mandame una foto de la caja",
+        )
+        await db.commit()
+    async with sesiones() as db:
+        parado = await db.get(ProductIncident, caso_id)
+        assert parado.seller_response_due_at is None
+        suyos = await incidencias.de_mi_tienda(db, seller_id=vendedor_id)
+        assert [c.id for c in suyos] == [caso_id], "el plazo nulo le escondio el caso"
+
+
+@pytest.mark.asyncio
+async def test_apelar_con_otro_caso_vivo_en_la_linea_no_revienta(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """DOS REGLAS QUE CHOCAN, Y EL CHOQUE SE CONTESTA, NO SE ESTRELLA.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE. `RESOLVED` no esta entre los estados
+    vivos, asi que sobre una linea con un caso resuelto se puede abrir uno
+    nuevo. Pero `APPEALED` SI esta en el indice unico parcial: al apelar el
+    resuelto, el UPDATE metia una segunda fila viva en la misma clave y salia
+    un IntegrityError sin envolver —500 sin texto en el movil—, y quien
+    reclamaba perdia su unica apelacion por haber abierto otro caso.
+
+    409 CON SU CODIGO, que es lo que la pantalla puede explicar.
+    """
+    from app.modules.products import media as fotos
+
+    _, _, comprador, orden_id, _, caso_id = await caso_abierto(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+    from app.modules.profiles.models import Profile
+
+    manda = await persona(sesiones, "mandaapel")
+    async with sesiones() as db:
+        (await db.get(Profile, manda)).role = "admin"
+        await db.commit()
+
+    #: El primero se lleva a mediacion y se resuelve.
+    async with sesiones() as db:
+        await incidencias.mover(
+            db,
+            incidencia_id=caso_id,
+            hasta=maquina.MEDIACION,
+            actor_id=comprador,
+            actor_rol=maquina.COMPRADOR,
+            nota="que lo mire Z",
+        )
+        await db.commit()
+    async with sesiones() as db:
+        await incidencias.mover(
+            db,
+            incidencia_id=caso_id,
+            hasta=maquina.RESUELTA,
+            actor_id=manda,
+            actor_rol=maquina.ADMINISTRACION,
+            nota="no procede segun lo que se ve",
+            resolucion=maquina.RECHAZAR,
+        )
+        await db.commit()
+
+    #: Y sobre la MISMA linea se abre otro, que es legal: el primero ya no vive.
+    async with sesiones() as db:
+        segundo = await incidencias.abrir(
+            db,
+            orden_id=orden_id,
+            usuario_id=comprador,
+            motivo=maquina.NO_FUNCIONA,
+            descripcion="Ademas de lo anterior, el aparato no enciende nunca.",
+            order_item_id=linea,
+        )
+        await db.commit()
+        assert segundo.id != caso_id
+
+    #: Evidencia NUEVA sobre el primero, para que la apelacion sea valida.
+    async with sesiones() as db:
+        fila = await db.get(ProductIncident, caso_id)
+        await incidencias.anadir_prueba(
+            db,
+            caso=fila,
+            medida=fotos.medir(imagen(90)),
+            actor_id=comprador,
+            actor_rol="buyer",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await incidencias.mover(
+                db,
+                incidencia_id=caso_id,
+                hasta=maquina.APELADA,
+                actor_id=comprador,
+                actor_rol=maquina.COMPRADOR,
+                nota="tengo una foto nueva que lo demuestra",
+            )
+        await db.rollback()
+    assert fallo.value.status_code == 409, fallo.value.status_code
+    assert fallo.value.code == "product_incident_already_open"
+
+    #: Y LA APELACION NO SE GASTA. Perderla por un choque ajeno seria cobrarle
+    #: a quien reclama un problema que no es suyo.
+    async with sesiones() as db:
+        fila = await db.get(ProductIncident, caso_id)
+        assert fila.status == maquina.RESUELTA
+        assert int(fila.appeals_used) == 0
+
+
+@pytest.mark.asyncio
+async def test_el_escalado_por_silencio_si_avisa_a_las_dos_partes(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL UNICO PASO QUE OCURRE SIN QUE NADIE LO PIDA ERA EL QUE NO SE CONTABA.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE: el barrido movia el caso a mediacion
+    y hacia commit sin avisar, y el tipo `product_incident_mediation` tenia sus
+    textos en los tres idiomas y era codigo muerto. Quien reclama no sabia que
+    su caso habia cambiado de manos, y el proveedor no sabia que habia perdido
+    el turno.
+
+    SE MIRA LA COLA DE ENTREGAS, que es donde deja el aviso `avisos.encolar`;
+    la fila de `notifications` la escribe despues quien entrega.
+    """
+    from app.modules.notifications.models import NotificationDelivery
+
+    _, _, comprador, orden_id, proveedor, caso_id = await caso_abierto(
+        sesiones, monkeypatch
+    )
+    async with sesiones() as db:
+        dueno = await db.get(ProductOrder, orden_id)
+        vendedor = await db.get(ProductSeller, dueno.seller_id)
+        perfil_del_proveedor = vendedor.profile_id
+
+    #: SOLO LOS DE ESTE CASO. La cola la comparten todas las pruebas del
+    #: modulo —`base_aplicada` no la vacia—, y contar por tipo daria lo que
+    #: dejaron las demas. La clave de deduplicacion lleva la entidad dentro.
+    async def _de_ese_tipo():
+        async with sesiones() as db:
+            return set(
+                await db.scalars(
+                    select(NotificationDelivery.user_id).where(
+                        NotificationDelivery.type == "product_incident_mediation",
+                        NotificationDelivery.dedupe_key.like(f"%{caso_id}%"),
+                    )
+                )
+            )
+
+    assert await _de_ese_tipo() == set(), "este caso ya tenia avisos antes de empezar"
+
+    despues = incidencias.ahora() + timedelta(hours=HORAS_PARA_RESPONDER + 1)
+    async with sesiones() as db:
+        assert await incidencias.escalar_las_vencidas(db, momento=despues) >= 1
+
+    avisados = await _de_ese_tipo()
+    assert comprador in avisados, "quien reclama no se entero"
+    assert perfil_del_proveedor in avisados, "el proveedor no supo que perdio el turno"
+
+    #: Y EL AVISO NO LLEVA EL TEXTO DE LA DISPUTA: la cola guarda el tipo y a
+    #: quien va, no lo que alguien conto que le paso en su casa.
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(NotificationDelivery).where(
+                    NotificationDelivery.type == "product_incident_mediation",
+                    NotificationDelivery.dedupe_key.like(f"%{caso_id}%"),
+                )
+            )
+        )
+    assert filas, "no se encolo ningun aviso"
+    for fila in filas:
+        assert DESCRIPCION not in str(fila.dedupe_key or "")
+        assert DESCRIPCION not in str(fila.correlation_id or "")
+
+
+@pytest.mark.asyncio
+async def test_escalar_a_mano_no_se_avisa_a_uno_mismo(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """A QUIEN NO LO HIZO. Contarle a quien acaba de pulsar un boton que eso ha
+    pasado es contarle lo que acaba de hacer.
+
+    Es la otra mitad de la correccion: pasar a mediacion lo tienen que saber
+    los dos, pero cuando lo pide quien compra, el aviso es para el proveedor.
+    """
+    from app.modules.notifications.models import NotificationDelivery
+
+    _, _, comprador, orden_id, _, caso_id = await caso_abierto(sesiones, monkeypatch)
+    async with sesiones() as db:
+        dueno = await db.get(ProductOrder, orden_id)
+        vendedor = await db.get(ProductSeller, dueno.seller_id)
+        perfil_del_proveedor = vendedor.profile_id
+
+    async with sesiones() as db:
+        caso = await incidencias.mover(
+            db,
+            incidencia_id=caso_id,
+            hasta=maquina.MEDIACION,
+            actor_id=comprador,
+            actor_rol=maquina.COMPRADOR,
+            nota="no acepto lo que proponen",
+        )
+        await incidencias.avisar(
+            db, caso=caso, estado=maquina.MEDIACION, lo_hizo=comprador
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        avisados = set(
+            await db.scalars(
+                select(NotificationDelivery.user_id).where(
+                    NotificationDelivery.type == "product_incident_mediation",
+                    NotificationDelivery.dedupe_key.like(f"%{caso_id}%"),
+                )
+            )
+        )
+    assert perfil_del_proveedor in avisados
+    assert comprador not in avisados, "se le conto a quien acababa de hacerlo"

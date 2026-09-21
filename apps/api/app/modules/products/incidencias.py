@@ -48,7 +48,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -391,6 +391,14 @@ async def de_quien_vende(
     fila = await db.get(ProductIncident, incidencia_id)
     if fila is None or fila.seller_id != vendedor.id:
         raise CasoNoEncontrado("Incidencia no encontrada.")
+    #: 404 TAMBIÉN PARA EL BORRADOR QUE TODAVÍA NO LE MANDARON. Es de su tienda,
+    #: pero aún no es suyo: decir «existe pero no puedes» ya contaría que
+    #: alguien está preparando una reclamación contra él.
+    if fila.seller_response_due_at is None and fila.status in (
+        maquina.ABIERTA,
+        maquina.RETIRADA,
+    ):
+        raise CasoNoEncontrado("Incidencia no encontrada.")
     return fila
 
 
@@ -521,9 +529,14 @@ async def _dentro_del_plazo(
     horas = politica.incident_report_hours if politica is not None else None
     if horas is None:
         return
-    arranque = desde_cuando_corre(envio)
+    arranque = pedidos.comparable(desde_cuando_corre(envio), momento)
     if arranque is None:
         return
+    #: POR `comparable`, COMO EL RESTO DEL MODULO. Lo señaló la revisión
+    #: independiente: era la única comparación de fechas que no pasaba por ahí.
+    #: Contra PostgreSQL no rompe porque `timestamptz` siempre trae zona, pero
+    #: una fecha ingenua comparada con una consciente lanza `TypeError`, y este
+    #: es justo el sitio donde eso cerraría el derecho a reclamar de alguien.
     limite = arranque + timedelta(hours=int(horas))
     if momento > limite:
         raise PlazoParaReclamarVencido(
@@ -679,6 +692,18 @@ async def anadir_prueba(
     await esquema.exigir_incidencias(db)
     momento = momento or ahora()
 
+    #: SE CUENTA CON LA FILA DEL CASO BLOQUEADA, y no a pelo. Lo señaló la
+    #: revisión independiente: dos subidas a la vez veían cinco y metían siete.
+    #: El cerrojo va sobre el caso —no sobre las pruebas, que se están
+    #: insertando— y serializa a quienes cuelgan algo del mismo expediente.
+    #:
+    #: LA HUELLA ÚNICA NO BASTABA: solo impide repetir el MISMO archivo, y dos
+    #: fotografías distintas pasan las dos. El tope de seis es el único
+    #: cuantificador del blueprint sin respaldo en la base, así que lo sostiene
+    #: el cerrojo.
+    if await _bloqueado(db, caso.id) is None:
+        raise CasoNoEncontrado("Incidencia no encontrada.")
+
     cuantas = await cuantas_pruebas(db, incidencia_id=caso.id)
     if cuantas >= MAXIMO_DE_FOTOS_DE_INCIDENCIA:
         raise DemasiadaEvidencia(
@@ -802,6 +827,39 @@ async def _bloqueado(db: AsyncSession, incidencia_id: str) -> ProductIncident | 
     )
 
 
+async def _exigir_sitio_para_revivir(
+    db: AsyncSession, *, caso: ProductIncident
+) -> None:
+    """Que no haya YA otro caso vivo sobre lo mismo.
+
+    Lo que impone la base son dos índices únicos parciales —uno por línea y otro
+    por pedido, porque en PostgreSQL los nulos no chocan entre sí—; esto
+    pregunta lo mismo con antelación para poder contestar 409 en vez de
+    estrellarse.
+    """
+    condiciones = [
+        ProductIncident.id != caso.id,
+        ProductIncident.status.in_(list(maquina.VIVAS)),
+    ]
+    if caso.order_item_id is None:
+        #: EL CASO DEL PEDIDO ENTERO choca con cualquier otro del pedido entero.
+        condiciones += [
+            ProductIncident.order_id == caso.order_id,
+            ProductIncident.order_item_id.is_(None),
+        ]
+    else:
+        condiciones.append(ProductIncident.order_item_id == caso.order_item_id)
+
+    if await db.scalar(select(func.count()).select_from(ProductIncident).where(*condiciones)):
+        raise YaHayUnCaso(
+            "Ya hay otra reclamación abierta sobre esto.",
+            details={
+                "order_id": caso.order_id,
+                "order_item_id": caso.order_item_id,
+            },
+        )
+
+
 async def mover(
     db: AsyncSession,
     *,
@@ -837,6 +895,32 @@ async def mover(
 
     desde = caso.status
     limpia = maquina.exigir(desde, hasta, actor_rol, nota)
+
+    # --- UN CASO NO SALE DE ABIERTO SIN SUS FOTOGRAFÍAS ------------------- #
+    #
+    # LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE. El mínimo del blueprint vivía solo
+    # dentro de `enviar`, así que se esquivaba entero pidiendo mediación: la
+    # pantalla pintaba deshabilitado el botón de enviar y habilitado el de «que
+    # lo mire Z», porque el servidor ofrecía ese salto desde ABIERTA. Quien no
+    # quisiera subir fotos tenía un botón activo para saltárselas, y la persona
+    # de Z acababa decidiendo sobre un expediente vacío.
+    #
+    # AQUÍ Y NO EN LAS RUTAS, que es lo que evita que el agujero vuelva a
+    # abrirse el día que alguien añada un camino nuevo. Cierra también que el
+    # proveedor se adelante sobre un borrador que todavía no ha visto.
+    #
+    # RETIRARLO NO CUENTA: exigir fotografías para abandonar algo que nadie ha
+    # visto sería obligar a documentar una reclamación que ya no se quiere
+    # hacer. Y la entrega negada exige cero, que es lo que dice `fotos_exigidas`.
+    if desde == maquina.ABIERTA and hasta != maquina.RETIRADA:
+        hacen_falta = maquina.fotos_exigidas(caso.reason)
+        if hacen_falta:
+            cuantas = await cuantas_pruebas(db, incidencia_id=caso.id)
+            if cuantas < hacen_falta:
+                raise FaltaEvidencia(
+                    "Hacen falta fotografías para poder revisarlo.",
+                    details={"required": hacen_falta, "current": cuantas},
+                )
 
     # --- Lo que ese salto en concreto exige ------------------------------- #
     if hasta == maquina.RESPONDIDA:
@@ -878,6 +962,20 @@ async def mover(
         caso.appeal_due_at = momento + timedelta(hours=HORAS_PARA_APELAR)
     elif hasta == maquina.APELADA:
         await _exigir_apelacion_valida(db, caso=caso, momento=momento)
+        #: APELAR VUELVE A PONER VIVO ESTE CASO, y sobre esta misma línea puede
+        #: haber otro que se abrió mientras este estaba resuelto —abrirlo era
+        #: legal, porque `RESOLVED` no está entre los vivos—.
+        #:
+        #: LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE: sin esta comprobación el
+        #: `UPDATE` chocaba contra el índice único parcial y salía un
+        #: `IntegrityError` sin envolver —500 sin texto en el móvil— que además
+        #: gastaba la única apelación de quien reclama por un choque ajeno.
+        #:
+        #: SE PREGUNTA ANTES DE ESCRIBIR, y no se deja al índice: un fallo de
+        #: `flush` deja la sesión entera inservible aunque se envuelva en un
+        #: punto de guardado, y con ella se perdería el renglón del historial.
+        #: El índice sigue ahí de último recurso.
+        await _exigir_sitio_para_revivir(db, caso=caso)
         caso.appealed_at = momento
         caso.appeals_used = int(caso.appeals_used) + 1
     elif hasta == maquina.RETIRADA:
@@ -1014,6 +1112,15 @@ async def escalar_las_vencidas(
             nota=None,
             momento=momento,
         )
+        #: SE AVISA, Y ES EL PASO QUE MÁS LO NECESITA. Lo encontró la revisión
+        #: independiente: el escalado por silencio es el único que ocurre SIN
+        #: QUE NADIE LO PIDA, y era justo el que no se comunicaba. Quien reclama
+        #: no sabía que su caso había cambiado de manos, y el proveedor no sabía
+        #: que había perdido el turno.
+        #:
+        #: DENTRO DE LA TRANSACCIÓN DE ESE CASO, antes del `commit`: un aviso de
+        #: algo que después no se guarda es peor que no avisar.
+        await avisar(db, caso=caso, estado=maquina.MEDIACION)
         await db.commit()
         escalados += 1
     return escalados
@@ -1036,14 +1143,45 @@ async def mias(
     )
 
 
+#: QUÉ CASOS HA VISTO YA QUIEN VENDE. Los que se le enviaron, y ninguno más.
+#:
+#: LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE: un caso recién abierto —un borrador,
+#: sin fotografías y sin aviso— aparecía en la lista del proveedor con la
+#: descripción entera dentro. La documentación dice que el proveedor se entera
+#: en el paso 3, al enviarse; aquí lo leía en el paso 1.
+#:
+#: SE DEDUCE, Y SE PUEDE DEDUCIR, porque `enviar` es lo único que pone el plazo
+#: y porque desde el Incremento 7 un caso no sale de ABIERTA sin sus
+#: fotografías. Así que: con plazo puesto, se envió; en cualquier estado que no
+#: sea ABIERTA ni RETIRADA, se envió —para llegar ahí hubo que pasar la puerta—;
+#: y un borrador retirado no llegó a salir de las manos de quien lo abrió.
+def _ya_se_lo_enviaron(consulta):
+    return consulta.where(
+        or_(
+            ProductIncident.seller_response_due_at.is_not(None),
+            ProductIncident.status.not_in(
+                [maquina.ABIERTA, maquina.RETIRADA]
+            ),
+        )
+    )
+
+
 async def de_mi_tienda(
     db: AsyncSession, *, seller_id: str, limite: int = 50
 ) -> list[ProductIncident]:
+    """Los casos de MI tienda que YA SE ME ENVIARON.
+
+    Un borrador que quien compró está preparando no es mío todavía, y su
+    descripción es texto libre que cuenta lo que le pasó en su casa.
+    """
     await esquema.exigir_incidencias(db)
     return list(
         await db.scalars(
-            select(ProductIncident)
-            .where(ProductIncident.seller_id == seller_id)
+            _ya_se_lo_enviaron(
+                select(ProductIncident).where(
+                    ProductIncident.seller_id == seller_id
+                )
+            )
             .order_by(ProductIncident.created_at.desc(), ProductIncident.id.desc())
             .limit(max(1, min(int(limite), 200)))
         )
@@ -1076,12 +1214,13 @@ async def en_mediacion(
 # Los avisos. DESPUÉS del hecho, y sin prometer nada
 # --------------------------------------------------------------------------- #
 async def avisar(
-    db: AsyncSession, *, caso: ProductIncident, estado: str
+    db: AsyncSession, *, caso: ProductIncident, estado: str, lo_hizo: str | None = None
 ) -> None:
     """Le cuenta a quien toca lo que acaba de pasar con el caso.
 
     A QUIEN NO LO HIZO. Contarle a quien acaba de escribir algo que eso ha
-    pasado es contarle lo que acaba de hacer.
+    pasado es contarle lo que acaba de hacer, y por eso `lo_hizo` deja fuera a
+    quien dio el paso.
 
     NINGÚN TEXTO PROMETE DINERO. «Resuelta» dice que hay una decisión, no que
     haya un reembolso hecho: eso no existe.
@@ -1105,9 +1244,24 @@ async def avisar(
     }.get(estado)
     if tipo is None:
         return
-    await avisos.encolar(
-        db, usuario_id=caso.buyer_id, tipo=tipo, entidad_id=caso.id
-    )
+
+    #: PASAR A MEDIACIÓN LO TIENEN QUE SABER LOS DOS, y es el único paso del que
+    #: hay que avisar a quien vende además de a quien compra: pierde el turno.
+    #:
+    #: LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE, y el caso que más lo necesita es
+    #: el escalado por silencio: es el único paso que ocurre SIN QUE NADIE LO
+    #: PIDA, y era justo el que no se contaba. Quien reclama no sabía que su
+    #: caso había cambiado de manos y el proveedor no sabía que ya no era suyo.
+    destinatarios: list[str] = [caso.buyer_id]
+    if estado == maquina.MEDIACION:
+        vendedor = await db.get(ProductSeller, caso.seller_id)
+        if vendedor is not None:
+            destinatarios.append(vendedor.profile_id)
+
+    for quien in destinatarios:
+        if quien == lo_hizo:
+            continue
+        await avisos.encolar(db, usuario_id=quien, tipo=tipo, entidad_id=caso.id)
 
 
 __all__ = [

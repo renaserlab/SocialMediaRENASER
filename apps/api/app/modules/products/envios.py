@@ -898,6 +898,15 @@ async def registrar_entrega(
     await esquema.exigir_envios(db)
     momento = momento or ahora()
 
+    #: PRIMERO EL CERROJO DEL ENVÍO, Y DESPUÉS LA PREGUNTA.
+    #:
+    #: Lo señaló la revisión independiente: preguntar antes de bloquear deja una
+    #: ventana en la que confirmar la recepción y abrir un «no me llegó» pasan
+    #: las dos comprobaciones y el pedido acaba con `buyer_confirmed_at` puesto
+    #: Y un caso vivo encima —justo la contradicción que este bloque existe para
+    #: impedir—. Con la fila tomada antes, las dos peticiones se ponen en fila.
+    envio = await _bloqueado(db, orden_id=orden.id, crear=False)
+
     #: QUIEN DICE QUE NO LE LLEGÓ NO PUEDE CONFIRMAR QUE LO RECIBIÓ.
     #:
     #: Es el bloqueo cruzado del Incremento 7, y se comprueba aquí y no en la
@@ -915,7 +924,6 @@ async def registrar_entrega(
                 details={"order_id": orden.id},
             )
 
-    envio = await _bloqueado(db, orden_id=orden.id, crear=False)
     if envio is not None and envio.status == estados_de_envio.ENTREGADO:
         #: YA ESTABA ENTREGADO. Si lo confirma quien compró, se guarda su
         #: confirmación —que es un dato que no teníamos— sin cambiar quién lo

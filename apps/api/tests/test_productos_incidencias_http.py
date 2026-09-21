@@ -205,7 +205,13 @@ async def test_el_recorrido_entero_de_una_incidencia(
 
     # --- Quien compra no lo acepta y pide mediacion ----------------------- #
     quien["uid"] = comprador
-    escalado = await http.post(f"{PRODUCTOS}/incidents/{incident_id}/escalate")
+    #: CON SU EXPLICACION: el motivo por el que se rechaza la propuesta es lo
+    #: primero que lee quien media, y desde la revision independiente la ruta
+    #: lo exige en vez de descartarlo en silencio.
+    escalado = await http.post(
+        f"{PRODUCTOS}/incidents/{incident_id}/escalate",
+        json={"note": "No acepto la propuesta: el golpe no se arregla asi."},
+    )
     assert escalado.status_code == 200, escalado.text
     assert escalado.json()["status"] == maquina.MEDIACION
 
@@ -340,7 +346,11 @@ async def test_el_caso_de_otro_es_un_404_por_http(
     for metodo, ruta, cuerpo in (
         ("get", f"{PRODUCTOS}/incidents/{incident_id}", None),
         ("post", f"{PRODUCTOS}/incidents/{incident_id}/submit", None),
-        ("post", f"{PRODUCTOS}/incidents/{incident_id}/escalate", None),
+        (
+            "post",
+            f"{PRODUCTOS}/incidents/{incident_id}/escalate",
+            {"note": "que lo mire Z"},
+        ),
         (
             "post",
             f"{PRODUCTOS}/incidents/{incident_id}/withdraw",
@@ -414,7 +424,7 @@ async def test_la_lista_no_lleva_el_texto_de_la_disputa(
     )
     linea = await primera_linea(sesiones, orden_id)
     quien["uid"] = comprador
-    await http.post(
+    abierto = await http.post(
         f"{PRODUCTOS}/orders/{orden_id}/incidents",
         json={
             "reason": maquina.DANADO,
@@ -422,6 +432,15 @@ async def test_la_lista_no_lleva_el_texto_de_la_disputa(
             "order_item_id": linea,
         },
     )
+    assert abierto.status_code == 201, abierto.text
+    #: Y SE ENVIA, porque desde la correccion de la revision independiente un
+    #: borrador que nadie ha mandado NO sale en la lista del proveedor: su
+    #: descripcion es texto libre sobre lo que paso en una casa, y hasta que se
+    #: envia el caso no es suyo. Sin esto, la lista del proveedor vendria vacia
+    #: y la comprobacion de «no filtra la descripcion» seria vacuamente cierta.
+    await _subir_dos_fotos(http, abierto.json()["id"])
+    enviado = await http.post(f"{PRODUCTOS}/incidents/{abierto.json()['id']}/submit")
+    assert enviado.status_code == 200, enviado.text
 
     for uid, ruta in ((comprador, f"{PRODUCTOS}/incidents"),
                       (proveedor, f"{PRODUCTOS}/seller/incidents")):
@@ -594,3 +613,186 @@ async def test_la_cola_de_conciliacion_no_lee_los_casos_de_cada_pedido(
     #: Y NINGUN CASO EN EL MOLDE: vacio, no ausente.
     for fila in respuesta.json():
         assert fila["incidents"] == []
+
+
+@pytest.mark.asyncio
+async def test_la_explicacion_de_escalar_y_de_aportar_llega_al_expediente(
+    cliente, sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL TEXTO QUE LA PANTALLA EXIGE ESCRIBIR TIENE QUE LLEGAR A ALGUN SITIO.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE: ni /escalate ni /reply declaraban
+    cuerpo, asi que FastAPI descartaba el `note` que el movil si obligaba a
+    rellenar —bloquea el boton por debajo de tres caracteres— y el renglon del
+    historial quedaba con la nota en nulo. Quien lo escribia creia que lo
+    habia mandado.
+
+    Y EL MOTIVO POR EL QUE SE RECHAZA UNA PROPUESTA es lo primero que lee quien
+    media: perderlo es perder la mitad del caso.
+    """
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await primera_linea(sesiones, orden_id)
+
+    quien["uid"] = comprador
+    abierto = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/incidents",
+        json={
+            "reason": maquina.DANADO,
+            "description": DESCRIPCION,
+            "order_item_id": linea,
+        },
+    )
+    caso_id = abierto.json()["id"]
+    await _subir_dos_fotos(http, caso_id)
+    await http.post(f"{PRODUCTOS}/incidents/{caso_id}/submit")
+
+    #: El proveedor pide mas pruebas y quien compra contesta CON SU TEXTO.
+    quien["uid"] = proveedor
+    pedido = await http.post(
+        f"{PRODUCTOS}/seller/incidents/{caso_id}/request-evidence",
+        json={"note": "Mandame una foto de la caja por fuera."},
+    )
+    assert pedido.status_code == 200, pedido.text
+
+    quien["uid"] = comprador
+    APORTADA = "Subi la foto de la caja, se ve el golpe en la esquina."
+    aportado = await http.post(
+        f"{PRODUCTOS}/incidents/{caso_id}/reply", json={"note": APORTADA}
+    )
+    assert aportado.status_code == 200, aportado.text
+    assert any(
+        p["note"] == APORTADA for p in aportado.json()["history"]
+    ), "la explicacion de aportar no llego al expediente"
+
+    #: Y al escalar, igual.
+    ESCALADA = "No acepto la reposicion: quiero que lo mire Z."
+    escalado = await http.post(
+        f"{PRODUCTOS}/incidents/{caso_id}/escalate", json={"note": ESCALADA}
+    )
+    assert escalado.status_code == 200, escalado.text
+    assert escalado.json()["status"] == maquina.MEDIACION
+    assert any(
+        p["note"] == ESCALADA for p in escalado.json()["history"]
+    ), "la explicacion de escalar no llego al expediente"
+
+    #: SIN TEXTO NO SE PUEDE. La pantalla lo exige y el servidor tambien.
+    quien["uid"] = comprador
+    sin_texto = await http.post(f"{PRODUCTOS}/incidents/{caso_id}/escalate", json={})
+    assert sin_texto.status_code in (400, 422), sin_texto.status_code
+
+
+@pytest.mark.asyncio
+async def test_con_las_seis_fotografias_gastadas_no_se_ofrece_apelar(
+    cliente, sesiones, venta_encendida, monkeypatch
+) -> None:
+    """NO SE ANUNCIA UN BOTON QUE EL SERVIDOR VA A RECHAZAR SIEMPRE.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE, y son dos reglas del blueprint que
+    chocan en el borde: el tope de seis fotografias y la exigencia de evidencia
+    POSTERIOR a la resolucion para apelar. Quien aporto todas las que el
+    blueprint permite antes de que se resolviera su caso no puede subir una mas
+    ni puede apelar sin ella.
+
+    QUE EL TOPE CUENTE EL EXPEDIENTE ENTERO O SOLO LA RECLAMACION INICIAL ES
+    UNA DECISION QUE NADIE HA TOMADO, y no se inventa aqui. Lo que si se puede
+    arreglar sin inventar nada es la mentira: `available_transitions` promete
+    que lo que sale ahi se puede pulsar.
+    """
+    from app.modules.products.models import MAXIMO_DE_FOTOS_DE_INCIDENCIA
+
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+    manda = await persona(sesiones, "seisfotos")
+    await _rol(sesiones, manda, "admin")
+
+    quien["uid"] = comprador
+    abierto = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/incidents",
+        json={
+            "reason": maquina.DANADO,
+            "description": DESCRIPCION,
+            "order_item_id": linea,
+        },
+    )
+    caso_id = abierto.json()["id"]
+
+    #: LAS SEIS QUE EL BLUEPRINT PERMITE, todas antes de que se resuelva.
+    for tono in range(100, 100 + MAXIMO_DE_FOTOS_DE_INCIDENCIA * 10, 10):
+        subida = await http.post(
+            f"{PRODUCTOS}/incidents/{caso_id}/evidence",
+            files={"archivo": ("p.png", io.BytesIO(imagen(tono)), "image/png")},
+        )
+        assert subida.status_code == 201, subida.text
+
+    await http.post(f"{PRODUCTOS}/incidents/{caso_id}/submit")
+    await http.post(
+        f"{PRODUCTOS}/incidents/{caso_id}/escalate", json={"note": "que lo mire Z"}
+    )
+    quien["uid"] = manda
+    resuelto = await http.post(
+        f"{ADMIN}/incidents/{caso_id}/resolve",
+        json={"resolution": maquina.RECHAZAR, "note": "no procede con lo aportado"},
+    )
+    assert resuelto.status_code == 200, resuelto.text
+
+    quien["uid"] = comprador
+    caso = await http.get(f"{PRODUCTOS}/incidents/{caso_id}")
+    assert caso.status_code == 200, caso.text
+    assert len(caso.json()["evidence"]) == MAXIMO_DE_FOTOS_DE_INCIDENCIA
+    #: NO SE OFRECE, porque no puede salir bien.
+    assert maquina.APELADA not in caso.json()["available_transitions"]
+
+    #: Y SI SE INTENTA A PESAR DE TODO, el servidor lo dice con su codigo, que
+    #: es lo que la pantalla puede explicar. No se estrella.
+    intento = await http.post(
+        f"{PRODUCTOS}/incidents/{caso_id}/appeal", json={"note": "quiero apelar"}
+    )
+    assert intento.status_code == 409, intento.text
+    assert intento.json()["error"]["code"] == "product_incident_appeal_without_evidence"
+
+
+@pytest.mark.asyncio
+async def test_con_sitio_para_otra_fotografia_si_se_ofrece_apelar(
+    cliente, sesiones, venta_encendida, monkeypatch
+) -> None:
+    """Y LA OTRA MITAD: con sitio para una mas, el boton SI sale.
+
+    Sin esta prueba, la correccion anterior podria haber apagado la apelacion
+    para todo el mundo y la suite seguiria verde.
+    """
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+    manda = await persona(sesiones, "dosfotos")
+    await _rol(sesiones, manda, "admin")
+
+    quien["uid"] = comprador
+    abierto = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/incidents",
+        json={
+            "reason": maquina.DANADO,
+            "description": DESCRIPCION,
+            "order_item_id": linea,
+        },
+    )
+    caso_id = abierto.json()["id"]
+    await _subir_dos_fotos(http, caso_id)
+    await http.post(f"{PRODUCTOS}/incidents/{caso_id}/submit")
+    await http.post(
+        f"{PRODUCTOS}/incidents/{caso_id}/escalate", json={"note": "que lo mire Z"}
+    )
+    quien["uid"] = manda
+    await http.post(
+        f"{ADMIN}/incidents/{caso_id}/resolve",
+        json={"resolution": maquina.RECHAZAR, "note": "no procede con lo aportado"},
+    )
+
+    quien["uid"] = comprador
+    caso = await http.get(f"{PRODUCTOS}/incidents/{caso_id}")
+    assert maquina.APELADA in caso.json()["available_transitions"], (
+        "con sitio para otra prueba, apelar tiene que seguir ofreciendose"
+    )

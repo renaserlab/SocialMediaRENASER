@@ -50,6 +50,7 @@ from app.modules.products.models import (
     DIMENSIONES,
     MAXIMO_BYTES_DE_LA_FOTO,
     MAXIMO_DE_FOTOS,
+    MAXIMO_DE_FOTOS_DE_INCIDENCIA,
     Product,
     ProductMedia,
     ProductOrder,
@@ -1709,13 +1710,41 @@ async def _caso(
             )
             for e in caso.history
         ],
-        available_transitions=(
-            list(maquina_de_incidencias.siguientes(caso.status, actor))
-            if actor is not None
-            else []
-        ),
+        available_transitions=_lo_que_puede_de_verdad(caso, actor),
         created_at=caso.created_at,
     )
+
+
+def _lo_que_puede_de_verdad(caso, actor: str | None) -> list[str]:
+    """Los saltos que este actor puede dar Y QUE VAN A SALIR BIEN.
+
+    `available_transitions` promete que lo que sale ahi se puede pulsar. Anunciar
+    un salto que el servidor va a rechazar SIEMPRE rompe esa promesa, y es peor
+    que no ofrecerlo: la persona pulsa, falla, y no entiende por que.
+
+    EL CASO QUE LO ROMPIA LO ENCONTRO LA REVISION INDEPENDIENTE. Quien uso las
+    seis fotografias que permite el blueprint antes de que se resolviera su caso
+    no puede subir una septima —el tope lo impide— y no puede apelar —apelar
+    exige evidencia POSTERIOR a la resolucion—. Las dos reglas son del blueprint
+    y chocan en el borde. Hasta que alguien decida si el tope de seis cuenta el
+    expediente entero o solo la reclamacion inicial, lo honesto es no ofrecer un
+    boton que no lleva a ninguna parte. Queda escrito como decision pendiente.
+    """
+    if actor is None:
+        return []
+    posibles = list(maquina_de_incidencias.siguientes(caso.status, actor))
+    if maquina_de_incidencias.APELADA not in posibles:
+        return posibles
+    #: SIN SITIO PARA MAS PRUEBAS Y SIN NINGUNA POSTERIOR A LA DECISION, apelar
+    #: no puede salir bien. Con sitio si: todavia puede subir la que le falta.
+    hay_sitio = len(caso.evidence) < MAXIMO_DE_FOTOS_DE_INCIDENCIA
+    corte = caso.resolved_at
+    hay_nueva = corte is not None and any(
+        pedidos.comparable(p.created_at, corte) > corte for p in caso.evidence
+    )
+    if not hay_sitio and not hay_nueva:
+        posibles.remove(maquina_de_incidencias.APELADA)
+    return posibles
 
 
 def _resumen_del_caso(fila) -> IncidenciaResumen:
@@ -1878,6 +1907,7 @@ async def enviar_incidencia(
 @router.post("/incidents/{incident_id}/reply", response_model=IncidenciaRead)
 async def responder_a_lo_pedido(
     incident_id: str,
+    cuerpo: NotaDelCaso,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> IncidenciaRead:
@@ -1885,6 +1915,10 @@ async def responder_a_lo_pedido(
 
     Y SU PLAZO EMPIEZA DE NUEVO: no puede correrle el reloj mientras espera la
     evidencia que el mismo pidio, ni empezar con el tiempo ya gastado.
+
+    LA EXPLICACION SE GUARDA, y antes no: la ruta no declaraba cuerpo, asi que
+    FastAPI descartaba el texto que la pantalla si exigia escribir. Lo encontro
+    la revision independiente. Quien lo escribia creia que lo habia mandado.
     """
     ensure_uuid(incident_id, "Incidencia no encontrada.")
     caso = await incidencias.de_quien_compra(
@@ -1896,6 +1930,7 @@ async def responder_a_lo_pedido(
         hasta=maquina_de_incidencias.ABIERTA,
         actor_id=current_user.id,
         actor_rol="buyer",
+        nota=cuerpo.note,
     )
     await incidencias.avisar(db, caso=caso, estado=maquina_de_incidencias.ABIERTA)
     await db.commit()
@@ -1905,6 +1940,7 @@ async def responder_a_lo_pedido(
 @router.post("/incidents/{incident_id}/escalate", response_model=IncidenciaRead)
 async def pedir_mediacion(
     incident_id: str,
+    cuerpo: NotaDelCaso,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> IncidenciaRead:
@@ -1912,6 +1948,13 @@ async def pedir_mediacion(
 
     NO CIERRA NADA NI DECIDE NADA. Pasa el caso a la cola de mediacion, que es
     donde una persona lo lee.
+
+    LA EXPLICACION SE GUARDA, y antes no —lo encontro la revision
+    independiente—: el motivo por el que quien compro rechaza la propuesta del
+    proveedor es precisamente lo primero que lee quien media, y nunca entraba
+    en el expediente porque la ruta no declaraba cuerpo.
+
+    Y SE AVISA. Cambiar de manos sin decirlo deja a las dos partes esperando.
     """
     ensure_uuid(incident_id, "Incidencia no encontrada.")
     caso = await incidencias.de_quien_compra(
@@ -1923,6 +1966,10 @@ async def pedir_mediacion(
         hasta=maquina_de_incidencias.MEDIACION,
         actor_id=current_user.id,
         actor_rol="buyer",
+        nota=cuerpo.note,
+    )
+    await incidencias.avisar(
+        db, caso=caso, estado=maquina_de_incidencias.MEDIACION
     )
     await db.commit()
     return await _caso(db, caso, actor="buyer")
