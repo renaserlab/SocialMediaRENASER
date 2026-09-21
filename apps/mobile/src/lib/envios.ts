@@ -434,6 +434,10 @@ const ERRORES: Record<string, ClaveDeTraduccion> = {
   product_shipment_reason_required: 'envio.error.motivo',
   product_shipment_intervene_forbidden: 'envio.error.intervenirProhibido',
   product_shipment_cancellation_not_configured: 'envio.error.sinPoliticaDeCancelacion',
+  //: DESDE EL INCREMENTO 7: no se confirma una recepcion mientras se discute
+  //: si el paquete llego. Quien dice que no lo recibio no puede a la vez decir
+  //: que si.
+  product_shipment_incident_open: 'envio.error.casoAbierto',
 };
 
 /** La clave del texto de un fallo del envío, o `null` si no es de aquí. */

@@ -1,4 +1,5 @@
 import type { Envio } from '@/lib/envios';
+import type { ResumenDeIncidencia } from '@/lib/incidencias';
 import { precioLegible, type ClaveDeTraduccion, type Precio } from '@/lib/productos';
 
 /*
@@ -132,6 +133,18 @@ export type Pedido = {
    * creer que va a salir algo.
    */
   shipment: Envio | null;
+  /**
+   * LAS RECLAMACIONES DE ESTE PEDIDO, por lo mismo que el envío: quien abrió
+   * una tiene que verla donde está el pedido del que habla, y no a base de
+   * buscarla en otra lista.
+   *
+   * SOLO EL RESUMEN. La descripción y el historial se leen entrando al caso,
+   * que es donde el servidor vuelve a comprobar quién puede.
+   *
+   * VACÍA MIENTRAS LA 0080 NO ESTÉ APLICADA, y no un error: un pedido no puede
+   * dejar de pintarse porque falte una migración de posventa.
+   */
+  incidents: ResumenDeIncidencia[];
   created_at: string;
 };
 
