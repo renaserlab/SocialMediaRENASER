@@ -168,7 +168,13 @@ CATALOGO = [
 ]
 
 
-async def sembrar(url: str, cuenta: str | None, *, limpiar: bool = False) -> None:
+async def sembrar(
+    url: str,
+    cuenta: str | None,
+    *,
+    limpiar: bool = False,
+    pedido_pagado: bool = False,
+) -> None:
     from sqlalchemy import select, text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -195,7 +201,12 @@ async def sembrar(url: str, cuenta: str | None, *, limpiar: bool = False) -> Non
         async with Sesion() as db:
             await db.execute(
                 text(
-                    "truncate table public.product_cart_items, public.product_carts,"
+                    "truncate table public.product_shipment_events,"
+                    " public.product_shipment_items, public.product_shipments,"
+                    " public.product_order_events, public.product_order_addresses,"
+                    " public.product_order_items, public.product_orders,"
+                    " public.product_policies,"
+                    " public.product_cart_items, public.product_carts,"
                     " public.inventory_movements, public.product_inventory,"
                     " public.saved_products, public.product_approval_reasons,"
                     " public.product_evaluation_evidence,"
@@ -473,6 +484,150 @@ async def sembrar(url: str, cuenta: str | None, *, limpiar: bool = False) -> Non
             await db.commit()
             print("  condiciones de venta de PRUEBA publicadas para PE")
 
+    # ------------------------------------------------------------------ #
+    # UN PEDIDO YA PAGADO, PARA PODER VER LA ENTREGA EN LOCAL (Incremento 6)
+    # ------------------------------------------------------------------ #
+    # POR QUÉ HACE FALTA UNA PASARELA FALSA. Un pedido solo llega a `PAID` por
+    # un aviso verificado de la pasarela; escribir `PAID` a mano dejaría un
+    # estado que el código nunca produce —sin fecha de pago y sin referencia
+    # del cobro— y el CHECK `product_orders_pagada_con_cobro` lo rechazaría.
+    # Así que se recorre el camino real con el borde del proveedor simulado.
+    #
+    # NO SE MUEVE UN CÉNTIMO. La pasarela falsa no sale a la red, la clave es
+    # una cadena de mentira y esto solo corre contra `localhost`: los tres
+    # guardias de la cabecera lo comprobaron antes de abrir la conexión.
+    #
+    # LAS CINCO BANDERAS SE ENCIENDEN SOLO EN ESTE PROCESO, en memoria. No se
+    # toca el `.env` ni se escribe ninguna configuración, y nada de esto
+    # sobrevive al final del script: que la configuración de fábrica NO venda
+    # es justamente lo que comprueba una prueba del servidor.
+    if pedido_pagado:
+        from app.core.config import get_settings
+        from app.modules.payments.providers import CheckoutSession
+        from app.modules.products import carts as _bolsa
+        from app.modules.products import pagos as _cobros
+        from app.modules.products import pedidos as _pedidos
+        from app.modules.products.models import ProductOrder as _Pedido
+        from app.modules.products.models import ProductVariant as _Variante
+        from app.modules.products.models import ProductVersion as _Version
+
+        ajustes = get_settings()
+        for nombre, valor in (
+            ("feature_product_sales", True),
+            ("payments_enabled", True),
+            ("stripe_payments_enabled", True),
+            ("product_reservation_minutes", 30),
+            ("stripe_secret_key", "sk_local_de_mentira_no_es_una_clave"),
+        ):
+            object.__setattr__(ajustes, nombre, valor)
+
+        class _PasarelaLocal:
+            """El BORDE del proveedor, simulado. No sale a la red."""
+
+            name = "stripe"
+
+            async def create_checkout(self, peticion):
+                return CheckoutSession(
+                    checkout_url=f"https://local.invalido/{peticion.purchase_id}",
+                    provider_reference=f"cs_local_{peticion.purchase_id[:12]}",
+                )
+
+        class _AvisoLocal:
+            """Un aviso YA VERIFICADO, como el que entrega el webhook."""
+
+            def __init__(self, orden) -> None:
+                self.purchase_id = orden.id
+                self.status = "paid"
+                self.amount_minor = int(orden.total_minor)
+                self.currency = orden.currency
+                self.environment = orden.environment
+                self.provider_transaction_id = "pi_local_de_prueba"
+                self.event_type = "checkout.session.completed"
+                self.event_id = "evt_local_" + uuid.uuid4().hex[:12]
+                self.dominio = _cobros.DOMINIO
+                self.payload: dict = {}
+
+        _cobros.get_provider = lambda _n: _PasarelaLocal()
+
+        comprador = await persona("Compra de prueba")
+        async with Sesion() as db:
+            elegida = (
+                await db.execute(
+                    select(_Variante, _Version)
+                    .join(_Version, _Version.id == _Variante.version_id)
+                    .where(_Version.status == "published")
+                    .limit(1)
+                )
+            ).first()
+            if elegida is None:
+                raise SystemExit("no hay ninguna versión publicada que comprar")
+            variante, version = elegida
+            await _bolsa.anadir(
+                db,
+                usuario_id=comprador,
+                producto_id=version.product_id,
+                variante_id=variante.id,
+                cantidad=2,
+            )
+            await db.commit()
+
+        async with Sesion() as db:
+            bolsa = await _bolsa.leer(db, usuario_id=comprador)
+            vendedor_id = bolsa.items[0].seller_id
+            politica = await _politicas.exigir_vigente(db, pais="PE")
+            creado = await _pedidos.crear(
+                db,
+                usuario_id=comprador,
+                seller_id=vendedor_id,
+                direccion={
+                    "recipient_name": "Quien recibe (local)",
+                    "phone": "+51900000000",
+                    "country_code": "PE",
+                    "region": "Lima",
+                    "city": "Lima",
+                    "district": "Miraflores",
+                    "address_line": "Calle de prueba 123",
+                    "reference": "Datos inventados para revisar en local",
+                    "postal_code": "15074",
+                    "instructions": None,
+                },
+                policy_id=politica.id,
+                policy_terms_sha256=politica.terms_sha256,
+                clave="siembra-" + uuid.uuid4().hex[:10],
+            )
+            orden_id = creado.orden.id
+
+        async with Sesion() as db:
+            orden = await db.get(_Pedido, orden_id)
+            await _cobros.iniciar_pago(db, orden=orden, correo="compra@local.test")
+        async with Sesion() as db:
+            orden = await db.get(_Pedido, orden_id)
+            await _cobros.atender_aviso(db, _AvisoLocal(orden))
+            await db.commit()
+
+        async with Sesion() as db:
+            orden = await db.get(_Pedido, orden_id)
+            estado = orden.status
+            dueno_del_pedido = await db.scalar(
+                text(
+                    "select profile_id from public.product_sellers"
+                    " where id = cast(:i as uuid)"
+                ),
+                {"i": orden.seller_id},
+            )
+        if estado != "PAID":
+            raise SystemExit(f"el pedido de muestra quedó en {estado}, no en PAID")
+
+        print("\nUn pedido PAGADO listo para preparar (pasarela falsa, sin dinero):")
+        print(f"  pedido:      {orden_id}")
+        print(f"  compra:      {comprador}")
+        print(f"               -> /productos/pedidos/{orden_id}")
+        print(f"  proveedor:   {dueno_del_pedido}")
+        print("               -> /proveedor/pedidos")
+        print("  administra:  la cuenta de --cuenta")
+        print("               -> /admin/productos/envios")
+        print("  el envío nace en «pendiente de preparación»: nadie lo ha tocado.")
+
     await motor.dispose()
     print(f"\n{creados} productos publicados en la base local.")
     print("Ninguna valoración, ninguna compra verificada y ningún plazo: no existen.")
@@ -486,11 +641,28 @@ def main() -> int:
         action="store_true",
         help="vacía antes las tablas de Productos de la base LOCAL",
     )
+    parser.add_argument(
+        "--pedido-pagado",
+        action="store_true",
+        help=(
+            "deja además un pedido YA PAGADO listo para preparar, con una "
+            "pasarela FALSA. Sin esto no hay forma de ver las pantallas de la "
+            "entrega, porque un pedido solo llega a pagado por un aviso de la "
+            "pasarela y en local no hay ninguna"
+        ),
+    )
     args = parser.parse_args()
     url = exigir_local(
         os.environ.get("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://")
     )
-    asyncio.run(sembrar(url, args.cuenta, limpiar=args.limpiar))
+    asyncio.run(
+        sembrar(
+            url,
+            args.cuenta,
+            limpiar=args.limpiar,
+            pedido_pagado=args.pedido_pagado,
+        )
+    )
     return 0
 
 
