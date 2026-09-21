@@ -1,18 +1,20 @@
-# Productos de Excelencia Z · Incrementos 1 a 5
+# Productos de Excelencia Z · Incrementos 1 a 6
 
 Qué se construyó, qué se decidió en cerrado y qué sigue esperando a una
 persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4
-—fotografías reales, inventario y carrito— y el mismo día con el Incremento 5:
-política por jurisdicción, pedido físico y reserva.
+—fotografías reales, inventario y carrito— y el mismo día con el Incremento 5
+—política por jurisdicción, pedido físico y reserva—, y el 21/09/2026 con el
+Incremento 6: preparación, despacho y entrega.
 
-## Estado, en cuatro líneas (21/09/2026)
+## Estado, en cinco líneas (21/09/2026)
 
 | | |
 |---|---|
-| **Incrementos 1 a 5** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta y pedido con reserva |
+| **Incrementos 1 a 6** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva y **entrega** |
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
+| **Migración 0079** | **escrita y SIN APLICAR.** Probada y reejecutada contra PostgreSQL 16 desechable. La aplica una persona; ver §16 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
-| **Siguiente incremento** | **el 6: entrega.** Preparación, despacho y entrega del pedido pagado. Es donde `inventory.despachar` deja de ser código sin llamar |
+| **Siguiente incremento** | **el 7: seguimiento e incidencias.** Reportar un producto dañado, incorrecto, incompleto o faltante, con evidencias y sin devolver nada automáticamente |
 
 Lo que la verificación del 18/09 confirma: el índice del vencimiento quedó en su
 versión corregida —por la reserva y no por el estado—, `inventory_movements` ya
@@ -69,18 +71,26 @@ verdades sobre quién es esa persona.
 | `0076_productos_inventario_claves.sql` | quita dos claves ajenas que dejaban una cuenta sin poder borrarse |
 | `0077_productos_politicas.sql` | `product_policies` |
 | `0078_productos_pedidos.sql` | `product_orders`, `product_order_items`, `product_order_addresses`, `product_order_events` |
+| `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **SIN APLICAR** |
 
-**LAS NUEVE ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
+**LAS NUEVE PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
 seis primeras contra la base gestionada en una sesión de solo lectura demostrada
 —una escritura fue rechazada antes de la primera consulta—: tablas, columnas
 contra el ORM, tipos, nulabilidad, claves primarias y ajenas con su `ON DELETE`,
 restricciones, índices con su unicidad y su parcialidad, el disparador con su
 cuerpo comparado carácter a carácter, RLS activa, cero políticas y cero
 permisos para `anon` y `authenticated`. El 18/09/2026 se repitió la misma
-verificación sobre las tres últimas. **Cero divergencias en las dos rondas.**
+verificación sobre la 0076, la 0077 y la 0078. **Cero divergencias en las dos
+rondas.**
 
-Las cabeceras de los `.sql` siguen diciendo «SIN APLICAR» a propósito: una
-migración aplicada no se reescribe, y el estado vive en esta documentación.
+**LA 0079 SE ENTREGA SIN APLICAR.** Escrita y probada contra PostgreSQL 16
+desechable, incluida su reejecución y una comparación del esquema real contra
+los modelos del ORM —columnas, CHECK, índices parciales con su condición, claves
+ajenas y el disparador—. No se aplicó a la base gestionada; ver §16.
+
+Las cabeceras de los `.sql` ya aplicados siguen diciendo «SIN APLICAR» a
+propósito: una migración aplicada no se reescribe, y el estado vive en esta
+documentación.
 
 **Y LAS PUERTAS DE ESQUEMA SIGUEN HACIENDO FALTA.** Que la base gestionada las
 tenga no significa que las tenga la de al lado: una local, una de pruebas o la
@@ -89,7 +99,7 @@ de quien acaba de clonar pueden no tenerlas. Sin ellas, cada ruta contesta
 `product_admission_not_available`, `product_saves_not_available`,
 `product_media_not_available`, `product_inventory_not_available`,
 `product_cart_not_available`, `product_policies_not_available`,
-`product_orders_not_available`— y no 404, que haría pensar que la ruta está mal
+`product_orders_not_available`, `product_shipments_not_available`— y no 404, que haría pensar que la ruta está mal
 escrita, ni 500, que haría pensar que algo se rompió.
 
 La puerta de las **fotografías mira una columna**, no una tabla: la 0073 no crea
@@ -495,6 +505,149 @@ reparte por `metadata.dominio = 'producto'` y, cuando el aviso no lo trae —un
 `refund.*` o un `charge.dispute.*` llevan metadata propia, vacía—, preguntando a
 nuestra propia tabla por la referencia del cobro.
 
+## 13.4. La entrega: preparar, despachar y que llegue (Incremento 6, 0079)
+
+**Aquí es donde `inventory.despachar` deja de ser código sin llamar.** Era lo
+único de los cinco movimientos del almacén que no llamaba nadie, y lo decía el
+Incremento 4 con esas palabras.
+
+### Por qué el envío no cabe en `product_orders.status`
+
+Un pedido tiene **cinco cosas que cambian por su cuenta**:
+
+    estado del pedido      ¿existe, sigue vivo, se canceló?
+    estado del pago        ¿pendiente, cobrado, fallido, en revisión?
+    estado del envío       ¿preparando, despachado, entregado?      <- el nuevo
+    estado de incidencia   ¿hay un caso abierto?          (Incremento 7)
+    estado financiero      ¿retenido, liberado, devuelto? (Incremento 9)
+
+Meterlas en un solo enum obliga a inventar valores como
+`PAID_PREPARING_WITH_INCIDENT`: el número de valores crece **multiplicando** en
+vez de sumando, y —peor— al escribir uno se pierde el otro. Un pedido que pasa a
+«despachado» no deja de estar pagado.
+
+`product_orders.status` sigue significando dónde está el **cobro** y la 0079 no
+le añade ni un valor. Lo vigilan dos cosas: la verificación de la propia
+migración y una prueba.
+
+### Un pedido, un paquete, y sale entero
+
+**No hay envíos parciales.** Repartir un pedido en dos paquetes obliga a decidir
+quién paga el segundo porte y qué pasa con lo que no salió, y ninguna política
+publicada lo dice. Un paquete sale entero o no sale, y el 409 dice qué línea
+falta y cuánto.
+
+Esa comprobación vive en **`mover`**, no en la función de cerrar. Estaba en la
+función de cerrar y la revisión independiente encontró que se podía rodear por
+la ruta de intervención de administración: quedaba un paquete «listo» con la
+caja vacía y después un despacho que sacaba unidades que nadie había contado.
+*Una invariante comprobada en la puerta y no en el paso se rodea el día que
+alguien añade una puerta nueva.*
+
+### La fila del envío nace tarde
+
+No se crea al cobrar: se crea con la primera acción. Un pedido pagado sin fila
+se lee como `PENDING`, que es exactamente lo que es. Crearla en el webhook
+metería una escritura más en el camino del cobro para no ganar nada, y
+`exists: false` distingue «nadie lo ha tocado» de «falta algo».
+
+### La reserva se consume AL SALIR, y exactamente una vez
+
+Al cobrar, las unidades siguen en la caja: la reserva deja de estar sujeta al
+vencimiento pero no se suelta ni se despacha. Solo el salto `READY → DISPATCHED`
+las saca, y baja **las dos cuentas** —lo que hay y lo comprometido—.
+
+**Tres capas, y cada una para en un sitio distinto.** Se comprobó quitándolas de
+una en una y mirando qué prueba se ponía roja:
+
+| Capa | Qué para | Qué pasa si se quita |
+|---|---|---|
+| El **estado** bajo el cerrojo de la fila | el segundo despacho de dos simultáneos | la prueba de concurrencia se pone roja: el segundo contesta `product_inventory_insufficient` en vez de un éxito tranquilo |
+| La **clave de idempotencia** del movimiento, derivada del pedido | el caso en que el mismo SKU tiene unidades apartadas por **otro** pedido | el almacén baja dos veces y se lleva por delante la reserva de otra persona: (6,2) pasó a (4,0) |
+| La **aritmética** de `inventory.mover` | que lo comprometido quede negativo | es la última y no depende de este módulo |
+
+`dispatch_settled_at` **no es ninguna de las tres**: es la marca que deja dicho
+que esto ya se decidió, y lo que sostiene el CHECK que impide un envío
+despachado sin salida de almacén. La primera mutación que se intentó fue
+quitarla, y **no puso nada rojo**: por eso hubo que escribir una prueba que baja
+hasta el consumo con dos pedidos sobre el mismo SKU, que es el único escenario
+en que la clave llega a hacer falta.
+
+### Quién puede qué, y qué no puede nadie
+
+| Quién | Puede | No puede |
+|---|---|---|
+| Proveedor | preparar, cerrar, reabrir con motivo, **despachar**, registrar entrega y fallo, reintentar | ver un pedido ajeno (404), despachar sin pagar |
+| Comprador | ver el seguimiento, **confirmar que lo recibió** | nada que mueva el almacén |
+| Administración (`admin`) | reabrir un paquete que no ha salido, registrar un fallo de entrega, registrar un reintento; **siempre con motivo** | **despachar** y **escribir «entregado»** |
+| Moderación | leer la cola de envíos sin cerrar | intervenir: 403 |
+
+**Despachar es solo del proveedor** porque es el único que puede afirmar que la
+caja salió de su almacén. **Administración no fabrica una entrega**: no tiene
+cómo saberlo, y escribirlo arrancaría plazos de posventa que nadie ha cumplido.
+**Moderación no entra** porque un envío mueve inventario, que es la misma línea
+que ya separa el ajuste de existencias.
+
+### Confirmar que llegó no es dar la conformidad
+
+La diferencia no es sutil. Confirmar que llegó es un hecho de logística; dar la
+conformidad es decir que el producto está bien, y en el blueprint §9 eso
+**libera el dinero** al proveedor. Lo segundo no existe: no hay transferencias,
+ni comisión, ni plazo aprobado. La pantalla lo dice con palabras bajo el botón,
+para que nadie confirme creyendo que renuncia a algo o que ha pagado a alguien.
+
+**Se guarda quién afirma la entrega** —`seller` o `buyer`— porque el blueprint
+contempla que el transportista la marque y quien compró la niegue, y esa
+discusión (Incremento 7) no se puede tener sin saber quién lo dijo.
+
+### El motivo de una entrega fallida NO sale del pedido
+
+Es texto libre que escribe quien vende, y lo primero que escribe cualquiera al
+reportar una entrega fallida es **dónde fue y a quién buscaba**. La revisión
+independiente lo encontró viajando en dos sitios donde no podía estar: la cola
+de envíos de administración —que la lee curaduría— y `audit_events`, que la leen
+otros módulos y otras personas.
+
+Hoy vive **solo** en `product_shipment_events`, que es de ese pedido y lo leen
+quien compró y quien vende, que ya conocen esa dirección porque es la suya. En
+la auditoría compartida queda anotado **que hubo un motivo**, sin decir cuál.
+
+### Cancelar un pedido pagado no se puede, y se dice por qué
+
+El salto está declarado en la máquina —con su actor, que es administración y
+nadie más— y la liberación del inventario está escrita con su marca y su clave.
+El servicio lo para con `product_shipment_cancellation_not_configured` y la
+lista de las tres decisiones que faltan: política de reembolso, quién paga el
+porte de vuelta y cuándo se repone el stock. *Devolver el dinero no lo decide el
+código.*
+
+### Lo que no se inventa, y es la mitad del trabajo
+
+| Lo que no hay | Qué se hace en su lugar |
+|---|---|
+| Transportista | texto libre opcional; **nulo es «no lo dijeron»**, nunca «N/A» |
+| Enlace de seguimiento | ninguno: construirlo exige saber el transportista |
+| Fecha prevista de llegada | ninguna: exige plazos de transporte que nadie fijó |
+| Coste de envío e impuestos | ninguna línea: un cero es una promesa de envío gratis |
+| «Atrasado» | **el tiempo transcurrido**, que es un hecho: ninguna política publica un plazo de despacho |
+| Reposición automática | ninguna: dónde está una unidad no entregada es inspección de posventa |
+
+### Lo que queda sin pantalla, a propósito
+
+`POST /admin/products/shipments/{order_id}/transition` existe, está probada y
+exige motivo, pero **no tiene pantalla**. Lo único que administración puede
+hacer con ella también lo hace quien vende desde la suya, y cuándo escala una
+cosa a la otra es una decisión operativa que nadie ha tomado. Un método de
+cliente sin pantalla detrás es código muerto que parece una función.
+
+### Una limitación conocida de los avisos
+
+Un **segundo** intento de entrega fallido del mismo pedido no vuelve a sonar: la
+barrera anti-repetición deduplica por `(persona, tipo, pedido)`. Aflojarla haría
+que un webhook reintentado avisara dos veces del mismo hecho y rompería el
+enlace del aviso al pedido. Entre callar una repetición y gritar dos veces lo
+mismo, se calla; el estado del pedido lo dice entero cuando se abre.
+
 ## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
@@ -506,6 +659,11 @@ nuestra propia tabla por la referencia del cobro.
 | Quién puede ser evaluador (¿un rol propio?) | la empresa |
 | Condiciones exactas de una aprobación condicionada | la empresa |
 | Transportista, cobertura y tarifas de envío | la empresa |
+| **Plazo de despacho** (cuántas horas antes de llamar tarde a un paquete parado) | la empresa |
+| **Si se puede cancelar un pedido ya pagado**, con qué plazo y en qué casos | la empresa + abogado |
+| **Quién paga el porte de vuelta** de una cancelación o devolución | la empresa |
+| **Cuándo vuelve al almacén** una unidad no entregada, dañada o devuelta | la empresa |
+| Si administración debe poder intervenir un envío desde una pantalla, y cuándo escala | operación |
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
 | Fuente del promedio de categoría | la empresa |
@@ -546,3 +704,51 @@ editorial de «Selección Z», que no tiene campo.
 Y el chip de Explorar ya existía: `AccesosAVerticales` pintaba los cuatro
 —Cursos, Eventos, Servicios y Productos— con Productos apagado. Lo único que
 hizo falta fue encenderlo.
+
+## 16. Qué hay que aplicar a mano, y en qué orden
+
+**Una sola migración, la 0079,** y no la aplica el código: no hay herramienta de
+migración en este proyecto y ninguna se aplica a una base gestionada sin que una
+persona lo decida.
+
+### El orden
+
+1. **Comprobar que la 0078 está puesta.** La 0079 la necesita —referencia
+   `product_orders`— y también la 0070 y la 0074. Si falta alguna, la migración
+   se para sola en la primera clave ajena.
+2. **Pegar `supabase/migrations/0079_productos_envios.sql` entero** en el editor
+   de Supabase. El editor corre el script como una transacción: o entra todo o
+   no entra nada, y el bloque de verificación del final lanza una excepción con
+   el motivo si algo no quedó como debía.
+3. **REINICIAR LA API.** No es opcional. La puerta de esquema cachea también el
+   «no» en la memoria del proceso: sin reiniciar, las rutas de la entrega siguen
+   contestando `503 product_shipments_not_available` aunque las tablas ya estén.
+
+### Qué comprobar después
+
+Lo hace el propio script, pero por si alguien lo trocea: las tres tablas
+existen, el disparador que congela el historial está puesto, están los dos CHECK
+que impiden un despacho sin salida de almacén y soltar lo ya salido,
+`product_orders_estado` **no** ha ganado ningún valor de envío, no hay columnas
+de coste, impuestos, fecha prevista ni URL de seguimiento, y `anon` y
+`authenticated` tienen **cero** permisos sobre las tres tablas.
+
+### Qué NO hace falta encender
+
+Nada. La 0079 no enciende ninguna venta: sin las cinco banderas y sin política
+publicada no se puede crear un pedido, y sin pedido pagado no hay nada que
+preparar. Aplicarla solo hace que las rutas de la entrega dejen de contestar
+503; el recorrido sigue sin poder empezar.
+
+### El rollback, y su límite
+
+    drop table public.product_shipment_events;
+    drop table public.product_shipment_items;
+    drop table public.product_shipments;
+    drop function public.product_shipment_events_solo_se_anaden();
+
+**Deshacer esto NO devuelve al almacén las unidades que se despacharon mientras
+estuvo puesta.** El movimiento de salida vive en `inventory_movements`, que es
+de la 0074 y solo se añade: un paquete que salió, salió. Quien revierta tiene
+que decidir a mano qué hace con esas unidades, y tiene el historial de
+movimientos para saber cuáles son.

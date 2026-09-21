@@ -897,6 +897,10 @@ Las unidades quedan comprometidas hasta que salgan del almacén, que es del
 Incremento 6. El pedido deja de estar sujeto al vencimiento. Despachar ahora
 diría que algo salió cuando sigue en la caja.
 
+> *Al 21/09/2026:* el Incremento 6 llegó y la decisión sigue entera. Lo que
+> saca las unidades es el salto `READY → DISPATCHED` del envío, y nada más;
+> ver D94.
+
 **D80 · Un cobro fallido no suelta la reserva.**
 
 La tarjeta puede reintentarse mientras la reserva siga viva, y soltar al primer
@@ -973,3 +977,128 @@ Lo impide el CHECK `product_orders_pagada_con_cobro`: sin fecha de pago, sin
 referencia externa y sin pasarela, esa fila no existe. Y las líneas de un pedido
 no se pueden editar: lo impone un disparador, porque un importe que se puede
 cambiar después de cobrarlo no es un importe.
+
+## 15. Productos, Incremento 6 — preparación, despacho y entrega (21/09/2026)
+
+**D92 · El envío tiene su propia máquina de estados, y `product_orders.status`
+no gana ni un valor.**
+
+Un pedido tiene cinco cosas que cambian por su cuenta —pedido, pago, envío,
+incidencia y dinero—. Juntarlas en un enum obliga a inventar valores como
+`PAID_PREPARING_WITH_INCIDENT`: el número crece multiplicando en vez de sumando,
+y al escribir uno se pierde el otro. Un pedido que pasa a «despachado» no deja
+de estar pagado. Lo vigilan la verificación de la 0079 y una prueba.
+
+**D93 · La fila del envío nace con la primera acción, no al cobrar.**
+
+Un pedido pagado sin fila se lee como «pendiente de preparación», que es
+exactamente lo que es. Crearla en el webhook metería una escritura más en el
+camino del cobro para no ganar nada, y `exists: false` distingue «nadie lo ha
+tocado» de «falta algo».
+
+**D94 · La reserva se consume al salir del almacén, no al cobrar.**
+
+Al cobrar, las unidades siguen en la caja. El único salto que las saca es
+`READY → DISPATCHED`, y baja las dos cuentas. Sacarlas al cobrar dejaría el
+inventario mintiendo durante todo el tiempo que tarde en prepararse el paquete.
+
+**D95 · Tres capas impiden el doble despacho, y cada una para en un sitio.**
+
+Arriba el estado bajo el cerrojo de la fila, que hace que un reintento sea un
+éxito tranquilo y no un error. En medio la clave de idempotencia del movimiento,
+que es la que para cuando el mismo SKU tiene unidades apartadas por **otro**
+pedido: ahí las cuentas cuadran solas y sin la clave saldrían cuatro donde se
+vendieron dos. Abajo la aritmética del inventario. Se comprobaron quitándolas de
+una en una.
+
+`dispatch_settled_at` **no es ninguna de las tres**: es la marca que sostiene el
+CHECK de la base. Quitarla no puso roja ninguna prueba, y eso enseñó que el
+comentario que decía «dos capas» estaba mal.
+
+**D96 · Un paquete sale entero o no sale, y se comprueba en el paso.**
+
+Cerrarlo a medias obliga a decidir qué pasa con lo que se quedó fuera —segundo
+envío, devolución parcial, quién paga el porte— y ninguna política lo dice. La
+comprobación vive en `mover` y no en la función de cerrar: estaba ahí y la
+revisión independiente encontró que se podía rodear por la ruta de
+administración. *Una invariante comprobada en la puerta y no en el paso se rodea
+el día que alguien añade una puerta nueva.*
+
+**D97 · Despachar es solo del proveedor.**
+
+Es el único que puede afirmar que la caja salió de su almacén. Administración no
+puede, ni con motivo.
+
+**D98 · Administración no fabrica una entrega.**
+
+No tiene cómo saber que algo llegó, y escribirlo arrancaría plazos de posventa
+que nadie ha cumplido. Puede registrar que la entrega **falló** —eso se lo
+cuenta el transportista— y reabrir un paquete que no ha salido.
+
+**D99 · Moderación no interviene un envío.**
+
+Un envío mueve inventario, y mover inventario no es moderar: la puerta es
+`FINANCE_ROLES`, la misma que ya guarda el ajuste de existencias. Leer la cola
+de envíos sin cerrar sí, porque no lleva ningún dato personal.
+
+**D100 · Confirmar que llegó NO es dar la conformidad.**
+
+Confirmar que llegó es un hecho de logística; dar la conformidad es decir que el
+producto está bien, y en el blueprint eso **libera el dinero** al proveedor. Lo
+segundo no existe. La pantalla lo dice con palabras bajo el botón, para que
+nadie confirme creyendo que renuncia a algo o que ha pagado a alguien.
+
+**D101 · Se guarda quién afirma la entrega.**
+
+`seller` o `buyer`, nunca administración. El blueprint contempla que el
+transportista marque la entrega y quien compró la niegue, y esa discusión —del
+Incremento 7— no se puede tener sin saber quién lo dijo.
+
+**D102 · El motivo de una entrega fallida no sale del pedido.**
+
+Es texto libre que escribe quien vende, y lo primero que escribe cualquiera es
+dónde fue y a quién buscaba. Viaja **solo** en `product_shipment_events`, que es
+de ese pedido y lo leen quien compró y quien vende. Ni a la cola de
+administración —que la lee curaduría— ni a `audit_events`, que la leen otros
+módulos y otras personas: ahí queda anotado que **hubo** un motivo, sin decir
+cuál. Lo encontró la revisión independiente en los dos sitios.
+
+**D103 · Cancelar un pedido ya pagado no se puede, y se dice qué falta.**
+
+El salto está declarado en la máquina y la liberación del inventario escrita con
+su marca y su clave; el servicio lo para con su propio código y la lista de las
+tres decisiones que faltan. Devolver el dinero no lo decide el código.
+
+**D104 · No hay transportista, ni fecha de llegada, ni enlace de seguimiento.**
+
+El nombre del transportista y la referencia son texto libre **opcional**, y
+cuando no se escriben quedan nulos: nulo es «no lo dijeron», nunca «N/A». No hay
+fecha prevista —exige plazos que nadie fijó— ni enlace de seguimiento
+—construirlo exige saber el transportista, y uno inventado sería un enlace roto
+dentro de un pedido pagado—.
+
+**D105 · Nada se marca como «atrasado».**
+
+Ninguna política publicada fija un plazo de despacho, así que no hay contra qué
+comparar: llamarle tarde a algo sin plazo es inventarse el plazo, y quien lo lea
+actuaría sobre un incumplimiento que nadie definió. Se da el **tiempo
+transcurrido**, que es un hecho, y quien mira decide.
+
+**D106 · Una entrega fallida no repone nada.**
+
+Dónde está esa unidad y qué se hace con ella es inspección de posventa, no un
+automatismo. Reponerla la pondría a la venta estando dentro de un camión.
+
+**D107 · La ruta de intervención de administración no tiene pantalla, a
+propósito.**
+
+Lo único que permite también lo hace quien vende desde la suya, y cuándo escala
+una cosa a la otra es una decisión operativa que nadie ha tomado. Un método de
+cliente sin pantalla detrás es código muerto que parece una función.
+
+**D108 · Un segundo intento de entrega fallido no vuelve a avisar.**
+
+La barrera anti-repetición deduplica por `(persona, tipo, pedido)`. Aflojarla
+haría que un webhook reintentado avisara dos veces del mismo hecho y rompería el
+enlace del aviso al pedido. Entre callar una repetición y gritar dos veces lo
+mismo, se calla. Es una limitación conocida, no un olvido.

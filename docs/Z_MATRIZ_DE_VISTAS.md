@@ -171,16 +171,22 @@ compra aceptó.
 
 ## 5. Productos
 
-Reescrita el 12/09/2026 y ampliada el 17/09/2026 con los Incrementos 4 y 5. La
-vertical existe: hay dominio, admisión con evaluación, catálogo con
-**fotografías reales**, **inventario**, **bolsa**, **condiciones de venta por
-jurisdicción** y **pedido con reserva**.
+Reescrita el 12/09/2026, ampliada el 17/09/2026 con los Incrementos 4 y 5, y el
+21/09/2026 con el 6. La vertical existe: hay dominio, admisión con evaluación,
+catálogo con **fotografías reales**, **inventario**, **bolsa**, **condiciones de
+venta por jurisdicción**, **pedido con reserva** y **entrega**.
 
 Lo que sigue sin haber es **cobrar de verdad**: el recorrido llega hasta la
 puerta de la pasarela y ahí se para, porque hacen falta cinco banderas
 encendidas, una clave de Stripe y una política publicada, y ninguna de esas
 decisiones la toma el código. La pantalla no lo disimula: dice con palabras qué
 falta.
+
+Y la entrega funciona entera **sobre un pedido pagado**, que hoy solo existe en
+local: se prepara, se cierra, se despacha —y ahí, y solo ahí, salen unidades del
+almacén—, se registra la entrega o su fallo y quien compró puede confirmar que
+lo recibió. **Sin transportista, sin fecha de llegada y sin «atrasado»**: nada
+de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 
 ### Comprador
 
@@ -201,7 +207,9 @@ falta.
 | Compra protegida y plazos | dentro del checkout y del pedido | `GET /products/policies` | **parcial** | los plazos salen de la política publicada. **Sin plazo de incidencias NO se dice «compra protegida»**: se dice que esa jurisdicción todavía no lo fija |
 | Barra fija de compra | — | — | **no existe** | en la ficha hay «Añadir a la bolsa», que NO es comprar. Comprar vive en la bolsa y lleva al checkout |
 | Impuestos y envío | — | — | **no existen** | entidad fiscal, transportista y tarifas. **No se pintan como cero**: el checkout dice con palabras que están sin decidir |
-| Transportista y seguimiento | — | — | **no existen** | Incrementos 6 y 7. El detalle del pedido lo dice con palabras |
+| Seguimiento del pedido | dentro de `/productos/pedidos/[orderId]` | `GET /products/orders/{id}` (campo `shipment`) | terminada | viaja **dentro del pedido**: una ruta aparte obligaría a dos viajes para pintar una ficha. Enseña el estado, lo que escribió quien despachó y una línea de tiempo que mezcla pago y envío **solo al pintar** |
+| Confirmar que llegó | dentro del detalle del pedido | `POST .../shipment/confirm-receipt` | terminada | **NO es dar la conformidad**, y el texto bajo el botón lo dice: eso liberaría el dinero al proveedor y no existe. Solo se ofrece sobre algo que ya salió y que esa persona no ha confirmado |
+| Transportista y fecha de llegada | — | — | **no existen** | la empresa no ha elegido transportista ni hay plazos acordados. El campo del transportista es texto libre y **nulo se dice con palabras**; no hay enlace de seguimiento ni fecha prevista |
 | Devolución, reembolso y garantía | — | — | **no existen** | Incrementos 8 y 9. Un aviso de devolución se anota para conciliar y **no deshace nada** |
 
 ### Proveedor
@@ -213,7 +221,8 @@ falta.
 | Crear y editar un producto | `/proveedor/productos/{nuevo,[productId]}` | `POST /products/seller/products`, `PUT .../draft`, `POST .../submit` | terminada | el borrador **ya no lleva galería**: las fotos tienen su pantalla |
 | Fotografías del producto | `/proveedor/productos/[productId]/fotos` | `GET/POST .../media`, `PUT .../media/order`, `DELETE .../media/{id}` | terminada | **el archivo lo sube la API**, no el móvil; nace pendiente de aprobación |
 | Inventario del producto | `/proveedor/productos/[productId]/inventario` | `GET .../inventory`, `POST .../inventory/{intake,adjust}`, `GET .../inventory/{sku}/movements` | terminada | reservar y liberar ya los llama el pedido; **despachar sigue sin llamarlo nadie**: sacar del almacén es del Incremento 6 |
-| Pedidos pagados de mi tienda | — (ruta de API) | `GET /products/seller/orders`, `GET .../orders/{id}` | **backend terminado, sin pantalla** | la pantalla es del Incremento 6, cuando haya algo que hacer con el pedido: hoy solo se podría mirar. **Solo los PAGADOS, y sin el cobro ni el comprador** |
+| Pedidos de mi tienda | `/proveedor/pedidos` | `GET /products/seller/orders` | terminada | **solo los PAGADOS, y sin el cobro ni el comprador**. Se llega desde «Mis productos», y se enseña siempre: la lista vacía explica que todavía no hay nada que preparar |
+| Preparar y despachar | `/proveedor/pedidos/[orderId]` | `GET/POST .../seller/orders/{id}/shipment/*` | terminada | es la **única pantalla de Productos donde salen unidades del almacén**, y por eso despachar pregunta antes. Transportista y referencia son opcionales |
 | Incidencias y saldos | — | — | **no existen** | Incrementos 7 a 9. No hay pantalla vacía que los simule |
 
 ### Administración
@@ -228,6 +237,8 @@ falta.
 | Publicar las condiciones de venta de un país | — (ruta de API) | `GET/POST /admin/products/policies`, `POST .../policies/{id}/retire` | **backend terminado, sin pantalla** | el texto legal lo escribe una persona con su abogado; una pantalla para redactarlo invitaría a improvisarlo. **Sin política publicada no se vende** |
 | Pedidos que necesitan una persona | — (ruta de API) | `GET /admin/products/orders/review` | **backend terminado, sin pantalla** | hoy solo caen ahí los pagos tardíos, y no hay ninguno: la venta está apagada |
 | Vencer reservas caducadas | — (planificador externo) | `POST /admin/products/orders/expire` | terminada | **no es un temporizador dentro de FastAPI**: la API puede tener varias réplicas. Lo llama un planificador de fuera |
+| Envíos sin cerrar | `/admin/productos/envios` | `GET /admin/products/shipments` | terminada | **ni un dato personal**: ni dirección, ni nombre, ni importe, ni el motivo de un fallo —que es texto libre y suele llevar la calle dentro—. **No marca nada como atrasado**: ninguna política publica un plazo de despacho, así que da el tiempo transcurrido |
+| Intervenir un envío parado | — (ruta de API) | `POST /admin/products/shipments/{id}/transition` | **backend terminado, sin pantalla** | lo único que permite —reabrir, registrar un fallo, registrar un reintento— también lo hace quien vende desde la suya, y **cuándo escala una cosa a la otra es una decisión operativa que nadie ha tomado**. No puede despachar ni escribir «entregado» |
 
 ### Lo que esta matriz dice, en una frase
 
@@ -237,12 +248,17 @@ comprar → dirección y condiciones → pedido reservado → mis pedidos**, y *
 proveedor postula → sube fotos → Z las aprueba → Z evalúa → Z publica → el
 proveedor carga existencias**.
 
+Y desde el Incremento 6 el recorrido sigue: **pedido pagado → el proveedor lo ve
+en su tienda → mete lo que va en la caja → cierra el paquete → lo despacha, y
+ahí salen las unidades → registra que llegó o que no se pudo → quien compró lo
+ve en su pedido y confirma que lo recibió**.
+
 Lo que queda fuera no es una pantalla sin conectar. Son: la valoración real, que
 necesita reseñas del Incremento 8; **el cobro**, que llega hasta la puerta de la
 pasarela y ahí se para porque faltan cinco banderas, una clave y una política, y
-la pantalla lo dice; **la entrega**, que es del Incremento 6; y **el acceso de
-Servicios**, que sigue siendo el único de los cuatro chips que no lleva a ninguna
-parte, a propósito y avisando.
+la pantalla lo dice; **las incidencias**, que son del Incremento 7; y **el
+acceso de Servicios**, que sigue siendo el único de los cuatro chips que no
+lleva a ninguna parte, a propósito y avisando.
 
 ## 6. Alumno / comprador
 
