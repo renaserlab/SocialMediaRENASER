@@ -1802,6 +1802,449 @@ class ProductShipmentEvent(Base):
     )
 
 
+
+
+# --------------------------------------------------------------------------- #
+# La incidencia de un pedido entregado (0080)
+# --------------------------------------------------------------------------- #
+#: Los motivos. CERRADOS: lo dice el blueprint §10. «Ya no lo quiero» NO esta:
+#: eso es desistimiento, no un defecto, y tiene otros plazos.
+INCIDENCIA_DANADO = "DAMAGED"
+INCIDENCIA_NO_COMO_SE_DESCRIBE = "NOT_AS_DESCRIBED"
+INCIDENCIA_PRODUCTO_INCORRECTO = "WRONG_ITEM"
+INCIDENCIA_FALTAN_PIEZAS = "MISSING_PARTS"
+INCIDENCIA_NO_FUNCIONA = "NOT_WORKING"
+INCIDENCIA_FALSIFICACION = "SUSPECTED_COUNTERFEIT"
+INCIDENCIA_OTRO = "OTHER"
+#: El octavo es del §9, no del §10: quien compro niega una entrega que el
+#: proveedor afirmo.
+INCIDENCIA_ENTREGA_NEGADA = "DELIVERY_DISPUTED"
+
+MOTIVOS_DE_INCIDENCIA = (
+    INCIDENCIA_DANADO,
+    INCIDENCIA_NO_COMO_SE_DESCRIBE,
+    INCIDENCIA_PRODUCTO_INCORRECTO,
+    INCIDENCIA_FALTAN_PIEZAS,
+    INCIDENCIA_NO_FUNCIONA,
+    INCIDENCIA_FALSIFICACION,
+    INCIDENCIA_OTRO,
+    INCIDENCIA_ENTREGA_NEGADA,
+)
+
+CASO_ABIERTO = "OPEN"
+CASO_MAS_EVIDENCIA = "MORE_EVIDENCE_REQUESTED"
+CASO_RESPONDIDO = "SELLER_RESPONDED"
+CASO_EN_MEDIACION = "MEDIATION"
+CASO_RESUELTO = "RESOLVED"
+CASO_APELADO = "APPEALED"
+CASO_RETIRADO = "WITHDRAWN"
+
+ESTADOS_DE_INCIDENCIA = (
+    CASO_ABIERTO,
+    CASO_MAS_EVIDENCIA,
+    CASO_RESPONDIDO,
+    CASO_EN_MEDIACION,
+    CASO_RESUELTO,
+    CASO_APELADO,
+    CASO_RETIRADO,
+)
+
+#: Los que todavia esperan a alguien.
+CASOS_VIVOS = (
+    CASO_ABIERTO,
+    CASO_MAS_EVIDENCIA,
+    CASO_RESPONDIDO,
+    CASO_EN_MEDIACION,
+    CASO_APELADO,
+)
+
+#: LAS CINCO SALIDAS. `REQUEST_MORE_EVIDENCE` no esta: pedir mas evidencia es un
+#: paso, no una salida, y contarlo como resolucion daria un numero falso.
+RESOLUCION_DEVOLVER_Y_REEMBOLSAR = "RETURN_AND_FULL_REFUND"
+RESOLUCION_REEMBOLSAR_SIN_DEVOLVER = "FULL_REFUND_WITHOUT_RETURN"
+RESOLUCION_REEMBOLSAR_EN_PARTE = "PARTIAL_REFUND"
+RESOLUCION_REPONER = "REPLACEMENT"
+RESOLUCION_RECHAZAR = "REJECT_CLAIM"
+
+RESOLUCIONES_DE_INCIDENCIA = (
+    RESOLUCION_DEVOLVER_Y_REEMBOLSAR,
+    RESOLUCION_REEMBOLSAR_SIN_DEVOLVER,
+    RESOLUCION_REEMBOLSAR_EN_PARTE,
+    RESOLUCION_REPONER,
+    RESOLUCION_RECHAZAR,
+)
+
+PEDIR_MAS_EVIDENCIA = "REQUEST_MORE_EVIDENCE"
+PROPUESTAS_DEL_PROVEEDOR = RESOLUCIONES_DE_INCIDENCIA + (PEDIR_MAS_EVIDENCIA,)
+
+#: RESOLVER NO ES PAGAR: el efecto nace pendiente y nadie lo ejecuta.
+EFECTO_PENDIENTE = "PENDING"
+EFECTO_NO_APLICA = "NOT_APPLICABLE"
+EFECTOS_DE_INCIDENCIA = (EFECTO_PENDIENTE, EFECTO_NO_APLICA)
+
+#: «2-6 fotografias» y «descripcion minima de 20 caracteres», literales del
+#: blueprint §10.
+MINIMO_DE_FOTOS_DE_INCIDENCIA = 2
+MAXIMO_DE_FOTOS_DE_INCIDENCIA = 6
+MINIMO_DE_LA_DESCRIPCION = 20
+MAXIMO_DE_LA_DESCRIPCION = 2000
+
+#: LAS 48 HORAS DEL PROVEEDOR. Del blueprint §10.1, exactas: «48 horas exactas
+#: desde la notificacion». Se transcribe, no se decide.
+HORAS_PARA_RESPONDER = 48
+#: Y LAS 48 DE LA APELACION, del mismo sitio.
+HORAS_PARA_APELAR = 48
+
+#: Los tipos que admite el deposito de evidencia. SIN VIDEO a proposito: un
+#: video no se puede validar abriendolo como se valida una imagen.
+TIPOS_DE_EVIDENCIA_DE_INCIDENCIA = ("image/jpeg", "image/png", "image/webp")
+
+
+class ProductIncident(Base):
+    """El expediente de algo que llego mal.
+
+    LA CUARTA MAQUINA, Y ES SUYA. Abrir una incidencia no despaga un pedido ni
+    devuelve un paquete al almacen: solo anota que hay un caso.
+
+    ABRIR NO ES APROBAR, Y RESOLVER NO ES PAGAR. `status = OPEN` significa que
+    alguien dice que algo llego mal; `resolution` dice que se decidio, y
+    `financial_effect` nace PENDIENTE porque mover el dinero es del Incremento 9
+    y no existe.
+    """
+
+    __tablename__ = "product_incidents"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+
+    order_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_orders.id", ondelete="RESTRICT")
+    )
+    #: NULO CUANDO EL CASO ES DE TODO EL PEDIDO. Hoy solo la entrega negada.
+    order_item_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_order_items.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    #: SE COPIAN LOS DOS LADOS: quien reclama y quien responde son un hecho de
+    #: este caso, y leerlos del pedido cada vez haria que un cambio de
+    #: responsable comercial reescribiera quien tenia que contestar.
+    buyer_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT")
+    )
+    seller_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_sellers.id", ondelete="RESTRICT")
+    )
+
+    reason: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default=CASO_ABIERTO)
+
+    #: NULO MIENTRAS LA PELOTA NO SEA SUYA: no puede correrle el reloj mientras
+    #: espera a que le manden la evidencia que pidio.
+    seller_response_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    seller_responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    seller_proposal: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Sin clave ajena: quien resolvio un caso es un hecho del pasado.
+    resolved_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    financial_effect: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    appeal_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    appealed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    appeals_used: Mapped[int] = mapped_column(Integer, default=0)
+
+    withdrawn_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "reason in ('DAMAGED', 'NOT_AS_DESCRIBED', 'WRONG_ITEM',"
+            " 'MISSING_PARTS', 'NOT_WORKING', 'SUSPECTED_COUNTERFEIT',"
+            " 'OTHER', 'DELIVERY_DISPUTED')",
+            name="product_incidents_motivo",
+        ),
+        CheckConstraint(
+            f"length(trim(description)) between {MINIMO_DE_LA_DESCRIPCION}"
+            f" and {MAXIMO_DE_LA_DESCRIPCION}",
+            name="product_incidents_descripcion",
+        ),
+        CheckConstraint(
+            "status in ('OPEN', 'MORE_EVIDENCE_REQUESTED', 'SELLER_RESPONDED',"
+            " 'MEDIATION', 'RESOLVED', 'APPEALED', 'WITHDRAWN')",
+            name="product_incidents_estado",
+        ),
+        CheckConstraint(
+            "seller_proposal is null or seller_proposal in"
+            " ('RETURN_AND_FULL_REFUND', 'FULL_REFUND_WITHOUT_RETURN',"
+            " 'PARTIAL_REFUND', 'REPLACEMENT', 'REJECT_CLAIM',"
+            " 'REQUEST_MORE_EVIDENCE')",
+            name="product_incidents_propuesta",
+        ),
+        #: LA RESOLUCION NUNCA ES `REQUEST_MORE_EVIDENCE`: es un paso.
+        CheckConstraint(
+            "resolution is null or resolution in ('RETURN_AND_FULL_REFUND',"
+            " 'FULL_REFUND_WITHOUT_RETURN', 'PARTIAL_REFUND', 'REPLACEMENT',"
+            " 'REJECT_CLAIM')",
+            name="product_incidents_resolucion",
+        ),
+        CheckConstraint(
+            "financial_effect is null or financial_effect in"
+            " ('PENDING', 'NOT_APPLICABLE')",
+            name="product_incidents_efecto",
+        ),
+        CheckConstraint(
+            "appeals_used between 0 and 1", name="product_incidents_una_apelacion"
+        ),
+        CheckConstraint(
+            "status <> 'RESOLVED' or (resolution is not null"
+            " and resolved_at is not null and resolved_by is not null"
+            " and financial_effect is not null)",
+            name="product_incidents_resuelta_completa",
+        ),
+        CheckConstraint(
+            "resolution is null or status in ('RESOLVED', 'APPEALED')",
+            name="product_incidents_resolucion_con_estado",
+        ),
+        CheckConstraint(
+            "status <> 'APPEALED' or appealed_at is not null",
+            name="product_incidents_apelada_con_fecha",
+        ),
+        CheckConstraint(
+            "status <> 'WITHDRAWN' or withdrawn_at is not null",
+            name="product_incidents_retirada_con_fecha",
+        ),
+        CheckConstraint(
+            "seller_responded_at is null or seller_proposal is not null",
+            name="product_incidents_respondida_con_fecha",
+        ),
+        #: EL CASO DE TODO EL PEDIDO ES SOLO EL DE LA ENTREGA NEGADA.
+        CheckConstraint(
+            "order_item_id is not null or reason = 'DELIVERY_DISPUTED'",
+            name="product_incidents_linea_salvo_entrega",
+        ),
+        Index(
+            "product_incidents_uno_vivo_por_linea",
+            "order_id",
+            "order_item_id",
+            unique=True,
+            postgresql_where=text(
+                "order_item_id is not null and status in ('OPEN',"
+                " 'MORE_EVIDENCE_REQUESTED', 'SELLER_RESPONDED', 'MEDIATION',"
+                " 'APPEALED')"
+            ),
+            sqlite_where=text(
+                "order_item_id is not null and status in ('OPEN',"
+                " 'MORE_EVIDENCE_REQUESTED', 'SELLER_RESPONDED', 'MEDIATION',"
+                " 'APPEALED')"
+            ),
+        ),
+        Index(
+            "product_incidents_uno_vivo_por_pedido",
+            "order_id",
+            unique=True,
+            postgresql_where=text(
+                "order_item_id is null and status in ('OPEN',"
+                " 'MORE_EVIDENCE_REQUESTED', 'SELLER_RESPONDED', 'MEDIATION',"
+                " 'APPEALED')"
+            ),
+            sqlite_where=text(
+                "order_item_id is null and status in ('OPEN',"
+                " 'MORE_EVIDENCE_REQUESTED', 'SELLER_RESPONDED', 'MEDIATION',"
+                " 'APPEALED')"
+            ),
+        ),
+        Index(
+            "product_incidents_del_comprador",
+            "buyer_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "product_incidents_del_proveedor",
+            "seller_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "product_incidents_en_mediacion",
+            "created_at",
+            "id",
+            postgresql_where=text("status in ('MEDIATION', 'APPEALED')"),
+            sqlite_where=text("status in ('MEDIATION', 'APPEALED')"),
+        ),
+        #: POR EL PLAZO Y NO POR EL ESTADO, igual que el vencimiento de reservas.
+        Index(
+            "product_incidents_por_escalar",
+            "seller_response_due_at",
+            "id",
+            postgresql_where=text(
+                "seller_response_due_at is not null and status = 'OPEN'"
+            ),
+            sqlite_where=text(
+                "seller_response_due_at is not null and status = 'OPEN'"
+            ),
+        ),
+    )
+
+
+class ProductIncidentEvidence(Base):
+    """Una prueba del caso. SOLO SE ANADE, y tampoco se borra.
+
+    NI SIQUIERA QUIEN LA SUBIO PUEDE QUITARLA. Retirar una foto despues de que
+    la otra parte la haya visto es reescribir lo que se discutio; si una
+    evidencia no vale, se dice en el historial.
+
+    SE GUARDA LA RUTA, NUNCA UNA URL: una firmada caduca, y guardarla haria que
+    la evidencia de una disputa dejara de cargar sin que nadie tocara nada.
+    """
+
+    __tablename__ = "product_incident_evidence"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    incident_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_incidents.id", ondelete="RESTRICT")
+    )
+    #: Sin clave ajena: quien aporto una prueba es un hecho del pasado.
+    uploaded_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    uploaded_role: Mapped[str] = mapped_column(Text)
+
+    storage_path: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(Text)
+    byte_size: Mapped[int] = mapped_column(BigInteger)
+    checksum_sha256: Mapped[str] = mapped_column(Text)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "uploaded_role in ('buyer', 'seller', 'admin')",
+            name="product_incident_evidence_rol",
+        ),
+        CheckConstraint(
+            "length(trim(storage_path)) between 1 and 500"
+            " and storage_path not like '%://%'",
+            name="product_incident_evidence_ruta",
+        ),
+        CheckConstraint(
+            "content_type in ('image/jpeg', 'image/png', 'image/webp')",
+            name="product_incident_evidence_tipo",
+        ),
+        CheckConstraint(
+            "byte_size > 0 and byte_size <= 10485760",
+            name="product_incident_evidence_peso",
+        ),
+        #: LA HUELLA TIENE SU CHECK, Y VIVE SOLO EN LA 0080.
+        #:
+        #: Es una expresión regular —`~ '^[0-9a-f]{64}$'`— y ese operador es de
+        #: PostgreSQL: SQLite no sabe leerlo, y la suite monta su esquema desde
+        #: ESTOS modelos. Declararlo aquí no protege más y rompe la suite
+        #: entera, que es exactamente lo que pasó al escribir este incremento.
+        #:
+        #: Es la misma decisión que ya estaba tomada para
+        #: `product_orders_huella` y `product_orders_moneda`, que tampoco están
+        #: aquí. Lo que sí se comprueba en las dos bases es la LONGITUD, que no
+        #: necesita expresiones regulares.
+        CheckConstraint(
+            "length(checksum_sha256) = 64",
+            name="product_incident_evidence_huella_larga",
+        ),
+        CheckConstraint("width > 0", name="product_incident_evidence_ancho"),
+        CheckConstraint("height > 0", name="product_incident_evidence_alto"),
+        CheckConstraint(
+            "caption is null or length(trim(caption)) between 1 and 300",
+            name="product_incident_evidence_texto",
+        ),
+        #: EL MISMO ARCHIVO NO SE CUENTA DOS VECES: subir dos veces la misma
+        #: foto para llegar al minimo de dos no es aportar dos evidencias.
+        UniqueConstraint(
+            "incident_id",
+            "checksum_sha256",
+            name="product_incident_evidence_una_vez",
+        ),
+        Index(
+            "product_incident_evidence_del_caso",
+            "incident_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+
+class ProductIncidentEvent(Base):
+    """Un paso del expediente. SOLO SE ANADE.
+
+    AQUI SI VA EL TEXTO LIBRE, y es correcto que vaya: este expediente lo leen
+    quien reclama, quien responde y quien resuelve, que son las tres personas
+    que ya conocen el caso. Lo que NO puede pasar es que salga de aqui a una
+    lista general o a la auditoria compartida.
+    """
+
+    __tablename__ = "product_incident_events"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    incident_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_incidents.id", ondelete="RESTRICT")
+    )
+    from_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_status: Mapped[str] = mapped_column(Text)
+    #: Sin clave ajena: quien movio un caso es un hecho del pasado.
+    actor_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    actor_role: Mapped[str] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "actor_role in ('buyer', 'seller', 'admin', 'system')",
+            name="product_incident_events_rol",
+        ),
+        CheckConstraint(
+            "from_status is null or length(from_status) <= 40",
+            name="product_incident_events_desde",
+        ),
+        CheckConstraint(
+            "length(to_status) <= 40", name="product_incident_events_hasta"
+        ),
+        CheckConstraint(
+            "note is null or length(trim(note)) between 3 and 1000",
+            name="product_incident_events_nota",
+        ),
+        Index(
+            "product_incident_events_del_caso",
+            "incident_id",
+            "created_at",
+            "id",
+        ),
+    )
+
 __all__ = [
     "ACTORES_DE_INVENTARIO",
     "ACTOR_ADMINISTRACION",
@@ -1811,12 +2254,23 @@ __all__ = [
     "APROBADO",
     "APROBADO_CON_CONDICIONES",
     "BORRADOR",
+    "CASOS_VIVOS",
+    "CASO_ABIERTO",
+    "CASO_APELADO",
+    "CASO_EN_MEDIACION",
+    "CASO_MAS_EVIDENCIA",
+    "CASO_RESPONDIDO",
+    "CASO_RESUELTO",
+    "CASO_RETIRADO",
     "DECISIONES",
     "DECISION_APROBADO",
     "DECISION_CONDICIONADO",
     "DECISION_RECHAZADO",
     "DIMENSIONES",
     "DOCUMENTOS",
+    "EFECTOS_DE_INCIDENCIA",
+    "EFECTO_NO_APLICA",
+    "EFECTO_PENDIENTE",
     "ENTRADA",
     "ENTREGA_LA_DICE_EL_COMPRADOR",
     "ENTREGA_LA_DICE_EL_PROVEEDOR",
@@ -1831,6 +2285,7 @@ __all__ = [
     "ENVIO_PREPARANDO",
     "ESTADOS_DE_ENVIO",
     "ESTADOS_DE_FOTO",
+    "ESTADOS_DE_INCIDENCIA",
     "ESTADOS_DE_PEDIDO",
     "ESTADOS_DE_POLITICA",
     "ESTADOS_DE_POSTULACION",
@@ -1845,13 +2300,28 @@ __all__ = [
     "FOTO_APROBADA",
     "FOTO_PENDIENTE",
     "FOTO_RECHAZADA",
+    "HORAS_PARA_APELAR",
+    "HORAS_PARA_RESPONDER",
+    "INCIDENCIA_DANADO",
+    "INCIDENCIA_ENTREGA_NEGADA",
+    "INCIDENCIA_FALSIFICACION",
+    "INCIDENCIA_FALTAN_PIEZAS",
+    "INCIDENCIA_NO_COMO_SE_DESCRIBE",
+    "INCIDENCIA_NO_FUNCIONA",
+    "INCIDENCIA_OTRO",
+    "INCIDENCIA_PRODUCTO_INCORRECTO",
     "LIBERACION",
     "MAXIMO_BYTES_DE_LA_FOTO",
     "MAXIMO_DEL_MOVIMIENTO",
     "MAXIMO_DE_FOTOS",
+    "MAXIMO_DE_FOTOS_DE_INCIDENCIA",
+    "MAXIMO_DE_LA_DESCRIPCION",
     "MAXIMO_POR_LINEA",
     "MAXIMO_PREPARADO",
     "MAXIMO_SEGURO_EN_JS",
+    "MINIMO_DE_FOTOS_DE_INCIDENCIA",
+    "MINIMO_DE_LA_DESCRIPCION",
+    "MOTIVOS_DE_INCIDENCIA",
     "MOVIMIENTOS",
     "MUESTRA_PEDIDA",
     "OBSERVACION",
@@ -1865,6 +2335,7 @@ __all__ = [
     "PEDIDO_PROCESANDO",
     "PEDIDO_RETIENE",
     "PEDIDO_VENCIDO",
+    "PEDIR_MAS_EVIDENCIA",
     "POLITICA_BORRADOR",
     "POLITICA_PUBLICADA",
     "POLITICA_RETIRADA",
@@ -1875,14 +2346,22 @@ __all__ = [
     "POSTULACION_EN_REVISION",
     "POSTULACION_RECHAZADA",
     "POSTULACION_RETIRADA",
+    "PROPUESTAS_DEL_PROVEEDOR",
     "PUBLICADO",
     "RAZONES_EXIGIDAS",
     "RESERVA",
+    "RESOLUCIONES_DE_INCIDENCIA",
+    "RESOLUCION_DEVOLVER_Y_REEMBOLSAR",
+    "RESOLUCION_RECHAZAR",
+    "RESOLUCION_REEMBOLSAR_EN_PARTE",
+    "RESOLUCION_REEMBOLSAR_SIN_DEVOLVER",
+    "RESOLUCION_REPONER",
     "RETIRADO",
     "REVISION_DOCUMENTAL",
     "SALIDA",
     "SUSPENDIDO",
     "TIPOS_DE_EVIDENCIA",
+    "TIPOS_DE_EVIDENCIA_DE_INCIDENCIA",
     "TIPOS_DE_IMAGEN",
     "VENDEDOR_ACTIVO",
     "VENDEDOR_PENDIENTE",
@@ -1899,6 +2378,9 @@ __all__ = [
     "ProductEvaluation",
     "ProductEvaluationEvidence",
     "ProductEvaluationScore",
+    "ProductIncident",
+    "ProductIncidentEvent",
+    "ProductIncidentEvidence",
     "ProductInventory",
     "ProductMedia",
     "ProductOrder",
