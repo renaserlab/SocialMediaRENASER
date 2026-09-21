@@ -196,6 +196,40 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("Delivery did not succeed", "Open the order to see why."),
         "pt": ("Não foi possível entregar", "Abra o pedido para ver o motivo."),
     },
+    # ------------------------------------------------------------------ #
+    # Incidencias de Productos
+    #
+    # NINGUNO PROMETE DINERO. «Resuelta» dice que hay una decisión, no que
+    # haya un reembolso hecho: devolver el dinero es del Incremento 9 y no
+    # existe. Un texto que dijera «te devolvemos el importe» haría que alguien
+    # esperara un abono que nadie ha ordenado.
+    # ------------------------------------------------------------------ #
+    "product_incident_opened": {
+        "es": ("Reportaron un problema", "Tienes que responder a este caso."),
+        "en": ("A problem was reported", "This case needs your answer."),
+        "pt": ("Relataram um problema", "Este caso precisa da sua resposta."),
+    },
+    "product_incident_answered": {
+        "es": ("Respondieron a tu caso", "Ábrelo para ver qué proponen."),
+        "en": ("Your case got a reply", "Open it to see what they propose."),
+        "pt": ("Responderam ao seu caso", "Abra-o para ver o que propõem."),
+    },
+    "product_incident_more_evidence": {
+        "es": ("Piden más evidencia", "Ábrelo para ver qué falta."),
+        "en": ("More evidence requested", "Open it to see what is missing."),
+        "pt": ("Pedem mais evidências", "Abra-o para ver o que falta."),
+    },
+    "product_incident_mediation": {
+        "es": ("Tu caso pasó a revisión de Z", "Lo está mirando una persona."),
+        "en": ("Your case went to Z review", "A person is looking at it."),
+        "pt": ("Seu caso foi para revisão da Z", "Uma pessoa está analisando."),
+    },
+    # «HAY UNA DECISIÓN», NO «TE DEVOLVIMOS EL DINERO».
+    "product_incident_resolved": {
+        "es": ("Hay una decisión sobre tu caso", "Ábrelo para leerla."),
+        "en": ("There is a decision on your case", "Open it to read it."),
+        "pt": ("Há uma decisão sobre seu caso", "Abra-o para lê-la."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

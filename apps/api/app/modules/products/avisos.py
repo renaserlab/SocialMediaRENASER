@@ -26,6 +26,14 @@ ENTREGADO = "product_shipment_delivered"
 #: EL INTENTO DE ENTREGA FALLÓ.
 ENTREGA_FALLIDA = "product_shipment_failed"
 
+#: LAS INCIDENCIAS (Incremento 7). NINGÚN TEXTO PROMETE DINERO: «resuelta» dice
+#: que hay una decisión, no que haya un reembolso hecho, porque eso no existe.
+INCIDENCIA_ABIERTA = "product_incident_opened"
+INCIDENCIA_RESPONDIDA = "product_incident_answered"
+INCIDENCIA_MAS_EVIDENCIA = "product_incident_more_evidence"
+INCIDENCIA_EN_MEDIACION = "product_incident_mediation"
+INCIDENCIA_RESUELTA = "product_incident_resolved"
+
 
 async def encolar(
     db: AsyncSession,
@@ -74,4 +82,14 @@ async def _idioma_de(db: AsyncSession, usuario_id: str) -> str | None:
     )
 
 
-__all__ = ["DESPACHADO", "ENTREGADO", "ENTREGA_FALLIDA", "encolar"]
+__all__ = [
+    "DESPACHADO",
+    "ENTREGADO",
+    "ENTREGA_FALLIDA",
+    "INCIDENCIA_ABIERTA",
+    "INCIDENCIA_EN_MEDIACION",
+    "INCIDENCIA_MAS_EVIDENCIA",
+    "INCIDENCIA_RESPONDIDA",
+    "INCIDENCIA_RESUELTA",
+    "encolar",
+]

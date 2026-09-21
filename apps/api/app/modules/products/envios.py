@@ -897,6 +897,24 @@ async def registrar_entrega(
     """
     await esquema.exigir_envios(db)
     momento = momento or ahora()
+
+    #: QUIEN DICE QUE NO LE LLEGÓ NO PUEDE CONFIRMAR QUE LO RECIBIÓ.
+    #:
+    #: Es el bloqueo cruzado del Incremento 7, y se comprueba aquí y no en la
+    #: pantalla: dos afirmaciones contrarias del mismo pedido dejarían un
+    #: expediente donde quien reclama se desmiente solo, y eso lo usaría la
+    #: otra parte para cerrar el caso sin mirarlo. Si de verdad apareció, lo
+    #: que hay que hacer es retirar el caso, que deja rastro de que se retiró.
+    if actor_rol == estados_de_envio.COMPRADOR:
+        from app.modules.products import incidencias
+
+        if await incidencias.hay_caso_vivo(db, orden_id=orden.id):
+            raise ConflictError(
+                "Tienes una incidencia abierta sobre este pedido.",
+                code="product_shipment_incident_open",
+                details={"order_id": orden.id},
+            )
+
     envio = await _bloqueado(db, orden_id=orden.id, crear=False)
     if envio is not None and envio.status == estados_de_envio.ENTREGADO:
         #: YA ESTABA ENTREGADO. Si lo confirma quien compró, se guarda su

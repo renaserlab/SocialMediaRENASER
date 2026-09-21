@@ -1010,3 +1010,147 @@ class EnvioPendienteRead(BaseModel):
     dispatched_at: datetime | None = None
     units: int = 0
     waiting_hours: int | None = None
+
+
+# --------------------------------------------------------------------------- #
+# La incidencia (0080)
+# --------------------------------------------------------------------------- #
+class PruebaRead(BaseModel):
+    """Una evidencia del caso. LA URL SE FIRMA AL PINTAR y no se guarda.
+
+    `url` viaja nula cuando el almacenamiento no contesta o no esta
+    configurado: el expediente se abre igual con la lista de pruebas y sin las
+    imagenes, porque un caso que no se puede leer porque un tercero esta caido
+    es peor que uno que se lee a medias.
+    """
+
+    id: str
+    uploaded_role: str
+    content_type: str
+    byte_size: int
+    width: int
+    height: int
+    caption: str | None = None
+    url: str | None = None
+    created_at: datetime
+
+
+class PasoDelCaso(BaseModel):
+    """Un paso del expediente. SOLO SE ANADE.
+
+    AQUI SI VA EL TEXTO LIBRE: este expediente lo leen quien reclama, quien
+    responde y quien resuelve, que son las tres personas que ya conocen el caso.
+    Lo que NO puede pasar es que salga de aqui a una lista general.
+    """
+
+    from_status: str | None = None
+    to_status: str
+    actor_role: str
+    note: str | None = None
+    created_at: datetime
+
+
+class IncidenciaRead(BaseModel):
+    """El expediente entero.
+
+    ABRIR NO ES APROBAR Y RESOLVER NO ES PAGAR. `status` dice donde esta el
+    caso; `resolution` dice que se decidio; y `financial_effect` nace PENDIENTE
+    porque mover el dinero es del Incremento 9 y no existe.
+
+    NO HAY NINGUN IMPORTE. Ni cuanto se devuelve, ni cuanto se pago: una
+    resolucion de esta version dice QUE se decidio, no CUANTO.
+    """
+
+    id: str
+    order_id: str
+    order_item_id: str | None = None
+    reason: str
+    description: str
+    status: str
+    #: LAS 48 HORAS DEL PROVEEDOR, ya calculadas. NULO mientras la pelota no sea
+    #: suya: no puede correrle el plazo mientras espera evidencia.
+    seller_response_due_at: datetime | None = None
+    seller_responded_at: datetime | None = None
+    #: LO QUE PROPUSO, que no es lo que se decidio.
+    seller_proposal: str | None = None
+    resolution: str | None = None
+    resolved_at: datetime | None = None
+    #: `PENDING` o `NOT_APPLICABLE`. NUNCA «hecho»: nadie lo ejecuta.
+    financial_effect: str | None = None
+    appeal_due_at: datetime | None = None
+    appealed_at: datetime | None = None
+    appeals_used: int = 0
+    withdrawn_at: datetime | None = None
+    evidence: list[PruebaRead] = Field(default_factory=list)
+    history: list[PasoDelCaso] = Field(default_factory=list)
+    #: LO QUE ESTE ACTOR PUEDE HACER AHORA. Para pintar botones, nunca para
+    #: decidir: quien decide es el servidor con la fila bloqueada delante.
+    available_transitions: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class IncidenciaResumen(BaseModel):
+    """Una fila de una lista de casos. SIN LA DESCRIPCION NI EL HISTORIAL.
+
+    Lo que hace falta para elegir cual abrir es de que pedido es, por que se
+    abrio y en que estado esta. El texto de lo que le paso a alguien se lee
+    entrando al caso, que es donde se comprueba quien puede.
+    """
+
+    id: str
+    order_id: str
+    order_item_id: str | None = None
+    reason: str
+    status: str
+    seller_response_due_at: datetime | None = None
+    resolution: str | None = None
+    created_at: datetime
+
+
+class AbrirIncidencia(BaseModel):
+    """Abrir un caso. LA DESCRIPCION LLEVA 20 CARACTERES COMO MINIMO.
+
+    Es literal del blueprint §10, y no es un capricho: «no funciona» a secas no
+    le permite a quien responde saber que mirar.
+    """
+
+    reason: str
+    description: str = Field(min_length=20, max_length=2000)
+    #: NULO SOLO PARA LA ENTREGA NEGADA: no hay una linea concreta de la que
+    #: quejarse porque no llego nada.
+    order_item_id: str | None = None
+
+
+class RespuestaDelProveedor(BaseModel):
+    """Lo que PROPONE quien vende. PROPONER NO ES RESOLVER.
+
+    Las cinco salidas mueven dinero, mueven mercancia o niegan la reclamacion, y
+    ninguna de las tres la decide en solitario quien tiene el conflicto.
+    """
+
+    proposal: str
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class NotaDelCaso(BaseModel):
+    """Los pasos que llevan explicacion. Sin el porque no se puede revisar."""
+
+    note: str = Field(min_length=3, max_length=1000)
+
+
+class ResolverIncidencia(NotaDelCaso):
+    """La resolucion que registra Z. NUNCA `REQUEST_MORE_EVIDENCE`.
+
+    Pedir mas evidencia es un paso, no una salida: un expediente al que se le
+    pide mas evidencia no esta resuelto, y contarlo como resuelto daria un
+    numero falso.
+    """
+
+    resolution: str
+
+
+class EscaladaRead(BaseModel):
+    """Cuantos casos mando a mediacion el barrido. Idempotente: llamarlo dos
+    veces seguidas devuelve cero la segunda porque ya no queda ninguno."""
+
+    escalated: int = 0

@@ -33,6 +33,8 @@ from app.modules.gobernanza import auditoria
 from app.modules.products import applications, carts, catalog, esquema, evaluations
 from app.modules.products import envios
 from app.modules.products import estados_de_envio
+from app.modules.products import estados_de_incidencia as maquina_de_incidencias
+from app.modules.products import incidencias
 from app.modules.products import inventory as almacen
 from app.modules.products import media as fotos
 from app.modules.products import pagos as cobros
@@ -51,12 +53,23 @@ from app.modules.products.models import (
     Product,
     ProductMedia,
     ProductOrder,
+    ProductIncident,
     ProductPolicy,
     ProductSeller,
     ProductVersion,
 )
+from app.shared import storage as almacenamiento
 from app.modules.products.schemas import (
+    AbrirIncidencia,
     CheckoutProductoRead,
+    EscaladaRead,
+    IncidenciaRead,
+    IncidenciaResumen,
+    NotaDelCaso,
+    PasoDelCaso,
+    PruebaRead,
+    ResolverIncidencia,
+    RespuestaDelProveedor,
     DespacharRequest,
     EnvioPendienteRead,
     EnvioRead,
@@ -1614,6 +1627,445 @@ async def reintentar_la_entrega(
     return await _del_proveedor(db, orden=orden)
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Las incidencias (Incremento 7)
+#
+# TRES PUERTAS DISTINTAS Y NINGUNA DE CORTESIA. Quien compro entra por
+# `de_quien_compra`, quien vende por `de_quien_vende` —que ademas exige
+# capacidad comercial activa— y administracion por `exigir_mediador`, que es
+# `admin` y no `is_admin`: resolver decide sobre dinero y sobre mercancia.
+#
+# Y EL AJENO ES UN 404 EN LOS DOS PRIMEROS. Decir «existe pero no es tuyo» ya
+# cuenta que alguien abrio una disputa sobre ese pedido.
+# --------------------------------------------------------------------------- #
+async def _caso(
+    db: AsyncSession, fila, *, actor: str | None = None
+) -> IncidenciaRead:
+    """El expediente como lo lee una pantalla, con las pruebas firmadas."""
+    caso = await incidencias.leer(db, incidencia_id=fila.id)
+    firmadas = await incidencias.firmar([p.storage_path for p in caso.evidence])
+    return IncidenciaRead(
+        id=caso.id,
+        order_id=caso.order_id,
+        order_item_id=caso.order_item_id,
+        reason=caso.reason,
+        description=caso.description,
+        status=caso.status,
+        seller_response_due_at=caso.seller_response_due_at,
+        seller_responded_at=caso.seller_responded_at,
+        seller_proposal=caso.seller_proposal,
+        resolution=caso.resolution,
+        resolved_at=caso.resolved_at,
+        financial_effect=caso.financial_effect,
+        appeal_due_at=caso.appeal_due_at,
+        appealed_at=caso.appealed_at,
+        appeals_used=caso.appeals_used,
+        withdrawn_at=caso.withdrawn_at,
+        evidence=[
+            PruebaRead(
+                id=p.id,
+                uploaded_role=p.uploaded_role,
+                content_type=p.content_type,
+                byte_size=p.byte_size,
+                width=p.width,
+                height=p.height,
+                caption=p.caption,
+                #: LA URL SE FIRMA AQUI Y NO SE GUARDA. Nula si el
+                #: almacenamiento no contesta: el caso se lee igual.
+                url=firmadas.get(p.storage_path),
+                created_at=p.created_at,
+            )
+            for p in caso.evidence
+        ],
+        history=[
+            PasoDelCaso(
+                from_status=e.from_status,
+                to_status=e.to_status,
+                actor_role=e.actor_role,
+                note=e.note,
+                created_at=e.created_at,
+            )
+            for e in caso.history
+        ],
+        available_transitions=(
+            list(maquina_de_incidencias.siguientes(caso.status, actor))
+            if actor is not None
+            else []
+        ),
+        created_at=caso.created_at,
+    )
+
+
+def _resumen_del_caso(fila) -> IncidenciaResumen:
+    return IncidenciaResumen(
+        id=fila.id,
+        order_id=fila.order_id,
+        order_item_id=fila.order_item_id,
+        reason=fila.reason,
+        status=fila.status,
+        seller_response_due_at=fila.seller_response_due_at,
+        resolution=fila.resolution,
+        created_at=fila.created_at,
+    )
+
+
+@router.get("/incidents", response_model=list[IncidenciaResumen])
+async def mis_incidencias(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[IncidenciaResumen]:
+    """Mis casos, los mas nuevos primero. SIN LA DESCRIPCION.
+
+    Lo que hace falta para elegir cual abrir es de que pedido es y en que
+    estado esta; el texto de lo que paso se lee entrando.
+    """
+    return [
+        _resumen_del_caso(c)
+        for c in await incidencias.mias(db, usuario_id=current_user.id)
+    ]
+
+
+@router.post(
+    "/orders/{order_id}/incidents", response_model=IncidenciaRead, status_code=201
+)
+async def abrir_incidencia(
+    order_id: str,
+    cuerpo: AbrirIncidencia,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Reporta un problema con un pedido entregado. ABRIR NO ES APROBAR NADA.
+
+    EL CASO NACE SIN EVIDENCIA Y SIN PLAZO CORRIENDO. El blueprint pide 2-6
+    fotografias, y exigirlas aqui obligaria a subirlas antes de que exista el
+    caso del que cuelgan. Asi que se abre, se le anaden las pruebas y se ENVIA:
+    ahi se comprueba el minimo y ahi empieza a correr el plazo del proveedor,
+    que el blueprint cuenta «desde la notificacion».
+
+    NO SE RECLAMA SOBRE ALGO QUE NO SALIO. Si el paquete sigue en el almacen, lo
+    que hay que mirar es el envio, y el 409 lo dice con su estado dentro.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    if cuerpo.order_item_id is not None:
+        ensure_uuid(cuerpo.order_item_id, "Articulo no encontrado.")
+    caso = await incidencias.abrir(
+        db,
+        orden_id=order_id,
+        usuario_id=current_user.id,
+        motivo=cuerpo.reason,
+        descripcion=cuerpo.description,
+        order_item_id=cuerpo.order_item_id,
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.get("/incidents/{incident_id}", response_model=IncidenciaRead)
+async def mi_incidencia(
+    incident_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Un caso mio. EL AJENO ES UN 404, nunca un 403."""
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.post(
+    "/incidents/{incident_id}/evidence", response_model=IncidenciaRead, status_code=201
+)
+async def anadir_evidencia(
+    incident_id: str,
+    archivo: UploadFile = File(...),
+    caption: str | None = Form(default=None),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Cuelga una fotografia del expediente. SOLO SE ANADE, Y NO SE QUITA.
+
+    EL ARCHIVO VIAJA A LA API, no al almacenamiento, y aqui SE MIRAN LOS BYTES:
+    los primeros para descartar barato, y despues se abre la imagen de verdad,
+    porque una cabecera de JPEG se puede pegar delante de cualquier cosa. Tres
+    tipos y ninguno mas, sin `image/*`, que dejaria pasar SVG.
+
+    EL NOMBRE LO GENERA EL SERVIDOR. El que trae quien sube puede llevar `../`.
+
+    Y NI SIQUIERA QUIEN LA SUBIO PUEDE QUITARLA DESPUES: retirar una foto
+    despues de que la otra parte la haya visto es reescribir lo que se discutio.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    datos = await archivo.read()
+    medida = fotos.medir(datos, declarado=archivo.content_type)
+
+    prueba = await incidencias.anadir_prueba(
+        db,
+        caso=caso,
+        medida=medida,
+        actor_id=current_user.id,
+        actor_rol="buyer",
+        pie=caption,
+    )
+    #: LA FILA PRIMERO Y EL ARCHIVO DESPUES. Si la subida falla, la transaccion
+    #: se deshace y no queda una fila apuntando a un archivo que no existe; al
+    #: reves quedaria un archivo huerfano en el deposito, que es menos grave
+    #: pero tambien hay que evitarlo, y por eso la ruta se genera con el
+    #: identificador de la fila.
+    await almacenamiento.subir_objeto(
+        incidencias.DEPOSITO, prueba.storage_path, datos, medida.content_type
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.post("/incidents/{incident_id}/submit", response_model=IncidenciaRead)
+async def enviar_incidencia(
+    incident_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Manda el caso al proveedor y ARRANCA SU PLAZO DE 48 HORAS.
+
+    AQUI SE COMPRUEBA EL MINIMO DE FOTOGRAFIAS. A la entrega negada no se le
+    piden: no hay nada que fotografiar porque el paquete no esta, y exigirlas
+    convertiria el unico recurso de quien no recibio nada en un requisito
+    imposible.
+
+    REPETIRLO NO REINICIA EL PLAZO del proveedor: seria una forma de darle menos
+    tiempo del que tiene.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    antes = caso.seller_response_due_at
+    await incidencias.enviar(db, caso=caso, usuario_id=current_user.id)
+    if antes is None and caso.seller_response_due_at is not None:
+        #: EL AVISO SOLO CUANDO ACABA DE PASAR, y dentro de la transaccion: asi
+        #: no anuncia algo que no llego a ocurrir.
+        await incidencias.avisar(db, caso=caso, estado=maquina_de_incidencias.ABIERTA)
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.post("/incidents/{incident_id}/reply", response_model=IncidenciaRead)
+async def responder_a_lo_pedido(
+    incident_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """He aportado lo que me pidieron: la pelota vuelve al proveedor.
+
+    Y SU PLAZO EMPIEZA DE NUEVO: no puede correrle el reloj mientras espera la
+    evidencia que el mismo pidio, ni empezar con el tiempo ya gastado.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.ABIERTA,
+        actor_id=current_user.id,
+        actor_rol="buyer",
+    )
+    await incidencias.avisar(db, caso=caso, estado=maquina_de_incidencias.ABIERTA)
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.post("/incidents/{incident_id}/escalate", response_model=IncidenciaRead)
+async def pedir_mediacion(
+    incident_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """No acepto lo que proponen: que lo mire Z.
+
+    NO CIERRA NADA NI DECIDE NADA. Pasa el caso a la cola de mediacion, que es
+    donde una persona lo lee.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.MEDIACION,
+        actor_id=current_user.id,
+        actor_rol="buyer",
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.post("/incidents/{incident_id}/appeal", response_model=IncidenciaRead)
+async def apelar(
+    incident_id: str,
+    cuerpo: NotaDelCaso,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Una sola apelacion, dentro de 48 horas y CON EVIDENCIA NUEVA.
+
+    «NUEVA» ES «POSTERIOR A LA RESOLUCION», y se sabe mirando las fechas. Sin
+    esa condicion, apelar seria repetir la misma frase mas alto: el blueprint
+    pide evidencia nueva precisamente para que la segunda vuelta mire algo que
+    la primera no vio.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.APELADA,
+        actor_id=current_user.id,
+        actor_rol="buyer",
+        nota=cuerpo.note,
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+@router.post("/incidents/{incident_id}/withdraw", response_model=IncidenciaRead)
+async def retirar_incidencia(
+    incident_id: str,
+    cuerpo: NotaDelCaso,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Retiro mi caso. CON MOTIVO, y queda en el historial.
+
+    RETIRAR NO BORRA NADA. El expediente sigue entero —descripcion, evidencia e
+    historial— y el renglon dice que se retiro y por que: un caso que
+    desapareciera dejaria a la otra parte sin poder demostrar que existio.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_compra(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.RETIRADA,
+        actor_id=current_user.id,
+        actor_rol="buyer",
+        nota=cuerpo.note,
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="buyer")
+
+
+# --------------------------------------------------------------------------- #
+# Lo del proveedor
+# --------------------------------------------------------------------------- #
+@router.get("/seller/incidents", response_model=list[IncidenciaResumen])
+async def incidencias_de_mi_tienda(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[IncidenciaResumen]:
+    """Los casos de mi tienda. SIN LA DESCRIPCION, que se lee entrando."""
+    vendedor = await permisos.exigir_vendedor_activo(db, current_user.id)
+    return [
+        _resumen_del_caso(c)
+        for c in await incidencias.de_mi_tienda(db, seller_id=vendedor.id)
+    ]
+
+
+@router.get("/seller/incidents/{incident_id}", response_model=IncidenciaRead)
+async def incidencia_de_mi_tienda(
+    incident_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Un caso de mi tienda. EL DE OTRA ES UN 404."""
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_vende(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    return await _caso(db, caso, actor="seller")
+
+
+@router.post("/seller/incidents/{incident_id}/respond", response_model=IncidenciaRead)
+async def responder_incidencia(
+    incident_id: str,
+    cuerpo: RespuestaDelProveedor,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Respondo con una PROPUESTA. PROPONER NO ES RESOLVER.
+
+    Las cinco salidas mueven dinero, mueven mercancia o niegan la reclamacion, y
+    ninguna de las tres puede decidirla en solitario quien tiene el conflicto.
+    Lo que se escribe aqui es `seller_proposal`; `resolution` la registra
+    administracion, y no hay ninguna ruta por la que el proveedor la escriba.
+
+    PEDIR MAS EVIDENCIA ES OTRO PASO, no una propuesta: tiene su propia ruta
+    porque para el expediente significa algo distinto —el caso no avanza, se
+    para— y porque para el reloj del proveedor tambien: se le para.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_vende(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.RESPONDIDA,
+        actor_id=current_user.id,
+        actor_rol="seller",
+        nota=cuerpo.note,
+        propuesta=cuerpo.proposal,
+    )
+    await incidencias.avisar(
+        db, caso=caso, estado=maquina_de_incidencias.RESPONDIDA
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="seller")
+
+
+@router.post(
+    "/seller/incidents/{incident_id}/request-evidence", response_model=IncidenciaRead
+)
+async def pedir_mas_evidencia(
+    incident_id: str,
+    cuerpo: NotaDelCaso,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Pido mas evidencia. CON MOTIVO, y MI PLAZO SE PARA.
+
+    No puede correrle el reloj al proveedor mientras espera la evidencia que el
+    mismo pidio: seria cobrarle el tiempo de la otra parte.
+    """
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.de_quien_vende(
+        db, incidencia_id=incident_id, usuario_id=current_user.id
+    )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.MAS_EVIDENCIA,
+        actor_id=current_user.id,
+        actor_rol="seller",
+        nota=cuerpo.note,
+    )
+    await incidencias.avisar(
+        db, caso=caso, estado=maquina_de_incidencias.MAS_EVIDENCIA
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="seller")
 # --------------------------------------------------------------------------- #
 # La ficha. AL FINAL, para no comerse las rutas estáticas.
 # --------------------------------------------------------------------------- #
@@ -2247,6 +2699,137 @@ async def intervenir_el_envio(
         await envios.avisar(db, orden=orden, estado=envio.status)
     await db.commit()
     return await _envio(db, envio, actor=estados_de_envio.ADMINISTRACION)
+
+
+
+
+@admin_router.get("/incidents", response_model=list[IncidenciaResumen])
+async def cola_de_mediacion(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[IncidenciaResumen]:
+    """Los casos que esperan a una persona de Z. LOS MAS VIEJOS PRIMERO.
+
+    NO SE MARCA NINGUNO COMO FUERA DE PLAZO. El blueprint pide que Z decida en
+    «tres dias habiles», y «habil» depende de un calendario de festivos que
+    nadie ha definido: llamarle tarde a algo sin plazo medible es inventarse el
+    plazo. Lo que se da es el orden, que es un hecho.
+
+    SIN LA DESCRIPCION, que es donde esta el texto libre de lo que le paso a
+    alguien. Se lee entrando al caso.
+
+    Y SOLO `admin`. Resolver decide sobre dinero y sobre mercancia, asi que
+    tambien mirar la cola: no tiene sentido abrir la lista a quien no puede
+    hacer nada con ella, y esta lista dice quien tiene una disputa abierta.
+    """
+    await incidencias.exigir_mediador(db, current_user.id)
+    await esquema.exigir_incidencias(db)
+    return [_resumen_del_caso(c) for c in await incidencias.en_mediacion(db)]
+
+
+@admin_router.post("/incidents/escalate-overdue", response_model=EscaladaRead)
+async def escalar_las_vencidas(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EscaladaRead:
+    """Manda a mediacion los casos cuyo plazo del proveedor vencio.
+
+    EL SILENCIO NO CIERRA NADA: pasa a mediacion, no a «rechazado» ni a
+    «aceptado». Que el proveedor no conteste no significa que tenga razon ni
+    que no la tenga.
+
+    NO HAY NINGUN TEMPORIZADOR DENTRO DE FASTAPI, igual que con el vencimiento
+    de reservas: la API puede correr con varias replicas y un temporizador por
+    replica es el mismo barrido ejecutandose tantas veces como procesos haya.
+    Esta ruta la llama un planificador de fuera.
+
+    IDEMPOTENTE: llamarla dos veces seguidas devuelve cero la segunda porque ya
+    no queda ninguno con el plazo vencido y abierto.
+    """
+    await incidencias.exigir_mediador(db, current_user.id)
+    await esquema.exigir_incidencias(db)
+    return EscaladaRead(escalated=await incidencias.escalar_las_vencidas(db))
+@admin_router.get("/incidents/{incident_id}", response_model=IncidenciaRead)
+async def expediente(
+    incident_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """El expediente entero, para poder decidir.
+
+    AQUI SI SE VE TODO: la descripcion, la evidencia firmada y el historial con
+    sus notas. Es lo que hace falta para resolver, y por eso esta detras de
+    `admin` y no de curaduria.
+    """
+    await incidencias.exigir_mediador(db, current_user.id)
+    await esquema.exigir_incidencias(db)
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await db.get(ProductIncident, incident_id)
+    if caso is None:
+        raise NotFoundError(
+            "Incidencia no encontrada.", code="product_incident_not_found"
+        )
+    #: EL ACCESO DEJA RASTRO. Igual que la cola de conciliacion de pedidos: con
+    #: una fila por expediente se puede contestar «quien vio este caso y
+    #: cuando», que es lo que de verdad se pregunta despues.
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role="admin",
+        action="product_incident.read",
+        entity_type="product_order",
+        entity_id=caso.order_id,
+        payload={"incident_id": caso.id, "status": caso.status},
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="admin")
+
+
+@admin_router.post("/incidents/{incident_id}/resolve", response_model=IncidenciaRead)
+async def resolver_incidencia(
+    incident_id: str,
+    cuerpo: ResolverIncidencia,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Registra la resolucion. RESOLVER NO ES PAGAR.
+
+    LO QUE ESTA RUTA ESCRIBE es `resolution` —una de las cinco salidas— y un
+    `financial_effect` que nace PENDIENTE. LO QUE NO HACE, Y NO ES UN OLVIDO:
+
+      * NO LLAMA A NINGUN ADAPTADOR DE REEMBOLSOS. Devolver el dinero es del
+        Incremento 9 y no existe; que exista una decision no significa que el
+        dinero se haya movido.
+      * NO TOCA EL INVENTARIO. Una resolucion de reposicion no saca una unidad
+        del almacen ni devuelve la dañada: donde esta esa unidad lo decide una
+        persona, y sacarla aqui la venderia dos veces.
+      * NO FIJA NINGUN IMPORTE. «Reembolso parcial» dice que se decidio
+        devolver parte; cuanto es una decision que nadie ha tomado y para la
+        que no hay ni columna.
+
+    Y NUNCA ES `REQUEST_MORE_EVIDENCE`: pedir mas evidencia es un paso, no una
+    salida, y contarlo como resolucion daria un numero falso.
+    """
+    await incidencias.exigir_mediador(db, current_user.id)
+    await esquema.exigir_incidencias(db)
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await db.get(ProductIncident, incident_id)
+    if caso is None:
+        raise NotFoundError(
+            "Incidencia no encontrada.", code="product_incident_not_found"
+        )
+    await incidencias.mover(
+        db,
+        incidencia_id=caso.id,
+        hasta=maquina_de_incidencias.RESUELTA,
+        actor_id=current_user.id,
+        actor_rol="admin",
+        nota=cuerpo.note,
+        resolucion=cuerpo.resolution,
+    )
+    await incidencias.avisar(db, caso=caso, estado=maquina_de_incidencias.RESUELTA)
+    await db.commit()
+    return await _caso(db, caso, actor="admin")
 
 
 @admin_router.post("/{product_id}/transition", response_model=ProductoDelProveedor)
