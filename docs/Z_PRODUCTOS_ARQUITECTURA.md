@@ -13,7 +13,7 @@ Incremento 7: las reclamaciones posventa.
 |---|---|
 | **Incrementos 1 a 7** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva, entrega y **reclamaciones** |
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
-| **Migraciones 0079 y 0080** | **escritas y SIN APLICAR, en ese orden.** Probadas y reejecutadas contra PostgreSQL 16 desechable. Las aplica una persona; ver §16 |
+| **Migraciones 0079 y 0080** | **APLICADAS.** La 0079 esta verificada contra la base gestionada en sesion de solo lectura demostrada, con **cero divergencias**; ver §17 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
 | **Dinero de vuelta** | **no existe.** Una reclamación resuelta dice QUÉ se decidió y deja el efecto en `PENDING`. Nadie lo ejecuta: eso es el Incremento 9 |
 | **Siguiente incremento** | **el 8 y el 9**, y antes hay que cruzar el blueprint con las capturas: el reparto entre devoluciones, garantías, reseñas y saldos no está decidido |
@@ -73,8 +73,8 @@ verdades sobre quién es esa persona.
 | `0076_productos_inventario_claves.sql` | quita dos claves ajenas que dejaban una cuenta sin poder borrarse |
 | `0077_productos_politicas.sql` | `product_policies` |
 | `0078_productos_pedidos.sql` | `product_orders`, `product_order_items`, `product_order_addresses`, `product_order_events` |
-| `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **SIN APLICAR** |
-| `0080_productos_incidencias.sql` | el depósito `product-incidents`, `product_incidents`, `product_incident_evidence`, `product_incident_events` · **SIN APLICAR** |
+| `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **aplicada y verificada** |
+| `0080_productos_incidencias.sql` | el depósito `product-incidents`, `product_incidents`, `product_incident_evidence`, `product_incident_events` · **aplicada** |
 
 **LAS NUEVE PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
 seis primeras contra la base gestionada en una sesión de solo lectura demostrada
@@ -86,11 +86,14 @@ permisos para `anon` y `authenticated`. El 18/09/2026 se repitió la misma
 verificación sobre la 0076, la 0077 y la 0078. **Cero divergencias en las dos
 rondas.**
 
-**LA 0079 Y LA 0080 SE ENTREGAN SIN APLICAR**, y en ese orden. Escritas y
-probadas contra PostgreSQL 16 desechable, incluida su reejecución y una
-comparación del esquema real contra los modelos del ORM —columnas, CHECK,
-índices parciales con su condición, claves ajenas y los disparadores—. No se
-aplicaron a la base gestionada; ver §16.
+**LA 0079 Y LA 0080 YA ESTAN APLICADAS.** La 0079 se verifico despues contra la
+base gestionada en una sesion de solo lectura **demostrada** —el guardia puesto
+con una sentencia explicita, comprobado con `show`, y una escritura de prueba
+inofensiva rechazada con `ReadOnlySqlTransaction`— con **cero divergencias**.
+Ver §17 y [D136].
+
+Lo que esa verificacion NO demuestra: las tres tablas tienen **cero filas**, asi
+que las comprobaciones de huerfanos e incoherencias son ciertas por vacio.
 
 La 0080 sí está aplicada **en el PostgreSQL local de demostración**, que es
 donde se comprobó que su bloque de verificación pasa, que las tres tablas
@@ -876,11 +879,20 @@ Y el chip de Explorar ya existía: `AccesosAVerticales` pintaba los cuatro
 —Cursos, Eventos, Servicios y Productos— con Productos apagado. Lo único que
 hizo falta fue encenderlo.
 
-## 16. Qué hay que aplicar a mano, y en qué orden
+## 16. Qué se aplicó a mano, y en qué orden
 
-**Dos migraciones, la 0079 y la 0080, en ese orden,** y no las aplica el
-código: no hay herramienta de migración en este proyecto y ninguna se aplica a
-una base gestionada sin que una persona lo decida.
+**YA ESTÁN APLICADAS LAS DOS**, la 0079 y la 0080, en ese orden. Lo que sigue se
+conserva porque describe el procedimiento —no lo aplica el código: no hay
+herramienta de migración en este proyecto y ninguna entra en una base gestionada
+sin que una persona lo decida— y porque **hace falta igual en cualquier otra
+base**: una local, una de pruebas o la de quien acabe de clonar.
+
+**EL REINICIO NO ES OPCIONAL Y SIGUE SIENDO UNA ACCIÓN MANUAL.** La puerta de
+esquema guarda también el «no» en la memoria del proceso. Un backend que llevara
+en marcha desde antes de aplicar las migraciones seguirá contestando **503**
+aunque las tablas ya estén: no se apaga solo y no hay forma de comprobarlo desde
+aquí. Comprobado en local tras reiniciar; en cualquier despliegue remoto, **hay
+que reiniciarlo y comprobarlo allí**.
 
 ### El orden
 

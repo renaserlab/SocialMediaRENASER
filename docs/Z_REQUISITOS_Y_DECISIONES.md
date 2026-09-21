@@ -1374,3 +1374,122 @@ Es la misma clase de defecto que costó una prueba tautológica en el Incremento
 6. También salió de aquí una tercera: al esconder los borradores al proveedor,
 la prueba de «la lista no lleva la descripción» pasó a comprobarlo sobre una
 lista **vacía**, que es cierto sin demostrar nada; ahora envía el caso primero.
+## 17. Cierre del Incremento 6: la 0079 verificada y lo que la revision encontro (21/09/2026)
+
+La 0079 y la 0080 **ya estan aplicadas** en la base gestionada. Esta seccion
+recoge la verificacion de la primera y los ocho defectos que salieron al
+auditar el incremento contra el esquema real.
+
+**D136 · La 0079 esta aplicada y coincide con el ORM, verificado en solo
+lectura DEMOSTRADA.**
+
+Cero divergencias: las tres tablas, 32 columnas con su nulabilidad, la clave
+primaria en `order_id` —una sola fila de envio por pedido—, 19 CHECK con los
+seis semanticos que exige el incremento, los dos indices parciales, el
+disparador que congela el historial cubriendo `update` **y** `delete`, RLS
+activa en las tres, cero politicas, y `anon` y `authenticated` sin un solo
+permiso ni de tabla ni de columna. Solo `postgres` y `service_role` conservan
+acceso. `product_orders.status` no admite ningun estado logistico.
+
+Y esta vez **el guardia se demostro**, corrigiendo el fallo que la propia
+verificacion de las 0051/0052 dejo anotado: alli se paso por `connect_args` y
+nunca llego a aplicarse. Aqui se puso con una sentencia explicita, se comprobo
+con `show`, y se lanzo una escritura de prueba —`update ... where false`,
+inofensiva aunque el guardia fallara— que fue rechazada con
+`ReadOnlySqlTransaction`.
+
+**LO QUE ESTA VERIFICACION NO DEMUESTRA:** las tres tablas tienen **cero
+filas**, asi que las comprobaciones de huerfanos e incoherencias son ciertas
+por vacio. No dicen nada sobre la integridad de datos reales; dicen que no hay
+nada roto porque no hay nada. La venta sigue apagada.
+
+**D137 · La 0080 no altero nada de la 0079.** Ninguna clave ajena de las tablas
+de incidencias apunta a las de envios, y las 32 columnas siguen intactas. La
+bateria completa pasa con las ochenta migraciones aplicadas desde cero.
+
+**D138 · `available_transitions` promete «esto el servidor te lo va a aceptar»,
+y ahora lo cumple en los dos sentidos.**
+
+Tres defectos de la misma familia, y los tres importan porque el movil pinta
+exactamente lo que esa lista dice:
+
+* **Faltaba lo que el servidor SI acepta.** Confirmar que llego no es un salto
+  —`DELIVERED -> DELIVERED` no existe y no se inventa—, asi que en cuanto quien
+  vende registraba la entrega, la lista venia vacia y el boton de «Confirmo que
+  lo recibi» no aparecia nunca. `registrar_entrega` tiene un camino explicito
+  para esa confirmacion. En el camino normal, `buyer_confirmed_at` era
+  inalcanzable desde la aplicacion.
+* **Sobraba lo que el servidor rechaza siempre.** A administracion se le
+  anunciaba `CANCELLED` desde los tres estados de antes de salir, y `cancelar`
+  se para siempre. Ahora lo dice una constante, `HAY_POLITICA_DE_CANCELACION`,
+  que leen el servicio y el serializador.
+* **Y la pantalla tampoco lo consultaba.** El boton de registrar la entrega
+  miraba el estado en vez de la lista, asi que desde una entrega fallida no
+  aparecia aunque el servidor la acepta —el caso de quien la lleva en mano al
+  dia siguiente—. Quien vende tenia que inventarse un reintento para poder
+  marcarla: dos renglones falsos en un historial inmutable.
+
+**D139 · Dos nombres del Incremento 6 pisaban a otros, y uno rompia una ruta de
+moderacion.**
+
+`MotivoRequest` se definio por segunda vez al final de `schemas.py`, donde ya
+existia. Python rebindea el nombre sin avisar, asi que
+`/admin/products/{id}/suspend` —que lee `cuerpo.motivo`— paso a exigir `reason`:
+el movil recibia 422 y quien mandara `reason` provocaba un 500. **Retirar del
+catalogo un producto reportado no funcionaba por ninguna via**, y no lo veia
+nadie porque ninguna prueba tocaba esa ruta por HTTP.
+
+Buscando la causa aparecio el segundo: `_del_proveedor` tambien estaba dos veces
+en `router.py`. Se renombran los dos del Incremento 6 y no los anteriores.
+
+**El centinela nuevo comprueba la causa y no el sintoma:** ningun nombre de
+nivel superior puede estar definido dos veces en `schemas.py` ni en `router.py`.
+
+**D140 · La lista del proveedor ordena por lo que necesita atencion.**
+
+Es la UNICA puerta a la pantalla de preparacion, trae los veinte mas recientes
+por fecha —entregados incluidos— y al detalle solo se llega pulsando una
+tarjeta. Un pedido que alguien deje sin preparar dejaba de existir para quien
+tenia que prepararlo en cuanto entraran veinte mas nuevos: justamente el que
+aparece en la cola de administracion como «lleva trescientas horas esperando»,
+y esa cola es de solo lectura. Ahora lo que espera va primero y los entregados
+salen detras. No se pagina ni se esconde nada, y el orden nuevo solo se aplica
+si la 0079 esta puesta.
+
+**D141 · Los codigos que despachar hereda del almacen tienen texto.**
+
+`POST /shipment/dispatch` es lo unico de esa pantalla que llama a `inventory`,
+asi que hereda codigos que no estan en `envios.py`. Las traducciones ya existian
+en `inventario.ts`; la pantalla no le preguntaba, y quien vende leia el mensaje
+crudo del servidor en castellano fuera cual fuera su idioma.
+
+**D142 · La pantalla de preparar no ofrece contar la caja cuando el servidor no
+lo acepta.**
+
+Escondia los controles solo cuando el paquete YA HABIA SALIDO, asi que con el
+paquete cerrado seguia pintando —activo— el boton de quitar una unidad, sobre
+una llamada que devuelve 409. El camino correcto, reabrir con motivo, estaba en
+la misma pantalla.
+
+### Y dos pruebas que no demostraban lo que decian
+
+Las dos salieron de esta misma ronda y las dos son del mismo tipo que ya costo
+una en el Incremento 6 y otra en el 7:
+
+* Dos pruebas anadidas en esta sesion contaban los movimientos de salida **sin
+  filtrar por producto**, sobre una base que comparten los cuarenta y cinco
+  casos del fichero. Ademas de dejar la bateria roja, el `== 0` solo habria
+  pasado si fueran las primeras en despachar: «corregir la cuenta no movio el
+  almacen» nunca se habia comprobado.
+* La primera version de la prueba de `CANCELLED` leia por descuido las
+  transiciones del **proveedor**, que nunca lo llevaron. Pasaba sin demostrar
+  nada, y la mutacion que tenia que ponerla roja la dejaba verde.
+
+### La pantalla de intervencion administrativa sigue sin existir, y es deliberado
+
+El blueprint y el mazo de capturas **no estan en el arbol de trabajo**, asi que
+no se pudo comprobar si la exigen. Lo que si consta: las tres cosas que esa ruta
+permite —reabrir un paquete que no ha salido, registrar un fallo de entrega,
+registrar un reintento— las hace ya quien vende desde su pantalla, y cuando
+escala una cosa a la otra es una decision operativa que nadie ha tomado. Se
+mantiene [D107]: no se inventa una pantalla redundante.
