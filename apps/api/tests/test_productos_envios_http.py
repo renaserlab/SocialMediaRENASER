@@ -546,3 +546,76 @@ async def test_la_lista_del_proveedor_no_lee_dos_veces_las_mismas_lineas(
     assert len(consultas) <= cuantos, (
         f"{len(consultas)} consultas a product_order_items para {cuantos} pedidos"
     )
+
+
+@pytest.mark.asyncio
+async def test_quien_compro_puede_confirmar_una_entrega_que_registro_el_proveedor(
+    sesiones, cliente, venta_encendida, monkeypatch
+) -> None:
+    """LA CONFIRMACION DE QUIEN COMPRO NO ES UN SALTO, Y ASI NO SE OFRECIA.
+
+    `registrar_entrega` tiene un camino explicito para esto —«YA ESTABA
+    ENTREGADO. Si lo confirma quien compro, se guarda su confirmacion, que es
+    un dato que no teniamos»— y el servidor lo acepta. Pero la maquina no tiene
+    ninguna transicion desde DELIVERED, asi que `available_transitions` venia
+    VACIA y el movil, que solo pinta lo que el servidor ofrece, no ensenaba
+    nunca el boton.
+
+    Resultado: en cuanto el proveedor registraba la entrega, quien compro ya no
+    podia decir «si, me llego». `buyer_confirmed_at` quedaba inalcanzable por
+    ese camino, que es justo el camino normal.
+
+    NO ES UN CAMBIO DE MAQUINA: DELIVERED -> DELIVERED no existe y no se
+    inventa. Lo que se corrige es lo que el servidor ANUNCIA que aceptara.
+    """
+    http, quien = cliente
+    _, _, comprador, orden_id = await pedido_pagado(sesiones, monkeypatch)
+    proveedor = await _duenno(sesiones, orden_id)
+
+    #: El proveedor lo prepara, lo despacha y REGISTRA LA ENTREGA el primero.
+    quien["uid"] = proveedor
+    detalle = (await http.get(f"{PRODUCTOS}/seller/orders/{orden_id}")).json()
+    await http.post(
+        f"{PRODUCTOS}/seller/orders/{orden_id}/shipment/prepare",
+        json={
+            "items": [
+                {"order_item_id": l["id"], "prepared_quantity": l["quantity"]}
+                for l in detalle["items"]
+            ]
+        },
+    )
+    await http.post(f"{PRODUCTOS}/seller/orders/{orden_id}/shipment/ready")
+    await http.post(f"{PRODUCTOS}/seller/orders/{orden_id}/shipment/dispatch", json={})
+    entregado = await http.post(
+        f"{PRODUCTOS}/seller/orders/{orden_id}/shipment/delivered"
+    )
+    assert entregado.status_code == 200, entregado.text
+
+    #: Y AHORA QUIEN COMPRO MIRA SU PEDIDO.
+    quien["uid"] = comprador
+    pedido = await http.get(f"{PRODUCTOS}/orders/{orden_id}")
+    assert pedido.status_code == 200, pedido.text
+    envio = pedido.json()["shipment"]
+    assert envio["status"] == "DELIVERED"
+    assert envio["delivered_source"] == "seller"
+    assert envio["buyer_confirmed_at"] is None, "todavia no lo ha confirmado"
+    assert "DELIVERED" in envio["available_transitions"], (
+        "el servidor no le ofrece confirmar una entrega que si acepta: el boton"
+        " no se pinta nunca"
+    )
+
+    #: Y EL SERVIDOR LO ACEPTA DE VERDAD, que es lo que hace correcta la oferta.
+    confirmado = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/shipment/confirm-receipt"
+    )
+    assert confirmado.status_code == 200, confirmado.text
+    assert confirmado.json()["shipment"]["buyer_confirmed_at"] is not None
+
+    #: UNA SOLA VEZ: confirmado ya, deja de ofrecerse.
+    otra = await http.get(f"{PRODUCTOS}/orders/{orden_id}")
+    assert "DELIVERED" not in otra.json()["shipment"]["available_transitions"]
+
+    #: Y AL PROVEEDOR NUNCA SE LE OFRECE: ya no hay nada que registrar.
+    quien["uid"] = proveedor
+    suyo = await http.get(f"{PRODUCTOS}/seller/orders/{orden_id}")
+    assert "DELIVERED" not in (suyo.json()["shipment"]["available_transitions"])

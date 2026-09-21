@@ -342,12 +342,43 @@ async def _envio(
             )
             for e in historial
         ],
-        available_transitions=(
-            list(estados_de_envio.siguientes(envio.status, actor))
-            if actor is not None
-            else []
-        ),
+        available_transitions=_lo_que_puede_con_el_paquete(envio, actor),
     )
+
+
+def _lo_que_puede_con_el_paquete(envio, actor: str | None) -> list[str]:
+    """Los saltos que este actor puede dar, MAS la confirmacion de recepcion.
+
+    CONFIRMAR QUE LLEGO NO ES UN SALTO, y modelarlo como uno fue el error. La
+    maquina no tiene `DELIVERED -> DELIVERED` —no existe y no se inventa—, asi
+    que en cuanto el proveedor registraba la entrega la lista venia vacia y el
+    movil, que solo pinta lo que el servidor ofrece, no ensenaba nunca el boton.
+    Quien compro se quedaba sin poder decir «si, me llego» justo en el camino
+    normal, y `buyer_confirmed_at` quedaba inalcanzable por ahi.
+
+    LO QUE ESTA LISTA PROMETE es «esto el servidor te lo va a aceptar», y
+    `registrar_entrega` SI acepta esa confirmacion: tiene un camino explicito
+    para ella que guarda la fecha sin tocar el estado ni quien afirmo la
+    entrega primero. Asi que se anuncia.
+
+    UNA SOLA VEZ. Ya confirmado, deja de ofrecerse: repetirlo haria dudar de si
+    la primera vez se guardo.
+
+    Y SOLO A QUIEN COMPRO. Al proveedor no se le ofrece porque no tiene nada que
+    registrar, y a administracion tampoco: fabricar una entrega desde una
+    oficina arrancaria plazos de posventa que nadie ha cumplido.
+    """
+    if actor is None:
+        return []
+    posibles = list(estados_de_envio.siguientes(envio.status, actor))
+    if (
+        actor == estados_de_envio.COMPRADOR
+        and envio.status == estados_de_envio.ENTREGADO
+        and envio.buyer_confirmed_at is None
+        and estados_de_envio.ENTREGADO not in posibles
+    ):
+        posibles.append(estados_de_envio.ENTREGADO)
+    return posibles
 
 
 async def _version_leida(
