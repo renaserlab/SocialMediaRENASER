@@ -262,6 +262,11 @@ async def _pedido(db: AsyncSession, orden, *, con_direccion: bool = True) -> Ped
             await envios.del_pedido(db, orden=orden, lineas=lineas),
             actor="buyer",
         ),
+        #: LOS CASOS, POR LO MISMO. Y solo el resumen: lo que hace falta aqui
+        #: es saber que hay uno abierto y poder entrar, no releer la disputa.
+        incidents=[
+            _resumen_del_caso(c) for c in await incidencias.del_pedido(db, orden_id=orden.id)
+        ],
         created_at=orden.created_at,
     )
 

@@ -24,6 +24,7 @@ LO QUE DEFIENDEN:
 from __future__ import annotations
 
 import io
+from datetime import timedelta
 
 import pytest
 import pytest_asyncio
@@ -432,3 +433,84 @@ async def test_la_lista_no_lleva_el_texto_de_la_disputa(
             assert "description" not in fila
             assert "evidence" not in fila
             assert "history" not in fila
+
+
+@pytest.mark.asyncio
+async def test_el_pedido_trae_sus_casos_y_solo_el_resumen(
+    cliente, sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL CASO VIAJA DENTRO DEL PEDIDO, igual que el seguimiento y por lo mismo.
+
+    Quien abrio una reclamacion tiene que verla donde esta el pedido del que
+    habla. Si no viajara aqui, la pantalla del pedido tendria que pedir ademas
+    la lista entera de casos de esa persona y buscar el suyo dentro.
+
+    Y SOLO EL RESUMEN: la descripcion —texto libre que escribio quien reclama—
+    se lee entrando al caso, no en la ficha del pedido.
+    """
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+    quien["uid"] = comprador
+
+    antes = await http.get(f"{PRODUCTOS}/orders/{orden_id}")
+    assert antes.status_code == 200, antes.text
+    assert antes.json()["incidents"] == [], "un pedido sin reclamar no tiene casos"
+
+    abierto = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/incidents",
+        json={
+            "reason": maquina.DANADO,
+            "description": DESCRIPCION,
+            "order_item_id": linea,
+        },
+    )
+    assert abierto.status_code == 201, abierto.text
+    caso_id = abierto.json()["id"]
+
+    despues = await http.get(f"{PRODUCTOS}/orders/{orden_id}")
+    assert despues.status_code == 200, despues.text
+    casos = despues.json()["incidents"]
+    assert [c["id"] for c in casos] == [caso_id]
+    assert casos[0]["status"] == maquina.ABIERTA
+    assert DESCRIPCION not in despues.text, "el pedido filtra la descripcion"
+    for campo in ("description", "evidence", "history"):
+        assert campo not in casos[0]
+
+
+@pytest.mark.asyncio
+async def test_pasado_el_plazo_de_la_politica_la_ruta_contesta_409(
+    cliente, sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL PLAZO DE LA POLITICA TAMBIEN SE APLICA POR HTTP, y con su codigo.
+
+    409 y no 400: no es que la peticion este mal escrita, es que el pedido ya
+    no admite reclamacion. La pantalla necesita distinguirlo para decir por que.
+    """
+    from app.modules.products.models import ProductPolicy, ProductShipment
+
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+
+    #: SE ENVEJECE LA ENTREGA en vez de viajar al futuro: por HTTP no hay
+    #: `momento`, y adelantar el reloj del proceso contaminaria el resto.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        politica = await db.get(ProductPolicy, orden.policy_id)
+        horas = int(politica.incident_report_hours)
+        envio = await db.get(ProductShipment, orden_id)
+        envio.delivered_at = envio.delivered_at - timedelta(hours=horas + 1)
+        await db.commit()
+
+    quien["uid"] = comprador
+    tarde = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/incidents",
+        json={
+            "reason": maquina.DANADO,
+            "description": DESCRIPCION,
+            "order_item_id": linea,
+        },
+    )
+    assert tarde.status_code == 409, tarde.text
+    assert tarde.json()["error"]["code"] == "product_incident_report_window_closed"

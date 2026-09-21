@@ -28,6 +28,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import AppError
 from app.modules.products import envios, esquema, estados_de_envio, incidencias
@@ -40,6 +41,8 @@ from app.modules.products.models import (
     ProductIncidentEvent,
     ProductIncidentEvidence,
     ProductOrder,
+    ProductPolicy,
+    ProductShipment,
 )
 from tests.test_productos_dominio import (  # noqa: F401
     SIN_POSTGRES,
@@ -1171,3 +1174,137 @@ async def test_sin_la_0080_las_incidencias_contestan_503(
         assert await incidencias.hay_caso_vivo(db, orden_id=orden_id) is False
         assert await incidencias.bloquea_el_dinero(db, orden_id=orden_id) is False
         assert await incidencias.del_pedido(db, orden_id=orden_id) == []
+
+
+@pytest.mark.asyncio
+async def test_pasado_el_plazo_de_la_politica_ya_no_se_reclama(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """EL PLAZO PARA RECLAMAR ES EL DE LA POLITICA, y no se lo inventa nadie.
+
+    `incident_report_hours` es un campo obligatorio de toda politica publicada
+    —lo impone el CHECK de la 0077— y viaja congelado en el pedido por su
+    `policy_id`. Ignorarlo dejaria reclamar un pedido de hace dos anos.
+
+    SE CUENTA DESDE QUE LLEGO, que es el primer momento en el que quien compro
+    pudo ver que algo estaba mal.
+    """
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        politica = await db.get(ProductPolicy, orden.policy_id)
+        horas = politica.incident_report_hours
+        envio = await db.get(ProductShipment, orden_id)
+        entregado = envio.delivered_at
+    assert horas is not None, "una politica publicada siempre trae el plazo"
+    assert entregado is not None
+
+    #: UN SEGUNDO DESPUES DEL LIMITE. No «mucho despues»: el borde es lo que
+    #: hay que probar, porque es donde una comparacion mal puesta se cuela.
+    tarde = entregado + timedelta(hours=int(horas), seconds=1)
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await incidencias.abrir(
+                db,
+                orden_id=orden_id,
+                usuario_id=comprador,
+                motivo=maquina.DANADO,
+                descripcion=DESCRIPCION,
+                order_item_id=linea,
+                momento=tarde,
+            )
+        await db.rollback()
+    assert fallo.value.status_code == 409
+    assert fallo.value.code == "product_incident_report_window_closed"
+
+    #: Y JUSTO EN EL LIMITE TODAVIA SE PUEDE. Quien reclama en la ultima hora
+    #: esta dentro de su derecho, y redondear en contra suya seria quitarselo.
+    a_tiempo = entregado + timedelta(hours=int(horas))
+    async with sesiones() as db:
+        caso = await incidencias.abrir(
+            db,
+            orden_id=orden_id,
+            usuario_id=comprador,
+            motivo=maquina.DANADO,
+            descripcion=DESCRIPCION,
+            order_item_id=linea,
+            momento=a_tiempo,
+        )
+        await db.commit()
+        assert caso.status == maquina.ABIERTA
+
+
+@pytest.mark.asyncio
+async def test_una_politica_publicada_nunca_puede_quedarse_sin_plazo(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """DE DONDE SALE LA CONFIANZA EN ESE PLAZO: LA BASE NO DEJA QUITARLO.
+
+    El plazo para reclamar no depende de que alguien se acuerde de rellenarlo.
+    `product_policies_publicada_esta_completa` —de la 0077, ya aplicada— impide
+    que una politica publicada se quede sin `incident_report_hours`, asi que un
+    pedido real SIEMPRE apunta a una fila que lo trae.
+
+    Esta prueba lo ejecuta: intenta vaciarlo y la base lo rechaza.
+    """
+    _, _, _, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        politica = await db.get(ProductPolicy, orden.policy_id)
+        assert politica.status == "published"
+        politica.incident_report_hours = None
+        with pytest.raises(IntegrityError):
+            await db.commit()
+        await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_una_fila_sin_plazo_no_quita_el_derecho_a_reclamar(
+    sesiones, venta_encendida, monkeypatch
+) -> None:
+    """UN DATO QUE FALTA NO QUITA UN DERECHO.
+
+    La unica fila que la base deja tener sin horas es una que NO esta publicada.
+    Si un pedido acabara apuntando a una asi, lo que NO se puede hacer es
+    deducir un plazo y negar la reclamacion con el: se deja abrir el caso, que
+    es la decision que no inventa nada.
+    """
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await primera_linea(sesiones, orden_id)
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        vieja = await db.get(ProductPolicy, orden.policy_id)
+        borrador = ProductPolicy(
+            country_code=vieja.country_code,
+            seller_entity=vieja.seller_entity,
+            version=vieja.version + 1,
+            currency=vieja.currency,
+            terms=vieja.terms,
+            terms_sha256=vieja.terms_sha256,
+            incident_report_hours=None,
+            status="draft",
+        )
+        db.add(borrador)
+        await db.flush()
+        orden.policy_id = borrador.id
+        await db.commit()
+
+    async with sesiones() as db:
+        envio = await db.get(ProductShipment, orden_id)
+        muy_tarde = envio.delivered_at + timedelta(days=3650)
+    async with sesiones() as db:
+        caso = await incidencias.abrir(
+            db,
+            orden_id=orden_id,
+            usuario_id=comprador,
+            motivo=maquina.DANADO,
+            descripcion=DESCRIPCION,
+            order_item_id=linea,
+            momento=muy_tarde,
+        )
+        await db.commit()
+        assert caso.status == maquina.ABIERTA

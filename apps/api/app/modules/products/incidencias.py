@@ -73,6 +73,7 @@ from app.modules.products.models import (
     ProductIncidentEvidence,
     ProductOrder,
     ProductOrderItem,
+    ProductPolicy,
     ProductSeller,
     ProductShipment,
 )
@@ -154,6 +155,23 @@ class ApelacionAgotada(ConflictError):
 
 class ResolucionInvalida(ValidationAppError):
     code = "product_incident_resolution_invalid"
+
+
+class PlazoParaReclamarVencido(ConflictError):
+    """Pasó el plazo que la política del pedido concede para reclamar.
+
+    ESTE PLAZO NO SE LO INVENTA NADIE: es `incident_report_hours` de la política
+    publicada que quien compró aceptó, congelada en el pedido por su `policy_id`
+    y su versión. El CHECK de la 0077 no deja publicar una política sin él, así
+    que un pedido real siempre lo tiene.
+
+    Y NO ES LO MISMO QUE NO TENER POLÍTICA. Si por lo que sea el pedido apunta a
+    una fila sin horas —una base a medio sembrar—, no se cierra la puerta: se
+    deja abrir el caso, porque negar el derecho a reclamar por un dato que falta
+    sería inventarse el plazo al revés.
+    """
+
+    code = "product_incident_report_window_closed"
 
 
 # --------------------------------------------------------------------------- #
@@ -480,6 +498,40 @@ async def _entregado(db: AsyncSession, *, orden: ProductOrder) -> ProductShipmen
     return envio
 
 
+def desde_cuando_corre(envio: ProductShipment) -> datetime | None:
+    """Desde cuándo se cuenta el plazo para reclamar.
+
+    DESDE QUE LLEGÓ, o desde que se supo que no iba a llegar. Son los dos únicos
+    momentos en los que quien compró puede saber que tiene algo que reclamar, y
+    antes de cualquiera de ellos no habría empezado a correr nada.
+    """
+    return envio.delivered_at or envio.failed_at
+
+
+async def _dentro_del_plazo(
+    db: AsyncSession, *, orden: ProductOrder, envio: ProductShipment, momento: datetime
+) -> None:
+    """Exige que no haya pasado el plazo de la política congelada en el pedido.
+
+    SE LEE LA POLÍTICA DEL PEDIDO, no la vigente hoy. Quien compró aceptó unas
+    condiciones concretas; cambiarlas después a su espalda —acortando el plazo
+    de una política nueva— le quitaría un derecho que ya tenía.
+    """
+    politica = await db.get(ProductPolicy, orden.policy_id)
+    horas = politica.incident_report_hours if politica is not None else None
+    if horas is None:
+        return
+    arranque = desde_cuando_corre(envio)
+    if arranque is None:
+        return
+    limite = arranque + timedelta(hours=int(horas))
+    if momento > limite:
+        raise PlazoParaReclamarVencido(
+            "El plazo para reclamar este pedido ya terminó.",
+            details={"hours": int(horas), "closed_at": limite.isoformat()},
+        )
+
+
 async def abrir(
     db: AsyncSession,
     *,
@@ -516,7 +568,8 @@ async def abrir(
         raise NoHayNadaQueReclamar(
             "Ese pedido no está pagado.", details={"order_status": orden.status}
         )
-    await _entregado(db, orden=orden)
+    envio = await _entregado(db, orden=orden)
+    await _dentro_del_plazo(db, orden=orden, envio=envio, momento=momento)
 
     limpia = (descripcion or "").strip()
     if not (

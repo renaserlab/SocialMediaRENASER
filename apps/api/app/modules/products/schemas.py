@@ -875,6 +875,16 @@ class PedidoRead(BaseModel):
     #: cancelado no tiene envio, y contestar «pendiente de preparacion» ahi
     #: haria creer que va a salir algo.
     shipment: EnvioRead | None = None
+    #: LOS CASOS DE ESTE PEDIDO, por lo mismo que el seguimiento: quien abrio
+    #: una reclamacion tiene que verla donde esta el pedido del que habla, y no
+    #: a base de buscarla en otra lista.
+    #:
+    #: SOLO EL RESUMEN. La descripcion y el historial se leen entrando al caso,
+    #: que es donde el servidor vuelve a comprobar quien puede.
+    #:
+    #: VACIA MIENTRAS LA 0080 NO ESTE APLICADA, y no 503: un pedido no puede
+    #: dejar de pintarse porque falte una migracion de posventa.
+    incidents: list["IncidenciaResumen"] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -1105,6 +1115,14 @@ class IncidenciaResumen(BaseModel):
     seller_response_due_at: datetime | None = None
     resolution: str | None = None
     created_at: datetime
+
+
+#: `PedidoRead` la nombra entre comillas porque esta definido mas arriba —el
+#: pedido es del Incremento 5 y la incidencia del 7—, y aqui es donde esa
+#: referencia adelantada se cierra. Explicito y no por casualidad: dejarselo a
+#: la reconstruccion perezosa haria que el fallo saliera en la primera peticion
+#: de un pedido y no al importar el modulo.
+PedidoRead.model_rebuild()
 
 
 class AbrirIncidencia(BaseModel):
