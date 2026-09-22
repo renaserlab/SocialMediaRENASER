@@ -3647,10 +3647,13 @@ async def moderar_resena(
     await auditoria.anotar(
         db,
         actor_id=current_user.id,
-        #: QUIEN FUE, Y DE DONDE VENIA. Sin el rol, el rastro decia que lo
-        #: escondio «el sistema»; sin el estado anterior no se podia leer el
-        #: salto. Lo senalo la revision independiente.
-        actor_role=ACTOR_ADMINISTRACION,
+        #: QUIEN FUE, CON QUE ROL Y DE DONDE VENIA. Sin el rol, el rastro
+        #: decia que lo escondio «el sistema»; sin el estado anterior no se
+        #: podia leer el salto. Y el rol se LEE, no se supone: moderar lo puede
+        #: hacer is_admin, que incluye moderacion, y escribir «admin» a
+        #: secas seria una mentira pequena en el unico sitio que existe para
+        #: no mentir. Lo senalo la revision independiente.
+        actor_role=await permisos.get_role(db, current_user.id),
         action="product_review.moderate",
         entity_type="product_review",
         entity_id=resena.id,
@@ -3690,7 +3693,7 @@ async def moderar_respuesta_de_resena(
     await auditoria.anotar(
         db,
         actor_id=current_user.id,
-        actor_role=ACTOR_ADMINISTRACION,
+        actor_role=await permisos.get_role(db, current_user.id),
         action="product_review_reply.moderate",
         entity_type="product_review_reply",
         entity_id=respuesta.id,
