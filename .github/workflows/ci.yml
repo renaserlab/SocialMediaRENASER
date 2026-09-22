@@ -82,7 +82,12 @@ jobs:
       # se comprueba. Lo que si importa es que estas pruebas NO se omitan;
       # `--strict-markers` no lo garantiza, asi que la linea siguiente lo
       # comprueba de verdad: si alguna se salta, el job falla.
-      - run: pytest -v tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py tests/test_migraciones_de_aprendizaje.py tests/test_migraciones_de_eventos.py tests/test_aforo_concurrente_postgres.py tests/test_entradas_concurrentes_postgres.py --junitxml=migraciones.xml
+      # LAS DE PRODUCTOS TAMBIEN, y por eso estan aqui y no arriba: la
+      # verificacion de la compra del Incremento 8 y el dinero del
+      # Incremento 9 viven en claves ajenas compuestas, indices unicos
+      # parciales y disparadores, que SQLite no impone. En el trabajo
+      # principal se saltaban 92 de 100 y la integracion seguia verde.
+      - run: pytest -v tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py tests/test_migraciones_de_aprendizaje.py tests/test_migraciones_de_eventos.py tests/test_aforo_concurrente_postgres.py tests/test_entradas_concurrentes_postgres.py tests/test_productos_resenas.py tests/test_productos_resenas_http.py tests/test_productos_finanzas.py --junitxml=migraciones.xml
       # Una prueba OMITIDA no es una prueba aprobada. Sin esto, borrar la
       # variable de entorno dejaria el job en verde sin ejecutar nada.
       - name: Ninguna prueba de PostgreSQL puede quedar omitida
@@ -95,6 +100,6 @@ jobs:
           print(f'{total} pruebas, {saltadas} omitidas')
           if saltadas:
               sys.exit('hay pruebas de PostgreSQL omitidas: omitida no es aprobada')
-          if total < 100:
+          if total < 266:
               sys.exit(f'solo se ejecutaron {total}: falta alguna suite')
           PY
