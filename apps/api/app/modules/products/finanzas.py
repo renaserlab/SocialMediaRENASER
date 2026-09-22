@@ -481,8 +481,18 @@ async def liberar_vencidos(
     )
 
     cuenta = {"mirados": 0, "liberados": 0, "bloqueados": 0}
-    for saldo in candidatos:
+    for candidato in candidatos:
         cuenta["mirados"] += 1
+        #: CON CERROJO DE FILA, Y RELEYENDO EL ESTADO. Entre la comprobación y
+        #: la escritura cabía una confirmación de devolución que cancelara el
+        #: saldo: `_confirmar` sí lo lee con cerrojo, pero esto no lo pedía, así
+        #: que el cerrojo del otro lado no protegía nada y se pisaba un
+        #: `cancelled` con `eligible`. Dinero ya devuelto al comprador quedaba
+        #: marcado como cobrable y contaba en el panel.
+        saldo = await db.get(OwnerSaleBalance, candidato.id, with_for_update=True)
+        if saldo is None or saldo.status != PENDIENTE:
+            cuenta["bloqueados"] += 1
+            continue
         bloqueo = await por_que_no_se_libera(db, saldo=saldo, momento=momento)
         if bloqueo is not None:
             cuenta["bloqueados"] += 1
@@ -533,11 +543,19 @@ async def reservar(
         created_by=creado_por,
         created_at=momento,
     )
+    #: PUNTO DE GUARDADO, NO `rollback` DE TODA LA SESIÓN. Quien más llama a
+    #: esto es `devoluciones.aprobar`, que para cuando llega aquí YA escribió
+    #: la devolución y su fila de historial: deshacer la transacción entera se
+    #: las llevaba por delante, y como el choque se traga a propósito —«ya
+    #: estaba apartado, que es lo que se quería»— nadie se enteraba. Quedaba
+    #: una anotación de auditoría afirmando una devolución que no existe.
+    #: Es el mismo error que `registrar_venta` ya evitaba, y aquí costaba más.
+    punto = await db.begin_nested()
     db.add(reserva)
     try:
         await db.flush()
     except IntegrityError:
-        await db.rollback()
+        await punto.rollback()
         raise AppError(
             "Ya hay una reserva viva por ese motivo en este saldo.",
             code="product_reserve_already_held",

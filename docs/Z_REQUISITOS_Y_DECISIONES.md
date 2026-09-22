@@ -1916,3 +1916,57 @@ Ninguna se ha inventado, y ninguna bloquea el resto del Incremento 9:
 | Frecuencia de transferencias y mínimo | igual |
 | Saldos negativos | `negative_balance` bloquea, y no se compensa solo |
 | Si el alta de Connect se abre desde la aplicación | la pantalla explica que hoy no |
+
+
+**D178 · El tope de una devolución lo sostiene un cerrojo, NO un CHECK.**
+
+La cabecera de la 0082 decía que un CHECK impedía pasar del bruto. **No
+existía**, y afirmarlo era peor que no tenerlo: quien lea la migración creería
+que la base lo protege y no añadiría el cerrojo que falta.
+
+Acotar `sum(amount_minor)` contra el total del pedido exige un disparador de
+restricción o una columna materializada, y eso es una decisión de esquema que no
+estaba tomada. Lo que hay hoy es un **cerrojo de fila sobre el pedido** en
+`aprobar`, que serializa las aprobaciones concurrentes, y la cabecera lo dice
+así. Queda anotado como pendiente si alguna vez se quiere en la base.
+
+**D179 · Tres partes del ciclo de devolución no tienen camino de ejecución, y
+se dicen.**
+
+Ninguna devolución parcial llega a la pasarela; los avisos asíncronos de
+reembolso no se encaminan a `devoluciones.atender_aviso`; y nadie inserta nunca
+una disputa. Las tres son **condiciones para encender los pagos**, no defectos
+que se arreglen hoy: la primera exige escribir `create_partial_refund` contra
+Stripe, la segunda decidir el encaminamiento del webhook compartido, y la
+tercera decidir si Z ingiere contracargos.
+
+Mientras tanto **no se disimulan**: están en esta documentación, en el informe y
+marcadas en la batería de mutaciones, y ninguna prueba finge cubrirlas.
+
+**D180 · Quien compró no lee el motivo interno de una decisión.**
+
+`decision_reason` es el texto libre que teclea administración para justificarse,
+y puede llevar dentro lo que se pensó de quien reclama. Tampoco es suyo el
+identificador del saldo del proveedor, ni el proveedor de pago, ni el código con
+el que falló la pasarela. La ruta de quien compra devuelve una proyección con lo
+que sí es suyo: cuánto, en qué moneda, en qué estado y cuándo se confirmó.
+
+**D181 · La fecha de liberación se contesta aunque la columna esté nula.**
+
+`available_at` se escribe nula al registrar la venta —sin entrega no hay reloj—
+y después **no la actualiza nadie**. Pero con la protección en curso el servidor
+sí sabe la fecha: la calcula y la manda en el detalle del bloqueo. Sin usarla, la
+pantalla escribía «todavía no se sabe» sobre un pedido entregado cuya ventana se
+puede datar al segundo, que es la misma clase de mentira que un `0,00`.
+
+**D182 · 92 de 100 pruebas de Productos se saltaban en la integración continua.**
+
+El trabajo principal no define `MIGRACIONES_DATABASE_URL` **a propósito**, y el
+trabajo `migraciones` —que sí tiene PostgreSQL y un guardia que falla si algo se
+omite— llevaba una lista explícita de seis ficheros. Los de los Incrementos 8 y
+9 no estaban en ella, así que la verificación de compra y todo el dinero corrían
+en el trabajo equivocado y se omitían en silencio.
+
+Ahora están los tres dentro, y el suelo del guardia se subió de 100 a **266,
+medido ejecutándolo**, no supuesto. Una prueba omitida no es una prueba
+aprobada, y el propio fichero ya lo decía.

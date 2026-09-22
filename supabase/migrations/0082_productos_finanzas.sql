@@ -235,7 +235,9 @@ $$;
 -- EL IMPORTE NO SE CALCULA: LO ESCRIBE UNA PERSONA. Cuanto se devuelve en cada
 -- una de las cinco salidas es una decision que la empresa no ha tomado, asi que
 -- no hay ninguna formula: lo teclea quien tiene permiso financiero, queda con
--- su nombre y su fecha, y un CHECK impide que pase del bruto de la venta.
+-- su nombre y su fecha, y el tope lo sostiene el SERVICIO, con cerrojo de fila sobre el pedido
+--     (no hay CHECK que lo imponga: acotar una suma exigiria un disparador
+--     de restriccion, y eso esta por decidir).
 -- ------------------------------------------------------------------------- --
 create table if not exists public.product_refunds (
   id uuid primary key default gen_random_uuid(),

@@ -34,6 +34,8 @@ import uuid
 from datetime import timedelta
 
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -50,8 +52,13 @@ from app.modules.products.finanzas_models import (
     DEVOLUCION_PEDIDA,
     ProductDispute,
     ProductRefund,
+    ProductRefundEvent,
 )
-from app.modules.products.models import ProductOrder, ProductShipment
+from app.modules.products.models import (
+    ProductOrder,
+    ProductPolicy,
+    ProductShipment,
+)
 from tests.test_productos_dominio import (  # noqa: F401
     SIN_POSTGRES,
     URL,
@@ -279,8 +286,24 @@ async def test_la_base_rechaza_un_saldo_con_dos_origenes(
     ramas o admitiera una fila sin origen, el dinero no sabria de que venta es.
     """
     _, orden_id, proveedor, saldo_id = await con_saldo(sesiones, monkeypatch)
+
+    async def rechaza_por_el_origen(sql: str, datos: dict) -> None:
+        """Y QUE LO RECHACE LA REGLA QUE IMPORTA, no otra cualquiera.
+
+        Pedir solo «un error de integridad» no vale: la fila lleva un `event_id`
+        inventado y la clave ajena de eventos levanta antes. Con eso, relajar el
+        CHECK del origen a una sola rama dejaba esta prueba en verde.
+        """
+        async with sesiones() as db:
+            with pytest.raises((IntegrityError, DBAPIError)) as fallo:
+                await db.execute(text(sql), datos)
+            assert "owner_sale_balances_un_origen" in str(
+                getattr(fallo.value, "orig", fallo.value)
+            ), "lo rechazo otra restriccion, no la del origen"
+            await db.rollback()
+
     async with sesiones() as db:
-        with pytest.raises((IntegrityError, DBAPIError)):
+        with pytest.raises((IntegrityError, DBAPIError)) as fallo:
             await db.execute(
                 text(
                     "insert into owner_sale_balances"
@@ -292,21 +315,55 @@ async def test_la_base_rechaza_un_saldo_con_dos_origenes(
                 ),
                 {"o": orden_id, "p": proveedor},
             )
+        #: AQUI NO SE EXIGE EL NOMBRE: con un `event_id` inventado puede
+        #: contestar antes la clave ajena de eventos, y las dos respuestas son
+        #: correctas. La combinacion que SI distingue el CHECK es la de abajo.
         await db.rollback()
 
+    #: PRODUCTO Y CURSO A LA VEZ, los dos existentes de verdad. Aqui no hay
+    #: ninguna clave ajena que pueda contestar por el CHECK, asi que si el
+    #: CHECK se relaja esta fila entra y la prueba se pone roja.
+    autor = await persona(sesiones, "fin-origen-autor")
     async with sesiones() as db:
-        with pytest.raises((IntegrityError, DBAPIError)):
-            await db.execute(
-                text(
-                    "insert into owner_sale_balances"
-                    " (id, owner_id, gross_amount_minor, platform_fee_minor,"
-                    "  net_amount_minor, currency, fee_rules_version, status)"
-                    " values (gen_random_uuid(), :p, 100, 10, 90, 'PEN',"
-                    "         'v1', 'pending')"
-                ),
-                {"p": proveedor},
-            )
-        await db.rollback()
+        curso = str(uuid.uuid4())
+        producto_de_curso = str(uuid.uuid4())
+        pedido_de_curso = str(uuid.uuid4())
+        await db.execute(
+            text("insert into courses (id, author_id, title) values (:i, :a, :t)"),
+            {"i": curso, "a": autor, "t": "Otro curso cualquiera"},
+        )
+        await db.execute(
+            text("insert into commerce_products (id, course_id) values (:i, :c)"),
+            {"i": producto_de_curso, "c": curso},
+        )
+        await db.execute(
+            text(
+                "insert into orders (id, user_id, commerce_product_id, provider,"
+                " channel) values (:i, :u, :p, 'stripe', 'web')"
+            ),
+            {"i": pedido_de_curso, "u": autor, "p": producto_de_curso},
+        )
+        await db.commit()
+
+    await rechaza_por_el_origen(
+        "insert into owner_sale_balances"
+        " (id, product_order_id, course_id, order_id, owner_id,"
+        "  gross_amount_minor, platform_fee_minor, net_amount_minor,"
+        "  currency, fee_rules_version, status)"
+        " values (gen_random_uuid(), :o, :c, :oc, :p,"
+        "         100, 10, 90, 'PEN', 'v1', 'pending')",
+        {"o": orden_id, "c": curso, "oc": pedido_de_curso, "p": proveedor},
+    )
+
+    #: Y SIN NINGUN ORIGEN, que tampoco puede contestar otra cosa.
+    await rechaza_por_el_origen(
+        "insert into owner_sale_balances"
+        " (id, owner_id, gross_amount_minor, platform_fee_minor,"
+        "  net_amount_minor, currency, fee_rules_version, status)"
+        " values (gen_random_uuid(), :p, 100, 10, 90, 'PEN',"
+        "         'v1', 'pending')",
+        {"p": proveedor},
+    )
 
 
 # =========================================================================== #
@@ -329,8 +386,6 @@ async def test_el_plazo_sale_de_la_politica_que_se_acepto(
         envio = await db.get(ProductShipment, orden_id)
         horas = await finanzas.horas_de_proteccion(db, orden=orden)
         cuando = await finanzas.cuando_se_puede_liberar(db, orden=orden, envio=envio)
-
-    from app.modules.products.models import ProductPolicy
 
     async with sesiones() as db:
         politica = await db.get(ProductPolicy, orden.policy_id)
@@ -1292,3 +1347,728 @@ def test_ninguna_ruta_ejecuta_una_transferencia() -> None:
         "OwnerTransfer(",
     ):
         assert prohibido not in codigo, f"el router de Productos usa {prohibido}"
+
+
+# =========================================================================== #
+# 12. LO QUE LA BATERIA DE MUTACIONES DEJO AL DESCUBIERTO
+#
+# Dieciseis mutaciones escapaban: retirabas la proteccion y ninguna prueba se
+# ponia roja. No es que el codigo estuviera mal —casi todas describen un fallo
+# que el codigo NO tiene—, es que nadie lo estaba comprobando, y una proteccion
+# que nadie comprueba se puede borrar en el proximo cambio sin que nada avise.
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_politica_sin_plazo_no_supone_el_72_del_blueprint(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """El blueprint escribe 72 en el §9. La orden manda, y dice que no se sabe.
+
+    Suponer el 72 le acortaria la proteccion a quien compro con una politica
+    que no fija plazo, y se la acortaria en silencio.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        politica = await db.get(ProductPolicy, orden.policy_id)
+        #: SE RETIRA ANTES. Una politica PUBLICADA no puede quedarse sin plazo:
+        #: lo impide `product_policies_publicada_esta_completa` de la 0077, y
+        #: esa es exactamente la proteccion que hace falta ahi. El pedido, sin
+        #: embargo, sigue apuntando a la suya: es la que se congelo al comprar.
+        politica.status = "retired"
+        politica.incident_report_hours = None
+        await db.commit()
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        assert await finanzas.horas_de_proteccion(db, orden=orden) is None
+        envio = await db.get(ProductShipment, orden_id)
+        assert await finanzas.cuando_se_puede_liberar(
+            db, orden=orden, envio=envio
+        ) is None
+        saldo = await finanzas.saldo_del_pedido(db, orden_id=orden_id)
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+        assert bloqueo is not None
+        assert bloqueo.motivo == finanzas.SIN_POLITICA_DE_PROTECCION
+
+    # Y UN CERO TAMPOCO ES UN PLAZO: cero horas de proteccion seria ninguna.
+    # NO SE ESCRIBE, porque `product_policies_incidencia` de la 0077 solo admite
+    # entre 1 y 8760 horas. La rama del servicio sigue existiendo, y esta es la
+    # forma honesta de ejecutarla: la base ya impide que se llegue ahi.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        politica = await db.get(ProductPolicy, orden.policy_id)
+        politica.incident_report_hours = 0
+        with db.no_autoflush:
+            assert await finanzas.horas_de_proteccion(db, orden=orden) is None
+        await db.rollback()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_sin_politica_en_el_pedido_no_se_lee_la_de_hoy(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """Un pedido cuya politica no se encuentra NO hereda la vigente.
+
+    La politica se congela al comprar. Leer la de hoy le aplicaria a una compra
+    vieja unas condiciones que su comprador no acepto.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        #: NO SE ESCRIBE, y no se puede: `product_orders_policy_id_fkey` lo
+        #: impide, que es otra proteccion que conviene que siga ahi. Lo que se
+        #: prueba es la rama de «la politica no aparece», que es lo que pasa si
+        #: alguien la borra entre que se lee el pedido y se lee su politica.
+        orden.policy_id = str(uuid.uuid4())
+        with db.no_autoflush:
+            assert await finanzas.horas_de_proteccion(db, orden=orden) is None
+        await db.rollback()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_sin_entrega_el_reloj_no_empieza(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """Y se comprueba sobre `cuando_se_puede_liberar`, no solo sobre el bloqueo.
+
+    El bloqueo contesta «sin entrega» un paso antes, asi que el reloj en si
+    nunca se estaba ejecutando en esa rama.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    async with sesiones() as db:
+        envio = await db.get(ProductShipment, orden_id)
+        envio.delivered_at = None
+        envio.conformity_at = None
+        envio.status = "DISPATCHED"
+        await db.commit()
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        envio = await db.get(ProductShipment, orden_id)
+        assert await finanzas.cuando_se_puede_liberar(
+            db, orden=orden, envio=envio
+        ) is None
+        # Y SIN ENVIO NINGUNO, tampoco.
+        assert await finanzas.cuando_se_puede_liberar(
+            db, orden=orden, envio=None
+        ) is None
+        saldo = await finanzas.saldo_del_pedido(db, orden_id=orden_id)
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+        assert bloqueo.motivo == finanzas.SIN_ENTREGA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_confirmar_que_llego_NO_es_dar_la_conformidad(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """Las dos columnas existen porque son dos afirmaciones distintas.
+
+    `buyer_confirmed_at` es «me llego» y viene del Incremento 6. Deducir de ahi
+    la conformidad le quitaria el plazo de proteccion a quien solo acuso recibo,
+    que es justo lo contrario de lo que esa accion significaba.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    async with sesiones() as db:
+        envio = await db.get(ProductShipment, orden_id)
+        envio.conformity_at = None
+        if "buyer_confirmed_at" in ProductShipment.__table__.c:
+            envio.buyer_confirmed_at = envio.delivered_at
+        await db.commit()
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        envio = await db.get(ProductShipment, orden_id)
+        cuando = await finanzas.cuando_se_puede_liberar(db, orden=orden, envio=envio)
+        horas = await finanzas.horas_de_proteccion(db, orden=orden)
+        # LA ENTREGA MAS EL PLAZO, no el instante de la entrega.
+        assert cuando is not None
+        assert horas is not None
+        assert cuando > envio.delivered_at.replace(tzinfo=cuando.tzinfo)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_barrido_no_toca_lo_que_ya_se_movio_ni_lo_ajeno(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """Dos filtros, y los dos importan.
+
+    `status == pending` es lo que lo hace idempotente: sin el, cada pasada
+    volveria a mirar —y a reescribir— saldos ya transferidos. Y
+    `product_order_id is not null` es lo que lo mantiene en su dominio: los
+    saldos de Cursos y de Eventos tienen sus propias reglas y su propio camino.
+    """
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+
+    async def mirados() -> int:
+        async with sesiones() as db:
+            cuenta = await finanzas.liberar_vencidos(db)
+            await db.commit()
+        return cuenta["mirados"]
+
+    #: PUNTO FIJO PRIMERO. El barrido es idempotente, asi que la segunda pasada
+    #: ya no mueve nada y a partir de ahi el recuento es estable aunque la base
+    #: compartida traiga saldos de otras pruebas.
+    await mirados()
+    base = await mirados()
+    assert base >= 1, "el saldo de esta prueba tiene que estar en la cola"
+
+    #: UN SALDO DE CURSO DE VERDAD, en la misma tabla compartida desde la 0068.
+    #: Hacen falta sus cuatro filas porque `course_id` y `order_id` son claves
+    #: ajenas desde la 0049: con uuids inventados la prueba no llegaria a
+    #: escribirse, y sin un saldo ajeno de verdad no distinguiria «el barrido
+    #: filtra por dominio» de «no habia nada mas que mirar».
+    autor = await persona(sesiones, "fin-curso-autor")
+    ajeno = str(uuid.uuid4())
+    async with sesiones() as db:
+        curso = str(uuid.uuid4())
+        producto = str(uuid.uuid4())
+        pedido_de_curso = str(uuid.uuid4())
+        await db.execute(
+            text("insert into courses (id, author_id, title) values (:i, :a, :t)"),
+            {"i": curso, "a": autor, "t": "Un curso cualquiera"},
+        )
+        await db.execute(
+            text(
+                "insert into commerce_products (id, course_id) values (:i, :c)"
+            ),
+            {"i": producto, "c": curso},
+        )
+        await db.execute(
+            text(
+                "insert into orders (id, user_id, commerce_product_id, provider,"
+                " channel) values (:i, :u, :p, 'stripe', 'web')"
+            ),
+            {"i": pedido_de_curso, "u": autor, "p": producto},
+        )
+        db.add(
+            OwnerSaleBalance(
+                id=ajeno,
+                course_id=curso,
+                order_id=pedido_de_curso,
+                owner_id=autor,
+                gross_amount_minor=10_000,
+                platform_fee_minor=1_000,
+                provider_fee_minor=0,
+                net_amount_minor=9_000,
+                currency="PEN",
+                fee_rules_version="v1",
+                status=finanzas.PENDIENTE,
+            )
+        )
+        await db.commit()
+
+    #: EL AJENO NO SUBE EL RECUENTO. Es el filtro de dominio.
+    assert await mirados() == base, "el barrido esta mirando saldos de Cursos"
+
+    #: Y EL NUESTRO, YA MOVIDO, LO BAJA EN UNO. Es el filtro de estado.
+    async with sesiones() as db:
+        (await db.get(OwnerSaleBalance, saldo_id)).status = finanzas.TRANSFERIDO
+        await db.commit()
+    assert await mirados() == base - 1, "el barrido vuelve a mirar lo ya movido"
+
+    #: MEDIR LA DIFERENCIA Y NO EL TOTAL ES LO QUE HACE ESTO HONESTO. Mirar solo
+    #: el estado final no distinguiria nada: los dos saldos entrarian como
+    #: candidatos y saldrian bloqueados igual, porque el bucle relee con cerrojo
+    #: y `por_que_no_se_libera` los para. Los dos filtros podrian borrarse
+    #: enteros sin que ninguna asercion se pusiera roja, y cada pasada pasaria a
+    #: arrastrar la tabla compartida entera pidiendo un cerrojo por fila.
+    async with sesiones() as db:
+        assert (await db.get(OwnerSaleBalance, saldo_id)).status == finanzas.TRANSFERIDO
+        assert (await db.get(OwnerSaleBalance, ajeno)).status == finanzas.PENDIENTE
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_cada_bloqueo_se_contesta_sobre_su_propia_causa(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """Cinco bloqueos, cada uno provocado a proposito y comprobado solo.
+
+    Estaban todos escritos y ninguno probado: `por_que_no_se_libera` contesta
+    el PRIMERO que aplica, asi que una prueba que solo mire el caso feliz no
+    distingue entre «esta comprobacion existe» y «esta comprobacion sobra».
+    """
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+
+    async def bloqueo_ahora():
+        async with sesiones() as db:
+            saldo = await db.get(OwnerSaleBalance, saldo_id)
+            return await finanzas.por_que_no_se_libera(db, saldo=saldo)
+
+    # 1. UN SALDO YA CANCELADO no es un saldo en cola.
+    async with sesiones() as db:
+        (await db.get(OwnerSaleBalance, saldo_id)).status = finanzas.CANCELADO
+        await db.commit()
+    assert (await bloqueo_ahora()).motivo == finanzas.SALDO_NO_PENDIENTE
+
+    # 2. UN NETO NEGATIVO NO PUEDE EXISTIR, y quien lo impide es la base.
+    #
+    #    `owner_sale_balances_importes` de la 0049 exige `net_amount_minor >= 0`
+    #    y `owner_sale_balances_cuadra` exige que cuadre, asi que la rama
+    #    `negative_balance` del servicio es INALCANZABLE hoy. Se deja puesta
+    #    —el dia que la empresa decida que hacer con un saldo negativo hara
+    #    falta—, pero lo que protege de verdad es la restriccion, y es la
+    #    restriccion lo que se comprueba: escribirlo y esperar el rechazo.
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        saldo.status = finanzas.PENDIENTE
+        bruto, comision = saldo.gross_amount_minor, saldo.platform_fee_minor
+        saldo.provider_fee_minor = bruto - comision + 500
+        saldo.net_amount_minor = -500
+        with pytest.raises(IntegrityError):
+            await db.commit()
+        await db.rollback()
+
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        assert saldo.net_amount_minor >= 0
+        saldo.status = finanzas.PENDIENTE
+        await db.commit()
+
+    # 3. UN PEDIDO QUE NO ESTA PAGADO no tiene nada que liberar.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        estaba = orden.status
+        orden.status = "CANCELLED"
+        #: CON SU FECHA: `product_orders_cancelada_con_fecha` de la 0078 no
+        #: admite una cancelacion que no diga cuando fue.
+        orden.cancelled_at = finanzas.ahora()
+        await db.commit()
+    assert (await bloqueo_ahora()).motivo == finanzas.PEDIDO_NO_PAGADO
+
+    # 4. UN ENVIO QUE EXISTE PERO NO HA LLEGADO. Es distinto de no tener envio:
+    #    el `if` mira las dos cosas y solo una estaba cubierta.
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        orden.status = estaba
+        orden.cancelled_at = None
+        envio = await db.get(ProductShipment, orden_id)
+        entrega = envio.delivered_at
+        envio.conformity_at = None
+        envio.delivered_at = None
+        envio.status = "DISPATCHED"
+        await db.commit()
+    assert (await bloqueo_ahora()).motivo == finanzas.SIN_ENTREGA
+
+    # 5. UNA DEVOLUCION VIVA retiene, aunque todo lo demas este en orden.
+    #    LA ENTREGA SE ATRASA TREINTA DIAS para que el plazo de proteccion este
+    #    vencido: el reloj se comprueba ANTES que las reservas, asi que sin esto
+    #    la prueba pasaria por el motivo equivocado y no probaria nada.
+    async with sesiones() as db:
+        envio = await db.get(ProductShipment, orden_id)
+        envio.delivered_at = entrega - timedelta(days=30)
+        envio.status = "DELIVERED"
+        await db.commit()
+
+    #: Y LA CUENTA DE COBRO, que se comprueba antes que las reservas. Sin ella
+    #: el bloqueo seria `payout_account_missing` y no se llegaria a mirar la
+    #: devolucion: recorrer el orden entero es lo que demuestra que el orden
+    #: esta ahi.
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        dueno = saldo.owner_id
+    saldo.payout_account_id = await cuenta_de_cobro(sesiones, dueno)
+    async with sesiones() as db:
+        fila = await db.get(OwnerSaleBalance, saldo_id)
+        fila.payout_account_id = saldo.payout_account_id
+        await db.commit()
+    assert (await bloqueo_ahora()) is None, "con todo en orden no deberia bloquear"
+
+    async with sesiones() as db:
+        await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=100,
+            motivo="Una parte, y sigue viva.",
+            actor_id=await persona(sesiones, "fin-bloq", rol="admin"),
+        )
+        await db.commit()
+    #: PRIMERO LA RESERVA, que es la que se comprueba antes.
+    assert (await bloqueo_ahora()).motivo == finanzas.RESERVA_VIVA
+
+    #: Y AHORA SE SUELTA, PARA VER LA DEVOLUCION SOLA.
+    #:
+    #: Con las dos puestas, el bloqueo de devolucion se podria borrar entero y
+    #: nada se pondria rojo: la reserva contestaria por el. Son dos protecciones
+    #: distintas —una aparta dinero, la otra dice que hay un expediente vivo— y
+    #: cada una tiene que sostenerse sola.
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        for reserva in await finanzas.reservas_de(db, saldo_id=saldo.id, solo_vivas=True):
+            await finanzas.soltar_reserva(
+                db,
+                reserva=reserva,
+                consumida=False,
+                motivo="para mirar la devolucion sola",
+            )
+        await db.commit()
+
+    assert (await bloqueo_ahora()).motivo == finanzas.DEVOLUCION_VIVA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_no_se_aprueba_una_devolucion_de_cero_ni_de_un_pedido_sin_cobrar(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """Las dos puertas mas baratas de `aprobar`, y ninguna estaba probada."""
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-cero", rol="admin")
+
+    async with sesiones() as db:
+        with pytest.raises(devoluciones.DevolucionNoPermitida) as caso:
+            await devoluciones.aprobar(
+                db,
+                orden_id=orden_id,
+                importe_minor=0,
+                motivo="Cero.",
+                actor_id=admin,
+            )
+        assert caso.value.details["reason"] == "amount_invalid"
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        estaba, cobrado = orden.status, orden.paid_at
+        orden.status = "PENDING_PAYMENT"
+        orden.paid_at = None
+        await db.commit()
+
+    async with sesiones() as db:
+        with pytest.raises(devoluciones.DevolucionNoPermitida) as caso:
+            await devoluciones.aprobar(
+                db,
+                orden_id=orden_id,
+                importe_minor=100,
+                motivo="De algo que no se cobro.",
+                actor_id=admin,
+            )
+        assert caso.value.details["reason"] == "order_not_paid"
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        orden.status, orden.paid_at = estaba, cobrado
+        await db.commit()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_aprobar_una_segunda_devolucion_no_borra_la_primera(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """EL BLOQUEANTE R-1 DE LA REVISION, reproducido.
+
+    Con una retencion por devolucion ya viva, `reservar` choca contra el unico
+    parcial de la 0068. Hacia `db.rollback()`, y para entonces la segunda
+    devolucion y su fila de historial YA estaban escritas: la transaccion
+    entera se iba, el `except AppError` de `aprobar` lo registraba como «no es
+    un fallo» —porque el dinero ya estaba apartado, que es cierto— y la ruta
+    escribia despues su anotacion de auditoria diciendo que se habia aprobado
+    una devolucion que no existe.
+
+    Ahora es un punto de guardado: se deshace la reserva repetida y nada mas.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-dos", rol="admin")
+
+    async with sesiones() as db:
+        primera = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=100,
+            motivo="La primera, que deja la retencion viva.",
+            actor_id=admin,
+        )
+        primera_id = primera.id
+        await db.commit()
+
+    async with sesiones() as db:
+        segunda = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=150,
+            motivo="La segunda, con la retencion de la primera todavia puesta.",
+            actor_id=admin,
+        )
+        segunda_id = segunda.id
+        await db.commit()
+
+    #: LAS DOS EXISTEN. Antes del arreglo, la segunda no llegaba a la base.
+    async with sesiones() as db:
+        assert await db.get(ProductRefund, primera_id) is not None
+        assert await db.get(ProductRefund, segunda_id) is not None
+        cuantos = await db.scalar(
+            select(func.count())
+            .select_from(ProductRefund)
+            .where(ProductRefund.order_id == orden_id)
+        )
+        assert cuantos == 2
+        #: Y SU HISTORIAL TAMBIEN: era lo otro que se llevaba por delante.
+        historial = await db.scalar(
+            select(func.count())
+            .select_from(ProductRefundEvent)
+            .where(ProductRefundEvent.refund_id == segunda_id)
+        )
+        assert historial >= 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_ya_pedida_a_la_pasarela_no_se_anula(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """EL ALTO R-6, reproducido.
+
+    Anularla soltaba la retencion y sacaba el importe de `devuelto_de`, asi que
+    el saldo quedaba libre y se podia aprobar otra vez lo mismo. La pasarela,
+    mientras tanto, completaba el reembolso de la primera.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-anul", rol="admin")
+
+    async with sesiones() as db:
+        fila = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=200,
+            motivo="Se aprueba y se pide.",
+            actor_id=admin,
+        )
+        devolucion_id = fila.id
+        await db.commit()
+
+    for estado in (devoluciones.DEVOLUCION_PEDIDA, devoluciones.DEVOLUCION_EN_CURSO):
+        async with sesiones() as db:
+            fila = await db.get(ProductRefund, devolucion_id)
+            fila.status = estado
+            #: CON SU FECHA. `product_refunds_confirmada_se_pidio` de la 0082
+            #: no admite `processing` sin `requested_at`, y hace bien: una
+            #: devolucion en curso que nadie pidio no existe.
+            fila.requested_at = fila.requested_at or finanzas.ahora()
+            await db.commit()
+        async with sesiones() as db:
+            with pytest.raises(devoluciones.DevolucionNoPermitida) as caso:
+                await devoluciones.anular(
+                    db,
+                    devolucion_id=devolucion_id,
+                    motivo="Me arrepiento.",
+                    actor_id=admin,
+                )
+            assert caso.value.details["reason"] == "already_requested"
+
+    #: DESDE «APROBADA» SI SE ANULA: todavia no ha salido a ninguna parte.
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+        fila.status = devoluciones.DEVOLUCION_APROBADA
+        fila.requested_at = None
+        await db.commit()
+    async with sesiones() as db:
+        anulada = await devoluciones.anular(
+            db,
+            devolucion_id=devolucion_id,
+            motivo="Todavia no habia salido.",
+            actor_id=admin,
+        )
+        assert anulada.status == devoluciones.DEVOLUCION_ANULADA
+        await db.commit()
+
+
+# =========================================================================== #
+# 13. LO QUE ENCONTRO LA REVISION EN LAS RUTAS
+# =========================================================================== #
+@pytest.mark.asyncio
+async def test_todas_las_rutas_que_mueven_dinero_dejan_rastro() -> None:
+    """Y la que habla con la pasarela era justo la que no lo dejaba.
+
+    `pedir` es la UNICA del modulo que sale fuera de Z. Aprobar, anular,
+    liberar los vencidos y soltar una retencion anotaban las cuatro; esa no.
+    """
+    import re
+    from pathlib import Path
+
+    codigo = Path("app/modules/products/router.py").read_text(encoding="utf-8")
+    #: DE CADA FUNCION DE RUTA, SU CUERPO. Buscar la anotacion en todo el
+    #: fichero diria que si aunque estuviera en otra ruta cualquiera.
+    trozos = re.split(r"\n@(?:admin_)?router\.", codigo)
+    faltan = []
+    for trozo in trozos:
+        nombre = re.search(r"async def (\w+)", trozo)
+        if nombre is None:
+            continue
+        cual = nombre.group(1)
+        if cual not in (
+            "aprobar_devolucion",
+            "pedir_devolucion",
+            "anular_devolucion",
+            "liberar_los_vencidos",
+            "soltar_una_retencion",
+            "dar_la_conformidad",
+        ):
+            continue
+        if "auditoria.anotar" not in trozo:
+            faltan.append(cual)
+    assert faltan == [], f"sin rastro: {faltan}"
+
+    #: CONTROL POSITIVO: el centinela tiene que ver una ruta sin anotacion.
+    roto = re.split(r"\n@(?:admin_)?router\.", codigo.replace("auditoria.anotar", "x"))
+    assert any(
+        "async def pedir_devolucion" in t and "auditoria.anotar" not in t for t in roto
+    )
+
+
+@pytest.mark.asyncio
+async def test_quien_compro_no_lee_el_motivo_interno_de_la_decision() -> None:
+    """`decision_reason` lo teclea administracion, y puede hablar de la persona.
+
+    Tampoco es suyo el saldo del proveedor, ni el proveedor de pago, ni el
+    codigo con el que fallo la pasarela. Lo suyo es cuanto, en que moneda, en
+    que estado y cuando se confirmo.
+    """
+    from pathlib import Path
+
+    codigo = Path("app/modules/products/router.py").read_text(encoding="utf-8")
+    trozo = codigo[
+        codigo.index("async def devoluciones_de_mi_pedido") :
+    ]
+    trozo = trozo[: trozo.index("@router.post")]
+    assert "_devolucion_de_quien_compro" in trozo, "devuelve la fila entera"
+    assert "_devolucion(f)" not in trozo
+
+    #: Y LA PROYECCION VACIA LOS CUATRO CAMPOS.
+    proyeccion = codigo[
+        codigo.index("def _devolucion_de_quien_compro") : codigo.index(
+            "def _devolucion(fila)"
+        )
+    ]
+    for campo in ("decision_reason", "balance_id", "provider", "failure_code"):
+        assert campo in proyeccion, campo
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_fecha_de_liberacion_se_dice_cuando_se_sabe(
+    sesiones, monkeypatch, cuenta_lista
+) -> None:
+    """`available_at` esta SIEMPRE nula en la columna, y eso no es «no se sabe».
+
+    `registrar_venta` la escribe nula a proposito —sin entrega no hay reloj— y
+    despues no la actualiza nadie. Pero con la proteccion en curso el servidor
+    si sabe la fecha: la calcula y la manda en el detalle del bloqueo. Sin
+    usarla, la pantalla decia «todavia no se sabe» sobre un pedido entregado
+    cuya ventana se puede datar al segundo.
+    """
+    from app.modules.products.router import _cuando_se_libera, _saldo
+
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        bloqueo = await finanzas.por_que_no_se_libera(db, saldo=saldo)
+
+        #: LA COLUMNA, NULA. Es el estado real de todos los saldos de hoy.
+        assert saldo.available_at is None
+
+        #: PERO EL BLOQUEO TRAE LA FECHA, y la respuesta la usa.
+        assert bloqueo is not None
+        assert bloqueo.motivo == finanzas.PROTECCION_EN_CURSO
+        cuando = _cuando_se_libera(saldo, bloqueo)
+        assert cuando is not None
+        assert _saldo(saldo, bloqueo=bloqueo).available_at == cuando
+
+        #: Y CON OTRO BLOQUEO NO SE INVENTA NINGUNA.
+        otro = finanzas.Bloqueo(finanzas.SIN_ENTREGA)
+        assert _cuando_se_libera(saldo, otro) is None
+        assert _cuando_se_libera(saldo, None) is None
+
+
+# =========================================================================== #
+# 14. POR HTTP: QUIEN PUEDE PEDIR QUE
+#
+# Todo lo de arriba llama al servicio directamente, asi que las dependencias de
+# sesion —que es donde vive la comprobacion de quien eres— no se ejecutaban
+# nunca. Dos mutaciones de autorizacion escapaban por eso.
+# =========================================================================== #
+@pytest_asyncio.fixture()
+async def cliente_de_finanzas(sesiones):
+    """La aplicacion de verdad, con la sesion de la base de la prueba."""
+    from app.core.security import AuthUser, get_current_user
+    from app.main import create_app
+    from app.shared.database import get_db
+
+    app = create_app()
+    quien: dict[str, str] = {"uid": ""}
+
+    async def _db():
+        async with sesiones() as db:
+            yield db
+
+    async def _usuario() -> AuthUser:
+        return AuthUser(id=quien["uid"], email="x@y.test", role="authenticated")
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _usuario
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        yield http, quien
+    for dep in (get_db, get_current_user):
+        app.dependency_overrides.pop(dep, None)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_nadie_da_la_conformidad_de_un_pedido_ajeno(
+    sesiones, cliente_de_finanzas, monkeypatch, cuenta_lista
+) -> None:
+    """Y CONTESTA 404, no 403: decir «ese no es tuyo» confirmaria que existe.
+
+    Dar la conformidad de un pedido ajeno adelantaria el pago al proveedor y
+    cerraria el plazo de proteccion de otra persona. Es de las pocas acciones
+    del modulo que un extrano podria querer de verdad.
+    """
+    http, quien = cliente_de_finanzas
+    comprador, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    extrano = await persona(sesiones, "fin-http-extrano")
+
+    quien["uid"] = extrano
+    ajena = await http.post(f"/api/v1/products/orders/{orden_id}/conformity")
+    assert ajena.status_code == 404, ajena.text
+
+    #: Y NO LA HA DADO: el envio sigue sin conformidad.
+    async with sesiones() as db:
+        assert (await db.get(ProductShipment, orden_id)).conformity_at is None
+
+    #: QUIEN COMPRO SI PUEDE, y asi se sabe que el 404 era por ser ajeno y no
+    #: porque la ruta este rota.
+    quien["uid"] = comprador
+    suya = await http.post(f"/api/v1/products/orders/{orden_id}/conformity")
+    assert suya.status_code == 200, suya.text
+    async with sesiones() as db:
+        assert (await db.get(ProductShipment, orden_id)).conformity_at is not None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_saldo_solo_lo_ve_quien_vende(
+    sesiones, cliente_de_finanzas, monkeypatch, cuenta_lista
+) -> None:
+    """Quien no es proveedor activo no recibe un resumen vacio: recibe un no.
+
+    Un resumen vacio se leeria como «no has vendido nada», que para alguien que
+    no es proveedor es una respuesta con sentido y por eso peligrosa: la ruta
+    dejaria de distinguir entre las dos cosas.
+    """
+    http, quien = cliente_de_finanzas
+    comprador, _, proveedor, _ = await con_saldo(sesiones, monkeypatch)
+
+    quien["uid"] = comprador
+    ajeno = await http.get("/api/v1/products/seller/finance")
+    assert ajeno.status_code in (401, 403, 404), ajeno.text
+
+    quien["uid"] = proveedor
+    suyo = await http.get("/api/v1/products/seller/finance")
+    assert suyo.status_code == 200, suyo.text
+    assert "fee_configured" in suyo.json()

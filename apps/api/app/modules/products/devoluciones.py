@@ -180,7 +180,14 @@ async def aprobar(
     await exigir_disponible(db)
     momento = momento or ahora()
 
-    orden = await db.get(ProductOrder, orden_id)
+    #: CON CERROJO DE FILA, Y ES LO QUE SOSTIENE EL TOPE. El tope se calcula
+    #: más abajo como «bruto menos lo ya devuelto», con un `select` que no
+    #: retiene nada: dos aprobaciones simultáneas del total leían las dos
+    #: «devuelto = 0» y las dos pasaban, con lo que se aprobaba el doble de lo
+    #: cobrado. La clave de idempotencia no las frenaba —lleva el reloj— y el
+    #: único parcial solo cubre las que vienen de una reclamación. Bloquear el
+    #: pedido las serializa, que es la única forma de que restar sirva.
+    orden = await db.get(ProductOrder, orden_id, with_for_update=True)
     if orden is None:
         raise DevolucionNoEncontrada("Pedido no encontrado.")
     if orden.status != PEDIDO_PAGADO or orden.paid_at is None:
@@ -243,11 +250,15 @@ async def aprobar(
         created_at=momento,
         updated_at=momento,
     )
+    punto = await db.begin_nested()
     db.add(devolucion)
     try:
         await db.flush()
     except IntegrityError as fallo:
-        await db.rollback()
+        #: PUNTO DE GUARDADO. Esto corre dentro de la transacción de la ruta;
+        #: deshacerla entera por un choque de índice se llevaba por delante lo
+        #: que hubiera hecho quien llama.
+        await punto.rollback()
         if "product_refunds_viva_por_expediente" in str(getattr(fallo, "orig", fallo)):
             raise DevolucionDuplicada(
                 "Ya hay una devolución en marcha de esa reclamación."
@@ -625,6 +636,16 @@ async def anular(
     devolucion = await db.get(ProductRefund, devolucion_id, with_for_update=True)
     if devolucion is None:
         raise DevolucionNoEncontrada("Devolución no encontrada.")
+    if devolucion.status in (DEVOLUCION_PEDIDA, DEVOLUCION_EN_CURSO):
+        #: YA ESTA EN LA PASARELA, Y ANULARLA AQUI NO LA PARA ALLI. Soltaba la
+        #: retención y sacaba el importe de `devuelto_de`, así que el saldo
+        #: quedaba libre y se podía volver a aprobar lo mismo; después la
+        #: pasarela completaba el reembolso y nadie lo conciliaba. Una petición
+        #: ya enviada necesita conciliarse, no cancelarse.
+        raise DevolucionNoPermitida(
+            "Esa devolución ya está en la pasarela.",
+            details={"reason": "already_requested", "status": devolucion.status},
+        )
     if devolucion.status == DEVOLUCION_CONFIRMADA:
         raise DevolucionNoPermitida(
             "Esa devolución ya se pagó y no se puede anular.",

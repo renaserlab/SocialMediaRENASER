@@ -3764,6 +3764,26 @@ async def historial_de_una_resena(
 # --------------------------------------------------------------------------- #
 
 
+def _cuando_se_libera(saldo, bloqueo):  # noqa: ANN001, ANN202
+    """La fecha de liberacion, de la columna o de lo que el bloqueo ya dice.
+
+    LA COLUMNA ESTA SIEMPRE NULA, y eso no es «no se sabe»: `registrar_venta`
+    la escribe nula a proposito —sin entrega no hay reloj— y despues no la
+    actualiza nadie. Pero el servidor SI sabe la fecha cuando la proteccion
+    esta en curso: la calcula y la manda en el detalle del bloqueo. Sin esto,
+    la pantalla escribia «todavia no se sabe» sobre un pedido entregado cuya
+    ventana se puede datar al segundo.
+    """
+    if saldo.available_at is not None:
+        return saldo.available_at
+    if bloqueo is None or bloqueo.motivo != dinero.PROTECCION_EN_CURSO:
+        return None
+    try:
+        return datetime.fromisoformat(str(bloqueo.detalle))
+    except (TypeError, ValueError):
+        return None
+
+
 def _saldo(saldo, *, retenido: int = 0, bloqueo=None) -> SaldoDeProductoRead:  # noqa: ANN001
     return SaldoDeProductoRead(
         id=saldo.id,
@@ -3776,10 +3796,34 @@ def _saldo(saldo, *, retenido: int = 0, bloqueo=None) -> SaldoDeProductoRead:  #
         net_minor=int(saldo.net_amount_minor or 0),
         fee_rules_version=saldo.fee_rules_version,
         held_minor=retenido,
-        available_at=saldo.available_at,
+        available_at=_cuando_se_libera(saldo, bloqueo),
         block=bloqueo.motivo if bloqueo is not None else None,
         block_detail=bloqueo.detalle if bloqueo is not None else None,
         created_at=saldo.created_at,
+    )
+
+
+def _devolucion_de_quien_compro(fila) -> DevolucionDeProductoRead:  # noqa: ANN001
+    """La misma devolucion, SIN lo que es de dentro.
+
+    QUIEN COMPRO NO LEE EL MOTIVO INTERNO. `decision_reason` es el texto libre
+    que teclea administracion para justificar la decision, y puede llevar
+    dentro lo que se penso de quien reclama. Tampoco es suyo el identificador
+    del saldo del proveedor, ni el proveedor de pago, ni el codigo con el que
+    fallo la pasarela.
+
+    Lo que si es suyo, y es lo que hace falta: cuanto, en que moneda, en que
+    estado y cuando se confirmo.
+    """
+    fila_publica = _devolucion(fila)
+    return fila_publica.model_copy(
+        update={
+            "decision_reason": "",
+            "balance_id": None,
+            "provider": "",
+            "failure_code": None,
+            "incident_id": None,
+        }
     )
 
 
@@ -3949,7 +3993,10 @@ async def devoluciones_de_mi_pedido(
     orden = await db.get(ProductOrder, order_id)
     if orden is None or orden.buyer_id != current_user.id:
         return []
-    return [_devolucion(f) for f in await devoluciones.del_pedido(db, orden_id=order_id)]
+    return [
+        _devolucion_de_quien_compro(f)
+        for f in await devoluciones.del_pedido(db, orden_id=order_id)
+    ]
 
 
 @router.post("/orders/{order_id}/conformity", response_model=EnvioRead)
@@ -4267,6 +4314,19 @@ async def pedir_devolucion(
     ensure_uuid(refund_id, "Devolucion no encontrada.")
     fila = await devoluciones.pedir(
         db, devolucion_id=refund_id, actor_id=current_user.id
+    )
+    #: Y SE ANOTA. Es la unica accion del modulo que habla con la pasarela, y
+    #: era la unica de las financieras sin rastro: aprobar, anular, liberar y
+    #: soltar una retencion si lo dejaban. El estado resultante importa tanto
+    #: como el intento, porque «fallida» y «confirmada» son cosas distintas.
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role=await permisos.get_role(db, current_user.id),
+        action="product_refund.request",
+        entity_type="product_refund",
+        entity_id=fila.id,
+        new_state=fila.status,
     )
     await db.commit()
     await db.refresh(fila)

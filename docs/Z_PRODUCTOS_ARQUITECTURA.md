@@ -1165,7 +1165,7 @@ volver a lanzarlo no mueve nada ya movido.
 
 | Lo que no hace | Cómo se comprueba |
 |---|---|
-| **No transfiere dinero.** No existe ninguna ruta que lo haga | un centinela lista las rutas del módulo y falla si aparece `transfer` |
+| **No transfiere dinero.** No existe ninguna ruta que lo haga | un centinela busca `transfer`, `payout` y `/transfers/run` en el fichero de rutas y falla si aparecen |
 | **No da de alta cuentas de cobro** | el repositorio del móvil no tiene el método, y hay una prueba que lo afirma |
 | **Moderación no mueve dinero** | las rutas financieras exigen administración, no el rol de evaluador |
 | **El adaptador apagado no simula éxito** | `NoConfigurado` levanta; ninguna prueba lo sustituye por un doble que diga que sí |
@@ -1226,6 +1226,68 @@ Ninguna de las dos ofrece un botón que mueva dinero. El panel dice con palabras
 que no lo mueve, que aprobar no es pagar y que quién paga la comisión de la
 pasarela está por decidir. Un botón que prometa pagar sin recorrido detrás cuesta
 más confianza que su ausencia, y aquí además costaría dinero.
+
+### Lo que encontró la revisión independiente, y lo que sigue abierto
+
+**Dos bloqueantes, los dos de transacción y los dos reproducidos antes de
+tocar nada.**
+
+`finanzas.reservar` hacía `db.rollback()`. Quien más lo llama es
+`devoluciones.aprobar`, que para entonces **ya ha escrito la devolución y su
+fila de historial**: deshacer la transacción entera se las llevaba por delante,
+y como el choque se traga a propósito —«ya había una reserva por devolución, que
+es lo que se quería»— nadie se enteraba. La ruta escribía después su anotación
+de auditoría, así que quedaba constancia de una devolución aprobada que no
+existe. Es el mismo error que `registrar_venta` ya evitaba con un punto de
+guardado, y aquí costaba mucho más.
+
+Y **el tope de devolución se calculaba con un `select` sin cerrojo**. Dos
+aprobaciones simultáneas del total leían las dos «devuelto = 0» y las dos
+pasaban: 2× el importe del pedido. La clave de idempotencia no las frenaba
+—lleva el reloj dentro— y el único parcial solo cubre las que vienen de una
+reclamación. Ahora el pedido se lee con cerrojo de fila, que es lo que las
+serializa.
+
+**Dos altos más.** `liberar_vencidos` comprobaba y después escribía con solo la
+clave primaria en el `WHERE`: entre las dos cosas cabía una confirmación de
+devolución que cancelara el saldo, y se pisaba. Y `anular` aceptaba `requested`
+y `processing` —peticiones que la pasarela ya conoce—, soltaba la retención y
+sacaba el importe de `devuelto_de`, con lo que el mismo dinero se podía volver a
+aprobar mientras la pasarela completaba el primero.
+
+### Tres sitios con código cuyo camino no existe
+
+Esto es lo más útil que salió, y no es un fallo de los que rompen: es código que
+**no se puede alcanzar**, con pruebas y documentación afirmando lo contrario.
+
+| Qué | Por qué no se alcanza |
+|---|---|
+| **Ninguna devolución parcial llega a la pasarela** | `pedir` comprueba `hasattr(proveedor, "create_partial_refund")` y **ningún adaptador lo define**. Como `kind` es `partial` para todo importe distinto del total exacto, toda devolución parcial acaba en `failed / partial_refund_not_supported` |
+| **`devoluciones.atender_aviso` no tiene quien lo llame** | el webhook entrega a `pagos.atender_aviso`, que ante un reembolso solo escribe «pendiente de conciliar a mano». Una devolución que la pasarela conteste `pending` no llega nunca a `confirmed` |
+| **`ProductDispute` no tiene escritor** | nada inserta jamás una fila, así que la puerta de disputa de `por_que_no_se_libera` no puede dispararse y `/finance/disputes` contesta siempre `[]` |
+
+Y uno más, de la misma familia pero inofensivo: **el bloqueo `negative_balance`
+es inalcanzable**, porque `owner_sale_balances_importes` exige
+`net_amount_minor >= 0` desde la 0049. Se deja puesto —el día que la empresa
+decida qué hacer con un saldo negativo hará falta— y la prueba comprueba lo que
+de verdad protege, que es la restricción.
+
+**La batería de mutaciones lo confirmó por su cuenta**: las mutaciones sobre esas
+ramas son *inmatables*, no por falta de pruebas sino porque el código no se
+ejecuta. Están marcadas «INALCANZABLE» en la batería para que no se confundan
+con un hueco de cobertura.
+
+### Y una prueba que pasaba por el motivo equivocado
+
+`test_la_base_rechaza_un_saldo_con_dos_origenes` pedía «cualquier error de
+integridad», y la fila de prueba llevaba un `event_id` inventado: **la clave
+ajena de eventos contestaba antes que el CHECK del origen**. Relajar el CHECK a
+una sola rama la dejaba en verde. Ahora afirma el nombre de la restricción y
+añade la combinación producto + curso, los dos existentes de verdad, donde
+ninguna clave ajena puede contestar en su lugar.
+
+Es el mismo error de fondo que los centinelas que no podían ponerse rojos del
+Incremento 8: **una aserción que admite varias causas no prueba ninguna**.
 
 ## 14. Lo que sigue esperando a una persona
 
