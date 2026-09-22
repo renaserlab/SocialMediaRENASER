@@ -1112,9 +1112,18 @@ async def test_dos_envios_a_la_vez_dejan_una_sola_resena(
 
     salidas = await asyncio.gather(valorar(), valorar(), return_exceptions=True)
     buenas = [s for s in salidas if isinstance(s, str)]
-    malas = [s for s in salidas if isinstance(s, Exception)]
+    #: LA EXCEPCION CONCRETA, no «alguna». Aceptar cualquier `Exception` dejaba
+    #: pasar un `IntegrityError` crudo —un 500 para quien pulsa dos veces— si
+    #: `_es` dejara de reconocer el nombre de la restriccion. Lo encontro la
+    #: revision independiente.
+    malas = [s for s in salidas if isinstance(s, resenas.ResenaDuplicada)]
+    otras = [
+        s for s in salidas if isinstance(s, Exception) and not isinstance(s, resenas.ResenaDuplicada)
+    ]
     assert len(buenas) == 1, f"las dos escribieron: {salidas}"
-    assert len(malas) == 1
+    assert len(malas) == 1, f"la segunda no dio un 409 limpio: {salidas}"
+    assert not otras, f"salio un error que la pantalla no sabe leer: {otras}"
+    assert malas[0].status_code == 409
 
     async with sesiones() as db:
         cuantas = await db.scalar(
@@ -1130,15 +1139,60 @@ async def test_dos_envios_a_la_vez_dejan_una_sola_resena(
 # =========================================================================== #
 @SIN_POSTGRES
 @pytest.mark.asyncio
-async def test_sin_la_0081_las_resenas_contestan_503(sesiones, monkeypatch, venta_encendida) -> None:
-    """503 CON CODIGO ESTABLE. No 404, que haria pensar que la ruta esta mal
-    escrita, ni 500, que haria pensar que algo se rompio."""
-    monkeypatch.setattr(esquema, "hay_resenas", lambda _db: _no())
+async def test_sin_la_0081_las_resenas_contestan_503(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """503 CON CODIGO ESTABLE, Y SOBRE LAS FUNCIONES DE VERDAD.
+
+    La primera version llamaba a `exigir_disponible` y nada mas, asi que
+    probaba el `if` de la puerta y no que las entradas del modulo contestasen
+    503. Lo encontro la revision independiente. Ahora se recorren las cinco que
+    una pantalla puede tocar.
+    """
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await linea_de(sesiones, orden_id)
+
+    async def _no_hay(db):  # noqa: ANN001, ANN202
+        return False
+
+    monkeypatch.setattr(esquema, "hay_resenas", _no_hay)
+
+    #: LAS CINCO ENTRADAS, cada una por su camino.
     async with sesiones() as db:
         with pytest.raises(AppError) as fallo:
-            await resenas.exigir_disponible(db)
+            await resenas.crear(
+                db,
+                order_item_id=linea.id,
+                usuario_id=comprador,
+                recommends=True,
+                **CINCO,
+            )
+        await db.rollback()
     assert fallo.value.status_code == 503
     assert fallo.value.code == "product_reviews_not_available"
+
+    for llamada in (
+        lambda db: resenas.listar(db, producto_id=linea.product_id),
+        lambda db: resenas.valorables_del_pedido(
+            db, orden_id=orden_id, usuario_id=comprador
+        ),
+        lambda db: resenas.del_proveedor(db, usuario_id=proveedor),
+        lambda db: resenas.para_moderar(db),
+    ):
+        async with sesiones() as db:
+            with pytest.raises(AppError) as fallo:
+                await llamada(db)
+        assert fallo.value.code == "product_reviews_not_available", llamada
+
+    #: Y `puede_resenar` NO LANZA: contesta el motivo, porque lo llama la
+    #: pantalla para decidir si ofrecer el formulario.
+    async with sesiones() as db:
+        puede, motivo, _ = await resenas.puede_resenar(
+            db, order_item_id=linea.id, usuario_id=comprador
+        )
+    assert (puede, motivo) == (False, "reviews_not_available")
 
     #: Y EL RESUMEN NO SE CAE: contesta vacio, porque es un bloque de la ficha
     #: y tumbar la ficha entera por esto seria peor.
@@ -1148,20 +1202,10 @@ async def test_sin_la_0081_las_resenas_contestan_503(sesiones, monkeypatch, vent
     assert resumen.promedio is None
 
 
-async def _no() -> bool:
-    return False
-
-
 # =========================================================================== #
 # 10. Lo que el codigo NO puede hacer
 # =========================================================================== #
-def test_ninguna_ruta_de_proveedor_escribe_la_resena() -> None:
-    """MODERAR ES ESCONDER Y RESPONDER ES RESPONDER.
-
-    Se recorre el arbol de sintaxis del router: ninguna funcion cuyo nombre
-    hable del proveedor puede asignar `overall`, `comment`, `status` ni
-    `author_id` sobre una resena.
-    """
+def _arbol(nombre: str):  # noqa: ANN202
     import ast
     import pathlib
 
@@ -1170,29 +1214,120 @@ def test_ninguna_ruta_de_proveedor_escribe_la_resena() -> None:
         / "app"
         / "modules"
         / "products"
-        / "router.py"
+        / nombre
     )
-    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
-    prohibidos = {"overall", "comment", "status", "author_id", "moderated_at"}
+    return ast.parse(ruta.read_text(encoding="utf-8"))
+
+
+#: Los campos que NADIE reescribe: son lo que escribio otra persona.
+INTOCABLES = frozenset(
+    {"overall", "quality", "fidelity", "functioning", "value_for_money",
+     "recommends", "comment", "author_id", "order_item_id", "product_id",
+     "order_paid_at", "delivered_at"}
+)
+
+
+def test_solo_editar_y_moderar_escriben_una_resena() -> None:
+    """NADIE REESCRIBE LO QUE ESCRIBIO OTRA PERSONA.
+
+    La primera version de esta prueba recorria el ROUTER buscando asignaciones
+    a atributo, y no habia ninguna: el router no escribe campos del ORM, todo
+    pasa por el servicio. Era una prueba VACIA —lo encontro la revision
+    independiente— y ademas excluia `moderar_resena`, que es la unica ruta que
+    si cambia el estado.
+
+    Ahora mira `resenas.py`, que es donde viven las escrituras, y se apoya en
+    dos cosas que la hacen poder fallar: cuenta las funciones que escriben algo
+    y exige que sean EXACTAMENTE las que pueden.
+    """
+    import ast
+
+    arbol = _arbol("resenas.py")
+    quien_escribe: dict[str, set[str]] = {}
     for nodo in ast.walk(arbol):
         if not isinstance(nodo, (ast.AsyncFunctionDef, ast.FunctionDef)):
             continue
-        if "resena" not in nodo.name and "review" not in nodo.name:
-            continue
-        if "moderar" in nodo.name or "cola" in nodo.name or "historial" in nodo.name:
-            continue
         for hijo in ast.walk(nodo):
-            if isinstance(hijo, ast.Attribute) and isinstance(hijo.ctx, ast.Store):
-                assert hijo.attr not in prohibidos, f"{nodo.name} escribe {hijo.attr}"
+            if not isinstance(hijo, ast.Attribute) or not isinstance(
+                hijo.ctx, ast.Store
+            ):
+                continue
+            if not isinstance(hijo.value, ast.Name):
+                continue
+            if hijo.value.id not in {"resena", "respuesta"}:
+                continue
+            quien_escribe.setdefault(nodo.name, set()).add(hijo.attr)
+
+    #: LA PRUEBA TIENE QUE PODER FALLAR: si no encontrara ninguna escritura
+    #: —porque alguien renombro las variables o movio el codigo— no estaria
+    #: comprobando nada, y eso se dice aqui en vez de pasar en verde.
+    assert quien_escribe, "no se encontro ni una escritura: la prueba no mide nada"
+    assert set(quien_escribe) == {"editar", "moderar", "moderar_respuesta"}, (
+        f"escriben tambien: {sorted(set(quien_escribe))}"
+    )
+
+    #: Y CADA UNA SOLO LO SUYO. `editar` toca lo que escribio su autor;
+    #: moderar NO puede tocar ni una de esas columnas.
+    for funcion in ("moderar", "moderar_respuesta"):
+        tocadas = quien_escribe[funcion] & INTOCABLES
+        assert not tocadas, f"{funcion} reescribe {sorted(tocadas)}"
+    assert "status" not in quien_escribe["editar"], "editar cambia el estado"
+
+
+def test_ninguna_ruta_de_proveedor_toca_la_resena() -> None:
+    """El proveedor RESPONDE, y nada mas.
+
+    Se comprueba sobre las rutas: ninguna funcion del router cuyo nombre hable
+    del proveedor puede llamar a `moderar`, `moderar_respuesta` ni `editar`.
+    """
+    import ast
+
+    arbol = _arbol("router.py")
+    del_proveedor = []
+    for nodo in ast.walk(arbol):
+        if not isinstance(nodo, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        fuente = ast.dump(nodo)
+        if "seller/reviews" not in fuente:
+            continue
+        del_proveedor.append(nodo.name)
+        for prohibido in ("moderar", "moderar_respuesta", "editar"):
+            assert f"attr='{prohibido}'" not in fuente, f"{nodo.name} llama a {prohibido}"
+
+    assert len(del_proveedor) == 2, (
+        f"se esperaban dos rutas de proveedor y hay {del_proveedor}"
+    )
+
+
+#: Lo que una resena no puede importar. Ni dinero, ni almacen.
+PROHIBIDOS = ("pagos", "refund", "reembolso", "finanzas", "liquidacion",
+              "transferencias", "inventory", "inventario")
+
+
+def _importados(codigo: str) -> set[str]:
+    """Todos los nombres que un fichero importa, en los TRES idiomas.
+
+    La primera version de este centinela solo miraba `nodo.module` de un
+    `ImportFrom`, asi que no veia `from app.modules.products import pagos`
+    —donde el nombre viaja en `nodo.names`— que es justamente el idioma que usa
+    todo el modulo. Lo encontro la revision independiente.
+    """
+    import ast
+
+    nombres: set[str] = set()
+    for nodo in ast.walk(ast.parse(codigo)):
+        if isinstance(nodo, ast.ImportFrom):
+            if nodo.module:
+                nombres.update(nodo.module.split("."))
+            nombres.update(a.name.split(".")[0] for a in nodo.names)
+        elif isinstance(nodo, ast.Import):
+            for a in nodo.names:
+                nombres.update(a.name.split("."))
+    return nombres
 
 
 def test_el_servicio_no_sabe_de_dinero() -> None:
-    """UNA RESENA NO MUEVE NI UN CENTIMO, y no importa nada que lo haga.
-
-    Si alguien anade el import, hace falta una decision en vez de que aparezca
-    solo.
-    """
-    import ast
+    """UNA RESENA NO MUEVE NI UN CENTIMO, y no importa nada que lo haga."""
     import pathlib
 
     ruta = (
@@ -1202,13 +1337,21 @@ def test_el_servicio_no_sabe_de_dinero() -> None:
         / "products"
         / "resenas.py"
     )
-    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
-    for nodo in ast.walk(arbol):
-        if isinstance(nodo, ast.ImportFrom) and nodo.module:
-            assert "pagos" not in nodo.module, nodo.module
-            assert "refund" not in nodo.module, nodo.module
-            assert "finanzas" not in nodo.module, nodo.module
-            assert "inventory" not in nodo.module, nodo.module
+    codigo = ruta.read_text(encoding="utf-8")
+    encontrados = sorted(PROHIBIDOS_EN := set(_importados(codigo)) & set(PROHIBIDOS))
+    assert not encontrados, f"resenas.py importa {encontrados}"
+
+    #: CONTROL POSITIVO: el centinela TIENE que ver los tres idiomas de import.
+    #: Sin esto, un centinela roto pasa en verde y nadie se entera.
+    for inyectado in (
+        "from app.modules.products import esquema, pagos",
+        "from app.modules.products.pagos import iniciar_pago",
+        "import app.modules.products.pagos",
+    ):
+        copia = codigo.replace(
+            "from app.modules.products import esquema", inyectado, 1
+        )
+        assert "pagos" in _importados(copia), f"el centinela no ve: {inyectado}"
 
 
 # =========================================================================== #
@@ -1316,3 +1459,354 @@ def test_armar_con_nadie_que_recomiende_si_dice_cero() -> None:
     """UN CERO DE VERDAD SI ES UN CERO. Que nadie lo recomiende es un dato."""
     ninguno = resenas.armar(total=4, promedio=2.0, recomiendan=0)
     assert ninguno.recomiendan_bps == 0
+
+
+# =========================================================================== #
+# 12. Lo que encontro la revision independiente
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_base_impide_que_nadie_modere_lo_suyo(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """EL BLOQUEANTE, EN LA CAPA QUE NO SE ESQUIVA.
+
+    `profiles.role` incluye `moderator`, asi que a un proveedor al que se le
+    diera rol de curaduria le bastaba la ruta de moderacion para enterrar todas
+    las valoraciones malas de su catalogo. Es la misma regla que gobierna
+    evaluar y publicar desde el Incremento 2, y faltaba aqui.
+
+    Esta prueba llama al SERVICIO, saltandose la ruta y su comprobacion de
+    propiedad: lo que la rechaza es el disparador de la 0081.
+    """
+    resena_id, _, proveedor, _, linea = await resena_puesta(
+        sesiones, monkeypatch, overall=1
+    )
+    async with sesiones() as db:
+        with pytest.raises((IntegrityError, DBAPIError)) as fallo:
+            await resenas.moderar(
+                db,
+                resena_id=resena_id,
+                actor_id=proveedor,
+                esconder=True,
+                motivo="no me gusta",
+            )
+        await db.rollback()
+    assert "propio producto" in str(fallo.value)
+
+    #: Y LA VALORACION SIGUE VISIBLE, con su estrella.
+    async with sesiones() as db:
+        fila = await db.get(ProductReview, resena_id)
+        resumen = await resenas.resumen(db, producto_id=linea.product_id)
+    assert fila.status == "visible"
+    assert resumen.total == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_base_impide_que_esconda_la_respuesta_de_lo_suyo(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """Lo mismo para la respuesta: esconder la suya tambien es moderar lo suyo."""
+    resena_id, _, proveedor, _, _ = await resena_puesta(sesiones, monkeypatch)
+    async with sesiones() as db:
+        respuesta = await resenas.responder(
+            db, resena_id=resena_id, usuario_id=proveedor, texto="Gracias."
+        )
+        await db.commit()
+        respuesta_id = respuesta.id
+    async with sesiones() as db:
+        with pytest.raises((IntegrityError, DBAPIError)):
+            await resenas.moderar_respuesta(
+                db, respuesta_id=respuesta_id, actor_id=proveedor, esconder=True
+            )
+        await db.rollback()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_escondida_vuelve_a_la_cola_y_se_puede_restaurar(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """EL ALTO A1. Esconder no puede ser una decision de un solo sentido.
+
+    Antes la cola solo traia las visibles, asi que una valoracion escondida por
+    error no se podia volver a encontrar sin haber apuntado su identificador a
+    mano, y el boton de restaurar de la pantalla era codigo muerto.
+    """
+    resena_id, _, _, _, _ = await resena_puesta(sesiones, monkeypatch)
+    moderador = await persona(sesiones, "mod-a1")
+
+    async with sesiones() as db:
+        await resenas.moderar(
+            db, resena_id=resena_id, actor_id=moderador, esconder=True, motivo="x"
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        visibles = [r.id for r in await resenas.para_moderar(db)]
+        escondidas = [
+            r.id for r in await resenas.para_moderar(db, escondidas=True)
+        ]
+    assert resena_id not in visibles
+    assert resena_id in escondidas, "una escondida no se puede volver a encontrar"
+
+    async with sesiones() as db:
+        await resenas.moderar(
+            db, resena_id=resena_id, actor_id=moderador, esconder=False
+        )
+        await db.commit()
+    async with sesiones() as db:
+        fila = await db.get(ProductReview, resena_id)
+        visibles = [r.id for r in await resenas.para_moderar(db)]
+    assert fila.status == "visible"
+    assert resena_id in visibles
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_las_tres_bandejas_paginan(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """EL ALTO A2. Sin cursor topaban en veinte y no habia forma de pedir mas.
+
+    Se prueba con paginas de UNA: lo que hay que demostrar es que el cursor
+    existe y avanza, no que veintiuna filas caben en dos paginas.
+    """
+    from tests.test_productos_carrito import con_existencias, variantes_de
+    from tests.test_productos_catalogo import publicado
+
+    producto_id, version_id, quien = await publicado(sesiones)
+    variantes = await variantes_de(sesiones, version_id)
+    await con_existencias(sesiones, producto_id, variantes[0].sku, 20)
+    tres = [
+        await entregado_del_mismo(
+            sesiones, monkeypatch, producto_id, variantes[0], quien
+        )
+        for _ in range(3)
+    ]
+
+    #: LA DEL PROVEEDOR.
+    async with sesiones() as db:
+        primera = await resenas.del_proveedor(db, usuario_id=quien, limite=1)
+    assert len(primera) == 1
+    cursor = (primera[0].created_at, primera[0].id)
+    async with sesiones() as db:
+        segunda = await resenas.del_proveedor(
+            db, usuario_id=quien, antes_de=cursor, limite=5
+        )
+    vistas = [r.id for r in primera] + [r.id for r in segunda]
+    assert len(vistas) == len(set(vistas)), "la bandeja repitio una valoracion"
+    assert set(tres) <= set(vistas), "la bandeja se salto una valoracion"
+
+    #: LA COLA DE MODERACION.
+    async with sesiones() as db:
+        primera = await resenas.para_moderar(db, limite=1)
+    assert len(primera) == 1
+    cursor = (primera[0].created_at, primera[0].id)
+    async with sesiones() as db:
+        segunda = await resenas.para_moderar(db, antes_de=cursor, limite=50)
+    ids = [r.id for r in primera] + [r.id for r in segunda]
+    assert len(ids) == len(set(ids))
+    assert primera[0].id not in [r.id for r in segunda]
+
+    #: Y LA DE QUIEN OPINO.
+    async with sesiones() as db:
+        autor = primera[0].author_id
+        suyas = await resenas.mias(db, usuario_id=autor, limite=1)
+    assert len(suyas) == 1
+    async with sesiones() as db:
+        despues = await resenas.mias(
+            db,
+            usuario_id=autor,
+            antes_de=(suyas[0].created_at, suyas[0].id),
+            limite=5,
+        )
+    assert suyas[0].id not in [r.id for r in despues]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_moderaciones_a_la_vez_dejan_UNA_fila_de_historial(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """EL MEDIO M3. El candado de fila, demostrado con una barrera.
+
+    Sin el, las dos leian `visible` antes de que ninguna escribiera y el
+    historial —que un disparador protege para que solo se anada— acababa
+    contando dos veces el mismo paso, con dos actores y dos motivos: quien
+    auditara despues no podia distinguir «se escondio dos veces» de «dos
+    personas pulsaron a la vez».
+
+    LA BARRERA ES LA PRUEBA: con candado, la segunda NO PUEDE leer hasta que la
+    primera suelta, asi que se comprueba que se queda esperando.
+    """
+    resena_id, _, _, _, _ = await resena_puesta(sesiones, monkeypatch)
+    uno = await persona(sesiones, "mod-m3-uno")
+    dos = await persona(sesiones, "mod-m3-dos")
+
+    empezo = asyncio.Event()
+    suelta = asyncio.Event()
+
+    async def primera():
+        async with sesiones() as db:
+            await db.get(ProductReview, resena_id, with_for_update=True)
+            empezo.set()
+            await suelta.wait()
+            await resenas.moderar(
+                db, resena_id=resena_id, actor_id=uno, esconder=True, motivo="uno"
+            )
+            await db.commit()
+
+    async def segunda():
+        await empezo.wait()
+        async with sesiones() as db:
+            await resenas.moderar(
+                db, resena_id=resena_id, actor_id=dos, esconder=True, motivo="dos"
+            )
+            await db.commit()
+
+    tarea_uno = asyncio.create_task(primera())
+    tarea_dos = asyncio.create_task(segunda())
+    await empezo.wait()
+    await asyncio.sleep(0.5)
+    assert not tarea_dos.done(), "la segunda no espero: no hay candado de fila"
+    suelta.set()
+    await asyncio.gather(tarea_uno, tarea_dos)
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(ProductReviewModeration).where(
+                    ProductReviewModeration.review_id == resena_id
+                )
+            )
+        )
+        fila = await db.get(ProductReview, resena_id)
+    assert fila.status == "hidden"
+    assert len(filas) == 1, (
+        f"el historial cuenta {len(filas)} pasos y solo hubo uno: "
+        f"{[(f.from_status, f.to_status) for f in filas]}"
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_no_se_edita_mientras_se_modera(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """EL MEDIO M1. Con candado, editar y moderar no se cruzan.
+
+    Sin el, el moderador acababa escondiendo un texto DISTINTO del que juzgo,
+    con un motivo que ya no se referia a nada. Lo reprodujo la revision
+    independiente.
+    """
+    resena_id, comprador, _, _, _ = await resena_puesta(sesiones, monkeypatch)
+    moderador = await persona(sesiones, "mod-m1")
+    nuevo = "Lo he cambiado mientras lo estaban mirando."
+
+    empezo = asyncio.Event()
+    suelta = asyncio.Event()
+
+    async def moderando():
+        async with sesiones() as db:
+            await db.get(ProductReview, resena_id, with_for_update=True)
+            empezo.set()
+            await suelta.wait()
+            await resenas.moderar(
+                db, resena_id=resena_id, actor_id=moderador, esconder=True, motivo="spam"
+            )
+            await db.commit()
+
+    async def editando():
+        await empezo.wait()
+        async with sesiones() as db:
+            await resenas.editar(
+                db, resena_id=resena_id, usuario_id=comprador, comentario=nuevo
+            )
+            await db.commit()
+
+    tarea_mod = asyncio.create_task(moderando())
+    tarea_edit = asyncio.create_task(editando())
+    await empezo.wait()
+    await asyncio.sleep(0.5)
+    assert not tarea_edit.done(), "la edicion no espero: no hay candado de fila"
+    suelta.set()
+    salidas = await asyncio.gather(tarea_mod, tarea_edit, return_exceptions=True)
+
+    async with sesiones() as db:
+        fila = await db.get(ProductReview, resena_id)
+    assert fila.status == "hidden"
+    #: LA EDICION TIENE QUE HABER FALLADO: cuando le toco, la valoracion ya
+    #: estaba escondida, y una escondida no se edita.
+    fallos = [s for s in salidas if isinstance(s, AppError)]
+    assert len(fallos) == 1, f"la edicion se colo: {salidas}"
+    assert fallos[0].details.get("reason") == "hidden"
+    assert nuevo not in (fila.comment or ""), (
+        "se escondio un texto distinto del que se juzgo"
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_las_lineas_valorables_no_preguntan_el_dueno_producto_a_producto(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """EL BAJO B-1. El docstring prometia una sola consulta y hacia N."""
+    from sqlalchemy import event
+
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+
+    consultas: list[str] = []
+    async with sesiones() as db:
+        conexion = await db.connection()
+        motor_sync = conexion.sync_connection.engine
+
+        def contar(conn, cursor, statement, params, context, many):  # noqa: ANN001
+            if "product_sellers" in statement:
+                consultas.append(statement)
+
+        event.listen(motor_sync, "before_cursor_execute", contar)
+        try:
+            await resenas.valorables_del_pedido(
+                db, orden_id=orden_id, usuario_id=comprador
+            )
+        finally:
+            event.remove(motor_sync, "before_cursor_execute", contar)
+
+    assert len(consultas) == 1, (
+        f"se pregunto el dueno {len(consultas)} veces, y con una basta"
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_envio_con_fecha_pero_sin_estado_entregado_no_deja_valorar(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """LA FRAGILIDAD QUE SENALO LA REVISION.
+
+    Mirar solo `delivered_at` es correcto HOY porque `DELIVERED` es terminal. El
+    dia que alguien anada una transicion que salga de ahi sin limpiar la fecha,
+    mirar solo la fecha dejaria de significar «entregado». Se comprueban las dos
+    cosas, y esta prueba lo demuestra retorciendo la fila del envio.
+    """
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await linea_de(sesiones, orden_id)
+    async with sesiones() as db:
+        #: La fecha se queda; el estado se mueve. Es lo que pasaria si algun dia
+        #: hubiera un salto que saliera de «entregado».
+        await db.execute(
+            text(
+                "update product_shipments set status = 'DELIVERY_FAILED',"
+                " failed_at = now(), failure_reason = 'nadie abrio' where order_id = :o"
+            ),
+            {"o": orden_id},
+        )
+        await db.commit()
+    async with sesiones() as db:
+        puede, motivo, _ = await resenas.puede_resenar(
+            db, order_item_id=linea.id, usuario_id=comprador
+        )
+    assert not puede
+    assert motivo == "not_delivered"

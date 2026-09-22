@@ -985,9 +985,14 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
     #: es lo que una resena NO puede hacer: no mueve dinero y no reescribe lo
     #: que escribio otra persona, asi que no hay ninguna ruta que ponga el
     #: sello a mano ni que edite una resena ajena.
-    for ruta in rutas:
-        assert "/reviews/verify" not in ruta, ruta
-        assert not ruta.endswith("/reviews/{review_id}/edit"), ruta
+    #: NINGUNA RUTA DE VALORACIONES FUERA DE ADMINISTRACION PUEDE MODERAR. Los
+    #: dos asertos que habia aqui —que no existiera una ruta de «verificar» ni
+    #: una de «editar» una valoracion— eran decorativos: nadie escribiria esas
+    #: URL. Lo senalo la revision independiente.
+    modera = [r for r in rutas if "moderate" in r or "moderation" in r]
+    assert modera, "no se encontro ninguna ruta de moderacion: esto no mide nada"
+    for ruta in modera:
+        assert ruta.startswith("/api/v1/admin/"), ruta
 
     #: Y NINGUNA RUTA DE PROVEEDOR TOCA LA RESENA. Puede responder, y nada mas:
     #: ni esconder, ni editar, ni borrar.

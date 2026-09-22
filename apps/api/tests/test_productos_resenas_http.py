@@ -64,7 +64,14 @@ CINCO = {
 
 @pytest_asyncio.fixture()
 async def cliente(sesiones):
-    """La aplicacion de verdad, con la sesion de la base local de la prueba."""
+    """La aplicacion de verdad, con la sesion de la base local de la prueba.
+
+    `quien["uid"]` vacio significa SIN SESION, y entonces `get_optional_user`
+    devuelve `None`, que es lo que pasa de verdad cuando alguien mira una ficha
+    sin haber entrado. La primera version devolvia siempre un usuario, asi que
+    las dos rutas publicas del incremento nunca se probaron anonimas: lo
+    encontro la revision independiente.
+    """
     app = create_app()
     quien: dict[str, str] = {"uid": ""}
 
@@ -75,9 +82,14 @@ async def cliente(sesiones):
     async def _usuario() -> AuthUser:
         return AuthUser(id=quien["uid"], email="x@y.test", role="authenticated")
 
+    async def _quizas() -> AuthUser | None:
+        if not quien["uid"]:
+            return None
+        return AuthUser(id=quien["uid"], email="x@y.test", role="authenticated")
+
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _usuario
-    app.dependency_overrides[get_optional_user] = _usuario
+    app.dependency_overrides[get_optional_user] = _quizas
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as http:
@@ -403,3 +415,206 @@ async def test_un_proveedor_suspendido_no_responde(
     #: Y tampoco ve su bandeja mientras este suspendida.
     r = await http.get(f"{PRODUCTOS}/seller/reviews")
     assert r.status_code == 403
+
+
+# =========================================================================== #
+# Lo que encontro la revision independiente
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_ruta_no_deja_que_nadie_modere_lo_suyo(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """EL BLOQUEANTE, EN LA RUTA, y con el motivo de verdad.
+
+    Un proveedor al que se le diera rol de curaduria enterraba todas las
+    valoraciones malas de su catalogo. La ruta lo comprueba ANTES del rol, por
+    lo mismo que en evaluar y publicar: para dar el motivo y no un 403 generico,
+    y para que relajar el rol no abra la puerta.
+    """
+    from sqlalchemy import text
+
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(
+        f"{PRODUCTOS}/order-items/{linea.id}/review", json={**CINCO, "overall": 1}
+    )
+    assert r.status_code == 201, r.text
+    resena_id = r.json()["id"]
+    producto_id = r.json()["product_id"]
+
+    #: SE LE DA ROL DE CURADURIA, que es lo que hace peligrosa la situacion.
+    async with sesiones() as db:
+        await db.execute(
+            text("update profiles set role = 'moderator' where id = :p"),
+            {"p": proveedor},
+        )
+        await db.commit()
+
+    quien["uid"] = proveedor
+    r = await http.post(
+        f"{ADMIN}/reviews/{resena_id}/moderate",
+        json={"hidden": True, "reason": "no me gusta"},
+    )
+    assert r.status_code != 200, "un proveedor escondio una valoracion suya"
+    assert r.json()["error"]["code"] == "product_self_review_forbidden", r.text
+
+    #: Y SIGUE VISIBLE, con su estrella.
+    r = await http.get(f"{PRODUCTOS}/{producto_id}/reviews/summary")
+    assert r.json()["total"] == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_cola_de_moderacion_tiene_dos_lados(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """EL ALTO A1, por HTTP. Y la cola NO lleva la linea de pedido (B-3)."""
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(f"{PRODUCTOS}/order-items/{linea.id}/review", json=CINCO)
+    resena_id = r.json()["id"]
+
+    quien["uid"] = await persona(sesiones, "adm-a1-http", rol="admin")
+    r = await http.get(f"{ADMIN}/reviews")
+    assert r.status_code == 200, r.text
+    visibles = {x["id"]: x for x in r.json()}
+    assert resena_id in visibles
+    #: EL ESTADO SI —si no, la pantalla no sabe si ofrecer esconder o
+    #: restaurar—, LA LINEA DE PEDIDO NO: para juzgar un texto no hace falta de
+    #: que compra salio.
+    assert visibles[resena_id]["status"] == "visible"
+    assert visibles[resena_id]["order_item_id"] is None
+
+    r = await http.post(
+        f"{ADMIN}/reviews/{resena_id}/moderate", json={"hidden": True, "reason": "x"}
+    )
+    assert r.status_code == 200, r.text
+
+    r = await http.get(f"{ADMIN}/reviews")
+    assert resena_id not in [x["id"] for x in r.json()]
+    r = await http.get(f"{ADMIN}/reviews?hidden=true")
+    assert r.status_code == 200, r.text
+    escondidas = {x["id"]: x for x in r.json()}
+    assert resena_id in escondidas, "una escondida no se puede volver a encontrar"
+    assert escondidas[resena_id]["status"] == "hidden"
+
+    r = await http.post(
+        f"{ADMIN}/reviews/{resena_id}/moderate", json={"hidden": False}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "visible"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_las_bandejas_aceptan_cursor(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """EL ALTO A2, por HTTP: las tres aceptan `before` y `before_id`."""
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(f"{PRODUCTOS}/order-items/{linea.id}/review", json=CINCO)
+    assert r.status_code == 201, r.text
+    mia = r.json()
+
+    for ruta, uid in (
+        (f"{PRODUCTOS}/reviews/mine", comprador),
+        (f"{PRODUCTOS}/seller/reviews", proveedor),
+    ):
+        quien["uid"] = uid
+        r = await http.get(f"{ruta}?limit=1")
+        assert r.status_code == 200, r.text
+        r = await http.get(
+            f"{ruta}?limit=5&before={mia['created_at']}&before_id={mia['id']}"
+        )
+        assert r.status_code == 200, r.text
+        assert mia["id"] not in [x["id"] for x in r.json()], ruta
+
+    quien["uid"] = await persona(sesiones, "adm-a2-http", rol="admin")
+    r = await http.get(
+        f"{ADMIN}/reviews?limit=5&before={mia['created_at']}&before_id={mia['id']}"
+    )
+    assert r.status_code == 200, r.text
+    assert mia["id"] not in [x["id"] for x in r.json()]
+
+    #: MEDIO CURSOR NO ES UN CURSOR: se ignora y vuelve la primera pagina.
+    quien["uid"] = comprador
+    r = await http.get(f"{PRODUCTOS}/reviews/mine?before={mia['created_at']}")
+    assert r.status_code == 200, r.text
+    assert mia["id"] in [x["id"] for x in r.json()]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_las_dos_rutas_publicas_funcionan_sin_sesion(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """LA FICHA LA MIRA CUALQUIERA, tambien sin haber entrado.
+
+    Son las dos unicas rutas publicas del incremento y no se probaban anonimas:
+    la fixture devolvia siempre un usuario. Lo encontro la revision
+    independiente.
+    """
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(f"{PRODUCTOS}/order-items/{linea.id}/review", json=CINCO)
+    producto_id = r.json()["product_id"]
+
+    #: SIN SESION.
+    quien["uid"] = ""
+    r = await http.get(f"{PRODUCTOS}/{producto_id}/reviews/summary")
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 1
+    r = await http.get(f"{PRODUCTOS}/{producto_id}/reviews")
+    assert r.status_code == 200, r.text
+    assert len(r.json()) == 1
+    #: Y SIGUE SIN DECIR de que compra sale.
+    assert r.json()[0]["order_item_id"] is None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_rastro_de_moderacion_dice_quien_y_de_donde(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """EL BAJO B-2. Sin el rol, el rastro decia que lo escondio «el sistema»."""
+    from sqlalchemy import select
+
+    from app.modules.gobernanza.models import AuditEvent
+
+    http, quien = cliente
+    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(f"{PRODUCTOS}/order-items/{linea.id}/review", json=CINCO)
+    resena_id = r.json()["id"]
+
+    administrador = await persona(sesiones, "adm-b2", rol="admin")
+    quien["uid"] = administrador
+    r = await http.post(
+        f"{ADMIN}/reviews/{resena_id}/moderate", json={"hidden": True, "reason": "x"}
+    )
+    assert r.status_code == 200, r.text
+
+    async with sesiones() as db:
+        fila = await db.scalar(
+            select(AuditEvent).where(AuditEvent.entity_id == resena_id)
+        )
+    assert fila is not None
+    assert fila.actor_id == administrador
+    assert fila.actor_role != "system", "el rastro dice que lo escondio el sistema"
+    assert fila.previous_state == "visible"
+    assert fila.new_state == "hidden"
