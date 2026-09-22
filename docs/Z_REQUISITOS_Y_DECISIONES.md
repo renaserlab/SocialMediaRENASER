@@ -1641,3 +1641,126 @@ blueprint §9 lista notificaciones obligatorias para el dinero y los plazos, y
 **ninguna para las valoraciones**. Se ve al recargar la pantalla. Añadir un aviso
 es una decisión de producto —cuántos, con qué texto, y si se puede apagar— y está
 escrita en el checklist de QA físico como limitación conocida.
+
+### Lo que encontró la revisión independiente del Incremento 8
+
+**Un bloqueante, dos altos, cuatro medios, siete centinelas vacíos y nueve
+bajos.** Los diez primeros se reprodujeron antes de tocar nada; de los dos que
+no se pudieron reproducir, uno se arregló igual porque el código no lo defendía
+y el otro queda escrito como sospecha.
+
+**D156 · EL BLOQUEANTE: nadie modera lo suyo, y faltaba.**
+
+`profiles.role` incluye `moderator`, así que a un proveedor al que se le diera
+rol de curaduría le bastaba la ruta de moderación para esconder todas las
+valoraciones malas de su catálogo. **Reproducido:** con una valoración de una
+estrella publicada, el proveedor con rol de moderación la escondía y el resumen
+del producto pasaba a cero.
+
+Lo doloroso es que la regla ya existía y estaba escrita en la cabecera de
+`permissions.py` desde el Incremento 2 —«nadie evalúa ni publica su propio
+producto, ni siendo administrador; se comprueba ANTES que el rol»— y se aplicaba
+a evaluar y a publicar. Moderar una valoración es exactamente el mismo tipo de
+acto y no se le aplicó.
+
+Se cierra en **dos capas, cada una con su prueba y su mutación**: la ruta lo
+comprueba antes del rol, y un disparador de la 0081 lo impone en la base. Un
+CHECK no servía —el dueño está a dos saltos y un CHECK no cruza tablas— y un
+`if` solo se esquiva desde cualquier otro sitio que escriba la fila.
+
+**D157 · Esconder no puede ser una decisión de un solo sentido.**
+
+La cola de moderación traía solo las visibles, y el índice era parcial a juego
+con el comentario «las escondidas no vuelven a ella». La consecuencia no estaba
+prevista: **una valoración escondida por error no se podía volver a encontrar**
+sin haber apuntado su identificador a mano, y el botón de «volver a mostrar» de
+la pantalla era código muerto, porque el estado que leía era siempre `visible`.
+
+Hay dos colas, dos índices y un botón que cambia de lado.
+
+**D158 · Las cuatro listas usan el mismo cursor.**
+
+Solo la lista pública lo tenía. Las otras tres topaban en veinte sin forma de
+pedir más: un proveedor con más de veinte valoraciones no podía responder las
+demás, y quien moderara no podía trabajar más allá de las veinte más nuevas. El
+docstring de `listar` ya explicaba por qué un desplazamiento numérico está mal, y
+esas tres no tenían ni eso.
+
+**D159 · La puntuación ajustada se enseña; las estrellas redondeadas, no.**
+
+El blueprint manda enseñar la ajustada y se enseña. Lo que añadía la primera
+versión era **dibujar estrellas redondeándola**, y con pocas valoraciones eso
+miente a lo grande: una sola de UNA estrella daba 3,9 y encendía **cuatro**,
+porque el 91 % de esa cifra es la referencia general de la que habla [D148].
+
+Fuera las estrellas del resumen —la captura pide un número y un recuento— y
+dentro la **puntuación real al lado**. Las estrellas de cada persona siguen en su
+valoración, donde son suyas.
+
+**D160 · Tres funciones leen la fila con candado.**
+
+`editar`, `moderar` y `moderar_respuesta`. Sin él se reprodujeron dos carreras:
+editar mientras se modera —el moderador escondía un texto distinto del que
+juzgó— y dos moderaciones a la vez, que dejaban dos filas en un historial que un
+disparador protege para que solo se añada, contando dos veces un paso que ocurrió
+una. Las dos pruebas usan barrera y comprueban que la segunda tarea **se queda
+esperando**.
+
+**D161 · El motivo de moderación es de cada fila.**
+
+Había un solo recuadro para toda la cola, y el botón de ocultar la respuesta
+vivía fuera del bloque abierto: un motivo escrito en una valoración y no enviado
+se pegaba a la siguiente que se tocara. Y esa tabla es **inmutable por
+disparador**, así que un motivo equivocado no se podía corregir nunca.
+
+**D162 · Un centinela que no puede ponerse rojo es peor que no tenerlo.**
+
+Siete lo estaban, y es el hallazgo más incómodo de la revisión porque los siete
+los escribí yo creyendo que protegían algo:
+
+| Qué decía medir | Por qué no medía nada |
+|---|---|
+| «ninguna ruta de proveedor escribe la reseña» | recorría el **router** buscando asignaciones a atributo, y no hay ninguna: todo pasa por el servicio. Cero funciones inspeccionadas con cero escrituras. Y excluía la única ruta que sí cambia el estado |
+| «el servicio no sabe de dinero» | solo leía `nodo.module` de un `ImportFrom`, así que no veía `from app.modules.products import pagos` —el idioma que usa todo el módulo— ni ningún `import` a secas |
+| «sin la 0081 contestan 503» | llamaba a la puerta y a nada más: probaba el `if` de `exigir_resenas`, no que ninguna entrada contestara 503 |
+| «dos envíos a la vez dejan una sola» | aceptaba cualquier `Exception`, así que un 500 crudo la dejaba verde |
+| la fixture HTTP | devolvía siempre un usuario, así que **las dos rutas públicas del incremento nunca se probaron anónimas** |
+| dos asertos del centinela de rutas | prohibían URL que nadie escribiría (`/reviews/verify`) |
+| dos regex del móvil | no habrían visto `cuantas / (cuantas + PESO)` ni `* PREVIO` |
+
+Los siete se arreglaron para que **puedan fallar**, y cuatro llevan ahora
+**control positivo**: inyectan el fallo que dicen detectar y exigen verlo. El del
+servicio además falla si no encuentra ni una escritura, porque entonces no
+estaría midiendo nada.
+
+**D163 · Y nueve bajos, todos cerrados.**
+
+El rastro de moderación decía que la escondió «el sistema» —faltaba el rol y el
+estado anterior—; la cola de moderación se llevaba la línea de pedido, que es
+justamente el campo que la 0081 saca de la lista pública; el dueño de los
+productos se preguntaba uno a uno aunque el docstring prometía una sola consulta;
+`moderar_respuesta` no protegía su `flush`; `crear` deshacía la transacción
+entera de quien llama en vez de un punto de guardado; la 0081 tenía una
+verificación decorativa que contaba filas y ejecutaba `null`; y en las pantallas,
+las barras del histograma y las filas de ejes eran `View`s desnudas que un lector
+de pantalla leía como «5», «1», «4», «0», y la fila de una valoración ya hecha se
+quedaba por debajo del área táctil mínima.
+
+**Lo que la revisión confirmó, y era lo que había que confirmar:** las tres claves
+ajenas compuestas existen y PostgreSQL las impone; no hay ninguna forma de crear
+una valoración sin compra pagada y entregada; y **las tres restricciones únicas
+nuevas sobre tablas que ya existían no pueden romper nada**, porque cada conjunto
+de columnas contiene ya la clave primaria de su tabla —`product_shipments.order_id`
+lo es desde la 0079, «una por pedido»— y porque ni `paid_at` ni `delivered_at`
+tienen hoy ningún camino de escritura que no sea el primero.
+
+**Y una fragilidad que no era un fallo, arreglada igual:** `puede_resenar` miraba
+solo `delivered_at` y no el estado del envío. Es correcto **únicamente** porque
+`DELIVERED` es terminal; el día que alguien añada una transición que salga de ahí
+sin limpiar la fecha, tanto el `if` como la clave ajena dejarían de significar
+«entregado» sin que ninguna prueba se pusiera roja. Ahora se miran las dos cosas.
+
+**Lo que queda escrito como sospecha, sin reproducir:** si la pre-comprobación de
+`moderar_respuesta` y su índice parcial se interleasen, podría salir un 500 en vez
+del 409. La revisión no consiguió provocarlo; se envolvió el `flush` igual, que
+es lo que hacen las otras dos.

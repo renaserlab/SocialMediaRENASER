@@ -985,3 +985,21 @@ la otra parte.
 - [ ] La ficha del pedido se sigue viendo entera, solo sin el bloque de valorar.
 - [ ] El catalogo, las fotografias, el inventario, la bolsa, el pedido, la
       entrega y las reclamaciones siguen funcionando.
+
+### Lo que anadio la revision independiente del Incremento 8
+
+- [ ] Con una cuenta de proveedor **a la que se le ha dado rol de moderacion**,
+      entrar en la cola de valoraciones e intentar ocultar una de un producto
+      propio: la pantalla dice que nadie modera lo suyo, y **no** un error
+      generico de permisos.
+- [ ] Ocultar una valoracion, pulsar «ver las ocultas» y **volver a mostrarla**:
+      el recorrido entero, en la pantalla, sin escribir ninguna URL.
+- [ ] Escribir un motivo en una valoracion, **no enviarlo**, bajar a otra y
+      ocultarla: el motivo de la primera **no** viaja con la segunda.
+- [ ] Un producto con **una sola** valoracion de una estrella: la ficha NO
+      enseña cuatro estrellas. Enseña el numero ajustado, la puntuacion real al
+      lado y la linea que explica la referencia.
+- [ ] Con mas de veinte valoraciones en la tienda, «ver mas» trae las
+      siguientes y no repite ninguna.
+- [ ] Con el lector de pantalla encendido, las barras del histograma se leen
+      «tres de cinco estrellas» y no «3».

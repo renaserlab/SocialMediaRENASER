@@ -15,7 +15,7 @@ las valoraciones verificadas.
 | **Incrementos 1 a 8** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva, entrega, reclamaciones y **valoraciones verificadas** |
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
 | **Migraciones 0079 y 0080** | **APLICADAS.** La 0079 esta verificada contra la base gestionada en sesion de solo lectura demostrada, con **cero divergencias**; ver §17 |
-| **Migración 0081** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable, con el ORM comparado contra el esquema real. **Se entrega para aplicarla a mano**; ver §16 |
+| **Migración 0081** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable, con el ORM comparado contra el esquema real, y **corregida tras la revisión independiente**: lleva el disparador que impide moderar lo propio. **Se entrega para aplicarla a mano**; ver §16 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
 | **Dinero de vuelta** | **no existe.** Una reclamación resuelta dice QUÉ se decidió y deja el efecto en `PENDING`. Nadie lo ejecuta: eso es el Incremento 9 |
 | **Siguiente incremento** | **el 9: finanzas y cierre operativo.** Reutiliza `owner_sale_balances`, que desde la 0068 ya admite dos orígenes; hace falta un tercero. Y **la comisión no está decidida** |
@@ -936,8 +936,22 @@ de categoría entero: una cifra sobre la categoría, no sobre este producto.
 
 **Nadie reescribe lo que escribió otra persona**, y no es una regla de rol: no
 existe ninguna ruta que lo permita, y una prueba recorre el árbol de sintaxis del
-router para que siga sin existir. El blueprint §15 lo dice de Mediador Z —«no
-puede editar la reseña del comprador»— y aquí vale para todo el mundo.
+servicio exigiendo que las únicas funciones que escriban sean `editar` y las dos
+de moderar. El blueprint §15 lo dice de Mediador Z —«no puede editar la reseña
+del comprador»— y aquí vale para todo el mundo.
+
+**Y NADIE MODERA LO SUYO.** Es la misma regla que gobierna evaluar y publicar
+desde el Incremento 2 —«nadie evalúa ni publica su propio producto, ni siendo
+administrador»— y **faltaba aquí**: `profiles.role` incluye `moderator`, así que
+a un proveedor al que se le diera rol de curaduría le bastaba la ruta de
+moderación para enterrar todas las valoraciones malas de su catálogo. Lo encontró
+la revisión independiente, y era el único bloqueante del incremento.
+
+Se cierra en **dos capas**: la ruta lo comprueba **antes que el rol** —para dar
+el motivo de verdad y para que relajar el rol no abra la puerta— y un
+**disparador** de la 0081 lo impone en la base, que es la capa que no se
+esquiva. Un CHECK no servía: el dueño está a dos saltos y un CHECK no cruza
+tablas. Cada capa tiene su propia prueba y su propia mutación.
 
 Moderar es `is_admin` —curaduría mira contenido— y responder exige **capacidad
 comercial activa**: un proveedor suspendido no publica respuestas. Lo encontró
@@ -980,6 +994,53 @@ El resumen de varios productos son **dos consultas**, no dos por producto, y hay
 una prueba que las cuenta interceptando el cursor. Las respuestas de una página
 de valoraciones se leen **en lote**: preguntar la de cada una serían veintiuna
 consultas para pintar veinte opiniones.
+
+### Esconder se puede deshacer, y por eso la cola tiene dos lados
+
+La primera versión traía solo las visibles, con el índice parcial a juego. Eso
+convertía esconder en una decisión **de un solo sentido**: una valoración
+escondida por error no se podía volver a encontrar sin haber apuntado su
+identificador a mano, y el botón de «volver a mostrar» de la pantalla era código
+muerto, porque el estado que leía era siempre `visible`. Lo encontró la revisión
+independiente.
+
+Hay dos colas y dos índices, y la pantalla cambia de lado con un botón.
+
+### Y las tres bandejas paginan
+
+También lo encontró la revisión: solo la lista pública tenía cursor. Las otras
+tres —lo que opinan de mi tienda, la cola de moderación y las mías— topaban en
+veinte sin forma de pedir más, así que un proveedor con más de veinte
+valoraciones no podía responder las demás y quien moderara no podía trabajar más
+allá de las veinte más nuevas. Las cuatro usan ahora el mismo cursor.
+
+### El candado de fila, y las dos carreras que cerró
+
+Sin él pasaban dos cosas, las dos reproducidas por la revisión:
+
+1. **Editar mientras se modera.** El moderador acababa escondiendo un texto
+   distinto del que juzgó, con un motivo que ya no se refería a nada.
+2. **Dos moderaciones a la vez.** El historial —que un disparador protege para
+   que solo se añada— guardaba dos veces el paso `visible → hidden`, con dos
+   actores y dos motivos, cuando solo hubo una transición. Quien auditara después
+   no podía distinguir «se escondió dos veces» de «dos personas pulsaron a la
+   vez».
+
+`editar`, `moderar` y `moderar_respuesta` leen la fila **con candado**, y las dos
+pruebas usan una barrera: comprueban que la segunda tarea **se queda esperando**,
+que es lo único que demuestra que el candado existe.
+
+### La puntuación que se enseña, y la que no
+
+El blueprint manda enseñar la ajustada, y se enseña. Lo que la primera versión
+hacía además era **dibujar estrellas redondeándola**, y eso miente con pocas
+valoraciones: una sola de UNA estrella daba 3,9 y encendía **cuatro**, porque el
+91 % de esa cifra es la referencia general que nadie ha decidido. Lo encontró la
+revisión independiente.
+
+Fuera las estrellas del resumen —la captura pide un número y un recuento, no
+estrellas— y dentro **la puntuación real al lado**. Las estrellas de cada persona
+siguen en su valoración, donde son suyas.
 
 ### Las cinco pantallas, y desde dónde se llega
 
