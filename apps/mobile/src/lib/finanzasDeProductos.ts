@@ -99,6 +99,16 @@ export const ESTADOS_DE_DISPUTA = [
   'withdrawn',
 ] as const;
 
+/**
+ * Los estados de una retención. SON OTROS QUE LOS DE UN SALDO.
+ *
+ * Y hacen falta porque no tenerlos costaba una pantalla mintiendo: la lista de
+ * retenciones pasaba `held` por el vocabulario de los saldos —pending, frozen,
+ * eligible…—, ninguno casaba, y cada importe apartado salía con el estado
+ * «desconocido» debajo. Lo encontró la revisión independiente.
+ */
+export const ESTADOS_DE_RETENCION = ['held', 'released', 'consumed'] as const;
+
 /** Los motivos de una retención, cerrados por la base. */
 export const MOTIVOS_DE_RETENCION = [
   'aftersale_case',
@@ -215,6 +225,15 @@ export function claveDelEstadoDeDisputa(estado: string): ClaveDeTraduccion {
 /** La clave del motivo de una retención. */
 export function claveDelMotivoDeRetencion(motivo: string): ClaveDeTraduccion {
   return conocido(MOTIVOS_DE_RETENCION, motivo, 'finanzaDeProducto.retencion');
+}
+
+/** Y la de su ESTADO, que no es el de un saldo. */
+export function claveDelEstadoDeRetencion(estado: string): ClaveDeTraduccion {
+  return conocido(
+    ESTADOS_DE_RETENCION,
+    estado,
+    'finanzaDeProducto.estadoDeRetencion',
+  );
 }
 
 /**

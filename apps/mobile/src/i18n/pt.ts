@@ -4686,6 +4686,22 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'finanzaDeProducto.sinTransferencias': 'Ainda não há histórico de transferências porque ainda não se fez nenhuma.',
   'finanzaDeProducto.retenciones': 'O que está reservado',
   'finanzaDeProducto.verMas': 'Ver mais',
+  'finanzaDeProducto.estadoDeRetencion.held':
+    'Separado',
+  'finanzaDeProducto.estadoDeRetencion.released':
+    'Libertado',
+  'finanzaDeProducto.estadoDeRetencion.consumed':
+    'Usado numa devolução',
+  'finanzaDeProducto.estadoDeRetencion.desconocido':
+    'Estado não reconhecido',
+  'finanzaDeProducto.conformidad.confirmar':
+    'Ao dar a conformidade o prazo de proteção fecha e o pagamento ao fornecedor é antecipado. Não se pode desfazer. Continuamos?',
+  'finanzaDeProducto.panel.confirmarLiberar':
+    'Isto marca como cobráveis todos os saldos vencidos que não tenham nenhum bloqueio. Não transfere dinheiro. Continuamos?',
+  'finanzaDeProducto.panel.confirmarPedir':
+    'Isto pede à plataforma de pagamento, que é dinheiro real a sair do Z. A partir daqui não se desfaz. Continuamos?',
+  'finanzaDeProducto.panel.confirmarAnular':
+    'Anular retira uma devolução já decidida e liberta o que tinha separado. Continuamos?',
   'finanzaDeProducto.panel.titulo': 'Finanças de Produtos',
   'finanzaDeProducto.panel.pendientes': 'A aguardar',
   'finanzaDeProducto.panel.elegibles': 'Prontos',

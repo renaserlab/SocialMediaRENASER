@@ -4681,6 +4681,22 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'finanzaDeProducto.sinTransferencias': 'There is no transfer history yet because none has been made.',
   'finanzaDeProducto.retenciones': 'What is set aside',
   'finanzaDeProducto.verMas': 'See more',
+  'finanzaDeProducto.estadoDeRetencion.held':
+    'Held',
+  'finanzaDeProducto.estadoDeRetencion.released':
+    'Released',
+  'finanzaDeProducto.estadoDeRetencion.consumed':
+    'Used for a refund',
+  'finanzaDeProducto.estadoDeRetencion.desconocido':
+    'Unrecognised status',
+  'finanzaDeProducto.conformidad.confirmar':
+    'Giving your approval closes the protection period and releases payment to the seller early. This cannot be undone. Continue?',
+  'finanzaDeProducto.panel.confirmarLiberar':
+    'This marks every due balance with no blocks as payable. It does not transfer any money. Continue?',
+  'finanzaDeProducto.panel.confirmarPedir':
+    'This asks the payment provider to refund, which is real money leaving Z. It cannot be undone from here. Continue?',
+  'finanzaDeProducto.panel.confirmarAnular':
+    'Cancelling withdraws a refund that was already decided and releases what it had held. Continue?',
   'finanzaDeProducto.panel.titulo': 'Products finance',
   'finanzaDeProducto.panel.pendientes': 'Waiting',
   'finanzaDeProducto.panel.elegibles': 'Ready',

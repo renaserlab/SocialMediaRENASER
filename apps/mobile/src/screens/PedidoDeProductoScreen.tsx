@@ -208,9 +208,18 @@ export function PedidoDeProductoScreen() {
 
   const darLaConformidad = () => {
     if (ocupadoRef.current || pedido === null) return;
-    ocupadoRef.current = true;
-    setOcupado(true);
     void (async () => {
+      //: SE PREGUNTA, PORQUE NO SE PUEDE DESHACER. Darla adelanta el pago al
+      //: proveedor y cierra el plazo de proteccion; nada la borra despues. Un
+      //: toque de mas en una fila no puede costar eso.
+      const acepta = await confirm({
+        title: f('finanzaDeProducto.conformidad.boton'),
+        message: f('finanzaDeProducto.conformidad.confirmar'),
+        confirmLabel: f('finanzaDeProducto.conformidad.boton'),
+      });
+      if (!acepta || ocupadoRef.current) return;
+      ocupadoRef.current = true;
+      setOcupado(true);
       try {
         await ProductBuyerMoneyRepository.darLaConformidad(pedido.id);
         setPedido(await ProductOrderRepository.leer(pedido.id));

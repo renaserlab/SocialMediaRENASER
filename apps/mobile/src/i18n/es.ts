@@ -4798,6 +4798,22 @@ export const es = {
   'finanzaDeProducto.sinTransferencias': 'Todavía no hay historial de transferencias porque todavía no se ha hecho ninguna.',
   'finanzaDeProducto.retenciones': 'Lo que está apartado',
   'finanzaDeProducto.verMas': 'Ver más',
+  'finanzaDeProducto.estadoDeRetencion.held':
+    'Apartado',
+  'finanzaDeProducto.estadoDeRetencion.released':
+    'Liberado',
+  'finanzaDeProducto.estadoDeRetencion.consumed':
+    'Usado en una devolución',
+  'finanzaDeProducto.estadoDeRetencion.desconocido':
+    'Estado no reconocido',
+  'finanzaDeProducto.conformidad.confirmar':
+    'Al dar la conformidad el plazo de protección se cierra y el pago al proveedor se adelanta. No se puede deshacer. ¿Seguimos?',
+  'finanzaDeProducto.panel.confirmarLiberar':
+    'Esto marca como cobrables todos los saldos vencidos que no tengan ningún bloqueo. No transfiere dinero. ¿Seguimos?',
+  'finanzaDeProducto.panel.confirmarPedir':
+    'Esto se lo pide a la pasarela de pago, que es dinero de verdad saliendo fuera de Z. Desde aquí no se deshace. ¿Seguimos?',
+  'finanzaDeProducto.panel.confirmarAnular':
+    'Anular retira una devolución ya decidida y suelta lo que tenía apartado. ¿Seguimos?',
   'finanzaDeProducto.panel.titulo': 'Finanzas de Productos',
   'finanzaDeProducto.panel.pendientes': 'Esperando',
   'finanzaDeProducto.panel.elegibles': 'Listos',

@@ -13,6 +13,7 @@ import {
   type ResumenFinanciero,
   type SaldoDeProducto,
   claveDelBloqueo,
+  claveDelEstadoDeRetencion,
   claveDelEstadoDeSaldo,
   claveDelMotivoDeRetencion,
   claveDeQueHacer,
@@ -275,7 +276,8 @@ export function MiSaldoDeProductosScreen() {
                   ) : null}
                 </View>
                 <Text variant="caption" color="muted">
-                  {f(claveDelEstadoDeSaldo(r.status))}
+                  {/* SU PROPIO VOCABULARIO: `held` no es un estado de saldo. */}
+                  {f(claveDelEstadoDeRetencion(r.status))}
                 </Text>
               </View>
             ))}

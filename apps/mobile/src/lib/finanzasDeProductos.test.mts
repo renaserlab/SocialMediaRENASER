@@ -35,12 +35,14 @@ import {
   BLOQUEOS,
   ESTADOS_DE_DEVOLUCION,
   ESTADOS_DE_DISPUTA,
+  ESTADOS_DE_RETENCION,
   ESTADOS_DE_SALDO,
   MOTIVOS_DE_RETENCION,
   claveDeErrorFinanciero,
   claveDelBloqueo,
   claveDelEstadoDeDevolucion,
   claveDelEstadoDeDisputa,
+  claveDelEstadoDeRetencion,
   claveDelEstadoDeSaldo,
   claveDelMotivoDeRetencion,
   claveDeQueHacer,
@@ -220,12 +222,23 @@ describe('la comisión vive en el servidor', () => {
       'multiplica o divide por el porcentaje',
     );
 
-    // CONTROL POSITIVO del segundo centinela también.
-    assert.ok(/\.platform_fee_bps/.test(codigo + 'const p = salud.platform_fee_bps;'));
 
-    // CONTROL POSITIVO: el centinela tiene que ver el cálculo si aparece.
-    const roto = sinComentarios(codigo + 'const c = bruto * bps / 10_000;');
-    assert.ok(roto.includes('10_000'), 'el centinela no ve el cálculo');
+
+    // CONTROL POSITIVO, Y UNO POR CENTINELA. Afirmar que la cadena que acabo
+    // de concatenar está ahí no demuestra nada: lo que hay que demostrar es
+    // que CADA aserción de arriba se pondría roja. Así que se vuelven a
+    // evaluar las tres contra un fichero con el cálculo dentro.
+    const roto = sinComentarios(codigo + 'const c = salud.platform_fee_bps * 10_000;');
+    assert.ok(roto.includes('10_000'), 'el centinela de la base no se pone rojo');
+    assert.ok(
+      /\.platform_fee_bps/.test(roto),
+      'el centinela de la lectura no se pone rojo',
+    );
+    const rotoBps = sinComentarios(codigo + 'const c = bruto * bps / base;');
+    assert.ok(
+      /[*/]\s*bps|bps\s*[*/]/.test(rotoBps),
+      'el centinela de la multiplicación no se pone rojo',
+    );
   });
 
   it('el repositorio tampoco calcula nada', () => {
@@ -354,6 +367,125 @@ describe('cada bloqueo dice qué hacer, y a veces es «nada»', () => {
     assert.equal(estaBloqueado({ block: null } as never), false);
     assert.equal(estaBloqueado({ block: '' } as never), false);
     assert.equal(estaBloqueado({ block: 'incident_open' } as never), true);
+  });
+});
+
+// ========================================================================== //
+// 6 bis. Una retención tiene SU PROPIO vocabulario
+//
+// Lo encontró la revisión independiente: la pantalla pasaba el estado de una
+// retención —`held`— por `claveDelEstadoDeSaldo`, cuyo vocabulario es el de los
+// saldos. Ninguno casaba, así que CADA importe apartado salía con el estado
+// «desconocido» debajo. Un fallo que solo se ve mirando la pantalla con datos.
+// ========================================================================== //
+describe('una retención no se cuenta con las palabras de un saldo', () => {
+  it('los tres estados de una retención tienen su clave', () => {
+    for (const estado of ESTADOS_DE_RETENCION) {
+      assert.equal(
+        claveDelEstadoDeRetencion(estado),
+        `finanzaDeProducto.estadoDeRetencion.${estado}`,
+      );
+    }
+    assert.equal(
+      claveDelEstadoDeRetencion('xx'),
+      'finanzaDeProducto.estadoDeRetencion.desconocido',
+    );
+  });
+
+  it('y NINGUNO de ellos existe en el vocabulario de los saldos', () => {
+    // Esta es la aserción que habría evitado el fallo: si algún día alguien
+    // añade `held` a ESTADOS_DE_SALDO, las dos funciones dejan de distinguirse
+    // y esta prueba se pone roja antes de que la pantalla mienta.
+    for (const estado of ESTADOS_DE_RETENCION) {
+      assert.equal(
+        claveDelEstadoDeSaldo(estado),
+        'finanzaDeProducto.estado.desconocido',
+        `${estado} no es un estado de saldo`,
+      );
+    }
+  });
+
+  it('la pantalla usa el vocabulario correcto para cada cosa', () => {
+    const codigo = fuente('screens', 'MiSaldoDeProductosScreen.tsx');
+    assert.ok(
+      codigo.includes('claveDelEstadoDeRetencion(r.status)'),
+      'la retención se pinta con el vocabulario de los saldos',
+    );
+  });
+
+  it('y los tres estados tienen texto en los tres idiomas', () => {
+    for (const diccionario of DICCIONARIOS) {
+      for (const estado of [...ESTADOS_DE_RETENCION, 'desconocido']) {
+        assert.ok(
+          `finanzaDeProducto.estadoDeRetencion.${estado}` in diccionario,
+          estado,
+        );
+      }
+    }
+  });
+});
+
+// ========================================================================== //
+// 6 ter. Lo que no se deshace se pregunta antes
+//
+// También de la revisión: la conformidad cierra el plazo de protección y
+// adelanta el pago, y disparaba al pulsar. `cancelar`, treinta líneas más
+// arriba en la misma pantalla, ya preguntaba: la incoherencia era la pista.
+// ========================================================================== //
+describe('las acciones que mueven dinero preguntan antes', () => {
+  it('la conformidad pregunta, y dice que no se puede deshacer', () => {
+    const codigo = fuente('screens', 'PedidoDeProductoScreen.tsx');
+    const trozo = codigo.slice(
+      codigo.indexOf('const darLaConformidad'),
+      codigo.indexOf('const cancelar'),
+    );
+    assert.ok(trozo.length > 100, 'no se encontró la acción');
+    assert.ok(trozo.includes('await confirm({'), 'no pregunta');
+    assert.ok(
+      trozo.includes('finanzaDeProducto.conformidad.confirmar'),
+      'pregunta sin decir qué pasa',
+    );
+    for (const diccionario of DICCIONARIOS) {
+      const texto = diccionario['finanzaDeProducto.conformidad.confirmar'];
+      assert.ok(texto && texto.length > 40, 'el aviso no explica nada');
+    }
+  });
+
+  it('y las tres del panel también, cada una con su texto', () => {
+    const codigo = fuente('screens', 'FinanzasDeProductosScreen.tsx');
+    for (const clave of [
+      'finanzaDeProducto.panel.confirmarLiberar',
+      'finanzaDeProducto.panel.confirmarPedir',
+      'finanzaDeProducto.panel.confirmarAnular',
+    ]) {
+      assert.ok(codigo.includes(clave), clave);
+      for (const diccionario of DICCIONARIOS) {
+        assert.ok(clave in diccionario, `${clave} sin traducir`);
+      }
+    }
+    // Y son TRES textos distintos: el mismo aviso para tres acciones
+    // distintas no informa de ninguna.
+    const avisos = new Set(
+      [
+        'finanzaDeProducto.panel.confirmarLiberar',
+        'finanzaDeProducto.panel.confirmarPedir',
+        'finanzaDeProducto.panel.confirmarAnular',
+      ].map((k) => (DICCIONARIOS[0] as Record<string, string>)[k]),
+    );
+    assert.equal(avisos.size, 3);
+  });
+
+  it('el de pedir dice que sale dinero de verdad fuera de Z', () => {
+    // `pedir` es la ÚNICA acción del panel que habla con la pasarela, y el
+    // aviso tiene que distinguirse de «liberar», que no mueve nada.
+    const pedir = (DICCIONARIOS[0] as Record<string, string>)[
+      'finanzaDeProducto.panel.confirmarPedir'
+    ];
+    const liberar = (DICCIONARIOS[0] as Record<string, string>)[
+      'finanzaDeProducto.panel.confirmarLiberar'
+    ];
+    assert.ok(/pasarela/i.test(pedir));
+    assert.ok(/no transfiere/i.test(liberar));
   });
 });
 

@@ -9,6 +9,7 @@ import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
+import { confirm } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import {
   type DevolucionDeProducto,
@@ -118,7 +119,20 @@ export function FinanzasDeProductosScreen() {
     void cargar();
   }, [cargar]);
 
+  //: LAS TRES PREGUNTAN ANTES. Liberar marca saldos como cobrables, pedir sale
+  //: a la pasarela y anular retira una devolucion decidida: ninguna es un
+  //: cambio de pestaña. La revision independiente las encontro a un toque.
   const liberar = async () => {
+    const acepta = await confirm({
+      title: f('finanzaDeProducto.panel.liberar'),
+      message: f('finanzaDeProducto.panel.confirmarLiberar'),
+      confirmLabel: f('finanzaDeProducto.panel.liberar'),
+    });
+    if (!acepta) return;
+    return liberarDeVerdad();
+  };
+
+  const liberarDeVerdad = async () => {
     setOcupado(true);
     setError(null);
     try {
@@ -137,6 +151,14 @@ export function FinanzasDeProductosScreen() {
   };
 
   const pedir = async (refundId: string) => {
+    //: ESTA SALE A LA PASARELA. Es la unica accion del panel que habla con
+    //: dinero de verdad fuera de Z, y no se deshace desde aqui.
+    const acepta = await confirm({
+      title: f('finanzaDeProducto.panel.pedir'),
+      message: f('finanzaDeProducto.panel.confirmarPedir'),
+      confirmLabel: f('finanzaDeProducto.panel.pedir'),
+    });
+    if (!acepta) return;
     setOcupado(true);
     setError(null);
     try {
@@ -156,6 +178,13 @@ export function FinanzasDeProductosScreen() {
   const anular = async (refundId: string) => {
     const motivo = (motivos[refundId] ?? '').trim();
     if (motivo.length < 3) return;
+    const acepta = await confirm({
+      title: f('finanzaDeProducto.panel.anular'),
+      message: f('finanzaDeProducto.panel.confirmarAnular'),
+      confirmLabel: f('finanzaDeProducto.panel.anular'),
+      destructive: true,
+    });
+    if (!acepta) return;
     setOcupado(true);
     setError(null);
     try {
