@@ -60,6 +60,7 @@ from app.modules.products.models import (
     ProductIncident,
     ProductPolicy,
     ProductReview,
+    ProductReviewReply,
     ProductSeller,
     ProductVersion,
 )
@@ -3273,11 +3274,16 @@ def _resena(
     *,
     respuesta=None,  # noqa: ANN001
     propia: bool = False,
+    con_estado: bool = False,
 ) -> ResenaRead:
     """El molde de salida.
 
-    `order_item_id` y el estado SOLO en la propia y en la de moderacion: en la
-    lista publica dirian de que compra concreta sale cada opinion.
+    DOS INTERRUPTORES Y NO UNO. El estado hace falta para moderar —si no, la
+    pantalla no sabe si ofrecer esconder o restaurar— pero `order_item_id` NO:
+    para juzgar un texto no hace falta de que linea de pedido salio, y es
+    justamente el campo que la 0081 saca de la lista publica por atar a una
+    persona con una compra concreta. Antes iban juntos y la cola de moderacion
+    se llevaba los dos; lo senalo la revision independiente.
     """
     return ResenaRead(
         id=resena.id,
@@ -3299,9 +3305,39 @@ def _resena(
         ),
         created_at=resena.created_at,
         updated_at=resena.updated_at,
-        status=resena.status if propia else None,
+        status=resena.status if (propia or con_estado) else None,
         order_item_id=resena.order_item_id if propia else None,
     )
+
+
+def _cursor(before: datetime | None, before_id: str | None):  # noqa: ANN202
+    """El cursor, entero o ninguno.
+
+    Las dos partes describen la misma fila; mandar solo una haria que el
+    servidor ignorara el cursor y devolviera otra vez la primera pagina.
+    """
+    if before is None or before_id is None:
+        return None
+    ensure_uuid(before_id, "Resena no encontrada.")
+    return (before, before_id)
+
+
+async def _exigir_que_no_sea_suyo(db: AsyncSession, *, producto_id: str, actor_id: str) -> None:
+    """Nadie modera las valoraciones de su propio producto.
+
+    SE COMPRUEBA ANTES QUE EL ROL, por lo mismo que en evaluar y publicar desde
+    el Incremento 2: si se comprobara despues, quien vende y ademas tiene rol de
+    curaduria recibiria un 403 generico en vez del motivo real, y el dia que
+    alguien relaje el rol la puerta desapareceria.
+
+    `profiles.role` incluye `moderator`, asi que sin esto un proveedor al que se
+    le diera rol de curaduria enterraba todas las valoraciones malas de su
+    catalogo. Lo encontro la revision independiente, y lo impone ademas un
+    disparador de la 0081: esta capa da el motivo, la de abajo no se esquiva.
+    """
+    producto = await db.get(Product, producto_id)
+    if producto is not None:
+        await permisos.exigir_ajeno(db, producto=producto, user_id=actor_id)
 
 
 async def _con_respuestas(db: AsyncSession, filas: list) -> list[ResenaRead]:
@@ -3316,12 +3352,22 @@ async def _con_respuestas(db: AsyncSession, filas: list) -> list[ResenaRead]:
 
 @router.get("/reviews/mine", response_model=list[ResenaRead])
 async def mis_resenas(
+    before: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None),
+    limit: int = Query(
+        default=opiniones.POR_PAGINA, ge=1, le=opiniones.TOPE_POR_PAGINA
+    ),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ResenaRead]:
     """Las que escribi, ESCONDIDAS INCLUIDAS: quien la escribio tiene derecho a
     saber que paso con lo que escribio."""
-    filas = await opiniones.mias(db, usuario_id=current_user.id)
+    filas = await opiniones.mias(
+        db,
+        usuario_id=current_user.id,
+        antes_de=_cursor(before, before_id),
+        limite=limit,
+    )
     return [_resena(r, propia=True) for r in filas]
 
 
@@ -3430,12 +3476,26 @@ async def editar_mi_resena(
 
 @router.get("/seller/reviews", response_model=list[ResenaRead])
 async def resenas_de_mi_tienda(
+    before: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None),
+    limit: int = Query(
+        default=opiniones.POR_PAGINA, ge=1, le=opiniones.TOPE_POR_PAGINA
+    ),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ResenaRead]:
-    """Lo que opinan de mis productos, para poder responderlo."""
+    """Lo que opinan de mis productos, para poder responderlo.
+
+    PAGINA COMO LA LISTA PUBLICA. Sin cursor topaba en veinte, y un proveedor
+    con mas de veinte valoraciones no podia ver ni responder las demas.
+    """
     await permisos.exigir_vendedor_activo(db, current_user.id)
-    filas = await opiniones.del_proveedor(db, usuario_id=current_user.id)
+    filas = await opiniones.del_proveedor(
+        db,
+        usuario_id=current_user.id,
+        antes_de=_cursor(before, before_id),
+        limite=limit,
+    )
     return await _con_respuestas(db, filas)
 
 
@@ -3465,6 +3525,8 @@ async def responder_resena(
     #: salido con 404 antes de llegar aqui.
     resena = await db.get(ProductReview, review_id)
     return _resena(resena, respuesta=respuesta)
+
+
 @router.get("/{product_id}/reviews/summary", response_model=ResumenDeResenas)
 async def resumen_de_resenas(
     product_id: str,
@@ -3519,19 +3581,40 @@ async def resenas_del_producto(
 
 @admin_router.get("/reviews", response_model=list[ResenaRead])
 async def cola_de_resenas(
+    hidden: bool = Query(default=False),
+    before: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None),
+    limit: int = Query(
+        default=opiniones.POR_PAGINA, ge=1, le=opiniones.TOPE_POR_PAGINA
+    ),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ResenaRead]:
-    """Las resenas visibles, para poder mirarlas.
+    """La cola de moderacion. DOS LADOS: las visibles y las escondidas.
+
+    Con un solo lado, esconder era una decision de un solo sentido: una
+    valoracion escondida por error no se podia volver a encontrar. Lo senalo la
+    revision independiente.
 
     EL ROL VA ANTES DE LA PUERTA DE ESQUEMA: si fuera al reves, una cuenta sin
     permisos distinguiria un 503 de un 403 y averiguaria que migraciones estan
     aplicadas.
+
+    Y NO LLEVA LA LINEA DE PEDIDO. Para juzgar un texto no hace falta de que
+    compra salio; el estado si, porque si no la pantalla no sabe si ofrecer
+    esconder o restaurar.
     """
     await permisos.exigir_evaluador(db, current_user.id)
-    filas = await opiniones.para_moderar(db)
+    filas = await opiniones.para_moderar(
+        db,
+        escondidas=hidden,
+        antes_de=_cursor(before, before_id),
+        limite=limit,
+    )
     respuestas = await opiniones.respuestas_de(db, resena_ids=[r.id for r in filas])
-    return [_resena(r, respuesta=respuestas.get(r.id), propia=True) for r in filas]
+    return [
+        _resena(r, respuesta=respuestas.get(r.id), con_estado=True) for r in filas
+    ]
 
 
 @admin_router.post("/reviews/{review_id}/moderate", response_model=ResenaRead)
@@ -3542,11 +3625,18 @@ async def moderar_resena(
     db: AsyncSession = Depends(get_db),
 ) -> ResenaRead:
     """Esconde o restaura. La fila se queda entera."""
-    await permisos.exigir_evaluador(db, current_user.id)
     ensure_uuid(review_id, "Resena no encontrada.")
+    #: NADIE MODERA LO SUYO, Y SE COMPRUEBA ANTES QUE EL ROL.
+    mirada = await db.get(ProductReview, review_id)
+    if mirada is not None:
+        await _exigir_que_no_sea_suyo(
+            db, producto_id=mirada.product_id, actor_id=current_user.id
+        )
+    await permisos.exigir_evaluador(db, current_user.id)
     #: EL MOTIVO NO VIAJA A LA AUDITORIA COMPARTIDA, que la leen mas personas
     #: que esta cola: puede llevar dentro una cita de lo que escribio quien
     #: opino. Vive en `product_review_moderation` y ahi se queda.
+    antes = mirada.status if mirada is not None else None
     resena = await opiniones.moderar(
         db,
         resena_id=review_id,
@@ -3557,9 +3647,14 @@ async def moderar_resena(
     await auditoria.anotar(
         db,
         actor_id=current_user.id,
+        #: QUIEN FUE, Y DE DONDE VENIA. Sin el rol, el rastro decia que lo
+        #: escondio «el sistema»; sin el estado anterior no se podia leer el
+        #: salto. Lo senalo la revision independiente.
+        actor_role=ACTOR_ADMINISTRACION,
         action="product_review.moderate",
         entity_type="product_review",
         entity_id=resena.id,
+        previous_state=antes,
         new_state=resena.status,
     )
     await db.commit()
@@ -3575,8 +3670,16 @@ async def moderar_respuesta_de_resena(
     db: AsyncSession = Depends(get_db),
 ) -> ResenaRead:
     """Lo mismo, para la respuesta del proveedor."""
-    await permisos.exigir_evaluador(db, current_user.id)
     ensure_uuid(reply_id, "Respuesta no encontrada.")
+    mirada = await db.get(ProductReviewReply, reply_id)
+    if mirada is not None:
+        dueña = await db.get(ProductReview, mirada.review_id)
+        if dueña is not None:
+            await _exigir_que_no_sea_suyo(
+                db, producto_id=dueña.product_id, actor_id=current_user.id
+            )
+    await permisos.exigir_evaluador(db, current_user.id)
+    antes = mirada.status if mirada is not None else None
     respuesta = await opiniones.moderar_respuesta(
         db,
         respuesta_id=reply_id,
@@ -3587,9 +3690,11 @@ async def moderar_respuesta_de_resena(
     await auditoria.anotar(
         db,
         actor_id=current_user.id,
+        actor_role=ACTOR_ADMINISTRACION,
         action="product_review_reply.moderate",
         entity_type="product_review_reply",
         entity_id=respuesta.id,
+        previous_state=antes,
         new_state=respuesta.status,
     )
     await db.commit()

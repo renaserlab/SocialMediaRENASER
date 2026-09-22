@@ -46,6 +46,7 @@ from app.core.exceptions import (
 from app.modules.products import esquema
 from app.modules.products.models import (
     EJES_DE_RESENA,
+    ENVIO_ENTREGADO,
     PEDIDO_PAGADO,
     RESENA_ESCONDIDA,
     RESENA_VISIBLE,
@@ -224,11 +225,28 @@ def armar(
 
 
 async def _dueno_del_producto(db: AsyncSession, producto_id: str) -> str | None:
-    return await db.scalar(
-        select(ProductSeller.profile_id)
-        .join(Product, Product.seller_id == ProductSeller.id)
-        .where(Product.id == producto_id)
-    )
+    return (await _duenos_de(db, [producto_id])).get(producto_id)
+
+
+async def _duenos_de(
+    db: AsyncSession, producto_ids: list[str]
+) -> dict[str, str | None]:
+    """De quien es cada producto, EN UNA SOLA CONSULTA.
+
+    Antes se preguntaba uno por uno, y el docstring de `valorables_del_pedido`
+    prometia lo contrario. Lo senalo la revision independiente: hoy son una o
+    dos consultas de mas, y con carritos de varios proveedores serian N.
+    """
+    if not producto_ids:
+        return {}
+    filas = (
+        await db.execute(
+            select(Product.id, ProductSeller.profile_id)
+            .join(ProductSeller, ProductSeller.id == Product.seller_id)
+            .where(Product.id.in_(list(dict.fromkeys(producto_ids))))
+        )
+    ).all()
+    return {pid: dueno for pid, dueno in filas}
 
 
 async def puede_resenar(
@@ -265,7 +283,16 @@ async def puede_resenar(
     if orden.status != PEDIDO_PAGADO or orden.paid_at is None:
         return False, "order_not_paid", None
 
-    if envio is None or envio.delivered_at is None:
+    # LAS DOS COSAS, Y NO SOLO LA FECHA. Hoy `DELIVERED` es terminal y no hay
+    # ninguna transicion que salga de ahi, asi que mirar la fecha bastaria. Pero
+    # el dia que se anada una que salga sin limpiar `delivered_at`, mirar solo la
+    # fecha dejaria de significar «entregado» sin que nada se pusiera rojo. Lo
+    # senalo la revision independiente.
+    if (
+        envio is None
+        or envio.delivered_at is None
+        or envio.status != ENVIO_ENTREGADO
+    ):
         return False, "not_delivered", None
 
     # NADIE VALORA LO SUYO. Es la única de las cuatro condiciones que la base no
@@ -334,9 +361,7 @@ async def valorables_del_pedido(
     #: DE QUIEN ES CADA PRODUCTO, en una consulta por producto distinto y no
     #: por linea. Hoy un pedido es de un solo proveedor, pero se mira por
     #: producto para que el dia que un carrito admita varios esto no mienta.
-    duenos: dict[str, str | None] = {}
-    for producto_id in dict.fromkeys(l.product_id for l in lineas):
-        duenos[producto_id] = await _dueno_del_producto(db, producto_id)
+    duenos = await _duenos_de(db, [l.product_id for l in lineas])
 
     ya = {
         item: rid
@@ -453,6 +478,11 @@ async def crear(
         created_at=momento,
         updated_at=momento,
     )
+    #: PUNTO DE GUARDADO, NO `rollback` DE TODA LA SESION. Antes se deshacia la
+    #: transaccion entera de quien llama: hoy es inocuo porque las rutas no
+    #: escriben nada antes, pero una que auditara primero perderia esa fila en
+    #: silencio. Lo senalo la revision independiente.
+    punto = await db.begin_nested()
     db.add(resena)
     try:
         await db.flush()
@@ -464,7 +494,7 @@ async def crear(
         # contaría una mentira: una puntuación fuera de rango o una clave ajena
         # rota diría «ya valoraste esta compra», que es falso y además esconde
         # el fallo de verdad. Cualquier otra se deja subir.
-        await db.rollback()
+        await punto.rollback()
         if _es(fallo, "product_reviews_una_por_linea"):
             raise ResenaDuplicada("Ya valoraste esta compra.") from None
         raise
@@ -495,7 +525,10 @@ async def editar(
     await exigir_disponible(db)
     momento = momento or ahora()
 
-    resena = await db.get(ProductReview, resena_id)
+    #: BAJO CANDADO. Sin el, editar y moderar podian cruzarse: el moderador
+    #: acababa escondiendo un texto distinto del que juzgo, con un motivo que
+    #: ya no se referia a nada. Lo reprodujo la revision independiente.
+    resena = await db.get(ProductReview, resena_id, with_for_update=True)
     if resena is None or resena.author_id != usuario_id:
         raise ResenaNoEncontrada("Reseña no encontrada.")
     if resena.status == RESENA_ESCONDIDA:
@@ -536,7 +569,12 @@ async def moderar(
     await exigir_disponible(db)
     momento = momento or ahora()
 
-    resena = await db.get(ProductReview, resena_id)
+    #: BAJO CANDADO, y el estado se lee DESPUES de tenerlo. Sin el, dos
+    #: moderadores a la vez dejaban dos filas de historial contando el mismo
+    #: paso `visible -> hidden` con dos actores y dos motivos: quien auditara
+    #: despues no podia distinguir «se escondio dos veces» de «dos personas
+    #: pulsaron a la vez». Lo reprodujo la revision independiente.
+    resena = await db.get(ProductReview, resena_id, with_for_update=True)
     if resena is None:
         raise ResenaNoEncontrada("Reseña no encontrada.")
 
@@ -586,7 +624,9 @@ async def moderar_respuesta(
     await exigir_disponible(db)
     momento = momento or ahora()
 
-    respuesta = await db.get(ProductReviewReply, respuesta_id)
+    respuesta = await db.get(
+        ProductReviewReply, respuesta_id, with_for_update=True
+    )
     if respuesta is None:
         raise ResenaNoEncontrada("Respuesta no encontrada.")
 
@@ -633,7 +673,18 @@ async def moderar_respuesta(
             created_at=momento,
         )
     )
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as fallo:
+        #: LA CARRERA QUE EL `select` DE ARRIBA NO CIERRA. Si dos
+        #: restauraciones se interlean, el indice parcial es el unico que lo
+        #: decide, y sin esto saldria un 500 en vez del 409 que promete el
+        #: comentario de arriba. Lo senalo la revision independiente.
+        if _es(fallo, "product_review_replies_una_visible"):
+            raise RespuestaDuplicada(
+                "Ya hay otra respuesta visible en esa reseña."
+            ) from None
+        raise
     return respuesta
 
 
@@ -685,11 +736,12 @@ async def responder(
         created_at=momento,
         updated_at=momento,
     )
+    punto = await db.begin_nested()
     db.add(respuesta)
     try:
         await db.flush()
     except IntegrityError as fallo:
-        await db.rollback()
+        await punto.rollback()
         if _es(fallo, "product_review_replies_una_visible"):
             raise RespuestaDuplicada("Ya respondiste a esa reseña.") from None
         raise
@@ -843,23 +895,56 @@ async def mia(
     return resena
 
 
+def _mas_viejas_que(consulta, antes_de: tuple[datetime, str] | None):  # noqa: ANN001
+    """El mismo cursor `(created_at, id)` para las cuatro listas.
+
+    LAS TRES BANDEJAS NO TENIAN NINGUNO y topaban en veinte: un proveedor con
+    mas de veinte valoraciones no podia ver ni responder las demas, y quien
+    moderara no podia trabajar mas alla de las veinte mas nuevas. Lo encontro
+    la revision independiente, y el docstring de `listar` ya explicaba por que
+    un desplazamiento numerico esta mal.
+    """
+    if antes_de is None:
+        return consulta
+    creada, ident = antes_de
+    return consulta.where(
+        (ProductReview.created_at < creada)
+        | ((ProductReview.created_at == creada) & (ProductReview.id < ident))
+    )
+
+
+def _pagina(limite: int) -> int:
+    return max(1, min(int(limite), TOPE_POR_PAGINA))
+
+
 async def mias(
-    db: AsyncSession, *, usuario_id: str, limite: int = POR_PAGINA
+    db: AsyncSession,
+    *,
+    usuario_id: str,
+    antes_de: tuple[datetime, str] | None = None,
+    limite: int = POR_PAGINA,
 ) -> list[ProductReview]:
     """Las que escribió esta persona, escondidas incluidas."""
     await exigir_disponible(db)
+    consulta = _mas_viejas_que(
+        select(ProductReview).where(ProductReview.author_id == usuario_id),
+        antes_de,
+    )
     return list(
         await db.scalars(
-            select(ProductReview)
-            .where(ProductReview.author_id == usuario_id)
-            .order_by(ProductReview.created_at.desc(), ProductReview.id.desc())
-            .limit(max(1, min(int(limite), TOPE_POR_PAGINA)))
+            consulta.order_by(
+                ProductReview.created_at.desc(), ProductReview.id.desc()
+            ).limit(_pagina(limite))
         )
     )
 
 
 async def del_proveedor(
-    db: AsyncSession, *, usuario_id: str, limite: int = POR_PAGINA
+    db: AsyncSession,
+    *,
+    usuario_id: str,
+    antes_de: tuple[datetime, str] | None = None,
+    limite: int = POR_PAGINA,
 ) -> list[ProductReview]:
     """Las reseñas de los productos de quien vende, para poder responderlas.
 
@@ -867,32 +952,53 @@ async def del_proveedor(
     que a quien la escribió.
     """
     await exigir_disponible(db)
+    consulta = _mas_viejas_que(
+        select(ProductReview)
+        .join(Product, Product.id == ProductReview.product_id)
+        .join(ProductSeller, ProductSeller.id == Product.seller_id)
+        .where(
+            ProductSeller.profile_id == usuario_id,
+            ProductReview.status == RESENA_VISIBLE,
+        ),
+        antes_de,
+    )
     return list(
         await db.scalars(
-            select(ProductReview)
-            .join(Product, Product.id == ProductReview.product_id)
-            .join(ProductSeller, ProductSeller.id == Product.seller_id)
-            .where(
-                ProductSeller.profile_id == usuario_id,
-                ProductReview.status == RESENA_VISIBLE,
-            )
-            .order_by(ProductReview.created_at.desc(), ProductReview.id.desc())
-            .limit(max(1, min(int(limite), TOPE_POR_PAGINA)))
+            consulta.order_by(
+                ProductReview.created_at.desc(), ProductReview.id.desc()
+            ).limit(_pagina(limite))
         )
     )
 
 
 async def para_moderar(
-    db: AsyncSession, *, limite: int = POR_PAGINA
+    db: AsyncSession,
+    *,
+    escondidas: bool = False,
+    antes_de: tuple[datetime, str] | None = None,
+    limite: int = POR_PAGINA,
 ) -> list[ProductReview]:
-    """La cola de moderación: las visibles, de la más nueva a la más vieja."""
+    """La cola de moderación, de la más nueva a la más vieja.
+
+    HAY DOS COLAS Y NO UNA. La primera versión solo traía las visibles, así que
+    esconder era una decisión de un solo sentido: una valoración escondida por
+    error no se podía encontrar otra vez sin haber apuntado su identificador a
+    mano, y el botón de restaurar de la pantalla era código muerto. Lo encontró
+    la revisión independiente.
+    """
     await exigir_disponible(db)
+    consulta = _mas_viejas_que(
+        select(ProductReview).where(
+            ProductReview.status
+            == (RESENA_ESCONDIDA if escondidas else RESENA_VISIBLE)
+        ),
+        antes_de,
+    )
     return list(
         await db.scalars(
-            select(ProductReview)
-            .where(ProductReview.status == RESENA_VISIBLE)
-            .order_by(ProductReview.created_at.desc(), ProductReview.id.desc())
-            .limit(max(1, min(int(limite), TOPE_POR_PAGINA)))
+            consulta.order_by(
+                ProductReview.created_at.desc(), ProductReview.id.desc()
+            ).limit(_pagina(limite))
         )
     )
 

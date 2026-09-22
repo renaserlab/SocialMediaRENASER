@@ -209,10 +209,20 @@ create index if not exists product_reviews_resumen_del_producto
 create index if not exists product_reviews_de_la_persona
   on public.product_reviews (author_id, created_at desc, id desc);
 
--- LA COLA DE MODERACION, y las escondidas no vuelven a ella.
+-- LAS DOS COLAS DE MODERACION, y son dos a proposito.
+--
+-- La primera version solo indexaba las visibles, con el comentario «las
+-- escondidas no vuelven a ella». Eso convertia esconder en una decision de un
+-- solo sentido: una resena escondida por error no se podia encontrar otra vez
+-- sin haber apuntado su identificador a mano. Lo encontro la revision
+-- independiente.
 create index if not exists product_reviews_por_moderar
   on public.product_reviews (created_at desc, id desc)
   where status = 'visible';
+
+create index if not exists product_reviews_escondidas
+  on public.product_reviews (moderated_at desc, id desc)
+  where status = 'hidden';
 
 -- Para saber que lineas de un pedido ya se valoraron sin recorrer nada.
 create index if not exists product_reviews_del_pedido
@@ -260,6 +270,70 @@ create unique index if not exists product_review_replies_una_visible
 
 create index if not exists product_review_replies_de_la_resena
   on public.product_review_replies (review_id, created_at desc, id desc);
+
+-- ------------------------------------------------------------------------- --
+-- 3.1. NADIE ESCONDE LO SUYO, y lo impone la base.
+--
+-- Es la misma regla que gobierna evaluar y publicar desde el Incremento 2
+-- —«nadie evalua ni publica su propio producto, ni siendo administrador»— y
+-- faltaba aqui. `profiles.role` incluye `moderator`, asi que un proveedor al
+-- que se le diera rol de curaduria podia esconder todas las resenas malas de
+-- su catalogo. Lo encontro la revision independiente del Incremento 8.
+--
+-- POR QUE UN DISPARADOR Y NO SOLO UN `if` EN LA RUTA. La ruta comprueba antes
+-- que el rol, para dar el motivo de verdad y no un 403 generico. Pero el `if`
+-- se puede esquivar desde cualquier otro sitio que escriba la fila, y el dia
+-- que alguien relaje el rol la puerta desaparece. Esta capa no se esquiva.
+--
+-- UN CHECK NO SIRVE: el dueno esta a dos saltos —producto, vendedor, perfil— y
+-- un CHECK no cruza tablas. Un disparador si.
+-- ------------------------------------------------------------------------- --
+create or replace function public.product_reviews_nadie_esconde_lo_suyo()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  dueno uuid;
+  producto uuid;
+begin
+  if new.moderated_by is null then
+    return new;
+  end if;
+
+  if tg_table_name = 'product_reviews' then
+    producto := new.product_id;
+  else
+    select r.product_id into producto
+      from public.product_reviews r
+     where r.id = new.review_id;
+  end if;
+
+  select s.profile_id into dueno
+    from public.products p
+    join public.product_sellers s on s.id = p.seller_id
+   where p.id = producto;
+
+  if dueno is not null and dueno = new.moderated_by then
+    raise exception
+      'Nadie modera las resenas de su propio producto'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists product_reviews_no_modera_lo_suyo on public.product_reviews;
+create trigger product_reviews_no_modera_lo_suyo
+before insert or update on public.product_reviews
+for each row execute function public.product_reviews_nadie_esconde_lo_suyo();
+
+drop trigger if exists product_review_replies_no_modera_lo_suyo
+  on public.product_review_replies;
+create trigger product_review_replies_no_modera_lo_suyo
+before insert or update on public.product_review_replies
+for each row execute function public.product_reviews_nadie_esconde_lo_suyo();
 
 -- ------------------------------------------------------------------------- --
 -- 4. El historial de moderacion. SOLO SE ANADE.
@@ -328,16 +402,12 @@ revoke all on public.product_review_moderation from anon, authenticated;
 do $$
 declare
   permisos bigint;
-  cuantas bigint;
 begin
-  -- ESTE FICHERO NO ESCRIBE NINGUNA FILA. No hay un solo `insert`, y las tres
-  -- tablas nacen vacias.
-  select count(*) into cuantas from public.product_reviews;
-  if cuantas > 0 then
-    -- No aborta: la migracion se declara re-ejecutable y el dia que haya
-    -- resenas esto seguiria siendo cierto. Solo se comprueba que exista.
-    null;
-  end if;
+  -- ESTE FICHERO NO ESCRIBE NINGUNA FILA, y no se comprueba contando: contar
+  -- y abortar haria que la migracion dejara de ser re-ejecutable en cuanto
+  -- existiera una resena. Se comprueba leyendo el fichero, donde no hay ni un
+  -- `insert`. La version anterior de este bloque contaba las filas y ejecutaba
+  -- `null`, que no comprobaba nada; lo encontro la revision independiente.
 
   -- LAS TRES CLAVES AJENAS COMPUESTAS. Si falta una, «compra verificada» vuelve
   -- a depender de que el servidor se acuerde de comprobarlo.
@@ -418,6 +488,30 @@ begin
     raise exception 'La 0081 no dejo el disparador del historial';
   end if;
 
+  -- Y NADIE MODERA LO SUYO. Sin estos dos, un proveedor con rol de curaduria
+  -- entierra las resenas malas de su catalogo.
+  if not exists (
+    select 1 from pg_trigger
+     where tgname = 'product_reviews_no_modera_lo_suyo' and not tgisinternal
+  ) then
+    raise exception 'La 0081 no dejo el disparador de la resena propia';
+  end if;
+  if not exists (
+    select 1 from pg_trigger
+     where tgname = 'product_review_replies_no_modera_lo_suyo'
+       and not tgisinternal
+  ) then
+    raise exception 'La 0081 no dejo el disparador de la respuesta propia';
+  end if;
+
+  -- Y LAS DOS COLAS DE MODERACION, para que esconder no sea de un solo sentido.
+  if not exists (
+    select 1 from pg_indexes
+     where schemaname = 'public' and indexname = 'product_reviews_escondidas'
+  ) then
+    raise exception 'La 0081 no dejo el indice de las escondidas';
+  end if;
+
   -- LAS OTRAS CUATRO MAQUINAS NO SE ENTERAN DE ESTA. Ni el pedido, ni el envio,
   -- ni la incidencia ganan un estado de resena. Se buscan valores concretos y
   -- no la palabra «REVIEW» suelta: `product_orders.status` ya tiene
@@ -457,6 +551,7 @@ notify pgrst, 'reload schema';
 --   drop table public.product_review_replies;
 --   drop table public.product_reviews;
 --   drop function public.product_review_moderation_solo_anadir();
+--   drop function public.product_reviews_nadie_esconde_lo_suyo();
 --
 -- Y SOLO DESPUES, si de verdad se quiere deshacer entero, los tres indices
 -- unicos redundantes. Quitarlos no es obligatorio —no estorban a nadie— y
