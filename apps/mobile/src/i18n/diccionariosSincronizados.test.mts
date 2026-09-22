@@ -73,6 +73,8 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Incremento 8 de Productos: «No» se escribe igual en los dos idiomas.
+    'resenaDeProducto.valorar.no',
     // Incremento 5 de Productos: se escriben igual en espanol y en ingles.
     'pedidoDeProducto.checkout.subtotal', // «Subtotal» es la misma palabra.
     'pedidoDeProducto.checkout.total',    // «Total», tambien.
@@ -127,6 +129,18 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 8 de Productos: se escriben IGUAL en español y en portugués.
+    'resenaDeProducto.ficha.comprasVerificadas',
+    'resenaDeProducto.ficha.unaCompraVerificada',
+    'resenaDeProducto.ficha.verTodas',
+    'resenaDeProducto.lista.selloCompra',
+    'resenaDeProducto.mia.editar',
+    'resenaDeProducto.tienda.responder',
+    'resenaDeProducto.moderar.esconder',
+    'resenaDeProducto.moderar.motivo',
+    'resenaDeProducto.moderar.ocultada',
+    // Un número y «de 5»: la misma cosa en los dos idiomas.
+    'resenaDeProducto.deCinco',
     // Incremento 7 de Productos: el portugues escribe estas EXACTAMENTE igual
     // que el espanol. Escribirlas distintas seria escribirlas mal.
     'incidencia.estado.APPEALED',   // «Apelado».
