@@ -18,9 +18,12 @@ LO QUE DEFIENDEN:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.main import create_app
@@ -354,3 +357,49 @@ async def test_la_auditoria_compartida_no_se_lleva_el_motivo(
     for fila in filas:
         assert secreto not in str(fila.payload or {})
         assert secreto not in (fila.reason or "")
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_proveedor_suspendido_no_responde(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """LA CAPACIDAD COMERCIAL SUSPENDIDA CIERRA LA RUTA, no solo la propiedad.
+
+    Lo encontro una mutacion: quitando `exigir_vendedor_activo` la ruta seguia
+    contestando 404 a quien no es dueno del producto, asi que ninguna prueba se
+    ponia roja. Lo que cambiaba de verdad es que un proveedor SUSPENDIDO podia
+    seguir publicando respuestas en las resenas de sus productos.
+    """
+    from app.modules.products.models import VENDEDOR_SUSPENDIDO, ProductSeller
+
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(sesiones, monkeypatch)
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(f"{PRODUCTOS}/order-items/{linea.id}/review", json=CINCO)
+    assert r.status_code == 201, r.text
+    resena_id = r.json()["id"]
+
+    #: Se le suspende la capacidad comercial, que es lo que hace administracion
+    #: cuando algo va mal con esa tienda.
+    async with sesiones() as db:
+        fila = await db.scalar(
+            select(ProductSeller).where(ProductSeller.profile_id == proveedor)
+        )
+        fila.status = VENDEDOR_SUSPENDIDO
+        #: CON SU FECHA Y SU MOTIVO: la base no admite una suspension sin
+        #: decir cuando ni por que, y aqui se respeta en vez de esquivarlo.
+        fila.suspended_at = datetime.now(timezone.utc)
+        fila.suspension_reason = "Revision de la tienda"
+        await db.commit()
+
+    quien["uid"] = proveedor
+    r = await http.post(
+        f"{PRODUCTOS}/seller/reviews/{resena_id}/reply", json={"body": "Hola."}
+    )
+    assert r.status_code == 403, r.text
+
+    #: Y tampoco ve su bandeja mientras este suspendida.
+    r = await http.get(f"{PRODUCTOS}/seller/reviews")
+    assert r.status_code == 403

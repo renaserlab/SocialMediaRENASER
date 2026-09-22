@@ -172,6 +172,52 @@ def ajustar(promedio: float, cuantas: int, previo: float) -> float:
     return (cuantas / peso) * promedio + (PESO_DEL_PREVIO / peso) * previo
 
 
+def armar(
+    *,
+    total: int,
+    promedio: float | None,
+    recomiendan: int,
+    ejes: dict[str, float | None] | None = None,
+    histograma: dict[int, int] | None = None,
+) -> Resumen:
+    """Arma el resumen a partir de lo que dijo la base. PURA a propósito.
+
+    ESTÁ APARTE PARA QUE SUS DOS GUARDIAS SE PUEDAN PROBAR. Dentro de la
+    consulta, `total` sale de un `count()` sobre un `group_by` y nunca vale
+    cero, así que los dos «si hay alguna» eran código defensivo que ninguna
+    prueba podía alcanzar: el día que la consulta pasara a un join externo
+    dejarían de estar probados sin que nadie se enterase. Aquí sí se pueden
+    llamar con cero y comprobar.
+
+    Y LAS DOS GUARDIAS DICEN LO MISMO CON PALABRAS DISTINTAS:
+
+      * sin reseñas no hay puntuación ajustada, porque la fórmula
+        devolvería el promedio de la categoría entero —una cifra sobre la
+        categoría, no sobre este producto—;
+      * sin reseñas no hay porcentaje que recomienda, y desde luego no un
+        «0 %», que se leería como que nadie lo recomienda.
+    """
+    vacio = {n: 0 for n in range(1, 6)}
+    return Resumen(
+        total=total,
+        promedio=promedio if total > 0 else None,
+        ajustada=(
+            ajustar(promedio, total, PROMEDIO_DE_CATEGORIA_POR_DEFECTO)
+            if promedio is not None and total > 0
+            else None
+        ),
+        histograma=histograma if histograma is not None else vacio,
+        recomiendan_bps=(round(recomiendan * 10_000 / total) if total > 0 else None),
+        por_eje=(
+            {eje: (ejes or {}).get(eje) for eje in EJES}
+            if total > 0
+            else {eje: None for eje in EJES}
+        ),
+        promedio_de_categoria=PROMEDIO_DE_CATEGORIA_POR_DEFECTO,
+        categoria_configurada=False,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Quién puede opinar, y por qué no.
 # --------------------------------------------------------------------------- #
@@ -737,31 +783,15 @@ async def resumen_de(
     salida: dict[str, Resumen] = {}
     for fila in agregado:
         producto_id = fila[0]
-        total = int(fila[1] or 0)
-        promedio = float(fila[2]) if fila[2] is not None else None
-        recomiendan = int(fila[3] or 0)
-        ejes = {
-            eje: (float(fila[4 + i]) if fila[4 + i] is not None else None)
-            for i, eje in enumerate(EJES)
-        }
-        salida[producto_id] = Resumen(
-            total=total,
-            promedio=promedio,
-            # CON CERO RESEÑAS NO SE PUBLICA NINGUNA PUNTUACIÓN AJUSTADA. La
-            # fórmula devolvería el promedio de categoría entero, que habla de
-            # la categoría y no de este producto.
-            ajustada=(
-                ajustar(promedio, total, PROMEDIO_DE_CATEGORIA_POR_DEFECTO)
-                if promedio is not None and total > 0
-                else None
-            ),
-            histograma=por_producto.get(producto_id, {n: 0 for n in range(1, 6)}),
-            recomiendan_bps=(
-                round(recomiendan * 10_000 / total) if total > 0 else None
-            ),
-            por_eje=ejes,
-            promedio_de_categoria=PROMEDIO_DE_CATEGORIA_POR_DEFECTO,
-            categoria_configurada=False,
+        salida[producto_id] = armar(
+            total=int(fila[1] or 0),
+            promedio=float(fila[2]) if fila[2] is not None else None,
+            recomiendan=int(fila[3] or 0),
+            ejes={
+                eje: (float(fila[4 + i]) if fila[4 + i] is not None else None)
+                for i, eje in enumerate(EJES)
+            },
+            histograma=por_producto.get(producto_id),
         )
 
     for producto_id in unicos:
@@ -911,6 +941,7 @@ __all__ = [
     "Valorable",
     "ahora",
     "ajustar",
+    "armar",
     "crear",
     "del_proveedor",
     "editar",

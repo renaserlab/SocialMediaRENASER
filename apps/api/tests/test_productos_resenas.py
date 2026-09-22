@@ -1209,3 +1209,110 @@ def test_el_servicio_no_sabe_de_dinero() -> None:
             assert "refund" not in nodo.module, nodo.module
             assert "finanzas" not in nodo.module, nodo.module
             assert "inventory" not in nodo.module, nodo.module
+
+
+# =========================================================================== #
+# 11. Los dos huecos que encontraron las mutaciones
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_proveedor_solo_ve_las_resenas_de_sus_productos(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """LA BANDEJA NO ES UNA VENTANA AL CATALOGO ENTERO.
+
+    Lo encontro una mutacion: sin el filtro por perfil, `del_proveedor`
+    devolvia todas las resenas de la plataforma y ninguna prueba se enteraba,
+    porque las que habia solo comprobaban que la propia SI estuviera.
+    """
+    mia, _, proveedor, _, _ = await resena_puesta(sesiones, monkeypatch)
+    ajena, _, otro_proveedor, _, _ = await resena_puesta(sesiones, monkeypatch)
+    assert proveedor != otro_proveedor, "el montaje necesita dos tiendas"
+
+    async with sesiones() as db:
+        vistas = [r.id for r in await resenas.del_proveedor(db, usuario_id=proveedor)]
+    assert mia in vistas
+    assert ajena not in vistas, "la bandeja ensena resenas de productos ajenos"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_resena_escondida_no_sale_en_la_bandeja_del_proveedor(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """Una escondida por moderacion no se le ensena a nadie mas que a su autor."""
+    resena_id, _, proveedor, _, _ = await resena_puesta(sesiones, monkeypatch)
+    moderador = await persona(sesiones, "modera10")
+    async with sesiones() as db:
+        await resenas.moderar(
+            db, resena_id=resena_id, actor_id=moderador, esconder=True, motivo="x"
+        )
+        await db.commit()
+    async with sesiones() as db:
+        vistas = [r.id for r in await resenas.del_proveedor(db, usuario_id=proveedor)]
+    assert resena_id not in vistas
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_el_histograma_ausente_sale_en_ceros_y_no_revienta(
+    sesiones, monkeypatch, venta_encendida
+) -> None:
+    """Un producto con resenas tiene su histograma; sin filas, cinco ceros."""
+    _, _, _, _, linea = await resena_puesta(sesiones, monkeypatch, overall=3)
+    async with sesiones() as db:
+        resumen = await resenas.resumen(db, producto_id=linea.product_id)
+    assert resumen.histograma[3] == 1
+    assert sum(resumen.histograma.values()) == 1
+
+
+def test_armar_con_cero_resenas_no_publica_ninguna_puntuacion() -> None:
+    """LAS DOS GUARDIAS DEL RESUMEN, LLAMADAS DIRECTAMENTE.
+
+    Dentro de la consulta `total` sale de un `count()` sobre un `group_by` y
+    nunca vale cero, asi que estas dos reglas eran codigo defensivo que ninguna
+    prueba podia alcanzar. Aqui si: se llama con cero y se comprueba que no se
+    publica ni la ajustada —que seria la puntuacion de la CATEGORIA— ni un
+    «0 %» que se leeria como que nadie lo recomienda.
+    """
+    #: SE LE PASAN DATOS A PROPOSITO en los tres sitios —promedio, quien
+    #: recomienda y los cuatro ejes— para que la prueba mida las guardias y no
+    #: la ausencia de datos: con  la de los ejes se cumpliria sola.
+    vacio = resenas.armar(
+        total=0,
+        promedio=4.5,
+        recomiendan=3,
+        ejes={eje: 4.0 for eje in resenas.EJES},
+    )
+    assert vacio.total == 0
+    assert vacio.promedio is None, "una media sobre cero opiniones no es una media"
+    assert vacio.ajustada is None, "con cero resenas la formula da la de la categoria"
+    assert vacio.recomiendan_bps is None, "«0 %» no es lo mismo que «nadie contesto»"
+    assert vacio.histograma == {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    assert all(v is None for v in vacio.por_eje.values())
+    #: Y EL PREVIO SE DICE IGUAL, para que la pantalla pueda explicarlo.
+    assert vacio.promedio_de_categoria == resenas.PROMEDIO_DE_CATEGORIA_POR_DEFECTO
+    assert vacio.categoria_configurada is False
+
+
+def test_armar_con_una_resena_publica_la_formula_del_blueprint() -> None:
+    uno = resenas.armar(
+        total=1,
+        promedio=4.0,
+        recomiendan=1,
+        ejes={"quality": 5.0, "fidelity": None, "functioning": 4.0, "value_for_money": 2.0},
+        histograma={1: 0, 2: 0, 3: 0, 4: 1, 5: 0},
+    )
+    assert uno.promedio == 4.0
+    assert uno.ajustada == pytest.approx((1 / 11) * 4.0 + (10 / 11) * 4.2)
+    assert uno.recomiendan_bps == 10_000
+    assert uno.por_eje["quality"] == 5.0
+    assert uno.por_eje["fidelity"] is None, "un eje sin datos no se rellena"
+    #: Y NINGUN EJE DE MAS: la tupla del modelo es la unica fuente.
+    assert set(uno.por_eje) == set(resenas.EJES)
+
+
+def test_armar_con_nadie_que_recomiende_si_dice_cero() -> None:
+    """UN CERO DE VERDAD SI ES UN CERO. Que nadie lo recomiende es un dato."""
+    ninguno = resenas.armar(total=4, promedio=2.0, recomiendan=0)
+    assert ninguno.recomiendan_bps == 0
