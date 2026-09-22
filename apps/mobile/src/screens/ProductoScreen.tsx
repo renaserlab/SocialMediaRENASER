@@ -12,6 +12,17 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { EstrellasDeResena } from '@/components/EstrellasDeResena';
+import {
+  type ResumenDeResenas,
+  ajustadaLegible,
+  comprasVerificadas,
+  esResenasApagadas,
+  hayValoraciones,
+  porcentajeLegible,
+  usaReferenciaPorDefecto,
+} from '@/lib/resenasDeProductos';
+import { ProductReviewRepository } from '@/repositories/ProductReviewRepository';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { toast } from '@/lib/toast';
 import {
@@ -104,6 +115,12 @@ export function ProductoScreen() {
     'red' | 'sinConexion' | 'noDisponible' | 'noEncontrado' | null
   >(null);
   const [ocupado, setOcupado] = useState(false);
+  /**
+   * La puntuacion del producto. `null` = todavia no se ha leido; un
+   * resumen con `total` en cero = LEIDO Y NO HAY NINGUNA, que no es lo
+   * mismo y se pinta distinto.
+   */
+  const [valoracion, setValoracion] = useState<ResumenDeResenas | null>(null);
   const ocupadoRef = useRef(false);
   /** Qué imagen de la galería se está viendo. El contador cuenta ESTO. */
   const [enLaGaleria, setEnLaGaleria] = useState(0);
@@ -138,6 +155,24 @@ export function ProductoScreen() {
     }
   }, []);
 
+  /**
+   * La puntuacion, EN SU PROPIA PETICION Y SIN TUMBAR LA FICHA.
+   *
+   * Es un bloque de la ficha, no la ficha: si la 0081 no esta aplicada o
+   * la peticion falla, el resto se sigue viendo y el bloque sale como la
+   * linea honesta que ya salia antes de que existieran las valoraciones.
+   */
+  const leerValoracion = useCallback(async () => {
+    if (!productId) return;
+    try {
+      setValoracion(await ProductReviewRepository.resumen(productId));
+    } catch (error) {
+      if (!(error instanceof ApiError) || !esResenasApagadas(error.code)) {
+        setValoracion(null);
+      }
+    }
+  }, [productId]);
+
   const cargar = useCallback(async () => {
     if (!productId) return;
     setCargando(true);
@@ -145,6 +180,7 @@ export function ProductoScreen() {
     try {
       setFicha(await ProductCatalogRepository.ficha(productId));
       void leerContadores();
+      void leerValoracion();
     } catch (error) {
       if (error instanceof ApiError && esProductosApagado(error.code)) setFallo('noDisponible');
       else if (error instanceof ApiError && error.status === 404) setFallo('noEncontrado');
@@ -606,10 +642,64 @@ export function ProductoScreen() {
           </View>
         );
 
-      // Los tres que hoy nunca tienen datos entran por `seDejaFuera` y salen
+      // LA VALORACION REAL (Incremento 8). SIN RESENAS SIGUE SALIENDO LA
+      // LINEA HONESTA de siempre: un producto sin opiniones no puntua 0,0
+      // y cinco estrellas vacias dirian que esta mal valorado.
+      //
+      // SE ENSENA LA AJUSTADA, que es la que pide el blueprint, y cuando se
+      // apoya en la referencia general —porque de donde sale el promedio de
+      // categoria no lo ha decidido nadie— la pantalla lo dice.
+      case 'valoracion':
+        if (!hayValoraciones(valoracion)) return sinDatos(cual);
+        return (
+          <View key={cual} style={styles.grupo}>
+            {tituloDelBloque(cual)}
+            <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+              <View style={styles.linea}>
+                <Text variant="titleMedium">{ajustadaLegible(valoracion)}</Text>
+                <EstrellasDeResena
+                  valor={
+                    valoracion?.adjusted ? Math.round(valoracion.adjusted) : null
+                  }
+                  tamano={16}
+                  etiqueta={f('resenaDeProducto.ficha.titulo')}
+                  sufijo={f('resenaDeProducto.deCinco')}
+                />
+              </View>
+              <Text variant="caption" color={colors.textMuted}>
+                {`${comprasVerificadas(valoracion)} ${
+                  comprasVerificadas(valoracion) === 1
+                    ? f('resenaDeProducto.ficha.unaCompraVerificada')
+                    : f('resenaDeProducto.ficha.comprasVerificadas')
+                }`}
+              </Text>
+              {porcentajeLegible(valoracion?.recommend_bps) !== null ? (
+                <Text variant="caption" color={colors.textMuted}>
+                  {`${porcentajeLegible(valoracion?.recommend_bps)} ${f(
+                    'resenaDeProducto.ficha.loRecomienda',
+                  )}`}
+                </Text>
+              ) : null}
+              {usaReferenciaPorDefecto(valoracion) ? (
+                <Text variant="caption" color={colors.textMuted}>
+                  {f('resenaDeProducto.ficha.referenciaPorDefecto')}
+                </Text>
+              ) : null}
+              <Button
+                label={f('resenaDeProducto.ficha.verTodas')}
+                variant="secondary"
+                icon="star"
+                onPress={() =>
+                  router.push(`/productos/${productId}/resenas` as never)
+                }
+              />
+            </View>
+          </View>
+        );
+
+      // Los dos que hoy nunca tienen datos entran por `seDejaFuera` y salen
       // como una línea honesta; estos `case` existen para el día que el
       // servidor mande algo de verdad, y para que el orden esté completo.
-      case 'valoracion':
       case 'compraProtegida':
       case 'entregaYDevolucion':
         return sinDatos(cual);

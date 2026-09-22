@@ -27,6 +27,13 @@ import {
   iconoDelEstadoDeIncidencia,
 } from '@/lib/incidencias';
 import {
+  type LineaValorable,
+  esResenasApagadas,
+  lineasYaValoradas,
+  sePuedeOfrecerValorar,
+} from '@/lib/resenasDeProductos';
+import { ProductReviewRepository } from '@/repositories/ProductReviewRepository';
+import {
   claveDeErrorDePedidos,
   claveDelEstado,
   direccionEnUnaLinea,
@@ -98,6 +105,9 @@ export function PedidoDeProductoScreen() {
   const [fallo, setFallo] = useState<
     'red' | 'sinConexion' | 'noDisponible' | 'sinSesion' | 'noEncontrado' | null
   >(null);
+  //: QUE SE PUEDE VALORAR DE ESTE PEDIDO. Lo dice el servidor, no la
+  //: pantalla: aqui no se deduce de que el paquete haya llegado.
+  const [valorables, setValorables] = useState<LineaValorable[]>([]);
   const ocupadoRef = useRef(false);
 
   const cargar = useCallback(async () => {
@@ -110,6 +120,16 @@ export function PedidoDeProductoScreen() {
     setFallo(null);
     try {
       setPedido(await ProductOrderRepository.leer(orderId));
+      try {
+        setValorables(await ProductReviewRepository.valorables(orderId));
+      } catch (error) {
+        //: SIN LAS VALORACIONES EL PEDIDO SE SIGUE VIENDO. Es un bloque
+        //: de mas, no el pedido: tumbar la pantalla entera porque la
+        //: 0081 no este aplicada seria peor que no ensenar el bloque.
+        if (!(error instanceof ApiError) || !esResenasApagadas(error.code)) {
+          setValorables([]);
+        }
+      }
     } catch (error) {
       if (error instanceof ApiError && esFaltaDeSesion(error.status)) setFallo('sinSesion');
       else if (error instanceof ApiError && esPedidoApagado(error.code)) setFallo('noDisponible');
@@ -598,6 +618,63 @@ export function PedidoDeProductoScreen() {
             </Text>
           )}
         </View>
+
+        {/*
+          Y VALORAR LO QUE LLEGO. Este es el sitio por lo mismo que las
+          reclamaciones: se valora una COMPRA, y la compra esta aqui.
+
+          SOLO SI QUEDA ALGO POR VALORAR. El servidor dice que lineas se pueden
+          valorar y cuales ya lo estan; sin ninguna pendiente el boton llevaria
+          a una pantalla vacia, asi que no se ensena y se dice por que.
+
+          NINGUNA PUNTUACION JUNTO AL BOTON: lo que opinaron otras personas de
+          este producto se lee en su ficha, no en el pedido de alguien.
+        */}
+        {yaLlego(pedido.shipment) ? (
+          <View style={[styles.bloque, { borderColor: colors.border }]}>
+            <Text variant="titleMedium">{f('resenaDeProducto.valorar.titulo')}</Text>
+            {sePuedeOfrecerValorar(valorables) ? (
+              <>
+                <Text variant="caption" color={colors.textMuted}>
+                  {f('resenaDeProducto.valorar.explicacion')}
+                </Text>
+                <Button
+                  label={f('resenaDeProducto.valorar.titulo')}
+                  variant="secondary"
+                  icon="star"
+                  onPress={() =>
+                    router.push(`/productos/pedidos/${pedido.id}/valorar` as never)
+                  }
+                  disabled={ocupado}
+                />
+              </>
+            ) : (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('resenaDeProducto.valorar.nadaQueValorar')}
+              </Text>
+            )}
+            {lineasYaValoradas(valorables).map((linea) => (
+              <Pressable
+                key={linea.order_item_id}
+                onPress={() =>
+                  router.push(`/productos/resenas/${linea.review_id}` as never)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={f('resenaDeProducto.valorar.verLaMia')}
+                style={styles.fila}
+              >
+                <Feather name="star" size={14} color={colors.textMuted} />
+                <View style={styles.crece}>
+                  <Text variant="caption">{linea.name}</Text>
+                  <Text variant="caption" color={colors.textMuted}>
+                    {f('resenaDeProducto.valorar.yaValorada')}
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={14} color={colors.textMuted} />
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
 
       {/*

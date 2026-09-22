@@ -414,6 +414,15 @@ export function AdminProductosScreen() {
         disabled={ocupado}
       />
 
+      {/* Y LA COLA DE VALORACIONES. MODERAR ES ESCONDER, NUNCA REESCRIBIR: la
+          puntuacion, el texto y quien lo escribio se quedan como estaban. */}
+      <Button
+        label={f('resenaDeProducto.moderar.titulo')}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos/resenas' as never)}
+        disabled={ocupado}
+      />
+
       {conflicto ? (
         <View style={[styles.recuadro, { borderColor: colors.danger }]}>
           <Text variant="secondary" weight="700" color={colors.danger}>

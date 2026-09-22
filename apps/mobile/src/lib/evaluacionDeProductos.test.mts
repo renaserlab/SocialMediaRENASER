@@ -1744,6 +1744,9 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       // tres codigos de transicion viven en la maquina, no en el servicio.
       'incidencias.py',
       'estados_de_incidencia.py',
+      // El del Incremento 8. Sin el, un codigo nuevo de valoraciones podia
+      // salir a produccion sin texto detras.
+      'resenas.py',
     ]) {
       let texto = '';
       try {
@@ -1776,6 +1779,7 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       'pedidos.ts',
       'envios.ts',
       'incidencias.ts',
+      'resenasDeProductos.ts',
     ]) {
       for (const m of fuente('lib', modulo).matchAll(
         /^\s{2}([a-z_0-9]+):\s*'[^']+',$/gm,

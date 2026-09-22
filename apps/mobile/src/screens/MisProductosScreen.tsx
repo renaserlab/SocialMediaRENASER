@@ -429,6 +429,17 @@ export function MisProductosScreen() {
         disabled={ocupado}
       />
 
+      {/* Y LO QUE OPINAN, AL LADO. Aqui solo se RESPONDE: no hay forma de
+          cambiar ni de esconder lo que escribio quien compro, y la pantalla lo
+          dice antes de entrar. */}
+      <Button
+        label={f('resenaDeProducto.tienda.titulo')}
+        icon="star"
+        variant="secondary"
+        onPress={() => router.push('/proveedor/resenas' as never)}
+        disabled={ocupado}
+      />
+
       {productos.length === 0 ? (
         <StateView
           state="empty"
