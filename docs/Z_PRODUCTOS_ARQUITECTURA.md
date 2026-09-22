@@ -16,6 +16,7 @@ las valoraciones verificadas.
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
 | **Migraciones 0079 y 0080** | **APLICADAS.** La 0079 esta verificada contra la base gestionada en sesion de solo lectura demostrada, con **cero divergencias**; ver §17 |
 | **Migración 0081** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable, con el ORM comparado contra el esquema real, y **corregida tras la revisión independiente**: lleva el disparador que impide moderar lo propio. **Se entrega para aplicarla a mano**; ver §16 |
+| **Migración 0082** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable. **No crea un segundo sistema financiero**: añade un tercer origen a `owner_sale_balances`, que la 0068 ya había generalizado. Se entrega para aplicarla a mano **después de la 0081**; ver §16 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
 | **Dinero de vuelta** | **no existe.** Una reclamación resuelta dice QUÉ se decidió y deja el efecto en `PENDING`. Nadie lo ejecuta: eso es el Incremento 9 |
 | **Siguiente incremento** | **el 9: finanzas y cierre operativo.** Reutiliza `owner_sale_balances`, que desde la 0068 ya admite dos orígenes; hace falta un tercero. Y **la comisión no está decidida** |
@@ -62,7 +63,7 @@ comercial añadida, y eso es `product_sellers`. Una tabla aparte crearía una
 segunda identidad que se desincroniza del perfil: dos nombres, dos fotos y dos
 verdades sobre quién es esa persona.
 
-## 3. Las doce migraciones, y en este orden
+## 3. Las trece migraciones, y en este orden
 
 | Fichero | Qué trae |
 |---|---|
@@ -78,6 +79,7 @@ verdades sobre quién es esa persona.
 | `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **aplicada y verificada** |
 | `0080_productos_incidencias.sql` | el depósito `product-incidents`, `product_incidents`, `product_incident_evidence`, `product_incident_events` · **aplicada** |
 | `0081_productos_resenas.sql` | `product_reviews`, `product_review_replies`, `product_review_moderation` y tres índices únicos redundantes sobre `product_orders`, `product_order_items` y `product_shipments` · **SIN APLICAR** |
+| `0082_productos_finanzas.sql` | el tercer origen de `owner_sale_balances`, dos referencias nuevas en `owner_sale_reserves`, `product_shipments.conformity_at`, `product_refunds`, `product_refund_events`, `product_disputes` y `product_dispute_events` · **SIN APLICAR** |
 
 **LAS NUEVE PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
 seis primeras contra la base gestionada en una sesión de solo lectura demostrada
@@ -1059,6 +1061,172 @@ El bloque «Valoración real» de la ficha **estaba reservado desde el Increment
 tiene sigue saliendo esa misma línea. Se lee **en su propia petición**: si la
 0081 no está aplicada, el resto de la ficha se ve entero.
 
+## 13.7. El dinero: qué se cobra, qué se aparta y qué vuelve (Incremento 9, 0082)
+
+Se vendió, se cobró y llegó. Esto es qué pasa con ese dinero: cuánto es de quien
+vende, cuándo deja de estar protegido, qué lo retiene y cómo vuelve si algo salió
+mal.
+
+**Tres frases lo gobiernan, y las tres son negativas:**
+
+* **No hay un segundo sistema financiero.** Cursos y Eventos ya tenían uno, y la
+  0068 ya lo había generalizado. Productos es **un tercer origen**, no otro
+  aparato.
+* **Sin comisión configurada no se escribe ni un saldo.** Ni cero, ni pendiente,
+  ni provisional: nada. Una cifra sin regla detrás es una cifra inventada.
+* **Aprobar no es pagar.** Ni aprobar una devolución, ni vencer un plazo, ni
+  quedar elegible. Ninguna de las tres mueve un céntimo.
+
+### Por qué se reutiliza, y dónde no se pudo
+
+`owner_sale_balances` ya guardaba ventas de Cursos y de Eventos con bruto,
+comisión, neto, moneda, versión de la regla y estado. Le faltaba **una columna**:
+de qué pedido de producto viene.
+
+| Lo que se reutilizó | Lo que se añadió |
+|---|---|
+| `owner_sale_balances` entera | `product_order_id` + clave ajena RESTRICT + un CHECK de tres ramas que exige **exactamente un** origen |
+| `owner_sale_reserves` entera | `product_incident_id` y `product_policy_id`, con sus dos índices únicos parciales |
+| El adaptador de devoluciones (`RefundProvider`, `NoConfigurado`) | nada: se usa **tal cual** |
+| La máquina de estados de incidencia del Incremento 7 | `EFECTO_EJECUTADO`, que cierra `bloquea_el_dinero` |
+
+**Lo que no se pudo reutilizar, y por qué.** `product_refunds` y
+`product_disputes` son tablas nuevas, y no por comodidad: `event_disputes` y
+`refund_requests` están **nombradas y referenciadas** contra otros dominios —sus
+claves ajenas apuntan a entradas de evento y a matrículas—, así que meterles un
+pedido de producto habría exigido aflojar precisamente las restricciones que las
+hacen fiables. Generalizar una tabla que ya ata bien es empeorarla.
+
+### La comisión se congela, y nunca se recalcula
+
+Cada venta guarda **la versión de la regla que se le aplicó** (`fee_rules_version`)
+junto al bruto, la comisión y el neto ya calculados. Cambiar la comisión mañana no
+toca ninguna venta de ayer: no existe ninguna consulta que multiplique un importe
+histórico por el porcentaje actual, y el móvil tampoco lo hace —hay una prueba que
+lee el fichero del cliente y falla si aparece la base de puntos básicos.
+
+**Y si no hay comisión configurada, `registrar_venta` no escribe nada y devuelve
+`None`.** No lanza: lo llama el webhook de pago justo después de marcar el pedido
+como pagado, y una excepción ahí desharía el cobro. Escribe en el registro y
+sigue. La pantalla del proveedor dice «pendiente de configuración» en lugar de un
+`0,00`, que se leería como «vendiste y no cobraste».
+
+**El savepoint no es decorativo.** `registrar_venta` corre dentro de la
+transacción del webhook; un `db.rollback()` suyo destruiría la confirmación del
+pago. Usa `begin_nested()`, así que si algo falla al escribir el saldo, se
+deshace el saldo y **el pedido sigue pagado**.
+
+### El reloj sale del pedido, no de una constante
+
+Cuándo deja de estar protegido un saldo lo dice **la política congelada de ese
+pedido** (`incident_report_hours`), no un 72 escrito en el código. El blueprint
+§13 manda sobre el §9 aquí: el plazo es el que aceptó quien compró en el momento
+de comprar, y si la empresa lo cambia después, los pedidos viejos conservan el
+suyo.
+
+Y **la conformidad lo adelanta**: si quien compró dice «está bien», el saldo pasa
+a elegible sin esperar. Es columna propia —`conformity_at`— y no se deduce de
+`buyer_confirmed_at`, que desde el Incremento 6 significa otra cosa: «confirmo que
+me llegó». Confirmar que algo llegó no es decir que está bien, y tratarlas como
+lo mismo le quitaría el plazo de protección a quien solo acusó recibo.
+
+Sin política no hay fecha, y sin fecha **no es «ya»**: es `protection_policy_not_configured`.
+
+### Los catorce bloqueos, y su orden
+
+`por_que_no_se_libera` contesta **un** código, el primero que aplica, y el orden
+importa porque es el que hace que la respuesta sea útil:
+
+| Orden | Código | Qué dice |
+|---|---|---|
+| 1 | `fee_not_configured` | no hay regla de comisión: no debería existir ni el saldo |
+| 2 | `balance_not_pending` | ya se movió, o se canceló |
+| 3 | `seller_missing` | el producto no tiene proveedor |
+| 4 | `negative_balance` | el neto quedó por debajo de cero |
+| 5 | `order_not_paid` | **la venta** |
+| 6 | `not_delivered` | **la entrega** |
+| 7 | `protection_policy_not_configured` / `protection_window_open` | **el reloj** |
+| 8 | `payout_account_missing` / `payout_account_not_ready` | la cuenta de cobro |
+| 9 | `reserve_held` | hay dinero apartado |
+| 10 | `incident_open` | una reclamación que **bloquea el dinero** |
+| 11 | `refund_pending` | una devolución viva |
+| 12 | `dispute_open` | una disputa, por saldo **o** por pedido |
+
+Venta, entrega y reloj van **antes** que la cuenta de cobro a propósito: decirle
+«te falta la cuenta» a quien todavía no ha entregado el paquete le manda a
+resolver algo que no es lo que le frena.
+
+**Y ninguna fecha libera sola.** `liberar_vencidos` recorre los saldos vencidos y
+pregunta por cada uno **los doce bloqueos otra vez**; el que tenga cualquiera se
+queda. Un plazo cumplido con una reclamación abierta no paga. Es idempotente:
+volver a lanzarlo no mueve nada ya movido.
+
+### Lo que este módulo NO hace, y se ejecuta
+
+| Lo que no hace | Cómo se comprueba |
+|---|---|
+| **No transfiere dinero.** No existe ninguna ruta que lo haga | un centinela lista las rutas del módulo y falla si aparece `transfer` |
+| **No da de alta cuentas de cobro** | el repositorio del móvil no tiene el método, y hay una prueba que lo afirma |
+| **Moderación no mueve dinero** | las rutas financieras exigen administración, no el rol de evaluador |
+| **El adaptador apagado no simula éxito** | `NoConfigurado` levanta; ninguna prueba lo sustituye por un doble que diga que sí |
+| **No inventa una comisión ni una moneda** | sin comisión no hay saldo; sin moneda de tres letras, el importe es `null` |
+
+**El adaptador falla cerrado, y eso es la funcionalidad.** Pedirle una devolución
+a la pasarela con Stripe apagado contesta un error y deja la devolución en
+`failed` con su motivo —reintentable—, nunca en `confirmed`. Una devolución que
+diga «confirmada» sin que el dinero haya salido es la peor fila que puede existir
+en esta base.
+
+### Una devolución, y sus cinco estados
+
+`requested` → `processing` → `confirmed`, o `failed`, o `cancelled`. Solo
+`confirmed` significa que el dinero volvió, y solo `confirmed`:
+
+* **consume la reserva** que lo estaba apartando,
+* **cancela el saldo** si se devolvió todo,
+* y marca el expediente con `EFECTO_EJECUTADO`, que es lo que suelta
+  `bloquea_el_dinero` del Incremento 7.
+
+**Un aviso de fallo posterior no deshace una confirmación.** La pasarela puede
+avisar tarde y desordenado; `atender_aviso` lo tiene en cuenta y no reabre lo que
+ya se pagó.
+
+El tope de una aprobación es **bruto menos lo ya devuelto**, y lo calcula el
+servidor: restarlo en el cliente exigiría saber qué devoluciones hay vivas.
+Cuando rechaza, contesta `max_minor` en el detalle del 409 para que la pantalla
+pueda enseñar el tope de verdad en lugar de uno estimado.
+
+### Las tres tablas nuevas, y las dos que solo crecieron
+
+| Tabla | Qué guarda |
+|---|---|
+| `product_refunds` | la devolución: de qué pedido, cuánto, en qué moneda, en qué estado, con qué proveedor y por qué se decidió |
+| `product_refund_events` | su historial. **Solo se añade**, y lo impone un disparador |
+| `product_disputes` + `product_dispute_events` | lo que dice la pasarela cuando quien compró reclama por su banco |
+| `owner_sale_balances` | **existía**: una columna y un CHECK más |
+| `owner_sale_reserves` | **existía**: dos referencias y dos únicos parciales más |
+
+Una devolución viva por expediente, por índice único parcial. Y `amount_minor`
+**no tiene valor por defecto**: el bloque de verificación de la 0082 falla si
+alguien se lo pone, porque un importe con defecto es un importe que se puede
+escribir sin decidirlo.
+
+### Las dos pantallas, y desde dónde se llega
+
+| Pantalla | Ruta | Quién |
+|---|---|---|
+| Mi saldo | `/proveedor/finanzas` | quien vende, desde «Mis productos» |
+| Panel financiero | `/admin/productos/finanzas` | administración, desde el panel de productos |
+
+Y dentro del pedido, para quien compró: **el bloque de conformidad** —que explica
+que no hace falta darla, porque si no se dice nada el plazo vence solo— y **el
+dinero que ha vuelto**, si ha vuelto alguno.
+
+Ninguna de las dos ofrece un botón que mueva dinero. El panel dice con palabras
+que no lo mueve, que aprobar no es pagar y que quién paga la comisión de la
+pasarela está por decidir. Un botón que prometa pagar sin recorrido detrás cuesta
+más confianza que su ausencia, y aquí además costaría dinero.
+
 ## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
@@ -1079,8 +1247,14 @@ tiene sigue saliendo esa misma línea. Se lee **en su propia petición**: si la
 | **Qué significa «tres días hábiles»**: calendario de festivos y jornada | la empresa |
 | **Si el tope de seis fotografías cuenta el expediente entero o solo la reclamación inicial** (hoy cierra la apelación a quien las gastó) | la empresa |
 | **Cuánto se devuelve** en cada una de las cinco salidas, y quién ejecuta el pago | la empresa + Incremento 9 |
-| Comisión de Productos | la empresa |
-| Cuenta Stripe Connect del proveedor | la empresa |
+| **Porcentaje de comisión de Productos** (sin él no se escribe ni un saldo) | la empresa |
+| **Quién absorbe la comisión de la pasarela**: si sale del bruto antes de la comisión de Z o después | la empresa |
+| **Plazo de retención** por defecto, cuando un pedido no trae política | la empresa |
+| **Reglas de devolución**: cuánto se devuelve en cada salida, y en qué plazo | la empresa + abogado |
+| **Portes de retorno y reposición**: quién los paga y si se descuentan del neto | la empresa |
+| **Cuenta o entidad que cobra**, y frecuencia de las transferencias | la empresa |
+| **Mínimo para transferir**, y qué se hace con un saldo negativo | la empresa |
+| Cuenta Stripe Connect del proveedor, y **si el alta se abre desde la aplicación** | la empresa |
 | **Fuente del promedio de categoría** (hoy la referencia 4,2 del blueprint, y se dice que es una referencia) | la empresa |
 | **Cómo se identifica públicamente a quien opina** (hoy solo el identificador del perfil) | la empresa |
 | **Si valorar debe avisar a quien vende, y responder a quien opinó** | producto |
@@ -1127,7 +1301,7 @@ hizo falta fue encenderlo.
 
 ## 16. Qué se aplicó a mano, y en qué orden
 
-### LA 0081 ESTÁ SIN APLICAR, y es lo único que queda pendiente
+### LA 0081 Y LA 0082 ESTÁN SIN APLICAR, y son lo único que queda pendiente
 
 **Se entrega para aplicarla una persona.** Qué se comprobó antes de entregarla:
 
@@ -1183,6 +1357,80 @@ y el día que se vuelva a aplicar la 0081 ya están.
 derivados: son texto y puntuaciones que escribieron personas sobre lo que
 compraron, y no se pueden reconstruir. Quien revierta tiene que decidir antes si
 las exporta.
+
+### LA 0082, y va DESPUÉS de la 0081
+
+**Se entrega para aplicarla una persona.** Qué se comprobó antes de entregarla:
+
+* corre **desde cero** sobre PostgreSQL 16, con las ochenta y dos migraciones en
+  orden, y el bloque de verificación del final pasa;
+* corre **dos veces** sin fallar;
+* el ORM y el esquema real dicen lo mismo, columna por columna.
+
+**Y no enciende ningún pago.** Aplicarla solo hace que dieciséis rutas dejen de
+contestar 503. Sin comisión configurada no se escribe ni un saldo, sin Stripe no
+se pide ninguna devolución, y **no existe ninguna ruta que transfiera dinero**.
+
+#### El orden, para la 0082
+
+1. **Aplicar antes la 0081.** No es que la 0082 la referencie: es que si algo
+   sale mal se quiere saber cuál de las dos fue.
+2. **Comprobar que están la 0068, la 0070, la 0078, la 0079 y la 0080.** La 0082
+   toca `owner_sale_balances` y `owner_sale_reserves` —que vienen de la 0068— y
+   referencia `product_orders`, `product_shipments`, `product_policies` y
+   `product_incidents`.
+3. **Pegar `supabase/migrations/0082_productos_finanzas.sql` entero** en el
+   editor de Supabase. Entra todo o no entra nada.
+4. **REINICIAR LA API.** Sin reiniciar, las rutas financieras siguen contestando
+   **503 `product_finance_not_available`** aunque las tablas ya estén. El síntoma
+   es que la pantalla de saldo dice que las finanzas no están desplegadas.
+
+**Y ojo con el paso 2 del CHECK.** La 0082 **quita y vuelve a poner**
+`owner_sale_balances_un_origen` para ampliarlo a tres ramas, porque un CHECK no
+se amplía en su sitio. Las filas de Cursos y de Eventos que ya existen siguen
+cumpliendo las dos primeras ramas, que no cambian ni una letra; si alguna fila
+existente no cumpliera, la migración se para ahí y no entra nada.
+
+#### Qué comprobar después de la 0082
+
+Lo hace el script, pero por si alguien lo trocea: `owner_sale_balances` tiene
+`product_order_id` con su clave ajena RESTRICT y el CHECK de **tres** ramas, está
+el único parcial que impide dos saldos para el mismo pedido —es lo único que
+protege de un aviso de cobro que llegue dos veces—, `product_shipments` tiene
+`conformity_at` con su restricción de que no exista sin entrega, las cuatro
+tablas nuevas existen, `amount_minor` **no tiene valor por defecto**, no hay
+ninguna columna de porcentaje, de plazo, de quién paga el porte ni de comisión de
+plataforma —las cuatro son decisiones de la empresa, y una columna con defecto
+las daría por tomadas—, el disparador de solo-añadir cubre `update` y `delete` en
+las dos tablas de historial, y `anon` y `authenticated` siguen con **cero**
+permisos sobre las cuatro.
+
+#### El rollback de la 0082, y sus dos límites
+
+    drop table public.product_dispute_events;
+    drop table public.product_disputes;
+    drop table public.product_refund_events;
+    drop table public.product_refunds;
+    drop function public.product_finanzas_solo_se_anaden();
+
+Eso es lo seguro. Lo demás **solo si de verdad se quiere deshacer entero**, y con
+dos comprobaciones antes, porque las dos van a cero o no van:
+
+    select count(*) from public.owner_sale_balances
+     where product_order_id is not null;   -- tiene que dar 0
+
+    select count(*) from public.product_incidents
+     where financial_effect = 'EXECUTED';  -- tiene que dar 0
+
+La primera protege de devolver el CHECK a dos ramas con saldos de producto ya
+escritos. La segunda, de devolver el CHECK del efecto a dos valores con
+reclamaciones ya ejecutadas: ambas dejarían filas que su propia restricción
+prohíbe.
+
+**DESHACER ESTO NO DEVUELVE NINGÚN DINERO NI LO RECLAMA.** Una devolución
+confirmada por la pasarela ya salió; borrar su fila borra el único registro de
+que salió, y la pasarela sigue diciendo lo contrario. Quien revierta tiene que
+exportar `product_refunds` antes.
 
 ### Y las dos anteriores, que ya están
 

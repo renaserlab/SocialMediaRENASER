@@ -1003,3 +1003,107 @@ la otra parte.
       siguientes y no repite ninguna.
 - [ ] Con el lector de pantalla encendido, las barras del histograma se leen
       «tres de cinco estrellas» y no «3».
+
+
+## Productos, Incremento 9 — el dinero y el cierre operativo (22/09/2026)
+
+**NADA DE ESTO ESTA COMPROBADO.** Son dos telefonos de verdad, y lo que se mira
+aqui es dinero: una cifra de mas o de menos en una pantalla no es un defecto
+cosmetico. Ninguna casilla se marca sin haberlo hecho.
+
+**Y hace falta la 0082 aplicada para casi todo.** El ultimo apartado es el unico
+que se comprueba sin aplicarla, y es como se entrega hoy.
+
+### Sin comision configurada, que es el estado de hoy
+
+- [ ] En «Mi saldo», con ventas pagadas y entregadas detras: la pantalla dice
+      **«pendiente de configuracion»** y **no** enseña ningun importe.
+- [ ] Concretamente: **no aparece ningun `0,00` en ninguna parte** de esa
+      pantalla. Ni en disponible, ni en retenido, ni en el desglose.
+- [ ] La pantalla distingue «todavia no has vendido» de «falta decidir la
+      comision»: son dos textos distintos y no el mismo.
+- [ ] En el panel de administracion, «salud financiera» dice que falta el
+      porcentaje de comision, con esas palabras.
+- [ ] Y **no hay ningun saldo escrito**: la lista de movimientos esta vacia
+      porque no hay filas, no porque no se pinten.
+
+### El recorrido de quien compro
+
+- [ ] Un pedido pagado y entregado enseña el bloque de conformidad.
+- [ ] El texto explica que **no hace falta darla**: si no se dice nada, el plazo
+      vence solo. Leerlo y comprobar que no suena a obligacion.
+- [ ] Dar la conformidad: la pantalla lo refleja sin recargar a mano.
+- [ ] **Volver a entrar**: ya no ofrece darla otra vez, dice que esta dada.
+- [ ] Con una reclamacion abierta sobre ese pedido, el boton **no se ofrece**, y
+      se explica por que.
+- [ ] La conformidad y «confirmar que llego» se ven como **dos cosas
+      distintas** en la pantalla, no como el mismo boton con dos nombres.
+
+### El dinero que vuelve, en el telefono de quien compro
+
+- [ ] Con una devolucion en «aprobada»: la pantalla **no** dice que el dinero
+      volvio. Dice que esta aprobada.
+- [ ] Con una en «en curso»: igual, y con un icono distinto del de confirmada.
+- [ ] Con una **confirmada**: ahi si, y con su importe y su moneda.
+- [ ] Ningun importe aparece sin su moneda al lado.
+
+### El recorrido de quien vende, en el otro telefono
+
+- [ ] Con la comision configurada y una venta entregada: «Mi saldo» enseña
+      disponible, retenido y el desglose de bruto, comision y neto.
+- [ ] Los tres importes llevan **su moneda**, y cuadran: bruto − comision = neto.
+- [ ] Un saldo bloqueado dice **por que** y **que hacer**, y las dos frases son
+      distintas entre si.
+- [ ] Con un pedido entregado hace poco: el bloqueo es **el reloj**, no la
+      cuenta de cobro. Y dice cuantas horas faltan.
+- [ ] Con un pedido **sin entregar**: el bloqueo es la entrega. **No** dice que
+      falte la cuenta de cobro.
+- [ ] **No hay ningun boton de transferir**, y la pantalla explica que el alta de
+      la cuenta de cobro todavia no esta abierta.
+- [ ] Con mas de veinte movimientos, «ver mas» trae los siguientes y no repite.
+
+### El panel financiero de administracion
+
+- [ ] Dice con palabras que **desde ahi no se mueve dinero**.
+- [ ] Dice que **aprobar no es pagar**.
+- [ ] Dice que **quien absorbe la comision de la pasarela esta por decidir**.
+- [ ] Los seis contadores salen, y un cero se ve como cero (aqui **si** es cero).
+- [ ] Aprobar una devolucion: queda en «aprobada», y **el dinero no se ha
+      movido**. Comprobarlo mirando el saldo del proveedor en el otro telefono.
+- [ ] Pedirla a la pasarela **con Stripe apagado**: falla, queda reintentable, y
+      **nunca** dice «confirmada».
+- [ ] El historial de esa devolucion enseña los dos movimientos **en orden**.
+- [ ] Intentar aprobar por **mas** del importe del pedido: lo rechaza y enseña
+      el tope de verdad, no uno estimado.
+- [ ] Lanzar «liberar los vencidos» con una reclamacion abierta sobre un saldo
+      vencido: **ese saldo no se libera**, y el motivo lo dice.
+- [ ] Lanzarlo **dos veces seguidas**: la segunda no mueve nada.
+
+### Quien puede que
+
+- [ ] Con una cuenta de **moderacion** (no `admin`): el panel financiero
+      contesta que no, y la pantalla lo dice con palabras.
+- [ ] Con la cuenta de un proveedor: ve **su** saldo y **ninguno ajeno**.
+- [ ] Con la cuenta de quien compro: ve las devoluciones de **sus** pedidos y
+      ninguna otra.
+
+### En las cuatro anchuras y los tres idiomas
+
+- [ ] 320, 360, 390 y 430 px: ningun importe se parte ni se sale, y la fila de
+      un saldo bloqueado cabe con su motivo.
+- [ ] En claro y en oscuro.
+- [ ] En espanol, ingles y portugues: ninguna clave cruda en pantalla.
+- [ ] Todas las areas tactiles llegan a 44x44.
+- [ ] Con el lector de pantalla encendido, un importe se lee entero y con su
+      moneda, no como una lista de numeros sueltos.
+
+### Con la 0082 SIN aplicar, que es como se entrega
+
+- [ ] «Mi saldo» y el panel financiero dicen que **todavia no esta desplegado**,
+      con esas palabras, y no un error.
+- [ ] **La ficha del pedido se sigue viendo entera**, solo sin el bloque de
+      conformidad y sin el del dinero devuelto.
+- [ ] El catalogo, las fotografias, el inventario, la bolsa, el pedido, la
+      entrega, las reclamaciones y las valoraciones siguen funcionando.
+- [ ] Un pago de prueba **se sigue confirmando**: que las finanzas no esten
+      desplegadas no puede romper el cobro.

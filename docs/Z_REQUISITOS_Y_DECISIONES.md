@@ -1764,3 +1764,155 @@ sin limpiar la fecha, tanto el `if` como la clave ajena dejarían de significar
 `moderar_respuesta` y su índice parcial se interleasen, podría salir un 500 en vez
 del 409. La revisión no consiguió provocarlo; se envolvió el `flush` igual, que
 es lo que hacen las otras dos.
+
+
+## Incremento 9 de Productos · el dinero y el cierre operativo (22/09/2026)
+
+**D164 · NO se construye un segundo sistema financiero.**
+
+Cursos y Eventos ya tenían uno, y la 0068 ya lo había generalizado: cada venta se
+guarda en `owner_sale_balances` con bruto, comisión, neto, moneda, versión de la
+regla y estado. Productos es **un tercer origen** de esa misma tabla, no otro
+aparato: una columna `product_order_id`, una clave ajena RESTRICT, y el CHECK
+`owner_sale_balances_un_origen` ampliado de dos ramas a tres.
+
+Lo mismo con `owner_sale_reserves`, que solo necesitó dos referencias nuevas, y
+con el adaptador de devoluciones (`RefundProvider`, `NoConfigurado`), que se usa
+**tal cual**, sin una línea nueva.
+
+**D165 · Y dónde SÍ hizo falta tabla nueva, con su razón.**
+
+`product_refunds` y `product_disputes` son nuevas porque `refund_requests` y
+`event_disputes` están **nombradas y referenciadas contra otros dominios**: sus
+claves ajenas apuntan a matrículas y a entradas de evento. Meterles un pedido de
+producto habría exigido aflojar precisamente las restricciones que las hacen
+fiables. Generalizar una tabla que ya ata bien es empeorarla, así que no se hizo.
+
+**D166 · Sin comisión configurada no se escribe NI UN SALDO.**
+
+Ni cero, ni pendiente, ni provisional. `registrar_venta` mira si hay regla de
+comisión y, si no la hay, no escribe nada.
+
+No es una pantalla que oculte un número: **es que la fila no existe**, porque una
+fila con importes sin regla detrás es una fila inventada que mañana habría que
+recalcular —y recalcular ventas históricas es exactamente lo que no se puede
+hacer—. La pantalla del proveedor dice «pendiente de configuración»; un `0,00` se
+leería como «vendiste y no cobraste», que es lo contrario de la verdad.
+
+**D167 · `registrar_venta` no lanza NUNCA, y usa un punto de guardado.**
+
+La llama el webhook de pago inmediatamente después de marcar el pedido como
+pagado, **dentro de la misma transacción**. Dos consecuencias, y las dos costaron
+un fallo real:
+
+* **No lanza.** Devuelve `None` y escribe en el registro. Una excepción ahí
+  desharía el cobro de quien ya pagó.
+* **No hace `db.rollback()`.** La primera versión lo hacía, y eso destruía la
+  confirmación del pago de quien llama. Ahora abre `begin_nested()`: si falla al
+  escribir el saldo, se deshace el saldo y **el pedido sigue pagado**.
+
+**D168 · La comisión se congela con la venta, y nunca se recalcula.**
+
+Cada saldo guarda `fee_rules_version` junto al bruto, la comisión y el neto ya
+calculados. Cambiar el porcentaje mañana no toca ninguna venta de ayer: no hay
+ninguna consulta que multiplique un importe histórico por el porcentaje actual.
+
+El móvil tampoco lo calcula, y no es una promesa: hay una prueba que **lee el
+fichero del cliente** y falla si aparece la base de puntos básicos o una lectura
+del porcentaje desde un dato.
+
+**D169 · El reloj de la protección sale de la política congelada del pedido.**
+
+`incident_report_hours` de la política que aceptó quien compró **en el momento de
+comprar**, no un 72 escrito en el código. El blueprint §13 manda sobre el §9 en
+esto: si la empresa cambia el plazo, los pedidos viejos conservan el suyo.
+
+Sin política no hay fecha, y **sin fecha no es «ya»**: es
+`protection_policy_not_configured`, y la pantalla lo dice.
+
+**D170 · La conformidad es una columna propia, no `buyer_confirmed_at`.**
+
+`conformity_at` es nueva. `buyer_confirmed_at` sigue significando lo que
+significaba desde el Incremento 6: «confirmo que me llegó».
+
+Son dos afirmaciones distintas, y tratarlas como una sola le quitaría el plazo de
+protección a quien solo acusó recibo. La conformidad **adelanta** la liberación;
+acusar recibo, no.
+
+Y no se ofrece dar la conformidad con una reclamación viva: quien dice que algo
+llegó mal no puede a la vez decir que está bien. Lo comprueban el servidor y la
+pantalla.
+
+**D171 · Ninguna fecha libera sola, y el orden de los bloqueos es deliberado.**
+
+`liberar_vencidos` recorre los saldos vencidos y vuelve a preguntar **los doce
+bloqueos** por cada uno. Un plazo cumplido con una reclamación abierta no paga.
+
+Y `por_que_no_se_libera` contesta el primero que aplica, en este orden: venta →
+entrega → reloj → cuenta de cobro → reservas, reclamaciones, devoluciones y
+disputas. **Venta, entrega y reloj van antes que la cuenta** a propósito: decirle
+«te falta la cuenta de cobro» a quien todavía no ha entregado el paquete le manda
+a resolver algo que no es lo que le frena. Una prueba fijó el orden después de
+que la primera versión contestara `payout_account_missing` a un pedido sin
+entregar.
+
+**D172 · Aprobar no es pagar, y solo `confirmed` dice que el dinero volvió.**
+
+`approved` es una decisión, `requested` una petición y `processing` una espera.
+Solo `confirmed` consume la reserva, cancela el saldo si se devolvió todo y marca
+el expediente con `EFECTO_EJECUTADO`, que es lo que suelta `bloquea_el_dinero`
+del Incremento 7.
+
+**Y un aviso de fallo posterior no deshace una confirmación.** La pasarela puede
+avisar tarde y desordenado.
+
+**D173 · El adaptador apagado falla cerrado, y eso ES la funcionalidad.**
+
+Con Stripe sin configurar, pedir una devolución contesta error y la deja en
+`failed` con su motivo —reintentable—, **nunca en `confirmed`**. Ninguna prueba
+sustituye el adaptador por un doble que diga que sí: una devolución marcada como
+confirmada sin que el dinero haya salido es la peor fila que puede existir en
+esta base.
+
+**D174 · Moderación no mueve dinero, y no existe ninguna ruta que transfiera.**
+
+Las rutas financieras exigen administración, no el rol de evaluador. Y no hay
+ruta de transferencia ni de alta de cuenta de cobro: hay un centinela que lista
+las rutas del módulo y falla si aparece `transfer`, y otro que lee el repositorio
+del móvil y falla si aparece `transferir()` o `darDeAltaLaCuenta()`.
+
+Las pantallas lo dicen con palabras en vez de enseñar un botón que fallaría.
+
+**D175 · El tope de una devolución lo calcula el servidor, y viaja en el 409.**
+
+Bruto menos lo ya devuelto. Restarlo en el cliente exigiría saber qué
+devoluciones hay vivas, que es justo lo que el cliente no sabe. Cuando rechaza,
+el 409 lleva `max_minor` en el detalle para que la pantalla enseñe el tope de
+verdad en lugar de uno estimado.
+
+**D176 · `amount_minor` no tiene valor por defecto, y ninguna columna decide por
+la empresa.**
+
+El bloque de verificación de la 0082 **falla** si aparece una columna de
+porcentaje de devolución, de días de retención, de quién paga el porte de vuelta
+o de comisión de plataforma, y si `amount_minor` tiene defecto. Las cuatro
+primeras son decisiones que no están tomadas, y una columna con valor por defecto
+las daría por tomadas en silencio. La quinta, porque un importe con defecto es un
+importe que se puede escribir sin decidirlo.
+
+**D177 · PENDIENTE DE LA EMPRESA: las nueve que mueven dinero, derechos o
+responsabilidad.**
+
+Ninguna se ha inventado, y ninguna bloquea el resto del Incremento 9:
+
+| Qué falta | Qué hace hoy el sistema |
+|---|---|
+| Porcentaje de comisión | no se escribe ningún saldo |
+| Quién absorbe la comisión de la pasarela | el panel lo dice con palabras |
+| Plazo de retención por defecto | sin política, `protection_policy_not_configured` |
+| Reglas de devolución (cuánto, en qué salida) | cada aprobación se decide a mano, con su motivo |
+| Portes de retorno y reposición | no se descuenta nada del neto |
+| Cuenta o entidad que cobra | no hay ruta de transferencia |
+| Frecuencia de transferencias y mínimo | igual |
+| Saldos negativos | `negative_balance` bloquea, y no se compensa solo |
+| Si el alta de Connect se abre desde la aplicación | la pantalla explica que hoy no |
