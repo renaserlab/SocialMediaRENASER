@@ -26,10 +26,14 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError, ServiceUnavailableError
+from app.core.exceptions import (
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.gobernanza import auditoria
 from app.modules.products import applications, carts, catalog, esquema, evaluations
@@ -42,6 +46,8 @@ from app.modules.products import media as fotos
 from app.modules.products import pagos as cobros
 from app.modules.products import pedidos
 from app.modules.products import politicas
+from app.modules.products import devoluciones
+from app.modules.products import finanzas as dinero
 from app.modules.products import resenas as opiniones
 from app.modules.products import permissions as permisos
 from app.modules.products import service
@@ -67,7 +73,18 @@ from app.modules.products.models import (
 from app.shared import storage as almacenamiento
 from app.modules.products.schemas import (
     AbrirIncidencia,
+    AprobarDevolucion,
+    CuentaDeCobroRead,
+    DevolucionDeProductoRead,
+    DisputaDeProductoRead,
     DistribucionRead,
+    LiberacionRead,
+    MotivoFinanciero,
+    MovimientoDeDevolucion,
+    ReservaDeProductoRead,
+    ResumenFinancieroDeProductos,
+    SaldoDeProductoRead,
+    SaludFinancieraDeProductos,
     LineaValorable,
     ModeracionDeResena,
     MovimientoDeModeracion,
@@ -334,6 +351,7 @@ async def _envio(
         cancelled_at=envio.cancelled_at,
         delivered_source=envio.delivered_source,
         buyer_confirmed_at=envio.buyer_confirmed_at,
+        conformity_at=envio.conformity_at,
         failure_reason=envio.failure_reason,
         cancellation_reason=envio.cancellation_reason,
         items=[
@@ -3734,4 +3752,683 @@ async def historial_de_una_resena(
     ]
 
 
+# --------------------------------------------------------------------------- #
+# Finanzas (Incremento 9, migracion 0082)
+#
+# QUIEN PUEDE MOVER DINERO ES UN CONJUNTO APARTE Y MAS ESTRECHO. Moderacion
+# —que cura contenido— no toca ni un saldo: aqui se exige `puede_mover_dinero`,
+# que es el mismo conjunto que usan Cursos y Eventos, y no `is_admin`.
+#
+# Y QUIEN VENDE VE LO SUYO Y NADA MAS: su resumen, sus movimientos, sus
+# retenciones y su cuenta de cobro. Ni un dato de quien compro.
+# --------------------------------------------------------------------------- #
+
+
+def _saldo(saldo, *, retenido: int = 0, bloqueo=None) -> SaldoDeProductoRead:  # noqa: ANN001
+    return SaldoDeProductoRead(
+        id=saldo.id,
+        order_id=saldo.product_order_id,
+        status=saldo.status,
+        currency=saldo.currency,
+        gross_minor=int(saldo.gross_amount_minor or 0),
+        platform_fee_minor=int(saldo.platform_fee_minor or 0),
+        provider_fee_minor=int(saldo.provider_fee_minor or 0),
+        net_minor=int(saldo.net_amount_minor or 0),
+        fee_rules_version=saldo.fee_rules_version,
+        held_minor=retenido,
+        available_at=saldo.available_at,
+        block=bloqueo.motivo if bloqueo is not None else None,
+        block_detail=bloqueo.detalle if bloqueo is not None else None,
+        created_at=saldo.created_at,
+    )
+
+
+def _devolucion(fila) -> DevolucionDeProductoRead:  # noqa: ANN001
+    return DevolucionDeProductoRead(
+        id=fila.id,
+        order_id=fila.order_id,
+        incident_id=fila.incident_id,
+        balance_id=fila.balance_id,
+        amount_minor=int(fila.amount_minor),
+        currency=fila.currency,
+        kind=fila.kind,
+        status=fila.status,
+        provider=fila.provider,
+        decision_reason=fila.decision_reason,
+        requested_at=fila.requested_at,
+        confirmed_at=fila.confirmed_at,
+        failed_at=fila.failed_at,
+        failure_code=fila.failure_code,
+        created_at=fila.created_at,
+    )
+
+
+@router.get("/seller/finance", response_model=ResumenFinancieroDeProductos)
+async def mi_saldo_de_productos(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResumenFinancieroDeProductos:
+    """Lo que ha vendido quien vende, y cuanto de eso es suyo.
+
+    SIN COMISION CONFIGURADA NO HAY BALANCE, Y LA BANDERA LO DICE. La pantalla
+    escribe «pendiente de configuracion» en vez de un 0,00 que se leeria como
+    «vendiste y no cobraste».
+
+    NO EXIGE LA 0082: contesta el resumen vacio con la bandera, porque es la
+    pantalla de quien vende y tumbarla porque falte una migracion seria peor.
+    """
+    await permisos.exigir_vendedor_activo(db, current_user.id)
+    resumen = await dinero.resumen_del_proveedor(db, usuario_id=current_user.id)
+    return ResumenFinancieroDeProductos(
+        currency=resumen.moneda,
+        gross_minor=resumen.bruto_minor,
+        platform_fee_minor=resumen.comision_minor,
+        net_minor=resumen.neto_minor,
+        held_minor=resumen.retenido_minor,
+        available_minor=resumen.disponible_minor,
+        sales=resumen.cuantas_ventas,
+        fee_configured=resumen.comision_configurada,
+        by_status=resumen.por_estado,
+    )
+
+
+@router.get("/seller/finance/balances", response_model=list[SaldoDeProductoRead])
+async def mis_movimientos_de_productos(
+    before: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SaldoDeProductoRead]:
+    """Venta a venta, con su comision, su neto y POR QUE no se libera todavia.
+
+    EL MOTIVO VIAJA CON CADA FILA. Decir «retenido» sin decir por que deja a
+    quien vende sin saber si tiene que hacer algo o solo esperar.
+    """
+    await permisos.exigir_vendedor_activo(db, current_user.id)
+    saldos = await dinero.saldos_del_proveedor(
+        db,
+        usuario_id=current_user.id,
+        antes_de=_cursor(before, before_id),
+        limite=limit,
+    )
+    salida: list[SaldoDeProductoRead] = []
+    for saldo in saldos:
+        retenido = await dinero.reservado_de(db, saldo_id=saldo.id)
+        bloqueo = await dinero.por_que_no_se_libera(
+            db, saldo=saldo, reservado=retenido
+        )
+        salida.append(_saldo(saldo, retenido=retenido, bloqueo=bloqueo))
+    return salida
+
+
+@router.get("/seller/finance/reserves", response_model=list[ReservaDeProductoRead])
+async def mis_retenciones(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ReservaDeProductoRead]:
+    """Lo que esta apartado y por que. Solo de sus propios saldos."""
+    await permisos.exigir_vendedor_activo(db, current_user.id)
+    await dinero.exigir_disponible(db)
+    saldos = await dinero.saldos_del_proveedor(
+        db, usuario_id=current_user.id, limite=50
+    )
+    salida: list[ReservaDeProductoRead] = []
+    for saldo in saldos:
+        for reserva in await dinero.reservas_de(db, saldo_id=saldo.id):
+            salida.append(
+                ReservaDeProductoRead(
+                    id=reserva.id,
+                    balance_id=reserva.balance_id,
+                    amount_minor=int(reserva.amount_minor),
+                    currency=reserva.currency,
+                    reason=reserva.reason,
+                    status=reserva.status,
+                    incident_id=reserva.product_incident_id,
+                    created_at=reserva.created_at,
+                    released_at=reserva.released_at,
+                )
+            )
+    return salida
+
+
+@router.get("/seller/payout-account", response_model=CuentaDeCobroRead)
+async def mi_cuenta_de_cobro(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CuentaDeCobroRead:
+    """Donde se le pagaria, y que falta para que se pueda.
+
+    NO HAY RUTA PARA CREARLA, Y NO ES UN OLVIDO. Darse de alta en Stripe Connect
+    exige una cuenta de la empresa verificada, la confirmacion de que la
+    modalidad esta disponible para el pais y el rubro, y una decision de quien
+    cobra. Ninguna de las tres existe, y una pantalla de alta que no diera de
+    alta a nadie seria una promesa.
+    """
+    await permisos.exigir_vendedor_activo(db, current_user.id)
+    from app.core.config import get_settings
+    from app.modules.commerce.models import OwnerPayoutAccount
+
+    ajustes = get_settings()
+    faltan: list[str] = []
+    if not ajustes.comision_configurada:
+        faltan.append("platform_fee_bps")
+    if not ajustes.stripe_connect_enabled:
+        faltan.append("stripe_connect_enabled")
+    if not ajustes.creator_transfers_enabled:
+        faltan.append("creator_transfers_enabled")
+
+    cuenta = await db.scalar(
+        select(OwnerPayoutAccount)
+        .where(OwnerPayoutAccount.owner_id == current_user.id)
+        .order_by(OwnerPayoutAccount.created_at.desc())
+        .limit(1)
+    )
+    if cuenta is None:
+        faltan.append("payout_account")
+    return CuentaDeCobroRead(
+        configured=cuenta is not None,
+        payouts_enabled=bool(cuenta is not None and cuenta.payouts_enabled),
+        onboarding_status=cuenta.onboarding_status if cuenta is not None else None,
+        missing=faltan,
+    )
+
+
+@router.get("/orders/{order_id}/refunds", response_model=list[DevolucionDeProductoRead])
+async def devoluciones_de_mi_pedido(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DevolucionDeProductoRead]:
+    """Que dinero ha vuelto de este pedido, para quien lo compro.
+
+    UN PEDIDO AJENO DEVUELVE LISTA VACIA, no un 403: decir «ese no es tuyo»
+    confirmaria que existe.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    orden = await db.get(ProductOrder, order_id)
+    if orden is None or orden.buyer_id != current_user.id:
+        return []
+    return [_devolucion(f) for f in await devoluciones.del_pedido(db, orden_id=order_id)]
+
+
+@router.post("/orders/{order_id}/conformity", response_model=EnvioRead)
+async def dar_la_conformidad(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EnvioRead:
+    """«Esto esta bien». LIBERA EL DINERO, y por eso es una accion aparte.
+
+    NO ES CONFIRMAR QUE LLEGO. Eso ya existia desde el Incremento 6 y sigue
+    significando lo mismo; esto es lo otro, y tiene su propia columna porque
+    cambiarle el significado a la primera seria redefinir en silencio algo que
+    ya tiene filas.
+
+    SOLO QUIEN COMPRO, Y SOLO UNA VEZ. Y no se da conformidad de algo que no
+    llego: lo impone un CHECK de la 0082, no un `if`.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    await esquema.exigir_envios(db)
+    orden = await db.get(ProductOrder, order_id)
+    if orden is None or orden.buyer_id != current_user.id:
+        raise NotFoundError("Pedido no encontrado.", code="product_order_not_found")
+    envio = await envios.dar_conformidad(
+        db, orden=orden, actor_id=current_user.id
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role="user",
+        action="product_shipment.conformity",
+        entity_type="product_shipment",
+        entity_id=order_id,
+    )
+    await db.commit()
+    leido = await _envio(db, envio, actor=estados_de_envio.COMPRADOR)
+    assert leido is not None
+    return leido
+
+
+# --------------------------------------------------------------------------- #
+# Administracion financiera (Incremento 9)
+#
+# `puede_mover_dinero` Y NO `is_admin`. `is_admin` incluye moderacion, que cura
+# contenido: liberar, retener, devolver y conciliar son otra cosa y viven en un
+# conjunto mas estrecho. Es el mismo que ya usan Cursos y Eventos.
+# --------------------------------------------------------------------------- #
+
+
+async def _exigir_finanzas_z(db: AsyncSession, usuario_id: str) -> None:
+    from app.shared.permissions import puede_mover_dinero
+
+    if not await puede_mover_dinero(db, usuario_id):
+        raise ForbiddenError(
+            "Solo administracion financiera puede hacer esto.",
+            code="product_finance_forbidden",
+        )
+
+
+@admin_router.get("/finance/health", response_model=SaludFinancieraDeProductos)
+async def salud_financiera(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SaludFinancieraDeProductos:
+    """El panel, en cuentas de filas.
+
+    NI UN IMPORTE NI UN PORCENTAJE. Son cuentas, que es lo que se puede afirmar
+    sin decidir nada: cuantos saldos esperan, cuantos estan bloqueados, cuantas
+    devoluciones hay en marcha y cuantas disputas abiertas.
+
+    EL ROL VA ANTES DE LA PUERTA DE ESQUEMA: si fuera al reves, una cuenta sin
+    permisos distinguiria un 503 de un 403 y averiguaria que migraciones estan
+    aplicadas.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    from app.core.config import get_settings
+    from app.modules.commerce.models import OwnerSaleBalance
+    from app.modules.events.finanzas_models import OwnerSaleReserve
+    from app.modules.products.finanzas_models import (
+        DEVOLUCION_EN_MARCHA,
+        DISPUTA_VIVA,
+        ProductDispute,
+        ProductRefund,
+    )
+
+    ajustes = get_settings()
+    faltan: list[str] = []
+    if not ajustes.comision_configurada:
+        faltan.append("platform_fee_bps")
+    if not ajustes.creator_transfers_enabled:
+        faltan.append("creator_transfers_enabled")
+    if not ajustes.stripe_connect_enabled:
+        faltan.append("stripe_connect_enabled")
+    if not ajustes.stripe_refunds_enabled:
+        faltan.append("stripe_refunds_enabled")
+
+    if not await esquema.hay_finanzas(db):
+        return SaludFinancieraDeProductos(
+            fee_configured=ajustes.comision_configurada,
+            transfers_enabled=ajustes.creator_transfers_enabled,
+            refunds_enabled=ajustes.stripe_refunds_enabled,
+            missing=faltan + ["migration_0082"],
+        )
+
+    pendientes = list(
+        await db.scalars(
+            select(OwnerSaleBalance).where(
+                OwnerSaleBalance.product_order_id.is_not(None),
+                OwnerSaleBalance.status == dinero.PENDIENTE,
+            )
+        )
+    )
+    bloqueados = 0
+    for saldo in pendientes:
+        if await dinero.por_que_no_se_libera(db, saldo=saldo) is not None:
+            bloqueados += 1
+    elegibles = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(OwnerSaleBalance)
+            .where(
+                OwnerSaleBalance.product_order_id.is_not(None),
+                OwnerSaleBalance.status == dinero.ELEGIBLE,
+            )
+        )
+        or 0
+    )
+    retenidas = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(OwnerSaleReserve)
+            .join(
+                OwnerSaleBalance,
+                OwnerSaleBalance.id == OwnerSaleReserve.balance_id,
+            )
+            .where(
+                OwnerSaleBalance.product_order_id.is_not(None),
+                OwnerSaleReserve.status == dinero.RESERVA_VIVA_ESTADO,
+            )
+        )
+        or 0
+    )
+    en_marcha = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(ProductRefund)
+            .where(ProductRefund.status.in_(DEVOLUCION_EN_MARCHA))
+        )
+        or 0
+    )
+    disputas = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(ProductDispute)
+            .where(ProductDispute.status.in_(DISPUTA_VIVA))
+        )
+        or 0
+    )
+    return SaludFinancieraDeProductos(
+        fee_configured=ajustes.comision_configurada,
+        transfers_enabled=ajustes.creator_transfers_enabled,
+        refunds_enabled=ajustes.stripe_refunds_enabled,
+        balances_pending=len(pendientes),
+        balances_eligible=elegibles,
+        balances_blocked=bloqueados,
+        reserves_held=retenidas,
+        refunds_in_flight=en_marcha,
+        disputes_open=disputas,
+        missing=faltan,
+    )
+
+
+@admin_router.post("/finance/release-due", response_model=LiberacionRead)
+async def liberar_los_vencidos(
+    limit: int = Query(default=200, ge=1, le=500),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiberacionRead:
+    """Pasa a elegibles los saldos que ya no tiene nada que impida.
+
+    IDEMPOTENTE, y se lanza desde FUERA: la API puede tener varias replicas y un
+    temporizador dentro de FastAPI se ejecutaria una vez por cada una. Es la
+    misma decision que el vencimiento de reservas del Incremento 5 y la escalada
+    de reclamaciones del 7.
+
+    Y NO LIBERA POR QUE VENCIO UNA FECHA: cada saldo pasa por
+    `por_que_no_se_libera`, que es la unica fuente de la regla.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    cuenta = await dinero.liberar_vencidos(db, limite=limit)
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role=await permisos.get_role(db, current_user.id),
+        action="product_finance.release_due",
+        entity_type="product_finance",
+        entity_id=current_user.id,
+        payload={"released": cuenta["liberados"], "blocked": cuenta["bloqueados"]},
+    )
+    await db.commit()
+    return LiberacionRead(
+        looked=cuenta["mirados"],
+        released=cuenta["liberados"],
+        blocked=cuenta["bloqueados"],
+    )
+
+
+@admin_router.get("/finance/blocks", response_model=list[SaldoDeProductoRead])
+async def saldos_bloqueados(
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SaldoDeProductoRead]:
+    """Los saldos que no se liberan, con el motivo de cada uno.
+
+    NI UN DATO DE QUIEN COMPRO. Esta cola es para saber que hay que desatascar,
+    no para leer el pedido de nadie.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    await dinero.exigir_disponible(db)
+    from app.modules.commerce.models import OwnerSaleBalance
+
+    candidatos = list(
+        await db.scalars(
+            select(OwnerSaleBalance)
+            .where(
+                OwnerSaleBalance.product_order_id.is_not(None),
+                OwnerSaleBalance.status.in_(dinero.SALDO_ABIERTO),
+            )
+            .order_by(OwnerSaleBalance.created_at)
+            .limit(limit)
+        )
+    )
+    salida: list[SaldoDeProductoRead] = []
+    for saldo in candidatos:
+        retenido = await dinero.reservado_de(db, saldo_id=saldo.id)
+        bloqueo = await dinero.por_que_no_se_libera(
+            db, saldo=saldo, reservado=retenido
+        )
+        if bloqueo is None:
+            continue
+        salida.append(_saldo(saldo, retenido=retenido, bloqueo=bloqueo))
+    return salida
+
+
+@admin_router.get("/finance/refunds", response_model=list[DevolucionDeProductoRead])
+async def devoluciones_por_atender(
+    limit: int = Query(default=20, ge=1, le=50),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DevolucionDeProductoRead]:
+    """Las que esperan algo: aprobadas sin pedir, o pedidas sin confirmar."""
+    await _exigir_finanzas_z(db, current_user.id)
+    return [_devolucion(f) for f in await devoluciones.por_atender(db, limite=limit)]
+
+
+@admin_router.post(
+    "/orders/{order_id}/refunds",
+    response_model=DevolucionDeProductoRead,
+    status_code=201,
+)
+async def aprobar_devolucion(
+    order_id: str,
+    cuerpo: AprobarDevolucion,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DevolucionDeProductoRead:
+    """Registra que se decidio devolver un importe. NO MUEVE UN CENTIMO.
+
+    EL IMPORTE LO TECLEA UNA PERSONA. Cuanto se devuelve en cada una de las
+    cinco salidas del blueprint es una decision que la empresa no ha tomado, asi
+    que no hay ninguna formula: hay un tope —lo que queda por devolver de esa
+    venta— y un rastro de quien lo decidio y por que.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    if cuerpo.incident_id is not None:
+        ensure_uuid(cuerpo.incident_id, "Reclamacion no encontrada.")
+    fila = await devoluciones.aprobar(
+        db,
+        orden_id=order_id,
+        importe_minor=cuerpo.amount_minor,
+        motivo=cuerpo.reason,
+        actor_id=current_user.id,
+        incidencia_id=cuerpo.incident_id,
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role=await permisos.get_role(db, current_user.id),
+        action="product_refund.approve",
+        entity_type="product_refund",
+        entity_id=fila.id,
+        new_state=fila.status,
+    )
+    await db.commit()
+    await db.refresh(fila)
+    return _devolucion(fila)
+
+
+@admin_router.post(
+    "/refunds/{refund_id}/request", response_model=DevolucionDeProductoRead
+)
+async def pedir_devolucion(
+    refund_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DevolucionDeProductoRead:
+    """Se lo pide a la pasarela. APAGADA, FALLA EN CERRADO Y LO DICE.
+
+    Nunca marca la devolucion como confirmada: eso diria que el dinero salio
+    cuando no ha salido, y es el peor error que puede cometer esta parte.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    ensure_uuid(refund_id, "Devolucion no encontrada.")
+    fila = await devoluciones.pedir(
+        db, devolucion_id=refund_id, actor_id=current_user.id
+    )
+    await db.commit()
+    await db.refresh(fila)
+    return _devolucion(fila)
+
+
+@admin_router.post(
+    "/refunds/{refund_id}/cancel", response_model=DevolucionDeProductoRead
+)
+async def anular_devolucion(
+    refund_id: str,
+    cuerpo: MotivoFinanciero,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DevolucionDeProductoRead:
+    """Cancela una que todavia no ha salido, y suelta su retencion.
+
+    UNA CONFIRMADA NO SE ANULA. El dinero ya volvio a quien compro; deshacerlo
+    aqui no lo trae de vuelta y dejaria el registro diciendo lo contrario de lo
+    que hizo la pasarela.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    ensure_uuid(refund_id, "Devolucion no encontrada.")
+    fila = await devoluciones.anular(
+        db,
+        devolucion_id=refund_id,
+        actor_id=current_user.id,
+        motivo=cuerpo.reason,
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role=await permisos.get_role(db, current_user.id),
+        action="product_refund.cancel",
+        entity_type="product_refund",
+        entity_id=fila.id,
+        new_state=fila.status,
+    )
+    await db.commit()
+    await db.refresh(fila)
+    return _devolucion(fila)
+
+
+@admin_router.get(
+    "/refunds/{refund_id}/history", response_model=list[MovimientoDeDevolucion]
+)
+async def historial_de_la_devolucion(
+    refund_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MovimientoDeDevolucion]:
+    """Que se hizo con este dinero, en orden. SOLO SE ANADE."""
+    await _exigir_finanzas_z(db, current_user.id)
+    ensure_uuid(refund_id, "Devolucion no encontrada.")
+    return [
+        MovimientoDeDevolucion(
+            id=f.id,
+            from_status=f.from_status,
+            to_status=f.to_status,
+            actor_id=f.actor_id,
+            actor_role=f.actor_role,
+            reason=f.reason,
+            provider_reference=f.provider_reference,
+            created_at=f.created_at,
+        )
+        for f in await devoluciones.historial_de(db, devolucion_id=refund_id)
+    ]
+
+
+@admin_router.get("/finance/disputes", response_model=list[DisputaDeProductoRead])
+async def disputas_de_productos(
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DisputaDeProductoRead]:
+    """Los contracargos. QUIEN ASUME LA PERDIDA NO ESTA DECIDIDO.
+
+    La pantalla no ofrece ninguna accion que la resuelva: bloquea el importe y
+    avisa. Decidir quien la paga sin regla aprobada es inventarse la regla.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    await dinero.exigir_disponible(db)
+    from app.modules.products.finanzas_models import ProductDispute
+
+    filas = list(
+        await db.scalars(
+            select(ProductDispute)
+            .order_by(ProductDispute.opened_at.desc())
+            .limit(limit)
+        )
+    )
+    return [
+        DisputaDeProductoRead(
+            id=f.id,
+            order_id=f.order_id,
+            balance_id=f.balance_id,
+            provider=f.provider,
+            external_dispute_id=f.external_dispute_id,
+            amount_minor=int(f.amount_minor),
+            currency=f.currency,
+            reason=f.reason,
+            status=f.status,
+            opened_at=f.opened_at,
+            due_at=f.due_at,
+            closed_at=f.closed_at,
+        )
+        for f in filas
+    ]
+
+
+@admin_router.post(
+    "/finance/reserves/{reserve_id}/release", response_model=ReservaDeProductoRead
+)
+async def soltar_una_retencion(
+    reserve_id: str,
+    cuerpo: MotivoFinanciero,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReservaDeProductoRead:
+    """Suelta una retencion a mano, con motivo y con rastro.
+
+    SOLTAR NO ES CONSUMIR. Esto devuelve el dinero a la cola del proveedor;
+    consumirlo —porque se gasto en devolver— lo hace la devolucion al
+    confirmarse, y no hay ninguna ruta que lo haga a mano.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    ensure_uuid(reserve_id, "Retencion no encontrada.")
+    await dinero.exigir_disponible(db)
+    from app.modules.events.finanzas_models import OwnerSaleReserve
+
+    reserva = await db.get(OwnerSaleReserve, reserve_id)
+    if reserva is None:
+        raise NotFoundError(
+            "Retencion no encontrada.", code="product_reserve_not_found"
+        )
+    reserva = await dinero.soltar_reserva(
+        db,
+        reserva=reserva,
+        consumida=False,
+        actor_id=current_user.id,
+        motivo=cuerpo.reason,
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        actor_role=await permisos.get_role(db, current_user.id),
+        action="product_reserve.release",
+        entity_type="owner_sale_reserve",
+        entity_id=reserva.id,
+        new_state=reserva.status,
+    )
+    await db.commit()
+    await db.refresh(reserva)
+    return ReservaDeProductoRead(
+        id=reserva.id,
+        balance_id=reserva.balance_id,
+        amount_minor=int(reserva.amount_minor),
+        currency=reserva.currency,
+        reason=reserva.reason,
+        status=reserva.status,
+        incident_id=reserva.product_incident_id,
+        created_at=reserva.created_at,
+        released_at=reserva.released_at,
+    )
 __all__ = ["admin_router", "router"]

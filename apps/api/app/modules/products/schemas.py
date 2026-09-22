@@ -837,6 +837,10 @@ class EnvioRead(BaseModel):
     #: CONFIRMAR QUE LLEGO NO ES DAR LA CONFORMIDAD. Lo segundo libera dinero y
     #: no existe todavia.
     buyer_confirmed_at: datetime | None = None
+    #: LA CONFORMIDAD (Incremento 9). NO es lo mismo que la de arriba:
+    #: confirmar que llego no es decir que esta bien, y ESTO SI libera el
+    #: dinero. La pantalla las pinta como dos cosas distintas.
+    conformity_at: datetime | None = None
     failure_reason: str | None = None
     cancellation_reason: str | None = None
     items: list[LineaPreparadaRead] = Field(default_factory=list)
@@ -1333,3 +1337,183 @@ class MovimientoDeModeracion(BaseModel):
     to_status: str
     reason: str | None = None
     created_at: datetime
+
+
+# --------------------------------------------------------------------------- #
+# Finanzas (Incremento 9)
+# --------------------------------------------------------------------------- #
+class SaldoDeProductoRead(BaseModel):
+    """Un movimiento: la fotografia inmutable de una venta cobrada.
+
+    LOS IMPORTES VIAJAN EN UNIDAD MENOR Y CON SU MONEDA. Un numero sin moneda no
+    significa nada: 19 900 soles y 19 900 dolares son el mismo numero y distinto
+    dinero. Y no se formatea aqui: formatear es de la pantalla, que sabe el
+    idioma de quien mira.
+    """
+
+    id: str
+    order_id: str
+    status: str
+    currency: str
+    gross_minor: int
+    platform_fee_minor: int
+    provider_fee_minor: int
+    net_minor: int
+    #: Que reglas de comision se aplicaron. NUNCA se recalcula con las de hoy.
+    fee_rules_version: str
+    #: Cuanto de este saldo esta retenido ahora mismo.
+    held_minor: int = 0
+    #: Cuando deja de estar protegido. NULO = todavia no se sabe, y eso no es un
+    #: error: es que el paquete no ha llegado o la politica no fija el plazo.
+    available_at: datetime | None = None
+    #: Por que no se libera. NULO = nada lo impide.
+    block: str | None = None
+    block_detail: str | None = None
+    created_at: datetime
+
+
+class ResumenFinancieroDeProductos(BaseModel):
+    """Lo que ve quien vende, sumado.
+
+    SIN COMISION CONFIGURADA NO HAY BALANCE, Y SE DICE. `fee_configured` en
+    falso significa que la empresa no ha decidido cuanto se queda Z: la pantalla
+    escribe «pendiente de configuracion» en vez de un 0,00 que se leeria como
+    «vendiste y no cobraste».
+    """
+
+    #: NULA si no hay ventas, o si hay mas de una moneda: sumar dos monedas
+    #: distintas da un numero que no significa nada.
+    currency: str | None = None
+    gross_minor: int = 0
+    platform_fee_minor: int = 0
+    net_minor: int = 0
+    held_minor: int = 0
+    available_minor: int = 0
+    sales: int = 0
+    fee_configured: bool = False
+    by_status: dict[str, int] = {}
+
+
+class CuentaDeCobroRead(BaseModel):
+    """La cuenta donde se le pagaria a quien vende.
+
+    NO HAY RUTA PARA CREARLA, y no es un olvido: darse de alta en Stripe Connect
+    exige una cuenta de la empresa verificada y una decision de quien cobra, y
+    ninguna de las dos existe. La pantalla lo dice con palabras.
+    """
+
+    configured: bool = False
+    payouts_enabled: bool = False
+    onboarding_status: str | None = None
+    #: Que falta para que esto funcione, en codigos. Vacio = nada.
+    missing: list[str] = []
+
+
+class ReservaDeProductoRead(BaseModel):
+    """Un importe retenido, con su motivo y su expediente."""
+
+    id: str
+    balance_id: str
+    amount_minor: int
+    currency: str
+    reason: str
+    status: str
+    incident_id: str | None = None
+    created_at: datetime
+    released_at: datetime | None = None
+
+
+class DevolucionDeProductoRead(BaseModel):
+    """El dinero que vuelve. APROBAR NO ES PAGAR.
+
+    `confirmed_at` es lo UNICO que dice que el dinero salio. Un `approved` es
+    una decision; un `requested` es una peticion; y `failed` dice por que no se
+    pudo, con el codigo que dio la pasarela.
+    """
+
+    id: str
+    order_id: str
+    incident_id: str | None = None
+    balance_id: str | None = None
+    amount_minor: int
+    currency: str
+    kind: str
+    status: str
+    provider: str
+    decision_reason: str
+    requested_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    failed_at: datetime | None = None
+    failure_code: str | None = None
+    created_at: datetime
+
+
+class AprobarDevolucion(BaseModel):
+    """EL IMPORTE LO TECLEA UNA PERSONA. No hay formula: cuanto se devuelve en
+    cada una de las cinco salidas es una decision que la empresa no ha tomado."""
+
+    amount_minor: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=1000)
+    incident_id: str | None = None
+
+
+class MotivoFinanciero(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class DisputaDeProductoRead(BaseModel):
+    """Un contracargo. QUIEN ASUME LA PERDIDA NO ESTA DECIDIDO: bloquea y avisa."""
+
+    id: str
+    order_id: str
+    balance_id: str | None = None
+    provider: str
+    external_dispute_id: str
+    amount_minor: int
+    currency: str
+    reason: str | None = None
+    status: str
+    opened_at: datetime
+    due_at: datetime | None = None
+    closed_at: datetime | None = None
+
+
+class MovimientoDeDevolucion(BaseModel):
+    """Una fila del historial de una devolucion. SOLO SE ANADE."""
+
+    id: str
+    from_status: str | None = None
+    to_status: str
+    actor_id: str | None = None
+    actor_role: str
+    reason: str | None = None
+    provider_reference: str | None = None
+    created_at: datetime
+
+
+class SaludFinancieraDeProductos(BaseModel):
+    """El panel de administracion financiera, en numeros.
+
+    NO TRAE NI UN IMPORTE FORMATEADO NI UN PORCENTAJE: son cuentas de filas, que
+    es lo que se puede afirmar sin decidir nada.
+    """
+
+    fee_configured: bool = False
+    transfers_enabled: bool = False
+    refunds_enabled: bool = False
+    balances_pending: int = 0
+    balances_eligible: int = 0
+    balances_blocked: int = 0
+    reserves_held: int = 0
+    refunds_in_flight: int = 0
+    disputes_open: int = 0
+    #: Que falta para que esto pueda mover dinero. Vacio = nada.
+    missing: list[str] = []
+
+
+class LiberacionRead(BaseModel):
+    """Cuantos saldos paso el barrido. IDEMPOTENTE: la segunda vez da cero."""
+
+    looked: int = 0
+    released: int = 0
+    blocked: int = 0

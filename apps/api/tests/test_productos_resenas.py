@@ -976,6 +976,13 @@ async def test_restaurar_una_respuesta_choca_con_la_que_haya_visible(
                 db, respuesta_id=primera_id, actor_id=moderador, esconder=False
             )
     assert fallo.value.code == "product_review_reply_already_exists"
+    #: Y DICE CUAL ES LA OTRA. Es lo que distingue la comprobacion previa del
+    #: indice unico de la base: las dos contestan el mismo codigo, pero solo la
+    #: de arriba sabe cual es la respuesta que estorba y puede llevar ahi. Sin
+    #: esta linea, retirar la comprobacion previa no cambiaba nada medible.
+    assert fallo.value.details.get("reply_id"), (
+        "el 409 no dice cual es la otra respuesta visible"
+    )
 
 
 @SIN_POSTGRES
@@ -1747,15 +1754,149 @@ async def test_no_se_edita_mientras_se_modera(
     )
 
 
+async def segundo_producto_del_mismo(sesiones, quien: str, evaluador: str):
+    """Otro producto publicado, DEL MISMO proveedor.
+
+    `publicado` crea una tienda nueva cada vez, y para medir el N+1 hacen falta
+    dos productos distintos en el MISMO pedido: con uno solo, preguntar el dueno
+    en bucle y preguntarlo en lote hacen exactamente una consulta y la mutacion
+    sobrevive sin que nada cambie.
+    """
+    from app.modules.products import evaluations, service
+    from app.modules.products import states as maquina
+    from tests.test_productos_admision import evaluar_completo
+    from tests.test_productos_dominio import DATOS, VARIANTES, foto_aprobada
+
+    async with sesiones() as db:
+        producto, version = await service.crear(
+            db,
+            usuario_id=quien,
+            datos={**DATOS, "name": "Tabla de cortar de nogal"},
+            variantes=VARIANTES,
+        )
+        await db.commit()
+        producto_id, version_id = producto.id, version.id
+
+    await foto_aprobada(sesiones, version_id, quien=evaluador)
+    async with sesiones() as db:
+        for hasta, rol in (
+            ("submitted", maquina.PROVEEDOR),
+            ("document_review", maquina.EVALUADOR),
+            ("evaluation", maquina.EVALUADOR),
+        ):
+            await service.transicionar(
+                db,
+                producto_id=producto_id,
+                hasta=hasta,
+                actor_id=evaluador,
+                actor_rol=rol,
+            )
+        await db.commit()
+
+    ident = await evaluar_completo(sesiones, version_id, evaluador, nota=95)
+    async with sesiones() as db:
+        evidencias = [
+            e.id for e in await evaluations.evidencia_de(db, evaluacion_id=ident)
+        ]
+        await evaluations.elegir_razones(
+            db,
+            evaluacion_id=ident,
+            usuario_id=evaluador,
+            razones=[
+                {"evidence_id": e, "text": f"Razón respaldada número {i}."}
+                for i, e in enumerate(evidencias[:3])
+            ],
+        )
+        await evaluations.decidir(db, evaluacion_id=ident, usuario_id=evaluador)
+        await db.commit()
+    async with sesiones() as db:
+        await service.publicar(db, producto_id=producto_id, usuario_id=evaluador)
+        await db.commit()
+    return producto_id, version_id
+
+
 @SIN_POSTGRES
 @pytest.mark.asyncio
 async def test_las_lineas_valorables_no_preguntan_el_dueno_producto_a_producto(
     sesiones, monkeypatch, venta_encendida
 ) -> None:
-    """EL BAJO B-1. El docstring prometia una sola consulta y hacia N."""
+    """EL BAJO B-1. El docstring prometia una sola consulta y hacia N.
+
+    CON DOS PRODUCTOS DEL MISMO PROVEEDOR, que es el caso que existe: un pedido
+    es de una sola tienda, pero esa tienda puede tener dos cosas en la misma
+    bolsa. Con uno solo, el bucle y el lote hacen exactamente una consulta y la
+    mutacion sobrevive sin que nada cambie.
+    """
     from sqlalchemy import event
 
-    _, _, comprador, orden_id, _ = await pedido_entregado(sesiones, monkeypatch)
+    from tests.test_productos_carrito import con_existencias, variantes_de
+    from tests.test_productos_catalogo import publicado
+
+    primero, version_uno, quien = await publicado(sesiones)
+    evaluador = await persona(sesiones, "adm-n1", rol="admin")
+    segundo, version_dos = await segundo_producto_del_mismo(
+        sesiones, quien, evaluador
+    )
+
+    variantes_uno = await variantes_de(sesiones, version_uno)
+    variantes_dos = await variantes_de(sesiones, version_dos)
+    await con_existencias(sesiones, primero, variantes_uno[0].sku, 5)
+    await con_existencias(sesiones, segundo, variantes_dos[0].sku, 5)
+
+    comprador = await persona(sesiones, "n1-compra")
+    async with sesiones() as db:
+        await carts.anadir(
+            db,
+            usuario_id=comprador,
+            producto_id=primero,
+            variante_id=variantes_uno[0].id,
+            cantidad=1,
+        )
+        await carts.anadir(
+            db,
+            usuario_id=comprador,
+            producto_id=segundo,
+            variante_id=variantes_dos[0].id,
+            cantidad=1,
+        )
+        await db.commit()
+    async with sesiones() as db:
+        bolsa = await carts.leer(db, usuario_id=comprador)
+        seller_id = bolsa.items[0].seller_id
+
+    politica_id = await politica_publicada(sesiones)
+    creado = await crear_pedido(
+        sesiones, comprador=comprador, seller_id=seller_id, politica_id=politica_id
+    )
+    orden_id = creado.orden.id
+
+    from app.modules.products import envios, estados_de_envio, pagos, pedidos
+
+    monkeypatch.setattr(pagos, "get_provider", lambda _n: PasarelaDeMentira())
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await pagos.iniciar_pago(db, orden=orden, correo="x@y.test")
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await pagos.atender_aviso(
+            db, AvisoDeMentira(purchase_id=orden.id, amount_minor=int(orden.total_minor))
+        )
+        await db.commit()
+    await preparar_entero(sesiones, orden_id, quien)
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.despachar(db, orden=orden, actor_id=quien)
+        await db.commit()
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        await envios.registrar_entrega(
+            db, orden=orden, actor_id=quien, actor_rol=estados_de_envio.PROVEEDOR
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        lineas = await pedidos.lineas_de(db, orden_id)
+    assert len({l.product_id for l in lineas}) == 2, "el montaje necesita dos productos"
 
     consultas: list[str] = []
     async with sesiones() as db:
@@ -1768,14 +1909,16 @@ async def test_las_lineas_valorables_no_preguntan_el_dueno_producto_a_producto(
 
         event.listen(motor_sync, "before_cursor_execute", contar)
         try:
-            await resenas.valorables_del_pedido(
+            valorables = await resenas.valorables_del_pedido(
                 db, orden_id=orden_id, usuario_id=comprador
             )
         finally:
             event.remove(motor_sync, "before_cursor_execute", contar)
 
+    assert len(valorables) == 2
     assert len(consultas) == 1, (
-        f"se pregunto el dueno {len(consultas)} veces, y con una basta"
+        f"se pregunto el dueno {len(consultas)} veces para dos productos, "
+        "y con una basta"
     )
 
 

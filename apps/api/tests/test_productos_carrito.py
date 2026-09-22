@@ -966,6 +966,23 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
         "/api/v1/admin/products/reviews/{review_id}/moderate",
         "/api/v1/admin/products/reviews/{review_id}/moderation",
         "/api/v1/admin/products/review-replies/{reply_id}/moderate",
+        # Incremento 9: las finanzas, enteras.
+        "/api/v1/products/seller/finance",
+        "/api/v1/products/seller/finance/balances",
+        "/api/v1/products/seller/finance/reserves",
+        "/api/v1/products/seller/payout-account",
+        "/api/v1/products/orders/{order_id}/refunds",
+        "/api/v1/products/orders/{order_id}/conformity",
+        "/api/v1/admin/products/finance/health",
+        "/api/v1/admin/products/finance/release-due",
+        "/api/v1/admin/products/finance/blocks",
+        "/api/v1/admin/products/finance/refunds",
+        "/api/v1/admin/products/finance/disputes",
+        "/api/v1/admin/products/orders/{order_id}/refunds",
+        "/api/v1/admin/products/refunds/{refund_id}/request",
+        "/api/v1/admin/products/refunds/{refund_id}/cancel",
+        "/api/v1/admin/products/refunds/{refund_id}/history",
+        "/api/v1/admin/products/finance/reserves/{reserve_id}/release",
     )
     for ruta in esperadas:
         assert ruta in rutas, ruta
@@ -975,10 +992,37 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
     #: `incident` SALIO DE AQUI con el Incremento 7, y entro en `esperadas`:
     #: cambiar una prueba para que deje de mirar algo es como se pierde una
     #: proteccion, asi que lo que antes prohibia ahora lo EXIGE.
-    prohibidas = ("/return", "refund", "transfer", "payout", "warranty")
+    #: LO QUE SIGUE SIN PODER EXISTIR. `refund` y `payout` SALIERON de aqui con
+    #: el Incremento 9 y entraron en `esperadas`, igual que `incident` con el 7 y
+    #: `reviews` con el 8: cambiar una prueba para que deje de mirar algo es como
+    #: se pierde una proteccion, asi que lo que antes prohibia ahora lo EXIGE.
+    #:
+    #: `/return` y `warranty` NO se mueven. El recorrido de devolucion fisica
+    #: —etiqueta, plazo de siete dias, inspeccion— y la garantia posterior son
+    #: del blueprint §11 y §12 y NO estan en este incremento: devolver DINERO y
+    #: devolver la MERCANCIA son dos cosas, y la segunda necesita transportista,
+    #: porte de vuelta y reposicion, que nadie ha decidido.
+    prohibidas = ("/return", "warranty")
     for ruta in rutas:
         for prohibida in prohibidas:
             assert prohibida not in ruta, ruta
+
+    #: Y `transfer` TAMPOCO: ejecutar una transferencia necesita Stripe Connect
+    #: confirmado para el pais y el rubro, y esa confirmacion no existe. El
+    #: panel dice cuanto hay y por que no sale; no hay ruta que lo saque.
+    for ruta in rutas:
+        assert "transfer" not in ruta, ruta
+
+    #: NINGUNA RUTA FINANCIERA FUERA DE ADMINISTRACION, salvo las del propio
+    #: proveedor y las de quien compro: mover dinero es de un conjunto mas
+    #: estrecho que curar contenido.
+    for ruta in rutas:
+        if "/finance" in ruta or "refund" in ruta:
+            assert (
+                ruta.startswith("/api/v1/admin/")
+                or "/seller/" in ruta
+                or "/orders/" in ruta
+            ), ruta
 
     #: LAS RESENAS SALIERON DE AQUI con el Incremento 8 y entraron en
     #: `esperadas`, igual que las incidencias con el 7. Lo que queda prohibido

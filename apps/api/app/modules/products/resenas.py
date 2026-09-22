@@ -681,6 +681,12 @@ async def moderar_respuesta(
         #: decide, y sin esto saldria un 500 en vez del 409 que promete el
         #: comentario de arriba. Lo senalo la revision independiente.
         if _es(fallo, "product_review_replies_una_visible"):
+            #: SIN `details`, Y ES A PROPOSITO. La comprobacion de arriba SI
+            #: sabe cual es la otra respuesta visible y la dice, porque la
+            #: pantalla puede llevar ahi; aqui no se sabe —el `select` ya no
+            #: vale, la transaccion se deshizo— y poner un identificador
+            #: inventado seria peor que no poner ninguno. Es tambien lo que
+            #: distingue las dos capas cuando se mide si cada una defiende algo.
             raise RespuestaDuplicada(
                 "Ya hay otra respuesta visible en esa reseña."
             ) from None

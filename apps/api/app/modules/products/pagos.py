@@ -253,6 +253,18 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:
                 amount_minor=evento.amount_minor,
                 currency=evento.currency,
             )
+            #: Y LA FOTOGRAFIA DE LA VENTA (Incremento 9). Va DESPUES de
+            #: confirmar y NUNCA revienta: devuelve `None` si la 0082 no
+            #: esta aplicada, si no hay comision configurada o si el aviso
+            #: llego dos veces. Una excepcion aqui desharia el marcado del
+            #: pago y dejaria un cobro real sin pedido pagado, que es mucho
+            #: peor que un saldo que todavia no existe.
+            from app.modules.products import finanzas
+            from app.modules.products.models import ProductOrder
+
+            orden_pagada = await db.get(ProductOrder, evento.purchase_id)
+            if orden_pagada is not None:
+                await finanzas.registrar_venta(db, orden=orden_pagada)
         except pedidos.PagoNoCuadra as fallo:
             #: EL PAGO QUE LLEGA TARDE, O QUE NO CUADRA. Ni se cobra en silencio
             #: ni se niega en silencio: el pedido queda EXPLÍCITAMENTE en

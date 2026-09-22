@@ -285,6 +285,10 @@ class Envio:
     cancelled_at: datetime | None
     delivered_source: str | None
     buyer_confirmed_at: datetime | None
+    #: LA CONFORMIDAD (0082). NO es lo mismo que la de arriba: esta libera el
+    #: dinero, y por eso es un campo distinto. Sin valor por defecto, como
+    #: el resto del molde: un campo que se puede olvidar se olvida.
+    conformity_at: datetime | None
     failure_reason: str | None
     cancellation_reason: str | None
     items: list[LineaPreparada] = field(default_factory=list)
@@ -305,6 +309,7 @@ def _leido(fila: ProductShipment, lineas: list[LineaPreparada]) -> Envio:
         cancelled_at=fila.cancelled_at,
         delivered_source=fila.delivered_source,
         buyer_confirmed_at=fila.buyer_confirmed_at,
+        conformity_at=fila.conformity_at,
         failure_reason=fila.failure_reason,
         cancellation_reason=fila.cancellation_reason,
         items=lineas,
@@ -327,6 +332,7 @@ def _sin_fila(orden_id: str, lineas: list[LineaPreparada]) -> Envio:
         cancelled_at=None,
         delivered_source=None,
         buyer_confirmed_at=None,
+        conformity_at=None,
         failure_reason=None,
         cancellation_reason=None,
         items=lineas,
@@ -945,6 +951,64 @@ async def registrar_entrega(
         actor_rol=actor_rol,
         momento=momento,
     )
+
+
+async def dar_conformidad(
+    db: AsyncSession,
+    *,
+    orden: ProductOrder,
+    actor_id: str,
+    momento: datetime | None = None,
+) -> Envio:
+    """«Esto está bien». ESTO SÍ LIBERA EL DINERO (Incremento 9).
+
+    Y POR ESO ES UNA ACCIÓN APARTE DE CONFIRMAR QUE LLEGÓ. Aquella existe desde
+    el Incremento 6 y sigue significando exactamente lo mismo; darle además este
+    significado habría redefinido en silencio una columna que ya tiene filas, y
+    habría convertido un «sí, me llegó» en una renuncia al plazo de protección.
+
+    SOLO SOBRE ALGO ENTREGADO, y lo impone un CHECK de la 0082 además de este
+    `if`. IDEMPOTENTE: darla dos veces no adelanta el reloj dos veces.
+
+    Y NO SE DA CON UNA RECLAMACIÓN VIVA. Quien dice que algo llegó mal no puede
+    a la vez decir que está bien: es el mismo bloqueo cruzado que ya protege la
+    confirmación de recepción, y aquí pesa más porque esto libera dinero.
+    """
+    await esquema.exigir_envios(db)
+    momento = momento or ahora()
+
+    #: PRIMERO EL CERROJO, DESPUÉS LA PREGUNTA. Es la corrección que costó una
+    #: revisión independiente en el Incremento 6 y vale igual aquí: preguntar
+    #: antes de bloquear deja una ventana en la que dar la conformidad y abrir
+    #: una reclamación pasan las dos comprobaciones.
+    envio = await _bloqueado(db, orden_id=orden.id, crear=False)
+    if envio is None or envio.status != estados_de_envio.ENTREGADO:
+        raise ConflictError(
+            "Todavía no ha llegado nada que confirmar.",
+            code="product_shipment_not_delivered",
+            details={"order_id": orden.id},
+        )
+
+    from app.modules.products import incidencias
+
+    if await incidencias.hay_caso_vivo(db, orden_id=orden.id):
+        raise ConflictError(
+            "Tienes una incidencia abierta sobre este pedido.",
+            code="product_shipment_incident_open",
+            details={"order_id": orden.id},
+        )
+
+    if envio.conformity_at is None:
+        envio.conformity_at = momento
+        #: Y SE GUARDA TAMBIÉN LA RECEPCIÓN si no estaba: quien da la
+        #: conformidad está diciendo también que lo recibió.
+        if envio.buyer_confirmed_at is None:
+            envio.buyer_confirmed_at = momento
+        envio.updated_at = momento
+        await db.flush()
+
+    lineas = await _lineas_con_preparado(db, orden_id=orden.id, hay_envios=True)
+    return _leido(envio, lineas)
 
 
 async def registrar_fallo(
