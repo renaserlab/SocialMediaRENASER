@@ -3544,6 +3544,9 @@ async def moderar_resena(
     """Esconde o restaura. La fila se queda entera."""
     await permisos.exigir_evaluador(db, current_user.id)
     ensure_uuid(review_id, "Resena no encontrada.")
+    #: EL MOTIVO NO VIAJA A LA AUDITORIA COMPARTIDA, que la leen mas personas
+    #: que esta cola: puede llevar dentro una cita de lo que escribio quien
+    #: opino. Vive en `product_review_moderation` y ahi se queda.
     resena = await opiniones.moderar(
         db,
         resena_id=review_id,
@@ -3557,7 +3560,7 @@ async def moderar_resena(
         action="product_review.moderate",
         entity_type="product_review",
         entity_id=resena.id,
-        metadata={"hidden": cuerpo.hidden},
+        new_state=resena.status,
     )
     await db.commit()
     await db.refresh(resena)
@@ -3587,7 +3590,7 @@ async def moderar_respuesta_de_resena(
         action="product_review_reply.moderate",
         entity_type="product_review_reply",
         entity_id=respuesta.id,
-        metadata={"hidden": cuerpo.hidden},
+        new_state=respuesta.status,
     )
     await db.commit()
     await db.refresh(respuesta)
