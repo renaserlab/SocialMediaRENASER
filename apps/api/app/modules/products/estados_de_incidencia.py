@@ -179,7 +179,16 @@ RESOLUCIONES_CON_DEUDA = frozenset(
 #: qué se decidió, no que el dinero se haya movido.
 EFECTO_PENDIENTE = "PENDING"
 EFECTO_NO_APLICA = "NOT_APPLICABLE"
-EFECTOS = (EFECTO_PENDIENTE, EFECTO_NO_APLICA)
+#: Y DESDE EL INCREMENTO 9, EJECUTADO. La 0080 dejó dos valores porque entonces
+#: no había forma de ejecutar nada; la 0082 amplía el CHECK y este es el valor
+#: que hace que un caso resuelto deje de bloquear el saldo. Se AÑADE: ninguna
+#: fila existente deja de valer.
+EFECTO_EJECUTADO = "EXECUTED"
+EFECTOS = (EFECTO_PENDIENTE, EFECTO_NO_APLICA, EFECTO_EJECUTADO)
+
+#: LOS QUE YA NO DEBEN NADA. `NOT_APPLICABLE` porque nunca debió, `EXECUTED`
+#: porque ya se pagó.
+EFECTOS_SALDADOS = frozenset({EFECTO_NO_APLICA, EFECTO_EJECUTADO})
 
 #: `(desde, hasta) -> quiénes`. Lo que no está aquí, no existe.
 TRANSICIONES: dict[tuple[str, str], frozenset[str]] = {
@@ -272,13 +281,18 @@ def bloquea_el_dinero(estado: str, resolucion: str | None, efecto: str | None) -
     debiendo y todavía no se ha ejecutado. Liberar el dinero al proveedor con un
     reembolso aprobado y sin pagar es pagarle dos veces.
 
-    ESTO NO LO USA NADIE TODAVÍA: las transferencias son del Incremento 9. Vive
-    aquí, escrito y probado, porque es la pregunta que ese incremento tendrá que
-    hacer y el sitio donde tiene que estar la respuesta.
+    Y DESDE EL INCREMENTO 9 SÍ LO USA ALGUIEN: `finanzas.por_que_no_se_libera`
+    lo llama por cada caso del pedido, y un `EXECUTED` es lo que deja de
+    bloquear. Nació escrito y probado un incremento antes de que hiciera falta,
+    que es lo que ha permitido que el 9 no tuviera que inventarse la regla.
     """
     if esta_viva(estado):
         return True
-    return estado == RESUELTA and deja_deuda(resolucion) and efecto != EFECTO_NO_APLICA
+    return (
+        estado == RESUELTA
+        and deja_deuda(resolucion)
+        and efecto not in EFECTOS_SALDADOS
+    )
 
 
 def exigir(desde: str, hasta: str, actor: str, motivo: str | None = None) -> str | None:
@@ -332,6 +346,8 @@ __all__ = [
     "DESCRIPCION_MINIMA",
     "DEVOLVER_Y_REEMBOLSAR_TODO",
     "EFECTOS",
+    "EFECTOS_SALDADOS",
+    "EFECTO_EJECUTADO",
     "EFECTO_NO_APLICA",
     "EFECTO_PENDIENTE",
     "ENTREGA_NEGADA",

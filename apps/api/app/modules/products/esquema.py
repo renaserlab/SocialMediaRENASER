@@ -103,6 +103,22 @@ _RESENAS = (
     "product_review_moderation",
 )
 
+#: Las cuatro de la 0082, MÁS la columna que hace falta en una tabla que ya
+#: existía. Se comprueban TODAS: con las tablas pero sin el tercer origen en
+#: `owner_sale_balances`, registrar una venta reventaría con un error que nadie
+#: captura en medio del aviso de cobro.
+_FINANZAS = (
+    "product_refunds",
+    "product_refund_events",
+    "product_disputes",
+    "product_dispute_events",
+)
+
+#: Y ESTA MIRA UNA COLUMNA, no una tabla: la 0082 no crea `owner_sale_balances`,
+#: le añade el tercer origen, y preguntar por la tabla diría que sí sin que
+#: exista nada de lo que hace falta. Es el mismo caso que las fotografías.
+_ORIGEN_DEL_SALDO = ("product_order_id",)
+
 #: Lo que la 0073 le añade a `product_media`. Se comprueban TODAS: una tabla con
 #: `status` pero sin `content_type` sería una migración aplicada a medias, y el
 #: catálogo firmaría rutas de archivos que nadie midió.
@@ -149,6 +165,36 @@ async def hay_admision(db: AsyncSession) -> bool:
 async def hay_guardados(db: AsyncSession) -> bool:
     """Si la 0072 está aplicada: productos guardados."""
     return await _hay(db, "guardados", _GUARDADOS)
+
+
+async def _hay_columnas(
+    db: AsyncSession, clave: str, tabla: str, columnas: tuple[str, ...]
+) -> bool:
+    """Si esa tabla existe Y trae esas columnas.
+
+    Igual que la puerta de las fotografías, y por lo mismo: una migración que
+    AÑADE columnas a una tabla que ya existe no se puede comprobar preguntando
+    por la tabla —diría que sí sin que exista nada de lo que hace falta—.
+    """
+    if clave not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            inspector = inspect(sync)
+            if not inspector.has_table(tabla):
+                return False
+            hay = {c["name"] for c in inspector.get_columns(tabla)}
+            return all(c in hay for c in columnas)
+
+        _cache[clave] = await conexion.run_sync(_mirar)
+        if not _cache[clave]:
+            logger.warning(
+                "Productos: a %s le faltan columnas (%s); las rutas que las "
+                "necesitan contestan 503",
+                tabla,
+                ", ".join(columnas),
+            )
+    return _cache[clave]
 
 
 async def hay_fotografias(db: AsyncSession) -> bool:
@@ -205,6 +251,21 @@ async def hay_incidencias(db: AsyncSession) -> bool:
 async def hay_resenas(db: AsyncSession) -> bool:
     """Si la 0081 esta aplicada: resena, respuesta e historial."""
     return await _hay(db, "resenas", _RESENAS)
+
+
+async def hay_finanzas(db: AsyncSession) -> bool:
+    """Si la 0082 está aplicada: las cuatro tablas Y el tercer origen del saldo.
+
+    DOS COMPROBACIONES Y NO UNA. Con las cuatro tablas puestas pero sin
+    `owner_sale_balances.product_order_id`, registrar una venta reventaría con un
+    error que nadie captura, y lo haría DENTRO del aviso de cobro: el peor sitio
+    posible. Es el mismo caso que las fotografías de la 0073.
+    """
+    if not await _hay(db, "finanzas", _FINANZAS):
+        return False
+    return await _hay_columnas(
+        db, "origen_del_saldo", "owner_sale_balances", _ORIGEN_DEL_SALDO
+    )
 
 
 async def exigir_dominio(db: AsyncSession) -> None:
@@ -295,6 +356,14 @@ async def exigir_resenas(db: AsyncSession) -> None:
         )
 
 
+async def exigir_finanzas(db: AsyncSession) -> None:
+    if not await hay_finanzas(db):
+        raise ServiceUnavailableError(
+            "Las finanzas de productos todavia no estan disponibles.",
+            code="product_finance_not_available",
+        )
+
+
 def olvidar() -> None:
     """Tira la caché. Para las pruebas, que montan y tiran esquemas."""
     _cache.clear()
@@ -305,6 +374,7 @@ __all__ = [
     "exigir_carrito",
     "exigir_dominio",
     "exigir_envios",
+    "exigir_finanzas",
     "exigir_incidencias",
     "exigir_fotografias",
     "exigir_guardados",
@@ -316,6 +386,7 @@ __all__ = [
     "hay_carrito",
     "hay_dominio",
     "hay_envios",
+    "hay_finanzas",
     "hay_incidencias",
     "hay_fotografias",
     "hay_guardados",

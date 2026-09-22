@@ -1607,9 +1607,16 @@ class ProductShipment(Base):
 
     delivered_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: LA CONFIRMACION DE QUIEN COMPRA, APARTE. Y NO ES CONFORMIDAD: confirmar
-    #: que llego no es decir que esta bien. Lo segundo libera dinero y es del
-    #: Incremento 9.
+    #: que llego no es decir que esta bien. Lo segundo libera dinero, y desde el
+    #: Incremento 9 tiene su PROPIA columna: cambiarle el significado a esta
+    #: seria redefinir en silencio algo que ya tiene filas.
     buyer_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: LA CONFORMIDAD (0082). Esto SI libera el dinero, de inmediato, y lo exige
+    #: el blueprint. No se puede dar sobre algo que no llego, y lo impone un
+    #: CHECK y no un `if`.
+    conformity_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
@@ -1717,6 +1724,10 @@ class ProductShipment(Base):
             sqlite_where=text(
                 "dispatch_settled_at is null and release_settled_at is null"
             ),
+        ),
+        CheckConstraint(
+            "conformity_at is null or delivered_at is not null",
+            name="product_shipments_conformidad_con_entrega",
         ),
         #: REDUNDANTE A PROPOSITO (0081). `order_id` ya es clave primaria. Esta
         #: es la que convierte «el paquete llego» en una clave ajena: la resena

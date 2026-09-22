@@ -58,6 +58,15 @@ class OwnerSaleReserve(Base):
     status: Mapped[str] = mapped_column(String(16), server_default=text("'held'"))
     #: La política que la calculó. Nula = una retención que nadie decidió.
     policy_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    #: LOS DOS DE PRODUCTOS (0082). La tabla es compartida desde la 0068 y esto
+    #: no la parte en dos: una reserva apunta como mucho a UN expediente y como
+    #: mucho a UNA politica, y dos CHECK lo imponen.
+    product_incident_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), nullable=True
+    )
+    product_policy_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), nullable=True
+    )
     created_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -72,6 +81,17 @@ class OwnerSaleReserve(Base):
 
     __table_args__ = (
         CheckConstraint("amount_minor > 0", name="owner_sale_reserves_importe"),
+        # COMO MUCHO UN EXPEDIENTE Y COMO MUCHO UNA POLITICA (0082). Una reserva
+        # que apuntara a un caso de evento Y a uno de producto no se sabria de
+        # quien es.
+        CheckConstraint(
+            "case_id is null or product_incident_id is null",
+            name="owner_sale_reserves_un_expediente",
+        ),
+        CheckConstraint(
+            "policy_id is null or product_policy_id is null",
+            name="owner_sale_reserves_una_politica",
+        ),
         CheckConstraint(
             f"reason in ({', '.join(repr(m) for m in MOTIVOS_DE_RESERVA)})",
             name="owner_sale_reserves_motivo",

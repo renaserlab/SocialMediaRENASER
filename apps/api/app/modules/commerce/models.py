@@ -553,6 +553,15 @@ class OwnerSaleBalance(Base):
         ForeignKey("event_orders.id", ondelete="RESTRICT"),
         nullable=True,
     )
+    #: EL TERCER ORIGEN (0082). Productos no tiene una tabla de «producto
+    #: vendido» equivalente a `courses` o `events`: lo que se vende es un pedido
+    #: con sus lineas, y el producto de cada linea vive ahi. Asi que el origen
+    #: es UNA columna y no un par, y el CHECK lo admite asi.
+    product_order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_orders.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     owner_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT"), index=True
     )
@@ -602,13 +611,29 @@ class OwnerSaleBalance(Base):
             name="owner_sale_balances_status",
         ),
         # UN ORIGEN, EXACTAMENTE UNO. Estaba en la 0068 y no aquí: las pruebas
-        # podían crear un saldo sin origen o con los dos y no enterarse.
+        # podían crear un saldo sin origen o con los dos y no enterarse. Desde
+        # la 0082 son TRES ramas, y las dos primeras no cambian ni una letra.
         CheckConstraint(
             "(course_id is not null and order_id is not null "
-            " and event_id is null and event_order_id is null) "
+            " and event_id is null and event_order_id is null "
+            " and product_order_id is null) "
             "or (event_id is not null and event_order_id is not null "
-            " and course_id is null and order_id is null)",
+            " and course_id is null and order_id is null "
+            " and product_order_id is null) "
+            "or (product_order_id is not null "
+            " and course_id is null and order_id is null "
+            " and event_id is null and event_order_id is null)",
             name="owner_sale_balances_un_origen",
+        ),
+        # UN SALDO POR PEDIDO DE PRODUCTO. Es lo único que protege de dos saldos
+        # para la misma venta cuando un aviso de cobro llega dos veces, y sin él
+        # en el modelo el camino del `IntegrityError` no se ejercita en pruebas.
+        Index(
+            "owner_sale_balances_pedido_de_producto_unico",
+            "product_order_id",
+            unique=True,
+            postgresql_where=text("product_order_id is not null"),
+            sqlite_where=text("product_order_id is not null"),
         ),
         # UN SALDO POR PEDIDO DE EVENTO. Es lo único que protege de dos saldos
         # para la misma venta bajo concurrencia, y sin él en el modelo el camino
