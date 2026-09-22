@@ -600,11 +600,14 @@ async def test_las_tablas_de_productos_no_las_lee_la_aplicacion(sesiones) -> Non
         )
         tablas = dict(cur.fetchall())
         # LAS TRECE DE LOS INCREMENTOS 1-3, LAS CUATRO DEL 4, LAS CINCO DEL 5,
-        # LAS TRES DEL 6 Y LAS TRES DEL 7. El número se escribe entero a
-        # propósito: si mañana aparece una tabla de Productos sin RLS, esta
-        # prueba se pone roja antes de que nadie la despliegue.
-        assert len(tablas) == 28, sorted(tablas)
+        # LAS TRES DEL 6, LAS TRES DEL 7 Y LAS TRES DEL 8. El número se escribe
+        # entero a propósito: si mañana aparece una tabla de Productos sin RLS,
+        # esta prueba se pone roja antes de que nadie la despliegue.
+        assert len(tablas) == 31, sorted(tablas)
         for nueva in (
+            "product_reviews",
+            "product_review_replies",
+            "product_review_moderation",
             "product_inventory",
             "inventory_movements",
             "product_carts",

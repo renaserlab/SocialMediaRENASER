@@ -953,6 +953,19 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
         "/api/v1/products/seller/incidents/{incident_id}/respond",
         "/api/v1/admin/products/incidents",
         "/api/v1/admin/products/incidents/{incident_id}/resolve",
+        # Incremento 8: la resena verificada, entera.
+        "/api/v1/products/orders/{order_id}/reviewable",
+        "/api/v1/products/order-items/{order_item_id}/review",
+        "/api/v1/products/reviews/mine",
+        "/api/v1/products/reviews/{review_id}",
+        "/api/v1/products/{product_id}/reviews",
+        "/api/v1/products/{product_id}/reviews/summary",
+        "/api/v1/products/seller/reviews",
+        "/api/v1/products/seller/reviews/{review_id}/reply",
+        "/api/v1/admin/products/reviews",
+        "/api/v1/admin/products/reviews/{review_id}/moderate",
+        "/api/v1/admin/products/reviews/{review_id}/moderation",
+        "/api/v1/admin/products/review-replies/{reply_id}/moderate",
     )
     for ruta in esperadas:
         assert ruta in rutas, ruta
@@ -967,11 +980,20 @@ def test_las_rutas_de_compra_existen_y_no_cobran_nada() -> None:
         for prohibida in prohibidas:
             assert prohibida not in ruta, ruta
 
-    #: NI UNA SOLA RESENA DE PRODUCTO. `/orders/review` es la cola de
-    #: conciliacion del Incremento 5 y se llama asi desde entonces; lo que no
-    #: puede existir es una ruta de resenas, que es del Incremento 8.
+    #: LAS RESENAS SALIERON DE AQUI con el Incremento 8 y entraron en
+    #: `esperadas`, igual que las incidencias con el 7. Lo que queda prohibido
+    #: es lo que una resena NO puede hacer: no mueve dinero y no reescribe lo
+    #: que escribio otra persona, asi que no hay ninguna ruta que ponga el
+    #: sello a mano ni que edite una resena ajena.
     for ruta in rutas:
-        assert "/reviews" not in ruta, ruta
+        assert "/reviews/verify" not in ruta, ruta
+        assert not ruta.endswith("/reviews/{review_id}/edit"), ruta
+
+    #: Y NINGUNA RUTA DE PROVEEDOR TOCA LA RESENA. Puede responder, y nada mas:
+    #: ni esconder, ni editar, ni borrar.
+    for ruta in rutas:
+        if "/seller/reviews" in ruta:
+            assert ruta.endswith("/reply") or ruta.endswith("/seller/reviews"), ruta
 
     #: Y ADMINISTRACION NO TIENE RUTA PARA DESPACHAR NI PARA ENTREGAR. Lo que
     #: puede mover lo decide la maquina de estados, pero que no exista una URL
