@@ -47,24 +47,44 @@ logger = logging.getLogger("renaser.products")
 #: buscar el identificador en la tabla equivocada primero.
 DOMINIO = "producto"
 
-#: Estados de aviso que hablan de dinero que VUELVE. Hoy NO deshacen nada: se
-#: anotan para que una persona los concilie.
+#: Avisos de una DEVOLUCION. Se encaminan al expediente que les corresponde.
 #:
-#: Y ES DELIBERADO. Devolver el importe y deshacer la venta son dos decisiones
-#: distintas, y la segunda no existe todavía: devolución, reembolso y garantía
-#: son de los Incrementos 8 y 9, y ninguna política los ha fijado. Soltar aquí
-#: el inventario por iniciativa propia sería inventarse la política.
-DINERO_QUE_VUELVE = frozenset(
+#: HASTA EL INCREMENTO 9 SOLO SE ANOTABAN, y con razon: no existia ninguna
+#: politica de devoluciones, asi que deshacer una venta por iniciativa propia
+#: habria sido inventarsela. Ahora existe el expediente —`product_refunds`, con
+#: su maquina de estados y su historial— y no encaminarlos tenia una
+#: consecuencia concreta: una devolucion que Stripe contestara `pending` no
+#: llegaba NUNCA a `confirmed`, porque el unico camino de confirmacion era la
+#: respuesta sincrona de `pedir`.
+#:
+#: LO QUE SIGUE SIN HACERSE, Y SIGUE SIENDO DELIBERADO: soltar inventario.
+#: Devolver el dinero y devolver la mercancia son dos decisiones distintas, y
+#: la segunda depende de una politica de devoluciones que nadie ha publicado.
+AVISOS_DE_DEVOLUCION = frozenset(
     {
         "refunded",
         "refund_procesando",
         "refund_parcial",
         "refund_fallido",
+    }
+)
+
+#: Avisos de una DISPUTA. No son devoluciones: las abre el banco del titular y
+#: el dinero se retira sin pasar por nuestro circuito.
+AVISOS_DE_DISPUTA = frozenset(
+    {
         "disputa_abierta",
         "disputa_fondos_retirados",
         "disputa_cerrada",
     }
 )
+
+#: Los dos juntos, que es lo que el resto del modulo llamaba asi.
+DINERO_QUE_VUELVE = AVISOS_DE_DEVOLUCION | AVISOS_DE_DISPUTA
+
+#: Los estados de aviso que dicen que el dinero SALIO DE VERDAD. El resto
+#: —`refund_procesando`— solo mueve el expediente hacia delante.
+DEVOLUCION_CONFIRMADA_POR_LA_PASARELA = frozenset({"refunded", "refund_parcial"})
 
 
 @dataclass(frozen=True)
@@ -304,23 +324,71 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:
         )
         return None
 
-    if evento.status in DINERO_QUE_VUELVE:
-        #: NO SE DESHACE NADA. Ver la cabecera de `DINERO_QUE_VUELVE`.
-        logger.info(
-            "[productos] dinero que vuelve (%s) del cobro %s",
-            evento.event_type,
-            evento.provider_transaction_id,
-        )
-        return (
-            f"Devolución o disputa de un pedido de productos ({evento.event_type})."
-            " Pendiente de conciliar a mano: no hay política de devoluciones."
-        )
+    if evento.status in AVISOS_DE_DEVOLUCION:
+        return await _aviso_de_devolucion(db, evento)
+
+    if evento.status in AVISOS_DE_DISPUTA:
+        from app.modules.products import disputas
+
+        return await disputas.atender_aviso(db, evento)
 
     #: 'pendiente' e 'ignorado'. Ninguno vende nada.
     return None
 
 
+async def _aviso_de_devolucion(db: AsyncSession, evento) -> str | None:
+    """Lleva el aviso al expediente de devolucion, por la puerta canonica.
+
+    SIN UNA REFERENCIA REAL NO SE TOCA NADA. `refund_id` es el `re_...` que
+    manda Stripe; sin el —un aviso antiguo, o uno que no lo traiga— no hay
+    forma de saber DE QUE devolucion habla, y adivinarla por el cobro tocaria
+    la equivocada cuando hay varias parciales sobre el mismo pedido.
+
+    NI UNA REGLA SE DECIDE AQUI. `devoluciones.atender_aviso` es quien sabe si
+    una confirmacion consume la reserva, si cancela el saldo y si marca el
+    efecto del expediente; el webhook solo entrega. Duplicar esas reglas aqui
+    seria tener dos sitios donde arreglarlas.
+
+    UN AVISO FUERA DE ORDEN NO DESHACE NADA. Un `failed` que llegue despues de
+    un `confirmed` lo ignora el servicio, que para eso lo comprueba.
+    """
+    referencia = (getattr(evento, "refund_id", "") or "").strip()
+    if not referencia:
+        logger.info(
+            "[productos] aviso de devolucion sin referencia propia (%s)",
+            evento.event_type,
+        )
+        return (
+            "Aviso de devolución sin identificador de reembolso. "
+            "Pendiente de conciliar a mano."
+        )
+
+    from app.modules.products import devoluciones
+
+    fila = await devoluciones.atender_aviso(
+        db,
+        referencia_externa=referencia,
+        exito=evento.status in DEVOLUCION_CONFIRMADA_POR_LA_PASARELA,
+        codigo=str(getattr(evento, "event_type", ""))[:64] or None,
+    )
+    if fila is None:
+        #: NO ES UN ERROR. El reembolso puede ser de Cursos o de Eventos, o de
+        #: uno hecho a mano desde el panel de Stripe que aqui no tiene
+        #: expediente. No reconocerlo no es fallar.
+        logger.info(
+            "[productos] el reembolso %s no tiene expediente de productos",
+            referencia,
+        )
+        return (
+            "Devolución sin expediente en Productos. "
+            "Pendiente de conciliar a mano."
+        )
+    return None
+
+
 __all__ = [
+    "AVISOS_DE_DEVOLUCION",
+    "AVISOS_DE_DISPUTA",
     "DINERO_QUE_VUELVE",
     "DOMINIO",
     "IntentoDePago",

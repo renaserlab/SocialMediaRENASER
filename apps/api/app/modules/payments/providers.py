@@ -106,6 +106,16 @@ class PaymentEvent:
     #: como «pedido inexistente» del otro.
     dominio: str = ""
 
+    #: El identificador REAL de la disputa (`dp_...`), solo en avisos de
+    #: contracargo. Vacío en todo lo demás.
+    #:
+    #: NO VALE LA REFERENCIA DEL COBRO en su lugar: un mismo cobro puede tener
+    #: más de una disputa a lo largo del tiempo, y usando la del cobro como
+    #: clave la segunda actualizaría la primera en vez de abrirse. Y es lo
+    #: único que permite cruzar nuestra fila con el panel de la pasarela
+    #: cuando alguien tenga que conciliar a mano.
+    dispute_id: str = ""
+
     #: El identificador REAL del reembolso (`re_...`), solo en avisos de
     #: devolución. Vacío en todo lo demás.
     #:

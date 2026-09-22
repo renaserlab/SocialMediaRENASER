@@ -316,6 +316,7 @@ def traducir_evento(evento: dict[str, Any]) -> PaymentEvent:
 
     return PaymentEvent(
         refund_id=_identificador_del_reembolso(tipo, objeto),
+        dispute_id=_identificador_de_la_disputa(tipo, objeto),
         purchase_id=interno,
         dominio=_dominio(objeto),
         provider_transaction_id=referencia,
@@ -365,6 +366,19 @@ def _estado_de_devolucion(tipo: str, objeto: dict[str, Any]) -> str:
             return "refund_parcial"
         return "refund_procesando"
     return "refunded"
+
+
+def _identificador_de_la_disputa(tipo: str, objeto: dict[str, Any]) -> str:
+    """El `dp_...` de este aviso, o cadena vacía si no es de una disputa.
+
+    En los tres `charge.dispute.*` el objeto ES la disputa, así que su `id` es
+    el que vale. No se compone nada a partir del cobro: un identificador
+    sintético no se puede consultar contra la pasarela ni cruzar con su panel.
+    """
+    if not tipo.startswith("charge.dispute."):
+        return ""
+    crudo = objeto.get("id")
+    return str(crudo) if isinstance(crudo, str) and crudo.startswith("dp_") else ""
 
 
 def _identificador_del_reembolso(tipo: str, objeto: dict[str, Any]) -> str:
