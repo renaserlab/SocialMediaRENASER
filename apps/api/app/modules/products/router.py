@@ -23,6 +23,8 @@ cómo saberlo, y escribirlo arrancaría plazos de posventa que nadie ha cumplido
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +42,7 @@ from app.modules.products import media as fotos
 from app.modules.products import pagos as cobros
 from app.modules.products import pedidos
 from app.modules.products import politicas
+from app.modules.products import resenas as opiniones
 from app.modules.products import permissions as permisos
 from app.modules.products import service
 from app.modules.products import states as maquina
@@ -56,12 +59,23 @@ from app.modules.products.models import (
     ProductOrder,
     ProductIncident,
     ProductPolicy,
+    ProductReview,
     ProductSeller,
     ProductVersion,
 )
 from app.shared import storage as almacenamiento
 from app.modules.products.schemas import (
     AbrirIncidencia,
+    DistribucionRead,
+    LineaValorable,
+    ModeracionDeResena,
+    MovimientoDeModeracion,
+    ResenaEditRequest,
+    ResenaRead,
+    ResenaRequest,
+    RespuestaAResenaRead,
+    RespuestaDelProveedorRequest,
+    ResumenDeResenas,
     CheckoutProductoRead,
     EscaladaRead,
     IncidenciaRead,
@@ -3215,6 +3229,398 @@ async def intervenir_inventario(
         reserved=hay.reserved,
         available=hay.available,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Resenas verificadas (Incremento 8, migracion 0081)
+#
+# EL SELLO NO ES UN CAMPO DEL FORMULARIO. Lo unico que entra por aqui son cinco
+# puntuaciones, un si/no y un texto: el producto, el pedido, la linea y las dos
+# fechas que verifican la compra las pone el servidor, y la base las vuelve a
+# comprobar con tres claves ajenas compuestas.
+# --------------------------------------------------------------------------- #
+
+
+def _distribucion(histograma: dict[int, int]) -> DistribucionRead:
+    return DistribucionRead(
+        uno=histograma.get(1, 0),
+        dos=histograma.get(2, 0),
+        tres=histograma.get(3, 0),
+        cuatro=histograma.get(4, 0),
+        cinco=histograma.get(5, 0),
+    )
+
+
+def _resumen_de_resenas(product_id: str, resumen: opiniones.Resumen) -> ResumenDeResenas:
+    return ResumenDeResenas(
+        product_id=product_id,
+        total=resumen.total,
+        average=resumen.promedio,
+        adjusted=resumen.ajustada,
+        distribution=_distribucion(resumen.histograma),
+        recommend_bps=resumen.recomiendan_bps,
+        quality=resumen.por_eje.get("quality"),
+        fidelity=resumen.por_eje.get("fidelity"),
+        functioning=resumen.por_eje.get("functioning"),
+        value_for_money=resumen.por_eje.get("value_for_money"),
+        category_average=resumen.promedio_de_categoria,
+        category_configured=resumen.categoria_configurada,
+    )
+
+
+def _resena(
+    resena,  # noqa: ANN001
+    *,
+    respuesta=None,  # noqa: ANN001
+    propia: bool = False,
+) -> ResenaRead:
+    """El molde de salida.
+
+    `order_item_id` y el estado SOLO en la propia y en la de moderacion: en la
+    lista publica dirian de que compra concreta sale cada opinion.
+    """
+    return ResenaRead(
+        id=resena.id,
+        product_id=resena.product_id,
+        author_id=resena.author_id,
+        overall=resena.overall,
+        quality=resena.quality,
+        fidelity=resena.fidelity,
+        functioning=resena.functioning,
+        value_for_money=resena.value_for_money,
+        recommends=resena.recommends,
+        comment=resena.comment,
+        reply=(
+            RespuestaAResenaRead(
+                id=respuesta.id, body=respuesta.body, created_at=respuesta.created_at
+            )
+            if respuesta is not None
+            else None
+        ),
+        created_at=resena.created_at,
+        updated_at=resena.updated_at,
+        status=resena.status if propia else None,
+        order_item_id=resena.order_item_id if propia else None,
+    )
+
+
+async def _con_respuestas(db: AsyncSession, filas: list) -> list[ResenaRead]:
+    """Pinta una lista de resenas con su respuesta, en UNA consulta mas.
+
+    CONTRA EL N+1: preguntar la respuesta de cada resena son tantas consultas
+    como resenas, y una pagina son veinte.
+    """
+    respuestas = await opiniones.respuestas_de(db, resena_ids=[r.id for r in filas])
+    return [_resena(r, respuesta=respuestas.get(r.id)) for r in filas]
+
+
+@router.get("/reviews/mine", response_model=list[ResenaRead])
+async def mis_resenas(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ResenaRead]:
+    """Las que escribi, ESCONDIDAS INCLUIDAS: quien la escribio tiene derecho a
+    saber que paso con lo que escribio."""
+    filas = await opiniones.mias(db, usuario_id=current_user.id)
+    return [_resena(r, propia=True) for r in filas]
+
+
+@router.get("/orders/{order_id}/reviewable", response_model=list[LineaValorable])
+async def lineas_valorables(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LineaValorable]:
+    """Que puedo valorar de este pedido, y que ya valore.
+
+    UN PEDIDO AJENO DEVUELVE LISTA VACIA, no un 403: decir «ese no es tuyo»
+    confirmaria que existe.
+    """
+    ensure_uuid(order_id, "Pedido no encontrado.")
+    lineas = await opiniones.valorables_del_pedido(
+        db, orden_id=order_id, usuario_id=current_user.id
+    )
+    return [
+        LineaValorable(
+            order_item_id=linea.order_item_id,
+            order_id=linea.order_id,
+            product_id=linea.product_id,
+            name=linea.name_snapshot,
+            variant_name=linea.variant_name_snapshot,
+            quantity=linea.quantity,
+            delivered_at=linea.delivered_at,
+            review_id=linea.review_id,
+            can_review=linea.review_id is None,
+            reason=None if linea.review_id is None else "already_reviewed",
+        )
+        for linea in lineas
+    ]
+
+
+@router.post(
+    "/order-items/{order_item_id}/review", response_model=ResenaRead, status_code=201
+)
+async def valorar(
+    order_item_id: str,
+    cuerpo: ResenaRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead:
+    """Valora una linea de pedido que llego. UNA POR LINEA."""
+    ensure_uuid(order_item_id, "Esa compra no existe.")
+    resena = await opiniones.crear(
+        db,
+        order_item_id=order_item_id,
+        usuario_id=current_user.id,
+        overall=cuerpo.overall,
+        quality=cuerpo.quality,
+        fidelity=cuerpo.fidelity,
+        functioning=cuerpo.functioning,
+        value_for_money=cuerpo.value_for_money,
+        recommends=cuerpo.recommends,
+        comentario=cuerpo.comment,
+    )
+    await db.commit()
+    await db.refresh(resena)
+    return _resena(resena, propia=True)
+
+
+@router.get("/reviews/{review_id}", response_model=ResenaRead)
+async def mi_resena(
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead:
+    """La propia. LA AJENA ES UN 404, para que probar identificadores no diga
+    quien opino sobre que."""
+    ensure_uuid(review_id, "Resena no encontrada.")
+    resena = await opiniones.mia(db, resena_id=review_id, usuario_id=current_user.id)
+    respuestas = await opiniones.respuestas_de(db, resena_ids=[resena.id])
+    return _resena(resena, respuesta=respuestas.get(resena.id), propia=True)
+
+
+@router.patch("/reviews/{review_id}", response_model=ResenaRead)
+async def editar_mi_resena(
+    review_id: str,
+    cuerpo: ResenaEditRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead:
+    """Cambia lo que escribi. NO de que compra habla."""
+    ensure_uuid(review_id, "Resena no encontrada.")
+    ejes = {
+        "quality": cuerpo.quality,
+        "fidelity": cuerpo.fidelity,
+        "functioning": cuerpo.functioning,
+        "value_for_money": cuerpo.value_for_money,
+    }
+    resena = await opiniones.editar(
+        db,
+        resena_id=review_id,
+        usuario_id=current_user.id,
+        overall=cuerpo.overall,
+        ejes={k: v for k, v in ejes.items() if v is not None},
+        recommends=cuerpo.recommends,
+        comentario=cuerpo.comment,
+    )
+    await db.commit()
+    await db.refresh(resena)
+    return _resena(resena, propia=True)
+
+
+@router.get("/seller/reviews", response_model=list[ResenaRead])
+async def resenas_de_mi_tienda(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ResenaRead]:
+    """Lo que opinan de mis productos, para poder responderlo."""
+    await permisos.exigir_vendedor_activo(db, current_user.id)
+    filas = await opiniones.del_proveedor(db, usuario_id=current_user.id)
+    return await _con_respuestas(db, filas)
+
+
+@router.post(
+    "/seller/reviews/{review_id}/reply", response_model=ResenaRead, status_code=201
+)
+async def responder_resena(
+    review_id: str,
+    cuerpo: RespuestaDelProveedorRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead:
+    """El proveedor responde en publico. UNA VISIBLE POR RESENA.
+
+    NO PUEDE TOCAR LA RESENA. No existe ninguna ruta de proveedor que escriba
+    puntuacion, texto, autor ni estado, y hay una prueba que recorre el router
+    para que siga sin existir.
+    """
+    ensure_uuid(review_id, "Resena no encontrada.")
+    await permisos.exigir_vendedor_activo(db, current_user.id)
+    respuesta = await opiniones.responder(
+        db, resena_id=review_id, usuario_id=current_user.id, texto=cuerpo.body
+    )
+    await db.commit()
+    await db.refresh(respuesta)
+    #: `responder` ya comprobo que el producto es suyo; si no lo fuera habria
+    #: salido con 404 antes de llegar aqui.
+    resena = await db.get(ProductReview, review_id)
+    return _resena(resena, respuesta=respuesta)
+@router.get("/{product_id}/reviews/summary", response_model=ResumenDeResenas)
+async def resumen_de_resenas(
+    product_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthUser | None = Depends(get_optional_user),
+) -> ResumenDeResenas:
+    """La puntuacion de un producto. SIN RESENAS VIAJA NULA, no en cero.
+
+    NO EXIGE SESION: la ficha la lee cualquiera. Y no exige la 0081: sin ella
+    contesta un resumen vacio en vez de 503, porque es un bloque de la ficha y
+    tumbar la ficha entera por eso seria peor.
+    """
+    ensure_uuid(product_id, "Producto no encontrado.")
+    return _resumen_de_resenas(product_id, await opiniones.resumen(db, producto_id=product_id))
+
+
+@router.get("/{product_id}/reviews", response_model=list[ResenaRead])
+async def resenas_del_producto(
+    product_id: str,
+    before: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None),
+    limit: int = Query(default=opiniones.POR_PAGINA, ge=1, le=opiniones.TOPE_POR_PAGINA),
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthUser | None = Depends(get_optional_user),
+) -> list[ResenaRead]:
+    """Las resenas visibles, de la mas nueva a la mas vieja.
+
+    EL CURSOR ES `(before, before_id)` y no un numero de pagina: con un
+    desplazamiento numerico, una resena nueva mientras alguien lee corre todas
+    las demas una posicion, y la pagina siguiente repite una fila y se salta
+    otra. Las dos partes van juntas o no va ninguna.
+    """
+    ensure_uuid(product_id, "Producto no encontrado.")
+    cursor = None
+    if before is not None and before_id is not None:
+        ensure_uuid(before_id, "Producto no encontrado.")
+        cursor = (before, before_id)
+    filas = await opiniones.listar(
+        db, producto_id=product_id, antes_de=cursor, limite=limit
+    )
+    return await _con_respuestas(db, filas)
+
+
+# --------------------------------------------------------------------------- #
+# Moderacion de resenas (Incremento 8)
+#
+# MODERAR ES ESCONDER, NUNCA REESCRIBIR. No hay ni una ruta que cambie la
+# puntuacion, el texto o el autor de una resena, y hay una prueba que lo
+# comprueba recorriendo el arbol de sintaxis de este fichero.
+# --------------------------------------------------------------------------- #
+
+
+@admin_router.get("/reviews", response_model=list[ResenaRead])
+async def cola_de_resenas(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ResenaRead]:
+    """Las resenas visibles, para poder mirarlas.
+
+    EL ROL VA ANTES DE LA PUERTA DE ESQUEMA: si fuera al reves, una cuenta sin
+    permisos distinguiria un 503 de un 403 y averiguaria que migraciones estan
+    aplicadas.
+    """
+    await permisos.exigir_evaluador(db, current_user.id)
+    filas = await opiniones.para_moderar(db)
+    respuestas = await opiniones.respuestas_de(db, resena_ids=[r.id for r in filas])
+    return [_resena(r, respuesta=respuestas.get(r.id), propia=True) for r in filas]
+
+
+@admin_router.post("/reviews/{review_id}/moderate", response_model=ResenaRead)
+async def moderar_resena(
+    review_id: str,
+    cuerpo: ModeracionDeResena,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead:
+    """Esconde o restaura. La fila se queda entera."""
+    await permisos.exigir_evaluador(db, current_user.id)
+    ensure_uuid(review_id, "Resena no encontrada.")
+    resena = await opiniones.moderar(
+        db,
+        resena_id=review_id,
+        actor_id=current_user.id,
+        esconder=cuerpo.hidden,
+        motivo=cuerpo.reason,
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        action="product_review.moderate",
+        entity_type="product_review",
+        entity_id=resena.id,
+        metadata={"hidden": cuerpo.hidden},
+    )
+    await db.commit()
+    await db.refresh(resena)
+    return _resena(resena, propia=True)
+
+
+@admin_router.post("/review-replies/{reply_id}/moderate", response_model=ResenaRead)
+async def moderar_respuesta_de_resena(
+    reply_id: str,
+    cuerpo: ModeracionDeResena,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResenaRead:
+    """Lo mismo, para la respuesta del proveedor."""
+    await permisos.exigir_evaluador(db, current_user.id)
+    ensure_uuid(reply_id, "Respuesta no encontrada.")
+    respuesta = await opiniones.moderar_respuesta(
+        db,
+        respuesta_id=reply_id,
+        actor_id=current_user.id,
+        esconder=cuerpo.hidden,
+        motivo=cuerpo.reason,
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        action="product_review_reply.moderate",
+        entity_type="product_review_reply",
+        entity_id=respuesta.id,
+        metadata={"hidden": cuerpo.hidden},
+    )
+    await db.commit()
+    await db.refresh(respuesta)
+    resena = await db.get(ProductReview, respuesta.review_id)
+    visibles = await opiniones.respuestas_de(db, resena_ids=[respuesta.review_id])
+    return _resena(resena, respuesta=visibles.get(respuesta.review_id), propia=True)
+
+
+@admin_router.get(
+    "/reviews/{review_id}/moderation", response_model=list[MovimientoDeModeracion]
+)
+async def historial_de_una_resena(
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MovimientoDeModeracion]:
+    """Que se hizo con esta resena y con su respuesta, en orden."""
+    await permisos.exigir_evaluador(db, current_user.id)
+    ensure_uuid(review_id, "Resena no encontrada.")
+    filas = await opiniones.historial_de_moderacion(db, resena_id=review_id)
+    return [
+        MovimientoDeModeracion(
+            id=f.id,
+            review_id=f.review_id,
+            reply_id=f.reply_id,
+            actor_id=f.actor_id,
+            from_status=f.from_status,
+            to_status=f.to_status,
+            reason=f.reason,
+            created_at=f.created_at,
+        )
+        for f in filas
+    ]
 
 
 __all__ = ["admin_router", "router"]

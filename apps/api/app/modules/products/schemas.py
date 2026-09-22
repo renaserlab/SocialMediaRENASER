@@ -1186,3 +1186,150 @@ class EscaladaRead(BaseModel):
     veces seguidas devuelve cero la segunda porque ya no queda ninguno."""
 
     escalated: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# Resenas verificadas (Incremento 8)
+# --------------------------------------------------------------------------- #
+class ResenaRequest(BaseModel):
+    """Lo UNICO que manda quien opina.
+
+    NO VIAJA NI EL PRODUCTO NI LA FECHA DE ENTREGA NI EL PEDIDO. Todo lo que
+    verifica la compra lo pone el servidor leyendo la linea, y la base lo vuelve
+    a comprobar con sus tres claves ajenas. Si el cliente pudiera mandarlos,
+    «compra verificada» seria un campo de formulario.
+    """
+
+    overall: int = Field(ge=1, le=5)
+    quality: int = Field(ge=1, le=5)
+    fidelity: int = Field(ge=1, le=5)
+    functioning: int = Field(ge=1, le=5)
+    value_for_money: int = Field(ge=1, le=5)
+    recommends: bool
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class ResenaEditRequest(BaseModel):
+    """Editar la propia. Todo opcional: se cambia lo que se mande."""
+
+    overall: int | None = Field(default=None, ge=1, le=5)
+    quality: int | None = Field(default=None, ge=1, le=5)
+    fidelity: int | None = Field(default=None, ge=1, le=5)
+    functioning: int | None = Field(default=None, ge=1, le=5)
+    value_for_money: int | None = Field(default=None, ge=1, le=5)
+    recommends: bool | None = None
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class RespuestaDelProveedorRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=1000)
+
+
+class ModeracionDeResena(BaseModel):
+    """Esconder o restaurar. NUNCA reescribir."""
+
+    hidden: bool
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class RespuestaAResenaRead(BaseModel):
+    id: str
+    body: str
+    created_at: datetime
+
+
+class ResenaRead(BaseModel):
+    """Una resena publicada. SIN el pedido ni la linea que la respaldan.
+
+    `order_id`, `order_item_id` y las dos fechas atan a una persona con una
+    compra concreta —su importe, su direccion, su dia— y el sello ya dice lo
+    unico que el lector necesita saber. En la PROPIA si viaja la linea, porque
+    quien la escribio tiene que poder volver a su pedido.
+    """
+
+    id: str
+    product_id: str
+    author_id: str
+    overall: int
+    quality: int
+    fidelity: int
+    functioning: int
+    value_for_money: int
+    recommends: bool
+    comment: str | None = None
+    #: Siempre `True`: una resena existe porque hubo una compra entregada. Va
+    #: explicito para que la pantalla no tenga que deducirlo.
+    compra_verificada: bool = True
+    reply: RespuestaAResenaRead | None = None
+    created_at: datetime
+    updated_at: datetime
+    #: Solo viaja en la PROPIA y en la de moderacion: en la lista publica no
+    #: hace falta, porque las escondidas ni siquiera salen.
+    status: str | None = None
+    order_item_id: str | None = None
+
+
+class DistribucionRead(BaseModel):
+    """Cuantas resenas hay de cada estrella. Cinco claves, siempre."""
+
+    uno: int = 0
+    dos: int = 0
+    tres: int = 0
+    cuatro: int = 0
+    cinco: int = 0
+
+
+class ResumenDeResenas(BaseModel):
+    """Lo que la ficha del producto ensena.
+
+    `average` y `adjusted` son NULOS cuando no hay ni una resena. No son cero:
+    un producto sin opiniones no tiene una puntuacion de 0,0; no tiene
+    puntuacion, y pintar cinco estrellas vacias dice algo que nadie ha dicho.
+    """
+
+    product_id: str
+    total: int = 0
+    average: float | None = None
+    adjusted: float | None = None
+    distribution: DistribucionRead = DistribucionRead()
+    #: Porcentaje que recomienda, en puntos basicos para no perder decimales.
+    #: NULO si no hay resenas.
+    recommend_bps: int | None = None
+    quality: float | None = None
+    fidelity: float | None = None
+    functioning: float | None = None
+    value_for_money: float | None = None
+    #: El previo de la formula del blueprint, y si salio de un promedio de
+    #: categoria de verdad. Hoy NO: de donde sale ese promedio es una decision
+    #: que nadie ha tomado, asi que se usa el valor por defecto escrito en el
+    #: blueprint y se dice que es por defecto.
+    category_average: float
+    category_configured: bool = False
+
+
+class LineaValorable(BaseModel):
+    """Una linea entregada de un pedido, con su resena si ya la tiene."""
+
+    order_item_id: str
+    order_id: str
+    product_id: str
+    name: str
+    variant_name: str | None = None
+    quantity: int
+    delivered_at: datetime
+    review_id: str | None = None
+    can_review: bool = False
+    reason: str | None = None
+
+
+class MovimientoDeModeracion(BaseModel):
+    """Una fila del historial. SOLO SE ANADE."""
+
+    id: str
+    review_id: str | None = None
+    reply_id: str | None = None
+    actor_id: str | None = None
+    from_status: str | None = None
+    to_status: str
+    reason: str | None = None
+    created_at: datetime
