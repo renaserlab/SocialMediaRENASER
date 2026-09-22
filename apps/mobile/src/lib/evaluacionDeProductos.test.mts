@@ -1747,6 +1747,11 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       // El del Incremento 8. Sin el, un codigo nuevo de valoraciones podia
       // salir a produccion sin texto detras.
       'resenas.py',
+      // Y los dos del Incremento 9. Aqui pesa mas que en ningun otro sitio:
+      // un codigo de dinero sin texto deja a quien vende leyendo el mensaje
+      // crudo del servidor en castellano, sea cual sea su idioma.
+      'finanzas.py',
+      'devoluciones.py',
     ]) {
       let texto = '';
       try {
@@ -1780,6 +1785,7 @@ describe('el 401, el 403, el 404, el 409 y el 503 no son lo mismo', () => {
       'envios.ts',
       'incidencias.ts',
       'resenasDeProductos.ts',
+      'finanzasDeProductos.ts',
     ]) {
       for (const m of fuente('lib', modulo).matchAll(
         /^\s{2}([a-z_0-9]+):\s*'[^']+',$/gm,

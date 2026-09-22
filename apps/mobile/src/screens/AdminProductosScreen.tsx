@@ -423,6 +423,16 @@ export function AdminProductosScreen() {
         disabled={ocupado}
       />
 
+      {/* Y EL PANEL FINANCIERO. NO MUEVE DINERO y lo dice arriba del todo:
+          dice cuanto hay y por que no sale. Pide permisos de administracion
+          financiera, que son un conjunto mas estrecho que la curaduria. */}
+      <Button
+        label={f('finanzaDeProducto.panel.titulo')}
+        variant="secondary"
+        onPress={() => router.push('/admin/productos/finanzas' as never)}
+        disabled={ocupado}
+      />
+
       {conflicto ? (
         <View style={[styles.recuadro, { borderColor: colors.danger }]}>
           <Text variant="secondary" weight="700" color={colors.danger}>

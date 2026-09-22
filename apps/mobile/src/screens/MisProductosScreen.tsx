@@ -440,6 +440,16 @@ export function MisProductosScreen() {
         disabled={ocupado}
       />
 
+      {/* Y SU SALDO. La pantalla explica que sin comision decidida no hay
+          balance: preferimos no ensenar una cifra antes de que sea de verdad. */}
+      <Button
+        label={f('finanzaDeProducto.titulo')}
+        icon="credit-card"
+        variant="secondary"
+        onPress={() => router.push('/proveedor/finanzas' as never)}
+        disabled={ocupado}
+      />
+
       {productos.length === 0 ? (
         <StateView
           state="empty"

@@ -32,6 +32,18 @@ import {
   lineasYaValoradas,
   sePuedeOfrecerValorar,
 } from '@/lib/resenasDeProductos';
+import {
+  type DevolucionDeProducto,
+  claveDeErrorFinanciero,
+  claveDelEstadoDeDevolucion,
+  elDineroYaVolvio,
+  esFinanzasApagadas,
+  importeDeLaDevolucion,
+  sePuedeDarConformidad,
+  yaDioLaConformidad,
+} from '@/lib/finanzasDeProductos';
+import { casoVivo } from '@/lib/incidencias';
+import { ProductBuyerMoneyRepository } from '@/repositories/ProductFinanceRepository';
 import { ProductReviewRepository } from '@/repositories/ProductReviewRepository';
 import {
   claveDeErrorDePedidos,
@@ -105,6 +117,8 @@ export function PedidoDeProductoScreen() {
   const [fallo, setFallo] = useState<
     'red' | 'sinConexion' | 'noDisponible' | 'sinSesion' | 'noEncontrado' | null
   >(null);
+  //: EL DINERO QUE HA VUELTO DE ESTE PEDIDO. Lo dice el servidor.
+  const [devueltos, setDevueltos] = useState<DevolucionDeProducto[]>([]);
   //: QUE SE PUEDE VALORAR DE ESTE PEDIDO. Lo dice el servidor, no la
   //: pantalla: aqui no se deduce de que el paquete haya llegado.
   const [valorables, setValorables] = useState<LineaValorable[]>([]);
@@ -120,6 +134,16 @@ export function PedidoDeProductoScreen() {
     setFallo(null);
     try {
       setPedido(await ProductOrderRepository.leer(orderId));
+      try {
+        setDevueltos(
+          await ProductBuyerMoneyRepository.devolucionesDelPedido(orderId),
+        );
+      } catch (error) {
+        //: SIN LAS FINANZAS EL PEDIDO SE SIGUE VIENDO. Es un bloque de mas.
+        if (!(error instanceof ApiError) || !esFinanzasApagadas(error.code)) {
+          setDevueltos([]);
+        }
+      }
       try {
         setValorables(await ProductReviewRepository.valorables(orderId));
       } catch (error) {
@@ -175,6 +199,28 @@ export function PedidoDeProductoScreen() {
         setPedido(await ProductOrderRepository.leer(pedido.id));
       } catch (error) {
         notify(f('carrito.noSePudo'), textoDelError(error));
+      } finally {
+        ocupadoRef.current = false;
+        setOcupado(false);
+      }
+    })();
+  };
+
+  const darLaConformidad = () => {
+    if (ocupadoRef.current || pedido === null) return;
+    ocupadoRef.current = true;
+    setOcupado(true);
+    void (async () => {
+      try {
+        await ProductBuyerMoneyRepository.darLaConformidad(pedido.id);
+        setPedido(await ProductOrderRepository.leer(pedido.id));
+      } catch (error) {
+        notify(
+          f('carrito.noSePudo'),
+          error instanceof ApiError
+            ? f(claveDeErrorFinanciero(error.code))
+            : textoDelError(error),
+        );
       } finally {
         ocupadoRef.current = false;
         setOcupado(false);
@@ -653,7 +699,85 @@ export function PedidoDeProductoScreen() {
                 {f('resenaDeProducto.valorar.nadaQueValorar')}
               </Text>
             )}
-            {/* 44 DE ALTO Y HOLGURA EN CADA FILA. styles.fila no lo traia, y
+            {/*
+          LA CONFORMIDAD (Incremento 9). ESTO SI LIBERA EL DINERO, y por eso es
+          una accion aparte de confirmar que llego: aquella existe desde el
+          Incremento 6 y sigue significando lo mismo.
+
+          NO HACE FALTA DARLA. Si no se dice nada, el dinero se paga solo cuando
+          venza el plazo de proteccion, y el texto lo explica: un boton que
+          parezca obligatorio empujaria a renunciar al plazo sin querer.
+
+          Y NO SE OFRECE CON UNA RECLAMACION VIVA: quien dice que algo llego mal
+          no puede a la vez decir que esta bien. Lo comprueba tambien el
+          servidor, que es quien decide.
+        */}
+        {yaLlego(pedido.shipment) ? (
+          <View style={[styles.bloque, { borderColor: colors.border }]}>
+            <Text variant="titleMedium">
+              {f('finanzaDeProducto.conformidad.titulo')}
+            </Text>
+            {yaDioLaConformidad(pedido.shipment) ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('finanzaDeProducto.conformidad.dada')}
+              </Text>
+            ) : sePuedeDarConformidad(
+                pedido.shipment,
+                casoVivo(pedido.incidents) !== null,
+              ) ? (
+              <>
+                <Text variant="caption" color={colors.textMuted}>
+                  {f('finanzaDeProducto.conformidad.cuerpo')}
+                </Text>
+                <Text variant="caption" color={colors.textMuted}>
+                  {f('finanzaDeProducto.conformidad.noEsLoMismo')}
+                </Text>
+                <Button
+                  label={f('finanzaDeProducto.conformidad.boton')}
+                  variant="secondary"
+                  icon="check-circle"
+                  onPress={darLaConformidad}
+                  disabled={ocupado}
+                />
+              </>
+            ) : (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('finanzaDeProducto.error.product_shipment_incident_open')}
+              </Text>
+            )}
+          </View>
+        ) : null}
+
+        {/* Y EL DINERO QUE HA VUELTO, si ha vuelto alguno. SOLO `confirmed`
+            dice que salio: un «aprobada» es una decision, no un cobro. */}
+        {devueltos.length > 0 ? (
+          <View style={[styles.bloque, { borderColor: colors.border }]}>
+            <Text variant="titleMedium">
+              {f('finanzaDeProducto.devueltoDeEstePedido')}
+            </Text>
+            {devueltos.map((d) => (
+              <View key={d.id} style={styles.fila}>
+                <Feather
+                  name={elDineroYaVolvio(d) ? 'check-circle' : 'clock'}
+                  size={14}
+                  color={colors.textMuted}
+                />
+                <View style={styles.crece}>
+                  <Text variant="caption">
+                    {f(claveDelEstadoDeDevolucion(d.status))}
+                  </Text>
+                  {importeDeLaDevolucion(d) !== null ? (
+                    <Text variant="caption" color={colors.textMuted}>
+                      {importeDeLaDevolucion(d)}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* 44 DE ALTO Y HOLGURA EN CADA FILA. styles.fila no lo traia, y
                una fila de dos textos pequenos se queda por debajo del area
                tactil minima. Lo senalo la revision independiente. */}
             {lineasYaValoradas(valorables).map((linea) => (

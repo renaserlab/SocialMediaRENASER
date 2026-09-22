@@ -70,6 +70,12 @@ export type Envio = {
   /** `seller` o `buyer`. Administración no puede afirmar una entrega. */
   delivered_source: string | null;
   buyer_confirmed_at: string | null;
+  /**
+   * LA CONFORMIDAD (Incremento 9). NO es lo mismo que la de arriba:
+   * confirmar que llego no es decir que esta bien, y ESTO SI libera el
+   * dinero. Son dos campos porque son dos afirmaciones distintas.
+   */
+  conformity_at?: string | null;
   failure_reason: string | null;
   cancellation_reason: string | null;
   items: LineaPreparada[];

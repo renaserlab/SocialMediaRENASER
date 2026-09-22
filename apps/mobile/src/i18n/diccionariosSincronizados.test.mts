@@ -129,6 +129,16 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 9 de Productos: se escriben IGUAL en español y en portugués.
+    'finanzaDeProducto.estado.cancelled',
+    'finanzaDeProducto.devolucion.cancelled',
+    'finanzaDeProducto.disputa.lost',
+    'finanzaDeProducto.disputa.withdrawn',
+    'finanzaDeProducto.falta.desconocido',
+    'finanzaDeProducto.panel.bloqueados',
+    'finanzaDeProducto.panel.disputas',
+    'finanzaDeProducto.panel.anular',
+    'finanzaDeProducto.panel.motivo',
     // Incremento 8 de Productos: se escriben IGUAL en español y en portugués.
     'resenaDeProducto.ficha.comprasVerificadas',
     'resenaDeProducto.ficha.unaCompraVerificada',
