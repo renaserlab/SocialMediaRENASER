@@ -171,10 +171,11 @@ compra aceptó.
 
 ## 5. Productos
 
-Reescrita el 12/09/2026, ampliada el 17/09/2026 con los Incrementos 4 y 5, y el
-21/09/2026 con el 6. La vertical existe: hay dominio, admisión con evaluación,
-catálogo con **fotografías reales**, **inventario**, **bolsa**, **condiciones de
-venta por jurisdicción**, **pedido con reserva** y **entrega**.
+Reescrita el 12/09/2026, ampliada el 17/09/2026 con los Incrementos 4 y 5, el
+21/09/2026 con el 6 y el 7, y el 22/09/2026 con el 8. La vertical existe: hay
+dominio, admisión con evaluación, catálogo con **fotografías reales**,
+**inventario**, **bolsa**, **condiciones de venta por jurisdicción**, **pedido
+con reserva**, **entrega**, **reclamaciones** y **valoraciones verificadas**.
 
 Lo que sigue sin haber es **cobrar de verdad**: el recorrido llega hasta la
 puerta de la pasarela y ahí se para, porque hacen falta cinco banderas
@@ -195,7 +196,7 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Portada de Productos Z | `/productos` | `GET /products` | terminada | el **título editorial** de «Selección Z» no tiene campo ni decisión: el bloque se pinta con el rótulo y las tarjetas, sin título inventado |
 | Buscador y filtros | `/productos/buscar` | `GET /products/search` | terminada | nada. Filtra en el servidor y pagina por cursor |
 | Categorías | dentro del buscador | `GET /products/categories` | terminada | **la tabla nace vacía**: las categorías iniciales las decide la empresa |
-| Ficha del producto | `/productos/[productId]` | `GET /products/{id}` | terminada | tres bloques de la captura 6 quedan FUERA por no tener datos: valoración real, compra protegida y la barra de comprar |
+| Ficha del producto | `/productos/[productId]` | `GET /products/{id}` + `GET /products/{id}/reviews/summary` | terminada | **la valoración real ya tiene datos** (Incremento 8) y se lee en su propia petición: sin la 0081 la ficha se ve entera, solo sin ese bloque. Siguen FUERA dos bloques de la captura 6: compra protegida y la barra de comprar |
 | Informe de evaluación | `/productos/[productId]/evaluacion` | `GET /products/{id}/evaluation` | terminada | nada. El sello lo abre, y enseña la evidencia por dimensión sin la nota interna |
 | Guardados | `/productos/guardados` | `GET /products/saved` + `POST/DELETE .../save` | terminada | nada. Guardar es idempotente y **no es un carrito** |
 | Bolsa con contador | encabezado | `GET /products/counts` | terminada | **la bolsa lleva al CARRITO** y cuenta unidades; guardados tiene su propio acceso al lado y cuenta productos marcados |
@@ -203,7 +204,12 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Comprar (revisar, dirección y condiciones) | `/productos/checkout` | `GET /products/checkout/preparation`, `GET /products/policies`, `POST /products/orders` | terminada | **no cobra**: reserva y deja el pedido esperando pago. Sin política publicada enseña qué falta |
 | Mis pedidos | `/productos/pedidos` | `GET /products/orders` | terminada | nada |
 | Detalle del pedido y vuelta del pago | `/productos/pedidos/[orderId]` | `GET /products/orders/{id}`, `POST .../checkout`, `POST .../cancel` | terminada | **la vuelta del navegador no confirma dinero**: la pantalla pregunta el estado al servidor |
-| Valoración real (4,8 · 184 compras verificadas) | — | — | **no existe** | reseñas de producto por línea de pedido entregada. Incremento 8 |
+| Valoración real (4,8 · 184 compras verificadas) | dentro de `/productos/[productId]` | `GET /products/{id}/reviews/summary` | terminada | **sin valoraciones no se pinta ninguna puntuación**: ni un 0,0, ni cinco estrellas vacías, ni un «0 %». La puntuación ajustada es la fórmula del blueprint §6.1, y cuando se apoya en la referencia general —porque de dónde sale el promedio de categoría no lo ha decidido nadie— la pantalla lo dice |
+| Lo que opinan | `/productos/[productId]/resenas` | `GET /products/{id}/reviews` | terminada | pagina por `(created_at, id)` y **no dice de qué compra sale cada opinión**: el pedido y la línea atan a una persona con un importe y una dirección. El sello de compra verificada dice lo único que hace falta |
+| Valorar lo que compré | `/productos/pedidos/[orderId]/valorar` | `GET /products/orders/{id}/reviewable`, `POST /products/order-items/{id}/review` | terminada | **la unidad es la línea del pedido**, no el pedido: dos artículos comprados juntos se valoran aparte. Las seis respuestas del blueprint son obligatorias y el botón dice cuál falta. **Aquí no se suben fotografías**: eso es una reclamación |
+| Mi valoración | `/productos/resenas/[reviewId]` | `GET/PATCH /products/reviews/{id}` | terminada | se edita la puntuación y el texto, **nunca de qué compra habla**. Una oculta por moderación **se sigue viendo entera** —es suya— pero no se edita: reescribirla y dejarla oculta no sirve, y dejarla visible sería saltarse la moderación escribiendo |
+| Quién opinó, con nombre y cara | — | — | **no existe** | viaja el identificador público del perfil y nada más, igual que en las reseñas de evento. **Cómo se identifica públicamente a quien opina es una decisión abierta** (ver D143): deducir un nombre completo sería publicarlo sin que nadie lo haya decidido |
+| Índice de permanencia (blueprint §7) | — | — | **no existe** | tres de sus siete componentes —devoluciones atribuibles, reclamos válidos y garantías atendidas— no existen hasta el Incremento 9. Calcularlo con cuatro de siete daría un número que parece el del blueprint y no lo es |
 | Compra protegida y plazos | dentro del checkout y del pedido | `GET /products/policies` | **parcial** | los plazos salen de la política publicada. **Sin plazo de incidencias NO se dice «compra protegida»**: se dice que esa jurisdicción todavía no lo fija |
 | Barra fija de compra | — | — | **no existe** | en la ficha hay «Añadir a la bolsa», que NO es comprar. Comprar vive en la bolsa y lleva al checkout |
 | Impuestos y envío | — | — | **no existen** | entidad fiscal, transportista y tarifas. **No se pintan como cero**: el checkout dice con palabras que están sin decidir |
@@ -215,7 +221,7 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | El expediente | `/productos/reclamaciones/[incidentId]` | `GET /products/incidents/{id}` + `evidence`/`submit`/`reply`/`escalate`/`appeal`/`withdraw` | terminada | de 2 a 6 fotografías, y **una vez añadida no se quita**: la otra parte ya la vio. El plazo del proveedor se dice como un hecho y **nunca** como un incumplimiento; nulo es «ahora no le toca a él» |
 | Cuánto se devuelve, y cuándo | — | — | **no existe** | una decisión registrada dice QUÉ se acordó, no CUÁNTO. El efecto queda `PENDING` y **nadie lo ejecuta**: Incremento 9 |
 | Fecha de la decisión de Z | — | — | **no existe** | el blueprint dice «tres días hábiles» y «hábil» depende de un calendario que nadie definió. Se dice «en revisión», y la pantalla explica por qué no hay fecha |
-| Devolución, reembolso y garantía ejecutados | — | — | **no existen** | Incrementos 8 y 9. Un aviso de devolución se anota para conciliar y **no deshace nada** |
+| Devolución, reembolso y garantía ejecutados | — | — | **no existen** | Incremento 9. Un aviso de devolución se anota para conciliar y **no deshace nada** |
 
 ### Proveedor
 
@@ -230,6 +236,8 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Preparar y despachar | `/proveedor/pedidos/[orderId]` | `GET/POST .../seller/orders/{id}/shipment/*` | terminada | es la **única pantalla de Productos donde salen unidades del almacén**, y por eso despachar pregunta antes. Transportista y referencia son opcionales |
 | Reclamaciones de mi tienda | `/proveedor/reclamaciones` | `GET /products/seller/incidents` | terminada | **sin la descripción**: ese texto lo escribe quien reclama y suele llevar dentro dónde vive. Se llega desde «Mis productos» y se enseña siempre |
 | Responder una reclamación | `/proveedor/reclamaciones/[incidentId]` | `GET .../seller/incidents/{id}`, `POST .../respond`, `POST .../request-evidence` | terminada | **propone, no resuelve**, y no existe ruta ni botón que resuelva: las cinco salidas mueven dinero o mercancía. Pedir más pruebas **para su reloj**. Ni un dato de quien compró |
+| Lo que opinan de mi tienda | `/proveedor/resenas` | `GET /products/seller/reviews` | terminada | **solo las de sus productos y solo las visibles**. Se llega desde «Mis productos», y la lista vacía lo explica en vez de parecer rota |
+| Responder una valoración | dentro de esa bandeja | `POST /products/seller/reviews/{id}/reply` | terminada | **responder es lo único que puede hacer**, y la pantalla lo dice: no hay ruta ni botón para cambiar ni ocultar lo que escribió quien compró. **Una respuesta visible por valoración**: varias serían una forma de insistirle a quien opinó |
 | Saldos del proveedor | — | — | **no existen** | Incremento 9. No hay pantalla vacía que los simule |
 
 ### Administración
@@ -248,6 +256,7 @@ de eso está decidido, y la pantalla lo dice con palabras en vez de inventarlo.
 | Reclamaciones por revisar | `/admin/productos/reclamaciones` | `GET /admin/products/incidents` | terminada | **solo `admin`, no `is_admin`**: moderación recibe 403 y la pantalla lo dice. Ni un dato personal en la cola |
 | Decidir una reclamación | `/admin/productos/reclamaciones/[incidentId]` | `GET /admin/products/incidents/{id}`, `POST .../resolve` | terminada | **registrar no es ejecutar**: no mueve dinero ni devuelve nada al almacén, y lo dice antes de pulsar. La explicación es obligatoria y el expediente no se reescribe |
 | Escalar las reclamaciones vencidas | dentro de esa cola | `POST /admin/products/incidents/escalate-overdue` | terminada | **idempotente**, y se lanza a mano: un temporizador dentro de FastAPI se ejecutaría una vez por réplica. Espera un planificador externo, como el vencimiento de reservas |
+| Valoraciones por revisar | `/admin/productos/resenas` | `GET /admin/products/reviews`, `POST .../reviews/{id}/moderate`, `POST .../review-replies/{id}/moderate`, `GET .../reviews/{id}/moderation` | terminada | **moderar es esconder, nunca reescribir**: la puntuación, el texto y el autor se quedan enteros, y el historial solo se añade. El motivo es interno y **no viaja a la auditoría compartida**: puede llevar dentro una cita de lo que escribió quien opinó |
 | Intervenir un envío parado | — (ruta de API) | `POST /admin/products/shipments/{id}/transition` | **backend terminado, sin pantalla** | lo único que permite —reabrir, registrar un fallo, registrar un reintento— también lo hace quien vende desde la suya, y **cuándo escala una cosa a la otra es una decisión operativa que nadie ha tomado**. No puede despachar ni escribir «entregado» |
 
 ### Lo que esta matriz dice, en una frase
@@ -269,12 +278,18 @@ plazo del proveedor → el proveedor propone o pide más pruebas → Z registra 
 se decidió**. Ahí se para, y se para diciéndolo: **el dinero de vuelta no
 existe**. Una decisión registrada deja el efecto `PENDING` y nadie lo ejecuta.
 
-Lo que queda fuera no es una pantalla sin conectar. Son: la valoración real, que
-necesita reseñas del Incremento 8; **el cobro**, que llega hasta la puerta de la
-pasarela y ahí se para porque faltan cinco banderas, una clave y una política, y
-la pantalla lo dice; **la ejecución del reembolso y los saldos**, que son del
-Incremento 9; y **el acceso de Servicios**, que sigue siendo el único de los
-cuatro chips que no lleva a ninguna parte, a propósito y avisando.
+Y desde el Incremento 8 el recorrido se cierra por donde empezó: **llegó → se
+valora la línea que llegó → la puntuación aparece en la ficha del producto → el
+proveedor responde en público → moderación puede esconder, nunca reescribir**.
+La valoración real era la primera diferencia con la captura 6 y ya no lo es.
+
+Lo que queda fuera no es una pantalla sin conectar. Son: **el cobro**, que llega
+hasta la puerta de la pasarela y ahí se para porque faltan cinco banderas, una
+clave y una política, y la pantalla lo dice; **la ejecución del reembolso y los
+saldos**, que son del Incremento 9; **el índice de permanencia**, que necesita
+tres datos que nacen con esos saldos; y **el acceso de Servicios**, que sigue
+siendo el único de los cuatro chips que no lleva a ninguna parte, a propósito y
+avisando.
 
 ## 6. Alumno / comprador
 

@@ -1,22 +1,24 @@
-# Productos de Excelencia Z · Incrementos 1 a 7
+# Productos de Excelencia Z · Incrementos 1 a 8
 
 Qué se construyó, qué se decidió en cerrado y qué sigue esperando a una
 persona. Escrito el 12/09/2026, ampliado el 17/09/2026 con el Incremento 4
 —fotografías reales, inventario y carrito— y el mismo día con el Incremento 5
 —política por jurisdicción, pedido físico y reserva—, el 21/09/2026 con el
-Incremento 6 —preparación, despacho y entrega— y el mismo día con el
-Incremento 7: las reclamaciones posventa.
+Incremento 6 —preparación, despacho y entrega—, el mismo día con el
+Incremento 7 —las reclamaciones posventa— y el 22/09/2026 con el Incremento 8:
+las valoraciones verificadas.
 
-## Estado, en seis líneas (21/09/2026)
+## Estado, en seis líneas (22/09/2026)
 
 | | |
 |---|---|
-| **Incrementos 1 a 7** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva, entrega y **reclamaciones** |
+| **Incrementos 1 a 8** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva, entrega, reclamaciones y **valoraciones verificadas** |
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
 | **Migraciones 0079 y 0080** | **APLICADAS.** La 0079 esta verificada contra la base gestionada en sesion de solo lectura demostrada, con **cero divergencias**; ver §17 |
+| **Migración 0081** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable, con el ORM comparado contra el esquema real. **Se entrega para aplicarla a mano**; ver §16 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
 | **Dinero de vuelta** | **no existe.** Una reclamación resuelta dice QUÉ se decidió y deja el efecto en `PENDING`. Nadie lo ejecuta: eso es el Incremento 9 |
-| **Siguiente incremento** | **el 8 y el 9**, y antes hay que cruzar el blueprint con las capturas: el reparto entre devoluciones, garantías, reseñas y saldos no está decidido |
+| **Siguiente incremento** | **el 9: finanzas y cierre operativo.** Reutiliza `owner_sale_balances`, que desde la 0068 ya admite dos orígenes; hace falta un tercero. Y **la comisión no está decidida** |
 
 Lo que la verificación del 18/09 confirma: el índice del vencimiento quedó en su
 versión corregida —por la reserva y no por el estado—, `inventory_movements` ya
@@ -60,7 +62,7 @@ comercial añadida, y eso es `product_sellers`. Una tabla aparte crearía una
 segunda identidad que se desincroniza del perfil: dos nombres, dos fotos y dos
 verdades sobre quién es esa persona.
 
-## 3. Las once migraciones, y en este orden
+## 3. Las doce migraciones, y en este orden
 
 | Fichero | Qué trae |
 |---|---|
@@ -75,6 +77,7 @@ verdades sobre quién es esa persona.
 | `0078_productos_pedidos.sql` | `product_orders`, `product_order_items`, `product_order_addresses`, `product_order_events` |
 | `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **aplicada y verificada** |
 | `0080_productos_incidencias.sql` | el depósito `product-incidents`, `product_incidents`, `product_incident_evidence`, `product_incident_events` · **aplicada** |
+| `0081_productos_resenas.sql` | `product_reviews`, `product_review_replies`, `product_review_moderation` y tres índices únicos redundantes sobre `product_orders`, `product_order_items` y `product_shipments` · **SIN APLICAR** |
 
 **LAS NUEVE PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
 seis primeras contra la base gestionada en una sesión de solo lectura demostrada
@@ -113,8 +116,13 @@ de quien acaba de clonar pueden no tenerlas. Sin ellas, cada ruta contesta
 `product_media_not_available`, `product_inventory_not_available`,
 `product_cart_not_available`, `product_policies_not_available`,
 `product_orders_not_available`, `product_shipments_not_available`,
-`product_incidents_not_available`— y no 404, que haría pensar que la ruta está mal
-escrita, ni 500, que haría pensar que algo se rompió.
+`product_incidents_not_available`, `product_reviews_not_available`— y no 404, que
+haría pensar que la ruta está mal escrita, ni 500, que haría pensar que algo se
+rompió.
+
+**Con UNA excepción, y es deliberada: el resumen de valoraciones de la ficha.**
+Sin la 0081 contesta un resumen vacío en vez de 503, por lo mismo que la portada:
+un bloque de la ficha no puede tumbar la ficha. Ver D153.
 
 La puerta de las **fotografías mira una columna**, no una tabla: la 0073 no crea
 ninguna, le añade estado y medidas a `product_media`, y preguntar por la tabla
@@ -818,6 +826,178 @@ El resumen de los casos viaja **dentro del pedido**, por lo mismo que ya viajaba
 el envío: quien reclamó tiene que ver su caso donde está el pedido del que
 habla.
 
+## 13.6. La valoración: quién opinó, y por qué se le cree (Incremento 8, 0081)
+
+Llegó el paquete y quien lo compró cuenta qué tal. Esto es eso, y lo que lo hace
+distinto de una reseña cualquiera es **por qué se le cree**.
+
+**Dos frases lo gobiernan todo, y están escritas en las pantallas:**
+
+* **El sello no es un campo.** «Compra verificada» no es una columna que alguien
+  pueda escribir: es una consecuencia de que existan las filas que la respaldan.
+* **Sin valoraciones no hay puntuación, y no hay un cero.** Un producto sin
+  opiniones no puntúa 0,0: no puntúa. Ni cinco estrellas vacías, ni un «0 %».
+
+### La unidad es la línea de pedido
+
+Lo dice el blueprint §6 con todas las letras: «la valoración solo se habilita
+para una línea de pedido entregada y no valorada; una compra genera como máximo
+una reseña por línea de pedido». No es por producto ni por variante.
+
+Consecuencia buscada: **quien compró lo mismo dos veces, en dos pedidos, opina
+dos veces**, porque le llegaron dos cajas en dos momentos y pueden no parecerse.
+Y quien compró dos cosas distintas en el mismo pedido las valora aparte: una
+sola puntuación para las dos no diría ninguna de las dos verdades.
+
+### El sello, que lo impone la base y no el servidor
+
+Las cuatro condiciones del blueprint —quien compró, pedido pagado, línea de ese
+pedido, paquete entregado— las imponen **tres claves ajenas compuestas**:
+
+| Lo que ata | Contra qué |
+|---|---|
+| `(order_id, author_id, order_paid_at)` | `product_orders (id, buyer_id, paid_at)` |
+| `(order_item_id, order_id, product_id)` | `product_order_items (id, order_id, product_id)` |
+| `(order_id, delivered_at)` | `product_shipments (order_id, delivered_at)` |
+
+Las columnas del lado hijo son **NOT NULL**, así que la clave tiene que casar:
+un pedido sin `paid_at` o un envío sin `delivered_at` no pueden emparejar con
+ninguna reseña, y PostgreSQL rechaza el INSERT. **Tres pruebas escriben el INSERT
+a mano**, saltándose el servicio entero, y las tres se rechazan igual: sin
+entrega, con otro autor y con una fecha de cobro inventada.
+
+Por eso hacen falta **tres índices únicos redundantes** sobre tablas que ya
+existían. Son redundantes de verdad —`id` ya es clave primaria en las tres— y
+existen solo porque una clave ajena compuesta exige que el lado padre sea único.
+Es el precio de que la verificación viva en la base, y es barato.
+
+**Y HAY UN EFECTO DE VUELTA QUE ES EL QUE MÁS IMPORTA.** Mientras exista la
+reseña, esas columnas quedan congeladas: nadie puede poner `paid_at` a nulo ni
+borrar la fecha de entrega de un pedido ya valorado. Una reseña es evidencia, y
+la evidencia ata también lo que la respalda.
+
+**La única de las cuatro que la base NO puede imponer** es «nadie valora lo
+suyo»: el dueño está a dos saltos —producto, vendedor, perfil— y un CHECK no
+cruza tablas. Vive en el servicio y tiene su propia prueba.
+
+### Las tres tablas
+
+| Tabla | Qué guarda |
+|---|---|
+| `product_reviews` | la opinión: de qué línea, de quién, las cinco puntuaciones, si lo recomienda, el texto y su estado |
+| `product_review_replies` | la respuesta pública de quien vende. **Una visible por valoración**, por índice parcial |
+| `product_review_moderation` | el historial. **Solo se añade**, y lo impone un disparador |
+
+**Ninguna fotografía.** El blueprint §6 marca «Multimedia: solo para
+incidencia», así que no hay columna de adjuntos ni depósito nuevo, y el bloque de
+verificación de la 0081 falla si aparecen. La pantalla lo dice con palabras: si
+algo llegó mal, eso es una reclamación y tiene su propio recorrido.
+
+### Las seis respuestas, y que la general no es la media
+
+Cinco puntuaciones de 1 a 5 —general, calidad, se parece a la descripción,
+funcionamiento y vale lo que cuesta— más «¿lo recomendarías?». **Las seis son
+obligatorias**: es lo que dice la tabla del blueprint §6, columna «Obligatorio».
+El comentario no.
+
+**La general NO es la media de los cuatro ejes.** Responde a otra pregunta
+—«¿entregó lo que anunció?»— y promediarlas exigiría decidir cuánto pesa cada
+eje, que no lo ha decidido nadie. No hay ninguna función que calcule `overall`,
+ni en el servidor ni en el móvil, y una prueba lo comprueba recorriendo el
+código.
+
+### La puntuación ajustada, y lo que la pantalla admite de ella
+
+Es la fórmula del blueprint §6.1, literal:
+
+    ajustada = (v / (v + 10)) * promedio + (10 / (v + 10)) * promedioCategoria
+
+Sirve para que un producto con una sola reseña de cinco estrellas no aparezca por
+encima de uno con doscientas de cuatro y media.
+
+**De dónde sale ese promedio de categoría es una decisión abierta** —ver D148— y
+mientras no se tome se usa el 4,2 del propio blueprint. No se calcula uno por
+nuestra cuenta: elegir la fuente es la decisión que falta. Lo que sí se hace es
+decirlo, y la pantalla escribe que la puntuación se ajusta con una referencia
+general.
+
+**Y con cero reseñas no se publica.** Con `v = 0` la fórmula devuelve el promedio
+de categoría entero: una cifra sobre la categoría, no sobre este producto.
+
+### Quién puede qué
+
+| | Comprador | Proveedor | `admin` | Moderación |
+|---|---|---|---|---|
+| Valorar una compra suya | **sí** | no | no | no |
+| Editar lo que escribió | **sí** | no | no | no |
+| Responder en público | no | **sí, una vez** | no | no |
+| Esconder y restaurar | no | no | **sí** | **sí** |
+| Reescribir una valoración | **no, nadie** | **no** | **no** | **no** |
+
+**Nadie reescribe lo que escribió otra persona**, y no es una regla de rol: no
+existe ninguna ruta que lo permita, y una prueba recorre el árbol de sintaxis del
+router para que siga sin existir. El blueprint §15 lo dice de Mediador Z —«no
+puede editar la reseña del comprador»— y aquí vale para todo el mundo.
+
+Moderar es `is_admin` —curaduría mira contenido— y responder exige **capacidad
+comercial activa**: un proveedor suspendido no publica respuestas. Lo encontró
+la batería de mutaciones, porque la comprobación de propiedad ya tapaba el caso
+del proveedor ajeno y nadie miraba el del suspendido.
+
+### Lo que este módulo NO hace, y se ejecuta
+
+**No importa `pagos`, ni `finanzas`, ni `inventory`.** Una valoración no mueve un
+céntimo y no toca el almacén. Una prueba recorre el árbol de sintaxis de
+`resenas.py` y falla si aparece cualquiera de esos imports.
+
+**No calcula el índice de permanencia.** Tres de sus siete componentes
+—devoluciones atribuibles, reclamos válidos y garantías atendidas— no existen
+hasta el Incremento 9, y ese número mueve ventas: de él dependen suspender y
+retirar un producto. Ver D154.
+
+**No publica el nombre de quien opinó.** Viaja el identificador del perfil y nada
+más, igual que en las reseñas de evento. Ver D143.
+
+**No avisa a nadie.** El blueprint §9 lista notificaciones obligatorias para el
+dinero y los plazos, y ninguna para las valoraciones. Ver D155.
+
+### La paginación, y por qué no es un número de página
+
+El cursor es `(created_at, id)`. Con un desplazamiento numérico, una valoración
+nueva mientras alguien lee corre todas las demás una posición: la página
+siguiente repite una fila y se salta otra. El `id` desempata porque dos
+valoraciones pueden compartir el mismo instante.
+
+Hay una prueba que lo demuestra de verdad: cuatro personas distintas compran el
+mismo producto, se pide una página de dos, **entra la cuarta entre las dos
+páginas** y se comprueba que la segunda no repite ni se salta nada. Moverlas de
+producto con un `update` para montar la prueba no vale: la clave ajena compuesta
+lo rechaza, que es justo lo que tiene que hacer.
+
+### Contra el N+1
+
+El resumen de varios productos son **dos consultas**, no dos por producto, y hay
+una prueba que las cuenta interceptando el cursor. Las respuestas de una página
+de valoraciones se leen **en lote**: preguntar la de cada una serían veintiuna
+consultas para pintar veinte opiniones.
+
+### Las cinco pantallas, y desde dónde se llega
+
+| Pantalla | Ruta | Se llega desde |
+|---|---|---|
+| Valorar lo que compré | `/productos/pedidos/[orderId]/valorar` | la ficha del pedido, una vez entregado y si queda algo por valorar |
+| Mi valoración | `/productos/resenas/[reviewId]` | la ficha del pedido, y al publicar |
+| Lo que opinan | `/productos/[productId]/resenas` | el bloque de valoración de la ficha |
+| Lo que opinan de mi tienda | `/proveedor/resenas` | «Mis productos» |
+| Valoraciones por revisar | `/admin/productos/resenas` | administración de productos |
+
+**Ninguna funciona solo escribiendo la URL**, y hay pruebas que lo comprueban.
+
+El bloque «Valoración real» de la ficha **estaba reservado desde el Incremento
+3** y salía como una línea honesta; ahora tiene datos detrás, y cuando no los
+tiene sigue saliendo esa misma línea. Se lee **en su propia petición**: si la
+0081 no está aplicada, el resto de la ficha se ve entero.
+
 ## 14. Lo que sigue esperando a una persona
 
 | Qué | Quién |
@@ -840,7 +1020,9 @@ habla.
 | **Cuánto se devuelve** en cada una de las cinco salidas, y quién ejecuta el pago | la empresa + Incremento 9 |
 | Comisión de Productos | la empresa |
 | Cuenta Stripe Connect del proveedor | la empresa |
-| Fuente del promedio de categoría | la empresa |
+| **Fuente del promedio de categoría** (hoy la referencia 4,2 del blueprint, y se dice que es una referencia) | la empresa |
+| **Cómo se identifica públicamente a quien opina** (hoy solo el identificador del perfil) | la empresa |
+| **Si valorar debe avisar a quien vende, y responder a quien opinó** | producto |
 | **Publicar la política de venta de cada país** (sin ella no se vende) | la empresa + abogado |
 | **Cuántos minutos aparta un pedido su inventario** (`PRODUCT_RESERVATION_MINUTES`) | la empresa |
 | Si un carrito con varios proveedores se puede pagar de una vez | la empresa |
@@ -860,7 +1042,7 @@ bloque por bloque. Estas cinco diferencias son deliberadas:
 |---|---|---|
 | Un título editorial sobre la imagen de «Selección Z» | el rótulo y las tarjetas | no existe el campo |
 | «98 % lo recomienda» / «Garantía 3 años» | el origen | los otros necesitan reseñas o condiciones aprobadas |
-| «Valoración real 4,8 · 184 compras verificadas» | el bloque, fuera | no hay reseñas de productos |
+| «Valoración real 4,8 · 184 compras verificadas» | **el bloque, con datos de verdad** | ya existe (Incremento 8). Sin valoraciones sigue saliendo la línea honesta |
 | «Compra protegida · 3 días para reportar» | el bloque, fuera | no hay entrega ni condiciones |
 | Barra fija con «Comprar» | el precio, guardar y **añadir a la bolsa** | existe la bolsa; **no existe la compra** |
 
@@ -872,14 +1054,76 @@ habilitada. Un botón que prometa pagar sin recorrido detrás cuesta más confia
 que su ausencia.
 
 Y las fotografías **ya no son un marcador**: la primera diferencia con la
-captura que se ha cerrado del todo. Lo que sigue faltando ahí es el título
-editorial de «Selección Z», que no tiene campo.
+captura que se ha cerrado del todo. La segunda es **la valoración real**, que el
+Incremento 8 cierra: la ficha enseña la puntuación ajustada, cuántas compras
+verificadas hay detrás y qué porcentaje lo recomienda, y cuando no hay ninguna lo
+dice en vez de inventarlo. Lo que sigue faltando ahí es el título editorial de
+«Selección Z», que no tiene campo.
 
 Y el chip de Explorar ya existía: `AccesosAVerticales` pintaba los cuatro
 —Cursos, Eventos, Servicios y Productos— con Productos apagado. Lo único que
 hizo falta fue encenderlo.
 
 ## 16. Qué se aplicó a mano, y en qué orden
+
+### LA 0081 ESTÁ SIN APLICAR, y es lo único que queda pendiente
+
+**Se entrega para aplicarla una persona.** Qué se comprobó antes de entregarla:
+
+* corre **desde cero** sobre PostgreSQL 16, con las ochenta y una migraciones en
+  orden, y el bloque de verificación del final pasa;
+* corre **dos veces** sin fallar: se declara re-ejecutable y lo cumple;
+* el ORM y el esquema real dicen lo mismo, columna por columna, y esa comparación
+  la hace la prueba que ya existía para las anteriores.
+
+**Y no enciende ninguna venta.** Aplicarla solo hace que doce rutas dejen de
+contestar 503; sin las cinco banderas, sin clave de pasarela y sin política
+publicada no se puede crear un pedido, y sin pedido entregado no hay nada que
+valorar.
+
+#### El orden, para la 0081
+
+1. **Comprobar que están la 0070, la 0078 y la 0079.** La 0081 referencia
+   `products`, `product_orders`, `product_order_items` y `product_shipments`. Si
+   falta alguna, la migración se para sola en la primera clave ajena.
+2. **Pegar `supabase/migrations/0081_productos_resenas.sql` entero** en el editor
+   de Supabase. El editor lo corre como una transacción: o entra todo o no entra
+   nada.
+3. **REINICIAR LA API.** No es opcional, por lo mismo que las anteriores: sin
+   reiniciar, las rutas de valoraciones siguen contestando **503
+   `product_reviews_not_available`** aunque las tablas ya estén. La excepción es
+   el resumen de la ficha, que contesta vacío y no 503 —ver D153—, así que **el
+   síntoma de no haber reiniciado es que la ficha no enseña valoraciones y las
+   demás pantallas dicen que no está desplegado**.
+
+#### Qué comprobar después de la 0081
+
+Lo hace el script, pero por si alguien lo trocea: las tres tablas existen, están
+las **tres claves ajenas compuestas** —sin ellas «compra verificada» vuelve a
+depender de que el servidor se acuerde—, `order_paid_at` y `delivered_at` son
+**NOT NULL** —con una nula la clave se cumple sola y la verificación desaparece
+sin ruido—, está la restricción de una valoración por línea de pedido, está el
+índice de una respuesta visible, el disparador del historial cubre `update` y
+`delete`, no hay ninguna columna de sello escribible ni de adjuntos ni de dinero,
+ningún estado de valoración se ha colado en los CHECK del pedido, del envío ni de
+la incidencia, y `anon` y `authenticated` siguen con **cero** permisos.
+
+#### El rollback de la 0081, y su límite
+
+    drop table public.product_review_moderation;
+    drop table public.product_review_replies;
+    drop table public.product_reviews;
+    drop function public.product_review_moderation_solo_anadir();
+
+Los tres índices únicos redundantes se pueden dejar puestos: no estorban a nadie
+y el día que se vuelva a aplicar la 0081 ya están.
+
+**DESHACER ESTO BORRA LO QUE ESCRIBIÓ GENTE.** Las valoraciones no son datos
+derivados: son texto y puntuaciones que escribieron personas sobre lo que
+compraron, y no se pueden reconstruir. Quien revierta tiene que decidir antes si
+las exporta.
+
+### Y las dos anteriores, que ya están
 
 **YA ESTÁN APLICADAS LAS DOS**, la 0079 y la 0080, en ese orden. Lo que sigue se
 conserva porque describe el procedimiento —no lo aplica el código: no hay

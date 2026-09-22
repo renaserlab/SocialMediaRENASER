@@ -882,3 +882,106 @@ personas en dos aparatos.
       esas palabras, y no un error.
 - [ ] El catalogo, las fotografias, el inventario, la bolsa y el pedido siguen
       funcionando.
+
+## Productos, Incremento 8 — las valoraciones (22/09/2026)
+
+**Nada de esta lista esta comprobado.** Son las cosas de valorar una compra que
+ninguna prueba automatica puede ver: acertar una estrella con el pulgar, el
+teclado tapando el contador del comentario, y las dos personas a la vez —quien
+opina y quien responde— en dos aparatos.
+
+**Antes de empezar:** la 0081 tiene que estar aplicada y **la API reiniciada
+despues** —la puerta de esquema guarda el «no» en memoria del proceso—, y tiene
+que haber un pedido pagado, despachado y **entregado** de verdad. Sin pasarela
+encendida el unico camino honesto es sembrarlo desde el servidor, igual que en
+el Incremento 6.
+
+**Dos cuentas distintas y dos telefonos.** Quien opina y quien vende tienen que
+ser dos personas en dos aparatos: la mitad de esta lista es ver como le llega a
+la otra parte.
+
+### El recorrido de quien compro
+
+- [ ] En la ficha del pedido entregado aparece el bloque de valorar, y **no**
+      aparece antes de que llegue.
+- [ ] Con las lineas ya valoradas, el bloque dice que no queda nada por valorar
+      en vez de llevar a una pantalla vacia.
+- [ ] Las cinco estrellas se aciertan con el pulgar sin ampliar: cada una llega
+      a 44x44 y las cinco caben en una fila a 320 px.
+- [ ] Con el lector de pantalla encendido, cada estrella se anuncia como «3 de
+      5» y el grupo dice de que eje habla.
+- [ ] Con el teclado abierto, el contador del comentario sigue viendose y el
+      boton de publicar se alcanza.
+- [ ] El boton de publicar esta apagado hasta que estan las seis respuestas, y
+      **encima dice cual falta**.
+- [ ] **Doble toque de verdad** sobre «Publicar valoracion»: dos pulsaciones
+      rapidas dejan UNA sola valoracion, no dos, y la segunda no deja un error
+      rojo sin explicacion.
+- [ ] Con conexion lenta (Network Link Conditioner o modo avion a medias): el
+      boton se queda en carga y no se puede pulsar dos veces.
+- [ ] Publicada, se llega a la propia y se puede editar.
+- [ ] En un pedido con **dos lineas** se puede valorar cada una aparte, y la
+      segunda no arrastra la puntuacion de la primera.
+- [ ] **Atras** desde el formulario a medias vuelve al pedido sin dejar nada
+      escrito a medias.
+
+### El recorrido de quien vende, en el otro telefono
+
+- [ ] «Mis productos» lleva a «Lo que opinan de mi tienda», y la lista vacia
+      explica que todavia no hay valoraciones en vez de parecer rota.
+- [ ] La bandeja **solo** ensena valoraciones de sus productos.
+- [ ] Responder publica una respuesta, y el boton **desaparece** despues: una
+      sola respuesta visible por valoracion.
+- [ ] No hay ningun boton para cambiar ni ocultar lo que escribio quien compro,
+      y la pantalla lo dice con palabras.
+- [ ] Con la capacidad comercial **suspendida**, la bandeja contesta que no le
+      toca y no un error.
+
+### La ficha del producto
+
+- [ ] Sin valoraciones, el bloque dice que todavia no lo ha valorado nadie:
+      **ni un 0,0, ni cinco estrellas vacias, ni un «0 %»**.
+- [ ] Con una sola valoracion, la puntuacion ajustada se ensena y **debajo se
+      explica** que se apoya en una referencia general.
+- [ ] «Ver todas» lleva a la lista, y la lista pagina sin repetir ni saltarse
+      filas al bajar.
+- [ ] La lista **no** dice de que pedido sale cada opinion.
+- [ ] Con la 0081 aplicada pero sin ninguna valoracion, el resto de la ficha se
+      ve entero.
+
+### Moderacion
+
+- [ ] La cola solo la abre administracion; con una cuenta de moderacion dice que
+      no le toca.
+- [ ] Ocultar **no cambia** la puntuacion, el texto ni el autor: se comprueba
+      volviendo a mostrarla y leyendola.
+- [ ] El historial cuenta los dos pasos, en orden.
+- [ ] Ocultar la respuesta del proveedor es una accion aparte de ocultar la
+      valoracion.
+- [ ] A quien la escribio se le sigue ensenando entera, con el aviso de que esta
+      oculta.
+
+### Entre los dos telefonos
+
+- [ ] Al publicar una valoracion, a quien vende le aparece en su bandeja al
+      recargar. **Limitacion conocida:** no hay aviso dentro de la aplicacion
+      para esto, y es deliberado: nadie ha decidido si valorar debe notificar.
+- [ ] Al responder, quien opino ve la respuesta en su valoracion al recargar.
+
+### En las cuatro anchuras y los tres idiomas
+
+- [ ] Las cinco pantallas a 320, 375, 390 y 768 px, sin desbordes. Ojo a la fila
+      de cinco estrellas y a las barras del histograma a 320 px.
+- [ ] En claro y en oscuro.
+- [ ] En espanol, ingles y portugues: ninguna clave cruda en pantalla.
+- [ ] Todas las areas tactiles llegan a 44x44.
+
+### Con la 0081 SIN aplicar, que es como se entrega
+
+- [ ] Las pantallas de valoraciones dicen que **todavia no esta desplegado**,
+      con esas palabras, y no un error.
+- [ ] **La ficha del producto se sigue viendo entera**, solo sin el bloque de
+      valoracion: se lee en su propia peticion a proposito.
+- [ ] La ficha del pedido se sigue viendo entera, solo sin el bloque de valorar.
+- [ ] El catalogo, las fotografias, el inventario, la bolsa, el pedido, la
+      entrega y las reclamaciones siguen funcionando.

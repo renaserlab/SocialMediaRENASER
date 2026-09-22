@@ -1493,3 +1493,151 @@ permite —reabrir un paquete que no ha salido, registrar un fallo de entrega,
 registrar un reintento— las hace ya quien vende desde su pantalla, y cuando
 escala una cosa a la otra es una decision operativa que nadie ha tomado. Se
 mantiene [D107]: no se inventa una pantalla redundante.
+
+## Incremento 8 de Productos · las valoraciones verificadas (22/09/2026)
+
+Trece decisiones nuevas. Cuatro de ellas **no las toma el código**: quedan
+abiertas y escritas, y la que más pesa es la primera.
+
+**D143 · PENDIENTE DE LA EMPRESA: cómo se identifica públicamente a quien
+opina.**
+
+El blueprint no lo dice. Hoy viaja **el identificador del perfil y nada más**,
+que es exactamente lo que ya hacen las reseñas de evento: ningún nombre, ninguna
+foto, ninguna inicial. Deducir un nombre completo a partir del perfil sería
+publicarlo sin que nadie lo haya decidido, y **no se puede deshacer**: una vez
+publicado junto a una opinión sobre un producto, quien opinó ya quedó
+identificado. La aplicación resuelve ese identificador contra el perfil público
+igual que en cualquier otra lista, así que la decisión se puede tomar después sin
+migración; lo que no se puede es tomarla por descuido.
+
+**D144 · La unidad de la valoración es la LÍNEA DE PEDIDO.**
+
+No el producto, ni la variante, ni el pedido. Lo dice el blueprint §6 con todas
+las letras —«una compra genera como máximo una reseña por línea de pedido»— y de
+ahí sale la restricción única sobre `order_item_id`. Consecuencia buscada: quien
+compró lo mismo dos veces, en dos pedidos, opina dos veces, porque le llegaron
+dos cajas en dos momentos y pueden no parecerse.
+
+**D145 · «Compra verificada» no es una columna: son tres claves ajenas
+compuestas.**
+
+No existe ningún booleano `verified` que alguien pueda escribir. Las cuatro
+condiciones del blueprint —quien compró, pedido pagado, línea de ese pedido,
+paquete entregado— las imponen tres claves ajenas de la 0081:
+
+    (order_id, author_id, order_paid_at) -> product_orders (id, buyer_id, paid_at)
+    (order_item_id, order_id, product_id)
+        -> product_order_items (id, order_id, product_id)
+    (order_id, delivered_at) -> product_shipments (order_id, delivered_at)
+
+Las columnas del lado hijo son NOT NULL, así que la clave **tiene** que casar: un
+pedido sin `paid_at` o un envío sin `delivered_at` no pueden emparejar con
+ninguna reseña. Tres pruebas escriben el INSERT a mano, saltándose el servicio
+entero, y PostgreSQL las rechaza igual.
+
+**Y hay un efecto de vuelta que es el que más importa:** mientras exista la
+reseña, esas columnas quedan CONGELADAS. Nadie puede poner `paid_at` a nulo ni
+borrar la fecha de entrega de un pedido ya valorado. Una reseña es evidencia, y
+la evidencia ata también lo que la respalda.
+
+**D146 · Tres índices únicos redundantes sobre tablas que ya existían, y se paga
+a propósito.**
+
+`product_orders (id, buyer_id, paid_at)`, `product_order_items (id, order_id,
+product_id)` y `product_shipments (order_id, delivered_at)`. Son redundantes de
+verdad —`id` ya es clave primaria en las tres— y existen solo porque una clave
+ajena compuesta exige que el lado padre sea único. Es el precio de que la
+verificación viva en la base y no en un `if`, y es barato: tres índices sobre
+tablas que se escriben una vez por compra.
+
+**D147 · La puntuación general NO es la media de los cuatro ejes.**
+
+Responde a otra pregunta —«¿entregó lo que anunció?»— y promediarlas exigiría
+decidir cuánto pesa cada eje, que no lo ha decidido nadie. No hay ninguna
+función, ni en el servidor ni en el móvil, que calcule `overall`, y hay una
+prueba que lo comprueba sobre el código fuente.
+
+Las cinco puntuaciones y la pregunta de si lo recomendaría son **obligatorias**,
+que es lo que dice la tabla del blueprint §6. A diferencia de las reseñas de
+evento, donde los ejes son opcionales.
+
+**D148 · PENDIENTE DE LA EMPRESA: de dónde sale el promedio de categoría.**
+
+La fórmula del blueprint §6.1 mezcla el promedio real con un promedio de
+categoría, con peso diez. «Si no existe promedio de categoría, categoryAverage =
+4.2», dice el propio blueprint, y eso es lo que se usa: **no se calcula uno por
+nuestra cuenta**, porque elegir la fuente —las reseñas de la plataforma, una
+referencia externa, un valor por categoría que escriba alguien— es la decisión
+que falta y hacerlo en silencio sería tomarla.
+
+Lo que sí se hace es **decirlo**: el resumen viaja con `category_configured:
+false` y la pantalla escribe que la puntuación se ajusta con una referencia
+general. Enseñar la ajustada a secas daría a entender que Z calculó algo que
+todavía no calcula nadie.
+
+**D149 · Con cero reseñas NO se publica la puntuación ajustada.**
+
+Con `v = 0` la fórmula devuelve el promedio de categoría entero: una cifra sobre
+la categoría, no sobre este producto. El servidor la manda nula, el móvil no la
+rellena y la pantalla escribe que todavía no lo ha valorado nadie. Nulo tampoco
+es cero en el promedio real, ni en el porcentaje que recomienda, ni en cada eje
+por separado, ni en el histograma —que sale vacío en vez de cinco barras a cero—.
+
+**Y las dos guardias viven en una función pura y probada.** Dentro de la
+consulta `total` sale de un `count()` sobre un `group_by` y nunca vale cero, así
+que eran código defensivo que ninguna prueba podía alcanzar; lo encontró la
+batería de mutaciones. Ahora el resumen se arma en `resenas.armar()`, que se
+puede llamar con cero y comprobar.
+
+**D150 · La respuesta del proveedor nace VISIBLE, y en Eventos nace apagada.**
+
+No es una incoherencia: en Eventos publicar la respuesta del organizador exige
+una política `organizer_reply` que nadie ha aprobado, y **en Productos esa
+política no existe ni hay dónde ponerla**. Inventar una puerta de configuración
+que ningún documento pide sería inventar la decisión. Lo que sí se conserva de
+Eventos es la protección que de verdad importa: **una sola respuesta visible por
+valoración**, por índice único parcial, porque varias serían una forma de
+insistirle a quien opinó. Y moderación puede esconderla.
+
+**D151 · Una valoración oculta se sigue viendo entera, y no se edita.**
+
+Moderar es esconder: la fila se queda con su puntuación, su texto y su autor
+intactos, y quien la escribió la sigue leyendo con un aviso de que está oculta.
+Borrarla la dejaría sin saber qué pasó con lo que escribió.
+
+Pero **no se edita**: reescribirla y dejarla oculta no sirve de nada, y dejarla
+visible sería saltarse la moderación escribiendo. Quien quiera que se revise otra
+vez tiene que pedirlo.
+
+**D152 · El motivo de moderación NO viaja a la auditoría compartida.**
+
+`audit_events` la leen más personas que la cola de moderación, y un motivo puede
+llevar dentro una cita de lo que escribió quien opinó. Se anota **qué** pasó
+—entidad, actor y estado nuevo— y el motivo se queda en
+`product_review_moderation`, que es de quien modera. Es la misma corrección que
+el Incremento 7 aplicó al texto de una disputa.
+
+**D153 · El resumen de la ficha NO exige la 0081; las otras once rutas sí.**
+
+Es la única excepción, y es la misma que ya tenía la portada: un bloque de la
+ficha no puede tumbar la ficha. Sin la migración contesta un resumen vacío —que
+la pantalla lee como «todavía nadie ha valorado»— en vez de un 503 que dejaría
+la ficha del producto sin poder pintarse. Las once restantes contestan **503
+`product_reviews_not_available`**.
+
+**D154 · El índice de permanencia (blueprint §7) queda FUERA del Incremento 8.**
+
+Sus siete componentes incluyen devoluciones atribuibles al producto, reclamos
+válidos y garantías atendidas: **tres de siete no existen** hasta que el
+Incremento 9 ejecute devoluciones y cierre reclamaciones con efecto. Calcularlo
+con cuatro de siete daría un número que parece el del blueprint y no lo es, y ese
+número mueve ventas: de él dependen suspender y retirar un producto.
+
+**D155 · PENDIENTE: valorar no avisa a nadie.**
+
+Ni a quien vende cuando le valoran, ni a quien opinó cuando le responden. El
+blueprint §9 lista notificaciones obligatorias para el dinero y los plazos, y
+**ninguna para las valoraciones**. Se ve al recargar la pantalla. Añadir un aviso
+es una decisión de producto —cuántos, con qué texto, y si se puede apagar— y está
+escrita en el checklist de QA físico como limitación conocida.
