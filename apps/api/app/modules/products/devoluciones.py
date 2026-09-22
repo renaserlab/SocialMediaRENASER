@@ -383,15 +383,17 @@ async def pedir(
         idempotency_key=str(devolucion.idempotency_key),
         metadata={"domain": "producto", "product_order_id": str(orden.id)},
     )
+    #: CADA TIPO POR SU PUERTA, y las dos existen en los tres adaptadores.
+    #:
+    #: Aquí había un `hasattr(proveedor, "create_partial_refund")` que, como
+    #: NINGÚN adaptador lo definía, mandaba toda devolución parcial a
+    #: `partial_refund_not_supported` sin llegar jamás a la pasarela. La
+    #: comprobación era razonable cuando el contrato solo sabía devolver el
+    #: cobro entero; ahora el método es abstracto, así que un adaptador que no
+    #: lo tenga ni siquiera se puede instanciar, y preguntar por él solo servía
+    #: para tapar el hueco en vez de cerrarlo.
     proveedor = _proveedor()
-    if devolucion.kind == DEVOLUCION_PARCIAL and not hasattr(
-        proveedor, "create_partial_refund"
-    ):
-        #: LA PARCIAL NECESITA UN MÉTODO QUE EL ADAPTADOR DE CURSOS NO TIENE:
-        #: el suyo omite el importe a propósito para devolver el cobro entero.
-        #: Se dice y se para; fingir una total sería devolver más de lo decidido.
-        resultado = None
-    elif devolucion.kind == DEVOLUCION_PARCIAL:
+    if devolucion.kind == DEVOLUCION_PARCIAL:
         resultado = await proveedor.create_partial_refund(peticion)
     else:
         resultado = await proveedor.create_full_refund(peticion)

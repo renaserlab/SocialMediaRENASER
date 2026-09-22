@@ -958,10 +958,15 @@ async def test_el_adaptador_apagado_falla_en_cerrado_y_no_simula_exito(
         await db.commit()
     assert fila.status == DEVOLUCION_FALLIDA
     assert fila.confirmed_at is None
-    assert fila.failure_code in (
-        "provider_not_configured",
-        "partial_refund_not_supported",
-    )
+    #: EL CODIGO EXACTO, Y UNO SOLO.
+    #:
+    #: Antes admitia tambien `partial_refund_not_supported`, y el real era
+    #: SIEMPRE ese: como ningun adaptador definia `create_partial_refund`, la
+    #: peticion moria antes de tocar la pasarela. Es decir, la prueba que
+    #: defiende «el adaptador apagado falla en cerrado» nunca llegaba al
+    #: adaptador. Una asercion que admite dos causas no distingue cual ocurrio,
+    #: y aqui las dos causas eran cosas muy distintas.
+    assert fila.failure_code == "provider_not_configured"
     #: Y EL HISTORIAL CUENTA LOS TRES PASOS.
     async with sesiones() as db:
         pasos = [
@@ -2072,3 +2077,231 @@ async def test_el_saldo_solo_lo_ve_quien_vende(
     suyo = await http.get("/api/v1/products/seller/finance")
     assert suyo.status_code == 200, suyo.text
     assert "fee_configured" in suyo.json()
+
+
+# =========================================================================== #
+# 15. LA DEVOLUCION PARCIAL, QUE AHORA TIENE CAMINO
+#
+# Ningun adaptador definia `create_partial_refund`, asi que `pedir` la mandaba
+# a `partial_refund_not_supported` sin salir de casa: toda devolucion que no
+# fuera del total exacto era imposible de ejecutar, y el diseno entero de «el
+# importe lo teclea una persona» no tenia recorrido.
+# =========================================================================== #
+@pytest.mark.asyncio
+async def test_los_tres_adaptadores_saben_devolver_una_parte() -> None:
+    """Y el contrato lo exige: es abstracto, no un metodo con defecto.
+
+    Un defecto que cayera en la total haria que un adaptador nuevo devolviera
+    el cobro ENTERO cuando alguien decidio devolver una parte, y en silencio.
+    """
+    import inspect
+
+    from app.modules.payments.reembolsos import (
+        DobleDeterminista,
+        NoConfigurado,
+        RefundProvider,
+    )
+    from app.modules.payments.stripe_refunds import StripeRefundProvider
+
+    assert "create_partial_refund" in RefundProvider.__abstractmethods__
+
+    for clase in (NoConfigurado, DobleDeterminista, StripeRefundProvider):
+        assert hasattr(clase, "create_partial_refund"), clase.__name__
+        #: SE PUEDE INSTANCIAR: si faltara el abstracto, Python lo impediria.
+        clase()
+        #: Y NO ES EL MISMO METODO QUE LA TOTAL: si lo fuera, una parcial
+        #: devolveria el cobro entero.
+        assert (
+            inspect.unwrap(clase.create_partial_refund)
+            is not inspect.unwrap(clase.create_full_refund)
+        ), clase.__name__
+
+
+@pytest.mark.asyncio
+async def test_el_importe_viaja_a_stripe_solo_en_la_parcial() -> None:
+    """`amount` es LA diferencia entre las dos, y se comprueba sobre la llamada.
+
+    Sin red: se le inyecta un cliente que guarda lo que se le pide. Stripe
+    devuelve el cobro entero cuando se omite `amount`, asi que mandarlo o no
+    mandarlo es exactamente la diferencia entre devolver 5 y devolver 100.
+    """
+    from app.modules.payments.reembolsos import RefundRequestToProvider
+    from app.modules.payments.stripe_refunds import StripeRefundProvider
+
+    class ClienteQueApunta:
+        def __init__(self) -> None:
+            self.campos: dict = {}
+
+        async def post(self, url, data=None, headers=None, timeout=None):  # noqa: ANN001
+            self.campos = dict(data or {})
+
+            class Respuesta:
+                status_code = 200
+
+                @staticmethod
+                def json() -> dict:
+                    return {
+                        "id": "re_prueba",
+                        "status": "succeeded",
+                        "amount": 500,
+                        "currency": "pen",
+                    }
+
+            return Respuesta()
+
+    peticion = RefundRequestToProvider(
+        external_transaction_id="pi_prueba",
+        amount_minor=500,
+        currency="PEN",
+        idempotency_key="pr-ref-clave",
+    )
+
+    apunta = ClienteQueApunta()
+    proveedor = StripeRefundProvider(cliente_http=apunta)
+    resultado = await proveedor.create_partial_refund(peticion)
+    assert resultado.status == "succeeded"
+    assert apunta.campos.get("amount") == "500", apunta.campos
+    assert apunta.campos.get("payment_intent") == "pi_prueba"
+
+    #: Y LA TOTAL NO LO MANDA. Es la mitad de la prueba: sin esto, la asercion
+    #: de arriba pasaria igual con las dos operaciones mandando el importe.
+    entera = ClienteQueApunta()
+    await StripeRefundProvider(cliente_http=entera).create_full_refund(peticion)
+    assert "amount" not in entera.campos, entera.campos
+
+
+@pytest.mark.asyncio
+async def test_una_parcial_de_cero_no_sale_a_la_red() -> None:
+    """Se rechaza antes, con codigo propio, y sin gastar una llamada."""
+    from app.modules.payments.reembolsos import (
+        DobleDeterminista,
+        RefundRequestToProvider,
+    )
+    from app.modules.payments.stripe_refunds import StripeRefundProvider
+
+    class ClienteQueFallaria:
+        async def post(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+            raise AssertionError("no tenia que salir a la red")
+
+    for importe in (0, -1):
+        peticion = RefundRequestToProvider(
+            external_transaction_id="pi_x",
+            amount_minor=importe,
+            currency="PEN",
+            idempotency_key="pr-ref-cero",
+        )
+        real = await StripeRefundProvider(
+            cliente_http=ClienteQueFallaria()
+        ).create_partial_refund(peticion)
+        assert real.status == "failed"
+        assert real.failure_code == "amount_invalid"
+
+        #: Y EL DOBLE RECHAZA LO MISMO. Un doble mas permisivo que el real
+        #: dejaria pasar en las pruebas lo que produccion rechaza.
+        doble = await DobleDeterminista().create_partial_refund(peticion)
+        assert doble.failure_code == "amount_invalid"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_parcial_llega_a_la_pasarela_y_se_confirma(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL RECORRIDO ENTERO DE UNA PARCIAL, que antes era imposible.
+
+    Con el doble determinista —un importe terminado en 00 contesta exito— la
+    devolucion llega a `confirmed`, consume la reserva y marca el efecto del
+    expediente. Antes moria en `partial_refund_not_supported`.
+    """
+    from app.modules.payments.reembolsos import DobleDeterminista
+
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-parcial", rol="admin")
+
+    doble = DobleDeterminista()
+    monkeypatch.setattr(devoluciones, "_proveedor", lambda: doble)
+
+    async with sesiones() as db:
+        fila = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=500,
+            motivo="Una parte, acordada con quien compro.",
+            actor_id=admin,
+        )
+        devolucion_id = fila.id
+        assert fila.kind == "partial"
+        await db.commit()
+
+    async with sesiones() as db:
+        pedida = await devoluciones.pedir(
+            db, devolucion_id=devolucion_id, actor_id=admin
+        )
+        await db.commit()
+
+    assert pedida.status == devoluciones.DEVOLUCION_CONFIRMADA
+    assert pedida.confirmed_at is not None
+
+    #: LLEGO A LA PASARELA, CON SU IMPORTE. Es lo que antes no pasaba.
+    assert len(doble.llamadas) == 1
+    assert doble.llamadas[0].amount_minor == 500
+
+    #: Y LA RESERVA SE CONSUMIO, que es lo que arrastra una confirmacion.
+    async with sesiones() as db:
+        reservas = await finanzas.reservas_de(db, saldo_id=saldo_id)
+        consumidas = [r for r in reservas if r.status == finanzas.RESERVA_CONSUMIDA]
+        assert consumidas, [r.status for r in reservas]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_parciales_sucesivas_no_pasan_del_cobro(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """El tope es acumulado: bruto menos lo ya devuelto, y lo dice el 409."""
+    from app.modules.payments.reembolsos import DobleDeterminista
+
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-acumula", rol="admin")
+    monkeypatch.setattr(devoluciones, "_proveedor", DobleDeterminista)
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        total = int(orden.total_minor)
+
+    #: LA PRIMERA, POR CASI TODO.
+    async with sesiones() as db:
+        await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=total - 100,
+            motivo="Casi todo.",
+            actor_id=admin,
+        )
+        await db.commit()
+
+    #: LA SEGUNDA, POR MAS DE LO QUE QUEDA.
+    async with sesiones() as db:
+        with pytest.raises(devoluciones.DevolucionNoPermitida) as caso:
+            await devoluciones.aprobar(
+                db,
+                orden_id=orden_id,
+                importe_minor=200,
+                motivo="Y lo que queda, y un poco mas.",
+                actor_id=admin,
+            )
+        assert caso.value.details["reason"] == "amount_above_charge"
+        #: EL TOPE DE VERDAD VIAJA EN EL 409, para que la pantalla no lo estime.
+        assert caso.value.details["max_minor"] == 100
+
+    #: Y POR LO QUE QUEDA EXACTAMENTE, SI.
+    async with sesiones() as db:
+        ultima = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=100,
+            motivo="Lo que quedaba.",
+            actor_id=admin,
+        )
+        assert ultima.amount_minor == 100
+        await db.commit()
