@@ -20,6 +20,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -1339,6 +1340,14 @@ class ProductOrder(Base):
         UniqueConstraint(
             "buyer_id", "idempotency_key", name="product_orders_una_clave"
         ),
+        #: REDUNDANTE A PROPOSITO (0081). `id` ya es clave primaria, asi que
+        #: esto no impide nada nuevo. Existe porque una resena verificada ata
+        #: `(order_id, author_id, order_paid_at)` contra estas tres columnas con
+        #: una clave ajena compuesta, y PostgreSQL exige que el lado padre sea
+        #: unico. Es lo que hace que «compra verificada» no sea un `if`.
+        UniqueConstraint(
+            "id", "buyer_id", "paid_at", name="product_orders_comprador_y_cobro"
+        ),
         Index(
             "product_orders_del_comprador",
             "buyer_id",
@@ -1438,6 +1447,16 @@ class ProductOrderItem(Base):
             "version_id",
             "variant_id",
             name="product_order_items_una_linea",
+        ),
+        #: REDUNDANTE A PROPOSITO (0081), por lo mismo: la resena declara de que
+        #: linea, de que pedido y de que producto habla, y las tres tienen que
+        #: casar. Sin esto se podria resenar un producto que no venia en esa
+        #: linea.
+        UniqueConstraint(
+            "id",
+            "order_id",
+            "product_id",
+            name="product_order_items_del_pedido_y_producto",
         ),
         Index("product_order_items_del_pedido", "order_id", "created_at", "id"),
         Index("product_order_items_de_la_unidad", "product_id", "sku"),
@@ -1698,6 +1717,13 @@ class ProductShipment(Base):
             sqlite_where=text(
                 "dispatch_settled_at is null and release_settled_at is null"
             ),
+        ),
+        #: REDUNDANTE A PROPOSITO (0081). `order_id` ya es clave primaria. Esta
+        #: es la que convierte «el paquete llego» en una clave ajena: la resena
+        #: lleva `delivered_at` NOT NULL, y una fila de envio sin entregar
+        #: —`delivered_at` nulo— no puede emparejar con ella.
+        UniqueConstraint(
+            "order_id", "delivered_at", name="product_shipments_entrega_del_pedido"
         ),
     )
 
@@ -2245,7 +2271,276 @@ class ProductIncidentEvent(Base):
         ),
     )
 
+# --------------------------------------------------------------------------- #
+# Las resenas verificadas (0081).
+# --------------------------------------------------------------------------- #
+
+RESENA_VISIBLE = "visible"
+RESENA_ESCONDIDA = "hidden"
+
+#: Los cuatro ejes del blueprint, en una tupla y no sueltos para que el resumen,
+#: el contrato y las pruebas no puedan divergir. La puntuacion general va aparte
+#: porque NO es su media: responde a otra pregunta.
+EJES_DE_RESENA = ("quality", "fidelity", "functioning", "value_for_money")
+
+
+class ProductReview(Base):
+    """Lo que opina quien compro una linea de pedido que le llego.
+
+    «COMPRA VERIFICADA» NO ES UNA COLUMNA. No hay ningun booleano que alguien
+    pueda escribir: las cuatro condiciones las imponen tres claves ajenas
+    compuestas contra `product_orders`, `product_order_items` y
+    `product_shipments`. Si falta una, el INSERT lo rechaza la base.
+
+    LA UNIDAD ES LA LINEA DE PEDIDO, no el producto: quien compro lo mismo dos
+    veces en dos pedidos opina dos veces, porque son dos compras.
+    """
+
+    __tablename__ = "product_reviews"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+
+    product_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("products.id", ondelete="RESTRICT")
+    )
+    order_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    order_item_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    author_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE")
+    )
+
+    #: LAS DOS FECHAS QUE VERIFICAN, y no se escriben a mano: tienen que casar
+    #: con las del pedido y las del envio. NOT NULL las dos, porque con una nula
+    #: la clave ajena compuesta se cumpliria sola.
+    order_paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    overall: Mapped[int] = mapped_column(Integer)
+    quality: Mapped[int] = mapped_column(Integer)
+    fidelity: Mapped[int] = mapped_column(Integer)
+    functioning: Mapped[int] = mapped_column(Integer)
+    value_for_money: Mapped[int] = mapped_column(Integer)
+    recommends: Mapped[bool] = mapped_column(Boolean)
+
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(Text, default=RESENA_VISIBLE)
+    moderation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moderated_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    moderated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("overall between 1 and 5", name="product_reviews_general"),
+        CheckConstraint("quality between 1 and 5", name="product_reviews_calidad"),
+        CheckConstraint("fidelity between 1 and 5", name="product_reviews_fidelidad"),
+        CheckConstraint(
+            "functioning between 1 and 5", name="product_reviews_funcionamiento"
+        ),
+        CheckConstraint("value_for_money between 1 and 5", name="product_reviews_valor"),
+        CheckConstraint(
+            "comment is null or length(comment) <= 1000",
+            name="product_reviews_comentario",
+        ),
+        CheckConstraint("status in ('visible', 'hidden')", name="product_reviews_estado"),
+        CheckConstraint(
+            "moderation_reason is null or length(moderation_reason) <= 500",
+            name="product_reviews_motivo_moderacion",
+        ),
+        CheckConstraint(
+            "(status = 'hidden') = (moderated_at is not null)",
+            name="product_reviews_escondida_con_fecha",
+        ),
+        UniqueConstraint("order_item_id", name="product_reviews_una_por_linea"),
+        #: QUIEN COMPRO, Y QUE ESTABA PAGADO.
+        ForeignKeyConstraint(
+            ["order_id", "author_id", "order_paid_at"],
+            ["product_orders.id", "product_orders.buyer_id", "product_orders.paid_at"],
+            name="product_reviews_de_su_compra",
+            ondelete="RESTRICT",
+        ),
+        #: LA LINEA ES DE ESE PEDIDO Y DE ESE PRODUCTO.
+        ForeignKeyConstraint(
+            ["order_item_id", "order_id", "product_id"],
+            [
+                "product_order_items.id",
+                "product_order_items.order_id",
+                "product_order_items.product_id",
+            ],
+            name="product_reviews_de_esa_linea",
+            ondelete="RESTRICT",
+        ),
+        #: Y EL PAQUETE LLEGO.
+        ForeignKeyConstraint(
+            ["order_id", "delivered_at"],
+            ["product_shipments.order_id", "product_shipments.delivered_at"],
+            name="product_reviews_con_entrega",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "product_reviews_del_producto",
+            "product_id",
+            text("created_at desc"),
+            text("id desc"),
+            postgresql_where=text("status = 'visible'"),
+            sqlite_where=text("status = 'visible'"),
+        ),
+        Index(
+            "product_reviews_resumen_del_producto",
+            "product_id",
+            "overall",
+            postgresql_where=text("status = 'visible'"),
+            sqlite_where=text("status = 'visible'"),
+        ),
+        Index(
+            "product_reviews_de_la_persona",
+            "author_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+        Index(
+            "product_reviews_por_moderar",
+            text("created_at desc"),
+            text("id desc"),
+            postgresql_where=text("status = 'visible'"),
+            sqlite_where=text("status = 'visible'"),
+        ),
+        Index("product_reviews_del_pedido", "order_id"),
+    )
+
+
+class ProductReviewReply(Base):
+    """La respuesta publica del proveedor. UNA VISIBLE POR RESENA.
+
+    Varias sobre la misma resena serian una forma de hostigar a quien opino, y
+    lo impide un indice unico parcial. Las escondidas por moderacion se quedan
+    en el historial y dejan sitio a otra.
+    """
+
+    __tablename__ = "product_review_replies"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    review_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("product_reviews.id", ondelete="CASCADE")
+    )
+    author_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE")
+    )
+
+    body: Mapped[str] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(Text, default=RESENA_VISIBLE)
+    moderation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moderated_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    moderated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(body)) between 1 and 1000",
+            name="product_review_replies_texto",
+        ),
+        CheckConstraint(
+            "status in ('visible', 'hidden')", name="product_review_replies_estado"
+        ),
+        CheckConstraint(
+            "moderation_reason is null or length(moderation_reason) <= 500",
+            name="product_review_replies_motivo",
+        ),
+        CheckConstraint(
+            "(status = 'hidden') = (moderated_at is not null)",
+            name="product_review_replies_escondida_con_fecha",
+        ),
+        Index(
+            "product_review_replies_una_visible",
+            "review_id",
+            unique=True,
+            postgresql_where=text("status = 'visible'"),
+            sqlite_where=text("status = 'visible'"),
+        ),
+        Index(
+            "product_review_replies_de_la_resena",
+            "review_id",
+            text("created_at desc"),
+            text("id desc"),
+        ),
+    )
+
+
+class ProductReviewModeration(Base):
+    """El historial de moderacion. SOLO SE ANADE: lo impone un disparador.
+
+    Una fila habla de una resena O de una respuesta, nunca de las dos ni de
+    ninguna: si no, no se sabe que se modero.
+    """
+
+    __tablename__ = "product_review_moderation"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    review_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_reviews.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    reply_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_review_replies.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    actor_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    from_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_status: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "reason is null or length(reason) <= 500",
+            name="product_review_moderation_motivo",
+        ),
+        CheckConstraint(
+            "(review_id is null) <> (reply_id is null)",
+            name="product_review_moderation_de_algo",
+        ),
+        Index("product_review_moderation_de_la_resena", "review_id", "created_at"),
+        Index("product_review_moderation_de_la_respuesta", "reply_id", "created_at"),
+    )
+
+
 __all__ = [
+    "EJES_DE_RESENA",
+    "RESENA_ESCONDIDA",
+    "RESENA_VISIBLE",
     "ACTORES_DE_INVENTARIO",
     "ACTOR_ADMINISTRACION",
     "ACTOR_PROVEEDOR",
@@ -2388,6 +2683,9 @@ __all__ = [
     "ProductOrderEvent",
     "ProductOrderItem",
     "ProductPolicy",
+    "ProductReview",
+    "ProductReviewModeration",
+    "ProductReviewReply",
     "ProductSeller",
     "ProductShipment",
     "ProductShipmentEvent",

@@ -94,6 +94,15 @@ _INCIDENCIAS = (
     "product_incident_events",
 )
 
+#: Las tres de la 0081. Se comprueban TODAS: sin la respuesta del proveedor la
+#: ficha pintaría media conversación, y sin el historial nadie puede auditar por
+#: qué se escondió una reseña.
+_RESENAS = (
+    "product_reviews",
+    "product_review_replies",
+    "product_review_moderation",
+)
+
 #: Lo que la 0073 le añade a `product_media`. Se comprueban TODAS: una tabla con
 #: `status` pero sin `content_type` sería una migración aplicada a medias, y el
 #: catálogo firmaría rutas de archivos que nadie midió.
@@ -193,6 +202,11 @@ async def hay_incidencias(db: AsyncSession) -> bool:
     return await _hay(db, "incidencias", _INCIDENCIAS)
 
 
+async def hay_resenas(db: AsyncSession) -> bool:
+    """Si la 0081 esta aplicada: resena, respuesta e historial."""
+    return await _hay(db, "resenas", _RESENAS)
+
+
 async def exigir_dominio(db: AsyncSession) -> None:
     if not await hay_dominio(db):
         raise ServiceUnavailableError(
@@ -273,6 +287,14 @@ async def exigir_incidencias(db: AsyncSession) -> None:
         )
 
 
+async def exigir_resenas(db: AsyncSession) -> None:
+    if not await hay_resenas(db):
+        raise ServiceUnavailableError(
+            "Las resenas de productos todavia no estan disponibles.",
+            code="product_reviews_not_available",
+        )
+
+
 def olvidar() -> None:
     """Tira la caché. Para las pruebas, que montan y tiran esquemas."""
     _cache.clear()
@@ -289,6 +311,7 @@ __all__ = [
     "exigir_inventario",
     "exigir_pedidos",
     "exigir_politicas",
+    "exigir_resenas",
     "hay_admision",
     "hay_carrito",
     "hay_dominio",
@@ -298,6 +321,7 @@ __all__ = [
     "hay_guardados",
     "hay_inventario",
     "hay_pedidos",
+    "hay_resenas",
     "hay_politicas",
     "olvidar",
 ]
