@@ -15,8 +15,11 @@ import { esFaltaDeSesion } from '@/lib/productos';
 import {
   claveDeErrorDeResena,
   compraVerificada,
+  cursorDeLaPagina,
   esResenasApagadas,
   estaEscondida,
+  fusionarPaginas,
+  hayMasPaginas,
   tieneRespuesta,
 } from '@/lib/resenasDeProductos';
 import {
@@ -37,13 +40,19 @@ import { ApiError } from '@/services/api';
  * la puntuación, el texto y quién lo escribió se quedan exactamente como
  * estaban. Lo único que cambia es si se ve.
  *
- * EL MOTIVO ES INTERNO. No se le enseña a quien opinó ni a quien vende, y no
- * viaja a la auditoría compartida: queda en el historial de esta cola, que es
- * lo que se mira si alguien pregunta por qué se escondió algo.
+ * HAY DOS LADOS, Y ESO ES LO QUE HACE QUE ESCONDER SE PUEDA DESHACER. La
+ * primera versión solo pedía las visibles, así que la rama de «volver a
+ * mostrar» era código muerto: una valoración escondida por error no se podía
+ * volver a encontrar. Lo encontró la revisión independiente del Incremento 8.
  *
- * LA RESPUESTA DEL PROVEEDOR SE MODERA APARTE. Esconder la valoración y
- * esconder lo que le contestaron son dos decisiones distintas, y a veces solo
- * hace falta una.
+ * EL MOTIVO ES DE CADA FILA, Y ES INTERNO. Antes había un solo recuadro para
+ * toda la lista, así que un motivo escrito en una valoración y no enviado se
+ * pegaba a la siguiente que se tocara —en una tabla que un disparador hace
+ * inmutable, así que no se podía corregir nunca—. Ahora cada fila guarda el
+ * suyo, y el de la respuesta del proveedor es otro campo distinto.
+ *
+ * Y NO VIAJA A LA AUDITORÍA COMPARTIDA: puede llevar dentro una cita de lo que
+ * escribió quien opinó. Vive en el historial de esta cola.
  */
 export function ModerarResenasDeProductosScreen() {
   const { t } = useTranslation();
@@ -51,12 +60,19 @@ export function ModerarResenasDeProductosScreen() {
   const router = useRouter();
   const f = useClaveDeProductos();
 
+  const [escondidas, setEscondidas] = useState(false);
   const [resenas, setResenas] = useState<ResenaDeProducto[]>([]);
   const [abierta, setAbierta] = useState<string | null>(null);
-  const [motivo, setMotivo] = useState('');
+  /** El motivo DE CADA FILA, y el de su respuesta aparte. */
+  const [motivos, setMotivos] = useState<Record<string, string>>({});
+  const [motivosDeRespuesta, setMotivosDeRespuesta] = useState<
+    Record<string, string>
+  >({});
   const [historial, setHistorial] = useState<MovimientoDeModeracion[]>([]);
   const [cargando, setCargando] = useState(true);
   const [ocupado, setOcupado] = useState(false);
+  const [hayMas, setHayMas] = useState(false);
+  const [pidiendoMas, setPidiendoMas] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fallo, setFallo] = useState<
     'red' | 'sinConexion' | 'sinSesion' | 'sinPermiso' | 'noDisponible' | null
@@ -65,8 +81,13 @@ export function ModerarResenasDeProductosScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     setFallo(null);
+    setAbierta(null);
     try {
-      setResenas(await ProductReviewModerationRepository.cola());
+      const filas = await ProductReviewModerationRepository.cola({
+        hidden: escondidas,
+      });
+      setResenas(filas);
+      setHayMas(hayMasPaginas(filas.length));
     } catch (e) {
       if (e instanceof ApiError && esFaltaDeSesion(e.status)) setFallo('sinSesion');
       else if (e instanceof ApiError && e.status === 403) setFallo('sinPermiso');
@@ -77,15 +98,34 @@ export function ModerarResenasDeProductosScreen() {
     } finally {
       setCargando(false);
     }
-  }, []);
+  }, [escondidas]);
 
   useEffect(() => {
     void cargar();
   }, [cargar]);
 
+  const verMas = async () => {
+    const cursor = cursorDeLaPagina(resenas);
+    if (!cursor) return;
+    setPidiendoMas(true);
+    try {
+      const siguiente = await ProductReviewModerationRepository.cola({
+        hidden: escondidas,
+        before: cursor.before,
+        beforeId: cursor.before_id,
+      });
+      setResenas((antes) => fusionarPaginas(antes, siguiente));
+      setHayMas(hayMasPaginas(siguiente.length));
+    } catch {
+      /* UN FALLO AL PEDIR MÁS NO VACÍA LO QUE YA SE LEÍA. */
+      setHayMas(true);
+    } finally {
+      setPidiendoMas(false);
+    }
+  };
+
   const abrir = async (reviewId: string) => {
     setAbierta(reviewId);
-    setMotivo('');
     setError(null);
     setHistorial([]);
     try {
@@ -96,16 +136,15 @@ export function ModerarResenasDeProductosScreen() {
     }
   };
 
-  const esconder = async (reviewId: string, ocultar: boolean) => {
+  const mover = async (reviewId: string, ocultar: boolean) => {
     setOcupado(true);
     setError(null);
     try {
       await ProductReviewModerationRepository.moderar(reviewId, {
         hidden: ocultar,
-        reason: motivo.trim() || null,
+        reason: (motivos[reviewId] ?? '').trim() || null,
       });
-      setAbierta(null);
-      setMotivo('');
+      setMotivos((antes) => ({ ...antes, [reviewId]: '' }));
       await cargar();
     } catch (e) {
       setError(
@@ -124,8 +163,9 @@ export function ModerarResenasDeProductosScreen() {
     try {
       await ProductReviewModerationRepository.moderarRespuesta(replyId, {
         hidden: true,
-        reason: motivo.trim() || null,
+        reason: (motivosDeRespuesta[replyId] ?? '').trim() || null,
       });
+      setMotivosDeRespuesta((antes) => ({ ...antes, [replyId]: '' }));
       await cargar();
     } catch (e) {
       setError(
@@ -143,6 +183,19 @@ export function ModerarResenasDeProductosScreen() {
 
   const encabezado = (
     <AppHeader title={f('resenaDeProducto.moderar.titulo')} onBack={volver} />
+  );
+
+  const cambiarDeLado = (
+    <Button
+      label={
+        escondidas
+          ? f('resenaDeProducto.moderar.verVisibles')
+          : f('resenaDeProducto.moderar.verEscondidas')
+      }
+      variant="secondary"
+      onPress={() => setEscondidas((antes) => !antes)}
+      disabled={ocupado}
+    />
   );
 
   if (cargando) {
@@ -194,11 +247,18 @@ export function ModerarResenasDeProductosScreen() {
     return (
       <AppScreen contentStyle={styles.contenido}>
         {encabezado}
-        <StateView
-          state="empty"
-          icon="check-circle"
-          title={f('resenaDeProducto.moderar.vacia')}
-        />
+        <ScrollView contentContainerStyle={styles.cuerpo}>
+          <StateView
+            state="empty"
+            icon="check-circle"
+            title={
+              escondidas
+                ? f('resenaDeProducto.moderar.vaciaEscondidas')
+                : f('resenaDeProducto.moderar.vacia')
+            }
+          />
+          {cambiarDeLado}
+        </ScrollView>
       </AppScreen>
     );
   }
@@ -210,6 +270,11 @@ export function ModerarResenasDeProductosScreen() {
         <Text variant="caption" color="muted">
           {f('resenaDeProducto.moderar.noSeReescribe')}
         </Text>
+        <Text variant="caption" color="muted">
+          {f('resenaDeProducto.moderar.seDeshace')}
+        </Text>
+        {cambiarDeLado}
+
         {resenas.map((resena) => (
           <View key={resena.id} style={[styles.tarjeta, { borderColor: colors.border }]}>
             <EstrellasDeResena
@@ -223,18 +288,10 @@ export function ModerarResenasDeProductosScreen() {
               </Text>
             ) : null}
             {resena.comment ? <Text>{resena.comment}</Text> : null}
-            {tieneRespuesta(resena) ? (
-              <View style={[styles.respuesta, { borderColor: colors.border }]}>
-                <Text variant="caption" color="muted">
-                  {f('resenaDeProducto.lista.respuestaDelProveedor')}
-                </Text>
-                <Text>{resena.reply?.body}</Text>
-                <Button
-                  label={f('resenaDeProducto.moderar.ocultarRespuesta')}
-                  onPress={() => void esconderRespuesta(resena.reply?.id as string)}
-                  disabled={ocupado}
-                />
-              </View>
+            {estaEscondida(resena) ? (
+              <Text variant="caption" color="muted">
+                {f('resenaDeProducto.moderar.ocultada')}
+              </Text>
             ) : null}
 
             {abierta === resena.id ? (
@@ -244,8 +301,10 @@ export function ModerarResenasDeProductosScreen() {
                   {f('resenaDeProducto.moderar.motivoAyuda')}
                 </Text>
                 <Input
-                  value={motivo}
-                  onChangeText={setMotivo}
+                  value={motivos[resena.id] ?? ''}
+                  onChangeText={(texto) =>
+                    setMotivos((antes) => ({ ...antes, [resena.id]: texto }))
+                  }
                   multiline
                   numberOfLines={2}
                   maxLength={500}
@@ -258,10 +317,46 @@ export function ModerarResenasDeProductosScreen() {
                       ? f('resenaDeProducto.moderar.restaurar')
                       : f('resenaDeProducto.moderar.esconder')
                   }
-                  onPress={() => void esconder(resena.id, !estaEscondida(resena))}
+                  onPress={() => void mover(resena.id, !estaEscondida(resena))}
                   disabled={ocupado}
                   loading={ocupado}
                 />
+
+                {/* LA RESPUESTA DEL PROVEEDOR SE MODERA APARTE, y con su propio
+                    motivo: esconder la valoración y esconder lo que le
+                    contestaron son dos decisiones distintas. */}
+                {tieneRespuesta(resena) ? (
+                  <View style={[styles.respuesta, { borderColor: colors.border }]}>
+                    <Text variant="caption" color="muted">
+                      {f('resenaDeProducto.lista.respuestaDelProveedor')}
+                    </Text>
+                    <Text>{resena.reply?.body}</Text>
+                    <Input
+                      value={motivosDeRespuesta[resena.reply?.id ?? ''] ?? ''}
+                      onChangeText={(texto) =>
+                        setMotivosDeRespuesta((antes) => ({
+                          ...antes,
+                          [resena.reply?.id ?? '']: texto,
+                        }))
+                      }
+                      multiline
+                      numberOfLines={2}
+                      maxLength={500}
+                      accessibilityLabel={f(
+                        'resenaDeProducto.moderar.motivoDeLaRespuesta',
+                      )}
+                    />
+                    <Button
+                      label={f('resenaDeProducto.moderar.ocultarRespuesta')}
+                      variant="secondary"
+                      onPress={() =>
+                        void esconderRespuesta(resena.reply?.id as string)
+                      }
+                      disabled={ocupado}
+                    />
+                  </View>
+                ) : null}
+
                 <Text variant="caption" color="muted">
                   {f('resenaDeProducto.moderar.historial')}
                 </Text>
@@ -281,13 +376,27 @@ export function ModerarResenasDeProductosScreen() {
               </View>
             ) : (
               <Button
-                label={f('resenaDeProducto.moderar.esconder')}
+                label={
+                  estaEscondida(resena)
+                    ? f('resenaDeProducto.moderar.restaurar')
+                    : f('resenaDeProducto.moderar.esconder')
+                }
+                variant="secondary"
                 onPress={() => void abrir(resena.id)}
                 disabled={ocupado}
               />
             )}
           </View>
         ))}
+
+        {hayMas ? (
+          <Button
+            label={f('resenaDeProducto.lista.verMas')}
+            onPress={() => void verMas()}
+            loading={pidiendoMas}
+            disabled={pidiendoMas || ocupado}
+          />
+        ) : null}
       </ScrollView>
     </AppScreen>
   );

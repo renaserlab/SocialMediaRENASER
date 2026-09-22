@@ -82,6 +82,14 @@ function fuente(...partes: string[]): string {
   return readFileSync(join(RAIZ, ...partes), 'utf8');
 }
 
+/** El código sin comentarios: un comentario que nombra un número no lo usa. */
+function sinComentarios(codigo: string): string {
+  return codigo
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\s\/\/.*$/gm, '');
+}
+
 const DICCIONARIOS: Array<Record<string, string>> = [
   es as unknown as Record<string, string>,
   en as unknown as Record<string, string>,
@@ -200,11 +208,33 @@ describe('sin reseñas no se inventa un cero', () => {
 // ========================================================================== //
 describe('la fórmula vive en el servidor', () => {
   it('no hay ninguna función que la calcule', () => {
-    const codigo = fuente('lib', 'resenasDeProductos.ts');
-    // Los dos números de la fórmula del blueprint no pueden aparecer en una
-    // cuenta: si aparecen, alguien la copió y habrá dos verdades.
-    assert.ok(!/\/\s*\(\s*\w+\s*\+\s*10\s*\)/.test(codigo));
-    assert.ok(!codigo.includes('* 4.2'));
+    // LA REGLA DE VERDAD, Y NO UNA REGEX QUE ADIVINA LA FORMA. Las dos
+    // regex de la primera versión no habrían visto `cuantas / (cuantas +
+    // PESO)` ni `* PREVIO`: lo señaló la revisión independiente. Lo que se
+    // comprueba ahora es más simple y más fuerte: este fichero NO PUEDE
+    // nombrar ni el peso ni el previo de la fórmula, porque sin esos dos
+    // números no se puede calcular.
+    const codigo = sinComentarios(fuente('lib', 'resenasDeProductos.ts'));
+    assert.ok(!codigo.includes('4.2'), 'nombra el promedio de referencia');
+    assert.ok(!/\bPESO\b/.test(codigo), 'nombra el peso del previo');
+    // Y NINGUNA DIVISIÓN: la única cuenta que hace esta capa es la del
+    // porcentaje y la de la anchura de una barra, que no dividen por un
+    // total desplazado.
+    const divisiones = [...codigo.matchAll(/\/\s*\(/g)];
+    assert.deepEqual(divisiones.map((m) => m[0]), []);
+
+    // CONTROL POSITIVO: el centinela tiene que ver las dos formas.
+    for (const copiada of [
+      'const x = (v / (v + 10)) * media + (10 / (v + 10)) * 4.2;',
+      'const x = (v / (v + PESO)) * media;',
+    ]) {
+      const roto = sinComentarios(codigo + copiada);
+      const visto =
+        roto.includes('4.2') ||
+        /\bPESO\b/.test(roto) ||
+        /\/\s*\(/.test(roto);
+      assert.ok(visto, `el centinela no ve: ${copiada}`);
+    }
   });
 
   it('dice si el previo es la referencia por defecto', () => {
@@ -529,5 +559,108 @@ describe('las pantallas no prometen lo que no hay', () => {
     }
     assert.equal(claveDelMotivoParaResenar('xx'), 'resenaDeProducto.motivo.desconocido');
     assert.equal(claveDelEje('xx'), 'resenaDeProducto.eje.desconocido');
+  });
+});
+
+
+// ========================================================================== //
+// 9. Lo que encontro la revision independiente
+// ========================================================================== //
+describe('la revision independiente', () => {
+  it('ninguna pantalla dibuja estrellas a partir de la puntuación ajustada', () => {
+    // EL MEDIO M2. Redondear la ajustada a estrellas miente con pocas
+    // valoraciones: una sola de UNA estrella daba 3,9 y encendía CUATRO,
+    // porque el 91 % de esa cifra es la referencia general. Y la captura pide
+    // un número y un recuento, no estrellas.
+    for (const pantalla of ['ProductoScreen.tsx', 'ResenasDelProductoScreen.tsx']) {
+      const codigo = sinComentarios(fuente('screens', pantalla));
+      assert.ok(
+        !/Math\.round\([^)]*adjusted/.test(codigo),
+        `${pantalla} redondea la ajustada a estrellas`,
+      );
+      assert.ok(
+        !/adjusted\s*\?/.test(codigo),
+        `${pantalla} comprueba adjusted por veracidad y nunca puede ser 0`,
+      );
+    }
+  });
+
+  it('la ficha enseña también la puntuación real, y no solo la ajustada', () => {
+    const codigo = fuente('screens', 'ProductoScreen.tsx');
+    assert.ok(codigo.includes('promedioLegible(valoracion)'));
+    assert.ok(codigo.includes('resenaDeProducto.ficha.promedioReal'));
+  });
+
+  it('la cola de moderación tiene los dos lados', () => {
+    // EL ALTO A1. Con un solo lado, la rama de restaurar era código muerto:
+    // una valoración escondida por error no se podía volver a encontrar.
+    const codigo = fuente('screens', 'ModerarResenasDeProductosScreen.tsx');
+    assert.ok(codigo.includes('hidden: escondidas'));
+    assert.ok(codigo.includes('resenaDeProducto.moderar.verEscondidas'));
+    assert.ok(codigo.includes('resenaDeProducto.moderar.verVisibles'));
+    assert.ok(codigo.includes('resenaDeProducto.moderar.restaurar'));
+    const repo = fuente('repositories', 'ProductReviewRepository.ts');
+    assert.ok(repo.includes("parametros.set('hidden', 'true')"));
+  });
+
+  it('el motivo de moderación es de cada fila, y el de la respuesta va aparte', () => {
+    // EL MEDIO M4. Un único recuadro para toda la lista pegaba el motivo al
+    // elemento equivocado, en una tabla que un disparador hace inmutable.
+    const codigo = fuente('screens', 'ModerarResenasDeProductosScreen.tsx');
+    assert.ok(
+      codigo.includes('useState<Record<string, string>>({})'),
+      'el motivo no está indexado por fila',
+    );
+    assert.ok(codigo.includes('motivos[reviewId]'));
+    assert.ok(codigo.includes('motivosDeRespuesta[replyId]'));
+    // Y NINGÚN ESTADO SUELTO: si vuelve un `motivo` de toda la lista, esto lo dice.
+    assert.ok(
+      !/const \[motivo, setMotivo\]/.test(codigo),
+      'ha vuelto el motivo único para toda la lista',
+    );
+  });
+
+  it('las tres listas paginan, y el cursor va entero o ninguno', () => {
+    // EL ALTO A2. Sin cursor topaban en veinte.
+    const repo = fuente('repositories', 'ProductReviewRepository.ts');
+    assert.ok(repo.includes('function _cola('));
+    // LAS DOS PARTES JUNTAS: mandar solo una haría que el servidor ignorara el
+    // cursor y devolviera otra vez la primera página.
+    assert.ok(repo.includes('if (opciones?.before && opciones?.beforeId)'));
+    for (const metodo of ['listar(', 'deMiTienda(', 'cola(']) {
+      assert.ok(repo.includes(metodo), metodo);
+    }
+    for (const pantalla of [
+      'ResenasDelProductoScreen.tsx',
+      'ResenasDeMiTiendaScreen.tsx',
+      'ModerarResenasDeProductosScreen.tsx',
+    ]) {
+      const codigo = fuente('screens', pantalla);
+      assert.ok(codigo.includes('cursorDeLaPagina'), pantalla);
+      assert.ok(codigo.includes('resenaDeProducto.lista.verMas'), pantalla);
+    }
+  });
+
+  it('el repositorio no tiene métodos sin pantalla detrás', () => {
+    // La regla del proyecto, aplicada ya al `mios()` de las reclamaciones y al
+    // `mover()` de administración: un método aquí sin pantalla es código muerto
+    // que parece una función.
+    const repo = fuente('repositories', 'ProductReviewRepository.ts');
+    assert.ok(!/async mias\(/.test(repo), 'mias() no tiene pantalla');
+  });
+
+  it('las barras y los ejes se leen en voz alta', () => {
+    // EL BAJO B-5. Eran `View`s desnudas: un lector de pantalla leía «5», «1»,
+    // «4», «0» sin decir de qué.
+    const codigo = fuente('screens', 'ResenasDelProductoScreen.tsx');
+    assert.ok(codigo.includes('resenaDeProducto.lista.cuantasDe'));
+    const etiquetas = [...codigo.matchAll(/accessibilityLabel=/g)];
+    assert.ok(etiquetas.length >= 2, `solo ${etiquetas.length} etiquetas habladas`);
+  });
+
+  it('la fila de una valoración ya hecha llega al área táctil mínima', () => {
+    const codigo = fuente('screens', 'PedidoDeProductoScreen.tsx');
+    assert.ok(codigo.includes('filaTocable'));
+    assert.ok(/filaTocable:\s*{\s*minHeight:\s*44/.test(codigo));
   });
 });

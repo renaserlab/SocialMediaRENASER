@@ -16,7 +16,10 @@ import {
   LARGO_MAXIMO_DE_LA_RESPUESTA,
   claveDeErrorDeResena,
   compraVerificada,
+  cursorDeLaPagina,
   esResenasApagadas,
+  fusionarPaginas,
+  hayMasPaginas,
   puedeOfrecerResponder,
   respuestaParaEnviar,
   tieneRespuesta,
@@ -55,6 +58,8 @@ export function ResenasDeMiTiendaScreen() {
   const [abierta, setAbierta] = useState<string | null>(null);
   const [texto, setTexto] = useState('');
   const [cargando, setCargando] = useState(true);
+  const [hayMas, setHayMas] = useState(false);
+  const [pidiendoMas, setPidiendoMas] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fallo, setFallo] = useState<
@@ -65,7 +70,9 @@ export function ResenasDeMiTiendaScreen() {
     setCargando(true);
     setFallo(null);
     try {
-      setResenas(await ProductReviewRepository.deMiTienda());
+      const filas = await ProductReviewRepository.deMiTienda();
+      setResenas(filas);
+      setHayMas(hayMasPaginas(filas.length));
     } catch (e) {
       if (e instanceof ApiError && esFaltaDeSesion(e.status)) setFallo('sinSesion');
       else if (e instanceof ApiError && esResenasApagadas(e.code))
@@ -84,6 +91,25 @@ export function ResenasDeMiTiendaScreen() {
   useEffect(() => {
     void cargar();
   }, [cargar]);
+
+  const verMas = async () => {
+    const cursor = cursorDeLaPagina(resenas);
+    if (!cursor) return;
+    setPidiendoMas(true);
+    try {
+      const siguiente = await ProductReviewRepository.deMiTienda({
+        before: cursor.before,
+        beforeId: cursor.before_id,
+      });
+      setResenas((antes) => fusionarPaginas(antes, siguiente));
+      setHayMas(hayMasPaginas(siguiente.length));
+    } catch {
+      /* UN FALLO AL PEDIR MÁS NO VACÍA LO QUE YA SE LEÍA. */
+      setHayMas(true);
+    } finally {
+      setPidiendoMas(false);
+    }
+  };
 
   const responder = async (reviewId: string) => {
     const limpio = respuestaParaEnviar(texto);
@@ -244,6 +270,15 @@ export function ResenasDeMiTiendaScreen() {
             ) : null}
           </View>
         ))}
+
+        {hayMas ? (
+          <Button
+            label={f('resenaDeProducto.lista.verMas')}
+            onPress={() => void verMas()}
+            loading={pidiendoMas}
+            disabled={pidiendoMas || enviando}
+          />
+        ) : null}
       </ScrollView>
     </AppScreen>
   );

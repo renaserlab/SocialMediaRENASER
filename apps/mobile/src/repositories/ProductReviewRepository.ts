@@ -58,6 +58,27 @@ export type CuerpoDeResena = {
   comment: string | null;
 };
 
+/** Lo que hace falta para pedir la pagina siguiente. */
+export type Pagina = { before?: string; beforeId?: string; limit?: number };
+
+/**
+ * La cola de la URL, con el cursor ENTERO O NINGUNO.
+ *
+ * Las dos partes describen la misma fila; mandar solo una haria que el servidor
+ * ignorara el cursor y devolviera otra vez la primera pagina.
+ */
+function _cola(opciones?: Pagina & { hidden?: boolean }): string {
+  const parametros = new URLSearchParams();
+  if (opciones?.hidden) parametros.set('hidden', 'true');
+  if (opciones?.before && opciones?.beforeId) {
+    parametros.set('before', opciones.before);
+    parametros.set('before_id', opciones.beforeId);
+  }
+  if (opciones?.limit) parametros.set('limit', String(opciones.limit));
+  const cola = parametros.toString();
+  return cola ? `?${cola}` : '';
+}
+
 export const ProductReviewRepository = {
   /** La puntuación de un producto. SIN RESEÑAS VIAJA NULA, no en cero. */
   async resumen(productId: string): Promise<ResumenDeResenas> {
@@ -75,17 +96,10 @@ export const ProductReviewRepository = {
    */
   async listar(
     productId: string,
-    opciones?: { before?: string; beforeId?: string; limit?: number },
+    opciones?: Pagina,
   ): Promise<ResenaDeProducto[]> {
-    const parametros = new URLSearchParams();
-    if (opciones?.before && opciones?.beforeId) {
-      parametros.set('before', opciones.before);
-      parametros.set('before_id', opciones.beforeId);
-    }
-    if (opciones?.limit) parametros.set('limit', String(opciones.limit));
-    const cola = parametros.toString();
     return apiRequest<ResenaDeProducto[]>(
-      `${API_V1}/products/${productId}/reviews${cola ? `?${cola}` : ''}`,
+      `${API_V1}/products/${productId}/reviews${_cola(opciones)}`,
     );
   },
 
@@ -109,10 +123,17 @@ export const ProductReviewRepository = {
     return apiRequest<ResenaDeProducto>(`${API_V1}/products/reviews/${reviewId}`);
   },
 
-  /** Las que escribí. */
-  async mias(): Promise<ResenaDeProducto[]> {
-    return apiRequest<ResenaDeProducto[]>(`${API_V1}/products/reviews/mine`);
-  },
+  /*
+   * NO HAY `mias()`, Y NO ES UN OLVIDO. La ruta `GET /products/reviews/mine`
+   * existe en el servidor y está probada, pero NO TIENE PANTALLA: a la propia
+   * valoración se llega desde el pedido del que habla, que es donde quien
+   * opinó la busca, y ahí se ve también si está oculta.
+   *
+   * UN MÉTODO AQUÍ SIN PANTALLA DETRÁS ES CÓDIGO MUERTO QUE PARECE UNA
+   * FUNCIÓN. Es la misma regla que se aplicó al `mios()` de las reclamaciones
+   * en el Incremento 7 y al `mover()` de administración en el 6. Cuando esa
+   * pantalla exista, se añaden las dos juntas.
+   */
 
   /** Cambia lo que escribí. NO de qué compra habla. */
   async editar(
@@ -125,9 +146,17 @@ export const ProductReviewRepository = {
     });
   },
 
-  /** Lo que opinan de mis productos. */
-  async deMiTienda(): Promise<ResenaDeProducto[]> {
-    return apiRequest<ResenaDeProducto[]>(`${API_V1}/products/seller/reviews`);
+  /**
+   * Lo que opinan de mis productos.
+   *
+   * PAGINA COMO LA LISTA PUBLICA, y por lo mismo: sin cursor topaba en veinte y
+   * un proveedor con mas valoraciones no podia ver ni responder las demas. Lo
+   * encontro la revision independiente.
+   */
+  async deMiTienda(opciones?: Pagina): Promise<ResenaDeProducto[]> {
+    return apiRequest<ResenaDeProducto[]>(
+      `${API_V1}/products/seller/reviews${_cola(opciones)}`,
+    );
   },
 
   /** Responde en público. UNA VISIBLE POR RESEÑA. */
@@ -141,9 +170,19 @@ export const ProductReviewRepository = {
 
 /** Lo que solo puede hacer quien modera. */
 export const ProductReviewModerationRepository = {
-  /** La cola: las visibles, de la más nueva a la más vieja. */
-  async cola(): Promise<ResenaDeProducto[]> {
-    return apiRequest<ResenaDeProducto[]>(`${API_V1}/admin/products/reviews`);
+  /**
+   * La cola, de la más nueva a la más vieja. DOS LADOS.
+   *
+   * `hidden` es lo que hace que esconder se pueda deshacer: sin él, una
+   * valoración escondida por error no se podía volver a encontrar. Lo encontró
+   * la revisión independiente.
+   */
+  async cola(
+    opciones?: Pagina & { hidden?: boolean },
+  ): Promise<ResenaDeProducto[]> {
+    return apiRequest<ResenaDeProducto[]>(
+      `${API_V1}/admin/products/reviews${_cola(opciones)}`,
+    );
   },
 
   /** Esconde o restaura. NUNCA reescribe. */

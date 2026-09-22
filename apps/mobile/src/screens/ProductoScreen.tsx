@@ -12,7 +12,6 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import { irAlPerfil } from '@/lib/irAlPerfil';
-import { EstrellasDeResena } from '@/components/EstrellasDeResena';
 import {
   type ResumenDeResenas,
   ajustadaLegible,
@@ -20,6 +19,7 @@ import {
   esResenasApagadas,
   hayValoraciones,
   porcentajeLegible,
+  promedioLegible,
   usaReferenciaPorDefecto,
 } from '@/lib/resenasDeProductos';
 import { ProductReviewRepository } from '@/repositories/ProductReviewRepository';
@@ -655,16 +655,23 @@ export function ProductoScreen() {
           <View key={cual} style={styles.grupo}>
             {tituloDelBloque(cual)}
             <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+              {/* NI UNA ESTRELLA AQUI, Y ES A PROPOSITO. Dibujarlas obligaba a
+                  redondear la puntuacion ajustada, y con pocas valoraciones eso
+                  miente a lo grande: una sola de UNA estrella daba 3,9 y
+                  encendia CUATRO, porque el 91 % de esa cifra es la referencia
+                  general. Lo encontro la revision independiente. La captura
+                  pide un numero y un recuento, no estrellas; las estrellas de
+                  cada persona se leen en su valoracion, donde son suyas. */}
               <View style={styles.linea}>
                 <Text variant="titleMedium">{ajustadaLegible(valoracion)}</Text>
-                <EstrellasDeResena
-                  valor={
-                    valoracion?.adjusted ? Math.round(valoracion.adjusted) : null
-                  }
-                  tamano={16}
-                  etiqueta={f('resenaDeProducto.ficha.titulo')}
-                  sufijo={f('resenaDeProducto.deCinco')}
-                />
+                {/* Y EL PROMEDIO REAL AL LADO: lo que de verdad puntuaron. */}
+                {promedioLegible(valoracion) !== null ? (
+                  <Text variant="caption" color={colors.textMuted}>
+                    {f('resenaDeProducto.ficha.promedioReal', {
+                      n: promedioLegible(valoracion) as string,
+                    })}
+                  </Text>
+                ) : null}
               </View>
               <Text variant="caption" color={colors.textMuted}>
                 {`${comprasVerificadas(valoracion)} ${

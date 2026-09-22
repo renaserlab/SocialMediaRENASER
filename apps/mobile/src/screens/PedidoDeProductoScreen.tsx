@@ -653,6 +653,9 @@ export function PedidoDeProductoScreen() {
                 {f('resenaDeProducto.valorar.nadaQueValorar')}
               </Text>
             )}
+            {/* 44 DE ALTO Y HOLGURA EN CADA FILA. styles.fila no lo traia, y
+               una fila de dos textos pequenos se queda por debajo del area
+               tactil minima. Lo senalo la revision independiente. */}
             {lineasYaValoradas(valorables).map((linea) => (
               <Pressable
                 key={linea.order_item_id}
@@ -661,7 +664,8 @@ export function PedidoDeProductoScreen() {
                 }
                 accessibilityRole="button"
                 accessibilityLabel={f('resenaDeProducto.valorar.verLaMia')}
-                style={styles.fila}
+                hitSlop={8}
+                style={[styles.fila, styles.filaTocable]}
               >
                 <Feather name="star" size={14} color={colors.textMuted} />
                 <View style={styles.crece}>
@@ -736,6 +740,8 @@ export function PedidoDeProductoScreen() {
 }
 
 const styles = StyleSheet.create({
+  //: 44 de alto: el area tactil minima.
+  filaTocable: { minHeight: 44, alignItems: 'center' },
   contenido: { padding: spacing.lg, gap: spacing.md },
   bloque: {
     gap: spacing.sm,

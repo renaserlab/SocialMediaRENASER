@@ -177,12 +177,11 @@ export function ResenasDelProductoScreen() {
         {/* LA CABECERA: la ajustada, cuántas compras verificadas y cuántos lo
             recomiendan. Es lo que pide el blueprint, en ese orden. */}
         <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+          {/* EL NUMERO Y EL RECUENTO, SIN ESTRELLAS. Redondear la ajustada a
+              estrellas miente con pocas valoraciones: una sola de UNA estrella
+              daba 3,9 y encendia CUATRO. Lo encontro la revision
+              independiente. */}
           <Text variant="display">{ajustadaLegible(resumen) ?? ''}</Text>
-          <EstrellasDeResena
-            valor={resumen?.adjusted ? Math.round(resumen.adjusted) : null}
-            etiqueta={f('resenaDeProducto.ficha.titulo')}
-            sufijo={f('resenaDeProducto.deCinco')}
-          />
           <Text variant="caption" color="muted">
             {`${total} ${
               total === 1
@@ -210,7 +209,15 @@ export function ResenasDelProductoScreen() {
         {/* LA DISTRIBUCIÓN. */}
         <View style={styles.bloque}>
           {histogramaOrdenado(resumen).map((barra) => (
-            <View key={barra.puntuacion} style={styles.barraFila}>
+            <View
+              key={barra.puntuacion}
+              style={styles.barraFila}
+              accessibilityRole="text"
+              accessibilityLabel={f('resenaDeProducto.lista.cuantasDe', {
+                cuantas: barra.cuantas,
+                estrellas: barra.puntuacion,
+              })}
+            >
               <Text variant="caption" color="muted" style={styles.barraNumero}>
                 {String(barra.puntuacion)}
               </Text>
@@ -235,7 +242,16 @@ export function ResenasDelProductoScreen() {
         {/* LOS CUATRO EJES. */}
         <View style={styles.bloque}>
           {ejesDelResumen(resumen).map(({ eje, valor, clave }) => (
-            <View key={eje} style={styles.ejeFila}>
+            <View
+              key={eje}
+              style={styles.ejeFila}
+              accessibilityRole="text"
+              accessibilityLabel={
+                valor !== null
+                  ? `${f(clave)}: ${valor.toFixed(1)} ${f('resenaDeProducto.deCinco')}`
+                  : f(clave)
+              }
+            >
               <Text style={styles.ejeNombre}>{f(clave)}</Text>
               {valor !== null ? <Text>{valor.toFixed(1)}</Text> : null}
             </View>
