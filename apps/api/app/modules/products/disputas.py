@@ -241,6 +241,23 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:  # noqa: ANN001
 
     saldo = await finanzas.saldo_del_pedido(db, orden_id=orden.id)
 
+    #: LA FILA DERIVADA SE ASCIENDE, NO SE DUPLICA.
+    #:
+    #: Cuando el primer aviso no trae `dp_...` se abre con una clave derivada
+    #: del cobro. El siguiente aviso del MISMO contracargo si lo trae, y con
+    #: otra clave se abria una SEGUNDA fila: el cierre llega con el
+    #: identificador de verdad, cierra la segunda, y la primera se queda abierta
+    #: para siempre. `por_que_no_se_libera` bloquea tambien por pedido, asi que
+    #: ese saldo no se liberaba nunca por una disputa fantasma ya resuelta.
+    #:
+    #: NO ES «TODA DISPUTA DE ESTE COBRO ES LA MISMA»: solo se asciende la fila
+    #: DERIVADA, que por construccion es la de un aviso sin identificador. Un
+    #: segundo contracargo real del mismo cobro trae el suyo y abre el suyo.
+    if clave.startswith("dp_"):
+        await _ascender_la_derivada(
+            db, orden_id=orden.id, referencia=referencia, clave=clave
+        )
+
     disputa, nueva = await _crear_o_leer(
         db,
         orden_id=orden.id,
@@ -272,6 +289,43 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:  # noqa: ANN001
             "decidir: queda anotado como responsabilidad pendiente."
         )
     return None
+
+
+async def _ascender_la_derivada(
+    db: AsyncSession, *, orden_id: str, referencia: str, clave: str
+) -> None:
+    """La fila abierta con la clave del cobro pasa a llamarse por la suya.
+
+    SE COMPRUEBA QUE NO EXISTA YA LA REAL, porque entonces son dos filas de
+    verdad y ascender la derivada chocaria contra el unico. En ese caso no se
+    toca: la derivada se queda como esta y lo mira una persona, que es mejor que
+    romper la transaccion de quien llama.
+    """
+    derivada_id = "cobro:" + referencia
+    ya = await db.scalar(
+        select(ProductDispute).where(
+            ProductDispute.provider == PROVEEDOR,
+            ProductDispute.external_dispute_id == clave,
+        )
+    )
+    if ya is not None:
+        return
+    derivada = await db.scalar(
+        select(ProductDispute).where(
+            ProductDispute.provider == PROVEEDOR,
+            ProductDispute.external_dispute_id == derivada_id[:128],
+            ProductDispute.order_id == orden_id,
+        )
+    )
+    if derivada is None:
+        return
+    derivada.external_dispute_id = clave[:128]
+    derivada.updated_at = ahora()
+    await db.flush()
+    logger.info(
+        "[productos] la disputa derivada de %s pasa a su identificador propio",
+        referencia,
+    )
 
 
 async def _crear_o_leer(

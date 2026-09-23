@@ -3019,3 +3019,118 @@ async def test_un_no_concluyente_cambia_la_clave_y_un_timeout_no(
     assert fila.idempotency_key == antes, (
         "tras un timeout la clave cambio: asi es como se paga dos veces"
     )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_aviso_sin_identificador_y_otro_con_el_son_UNA_disputa(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """DOS FILAS PARA EL MISMO CONTRACARGO DEJABAN UNA ABIERTA PARA SIEMPRE.
+
+    EL DEFECTO. Cuando el aviso no trae `dp_...` se deriva una clave del cobro,
+    que es lo correcto: sigue siendo idempotente. Pero el siguiente aviso del
+    MISMO contracargo si lo trae, y con otra clave se abria una SEGUNDA fila. El
+    cierre llega con el identificador de verdad y solo cierra la segunda: la
+    primera se queda abierta, y `por_que_no_se_libera` bloquea tambien por
+    pedido, asi que ese saldo no se libera nunca por una disputa fantasma que ya
+    se resolvio.
+
+    LO QUE SE HACE AHORA: la fila derivada se ASCIENDE a su identificador real
+    en cuanto llega. No se crea otra y no se pierde el historial.
+    """
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+    cobro = await _cobro_propio(sesiones, orden_id)
+    from app.modules.products import disputas
+
+    identificador = "dp_" + uuid.uuid4().hex[:16]
+
+    #: 1. EL PRIMER AVISO NO LO TRAE.
+    async with sesiones() as db:
+        sin_id = AvisoDeDisputa(
+            referencia_cobro=cobro, estado="disputa_abierta", disputa=""
+        )
+        await disputas.atender_aviso(db, sin_id)
+        await db.commit()
+
+    #: 2. EL SEGUNDO SI, Y ES EL MISMO CONTRACARGO.
+    async with sesiones() as db:
+        await disputas.atender_aviso(
+            db,
+            AvisoDeDisputa(
+                referencia_cobro=cobro,
+                estado="disputa_fondos_retirados",
+                disputa=identificador,
+            ),
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(ProductDispute).where(ProductDispute.order_id == orden_id)
+            )
+        )
+    assert len(filas) == 1, (
+        f"un solo contracargo abrio {len(filas)} filas; la derivada se queda "
+        "abierta para siempre y ese saldo no se libera nunca"
+    )
+    assert filas[0].external_dispute_id == identificador, (
+        "la fila se quedo con la clave derivada y el cierre no la va a encontrar"
+    )
+
+    #: 3. Y EL CIERRE, QUE LLEGA CON EL DE VERDAD, LA CIERRA.
+    async with sesiones() as db:
+        await disputas.atender_aviso(
+            db,
+            AvisoDeDisputa(
+                referencia_cobro=cobro,
+                estado="disputa_cerrada",
+                disputa=identificador,
+                cierre="won",
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        fila = await db.scalar(
+            select(ProductDispute).where(ProductDispute.order_id == orden_id)
+        )
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+    assert fila.status == disputas.DISPUTA_GANADA
+    assert saldo.status == finanzas.PENDIENTE, "el saldo se quedo congelado"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dos_contracargos_distintos_del_mismo_cobro_siguen_siendo_dos(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO, Y ES EL MOTIVO POR EL QUE LA CLAVE ES LA DE LA DISPUTA.
+
+    Un mismo cobro puede tener mas de un contracargo a lo largo del tiempo. Si
+    ascender la fila derivada se convirtiera en «toda disputa de este cobro es la
+    misma», el segundo actualizaria al primero en vez de abrirse.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    cobro = await _cobro_propio(sesiones, orden_id)
+    from app.modules.products import disputas
+
+    uno = "dp_" + uuid.uuid4().hex[:16]
+    dos = "dp_" + uuid.uuid4().hex[:16]
+    for ident in (uno, dos):
+        async with sesiones() as db:
+            await disputas.atender_aviso(
+                db,
+                AvisoDeDisputa(
+                    referencia_cobro=cobro, estado="disputa_abierta", disputa=ident
+                ),
+            )
+            await db.commit()
+
+    async with sesiones() as db:
+        filas = list(
+            await db.scalars(
+                select(ProductDispute).where(ProductDispute.order_id == orden_id)
+            )
+        )
+    assert {f.external_dispute_id for f in filas} == {uno, dos}
