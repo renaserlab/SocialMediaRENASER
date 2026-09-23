@@ -2580,3 +2580,156 @@ async def test_una_disputa_ganada_si_devuelve_el_saldo_a_la_cola(
         retenido = await finanzas.reservado_de(db, saldo_id=saldo_id)
     assert saldo.status == finanzas.PENDIENTE, "ganar tiene que devolverlo a la cola"
     assert retenido == 0
+
+
+# --------------------------------------------------------------------------- #
+# La reposicion: mercancia, no dinero
+# --------------------------------------------------------------------------- #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_reposicion_no_abre_una_devolucion_de_dinero(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """REPONER DEVUELVE MERCANCIA Y NO DINERO, y lo decia el propio docstring.
+
+    EL DEFECTO. `aprobar` miraba `deja_deuda`, que responde a otra pregunta
+    —«¿queda algo debiendo?»— y contesta que si tambien para la reposicion,
+    porque lo que queda debiendo es la unidad de repuesto. Asi que la puerta que
+    su propia especificacion describe —«REJECT_CLAIM no devuelve nada, y
+    REPLACEMENT devuelve mercancia y no dinero»— nunca se escribio: solo paraba
+    a la primera.
+
+    LO QUE COSTABA. Con el expediente resuelto como reposicion, el proveedor
+    manda la unidad nueva Y ademas se le puede aprobar y ejecutar la devolucion
+    del importe entero. Quien compro se queda con el repuesto y con el dinero, y
+    no hay nada en el registro que lo senale.
+    """
+    _, orden_id, _, _, caso_id = await con_saldo_y_caso(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-repo", rol="admin")
+    await resolver_con(sesiones, caso_id, admin, maquina.REPONER)
+
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        total = int(orden.total_minor)
+        with pytest.raises(AppError) as fallo:
+            await devoluciones.aprobar(
+                db,
+                orden_id=orden_id,
+                importe_minor=total,
+                motivo="No deberia poder devolverse dinero.",
+                actor_id=admin,
+                incidencia_id=caso_id,
+            )
+    assert fallo.value.code == "product_refund_not_allowed"
+    assert fallo.value.details.get("reason") == "resolution_without_money"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_resolucion_que_si_debe_dinero_sigue_abriendo_su_devolucion(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO. Cerrar la puerta de arriba no puede cerrar las tres.
+
+    Sin esta, rechazar SIEMPRE que venga una reclamacion pasaria la anterior y
+    dejaria sin salida a las tres resoluciones que si devuelven dinero.
+    """
+    _, orden_id, _, _, caso_id = await con_saldo_y_caso(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-dinero", rol="admin")
+    await resolver_con(sesiones, caso_id, admin, maquina.REEMBOLSAR_EN_PARTE)
+
+    async with sesiones() as db:
+        fila = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=300,
+            motivo="Se devuelve una parte.",
+            actor_id=admin,
+            incidencia_id=caso_id,
+        )
+        await db.commit()
+    assert fila.status == DEVOLUCION_APROBADA
+    assert int(fila.amount_minor) == 300
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_reposicion_entregada_deja_de_bloquear_el_saldo(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """Y SI NO, EL DINERO SE QUEDA ATRAPADO PARA SIEMPRE.
+
+    EL DEFECTO. `bloquea_el_dinero` mantiene bloqueado un caso resuelto mientras
+    su efecto no este saldado, y el UNICO sitio de todo el codigo que escribia
+    `EXECUTED` era confirmar una devolucion de DINERO. Una reposicion nunca
+    tiene una, asi que su efecto se quedaba PENDIENTE: el proveedor mandaba la
+    unidad nueva, quien compro la recibia, y el saldo de esa venta no salia de
+    la cola en ninguna pasada de `liberar_vencidos`. Solo se desatascaba
+    editando la base a mano —o aprobando la devolucion de dinero que la prueba
+    de arriba acaba de prohibir—.
+
+    LO QUE SE ANADE NO ES UNA REGLA DE NEGOCIO: es poder REGISTRAR UN HECHO
+    FISICO —la reposicion llego— con su motivo, su rastro y su renglon en el
+    historial. Quien absorbe el coste sigue sin decidirse, y esta ruta no lo
+    decide.
+    """
+    from app.modules.products import incidencias
+
+    _, orden_id, _, saldo_id, caso_id = await con_saldo_y_caso(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-repo2", rol="admin")
+    await resolver_con(sesiones, caso_id, admin, maquina.REPONER)
+
+    #: SE PREGUNTA POR LA REGLA, no por el primer bloqueo de la cola. El plazo
+    #: de proteccion todavia corre, asi que `por_que_no_se_libera` contestaria
+    #: eso y la prueba pasaria sin haber mirado nunca la reclamacion.
+    async with sesiones() as db:
+        caso = await incidencias.leer(db, incidencia_id=caso_id)
+    assert caso.financial_effect == maquina.EFECTO_PENDIENTE
+    assert maquina.bloquea_el_dinero(
+        caso.status, caso.resolution, caso.financial_effect
+    ), "una reposicion resuelta y sin entregar tiene que bloquear"
+
+    async with sesiones() as db:
+        await incidencias.marcar_reposicion_entregada(
+            db,
+            incidencia_id=caso_id,
+            actor_id=admin,
+            motivo="La unidad de repuesto llego y quien compro lo confirmo.",
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        caso = await incidencias.leer(db, incidencia_id=caso_id)
+        bloquea = await incidencias.bloquea_el_dinero(db, orden_id=orden_id)
+    assert caso.financial_effect == maquina.EFECTO_EJECUTADO
+    assert bloquea is False, "la reposicion entregada sigue atrapando el saldo"
+    #: Y DEJA RENGLON. El historial es solo-anadir y esto es un hecho del caso.
+    assert any(p.note and "repuesto" in p.note for p in caso.history)
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_deuda_de_dinero_no_se_salda_diciendo_que_se_repuso(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """LA PUERTA NUEVA NO PUEDE SER UN ATAJO PARA PAGAR SIN PAGAR.
+
+    Una resolucion que debe DINERO solo se salda con una devolucion confirmada
+    por la pasarela. Si esta ruta la aceptara, bastaria con escribir un motivo
+    para desbloquear el saldo de un pedido cuyo reembolso nadie ha hecho.
+    """
+    from app.modules.products import incidencias
+
+    _, orden_id, _, _, caso_id = await con_saldo_y_caso(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-atajo", rol="admin")
+    await resolver_con(sesiones, caso_id, admin, maquina.REEMBOLSAR_TODO_SIN_DEVOLVER)
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await incidencias.marcar_reposicion_entregada(
+                db,
+                incidencia_id=caso_id,
+                actor_id=admin,
+                motivo="Intento saldar una deuda de dinero por la puerta de atras.",
+            )
+    assert fallo.value.details.get("reason") == "resolution_owes_money"

@@ -22,6 +22,7 @@ import {
   esIncidenciaApagada,
   historialPintable,
   iconoDelEstadoDeIncidencia,
+  esperaRegistrarLaReposicion,
   quedaAlgoPendiente,
   type Incidencia,
 } from '@/lib/incidencias';
@@ -152,6 +153,50 @@ export function DecidirReclamacionScreen() {
         }),
       );
       setDecision(null);
+      setNota('');
+    } catch (e) {
+      setError(textoDelError(e));
+      if (e instanceof ApiError && e.status === 409) void cargar();
+    } finally {
+      ocupadoRef.current = false;
+      setOcupado(false);
+    }
+  };
+
+  /**
+   * Registra que la unidad de repuesto llegó. NO MUEVE UN CÉNTIMO.
+   *
+   * POR QUÉ ESTE BOTÓN EXISTE. Un caso resuelto retiene el dinero de esa venta
+   * mientras su efecto no esté saldado, y lo único que lo saldaba era confirmar
+   * una devolución de DINERO. Una reposición nunca tiene una: sin esto, quien
+   * vende manda la unidad nueva, quien compró la recibe, y ese dinero no sale
+   * de la cola nunca.
+   *
+   * SE PREGUNTA ANTES, como al resolver, y por lo mismo: el expediente no se
+   * reescribe, lo impide un disparador de la base.
+   */
+  const registrarLaReposicion = async () => {
+    if (ocupadoRef.current) return;
+    const limpia = nota.trim();
+    if (limpia.length < 3) {
+      setError(f('incidencia.error.faltaNota'));
+      return;
+    }
+    const seguro = await confirm({
+      title: f('incidencia.admin.reposicionTitulo'),
+      message: f('incidencia.admin.reposicionConfirmar'),
+      confirmLabel: f('incidencia.admin.reposicionBoton'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!seguro) return;
+
+    ocupadoRef.current = true;
+    setOcupado(true);
+    setError(null);
+    try {
+      setCaso(
+        await ProductIncidentAdminRepository.reposicionEntregada(casoId, limpia),
+      );
       setNota('');
     } catch (e) {
       setError(textoDelError(e));
@@ -319,6 +364,35 @@ export function DecidirReclamacionScreen() {
                     {f('incidencia.detalle.efectoPendiente')}
                   </Text>
                 ) : null}
+              </>,
+            )
+          : null}
+
+        {/* LO QUE FALTABA PARA QUE EL DINERO NO SE QUEDE ATRAPADO. Solo sale
+            con la reposición: las tres resoluciones de dinero se saldan
+            devolviendo de verdad, y aceptarlas aquí dejaría desbloquear el
+            cobro de un reembolso que nadie hizo. */}
+        {esperaRegistrarLaReposicion(caso)
+          ? bloque(
+              f('incidencia.admin.reposicionTitulo'),
+              <>
+                <Text variant="caption" color="muted">
+                  {f('incidencia.admin.reposicionCuerpo')}
+                </Text>
+                <Input
+                  label={f('incidencia.admin.reposicionMotivo')}
+                  value={nota}
+                  onChangeText={setNota}
+                  multiline
+                  editable={!ocupado}
+                />
+                {error !== null ? <InlineError message={error} /> : null}
+                <Button
+                  label={f('incidencia.admin.reposicionBoton')}
+                  onPress={() => void registrarLaReposicion()}
+                  loading={ocupado}
+                  disabled={ocupado || nota.trim().length < 3}
+                />
               </>,
             )
           : null}

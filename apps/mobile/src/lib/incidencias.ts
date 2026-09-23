@@ -357,6 +357,28 @@ export function quedaAlgoPendiente(caso: Incidencia | null): boolean {
   return caso !== null && caso.financial_effect === 'PENDING';
 }
 
+/**
+ * Si este caso espera que alguien registre que la REPOSICIÓN ya llegó.
+ *
+ * POR QUÉ HACE FALTA UN BOTÓN. Un caso resuelto bloquea el saldo del pedido
+ * mientras su efecto no esté saldado, y lo único que lo saldaba era confirmar
+ * una devolución de DINERO. Una reposición nunca tiene una: sin esto, quien
+ * vende manda la unidad nueva, quien compró la recibe, y su dinero no sale de
+ * la cola nunca.
+ *
+ * LAS TRES RESOLUCIONES DE DINERO NO SE SALDAN ASÍ, y es deliberado: esas se
+ * saldan devolviendo de verdad. Si este botón las aceptara, bastaría escribir
+ * un motivo para desbloquear el cobro de un reembolso que nadie hizo.
+ */
+export function esperaRegistrarLaReposicion(caso: Incidencia | null): boolean {
+  return (
+    caso !== null &&
+    caso.status === 'RESOLVED' &&
+    caso.resolution === 'REPLACEMENT' &&
+    caso.financial_effect === 'PENDING'
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Lo que puede hacer cada quien                                               */
 /* -------------------------------------------------------------------------- */
@@ -519,6 +541,8 @@ const ERRORES: Record<string, ClaveDeTraduccion> = {
   product_incident_appeal_without_evidence: 'incidencia.error.apelacionSinPruebas',
   product_incident_mediate_forbidden: 'incidencia.error.resolverProhibido',
   product_incident_resolution_invalid: 'incidencia.error.resolucionInvalida',
+  product_incident_replacement_not_applicable:
+    'incidencia.error.reposicionNoAplica',
   product_incident_transition_invalid: 'incidencia.error.saltoInvalido',
   product_incident_transition_forbidden: 'incidencia.error.saltoProhibido',
   product_incident_reason_required: 'incidencia.error.faltaNota',

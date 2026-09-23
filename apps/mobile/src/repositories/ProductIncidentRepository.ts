@@ -224,6 +224,28 @@ export const ProductIncidentAdminRepository = {
   },
 
   /**
+   * Registra que la unidad de repuesto llegó. NO MUEVE UN CÉNTIMO.
+   *
+   * SOLO PARA LA REPOSICIÓN. Un caso resuelto sigue bloqueando el saldo de ese
+   * pedido mientras su efecto no esté saldado, y lo único que lo saldaba era
+   * confirmar una devolución de DINERO. Una reposición nunca tiene una: sin
+   * esta ruta, el proveedor mandaba la unidad nueva y su dinero se quedaba
+   * atrapado para siempre.
+   *
+   * ES DE FINANZAS Y NO DE MODERACIÓN: lo que se escribe es el efecto
+   * financiero, y desbloquear un cobro es mover dinero.
+   */
+  async reposicionEntregada(
+    incidentId: string,
+    motivo: string,
+  ): Promise<Incidencia> {
+    return apiRequest<Incidencia>(
+      `${API_V1}/admin/products/incidents/${incidentId}/replacement-delivered`,
+      { method: 'POST', body: JSON.stringify({ reason: motivo }) },
+    );
+  },
+
+  /**
    * Manda a mediación los casos cuyo plazo venció. IDEMPOTENTE.
    *
    * NO ES UN TEMPORIZADOR DENTRO DE LA API: la API puede correr con varias

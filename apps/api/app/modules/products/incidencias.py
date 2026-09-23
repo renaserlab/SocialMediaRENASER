@@ -153,6 +153,17 @@ class ApelacionAgotada(ConflictError):
     code = "product_incident_appeal_used"
 
 
+class ReposicionNoAplica(ConflictError):
+    """Se intenta dar por entregada una reposicion que ese caso no debe.
+
+    Existe aparte para que el movil pueda distinguir «todavia no esta resuelta»
+    de «esa decision debe DINERO y se salda devolviendolo», que son dos cosas
+    muy distintas para quien opera.
+    """
+
+    code = "product_incident_replacement_not_applicable"
+
+
 class ResolucionInvalida(ValidationAppError):
     code = "product_incident_resolution_invalid"
 
@@ -1059,6 +1070,98 @@ async def _exigir_apelacion_valida(
 
 # --------------------------------------------------------------------------- #
 # La escalada por silencio. NO ES UN TEMPORIZADOR
+async def marcar_reposicion_entregada(
+    db: AsyncSession,
+    *,
+    incidencia_id: str,
+    actor_id: str,
+    motivo: str,
+    momento: datetime | None = None,
+) -> ProductIncident:
+    """Registra que la unidad de repuesto llegó. NO MUEVE UN CÉNTIMO.
+
+    POR QUÉ EXISTE. Un caso resuelto sigue bloqueando el saldo del pedido
+    mientras su efecto no esté saldado, y el único sitio que escribía
+    `EXECUTED` era confirmar una devolución de DINERO. Una reposición nunca
+    tiene una: el proveedor manda la unidad nueva, quien compró la recibe, y el
+    saldo de esa venta no salía de la cola en ninguna pasada. Para siempre, y
+    sin ninguna salida por la API.
+
+    LO QUE SE REGISTRA ES UN HECHO FÍSICO, NO UNA DECISIÓN DE NEGOCIO. Quién
+    absorbe el coste de una reposición sigue sin decidirse y esta ruta no lo
+    decide: solo deja constancia, con su motivo y su renglón en el historial, de
+    que lo que se debía ya se entregó.
+
+    **SOLO PARA LA REPOSICIÓN.** Una resolución que debe dinero se salda con una
+    devolución confirmada por la pasarela y con nada más; si esta puerta la
+    aceptara, bastaría con escribir un motivo para desbloquear el saldo de un
+    pedido cuyo reembolso nadie ha hecho.
+
+    IDEMPOTENTE: marcarla dos veces no escribe dos renglones.
+    """
+    await esquema.exigir_incidencias(db)
+    momento = momento or ahora()
+    limpio = _texto(motivo, 1000)
+    if not limpio or len(limpio) < 3:
+        raise MotivoInvalido(
+            "Hace falta decir por qué se da por entregada la reposición.",
+            details={"reason": "reason_required"},
+        )
+
+    caso = await _bloqueado(db, incidencia_id)
+    if caso is None:
+        raise CasoNoEncontrado("Reclamación no encontrada.")
+    if caso.status != maquina.RESUELTA:
+        raise ReposicionNoAplica(
+            "Esa reclamación todavía no está resuelta.",
+            details={"reason": "incident_not_resolved", "status": caso.status},
+        )
+    if caso.resolution != maquina.REPONER:
+        raise ReposicionNoAplica(
+            "Esa decisión no se salda con una reposición.",
+            details={
+                "reason": (
+                    "resolution_owes_money"
+                    if maquina.debe_dinero(caso.resolution)
+                    else "resolution_without_replacement"
+                ),
+                "resolution": caso.resolution,
+            },
+        )
+    if caso.financial_effect in maquina.EFECTOS_SALDADOS:
+        #: YA ESTABA. Volver a marcarla no es un error ni escribe otro renglón.
+        return caso
+
+    caso.financial_effect = maquina.EFECTO_EJECUTADO
+    caso.updated_at = momento
+    await _anotar(
+        db,
+        incidencia_id=caso.id,
+        desde=maquina.RESUELTA,
+        hasta=maquina.RESUELTA,
+        actor_id=actor_id,
+        actor_rol=maquina.ADMINISTRACION,
+        nota=limpio,
+        momento=momento,
+    )
+    await db.flush()
+    await auditoria.anotar(
+        db,
+        actor_id=actor_id,
+        actor_role=ROL_DE_AUDITORIA[maquina.ADMINISTRACION],
+        action="product_incident.replacement_delivered",
+        entity_type="product_order",
+        entity_id=caso.order_id,
+        #: SIN EL MOTIVO. Es texto libre y puede llevar dentro lo que contó
+        #: quien reclama; `audit_events` lo leen otros módulos.
+        payload={
+            "incident_id": caso.id,
+            "resolution": caso.resolution,
+            "financial_effect": caso.financial_effect,
+        },
+    )
+    return caso
+
 # --------------------------------------------------------------------------- #
 async def escalar_las_vencidas(
     db: AsyncSession, *, momento: datetime | None = None, lote: int = 200

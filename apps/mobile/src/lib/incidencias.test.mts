@@ -81,6 +81,7 @@ const {
   ofrece,
   pideLinea,
   porQueNoSePuedeAdjuntar,
+  esperaRegistrarLaReposicion,
   quedaAlgoPendiente,
   sePasoDelPlazo,
   sePuedeApelar,
@@ -855,5 +856,63 @@ describe('el contrato con el servidor, donde la revisión lo encontró roto', ()
     );
     assert.ok(bloque.length > 100, 'no encontré el repositorio de quien compra');
     assert.ok(!sinComentarios(bloque).includes('async mios('));
+  });
+});
+
+describe('la reposicion entregada, que era el unico efecto sin salida', () => {
+    it('una reposicion resuelta y sin entregar espera que alguien la registre', () => {
+    // Es el unico caso que lo pide: las tres resoluciones de dinero se saldan
+    // devolviendo de verdad, y aceptar aqui una de ellas dejaria desbloquear el
+    // cobro de un reembolso que nadie hizo.
+    assert.equal(
+      esperaRegistrarLaReposicion(
+        caso({
+          status: 'RESOLVED',
+          resolution: 'REPLACEMENT',
+          financial_effect: 'PENDING',
+        }),
+      ),
+      true,
+    );
+    assert.equal(
+      esperaRegistrarLaReposicion(
+        caso({
+          status: 'RESOLVED',
+          resolution: 'REPLACEMENT',
+          financial_effect: 'EXECUTED',
+        }),
+      ),
+      false,
+      'ya registrada: el boton no vuelve a salir',
+    );
+    for (const dinero of [
+      'RETURN_AND_FULL_REFUND',
+      'FULL_REFUND_WITHOUT_RETURN',
+      'PARTIAL_REFUND',
+    ]) {
+      assert.equal(
+        esperaRegistrarLaReposicion(
+          caso({
+            status: 'RESOLVED',
+            resolution: dinero,
+            financial_effect: 'PENDING',
+          }),
+        ),
+        false,
+        `${dinero} se salda devolviendo, no diciendo que se repuso`,
+      );
+    }
+    assert.equal(
+      esperaRegistrarLaReposicion(
+        caso({
+          status: 'MEDIATION',
+          resolution: 'REPLACEMENT',
+          financial_effect: 'PENDING',
+        }),
+      ),
+      false,
+      'sin resolver no hay nada que registrar',
+    );
+    assert.equal(esperaRegistrarLaReposicion(null), false);
   });
 });

@@ -163,17 +163,27 @@ PEDIR_MAS_EVIDENCIA = "REQUEST_MORE_EVIDENCE"
 #: Proponer no es resolver.
 PROPUESTAS = RESOLUCIONES + (PEDIR_MAS_EVIDENCIA,)
 
-#: LAS QUE DEJAN ALGO DEBIENDO. Dinero en las tres primeras, mercancía en la
-#: cuarta. Mientras no se ejecuten, este pedido no puede liberar su saldo:
-#: es lo que leerá el Incremento 9.
-RESOLUCIONES_CON_DEUDA = frozenset(
+#: LAS QUE DEBEN DINERO. Son tres, y la reposición NO es una de ellas: ahí lo
+#: que se debe es una unidad de repuesto.
+#:
+#: POR QUÉ ESTÁN SEPARADAS. Durante un tiempo hubo un solo conjunto y respondía
+#: a dos preguntas distintas: «¿queda algo debiendo?» —que gobierna el bloqueo
+#: del saldo— y «¿se puede abrir una devolución de dinero?» —que gobierna
+#: `devoluciones.aprobar`—. Con la reposición dentro, la segunda contestaba que
+#: sí: el proveedor mandaba la unidad nueva Y además se le podía aprobar y
+#: ejecutar el reembolso del importe entero. Quien compró se quedaba con el
+#: repuesto y con el dinero.
+RESOLUCIONES_CON_DEUDA_DE_DINERO = frozenset(
     {
         DEVOLVER_Y_REEMBOLSAR_TODO,
         REEMBOLSAR_TODO_SIN_DEVOLVER,
         REEMBOLSAR_EN_PARTE,
-        REPONER,
     }
 )
+
+#: LAS QUE DEJAN ALGO DEBIENDO, sea dinero o mercancía. Mientras no se ejecuten,
+#: este pedido no puede liberar su saldo: es lo que lee el Incremento 9.
+RESOLUCIONES_CON_DEUDA = RESOLUCIONES_CON_DEUDA_DE_DINERO | frozenset({REPONER})
 
 #: EL EFECTO DE UNA RESOLUCIÓN NACE PENDIENTE Y NADIE LO EJECUTA. Resolver dice
 #: qué se decidió, no que el dinero se haya movido.
@@ -269,8 +279,22 @@ def exige_motivo(desde: str, hasta: str) -> bool:
 
 
 def deja_deuda(resolucion: str | None) -> bool:
-    """Si esa resolución deja algo debiendo: dinero o mercancía."""
+    """Si esa resolución deja algo debiendo: dinero o mercancía.
+
+    Gobierna el BLOQUEO del saldo. Para saber si se puede abrir una devolución
+    de dinero la pregunta es otra y la contesta `debe_dinero`.
+    """
     return resolucion in RESOLUCIONES_CON_DEUDA
+
+
+def debe_dinero(resolucion: str | None) -> bool:
+    """Si esa resolución obliga a devolver DINERO, y no mercancía.
+
+    Es la puerta de `devoluciones.aprobar`. `REJECT_CLAIM` no debe nada y
+    `REPLACEMENT` debe una unidad de repuesto: ninguna de las dos abre un
+    reembolso.
+    """
+    return resolucion in RESOLUCIONES_CON_DEUDA_DE_DINERO
 
 
 def bloquea_el_dinero(estado: str, resolucion: str | None, efecto: str | None) -> bool:

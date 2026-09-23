@@ -2973,6 +2973,43 @@ async def resolver_incidencia(
     return await _caso(db, caso, actor="admin")
 
 
+@admin_router.post(
+    "/incidents/{incident_id}/replacement-delivered", response_model=IncidenciaRead
+)
+async def reposicion_entregada(
+    incident_id: str,
+    cuerpo: MotivoFinanciero,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IncidenciaRead:
+    """Registra que la unidad de repuesto llego. NO MUEVE UN CENTIMO.
+
+    POR QUE HACE FALTA. Un caso resuelto sigue bloqueando el saldo del pedido
+    mientras su efecto no este saldado, y lo unico que escribia `EXECUTED` era
+    confirmar una devolucion de DINERO. Una reposicion nunca tiene una: el
+    proveedor mandaba la unidad nueva, quien compro la recibia, y el saldo de esa
+    venta no salia de la cola en ninguna pasada. Para siempre.
+
+    POR QUE LA PIDE FINANZAS Y NO MODERACION. Lo que se escribe aqui es
+    `financial_effect`, y desbloquear un cobro es mover dinero. En este modulo
+    moderacion no lo mueve —`puede_mover_dinero` es un conjunto mas estrecho que
+    `is_admin`— y esta ruta no iba a ser la excepcion.
+
+    LO QUE SE REGISTRA ES UN HECHO FISICO, NO UNA DECISION DE NEGOCIO. Quien
+    absorbe el coste de una reposicion sigue sin decidirse y esto no lo decide.
+    """
+    await _exigir_finanzas_z(db, current_user.id)
+    ensure_uuid(incident_id, "Incidencia no encontrada.")
+    caso = await incidencias.marcar_reposicion_entregada(
+        db,
+        incidencia_id=incident_id,
+        actor_id=current_user.id,
+        motivo=cuerpo.reason,
+    )
+    await db.commit()
+    return await _caso(db, caso, actor="admin")
+
+
 @admin_router.post("/{product_id}/transition", response_model=ProductoDelProveedor)
 async def transicionar(
     product_id: str,

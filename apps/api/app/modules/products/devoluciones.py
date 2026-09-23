@@ -206,7 +206,12 @@ async def aprobar(
                 "Esa reclamación todavía no está resuelta.",
                 details={"reason": "incident_not_resolved", "status": caso.status},
             )
-        if not maquina.deja_deuda(caso.resolution):
+        #: `debe_dinero` Y NO `deja_deuda`. La segunda contesta a otra
+        #: pregunta —si queda algo debiendo— y dice que si tambien para la
+        #: reposicion, donde lo que se debe es una unidad. Con ella aqui, esta
+        #: puerta nunca paro a la reposicion aunque su propia especificacion lo
+        #: diga.
+        if not maquina.debe_dinero(caso.resolution):
             raise DevolucionNoPermitida(
                 "Esa decisión no devuelve dinero.",
                 details={

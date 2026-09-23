@@ -796,3 +796,97 @@ async def test_con_sitio_para_otra_fotografia_si_se_ofrece_apelar(
     assert maquina.APELADA in caso.json()["available_transitions"], (
         "con sitio para otra prueba, apelar tiene que seguir ofreciendose"
     )
+
+
+# =========================================================================== #
+# La reposicion entregada, POR HTTP
+# =========================================================================== #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_dar_por_entregada_una_reposicion_es_de_finanzas_y_no_de_moderacion(
+    sesiones, cliente, venta_encendida, monkeypatch
+) -> None:
+    """La ruta EXISTE, la alcanza finanzas, y moderacion no.
+
+    POR QUE POR HTTP. Un servicio correcto al que no llega ninguna ruta es el
+    defecto que este modulo ya ha pagado tres veces: codigo escrito, comentado y
+    probado que no se ejecutaba nunca. Y porque el reparto de permisos solo se
+    puede comprobar aqui: `puede_mover_dinero` es un conjunto MAS ESTRECHO que
+    `is_admin`, y desbloquear un cobro es mover dinero.
+    """
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await primera_linea(sesiones, orden_id)
+    manda = await persona(sesiones, "reposicion-admin")
+    await _rol(sesiones, manda, "admin")
+    modera = await persona(sesiones, "reposicion-modera")
+    await _rol(sesiones, modera, "moderator")
+
+    quien["uid"] = comprador
+    abierto = await http.post(
+        f"{PRODUCTOS}/orders/{orden_id}/incidents",
+        json={
+            "reason": maquina.DANADO,
+            "description": DESCRIPCION,
+            "order_item_id": linea,
+        },
+    )
+    assert abierto.status_code == 201, abierto.text
+    caso_id = abierto.json()["id"]
+    await _subir_dos_fotos(http, caso_id)
+    assert (await http.post(f"{PRODUCTOS}/incidents/{caso_id}/submit")).status_code == 200
+
+    #: A MEDIACION LO LLEVA QUIEN COMPRA. No hay salto de abierta a resuelta:
+    #: resolver es de Z y se llega desde respondida, mediacion o apelada.
+    quien["uid"] = comprador
+    mediacion = await http.post(
+        f"{PRODUCTOS}/incidents/{caso_id}/escalate",
+        json={"note": "No hay respuesta y pido que lo mire Z."},
+    )
+    assert mediacion.status_code == 200, mediacion.text
+
+    quien["uid"] = manda
+    resuelto = await http.post(
+        f"{ADMIN}/incidents/{caso_id}/resolve",
+        json={
+            "resolution": maquina.REPONER,
+            "note": "Se repone la unidad danada.",
+        },
+    )
+    assert resuelto.status_code == 200, resuelto.text
+    assert resuelto.json()["financial_effect"] == maquina.EFECTO_PENDIENTE
+
+    #: MODERACION NO. Puede resolver el caso y no puede saldar su efecto.
+    quien["uid"] = modera
+    negado = await http.post(
+        f"{ADMIN}/incidents/{caso_id}/replacement-delivered",
+        json={"reason": "Moderacion no mueve dinero."},
+    )
+    assert negado.status_code == 403, negado.text
+    assert negado.json()["error"]["code"] == "product_finance_forbidden"
+
+    #: Y SIN MOTIVO TAMPOCO, ni siquiera finanzas.
+    quien["uid"] = manda
+    sin_motivo = await http.post(
+        f"{ADMIN}/incidents/{caso_id}/replacement-delivered",
+        json={"reason": "  "},
+    )
+    assert sin_motivo.status_code == 422, sin_motivo.text
+
+    hecho = await http.post(
+        f"{ADMIN}/incidents/{caso_id}/replacement-delivered",
+        json={"reason": "La unidad de repuesto llego y quien compro lo confirmo."},
+    )
+    assert hecho.status_code == 200, hecho.text
+    assert hecho.json()["financial_effect"] == maquina.EFECTO_EJECUTADO
+
+    #: IDEMPOTENTE: repetirla no escribe un segundo renglon en el historial.
+    pasos = len(hecho.json()["history"])
+    otra = await http.post(
+        f"{ADMIN}/incidents/{caso_id}/replacement-delivered",
+        json={"reason": "Otra vez, por si acaso."},
+    )
+    assert otra.status_code == 200, otra.text
+    assert len(otra.json()["history"]) == pasos
