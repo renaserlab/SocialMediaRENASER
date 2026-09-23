@@ -453,6 +453,10 @@ Mappings:
       # Si el trafico crece de verdad, el salto NO es a una maquina mas grande:
       # es subir Maximo y dejar que el grupo ponga mas maquinas iguales.
       TipoDeInstancia: t3.small
+      # CPU que una t3.small puede sostener sin gastar creditos (20 %). Por
+      # debajo los GANA. Lo usan las alarmas de creditos: si se cambia el tipo
+      # de instancia, este numero cambia con el.
+      LineaBaseDeCpu: '20'
 
     alta-disponibilidad:
       # 2 maquinas en 2 zonas distintas. Con min=2 el grupo reparte una por
@@ -462,6 +466,7 @@ Mappings:
       Deseadas: '2'
       Maximo: '3'
       TipoDeInstancia: t3.small
+      LineaBaseDeCpu: '20'
 
   # Cuenta de AWS que escribe los logs de acceso del balanceador. Es un valor
   # publicado por AWS y distinto en cada region; la plantilla esta fijada a
@@ -1669,17 +1674,47 @@ Resources:
       AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-creditos-de-cpu-bajos'
       AlarmDescription: >-
         Las instancias t3 en modo `standard` se FRENAN al quedarse sin creditos.
-        Esta alarma avisa antes de que pase: es la senal de que hay que subir de
-        tipo de instancia o de numero de maquinas.
-      Namespace: AWS/EC2
-      MetricName: CPUCreditBalance
-      Dimensions:
-        - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
-      Statistic: Minimum
-      Period: 300
+        Esta alarma avisa antes de que pase: saldo por debajo de 20 MIENTRAS la
+        CPU supera su linea base, es decir, gastando creditos mas deprisa de lo
+        que los gana. Es la senal de subir de tipo de instancia o de numero de
+        maquinas.
+      # POR QUE NO BASTA CON EL SALDO. Una t3 en modo `standard` NACE CON CERO
+      # CREDITOS y gana 24 por hora. Mirando solo el saldo, esta alarma saltaba
+      # tras CADA despliegue durante casi una hora, con la CPU al 1 %: medido el
+      # 23/09/2026 en RenaserLab. Una alarma que salta sin motivo en cada
+      # despliegue ensena a ignorarla. Con la CPU por debajo de la base la
+      # maquina no puede frenarse (no necesita creditos), asi que sin gasto no
+      # hay aviso; con gasto y saldo bajo, avisa igual que antes.
+      Metrics:
+        - Id: saldo
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/EC2
+              MetricName: CPUCreditBalance
+              Dimensions:
+                - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+            Period: 300
+            Stat: Minimum
+        - Id: cpu
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/EC2
+              MetricName: CPUUtilization
+              Dimensions:
+                - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+            Period: 300
+            Stat: Average
+        - Id: gastando
+          Label: Saldo bajo con la CPU por encima de su base
+          ReturnData: true
+          Expression: !Sub
+            - 'IF(saldo < 20 AND cpu > ${Base}, 1, 0)'
+            - Base: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, LineaBaseDeCpu]
       EvaluationPeriods: 2
-      Threshold: 20
-      ComparisonOperator: LessThanThreshold
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref TemaDeAlertas]
 
@@ -1696,18 +1731,43 @@ Resources:
         `VIDEO_HLS_ENABLED`, bajar `VIDEO_JOBS_CONCURRENTES` o subir de maquina.
         Es la condicion que convierte encender HLS —tres codificaciones por
         video en vez de una— en una operacion vigilada en lugar de una apuesta.
-      Namespace: AWS/EC2
-      MetricName: CPUCreditBalance
-      Dimensions:
-        - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
-      Statistic: Minimum
+      # La misma correccion que `creditos-de-cpu-bajos`: el saldo solo cuenta
+      # si la CPU esta por encima de su base. Sin ella, esta alarma pasaba unas
+      # SEIS HORAS en rojo tras cada despliegue, lo que tarda una maquina nueva
+      # en juntar 144 creditos a 24 por hora.
+      Metrics:
+        - Id: saldo
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/EC2
+              MetricName: CPUCreditBalance
+              Dimensions:
+                - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+            Period: 300
+            Stat: Minimum
+        - Id: cpu
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/EC2
+              MetricName: CPUUtilization
+              Dimensions:
+                - {Name: AutoScalingGroupName, Value: !Ref GrupoDeAutoescalado}
+            Period: 300
+            Stat: Average
+        - Id: bajando
+          Label: Saldo por debajo de 144 con la CPU por encima de su base
+          ReturnData: true
+          Expression: !Sub
+            - 'IF(saldo < 144 AND cpu > ${Base}, 1, 0)'
+            - Base: !FindInMap [PerfilesDeCapacidad, !Ref PerfilDeCapacidad, LineaBaseDeCpu]
       # 3 periodos de 5 minutos: la metrica de creditos solo se publica cada 5,
       # y el saldo baja despacio. Exigir 15 minutos sostenidos evita el aviso
       # por un pico suelto sin perder margen de reaccion.
-      Period: 300
       EvaluationPeriods: 3
-      Threshold: 144
-      ComparisonOperator: LessThanThreshold
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       # notBreaching: sin datos no hay nada que decir. Una maquina que acaba de
       # arrancar, o un tipo de instancia no burstable, no publican esta metrica
       # y eso no es una emergencia.

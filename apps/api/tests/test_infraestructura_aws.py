@@ -188,6 +188,21 @@ def test_las_maquinas_no_leen_parametros_de_otros_productos() -> None:
     ), "las maquinas podrian leer los parametros de cualquier producto de la cuenta"
 
 
+def test_las_alarmas_de_creditos_no_saltan_por_una_maquina_nueva() -> None:
+    """Una t3 standard nace con cero creditos: el saldo solo no dice nada.
+
+    Mirando solo el saldo, `creditos-de-cpu-bajos` pasaba casi una hora en rojo
+    tras cada despliegue y `creditos-de-cpu-bajando` unas seis, con la CPU al
+    1 %. Tienen que exigir ademas que la CPU supere su linea base.
+    """
+    texto = PLATAFORMA.read_text(encoding="utf-8")
+    for umbral in ("20", "144"):
+        assert f"IF(saldo < {umbral} AND cpu > ${{Base}}, 1, 0)" in texto, (
+            f"la alarma de creditos de {umbral} vuelve a mirar solo el saldo"
+        )
+    assert texto.count("LineaBaseDeCpu: '20'") == 2, "cada perfil necesita su linea base"
+
+
 def test_el_flujo_de_despliegue_no_lleva_la_cuenta_escrita() -> None:
     """Mudar de cuenta es cambiar variables de GitHub, no editar el flujo."""
     flujo = FLUJO.read_text(encoding="utf-8")
