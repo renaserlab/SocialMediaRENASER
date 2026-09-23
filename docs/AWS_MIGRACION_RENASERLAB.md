@@ -3,11 +3,12 @@
 Rama `Edson`, 23 de septiembre de 2026. Plantillas en `infra/aws/`, guion en
 `infra/aws/deploy-renaserlab.ps1`.
 
-> **Estado: PREPARADA, NO EJECUTADA.** En la cuenta de RenaserLab no se ha
-> creado ningún recurso. El guion se ha probado contra ella con las acciones
-> que solo leen o planifican (`Verificar`, `Planificar` y la validación de
-> secretos), y la barrera de cuenta se ha comprobado con una cuenta falsa. La
-> cuenta anterior no se ha tocado. El tráfico sigue donde estaba.
+> **Estado (23/09/2026, 12:10): INFRAESTRUCTURA CREADA, API SIN BASE.** Las
+> dos pilas existen en RenaserLab con el perfil `costo-controlado` y la imagen
+> `sha-4b4dbdf`. La URL temporal es `https://dzqncwhehxai0.cloudfront.net`.
+> Máquina, balanceador, CloudFront y alarmas están sanos, pero todo lo que lee
+> datos devuelve 500: Supabase rechaza la contraseña del secreto. El tráfico,
+> GitHub y la cuenta anterior no se han tocado. Ver §12.
 
 ---
 
@@ -447,3 +448,35 @@ el primer día:
   GitHub o en el guion, y si llega a afectar al servicio salta
   `sin-instancias-sanas`. Una regla de EventBridge para las renovaciones
   fallidas es barata si un día se quiere aviso aunque nadie esté mirando.
+
+---
+
+## 12. El despliegue del 23/09/2026
+
+Lo que salió al crear la infraestructura de verdad. Todo está corregido en el
+repositorio salvo lo que se dice.
+
+- **Las máquinas podían leer los parámetros de otros productos.** La política
+  gestionada `AmazonSSMManagedInstanceCore`, que da Session Manager, concede
+  `ssm:GetParameter` sobre `*`. En esta cuenta eso incluía `/renaser/prod/*`.
+  Lo encontró el simulador de IAM con la pila ya creada. Corregido con un
+  `Deny` explícito (`e534def`) y **demostrado**: `explicitDeny` sobre
+  `/renaser/prod/*`, `/renaser/pruebas/*` y otros entornos de Z; Session
+  Manager, el puntero de versión y su secreto siguen abiertos.
+- **Docker Desktop publicaba un índice OCI**, con la imagen real como hijo sin
+  etiqueta: ECR no lo escaneaba y la regla de ciclo de vida podía borrarla.
+  Ahora se construye con `--provenance=false --sbom=false` y el guion rechaza
+  un índice. La imagen `sha-0e39bcc` es aquel índice y sigue en ECR sin usar.
+- **El escaneo automático de ECR está desactivado para toda la cuenta** (reglas
+  vacías a nivel de registro). No se ha cambiado, porque afecta a los otros
+  productos: la imagen se escaneó a mano. Resultado: 0 críticas y 14 altas, en
+  paquetes de Debian que arrastra ffmpeg.
+- **SIN CORREGIR: las alarmas de créditos de CPU saltan tras cada despliegue.**
+  Una `t3` en modo `standard` nace con 0 créditos y acumula 24 por hora. Así,
+  `creditos-de-cpu-bajos` (umbral 20) queda en `ALARM` casi una hora y
+  `creditos-de-cpu-bajando` (umbral 144) unas seis, con la CPU al 1 %. La
+  corrección es condicionarlas a que la CPU supere su base (20 % en una
+  t3.small) con una expresión de métricas. No está autorizada.
+- `sin-instancias-sanas` pasa por `ALARM` al crear la pila, antes de que la
+  primera máquina esté sana, y vuelve a `OK`. Se comprobó que la métrica llega
+  cada minuto aunque no haya tráfico: no es una alarma que se quede en rojo.
