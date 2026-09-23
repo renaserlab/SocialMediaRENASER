@@ -45,7 +45,8 @@ from app.modules.events.finanzas_models import OwnerSaleReserve
 from app.modules.products import esquema
 from app.modules.products import estados_de_incidencia as maquina
 from app.modules.products.finanzas_models import (
-    DEVOLUCION_RETIENE,
+    DEVOLUCION_CONFIRMADA,
+    DEVOLUCION_EN_MARCHA,
     DISPUTA_VIVA,
     ProductDispute,
     ProductRefund,
@@ -91,6 +92,17 @@ PROTECCION_EN_CURSO = "protection_window_open"
 RESERVA_VIVA = "reserve_held"
 RECLAMACION_ABIERTA = "incident_open"
 DEVOLUCION_VIVA = "refund_pending"
+#: UNA PARCIAL CONFIRMADA NO ES UNA DEVOLUCION EN MARCHA, y decirlo asi
+#: era mentir con consecuencias: el bloqueo no se levantaba nunca porque
+#: `confirmed` es terminal, y quien vende leia «se esta tramitando algo»
+#: sobre un expediente cerrado hacia semanas.
+#:
+#: EL BLOQUEO ES CORRECTO Y SE QUEDA. El neto se calculo sobre el bruto
+#: entero y una parte volvio a quien compro; quien la absorbe —Z o quien
+#: vende— es una decision que la empresa no ha tomado. Lo que cambia es
+#: que ahora lo DICE, con su propio codigo, y sale en la lista de
+#: decisiones pendientes en vez de parecer una espera.
+DEVOLUCION_SIN_ASIGNAR = "refund_unallocated"
 DISPUTA_ABIERTA_BLOQUEA = "dispute_open"
 SALDO_NEGATIVO = "negative_balance"
 
@@ -418,16 +430,33 @@ async def por_que_no_se_libera(
         ):
             return Bloqueo(RECLAMACION_ABIERTA, caso.id)
 
+    #: DOS PREGUNTAS DISTINTAS, Y ANTES ERAN UNA. «Hay algo en marcha» y «se
+    #: devolvio dinero de esta venta» bloquean las dos, pero no son lo mismo y
+    #: no se arreglan igual.
     viva = await db.scalar(
         select(func.count())
         .select_from(ProductRefund)
         .where(
             ProductRefund.order_id == saldo.product_order_id,
-            ProductRefund.status.in_(DEVOLUCION_RETIENE),
+            ProductRefund.status.in_(DEVOLUCION_EN_MARCHA),
         )
     )
     if viva:
         return Bloqueo(DEVOLUCION_VIVA)
+
+    #: YA CONFIRMADA. Para una TOTAL no se llega aqui —el saldo esta cancelado y
+    #: el primer bloqueo salta antes—, asi que en la practica esto es la parcial:
+    #: el dinero salio, el resto no se paga, y quien lo asume esta sin decidir.
+    devuelto = await db.scalar(
+        select(func.count())
+        .select_from(ProductRefund)
+        .where(
+            ProductRefund.order_id == saldo.product_order_id,
+            ProductRefund.status == DEVOLUCION_CONFIRMADA,
+        )
+    )
+    if devuelto:
+        return Bloqueo(DEVOLUCION_SIN_ASIGNAR)
 
     # POR SALDO O POR PEDIDO. Una disputa abierta antes de que existiera el saldo
     # se queda con `balance_id` nulo, y filtrando solo por `balance_id` no

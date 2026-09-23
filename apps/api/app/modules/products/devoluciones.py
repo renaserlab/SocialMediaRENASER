@@ -345,7 +345,29 @@ async def pedir(
     devolucion = await db.get(ProductRefund, devolucion_id, with_for_update=True)
     if devolucion is None:
         raise DevolucionNoEncontrada("Devolución no encontrada.")
-    if devolucion.status not in (DEVOLUCION_APROBADA, DEVOLUCION_FALLIDA):
+    #: Y TAMBIEN UNA EN CURSO QUE SALIO SIN REFERENCIA, que es el unico caso en
+    #: el que hay que volver a pedirla.
+    #:
+    #: Cuando la pasarela no contesta a tiempo o su respuesta no se puede leer,
+    #: el adaptador devuelve «pendiente» SIN identificador, y con razon: la
+    #: peticion salio con su clave de idempotencia, asi que el reembolso puede
+    #: existir. Pero `atender_aviso` localiza la fila SOLO por esa columna, asi
+    #: que el aviso que llegue despues no la encuentra nunca. Sin este camino la
+    #: fila se quedaba en curso para siempre: `anular` la rechaza por estar en
+    #: curso y `pedir` la rechazaba por no estar aprobada ni fallida. Retencion
+    #: viva, saldo bloqueado y la reclamacion de origen sin ejecutar.
+    #:
+    #: REINTENTAR AQUI ES SEGURO, Y ES LO UNICO QUE PUEDE SERLO: se manda LA
+    #: MISMA clave —el intento solo cambia tras un fallo CONCLUYENTE, y este no
+    #: lo es—, asi que la pasarela devuelve el reembolso que ya creo, con su
+    #: identificador, en vez de crear un segundo.
+    sin_referencia = devolucion.status == DEVOLUCION_EN_CURSO and not (
+        devolucion.external_refund_id or ""
+    ).strip()
+    if (
+        devolucion.status not in (DEVOLUCION_APROBADA, DEVOLUCION_FALLIDA)
+        and not sin_referencia
+    ):
         raise DevolucionNoPermitida(
             "Esa devolución ya se pidió.",
             details={"reason": "already_requested", "status": devolucion.status},

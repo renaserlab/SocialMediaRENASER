@@ -41,7 +41,7 @@ export const ESTADOS_DE_SALDO = [
 ] as const;
 export type EstadoDeSaldo = (typeof ESTADOS_DE_SALDO)[number];
 
-/** Por qué un saldo no se libera. Catorce códigos, y ninguna frase. */
+/** Por qué un saldo no se libera. Quince códigos, y ninguna frase. */
 export const BLOQUEOS = [
   'fee_not_configured',
   'balance_not_pending',
@@ -55,6 +55,12 @@ export const BLOQUEOS = [
   'reserve_held',
   'incident_open',
   'refund_pending',
+  // UNA PARCIAL CONFIRMADA NO ES UNA DEVOLUCIÓN EN MARCHA. El dinero ya
+  // salió, el expediente está cerrado, y lo que queda sin decidir es quién
+  // absorbe la parte devuelta. Iban con el mismo código y el bloqueo no se
+  // levantaba nunca: quien vende leía «se está tramitando algo» sobre algo
+  // que terminó hace semanas.
+  'refund_unallocated',
   'dispute_open',
   'negative_balance',
 ] as const;

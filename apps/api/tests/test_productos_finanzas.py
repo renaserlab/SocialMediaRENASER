@@ -45,6 +45,7 @@ from app.modules.commerce.models import OwnerSaleBalance
 from app.modules.events.finanzas_models import OwnerSaleReserve
 from app.modules.products import devoluciones, envios, esquema, finanzas
 from app.modules.products import estados_de_incidencia as maquina
+from app.modules.products import finanzas_models as finanzas_modelos
 from app.modules.products.finanzas_models import (
     DEVOLUCION_APROBADA,
     DEVOLUCION_CONFIRMADA,
@@ -2361,6 +2362,19 @@ async def _cobro_propio(sesiones, orden_id: str) -> str:
     return referencia
 
 
+async def _cuenta_lista_en(sesiones, saldo_id: str, proveedor: str) -> None:
+    """Una cuenta de cobro dada de alta, apuntada en ese saldo.
+
+    Sin ella el bloqueo de la cuenta salta antes que el de la devolucion, y la
+    prueba pasaria sin haber mirado nunca lo que dice mirar.
+    """
+    cuenta = await cuenta_de_cobro(sesiones, proveedor)
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        saldo.payout_account_id = cuenta
+        await db.commit()
+
+
 async def _devolucion_en_curso(sesiones, orden_id, admin, *, importe, referencia):
     """Una devolucion aprobada y YA PEDIDA, esperando a la pasarela."""
     async with sesiones() as db:
@@ -2733,3 +2747,163 @@ async def test_una_deuda_de_dinero_no_se_salda_diciendo_que_se_repuso(
                 motivo="Intento saldar una deuda de dinero por la puerta de atras.",
             )
     assert fallo.value.details.get("reason") == "resolution_owes_money"
+
+
+# --------------------------------------------------------------------------- #
+# Dos formas de dejar el dinero atrapado, que encontro la revision
+# --------------------------------------------------------------------------- #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_parcial_confirmada_bloquea_diciendo_lo_que_pasa_de_verdad(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """DEVOLVER UNA PARTE NO ES TENER UNA DEVOLUCION EN MARCHA.
+
+    EL DEFECTO. El bloqueo se decidia por la EXISTENCIA de una fila en un
+    conjunto que incluye `confirmed`. Para una devolucion TOTAL da igual —el
+    saldo se cancela y el bloqueo salta antes— pero una PARCIAL confirmada deja
+    el saldo vivo, y entonces el resto quedaba bloqueado con el codigo
+    `refund_pending`: «hay una devolucion en marcha». No la hay. Esta cerrada,
+    su retencion se consumio, y ese bloqueo no se levantaba nunca porque
+    `confirmed` es terminal.
+
+    LO QUE SE ARREGLA NO ES EL BLOQUEO, ES LA MENTIRA. Que el resto no se pague
+    sigue siendo lo correcto: el neto se calculo sobre el bruto entero y quien
+    absorbe la parte devuelta es una decision que la empresa no ha tomado. Lo
+    que no puede ser es que se diga que se espera algo que ya termino. Ahora
+    tiene su propio codigo y sale en la lista de decisiones pendientes.
+    """
+    _, orden_id, proveedor, saldo_id = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-parcial", rol="admin")
+    await _cuenta_lista_en(sesiones, saldo_id, proveedor)
+    devolucion_id = await _devolucion_en_curso(
+        sesiones, orden_id, admin, importe=200, referencia="re_parcial_ok"
+    )
+    async with sesiones() as db:
+        await devoluciones.atender_aviso(
+            db,
+            referencia_externa="re_parcial_ok",
+            resultado=devoluciones.AVISO_CONFIRMA,
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        #: CON EL PLAZO VENCIDO Y SIN RETENCION VIVA, que es lo unico que
+        #: deja ver este bloqueo: las puertas anteriores saltarian antes y
+        #: la prueba pasaria sin haber mirado nunca la devolucion.
+        bloqueo = await finanzas.por_que_no_se_libera(
+            db,
+            saldo=saldo,
+            reservado=0,
+            momento=finanzas.ahora() + timedelta(days=30),
+        )
+    assert fila.status == DEVOLUCION_CONFIRMADA
+    assert fila.kind == finanzas_modelos.DEVOLUCION_PARCIAL
+    assert saldo.status == finanzas.PENDIENTE, "una parcial no cancela el saldo"
+    assert bloqueo is not None
+    assert bloqueo.motivo != finanzas.DEVOLUCION_VIVA, (
+        "dice que hay una devolucion en marcha y esta confirmada y cerrada"
+    )
+    assert bloqueo.motivo == finanzas.DEVOLUCION_SIN_ASIGNAR
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_en_marcha_sigue_diciendo_que_esta_en_marcha(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO: separar los dos codigos no puede borrar el primero."""
+    _, orden_id, proveedor, saldo_id = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-marcha", rol="admin")
+    await _cuenta_lista_en(sesiones, saldo_id, proveedor)
+    await _devolucion_en_curso(
+        sesiones, orden_id, admin, importe=200, referencia="re_en_marcha"
+    )
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        bloqueo = await finanzas.por_que_no_se_libera(
+            db,
+            saldo=saldo,
+            reservado=0,
+            momento=finanzas.ahora() + timedelta(days=30),
+        )
+    assert bloqueo is not None and bloqueo.motivo == finanzas.DEVOLUCION_VIVA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_que_salio_sin_referencia_se_puede_reintentar(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """SI NO, EL DINERO SE VA Y EL EXPEDIENTE NO SE CIERRA NUNCA.
+
+    EL DEFECTO. Cuando la pasarela no contesta a tiempo o su respuesta no se
+    puede leer, el adaptador devuelve «pendiente» SIN identificador, y con
+    razon: la peticion salio con su clave de idempotencia, asi que el reembolso
+    puede existir. La fila quedaba en `processing` con `external_refund_id`
+    nulo, y `atender_aviso` localiza la fila SOLO por esa columna: el aviso que
+    llega despues no la encuentra.
+
+    A partir de ahi no habia ninguna salida por la API. `anular` la rechaza por
+    estar en curso, `pedir` la rechazaba por no estar aprobada ni fallida, y el
+    webhook no iba a encontrarla jamas. Retencion viva, saldo bloqueado para
+    siempre y la reclamacion de origen sin ejecutar.
+
+    REINTENTAR ES SEGURO Y ES LO UNICO QUE PUEDE SERLO: se manda LA MISMA clave
+    de idempotencia, asi que la pasarela devuelve el reembolso que ya creo —con
+    su identificador— en vez de crear un segundo.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-sin-ref", rol="admin")
+    devolucion_id = await _devolucion_en_curso(
+        sesiones, orden_id, admin, importe=100, referencia="re_se_borra"
+    )
+    #: Como lo deja un tiempo de espera agotado: en curso y SIN referencia.
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+        fila.status = devoluciones.DEVOLUCION_EN_CURSO
+        fila.external_refund_id = None
+        clave = fila.idempotency_key
+        await db.commit()
+
+    async with sesiones() as db:
+        vuelta = await devoluciones.pedir(
+            db, devolucion_id=devolucion_id, actor_id=admin
+        )
+        await db.commit()
+    assert vuelta is not None
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+    assert fila.idempotency_key == clave, (
+        "el reintento cambio la clave: eso crea un SEGUNDO reembolso real"
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_devolucion_en_curso_CON_referencia_no_se_vuelve_a_pedir(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO. Abrir el reintento no puede abrirlo para todas.
+
+    Con identificador, el aviso de la pasarela SI va a encontrar la fila: volver
+    a pedirla seria trabajo para nada y ruido en el expediente.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-con-ref", rol="admin")
+    devolucion_id = await _devolucion_en_curso(
+        sesiones, orden_id, admin, importe=100, referencia="re_si_esta"
+    )
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+        fila.status = devoluciones.DEVOLUCION_EN_CURSO
+        await db.commit()
+
+    async with sesiones() as db:
+        with pytest.raises(AppError) as fallo:
+            await devoluciones.pedir(
+                db, devolucion_id=devolucion_id, actor_id=admin
+            )
+    assert fallo.value.details.get("reason") == "already_requested"
