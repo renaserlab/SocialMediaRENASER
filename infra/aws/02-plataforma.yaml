@@ -25,30 +25,45 @@ AWSTemplateFormatVersion: '2010-09-09'
 # =============================================================================
 
 Description: >-
-  RENASER — Plataforma de la API FastAPI en AWS: VPC en 2 zonas, Application
-  Load Balancer, Auto Scaling Group con EC2 + Docker, CloudWatch y secretos en
-  Secrets Manager. Requiere la pila de fundacion desplegada. Region: us-east-1.
+  Z Excelencia — Plataforma de la API FastAPI en AWS: VPC en 2 zonas,
+  CloudFront, Application Load Balancer, Auto Scaling Group con EC2 + Docker,
+  CloudWatch y secretos en Secrets Manager. Requiere la pila de fundacion.
 
 # -----------------------------------------------------------------------------
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: {default: Identidad y perfil}
-        Parameters: [Entorno, PerfilDeCapacidad, PrefijoDeRecursos, PilaDeFundacion]
+        Parameters: [ExpectedAccountId, Proyecto, Entorno, PerfilDeCapacidad, PrefijoDeRecursos, PilaDeFundacion]
       - Label: {default: Red}
         Parameters: [CidrDeLaVpc, NumeroDeNatGateways, RegistroDeFlujoDeRed]
       - Label: {default: Publicacion y TLS}
-        Parameters: [CertificadoAcmArn, NombreDeDominio, SoloDesdeCloudFront, ListaDePrefijosDeCloudFront, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
+        Parameters: [FrenteHttpsDeEmergencia, NombreDeDominio, CertificadoDeCloudFrontArn, CertificadoAcmArn, SoloDesdeCloudFront, VerificarCabeceraDeOrigen, ListaDePrefijosDeCloudFront, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
       - Label: {default: Aplicacion}
         Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl, BetaFreeAccessEnabled]
       - Label: {default: Observabilidad y escalado}
-        Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
+        Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, UmbralLatenciaP95Segundos, UmbralErrores5xxDeLaApi, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
     ParameterLabels:
       PerfilDeCapacidad: {default: Perfil de capacidad (coste vs disponibilidad)}
       NumeroDeNatGateways: {default: NAT Gateways (0 = instancias en subred publica)}
 
 # -----------------------------------------------------------------------------
 Parameters:
+
+  # Sin valor por defecto: ver `BarreraExpectedAccountId`.
+  ExpectedAccountId:
+    Type: String
+    AllowedPattern: '^\d{12}$'
+    ConstraintDescription: doce digitos, el identificador de la cuenta de AWS.
+    Description: >-
+      Cuenta de AWS en la que se espera desplegar. Si no es la cuenta real de
+      la sesion, CloudFormation rechaza el plan sin crear ningun recurso.
+
+  Proyecto:
+    Type: String
+    Default: Z-Excelencia
+    AllowedPattern: '^[A-Za-z0-9 ._-]{1,64}$'
+    Description: Etiqueta `Proyecto` de cada recurso (la cuenta es compartida).
 
   Entorno:
     Type: String
@@ -57,15 +72,16 @@ Parameters:
 
   PrefijoDeRecursos:
     Type: String
-    Default: renaser
-    AllowedPattern: '^[a-z][a-z0-9-]{1,20}$'
+    Default: zexcelencia
+    AllowedPattern: '^[a-z][a-z0-9-]{1,16}$'
     Description: >-
       Tiene que coincidir con el de la pila de fundacion: el rol de despliegue
-      de GitHub solo puede renovar grupos que empiecen por este prefijo.
+      de GitHub solo puede renovar grupos que empiecen por este prefijo. Como
+      mucho 17 caracteres: `<prefijo>-produccion-alb` no puede pasar de 32.
 
   PilaDeFundacion:
     Type: String
-    Default: renaser-fundacion
+    Default: zexcelencia-fundacion
     Description: Nombre de la pila 01-fundacion.yaml, de la que se importan ECR y registro.
 
   PerfilDeCapacidad:
@@ -157,13 +173,30 @@ Parameters:
     Type: String
     Default: ''
     Description: >-
-      Solo informativo (aparece en las salidas). El DNS no se gestiona aqui a
-      proposito: la zona del dominio suele vivir en otro proveedor y que dos
-      sistemas se peleen por un registro DNS es una caida garantizada.
+      Dominio propio de la API (por ejemplo api.ejemplo.com). Con
+      `CertificadoDeCloudFrontArn` se anade como nombre alternativo de la
+      distribucion de CloudFront; sin el, solo aparece en las salidas. El DNS
+      no se gestiona aqui a proposito: la zona suele vivir en otro proveedor y
+      que dos sistemas se peleen por un registro es una caida garantizada.
 
-  # MEDIDO CONTRA LA CUENTA EL 27/08/2026, no es una precaucion teorica:
+  # EL DESTINO DEFINITIVO, y la razon de que exista: sin dominio propio, la
+  # URL de la API es el nombre que Amazon le da a la distribucion, y ese nombre
+  # CAMBIA con la cuenta. Mudar de cuenta obliga a recompilar la app movil. Con
+  # un dominio propio en CloudFront, la proxima mudanza es cambiar un registro
+  # DNS y ningun cliente se entera.
+  CertificadoDeCloudFrontArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:acm:us-east-1:\d{12}:certificate/[0-9a-f-]+$'
+    ConstraintDescription: >-
+      un certificado de ACM EN us-east-1: CloudFront no acepta de otra region.
+    Description: >-
+      Certificado de ACM en us-east-1 para `NombreDeDominio`. Vacio = la
+      distribucion solo responde en su nombre *.cloudfront.net.
+
+  # MEDIDO CONTRA LA CUENTA ANTERIOR EL 27/08/2026, no es una precaucion teorica:
   #
-  #   curl http://renaser-produccion-alb-151836231.us-east-1.elb.amazonaws.com/api/v1/notifications
+  #   curl http://<nombre-del-balanceador>.us-east-1.elb.amazonaws.com/api/v1/notifications
   #   -> HTTP 401
   #
   # Ese 401 es la API contestando EN CLARO desde Internet abierto, sin pasar por
@@ -192,6 +225,33 @@ Parameters:
 
       VUELTA ATRAS: es un parametro, no una edicion de emergencia. Si algo va
       mal, volver a desplegar con 'No' reabre la entrada.
+
+  # LO QUE LA LISTA DE PREFIJOS NO CIERRA. `SoloDesdeCloudFront` deja entrar a
+  # las IPs de CloudFront, y CloudFront es de todos: cualquiera puede crear su
+  # propia distribucion con nuestro balanceador como origen y hablar con la API
+  # sin pasar por la nuestra. No expone un token en claro —su distribucion
+  # tambien obliga a HTTPS—, pero se salta todo lo que un dia se ponga delante
+  # (limites, WAF, registros) y usa nuestra API como origen de terceros.
+  #
+  # Esto lo cierra: CloudFront anade una cabecera con un valor secreto y el
+  # balanceador solo reenvia las peticiones que la traen; el resto recibe un
+  # 403. EL RIESGO QUE QUEDA, dicho claro: es un secreto compartido y estatico.
+  # Quien pueda leer la configuracion de la distribucion o del balanceador en
+  # esta cuenta lo ve, y no caduca solo. Por eso vive en Secrets Manager y no en
+  # el repositorio, y rotarlo es cambiar la clave del secreto y volver a
+  # desplegar la pila (ver docs/AWS_MIGRACION_RENASERLAB.md). La solucion sin
+  # secreto es un origen de VPC de CloudFront con el balanceador interno; se
+  # deja para cuando haya dominio propio, porque cambia el esquema del
+  # balanceador y eso es reemplazarlo.
+  VerificarCabeceraDeOrigen:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      El balanceador exige la cabecera X-Origen-Verificado con el valor de la
+      clave CLOUDFRONT_ORIGIN_SECRET del secreto `NombreDelSecreto`. Solo
+      actua con FrenteHttpsDeEmergencia='Si'. Si la clave no existe en el
+      secreto, el despliegue falla antes de tocar nada.
 
   # Parametro y no un valor escrito a fuego porque el id CAMBIA segun la region:
   # dejarlo incrustado es una bomba para el dia que alguien despliegue fuera de
@@ -232,25 +292,32 @@ Parameters:
       OJO: el bucket de destino se crea igualmente con `No` (vacio no cuesta
       nada); este interruptor solo decide si el balanceador escribe en el.
 
+  # SIN VALOR POR DEFECTO Y SIN `latest`. Una etiqueta que se mueve no dice
+  # que codigo corre; `sha-<commit>` si. El guion la calcula al publicar.
+  #
+  # CUIDADO AL ACTUALIZAR LA PILA: pasar aqui otra etiqueta REESCRIBE el
+  # parametro de SSM que el CI ya habia movido, y la proxima maquina que nazca
+  # arrancaria esa version. Por eso el guion solo la pasa al CREAR la pila; en
+  # una actualizacion la deja fuera y CloudFormation conserva la anterior.
   EtiquetaDeImagen:
     Type: String
-    Default: latest
-    AllowedPattern: '^[A-Za-z0-9._-]{1,128}$'
+    AllowedPattern: '^sha-[0-9a-f]{7,40}$'
+    ConstraintDescription: 'sha-<commit>, por ejemplo sha-c45bf93. Nunca latest.'
     Description: >-
       Etiqueta INICIAL de la imagen en ECR. A partir del primer despliegue, el
       valor vivo lo manda el parametro de SSM que crea esta pila y que mueve el
-      CI (ver ParametroDeLaImagen). Este valor solo se vuelve a aplicar si
-      alguien lo cambia aqui y actualiza la pila.
+      CI (ver ParametroDeLaImagen).
 
   NombreDelSecreto:
     Type: String
-    Default: renaser/produccion/api
+    Default: zexcelencia/produccion/api
     Description: >-
       Nombre del secreto de Secrets Manager con DATABASE_URL, SUPABASE_URL,
-      SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY y SUPABASE_JWT_SECRET.
-      ESTA PILA NO LO CREA: se crea a mano una sola vez (paso manual 4). Si lo
-      creara la plantilla, cada actualizacion de la pila correria el riesgo de
-      pisar las claves de produccion con el valor de relleno del fichero.
+      SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET y, si
+      VerificarCabeceraDeOrigen='Si', CLOUDFRONT_ORIGIN_SECRET. ESTA PILA NO LO
+      CREA: lo carga el guion desde un fichero local. Si lo creara la
+      plantilla, cada actualizacion correria el riesgo de pisar las claves de
+      produccion con un valor de relleno.
 
   CorsOrigins:
     Type: String
@@ -307,7 +374,8 @@ Parameters:
     Description: >-
       Correo que recibe las alarmas. Vacio = las alarmas se crean igual y se ven
       en la consola, pero NADIE se entera de una caida hasta que la reporta un
-      usuario. AWS envia un correo de confirmacion que hay que aceptar.
+      usuario. AWS envia un correo de confirmacion que hay que aceptar: hasta
+      entonces la suscripcion queda en PendingConfirmation y no avisa a nadie.
 
   CpuObjetivo:
     Type: Number
@@ -330,6 +398,23 @@ Parameters:
       concurrencia mucho antes que por CPU: por eso hay una segunda politica
       mirando peticiones y no solo procesador. Calibrar con el dato real de
       CloudWatch tras la primera semana.
+
+  UmbralLatenciaP95Segundos:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 30
+    Description: >-
+      Percentil 95 de la latencia que dispara la alarma si se sostiene 3
+      minutos. Referencia medida: 0,29-0,66 s en AWS.
+
+  UmbralErrores5xxDeLaApi:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10000
+    Description: >-
+      Errores 5xx devueltos por la propia API en 5 minutos antes de avisar.
 
   AmiDeAmazonLinux2023:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -391,6 +476,7 @@ Mappings:
 # -----------------------------------------------------------------------------
 Conditions:
 
+  EsLaCuentaEsperada: !Equals [!Ref ExpectedAccountId, !Ref 'AWS::AccountId']
   EsAltaDisponibilidad: !Equals [!Ref PerfilDeCapacidad, alta-disponibilidad]
   EsSoloDesdeCloudFront: !Equals [!Ref SoloDesdeCloudFront, 'Si']
   HayCertificado: !Not [!Equals [!Ref CertificadoAcmArn, '']]
@@ -400,6 +486,13 @@ Conditions:
   HayCorreoDeAlertas: !Not [!Equals [!Ref CorreoDeAlertas, '']]
   HayLogsDeAcceso: !Equals [!Ref LogsDeAccesoDelBalanceador, 'Si']
   HayFlowLogs: !Equals [!Ref RegistroDeFlujoDeRed, 'Si']
+  ExigeCabeceraDeOrigen: !And
+    - !Equals [!Ref VerificarCabeceraDeOrigen, 'Si']
+    - !Condition HayFrenteHttps
+  HayDominioEnCloudFront: !And
+    - !Condition HayDominio
+    - !Not [!Equals [!Ref CertificadoDeCloudFrontArn, '']]
+    - !Condition HayFrenteHttps
   # Con 1 o 2 NAT las maquinas se van a las subredes privadas. Con 0 se quedan
   # en las publicas con IP publica (ver la explicacion en NumeroDeNatGateways).
   MaquinasEnPrivada: !Not [!Equals [!Ref NumeroDeNatGateways, '0']]
@@ -412,8 +505,24 @@ Resources:
   # ===========================================================================
   # RED
   # ===========================================================================
+  # Solo existe si ExpectedAccountId es la cuenta real, y la VPC —de la que
+  # cuelga todo lo demas— depende de ella. En otra cuenta, CloudFormation
+  # rechaza el PLAN con «Unresolved resource dependencies
+  # [BarreraExpectedAccountId]» y no crea ni la pila. Comprobado contra la
+  # cuenta el 23/09/2026; la alternativa con `Rules` no bloqueo el plan en la
+  # misma prueba. Ver la explicacion completa en 01-fundacion.yaml.
+  BarreraExpectedAccountId:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: EsLaCuentaEsperada
+
   Vpc:
     Type: AWS::EC2::VPC
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      # E3005: la barrera no existe cuando la cuenta no coincide. Es lo buscado.
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
     Properties:
       CidrBlock: !Ref CidrDeLaVpc
       EnableDnsSupport: true
@@ -422,7 +531,7 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}'}
-        - {Key: Proyecto, Value: RENASER}
+        - {Key: Proyecto, Value: !Ref Proyecto}
 
   PasarelaDeInternet:
     Type: AWS::EC2::InternetGateway
@@ -781,7 +890,7 @@ Resources:
             ExpirationInDays: 30
             AbortIncompleteMultipartUpload: {DaysAfterInitiation: 3}
       Tags:
-        - {Key: Proyecto, Value: RENASER}
+        - {Key: Proyecto, Value: !Ref Proyecto}
 
   PoliticaDelBucketDeLogs:
     Type: AWS::S3::BucketPolicy
@@ -841,7 +950,7 @@ Resources:
         - {Key: deregistration_delay.timeout_seconds, Value: '30'}
         - {Key: load_balancing.algorithm.type, Value: least_outstanding_requests}
       Tags:
-        - {Key: Proyecto, Value: RENASER}
+        - {Key: Proyecto, Value: !Ref Proyecto}
 
   Balanceador:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -874,7 +983,7 @@ Resources:
         - Key: access_logs.s3.prefix
           Value: alb
       Tags:
-        - {Key: Proyecto, Value: RENASER}
+        - {Key: Proyecto, Value: !Ref Proyecto}
 
   EscuchaHttps:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -900,14 +1009,42 @@ Resources:
       Port: 80
       DefaultActions:
         # Con certificado, el puerto 80 NO sirve la API: redirige (301) a HTTPS.
-        # Sin certificado, sirve directamente, y eso es solo aceptable para la
-        # prueba de humo del primer despliegue.
+        # Sin certificado, sirve directamente... salvo que se exija la cabecera
+        # de CloudFront: entonces lo que llega sin ella recibe un 403 y solo la
+        # regla `ReglaCabeceraDeOrigen` reenvia a las maquinas.
         - !If
           - HayCertificado
           - Type: redirect
             RedirectConfig: {Protocol: HTTPS, Port: '443', StatusCode: HTTP_301}
-          - Type: forward
-            TargetGroupArn: !Ref GrupoDeDestino
+          - !If
+            - ExigeCabeceraDeOrigen
+            - Type: fixed-response
+              FixedResponseConfig:
+                StatusCode: '403'
+                ContentType: text/plain
+                MessageBody: Acceso directo no permitido
+            - Type: forward
+              TargetGroupArn: !Ref GrupoDeDestino
+
+  # El valor NO esta en la plantilla ni en el repositorio: CloudFormation lo
+  # lee del secreto al desplegar y no lo guarda en sus registros. Es hexadecimal
+  # a proposito: el balanceador compara sin distinguir mayusculas y trata `*` y
+  # `?` como comodines, y un valor hexadecimal no tiene ni lo uno ni lo otro.
+  ReglaCabeceraDeOrigen:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: ExigeCabeceraDeOrigen
+    Properties:
+      ListenerArn: !Ref EscuchaHttp
+      Priority: 1
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Origen-Verificado
+            Values:
+              - !Sub '{{resolve:secretsmanager:${NombreDelSecreto}:SecretString:CLOUDFRONT_ORIGIN_SECRET}}'
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref GrupoDeDestino
 
   # ===========================================================================
   # OBSERVABILIDAD
@@ -924,7 +1061,7 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub '${PrefijoDeRecursos}-${Entorno}-alertas'
-      DisplayName: Alertas API RENASER
+      DisplayName: !Sub 'Alertas ${Proyecto} ${Entorno}'
 
   SuscripcionDeCorreo:
     Type: AWS::SNS::Subscription
@@ -1062,7 +1199,7 @@ Resources:
                 Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
 
       Tags:
-        - {Key: Proyecto, Value: RENASER}
+        - {Key: Proyecto, Value: !Ref Proyecto}
 
   PerfilDeLasMaquinas:
     Type: AWS::IAM::InstanceProfile
@@ -1137,11 +1274,11 @@ Resources:
           - ResourceType: instance
             Tags:
               - {Key: Name, Value: !Sub '${PrefijoDeRecursos}-${Entorno}-api'}
-              - {Key: Proyecto, Value: RENASER}
+              - {Key: Proyecto, Value: !Ref Proyecto}
               - {Key: Entorno, Value: !Ref Entorno}
           - ResourceType: volume
             Tags:
-              - {Key: Proyecto, Value: RENASER}
+              - {Key: Proyecto, Value: !Ref Proyecto}
 
         UserData:
           Fn::Base64: !Sub
@@ -1362,7 +1499,7 @@ Resources:
       MetricsCollection:
         - Granularity: 1Minute
       Tags:
-        - {Key: Proyecto, Value: RENASER, PropagateAtLaunch: true}
+        - {Key: Proyecto, Value: !Ref Proyecto, PropagateAtLaunch: true}
         - {Key: Entorno, Value: !Ref Entorno, PropagateAtLaunch: true}
         - {Key: Perfil, Value: !Ref PerfilDeCapacidad, PropagateAtLaunch: true}
         - {Key: Gestionado-por, Value: CloudFormation, PropagateAtLaunch: true}
@@ -1457,7 +1594,7 @@ Resources:
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 10
+      Threshold: !Ref UmbralErrores5xxDeLaApi
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref TemaDeAlertas]
@@ -1466,9 +1603,10 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-latencia-alta'
-      AlarmDescription: >-
-        El percentil 95 pasa de 2 s durante 3 minutos. Referencia medida en
-        Render: 0,30 s en caliente. Si esto salta, algo se ha torcido.
+      AlarmDescription: !Sub >-
+        El percentil 95 pasa de ${UmbralLatenciaP95Segundos} s durante 3
+        minutos. Referencia medida en AWS: 0,29-0,66 s. Si esto salta, algo se
+        ha torcido.
       Namespace: AWS/ApplicationELB
       MetricName: TargetResponseTime
       Dimensions:
@@ -1479,7 +1617,7 @@ Resources:
       ExtendedStatistic: p95
       Period: 60
       EvaluationPeriods: 3
-      Threshold: 2
+      Threshold: !Ref UmbralLatenciaP95Segundos
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref TemaDeAlertas]
@@ -1628,7 +1766,6 @@ Resources:
           GrupoTg: !GetAtt GrupoDeDestino.TargetGroupFullName
           GrupoAsg: !Ref GrupoDeAutoescalado
 
-# -----------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
   # Frente HTTPS de emergencia (CloudFront)
   # ---------------------------------------------------------------------------
@@ -1639,6 +1776,13 @@ Resources:
       DistributionConfig:
         Enabled: true
         Comment: !Sub 'HTTPS para ${PrefijoDeRecursos}-${Entorno} sin dominio propio'
+        Aliases: !If [HayDominioEnCloudFront, [!Ref NombreDeDominio], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HayDominioEnCloudFront
+          - AcmCertificateArn: !Ref CertificadoDeCloudFrontArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - !Ref 'AWS::NoValue'
         HttpVersion: http2and3
         IPV6Enabled: true
         PriceClass: PriceClass_100
@@ -1652,6 +1796,13 @@ Resources:
               OriginProtocolPolicy: http-only
               HTTPPort: 80
               OriginReadTimeout: 60
+            # Si el visitante manda una cabecera con el mismo nombre, CloudFront
+            # la sustituye por esta: no se puede falsificar desde fuera.
+            OriginCustomHeaders: !If
+              - ExigeCabeceraDeOrigen
+              - - HeaderName: X-Origen-Verificado
+                  HeaderValue: !Sub '{{resolve:secretsmanager:${NombreDelSecreto}:SecretString:CLOUDFRONT_ORIGIN_SECRET}}'
+              - !Ref 'AWS::NoValue'
         DefaultCacheBehavior:
           TargetOriginId: balanceador
           # Redirige, no bloquea: quien llegue por http acaba en https en vez
@@ -1669,7 +1820,7 @@ Resources:
           # `Authorization` y no habria forma de autenticarse.
           OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
       Tags:
-        - {Key: Proyecto, Value: RENASER}
+        - {Key: Proyecto, Value: !Ref Proyecto}
         - {Key: Entorno, Value: !Ref Entorno}
 
 Outputs:
@@ -1690,6 +1841,38 @@ Outputs:
       mientras no exista dominio + certificado en el listener 443.
     Value: !Sub 'https://${FrenteHttps.DomainName}'
     Export: {Name: !Sub '${AWS::StackName}-UrlHttpsDeEmergencia'}
+
+  UrlPublicaDeLaApi:
+    Description: >-
+      La URL que tienen que usar la web y la app movil (EXPO_PUBLIC_API_URL):
+      el dominio propio si esta configurado en CloudFront; si no, el nombre de
+      la distribucion; y sin CloudFront, el balanceador.
+    Value: !If
+      - HayDominioEnCloudFront
+      - !Sub 'https://${NombreDeDominio}'
+      - !If
+        - HayFrenteHttps
+        - !Sub 'https://${FrenteHttps.DomainName}'
+        - !If
+          - HayCertificado
+          - !Sub 'https://${Balanceador.DNSName}'
+          - !Sub 'http://${Balanceador.DNSName}'
+
+  IdDeLaDistribucion:
+    Condition: HayFrenteHttps
+    Description: Identificador de la distribucion de CloudFront (operacion y cambio de trafico).
+    Value: !Ref FrenteHttps
+
+  DominioDeLaDistribucion:
+    Condition: HayFrenteHttps
+    Description: >-
+      Nombre *.cloudfront.net de la distribucion. Es el destino del CNAME del
+      dominio propio cuando exista.
+    Value: !GetAtt FrenteHttps.DomainName
+
+  NombreDelSecretoDeLaApi:
+    Description: Secreto de Secrets Manager que leen las maquinas al arrancar.
+    Value: !Ref NombreDelSecreto
 
   DnsDelBalanceador:
     Description: Nombre DNS del balanceador (destino del CNAME o del ALIAS del dominio).

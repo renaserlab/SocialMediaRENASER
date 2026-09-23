@@ -1,102 +1,35 @@
 [
-  {
-    "ParameterKey": "Entorno",
-    "ParameterValue": "produccion"
-  },
-  {
-    "ParameterKey": "PerfilDeCapacidad",
-    "ParameterValue": "costo-controlado"
-  },
-  {
-    "ParameterKey": "PrefijoDeRecursos",
-    "ParameterValue": "renaser"
-  },
-  {
-    "ParameterKey": "PilaDeFundacion",
-    "ParameterValue": "renaser-fundacion"
-  },
-  {
-    "ParameterKey": "CidrDeLaVpc",
-    "ParameterValue": "10.20.0.0/16"
-  },
-  {
-    "ParameterKey": "NumeroDeNatGateways",
-    "ParameterValue": "0"
-  },
-  {
-    "ParameterKey": "RegistroDeFlujoDeRed",
-    "ParameterValue": "No"
-  },
-  {
-    "ParameterKey": "CertificadoAcmArn",
-    "ParameterValue": ""
-  },
-  {
-    "ParameterKey": "NombreDeDominio",
-    "ParameterValue": ""
-  },
-  {
-    "ParameterKey": "SoloDesdeCloudFront",
-    "ParameterValue": "Si"
-  },
-  {
-    "ParameterKey": "ListaDePrefijosDeCloudFront",
-    "ParameterValue": "pl-3b927c52"
-  },
-  {
-    "ParameterKey": "FrenteHttpsDeEmergencia",
-    "ParameterValue": "Si"
-  },
-  {
-    "ParameterKey": "ProteccionContraBorrado",
-    "ParameterValue": "No"
-  },
-  {
-    "ParameterKey": "LogsDeAccesoDelBalanceador",
-    "ParameterValue": "Si"
-  },
-  {
-    "ParameterKey": "EtiquetaDeImagen",
-    "ParameterValue": "latest"
-  },
-  {
-    "ParameterKey": "NombreDelSecreto",
-    "ParameterValue": "renaser/produccion/api"
-  },
-  {
-    "ParameterKey": "CorsOrigins",
-    "ParameterValue": "https://social-media-renaser.vercel.app"
-  },
-  {
-    "ParameterKey": "FeatureRecommendationsV1",
-    "ParameterValue": "true"
-  },
-  {
-    "ParameterKey": "PaymentsEnabled",
-    "ParameterValue": "false"
-  },
-  {
-    "ParameterKey": "PaymentsReturnUrl",
-    "ParameterValue": "https://social-media-renaser.vercel.app/pago"
-  },
-  {
-    "ParameterKey": "BetaFreeAccessEnabled",
-    "ParameterValue": "true"
-  },
-  {
-    "ParameterKey": "RetencionDeLogsEnDias",
-    "ParameterValue": "30"
-  },
-  {
-    "ParameterKey": "CorreoDeAlertas",
-    "ParameterValue": "renaserlab@gmail.com"
-  },
-  {
-    "ParameterKey": "CpuObjetivo",
-    "ParameterValue": "60"
-  },
-  {
-    "ParameterKey": "PeticionesPorInstanciaObjetivo",
-    "ParameterValue": "600"
-  }
+  { "ParameterKey": "Entorno", "ParameterValue": "produccion" },
+  { "ParameterKey": "PerfilDeCapacidad", "ParameterValue": "costo-controlado" },
+  { "ParameterKey": "Proyecto", "ParameterValue": "Z-Excelencia" },
+  { "ParameterKey": "PrefijoDeRecursos", "ParameterValue": "zexcelencia" },
+  { "ParameterKey": "PilaDeFundacion", "ParameterValue": "zexcelencia-fundacion" },
+
+  { "ParameterKey": "CidrDeLaVpc", "ParameterValue": "10.20.0.0/16" },
+  { "ParameterKey": "NumeroDeNatGateways", "ParameterValue": "0" },
+  { "ParameterKey": "RegistroDeFlujoDeRed", "ParameterValue": "No" },
+
+  { "ParameterKey": "FrenteHttpsDeEmergencia", "ParameterValue": "Si" },
+  { "ParameterKey": "NombreDeDominio", "ParameterValue": "" },
+  { "ParameterKey": "CertificadoDeCloudFrontArn", "ParameterValue": "" },
+  { "ParameterKey": "CertificadoAcmArn", "ParameterValue": "" },
+  { "ParameterKey": "SoloDesdeCloudFront", "ParameterValue": "Si" },
+  { "ParameterKey": "VerificarCabeceraDeOrigen", "ParameterValue": "Si" },
+  { "ParameterKey": "ListaDePrefijosDeCloudFront", "ParameterValue": "pl-3b927c52" },
+  { "ParameterKey": "ProteccionContraBorrado", "ParameterValue": "No" },
+  { "ParameterKey": "LogsDeAccesoDelBalanceador", "ParameterValue": "Si" },
+
+  { "ParameterKey": "NombreDelSecreto", "ParameterValue": "zexcelencia/produccion/api" },
+  { "ParameterKey": "CorsOrigins", "ParameterValue": "https://social-media-renaser.vercel.app" },
+  { "ParameterKey": "FeatureRecommendationsV1", "ParameterValue": "true" },
+  { "ParameterKey": "PaymentsEnabled", "ParameterValue": "false" },
+  { "ParameterKey": "PaymentsReturnUrl", "ParameterValue": "https://social-media-renaser.vercel.app/pago" },
+  { "ParameterKey": "BetaFreeAccessEnabled", "ParameterValue": "false" },
+
+  { "ParameterKey": "RetencionDeLogsEnDias", "ParameterValue": "30" },
+  { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "renaserlab@gmail.com" },
+  { "ParameterKey": "UmbralLatenciaP95Segundos", "ParameterValue": "2" },
+  { "ParameterKey": "UmbralErrores5xxDeLaApi", "ParameterValue": "10" },
+  { "ParameterKey": "CpuObjetivo", "ParameterValue": "60" },
+  { "ParameterKey": "PeticionesPorInstanciaObjetivo", "ParameterValue": "600" }
 ]
