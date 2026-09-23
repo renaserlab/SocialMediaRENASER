@@ -2348,3 +2348,11 @@ todas las claves literales y encontró esa y ninguna otra.
 * **Dos baterías SQL de RLS** (`supabase/tests/stories_rls_test.sql` y
   `testimonials_rls_test.sql`) no las ejecuta ningún trabajo. Son de otras
   verticales.
+* **Tres hallazgos BAJOS de la revisión de permisos**, que no filtran nada fuera
+  de su rol: la cola de conciliación de administración arrastra el texto libre
+  del historial del envío —la revisión lo marcó como sospecha y solo aparece si
+  un pedido en revisión ya tiene envío—; quien vende ve el identificador del
+  administrador que ajustó su inventario; y la lista pública de valoraciones
+  lleva el `author_id` de quien opinó junto al sello de compra verificada. El
+  último puede ser una decisión de producto y la justificación escrita no la
+  cubre: queda para quien decida qué se enseña de quien opina.
