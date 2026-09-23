@@ -239,6 +239,22 @@ export function CarritoScreen() {
           description={f('carrito.vacioCuerpo')}
           onRetry={() => void cargar()}
         />
+        {/* TAMBIÉN CON LA BOLSA VACÍA, que es justo como queda después de
+            comprar: el servidor retira de la bolsa lo que se acaba de pedir.
+            El pie de abajo dice «SIEMPRE, haya o no algo que comprar» y estaba
+            dentro de la otra rama, así que quien acababa de pagar se quedaba
+            sin ninguna puerta hacia su pedido. */}
+        <Pressable
+          onPress={() => router.push('/productos/pedidos' as never)}
+          accessibilityRole="button"
+          accessibilityLabel={f('pedidoDeProducto.accion.verPedidos')}
+          style={({ pressed }) => [styles.vaciar, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <Feather name="package" size={14} color={colors.text} />
+          <Text variant="caption" weight="700">
+            {f('pedidoDeProducto.accion.verPedidos')}
+          </Text>
+        </Pressable>
       </AppScreen>
     );
   }

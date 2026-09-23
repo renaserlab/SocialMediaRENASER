@@ -371,6 +371,15 @@ export function ProductosScreen() {
   const irALaBolsa = () => router.push('/productos/carrito' as never);
   const irAGuardados = () => router.push('/productos/guardados' as never);
   const irAlBuscador = () => router.push('/productos/buscar' as never);
+  // MIS PEDIDOS, DESDE AQUÍ, y no solo desde el pie de la bolsa.
+  //
+  // El único enlace hacia adelante vivía en ese pie, DENTRO de la rama que se
+  // pinta cuando hay líneas. Y el servidor quita de la bolsa exactamente lo que
+  // se compró, así que con un solo proveedor la bolsa queda vacía justo después
+  // de pagar: la pantalla salía por el estado vacío, el pie no se pintaba, y no
+  // quedaba ninguna puerta. Desde ahí no se podía ver el pedido, ni pagar uno
+  // pendiente, ni confirmar que llegó, ni reclamar, ni valorar.
+  const irAMisPedidos = () => router.push('/productos/pedidos' as never);
 
   const encabezado = (
     <AppHeader
@@ -429,6 +438,21 @@ export function ProductosScreen() {
         <Feather name="shopping-bag" size={16} color={colors.text} />
         <Text variant="caption" weight="700">
           {enLaBolsa !== null ? f('carrito.contador', { n: enLaBolsa }) : f('carrito.acceso.bolsa')}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={irAMisPedidos}
+        accessibilityRole="button"
+        accessibilityLabel={f('pedidoDeProducto.accion.verPedidos')}
+        style={({ pressed }) => [
+          styles.acceso,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name="package" size={16} color={colors.text} />
+        <Text variant="caption" weight="700">
+          {f('pedidoDeProducto.accion.verPedidos')}
         </Text>
       </Pressable>
     </View>

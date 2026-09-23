@@ -523,3 +523,44 @@ describe('los importes de una línea se escriben, no se calculan', () => {
     assert.ok(total.configurado && total.texto.includes('360'));
   });
 });
+
+describe('a «mis pedidos» se llega sin escribir la URL', () => {
+  const portada = fuente('screens', 'ProductosScreen.tsx');
+  const bolsa = fuente('screens', 'CarritoScreen.tsx');
+
+  it('la portada de Productos ofrece el acceso a los pedidos', () => {
+    // EL BLOQUEANTE QUE ENCONTRÓ LA REVISIÓN INDEPENDIENTE.
+    //
+    // El único enlace hacia adelante a `/productos/pedidos` vivía en el pie de
+    // la bolsa, DENTRO de la rama que se pinta cuando hay líneas. Y el servidor
+    // quita de la bolsa exactamente lo que se compró, así que con un solo
+    // proveedor la bolsa queda vacía justo después de pagar: la pantalla sale
+    // por el estado vacío, el pie no se pinta, y no queda ninguna puerta.
+    //
+    // A partir de ahí no se podía ver el pedido, ni pagar uno pendiente, ni
+    // confirmar que llegó, ni reclamar, ni valorar, ni dar la conformidad:
+    // todo eso cuelga del detalle del pedido.
+    //
+    // Se comprueba en la PORTADA porque es donde alguien lo busca, al lado de
+    // la bolsa y de guardados; no en el sitio donde se vio el síntoma.
+    assert.ok(
+      portada.includes("router.push('/productos/pedidos'"),
+      'la portada de Productos no lleva a «mis pedidos»',
+    );
+  });
+
+  it('y el pie de la bolsa lo ofrece también con la bolsa VACÍA', () => {
+    // Su propio comentario decía «SIEMPRE, haya o no algo que comprar», y el
+    // bloque estaba dentro de la rama con líneas. Ahora el estado vacío lleva
+    // el mismo acceso.
+    const vacio = bolsa.slice(
+      bolsa.indexOf('if (carritoVacio(carrito))'),
+      bolsa.indexOf('const leido = carrito as Carrito;'),
+    );
+    assert.ok(vacio.length > 100, 'no encontré la rama de la bolsa vacía');
+    assert.ok(
+      vacio.includes("/productos/pedidos"),
+      'con la bolsa vacía no hay forma de llegar a los pedidos',
+    );
+  });
+});
