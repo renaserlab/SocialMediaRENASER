@@ -27,28 +27,38 @@ AWSTemplateFormatVersion: '2010-09-09'
 # COSTE DE ESTA PILA: practicamente cero. ECR cobra 0,10 USD por GB-mes de
 # imagenes almacenadas; el proveedor OIDC y los roles de IAM son gratis.
 #
-# DESPLIEGUE (lo ejecuta una persona con permisos de administrador, NO el CI):
-#   aws cloudformation deploy \
-#     --region us-east-1 \
-#     --stack-name renaser-fundacion \
-#     --template-file infra/aws/01-fundacion.yaml \
-#     --capabilities CAPABILITY_NAMED_IAM
+# LA CUENTA DE RENASERLAB ES COMPARTIDA. Viven en ella otros productos que ya
+# usan el prefijo `renaser` (parametros `/renaser/prod/*` con contrasenas de
+# base de datos, roles `renaser-*`, un tema `renaser-alertas`). Como el rol de
+# despliegue se acota POR PREFIJO, con `renaser` podria leer y sobrescribir los
+# parametros de otro producto. Por eso Z Excelencia usa su propio prefijo.
+#
+# DESPLIEGUE: lo ejecuta una persona con permisos de administrador, NO el CI,
+# y siempre a traves de `infra/aws/deploy-renaserlab.ps1`, que comprueba la
+# cuenta antes de tocar nada y ensena el plan antes de aplicarlo.
 #
 # =============================================================================
 
 Description: >-
-  RENASER — Fundacion: repositorio ECR de la API, proveedor OIDC de GitHub y
-  rol de despliegue sin claves permanentes. Region objetivo: us-east-1.
+  Z Excelencia — Fundacion: repositorio ECR de la API, bucket de plantillas,
+  confianza OIDC con GitHub y rol de despliegue sin claves permanentes.
 
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
+          default: Cuenta y proyecto
+        Parameters:
+          - ExpectedAccountId
+          - Proyecto
+      - Label:
           default: Repositorio de imagenes
         Parameters:
           - NombreDelRepositorio
+          - MutabilidadDeEtiquetas
           - ImagenesEtiquetadasAConservar
           - DiasParaBorrarImagenesSinEtiqueta
+          - DiasParaBorrarPlantillas
       - Label:
           default: Confianza con GitHub (OIDC)
         Parameters:
@@ -63,12 +73,43 @@ Metadata:
 
 Parameters:
 
+  # SIN VALOR POR DEFECTO, a proposito: quien despliega tiene que decir en que
+  # cuenta cree estar. Si no coincide con la cuenta real, el plan falla antes de
+  # crear nada (ver `BarreraExpectedAccountId`). No se escribe en el
+  # repositorio: el guion lo toma de RENASERLAB_AWS_ACCOUNT_ID.
+  ExpectedAccountId:
+    Type: String
+    AllowedPattern: '^\d{12}$'
+    ConstraintDescription: doce digitos, el identificador de la cuenta de AWS.
+    Description: >-
+      Cuenta de AWS en la que se espera desplegar. Si no es la cuenta real de
+      la sesion, CloudFormation rechaza el plan sin crear ningun recurso.
+
+  Proyecto:
+    Type: String
+    Default: Z-Excelencia
+    AllowedPattern: '^[A-Za-z0-9 ._-]{1,64}$'
+    Description: >-
+      Etiqueta `Proyecto` de cada recurso. En una cuenta compartida es lo que
+      separa en la factura lo de este producto de lo de los demas.
+
   NombreDelRepositorio:
     Type: String
-    Default: renaser/api
+    Default: zexcelencia/api
     AllowedPattern: '^[a-z0-9][a-z0-9._/-]{1,255}$'
     Description: >-
       Nombre del repositorio ECR donde vive la imagen de apps/api.
+
+  MutabilidadDeEtiquetas:
+    Type: String
+    Default: IMMUTABLE
+    AllowedValues: [IMMUTABLE, MUTABLE]
+    Description: >-
+      IMMUTABLE = una etiqueta `sha-<commit>` apunta para siempre a la misma
+      imagen: nadie puede subir otra con el mismo nombre. Es lo que hace que
+      volver atras a una etiqueta sea volver al codigo exacto de ese commit.
+      El despliegue ya no publica `latest` y no vuelve a subir una etiqueta que
+      ya existe, asi que no hay nada que necesite moverla.
 
   ImagenesEtiquetadasAConservar:
     Type: Number
@@ -125,26 +166,66 @@ Parameters:
       Solo si CrearProveedorOidc = No. Formato:
       arn:aws:iam::<cuenta>:oidc-provider/token.actions.githubusercontent.com
 
+  # 17 caracteres como mucho: el balanceador y su grupo de destino se llaman
+  # `<prefijo>-produccion-alb` y AWS no admite mas de 32 en esos nombres. Con
+  # 21, como se permitia antes, el despliegue fallaba a mitad de camino.
   PrefijoDeRecursos:
     Type: String
-    Default: renaser
-    AllowedPattern: '^[a-z][a-z0-9-]{1,20}$'
+    Default: zexcelencia
+    AllowedPattern: '^[a-z][a-z0-9-]{1,16}$'
     Description: >-
-      Prefijo con el que empiezan el grupo de autoescalado y los parametros de
-      SSM. El rol de despliegue solo puede tocar recursos que empiecen asi;
-      cambiarlo aqui obliga a cambiarlo tambien en la pila de plataforma.
+      Prefijo con el que empiezan el grupo de autoescalado, las pilas y los
+      parametros de SSM. El rol de despliegue solo puede tocar recursos que
+      empiecen asi; cambiarlo aqui obliga a cambiarlo tambien en la pila de
+      plataforma. NO usar `renaser` en la cuenta de RenaserLab: es el de otros
+      productos y el rol alcanzaria sus parametros.
+
+  DiasParaBorrarPlantillas:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 365
+    Description: >-
+      Las plantillas subidas para desplegar solo sirven mientras dura el
+      despliegue; la fuente de verdad es el repositorio. Se borran solas.
 
 Conditions:
 
   HayQueCrearElProveedorOidc: !Equals [!Ref CrearProveedorOidc, 'Si']
+  EsLaCuentaEsperada: !Equals [!Ref ExpectedAccountId, !Ref 'AWS::AccountId']
 
 Resources:
+
+  # ---------------------------------------------------------------------------
+  # Barrera de cuenta
+  # ---------------------------------------------------------------------------
+  #
+  # Solo existe si ExpectedAccountId es la cuenta real. El repositorio depende
+  # de ella, asi que en otra cuenta CloudFormation rechaza el PLAN entero con
+  # «Unresolved resource dependencies [BarreraExpectedAccountId]» y no llega a
+  # crear ni la pila. Probado el 23/09/2026 contra la cuenta: con una cuenta
+  # falsa, `create-change-set` falla en el acto; con la buena, el plan pasa.
+  #
+  # POR QUE ASI Y NO CON `Rules`. Una regla que compara contra AWS::AccountId
+  # dejo crear el plan igualmente en la misma prueba: no se evalua en esa fase
+  # o no resuelve la pseudovariable. Esta forma si esta comprobada. El recurso
+  # es un manejador de espera vacio: no cuesta nada y no hace nada.
+  BarreraExpectedAccountId:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: EsLaCuentaEsperada
 
   # ---------------------------------------------------------------------------
   # Repositorio de imagenes
   # ---------------------------------------------------------------------------
   RepositorioDeImagenes:
     Type: AWS::ECR::Repository
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      # E3005 avisa de que la barrera no existe cuando la cuenta no coincide.
+      # Es exactamente lo que se busca: ver `BarreraExpectedAccountId`.
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
     # Retain: aunque alguien borre esta pila, las imagenes sobreviven. Sin
     # imagenes no hay a donde volver en un incidente, y el historial de
     # despliegues es justamente el plan B.
@@ -152,10 +233,10 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Ref NombreDelRepositorio
-      # Mutable a proposito: el CI publica cada imagen con el SHA del commit
-      # (inmutable en la practica, porque un SHA no se repite) y ademas mueve
-      # la etiqueta `latest`. Con IMMUTABLE, mover `latest` fallaria.
-      ImageTagMutability: MUTABLE
+      # Ver `MutabilidadDeEtiquetas`. Antes era MUTABLE porque el CI movia
+      # `latest`; ya no la publica, y una etiqueta `sha-<commit>` que se puede
+      # reescribir no garantiza que volver a ella sea volver a ese codigo.
+      ImageTagMutability: !Ref MutabilidadDeEtiquetas
       ImageScanningConfiguration:
         # Escaneo basico de vulnerabilidades al subir. Es gratis y avisa de CVEs
         # en la imagen base de Python sin que nadie tenga que acordarse.
@@ -194,9 +275,75 @@ Resources:
           }
       Tags:
         - Key: Proyecto
-          Value: RENASER
+          Value: !Ref Proyecto
         - Key: Gestionado-por
           Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # Bucket de plantillas
+  # ---------------------------------------------------------------------------
+  #
+  # NO ES OPCIONAL. `02-plataforma.yaml` pesa unos 80 KB y CloudFormation solo
+  # acepta plantillas de hasta 51.200 bytes en linea: por encima exige leerlas
+  # de S3. Sin este bucket, el `aws cloudformation deploy` que documentaba la
+  # guia fallaba antes de empezar.
+  #
+  # Vive aqui y no en la plataforma porque la plataforma no puede subir su
+  # propia plantilla a un bucket que ella misma crea.
+  BucketDePlantillas:
+    Type: AWS::S3::Bucket
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      # E3005 avisa de que la barrera no existe cuando la cuenta no coincide.
+      # Es exactamente lo que se busca: ver `BarreraExpectedAccountId`.
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    # Retain: si tuviera algo dentro al borrar la pila, el borrado fallaria. Lo
+    # que guarda es regenerable y caduca solo.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${PrefijoDeRecursos}-plantillas-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: caducar-plantillas
+            Status: Enabled
+            ExpirationInDays: !Ref DiasParaBorrarPlantillas
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}
+      Tags:
+        - Key: Proyecto
+          Value: !Ref Proyecto
+        - Key: Gestionado-por
+          Value: CloudFormation
+
+  PoliticaDelBucketDePlantillas:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketDePlantillas
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: NadaSinTls
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt BucketDePlantillas.Arn
+              - !Sub '${BucketDePlantillas.Arn}/*'
+            Condition:
+              Bool: {'aws:SecureTransport': 'false'}
 
   # ---------------------------------------------------------------------------
   # Confianza con GitHub: OIDC en lugar de claves de acceso
@@ -224,7 +371,7 @@ Resources:
         - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
       Tags:
         - Key: Proyecto
-          Value: RENASER
+          Value: !Ref Proyecto
 
   RolDeDespliegueDesdeGitHub:
     Type: AWS::IAM::Role
@@ -313,13 +460,18 @@ Resources:
               # El parametro de SSM es el "puntero" a la version en produccion.
               # El CI lo mueve al SHA nuevo; el rollback lo mueve al SHA viejo.
               # Escribir aqui es lo unico que hace falta para cambiar de version.
+              #
+              # SOLO ESE PARAMETRO, y no `/${PrefijoDeRecursos}/*`: en una
+              # cuenta compartida el comodin sobre todo el prefijo es la
+              # diferencia entre mover una etiqueta y poder reescribir la
+              # configuracion de otro entorno.
               - Sid: MoverElPunteroDeVersion
                 Effect: Allow
                 Action:
                   - ssm:PutParameter
                   - ssm:GetParameter
                   - ssm:GetParameterHistory
-                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${PrefijoDeRecursos}/*'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${PrefijoDeRecursos}/*/imagen-api'
 
         - PolicyName: renovar-instancias
           PolicyDocument:
@@ -351,7 +503,7 @@ Resources:
 
       Tags:
         - Key: Proyecto
-          Value: RENASER
+          Value: !Ref Proyecto
         - Key: Gestionado-por
           Value: CloudFormation
 
@@ -382,3 +534,11 @@ Outputs:
     Value: !GetAtt RolDeDespliegueDesdeGitHub.Arn
     Export:
       Name: !Sub '${AWS::StackName}-ArnDelRolDeDespliegue'
+
+  BucketDePlantillas:
+    Description: >-
+      Bucket al que el guion sube las plantillas grandes antes de desplegarlas
+      (CloudFormation no acepta mas de 51.200 bytes en linea).
+    Value: !Ref BucketDePlantillas
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketDePlantillas'
