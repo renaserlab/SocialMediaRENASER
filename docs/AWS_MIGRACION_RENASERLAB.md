@@ -3,12 +3,13 @@
 Rama `Edson`, 23 de septiembre de 2026. Plantillas en `infra/aws/`, guion en
 `infra/aws/deploy-renaserlab.ps1`.
 
-> **Estado (23/09/2026, 12:10): INFRAESTRUCTURA CREADA, API SIN BASE.** Las
+> **Estado (23/09/2026, 14:43): PLATAFORMA NUEVA OPERATIVA, SIN TRÁFICO.** Las
 > dos pilas existen en RenaserLab con el perfil `costo-controlado` y la imagen
-> `sha-4b4dbdf`. La URL temporal es `https://dzqncwhehxai0.cloudfront.net`.
-> Máquina, balanceador, CloudFront y alarmas están sanos, pero todo lo que lee
-> datos devuelve 500: Supabase rechaza la contraseña del secreto. El tráfico,
-> GitHub y la cuenta anterior no se han tocado. Ver §12.
+> `sha-4b4dbdf`. La URL temporal es `https://dzqncwhehxai0.cloudfront.net` y
+> responde con datos. Tras restablecer la contraseña de la base, **la
+> producción de la cuenta anterior devuelve 500 en todo lo que lee datos**:
+> sigue con la contraseña antigua. El tráfico, GitHub y la cuenta anterior no
+> se han tocado. Ver §12.
 
 ---
 
@@ -482,3 +483,17 @@ repositorio salvo lo que se dice.
 - `sin-instancias-sanas` pasa por `ALARM` al crear la pila, antes de que la
   primera máquina esté sana, y vuelve a `OK`. Se comprobó que la métrica llega
   cada minuto aunque no haya tráfico: no es una alarma que se quede en rojo.
+- **La renovación de máquinas cortaba el servicio.** Con solo
+  `MinHealthyPercentage=100`, AWS termina la instancia vieja antes de lanzar la
+  nueva: al renovar en RenaserLab hubo tres minutos sin ninguna máquina sana, y
+  `sin-instancias-sanas` saltó como debía. El mismo defecto estaba en el flujo
+  de GitHub, así que **cada despliegue a producción con una sola máquina
+  cortaba el servicio unos minutos**. Corregido (`1de7f6c`) con
+  `MaxHealthyPercentage=200` en las tres renovaciones: la del guion y las de
+  desplegar y volver atrás del flujo.
+- **Restablecer la contraseña de Supabase rompe la producción anterior.** El
+  pooler tardó más de una hora en aceptar la contraseña nueva: la primera no
+  entró nunca y hubo que generar otra. En cuanto la aceptó, la producción de la
+  cuenta anterior dejó de poder abrir conexiones (500 desde ~14:40). La próxima
+  rotación tiene que hacerse a la vez en todos los entornos que comparten la
+  base.
