@@ -238,6 +238,17 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:  # noqa: ANN001
         evento.status, _estado_del_cierre(getattr(evento, "payload", None))
     )
     importe, moneda = _importe_del_aviso(evento)
+    if importe <= 0:
+        #: SIN IMPORTE EN EL AVISO SE APARTA LO COBRADO, que es el tope de lo
+        #: que el banco puede llevarse y no una cifra inventada.
+        #:
+        #: Antes se escribia el minimo que admite el CHECK —un centimo— y con la
+        #: moneda del pedido puesta al lado, asi que la fila afirmaba que el
+        #: banco reclamaba 0,01 y eso era lo que se apartaba. Pasarse al apartar
+        #: es el lado seguro: se deja de pagar dinero que quiza haya que
+        #: devolver. Quedarse corto es pagar de mas.
+        importe = int(orden.total_minor)
+        moneda = moneda or str(orden.currency)
 
     saldo = await finanzas.saldo_del_pedido(db, orden_id=orden.id)
 

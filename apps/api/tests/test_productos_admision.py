@@ -1038,3 +1038,57 @@ async def test_nadie_lee_el_expediente_de_evaluacion_de_lo_suyo(
     assert ajena.status_code == 200, ajena.text
     cola = await http.get(f"{ADMIN}/evaluations")
     assert ident in [e["id"] for e in cola.json()]
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_sin_rol_no_se_distingue_un_producto_que_no_existe_de_uno_ajeno(
+    sesiones, cliente
+) -> None:
+    """LAS TRES RUTAS ERAN UN ORACULO DE EXISTENCIA.
+
+    EL DEFECTO. Miraban la fila y contestaban 404 ANTES de comprobar el rol, asi
+    que cualquier cuenta autenticada —un comprador cualquiera— podia probar
+    identificadores y distinguir «no existe» de «existe y no es tuyo». Eso
+    confirma la existencia de productos en borrador, rechazados, suspendidos o
+    retirados, que no estan en el catalogo y cuyos identificadores no se
+    publican en ninguna parte.
+
+    LO QUE NO CAMBIA: a quien SI es su dueno se le sigue diciendo el motivo de
+    verdad, que es para lo que se puso «lo propio primero». Lo que espera ahora
+    es el 404.
+    """
+    cualquiera = await persona(sesiones, "oraculo-nadie")
+    dueno = await persona(sesiones, "oraculo-dueno", rol="admin")
+    await vendedor(sesiones, dueno)
+    otro = await persona(sesiones, "oraculo-otro", rol="admin")
+    producto_id, _ = await hasta_evaluacion(sesiones, dueno, otro)
+    inventado = str(uuid.uuid4())
+
+    http, quien = cliente
+    quien["uid"] = cualquiera
+    for ruta, cuerpo in (
+        ("transition", {"hasta": "published"}),
+        ("suspend", {"motivo": "Un motivo cualquiera."}),
+        ("publish", None),
+    ):
+        existe = await http.post(
+            f"{ADMIN}/{producto_id}/{ruta}", json=cuerpo if cuerpo else {}
+        )
+        no_existe = await http.post(
+            f"{ADMIN}/{inventado}/{ruta}", json=cuerpo if cuerpo else {}
+        )
+        assert existe.status_code == no_existe.status_code, (
+            f"{ruta}: se distingue un producto que existe de uno que no"
+        )
+        assert existe.json()["error"]["code"] == no_existe.json()["error"]["code"], (
+            f"{ruta}: el codigo de error delata la existencia"
+        )
+        assert existe.status_code == 403, existe.text
+
+    #: EL CONTROL POSITIVO: su dueno sigue recibiendo el motivo de verdad.
+    quien["uid"] = dueno
+    suyo = await http.post(
+        f"{ADMIN}/{producto_id}/transition", json={"hasta": "published"}
+    )
+    assert suyo.json()["error"]["code"] == "product_self_review_forbidden", suyo.text

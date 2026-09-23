@@ -3037,11 +3037,21 @@ async def transicionar(
     """
     await esquema.exigir_dominio(db)
     ensure_uuid(product_id, "Producto no encontrado.")
+    #: EL ORDEN IMPORTA, Y ANTES CONTABA DE MAS. Se miraba la fila y se
+    #: contestaba 404 ANTES del rol, asi que cualquier cuenta autenticada podia
+    #: preguntar por un identificador y distinguir «no existe» de «existe y no
+    #: es tuyo»: un oraculo sobre productos en borrador, rechazados o retirados,
+    #: que no estan en el catalogo y cuyos identificadores no se publican.
+    #:
+    #: SIGUE SIENDO «LO PROPIO PRIMERO» para quien SI es su dueno, que es por lo
+    #: que se puso asi: a esa persona se le dice el motivo de verdad y no un 403
+    #: generico. Lo que cambia es que el 404 espera al rol.
     producto = await db.get(Product, product_id)
+    if producto is not None:
+        await permisos.exigir_ajeno(db, producto=producto, user_id=current_user.id)
+    await permisos.exigir_evaluador(db, current_user.id)
     if producto is None:
         raise permisos.NoEsTuProducto("Producto no encontrado.")
-    await permisos.exigir_ajeno(db, producto=producto, user_id=current_user.id)
-    await permisos.exigir_evaluador(db, current_user.id)
     # RETIRAR Y SUSPENDER son de administración, no de curaduría. La máquina ya
     # lo dice: el actor es `admin` solo si el rol lo permite.
     actor = (
@@ -3087,11 +3097,21 @@ async def suspender(
     """Lo saca del catálogo, con motivo. Suspender no es retirar."""
     await esquema.exigir_dominio(db)
     ensure_uuid(product_id, "Producto no encontrado.")
+    #: EL ORDEN IMPORTA, Y ANTES CONTABA DE MAS. Se miraba la fila y se
+    #: contestaba 404 ANTES del rol, asi que cualquier cuenta autenticada podia
+    #: preguntar por un identificador y distinguir «no existe» de «existe y no
+    #: es tuyo»: un oraculo sobre productos en borrador, rechazados o retirados,
+    #: que no estan en el catalogo y cuyos identificadores no se publican.
+    #:
+    #: SIGUE SIENDO «LO PROPIO PRIMERO» para quien SI es su dueno, que es por lo
+    #: que se puso asi: a esa persona se le dice el motivo de verdad y no un 403
+    #: generico. Lo que cambia es que el 404 espera al rol.
     producto = await db.get(Product, product_id)
+    if producto is not None:
+        await permisos.exigir_ajeno(db, producto=producto, user_id=current_user.id)
+    await permisos.exigir_publicador(db, current_user.id)
     if producto is None:
         raise permisos.NoEsTuProducto("Producto no encontrado.")
-    await permisos.exigir_ajeno(db, producto=producto, user_id=current_user.id)
-    await permisos.exigir_publicador(db, current_user.id)
     producto = await service.transicionar(
         db,
         producto_id=product_id,
@@ -4529,10 +4549,21 @@ async def soltar_una_retencion(
     await _exigir_finanzas_z(db, current_user.id)
     ensure_uuid(reserve_id, "Retencion no encontrada.")
     await dinero.exigir_disponible(db)
+    from app.modules.commerce.models import OwnerSaleBalance
     from app.modules.events.finanzas_models import OwnerSaleReserve
 
     reserva = await db.get(OwnerSaleReserve, reserve_id)
     if reserva is None:
+        raise NotFoundError(
+            "Retencion no encontrada.", code="product_reserve_not_found"
+        )
+    #: Y QUE SEA DE PRODUCTOS. El resto del bloque financiero filtra por
+    #: `product_order_id`; esta no lo hacia, asi que por aqui se podia soltar
+    #: una retencion de EVENTOS y el rastro la etiquetaba como una accion de
+    #: Productos. No es una escalada —es el mismo rol en los dos modulos— pero
+    #: deja la auditoria diciendo algo que no paso.
+    suyo = await db.get(OwnerSaleBalance, reserva.balance_id)
+    if suyo is None or suyo.product_order_id is None:
         raise NotFoundError(
             "Retencion no encontrada.", code="product_reserve_not_found"
         )

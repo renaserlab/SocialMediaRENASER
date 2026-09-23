@@ -3134,3 +3134,82 @@ async def test_dos_contracargos_distintos_del_mismo_cobro_siguen_siendo_dos(
             )
         )
     assert {f.external_dispute_id for f in filas} == {uno, dos}
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_retencion_sobre_un_saldo_que_no_esta_para_pagar_no_baja_el_disponible(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """DOS CONJUNTOS DISTINTOS, Y SE RESTABA UNO DEL OTRO.
+
+    EL DEFECTO. `disponible` suma el neto de los saldos que YA se podrian pagar,
+    y se le restaba TODO lo apartado del proveedor, incluidas las retenciones
+    sobre saldos que todavia no estan para pagar —porque el paquete va de
+    camino, o porque hay una disputa—. Esas retenciones no estaban dentro del
+    disponible, asi que restarlas le bajaba la cifra a quien vende por una venta
+    que no entraba en ella.
+
+    LO APARTADO SE SIGUE ENSENANDO ENTERO: lo que cambia es de donde se resta.
+    """
+    _, _, proveedor, elegible_id = await con_saldo(sesiones, monkeypatch)
+    _, _, _, pendiente_id = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-disp", rol="admin")
+
+    #: El primero, listo para pagar. El segundo se queda pendiente, y es el que
+    #: lleva la retencion.
+    async with sesiones() as db:
+        uno = await db.get(OwnerSaleBalance, elegible_id)
+        uno.status = finanzas.ELEGIBLE
+        otro = await db.get(OwnerSaleBalance, pendiente_id)
+        #: Los dos saldos son del mismo proveedor: `con_saldo` reutiliza la
+        #: tienda, pero se afirma para que la prueba no dependa de ello.
+        otro.owner_id = uno.owner_id
+        neto = int(uno.net_amount_minor)
+        await finanzas.reservar(
+            db,
+            saldo=otro,
+            importe_minor=1_000,
+            motivo=finanzas.RESERVA_POR_DISPUTA,
+            creado_por=admin,
+        )
+        await db.commit()
+        dueno = uno.owner_id
+
+    async with sesiones() as db:
+        resumen = await finanzas.resumen_del_proveedor(db, usuario_id=dueno)
+    assert resumen.retenido_minor >= 1_000, "lo apartado se sigue ensenando entero"
+    assert resumen.disponible_minor == neto, (
+        "una retencion sobre un saldo que no esta para pagar bajo el disponible"
+    )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_retencion_sobre_lo_que_SI_esta_para_pagar_si_baja_el_disponible(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO. Separar los dos conjuntos no puede dejar de restar.
+
+    Sin esta, no restar nunca pasaria la prueba anterior y le diria a quien
+    vende que tiene disponible un dinero que esta apartado por una disputa.
+    """
+    _, _, proveedor, saldo_id = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-disp2", rol="admin")
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        saldo.status = finanzas.ELEGIBLE
+        neto = int(saldo.net_amount_minor)
+        await finanzas.reservar(
+            db,
+            saldo=saldo,
+            importe_minor=500,
+            motivo=finanzas.RESERVA_POR_DISPUTA,
+            creado_por=admin,
+        )
+        await db.commit()
+        dueno = saldo.owner_id
+
+    async with sesiones() as db:
+        resumen = await finanzas.resumen_del_proveedor(db, usuario_id=dueno)
+    assert resumen.disponible_minor <= max(0, neto - 500)

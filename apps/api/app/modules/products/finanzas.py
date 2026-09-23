@@ -712,8 +712,8 @@ async def resumen_del_proveedor(
     for fila in filas:
         por_estado[fila[1]] = por_estado.get(fila[1], 0) + int(fila[2])
 
-    retenido = int(
-        await db.scalar(
+    async def _apartado(solo_liberables: bool) -> int:
+        consulta = (
             select(func.coalesce(func.sum(OwnerSaleReserve.amount_minor), 0))
             .select_from(OwnerSaleReserve)
             .join(
@@ -726,8 +726,24 @@ async def resumen_del_proveedor(
                 OwnerSaleReserve.status == RESERVA_VIVA_ESTADO,
             )
         )
-        or 0
-    )
+        if solo_liberables:
+            consulta = consulta.where(
+                OwnerSaleBalance.status.in_((ELEGIBLE, EN_TRANSFERENCIA))
+            )
+        return int(await db.scalar(consulta) or 0)
+
+    #: LO APARTADO, ENTERO, que es lo que se enseña.
+    retenido = await _apartado(False)
+
+    #: Y LO APARTADO SOBRE LO QUE YA SE PODRIA PAGAR, que es lo unico que se
+    #: puede RESTAR del disponible.
+    #:
+    #: ANTES SE RESTABA EL TOTAL, y eso mezcla dos conjuntos distintos: una
+    #: retencion sobre un saldo que todavia no esta para pagar —porque el
+    #: paquete va de camino, o porque hay una disputa— no tiene nada que ver con
+    #: el dinero que si esta listo, y le bajaba la cifra a quien vende por una
+    #: venta que no entraba en ella.
+    apartado_de_lo_liberable = await _apartado(True)
 
     disponible = sum(
         int(f[5]) for f in filas if f[1] in (ELEGIBLE, EN_TRANSFERENCIA)
@@ -742,7 +758,7 @@ async def resumen_del_proveedor(
         comision_minor=comision,
         neto_minor=neto,
         retenido_minor=retenido,
-        disponible_minor=max(0, disponible - retenido),
+        disponible_minor=max(0, disponible - apartado_de_lo_liberable),
         cuantas_ventas=cuantas,
         comision_configurada=ajustes_ok,
         por_estado=por_estado,

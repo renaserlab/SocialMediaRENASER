@@ -633,12 +633,17 @@ async def publicar(
     resultado dependería del orden de lectura.
     """
     await esquema.exigir_dominio(db)
+    #: MISMO ORDEN QUE EN LAS RUTAS DE TRANSICION Y SUSPENSION: lo propio
+    #: primero —para darle a su dueno el motivo de verdad— pero el 404 DESPUES
+    #: del rol. Contestarlo antes convertia esta ruta en un oraculo: cualquier
+    #: cuenta autenticada distinguia «no existe» de «existe y no es tuyo» sobre
+    #: productos que no estan en el catalogo.
     producto = await db.get(Product, producto_id)
+    if producto is not None:
+        await permissions.exigir_ajeno(db, producto=producto, user_id=usuario_id)
+    await permissions.exigir_publicador(db, usuario_id)
     if producto is None:
         raise permissions.NoEsTuProducto("Producto no encontrado.")
-    # ANTES QUE EL ROL: ni un administrador publica lo suyo.
-    await permissions.exigir_ajeno(db, producto=producto, user_id=usuario_id)
-    await permissions.exigir_publicador(db, usuario_id)
 
     falta = await por_que_no_se_publica(db, producto=producto)
     if falta is not None:
