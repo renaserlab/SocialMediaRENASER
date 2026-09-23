@@ -47,10 +47,16 @@ concurrency:
   # instancias a medio reemplazar. Que el segundo espere.
   cancel-in-progress: false
 
+# A QUE CUENTA SE DESPLIEGA lo deciden las variables del repositorio, no este
+# fichero. Mudar la API de cuenta de AWS es cambiar tres variables en GitHub
+# (AWS_ROLE_ARN, AWS_PILA_PLATAFORMA y AWS_REPOSITORIO_ECR), no editar el
+# flujo. Los valores por defecto son los de la cuenta en la que corre hoy
+# produccion: mientras nadie cambie las variables, nada cambia de sitio. Ver
+# docs/AWS_MIGRACION_RENASERLAB.md.
 env:
-  AWS_REGION: us-east-1
-  PILA_PLATAFORMA: renaser-plataforma-produccion
-  REPOSITORIO_ECR: renaser/api
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  PILA_PLATAFORMA: ${{ vars.AWS_PILA_PLATAFORMA || 'renaser-plataforma-produccion' }}
+  REPOSITORIO_ECR: ${{ vars.AWS_REPOSITORIO_ECR || 'renaser/api' }}
 
 jobs:
 
@@ -141,26 +147,56 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # UNA ETIQUETA NO SE VUELVE A SUBIR. En el repositorio de RenaserLab las
+      # etiquetas son inmutables: `sha-<commit>` apunta para siempre a la misma
+      # imagen. Relanzar un despliegue del mismo commit (porque fallo la
+      # renovacion, no la construccion) chocaria con la etiqueta ya publicada;
+      # como es el mismo commit, es la misma imagen, y se reutiliza.
+      - name: Comprobar si esta version ya esta publicada
+        id: publicada
+        env:
+          ETIQUETA: ${{ steps.version.outputs.etiqueta }}
+        run: |
+          if aws ecr describe-images --repository-name "$REPOSITORIO_ECR" \
+               --image-ids imageTag="$ETIQUETA" > /dev/null 2>&1; then
+            echo "existe=true" >> "$GITHUB_OUTPUT"
+            echo "$ETIQUETA ya esta en ECR: no se reconstruye."
+          else
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: docker/setup-buildx-action@v3
+        if: steps.publicada.outputs.existe != 'true'
 
       - name: Construir y subir
+        if: steps.publicada.outputs.existe != 'true'
         uses: docker/build-push-action@v6
         with:
           context: apps/api
           file: apps/api/Dockerfile
           push: true
-          # Dos etiquetas con papeles distintos: la del SHA es la que se
-          # despliega y a la que se vuelve; `latest` solo existe como red de
-          # seguridad para una maquina que arranque con el parametro de SSM sin
-          # tocar (primer despliegue).
+          # SOLO la etiqueta del commit. `latest` existia como red para una
+          # maquina que arrancase con el parametro de SSM sin tocar; hoy la
+          # plantilla exige una etiqueta `sha-` al crear la pila, asi que no la
+          # lee nadie, y una etiqueta que se mueve no dice que codigo corre.
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORIO_ECR }}:${{ steps.version.outputs.etiqueta }}
-            ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORIO_ECR }}:latest
           provenance: false
           # Cache entre ejecuciones: la capa de pip install es la cara y solo
           # cambia cuando cambia requirements.txt.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # El resumen del despliegue deja escrito el DIGEST, que es lo unico que
+      # identifica una imagen sin depender de que nadie haya movido una etiqueta.
+      - name: Anotar la huella de la imagen
+        env:
+          ETIQUETA: ${{ steps.version.outputs.etiqueta }}
+        run: |
+          set -euo pipefail
+          DIGEST=$(aws ecr describe-images --repository-name "$REPOSITORIO_ECR" \
+            --image-ids imageTag="$ETIQUETA" --query 'imageDetails[0].imageDigest' --output text)
+          echo "- Imagen: \`$REPOSITORIO_ECR:$ETIQUETA\` (\`$DIGEST\`)" >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   desplegar:
