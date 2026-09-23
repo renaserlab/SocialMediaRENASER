@@ -1930,8 +1930,8 @@ estaba tomada. Lo que hay hoy es un **cerrojo de fila sobre el pedido** en
 `aprobar`, que serializa las aprobaciones concurrentes, y la cabecera lo dice
 así. Queda anotado como pendiente si alguna vez se quiere en la base.
 
-**D179 · Tres partes del ciclo de devolución no tienen camino de ejecución, y
-se dicen.**
+**D179 · Tres partes del ciclo de devolución no tenían camino de ejecución, y
+se dijeron. CERRADAS el 22/09/2026; ver [D184].**
 
 Ninguna devolución parcial llega a la pasarela; los avisos asíncronos de
 reembolso no se encaminan a `devoluciones.atender_aviso`; y nadie inserta nunca
@@ -1970,3 +1970,297 @@ en el trabajo equivocado y se omitían en silencio.
 Ahora están los tres dentro, y el suelo del guardia se subió de 100 a **266,
 medido ejecutándolo**, no supuesto. Una prueba omitida no es una prueba
 aprobada, y el propio fichero ya lo decía.
+
+**Y VOLVIÓ A PASAR con la lista arreglada**, en la misma sesión: ver [D185]. La
+corrección de aquí era la lista; la de allí es que no haya lista.
+
+
+## 18. Cierre de Z Productos: Stripe, la integración continua y la revisión del dinero (22/09/2026)
+
+Esta sección recoge el cierre técnico de la vertical. Lo que la ordena no son
+los incrementos —están todos implementados— sino tres cosas que parecían hechas
+y no lo estaban: la preparación de Stripe, lo que la integración continua
+ejecutaba de verdad, y lo que la revisión independiente encontró en el dinero y
+en los permisos.
+
+**D183 · Las 0079, 0080, 0081 y 0082 están aplicadas, y no hace falta una
+0083.**
+
+Las cuatro se aplicaron a mano y se verificaron después contra la base
+gestionada en una sesión de **solo lectura demostrada**: doce tablas, las cuatro
+columnas añadidas, las restricciones, los índices con su parcialidad, los
+disparadores, RLS activa en todas y **cero permisos** para `anon` y
+`authenticated`. Los cinco invariantes de datos, a cero violaciones.
+
+Toda la documentación que decía «sin aplicar» estaba desfasada y se ha
+corregido. Las cabeceras de los `.sql` siguen diciéndolo a propósito: una
+migración aplicada no se reescribe, porque cambiarla haría que la comprobación
+de re-ejecución dejara de valer sobre lo que de verdad se pegó en el editor.
+
+**D184 · Los tres huecos de [D179] están cerrados, y ninguno era una decisión
+pendiente.**
+
+[D179] los declaró «condiciones para encender los pagos». Dos de las tres no lo
+eran: eran código escrito, comentado y con pruebas alrededor que **no se
+ejecutaba nunca**.
+
+* **La devolución parcial** no llegaba a la pasarela porque ningún adaptador
+  definía `create_partial_refund`. Ahora es abstracto: un adaptador que se
+  olvide no arranca. Con una implementación por defecto que cayera en la total,
+  se olvidaría en silencio y devolvería el cobro entero cuando alguien decidió
+  devolver una parte.
+* **Una devolución pendiente** no llegaba nunca a confirmada, porque el único
+  camino era la respuesta síncrona de `pedir`. Ahora la confirma el aviso
+  verificado.
+* **`ProductDispute` no tenía escritor**, así que la puerta de disputa de
+  `por_que_no_se_libera` —escrita, comentada y con su índice— no podía
+  dispararse jamás.
+
+**D185 · La lista de ficheros de la integración continua se quedó vieja dos
+veces, así que ya no hay lista.**
+
+[D182] contó la primera: 92 de 100 pruebas de Productos no se ejecutaban. Se
+corrigió añadiendo los ficheros que faltaban, y **la lista volvió a quedarse
+vieja en la misma sesión**: veinte ficheros fuera, entre ellos los Incrementos 1
+a 7 de Productos enteros y `test_productos_disputas.py`, que protege la única
+puerta por la que se registra un contracargo. Sus once pruebas se saltaban en el
+trabajo sin base y no se recogían en el que la tiene: no se ejecutaban en
+ninguna parte.
+
+Una lista escrita a mano se queda vieja sola, porque un fichero nuevo no falla y
+no se salta con un aviso: sencillamente **no se recoge**. Ahora el trabajo con
+PostgreSQL ejecuta **la batería entera**, que es lo único que no se puede
+olvidar de nada, y el suelo del guardia se midió ejecutándolo.
+
+Y lo que se vigila desde `tests/test_integracion_continua.py` **es la causa**:
+que no vuelva a aparecer una selección incompleta.
+
+**D186 · Las ciento trece baterías del móvil no se ejecutaban en ningún
+trabajo.**
+
+El trabajo `mobile` ejecutaba `tsc --noEmit`, que comprueba **tipos** y no
+comportamiento. Los contratos con la API, las reglas de cada pantalla y la
+paridad de los tres diccionarios no corrían en ninguna parte: un cambio que
+rompiera una pantalla o dejara una clave sin traducir pasaba la integración en
+verde. Tardan cuatro segundos.
+
+**D187 · Encender Stripe exigía leerse `config.py`, y eso no es configuración.**
+
+La entrega tiene que poder hacerse sin desarrollo: llegan las credenciales, se
+registra el webhook, se marcan los eventos y se encienden las banderas. Eso solo
+es cierto si los nombres exactos están escritos fuera del código fuente.
+
+`.env.example` documentaba la clave secreta y el secreto del webhook. No estaban
+la bandera que ejecuta las devoluciones contra la pasarela, la de cuentas
+conectadas, la de transferencias, **la comisión** —que nace en `-1`, sin
+configurar, y sin la cual no se escribe ni un saldo—, la que habilita vender un
+producto físico ni los minutos que aparta un pedido.
+
+La puerta canónica no es una lista de nombres sino **una regla**: cualquier
+ajuste cuyo nombre hable de dinero tiene que aparecer en `.env.example`,
+apagado, y los eventos que el documento manda marcar tienen que ser los que el
+código traduce. Así queda cubierta la bandera que alguien añada mañana.
+Los pasos concretos están en `docs/Z_STRIPE_PUESTA_EN_MARCHA.md`.
+
+**D188 · El adaptador de Stripe y su puerto se necesitaban en círculo.**
+
+`providers.py` define el contrato y `stripe_provider.py` lo implementa, y el
+registro estaba al final del primero con un `import` del segundo. El **orden de
+importación** decidía si la aplicación arrancaba: entrando por `providers`
+funcionaba, y entrando por `stripe_provider` Python encontraba `providers` a
+medio ejecutar y levantaba `ImportError` hablando de un ciclo, no de pagos.
+
+No se notaba porque en todos los caminos reales `providers` entra primero, pero
+bastaba un módulo nuevo que importara el adaptador directamente para que no
+arrancara la API entera. El registro pasa al `__init__` del paquete, que Python
+ejecuta antes que cualquier submódulo, y **sigue siendo ansioso**.
+
+### Lo que encontró la revisión independiente del dinero
+
+**D189 · Una devolución EN CURSO no es una devolución FALLIDA.**
+
+`atender_aviso` recibía un booleano —salió o no salió— y `refund_procesando`
+caía en el «no salió», que es marcar el expediente como fallido. Un reembolso de
+tarjeta **nace pendiente** en la pasarela, así que el `refund.created` que llega
+a los segundos lo tumbaba.
+
+Desde ahí desaparecía de la cola de trabajo, dejaba de contar en el tope de lo
+ya devuelto y `anular` lo aceptaba: quien opera ve «fallida», la anula, aprueba
+otra por el mismo importe **con otra clave de idempotencia**, y quien compró
+cobra dos veces un pedido que pagó una. El aviso tiene ahora tres respuestas, y
+estar en curso no toca nada.
+
+**D190 · Una disputa cerrada DEVOLVIENDO el cobro no es una disputa RETIRADA.**
+
+Retirada es la que retira quien la abrió, y ahí el dinero **se queda**; cerrada
+devolviendo significa que **salió**. Se traducían igual, así que se soltaba la
+retención sin consumirla y el saldo volvía a la cola de pago después de haberle
+reembolsado el cobro entero a quien compró. Y no lo tapaba nada más, porque ese
+reembolso se hizo desde el panel de la pasarela y no tiene expediente aquí.
+
+No se inventa ningún estado: el CHECK de `product_disputes` admite seis y no hay
+migración pendiente. **La fila carga el hecho financiero** porque cada aviso
+repetido vuelve a aplicar el dinero leyéndola a ella y no al cuerpo del aviso.
+
+**D191 · Reponer devuelve mercancía y no dinero, y hacía falta un camino para
+saldarla.**
+
+Un solo conjunto de resoluciones contestaba a dos preguntas distintas. Con la
+reposición dentro, `aprobar` dejaba abrir una devolución **de dinero** sobre un
+expediente que se resolvió mandando una unidad nueva: quien compró se quedaba
+con las dos cosas.
+
+Y al cerrar esa puerta, el dinero se quedaba dentro: un caso resuelto retiene el
+saldo mientras su efecto no esté saldado, y lo único que escribía `EXECUTED` era
+confirmar una devolución de dinero. Una reposición nunca tiene una, así que ese
+saldo **no salía de la cola nunca**; el único desatasco era precisamente el error
+de arriba.
+
+Se separan las dos preguntas y se añade el camino que faltaba: registrar que la
+unidad de repuesto llegó, con motivo, renglón en el historial solo-añadir y
+rastro de auditoría. **No decide quién absorbe el coste**: deja constancia de un
+hecho físico. Lo pide finanzas y no moderación, porque lo que se escribe es el
+efecto financiero y desbloquear un cobro es mover dinero.
+
+**D192 · La clave que impide pagar dos veces salía de un flotante del reloj, y
+no cambiaba nunca.**
+
+Se componía con `momento.timestamp()`: la cadena que protege dinero real
+dependía de su representación binaria, y dos aprobaciones sobre el mismo pedido
+con el mismo instante chocaban contra el único y salía un `IntegrityError`
+crudo, un 500 sin código.
+
+Y con una clave fija el primer «no» de la pasarela queda grabado: el reintento
+reenvía la misma y la pasarela devuelve **la misma respuesta fallida, para
+siempre**. La regla correcta ya estaba escrita y probada en
+`payments/reembolsos.py` —cambiar solo tras un fallo **concluyente**, porque un
+tiempo de espera agotado no significa que no se haya hecho— y Productos no la
+usaba.
+
+**D193 · Una parcial CONFIRMADA no es una devolución EN MARCHA.**
+
+El bloqueo se decidía por la existencia de una fila en un conjunto que incluye
+`confirmed`. Para una total da igual —el saldo se cancela y el primer bloqueo
+salta antes— pero una parcial deja el saldo vivo, y el resto quedaba bloqueado
+diciendo «hay una devolución en marcha». No la hay: está cerrada, su retención se
+consumió, y `confirmed` es terminal, así que ese bloqueo **no se levantaba
+nunca**.
+
+El bloqueo es correcto y se queda: el neto se calculó sobre el bruto entero y
+quién absorbe la parte devuelta es una decisión que la empresa no ha tomado. Lo
+que se arregla es la mentira. Ahora tiene código propio y sale como decisión
+pendiente en vez de parecer una espera.
+
+**D194 · Una devolución que salió sin referencia no tenía ninguna salida.**
+
+Cuando la pasarela no contesta a tiempo o su respuesta no se puede leer, el
+adaptador devuelve «pendiente» sin identificador, y con razón: la petición salió
+con su clave, así que el reembolso **puede existir**. Pero `atender_aviso`
+localiza la fila solo por esa columna, así que el aviso posterior no la encuentra
+jamás; y `anular` la rechazaba por estar en curso y `pedir` por no estar
+aprobada ni fallida. Dinero fuera, retención viva, saldo bloqueado para siempre
+y la reclamación de origen sin ejecutar.
+
+Ahora se puede volver a pedir, **y solo en ese caso**. Es seguro porque se manda
+la misma clave: la pasarela devuelve el reembolso que ya creó —con su
+identificador— en vez de crear un segundo.
+
+**D195 · Un contracargo abría dos filas y una se quedaba abierta para siempre.**
+
+Cuando el primer aviso no trae el identificador de la disputa se deriva una
+clave del cobro, que es lo correcto. Pero el siguiente aviso del mismo
+contracargo sí lo trae, y con otra clave se abría una **segunda** fila. El cierre
+llega con el identificador de verdad y solo cierra la segunda; la primera se
+queda abierta, y el bloqueo mira también por pedido, así que ese saldo no se
+liberaba nunca por una disputa fantasma ya resuelta.
+
+La fila derivada se **asciende** a su identificador propio. No es «toda disputa
+de este cobro es la misma»: dos contracargos reales del mismo cobro siguen
+siendo dos filas, que es el motivo por el que la clave es la de la disputa.
+
+**D196 · El disponible se restaba de dos conjuntos distintos.**
+
+`disponible` suma el neto de los saldos que **ya se podrían pagar**, y se le
+restaba todo lo apartado del proveedor, incluidas las retenciones sobre saldos
+que todavía no están para pagar. Esas no estaban dentro del disponible, así que
+restarlas le bajaba la cifra a quien vende por una venta que no entraba en ella.
+
+**D197 · Una disputa sin importe se anotaba como un céntimo.**
+
+El CHECK exige mayor que cero y se escribía el mínimo, con la moneda del pedido
+al lado: la fila afirmaba que el banco reclamaba 0,01 y eso era lo que se
+apartaba. Ahora se aparta **lo cobrado**, que es el tope de lo que el banco puede
+llevarse y no una cifra inventada. Pasarse al apartar es el lado seguro.
+
+### Lo que encontró la revisión independiente de permisos
+
+**D198 · Nadie puntúa, documenta ni redacta la evaluación de lo suyo, y tampoco
+la lee.**
+
+Abrirla y decidirla comprobaban que el producto fuera ajeno; **las tres
+operaciones de en medio** —puntuar, registrar evidencia y elegir las tres razones
+que leerá quien compre— pasan por un único punto que solo miraba el rol. Bastaba
+con que la evaluación la abriera otra persona.
+
+Y no es cosmético: la decisión **no la toma quien pulsa**, la deriva
+`decidir_por_puntuacion` del total, así que quien evalúa de verdad solo
+ratificaba las cifras del dueño. La base tampoco lo paraba: el disparador de la
+0071 compara `evaluator_id`, que sigue siendo el del otro, y las tablas de
+puntuaciones, evidencias y razones no tienen disparador.
+
+Leerla tenía el mismo hueco: dentro van las **notas internas** de quien evaluó,
+que el informe público excluye a propósito.
+
+**D199 · Moderar no contesta con la línea de pedido, y nadie lee el rastro de
+moderación de lo suyo.**
+
+El molde de salida tiene dos interruptores a propósito y las dos rutas de moderar
+usaban el que trae `order_item_id`, que es justo el campo que la 0081 saca de lo
+público por atar una persona con una compra concreta. La corrección anterior se
+aplicó a la cola y no a las acciones.
+
+Y la regla «nadie modera lo suyo» se había aplicado a **escribir** y no a
+**leer**: un proveedor con curaduría pedía el rastro de una valoración de una
+estrella de su propio producto y leía el motivo —que el propio código declara
+demasiado sensible hasta para la auditoría compartida, porque puede llevar dentro
+una cita de lo que contó quien opinó— y quién moderó.
+
+**D200 · Tres rutas de administración eran un oráculo de existencia.**
+
+Miraban la fila y contestaban 404 **antes** de comprobar el rol, así que
+cualquier cuenta autenticada podía probar identificadores y distinguir «no
+existe» de «existe y no es tuyo» sobre productos en borrador, rechazados o
+retirados, que no están en el catálogo y cuyos identificadores no se publican.
+Sigue siendo «lo propio primero» para quien es su dueño; lo que espera ahora es
+el 404.
+
+### Lo que la revisión señaló y NO era un defecto
+
+**D201 · El resumen suma importes de monedas distintas, y está decidido.**
+
+La revisión lo marcó como cifra sin sentido. Se comprobó y **la protección ya
+existe, en el otro lado**: con más de una moneda el servidor manda la moneda
+nula a propósito, y el móvil se niega a pintar cualquier importe sin su moneda.
+Ninguna de esas cifras llega a una pantalla. No se toca.
+
+### Lo que queda anotado y NO se ha arreglado
+
+**D202 · Solo cabe una retención viva por saldo y motivo.**
+
+Lo impone un índice único parcial de la 0068. Con dos devoluciones parciales
+sobre el mismo pedido, la segunda no crea su retención y el error se traga: el
+bloqueo del pago **no se pierde** —lo sostiene la fila de la devolución— pero las
+cifras de apartado y disponible del panel se quedan cortas.
+
+**No se arregla hoy y es deliberado:** la corrección de verdad es cambiar el
+índice para que admita una retención por expediente, y eso es una migración
+nueva. Este cierre no escribe ninguna sin demostrar antes una divergencia real,
+y aquí no la hay: el esquema hace exactamente lo que dice.
+
+**D203 · `devoluciones.pedir` confirma la transacción de quien la llama.**
+
+Es deliberado y está documentado —la llamada a la pasarela no puede ocurrir con
+filas bloqueadas— pero deja una trampa preparada: cualquier escritura que se
+añada antes de esa llamada quedará confirmada aunque el resto de la petición
+falle. Hoy no sangra, porque su único llamador no escribe nada antes. Queda
+anotado para quien toque esa ruta.

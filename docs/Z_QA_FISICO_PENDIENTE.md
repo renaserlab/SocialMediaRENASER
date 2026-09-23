@@ -1107,3 +1107,75 @@ que se comprueba sin aplicarla, y es como se entrega hoy.
       entrega, las reclamaciones y las valoraciones siguen funcionando.
 - [ ] Un pago de prueba **se sigue confirmando**: que las finanzas no esten
       desplegadas no puede romper el cobro.
+
+
+---
+
+## Productos, cierre de la vertical (22/09/2026)
+
+**Nada de esta lista esta comprobado.** Son las comprobaciones que quedan
+despues del cierre tecnico, y son POCAS a proposito: se han dejado fuera las que
+ya cubre la bateria automatica. Lo que queda aqui es lo que necesita una cuenta
+de Stripe de verdad, dos aparatos o una persona mirando la pantalla.
+
+**Antes de empezar:** las ochenta y dos migraciones estan aplicadas, asi que ya
+no hay que comprobar ninguna puerta de esquema contra la base gestionada. Lo que
+si hay que hacer es **reiniciar la API** despues de cada cambio de variables: los
+ajustes se leen una vez por proceso.
+
+### Con Stripe en modo de PRUEBA, y solo ahi
+
+Estas veinte estan detalladas en `Z_STRIPE_PUESTA_EN_MARCHA.md` §5 y no se
+repiten aqui. Ninguna se hace contra la cuenta real hasta que la empresa lo
+autorice.
+
+- [ ] Las veinte del apartado 5 del documento de puesta en marcha, en orden.
+- [ ] Y una mas que no esta alli: con la clave secreta puesta pero **el webhook
+      sin registrar**, una compra se queda pagada en la pasarela y el pedido NO
+      pasa a pagado. Es el fallo mas probable de la puesta en marcha y conviene
+      haberlo visto una vez.
+
+### La reposicion entregada, que es la pantalla nueva
+
+- [ ] Con una reclamacion resuelta como **reposicion**, la pantalla de decidir
+      ofrece «Registrar que llego» y explica que el dinero sigue retenido hasta
+      entonces.
+- [ ] Con una resuelta como **reembolso** (cualquiera de las tres), ese bloque
+      **no aparece**.
+- [ ] Sin escribir motivo, el boton esta apagado.
+- [ ] Al pulsar, **pregunta antes** y el dialogo dice que no se deshace y que no
+      devuelve dinero.
+- [ ] Despues de registrarla, el bloque desaparece y el paso queda en el
+      historial con su texto.
+- [ ] **Doble toque de verdad**: dos pulsaciones rapidas dejan UN solo renglon.
+- [ ] Con una cuenta de **moderacion** (no financiera): la aplicacion dice que no
+      puede, con palabras y no con un codigo.
+- [ ] En espanol, ingles y portugues.
+
+### El saldo que se devolvio en parte
+
+- [ ] Con una devolucion parcial confirmada, «Mi saldo» dice que **se devolvio
+      una parte de esta venta** y que quien la asume esta sin decidir. **No dice
+      que haya una devolucion en marcha.**
+- [ ] El importe apartado y el disponible cuadran con lo que se ve en el detalle.
+- [ ] En los tres idiomas.
+
+### Lo que sigue necesitando dos personas y dos telefonos
+
+- [ ] El recorrido entero de quien compra y quien vende, de pagado a entregado,
+      con los dos aparatos a la vez. (Ver la seccion del Incremento 6.)
+- [ ] Una reclamacion abierta desde un telefono y respondida desde el otro, con
+      fotografias hechas con la camara de verdad.
+- [ ] Los avisos dentro de la aplicacion, que no se pueden comprobar sin dos
+      sesiones.
+
+### Lo que NO se puede comprobar en ningun aparato
+
+Se deja escrito para que nadie lo marque por error:
+
+- [ ] ~~El transportista, la tarifa y el plazo de entrega~~ — no hay
+      transportista elegido. **El Incremento 6 no es un entregable comercial
+      terminado hasta que lo haya.**
+- [ ] ~~El impuesto y el comprobante~~ — no hay entidad legal decidida.
+- [ ] ~~La transferencia a quien vende~~ — no existe el alta de cuenta conectada.
+- [ ] ~~Quien absorbe un contracargo perdido~~ — sin decidir.

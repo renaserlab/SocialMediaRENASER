@@ -15,8 +15,8 @@ las valoraciones verificadas.
 | **Incrementos 1 a 8** | **terminados.** Dominio y ciclo, admisión y evaluación, catálogo, fotografías, inventario, bolsa, condiciones de venta, pedido con reserva, entrega, reclamaciones y **valoraciones verificadas** |
 | **Migraciones 0070–0078** | **aplicadas y verificadas** contra la base gestionada, en sesión de solo lectura y con cero divergencias |
 | **Migraciones 0079 y 0080** | **APLICADAS.** La 0079 esta verificada contra la base gestionada en sesion de solo lectura demostrada, con **cero divergencias**; ver §17 |
-| **Migración 0081** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable, con el ORM comparado contra el esquema real, y **corregida tras la revisión independiente**: lleva el disparador que impide moderar lo propio. **Se entrega para aplicarla a mano**; ver §16 |
-| **Migración 0082** | **SIN APLICAR.** Probada desde cero y re-ejecutada en PostgreSQL 16 desechable. **No crea un segundo sistema financiero**: añade un tercer origen a `owner_sale_balances`, que la 0068 ya había generalizado. Se entrega para aplicarla a mano **después de la 0081**; ver §16 |
+| **Migración 0081** | **APLICADA** y verificada contra la base gestionada en sesión de solo lectura demostrada. Lleva el disparador que impide moderar lo propio; ver §16 |
+| **Migración 0082** | **APLICADA**, después de la 0081, y verificada. **No crea un segundo sistema financiero**: añade un tercer origen a `owner_sale_balances`, que la 0068 ya había generalizado; ver §16 |
 | **Ventas reales** | **apagadas.** `feature_product_sales`, `payments_enabled`, `stripe_payments_enabled`, `PRODUCT_RESERVATION_MINUTES` y la clave de Stripe, las cinco. Y `product_policies` está vacía |
 | **Dinero de vuelta** | **no existe.** Una reclamación resuelta dice QUÉ se decidió y deja el efecto en `PENDING`. Nadie lo ejecuta: eso es el Incremento 9 |
 | **Siguiente incremento** | **el 9: finanzas y cierre operativo.** Reutiliza `owner_sale_balances`, que desde la 0068 ya admite dos orígenes; hace falta un tercero. Y **la comisión no está decidida** |
@@ -78,8 +78,8 @@ verdades sobre quién es esa persona.
 | `0078_productos_pedidos.sql` | `product_orders`, `product_order_items`, `product_order_addresses`, `product_order_events` |
 | `0079_productos_envios.sql` | `product_shipments`, `product_shipment_items`, `product_shipment_events` · **aplicada y verificada** |
 | `0080_productos_incidencias.sql` | el depósito `product-incidents`, `product_incidents`, `product_incident_evidence`, `product_incident_events` · **aplicada** |
-| `0081_productos_resenas.sql` | `product_reviews`, `product_review_replies`, `product_review_moderation` y tres índices únicos redundantes sobre `product_orders`, `product_order_items` y `product_shipments` · **SIN APLICAR** |
-| `0082_productos_finanzas.sql` | el tercer origen de `owner_sale_balances`, dos referencias nuevas en `owner_sale_reserves`, `product_shipments.conformity_at`, `product_refunds`, `product_refund_events`, `product_disputes` y `product_dispute_events` · **SIN APLICAR** |
+| `0081_productos_resenas.sql` | `product_reviews`, `product_review_replies`, `product_review_moderation` y tres índices únicos redundantes sobre `product_orders`, `product_order_items` y `product_shipments` · **aplicada y verificada** |
+| `0082_productos_finanzas.sql` | el tercer origen de `owner_sale_balances`, dos referencias nuevas en `owner_sale_reserves`, `product_shipments.conformity_at`, `product_refunds`, `product_refund_events`, `product_disputes` y `product_dispute_events` · **aplicada y verificada** |
 
 **LAS NUEVE PRIMERAS ESTÁN APLICADAS Y VERIFICADAS.** El 17/09/2026 se comprobaron las
 seis primeras contra la base gestionada en una sesión de solo lectura demostrada
@@ -107,8 +107,10 @@ ni un permiso, y que el depósito `product-incidents` es privado, con tope de
 diez megas y lista de tipos cerrada.
 
 Las cabeceras de los `.sql` ya aplicados siguen diciendo «SIN APLICAR» a
-propósito: una migración aplicada no se reescribe, y el estado vive en esta
-documentación.
+propósito: una migración aplicada no se reescribe —cambiarla haría que la
+comprobación de re-ejecución dejara de valer sobre lo que de verdad se pegó en
+el editor— y el estado vive en esta documentación. **Hoy están aplicadas las
+ochenta y dos.**
 
 **Y LAS PUERTAS DE ESQUEMA SIGUEN HACIENDO FALTA.** Que la base gestionada las
 tenga no significa que las tenga la de al lado: una local, una de pruebas o la
@@ -1363,20 +1365,32 @@ hizo falta fue encenderlo.
 
 ## 16. Qué se aplicó a mano, y en qué orden
 
-### LA 0081 Y LA 0082 ESTÁN SIN APLICAR, y son lo único que queda pendiente
+### LA 0081 Y LA 0082 YA ESTÁN APLICADAS. No queda ninguna pendiente
 
-**Se entrega para aplicarla una persona.** Qué se comprobó antes de entregarla:
+Las ochenta y dos migraciones están en la base gestionada. Las cuatro de
+Productos que faltaban —0079, 0080, 0081 y 0082— se aplicaron a mano y se
+verificaron después **en una sesión de solo lectura demostrada**: doce tablas,
+las cuatro columnas añadidas, las restricciones, los índices con su parcialidad,
+los disparadores, RLS activa en todas y cero permisos para `anon` y
+`authenticated`. Los cinco invariantes de datos, a cero violaciones. **No hace
+falta ninguna 0083.**
 
-* corre **desde cero** sobre PostgreSQL 16, con las ochenta y una migraciones en
-  orden, y el bloque de verificación del final pasa;
-* corre **dos veces** sin fallar: se declara re-ejecutable y lo cumple;
-* el ORM y el esquema real dicen lo mismo, columna por columna, y esa comparación
-  la hace la prueba que ya existía para las anteriores.
+Qué se había comprobado antes de aplicarlas, y sigue siendo cierto:
 
-**Y no enciende ninguna venta.** Aplicarla solo hace que doce rutas dejen de
+* corren **desde cero** sobre PostgreSQL 16, en orden, y el bloque de
+  verificación del final pasa;
+* corren **dos veces** sin fallar: se declaran re-ejecutables y lo cumplen;
+* el ORM y el esquema real dicen lo mismo, columna por columna.
+
+**Y NO ENCIENDEN NINGUNA VENTA.** Aplicarlas solo hizo que doce rutas dejaran de
 contestar 503; sin las cinco banderas, sin clave de pasarela y sin política
 publicada no se puede crear un pedido, y sin pedido entregado no hay nada que
-valorar.
+valorar. Lo que hay que tocar el día que llegue Stripe está en
+`docs/Z_STRIPE_PUESTA_EN_MARCHA.md`.
+
+El procedimiento de abajo se conserva porque describe **qué se hizo** y cómo se
+comprobó, y porque es el que hay que repetir en cualquier otra base —una de
+pruebas, una local— que todavía no las tenga.
 
 #### El orden, para la 0081
 
