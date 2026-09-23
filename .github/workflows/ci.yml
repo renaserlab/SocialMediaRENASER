@@ -15,6 +15,13 @@ jobs:
           node-version: '22.13'
       - run: npm install
       - run: npm run mobile:check
+      # Y LAS PRUEBAS. `mobile:check` es `tsc --noEmit`: comprueba TIPOS, no
+      # comportamiento. Las 113 baterias del movil —los contratos con la API,
+      # las reglas de cada pantalla, la paridad de los tres diccionarios— no se
+      # ejecutaban en ningun sitio, asi que un cambio que rompiera la pantalla
+      # de preparar un pedido o dejara una clave sin traducir pasaba en verde.
+      # Tardan cuatro segundos.
+      - run: npm run mobile:test
 
   api:
     runs-on: ubuntu-latest
@@ -87,7 +94,23 @@ jobs:
       # Incremento 9 viven en claves ajenas compuestas, indices unicos
       # parciales y disparadores, que SQLite no impone. En el trabajo
       # principal se saltaban 92 de 100 y la integracion seguia verde.
-      - run: pytest -v tests/test_migraciones_reales.py tests/test_secuencia_de_migraciones.py tests/test_migraciones_de_aprendizaje.py tests/test_migraciones_de_eventos.py tests/test_aforo_concurrente_postgres.py tests/test_entradas_concurrentes_postgres.py tests/test_productos_resenas.py tests/test_productos_resenas_http.py tests/test_productos_finanzas.py --junitxml=migraciones.xml
+      # LA BATERIA ENTERA, Y NO UNA LISTA DE FICHEROS.
+      #
+      # Aqui habia una lista escrita a mano, y una lista escrita a mano se
+      # queda vieja sola: un fichero nuevo que necesite la base no falla y no
+      # se salta con un aviso, sencillamente NO SE RECOGE, y la integracion
+      # sigue verde. Ya paso dos veces. La primera dejo fuera 92 de las 100
+      # pruebas de Productos de los Incrementos 8 y 9. Se corrigio anadiendolos
+      # (5cd6d28) y la lista volvio a quedarse vieja en la misma sesion: veinte
+      # ficheros se quedaron fuera, entre ellos los Incrementos 1 a 7 enteros y
+      # `test_productos_disputas.py`, que protege la unica puerta por la que se
+      # registra un contracargo.
+      #
+      # Ejecutar todo no se puede olvidar de nada. Cuesta unos minutos mas de
+      # maquina y ahorra dar por cerrado un incremento cuya verificacion no
+      # existia. `tests/test_integracion_continua.py` vigila que no vuelva a
+      # aparecer una lista incompleta aqui.
+      - run: pytest -q --junitxml=migraciones.xml
       # Una prueba OMITIDA no es una prueba aprobada. Sin esto, borrar la
       # variable de entorno dejaria el job en verde sin ejecutar nada.
       - name: Ninguna prueba de PostgreSQL puede quedar omitida
@@ -100,6 +123,10 @@ jobs:
           print(f'{total} pruebas, {saltadas} omitidas')
           if saltadas:
               sys.exit('hay pruebas de PostgreSQL omitidas: omitida no es aprobada')
-          if total < 266:
+          # SUELO MEDIDO, no supuesto: la bateria entera con PostgreSQL da
+          # 3324 casos (22/09/2026, 11 min 55 s). El suelo va algo por debajo
+          # para que anadir o quitar un par de casos no tumbe la integracion,
+          # y lo bastante alto para que acotar la seleccion por error si.
+          if total < 3300:
               sys.exit(f'solo se ejecutaron {total}: falta alguna suite')
           PY

@@ -11,6 +11,7 @@
     "mobile:ios": "npm --workspace apps/mobile run ios",
     "mobile:web": "npm --workspace apps/mobile run web",
     "mobile:check": "npm --workspace apps/mobile run check",
+    "mobile:test": "npm --workspace apps/mobile run test",
     "build:web": "npm --workspace apps/mobile run build:web"
   },
   "engines": {
