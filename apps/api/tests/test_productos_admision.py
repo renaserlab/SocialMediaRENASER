@@ -52,6 +52,8 @@ from app.modules.products.models import (
     ProductSeller,
     SellerApplication,
 )
+from app.modules.products.models import ProductEvaluationEvidence
+
 from tests.test_productos_dominio import (  # noqa: F401
     DATOS,
     foto_aprobada,
@@ -847,3 +849,107 @@ async def test_abrir_dos_veces_la_evaluacion_devuelve_la_misma(sesiones) -> None
                 .where(ProductEvaluation.version_id == version_id)
             )
         ) == 1
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_nadie_puntua_ni_documenta_ni_redacta_la_evaluacion_de_lo_suyo(
+    sesiones,
+) -> None:
+    """ABRIRLA Y DECIDIRLA ESTABAN CERRADAS. LO DE EN MEDIO, NO.
+
+    EL DEFECTO, QUE ENCONTRO LA REVISION INDEPENDIENTE. `abrir` y `decidir`
+    llaman a `exigir_ajeno`; las tres que hay entre medias —puntuar, registrar
+    evidencia y elegir las razones— pasan por `_abierta`, que solo comprobaba el
+    ROL. Bastaba con que la evaluacion la abriera otra persona.
+
+    Y NO ES UN AGUJERO COSMETICO, porque la decision NO la toma quien pulsa:
+    `decidir_por_puntuacion` la deriva del total. Quien evalua de verdad solo
+    ratifica las cifras que escribio el dueno, y las tres razones que leera
+    quien compre son texto suyo.
+
+    TAMPOCO LO PARABA LA BASE. El disparador de la 0071 compara `evaluator_id`
+    con el dueno, y ese sigue siendo el del otro evaluador. Las tablas de
+    puntuaciones, evidencias y razones no tienen disparador.
+
+    LA CORRECCION VA EN `_abierta`, que es por donde pasan las tres: cerrar cada
+    una por su lado dejaria abierta la cuarta que alguien anada.
+    """
+    dueno = await persona(sesiones, "eval-propia", rol="moderator")
+    await vendedor(sesiones, dueno)
+    otro = await persona(sesiones, "eval-otro", rol="admin")
+    _, version_id = await hasta_evaluacion(sesiones, dueno, otro)
+
+    #: La abre OTRO, que es el camino legitimo y el que deja el hueco.
+    async with sesiones() as db:
+        evaluacion = await evaluations.abrir(
+            db, version_id=version_id, usuario_id=otro
+        )
+        await db.commit()
+        ident = evaluacion.id
+
+    dimension = next(iter(DIMENSIONES))
+    async with sesiones() as db:
+        with pytest.raises(permissions.EsTuPropioProducto):
+            await evaluations.puntuar(
+                db,
+                evaluacion_id=ident,
+                usuario_id=dueno,
+                dimension=dimension,
+                score=100,
+            )
+    async with sesiones() as db:
+        with pytest.raises(permissions.EsTuPropioProducto):
+            await evaluations.registrar_evidencia(
+                db,
+                evaluacion_id=ident,
+                usuario_id=dueno,
+                dimension=dimension,
+                kind="inspection",
+                summary="Lo inspeccione yo mismo y esta perfecto.",
+            )
+    async with sesiones() as db:
+        with pytest.raises(permissions.EsTuPropioProducto):
+            await evaluations.elegir_razones(
+                db,
+                evaluacion_id=ident,
+                usuario_id=dueno,
+                razones=[{"evidence_id": "x", "text": "Lo mio es lo mejor."}],
+            )
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_quien_no_es_dueno_sigue_pudiendo_puntuar_documentar_y_redactar(
+    sesiones,
+) -> None:
+    """EL CONTROL POSITIVO. Cerrar lo de arriba no puede cerrar la evaluacion.
+
+    Sin esta, rechazar SIEMPRE en `_abierta` pasaria la prueba anterior y
+    dejaria el modulo de admision sin poder evaluar nada.
+    """
+    dueno = await persona(sesiones, "eval-dueno2", rol="admin")
+    await vendedor(sesiones, dueno)
+    otro = await persona(sesiones, "eval-otro2", rol="admin")
+    _, version_id = await hasta_evaluacion(sesiones, dueno, otro)
+
+    ident = await evaluar_completo(sesiones, version_id, otro)
+    async with sesiones() as db:
+        evidencias = list(
+            await db.scalars(
+                select(ProductEvaluationEvidence.id).where(
+                    ProductEvaluationEvidence.evaluation_id == ident
+                )
+            )
+        )
+        razones = await evaluations.elegir_razones(
+            db,
+            evaluacion_id=ident,
+            usuario_id=otro,
+            razones=[
+                {"evidence_id": e, "text": f"Razon respaldada numero {i}."}
+                for i, e in enumerate(evidencias[:3])
+            ],
+        )
+        await db.commit()
+    assert len(razones) == 3

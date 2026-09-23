@@ -3717,7 +3717,12 @@ async def moderar_resena(
     )
     await db.commit()
     await db.refresh(resena)
-    return _resena(resena, propia=True)
+    #: `con_estado` Y NO `propia`. Moderar necesita el ESTADO —si no, la
+    #: pantalla no sabe si ofrecer esconder o restaurar— pero no la linea de
+    #: pedido, que es justo el campo que la 0081 saca de lo publico por atar una
+    #: persona con una compra concreta. La cola ya se corrigio; estas dos
+    #: acciones seguian contestando con ella.
+    return _resena(resena, con_estado=True)
 
 
 @admin_router.post("/review-replies/{reply_id}/moderate", response_model=ResenaRead)
@@ -3759,7 +3764,10 @@ async def moderar_respuesta_de_resena(
     await db.refresh(respuesta)
     resena = await db.get(ProductReview, respuesta.review_id)
     visibles = await opiniones.respuestas_de(db, resena_ids=[respuesta.review_id])
-    return _resena(resena, respuesta=visibles.get(respuesta.review_id), propia=True)
+    #: Por lo mismo que arriba: el estado si, la linea de pedido no.
+    return _resena(
+        resena, respuesta=visibles.get(respuesta.review_id), con_estado=True
+    )
 
 
 @admin_router.get(
@@ -3770,9 +3778,24 @@ async def historial_de_una_resena(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MovimientoDeModeracion]:
-    """Que se hizo con esta resena y con su respuesta, en orden."""
+    """Que se hizo con esta resena y con su respuesta, en orden.
+
+    NADIE LEE EL RASTRO DE LO SUYO. La regla «nadie modera lo suyo» se aplico a
+    ESCRIBIR y no a LEER: un proveedor con curaduria pedia el rastro de una
+    valoracion de una estrella de su propio producto y leia el MOTIVO, que este
+    mismo fichero declara demasiado sensible hasta para la auditoria compartida
+    porque puede llevar dentro una cita de lo que conto quien opino.
+    """
     await permisos.exigir_evaluador(db, current_user.id)
     ensure_uuid(review_id, "Resena no encontrada.")
+    #: MISMO PATRON QUE MODERAR: se mira la fila para poder decir de quien es.
+    #: Si no existe, no se adelanta nada y el historial sale vacio, que es la
+    #: verdad y no cuenta si ese identificador existe.
+    mirada = await db.get(ProductReview, review_id)
+    if mirada is not None:
+        await _exigir_que_no_sea_suyo(
+            db, producto_id=mirada.product_id, actor_id=current_user.id
+        )
     filas = await opiniones.historial_de_moderacion(db, resena_id=review_id)
     return [
         MovimientoDeModeracion(

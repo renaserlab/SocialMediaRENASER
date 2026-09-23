@@ -618,3 +618,131 @@ async def test_el_rastro_de_moderacion_dice_quien_y_de_donde(
     assert fila.actor_role != "system", "el rastro dice que lo escondio el sistema"
     assert fila.previous_state == "visible"
     assert fila.new_state == "hidden"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_moderar_contesta_sin_decir_de_que_compra_salio(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """LA COLA YA NO LO LLEVABA; LA RESPUESTA DE MODERAR, SI.
+
+    EL DEFECTO, QUE ENCONTRO LA REVISION INDEPENDIENTE. `_resena` tiene dos
+    interruptores a proposito: `con_estado` para moderar y `propia` para quien
+    escribio. Las dos rutas de moderar contestaban con `propia=True`, que trae
+    `order_item_id` —la linea de pedido concreta—, justo el campo que la 0081
+    saca de lo publico por atar una persona con una compra. La correccion
+    anterior se aplico a la COLA y no a las dos acciones.
+
+    Y EL ESTADO SI HACE FALTA: sin el, la pantalla no sabe si ofrecer esconder
+    o restaurar. Por eso no basta con quitar el interruptor: hay que cambiarlo.
+    """
+    from sqlalchemy import text
+
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(
+        f"{PRODUCTOS}/order-items/{linea.id}/review", json={**CINCO, "overall": 2}
+    )
+    assert r.status_code == 201, r.text
+    resena_id = r.json()["id"]
+
+    #: Y SU RESPUESTA, para moderar tambien la del proveedor.
+    quien["uid"] = proveedor
+    respondida = await http.post(
+        f"{PRODUCTOS}/seller/reviews/{resena_id}/reply",
+        json={"body": "Lamentamos que llegara asi; lo revisamos con el taller."},
+    )
+    assert respondida.status_code in (200, 201), respondida.text
+
+    modera = await persona(sesiones, "modera-fuga")
+    async with sesiones() as db:
+        await db.execute(
+            text("update profiles set role = 'moderator' where id = :p"),
+            {"p": modera},
+        )
+        await db.commit()
+
+    quien["uid"] = modera
+    escondida = await http.post(
+        f"{ADMIN}/reviews/{resena_id}/moderate",
+        json={"hidden": True, "reason": "Contiene datos personales."},
+    )
+    assert escondida.status_code == 200, escondida.text
+    assert escondida.json()["order_item_id"] is None, (
+        "moderar contesta con la linea de pedido de quien opino"
+    )
+    assert escondida.json()["status"] is not None, "sin estado no se puede moderar"
+
+    respuesta_id = respondida.json()["reply"]["id"]
+    moderada = await http.post(
+        f"{ADMIN}/review-replies/{respuesta_id}/moderate",
+        json={"hidden": True, "reason": "Contiene un telefono."},
+    )
+    assert moderada.status_code == 200, moderada.text
+    assert moderada.json()["order_item_id"] is None
+    assert moderada.json()["status"] is not None
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_nadie_lee_el_rastro_de_moderacion_de_lo_suyo(
+    sesiones, cliente, monkeypatch, venta_encendida
+) -> None:
+    """LA REGLA «NADIE MODERA LO SUYO» SE APLICO A ESCRIBIR Y NO A LEER.
+
+    `GET /admin/products/reviews/{id}/moderation` solo exigia el rol. Un
+    proveedor con curaduria pedia el rastro de una valoracion de una estrella de
+    su propio producto y leia el MOTIVO —que el propio codigo declara demasiado
+    sensible hasta para la auditoria compartida, porque puede llevar dentro una
+    cita de lo que escribio quien opino— y el identificador de quien modero.
+    """
+    from sqlalchemy import text
+
+    http, quien = cliente
+    _, _, comprador, orden_id, proveedor = await pedido_entregado(
+        sesiones, monkeypatch
+    )
+    linea = await linea_de(sesiones, orden_id)
+    quien["uid"] = comprador
+    r = await http.post(
+        f"{PRODUCTOS}/order-items/{linea.id}/review", json={**CINCO, "overall": 1}
+    )
+    assert r.status_code == 201, r.text
+    resena_id = r.json()["id"]
+
+    modera = await persona(sesiones, "modera-rastro")
+    async with sesiones() as db:
+        await db.execute(
+            text("update profiles set role = 'moderator' where id = :p"),
+            {"p": modera},
+        )
+        await db.commit()
+    quien["uid"] = modera
+    assert (
+        await http.post(
+            f"{ADMIN}/reviews/{resena_id}/moderate",
+            json={"hidden": True, "reason": "Cita literal de lo que conto."},
+        )
+    ).status_code == 200
+
+    #: MODERACION AJENA SI LO LEE: es su trabajo.
+    ajeno = await http.get(f"{ADMIN}/reviews/{resena_id}/moderation")
+    assert ajeno.status_code == 200, ajeno.text
+    assert len(ajeno.json()) >= 1
+
+    #: EL PROVEEDOR DEL PRODUCTO, NO.
+    async with sesiones() as db:
+        await db.execute(
+            text("update profiles set role = 'moderator' where id = :p"),
+            {"p": proveedor},
+        )
+        await db.commit()
+    quien["uid"] = proveedor
+    suyo = await http.get(f"{ADMIN}/reviews/{resena_id}/moderation")
+    assert suyo.status_code != 200, "el proveedor leyo el rastro de lo suyo"
+    assert suyo.json()["error"]["code"] == "product_self_review_forbidden", suyo.text

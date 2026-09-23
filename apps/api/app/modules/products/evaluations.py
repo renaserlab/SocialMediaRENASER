@@ -556,12 +556,33 @@ async def de_la_version(
 async def _abierta(
     db: AsyncSession, evaluacion_id: str, usuario_id: str
 ) -> ProductEvaluation:
-    """La evaluación abierta, comprobando el permiso. Cerrada no se toca."""
+    """La evaluación abierta, comprobando el permiso. Cerrada no se toca.
+
+    AQUÍ SE COMPRUEBA TAMBIÉN QUE NO SEA LO SUYO, y es el sitio: por esta
+    función pasan las tres operaciones de en medio —puntuar, registrar
+    evidencia y elegir las razones—, así que cerrar cada una por su lado
+    dejaría abierta la cuarta que alguien añada.
+
+    ABRIRLA Y DECIDIRLA YA LO COMPROBABAN; LO DE EN MEDIO NO. Bastaba con que la
+    evaluación la abriera otra persona para que el dueño del producto, con rol
+    de curaduría, pusiera las seis puntuaciones, la evidencia que las sostiene y
+    las tres frases que leerá quien compre. Y no es cosmético: la decisión NO la
+    toma quien pulsa, la deriva `decidir_por_puntuacion` del total, así que
+    quien evalúa de verdad solo ratifica las cifras del dueño.
+
+    LA BASE TAMPOCO LO PARABA: el disparador de la 0071 compara `evaluator_id`
+    con el dueño, y ese sigue siendo el del otro evaluador; las tablas de
+    puntuaciones, evidencias y razones no tienen disparador.
+    """
     await permissions.exigir_evaluador(db, usuario_id)
     await esquema.exigir_admision(db)
     evaluacion = await db.get(ProductEvaluation, evaluacion_id)
     if evaluacion is None:
         raise EvaluacionNoEncontrada("Evaluación no encontrada.")
+    producto = await db.get(Product, evaluacion.product_id)
+    if producto is None:
+        raise EvaluacionNoEncontrada("Producto no encontrado.")
+    await permissions.exigir_ajeno(db, producto=producto, user_id=usuario_id)
     if evaluacion.status != EVALUACION_BORRADOR:
         raise EvaluacionCerrada(
             "Esta evaluación ya está decidida y no se reescribe.",
