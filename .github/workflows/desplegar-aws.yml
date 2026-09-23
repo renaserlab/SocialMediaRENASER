@@ -64,6 +64,27 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    # CON POSTGRESQL, Y NO SIN EL. Sin base, las pruebas que verifican lo que
+    # solo PostgreSQL impone —claves ajenas compuestas, indices unicos
+    # parciales, disparadores, RLS— se OMITEN, pytest sale con 0 y se publica
+    # la imagen: 416 pruebas saltadas en silencio a la puerta de produccion.
+    # En `ci.yml` ese hueco lo tapa el trabajo `migraciones`; aqui no habia
+    # nada detras, porque un push a `main` no espera a la integracion continua.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: renaser_migraciones
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIGRACIONES_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/renaser_migraciones
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -84,7 +105,11 @@ jobs:
       # quedo fuera. Ahora lo vigila `tests/test_integracion_continua.py`, que
       # mira TODOS los flujos y no una lista.
       - run: pip install 'psycopg[binary]'
-      - run: pytest
+      - run: pytest -q --junitxml=despliegue.xml
+      # EL MISMO GUARDIA QUE LA INTEGRACION CONTINUA, y es el mismo guion a
+      # proposito: duplicarlo aqui es como se quedo viejo lo de psycopg.
+      - name: Ninguna prueba puede quedar omitida ni faltar antes de publicar
+        run: python scripts/exigir_bateria_completa.py despliegue.xml
 
   # ---------------------------------------------------------------------------
   publicar:

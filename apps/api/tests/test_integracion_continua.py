@@ -69,17 +69,37 @@ def _trabajo_de_migraciones() -> str:
     return resto[: siguiente.start()] if siguiente else resto
 
 
+def _sin_comentarios(bloque: str) -> list[str]:
+    """Las lineas que se EJECUTAN: un comentario que nombra algo no lo hace."""
+    return [
+        linea
+        for linea in bloque.splitlines()
+        if linea.strip() and not linea.strip().startswith("#")
+    ]
+
+
+def _pone_la_base(bloque: str) -> bool:
+    """Si el trabajo levanta PostgreSQL Y le dice a las pruebas donde esta."""
+    lineas = _sin_comentarios(bloque)
+    return any("MIGRACIONES_DATABASE_URL:" in l for l in lineas) and any(
+        re.search(r"image:\s*postgres", l) for l in lineas
+    )
+
+
+#: Formas de ACOTAR una seleccion de pytest. Cualquiera de ellas deja fuera
+#: pruebas sin que el trabajo falle: ni se omiten ni se recogen.
+ACOTAN = ("-k", "-m", "--deselect", "--ignore", "--ignore-glob", "-p no:", "--lf", "--last-failed", "-x")
+
+
 def test_el_trabajo_con_postgresql_no_deja_fuera_ningun_fichero() -> None:
-    """Todo lo que necesita la base se ejecuta donde hay base.
-
-    DOS FORMAS DE CUMPLIRLO, y las dos valen:
-
-    * el trabajo ejecuta `pytest` sin nombrar ficheros —la bateria entera—, que
-      es lo que no se puede olvidar de nada;
-    * o los nombra, y entonces estan TODOS.
+    """Todo lo que necesita la base se ejecuta donde hay base, y ENTERO.
 
     Lo que no vale es una seleccion incompleta, que es lo que ha fallado dos
-    veces.
+    veces con una lista de ficheros. Y NO SOLO CON FICHEROS: la revision
+    independiente senalo que esta prueba solo reconocia rutas `tests/test_x.py`,
+    asi que un `-k "not concurrente"` dejaba fuera las tres baterias de
+    concurrencia —lo unico que PostgreSQL valida y SQLite no— y la prueba
+    retornaba sin comprobar nada.
     """
     bloque = _trabajo_de_migraciones()
     necesitan = _ficheros_que_necesitan_postgres()
@@ -87,41 +107,86 @@ def test_el_trabajo_con_postgresql_no_deja_fuera_ningun_fichero() -> None:
 
     invocaciones = [
         linea
-        for linea in bloque.splitlines()
-        if re.search(r"(^|\s)pytest(\s|$)", linea) and not linea.strip().startswith("#")
+        for linea in _sin_comentarios(bloque)
+        if re.search(r"(^|\s)pytest(\s|$)", linea)
     ]
     assert invocaciones, "el trabajo `migraciones` no ejecuta pytest"
 
-    nombrados = set()
-    acota = False
     for linea in invocaciones:
         citados = re.findall(r"tests/(test_[A-Za-z0-9_]+\.py)", linea)
-        if citados:
-            acota = True
-            nombrados.update(citados)
+        faltan = sorted(necesitan - set(citados)) if citados else []
+        assert not faltan, (
+            "estos ficheros necesitan PostgreSQL y el trabajo `migraciones` no "
+            "los ejecuta: " + ", ".join(faltan)
+        )
+        partes = linea.split()
+        acotado = [
+            marca
+            for marca in ACOTAN
+            if any(p == marca or p.startswith(marca) for p in partes)
+            or (marca.endswith(":") and marca in linea)
+        ]
+        assert not acotado, (
+            f"la bateria con PostgreSQL esta acotada con {acotado}: deja fuera "
+            "pruebas sin que ninguna falle ni se omita"
+        )
 
-    if not acota:
-        #: Ejecuta la bateria entera: no hay lista que se quede vieja.
-        return
 
-    faltan = sorted(necesitan - nombrados)
-    assert not faltan, (
-        "estos ficheros necesitan PostgreSQL y el trabajo `migraciones` no los "
-        "ejecuta, asi que sus pruebas no corren en NINGUN trabajo: "
-        + ", ".join(faltan)
-    )
+def test_una_prueba_omitida_o_que_falte_sigue_tumbando_el_trabajo() -> None:
+    """El guardia EXISTE, SE EJECUTA y no se puede cumplir con un comentario.
 
+    ANTES se buscaban unas frases en el bloque YAML en crudo, comentarios
+    incluidos: borrar el guardia y dejar un comentario con esas palabras
+    satisfacia las cuatro comprobaciones. Y ninguna miraba el suelo.
 
-def test_una_prueba_omitida_sigue_tumbando_el_trabajo() -> None:
-    """El guardia de omisiones existe y se ejecuta sobre el informe real.
-
-    Sin el, borrar la variable de entorno dejaria el trabajo en verde sin haber
-    ejecutado nada contra PostgreSQL: todo omitido, todo «aprobado».
+    Ahora el guardia es un guion unico que usan los dos flujos con PostgreSQL,
+    y lo que se comprueba es que cada uno lo LLAME en una linea que se ejecuta,
+    sobre el informe que su propio pytest escribe.
     """
-    bloque = _trabajo_de_migraciones()
-    assert "--junitxml=" in bloque, "sin informe no hay nada que auditar"
-    assert "omitida no es aprobada" in bloque, "falta el guardia de omisiones"
-    assert "saltadas" in bloque and "sys.exit" in bloque
+    guion = RAIZ / "apps" / "api" / "scripts" / "exigir_bateria_completa.py"
+    assert guion.exists(), "falta el guion del guardia"
+    fuente = guion.read_text(encoding="utf-8")
+    suelo = re.search(r"^SUELO = (\d+)", fuente, re.M)
+    assert suelo is not None, "el guardia no tiene suelo"
+    assert int(suelo.group(1)) >= 3000, f"el suelo es {suelo.group(1)}: no protege de nada"
+    assert re.search(r"if omitidas:\s*\n.*\n\s*return 1", fuente), "las omitidas no tumban"
+    assert re.search(r"if total < SUELO:\s*\n.*\n\s*return 1", fuente), "el suelo no tumba"
+
+    for fichero, trabajo, bloque in _trabajos_que_ejecutan_pytest():
+        #: CON LA VARIABLE PUESTA, no nombrada: el trabajo `api` la menciona en
+        #: un comentario para explicar por que NO la pone.
+        if not _pone_la_base(bloque):
+            continue
+        lineas = _sin_comentarios(bloque)
+        informe = next(
+            (
+                re.search(r"--junitxml=(\S+)", l).group(1)
+                for l in lineas
+                if "pytest" in l and "--junitxml=" in l
+            ),
+            None,
+        )
+        assert informe, f"{fichero}:{trabajo} no escribe informe: no hay nada que auditar"
+        assert any(
+            "exigir_bateria_completa.py" in l and informe in l for l in lineas
+        ), f"{fichero}:{trabajo} no pasa su informe por el guardia"
+
+
+def test_la_puerta_del_despliegue_tiene_postgresql_y_su_guardia() -> None:
+    """A produccion no se publica sin haber ejecutado las pruebas de la base.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE: la copia de la bateria del flujo de
+    despliegue corria SIN PostgreSQL, asi que 416 pruebas —claves ajenas
+    compuestas, indices parciales, disparadores, RLS— se omitian, pytest salia
+    con 0 y se publicaba la imagen. En `ci.yml` lo tapa el trabajo
+    `migraciones`; en el despliegue no habia nada detras.
+    """
+    con_base = [
+        (fichero, trabajo)
+        for fichero, trabajo, bloque in _trabajos_que_ejecutan_pytest()
+        if fichero == "desplegar-aws.yml" and _pone_la_base(bloque)
+    ]
+    assert con_base, "la puerta del despliegue ejecuta la bateria sin PostgreSQL"
 
 
 FLUJOS = RAIZ / ".github" / "workflows"

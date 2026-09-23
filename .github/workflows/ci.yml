@@ -41,13 +41,12 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
       # psycopg NO es una dependencia de la aplicacion —la API habla con la base
-      # por asyncpg— sino del ARNES de las migraciones, que abre la base
-      # desechable con el. Seis ficheros de pruebas lo importan arriba del todo,
-      # asi que sin el aqui la recoleccion revienta y trece ficheros no llegan a
-      # ejecutarse: no es que fallen, es que no se recogen. Los casos que
-      # necesitan PostgreSQL se siguen saltando por MIGRACIONES_DATABASE_URL,
-      # que aqui no esta puesta a proposito; lo que hace falta es poder
-      # RECOGERLOS. El trabajo de migraciones lo instala por lo mismo.
+      # por asyncpg— sino del ARNES de las migraciones. Diecisiete ficheros de
+      # pruebas lo importan arriba del todo, asi que sin el aqui la recoleccion
+      # revienta y esos ficheros no llegan a ejecutarse: no es que fallen, es
+      # que no se recogen. Los casos que necesitan PostgreSQL se siguen
+      # saltando en ESTE trabajo porque MIGRACIONES_DATABASE_URL no esta puesta
+      # a proposito; los ejecuta, todos, el trabajo `migraciones`.
       - run: pip install 'psycopg[binary]'
       - run: pytest
 
@@ -89,10 +88,12 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
       - run: pip install 'psycopg[binary]'
-      # `-p no:randomly` NO se usa: el orden aleatorio es parte de lo que
-      # se comprueba. Lo que si importa es que estas pruebas NO se omitan;
-      # `--strict-markers` no lo garantiza, asi que la linea siguiente lo
-      # comprueba de verdad: si alguna se salta, el job falla.
+      # EL ORDEN ES EL DE ESCRITURA. Aqui decia que el orden aleatorio era
+      # parte de lo que se comprobaba, y no era verdad: `pytest-randomly` no
+      # esta en `requirements.txt` ni lo instala ningun paso. Lo que SI se
+      # comprueba es que ninguna prueba se omita y que no falte ninguna; lo
+      # hace `scripts/exigir_bateria_completa.py`, el mismo guion que usa la
+      # puerta del despliegue.
       # LAS DE PRODUCTOS TAMBIEN, y por eso estan aqui y no arriba: la
       # verificacion de la compra del Incremento 8 y el dinero del
       # Incremento 9 viven en claves ajenas compuestas, indices unicos
@@ -117,20 +118,5 @@ jobs:
       - run: pytest -q --junitxml=migraciones.xml
       # Una prueba OMITIDA no es una prueba aprobada. Sin esto, borrar la
       # variable de entorno dejaria el job en verde sin ejecutar nada.
-      - name: Ninguna prueba de PostgreSQL puede quedar omitida
-        run: |
-          python - <<'PY'
-          import sys, xml.etree.ElementTree as ET
-          suite = ET.parse('migraciones.xml').getroot()
-          total = int(suite.get('tests') or suite[0].get('tests'))
-          saltadas = int(suite.get('skipped') or suite[0].get('skipped'))
-          print(f'{total} pruebas, {saltadas} omitidas')
-          if saltadas:
-              sys.exit('hay pruebas de PostgreSQL omitidas: omitida no es aprobada')
-          # SUELO MEDIDO, no supuesto: la bateria entera con PostgreSQL da
-          # 3324 casos (22/09/2026, 11 min 55 s). El suelo va algo por debajo
-          # para que anadir o quitar un par de casos no tumbe la integracion,
-          # y lo bastante alto para que acotar la seleccion por error si.
-          if total < 3300:
-              sys.exit(f'solo se ejecutaron {total}: falta alguna suite')
-          PY
+      - name: Ninguna prueba de PostgreSQL puede quedar omitida ni faltar
+        run: python scripts/exigir_bateria_completa.py migraciones.xml
