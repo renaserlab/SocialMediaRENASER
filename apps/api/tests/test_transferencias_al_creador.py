@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -552,3 +552,235 @@ async def test_la_salud_de_los_saldos_saca_a_la_luz_lo_retenido(sesiones):
             assert cuerpo["por_estado"]["transferred"]["count"] == 0
     finally:
         app.dependency_overrides.clear()
+
+
+async def _como_admin(sesiones):
+    """Cliente HTTP autenticado como administración. Devuelve (http, cerrar)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import get_current_user
+    from app.main import app
+    from app.shared.database import get_db
+
+    async with sesiones() as db:
+        perfil = await db.get(Profile, BRUNO)
+        perfil.role = "admin"
+        await db.commit()
+
+    async def _sesion():
+        async with sesiones() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = _sesion
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=BRUNO, email="x@y.z"
+    )
+    http = AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+    async def _cerrar() -> None:
+        await http.aclose()
+        app.dependency_overrides.clear()
+
+    return http, _cerrar
+
+
+@pytest.mark.asyncio
+async def test_la_liquidacion_tiene_por_fin_quien_la_dispare(sesiones, monkeypatch):
+    """El saldo vencido llega a `eligible` y se paga. Antes no lo hacía nadie.
+
+    EL AGUJERO QUE ESTO CIERRA. `liberar_vencidos` y `ejecutar_transferencia`
+    estaban escritas, documentadas y probadas, y no las llamaba ni un endpoint
+    ni una tarea. Un saldo `pending` con la fecha ya pasada se quedaba ahí para
+    siempre, así que `puede_transferirse` contestaba `not_eligible` eternamente
+    y el dinero del propietario no salía aunque las banderas estuvieran puestas.
+    """
+    _usar(monkeypatch, DobleDeterminista())
+    async with sesiones() as db:
+        # El saldo de la fixture ya está `eligible`; se retrocede a `pending`
+        # con la fecha vencida para que la pasada tenga que hacer las dos cosas.
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        saldo.status = "pending"
+        saldo.available_at = _antes(2)
+        await db.commit()
+
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        respuesta = await http.post("/api/v1/admin/owner-balances/settle")
+        assert respuesta.status_code == 200, respuesta.text
+        cuerpo = respuesta.json()
+        assert cuerpo["liberados"] == 1
+        assert cuerpo["transferencias_intentadas"] == 1
+        assert cuerpo["transferencias_completadas"] == 1
+        assert cuerpo["fallidos"] == 0
+    finally:
+        await cerrar()
+
+    async with sesiones() as db:
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        assert saldo.status == "transferred"
+        intento = await db.scalar(select(OwnerTransfer))
+        assert intento is not None and intento.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_liquidar_dos_veces_no_paga_dos_veces(sesiones, monkeypatch):
+    """Idempotente: la segunda pasada no encuentra nada que hacer."""
+    _usar(monkeypatch, DobleDeterminista())
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        primera = (await http.post("/api/v1/admin/owner-balances/settle")).json()
+        segunda = (await http.post("/api/v1/admin/owner-balances/settle")).json()
+    finally:
+        await cerrar()
+
+    assert primera["transferencias_intentadas"] == 1
+    assert segunda["transferencias_intentadas"] == 0
+    async with sesiones() as db:
+        assert len(list(await db.scalars(select(OwnerTransfer)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_con_las_banderas_apagadas_se_libera_pero_no_se_paga(sesiones):
+    """Liberar es contabilidad interna; transferir es dinero saliendo.
+
+    Con `creator_transfers_enabled` apagada, el saldo tiene que poder llegar a
+    `eligible` —eso solo mueve un estado— y ninguna transferencia debe
+    intentarse. El motivo sale en `omitidos`, que es lo que explica el cero.
+    """
+    ajustes = get_settings()
+    ajustes.creator_transfers_enabled = False
+    async with sesiones() as db:
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        saldo.status = "pending"
+        saldo.available_at = _antes(2)
+        await db.commit()
+
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        cuerpo = (await http.post("/api/v1/admin/owner-balances/settle")).json()
+    finally:
+        await cerrar()
+
+    assert cuerpo["liberados"] == 1
+    assert cuerpo["transferencias_intentadas"] == 0
+    assert cuerpo["omitidos"] == {"transfers_disabled": 1}
+    async with sesiones() as db:
+        assert (await db.scalar(select(OwnerSaleBalance))).status == "eligible"
+        assert await db.scalar(select(OwnerTransfer)) is None
+
+
+@pytest.mark.asyncio
+async def test_liberar_no_descongela_una_disputa(sesiones, monkeypatch):
+    """Un contracargo congela el saldo. La liberacion no puede deshacerlo.
+
+    LA CARRERA, Y HAY QUE PROVOCARLA DE VERDAD. `liberar_vencidos` lee los
+    identificadores con `status = 'pending'` y despues escribe. Entre las dos
+    sentencias cabe `charge.dispute.created`, que pone el saldo en `frozen` sin
+    solicitud asociada; filtrando el UPDATE solo por `id`, lo devolvia a
+    `eligible` y autorizaba un pago sobre dinero que el banco esta reclamando.
+
+    CONGELARLO ANTES DE LLAMAR NO PRUEBA NADA: el propio SELECT lo descartaria
+    y la funcion saldria por `if not ids`. Hay que colarse ENTRE las dos, y por
+    eso se envuelve el `flush` que va justo despues de la lectura.
+    """
+    async with sesiones() as db:
+        saldo = await db.scalar(select(OwnerSaleBalance))
+        saldo.status = "pending"
+        saldo.available_at = _antes(2)
+        await db.commit()
+        identificador = saldo.id
+
+    async with sesiones() as db:
+        original = db.execute
+        llamadas = {"n": 0}
+
+        async def _colarse(sentencia, *args, **kwargs):
+            resultado = await original(sentencia, *args, **kwargs)
+            # La PRIMERA sentencia de `liberar_vencidos` es el SELECT de
+            # candidatos. Justo despues, y antes del UPDATE, entra la disputa.
+            llamadas["n"] += 1
+            if llamadas["n"] == 1:
+                await original(
+                    update(OwnerSaleBalance)
+                    .where(OwnerSaleBalance.id == identificador)
+                    .values(status="frozen", frozen_by_request_id=None)
+                )
+            return resultado
+
+        monkeypatch.setattr(db, "execute", _colarse)
+        movidos = await liquidacion.liberar_vencidos(db)
+        monkeypatch.undo()
+        await db.commit()
+
+    # El UPDATE no encontro ninguna fila `pending`: no movio nada y lo dice.
+    assert movidos == 0
+    async with sesiones() as db:
+        assert (await db.scalar(select(OwnerSaleBalance))).status == "frozen"
+
+
+@pytest.mark.asyncio
+async def test_un_saldo_que_falla_no_se_lleva_por_delante_a_los_demas(
+    sesiones, monkeypatch
+):
+    """El `rollback` de una vuelta caduca los objetos de todas las demas.
+
+    `Session.rollback()` expira TODO el mapa de identidad, no solo lo de la
+    vuelta que fallo. Recorriendo una lista de objetos ya cargados, la vuelta
+    siguiente leia `saldo.status` de uno caducado y disparaba una recarga
+    perezosa: `MissingGreenlet` sin capturar, un 500, y los saldos restantes
+    sin pagar. Justo lo contrario de lo que el `try` del bucle promete.
+    """
+    OTRA_ORDEN = "00000000-0000-0000-0000-0000000000a3"
+    async with sesiones() as db:
+        producto = await db.scalar(select(CommerceProduct))
+        cuenta = await db.scalar(select(OwnerPayoutAccount))
+        db.add(
+            Order(
+                id=OTRA_ORDEN, user_id=ANA, commerce_product_id=producto.id,
+                provider="stripe", channel="web", environment="sandbox",
+                amount_minor=PRECIO, currency="PEN", status="paid",
+            )
+        )
+        await db.flush()
+        db.add(
+            OwnerSaleBalance(
+                order_id=OTRA_ORDEN, course_id=CURSO, owner_id=BRUNO,
+                payout_account_id=cuenta.id, gross_amount_minor=PRECIO,
+                platform_fee_minor=PRECIO - NETO, provider_fee_minor=0,
+                net_amount_minor=NETO, currency="PEN", fee_rules_version="v1",
+                status="eligible", available_at=_antes(1),
+            )
+        )
+        await db.commit()
+
+    class _FallaLaPrimera(DobleDeterminista):
+        """Revienta con el primer saldo y paga el segundo."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.veces = 0
+
+        async def create_transfer(self, peticion):
+            self.veces += 1
+            if self.veces == 1:
+                raise RuntimeError("la pasarela se cayo")
+            return await super().create_transfer(peticion)
+
+    _usar(monkeypatch, _FallaLaPrimera())
+
+    http, cerrar = await _como_admin(sesiones)
+    try:
+        respuesta = await http.post("/api/v1/admin/owner-balances/settle")
+        assert respuesta.status_code == 200, respuesta.text
+        cuerpo = respuesta.json()
+    finally:
+        await cerrar()
+
+    # Uno cae, el otro cobra. Antes caian los dos con un 500.
+    assert cuerpo["fallidos"] == 1
+    assert cuerpo["transferencias_completadas"] == 1
+    async with sesiones() as db:
+        estados = sorted(
+            s.status for s in await db.scalars(select(OwnerSaleBalance))
+        )
+        assert estados == ["eligible", "transferred"], estados

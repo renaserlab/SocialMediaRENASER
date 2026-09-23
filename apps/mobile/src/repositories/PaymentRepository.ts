@@ -175,6 +175,16 @@ export type CompraDelHistorial = {
   purchasedAt: string | null;
   /** Si HOY se puede ver el curso. Va aparte del estado del pedido. */
   hasAccess: boolean;
+  /**
+   * Qué versión del curso se compró, o `null` si no consta.
+   *
+   * `null` NO es un hueco que rellenar: en las compras anteriores al versionado
+   * no hay forma de saber qué contenido se vendió, y decir «versión 1» sería
+   * inventarlo. La pantalla tiene que saber callarse.
+   */
+  courseVersion: number | null;
+  /** La promesa de garantía que se enseñó, en horas. */
+  guaranteeHours: number | null;
 };
 
 type ProductoDto = {
@@ -205,9 +215,75 @@ type HistorialDto = {
   channel: string;
   purchased_at: string | null;
   has_access: boolean;
+  course_version: number | null;
+  guarantee_hours: number | null;
+};
+
+/** En que quedo una orden, segun el SERVIDOR. */
+export type EstadoDeOrden = {
+  id: string;
+  courseId: string;
+  /** 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded'. */
+  status: string;
+  amountMinor: number;
+  currency: string;
+  /** Si el acceso ya esta concedido. Va aparte del estado a proposito. */
+  tieneAcceso: boolean;
+  cursoTitulo: string;
+  creadaEn: string;
+  pagadaEn: string | null;
+  proveedor: string;
+  /** `null` en las compras anteriores al versionado. No se inventa. */
+  version: number | null;
+  horasDeGarantia: number | null;
+  recompraSinGarantia: boolean;
+};
+
+type EstadoDeOrdenDto = {
+  id: string;
+  course_id: string;
+  status: string;
+  amount_minor: number;
+  currency: string;
+  has_access: boolean;
+  course_title: string;
+  created_at: string;
+  paid_at: string | null;
+  provider: string;
+  course_version: number | null;
+  guarantee_hours: number | null;
+  repurchase_without_guarantee: boolean;
 };
 
 export const CommerceRepository = {
+  /**
+   * En que quedo una orden. Lo unico que puede creerse la pantalla de vuelta.
+   *
+   * AL VOLVER DE LA PASARELA SOLO LLEGA `?order=<id>` EN LA URL, y ese
+   * parametro lo escribe cualquiera. Decir «pago confirmado» a partir de el
+   * seria dejar que quien pide decida si ha pagado.
+   */
+  async estadoDeOrden(orderId: string): Promise<EstadoDeOrden> {
+    const dto = await apiRequest<EstadoDeOrdenDto>(
+      `${API_V1}/payments/orders/${orderId}`,
+    );
+    return {
+      id: dto.id,
+      courseId: dto.course_id,
+      status: dto.status,
+      amountMinor: dto.amount_minor,
+      currency: dto.currency,
+      tieneAcceso: dto.has_access,
+      cursoTitulo: dto.course_title,
+      creadaEn: dto.created_at,
+      pagadaEn: dto.paid_at,
+      proveedor: dto.provider,
+      version: dto.course_version,
+      horasDeGarantia: dto.guarantee_hours,
+      recompraSinGarantia: dto.repurchase_without_guarantee,
+    };
+  },
+
   /**
    * Que se puede comprar para un curso desde ESTA plataforma.
    *
@@ -284,6 +360,10 @@ export const CommerceRepository = {
       channel: dto.channel,
       purchasedAt: dto.purchased_at,
       hasAccess: dto.has_access,
+      // `?? null` y no `?? 1`: un backend sin la 0050 no manda el campo, y
+      // rellenarlo con un número sería afirmar una versión que nadie sabe.
+      courseVersion: dto.course_version ?? null,
+      guaranteeHours: dto.guarantee_hours ?? null,
     }));
   },
 };
@@ -344,6 +424,8 @@ export type EstadoDeGarantia = {
   primerAccesoEn: string | null;
   venceEn: string | null;
   segundosRestantes: number;
+  /** Las horas que dura la garantia, segun el SERVIDOR. */
+  horasDeGarantia: number;
   garantiaUsada: boolean;
   garantiaUsadaEn: string | null;
   solicitudActivaId: string | null;
@@ -388,6 +470,7 @@ type ElegibilidadDto = {
   first_accessed_at: string | null;
   expires_at: string | null;
   seconds_remaining: number;
+  guarantee_hours: number;
   refund_used: boolean;
   refund_used_at: string | null;
   active_request_id: string | null;
@@ -456,6 +539,7 @@ export const DevolucionesRepository = {
       primerAccesoEn: dto.first_accessed_at,
       venceEn: dto.expires_at,
       segundosRestantes: dto.seconds_remaining ?? 0,
+      horasDeGarantia: dto.guarantee_hours,
       garantiaUsada: dto.refund_used ?? false,
       garantiaUsadaEn: dto.refund_used_at,
       solicitudActivaId: dto.active_request_id,
@@ -536,10 +620,30 @@ export const DevolucionesRepository = {
   },
 
   /** Guarda la aceptacion. Sin ella el servidor no deja seguir al pago. */
-  async aceptarRecompra(courseId: string): Promise<void> {
+  /**
+   * Firma que se acepta recomprar sin garantia.
+   *
+   * `origen` DICE POR DONDE SE VA A COMPRAR, y solo hace falta en las tiendas:
+   * en la web la orden identifica la compra, pero en Google y Apple la orden no
+   * existe hasta despues del cobro, asi que sin esto no se puede responder «que
+   * acepto exactamente quien hizo ESTA compra».
+   *
+   * NO DECIDE NADA. Es una etiqueta para el rastro: lo que concede el acceso lo
+   * resuelve el servidor contra RevenueCat, pase lo que pase por aqui.
+   */
+  async aceptarRecompra(
+    courseId: string,
+    origen?: { proveedor: 'apple' | 'google'; productoDeTienda: string },
+  ): Promise<void> {
     await apiRequest<void>(`${API_V1}/payments/repurchase-acceptance`, {
       method: 'POST',
-      body: JSON.stringify({ course_id: courseId, accepted: true }),
+      body: JSON.stringify({
+        course_id: courseId,
+        accepted: true,
+        ...(origen
+          ? { provider: origen.proveedor, product_id: origen.productoDeTienda }
+          : {}),
+      }),
     });
   },
 };

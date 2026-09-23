@@ -40,6 +40,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.commerce import service as comercio
+from app.modules.catalog.models import CourseVersion
 from app.modules.commerce.models import (
     CommerceProduct,
     Entitlement,
@@ -204,8 +205,68 @@ async def conceder(
         # que haya suscripción, no para usarla hoy.
         expires_at=None,
         matricular_tambien=True,
+        # Para que el derecho apunte a la MISMA version que la orden.
+        order_id=order_id,
     )
     return ResultadoDeConcesion(course_id=producto.course_id, nuevo=es_nuevo)
+
+
+async def orden_pagada_de(
+    db: AsyncSession, *, user_id: str, producto: ProductoComercial
+) -> Order | None:
+    """La compra viva de esta persona sobre este producto, o nada.
+
+    Hace falta cuando la devolución llega por la TIENDA. Stripe avisa sobre un
+    pedido concreto y quien atiende el aviso ya lo tiene en la mano; Google y
+    Apple avisan sobre una transacción suya, y el pedido hay que encontrarlo.
+
+    La más reciente en pie: quien devolvió una vez y volvió a comprar tiene dos
+    pedidos, y el que se cierra es el que sigue `paid`.
+
+    SE FILTRA POR PASARELA Y POR ENTORNO, y no sobra ninguno de los dos. Un
+    mismo `CommerceProduct` se vende por varias vías —Stripe en la web, Google
+    y Apple en el móvil— y en dos entornos. Sin estos filtros, una devolución
+    de Play Store podía encontrar el pedido de una compra por tarjeta que nadie
+    devolvió, marcarlo `refunded` y anular su saldo: se le quitaba al
+    propietario dinero de una venta que seguía en pie.
+    """
+    return await db.scalar(
+        select(Order)
+        .where(
+            Order.user_id == user_id,
+            Order.commerce_product_id == producto.commerce_product_id,
+            Order.provider == producto.provider,
+            Order.environment == producto.environment,
+            Order.status == "paid",
+        )
+        .order_by(Order.created_at.desc())
+        .limit(1)
+    )
+
+
+async def marcar_pedido_devuelto(db: AsyncSession, *, order_id: str) -> None:
+    """Cierra el pedido y suelta el saldo que hubiera retenido por esa venta.
+
+    Las dos cosas juntas porque son la misma consecuencia: la venta se deshizo.
+    Es lo que el camino de Stripe ya hacía por su cuenta, y lo que al de la
+    tienda le faltaba.
+
+    `liquidacion.cancelar` es idempotente y no hace nada si no hay saldo —hoy
+    las compras por tienda no generan ninguno—; se llama igual para que el día
+    que lo generen esto no haya que recordarlo.
+
+    PERO SOLO CON LA 0049 APLICADA. `cancelar` consulta `owner_sale_balances`, y
+    sin esa tabla la sentencia falla; como la sincronización de la tienda no
+    confirma hasta el final del bucle, ese fallo se llevaría por delante las
+    concesiones y revocaciones del resto de compras de la misma pasada. Es el
+    mismo guardián que usa el resto del módulo.
+    """
+    from app.modules.commerce import liquidacion
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    await comercio.marcar_orden(db, order_id=order_id, status="refunded")
+    if await esquema_devoluciones.hay_liquidaciones(db):
+        await liquidacion.cancelar(db, order_id=order_id)
 
 
 async def revocar(
@@ -374,6 +435,8 @@ async def historial(db: AsyncSession, user_id: str) -> list[dict]:
             Order.created_at,
             Order.paid_at,
             Entitlement.status,
+            CourseVersion.version,
+            Order.guarantee_hours,
         )
         .join(CommerceProduct, CommerceProduct.id == Order.commerce_product_id)
         .outerjoin(
@@ -382,6 +445,9 @@ async def historial(db: AsyncSession, user_id: str) -> list[dict]:
             & (Entitlement.commerce_product_id == Order.commerce_product_id)
             & (Entitlement.status == "active"),
         )
+        # `outerjoin` y no `join`: las ordenes anteriores a la 0050 no tienen
+        # version, y un `join` a secas las borraria del historial entero.
+        .outerjoin(CourseVersion, CourseVersion.id == Order.course_version_id)
         .where(Order.user_id == user_id)
         .order_by(Order.created_at.desc())
     )
@@ -397,6 +463,8 @@ async def historial(db: AsyncSession, user_id: str) -> list[dict]:
             "channel": f[6],
             "purchased_at": f[8] or f[7],
             "has_access": f[9] == "active",
+            "course_version": f[10],
+            "guarantee_hours": f[11],
         }
         for f in filas
         if f[1] is not None

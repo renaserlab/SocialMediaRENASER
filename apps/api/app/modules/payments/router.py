@@ -60,6 +60,8 @@ from app.modules.learning.models import Purchase
 from app.modules.catalog import esquema as esquema_catalogo
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce import service as comercio_service
+from app.modules.events import pagos as eventos_pagos
+from app.modules.products import pagos as productos_pagos
 from app.modules.payments import nativo, service
 from app.modules.payments.providers import CheckoutRequest, get_provider
 from app.modules.payments.revenuecat import RevenueCatClient, RevenueCatError
@@ -67,6 +69,7 @@ from app.modules.payments.schemas import (
     CheckoutCreate,
     CheckoutRead,
     CourseAccessRead,
+    EstadoDeOrdenRead,
     NativeSyncCreate,
     NativeSyncRead,
     PurchaseHistoryRead,
@@ -160,7 +163,7 @@ async def create_checkout(
     session = await provider.create_checkout(
         CheckoutRequest(
             purchase_id=purchase.id,
-            course_title=course.title,
+            concepto=course.title,
             amount_minor=purchase.amount_minor,
             currency=purchase.currency,
             user_email=current_user.email or "",
@@ -259,6 +262,102 @@ async def my_purchases(
         .order_by(Purchase.purchased_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def _curso_de_la_orden(db: AsyncSession, orden) -> str | None:
+    """El curso al que apunta una orden, a través de su producto de comercio."""
+    from app.modules.commerce.models import CommerceProduct
+
+    producto = await db.get(CommerceProduct, orden.commerce_product_id)
+    return str(producto.course_id) if producto is not None else None
+
+
+@router.get("/orders/{order_id}", response_model=EstadoDeOrdenRead)
+async def estado_de_la_orden(
+    order_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EstadoDeOrdenRead:
+    """En qué quedó una orden. Es lo que mira la pantalla de vuelta del pago.
+
+    LA PANTALLA NO PUEDE CREERSE LA URL. Al volver de la pasarela, el navegador
+    trae `?order=<id>` y nada más: ese parámetro lo escribe cualquiera, y
+    conceder acceso —o simplemente decir «pago confirmado»— a partir de él sería
+    dejar que quien pide decida si ha pagado. Aquí se le pregunta al servidor.
+
+    Y SE DEVUELVE EL ACCESO APARTE DEL ESTADO. Una orden puede estar `paid` con
+    el acceso todavía sin conceder, porque quien lo concede es el aviso de la
+    pasarela y aún no ha llegado. Son segundos, pero son exactamente los
+    segundos en los que la persona está mirando la pantalla.
+
+    404 SI NO ES SUYA, y no 403: responder «prohibido» confirmaría que esa orden
+    existe, y con eso se puede recorrer el espacio de identificadores para saber
+    qué órdenes hay. Que una orden ajena y una inexistente se vean igual desde
+    fuera es lo correcto.
+    """
+    from app.modules.commerce.models import Order
+
+    oid = ensure_uuid(order_id, "order_id")
+    orden = await db.get(Order, oid)
+    if orden is None or orden.user_id != current_user.id:
+        raise NotFoundError("Orden no encontrada.")
+
+    curso = await _curso_de_la_orden(db, orden)
+    acceso = False
+    if curso is not None and await esquema_comercio.hay_comercio(db):
+        resuelto = await comercio_service.resolver_acceso_al_curso(
+            db, user_id=current_user.id, course_id=curso, es_admin=False
+        )
+        acceso = resuelto.tiene_acceso
+
+    titulo = ""
+    version = None
+    if curso:
+        ficha = await db.get(Course, curso)
+        titulo = ficha.title if ficha else ""
+        version = await _numero_de_version(db, orden.course_version_id)
+
+    return EstadoDeOrdenRead(
+        id=str(orden.id),
+        course_id=curso or "",
+        course_title=titulo,
+        status=orden.status,
+        amount_minor=orden.amount_minor,
+        currency=orden.currency,
+        has_access=acceso,
+        created_at=orden.created_at,
+        paid_at=orden.paid_at,
+        provider=orden.provider or "",
+        course_version=version,
+        guarantee_hours=orden.guarantee_hours,
+        repurchase_without_guarantee=await _fue_recompra_sin_garantia(db, orden.id),
+    )
+
+
+async def _numero_de_version(db: AsyncSession, version_id: str | None) -> int | None:
+    if version_id is None:
+        return None
+    from app.modules.catalog.models import CourseVersion
+
+    fila = await db.get(CourseVersion, version_id)
+    return fila.version if fila else None
+
+
+async def _fue_recompra_sin_garantia(db: AsyncSession, order_id: str) -> bool:
+    """Si esta compra se hizo firmando que no tendria garantia."""
+    from app.modules.refunds import esquema as esquema_devoluciones
+
+    if not await esquema_devoluciones.hay_devoluciones(db):
+        return False
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    return bool(
+        await db.scalar(
+            select(RefundPolicyAcceptance.id)
+            .where(RefundPolicyAcceptance.order_id == order_id)
+            .limit(1)
+        )
+    )
 
 
 @router.get("/courses/{course_id}/access", response_model=CourseAccessRead)
@@ -605,7 +704,7 @@ async def stripe_checkout(
         sesion = await proveedor.create_checkout(
             CheckoutRequest(
                 purchase_id=pedido.id,
-                course_title=course.title,
+                concepto=course.title,
                 # Del PEDIDO, no del curso: es el importe que se congeló en el
                 # servidor al abrirlo. Si el precio del curso cambia mientras
                 # alguien está pagando, paga lo que se le enseñó.
@@ -663,6 +762,29 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
         logger.warning("[pagos] aviso de Stripe rechazado", exc_info=True)
         raise ValidationAppError("Aviso no válido.")
 
+    # LOS AVISOS DE ENTRADAS SE ENTREGAN A EVENTOS, y antes de la bandera de
+    # Cursos: `stripe_payments_enabled` gobierna la compra de un CURSO y no
+    # tiene nada que decir sobre una entrada. El dominio sale de la metadata que
+    # nosotros adjuntamos al abrir el cobro, no de un campo que Stripe rellene.
+    #
+    # Y SI NO VIENE EL DOMINIO, SE PREGUNTA A NUESTRAS TABLAS. Un `refund.*` o
+    # un `charge.dispute.*` traen el objeto reembolso o disputa, con metadata
+    # propia —vacia— en vez de la del cobro: sin esta segunda pregunta, la
+    # devolucion de una entrada caia aqui como si fuera de Cursos.
+    if evento.dominio == eventos_pagos.DOMINIO or await eventos_pagos.es_de_entradas(
+        db, evento
+    ):
+        return await _webhook_de_eventos(db, evento)
+
+    # LOS AVISOS DE PRODUCTOS SE ENTREGAN A PRODUCTOS, por lo mismo y con la
+    # misma segunda pregunta: un `refund.*` o un `charge.dispute.*` llegan sin
+    # dominio, y sin mirar nuestra propia tabla la devolucion de un producto
+    # caeria aqui como si fuera de Cursos.
+    if evento.dominio == productos_pagos.DOMINIO or await productos_pagos.es_de_productos(
+        db, evento
+    ):
+        return await _webhook_de_productos(db, evento)
+
     if not ajustes.stripe_payments_enabled and evento.status not in _ESTADOS_DE_DEVOLUCION:
         # Firma valida, pero es un aviso de COMPRA y las compras estan
         # apagadas. Sigue bloqueado, igual que antes.
@@ -694,29 +816,158 @@ async def procesar_webhook_stripe(request: Request, db: AsyncSession) -> Respons
         await db.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    # EL IDENTIFICADOR, EN UNA VARIABLE, ANTES DE TOCAR NADA. `_fila` es un
+    # objeto del ORM: en cuanto la transacción se deshace queda caducado, y
+    # leerle un atributo dispara una recarga perezosa que en asíncrono revienta
+    # con `MissingGreenlet`. Una cadena no caduca.
+    id_del_aviso = _fila.id
+
     try:
-        await _aplicar_evento_stripe(db, evento)
+        # SAVEPOINT, NO `rollback`. Antes esto se aplicaba suelto y el manejador
+        # de error deshacía la transacción entera; el problema es que la fila de
+        # `payment_events` se escribió en ESA misma transacción y todavía no
+        # estaba confirmada, así que el `rollback` se llevaba por delante justo
+        # el registro anti-repetición que el bloque de abajo existe para
+        # garantizar. Y el `UPDATE` posterior no encontraba ninguna fila que
+        # marcar.
+        #
+        # Con el savepoint, un fallo deshace SOLO lo que intentó aplicarse: la
+        # fila del aviso sigue en pie, la transacción de fuera sigue utilizable
+        # —que es lo que en PostgreSQL no ocurre tras una sentencia fallida sin
+        # aislar— y el error queda anotado y confirmado.
+        async with db.begin_nested():
+            await _aplicar_evento_stripe(db, evento)
     except Exception as error:
         # El aviso queda marcado con su error para poder reprocesarlo a mano.
         # Se deja constancia ANTES de propagar: si se pierde el registro del
         # fallo, nadie sabrá que hubo un cobro que no llegó a conceder nada.
         logger.exception("[pagos] no se pudo aplicar el aviso %s", evento.event_id)
-        # ROLLBACK PRIMERO. Si lo que falló fue una sentencia SQL, en PostgreSQL
-        # la transacción queda abortada y este mismo `marcar_evento_procesado`
-        # fallaría también —perdiendo justo el registro que este bloque existe
-        # para garantizar—.
-        await db.rollback()
         await comercio_service.marcar_evento_procesado(
-            db, event_id=_fila.id, error=str(error)[:500]
+            db, event_id=id_del_aviso, error=str(error)[:500]
         )
         await db.commit()
         raise
 
-    await comercio_service.marcar_evento_procesado(db, event_id=_fila.id)
+    await comercio_service.marcar_evento_procesado(db, event_id=id_del_aviso)
     # Nadie hace `commit` dentro del comercio: solo `flush`. Se hace aquí, una
     # vez, cuando la operación entera ha salido bien. Al revés, un webhook que
     # concede el derecho y luego falla al marcar la orden dejaría las dos cosas
     # a medias.
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _webhook_de_productos(db: AsyncSession, evento) -> Response:
+    """Un aviso de un pedido de productos, ya verificado. Mismas garantias.
+
+    LA BANDERA DE VENTA NO SE MIRA AQUI. Apagar `feature_product_sales` impide
+    ABRIR cobros nuevos; rechazar el aviso de uno que ya se abrio dejaria a
+    quien pago sin su pedido y a Stripe reintentando en bucle.
+
+    NI SE DUPLICA LA VERIFICACION DE FIRMA NI LA BARRERA ANTI-REPETICION: las
+    dos son las de arriba, y son las mismas que usan Cursos y Eventos.
+    """
+    ajustes = get_settings()
+
+    if not await esquema_comercio.hay_comercio(db):
+        # Sin la 0035 no hay donde anotar el aviso, y sin anotarlo no se puede
+        # garantizar que no se procese dos veces. Se falla en cerrado.
+        logger.error("[productos] aviso de Stripe sin la migracion 0035 aplicada")
+        raise ServiceUnavailableError("El módulo de compras aún no está desplegado.")
+
+    if evento.environment != ajustes.payments_environment:
+        # Un aviso de pruebas NO entrega un producto en produccion, ni al reves.
+        logger.info("[productos] aviso de otro entorno: %s", evento.environment)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    _fila, es_nuevo = await comercio_service.registrar_evento(
+        db,
+        provider="stripe",
+        external_event_id=evento.event_id,
+        event_type=evento.event_type,
+        environment=evento.environment,
+        payload=dict(evento.payload),
+    )
+    if not es_nuevo:
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    id_del_aviso = _fila.id
+    try:
+        async with db.begin_nested():
+            nota = await productos_pagos.atender_aviso(db, evento)
+    except Exception as error:  # noqa: BLE001
+        logger.exception("[productos] no se pudo aplicar el aviso %s", evento.event_id)
+        await comercio_service.marcar_evento_procesado(
+            db, event_id=id_del_aviso, error=str(error)[:500]
+        )
+        await db.commit()
+        # NO SE PROPAGA. Un aviso que no cuadra no se arregla reintentandolo:
+        # queda anotado con su error para que una persona lo concilie.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await comercio_service.marcar_evento_procesado(
+        db, event_id=id_del_aviso, error=nota
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _webhook_de_eventos(db: AsyncSession, evento) -> Response:
+    """Un aviso de entradas, ya verificado. Mismas garantias que el de Cursos.
+
+    LA BANDERA DE VENTA NO SE MIRA AQUI. Apagar `FEATURE_EVENT_PAYMENTS` impide
+    ABRIR cobros nuevos; rechazar el aviso de uno que ya se abrio dejaria a
+    quien pago sin su entrada y a Stripe reintentando en bucle.
+    """
+    ajustes = get_settings()
+
+    if not await esquema_comercio.hay_comercio(db):
+        # Sin la 0035 no hay donde anotar el aviso, y sin anotarlo no se puede
+        # garantizar que no se procese dos veces. Se falla en cerrado.
+        logger.error("[eventos] aviso de Stripe sin la migración 0035 aplicada")
+        raise ServiceUnavailableError("El módulo de compras aún no está desplegado.")
+
+    if evento.environment != ajustes.payments_environment:
+        # Un aviso de pruebas NO emite una entrada en producción, ni al revés.
+        logger.info("[eventos] aviso de otro entorno: %s", evento.environment)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # ANTI-REPETICION EN LA BASE, no en un `if`: dos avisos simultáneos pasarían
+    # los dos por una comprobación y por el índice único pasa uno.
+    _fila, es_nuevo = await comercio_service.registrar_evento(
+        db,
+        provider="stripe",
+        external_event_id=evento.event_id,
+        event_type=evento.event_type,
+        environment=evento.environment,
+        payload=dict(evento.payload),
+    )
+    if not es_nuevo:
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    id_del_aviso = _fila.id
+    try:
+        async with db.begin_nested():
+            nota = await eventos_pagos.atender_aviso(db, evento)
+    except Exception as error:  # noqa: BLE001
+        logger.exception("[eventos] no se pudo aplicar el aviso %s", evento.event_id)
+        await comercio_service.marcar_evento_procesado(
+            db, event_id=id_del_aviso, error=str(error)[:500]
+        )
+        await db.commit()
+        # NO SE PROPAGA. Un aviso que no cuadra —importe distinto, reserva
+        # vencida, pedido cancelado— no se arregla reintentandolo: queda
+        # anotado con su error para que una persona lo concilie. Propagar
+        # pondria a Stripe a repetirlo cada pocos minutos durante días.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # CON LA NOTA, SI LA HAY. Un aviso de devolucion queda cerrado pero
+    # marcado: `error` es la cola de conciliacion que ya usa Cursos.
+    await comercio_service.marcar_evento_procesado(
+        db, event_id=id_del_aviso, error=nota
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -897,7 +1148,10 @@ async def _atender_disputa(db: AsyncSession, evento) -> None:
         pedido.id,
         retenido,
     )
-    await db.commit()
+    # SIN `commit`. Esto corre dentro del SAVEPOINT que abre el webhook, y un
+    # `commit` no confirma el savepoint: sube hasta la raiz, la confirma entera
+    # y deja sin efecto el aislamiento. Escribe el `commit` unico del final.
+    await db.flush()
 
 
 async def _aplicar_reembolso_total(db: AsyncSession, pedido, evento) -> None:
@@ -1011,9 +1265,17 @@ async def _anotar_sin_conciliar(
 
     Solo identificadores y texto ya recortado: nunca el cuerpo del aviso.
 
-    Va despues del rollback —la transaccion anterior quedo abortada al levantar
-    la validacion— y por eso recibe cadenas y no objetos: los de antes quedaron
-    caducados.
+    RECIBE CADENAS Y NO OBJETOS porque llega justo despues de deshacer un
+    savepoint, y eso caduca los objetos del ORM: leerles un atributo dispararia
+    una recarga perezosa que en asincrono revienta con `MissingGreenlet`.
+
+    Y NO HACE `commit` NI `rollback`, que es lo que antes se le escapaba. Los
+    dos suben hasta la raiz: el `commit` confirmaba la transaccion del webhook a
+    medias, y el `rollback` del manejador de error se llevaba por delante la
+    fila de `payment_events` —el registro anti-repeticion que todo este bloque
+    existe para conservar—. Y lo hacia EN SILENCIO: no lanza nada, asi que la
+    peticion respondia con normalidad y el reenvio de Stripe se procesaba como
+    si fuera nuevo. Un savepoint propio deshace solo esta anotacion.
     """
     from app.modules.refunds import service as devoluciones
     from app.modules.refunds.models import RefundRequest
@@ -1021,23 +1283,23 @@ async def _anotar_sin_conciliar(
     if solicitud_id is None:
         return
     try:
-        solicitud = await db.get(RefundRequest, solicitud_id)
-        if solicitud is None:
-            return
-        await devoluciones._anotar(
-            db,
-            solicitud,
-            desde=solicitud.status,
-            hasta=solicitud.status,
-            rol="system",
-            actor_id=None,
-            reason="aviso de devolucion sin conciliar",
-            notes=motivo,
-            metadata={"order_id": orden_id, "requiere_revision": True},
-        )
-        await db.commit()
+        async with db.begin_nested():
+            solicitud = await db.get(RefundRequest, solicitud_id)
+            if solicitud is None:
+                return
+            await devoluciones._anotar(
+                db,
+                solicitud,
+                desde=solicitud.status,
+                hasta=solicitud.status,
+                rol="system",
+                actor_id=None,
+                reason="aviso de devolucion sin conciliar",
+                notes=motivo,
+                metadata={"order_id": orden_id, "requiere_revision": True},
+            )
     except Exception:  # pragma: no cover - la anotacion no puede romper el aviso
-        await db.rollback()
+        # El savepoint ya deshizo lo suyo al salir. No se deshace nada mas.
         logger.exception("[pagos] no se pudo anotar la devolucion sin conciliar")
 
 
@@ -1275,7 +1537,14 @@ async def _crear_saldo_del_propietario(db: AsyncSession, orden) -> None:
     await liquidacion.registrar_saldo(
         db, orden=orden, disponible_desde=None if con_garantia else ahora()
     )
-    await db.commit()
+    # SIN `commit` AQUI, y es lo que hace que el savepoint de arriba sirva de
+    # algo. Un `commit` dentro de un SAVEPOINT no lo deshace: lo CIERRA, y de
+    # paso escribe la transaccion entera del webhook. Con el puesto, el
+    # aislamiento que `_al_confirmar_la_compra` promete era mentira —el saldo ya
+    # estaba escrito cuando fallaba el aviso— y el `rollback` del manejador de
+    # error de mas arriba ya no deshacia la concesion que dice deshacer.
+    # Escribe el `commit` unico del final del webhook.
+    await db.flush()
 
 
 async def _avisar_compra_al_propietario(db: AsyncSession, orden) -> None:
@@ -1310,7 +1579,9 @@ async def _avisar_compra_al_propietario(db: AsyncSession, orden) -> None:
         entity_id=orden.id,
         payload={"orderId": orden.id, "courseId": curso.id},
     )
-    await db.commit()
+    # Tampoco aqui: mismo motivo que en `_crear_saldo_del_propietario`. El
+    # comercio solo hace `flush`; el `commit` es uno y esta al final del webhook.
+    await db.flush()
 
 
 @router.get("/history", response_model=list[PurchaseHistoryRead])

@@ -25,6 +25,7 @@ import { Platform } from 'react-native';
 
 import { CommerceRepository } from '@/repositories/PaymentRepository';
 import type { ProductoDisponible } from '@/repositories/PaymentRepository';
+import { accesosTras } from '@/lib/restauracion';
 import { comprasHabilitadas } from '@/services/comprasConfig';
 import * as revenueCat from '@/services/revenueCat';
 
@@ -172,7 +173,20 @@ export async function ofertaPara(courseId: string): Promise<OfertaDeCompra> {
 }
 
 export type ResultadoDeCompraCompleta =
-  | { estado: 'comprada' }
+  /**
+   * `accesos` es CUÁNTOS accesos tiene esta persona a este curso según el
+   * servidor, y existe porque sin ese número no se podía distinguir «restauré
+   * tus compras» de «pregunté y no había ninguna»: las dos decían lo mismo.
+   *
+   * ES `granted` + `unchanged`, y la suma no es un detalle. El servidor mete en
+   * `granted` solo los accesos NUEVOS: quien ya lo tenía concedido —porque
+   * llegó el aviso de la tienda, porque la aplicación sincronizó sola al
+   * entrar, o porque es el segundo toque del botón— vuelve con `granted: []` y
+   * el curso en `unchanged`. Contando solo `granted` se le diría «no
+   * encontramos compras» a alguien que sí pagó, que es la mentira contraria a
+   * la que esto vino a arreglar.
+   */
+  | { estado: 'comprada'; accesos: number }
   | { estado: 'cancelada' }
   | { estado: 'pendiente_de_sincronizar' }
   | { estado: 'error'; mensaje: string };
@@ -226,8 +240,14 @@ export async function sincronizar(): Promise<ResultadoDeCompraCompleta> {
   const plataforma = plataformaDeCompra();
   if (plataforma === 'web') return { estado: 'error', mensaje: 'Solo móvil.' };
   try {
-    await CommerceRepository.nativeSync(plataforma);
-    return { estado: 'comprada' };
+    // SE MIRA LO QUE CONTESTA, no solo que no falle. El resultado se tiraba y
+    // se devolvía «comprada» con que la petición no reventara, así que quien
+    // pulsaba «Restaurar compras» sin ninguna compra en esa cuenta de la tienda
+    // leía «Compras restauradas» y seguía viendo el botón de comprar: la
+    // aplicación le decía que había hecho algo que no había hecho, y encima le
+    // quitaba la única pista de que la cuenta de la tienda no era la suya.
+    const { granted, unchanged } = await CommerceRepository.nativeSync(plataforma);
+    return { estado: 'comprada', accesos: granted.length + unchanged.length };
   } catch {
     return { estado: 'pendiente_de_sincronizar' };
   }

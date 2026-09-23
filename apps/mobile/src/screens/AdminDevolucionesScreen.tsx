@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -10,6 +10,7 @@ import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
+import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { deCentavos } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
 import { ApiError } from '@/services/api';
@@ -153,6 +154,36 @@ export function AdminDevolucionesScreen() {
   const [abierta, setAbierta] = useState<DetalleDeSolicitud | null>(null);
   const [abriendo, setAbriendo] = useState(false);
   const masRef = useRef(false);
+  /**
+   * La ULTIMA pagina pedida no llego.
+   *
+   * Antes esto apagaba `hayMas` y no se decia nada: la lista quedaba truncada
+   * con el mismo aspecto que una lista completa, asi que se leia como «ya no
+   * hay mas» cuando lo que habia era un fallo de red. En una bandeja de
+   * expedientes o en un listado de ventas eso es dar por vistas cosas que no se
+   * han visto. Ahora se avisa en el pie y se puede reintentar la misma pagina.
+   */
+  const [falloAlPaginar, setFalloAlPaginar] = useState(false);
+
+  /*
+    EL DETALLE SE CIERRA CON EL ATRAS FISICO, no solo con su enlace «Volver».
+
+    No es una pantalla aparte: es esta misma cambiando lo que pinta. Sin esto,
+    la tecla Atras de Android veia una ruta anterior, salia de la bandeja
+    entera y quien estaba mirando un expediente acababa fuera de la seccion.
+  */
+  //
+  // AL FOCO Y NO AL MONTAJE: esta pantalla sigue montada al cambiar de seccion,
+  // y con el registro puesto el Atras de la seccion nueva cerraba un expediente
+  // que nadie estaba mirando. Para quien lo pulsaba, Atras no hacia nada.
+  const abiertaRef = useRef<DetalleDeSolicitud | null>(null);
+  abiertaRef.current = abierta;
+  useFocusEffect(
+    useCallback(() => {
+      if (!abiertaRef.current) return;
+      return registrarSalidaPropia(() => setAbierta(null));
+    }, [abierta]),
+  );
 
   useEffect(() => {
     const temporizador = setTimeout(() => setBusqueda(texto.trim()), 350);
@@ -161,6 +192,9 @@ export function AdminDevolucionesScreen() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
+    // Recargar de cero borra el fallo de la pagina anterior: se vuelve a
+    // empezar y ese error ya no describe nada.
+    setFalloAlPaginar(false);
     setError(null);
     setProhibido(false);
     try {
@@ -186,8 +220,11 @@ export function AdminDevolucionesScreen() {
     void cargar();
   }, [cargar]);
 
-  const cargarMas = useCallback(async () => {
+  const cargarMas = useCallback(async (reintentoManual = false) => {
+    // `falloAlPaginar` corta el reintento AUTOMATICO: ver el comentario del
+    // estado. Se reintenta solo cuando la persona toca el aviso del pie.
     if (masRef.current || !hayMas || cargando) return;
+    if (falloAlPaginar && !reintentoManual) return;
     masRef.current = true;
     setCargandoMas(true);
     try {
@@ -202,13 +239,16 @@ export function AdminDevolucionesScreen() {
         return [...previas, ...pagina.filter((s) => !vistas.has(s.id))];
       });
       setHayMas(pagina.length === POR_PAGINA);
+      setFalloAlPaginar(false);
     } catch {
-      setHayMas(false);
+      // La lista no se cierra: `hayMas` se queda como estaba para que el
+      // reintento vuelva a pedir la misma pagina.
+      setFalloAlPaginar(true);
     } finally {
       masRef.current = false;
       setCargandoMas(false);
     }
-  }, [busqueda, cargando, estado, hayMas, solicitudes.length]);
+  }, [busqueda, cargando, estado, falloAlPaginar, hayMas, solicitudes.length]);
 
   const abrir = useCallback(
     async (id: string) => {
@@ -276,8 +316,14 @@ export function AdminDevolucionesScreen() {
         autoCorrect={false}
         returnKeyType="search"
       />
-      <View style={styles.chips}>
+      {/*
+        ELECCION UNICA: `radio` y no `checkbox`, y la barra entera es un
+        `radiogroup`. Elegir un filtro apaga el anterior, y anunciarlos como
+        casillas hacia creer que se podian acumular.
+      */}
+      <View style={styles.chips} accessibilityRole="radiogroup">
         <Chip
+          rol="radio"
           label={t('devolucionesAdmin.todas')}
           selected={estado === null}
           onPress={() => setEstado(null)}
@@ -285,6 +331,7 @@ export function AdminDevolucionesScreen() {
         {ESTADOS_DE_SOLICITUD.map((valor) => (
           <Chip
             key={valor}
+            rol="radio"
             label={t(`devolucionesAdmin.estado.${valor}`)}
             selected={estado === valor}
             onPress={() => setEstado(valor)}
@@ -310,7 +357,10 @@ export function AdminDevolucionesScreen() {
             onPress={() => void abrir(item.id)}
             disabled={abriendo}
             accessibilityRole="button"
-            accessibilityLabel={item.courseTitle || item.id}
+            // NUNCA el identificador interno: es lo que el resto de la
+            // aplicacion evita enseñar, y leido en voz alta por un lector de
+            // pantalla no dice absolutamente nada.
+            accessibilityLabel={item.courseTitle || t('devolucionesAdmin.sinTitulo')}
             accessibilityState={{ disabled: abriendo }}
             style={[
               styles.fila,
@@ -355,6 +405,17 @@ export function AdminDevolucionesScreen() {
         ListFooterComponent={
           cargandoMas ? (
             <ActivityIndicator style={styles.pie} color={colors.textMuted} />
+          ) : falloAlPaginar ? (
+            <Pressable
+              onPress={() => void cargarMas(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.retry')}
+              style={styles.pie}
+            >
+              <Text style={[styles.cargarMas, { color: colors.danger }]}>
+                {t('common.loadMoreFailed')}
+              </Text>
+            </Pressable>
           ) : hayMas ? (
             <Pressable
               onPress={() => void cargarMas()}
@@ -392,13 +453,17 @@ function Detalle({
 
   const ejecutar = async (accion: AccionDeDevolucion): Promise<void> => {
     // Cerrojo síncrono: `enviando` no está puesto hasta el siguiente render, y
-    // dos toques rápidos caben de sobra en ese hueco.
+    // dos toques rápidos caben de sobra en ese hueco. Se cierra ANTES de abrir
+    // el diálogo, porque cerrarlo después deja pasar los dos toques: los dos
+    // encuentran la referencia abierta y aceptar los dos avisos ejecuta la
+    // acción financiera dos veces.
     if (enviandoRef.current) return;
     const motivo = notas.trim();
     if (accion === 'reject' && motivo === '') {
       notify(t('devolucionesAdmin.notasFaltan'));
       return;
     }
+    enviandoRef.current = true;
     const aviso = AVISOS[accion];
     if (aviso) {
       const aceptado = await confirm({
@@ -409,9 +474,11 @@ function Detalle({
         confirmLabel: t(`devolucionesAdmin.${ETIQUETA_DE_ACCION[accion]}`),
         destructive: accion === 'reject' || accion === 'cancel',
       });
-      if (!aceptado) return;
+      if (!aceptado) {
+        enviandoRef.current = false;
+        return;
+      }
     }
-    enviandoRef.current = true;
     setEnviando(accion);
     try {
       await OwnerRepository.accion(solicitud.id, accion, motivo || undefined);
@@ -603,7 +670,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   accionTexto: { fontSize: 13, fontWeight: '700' },
-  volver: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  // `minHeight` porque con el relleno solo el area pulsable se quedaba en 32.
+  volver: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    minHeight: 44,
+  },
   volverTexto: { fontSize: 13, fontWeight: '700' },
   pie: { paddingVertical: spacing.lg, alignItems: 'center' },
   cargarMas: { fontSize: 13, fontWeight: '700' },

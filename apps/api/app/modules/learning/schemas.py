@@ -75,6 +75,10 @@ class CourseDetailRead(BaseModel):
     #: Quien lo creo. Sin este campo la aplicacion no podia saber si quien mira
     #: es el autor, y acababa dando la gestion solo a la administracion.
     author_id: str
+    #: Nombre y usuario del autor. Van en el detalle para no obligar a la
+    #: ficha a pedir el perfil aparte solo para escribir «por Fulana».
+    author_name: str | None = None
+    author_username: str | None = None
     title: str
     description: str
     cover_path: str | None = None
@@ -190,3 +194,218 @@ class CourseStudentRead(BaseModel):
     #: Estado COMERCIAL, el único que el propietario necesita: si la venta
     #: sigue en pie, si está en revisión o si se devolvió. Sin el motivo.
     commercial_state: str = "none"
+
+
+class NotaCreate(BaseModel):
+    """Lo único que el cliente manda al crear una nota.
+
+    NO lleva `user_id`: lo pone el servidor con la sesión. Y no lleva la versión
+    del curso: la resuelve el servidor mirando cuál está publicada, porque es
+    una afirmación sobre qué se estudió.
+    """
+
+    body: str = Field(min_length=1, max_length=2000)
+    #: El minuto del vídeo. `None` cuando el reproductor no da una posición
+    #: real; nunca 0 por defecto, que diría «al principio».
+    position_seconds: int | None = Field(default=None, ge=0)
+
+
+class NotaUpdate(BaseModel):
+    """Un PATCH cambia lo que trae; lo que no viene se queda como estaba."""
+
+    body: str | None = Field(default=None, min_length=1, max_length=2000)
+    position_seconds: int | None = Field(default=None, ge=0)
+
+
+class NotaRead(BaseModel):
+    id: str
+    lesson_id: str
+    course_id: str
+    body: str
+    position_seconds: int | None = None
+    #: La versión que se estudiaba. `None` cuando el curso no tenía ninguna
+    #: publicada al escribirla.
+    course_version: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------------------------------- #
+# Evaluación final (0058)
+#
+# DOS FAMILIAS DE ESQUEMAS, y la separación es la garantía: los de quien la
+# escribe llevan `is_correct`; los de quien la responde NO LO DECLARAN, así que
+# no hay forma de que se cuele por descuido al añadir un campo.
+# --------------------------------------------------------------------------- #
+
+
+class OpcionDeAutor(BaseModel):
+    """Una alternativa, como la ve quien escribe la evaluación."""
+
+    body: str = Field(min_length=1, max_length=300)
+    is_correct: bool = False
+
+
+class PreguntaDeAutor(BaseModel):
+    prompt: str = Field(min_length=1, max_length=500)
+    options: list[OpcionDeAutor] = Field(min_length=2, max_length=5)
+
+
+class EvaluacionGuardada(BaseModel):
+    """Lo que manda quien la escribe. Reemplaza la evaluación entera.
+
+    Se guarda completa y no por trozos: media evaluación guardada —preguntas
+    nuevas con las alternativas viejas— es peor que ninguna, y reconstruirla
+    trozo a trozo pide una máquina de estados que nadie ha pedido.
+    """
+
+    title: str = Field(default="", max_length=200)
+    pass_percent: int = Field(default=70, ge=1, le=100)
+    questions: list[PreguntaDeAutor] = Field(default_factory=list, max_length=50)
+
+
+class OpcionDeAutorRead(OpcionDeAutor):
+    id: str
+
+
+class PreguntaDeAutorRead(BaseModel):
+    id: str
+    prompt: str
+    sort_order: int
+    options: list[OpcionDeAutorRead] = []
+
+
+class EvaluacionDeAutorRead(BaseModel):
+    """El borrador, CON las respuestas correctas. Solo para quien gestiona."""
+
+    id: str
+    course_id: str
+    title: str = ""
+    pass_percent: int = 70
+    status: str = "draft"
+    questions: list[PreguntaDeAutorRead] = []
+    #: Por qué todavía no se puede publicar, o `None`. Se calcula al leer para
+    #: que la pantalla lo diga antes de que alguien toque «Publicar».
+    blocking_reason: str | None = None
+
+
+class OpcionRead(BaseModel):
+    """Una alternativa, como la ve quien responde. SIN `is_correct`."""
+
+    id: str
+    body: str
+
+
+class PreguntaRead(BaseModel):
+    id: str
+    prompt: str
+    sort_order: int
+    options: list[OpcionRead] = []
+
+
+class IntentoRead(BaseModel):
+    id: str
+    status: str
+    #: Nula mientras no se envía: un 0 diría «lo hizo y sacó cero».
+    score_percent: int | None = None
+    passed: bool | None = None
+    started_at: datetime
+    submitted_at: datetime | None = None
+    course_version: int | None = None
+
+
+class EvaluacionRead(BaseModel):
+    """La evaluación publicada, como la ve el alumno."""
+
+    id: str
+    course_id: str
+    title: str = ""
+    pass_percent: int = 70
+    questions: list[PreguntaRead] = []
+    #: El intento abierto, si lo hay. Es lo que permite retomar sin perder nada.
+    open_attempt: IntentoRead | None = None
+    #: El mejor resultado enviado. Es el que cuenta para terminar el curso.
+    best_attempt: IntentoRead | None = None
+
+
+class RespuestaEnviada(BaseModel):
+    question_id: str
+    option_id: str
+
+
+class EnvioDeIntento(BaseModel):
+    """Lo que manda el alumno al enviar.
+
+    NO lleva nota ni `passed`: los calcula el servidor. Un cliente que pudiera
+    declarar su propia nota convertiría el certificado en un adorno.
+    """
+
+    answers: list[RespuestaEnviada] = Field(default_factory=list, max_length=50)
+
+
+# --------------------------------------------------------------------------- #
+# Finalización y certificado (0059)
+# --------------------------------------------------------------------------- #
+
+
+class FinalizacionRead(BaseModel):
+    """El estado de finalización de un curso, calculado por el SERVIDOR."""
+
+    course_id: str
+    course_title: str = ""
+    lessons_total: int = 0
+    lessons_completed: int = 0
+    progress_percent: int = 0
+    #: Si el curso tiene evaluación final publicada.
+    quiz_required: bool = False
+    quiz_best_score: int | None = None
+    quiz_passed: bool = False
+    completed: bool = False
+    #: Cuándo se terminó. `None` si no está terminado o falta la 0059.
+    completed_at: datetime | None = None
+    #: El código público del certificado, si ya se emitió.
+    certificate_public_id: str | None = None
+
+
+class MotivoDeRevocacion(BaseModel):
+    """Por qué se revoca. Obligatorio: revocar sin motivo no se puede auditar."""
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class CertificadoRead(BaseModel):
+    """El certificado de quien lo obtuvo."""
+
+    public_id: str
+    course_id: str
+    course_title: str
+    display_name: str
+    author_name: str = ""
+    course_version: int | None = None
+    completed_at: datetime
+    issued_at: datetime
+    status: str = "valid"
+    #: La dirección de la verificación pública. La compone el servidor: el
+    #: teléfono no sabe en qué dominio vive.
+    verify_url: str
+
+
+class VerificacionPublicaRead(BaseModel):
+    """Lo que ve CUALQUIERA con el código. Sin sesión.
+
+    LO QUE NO LLEVA: correo, identificador de usuario, orden, importe ni
+    referencia de pago. Y no lleva `course_id` tampoco: no hace falta para
+    verificar y es un identificador interno más.
+    """
+
+    public_id: str
+    display_name: str
+    course_title: str
+    author_name: str = ""
+    course_version: int | None = None
+    completed_at: datetime
+    issued_at: datetime
+    #: 'valid' o 'revoked'. Un código que no existe responde 404, no `false`.
+    status: str

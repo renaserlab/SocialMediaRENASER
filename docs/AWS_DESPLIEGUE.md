@@ -3,6 +3,16 @@
 Rama `Edson`, agosto de 2026. Plantillas en `infra/aws/`, workflow en
 `.github/workflows/desplegar-aws.yml`.
 
+> **MIGRACIÓN EN CURSO (23/09/2026).** La API se prepara para mudarse a la
+> cuenta AWS de RenaserLab con el prefijo `zexcelencia` y el guion
+> `infra/aws/deploy-renaserlab.ps1`. El procedimiento vigente, la auditoría y el
+> plan de corte están en [`AWS_MIGRACION_RENASERLAB.md`](AWS_MIGRACION_RENASERLAB.md).
+> Lo que sigue describe la **cuenta anterior**, donde corre hoy producción:
+> sus nombres (`renaser-fundacion`, `renaser/produccion/api`,
+> `/renaser/produccion/imagen-api`) son los de esa cuenta. Los comandos del §6
+> ya no sirven tal cual: `02-plataforma.yaml` pasa de 51 200 bytes y
+> CloudFormation exige subirla a S3, que es lo que hace el guion.
+>
 > **Estado: DESPLEGADO** (comprobado el 27 de agosto de 2026). La pila esta
 > viva en `us-east-1` y sirve a la web publicada. La entrada real es la
 > distribucion de CloudFront `https://d33u17ka1rcaax.cloudfront.net`
@@ -125,7 +135,8 @@ pero real. La recomendación es empezar en `costo-controlado`; pasar al otro es
 un parámetro y unos 5 minutos.
 
 En ambos, **el máximo es siempre las deseadas + 1**. No es decoración: el
-despliegue usa `MinHealthyPercentage=100`, que levanta la máquina nueva antes de
+despliegue usa `MinHealthyPercentage=100` con `MaxHealthyPercentage=200` (sin este
+segundo, AWS termina primero: medido el 23/09/2026), que levanta la máquina nueva antes de
 apagar la vieja. Sin ese hueco libre, AWS tendría que apagar antes de encender y
 cada despliegue sería un microcorte.
 
@@ -479,7 +490,7 @@ aws ssm put-parameter --region us-east-1 \
 
 aws autoscaling start-instance-refresh --region us-east-1 \
   --auto-scaling-group-name renaser-api-produccion \
-  --preferences '{"MinHealthyPercentage":100,"InstanceWarmup":300}'
+  --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":300}'
 ```
 
 Esto funciona así porque **la versión desplegada vive en un parámetro de SSM, no
@@ -588,8 +599,9 @@ Dicho para que nadie lo dé por hecho:
 
 - **WAF.** Unos 5–8 USD/mes más reglas. Vale la pena el día que haya abuso real
   o formularios públicos sin autenticar.
-- **CloudFront.** No aporta: la media pesada la sirve el CDN de Supabase, no
-  esta API.
+- **CloudFront como caché.** No aporta: la media pesada la sirve el CDN de
+  Supabase, no esta API. (CloudFront SÍ está, pero como frente HTTPS sin caché:
+  ver el aviso del principio y `FrenteHttpsDeEmergencia`.)
 - **Route 53.** El DNS se queda donde esté hoy. Que dos sistemas se peleen por
   un registro DNS es una caída garantizada.
 - **Copias de seguridad de la base de datos.** Son de Supabase y siguen siendo

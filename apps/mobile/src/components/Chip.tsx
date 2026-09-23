@@ -22,6 +22,17 @@ type ChipProps = {
    * son dos cosas distintas.
    */
   disabled?: boolean;
+  /**
+   * `'checkbox'` cuando se pueden elegir varios y `'radio'` cuando la eleccion
+   * es unica. Por defecto sigue siendo `'checkbox'`, que es como se usaba.
+   *
+   * NO ES COSMETICA. Un lector de pantalla anuncia «casilla, no marcada» para
+   * lo primero y «boton de opcion» para lo segundo, y la diferencia le dice a
+   * quien escucha si al elegir otro se apagara este. Las barras de filtros de
+   * alumnos, ventas y devoluciones son de eleccion unica y se anunciaban como
+   * casillas: parecia que se podian acumular.
+   */
+  rol?: 'checkbox' | 'radio';
 };
 
 export function Chip({
@@ -31,6 +42,7 @@ export function Chip({
   style,
   icon,
   disabled = false,
+  rol = 'checkbox',
 }: ChipProps) {
   const { colors } = useAppTheme();
 
@@ -38,8 +50,10 @@ export function Chip({
     <Pressable
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected, disabled }}
+      accessibilityRole={rol}
+      // `checked` vale para los dos papeles; `selected` es el que leen algunos
+      // lectores para los botones de opcion, asi que se mandan ambos.
+      accessibilityState={{ checked: selected, selected, disabled }}
       accessibilityLabel={label}
       style={({ pressed }: { pressed: boolean }) => [
         styles.base,

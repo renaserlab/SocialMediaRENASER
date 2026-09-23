@@ -56,6 +56,50 @@ class Settings(BaseSettings):
     #: a cancelar es mentirle a la persona sobre lo que acaba de pasar.
     payments_cancel_url: str = "https://social-media-renaser.vercel.app/pago/cancelado"
 
+    #: Donde se verifica un certificado. Es una pagina de la WEB porque el
+    #: destinatario de un certificado —una empresa, alguien que contrata— no
+    #: tiene la aplicacion instalada, y pedirle que se la instale para
+    #: comprobar un codigo es no ofrecer verificacion.
+    certificates_verify_url: str = (
+        "https://social-media-renaser.vercel.app/verificar"
+    )
+
+    # --- Eventos ---
+    #: Cuanto espera una reserva a que se suelte el cerrojo del evento, en
+    #: milisegundos. CERO lo desactiva.
+    #:
+    #: Sin limite, dos peticiones por el mismo evento esperan indefinidamente y
+    #: cada una ocupa una conexion del pool: un evento popular con gente
+    #: reintentando encadena esperas hasta agotarlo, y entonces se para la API
+    #: entera y no ese evento. Cinco segundos es mucho mas de lo que tarda una
+    #: reserva y mucho menos de lo que aguanta quien mira la pantalla.
+    #:
+    #: Se aplica con `SET LOCAL`, asi que vale para ESA transaccion y no cambia
+    #: nada en la base.
+    inventory_lock_timeout_ms: int = 5000
+
+    #: La venta de entradas de eventos. APAGADA: el flujo esta construido hasta
+    #: la reserva temporal, pero no hay cobro, ni entrada emitida, ni
+    #: liquidacion. Encenderla sin eso ofreceria un carrito que no lleva a
+    #: ninguna parte.
+    feature_event_ticketing: bool = False
+
+    #: Cobrar una entrada de evento. SEPARADA de `feature_event_ticketing` a
+    #: propósito: apagarla detiene la VENTA y deja intactos los tipos de
+    #: entrada, la disponibilidad y las reservas temporales, que siguen siendo
+    #: útiles sin cobro. Y separada de las de Cursos, cuya semántica es otra:
+    #: allí `stripe_payments_enabled` gobierna la compra de un curso.
+    #:
+    #: APAGADA NO PARA EL DINERO YA EN CURSO. Un webhook verificado de una orden
+    #: que ya se inició se sigue procesando: apagar la venta significa «no se
+    #: abren cobros nuevos», no «el que pagó se queda sin su entrada».
+    feature_event_payments: bool = False
+
+    #: Qué pasarela cobra las entradas: `none` o `stripe`. Con `none` no se
+    #: puede iniciar un pago, y decirlo es más honesto que fallar al llamar.
+    event_payments_provider: str = "none"
+
+
     # --- Pagos: nativo (RevenueCat) ---
     #: Verificacion servidor a servidor de las compras de las tiendas. APAGADA
     #: por defecto. Mientras este en false, `POST /payments/native/sync`
@@ -123,6 +167,35 @@ class Settings(BaseSettings):
     # Transmisiones en vivo
     # ----------------------------------------------------------------- #
 
+    #: PRODUCTOS FISICOS. Encendida, el catalogo se puede mirar: portada,
+    #: busqueda, categorias y ficha. NO habilita comprar nada.
+    #:
+    #: Nace ENCENDIDA porque un catalogo de solo lectura no promete nada: lo que
+    #: promete es el boton de comprar, y ese esta en la otra bandera. Y si no
+    #: hay migraciones aplicadas la portada contesta `disponible: false` sola.
+    feature_products: bool = True
+
+    #: VENDER UN PRODUCTO FISICO. APAGADA, y no hay codigo detras: no existen
+    #: carrito, pedido, existencias, envio ni devolucion de productos.
+    #:
+    #: SEPARADA DE `feature_products` a proposito. Ademas de que falta el
+    #: codigo, faltan decisiones de la empresa sin las cuales no se puede
+    #: vender: entidad legal que emite el comprobante, paises, impuestos,
+    #: transportista, cobertura, tarifas de envio y moneda. Encenderla no haria
+    #: que se pudiera comprar; solo dejaria de ser verdad que no se puede.
+    feature_product_sales: bool = False
+
+    #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
+    #:
+    #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay
+    #: numero de fabrica a proposito: cuanto tiempo se le guarda a alguien la
+    #: ultima unidad mientras paga es una decision comercial —afecta a cuantas
+    #: ventas se pierden y a cuanto stock queda congelado— y escribir aqui «15»
+    #: seria tomarla en nombre de la empresa, en silencio y para siempre.
+    #:
+    #: Las pruebas lo fijan explicitamente. Un despliegue tiene que ponerlo.
+    product_reservation_minutes: int = 0
+
     #: Interruptor general de los directos CON VIDEO. Apagado, el modulo entero
     #: sigue funcionando —sala, chat, reacciones, moderacion— y lo unico que no
     #: hay es imagen: es exactamente el estado en el que lleva viviendo el
@@ -173,9 +246,54 @@ class Settings(BaseSettings):
         )
 
     @property
+    def reserva_de_productos_configurada(self) -> bool:
+        """Si la duracion de la reserva esta decidida. Sin ella no se vende.
+
+        El tope de arriba no es una regla comercial: esta para que un despiste
+        —un valor en segundos, o en dias— no deje inventario apartado durante
+        semanas sin que nadie se entere.
+        """
+        return 1 <= self.product_reservation_minutes <= 1440
+
+    @property
+    def venta_de_productos_habilitada(self) -> bool:
+        """Si HOY se puede cobrar un producto fisico. Todas, no una.
+
+        CINCO CONDICIONES, Y ENCENDER UNA NO BASTA. Estan escritas juntas aqui
+        para que nadie pueda habilitar la venta tocando un solo interruptor, y
+        para que la razon por la que no se puede se pueda contar entera.
+        """
+        return bool(
+            self.feature_product_sales
+            and self.payments_enabled
+            and self.stripe_payments_enabled
+            and self.reserva_de_productos_configurada
+            and (self.stripe_secret_key or "").strip()
+        )
+
+    @property
     def comision_configurada(self) -> bool:
         """Si hay comision valida. Sin ella no se transfiere nada."""
         return 0 <= self.platform_fee_bps <= 10_000
+
+    # ----------------------------------------------------------------- #
+    # Contexto de las peticiones (0050)
+    # ----------------------------------------------------------------- #
+
+    #: Sal para la huella de la IP que se guarda con un consentimiento.
+    #:
+    #: VACIA POR DEFECTO, Y ESO APAGA LA HUELLA. Sin sal, el hash de una IPv4 se
+    #: revierte por fuerza bruta en segundos: el espacio entero son 2^32 valores.
+    #: Escribirlo igualmente daria una sensacion de proteccion que no existe, asi
+    #: que sin sal se guarda `NULL` y se dice. Es un secreto: solo backend.
+    ip_hash_salt: str = ""
+
+    #: Si hay un proxy DE CONFIANZA delante que escriba `X-Forwarded-For`.
+    #:
+    #: APAGADO POR DEFECTO porque esa cabecera la puede mandar cualquiera: con
+    #: esto encendido sin un proxy que la reescriba, quien pide elige que IP se
+    #: le apunta. Se enciende cuando se sabe que hay un balanceador delante.
+    trust_proxy_headers: bool = False
 
     # --- Beta gratuita ---
     #: Durante la BETA, un curso de pago se puede conceder GRATIS a quien lo

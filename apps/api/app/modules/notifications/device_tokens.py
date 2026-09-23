@@ -19,6 +19,10 @@ class DeviceToken(Base):
         Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True
     )
     platform: Mapped[str] = mapped_column(Text)
+    #: El idioma del aparato (0066). Nulo = no lo dijo, y manda el de por
+    #: defecto. No hay preferencia de idioma en el perfil, y anadirla seria
+    #: inventar una eleccion que nadie ha hecho.
+    locale: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
@@ -13,6 +13,7 @@ import { duracionLegible, moviendo } from '@/lib/asistenteDeCurso';
 import { toast } from '@/lib/toast';
 import {
   CourseContentRepository,
+  nuevaClaveDeCreacion,
   soportaContenidoV2,
   type CourseLesson,
   type CourseModule,
@@ -101,7 +102,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
     // hace que el botón parezca roto.
     setModulos(ids.map((id) => modulos.find((m) => m.id === id)!));
     try {
-      await CourseContentRepository.reorderModules(ids);
+      await CourseContentRepository.reorderModules(courseId, ids);
     } catch {
       notify(t('syllabus.reorderFailed'), t('common.tryAgain'));
     }
@@ -113,7 +114,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
     const ids = moviendo(actuales, desde, hacia);
     if (ids === actuales) return;
     try {
-      await CourseContentRepository.reorderLessons(ids);
+      await CourseContentRepository.reorderLessons(courseId, modulo.id, ids);
     } catch {
       notify(t('syllabus.reorderFailed'), t('common.tryAgain'));
     }
@@ -132,7 +133,7 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
     });
     if (!aceptado) return;
     try {
-      await CourseContentRepository.removeModule(modulo.id);
+      await CourseContentRepository.removeModule(courseId, modulo.id);
       toast(t('syllabus.moduleDeleted'));
       await cargar();
     } catch {
@@ -149,7 +150,11 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
     });
     if (!aceptado) return;
     try {
-      await CourseContentRepository.removeLesson(leccion.id);
+      await CourseContentRepository.removeLesson({
+        courseId,
+        moduleId: leccion.moduleId,
+        lessonId: leccion.id,
+      });
       toast(t('lesson.deleted'));
       await cargar();
     } catch {
@@ -319,7 +324,6 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
         <HojaDeModulo
           courseId={courseId}
           modulo={moduloEnEdicion === 'nuevo' ? null : moduloEnEdicion}
-          posicion={modulos.length}
           admiteDescripcion={v2}
           alCerrar={() => setModuloEnEdicion(null)}
           alGuardar={() => void cargar()}
@@ -340,18 +344,22 @@ export function EditorDeContenido({ courseId, alCambiar }: Props) {
   );
 }
 
-/** Alta y edición de un módulo: título y de qué va el bloque. */
+/**
+ * Alta y edición de un módulo: título y de qué va el bloque.
+ *
+ * YA NO RECIBE POSICIÓN: crear añade al final y el orden se cambia solo con las
+ * flechas, que reescriben la lista entera. Elegirla aquí era proponer un número
+ * que otra alta simultánea proponía también.
+ */
 function HojaDeModulo({
   courseId,
   modulo,
-  posicion,
   admiteDescripcion,
   alCerrar,
   alGuardar,
 }: {
   courseId: string;
   modulo: CourseModule | null;
-  posicion: number;
   admiteDescripcion: boolean;
   alCerrar: () => void;
   alGuardar: () => void;
@@ -361,6 +369,9 @@ function HojaDeModulo({
   const [titulo, setTitulo] = useState(modulo?.title ?? '');
   const [descripcion, setDescripcion] = useState(modulo?.description ?? '');
   const [guardando, setGuardando] = useState(false);
+  // La hoja se monta al abrirla y se desmonta al cerrarla, así que la clave
+  // nace vacía en cada alta sin tener que limpiarla a mano.
+  const clave = useRef<string | null>(null);
   // El aviso vive DENTRO de la hoja: en iOS un diálogo no se abre encima de un
   // Modal y no llegaría a verse.
   const [error, setError] = useState<string | null>(null);
@@ -371,17 +382,22 @@ function HojaDeModulo({
     setError(null);
     try {
       if (modulo) {
-        await CourseContentRepository.updateModule(modulo.id, {
+        await CourseContentRepository.updateModule(courseId, modulo.id, {
           title: titulo.trim(),
           description: descripcion.trim(),
         });
       } else {
-        await CourseContentRepository.createModule(
+        // La clave se reserva antes de esperar a nadie, y se conserva mientras
+        // la hoja siga abierta: dos toques —o un reintento tras un corte— son
+        // el MISMO módulo, y el servidor devuelve el que ya creó.
+        clave.current ??= nuevaClaveDeCreacion();
+        await CourseContentRepository.createModule({
           courseId,
-          titulo.trim(),
-          posicion,
-          descripcion.trim(),
-        );
+          title: titulo.trim(),
+          description: descripcion.trim(),
+          claveDeIdempotencia: clave.current,
+        });
+        clave.current = null;
       }
       alGuardar();
       alCerrar();
@@ -456,6 +472,9 @@ function HojaDeLeccion({
   const [progreso, setProgreso] = useState<UploadProgress | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Ver `HojaDeModulo`. Aquí pesa más: antes del alta se sube el vídeo, así que
+  // hay tiempo de sobra para volver a pulsar creyendo que no pasó nada.
+  const clave = useRef<string | null>(null);
 
   const elegirVideo = async () => {
     try {
@@ -486,27 +505,33 @@ function HojaDeLeccion({
     try {
       const mediaPath = video ? await uploadCourseMedia(video, courseId, setProgreso) : undefined;
       if (leccion) {
-        await CourseContentRepository.updateLesson(leccion.id, {
-          title: titulo.trim(),
-          body: cuerpo,
-          durationSeconds: duracion,
-          kind: tipo,
-          isPreview: muestra,
-          // `undefined` deja el vídeo que ya tenía: solo se toca si se eligió
-          // uno nuevo. Sin esto, editar el título borraba el vídeo.
-          ...(mediaPath !== undefined ? { mediaPath } : {}),
-        });
+        await CourseContentRepository.updateLesson(
+          { courseId, moduleId: modulo.id, lessonId: leccion.id },
+          {
+            title: titulo.trim(),
+            body: cuerpo,
+            durationSeconds: duracion,
+            kind: tipo,
+            isPreview: muestra,
+            // `undefined` deja el vídeo que ya tenía: solo se toca si se eligió
+            // uno nuevo. Sin esto, editar el título borraba el vídeo.
+            ...(mediaPath !== undefined ? { mediaPath } : {}),
+          },
+        );
       } else {
+        clave.current ??= nuevaClaveDeCreacion();
         await CourseContentRepository.createLesson({
+          courseId,
           moduleId: modulo.id,
           title: titulo.trim(),
           body: cuerpo,
           mediaPath: mediaPath ?? null,
           durationSeconds: duracion,
-          sortOrder: modulo.lessons.length,
           kind: tipo,
           isPreview: muestra,
+          claveDeIdempotencia: clave.current,
         });
+        clave.current = null;
       }
       alGuardar();
       alCerrar();

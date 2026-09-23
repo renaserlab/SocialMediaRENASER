@@ -25,7 +25,13 @@ import { useProfilePosts } from '@/hooks/useProfilePosts';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
+import { ProductSellerRepository } from '@/repositories/ProductSellerRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import {
+  esProveedorActivo,
+  rutaDelProveedor,
+  type EstadoDelProveedor,
+} from '@/lib/proveedorDeProductos';
 import { guardarPerfil, pedirPerfil, perfilEnCache } from '@/services/cachePerfil';
 import { ConfirmarRecorte } from '@/components/ConfirmarRecorte';
 import {
@@ -137,6 +143,37 @@ export function ProfileScreen() {
    * de las descripciones, y así el caso normal no parpadea.
    */
   const [bioLarga, setBioLarga] = useState(false);
+  /**
+   * Si esta persona ya es responsable comercial de productos en Z.
+   *
+   * Hace falta para saber A DÓNDE lleva el acceso: quien ya lo es va a sus
+   * productos y quien no, a postular. `null` es «todavía no lo sé», y mientras
+   * lo sea no se pinta la entrada: una fila que aparece y cambia de destino un
+   * segundo después es peor que una que tarda en aparecer.
+   */
+  const [estadoDeProveedor, setEstadoDeProveedor] = useState<EstadoDelProveedor | null>(
+    null,
+  );
+
+  /*
+    SOLO EN EL PROPIO PERFIL Y CON SESION. En el de otra persona no se pregunta
+    nada: si es proveedora o no es asunto suyo, y esta lectura es de quien
+    pregunta. Un fallo se ignora a proposito —la entrada no aparece— porque
+    Productos puede no estar desplegado en este servidor, y eso no es motivo
+    para enseñar un error en el perfil.
+  */
+  useEffect(() => {
+    if (isPublic || !signedIn) return undefined;
+    let vivo = true;
+    ProductSellerRepository.estado()
+      .then((leido) => {
+        if (vivo) setEstadoDeProveedor(leido);
+      })
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+  }, [isPublic, signedIn]);
 
   /**
    * Sincroniza la seccion con el parametro de la ruta.
@@ -1048,6 +1085,33 @@ export function ProfileScreen() {
         )}
         {!isPublic ? (
           <React.Fragment>
+            {/*
+              PRODUCTOS Z, DESDE EL PERFIL.
+
+              Aquí y no en los accesos circulares —que son las cuatro secciones
+              del perfil— por el mismo motivo que la galería: no es de ese
+              rango, y añadir un quinto círculo apretaría la fila.
+
+              A DÓNDE LLEVA LO DICE EL CONTRATO, no un rol adivinado. Quien ya
+              es responsable comercial va a sus productos; quien no, a postular.
+              `pending` y `suspended` NO son «casi activo»: el servidor los
+              rechaza, así que mandarlos a crear un producto sería mandarlos a
+              un 403. Mientras no se sepa, la fila no se pinta.
+            */}
+            {estadoDeProveedor !== null ? (
+              <ListRow
+                title={
+                  esProveedorActivo(estadoDeProveedor)
+                    ? t('proveedorProductos.productos.titulo')
+                    : t('proveedorProductos.marca.postula')
+                }
+                leftIcon="package"
+                onPress={() => {
+                  setOptionsVisible(false);
+                  router.push(rutaDelProveedor(estadoDeProveedor) as never);
+                }}
+              />
+            ) : null}
             <ListRow
               title={t('profile.editProfile')}
               leftIcon="edit-3"

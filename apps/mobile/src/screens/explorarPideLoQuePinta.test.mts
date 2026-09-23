@@ -54,19 +54,45 @@ test('Explorar pide un curso, que es el que enseña', () => {
 // ---------------------------------------------------------------------------
 
 test('el tope de eventos es opcional y por omisión pide lo de antes', () => {
+  // Los filtros que se añadieron después también son opcionales: quien no
+  // indique nada sigue recibiendo exactamente lo de antes.
   const catalogo = fuente('repositories/CatalogRepository.ts');
-  assert.match(
-    catalogo,
-    /listEvents\(cuando: GrupoDeEventos = 'all', limite = 50\)/,
+  assert.ok(
+    catalogo.includes("cuando: GrupoDeEventos = 'all',"),
     'la pantalla de Agenda los usa todos: sin indicar nada tiene que llegar lo mismo',
+  );
+  assert.ok(catalogo.includes('limite = 50,'));
+  assert.ok(
+    catalogo.includes('} = {},'),
+    'los filtros tienen que ser opcionales',
   );
 });
 
-test('sin tope, el catálogo de cursos no manda el parámetro', () => {
-  // `ProfileSection` llama a `listCourses()` y filtra por autor en el cliente:
-  // limitarle la lista le escondería cursos de esa persona.
+test('sin tope ni filtros, el catálogo de cursos no manda ningún parámetro', () => {
+  /*
+    `ProfileSection` llama a `listCourses()` y filtra por autor en el cliente:
+    limitarle la lista le escondería cursos de esa persona.
+
+    Y desde que existen los filtros del servidor, la regla es la misma para
+    ellos: sin filtros, la petición tiene que ser LITERALMENTE la de siempre. Un
+    `?q=` vacío colado cambiaría lo que ve todo el mundo en la pantalla de
+    inicio.
+  */
   const learning = fuente('repositories/LearningRepository.ts');
-  assert.match(learning, /const consulta = limite \? `\?limit=\$\{limite\}` : '';/);
+  assert.match(
+    learning,
+    /if \(limite\) partes\.push\(`limit=\$\{limite\}`\);/,
+    'el tope solo se manda si lo hay.',
+  );
+  assert.match(
+    learning,
+    /const consulta = partes\.length > 0 \? `\?\$\{partes\.join\('&'\)\}` : '';/,
+    'sin nada que mandar, la consulta va vacía.',
+  );
+  assert.ok(
+    /if \(filtros\?\.texto\?\.trim\(\)\)/.test(learning),
+    'el texto vacío no puede convertirse en un `q=` vacío.',
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,26 @@ export type EventDto = {
    * fechas REALES. Opcional porque una API todavía sin desplegar no lo manda.
    */
   time_state?: string | null;
+  organizer_name?: string | null;
+  organizer_username?: string | null;
+  /**
+   * La curaduria: `none`, `pending`, `approved` o `rejected`. Opcional porque
+   * una API todavia sin desplegar no lo manda, y entonces NO hay sello.
+   */
+  selection_status?: string | null;
+  /** «Seleccionado por Z». LO AFIRMA EL SERVIDOR; aqui no se deduce. */
+  seleccionado_por_z?: boolean | null;
+  /**
+   * `FREE_RSVP`, `TICKETED` o `INVITATION_ONLY`.
+   *
+   * AUSENTE SIGNIFICA «NO SE PREGUNTO», y solo la FICHA lo trae: el listado no
+   * lo pide porque averiguarlo por fila seria una consulta por evento.
+   */
+  access_mode?: string | null;
+  /** El precio mas barato que queda, en unidad menor. */
+  price_from_minor?: number | null;
+  /** Moneda de `price_from_minor`, ISO 4217. Solo la ficha la trae. */
+  currency?: string | null;
 };
 
 /**
@@ -81,5 +101,24 @@ export function toEventItem(dto: EventDto): EventItem {
     location: dto.location ?? '',
     type: mapType(dto.event_type),
     timeState: mapTimeState(dto.time_state),
+    // Cadenas vacías si el servidor no las manda: la pantalla decide qué hacer
+    // con eso. Poner «Organizador» aquí sería inventarse un nombre.
+    organizerName: dto.organizer_name ?? '',
+    organizerUsername: dto.organizer_username ?? '',
+    registrationsCount: dto.registrations_count ?? 0,
+    // `?? null` y no `?? 0`: cero sería «aforo cero», que es otra cosa.
+    capacity: dto.capacity ?? null,
+    reservedByMe: dto.reserved_by_me === true,
+    // `=== true` Y NO UN VALOR POR DEFECTO. Un servidor que no manda el campo
+    // —una version anterior, o la 0060 sin aplicar— NO tiene sello, y sin esta
+    // comparacion `undefined` acabaria pintandolo en cuanto alguien escribiera
+    // `!== false` por descuido.
+    seleccionadoPorZ: dto.seleccionado_por_z === true,
+    // `?? null` y no un valor por defecto: `FREE_RSVP` por omision haria que un
+    // evento con entradas apareciera como gratuito en cuanto el servidor no lo
+    // mandara (el listado no lo manda).
+    accessMode: dto.access_mode ?? null,
+    precioDesde: dto.price_from_minor ?? null,
+    monedaDelPrecio: dto.currency ?? null,
   };
 }

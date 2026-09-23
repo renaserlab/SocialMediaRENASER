@@ -111,6 +111,19 @@ export function deCentavos(centavos: number, moneda = 'PEN'): string {
 }
 
 /**
+ * El importe de un documento: con el codigo de la moneda, siempre.
+ *
+ * `MXN` y `USD` comparten el simbolo `$`, y una moneda que no esta en la tabla
+ * sale sin ninguno. En un catalogo eso se entiende por el contexto; en una
+ * constancia de compra no: es la prueba de cuanto se pago y en que.
+ */
+export function importeConMoneda(centavos: number, moneda: string): string {
+  const codigo = (moneda ?? '').trim().toUpperCase();
+  const cifra = deCentavos(centavos, codigo);
+  return codigo ? `${cifra} ${codigo}` : cifra;
+}
+
+/**
  * Lo que se ensena cuando el precio ES la informacion: gratis o cuanto cuesta.
  *
  * «Gratis» y no «S/ 0.00» porque son dos afirmaciones distintas: la segunda

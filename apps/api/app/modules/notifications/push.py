@@ -233,3 +233,103 @@ def encolar_push(
         actor_name,
         data,
     )
+
+
+class EnvioRechazado(Exception):
+    """Expo aceptó la petición y rechazó el mensaje. Es un fallo de envío."""
+
+
+async def enviar_de_la_cola(
+    db: AsyncSession, *, usuario_id: str, tipo: str, locale: str
+) -> bool:
+    """Envía un aviso de la cola, con el texto en el idioma que se guardó.
+
+    LANZA SI NO SE PUDO. Quien llama es `entregas.procesar`, que traduce la
+    excepción en un reintento: tragársela aquí marcaría como enviada una
+    notificación que no salió.
+
+    DEVUELVE `False` CUANDO NO HABÍA A DÓNDE MANDARLA —sin texto para ese tipo,
+    sin ningún aparato registrado—. No es un fallo y no se reintenta, pero
+    tampoco es un envío: contarlo como tal hacía que el panel de operación
+    dijera «enviadas» de avisos que nunca salieron de aquí.
+    """
+    from app.modules.notifications import textos
+
+    par = textos.texto(tipo, locale=locale)
+    if par is None:
+        # Un tipo sin texto no es un fallo de envío: no hay nada que mandar.
+        return False
+    titulo, cuerpo = par
+
+    tokens = list(
+        await db.scalars(
+            select(DeviceToken.token).where(DeviceToken.user_id == usuario_id)
+        )
+    )
+    if not tokens:
+        # Sin aparato registrado no hay push. Tampoco es un fallo: el aviso
+        # in-app ya está, y reintentar no va a hacer aparecer un teléfono.
+        return False
+
+    mensajes = [
+        {
+            "to": token,
+            "title": titulo,
+            "body": cuerpo,
+            "sound": "default",
+            "channelId": textos.CANALES.get(tipo, "contenido"),
+        }
+        for token in tokens
+    ]
+    # NO SE USA EL ENVIO DE SIEMPRE: aquel se traga el error a proposito —es
+    # «mejor esfuerzo»— y aqui hace falta lo contrario. Si esto no lanza, la
+    # entrega se marca enviada sin haber salido.
+    for inicio in range(0, len(mensajes), BATCH_SIZE):
+        async with httpx.AsyncClient(timeout=10) as cliente:
+            respuesta = await cliente.post(
+                EXPO_PUSH_URL, json=mensajes[inicio : inicio + BATCH_SIZE]
+            )
+            respuesta.raise_for_status()
+            _exigir_recibos(respuesta)
+    return True
+
+
+def _exigir_recibos(respuesta) -> None:
+    """Mira el CUERPO, no solo el código HTTP.
+
+    Expo contesta 200 y mete el resultado de cada mensaje dentro: un token que
+    ya no existe llega como `{"status": "error"}` en un 200. Mirar solo
+    `raise_for_status()` marcaba como enviada una entrega que Expo rechazó.
+
+    Un cuerpo que no se entiende NO se trata como fallo: la petición salió y el
+    formato de la respuesta no es algo que deba reintentarse en bucle.
+    """
+    try:
+        cuerpo = respuesta.json()
+    except Exception:  # noqa: BLE001
+        return
+    if not isinstance(cuerpo, dict):
+        return
+    recibos = cuerpo.get("data")
+    if not isinstance(recibos, list):
+        return
+    fallos = [
+        str(r.get("message") or r.get("details") or "rechazado")
+        for r in recibos
+        if isinstance(r, dict) and r.get("status") == "error"
+    ]
+    # SI ALGUNO SALIÓ, LA ENTREGA SALIÓ. Un móvil viejo desinstalado hacía
+    # fallar el lote entero, y el reintento repetía el aviso en los aparatos
+    # que sí lo habían recibido: hasta cinco veces, por las cinco esperas.
+    # Reintentar no va a resucitar un token que ya no existe.
+    if fallos and len(fallos) < len(recibos):
+        logger.warning(
+            "[push] %s de %s destinos rechazados: %s",
+            len(fallos),
+            len(recibos),
+            fallos[0][:200],
+        )
+        return
+    if fallos:
+        # SIN EL TOKEN NI EL CUERPO ENTERO: solo cuántos y el primer motivo.
+        raise EnvioRechazado(f"{len(fallos)} de {len(recibos)}: {fallos[0]}"[:400])

@@ -43,6 +43,7 @@ const TARJETA = fuente('components/TarjetaDeGarantia.tsx');
 const FORMULARIO = fuente('screens/SolicitarDevolucionScreen.tsx');
 const HISTORIAL = fuente('screens/ComprasYDevolucionesScreen.tsx');
 const CURSO = fuente('screens/CourseScreen.tsx');
+const ADMIN = fuente('screens/AdminDevolucionesScreen.tsx');
 const AJUSTES = fuente('screens/SettingsScreen.tsx');
 const REPOSITORIO = fuente('repositories/PaymentRepository.ts');
 
@@ -258,6 +259,99 @@ describe('la solicitud de devolución', () => {
       'Y el botón se apaga mientras se envía: es la mitad visible.',
     );
   });
+
+  it('echa el cerrojo ANTES de abrir el diálogo de confirmación', () => {
+    /*
+      EL CERROJO DETRÁS DEL DIÁLOGO NO PROTEGE NADA. La comprobación estaba al
+      entrar, pero la referencia no se ponía a `true` hasta DESPUÉS del
+      `await confirm(...)`: dos toques rápidos la encuentran los dos en
+      `false`, los dos abren su diálogo, y aceptar los dos abre dos
+      expedientes sobre la misma compra. Justo lo que el cerrojo existe para
+      impedir.
+
+      Y si la persona cancela hay que soltarlo, o el botón se queda muerto
+      hasta salir de la pantalla.
+    */
+    for (const [fichero, nombre, ref] of [
+      [FORMULARIO, 'la solicitud', 'enviandoRef'],
+      [HISTORIAL, 'la retirada', 'retirandoRef'],
+      [ADMIN, 'las acciones de administración', 'enviandoRef'],
+    ] as const) {
+      const cerrojo = fichero.indexOf(`${ref}.current = true;`);
+      const dialogo = fichero.indexOf('await confirm({');
+      assert.ok(cerrojo !== -1 && dialogo !== -1, `Faltan cerrojo o diálogo en ${nombre}.`);
+      assert.ok(
+        cerrojo < dialogo,
+        `En ${nombre} el cerrojo se echa antes de abrir el diálogo.`,
+      );
+      assert.ok(
+        fichero.includes(`${ref}.current = false;`),
+        `En ${nombre} hay que soltar el cerrojo si se cancela.`,
+      );
+    }
+  });
+
+  it('cobrar y restaurar tienen cerrojo síncrono, no solo estado', () => {
+    /*
+      `comprando` ES ESTADO, y el estado no está puesto hasta el siguiente
+      render. Entre el primer toque y ese render caben más toques: con dos se
+      abren dos checkouts de Stripe, o se lanzan dos compras a la tienda sobre
+      el mismo curso. Una referencia se actualiza en el acto.
+
+      Se comprueba tambien que se suelta en el `finally`, o el botón se queda
+      muerto en cuanto una compra falle.
+    */
+    assert.ok(
+      CURSO.includes('const comprandoRef = useRef(false);'),
+      'Falta el cerrojo síncrono de compra.',
+    );
+    assert.ok(
+      CURSO.includes('|| comprandoRef.current) return;'),
+      'Comprar tiene que salir si ya hay una compra en marcha.',
+    );
+    assert.ok(
+      CURSO.includes('if (comprandoRef.current) return;'),
+      'Restaurar tiene que salir si ya hay una operación en marcha.',
+    );
+    assert.strictEqual(
+      CURSO.split('comprandoRef.current = false;').length - 1,
+      2,
+      'Los dos caminos sueltan el cerrojo en su `finally`.',
+    );
+
+    /*
+      Y AQUÍ ESTÁ LO QUE FALTABA, que es lo único que de verdad cierra la
+      puerta: que el cerrojo SE ECHE, y antes de llamar a la pasarela.
+
+      Todo lo de arriba comprobaba que la referencia se declara, se lee y se
+      suelta. Borrando las tres asignaciones a `true` el cerrojo no se cerraba
+      nunca, dos toques rápidos abrían dos checkouts sobre el mismo curso, y las
+      cinco aserciones seguían en verde. Comprobado quitándolas: la suite entera
+      —1134 pruebas— pasaba igual.
+    */
+    // `await …` Y NO EL NOMBRE SUELTO: `comprarEnTienda` aparece antes que nada
+    // en la línea del `import`, así que buscarlo a secas encontraba la
+    // importación y la aserción fallaba con el código correcto.
+    for (const [ref, llamada, nombre] of [
+      ['comprandoRef', 'await CommerceRepository.stripeCheckout', 'la compra web'],
+      ['comprandoRef', 'await comprarEnTienda', 'la compra en la tienda'],
+      ['aceptandoRef', 'await DevolucionesRepository.aceptarRecompra', 'la recompra'],
+    ] as const) {
+      const echado = CURSO.indexOf(ref + '.current = true;');
+      const cobra = CURSO.indexOf(llamada);
+      assert.ok(echado !== -1, `En ${nombre} el cerrojo nunca se echa.`);
+      assert.ok(cobra !== -1, `No se encuentra la llamada de ${nombre}.`);
+      assert.ok(
+        echado < cobra,
+        `En ${nombre} el cerrojo se echa ANTES de llamar a la pasarela.`,
+      );
+    }
+  });
+
+  // La prueba de «restaurar compras» vivia aqui y miraba subcadenas del
+  // codigo fuente: cambiando `granted.length` por `granted.length + 1` seguia
+  // verde y el mensaje falso volvia. Se sustituyo por una que EJECUTA el
+  // codigo, en `lib/restauracion.test.mts`.
 
   it('resume las consecuencias y confirma antes de enviar', () => {
     assert.ok(
@@ -541,8 +635,32 @@ describe('el repositorio de devoluciones', () => {
 
   it('la aceptación se manda como aceptada de verdad', () => {
     assert.ok(
-      REPOSITORIO.includes('{ course_id: courseId, accepted: true }'),
+      /course_id: courseId,\s*accepted: true,/.test(REPOSITORIO),
       'El endpoint rechaza `accepted: false`, y hace bien.',
+    );
+  });
+
+  it('y con el origen de la compra cuando es de tienda', () => {
+    /*
+      En la web la orden identifica la firma. En Google y Apple la orden no
+      existe hasta DESPUÉS del cobro, así que sin el proveedor y el producto la
+      aceptación no se puede atar a la compra concreta que la consumió, y «qué
+      aceptó exactamente quien hizo ESTA compra» se queda sin respuesta.
+
+      Es una etiqueta para el rastro y no decide nada: lo que concede el acceso
+      lo sigue resolviendo el servidor contra RevenueCat.
+    */
+    assert.ok(
+      REPOSITORIO.includes('provider: origen.proveedor'),
+      'el proveedor tiene que viajar en el cuerpo.',
+    );
+    assert.ok(
+      REPOSITORIO.includes('product_id: origen.productoDeTienda'),
+      'y el producto de la tienda con él.',
+    );
+    assert.ok(
+      CURSO.includes("oferta?.plataforma === 'ios'"),
+      'la pantalla decide el proveedor a partir de la plataforma de la oferta.',
     );
   });
 
@@ -560,5 +678,42 @@ describe('el repositorio de devoluciones', () => {
     ]) {
       assert.ok(tipo.includes(`'${estado}'`), `Falta el estado «${estado}».`);
     }
+  });
+});
+
+describe('la versión adquirida', () => {
+  it('solo se enseña cuando consta, y nunca se inventa', () => {
+    /*
+      EL RIESGO REAL. Las compras anteriores al versionado no tienen versión, y
+      no la tienen por un motivo: el temario nunca guardó una marca temporal, así
+      que no hay forma de saber qué contenido se vendió. Escribir «versión 1»
+      para que la fila no quede coja sería inventar una prueba.
+
+      Por eso la condición es `!== null` y NO hay rama `else`: callarse es la
+      respuesta honesta.
+    */
+    const inicio = HISTORIAL.indexOf('compra.courseVersion !== null ? (');
+    assert.ok(inicio !== -1, 'La versión se pinta solo cuando el servidor la manda.');
+
+    // SE COMPRUEBA LA RAMA `else`, NO SOLO LA CONDICIÓN. Mirando únicamente que
+    // exista el `!== null`, esta prueba seguía pasando con un
+    // `) : <Text>versión 1</Text>}` detrás, que es exactamente el fallo que
+    // pretende impedir. Lo que hay que afirmar es que cuando no consta no se
+    // pinta NADA.
+    const cierre = HISTORIAL.indexOf(') : ', inicio);
+    assert.ok(cierre !== -1, 'Falta el cierre del ternario de la versión.');
+    assert.strictEqual(
+      HISTORIAL.slice(cierre, cierre + 9),
+      ') : null}',
+      'Si no consta la versión no se pinta nada: callarse es la respuesta honesta.',
+    );
+    assert.ok(
+      !/courseVersion\s*\?\?\s*\d/.test(HISTORIAL),
+      'No se puede rellenar una versión ausente con un número.',
+    );
+    assert.ok(
+      !/courseVersion\s*\|\|\s*\d/.test(HISTORIAL),
+      'Tampoco con un `||`, que además trataría la versión 0 como ausente.',
+    );
   });
 });

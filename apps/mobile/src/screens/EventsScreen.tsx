@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -9,15 +9,28 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
+import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { assets } from '@/data/assets';
 import { events as mockEvents } from '@/data/mockData';
 import { useTranslation } from '@/i18n/useTranslation';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
+import type { ModalidadDeEvento } from '@/repositories/CatalogRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { EventItem } from '@/types';
+
+/** Las modalidades que el servidor acepta, y «todas». Ni una más. */
+const MODALIDADES: Array<{
+  clave: 'eventos.todasLasModalidades' | 'evento.modalidad.presencial' | 'evento.modalidad.online' | 'evento.modalidad.live';
+  valor: ModalidadDeEvento | null;
+}> = [
+  { clave: 'eventos.todasLasModalidades', valor: null },
+  { clave: 'evento.modalidad.presencial', valor: 'presential' },
+  { clave: 'evento.modalidad.online', valor: 'online' },
+  { clave: 'evento.modalidad.live', valor: 'live' },
+];
 
 /**
  * La agenda de eventos, con lo vigente separado de lo que ya pasó.
@@ -49,6 +62,15 @@ export function EventsScreen() {
   const [remoteEvents, setRemoteEvents] = useState<EventItem[]>([]);
   const [remoteReserved, setRemoteReserved] = useState<string[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  /*
+    BUSCAR Y FILTRAR LOS RESUELVE EL SERVIDOR. Hacerlo sobre lo ya descargado
+    deja fuera todo lo que no cupo en la página, y entonces el resultado depende
+    de cuánto se haya bajado en vez de de lo que hay.
+  */
+  const [texto, setTexto] = useState('');
+  const [modalidad, setModalidad] = useState<ModalidadDeEvento | null>(null);
+  /** Lo que de verdad se pidió: el texto se manda al dejar de escribir. */
+  const [buscado, setBuscado] = useState('');
 
   const load = useCallback(() => {
     if (!supabaseEnabled) {
@@ -59,20 +81,30 @@ export function EventsScreen() {
     // `all`: aquí se quieren los tres grupos y el servidor ya los devuelve
     // ordenados —vigentes, sin fecha, anteriores—, así que una sola petición
     // basta y la paginación sigue teniendo sentido.
-    CatalogRepository.listEvents('all')
+    CatalogRepository.listEvents('all', 50, { texto: buscado, modalidad })
       .then(({ items, reservedIds }) => {
         setRemoteEvents(items);
         setRemoteReserved(reservedIds);
         setStatus('idle');
       })
       .catch(() => setStatus('error'));
-  }, [supabaseEnabled]);
+  }, [supabaseEnabled, buscado, modalidad]);
 
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load]),
   );
+
+  /*
+    Una petición por búsqueda, no una por letra. Medio segundo después de la
+    última tecla: escribir «respiración» son once pulsaciones y once listados
+    que se pisan entre sí, y el que gana no es necesariamente el último.
+  */
+  useEffect(() => {
+    const t = setTimeout(() => setBuscado(texto), 500);
+    return () => clearTimeout(t);
+  }, [texto]);
 
   const events = supabaseEnabled ? remoteEvents : mockEvents;
   const reservedIds = supabaseEnabled ? remoteReserved : demoReserved;
@@ -141,7 +173,12 @@ export function EventsScreen() {
           source={event.coverUrl ? { uri: event.coverUrl } : assets.event}
           style={[styles.thumb, { borderColor: colors.border }]}
         />
-        <View style={{ flex: 1 }}>
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={() => router.push(`/eventos/${event.id}` as never)}
+          accessibilityRole="button"
+          accessibilityLabel={event.title}
+        >
           <Text style={[styles.title, { color: colors.text }]}>{event.title}</Text>
           <Text style={[styles.description, { color: colors.textMuted }]}>
             {event.description}
@@ -149,7 +186,7 @@ export function EventsScreen() {
           <Text style={[styles.meta, { color: colors.textMuted }]}>
             {event.date} · {event.location}
           </Text>
-        </View>
+        </Pressable>
         {/*
           NUNCA UN BOTÓN MUERTO. Un evento que ya terminó no se reserva, así
           que no se ofrece un botón que iba a no servir de nada: se dice que
@@ -226,11 +263,81 @@ export function EventsScreen() {
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
         <View style={styles.container}>
+          {/*
+            BUSCADOR Y MODALIDAD, resueltos EN EL SERVIDOR. Sin backend no se
+            ofrecen: el catálogo de demostración no se puede consultar.
+          */}
+          {supabaseEnabled ? (
+            <React.Fragment>
+              <View style={[styles.buscador, { borderColor: colors.border }]}>
+                <Feather name="search" size={16} color={colors.textMuted} />
+                <TextInput
+                  value={texto}
+                  onChangeText={setTexto}
+                  placeholder={t('eventos.buscar')}
+                  placeholderTextColor={colors.textMuted}
+                  accessibilityLabel={t('eventos.buscar')}
+                  style={[styles.entrada, { color: colors.text }]}
+                  returnKeyType="search"
+                />
+                {texto !== '' ? (
+                  <Pressable
+                    onPress={() => setTexto('')}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.close')}
+                  >
+                    <Feather name="x" size={16} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <SinCambioDeSeccion>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.modalidades}
+                >
+                  {MODALIDADES.map((opcion) => {
+                    const elegida = modalidad === opcion.valor;
+                    return (
+                      <Pressable
+                        key={opcion.clave}
+                        onPress={() => setModalidad(opcion.valor)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: elegida }}
+                        accessibilityLabel={t(opcion.clave)}
+                        style={[
+                          styles.modalidad,
+                          {
+                            borderColor: elegida ? colors.text : colors.border,
+                            backgroundColor: elegida ? colors.surfaceAlt : 'transparent',
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: colors.text, fontSize: 13 }}>
+                          {t(opcion.clave)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </SinCambioDeSeccion>
+            </React.Fragment>
+          ) : null}
+
           <StateView
             state={uiState}
             onRetry={load}
             title={uiState === 'empty' ? t('events.emptyTitle') : undefined}
-            description={uiState === 'empty' ? t('events.emptyBody') : undefined}
+            description={
+              uiState !== 'empty'
+                ? undefined
+                : // «No hay eventos» y «no hay resultados» son dos cosas
+                  // distintas: la segunda tiene arreglo cambiando la búsqueda.
+                  buscado !== '' || modalidad !== null
+                  ? t('eventos.sinResultados')
+                  : t('events.emptyBody')
+            }
           >
             {!supabaseEnabled ? (
               // Catálogo de demostración: sin fechas reales no hay nada que
@@ -277,6 +384,25 @@ export function EventsScreen() {
 }
 
 const styles = StyleSheet.create({
+  buscador: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    minHeight: 44,
+    marginBottom: spacing.md,
+  },
+  entrada: { flex: 1, paddingVertical: spacing.sm, fontSize: 14 },
+  modalidades: { gap: spacing.sm, paddingBottom: spacing.md },
+  modalidad: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    justifyContent: 'center',
+    minHeight: 40,
+  },
   container: { paddingHorizontal: spacing.lg },
   mainCard: { height: 460, borderRadius: radius.xl, overflow: 'hidden', justifyContent: 'flex-end', marginBottom: spacing.lg, borderWidth: 1, borderColor: '#333' },
   overlay: { ...StyleSheet.absoluteFillObject },

@@ -392,11 +392,40 @@ async def test_un_curso_con_acceso_pero_sin_empezar(entorno):
 
 @pytest.mark.asyncio
 async def test_la_biblioteca_no_pregunta_una_vez_por_curso(entorno):
-    """Numero de consultas constante, no proporcional a los cursos."""
+    """Numero de consultas CONSTANTE, no proporcional a los cursos.
+
+    Se mide comparando una biblioteca de un curso con una de seis, en vez de
+    contra un tope escrito a mano: el tope caducaba en cuanto la biblioteca
+    aprendia a mirar una cosa mas —le paso con la evaluacion final— y entonces
+    la prueba fallaba sin que hubiera aparecido ningun N+1.
+    """
     from sqlalchemy import event
 
     http, sesiones, _, curso_id, _ = entorno
     await http.post(f"{LEARNING}/courses/{curso_id}/enroll")
+
+    def _escuchar():
+        consultas: list[str] = []
+
+        def _contar(conn, cursor, statement, *args):  # noqa: ANN001
+            consultas.append(statement)
+
+        motor = sesiones.kw["bind"].sync_engine
+        event.listen(motor, "before_cursor_execute", _contar)
+        return consultas, lambda: event.remove(motor, "before_cursor_execute", _contar)
+
+    async def _selects() -> tuple[int, int]:
+        consultas, quitar = _escuchar()
+        try:
+            respuesta = await http.get(f"{LEARNING}/me/courses")
+        finally:
+            quitar()
+        selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
+        return len(selects), len(respuesta.json())
+
+    con_uno, cuantos_uno = await _selects()
+    assert cuantos_uno == 1
+
     async with sesiones() as db:
         for i in range(5):
             otro = Course(
@@ -421,21 +450,11 @@ async def test_la_biblioteca_no_pregunta_una_vez_por_curso(entorno):
             )
         await db.commit()
 
-    consultas: list[str] = []
-
-    def _contar(conn, cursor, statement, *args):  # noqa: ANN001
-        consultas.append(statement)
-
-    motor = sesiones.kw["bind"].sync_engine
-    event.listen(motor, "before_cursor_execute", _contar)
-    try:
-        respuesta = await http.get(f"{LEARNING}/me/courses")
-    finally:
-        event.remove(motor, "before_cursor_execute", _contar)
-
-    assert len(respuesta.json()) == 6
-    selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
-    assert len(selects) <= 5, f"{len(selects)} consultas: {selects}"
+    con_seis, cuantos_seis = await _selects()
+    assert cuantos_seis == 6
+    assert con_seis == con_uno, (
+        f"{con_uno} consultas con un curso y {con_seis} con seis"
+    )
 
 
 @pytest.mark.asyncio

@@ -221,7 +221,7 @@ class StripeProvider(PaymentProvider):
                     "price_data": {
                         "currency": request.currency.lower(),
                         "unit_amount": request.amount_minor,
-                        "product_data": {"name": request.course_title},
+                        "product_data": {"name": request.concepto},
                     },
                 }
             ],
@@ -316,7 +316,9 @@ def traducir_evento(evento: dict[str, Any]) -> PaymentEvent:
 
     return PaymentEvent(
         refund_id=_identificador_del_reembolso(tipo, objeto),
+        dispute_id=_identificador_de_la_disputa(tipo, objeto),
         purchase_id=interno,
+        dominio=_dominio(objeto),
         provider_transaction_id=referencia,
         status=estado,
         amount_minor=_importe(objeto),
@@ -364,6 +366,19 @@ def _estado_de_devolucion(tipo: str, objeto: dict[str, Any]) -> str:
             return "refund_parcial"
         return "refund_procesando"
     return "refunded"
+
+
+def _identificador_de_la_disputa(tipo: str, objeto: dict[str, Any]) -> str:
+    """El `dp_...` de este aviso, o cadena vacía si no es de una disputa.
+
+    En los tres `charge.dispute.*` el objeto ES la disputa, así que su `id` es
+    el que vale. No se compone nada a partir del cobro: un identificador
+    sintético no se puede consultar contra la pasarela ni cruzar con su panel.
+    """
+    if not tipo.startswith("charge.dispute."):
+        return ""
+    crudo = objeto.get("id")
+    return str(crudo) if isinstance(crudo, str) and crudo.startswith("dp_") else ""
 
 
 def _identificador_del_reembolso(tipo: str, objeto: dict[str, Any]) -> str:
@@ -421,6 +436,16 @@ def _importe_del_cobro(objeto: dict[str, Any]) -> int:
             return valor
     valor = objeto.get("charge_amount")
     return valor if isinstance(valor, int) else 0
+
+
+def _dominio(objeto: dict[str, Any]) -> str:
+    """De que dominio es este cobro, segun la metadata que le adjuntamos."""
+    metadata = objeto.get("metadata")
+    if isinstance(metadata, dict):
+        valor = metadata.get("dominio")
+        if isinstance(valor, str):
+            return valor
+    return ""
 
 
 def _identificador_interno(objeto: dict[str, Any]) -> str:

@@ -50,7 +50,7 @@ def test_el_importe_viaja_en_unidad_menor():
     """
     peticion = CheckoutRequest(
         purchase_id="c1",
-        course_title="Curso",
+        concepto="Curso",
         amount_minor=29700,
         currency="PEN",
         user_email="a@b.c",
@@ -76,7 +76,7 @@ async def test_sin_pasarela_no_se_puede_cobrar():
         await proveedor.create_checkout(
             CheckoutRequest(
                 purchase_id="c1",
-                course_title="Curso",
+                concepto="Curso",
                 amount_minor=100,
                 currency="PEN",
                 user_email="a@b.c",

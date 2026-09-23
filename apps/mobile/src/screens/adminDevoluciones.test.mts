@@ -106,11 +106,20 @@ test('las acciones financieras avisan ANTES de ejecutarse', () => {
 });
 
 test('rechazar SIN motivo no llega al servidor', () => {
-  assert.match(BANDEJA, /accion === 'reject' && motivo === ''/);
   const ejecutar = BANDEJA.slice(BANDEJA.indexOf('const ejecutar'));
   const guarda = ejecutar.indexOf("accion === 'reject' && motivo === ''");
   const peticion = ejecutar.indexOf('OwnerRepository.accion');
   assert.ok(guarda > 0 && peticion > guarda, 'se rechaza sin comprobar el motivo');
+
+  // Y QUE LA GUARDA CORTE, que es lo que no se comprobaba. Antes bastaba con
+  // que la condicion existiera antes de la llamada: quitando el `return;` y
+  // dejando el aviso, un rechazo sin motivo llegaba al servidor y las 1134
+  // pruebas seguian en verde. Comprobado quitandolo.
+  assert.match(
+    ejecutar,
+    /accion === 'reject' && motivo === ''\)\s*\{[^}]*\breturn;\s*\}/,
+    'avisar no basta: sin `return` el rechazo sin motivo sale igual',
+  );
 });
 
 test('el motivo se manda en el cuerpo, como pide el contrato', () => {
@@ -146,4 +155,15 @@ test('la lista se pagina y se filtra por estado contra el servidor', () => {
   assert.match(BANDEJA, /offset: solicitudes\.length/);
   assert.match(BANDEJA, /status: estado/);
   assert.match(BANDEJA, /onEndReached/);
+});
+
+test('el Atras fisico cierra el expediente abierto, no la bandeja entera', () => {
+  // El detalle no es otra pantalla: es esta cambiando lo que pinta. Sin
+  // registrarlo, Atras veia una ruta anterior y sacaba de la seccion a quien
+  // estaba leyendo un expediente.
+  assert.match(BANDEJA, /registrarSalidaPropia\(\(\) => setAbierta\(null\)\)/);
+  // Al FOCO: la pantalla sigue montada al cambiar de seccion, y con el
+  // registro puesto el Atras de la seccion nueva cerraba un expediente que
+  // nadie miraba. Para quien lo pulsaba, Atras no hacia nada.
+  assert.match(BANDEJA, /useFocusEffect\(/);
 });

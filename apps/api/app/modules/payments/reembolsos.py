@@ -75,6 +75,23 @@ class RefundProvider(ABC):
         """Pide la devolución TOTAL de una transacción."""
 
     @abstractmethod
+    async def create_partial_refund(
+        self, peticion: RefundRequestToProvider
+    ) -> RefundResult:
+        """Pide devolver SOLO `peticion.amount_minor` de la transacción.
+
+        ES ABSTRACTO A PROPÓSITO, y no un método con implementación por defecto.
+        Un adaptador nuevo que se olvide de esto no arranca; con un defecto que
+        cayera en la total, se olvidaría en silencio y devolvería el cobro
+        entero cuando alguien decidió devolver una parte. La diferencia entre
+        las dos operaciones es dinero.
+
+        QUIEN LO IMPLEMENTE TIENE QUE VALIDAR EL IMPORTE. Cero o negativo no es
+        una devolución, y pasar del cobro lo rechaza la pasarela, pero
+        comprobarlo antes ahorra una llamada y da un código propio.
+        """
+
+    @abstractmethod
     async def get_refund_status(self, external_refund_id: str) -> RefundResult:
         """Consulta cómo va."""
 
@@ -92,6 +109,19 @@ class NoConfigurado(RefundProvider):
     async def create_full_refund(
         self, peticion: RefundRequestToProvider
     ) -> RefundResult:
+        return RefundResult(
+            status="failed",
+            failure_code="provider_not_configured",
+            failure_message=(
+                "Los reembolsos automáticos están desactivados o sin configurar."
+            ),
+        )
+
+    async def create_partial_refund(
+        self, peticion: RefundRequestToProvider
+    ) -> RefundResult:
+        #: IGUAL DE CERRADO QUE LA TOTAL. Que la parcial exista ahora no
+        #: significa que se pueda ejecutar sin pasarela configurada.
         return RefundResult(
             status="failed",
             failure_code="provider_not_configured",
@@ -162,6 +192,28 @@ class DobleDeterminista(RefundProvider):
             )
         self.vistas[peticion.idempotency_key] = resultado
         return resultado
+
+    async def create_partial_refund(
+        self, peticion: RefundRequestToProvider
+    ) -> RefundResult:
+        """La misma tabla de resultados, y el MISMO registro de llamadas.
+
+        Se comparte la implementación con la total porque el escenario que hay
+        que poder reproducir es el de la respuesta de la pasarela, y ese no
+        cambia. Lo que sí cambia —que el importe viaje— se comprueba mirando
+        `llamadas`, que guarda la petición entera.
+
+        Y SE VALIDA EL IMPORTE aquí también: el doble tiene que rechazar lo que
+        rechazaría el real, o las pruebas pasarían contra un adaptador más
+        permisivo que producción.
+        """
+        if peticion.amount_minor <= 0:
+            return RefundResult(
+                status="failed",
+                failure_code="amount_invalid",
+                failure_message="Una devolución de cero no devuelve nada.",
+            )
+        return await self.create_full_refund(peticion)
 
     async def get_refund_status(self, external_refund_id: str) -> RefundResult:
         for resultado in self.vistas.values():

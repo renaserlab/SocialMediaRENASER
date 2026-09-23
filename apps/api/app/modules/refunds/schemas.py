@@ -43,6 +43,10 @@ class RefundEligibilityRead(BaseModel):
     first_accessed_at: datetime | None = None
     expires_at: datetime | None = None
     seconds_remaining: int = 0
+    #: Las horas que dura la garantía, según el servidor. La app las tenía
+    #: escritas a mano («7 días»), así que el día que cambien diría un plazo
+    #: que nadie honra.
+    guarantee_hours: int
     refund_used: bool = False
     refund_used_at: datetime | None = None
     active_request_id: str | None = None
@@ -119,6 +123,16 @@ class PolicyAcceptanceCreate(BaseModel):
 
     course_id: str
     accepted: bool
+    #: Por dónde se va a comprar. Opcional: en la web no hace falta, porque la
+    #: orden lo dice. En las tiendas la orden no existe hasta después del cobro,
+    #: así que sin esto no se puede saber a qué compra correspondió la firma.
+    #:
+    #: NO DECIDE NADA, y por eso puede venir del cliente sin riesgo: es una
+    #: etiqueta para el rastro. Lo que concede el acceso lo sigue resolviendo el
+    #: servidor contra RevenueCat.
+    provider: Literal["stripe", "apple", "google"] | None = None
+    #: El identificador del producto en esa tienda.
+    product_id: str | None = Field(default=None, max_length=255)
 
 
 class RepurchaseNoticeRead(BaseModel):

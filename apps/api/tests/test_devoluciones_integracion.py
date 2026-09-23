@@ -47,6 +47,7 @@ LEARNING = "/api/v1/learning"
 ANA = "aaaaaaaa-0000-0000-0000-000000000001"
 BRUNO = "aaaaaaaa-0000-0000-0000-000000000002"  # autor del curso
 JEFA = "aaaaaaaa-0000-0000-0000-000000000003"  # administración
+MODERA = "aaaaaaaa-0000-0000-0000-00000000000d"  # solo modera contenido
 CARLA = "aaaaaaaa-0000-0000-0000-000000000004"
 CURSO = "cccccccc-0000-0000-0000-000000000001"
 ORDEN = "00000000-0000-0000-0000-0000000000a1"
@@ -161,6 +162,105 @@ async def _pedir(http, *, orden=ORDEN, motivo="not_as_expected"):
     return await http.post(
         f"{PAGOS}/refund-requests", json={"order_id": orden, "reason": motivo}
     )
+
+
+# --------------------------------------------------------------------------- #
+# 0. El estado de una orden: lo que mira la pantalla de vuelta del pago
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_el_estado_de_la_orden_lo_dice_el_servidor(entorno):
+    """LA PANTALLA DE VUELTA NO PUEDE CREERSE LA URL.
+
+    Al volver de la pasarela, el navegador trae `?order=<id>` y nada mas. Ese
+    parametro lo escribe cualquiera, asi que decir «pago confirmado» a partir de
+    el seria dejar que quien pide decida si ha pagado.
+    """
+    http, _, _ = entorno
+    cuerpo = (await http.get(f"{PAGOS}/orders/{ORDEN}")).json()
+    assert cuerpo["id"] == ORDEN
+    assert cuerpo["status"] == "paid"
+    assert cuerpo["course_id"] == CURSO
+    assert cuerpo["currency"] == "PEN"
+    # El acceso viaja APARTE del estado: una orden puede estar pagada con el
+    # acceso sin conceder todavia, porque quien lo concede es el aviso de la
+    # pasarela. Son segundos, y son justo los que la persona esta mirando.
+    assert "has_access" in cuerpo
+
+
+@pytest.mark.asyncio
+async def test_la_constancia_trae_lo_que_hace_falta_y_nada_mas(entorno):
+    """Los datos de una constancia NO fiscal, todos de la orden.
+
+    Sin numero fiscal, sin razon social, sin RUC y sin impuestos: no se calculan
+    en ninguna parte, y ponerlos a cero seria afirmar que no los hay.
+    """
+    http, _, _ = entorno
+    cuerpo = (await http.get(f"{PAGOS}/orders/{ORDEN}")).json()
+
+    for campo in (
+        "id", "course_id", "course_title", "status", "amount_minor", "currency",
+        "created_at", "provider", "has_access",
+    ):
+        assert campo in cuerpo, f"falta {campo}"
+    assert cuerpo["course_title"], "el titulo del curso viene del servidor"
+    assert cuerpo["amount_minor"] == PRECIO, "el importe es el de LA ORDEN"
+
+    prohibidos = (
+        "payment_intent", "client_secret", "token", "idempotency", "user_id",
+        "tax", "impuesto", "ruc", "serie", "razon_social", "card", "tarjeta",
+    )
+    for campo in cuerpo:
+        assert not any(p in campo.lower() for p in prohibidos), (
+            f"la constancia no puede llevar «{campo}»"
+        )
+
+
+@pytest.mark.asyncio
+async def test_la_constancia_no_usa_el_precio_de_hoy_del_catalogo(entorno):
+    """UNA COMPRA HISTORICA VALE LO QUE VALIO.
+
+    Si el autor sube el precio manana, la constancia de una compra de ayer
+    seguiria diciendo lo que se cobro. Leerlo del catalogo seria reescribir un
+    justificante.
+    """
+    from app.modules.catalog.models import Course as C
+
+    http, _, sesiones = entorno
+    async with sesiones() as db:
+        curso = await db.get(C, CURSO)
+        curso.price_minor = PRECIO * 3
+        await db.commit()
+
+    cuerpo = (await http.get(f"{PAGOS}/orders/{ORDEN}")).json()
+    assert cuerpo["amount_minor"] == PRECIO
+
+
+@pytest.mark.asyncio
+async def test_la_orden_de_otra_persona_responde_404_y_no_403(entorno):
+    """404 Y NO 403, y la diferencia importa.
+
+    Un «prohibido» confirmaria que esa orden existe, y con eso se puede recorrer
+    el espacio de identificadores para averiguar que ordenes hay. Una orden
+    ajena y una inexistente tienen que verse igual desde fuera.
+    """
+    http, identidad, _ = entorno
+    identidad["uid"] = CARLA
+    ajena = await http.get(f"{PAGOS}/orders/{ORDEN}")
+    inexistente = await http.get(f"{PAGOS}/orders/00000000-0000-0000-0000-00000000ffff")
+    assert ajena.status_code == 404
+    assert inexistente.status_code == 404
+    assert ajena.json() == inexistente.json(), (
+        "las dos respuestas tienen que ser indistinguibles"
+    )
+
+
+@pytest.mark.asyncio
+async def test_un_identificador_que_no_es_uuid_no_revienta(entorno):
+    http, _, _ = entorno
+    respuesta = await http.get(f"{PAGOS}/orders/no-soy-un-uuid")
+    assert respuesta.status_code in (404, 422)
 
 
 # --------------------------------------------------------------------------- #
@@ -322,6 +422,38 @@ async def test_el_creador_del_curso_NO_puede_aprobar(entorno):
             f"{ADMIN}/refund-requests/{solicitud['id']}/{ruta}", json={"notes": "x"}
         )
         assert respuesta.status_code == 403, f"{ruta}: {respuesta.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_quien_solo_modera_contenido_no_mueve_dinero(entorno):
+    """`moderator` oculta publicaciones. No aprueba reembolsos.
+
+    LOS DOS PERMISOS SE PARECEN Y NO SON EL MISMO. La comprobación usaba
+    `is_admin`, y ese conjunto incluye `moderator`: el rol pensado para resolver
+    un reporte podía entrar en la bandeja, leer el motivo privado de cualquier
+    alumno y lanzar un reembolso real contra la pasarela. Ahora el dinero exige
+    `FINANCE_ROLES`, que es más estrecho.
+    """
+    http, identidad, sesiones = entorno
+    await _arrancar_garantia(sesiones)
+    solicitud = (await _pedir(http)).json()
+
+    async with sesiones() as db:
+        db.add(Profile(id=MODERA, full_name="Modera", username="modera", role="moderator"))
+        await db.commit()
+
+    identidad["uid"] = MODERA
+    assert (await http.get(f"{ADMIN}/refund-requests")).status_code == 403
+    assert (
+        await http.get(f"{ADMIN}/refund-requests/{solicitud['id']}")
+    ).status_code == 403
+    for ruta in ("take", "approve", "reject", "retry", "cancel"):
+        respuesta = await http.post(
+            f"{ADMIN}/refund-requests/{solicitud['id']}/{ruta}", json={"notes": "x"}
+        )
+        assert respuesta.status_code == 403, f"{ruta}: {respuesta.status_code}"
+    # Y tampoco la tesorería: los saldos retenidos son dinero, no moderación.
+    assert (await http.get(f"{ADMIN}/owner-balances/health")).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -656,6 +788,235 @@ async def test_tras_usar_la_garantia_se_exige_aceptar(entorno):
         f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
     )
     assert aceptar.status_code == 204
+    despues = (await http.get(f"{PAGOS}/courses/{CURSO}/repurchase-notice")).json()
+    assert despues["requires_acceptance"] is False
+
+
+async def politicas_de_gobernanza(db) -> None:
+    from app.modules.gobernanza import politicas
+
+    await politicas.sembrar_recompra(db)
+    await db.commit()
+
+
+async def _lista_para_recomprar(sesiones) -> None:
+    """Garantia usada: la siguiente compra exige aceptar la condicion."""
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import CourseRefundWindow
+
+    await _arrancar_garantia(sesiones)
+    async with sesiones() as db:
+        ventana = await db.scalar(select(CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_si_falla_la_anotacion_la_aceptacion_y_el_consentimiento_siguen(
+    entorno, monkeypatch
+):
+    """LOS DOS SAVEPOINTS SEPARADOS SON EL MOTIVO DE ESTA PRUEBA.
+
+    Compartiendo uno, un fallo al anotar en la auditoria deshacia tambien el
+    `consent_record` que ya se habia creado bien: se perdia la prueba del
+    consentimiento por no poder escribir su nota. El consentimiento es el dato
+    con valor legal; la nota es el rastro.
+    """
+    from app.modules.gobernanza import auditoria
+    from app.modules.gobernanza.models import ConsentRecord
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)
+    async with sesiones() as db:
+        await politicas_de_gobernanza(db)
+
+    async def _revienta(*_a, **_k):
+        raise RuntimeError("la auditoria se cayo")
+
+    monkeypatch.setattr(auditoria, "anotar", _revienta)
+
+    respuesta = await http.post(
+        f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
+    )
+    assert respuesta.status_code == 204, respuesta.text
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(RefundPolicyAcceptance)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 1
+
+
+@pytest.mark.asyncio
+async def test_si_falla_el_consentimiento_la_aceptacion_sigue_y_se_anota(
+    entorno, monkeypatch
+):
+    """LO ACCESORIO NO PUEDE TUMBAR LO PRINCIPAL.
+
+    `refund_policy_acceptances` es la que consulta el checkout para dejar
+    comprar. Si se perdiera por un fallo al escribir la trazabilidad anadida,
+    la compra quedaria bloqueada por un problema que no es de quien compra.
+    """
+    from app.modules.gobernanza import consentimientos
+    from app.modules.gobernanza.models import AuditEvent, ConsentRecord
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)
+    async with sesiones() as db:
+        await politicas_de_gobernanza(db)
+
+    async def _revienta(*_a, **_k):
+        raise RuntimeError("el consentimiento se cayo")
+
+    monkeypatch.setattr(consentimientos, "registrar", _revienta)
+
+    respuesta = await http.post(
+        f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
+    )
+    assert respuesta.status_code == 204, respuesta.text
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(RefundPolicyAcceptance)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 0
+        # La nota se escribe igual, con `consent_id` vacio: dice lo que paso.
+        notas = list(await db.scalars(select(AuditEvent)))
+        assert len(notas) == 1 and notas[0].action == "consent.accepted"
+
+
+@pytest.mark.asyncio
+async def test_sin_la_politica_sembrada_la_recompra_no_se_bloquea(entorno):
+    """El caso normal hasta que alguien llame al endpoint de siembra.
+
+    Bloquear una compra porque una tabla de trazabilidad esta vacia seria una
+    regresion causada por lo accesorio.
+    """
+    from app.modules.gobernanza.models import ConsentRecord
+    from app.modules.refunds.models import RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)  # SIN sembrar ninguna politica
+
+    respuesta = await http.post(
+        f"{PAGOS}/repurchase-acceptance", json={"course_id": CURSO, "accepted": True}
+    )
+    assert respuesta.status_code == 204, respuesta.text
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(RefundPolicyAcceptance)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 0
+
+
+ORDEN_2 = "00000000-0000-0000-0000-0000000000a2"
+
+
+@pytest.mark.asyncio
+async def test_la_recompra_hasta_la_segunda_devolucion(entorno):
+    """EL ESCENARIO, que hasta ahora estaba probado a trozos.
+
+    NO ES DE PUNTA A PUNTA, y conviene decirlo aqui en vez de prometerlo en el
+    nombre: el aviso, la aceptacion y la elegibilidad pasan por HTTP, pero la
+    segunda compra se monta a mano —una `Order` insertada y las llamadas
+    directas a `enlazar_aceptacion` y `asegurar_ventana`—. El checkout, que es
+    quien crearia esa orden de verdad, no se ejercita aqui.
+
+    Aceptar, recomprar, y las tres consecuencias que la politica promete y que
+    nadie comprobaba juntas:
+
+      1. La aceptacion se consume UNA vez, y queda atada a la orden concreta
+         que se creo. Es lo que permite responder «que acepto exactamente quien
+         compro ESTA orden» con una sola respuesta.
+      2. La segunda compra NO abre una segunda garantia. Por politica solo hay
+         una devolucion voluntaria por persona y curso; si la recompra
+         reiniciara el plazo, la promesa seria otra.
+      3. Y por eso una segunda devolucion voluntaria se rechaza, con el motivo
+         de fondo —ya la usaste— y no con «se te paso el plazo», que le haria
+         pensar que llego tarde por poco.
+    """
+    from app.modules.commerce.models import Order
+    from app.modules.gobernanza.models import ConsentRecord
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import CourseRefundWindow, RefundPolicyAcceptance
+
+    http, _, sesiones = entorno
+    await _lista_para_recomprar(sesiones)
+    async with sesiones() as db:
+        await politicas_de_gobernanza(db)
+
+    # --- Se exige aceptar, y el texto lo pone el servidor -------------------- #
+    aviso = (await http.get(f"{PAGOS}/courses/{CURSO}/repurchase-notice")).json()
+    assert aviso["requires_acceptance"] is True
+    assert aviso["policy_version"] and aviso["notice"]
+
+    assert (
+        await http.post(
+            f"{PAGOS}/repurchase-acceptance",
+            json={"course_id": CURSO, "accepted": True},
+        )
+    ).status_code == 204
+
+    async with sesiones() as db:
+        sueltas = list(
+            await db.scalars(
+                select(RefundPolicyAcceptance).where(
+                    RefundPolicyAcceptance.order_id.is_(None)
+                )
+            )
+        )
+        assert len(sueltas) == 1, "la aceptacion nace suelta y solo una vez"
+        assert await db.scalar(select(func.count()).select_from(ConsentRecord)) == 1
+        original = await db.scalar(select(CourseRefundWindow))
+        primera_fecha, usada = original.first_accessed_at, original.refund_used_at
+
+    # --- La recompra: se crea la orden y se ata la aceptacion --------------- #
+    async with sesiones() as db:
+        producto = await db.scalar(select(CommerceProduct))
+        db.add(
+            Order(
+                id=ORDEN_2,
+                user_id=ANA,
+                commerce_product_id=producto.id,
+                provider="stripe",
+                channel="web",
+                environment="sandbox",
+                status="paid",
+                amount_minor=PRECIO,
+                currency="PEN",
+            )
+        )
+        await db.flush()
+        await devoluciones.enlazar_aceptacion(
+            db, user_id=ANA, course_id=CURSO, order_id=ORDEN_2
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        aceptaciones = list(await db.scalars(select(RefundPolicyAcceptance)))
+        assert len(aceptaciones) == 1, "recomprar no duplica la aceptacion"
+        assert aceptaciones[0].order_id == ORDEN_2, "quedo atada a la orden nueva"
+
+    # --- Entrar al curso otra vez NO abre una segunda garantia -------------- #
+    async with sesiones() as db:
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=ORDEN_2
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        ventanas = list(await db.scalars(select(CourseRefundWindow)))
+        assert len(ventanas) == 1, "la recompra abrio una segunda garantia"
+        assert ventanas[0].first_accessed_at == primera_fecha, "se reinicio el plazo"
+        assert ventanas[0].refund_used_at == usada, "se borro que ya se uso"
+
+    # --- Y una segunda devolucion voluntaria se rechaza --------------------- #
+    elegible = (
+        await http.get(f"{PAGOS}/courses/{CURSO}/refund-eligibility")
+    ).json()
+    assert elegible["eligible"] is False
+    assert elegible["reason_code"] == "already_refunded", (
+        "el motivo tiene que ser el de fondo, no «fuera de plazo»"
+    )
+    segunda = await _pedir(http, orden=ORDEN_2)
+    assert segunda.status_code == 422, segunda.text
+    assert "already_refunded" in segunda.text
+
+    # --- Y ya no se vuelve a pedir la aceptacion ---------------------------- #
     despues = (await http.get(f"{PAGOS}/courses/{CURSO}/repurchase-notice")).json()
     assert despues["requires_acceptance"] is False
 

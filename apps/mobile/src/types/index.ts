@@ -289,6 +289,26 @@ export type Conversation = {
 
 export type EventItem = {
   id: string;
+  /**
+   * «Seleccionado por Z». LO CONFIRMA EL SERVIDOR y no se deduce de nada mas:
+   * ni del estado, ni de la puntuacion —que no llega aqui—, ni de que el
+   * evento lleve tiempo publicado. Sin confirmacion, no se pinta.
+   */
+  seleccionadoPorZ?: boolean;
+  /**
+   * Como se accede al evento. `null` significa «no se pregunto»: solo la ficha
+   * lo trae, y sin el la pantalla NO decide que es gratuito.
+   */
+  accessMode?: string | null;
+  /** El precio mas barato que queda, en unidad menor. `null` si no hay. */
+  precioDesde?: number | null;
+  /**
+   * La moneda de ese precio, ISO 4217. `null` cuando no se pregunto.
+   *
+   * Sin ella la ficha escribia «S/» sobre un importe que podia estar en
+   * dolares: un precio con la moneda equivocada es un precio falso.
+   */
+  monedaDelPrecio?: string | null;
   /** Quien organiza el evento; permite listar los de un perfil. */
   organizerId?: string;
   /** Fecha real de inicio; `date` es solo el texto ya formateado. */
@@ -319,12 +339,25 @@ export type EventItem = {
    * se sabe», y por eso las pantallas no agrupan cuando no hay backend.
    */
   timeState?: 'upcoming' | 'past' | 'undated';
+  /** Nombre y usuario de quien organiza. Pueden llegar vacíos: el servidor no
+   * inventa un nombre cuando el perfil no está. */
+  organizerName?: string;
+  organizerUsername?: string;
+  /** Cuántas personas se han inscrito. Es el conteo REAL, no un redondeo. */
+  registrationsCount?: number;
+  /** Aforo, si el organizador lo declaró. `null` cuando no hay límite puesto. */
+  capacity?: number | null;
+  /** Si ESTA persona ya reservó. `false` sin sesión: no hay a quién preguntar. */
+  reservedByMe?: boolean;
 };
 
 export type Course = {
   id: string;
   /** Quién publica el curso; permite listar los de un perfil. */
   authorId?: string;
+  /** Nombre y usuario del autor. Solo los trae el detalle. */
+  authorName?: string | null;
+  authorUsername?: string | null;
   title: string;
   /** Ruta de la portada en Storage (bucket post-media). */
   coverPath?: string | null;

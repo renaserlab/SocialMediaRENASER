@@ -14,7 +14,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { aCentavos, aTextoEditable, deCentavos, etiquetaDePrecio } from './dinero.ts';
+import {
+  aCentavos,
+  aTextoEditable,
+  deCentavos,
+  etiquetaDePrecio,
+  importeConMoneda,
+} from './dinero.ts';
 
 function centavosDe(texto: string): number {
   const leido = aCentavos(texto);
@@ -93,5 +99,24 @@ describe('ida y vuelta', () => {
       }
       assert.equal(centavosDe(texto), centavos, `ida y vuelta de ${centavos}`);
     }
+  });
+});
+
+describe('el importe de una constancia', () => {
+  it('lleva el codigo, porque el simbolo no distingue', () => {
+    // Es la prueba de cuanto se pago: «$ 49.90» no dice si son pesos o dolares.
+    assert.equal(importeConMoneda(4990, 'MXN'), '$ 49.90 MXN');
+    assert.equal(importeConMoneda(4990, 'USD'), '$ 49.90 USD');
+    assert.notEqual(importeConMoneda(4990, 'MXN'), importeConMoneda(4990, 'USD'));
+  });
+
+  it('una moneda sin simbolo se lee igual', () => {
+    assert.equal(importeConMoneda(4990, 'COP'), '49.90 COP');
+  });
+
+  it('sin moneda no se inventa ninguna', () => {
+    // Ni el simbolo por defecto: poner «S/» donde el servidor no dijo nada
+    // seria afirmar en que se cobro.
+    assert.equal(importeConMoneda(4990, ''), '49.90');
   });
 });

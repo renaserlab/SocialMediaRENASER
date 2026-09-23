@@ -26,6 +26,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -201,6 +202,53 @@ class Order(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ------------------------------------------------------------------ #
+    # LA OFERTA, CONGELADA (0050)
+    #
+    # *** ESTAS COLUMNAS NO TIENEN GUARDA DE ESQUEMA. ***
+    #
+    # A diferencia de `cursos_v2`, que lee las columnas de la 0034 por un
+    # `MetaData` aparte, aqui estan en el modelo: cualquier `select(Order)` las
+    # pide. Desplegar este codigo con la 0050 SIN APLICAR tumba el checkout, el
+    # webhook de pago y el historial de compras. La 0050 va PRIMERO.
+    #
+    # La orden ya era el snapshot del dinero —importe y moneda desde la 0035—;
+    # esto completa lo que faltaba: QUE se compro y con QUE promesa. En columnas
+    # y no en una tabla aparte porque la relacion es uno a uno, y una fila mas
+    # que puede faltar es una fila mas que puede faltar justo donde el dinero no
+    # admite «casi».
+    # ------------------------------------------------------------------ #
+
+    #: ANULABLE, y no se puede evitar: las ordenes anteriores a la 0050 no
+    #: tienen version, y ponerles una seria afirmar que se vendio. El temario no
+    #: guarda ninguna marca temporal, asi que no hay forma de saberlo.
+    course_version_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("course_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    #: La promesa de garantia que se enseño, en horas. 168 por defecto porque es
+    #: lo que el codigo aplica hoy a todos los cursos; congelarlo aqui NO cambia
+    #: ningun plazo vivo —las ventanas guardan su propio `expires_at`— y evita
+    #: una segunda migracion sobre ordenes ya pagadas el dia que la duracion
+    #: deje de ser unica.
+    guarantee_hours: Mapped[int] = mapped_column(
+        Integer, default=168, server_default="168"
+    )
+    guarantee_policy: Mapped[str] = mapped_column(
+        Text, default="refund_v1", server_default="refund_v1"
+    )
+    #: Reservada. HOY SIEMPRE NULA: no hay terminos de compra aprobados porque
+    #: falta decidir entidad vendedora, jurisdiccion e impuestos.
+    terms_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    offer_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: `live` cuando la orden nacio con version; `legacy` para lo anterior. El
+    #: valor por defecto es `legacy` a proposito: si el codigo no lo rellena, lo
+    #: honesto es decir que no se sabe.
+    snapshot_origin: Mapped[str] = mapped_column(
+        String(16), default="legacy", server_default="legacy"
+    )
+
     __table_args__ = (
         CheckConstraint("channel in ('ios', 'android', 'web')", name="orders_channel"),
         CheckConstraint(
@@ -208,6 +256,10 @@ class Order(Base):
             name="orders_status",
         ),
         CheckConstraint("amount_minor >= 0", name="orders_amount_minor"),
+        CheckConstraint(
+            "snapshot_origin in ('live', 'legacy')", name="orders_snapshot_origin"
+        ),
+        CheckConstraint("guarantee_hours >= 0", name="orders_guarantee_hours"),
     )
 
 
@@ -332,6 +384,21 @@ class Entitlement(Base):
     #: antiguos, y esa decision tomada con prisa deja gente fuera.
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    #: QUE VERSION ABRE ESTE DERECHO (0050).
+    #:
+    #: Esta aqui ADEMAS de en la orden porque el derecho es el UNICO punto comun
+    #: a las tres vias de acceso: compra por web, compra por tienda y beta. La
+    #: beta no crea orden ninguna, asi que un snapshot que viviera solo en
+    #: `orders` la dejaria fuera.
+    #:
+    #: `SET NULL` y no `RESTRICT`: aqui la version es informativa —quien decide
+    #: el acceso es el producto—, y un derecho vivo no puede quedar bloqueado
+    #: por una fila de version.
+    course_version_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("course_versions.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     __table_args__ = (
@@ -466,11 +533,34 @@ class OwnerSaleBalance(Base):
     __tablename__ = "owner_sale_balances"
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
-    order_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("orders.id", ondelete="RESTRICT")
+    #: UN ORIGEN, EXACTAMENTE UNO (0068): o curso, o evento. Un CHECK de la base
+    #: lo impone; aquí los cuatro son anulables porque cada venta llena su par.
+    #: Los saldos anteriores siguen con `order_id` y `course_id`, sin tocar.
+    order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("orders.id", ondelete="RESTRICT"), nullable=True
     )
-    course_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("courses.id", ondelete="RESTRICT"), index=True
+    course_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("courses.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=True,
+    )
+    event_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("events.id", ondelete="RESTRICT"), nullable=True
+    )
+    event_order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("event_orders.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    #: EL TERCER ORIGEN (0082). Productos no tiene una tabla de «producto
+    #: vendido» equivalente a `courses` o `events`: lo que se vende es un pedido
+    #: con sus lineas, y el producto de cada linea vive ahi. Asi que el origen
+    #: es UNA columna y no un par, y el CHECK lo admite asi.
+    product_order_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("product_orders.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     owner_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT"), index=True
@@ -483,12 +573,16 @@ class OwnerSaleBalance(Base):
         nullable=True,
     )
 
-    gross_amount_minor: Mapped[int] = mapped_column(Integer)
-    platform_fee_minor: Mapped[int] = mapped_column(Integer)
+    # `BigInteger` desde la 0068. Con `Integer` el tope eran 21 474 836,47 en
+    # una moneda de dos decimales, y `event_orders.total_minor` ya era `bigint`:
+    # un pedido por encima reventaba el INSERT con un error que nadie captura,
+    # dentro del savepoint del webhook de cobro.
+    gross_amount_minor: Mapped[int] = mapped_column(BigInteger)
+    platform_fee_minor: Mapped[int] = mapped_column(BigInteger)
     provider_fee_minor: Mapped[int] = mapped_column(
-        Integer, default=0, server_default="0"
+        BigInteger, default=0, server_default="0"
     )
-    net_amount_minor: Mapped[int] = mapped_column(Integer)
+    net_amount_minor: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(3))
     #: Que reglas de comision se aplicaron. Cambiarlas no reescribe lo anterior.
     fee_rules_version: Mapped[str] = mapped_column(String(32))
@@ -515,6 +609,41 @@ class OwnerSaleBalance(Base):
             "status in ('pending', 'frozen', 'eligible', 'transferring', "
             "'transferred', 'cancelled', 'failed')",
             name="owner_sale_balances_status",
+        ),
+        # UN ORIGEN, EXACTAMENTE UNO. Estaba en la 0068 y no aquí: las pruebas
+        # podían crear un saldo sin origen o con los dos y no enterarse. Desde
+        # la 0082 son TRES ramas, y las dos primeras no cambian ni una letra.
+        CheckConstraint(
+            "(course_id is not null and order_id is not null "
+            " and event_id is null and event_order_id is null "
+            " and product_order_id is null) "
+            "or (event_id is not null and event_order_id is not null "
+            " and course_id is null and order_id is null "
+            " and product_order_id is null) "
+            "or (product_order_id is not null "
+            " and course_id is null and order_id is null "
+            " and event_id is null and event_order_id is null)",
+            name="owner_sale_balances_un_origen",
+        ),
+        # UN SALDO POR PEDIDO DE PRODUCTO. Es lo único que protege de dos saldos
+        # para la misma venta cuando un aviso de cobro llega dos veces, y sin él
+        # en el modelo el camino del `IntegrityError` no se ejercita en pruebas.
+        Index(
+            "owner_sale_balances_pedido_de_producto_unico",
+            "product_order_id",
+            unique=True,
+            postgresql_where=text("product_order_id is not null"),
+            sqlite_where=text("product_order_id is not null"),
+        ),
+        # UN SALDO POR PEDIDO DE EVENTO. Es lo único que protege de dos saldos
+        # para la misma venta bajo concurrencia, y sin él en el modelo el camino
+        # del `IntegrityError` no se ejercitaba nunca en pruebas.
+        Index(
+            "owner_sale_balances_pedido_de_evento_unico",
+            "event_order_id",
+            unique=True,
+            postgresql_where=text("event_order_id is not null"),
+            sqlite_where=text("event_order_id is not null"),
         ),
         CheckConstraint(
             "gross_amount_minor >= 0 and platform_fee_minor >= 0 "
@@ -585,6 +714,13 @@ class OwnerTransfer(Base):
             name="owner_transfers_status",
         ),
         CheckConstraint("amount_minor >= 0", name="owner_transfers_amount"),
+        # Igual que en `refund_requests`: estaba solo en el SQL de la 0049, así
+        # que una transferencia con entorno 'live' pasaba en pruebas y la base
+        # de verdad la rechaza. Aquí no admite nulo, y ese matiz también importa.
+        CheckConstraint(
+            "environment in ('sandbox', 'production')",
+            name="owner_transfers_environment",
+        ),
         # UNA TRANSFERENCIA VIVA POR SALDO. Parcial porque un fallo se puede
         # reintentar y los intentos fallidos son historial.
         Index(

@@ -67,6 +67,8 @@ export type FichaDeCursoDto = {
 export type CourseDetailDto = FichaDeCursoDto & {
   id: string;
   author_id: string;
+  author_name?: string | null;
+  author_username?: string | null;
   title: string;
   description: string;
   cover_path: string | null;
@@ -175,6 +177,8 @@ export function toCourseFromDetail(dto: CourseDetailDto): Course {
     coverPath: dto.cover_path ?? null,
     subtitle: deriveSubtitle(dto.description, dto.subtitle),
     authorId: dto.author_id,
+    authorName: dto.author_name ?? null,
+    authorUsername: dto.author_username ?? null,
     priceMinor: dto.price_minor ?? 0,
     currency: toCurrency(dto.currency),
     modules: dto.modules?.length ?? 0,

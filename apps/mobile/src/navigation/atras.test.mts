@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test';
 
 import {
   MARGEN_DE_SALIDA_MS,
+  decidirAtras,
   hayAtrasInstalado,
   instalarAtras,
   type EntornoDeAtras,
@@ -12,6 +13,7 @@ import {
   hayCapaAbierta,
   olvidarCapasAbiertas,
   registrarCapaAbierta,
+  registrarSalidaPropia,
 } from './capasAbiertas.ts';
 
 /**
@@ -339,5 +341,91 @@ describe('el arranque no es una invitacion a cerrar', () => {
 
     assert.equal(app.pulsar(), true);
     assert.equal(app.registro.avisos, 1);
+  });
+});
+
+describe('una pantalla que se queda el Atras para despedirse', () => {
+  /*
+    POR QUE ESTAS PRUEBAS SON DISTINTAS DE LAS DE LAS PANTALLAS. Las de
+    `screens/*.test.mts` miran el TEXTO del fichero porque importan React
+    Native y aqui no hay renderizador. Estas no: `capasAbiertas` y
+    `decidirAtras` son codigo puro, se ejecutan tal cual, y comprueban la
+    CONDUCTA. Una prueba de texto pasaria aunque el registro no estuviera
+    conectado a la maquina del boton Atras; estas no.
+
+    QUE SE PROTEGE. El asistente de curso tiene que preguntar «¿guardo antes de
+    salir?» y el detalle de la bandeja tiene que volver a su lista, y las dos
+    cosas colgaban solo del boton de la cabecera: la tecla fisica de Android no
+    pasaba por ahi.
+  */
+  it('el Atras la llama a ella y NO toca la navegacion', () => {
+    olvidarCapasAbiertas();
+    let despedida = 0;
+    const retirar = registrarSalidaPropia(() => {
+      despedida += 1;
+    });
+
+    // Hay ruta anterior: sin registrarse, el Atras habria retrocedido.
+    assert.equal(
+      decidirAtras({
+        hayCapaAbierta: hayCapaAbierta(),
+        puedeVolver: true,
+        msDesdeLaUltimaPulsacion: null,
+      }),
+      'cerrarCapa',
+    );
+    assert.equal(cerrarCapaSuperior(), true);
+    assert.equal(despedida, 1, 'la despedida tiene que ejecutarse');
+
+    retirar();
+    // Retirada, el Atras vuelve a ser el de siempre.
+    assert.equal(
+      decidirAtras({
+        hayCapaAbierta: hayCapaAbierta(),
+        puedeVolver: true,
+        msDesdeLaUltimaPulsacion: null,
+      }),
+      'volver',
+    );
+    olvidarCapasAbiertas();
+  });
+
+  it('manda la ultima registrada: una capa encima gana a la pantalla', () => {
+    /*
+      El caso real: se abre el recorte de una foto DESDE el asistente. El
+      recorte se monta despues, asi que el Atras tiene que cerrarlo a el y
+      dejar intacta la despedida del asistente, que sigue debajo.
+    */
+    olvidarCapasAbiertas();
+    const hecho: string[] = [];
+    const retirarPantalla = registrarSalidaPropia(() => hecho.push('asistente'));
+    const retirarCapa = registrarCapaAbierta(() => hecho.push('recorte'));
+
+    cerrarCapaSuperior();
+    assert.deepEqual(hecho, ['recorte']);
+
+    retirarCapa();
+    cerrarCapaSuperior();
+    assert.deepEqual(hecho, ['recorte', 'asistente']);
+
+    retirarPantalla();
+    assert.equal(hayCapaAbierta(), false);
+    olvidarCapasAbiertas();
+  });
+
+  it('retirarse deja de interceptar aunque se retire dos veces', () => {
+    // Es lo que devuelve un `useFocusEffect`: al perder el foco se llama, y
+    // React puede llamarlo otra vez al desmontar.
+    olvidarCapasAbiertas();
+    let veces = 0;
+    const retirar = registrarSalidaPropia(() => {
+      veces += 1;
+    });
+    retirar();
+    retirar();
+    assert.equal(hayCapaAbierta(), false);
+    assert.equal(cerrarCapaSuperior(), false);
+    assert.equal(veces, 0, 'una pantalla sin foco no puede quedarse el Atras');
+    olvidarCapasAbiertas();
   });
 });

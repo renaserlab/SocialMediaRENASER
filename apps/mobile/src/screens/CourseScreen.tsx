@@ -8,9 +8,12 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { CoachMark } from '@/components/CoachMark';
 import { CourseContentEditor } from '@/components/CourseContentEditor';
+import { CondicionesDeCompra } from '@/components/CondicionesDeCompra';
 import { CourseHighlights } from '@/components/CourseHighlights';
+import { FichaDelCurso } from '@/components/FichaDelCurso';
 import { StateView } from '@/components/StateView';
 import { TarjetaDeGarantia } from '@/components/TarjetaDeGarantia';
+import { ValoracionesDelCurso } from '@/components/valoraciones/ValoracionesDelCurso';
 import { esMovil, explicar, ofertaPara, comprarEnTienda, restaurarCompras } from '@/services/compras';
 import type { OfertaDeCompra } from '@/services/compras';
 import { CommerceRepository, DevolucionesRepository } from '@/repositories/PaymentRepository';
@@ -18,6 +21,7 @@ import type { AvisoDeRecompra } from '@/repositories/PaymentRepository';
 import { confirm, notify } from '@/lib/confirm';
 import * as WebBrowser from 'expo-web-browser';
 import { etiquetaDePrecio } from '@/lib/dinero';
+import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import type { AccesoDeBeta } from '@/repositories/LearningRepository';
@@ -34,11 +38,27 @@ export function CourseScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const { course, lessons, canManage, hasAccess, loading, error, reload } = useCourse(id);
+  const {
+    course,
+    lessons,
+    canManage,
+    hasAccess,
+    progressPercent,
+    durationSecondsTotal,
+    loading,
+    error,
+    reload,
+  } = useCourse(id);
   // Primera leccion sin completar; si estan todas, la primera del curso.
   const siguiente = lessons.find((l) => !l.completed) ?? lessons[0];
   const firstLessonId = siguiente?.id;
   const empezado = lessons.some((l) => l.completed || l.progressSeconds > 0);
+  // Un conjunto y no un `find` por fila: el temario lo consulta una vez por
+  // leccion y con una lista larga eso es cuadratico.
+  const completadas = React.useMemo(
+    () => new Set(lessons.filter((l) => l.completed).map((l) => l.id)),
+    [lessons],
+  );
   const [enrolling, setEnrolling] = useState(false);
   const [publicando, setPublicando] = useState(false);
   /**
@@ -71,9 +91,35 @@ export function CourseScreen() {
    */
   const [avisoDeRecompra, setAvisoDeRecompra] = useState<AvisoDeRecompra | null>(null);
   const [aceptaLaRecompra, setAceptaLaRecompra] = useState(false);
+  /**
+   * No se pudo preguntar si esta compra necesita aceptacion.
+   *
+   * ES UN TERCER ESTADO, y hace falta: `avisoDeRecompra === null` significaba a
+   * la vez «no hace falta aceptar nada» y «no se ha podido averiguar». El
+   * `catch` devolvia `null` y la ficha caia en el boton de comprar de siempre,
+   * sin casilla y sin aviso, justo en el caso en el que no sabemos si hace
+   * falta. El servidor sigue rechazando la compra —la proteccion de verdad esta
+   * ahi—, pero la persona se llevaba un error sin explicacion despues de pulsar.
+   */
+  const [falloDelAviso, setFalloDelAviso] = useState(false);
+  /** Sube al reintentar: es lo que vuelve a lanzar la consulta. */
+  const [intentoDelAviso, setIntentoDelAviso] = useState(0);
   const [aceptando, setAceptando] = useState(false);
   /** Cerrojo sincrono: dos toques rapidos no pueden abrir dos pagos. */
   const aceptandoRef = useRef(false);
+  /*
+    CERROJO SINCRONO PARA COBRAR Y PARA RESTAURAR. `comprando` es estado: no
+    esta puesto hasta el siguiente render, y entre el primer toque y ese render
+    caben mas toques. Con dos, se abren dos checkouts de Stripe o se lanzan dos
+    compras a la tienda sobre el mismo curso. Una referencia se actualiza en el
+    acto, asi que el segundo toque encuentra la puerta cerrada.
+  */
+  const comprandoRef = useRef(false);
+  /** La hoja de condiciones se enseña antes de ir al pago. */
+  const [viendoCondiciones, setViendoCondiciones] = useState(false);
+  /** Version publicada y horas de garantia, las dos del SERVIDOR. */
+  const [versionDeLaOferta, setVersionDeLaOferta] = useState<number | null>(null);
+  const [horasDeGarantia, setHorasDeGarantia] = useState<number | null>(null);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
   const borrador = course?.status === 'draft';
@@ -123,6 +169,20 @@ export function CourseScreen() {
    */
   React.useEffect(() => {
     let vigente = true;
+    if (!course || !esDePago || hasAccess) return;
+    void LearningRepository.publishedVersion(course.id)
+      .then((v) => vigente && setVersionDeLaOferta(v?.version ?? null))
+      .catch(() => null);
+    void DevolucionesRepository.garantia(course.id)
+      .then((e) => vigente && setHorasDeGarantia(e.horasDeGarantia))
+      .catch(() => null);
+    return () => {
+      vigente = false;
+    };
+  }, [course, esDePago, hasAccess]);
+
+  React.useEffect(() => {
+    let vigente = true;
     if (!course || !esDePago || hasAccess) {
       setBeta(null);
       return;
@@ -149,20 +209,28 @@ export function CourseScreen() {
     if (!course || !esDePago || hasAccess) {
       setAvisoDeRecompra(null);
       setAceptaLaRecompra(false);
+      setFalloDelAviso(false);
       return;
     }
     DevolucionesRepository.avisoDeRecompra(course.id)
-      // Que falle preguntando no puede romper la ficha del curso. Sin respuesta
-      // no hay aviso: la compra normal sigue su camino y el servidor la
-      // rechazaria si de verdad hiciera falta aceptar.
-      .catch(() => null)
       .then((resultado) => {
-        if (vigente) setAvisoDeRecompra(resultado);
+        if (!vigente) return;
+        setAvisoDeRecompra(resultado);
+        setFalloDelAviso(false);
+      })
+      // Que falle preguntando no rompe la ficha del curso, pero SI bloquea la
+      // compra: sin respuesta no se sabe si esta persona tiene que aceptar
+      // antes que su recompra no llevara garantia, y ofrecerle el boton normal
+      // seria enviarla a un rechazo del servidor sin decirle por que.
+      .catch(() => {
+        if (!vigente) return;
+        setAvisoDeRecompra(null);
+        setFalloDelAviso(true);
       });
     return () => {
       vigente = false;
     };
-  }, [course, esDePago, hasAccess]);
+  }, [course, esDePago, hasAccess, intentoDelAviso]);
 
   /**
    * Aceptar la recompra sin garantia y seguir al pago, en ese orden.
@@ -180,7 +248,24 @@ export function CourseScreen() {
     aceptandoRef.current = true;
     setAceptando(true);
     try {
-      await DevolucionesRepository.aceptarRecompra(course.id);
+      /*
+        SE MANDA DE DONDE VIENE LA COMPRA cuando es de tienda. En la web la
+        orden identifica la firma; en Google y Apple la orden no existe hasta
+        despues del cobro, asi que sin esto la aceptacion no se puede atar a
+        la compra concreta que la consumio.
+      */
+      const proveedor =
+        oferta?.plataforma === 'ios'
+          ? ('apple' as const)
+          : oferta?.plataforma === 'android'
+            ? ('google' as const)
+            : null;
+      await DevolucionesRepository.aceptarRecompra(
+        course.id,
+        proveedor && oferta?.productoDeTienda
+          ? { proveedor, productoDeTienda: oferta.productoDeTienda }
+          : undefined,
+      );
       // Aceptado y guardado: la puerta desaparece y se pasa al pago.
       setAvisoDeRecompra((previo) =>
         previo ? { ...previo, requiereAceptacion: false } : previo,
@@ -226,7 +311,8 @@ export function CourseScreen() {
    * y se lo piense es una decision normal, no un fallo.
    */
   const comprar = async () => {
-    if (!course || !oferta?.sePuedeComprar) return;
+    if (!course || !oferta?.sePuedeComprar || comprandoRef.current) return;
+    comprandoRef.current = true;
     setComprando(true);
     try {
       if (oferta.plataforma === 'web') {
@@ -263,6 +349,7 @@ export function CourseScreen() {
         e instanceof Error ? e.message : t('common.tryAgain'),
       );
     } finally {
+      comprandoRef.current = false;
       setComprando(false);
     }
   };
@@ -274,11 +361,23 @@ export function CourseScreen() {
    * pago, y las tiendas lo exigen.
    */
   const restaurar = async () => {
+    if (comprandoRef.current) return;
+    comprandoRef.current = true;
     setComprando(true);
     try {
       const resultado = await restaurarCompras();
-      if (resultado.estado === 'comprada') {
+      if (resultado.estado === 'comprada' && resultado.accesos > 0) {
         toast(t('course.purchasesRestored'));
+        reload();
+      } else if (resultado.estado === 'comprada') {
+        // PREGUNTAR NO ES RESTAURAR. El servidor contestó y esta cuenta no
+        // tiene ningún acceso: decir «restauradas» sería mentir, y además deja
+        // sin diagnóstico a quien está en la cuenta de tienda equivocada, que
+        // es la causa más común de que esto se pulse una y otra vez.
+        //
+        // Se recarga igual: el servidor acaba de decir la verdad sobre esta
+        // cuenta y la pantalla tiene que reflejarla, tenga compras o no.
+        notify(t('course.noPurchasesFound'), t('course.noPurchasesFoundBody'));
         reload();
       } else if (resultado.estado === 'error') {
         notify(t('course.restoreFailed'), resultado.mensaje);
@@ -286,6 +385,7 @@ export function CourseScreen() {
         notify(t('course.almost'), t('course.checkingPurchases'));
       }
     } finally {
+      comprandoRef.current = false;
       setComprando(false);
     }
   };
@@ -353,7 +453,7 @@ export function CourseScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader title={t('course.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="loading" />
       </View>
     );
@@ -362,7 +462,7 @@ export function CourseScreen() {
   if (error || !course) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title="Programa" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <AppHeader title={t('course.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
       </View>
     );
@@ -371,7 +471,7 @@ export function CourseScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
-        title="Programa"
+        title={t('course.headerTitle')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
         /*
           Editar abre el ASISTENTE, no una hoja.
@@ -385,8 +485,18 @@ export function CourseScreen() {
         onRightPress={canManage ? () => router.push(`/editar-curso/${course?.id}` as never) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
-        {/* Portada real del curso; el asset local solo mientras no tenga. */}
+        {/*
+          Portada real del curso; el asset local solo mientras no tenga.
+
+          DECORATIVA. El titulo del curso va justo debajo, en texto, asi que
+          etiquetar la imagen con el mismo titulo lo haria sonar dos veces al
+          lector de pantalla. Sin marcar, en cambio, se anunciaba como una
+          imagen sin nombre: ruido en medio de la ficha.
+        */}
         <Image
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
           source={course.coverUrl ? { uri: course.coverUrl } : assets.course}
           style={[styles.hero, { borderColor: colors.border }]}
         />
@@ -456,6 +566,37 @@ export function CourseScreen() {
 
           <Text style={[styles.description, { color: colors.textMuted }]}>{course.description}</Text>
 
+          {course.authorName ? (
+            <Pressable
+              style={styles.autor}
+              onPress={() => irAlPerfil(router, course.authorId)}
+              accessibilityRole="button"
+              accessibilityLabel={t('curso.verPerfilDe').replace('{nombre}', course.authorName)}
+            >
+              <Feather name="user" size={15} color={colors.textMuted} />
+              <Text style={[styles.textoDeAutor, { color: colors.textMuted }]}>
+                {t('curso.por').replace('{nombre}', course.authorName)}
+              </Text>
+              <Feather name="chevron-right" size={15} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
+
+          <FichaDelCurso course={course} duracionSegundos={durationSecondsTotal} />
+
+          <CondicionesDeCompra
+            visible={viendoCondiciones}
+            onClose={() => setViendoCondiciones(false)}
+            onConfirmar={() => {
+              setViendoCondiciones(false);
+              void comprar();
+            }}
+            titulo={course.title}
+            precio={oferta?.precio ?? etiquetaDePrecio(course.priceMinor, course.currency)}
+            version={versionDeLaOferta}
+            horasDeGarantia={horasDeGarantia}
+            confirmando={comprando}
+          />
+
           {/*
             Solo hechos que salen de la base de datos. Antes aqui ponia
             «Plantillas y ejercicios» y «Comunidad privada» para todos los
@@ -502,6 +643,11 @@ export function CourseScreen() {
               // Del detalle del curso, que es de donde sale todo lo demás de
               // esta pantalla: una sola fuente para un solo dato.
               comingSoon={!!course.comingSoon}
+              // Que hay hecho y cuanto se lleva: del detalle del curso, que es
+              // de donde sale todo lo demas de esta pantalla. El temario no lo
+              // calcula ni lo vuelve a pedir.
+              completadas={completadas}
+              progresoDelCurso={progressPercent}
               onOpenLesson={(lessonId) => router.push(`/lesson/${lessonId}` as never)}
               // Los contadores de arriba ("X modulos, Y lecciones") vienen del
               // detalle del curso, que se pide una sola vez al montar. Sin esto
@@ -550,7 +696,20 @@ export function CourseScreen() {
                 dos a la vez —o el aviso al lado de un boton que ya cobra— seria
                 cobrar antes de que nadie haya aceptado nada.
               */
-              avisoDeRecompra?.requiereAceptacion ? (
+              falloDelAviso ? (
+                /*
+                  NO SE PUDO PREGUNTAR SI HACE FALTA ACEPTAR, asi que no se
+                  ofrece comprar. Antes se caia al boton normal y la persona
+                  descubria el problema despues de pulsar, con un error del
+                  servidor que no explica nada. Aqui se dice y se ofrece
+                  reintentar.
+                */
+                <StateView
+                  state="error"
+                  description={t('recompra.noSePudoComprobar')}
+                  onRetry={() => setIntentoDelAviso((n) => n + 1)}
+                />
+              ) : avisoDeRecompra?.requiereAceptacion ? (
                 <View
                   style={[styles.recompra, { borderColor: colors.border }]}
                   accessibilityRole="alert"
@@ -596,7 +755,7 @@ export function CourseScreen() {
                   label={comprando ? t('course.processing') : t('course.buy')}
                   disabled={comprando}
                   loading={comprando}
-                  onPress={() => void comprar()}
+                  onPress={() => setViendoCondiciones(true)}
                   style={{ marginTop: spacing.xl }}
                 />
               )
@@ -620,6 +779,46 @@ export function CourseScreen() {
           )}
 
           {/*
+            LA EVALUACION Y EL FINAL DEL CURSO, para quien lo tiene.
+
+            Son dos destinos y no uno: la evaluacion se puede hacer con el
+            curso a medias, y la pantalla de finalizacion sirve tanto para
+            celebrarla como para decir que falta. Las dos preguntan al servidor
+            al abrirse, asi que desde aqui no se afirma nada: si esta
+            instalacion no tiene la 0058 o la 0059, cada una lo dice al llegar.
+          */}
+          {hasAccess && !canManage ? (
+            <View style={styles.accionesDeAprendizaje}>
+              <Button
+                label={t('evaluacion.titulo')}
+                variant="secondary"
+                onPress={() => router.push(`/evaluacion/${course.id}`)}
+                style={styles.accionDeAprendizaje}
+              />
+              <Button
+                label={t('completado.titulo')}
+                variant="secondary"
+                onPress={() => router.push(`/completado/${course.id}`)}
+                style={styles.accionDeAprendizaje}
+              />
+            </View>
+          ) : null}
+
+          {/*
+            AYUDA DEL CURSO. Para quien lo tiene: es donde se llega con «no
+            puedo entrar», «el video falla» o «quiero mi dinero». No abre un
+            sistema de soporte nuevo, reparte hacia el que ya resuelve cada
+            cosa.
+          */}
+          {hasAccess && !canManage ? (
+            <Button
+              label={t('ayuda.titulo')}
+              variant="ghost"
+              onPress={() => router.push(`/ayuda/${course.id}`)}
+            />
+          ) : null}
+
+          {/*
             LA GARANTIA DE DEVOLUCION, para quien compro este curso.
 
             Se pinta solo cuando hay compra de pago con acceso; quien lo
@@ -633,6 +832,26 @@ export function CourseScreen() {
           ) : null}
 
           {/*
+            LAS VALORACIONES.
+
+            `puedeValorar` es solo para no ensenar un boton imposible: valorar
+            pide HABER PAGADO el curso, no poder entrar. En uno gratis nadie
+            compro, asi que el boton contestaba siempre 422
+            `review_purchase_required`; y quien lo publico tampoco valora
+            —valorar lo propio no es una opinion, es publicidad—. Quien DECIDE
+            sigue siendo el servidor, que vuelve a mirar la compra y la
+            devolucion en cada escritura; por eso sus rechazos estan traducidos
+            y se leen dentro de la hoja.
+
+            La seccion se calla entera si esta instalacion no tiene la
+            migracion 0056 (503 `course_reviews_not_available`).
+          */}
+          <ValoracionesDelCurso
+            cursoId={course.id}
+            puedeValorar={esDePago && hasAccess && !canManage}
+          />
+
+          {/*
             Restaurar compras. Obligatorio en movil y visible cuando hace
             falta: quien reinstala o cambia de telefono llega justo aqui, a un
             curso que pago y que no puede abrir.
@@ -643,11 +862,11 @@ export function CourseScreen() {
               disabled={comprando}
               style={styles.retirar}
               accessibilityRole="button"
-              accessibilityLabel="Restaurar compras"
+              accessibilityLabel={t('course.restorePurchases')}
             >
               <Feather name="refresh-cw" size={14} color={colors.textMuted} />
               <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: '700' }}>
-                Restaurar compras
+                {t('course.restorePurchases')}
               </Text>
             </Pressable>
           ) : null}
@@ -694,6 +913,12 @@ function Info({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: str
 }
 
 const styles = StyleSheet.create({
+  accionesDeAprendizaje: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  accionDeAprendizaje: { flex: 1 },
   // 16:9 en vez de 1.1: una portada panoramica se recortaba de forma agresiva
   // en un lienzo casi cuadrado. Este ratio respeta mejor la imagen que se sube.
   hero: { width: '100%', aspectRatio: 16 / 9, resizeMode: 'cover' },
@@ -738,8 +963,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.md,
     paddingVertical: spacing.sm,
+    // 44 pt es el minimo que se puede pulsar con fiabilidad; con el relleno
+    // solo se quedaba por debajo.
+    minHeight: 44,
   },
   casillaTexto: { fontSize: 13, lineHeight: 19, flex: 1 },
+  autor: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  textoDeAutor: { flex: 1, fontSize: 14 },
   description: { fontSize: 14, lineHeight: 21, marginTop: spacing.md },
   info: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: spacing.md, marginVertical: spacing.xl },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

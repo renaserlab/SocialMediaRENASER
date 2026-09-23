@@ -82,6 +82,17 @@ export function EstudiantesDelCursoScreen() {
   const chatRef = useRef(false);
   /** Cerrojo de la página siguiente: `onEndReached` se dispara varias veces. */
   const masRef = useRef(false);
+  /**
+   * La ULTIMA pagina pedida no llego.
+   *
+   * Antes esto apagaba `hayMas` y no se decia nada: la lista quedaba truncada
+   * con el mismo aspecto que una lista completa, asi que se leia como «ya no
+   * hay mas» cuando lo que habia era un fallo de red. En una bandeja de
+   * expedientes o en un listado de ventas eso es dar por vistas cosas que no se
+   * han visto. Ahora se avisa en el pie y se puede reintentar la misma pagina.
+   */
+  const [falloAlPaginar, setFalloAlPaginar] = useState(false);
+
 
   useEffect(() => {
     const temporizador = setTimeout(() => setBusqueda(texto.trim()), 350);
@@ -91,6 +102,9 @@ export function EstudiantesDelCursoScreen() {
   const cargar = useCallback(async () => {
     if (!courseId) return;
     setCargando(true);
+    // Recargar de cero borra el fallo de la pagina anterior: se vuelve a
+    // empezar y ese error ya no describe nada.
+    setFalloAlPaginar(false);
     setError(null);
     setProhibido(false);
     try {
@@ -116,8 +130,13 @@ export function EstudiantesDelCursoScreen() {
     void cargar();
   }, [cargar]);
 
-  const cargarMas = useCallback(async () => {
+  const cargarMas = useCallback(async (reintentoManual = false) => {
+    // `falloAlPaginar` corta el reintento AUTOMATICO. Al no apagar ya `hayMas`,
+    // repintar el pie cambia el alto del contenido y `onEndReached` vuelve a
+    // dispararse: con el servidor caido eso es un bucle de peticiones sin
+    // freno. Se reintenta solo cuando la persona toca el aviso.
     if (masRef.current || !hayMas || cargando || !courseId) return;
+    if (falloAlPaginar && !reintentoManual) return;
     masRef.current = true;
     setCargandoMas(true);
     try {
@@ -134,15 +153,16 @@ export function EstudiantesDelCursoScreen() {
         return [...previos, ...pagina.filter((a) => !vistos.has(a.id))];
       });
       setHayMas(pagina.length === POR_PAGINA);
+      setFalloAlPaginar(false);
     } catch {
-      // Una página que no llega no borra las que ya se leen: se deja de
-      // ofrecer más y quien quiera reintentar recarga la pantalla.
-      setHayMas(false);
+      // Una página que no llega no borra las que ya se leen NI cierra la lista:
+      // `hayMas` se queda como estaba para que el reintento pida la misma.
+      setFalloAlPaginar(true);
     } finally {
       masRef.current = false;
       setCargandoMas(false);
     }
-  }, [alumnos.length, busqueda, cargando, courseId, filtro, hayMas]);
+  }, [alumnos.length, busqueda, cargando, courseId, falloAlPaginar, filtro, hayMas]);
 
   const escribirA = useCallback(
     async (alumno: AlumnoDelCurso) => {
@@ -184,10 +204,16 @@ export function EstudiantesDelCursoScreen() {
         autoCorrect={false}
         returnKeyType="search"
       />
-      <View style={styles.chips}>
+      {/*
+        ELECCION UNICA: `radio` y no `checkbox`, y la barra entera es un
+        `radiogroup`. Elegir un filtro apaga el anterior, y anunciarlos como
+        casillas hacia creer que se podian acumular.
+      */}
+      <View style={styles.chips} accessibilityRole="radiogroup">
         {FILTROS.map((opcion) => (
           <Chip
             key={opcion.clave}
+            rol="radio"
             label={t(opcion.clave)}
             selected={filtro === opcion.valor}
             onPress={() => setFiltro(opcion.valor)}
@@ -246,6 +272,17 @@ export function EstudiantesDelCursoScreen() {
         ListFooterComponent={
           cargandoMas ? (
             <ActivityIndicator style={styles.pie} color={colors.textMuted} />
+          ) : falloAlPaginar ? (
+            <Pressable
+              onPress={() => void cargarMas(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.retry')}
+              style={styles.pie}
+            >
+              <Text style={[styles.cargarMas, { color: colors.danger }]}>
+                {t('common.loadMoreFailed')}
+              </Text>
+            </Pressable>
           ) : hayMas ? (
             // Botón ADEMÁS del desplazamiento: en web y con listas cortas el
             // final no siempre se alcanza arrastrando.

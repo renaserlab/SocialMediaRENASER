@@ -15,6 +15,14 @@ type StateViewProps = {
   children?: React.ReactNode;
   title?: string;
   description?: string;
+  /**
+   * Reintentar. Se pinta en 'error' Y en 'offline'.
+   *
+   * SIN CONEXION TAMBIEN SE REINTENTA. Solo se pintaba en 'error', asi que
+   * siete pantallas ensenaban «sin conexion» sin nada que pulsar: la red
+   * volvia un segundo despues y la unica salida era salir con Atras y volver a
+   * entrar. En una puerta, con gente detras, eso es una pantalla muerta.
+   */
   onRetry?: () => void;
   /**
    * Accion principal, disponible en cualquier estado salvo carga.
@@ -101,7 +109,7 @@ export function StateView({
           variant="secondary"
           style={styles.retryButton}
         />
-      ) : state === 'error' && onRetry ? (
+      ) : (state === 'error' || state === 'offline') && onRetry ? (
         <Button
           label={t('common.retry')}
           onPress={onRetry}

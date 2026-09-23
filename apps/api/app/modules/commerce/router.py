@@ -17,7 +17,9 @@ equivocado. Misma leccion que en `recommendations/esquema.py`.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,12 +27,16 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.security import AuthUser, get_current_user
 from app.modules.catalog.models import Course
 from app.modules.commerce.models import CommerceProduct, Order, OwnerSaleBalance
+from app.modules.commerce import liquidacion
+from app.modules.gobernanza import auditoria
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.commerce.schemas import (
     ESTADOS_DE_SALDO,
     Comprador,
     OwnerCourseSummary,
     BalancesRetenidos,
     OwnerSaleRead,
+    ResultadoDeLiquidacion,
     SaldoPorEstado,
 )
 from app.modules.profiles.models import Profile
@@ -38,7 +44,9 @@ from app.modules.refunds import esquema as esquema_devoluciones
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin
+from app.shared.permissions import puede_mover_dinero
+
+logger = logging.getLogger("renaser.commerce")
 
 router = APIRouter(prefix="/commerce", tags=["comercio-propietario"])
 
@@ -51,7 +59,14 @@ async def _curso_propio(
     curso = await db.get(Course, course_id)
     if curso is None:
         raise NotFoundError("Curso no encontrado.")
-    if curso.author_id != current_user.id and not await is_admin(db, current_user.id):
+    # `puede_mover_dinero` Y NO `is_admin`. `is_admin` incluye `moderator`, que
+    # es la cuenta creada para ocultar una publicacion o resolver un reporte; con
+    # ella se veian importes brutos, comision de plataforma, neto del autor y el
+    # listado de ventas de CUALQUIER curso. Moderar contenido y mirar la caja de
+    # otra persona son dos permisos distintos, y aqui lo eran solo en el nombre.
+    if curso.author_id != current_user.id and not await puede_mover_dinero(
+        db, current_user.id
+    ):
         raise ForbiddenError("No puedes ver las ventas de este curso.")
     return curso
 
@@ -219,7 +234,13 @@ admin_router = APIRouter(prefix="/admin", tags=["comercio-administracion"])
 
 
 async def _exigir_admin(db: AsyncSession, current_user: AuthUser) -> None:
-    if not await is_admin(db, current_user.id):
+    """Los saldos son dinero, así que valen los mismos permisos que el dinero.
+
+    `puede_mover_dinero` y no `is_admin`: este endpoint dice cuánto hay
+    retenido, cuánto congelado y desde cuándo. Es información de tesorería, no
+    de moderación, y `is_admin` incluía al rol `moderator`.
+    """
+    if not await puede_mover_dinero(db, current_user.id):
         raise ForbiddenError("Solo administración puede ver los saldos.")
 
 
@@ -254,7 +275,9 @@ async def salud_de_los_saldos(
             OwnerSaleBalance.status,
             func.count(OwnerSaleBalance.id),
             func.coalesce(func.sum(OwnerSaleBalance.net_amount_minor), 0),
-        ).group_by(OwnerSaleBalance.status)
+        )
+        .where(OwnerSaleBalance.course_id.is_not(None))
+        .group_by(OwnerSaleBalance.status)
     )
     por_estado = _saldos_en_cero()
     for estado, cuantos, importe in filas:
@@ -266,14 +289,20 @@ async def salud_de_los_saldos(
     # LA SEÑAL QUE IMPORTA: `pending` sin fecha de vencimiento. Significa que la
     # persona compró y no ha entrado nunca, así que la garantía no ha arrancado
     # y el dinero no tiene cuándo liberarse.
+    #
+    # Y SOLO CURSOS: desde la 0068 los saldos de entradas comparten tabla, y
+    # todos nacen sin fecha porque la política de retención no está publicada.
+    # Sin filtrar, la señal de alarma de Cursos se llenaba de ruido de eventos.
     sin_fecha = await db.scalar(
         select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "pending",
             OwnerSaleBalance.available_at.is_(None),
         )
     )
     sin_fecha_antiguos = await db.scalar(
         select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "pending",
             OwnerSaleBalance.available_at.is_(None),
             OwnerSaleBalance.created_at <= corte,
@@ -282,6 +311,7 @@ async def salud_de_los_saldos(
     # Y los congelados que nadie resuelve: expedientes abiertos, o una disputa.
     congelados = await db.scalar(
         select(func.count(OwnerSaleBalance.id)).where(
+            OwnerSaleBalance.course_id.is_not(None),
             OwnerSaleBalance.status == "frozen",
             OwnerSaleBalance.updated_at <= corte,
         )
@@ -293,3 +323,157 @@ async def salud_de_los_saldos(
         congelados_antiguos=int(congelados or 0),
         dias=dias,
     )
+
+
+@admin_router.post("/owner-balances/settle", response_model=ResultadoDeLiquidacion)
+async def liquidar(
+    request: Request,
+    limite: int = Query(default=100, ge=1, le=500),
+    solo_liberar: bool = Query(default=False),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResultadoDeLiquidacion:
+    """Mueve los saldos vencidos y paga a los propietarios que toque.
+
+    POR QUE EXISTE ESTE ENDPOINT. `liberar_vencidos` y `ejecutar_transferencia`
+    estaban escritas, documentadas y probadas, y NADIE LAS LLAMABA: ni un
+    endpoint, ni una tarea, ni el arranque. El resultado es que ningun saldo
+    salia nunca de `pending`, asi que `puede_transferirse` contestaba siempre
+    `not_eligible` y el dinero del propietario se quedaba retenido para siempre
+    por mucho que se encendieran las banderas. Solo se veia en el endpoint de
+    salud, que mira pero no toca.
+
+    SE DISPARA A MANO, y no desde un planificador dentro de la API. La aplicacion
+    corre en varias replicas y un temporizador en el proceso significa tantas
+    pasadas simultaneas como replicas haya; ademas, pagar dinero cuando nadie
+    esta mirando es exactamente lo que no conviene mientras la funcion es nueva.
+    Es idempotente y acotado, asi que llamarlo dos veces seguidas no duplica
+    nada y se puede colgar de un cron externo cuando se decida.
+
+    NO ENCIENDE NADA. Con las banderas apagadas la parte de liberacion sigue
+    funcionando —es contabilidad interna, no dinero saliendo— y todas las
+    transferencias se cuentan como omitidas con el motivo `transfers_disabled`,
+    que es lo que hace util llamarlo tambien en pruebas.
+
+    `solo_liberar` deja la primera mitad y se salta los pagos: sirve para poner
+    al dia los estados sin tocar la pasarela.
+
+    LIMITE CONOCIDO. Los elegibles se toman por fecha de vencimiento y acotados
+    por `limite`; los que no pasan `puede_transferirse` se cuentan como omitidos
+    pero siguen siendo los primeros de la cola en la siguiente pasada. Con
+    `limite` saldos permanentemente bloqueados —una cuenta de cobro sin
+    completar, por ejemplo— los de detras no llegarian a pagarse nunca. Se
+    detecta mirando `omitidos`: un motivo repetido y estable en cada pasada es
+    justo eso, y se resuelve subiendo `limite` o arreglando esas cuentas. No se
+    pagina aqui porque hoy el volumen no lo justifica y un `offset` sobre una
+    lista que cambia mientras se recorre trae sus propios problemas.
+    """
+    await _exigir_admin(db, current_user)
+    resultado = ResultadoDeLiquidacion()
+    if not await esquema_devoluciones.hay_liquidaciones(db):
+        # Sin la 0049 no hay nada que liquidar. Ceros, no un 500: el endpoint se
+        # puede desplegar antes que la migracion.
+        return resultado
+
+    resultado.liberados = await liquidacion.liberar_vencidos(db, limite=limite)
+    if resultado.liberados:
+        # QUIEN LO DISPARO Y CUANTOS SE MOVIERON. Antes esto solo devolvia un
+        # contador: no quedaba constancia de que alguien hubiera pasado saldos a
+        # disponibles, ni de cuando. Va en la MISMA transaccion que el cambio.
+        await auditoria.anotar(
+            db,
+            action="balances.released",
+            entity_type="owner_sale_balance",
+            # No hay una entidad unica: es una pasada. Se apunta contra quien la
+            # lanzo, que es la respuesta a «¿quien movio esto?».
+            entity_id=current_user.id,
+            actor_id=current_user.id,
+            actor_role="admin",
+            new_state="eligible",
+            payload={"liberados": resultado.liberados, "limite": limite},
+            origen=leer_origen(request),
+        )
+    await db.commit()
+    if solo_liberar:
+        return resultado
+
+    # SOLO LOS IDENTIFICADORES, no los objetos.
+    #
+    # El bucle hace `commit` y, cuando algo falla, `rollback`. Las dos cosas
+    # caducan TODOS los objetos del ORM cargados en la sesion, no solo el de la
+    # vuelta que fallo: guardando la lista de saldos, la vuelta siguiente leia
+    # `saldo.status` de un objeto expirado y disparaba una recarga perezosa que
+    # en asincrono revienta con `MissingGreenlet`. Un fallo en el primero se
+    # llevaba por delante a todos los demas, que es justo lo que el `try` de
+    # abajo dice evitar.
+    #
+    # Con los identificadores se recarga en cada vuelta y el estado es el real,
+    # no el que se leyo hace veinte transferencias.
+    identificadores = list(
+        await db.scalars(
+            select(OwnerSaleBalance.id)
+            .where(
+                # SOLO CURSOS. Los saldos de evento comparten tabla desde la
+                # 0068 y este turno no sabe evaluarlos: entrarían, serían
+                # omitidos siempre, y copar el `limite` deja a los creadores de
+                # cursos sin cobrar. Las entradas se pagan por su propio camino.
+                OwnerSaleBalance.course_id.is_not(None),
+                OwnerSaleBalance.status == "eligible",
+            )
+            .order_by(OwnerSaleBalance.available_at)
+            .limit(limite)
+        )
+    )
+    omitidos: dict[str, int] = {}
+    for balance_id in identificadores:
+        saldo = await db.get(OwnerSaleBalance, balance_id)
+        if saldo is None:
+            continue
+        motivo = await liquidacion.puede_transferirse(db, saldo)
+        if motivo is not None:
+            omitidos[motivo] = omitidos.get(motivo, 0) + 1
+            continue
+        try:
+            intento = await liquidacion.ejecutar_transferencia(db, saldo)
+            estado_del_intento = intento.status if intento is not None else None
+            if intento is not None:
+                # ANTES DEL `commit`, Y NO DESPUES. La propiedad que se busca es
+                # «no existe movimiento sin su registro»: con la anotacion
+                # despues, una caida entre los dos `commit` dejaba el dinero
+                # fuera y `audit_events` vacio, que es exactamente el caso
+                # indefendible.
+                await auditoria.anotar(
+                    db,
+                    action="transfer.executed",
+                    entity_type="owner_sale_balance",
+                    entity_id=balance_id,
+                    actor_id=current_user.id,
+                    actor_role="admin",
+                    # `ok` solo cuando la pasarela lo dio por completado. Un
+                    # intento en curso no es un pago hecho.
+                    outcome="ok" if estado_del_intento == "completed" else "error",
+                    new_state=estado_del_intento,
+                    payload={"transfer_id": intento.id},
+                    origen=leer_origen(request),
+                )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            # UNO QUE FALLA NO SE LLEVA A LOS DEMAS. Se deshace lo suyo y se
+            # sigue: el saldo se queda como estaba y entra en la proxima pasada.
+            logger.exception(
+                "[liquidacion] fallo al transferir el saldo %s", balance_id
+            )
+            await db.rollback()
+            resultado.fallidos += 1
+            continue
+        if intento is None:
+            # Se lo llevo otro proceso entre la comprobacion y el turno.
+            omitidos["taken"] = omitidos.get("taken", 0) + 1
+            continue
+        resultado.transferencias_intentadas += 1
+        # `estado_del_intento` se leyo ANTES del commit: despues, el objeto esta
+        # caducado y leerle el estado seria otra recarga perezosa.
+        if estado_del_intento == "completed":
+            resultado.transferencias_completadas += 1
+    resultado.omitidos = omitidos
+    return resultado

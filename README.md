@@ -17,7 +17,7 @@ MVP funcional inspirado en el diseño entregado. La aplicación es **móvil híb
 
 ## Requisitos
 
-- Node.js 22.13 o superior.
+- Node.js 22.15 o superior (`module.registerHooks`, que usan cuatro baterías del móvil, se añadió ahí).
 - npm 10 o superior.
 - Expo Go para una prueba rápida, o Development Build para trabajo profesional.
 - Android Studio para emulador Android.

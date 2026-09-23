@@ -111,3 +111,102 @@ async def delete_user_files(user_id: str) -> int:
     if borrados:
         logger.info("Borrados %d archivos de Storage de %s", borrados, user_id)
     return borrados
+
+
+# --------------------------------------------------------------------------- #
+# Subir, firmar y borrar un objeto concreto
+#
+# POR QUE ESTA AQUI Y NO EN `modules/products`. Porque hablar con Storage es lo
+# mismo para todo el mundo —la misma URL, la misma clave de servicio, los mismos
+# errores— y tener dos copias de estas cuatro funciones garantiza que un dia una
+# de ellas deje de comprobar algo que la otra si comprueba.
+#
+# LA CLAVE `service_role` NO SALE DE AQUI. Ninguna de estas funciones devuelve
+# ni registra la clave; lo que sale es una URL firmada de vida corta.
+# --------------------------------------------------------------------------- #
+class StorageNoConfigurado(RuntimeError):
+    """No hay credenciales para operar sobre Storage."""
+
+
+class StorageFallo(RuntimeError):
+    """Storage contesto algo que no es un exito."""
+
+
+def _exigir_configurado() -> None:
+    if not storage_configured():
+        raise StorageNoConfigurado(
+            "Falta SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY."
+        )
+
+
+async def subir_objeto(
+    bucket: str, ruta: str, datos: bytes, content_type: str, *, sobrescribir: bool = False
+) -> None:
+    """Sube `datos` a `bucket/ruta`.
+
+    `sobrescribir` va en False por defecto a proposito: el nombre lo genera el
+    servidor y es unico, asi que una segunda subida a la misma ruta significa
+    que algo se esta pisando y conviene que falle.
+    """
+    _exigir_configurado()
+    url = f"{get_settings().supabase_url}/storage/v1/object/{bucket}/{ruta}"
+    cabeceras = {**_headers(), "Content-Type": content_type}
+    if sobrescribir:
+        cabeceras["x-upsert"] = "true"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        respuesta = await client.post(url, headers=cabeceras, content=datos)
+    if respuesta.status_code >= 400:
+        raise StorageFallo(f"Storage devolvio {respuesta.status_code} al subir")
+
+
+async def firmar_objetos(
+    bucket: str, rutas: list[str], *, segundos: int = 3600
+) -> dict[str, str]:
+    """`ruta -> URL firmada`, en UNA sola llamada.
+
+    Firmar de una en una serian nueve viajes para pintar una portada. Lo que no
+    se pueda firmar simplemente no aparece en el diccionario: quien llama decide
+    que hacer con una imagen que no esta, y la alternativa —inventar una URL—
+    pinta una foto rota.
+    """
+    if not rutas:
+        return {}
+    _exigir_configurado()
+    base = get_settings().supabase_url
+    unicas = list(dict.fromkeys(rutas))
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        respuesta = await client.post(
+            f"{base}/storage/v1/object/sign/{bucket}",
+            headers=_headers(),
+            json={"expiresIn": segundos, "paths": unicas},
+        )
+    if respuesta.status_code >= 400:
+        raise StorageFallo(f"Storage devolvio {respuesta.status_code} al firmar")
+    firmadas: dict[str, str] = {}
+    for item in respuesta.json():
+        ruta = item.get("path")
+        firma = item.get("signedURL") or item.get("signedUrl")
+        if ruta and firma:
+            firmadas[ruta] = f"{base}/storage/v1{firma}"
+    return firmadas
+
+
+async def borrar_objeto(bucket: str, ruta: str) -> bool:
+    """Borra `bucket/ruta`. Devuelve si Storage dijo que si."""
+    _exigir_configurado()
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        respuesta = await client.request(
+            "DELETE",
+            f"{get_settings().supabase_url}/storage/v1/object/{bucket}",
+            headers=_headers(),
+            json={"prefixes": [ruta]},
+        )
+    if respuesta.status_code >= 400:
+        logger.warning(
+            "No se pudo borrar %s/%s: Storage devolvio %s",
+            bucket,
+            ruta,
+            respuesta.status_code,
+        )
+        return False
+    return True

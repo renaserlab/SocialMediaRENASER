@@ -6,6 +6,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '@/components/AppHeader';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { BarraDeProgreso } from '@/components/BarraDeProgreso';
+import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { ListRow } from '@/components/ListRow';
 import { estadoDeGuardados, filaDeAudio } from '@/lib/guardados';
@@ -13,7 +15,7 @@ import { AuthRepository } from '@/repositories/AuthRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
-import { spacing } from '@/theme/tokens';
+import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { MyCourse, Post } from '@/types';
 import { traduceEnElIdiomaActual } from '@/i18n';
@@ -51,7 +53,20 @@ export function LibraryScreen() {
 
   const currentUserId = useAppStore((state) => state.user?.id);
 
+  /**
+   * LA SALIDA, que tampoco estaba.
+   *
+   * `/library` vive fuera de `app/(tabs)/`: no hay barra inferior, así que el
+   * encabezado es el único camino de vuelta. Se llega desde el icono de la
+   * portada de Cursos, y por eso el respaldo sin historial es `/cursos`: es el
+   * sitio del que se viene, no un inicio inventado.
+   */
+  const volver = () =>
+    router.canGoBack() ? router.back() : router.replace('/cursos' as never);
+
   const [pestana, setPestana] = useState(0);
+  /** Cual de los tres estados se esta mirando dentro de «Mis cursos». */
+  const [estadoElegido, setEstadoElegido] = useState(0);
   const [cursos, setCursos] = useState<MyCourse[] | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
 
@@ -184,7 +199,7 @@ export function LibraryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title={t('library.title')} />
+      <AppHeader title={t('library.title')} onBack={volver} />
       <View style={styles.header}>
         <SegmentedControl
           options={[t('library.myCourses'), t('library.myAudios')]}
@@ -216,9 +231,29 @@ export function LibraryScreen() {
       >
         {pestana === 0 ? (
           <ScrollView contentContainerStyle={styles.list}>
-            <Grupo titulo={t('library.keepLearning')} cursos={enCurso} router={router} />
-            <Grupo titulo={t('library.notStarted')} cursos={sinEmpezar} router={router} />
-            <Grupo titulo={t('library.completed')} cursos={terminados} router={router} />
+            {/*
+              LOS TRES ESTADOS, uno cada vez. Apilados, quien tiene doce cursos
+              empezados no llegaba nunca a los terminados; y son tres cosas que
+              piden acciones opuestas.
+            */}
+            <SegmentedControl
+              options={[
+                t('biblioteca.enProgreso'),
+                t('biblioteca.noIniciados'),
+                t('biblioteca.finalizados'),
+              ]}
+              selectedIndex={estadoElegido}
+              onChange={setEstadoElegido}
+              style={styles.filtro}
+            />
+            {(estadoElegido === 0
+              ? enCurso
+              : estadoElegido === 1
+                ? sinEmpezar
+                : terminados
+            ).map((curso) => (
+              <FilaDeCurso key={curso.id} curso={curso} router={router} />
+            ))}
           </ScrollView>
         ) : (
           <FlashList
@@ -279,32 +314,61 @@ function Audio({
   );
 }
 
-function Grupo({
-  titulo,
-  cursos,
+/**
+ * Un curso de la biblioteca, con lo que hace falta para retomarlo.
+ *
+ * EL PORCENTAJE Y LA SIGUIENTE LECCION VIENEN DEL SERVIDOR (`/me/courses`).
+ * Aqui no se calcula ninguno de los dos: lo que significa «completada» vive en
+ * `progreso.py` y deducirlo otra vez en el telefono seria tener dos reglas.
+ *
+ * «CONTINUAR» SOLO SI HAY A DONDE IR. Un curso sin lecciones, o ya terminado,
+ * no tiene siguiente leccion y el servidor manda `null`; ofrecer el boton
+ * llevaria a una pantalla que no existe.
+ */
+function FilaDeCurso({
+  curso,
   router,
 }: {
-  titulo: string;
-  cursos: MyCourse[];
+  curso: MyCourse;
   router: ReturnType<typeof useRouter>;
 }) {
   const { colors } = useAppTheme();
-  if (cursos.length === 0) return null;
+  const t = traduceEnElIdiomaActual;
+  const abrir = () => router.push(`/course/${curso.id}` as never);
+
   return (
-    <View style={styles.grupo}>
-      <Text style={[styles.tituloDeGrupo, { color: colors.textMuted }]}>{titulo}</Text>
-      {cursos.map((curso) => (
-        <ListRow
-          key={curso.id}
-          title={curso.title}
-          subtitle={subtituloDe(curso)}
-          leftIcon={curso.state === 'completed' ? 'check-circle' : 'play-circle'}
-          rightIcon="chevron-right"
-          // Siempre al curso real. Continuar desde la leccion pendiente vive
-          // dentro, junto al temario, que es donde se ve por que se continua.
-          onPress={() => router.push(`/course/${curso.id}` as never)}
+    <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+      <ListRow
+        title={curso.title}
+        subtitle={subtituloDe(curso)}
+        leftIcon={curso.state === 'completed' ? 'check-circle' : 'play-circle'}
+        rightIcon="chevron-right"
+        onPress={abrir}
+      />
+
+      {/* La barra SOLO cuando el curso tiene contenido: una barra vacia sobre
+          un curso sin lecciones parece un avance de cero, y no lo es. */}
+      {curso.lessonsTotal > 0 ? (
+        <View style={styles.progresoDeCurso}>
+          <BarraDeProgreso porcentaje={curso.progressPercent} style={styles.barra} />
+          <Text style={[styles.porcentaje, { color: colors.textMuted }]}>
+            {t('biblioteca.completado', { porcentaje: curso.progressPercent })}
+          </Text>
+        </View>
+      ) : null}
+
+      {curso.nextLessonId ? (
+        <Button
+          label={
+            curso.state === 'not_started'
+              ? t('biblioteca.empezar')
+              : t('biblioteca.continuar')
+          }
+          variant="secondary"
+          onPress={() => router.push(`/lesson/${curso.nextLessonId}` as never)}
+          style={styles.continuar}
         />
-      ))}
+      ) : null}
     </View>
   );
 }
@@ -340,6 +404,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
   },
+  filtro: { marginBottom: spacing.lg },
+  tarjeta: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  progresoDeCurso: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  barra: { flex: 1 },
+  porcentaje: { fontSize: 12 },
+  continuar: { marginTop: spacing.md },
   grupo: { marginBottom: spacing.lg },
   tituloDeGrupo: {
     fontSize: 12,
