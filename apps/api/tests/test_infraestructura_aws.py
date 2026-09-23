@@ -147,6 +147,19 @@ def test_la_imagen_se_nombra_por_su_commit() -> None:
     assert ":latest" not in flujo, "una etiqueta que se mueve no dice que codigo corre"
 
 
+def test_se_publica_una_imagen_y_no_un_indice() -> None:
+    """Un indice OCI deja la imagen real SIN ETIQUETA dentro de ECR.
+
+    ECR no escanea el indice, y la regla de ciclo de vida que borra lo no
+    etiquetado podria llevarse la imagen y dejar `sha-<commit>` sin nada que
+    descargar. Paso con la primera imagen publicada en RenaserLab.
+    """
+    guion = GUION.read_text(encoding="utf-8")
+    assert "'--provenance=false', '--sbom=false'" in guion
+    assert "imageManifestMediaType" in guion, "el guion no comprueba lo que publico"
+    assert "provenance: false" in FLUJO.read_text(encoding="utf-8")
+
+
 def test_el_rol_de_github_solo_mueve_su_puntero() -> None:
     texto = FUNDACION.read_text(encoding="utf-8")
     assert ":parameter/${PrefijoDeRecursos}/*/imagen-api'" in texto

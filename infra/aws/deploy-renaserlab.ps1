@@ -679,6 +679,11 @@ function Read-FicheroDeSecretos([string] $Ruta) {
     if ($secreto.Contains('DATABASE_URL') -and [string] $secreto['DATABASE_URL'] -notmatch '^postgresql\+asyncpg://') {
         $problemas.Add('DATABASE_URL tiene que empezar por postgresql+asyncpg://')
     }
+    # `sslmode` es de psycopg: SQLAlchemy se lo pasaria a asyncpg como un
+    # argumento que no conoce y la primera consulta fallaria. En asyncpg es `ssl`.
+    if ($secreto.Contains('DATABASE_URL') -and [string] $secreto['DATABASE_URL'] -match '[?&]sslmode=') {
+        $problemas.Add('DATABASE_URL usa sslmode=, que asyncpg no entiende: usa ssl=require')
+    }
     if ($secreto.Contains('SUPABASE_URL') -and [string] $secreto['SUPABASE_URL'] -notmatch '^https://') {
         $problemas.Add('SUPABASE_URL tiene que ser https://')
     }
@@ -823,7 +828,13 @@ function Publish-Imagen([System.Collections.IDictionary] $Configuracion) {
             # consola interactiva, falla con un error que no dice por que.
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             [System.IO.Compression.ZipFile]::ExtractToDirectory($paquete, $temporal)
-            Invoke-Nativo docker @('build', '--pull', '--platform', 'linux/amd64',
+            # UNA imagen, no un indice. Sin estas dos opciones, Docker Desktop
+            # publica un indice OCI con la imagen y una atestacion como hijos SIN
+            # ETIQUETA: ECR no escanea el indice, y la regla de ciclo de vida que
+            # borra lo no etiquetado a los 7 dias podria llevarse la imagen y
+            # dejar la etiqueta sin nada que descargar. Paso con la primera
+            # imagen de RenaserLab. El flujo de GitHub ya lleva provenance: false.
+            Invoke-Nativo docker @('build', '--pull', '--platform', 'linux/amd64', '--provenance=false', '--sbom=false',
                 '--label', "org.opencontainers.image.revision=$commit", '-t', $uri, (Join-Path $temporal 'apps' 'api'))
         }
         finally {
@@ -834,6 +845,9 @@ function Publish-Imagen([System.Collections.IDictionary] $Configuracion) {
         Invoke-Nativo docker @('push', $uri)
         $publicada = Get-ImagenPublicada $Configuracion $etiqueta
         if (-not $publicada) { throw "La imagen no aparece en ECR tras subirla: $uri" }
+        if ([string] (Get-Valor $publicada 'imageManifestMediaType') -match 'index|manifest\.list') {
+            throw "Se publico un indice y no una imagen ($($publicada.imageManifestMediaType)): no se usa."
+        }
         Write-Bien "Publicada $uri ($($publicada.imageDigest))"
     }
 
