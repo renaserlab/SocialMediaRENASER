@@ -2264,3 +2264,87 @@ filas bloqueadas— pero deja una trampa preparada: cualquier escritura que se
 añada antes de esa llamada quedará confirmada aunque el resto de la petición
 falle. Hoy no sangra, porque su único llamador no escribe nada antes. Queda
 anotado para quien toque esa ruta.
+
+
+### Lo que salió al ejecutar por fin el móvil y la puerta del despliegue (23/09/2026)
+
+**D204 · La puerta del despliegue a producción llevaba semanas en rojo, y sin
+base.**
+
+Dos defectos en el mismo trabajo. El primero: no instalaba el arnés de las
+pruebas, así que desde el Incremento 4 la recolección reventaba y **el
+despliegue estaba bloqueado** sin que nadie lo supiera, porque no se ha
+fusionado nada a `main` desde entonces. El segundo, que encontró la revisión:
+corría **sin PostgreSQL**, así que 416 pruebas —claves ajenas compuestas,
+índices parciales, disparadores, RLS— se omitían y se publicaba la imagen.
+
+Ahora levanta su base y pasa por **el mismo guardia** que la integración
+continua, que vive en un único guion (`apps/api/scripts/exigir_bateria_completa.py`)
+para que no pueda quedarse viejo en un flujo y no en el otro.
+
+**D205 · Lo que salió en cuanto las pruebas del móvil corrieron en CI.**
+
+* El flujo fijaba Node 22.13 y cuatro baterías usan `module.registerHooks`, que
+  llegó en 22.15: esos ficheros no se importaban. Se sube el flujo, `engines` y
+  el README.
+* Una prueba leía `.env`, que no está versionado y en CI no existe.
+* Y el guion podía pasar en verde **sin ejecutar nada**: un patrón que no casa
+  es «cero pruebas, todo bien» para Node. El patrón y su suelo viven ahora
+  juntos en `apps/mobile/scripts/pruebas.mjs`.
+
+**D206 · Quien acababa de pagar no podía volver a su pedido.**
+
+El único enlace a «mis pedidos» estaba en el pie de la bolsa, dentro de la rama
+con líneas; y el servidor retira de la bolsa lo que se acaba de comprar. Con un
+solo proveedor, la bolsa queda vacía y no quedaba ninguna puerta hacia el
+detalle, del que cuelgan pagar, confirmar, reclamar, valorar y dar la
+conformidad. El acceso va ahora en la portada de Productos.
+
+**D207 · El dinero devuelto se escondía justo cuando más importaba.**
+
+Los bloques de conformidad y de devoluciones estaban dentro de la tarjeta de
+valorar, que solo sale con el paquete entregado: a quien negó la entrega y cobró
+el reembolso no se le enseñaba nunca.
+
+**D208 · El panel financiero decía cero cuando no sabía.**
+
+Sin las finanzas desplegadas pintaba seis cuentas en `0` en vez de decir que no
+estaban disponibles, y ofrecía «liberar», que el servidor rechazaría siempre.
+
+**D209 · Los formularios de una reclamación compartían la caja de texto.**
+
+Lo escrito para una acción viajaba como motivo de otra, a un expediente que no
+se reescribe. Cada formulario tiene ahora la suya, y apelar —una vez en la vida
+del caso— pregunta antes.
+
+**D210 · Marcar como entregado pregunta antes, en los dos lados.**
+
+No se deshace y arranca el plazo para reclamar y el de protección del pago. El
+comentario de quien compra decía lo contrario.
+
+**D211 · La ficha no se enteraba de que se puede comprar.**
+
+`purchasable` estaba en `false` escrito a fuego; encender las ventas habría
+exigido tocar código. Ahora usa las mismas cinco condiciones que la ruta de pago.
+
+**D212 · Una clave de traducción que no existía se pintaba cruda.**
+
+La paridad de diccionarios comprobaba que los tres dijeran lo mismo; ninguna
+prueba comprobaba que lo que el código **pide** esté en ellos. La nueva recorre
+todas las claves literales y encontró esa y ninguna otra.
+
+### Lo que la revisión de vistas y CI señaló y queda ANOTADO sin arreglar
+
+* **La clave del historial del pago se construye sin validar** (`envios.ts`,
+  `lineaDeTiempo`). Hoy no tiene efecto —los siete estados coinciden en los dos
+  lados— y el día que el servidor añada un octavo se pintaría crudo. Arreglarlo
+  bien exige mover la lista de estados entre módulos que se prueban sin
+  resolver alias; se deja para quien añada ese estado.
+* **`pytest.ini` no lleva `--strict-markers`.** En el trabajo con base lo tapa
+  el guardia de omisiones; en el otro, un marcador mal escrito sería un aviso.
+* **La puerta del despliegue acepta `skipped` como «no es fallo»** para permitir
+  la vuelta atrás manual. Distinguir los dos casos es trabajo del flujo de
+  despliegue, no de Productos.
+* **Dos baterías SQL de RLS** (`supabase/tests/stories_rls_test.sql` y
+  `testimonials_rls_test.sql`) no las ejecuta ningún trabajo. Son de otras
+  verticales.

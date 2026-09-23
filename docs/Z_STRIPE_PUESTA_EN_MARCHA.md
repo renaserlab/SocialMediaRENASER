@@ -210,6 +210,13 @@ No se encienden todas a la vez. Cada paso se comprueba antes del siguiente.
 **Reiniciar la API después de cada cambio de variables.** Los ajustes se leen
 una vez por proceso, igual que las puertas de esquema.
 
+**Lo que cambia solo, sin tocar código, al encender la venta:** la ficha deja de
+decir «en Z todavía no se compran productos» —lo decide el servidor con las
+mismas cinco condiciones que la ruta de pago— y la bolsa ofrece continuar.
+
+**Y antes de fusionar a `main`:** el flujo de despliegue ejecuta la batería
+entera con PostgreSQL y no publica nada si falta o se omite una sola prueba.
+
 ---
 
 ## 5. Las pruebas en modo de prueba, una por una
