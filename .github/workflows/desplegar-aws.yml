@@ -306,7 +306,12 @@ jobs:
             --value "$ETIQUETA" --overwrite > /dev/null
           echo "Parametro $PARAMETRO -> $ETIQUETA"
 
-          # MinHealthyPercentage=100: primero levanta la maquina nueva y solo
+          # MinHealthyPercentage=100 Y MaxHealthyPercentage=200. Con solo el
+          # minimo, AWS TERMINA primero y lanza despues: medido en RenaserLab el
+          # 23/09/2026, tres minutos sin ninguna maquina sana con una instancia.
+          # El maximo por encima de 100 es lo que le deja lanzar antes.
+          #
+          # Asi: primero levanta la maquina nueva y solo
           # cuando pasa el health check apaga la vieja. Con una imagen rota, la
           # nueva nunca llega a estar sana, la renovacion falla y la version
           # anterior SIGUE SIRVIENDO. Esta es la razon de que los dos perfiles
@@ -320,7 +325,7 @@ jobs:
           # si hace lo correcto: devolver el parametro a la version anterior.
           ID=$(aws autoscaling start-instance-refresh \
             --auto-scaling-group-name "$GRUPO" \
-            --preferences '{"MinHealthyPercentage":100,"InstanceWarmup":300,"AutoRollback":false,"ScaleInProtectedInstances":"Ignore","StandbyInstances":"Ignore"}' \
+            --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":300,"AutoRollback":false,"ScaleInProtectedInstances":"Ignore","StandbyInstances":"Ignore"}' \
             --query InstanceRefreshId --output text)
           echo "id=$ID" >> "$GITHUB_OUTPUT"
           echo "Renovacion $ID en marcha"
@@ -416,7 +421,7 @@ jobs:
 
           ID=$(aws autoscaling start-instance-refresh \
             --auto-scaling-group-name "$GRUPO" \
-            --preferences '{"MinHealthyPercentage":100,"InstanceWarmup":300,"AutoRollback":false,"ScaleInProtectedInstances":"Ignore","StandbyInstances":"Ignore"}' \
+            --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":300,"AutoRollback":false,"ScaleInProtectedInstances":"Ignore","StandbyInstances":"Ignore"}' \
             --query InstanceRefreshId --output text)
 
           while true; do

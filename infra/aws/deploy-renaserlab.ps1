@@ -1090,10 +1090,16 @@ function Start-Renovacion([string] $Grupo) {
 
     # Primero nace la maquina nueva y solo cuando esta sana se apaga la vieja:
     # con una imagen rota, la version anterior sigue sirviendo.
+    #
+    # HACEN FALTA LOS DOS PORCENTAJES. Con solo MinHealthyPercentage=100, AWS
+    # TERMINA primero y lanza despues: medido en RenaserLab el 23/09/2026, tres
+    # minutos sin ninguna maquina sana con una sola instancia. Es
+    # MaxHealthyPercentage por encima de 100 lo que le permite lanzar antes de
+    # terminar; el hueco lo da el maximo del grupo (deseadas + 1).
     $entrada = [ordered]@{
         AutoScalingGroupName = $Grupo
         Preferences          = [ordered]@{
-            MinHealthyPercentage = 100; InstanceWarmup = 300; AutoRollback = $false
+            MinHealthyPercentage = 100; MaxHealthyPercentage = 200; InstanceWarmup = 300; AutoRollback = $false
             ScaleInProtectedInstances = 'Ignore'; StandbyInstances = 'Ignore'
         }
     }

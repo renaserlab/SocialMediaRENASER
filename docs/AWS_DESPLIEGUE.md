@@ -135,7 +135,8 @@ pero real. La recomendación es empezar en `costo-controlado`; pasar al otro es
 un parámetro y unos 5 minutos.
 
 En ambos, **el máximo es siempre las deseadas + 1**. No es decoración: el
-despliegue usa `MinHealthyPercentage=100`, que levanta la máquina nueva antes de
+despliegue usa `MinHealthyPercentage=100` con `MaxHealthyPercentage=200` (sin este
+segundo, AWS termina primero: medido el 23/09/2026), que levanta la máquina nueva antes de
 apagar la vieja. Sin ese hueco libre, AWS tendría que apagar antes de encender y
 cada despliegue sería un microcorte.
 
@@ -489,7 +490,7 @@ aws ssm put-parameter --region us-east-1 \
 
 aws autoscaling start-instance-refresh --region us-east-1 \
   --auto-scaling-group-name renaser-api-produccion \
-  --preferences '{"MinHealthyPercentage":100,"InstanceWarmup":300}'
+  --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":300}'
 ```
 
 Esto funciona así porque **la versión desplegada vive en un parámetro de SSM, no

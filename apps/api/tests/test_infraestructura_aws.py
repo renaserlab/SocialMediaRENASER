@@ -203,6 +203,21 @@ def test_las_alarmas_de_creditos_no_saltan_por_una_maquina_nueva() -> None:
     assert texto.count("LineaBaseDeCpu: '20'") == 2, "cada perfil necesita su linea base"
 
 
+def test_renovar_lanza_la_maquina_nueva_antes_de_terminar_la_vieja() -> None:
+    """Con solo MinHealthyPercentage=100, AWS termina primero y lanza despues.
+
+    Medido en RenaserLab: tres minutos sin ninguna maquina sana al renovar con
+    una sola instancia. Hace falta MaxHealthyPercentage por encima de 100 en
+    TODAS las renovaciones: la del guion y las dos del flujo (desplegar y
+    volver atras).
+    """
+    guion = GUION.read_text(encoding="utf-8")
+    flujo = FLUJO.read_text(encoding="utf-8")
+    assert "MinHealthyPercentage = 100; MaxHealthyPercentage = 200" in guion
+    assert flujo.count('"MinHealthyPercentage":100,"MaxHealthyPercentage":200') == 2
+    assert flujo.count('"MinHealthyPercentage"') == 2, "hay una renovacion sin el maximo"
+
+
 def test_el_flujo_de_despliegue_no_lleva_la_cuenta_escrita() -> None:
     """Mudar de cuenta es cambiar variables de GitHub, no editar el flujo."""
     flujo = FLUJO.read_text(encoding="utf-8")
