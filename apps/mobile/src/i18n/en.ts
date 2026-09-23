@@ -4726,6 +4726,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'finanzaDeProducto.panel.sinDisputas': 'There are no open disputes.',
   'finanzaDeProducto.panel.aprobarNoEsPagar': 'Approving a refund does not move money. Money leaves when the gateway confirms it.',
   'finanzaDeProducto.panel.pedir': 'Request it from the gateway',
+  'finanzaDeProducto.panel.codigoDeLaPasarela': 'The gateway did not confirm it. Code for reconciliation: {codigo}',
   'finanzaDeProducto.panel.anular': 'Cancel',
   'finanzaDeProducto.panel.motivo': 'Reason',
   'finanzaDeProducto.panel.quienPaga': 'Who bears a dispute has not been decided. Here it is only shown and the amount held.',

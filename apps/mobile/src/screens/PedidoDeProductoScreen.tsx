@@ -708,6 +708,40 @@ export function PedidoDeProductoScreen() {
                 {f('resenaDeProducto.valorar.nadaQueValorar')}
               </Text>
             )}
+
+        {/* 44 DE ALTO Y HOLGURA EN CADA FILA. styles.fila no lo traia, y
+               una fila de dos textos pequenos se queda por debajo del area
+               tactil minima. Lo senalo la revision independiente. */}
+            {lineasYaValoradas(valorables).map((linea) => (
+              <Pressable
+                key={linea.order_item_id}
+                onPress={() =>
+                  router.push(`/productos/resenas/${linea.review_id}` as never)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={f('resenaDeProducto.valorar.verLaMia')}
+                hitSlop={8}
+                style={[styles.fila, styles.filaTocable]}
+              >
+                <Feather name="star" size={14} color={colors.textMuted} />
+                <View style={styles.crece}>
+                  <Text variant="caption">{linea.name}</Text>
+                  <Text variant="caption" color={colors.textMuted}>
+                    {f('resenaDeProducto.valorar.yaValorada')}
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={14} color={colors.textMuted} />
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
+        {/* FUERA DE LA TARJETA DE VALORAR, y no es estetica. Estos dos bloques
+            estaban anidados DENTRO de ella, que solo se pinta con el paquete
+            entregado, asi que el dinero devuelto desaparecia justo en los
+            casos en los que mas importa: una entrega que quien compro niega,
+            un pedido cancelado o vencido. Los datos llegaban al telefono y no
+            se ensenaban. Lo encontro la revision independiente. */}
             {/*
           LA CONFORMIDAD (Incremento 9). ESTO SI LIBERA EL DINERO, y por eso es
           una accion aparte de confirmar que llego: aquella existe desde el
@@ -782,33 +816,6 @@ export function PedidoDeProductoScreen() {
                   ) : null}
                 </View>
               </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* 44 DE ALTO Y HOLGURA EN CADA FILA. styles.fila no lo traia, y
-               una fila de dos textos pequenos se queda por debajo del area
-               tactil minima. Lo senalo la revision independiente. */}
-            {lineasYaValoradas(valorables).map((linea) => (
-              <Pressable
-                key={linea.order_item_id}
-                onPress={() =>
-                  router.push(`/productos/resenas/${linea.review_id}` as never)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={f('resenaDeProducto.valorar.verLaMia')}
-                hitSlop={8}
-                style={[styles.fila, styles.filaTocable]}
-              >
-                <Feather name="star" size={14} color={colors.textMuted} />
-                <View style={styles.crece}>
-                  <Text variant="caption">{linea.name}</Text>
-                  <Text variant="caption" color={colors.textMuted}>
-                    {f('resenaDeProducto.valorar.yaValorada')}
-                  </Text>
-                </View>
-                <Feather name="chevron-right" size={14} color={colors.textMuted} />
-              </Pressable>
             ))}
           </View>
         ) : null}

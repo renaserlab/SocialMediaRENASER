@@ -4843,6 +4843,7 @@ export const es = {
   'finanzaDeProducto.panel.sinDisputas': 'No hay disputas abiertas.',
   'finanzaDeProducto.panel.aprobarNoEsPagar': 'Aprobar una devolución no mueve dinero. El dinero sale cuando la pasarela lo confirma.',
   'finanzaDeProducto.panel.pedir': 'Pedirla a la pasarela',
+  'finanzaDeProducto.panel.codigoDeLaPasarela': 'La pasarela no la confirmó. Código para conciliar: {codigo}',
   'finanzaDeProducto.panel.anular': 'Anular',
   'finanzaDeProducto.panel.motivo': 'Motivo',
   'finanzaDeProducto.panel.quienPaga': 'Quién asume una disputa no está decidido. Aquí solo se ve y se bloquea el importe.',

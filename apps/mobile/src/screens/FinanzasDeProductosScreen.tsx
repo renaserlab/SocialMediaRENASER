@@ -78,7 +78,7 @@ export function FinanzasDeProductosScreen() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fallo, setFallo] = useState<
-    'red' | 'sinConexion' | 'sinSesion' | 'sinPermiso' | null
+    'red' | 'sinConexion' | 'sinSesion' | 'sinPermiso' | 'noDisponible' | null
   >(null);
 
   const cargar = useCallback(async () => {
@@ -107,7 +107,12 @@ export function FinanzasDeProductosScreen() {
     } catch (e) {
       if (e instanceof ApiError && esFaltaDeSesion(e.status)) setFallo('sinSesion');
       else if (e instanceof ApiError && e.status === 403) setFallo('sinPermiso');
-      else if (e instanceof ApiError && esFinanzasApagadas(e.code)) setSalud(null);
+      //: «NO DISPONIBLE» ES UN ESTADO, NO UN PANEL VACÍO. Esta rama ponía la
+      //: salud a nula y seguía: el cuerpo pintaba las seis cuentas con `0` y el
+      //: aviso de arriba sin una sola razón debajo. Quien opera leía «no hay
+      //: nada que atender» cuando lo cierto es «no lo sé». La pantalla del
+      //: proveedor ya lo hacía bien; esta no. Lo encontró la revisión.
+      else if (e instanceof ApiError && esFinanzasApagadas(e.code)) setFallo('noDisponible');
       else if (e instanceof ApiError && esFalloDeRed(e.code)) setFallo('sinConexion');
       else setFallo('red');
     } finally {
@@ -236,6 +241,13 @@ export function FinanzasDeProductosScreen() {
             title={f('finanzaDeProducto.panel.sinPermiso')}
             description={f('finanzaDeProducto.panel.sinPermisoCuerpo')}
           />
+        ) : fallo === 'noDisponible' ? (
+          <StateView
+            state="empty"
+            icon="clock"
+            title={f('finanzaDeProducto.apagadas')}
+            description={f('finanzaDeProducto.apagadasCuerpo')}
+          />
         ) : (
           <StateView
             state={fallo === 'sinConexion' ? 'offline' : 'error'}
@@ -248,6 +260,9 @@ export function FinanzasDeProductosScreen() {
   }
 
   const faltan = queLeFaltaAlPanel(salud);
+  //: SIN LA 0082 NO SE OFRECE LIBERAR. El servidor lo rechaza siempre con 503
+  //: en ese estado, y un botón que falla siempre no es una acción: es ruido.
+  const sinFinanzasDesplegadas = (salud?.missing ?? []).includes('migration_0082');
 
   return (
     <AppScreen contentStyle={styles.contenido}>
@@ -287,13 +302,15 @@ export function FinanzasDeProductosScreen() {
         ) : null}
         {error !== null ? <InlineError message={f(error)} /> : null}
 
-        <Button
-          label={f('finanzaDeProducto.panel.liberar')}
-          variant="secondary"
-          onPress={() => void liberar()}
-          disabled={ocupado}
-          loading={ocupado}
-        />
+        {!sinFinanzasDesplegadas ? (
+          <Button
+            label={f('finanzaDeProducto.panel.liberar')}
+            variant="secondary"
+            onPress={() => void liberar()}
+            disabled={ocupado}
+            loading={ocupado}
+          />
+        ) : null}
 
         {/* LOS BLOQUEOS, CON SU MOTIVO. Ni un dato de quien compró. */}
         <View style={styles.bloque}>
@@ -351,9 +368,15 @@ export function FinanzasDeProductosScreen() {
                     {f('finanzaDeProducto.devolucion.confirmed')}
                   </Text>
                 ) : null}
+                {/* EL CÓDIGO DE LA PASARELA, CON SU RÓTULO. Se enseña porque es
+                    lo que permite cruzar esta fila con el panel de la pasarela
+                    al conciliar; lo que no puede es salir suelto, sin decir qué
+                    es, como si fuera un mensaje para quien opera. */}
                 {d.failure_code ? (
                   <Text variant="caption" color="muted">
-                    {d.failure_code}
+                    {f('finanzaDeProducto.panel.codigoDeLaPasarela', {
+                      codigo: d.failure_code,
+                    })}
                   </Text>
                 ) : null}
                 {sePuedePedir(d) ? (

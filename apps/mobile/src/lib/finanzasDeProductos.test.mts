@@ -759,3 +759,82 @@ describe('las pantallas no prometen lo que no hay', () => {
     assert.ok(codigo.includes('casoVivo(pedido.incidents)'));
   });
 });
+
+describe('el dinero devuelto se ve aunque el paquete no haya llegado', () => {
+  /**
+   * El bloque JSX `{condicion ? ( ... ) : null}` que contiene `marca`, desde su
+   * llave de apertura hasta la de cierre, contando llaves.
+   */
+  function bloqueQueContiene(texto: string, marca: string): string {
+    const donde = texto.indexOf(marca);
+    assert.ok(donde > 0, `no encontré ${marca}`);
+    let profundidad = 0;
+    let inicio = donde;
+    for (let i = donde; i >= 0; i -= 1) {
+      if (texto[i] === '}') profundidad += 1;
+      if (texto[i] === '{') {
+        if (profundidad === 0 && texto.slice(i, i + 40).includes('?')) {
+          inicio = i;
+          break;
+        }
+        profundidad = Math.max(0, profundidad - 1);
+      }
+    }
+    profundidad = 0;
+    for (let i = inicio; i < texto.length; i += 1) {
+      if (texto[i] === '{') profundidad += 1;
+      if (texto[i] === '}') {
+        profundidad -= 1;
+        if (profundidad === 0) return texto.slice(inicio, i + 1);
+      }
+    }
+    return texto.slice(inicio);
+  }
+
+  it('la tarjeta de valorar no se lleva dentro ni la conformidad ni las devoluciones', () => {
+    // LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE. Los dos bloques del Incremento 9
+    // se insertaron DENTRO de la tarjeta de valorar, que solo se pinta con el
+    // paquete entregado. Así, a quien negó la entrega y cobró el reembolso
+    // —exactamente quien más necesita verlo— no se le enseñaba nunca: los
+    // datos llegaban al teléfono y el bloque no se pintaba.
+    const pantalla = fuente('screens', 'PedidoDeProductoScreen.tsx');
+    const valorar = bloqueQueContiene(pantalla, "f('resenaDeProducto.valorar.titulo')");
+    assert.ok(valorar.includes('yaLlego('), 'no encontré la condición de la tarjeta de valorar');
+    assert.ok(
+      !valorar.includes('finanzaDeProducto.devueltoDeEstePedido'),
+      'el dinero devuelto está dentro de una tarjeta que solo sale con el paquete entregado',
+    );
+    assert.ok(
+      !valorar.includes('finanzaDeProducto.conformidad.titulo'),
+      'la conformidad está pintada como parte de «valorar»',
+    );
+
+    const devuelto = bloqueQueContiene(pantalla, "f('finanzaDeProducto.devueltoDeEstePedido')");
+    assert.ok(
+      !devuelto.includes('yaLlego('),
+      'el dinero devuelto depende de que el paquete haya llegado',
+    );
+  });
+});
+
+describe('el panel financiero no dice cero cuando no sabe', () => {
+  it('sin finanzas desplegadas es un estado propio, no seis ceros', () => {
+    // LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE. La rama de «finanzas apagadas»
+    // ponía la salud a nula y seguía; el cuerpo pintaba las seis cuentas con 0.
+    const panel = sinComentarios(fuente('screens', 'FinanzasDeProductosScreen.tsx'));
+    assert.ok(
+      !/esFinanzasApagadas\(e\.code\)\)\s*setSalud\(null\)/.test(panel),
+      'la rama de finanzas apagadas sigue dejando el panel sin datos y sin estado',
+    );
+    assert.ok(panel.includes("setFallo('noDisponible')"));
+    assert.ok(panel.includes("fallo === 'noDisponible'"));
+  });
+
+  it('sin la 0082 no se ofrece liberar, que el servidor rechazaría siempre', () => {
+    const panel = sinComentarios(fuente('screens', 'FinanzasDeProductosScreen.tsx'));
+    const boton = panel.indexOf("label={f('finanzaDeProducto.panel.liberar')}");
+    assert.ok(boton > 0, 'no encontré el botón de liberar');
+    const antes = panel.slice(Math.max(0, boton - 200), boton);
+    assert.ok(antes.includes('sinFinanzasDesplegadas'), 'liberar se ofrece sin la 0082');
+  });
+});

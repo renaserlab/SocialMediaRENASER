@@ -4731,6 +4731,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'finanzaDeProducto.panel.sinDisputas': 'Não há disputas abertas.',
   'finanzaDeProducto.panel.aprobarNoEsPagar': 'Aprovar uma devolução não movimenta dinheiro. O dinheiro sai quando a plataforma confirma.',
   'finanzaDeProducto.panel.pedir': 'Pedir à plataforma',
+  'finanzaDeProducto.panel.codigoDeLaPasarela': 'A plataforma de pagamento não a confirmou. Código para conciliar: {codigo}',
   'finanzaDeProducto.panel.anular': 'Anular',
   'finanzaDeProducto.panel.motivo': 'Motivo',
   'finanzaDeProducto.panel.quienPaga': 'Quem assume uma disputa não está decidido. Aqui apenas se vê e se bloqueia o valor.',
