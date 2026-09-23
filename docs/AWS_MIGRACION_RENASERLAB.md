@@ -471,12 +471,14 @@ repositorio salvo lo que se dice.
   vacías a nivel de registro). No se ha cambiado, porque afecta a los otros
   productos: la imagen se escaneó a mano. Resultado: 0 críticas y 14 altas, en
   paquetes de Debian que arrastra ffmpeg.
-- **SIN CORREGIR: las alarmas de créditos de CPU saltan tras cada despliegue.**
-  Una `t3` en modo `standard` nace con 0 créditos y acumula 24 por hora. Así,
-  `creditos-de-cpu-bajos` (umbral 20) queda en `ALARM` casi una hora y
-  `creditos-de-cpu-bajando` (umbral 144) unas seis, con la CPU al 1 %. La
-  corrección es condicionarlas a que la CPU supere su base (20 % en una
-  t3.small) con una expresión de métricas. No está autorizada.
+- **Las alarmas de créditos de CPU saltaban tras cada despliegue.** Una `t3`
+  en modo `standard` nace con 0 créditos y acumula 24 por hora. Así,
+  `creditos-de-cpu-bajos` (umbral 20) quedaba en `ALARM` casi una hora y
+  `creditos-de-cpu-bajando` (umbral 144) unas seis, con la CPU al 1 %.
+  Corregido (`4deab1d`): las dos exigen además que la CPU supere su línea base
+  (20 % en una t3.small, en el Mapping junto al tipo de instancia). Sin gasto
+  la máquina no puede frenarse; con gasto y saldo bajo avisan igual que antes.
+  Aplicado como dos modificaciones sin reemplazo.
 - `sin-instancias-sanas` pasa por `ALARM` al crear la pila, antes de que la
   primera máquina esté sana, y vuelve a `OK`. Se comprobó que la métrica llega
   cada minuto aunque no haya tráfico: no es una alarma que se quede en rojo.
