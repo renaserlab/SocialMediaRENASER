@@ -555,9 +555,12 @@ function Invoke-Plan {
 }
 
 function Set-ProteccionDeLaPila([string] $Pila, [bool] $Activar) {
-    $pila = Get-Pila $Pila
-    if (-not (Test-PilaUtilizable $pila)) { return }
-    if ([bool] (Get-Valor $pila 'EnableTerminationProtection') -eq $Activar) { return }
+    # OJO: PowerShell no distingue mayusculas en los nombres de variable. Un
+    # `$pila = Get-Pila $Pila` reescribia el parametro [string] con el objeto
+    # convertido a texto.
+    $leida = Get-Pila $Pila
+    if (-not (Test-PilaUtilizable $leida)) { return }
+    if ([bool] (Get-Valor $leida 'EnableTerminationProtection') -eq $Activar) { return }
     $opcion = if ($Activar) { '--enable-termination-protection' } else { '--no-enable-termination-protection' }
     Invoke-Aws @('cloudformation', 'update-termination-protection', '--stack-name', $Pila, $opcion) | Out-Null
     Write-Bien "Proteccion contra borrado de $Pila = $Activar"
