@@ -1017,7 +1017,7 @@ async def test_confirmar_cierra_lo_que_arrastra(
         await db.commit()
     async with sesiones() as db:
         await devoluciones.atender_aviso(
-            db, referencia_externa="re_de_mentira", exito=True
+            db, referencia_externa="re_de_mentira", resultado=devoluciones.AVISO_CONFIRMA
         )
         await db.commit()
 
@@ -1075,7 +1075,7 @@ async def test_dos_avisos_de_la_pasarela_no_cancelan_dos_veces(
     for _ in range(2):
         async with sesiones() as db:
             await devoluciones.atender_aviso(
-                db, referencia_externa="re_dos_veces", exito=True
+                db, referencia_externa="re_dos_veces", resultado=devoluciones.AVISO_CONFIRMA
             )
             await db.commit()
 
@@ -1114,12 +1114,12 @@ async def test_un_aviso_de_fallo_no_deshace_una_confirmada(
         await db.commit()
     async with sesiones() as db:
         await devoluciones.atender_aviso(
-            db, referencia_externa="re_contradictorio", exito=True
+            db, referencia_externa="re_contradictorio", resultado=devoluciones.AVISO_CONFIRMA
         )
         await db.commit()
     async with sesiones() as db:
         await devoluciones.atender_aviso(
-            db, referencia_externa="re_contradictorio", exito=False, codigo="x"
+            db, referencia_externa="re_contradictorio", resultado=devoluciones.AVISO_FALLA, codigo="x"
         )
         await db.commit()
     async with sesiones() as db:
@@ -1152,7 +1152,7 @@ async def test_una_confirmada_no_se_anula(
         await db.commit()
     async with sesiones() as db:
         await devoluciones.atender_aviso(
-            db, referencia_externa="re_pagado", exito=True
+            db, referencia_externa="re_pagado", resultado=devoluciones.AVISO_CONFIRMA
         )
         await db.commit()
     async with sesiones() as db:
@@ -2305,3 +2305,278 @@ async def test_dos_parciales_sucesivas_no_pasan_del_cobro(
         )
         assert ultima.amount_minor == 100
         await db.commit()
+
+
+# =========================================================================== #
+# Lo que encontro la revision independiente del dinero
+# =========================================================================== #
+class AvisoDeDevolucion(AvisoDeMentira):
+    """Un aviso de la pasarela SOBRE UN REEMBOLSO, con su `re_...` propio."""
+
+    def __init__(self, *, referencia_cobro: str, estado: str, refund: str) -> None:
+        super().__init__(
+            purchase_id="",
+            status=estado,
+            transaction=referencia_cobro,
+            event_type="refund.created",
+        )
+        self.refund_id = refund
+        self.dispute_id = ""
+
+
+class AvisoDeDisputa(AvisoDeMentira):
+    """Un `charge.dispute.*` con el identificador propio y el objeto crudo."""
+
+    def __init__(
+        self, *, referencia_cobro: str, estado: str, disputa: str, cierre: str = ""
+    ) -> None:
+        super().__init__(
+            purchase_id="",
+            status=estado,
+            transaction=referencia_cobro,
+            event_type="charge.dispute.closed",
+            amount_minor=1000,
+        )
+        self.dispute_id = disputa
+        self.refund_id = ""
+        self.payload = {"data": {"object": {"status": cierre}}} if cierre else {}
+
+
+async def _cobro_propio(sesiones, orden_id: str) -> str:
+    """Una referencia de cobro UNICA para este pedido.
+
+    POR QUE HACE FALTA. `AvisoDeMentira` usa `pi_de_prueba` para todos, asi que
+    en una base compartida por cincuenta casos todos los pedidos acaban con la
+    MISMA referencia de cobro. `pedidos.por_cobro` devolveria el primero que
+    encuentre —el de otra prueba—, y el aviso de disputa congelaria un saldo
+    ajeno mientras el de esta prueba se queda intacto. En aislado pasaba; en la
+    bateria entera, no. Es el mismo tropiezo que ya costo dos pruebas antes:
+    afirmar sobre un estado global en vez de sobre el propio.
+    """
+    referencia = "pi_" + uuid.uuid4().hex[:16]
+    async with sesiones() as db:
+        orden = await db.get(ProductOrder, orden_id)
+        orden.external_payment_id = referencia
+        await db.commit()
+    return referencia
+
+
+async def _devolucion_en_curso(sesiones, orden_id, admin, *, importe, referencia):
+    """Una devolucion aprobada y YA PEDIDA, esperando a la pasarela."""
+    async with sesiones() as db:
+        fila = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=importe,
+            motivo="La revision del dinero.",
+            actor_id=admin,
+        )
+        await db.commit()
+        devolucion_id = fila.id
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+        fila.status = DEVOLUCION_PEDIDA
+        fila.requested_at = finanzas.ahora()
+        fila.external_refund_id = referencia
+        await db.commit()
+    return devolucion_id
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_aviso_de_que_la_devolucion_sigue_en_curso_no_la_da_por_fallida(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """`refund.created` con `pending` NO es un fallo, y asi nace toda devolucion.
+
+    EL DEFECTO. `pagos.atender_aviso` traducia el aviso a un booleano —salio o
+    no salio— y `refund_procesando` caia en el `False`, que es `_marcar_fallo`.
+    El propio comentario de `pagos.py` decia lo contrario: «el resto solo mueve
+    el expediente hacia delante». No habia codigo que lo hiciera.
+
+    LO QUE COSTABA. Un reembolso de tarjeta nace `pending` en Stripe, asi que el
+    `refund.created` que llega a los segundos marcaba el expediente como
+    FALLIDO. A partir de ahi desaparecia de la cola de trabajo, dejaba de contar
+    en el tope de lo ya devuelto —`devuelto_de` no suma las fallidas— y `anular`
+    la aceptaba. Quien opera ve «fallida», la anula y aprueba otra por el mismo
+    importe: clave de idempotencia distinta, segundo reembolso REAL, y quien
+    compro cobra dos veces un pedido que pago una.
+    """
+    from app.modules.products import pagos as pagos_de_productos
+
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-proc", rol="admin")
+    cobro = await _cobro_propio(sesiones, orden_id)
+    devolucion_id = await _devolucion_en_curso(
+        sesiones, orden_id, admin, importe=500, referencia="re_en_curso"
+    )
+
+    async with sesiones() as db:
+        await pagos_de_productos.atender_aviso(
+            db,
+            AvisoDeDevolucion(
+                referencia_cobro=cobro,
+                estado="refund_procesando",
+                refund="re_en_curso",
+            ),
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+    assert fila.status != DEVOLUCION_FALLIDA, (
+        "un aviso de que la devolucion SIGUE EN CURSO la dio por fallida: "
+        "eso reabre el tope y permite un segundo reembolso del mismo dinero"
+    )
+    assert fila.status == DEVOLUCION_PEDIDA
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_aviso_de_fallo_de_verdad_si_marca_la_devolucion_fallida(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO. Arreglar lo de arriba no puede tapar los fallos.
+
+    Sin esta, bastaria con no marcar nunca nada como fallido para que la prueba
+    anterior pasara, y entonces una devolucion rechazada de verdad se quedaria
+    «pedida» para siempre.
+    """
+    from app.modules.products import pagos as pagos_de_productos
+
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-fallo", rol="admin")
+    cobro = await _cobro_propio(sesiones, orden_id)
+    devolucion_id = await _devolucion_en_curso(
+        sesiones, orden_id, admin, importe=500, referencia="re_fallido"
+    )
+
+    async with sesiones() as db:
+        await pagos_de_productos.atender_aviso(
+            db,
+            AvisoDeDevolucion(
+                referencia_cobro=cobro,
+                estado="refund_fallido",
+                refund="re_fallido",
+            ),
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, devolucion_id)
+    assert fila.status == DEVOLUCION_FALLIDA
+    assert fila.failure_code
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_disputa_cerrada_devolviendo_el_cobro_no_vuelve_a_la_cola_de_pago(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """Un cierre por reembolso cierra la disputa PORQUE EL DINERO SALIO.
+
+    EL DEFECTO. `_estado_del_cierre` lo traducia a «retirada» —con un comentario
+    que ya decia «no es una derrota, pero el dinero salio»— y `_aplicar_al_dinero`
+    solo distinguia perdida de todo lo demas: soltaba la retencion SIN consumir y
+    devolvia el saldo a `pending`. El cobro se le habia devuelto entero a quien
+    compro y el saldo volvia a la cola de pago del proveedor.
+
+    Y no lo tapaba nada mas: los avisos de reembolso que llegan despues no
+    encuentran expediente —el reembolso se hizo desde el panel de la pasarela—,
+    asi que no hay ninguna fila de devolucion que bloquee.
+    """
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+    cobro = await _cobro_propio(sesiones, orden_id)
+
+    from app.modules.products import disputas
+
+    #: UNICO EN TODA LA BASE: el indice de `product_disputes` es
+    #: `(provider, external_dispute_id)`, sin el pedido dentro.
+    identificador = "dp_" + uuid.uuid4().hex[:16]
+
+    async with sesiones() as db:
+        await disputas.atender_aviso(
+            db,
+            AvisoDeDisputa(
+                referencia_cobro=cobro, estado="disputa_abierta", disputa=identificador
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        assert saldo.status == finanzas.RETENIDO, "la disputa abierta no congelo"
+
+    async with sesiones() as db:
+        await disputas.atender_aviso(
+            db,
+            AvisoDeDisputa(
+                referencia_cobro=cobro,
+                estado="disputa_cerrada",
+                disputa=identificador,
+                cierre="charge_refunded",
+            ),
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        fila = await db.scalar(
+            select(ProductDispute).where(
+                ProductDispute.external_dispute_id == identificador
+            )
+        )
+    #: EL HECHO FINANCIERO LO CARGA LA FILA. El CHECK de `product_disputes`
+    #: admite seis estados y ninguno dice «cerrada devolviendo», asi que se usa
+    #: el que describe lo que paso con el dinero. Lo que de verdad se afirma
+    #: aqui son las dos lineas siguientes.
+    assert fila.status == disputas.DISPUTA_PERDIDA
+    assert saldo.status != finanzas.PENDIENTE, (
+        "el cobro se devolvio entero y el saldo volvio a la cola de pago"
+    )
+    assert saldo.status == finanzas.CANCELADO
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_una_disputa_ganada_si_devuelve_el_saldo_a_la_cola(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """EL CONTROL POSITIVO de la anterior: ganar no puede cancelar el saldo.
+
+    Sin esta, cancelar siempre al cerrar pasaria la prueba de arriba y le
+    quitaria su dinero a quien vende cada vez que Z gana un contracargo.
+    """
+    _, orden_id, _, saldo_id = await con_saldo(sesiones, monkeypatch)
+    cobro = await _cobro_propio(sesiones, orden_id)
+
+    from app.modules.products import disputas
+
+    #: UNICO EN TODA LA BASE: el indice de `product_disputes` es
+    #: `(provider, external_dispute_id)`, sin el pedido dentro.
+    identificador = "dp_" + uuid.uuid4().hex[:16]
+
+    async with sesiones() as db:
+        await disputas.atender_aviso(
+            db,
+            AvisoDeDisputa(
+                referencia_cobro=cobro, estado="disputa_abierta", disputa=identificador
+            ),
+        )
+        await db.commit()
+    async with sesiones() as db:
+        await disputas.atender_aviso(
+            db,
+            AvisoDeDisputa(
+                referencia_cobro=cobro,
+                estado="disputa_cerrada",
+                disputa=identificador,
+                cierre="won",
+            ),
+        )
+        await db.commit()
+
+    async with sesiones() as db:
+        saldo = await db.get(OwnerSaleBalance, saldo_id)
+        retenido = await finanzas.reservado_de(db, saldo_id=saldo_id)
+    assert saldo.status == finanzas.PENDIENTE, "ganar tiene que devolverlo a la cola"
+    assert retenido == 0

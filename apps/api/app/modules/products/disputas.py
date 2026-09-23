@@ -118,9 +118,41 @@ def _estado_del_cierre(payload) -> str:  # noqa: ANN001
     if crudo == "lost":
         return DISPUTA_PERDIDA
     if crudo in ("charge_refunded",):
-        #: Se resolvió devolviendo: no es una derrota, pero el dinero salió.
-        return DISPUTA_RETIRADA
+        #: SE RESOLVIÓ DEVOLVIENDO, Y ESO CUENTA COMO PERDIDA. No porque fuera
+        #: una derrota —no lo es: se devolvió para cerrar la reclamación antes
+        #: de que la decidiera el banco— sino porque **el dinero salió**, que es
+        #: lo único que este estado gobierna.
+        #:
+        #: ANTES SE TRADUCÍA A «RETIRADA», que es lo que Stripe llama a la
+        #: disputa que retira quien la abrió: ahí el dinero SE QUEDA. Con esa
+        #: traducción, `_aplicar_al_dinero` soltaba la retención sin consumirla
+        #: y devolvía el saldo a la cola de pago después de haberle reembolsado
+        #: el cobro entero a quien compró. Y no lo tapaba nada más: ese
+        #: reembolso se hizo desde el panel de la pasarela, así que no tiene
+        #: expediente aquí y no hay ninguna devolución que bloquee.
+        #:
+        #: NO SE INVENTA UN ESTADO NUEVO: el CHECK de `product_disputes` admite
+        #: seis y no hay ninguna migración pendiente. Además, la fila tiene que
+        #: CARGAR el hecho financiero, porque cada aviso repetido vuelve a
+        #: aplicar el dinero leyéndola a ella y no al cuerpo del aviso.
+        return DISPUTA_PERDIDA
     return DISPUTA_EN_REVISION
+
+
+def _se_cerro_devolviendo(payload) -> bool:  # noqa: ANN001
+    """Si este cierre concreto fue por un reembolso, para poder DECIRLO.
+
+    Solo cambia el texto de la nota que lee quien concilia: el efecto sobre el
+    dinero es el mismo que el de una derrota y lo decide el estado de la fila.
+    """
+    if not isinstance(payload, dict):
+        return False
+    objeto = payload.get("data")
+    if isinstance(objeto, dict):
+        objeto = objeto.get("object")
+    if not isinstance(objeto, dict):
+        objeto = payload
+    return str(objeto.get("status") or "").lower() == "charge_refunded"
 
 
 def _importe_del_aviso(evento) -> tuple[int, str]:  # noqa: ANN001
@@ -229,6 +261,12 @@ async def atender_aviso(db: AsyncSession, evento) -> str | None:  # noqa: ANN001
     await db.flush()
 
     if disputa.status == DISPUTA_PERDIDA:
+        if _se_cerro_devolviendo(getattr(evento, "payload", None)):
+            return (
+                "Contracargo cerrado DEVOLVIENDO el cobro. El dinero ya salió y "
+                "quién lo asume está sin decidir: queda anotado como "
+                "responsabilidad pendiente."
+            )
         return (
             "Contracargo PERDIDO. El dinero ya salió y quién lo asume está sin "
             "decidir: queda anotado como responsabilidad pendiente."

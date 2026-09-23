@@ -566,16 +566,36 @@ async def _confirmar(
     return devolucion
 
 
+#: LO QUE PUEDE DECIR UN AVISO DE LA PASARELA SOBRE UNA DEVOLUCIÓN. Son TRES
+#: cosas distintas y durante un tiempo fueron dos, porque `atender_aviso`
+#: recibía un booleano: salió o no salió.
+#:
+#: LO QUE COSTABA ESA SIMPLIFICACIÓN. Un reembolso de tarjeta NACE pendiente en
+#: la pasarela, así que el primer aviso que llega —a los segundos— decía «sigue
+#: en curso» y se traducía a «no salió», o sea a FALLIDA. A partir de ahí el
+#: expediente desaparecía de la cola de trabajo, dejaba de contar en el tope de
+#: lo ya devuelto y `anular` lo aceptaba: quien opera ve «fallida», la anula y
+#: aprueba otra por el mismo importe, con una clave de idempotencia distinta.
+#: Segundo reembolso real, y quien compró cobra dos veces un pedido que pagó
+#: una.
+AVISO_CONFIRMA = "confirma"
+AVISO_EN_CURSO = "en_curso"
+AVISO_FALLA = "falla"
+
+
 async def atender_aviso(
     db: AsyncSession,
     *,
     referencia_externa: str,
-    exito: bool,
+    resultado: str,
     codigo: str | None = None,
     mensaje: str | None = None,
     momento: datetime | None = None,
 ) -> ProductRefund | None:
     """Lo que dice la pasarela. ES LO ÚNICO QUE CONFIRMA QUE EL DINERO SALIÓ.
+
+    `resultado` es uno de `AVISO_CONFIRMA`, `AVISO_EN_CURSO` o `AVISO_FALLA`, y
+    los tres son distintos: **estar en curso no es haber fallado**.
 
     `None` cuando ese reembolso no es de Productos: el aviso lo atiende primero
     quien lo reconoce, y no reconocerlo no es un error.
@@ -590,7 +610,12 @@ async def atender_aviso(
     )
     if devolucion is None:
         return None
-    if exito:
+    if resultado == AVISO_EN_CURSO:
+        #: NO SE TOCA NADA. La pasarela está diciendo que sigue trabajando en
+        #: ello, que es exactamente lo que el expediente ya dice. Lo único que
+        #: importa es no confundirlo con un fallo.
+        return devolucion
+    if resultado == AVISO_CONFIRMA:
         return await _confirmar(
             db,
             devolucion,

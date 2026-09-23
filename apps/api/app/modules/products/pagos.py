@@ -82,9 +82,17 @@ AVISOS_DE_DISPUTA = frozenset(
 #: Los dos juntos, que es lo que el resto del modulo llamaba asi.
 DINERO_QUE_VUELVE = AVISOS_DE_DEVOLUCION | AVISOS_DE_DISPUTA
 
-#: Los estados de aviso que dicen que el dinero SALIO DE VERDAD. El resto
-#: —`refund_procesando`— solo mueve el expediente hacia delante.
+#: Los estados de aviso que dicen que el dinero SALIO DE VERDAD.
 DEVOLUCION_CONFIRMADA_POR_LA_PASARELA = frozenset({"refunded", "refund_parcial"})
+
+#: Y EL QUE DICE QUE SIGUE EN CAMINO, que no es lo mismo que fallar. Un
+#: reembolso de tarjeta NACE pendiente en la pasarela: el `refund.created` que
+#: llega a los segundos trae este estado. Tratarlo como fallo marcaba el
+#: expediente como fallido, lo sacaba de la cola de trabajo, lo descontaba del
+#: tope de lo ya devuelto y dejaba anularlo; desde ahi, aprobar otra por el
+#: mismo importe genera un SEGUNDO reembolso real con otra clave de
+#: idempotencia. Quien compro cobraria dos veces un pedido que pago una.
+DEVOLUCION_EN_CAMINO = frozenset({"refund_procesando"})
 
 
 @dataclass(frozen=True)
@@ -365,10 +373,17 @@ async def _aviso_de_devolucion(db: AsyncSession, evento) -> str | None:
 
     from app.modules.products import devoluciones
 
+    if evento.status in DEVOLUCION_CONFIRMADA_POR_LA_PASARELA:
+        resultado = devoluciones.AVISO_CONFIRMA
+    elif evento.status in DEVOLUCION_EN_CAMINO:
+        resultado = devoluciones.AVISO_EN_CURSO
+    else:
+        resultado = devoluciones.AVISO_FALLA
+
     fila = await devoluciones.atender_aviso(
         db,
         referencia_externa=referencia,
-        exito=evento.status in DEVOLUCION_CONFIRMADA_POR_LA_PASARELA,
+        resultado=resultado,
         codigo=str(getattr(evento, "event_type", ""))[:64] or None,
     )
     if fila is None:
