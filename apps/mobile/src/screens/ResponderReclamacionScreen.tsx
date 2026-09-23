@@ -76,6 +76,14 @@ export function ResponderReclamacionScreen() {
 
   const [propuesta, setPropuesta] = useState<string | null>(null);
   const [nota, setNota] = useState('');
+  /**
+   * EL MOTIVO DE PEDIR PRUEBAS TIENE SU PROPIA CAJA. Compartía `nota` con la
+   * nota de la propuesta, y con el caso abierto los dos formularios se pintan
+   * a la vez: lo que alguien escribía para su propuesta se mandaba como «qué
+   * pruebas te pido», quedaba en un expediente que no se reescribe, y quien
+   * compró lo leía como una petición que nadie le había hecho.
+   */
+  const [queSePide, setQueSePide] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const ocupadoRef = useRef(false);
@@ -156,14 +164,14 @@ export function ResponderReclamacionScreen() {
 
   /** Pedir pruebas SÍ lleva motivo: sin decir cuáles, nadie sabe qué mandar. */
   const pedirPruebas = () => {
-    const limpia = nota.trim();
+    const limpia = queSePide.trim();
     if (limpia.length < 3) {
       setError(f('incidencia.error.faltaNota'));
       return;
     }
     void mandar(
       () => ProductIncidentSellerRepository.pedirMasEvidencia(casoId, limpia),
-      () => setNota(''),
+      () => setQueSePide(''),
     );
   };
 
@@ -406,8 +414,8 @@ export function ResponderReclamacionScreen() {
                   {f('incidencia.proveedor.pedirCuerpo')}
                 </Text>
                 <Input
-                  value={nota}
-                  onChangeText={setNota}
+                  value={queSePide}
+                  onChangeText={setQueSePide}
                   multiline
                   numberOfLines={3}
                   maxLength={1000}

@@ -916,3 +916,37 @@ describe('la reposicion entregada, que era el unico efecto sin salida', () => {
     assert.equal(esperaRegistrarLaReposicion(null), false);
   });
 });
+
+describe('cada formulario de una reclamación escribe en su propia caja', () => {
+  /** Los `value={...}` de los `<Input>` de una pantalla, en orden. */
+  const cajas = (texto: string): string[] =>
+    [...sinComentarios(texto).matchAll(/<Input\b[\s\S]*?\bvalue=\{([^}]+)\}/g)].map(
+      (m) => m[1].trim(),
+    );
+
+  it('quien compra: aportar, escalar, apelar y retirar no comparten texto', () => {
+    // LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE. Con el caso a la espera de pruebas
+    // se pintan tres formularios a la vez y los cuatro escribían en la misma
+    // `nota`: lo escrito para uno viajaba como motivo del otro, a un expediente
+    // que no se reescribe. Lo peor, apelar —una vez en la vida del caso— con el
+    // texto que se había escrito para retirar.
+    const valores = cajas(fuente('screens', 'ReclamacionScreen.tsx'));
+    assert.ok(valores.length >= 4, `solo encontré ${valores.length} cajas`);
+    assert.equal(new Set(valores).size, valores.length, `cajas compartidas: ${valores.join(', ')}`);
+  });
+
+  it('quien vende: la propuesta y la petición de pruebas no comparten texto', () => {
+    const valores = cajas(fuente('screens', 'ResponderReclamacionScreen.tsx'));
+    assert.ok(valores.length >= 2, `solo encontré ${valores.length} cajas`);
+    assert.equal(new Set(valores).size, valores.length, `cajas compartidas: ${valores.join(', ')}`);
+  });
+
+  it('apelar pregunta antes, porque es una sola vez y no se deshace', () => {
+    const pantalla = sinComentarios(fuente('screens', 'ReclamacionScreen.tsx'));
+    const desde = pantalla.indexOf('const apelar = async');
+    assert.ok(desde > 0, 'no encontré el manejador de apelar');
+    const cuerpo = pantalla.slice(desde, pantalla.indexOf('};', desde));
+    assert.ok(cuerpo.includes('await confirm('), 'apelar dispara sin preguntar');
+    assert.ok(pantalla.includes('onPress={() => void apelar()}'));
+  });
+});

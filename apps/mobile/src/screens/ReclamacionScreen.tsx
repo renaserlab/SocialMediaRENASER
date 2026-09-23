@@ -85,6 +85,15 @@ import { ApiError } from '@/services/api';
  * delante —la nota de cada paso— y un diálogo encima de ellos en iOS no se ve.
  * Lo que sí es un diálogo es retirar la reclamación, porque eso no se deshace.
  */
+/** Los formularios con explicación de esta pantalla, cada uno con su caja. */
+type Formulario = 'aportar' | 'escalar' | 'apelar' | 'retirar';
+const NOTAS_VACIAS: Record<Formulario, string> = {
+  aportar: '',
+  escalar: '',
+  apelar: '',
+  retirar: '',
+};
+
 export function ReclamacionScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
@@ -99,7 +108,21 @@ export function ReclamacionScreen() {
     'red' | 'sinConexion' | 'sinSesion' | 'noEncontrado' | 'noDisponible' | null
   >(null);
 
-  const [nota, setNota] = useState('');
+  /**
+   * UNA CAJA POR FORMULARIO, y no una para todos.
+   *
+   * Con el caso a la espera de pruebas se pintan a la vez aportar, pedir
+   * mediación y retirar, y los cuatro formularios compartían la misma nota: lo
+   * que se escribía para uno viajaba como motivo del otro al pulsar, a un
+   * expediente que no se reescribe. Lo peor era apelar —una sola vez en la
+   * vida del caso— con el texto que se había escrito para retirar.
+   */
+  const [notas, setNotas] = useState<Record<Formulario, string>>(NOTAS_VACIAS);
+  const notaDe = (formulario: Formulario) => notas[formulario];
+  const escribir = (formulario: Formulario) => (texto: string) =>
+    setNotas((antes) => ({ ...antes, [formulario]: texto }));
+  const vaciar = (formulario: Formulario) => () =>
+    setNotas((antes) => ({ ...antes, [formulario]: '' }));
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const ocupadoRef = useRef(false);
@@ -166,13 +189,36 @@ export function ReclamacionScreen() {
   };
 
   /** Los pasos que llevan explicación. La nota no se rellena con nada. */
-  const conNota = async (operacion: (texto: string) => Promise<Incidencia>) => {
-    const limpia = nota.trim();
+  const conNota = async (
+    formulario: Formulario,
+    operacion: (texto: string) => Promise<Incidencia>,
+  ) => {
+    const limpia = notaDe(formulario).trim();
     if (limpia.length < 3) {
       setError(f('incidencia.error.faltaNota'));
       return;
     }
-    await mandar(operacion.bind(null, limpia), () => setNota(''));
+    await mandar(operacion.bind(null, limpia), vaciar(formulario));
+  };
+
+  /**
+   * Apelar SE PREGUNTA, como retirar. Es una sola vez en la vida del caso y no
+   * se deshace: dispararla al primer toque es gastar la única apelación con un
+   * dedo que resbala.
+   */
+  const apelar = async () => {
+    if (notaDe('apelar').trim().length < 3) {
+      setError(f('incidencia.error.faltaNota'));
+      return;
+    }
+    const seguro = await confirm({
+      title: f('incidencia.detalle.apelarConfirmar'),
+      message: f('incidencia.detalle.apelarConfirmarCuerpo'),
+      confirmLabel: f('incidencia.detalle.apelar'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!seguro) return;
+    await conNota('apelar', (texto) => ProductIncidentRepository.apelar(casoId, texto));
   };
 
   /**
@@ -218,7 +264,7 @@ export function ReclamacionScreen() {
 
   /** Retirar no se deshace: se pregunta, y se dice qué implica. */
   const retirar = async () => {
-    const limpia = nota.trim();
+    const limpia = notaDe('retirar').trim();
     if (limpia.length < 3) {
       setError(f('incidencia.error.faltaNota'));
       return;
@@ -232,7 +278,7 @@ export function ReclamacionScreen() {
     if (!seguro) return;
     await mandar(
       () => ProductIncidentRepository.retirar(casoId, limpia),
-      () => setNota(''),
+      vaciar('retirar'),
     );
   };
 
@@ -460,8 +506,8 @@ export function ReclamacionScreen() {
               f('incidencia.detalle.aportarTitulo'),
               <>
                 <Input
-                  value={nota}
-                  onChangeText={setNota}
+                  value={notaDe('aportar')}
+                  onChangeText={escribir('aportar')}
                   multiline
                   numberOfLines={3}
                   maxLength={1000}
@@ -472,7 +518,7 @@ export function ReclamacionScreen() {
                 <Button
                   label={f('incidencia.detalle.aportar')}
                   onPress={() =>
-                    void conNota((texto) =>
+                    void conNota('aportar', (texto) =>
                       ProductIncidentRepository.responder(casoId, texto),
                     )
                   }
@@ -491,8 +537,8 @@ export function ReclamacionScreen() {
                   {f('incidencia.sinPlazoDeDecision')}
                 </Text>
                 <Input
-                  value={nota}
-                  onChangeText={setNota}
+                  value={notaDe('escalar')}
+                  onChangeText={escribir('escalar')}
                   multiline
                   numberOfLines={3}
                   maxLength={1000}
@@ -503,7 +549,7 @@ export function ReclamacionScreen() {
                 <Button
                   label={f('incidencia.detalle.escalar')}
                   onPress={() =>
-                    void conNota((texto) =>
+                    void conNota('escalar', (texto) =>
                       ProductIncidentRepository.escalar(casoId, texto),
                     )
                   }
@@ -522,8 +568,8 @@ export function ReclamacionScreen() {
                   {f('incidencia.detalle.apelarCuerpo', { n: HORAS_PARA_APELAR })}
                 </Text>
                 <Input
-                  value={nota}
-                  onChangeText={setNota}
+                  value={notaDe('apelar')}
+                  onChangeText={escribir('apelar')}
                   multiline
                   numberOfLines={3}
                   maxLength={1000}
@@ -533,11 +579,7 @@ export function ReclamacionScreen() {
                 />
                 <Button
                   label={f('incidencia.detalle.apelar')}
-                  onPress={() =>
-                    void conNota((texto) =>
-                      ProductIncidentRepository.apelar(casoId, texto),
-                    )
-                  }
+                  onPress={() => void apelar()}
                   disabled={ocupado}
                   loading={ocupado}
                 />
@@ -550,8 +592,8 @@ export function ReclamacionScreen() {
               f('incidencia.detalle.retirarTitulo'),
               <>
                 <Input
-                  value={nota}
-                  onChangeText={setNota}
+                  value={notaDe('retirar')}
+                  onChangeText={escribir('retirar')}
                   multiline
                   numberOfLines={3}
                   maxLength={1000}
