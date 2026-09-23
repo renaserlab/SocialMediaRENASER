@@ -819,7 +819,10 @@ function Publish-Imagen([System.Collections.IDictionary] $Configuracion) {
             # llamarse como ese commit.
             $paquete = Join-Path $temporal 'api.zip'
             Invoke-Nativo git @('-C', $Raiz, 'archive', '--format=zip', '-o', $paquete, $commit, 'apps/api')
-            Expand-Archive -LiteralPath $paquete -DestinationPath $temporal -WhatIf:$false -Confirm:$false
+            # .NET y no Expand-Archive: el cmdlet intenta preguntar y, sin
+            # consola interactiva, falla con un error que no dice por que.
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($paquete, $temporal)
             Invoke-Nativo docker @('build', '--pull', '--platform', 'linux/amd64',
                 '--label', "org.opencontainers.image.revision=$commit", '-t', $uri, (Join-Path $temporal 'apps' 'api'))
         }
