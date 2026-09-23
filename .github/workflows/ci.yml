@@ -12,7 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.13'
+          # 22.15 Y NO 22.13: `module.registerHooks` —que usan cuatro
+          # baterias del movil para sustituir modulos— se anadio en
+          # 22.15. Con 22.13 esos cuatro ficheros no llegan ni a
+          # importarse: `SyntaxError`, y el fichero entero cae.
+          node-version: '22.15'
       - run: npm install
       - run: npm run mobile:check
       # Y LAS PRUEBAS. `mobile:check` es `tsc --noEmit`: comprueba TIPOS, no

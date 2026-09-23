@@ -11,7 +11,7 @@
     "build:web": "expo export --platform web",
     "check": "tsc --noEmit",
     "doctor": "npx expo-doctor@latest",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.mts\""
+    "test": "node scripts/pruebas.mjs"
   },
   "dependencies": {
     "@100mslive/react-native-hms": "1.12.3",

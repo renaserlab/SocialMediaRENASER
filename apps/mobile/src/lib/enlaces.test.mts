@@ -83,7 +83,24 @@ test('la variable esta en los tres perfiles de eas.json y en .env.example', () =
     assert.ok(valor.startsWith('https://'), `el perfil ${perfil} no usa HTTPS: ${valor}`);
   }
   assert.ok(leer('.env.example').includes('EXPO_PUBLIC_WEB_URL=https://'));
-  assert.ok(leer('.env').includes('EXPO_PUBLIC_WEB_URL=https://'));
+
+  // EL `.env` SOLO SI EXISTE, y no es una rebaja.
+  //
+  // `.env` no esta versionado —lleva valores de cada quien— asi que en la
+  // integracion continua NO EXISTE, y exigirlo hacia que esta prueba fallara
+  // alli con un ENOENT que no habla de enlaces ni de perfiles. No se vio
+  // durante meses porque las baterias del movil no se ejecutaban en ningun
+  // trabajo.
+  //
+  // Lo que se comprueba de verdad es `eas.json` y `.env.example`, que si estan
+  // versionados y son el contrato. El `.env` local se revisa cuando lo hay,
+  // que es donde ese aviso le sirve a alguien.
+  if (existsSync(join(RAIZ, '.env'))) {
+    assert.ok(
+      leer('.env').includes('EXPO_PUBLIC_WEB_URL=https://'),
+      'tu .env local no define EXPO_PUBLIC_WEB_URL con https',
+    );
+  }
 });
 
 test('sin HTTPS no se comparte enlace: una URL rota es peor que solo texto', () => {

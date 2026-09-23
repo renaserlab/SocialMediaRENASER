@@ -210,3 +210,70 @@ def test_el_trabajo_del_movil_ejecuta_sus_pruebas_y_no_solo_los_tipos() -> None:
     raiz = RAIZ / "package.json"
     guiones = json.loads(raiz.read_text(encoding="utf-8"))["scripts"]
     assert "mobile:test" in guiones, "falta el guion `mobile:test` en package.json"
+
+
+def test_el_movil_no_puede_pasar_en_verde_sin_ejecutar_nada() -> None:
+    """Un patron que no casa nada NO es un error para Node: son cero pruebas.
+
+    EL AGUJERO. El guion del movil era una linea con un patron entre comillas.
+    Renombrar a `.test.ts`, mover las pruebas a otra carpeta o tocar el patron
+    en un refactor dejaba las ciento trece baterias sin ejecutar, con salida
+    cero y el trabajo en verde. Es la misma forma de fallo que la lista de
+    ficheros escrita a mano del trabajo con PostgreSQL, y esa ya se quedo vieja
+    dos veces.
+
+    LA DIFERENCIA CON LA BATERIA DE PYTHON: alli el suelo vive en el flujo
+    porque el informe se audita despues. Aqui vive JUNTO AL PATRON, en el
+    guion, porque separar los dos es precisamente lo que permite que uno se
+    quede viejo sin el otro.
+    """
+    import json
+
+    guion = RAIZ / "apps" / "mobile" / "scripts" / "pruebas.mjs"
+    assert guion.exists(), "falta apps/mobile/scripts/pruebas.mjs"
+    fuente = guion.read_text(encoding="utf-8")
+    assert "SUELO" in fuente, "el lanzador del movil no tiene suelo"
+    suelo = re.search(r"const SUELO = (\d+)", fuente)
+    assert suelo is not None, "no se encuentra el suelo del lanzador"
+    assert int(suelo.group(1)) >= 50, (
+        f"el suelo del movil es {suelo.group(1)}: no protege de nada"
+    )
+    assert "process.exit(1)" in fuente, "el suelo no tumba nada"
+
+    #: Y EL GUION DE NPM LO USA. Si `test` volviera a ser el patron suelto, el
+    #: lanzador quedaria ahi sin que nadie lo llame.
+    paquete = json.loads(
+        (RAIZ / "apps" / "mobile" / "package.json").read_text(encoding="utf-8")
+    )
+    assert "scripts/pruebas.mjs" in paquete["scripts"]["test"], (
+        "el guion `test` del movil no pasa por el lanzador con suelo"
+    )
+
+
+def test_el_node_del_ci_es_el_que_las_pruebas_necesitan() -> None:
+    """`module.registerHooks` se anadio en 22.15, y cuatro baterias lo usan.
+
+    Con 22.13 —lo que el flujo fijaba— esos cuatro ficheros no llegan ni a
+    importarse: `SyntaxError`, y el fichero entero cae. No se vio hasta que las
+    pruebas del movil empezaron a ejecutarse en la integracion continua.
+
+    SE COMPRUEBA QUE LOS TRES SITIOS DIGAN LO MISMO: el flujo, `engines` y el
+    README. Un `engines` que permita menos de lo que las pruebas necesitan deja
+    a quien clone el repositorio con cuatro ficheros rotos y ningun motivo.
+    """
+    import json
+
+    texto = CI.read_text(encoding="utf-8")
+    del_flujo = re.search(r"node-version: '(\d+)\.(\d+)'", texto)
+    assert del_flujo is not None, "el flujo no fija version de node"
+    mayor, menor = int(del_flujo.group(1)), int(del_flujo.group(2))
+    assert (mayor, menor) >= (22, 15), (
+        f"el flujo fija node {mayor}.{menor}: `module.registerHooks` no existe"
+    )
+
+    paquete = json.loads((RAIZ / "package.json").read_text(encoding="utf-8"))
+    exigido = re.search(r">=(\d+)\.(\d+)", paquete["engines"]["node"])
+    assert exigido is not None
+    assert (int(exigido.group(1)), int(exigido.group(2))) >= (22, 15), (
+        "`engines` permite un node en el que cuatro baterias no se importan"
+    )

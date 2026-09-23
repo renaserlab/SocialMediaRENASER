@@ -15,7 +15,7 @@
     "build:web": "npm --workspace apps/mobile run build:web"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.15.0"
   },
   "overrides": {
     "react": "19.1.0",
