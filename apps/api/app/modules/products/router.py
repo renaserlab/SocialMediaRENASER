@@ -2400,10 +2400,16 @@ async def bandeja_de_evaluaciones(
 ) -> list[EvaluacionRead]:
     await permisos.exigir_evaluador(db, current_user.id)
     await esquema.exigir_admision(db)
-    return [
-        await _evaluacion_leida(db, e)
-        for e in await evaluations.bandeja(db, estado=estado, limite=limit)
-    ]
+    #: Y LA BANDEJA NO ENSEÑA LO PROPIO. Un proveedor con curaduría veía en la
+    #: cola la evaluación de su propio producto, con la nota interna de quien la
+    #: escribió. No es un 403: es que no le toca, así que sencillamente no sale.
+    bandeja = []
+    for e in await evaluations.bandeja(db, estado=estado, limite=limit):
+        suyo = await db.get(Product, e.product_id)
+        if suyo is not None and await permisos.dueno_de(db, suyo) == current_user.id:
+            continue
+        bandeja.append(await _evaluacion_leida(db, e))
+    return bandeja
 
 
 @admin_router.post(
@@ -2437,6 +2443,14 @@ async def leer_evaluacion(
     evaluacion = await db.get(evaluations.ProductEvaluation, evaluation_id)
     if evaluacion is None:
         raise evaluations.EvaluacionNoEncontrada("Evaluación no encontrada.")
+    #: NI EL EXPEDIENTE DE LO SUYO. Escribirlo ya estaba cerrado; LEERLO no, y
+    #: aquí dentro van las notas internas de quien evaluó, que el informe
+    #: público excluye a propósito. Quien vende las leía por esta puerta.
+    producto_mirado = await db.get(Product, evaluacion.product_id)
+    if producto_mirado is not None:
+        await permisos.exigir_ajeno(
+            db, producto=producto_mirado, user_id=current_user.id
+        )
     leida = await _evaluacion_leida(db, evaluacion)
     # CON SU EVIDENCIA. Una razón sin decir de qué sale no se puede comprobar,
     # y comprobarla es lo único que la distingue de una frase escrita a mano.

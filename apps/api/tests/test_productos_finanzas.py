@@ -2907,3 +2907,115 @@ async def test_una_devolucion_en_curso_CON_referencia_no_se_vuelve_a_pedir(
                 db, devolucion_id=devolucion_id, actor_id=admin
             )
     assert fallo.value.details.get("reason") == "already_requested"
+
+
+# --------------------------------------------------------------------------- #
+# La clave que viaja a la pasarela
+# --------------------------------------------------------------------------- #
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_clave_de_idempotencia_no_sale_de_un_flotante_del_reloj(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """Dos aprobaciones sobre el mismo pedido no pueden chocar por el reloj.
+
+    EL DEFECTO. La clave se componia con `momento.timestamp()`, que es un
+    flotante: la cadena que protege dinero real dependia de su representacion
+    binaria, y dos aprobaciones con el mismo `momento` —es un parametro
+    inyectable— chocaban contra el unico y salia un `IntegrityError` crudo, un
+    500 sin codigo, en vez de un conflicto con su motivo.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-clave", rol="admin")
+    momento = finanzas.ahora()
+    claves = set()
+    async with sesiones() as db:
+        for importe in (100, 150):
+            fila = await devoluciones.aprobar(
+                db,
+                orden_id=orden_id,
+                importe_minor=importe,
+                motivo="Dos parciales aprobadas a la vez.",
+                actor_id=admin,
+                momento=momento,
+            )
+            claves.add(fila.idempotency_key)
+        await db.commit()
+    assert len(claves) == 2, "dos solicitudes distintas comparten clave"
+    for clave in claves:
+        assert "." not in clave, f"la clave lleva un flotante dentro: {clave}"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_un_no_concluyente_cambia_la_clave_y_un_timeout_no(
+    sesiones, monkeypatch, comision_puesta
+) -> None:
+    """LA REGLA QUE YA ESTABA ESCRITA EN `payments.reembolsos`, Y AQUI NO SE USABA.
+
+    Con una clave fija, el primer «no» de la pasarela queda grabado: reintentar
+    reenvia la misma clave y la pasarela devuelve LA MISMA respuesta fallida,
+    para siempre. El boton de reintentar no serviria de nada nunca mas.
+
+    Y NO PUEDE CAMBIAR SIEMPRE: un tiempo de espera agotado no significa que no
+    se haya hecho, y mandar una clave nueva despues de un timeout es exactamente
+    como se paga dos veces.
+    """
+    _, orden_id, _, _ = await con_saldo(sesiones, monkeypatch)
+    admin = await persona(sesiones, "fin-clave2", rol="admin")
+
+    #: CONCLUYENTE: la tarjeta dijo que no. La clave TIENE que cambiar.
+    async with sesiones() as db:
+        fila = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=100,
+            motivo="Se intenta y la tarjeta dice que no.",
+            actor_id=admin,
+        )
+        await db.commit()
+        terminal_id = fila.id
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, terminal_id)
+        fila.status = DEVOLUCION_FALLIDA
+        fila.failure_code = "card_declined"
+        #: EL CHECK `product_refunds_fallida_con_fecha` LO EXIGE, y hace bien:
+        #: una fallida sin fecha no se puede ordenar en el historial.
+        fila.failed_at = finanzas.ahora()
+        antes = fila.idempotency_key
+        await db.commit()
+    async with sesiones() as db:
+        await devoluciones.pedir(db, devolucion_id=terminal_id, actor_id=admin)
+        await db.commit()
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, terminal_id)
+    assert fila.idempotency_key != antes, (
+        "tras un no concluyente la clave no cambio: reintentar no servira nunca"
+    )
+
+    #: AMBIGUO: no hubo respuesta. La clave NO puede cambiar.
+    async with sesiones() as db:
+        otra = await devoluciones.aprobar(
+            db,
+            orden_id=orden_id,
+            importe_minor=120,
+            motivo="Se intenta y no contesta nadie.",
+            actor_id=admin,
+        )
+        await db.commit()
+        ambigua_id = otra.id
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, ambigua_id)
+        fila.status = DEVOLUCION_FALLIDA
+        fila.failure_code = "network_timeout"
+        fila.failed_at = finanzas.ahora()
+        antes = fila.idempotency_key
+        await db.commit()
+    async with sesiones() as db:
+        await devoluciones.pedir(db, devolucion_id=ambigua_id, actor_id=admin)
+        await db.commit()
+    async with sesiones() as db:
+        fila = await db.get(ProductRefund, ambigua_id)
+    assert fila.idempotency_key == antes, (
+        "tras un timeout la clave cambio: asi es como se paga dos veces"
+    )

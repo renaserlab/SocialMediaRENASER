@@ -30,6 +30,7 @@ falla si aparece el import.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -37,6 +38,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError, ConflictError, NotFoundError
+from app.modules.payments import reembolsos as reembolsos_del_proveedor
 from app.modules.payments.reembolsos import RefundRequestToProvider
 from app.modules.products import esquema
 from app.modules.products import estados_de_incidencia as maquina
@@ -249,7 +251,17 @@ async def aprobar(
         status=DEVOLUCION_APROBADA,
         provider="none",
         environment=orden.environment,
-        idempotency_key=CLAVE_DE_DEVOLUCION + orden_id + "-" + str(momento.timestamp()),
+        #: LA CLAVE QUE VIAJARA A LA PASARELA. Estable por SOLICITUD: los
+        #: reintentos la reutilizan y la pasarela devuelve el mismo reembolso en
+        #: vez de crear un segundo.
+        #:
+        #: ANTES SE COMPONIA CON `momento.timestamp()`, que es un flotante: la
+        #: clave que protege dinero real dependia de su representacion binaria,
+        #: y dos aprobaciones sobre el mismo pedido en el mismo instante
+        #: chocaban contra el unico y salia un IntegrityError crudo en vez de un
+        #: conflicto con codigo. Un identificador aleatorio no tiene ninguno de
+        #: los dos problemas.
+        idempotency_key=CLAVE_DE_DEVOLUCION + uuid.uuid4().hex,
         decided_by=actor_id,
         decision_reason=(motivo or "").strip(),
         created_at=momento,
@@ -364,6 +376,21 @@ async def pedir(
     sin_referencia = devolucion.status == DEVOLUCION_EN_CURSO and not (
         devolucion.external_refund_id or ""
     ).strip()
+    #: SI EL "NO" ANTERIOR FUE CONCLUYENTE, LA CLAVE CAMBIA. Con una clave fija
+    #: el primer rechazo queda grabado: reintentar reenvia la misma y la pasarela
+    #: devuelve LA MISMA respuesta fallida, para siempre. El boton de reintentar
+    #: no serviria de nada nunca mas.
+    #:
+    #: Y SOLO SI FUE CONCLUYENTE. Un tiempo de espera agotado no significa que no
+    #: se haya hecho: mandar una clave nueva despues de un timeout es exactamente
+    #: como se paga dos veces. La lista de codigos concluyentes vive en
+    #: `payments.reembolsos` y se reutiliza en vez de escribir otra aqui.
+    if devolucion.status == DEVOLUCION_FALLIDA and reembolsos_del_proveedor.es_terminal(
+        devolucion.failure_code
+    ):
+        devolucion.idempotency_key = _clave_del_siguiente_intento(
+            devolucion.idempotency_key
+        )
     if (
         devolucion.status not in (DEVOLUCION_APROBADA, DEVOLUCION_FALLIDA)
         and not sin_referencia
@@ -608,6 +635,14 @@ async def _confirmar(
 AVISO_CONFIRMA = "confirma"
 AVISO_EN_CURSO = "en_curso"
 AVISO_FALLA = "falla"
+
+
+def _clave_del_siguiente_intento(clave: str) -> str:
+    """La misma solicitud, un intento mas. Solo tras un "no" CONCLUYENTE."""
+    base, marca, sufijo = clave.rpartition("-r")
+    if marca and sufijo.isdigit():
+        return f"{base}-r{int(sufijo) + 1}"
+    return f"{clave}-r1"
 
 
 async def atender_aviso(

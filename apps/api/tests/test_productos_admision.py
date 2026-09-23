@@ -24,6 +24,7 @@ import uuid
 
 import psycopg
 import pytest
+import pytest_asyncio
 from sqlalchemy import func, select
 
 from app.core.exceptions import AppError, ForbiddenError
@@ -77,6 +78,44 @@ PROPUESTA = (
 # =========================================================================== #
 # Ayudantes
 # =========================================================================== #
+ADMIN = "/api/v1/admin/products"
+
+
+@pytest_asyncio.fixture()
+async def cliente(sesiones):
+    """La aplicacion de verdad, con la sesion de la base de la prueba.
+
+    Hace falta aqui porque dos de las puertas de la admision —leer el expediente
+    de una evaluacion y verla en la cola— viven en el router y no en el
+    servicio: comprobarlas por debajo probaria otra cosa.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import AuthUser, get_current_user, get_optional_user
+    from app.main import create_app
+    from app.shared.database import get_db
+
+    app = create_app()
+    quien: dict[str, str] = {"uid": ""}
+
+    async def _db():
+        async with sesiones() as db:
+            yield db
+
+    async def _usuario() -> AuthUser:
+        return AuthUser(id=quien["uid"], email="x@y.test", role="authenticated")
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _usuario
+    app.dependency_overrides[get_optional_user] = _usuario
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        yield http, quien
+    for dep in (get_db, get_current_user, get_optional_user):
+        app.dependency_overrides.pop(dep, None)
+
+
 async def postular(sesiones, quien: str, *, enviar=True) -> str:
     async with sesiones() as db:
         postulacion = await applications.guardar(
@@ -953,3 +992,49 @@ async def test_quien_no_es_dueno_sigue_pudiendo_puntuar_documentar_y_redactar(
         )
         await db.commit()
     assert len(razones) == 3
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_nadie_lee_el_expediente_de_evaluacion_de_lo_suyo(
+    sesiones, cliente
+) -> None:
+    """ESCRIBIRLO YA ESTABA CERRADO; LEERLO NO.
+
+    Dentro del expediente van las NOTAS INTERNAS de quien evaluo, que el informe
+    publico excluye a proposito. Un proveedor con rol de curaduria las leia por
+    la ruta de administracion, y ademas veia la evaluacion de su propio producto
+    en la cola.
+
+    LA COLA NO CONTESTA 403: sencillamente no se la ensena, porque no es un
+    error pedir la bandeja, es que ese caso no le toca.
+    """
+    http, quien = cliente
+    dueno = await persona(sesiones, "lee-suyo", rol="moderator")
+    await vendedor(sesiones, dueno)
+    otro = await persona(sesiones, "lee-otro", rol="admin")
+    _, version_id = await hasta_evaluacion(sesiones, dueno, otro)
+    async with sesiones() as db:
+        evaluacion = await evaluations.abrir(
+            db, version_id=version_id, usuario_id=otro
+        )
+        await db.commit()
+        ident = evaluacion.id
+
+    quien["uid"] = dueno
+    suyo = await http.get(f"{ADMIN}/evaluations/{ident}")
+    assert suyo.status_code != 200, "leyo el expediente de su propio producto"
+    assert suyo.json()["error"]["code"] == "product_self_review_forbidden", suyo.text
+
+    cola = await http.get(f"{ADMIN}/evaluations")
+    assert cola.status_code == 200, cola.text
+    assert ident not in [e["id"] for e in cola.json()], (
+        "la cola le ensena la evaluacion de su propio producto"
+    )
+
+    #: EL CONTROL POSITIVO: quien no es dueno sigue leyendola y sigue en su cola.
+    quien["uid"] = otro
+    ajena = await http.get(f"{ADMIN}/evaluations/{ident}")
+    assert ajena.status_code == 200, ajena.text
+    cola = await http.get(f"{ADMIN}/evaluations")
+    assert ident in [e["id"] for e in cola.json()]
