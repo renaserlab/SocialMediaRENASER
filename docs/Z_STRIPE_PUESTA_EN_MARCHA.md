@@ -111,7 +111,8 @@ una compra de juguete.
 **No hay variable de cuenta conectada, y no hay alta.** `STRIPE_CONNECT_ENABLED`
 es un interruptor sin nada detrás todavía: no existe el flujo de alta de la
 cuenta de quien vende. Mientras no exista, un saldo que haya cumplido todo lo
-demás se queda bloqueado con el código `payout_account_incomplete`, que es la
+demás se queda bloqueado con el código `payout_account_not_ready` (o
+`payout_account_missing` si ni siquiera hay cuenta apuntada), que es la
 respuesta honesta.
 
 ---
