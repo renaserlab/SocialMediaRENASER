@@ -169,6 +169,25 @@ def test_el_rol_de_github_solo_mueve_su_puntero() -> None:
     )
 
 
+def test_las_maquinas_no_leen_parametros_de_otros_productos() -> None:
+    """AmazonSSMManagedInstanceCore concede ssm:GetParameter sobre `*`.
+
+    En la cuenta compartida eso dejaba leer /renaser/prod/* a las maquinas de
+    Z. Lo encontro el simulador de IAM con la pila ya desplegada. Mientras esa
+    politica gestionada siga puesta, tiene que ir acompanada del Deny.
+    """
+    texto = PLATAFORMA.read_text(encoding="utf-8")
+    if "AmazonSSMManagedInstanceCore" not in texto:
+        return
+    assert re.search(
+        r"Sid: NingunParametroQueNoSeaDeEsteEntorno\n\s+Effect: Deny\n"
+        r"\s+Action: \[ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath, ssm:GetParameterHistory\]\n"
+        r"\s+NotResource:\n"
+        r"\s+- !Sub 'arn:\$\{AWS::Partition\}:ssm:\$\{AWS::Region\}:\$\{AWS::AccountId\}:parameter/\$\{PrefijoDeRecursos\}/\$\{Entorno\}/\*'",
+        texto,
+    ), "las maquinas podrian leer los parametros de cualquier producto de la cuenta"
+
+
 def test_el_flujo_de_despliegue_no_lleva_la_cuenta_escrita() -> None:
     """Mudar de cuenta es cambiar variables de GitHub, no editar el flujo."""
     flujo = FLUJO.read_text(encoding="utf-8")

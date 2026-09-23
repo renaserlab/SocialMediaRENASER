@@ -1163,6 +1163,25 @@ Resources:
                 Effect: Allow
                 Action: [ssm:GetParameter, ssm:GetParameters]
                 Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${PrefijoDeRecursos}/${Entorno}/*'
+              # LA POLITICA GESTIONADA DE SESSION MANAGER LEE TODO.
+              # AmazonSSMManagedInstanceCore concede ssm:GetParameter y
+              # ssm:GetParameters sobre `*`: sobre CUALQUIER parametro de la
+              # cuenta. En la cuenta compartida de RenaserLab eso incluia
+              # /renaser/prod/* y /renaser/pruebas/*, con contrasenas de base de
+              # datos de otros productos cifradas con la clave gestionada aws/ssm,
+              # que descifra cualquiera de la cuenta a traves de SSM. Lo encontro
+              # el simulador de IAM el 23/09/2026, con la pila ya desplegada.
+              #
+              # Un Deny explicito gana a cualquier Allow, tambien al de una
+              # politica gestionada: la maquina solo puede leer lo de su entorno
+              # y los parametros publicos de AWS. Session Manager no los necesita,
+              # y el agente de CloudWatch lee su configuracion de un fichero.
+              - Sid: NingunParametroQueNoSeaDeEsteEntorno
+                Effect: Deny
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath, ssm:GetParameterHistory]
+                NotResource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${PrefijoDeRecursos}/${Entorno}/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter/aws/*'
 
         - PolicyName: escribir-telemetria
           PolicyDocument:
