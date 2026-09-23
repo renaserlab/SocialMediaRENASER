@@ -210,13 +210,38 @@ PROVIDERS: dict[str, PaymentProvider] = {
 }
 
 
+def registrar_pasarelas() -> None:
+    """Da de alta las pasarelas concretas. La llama `payments/__init__.py`.
+
+    POR QUÉ NO SE HACE AL FINAL DE ESTE FICHERO, que es donde estaba. El módulo
+    de Stripe necesita `PaymentProvider` y `CheckoutRequest`, definidos aquí
+    arriba; y este fichero necesitaba `StripeProvider`, definido allí. Los dos
+    se necesitaban, así que el ORDEN DE IMPORTACIÓN decidía si la aplicación
+    arrancaba: entrando por `providers` funcionaba, y entrando por
+    `stripe_provider` Python encontraba este fichero a medio ejecutar y
+    levantaba `ImportError` hablando de un ciclo, no de pagos.
+
+    No se notaba porque en todos los caminos reales `providers` entra primero.
+    Pero bastaba un módulo nuevo que importara el adaptador directamente para
+    que no arrancara la API entera, y el mensaje no habría señalado a esto.
+
+    Llamarla desde el `__init__` del paquete rompe el ciclo sin perder nada:
+    Python ejecuta ese fichero ANTES que cualquier submódulo, así que cuando
+    alguien llega aquí o a `stripe_provider`, el registro ya está hecho y
+    `PROVIDERS` está completo. **Y sigue siendo ansioso**: el diccionario no
+    depende de que alguien haya preguntado antes.
+
+    Es idempotente: volver a llamarla no crea una segunda instancia.
+    """
+    if "stripe" in PROVIDERS:
+        return
+    from app.modules.payments.stripe_provider import StripeProvider
+
+    PROVIDERS["stripe"] = StripeProvider()
 def get_provider(name: str) -> PaymentProvider | None:
+    """La pasarela que se llama así, o `None` si no hay ninguna.
+
+    NO INVENTA NINGUNA: un nombre desconocido devuelve `None` y quien llama
+    decide qué hacer con eso.
+    """
     return PROVIDERS.get(name)
-
-
-# Se registra al final y con importación local para no morder la cola: el
-# módulo de Stripe necesita `CheckoutRequest` y `PaymentProvider`, que se
-# definen justo arriba.
-from app.modules.payments.stripe_provider import StripeProvider  # noqa: E402
-
-PROVIDERS["stripe"] = StripeProvider()

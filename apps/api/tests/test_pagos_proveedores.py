@@ -957,3 +957,52 @@ def test_no_hay_secretos_escritos_en_el_codigo():
 def test_stripe_esta_registrado_como_pasarela():
     assert "stripe" in PROVIDERS
     assert PROVIDERS["stripe"].name == "stripe"
+
+
+# --------------------------------------------------------------------------- #
+# El adaptador se puede importar SOLO, sin pasar antes por el puerto
+# --------------------------------------------------------------------------- #
+def test_importar_el_adaptador_de_stripe_el_primero_no_revienta() -> None:
+    """`stripe_provider` importado ANTES que `providers` tiene que funcionar.
+
+    EL CICLO. `stripe_provider` necesita `PaymentProvider` de `providers`, y
+    `providers` registraba la pasarela con un `import` al final de su propio
+    fichero. Importar el adaptador primero dejaba a Python a medio ejecutar
+    `stripe_provider`, entraba en `providers`, y al llegar a esa ultima linea
+    buscaba `StripeProvider` en un modulo todavia sin terminar: `ImportError`.
+
+    HOY NO SE NOTA porque en todos los caminos reales `providers` entra antes
+    —el router lo importa por orden alfabetico, y las pruebas montan la
+    aplicacion primero—. Pero es una bomba de relojeria en el modulo que cobra:
+    basta un modulo nuevo que importe el adaptador directamente para que la API
+    entera no arranque, y el mensaje hablaria de un ciclo, no de pagos.
+
+    SE COMPRUEBA EN UN INTERPRETE NUEVO a proposito. Dentro de esta bateria el
+    modulo ya esta en `sys.modules`, asi que cualquier comprobacion aqui dentro
+    pasaria sin demostrar nada: seria una prueba que no puede fallar.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[1]
+    guion = (
+        "from app.modules.payments.stripe_provider import StripeProvider;"
+        "from app.modules.payments.providers import get_provider;"
+        "p = get_provider('stripe');"
+        "assert p is not None, 'la pasarela no quedo registrada';"
+        "assert isinstance(p, StripeProvider), type(p);"
+        "print('ok')"
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", guion],
+        cwd=str(raiz),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert resultado.returncode == 0, (
+        "importar el adaptador antes que el puerto revienta:\n"
+        + resultado.stderr[-1500:]
+    )
+    assert "ok" in resultado.stdout
