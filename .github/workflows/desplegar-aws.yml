@@ -72,6 +72,18 @@ jobs:
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
+      # psycopg NO es dependencia de la aplicacion —la API habla con la base por
+      # asyncpg— sino del ARNES de las migraciones. Diecisiete ficheros de
+      # pruebas lo importan arriba del todo, asi que sin el aqui la RECOLECCION
+      # revienta y este trabajo termina en rojo sin que el mensaje hable de
+      # pruebas.
+      #
+      # ESTUVO ROTO DESDE EL INCREMENTO 4, y no se vio porque no se ha fusionado
+      # nada a `main` desde entonces: el despliegue a produccion llevaba semanas
+      # bloqueado. `ci.yml` lo corrigio en sus dos trabajos y esta copia se
+      # quedo fuera. Ahora lo vigila `tests/test_integracion_continua.py`, que
+      # mira TODOS los flujos y no una lista.
+      - run: pip install 'psycopg[binary]'
       - run: pytest
 
   # ---------------------------------------------------------------------------

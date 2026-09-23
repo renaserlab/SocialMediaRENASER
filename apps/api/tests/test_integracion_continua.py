@@ -124,20 +124,67 @@ def test_una_prueba_omitida_sigue_tumbando_el_trabajo() -> None:
     assert "saltadas" in bloque and "sys.exit" in bloque
 
 
-@pytest.mark.parametrize("trabajo", ["api", "migraciones"])
-def test_los_dos_trabajos_de_python_instalan_el_arnes(trabajo: str) -> None:
-    """`psycopg` no es dependencia de la aplicacion pero si de las pruebas.
+FLUJOS = RAIZ / ".github" / "workflows"
 
-    Sin el, trece ficheros ni siquiera se RECOGEN —revienta la importacion— y
-    eso no se lee como un fallo de la bateria sino como una bateria mas corta.
+
+def _trabajos_que_ejecutan_pytest() -> list[tuple[str, str, str]]:
+    """(fichero, trabajo, bloque) de cada trabajo de cada flujo que lanza pytest.
+
+    SE BUSCA EN TODOS LOS FLUJOS, no solo en `ci.yml`. El despliegue tiene su
+    propia copia de la bateria —a proposito: un push a `main` no espera a la
+    integracion continua— y esa copia tambien se puede quedar sin el arnes.
     """
-    texto = CI.read_text(encoding="utf-8")
-    inicio = texto.index(f"\n  {trabajo}:")
-    resto = texto[inicio + 1 :]
-    siguiente = re.search(r"\n  [a-z_-]+:\n", resto)
-    bloque = resto[: siguiente.start()] if siguiente else resto
-    assert "psycopg" in bloque, f"el trabajo `{trabajo}` no instala psycopg"
+    encontrados: list[tuple[str, str, str]] = []
+    for flujo in sorted(FLUJOS.glob("*.yml")):
+        texto = flujo.read_text(encoding="utf-8")
+        for casa in re.finditer(r"\n  ([a-z_-]+):\n", texto):
+            resto = texto[casa.end() :]
+            fin = re.search(r"\n  [a-z_-]+:\n", resto)
+            bloque = resto[: fin.start()] if fin else resto
+            lanza = [
+                linea
+                for linea in bloque.splitlines()
+                if re.search(r"(^|\s)pytest(\s|$)", linea)
+                and not linea.strip().startswith("#")
+            ]
+            if lanza:
+                encontrados.append((flujo.name, casa.group(1), bloque))
+    return encontrados
 
+
+def test_todo_trabajo_que_ejecuta_pytest_instala_el_arnes() -> None:
+    """`psycopg` no es dependencia de la aplicacion pero SI de las pruebas.
+
+    No esta en `requirements.txt` —la API habla con la base por asyncpg— y
+    diecisiete ficheros de pruebas lo importan arriba del todo. Sin el, esos
+    ficheros ni siquiera se RECOGEN: revienta la importacion, y eso no se lee
+    como una bateria en rojo sino como una bateria mas corta... o como un
+    trabajo entero en rojo sin que el mensaje hable de pruebas.
+
+    EL CASO QUE ESTO TAPA, Y QUE ESTUVO ROTO DESDE EL INCREMENTO 4: el flujo de
+    despliegue vuelve a lanzar la bateria a proposito, porque un push a `main`
+    no espera a la integracion continua. Esa copia no instalaba psycopg, asi que
+    el despliegue a produccion estaba BLOQUEADO —fallaba en la recoleccion— y
+    nadie lo sabia, porque no se ha fusionado nada a `main` desde entonces.
+
+    SE MIRAN TODOS LOS FLUJOS y no una lista de dos trabajos, por lo mismo que
+    el trabajo con PostgreSQL ya no lleva una lista de ficheros: una lista
+    escrita a mano se queda vieja sola.
+    """
+    trabajos = _trabajos_que_ejecutan_pytest()
+    assert len(trabajos) >= 3, (
+        f"se esperaban al menos tres trabajos con pytest, hay {len(trabajos)}: "
+        f"{[(f, t) for f, t, _ in trabajos]}"
+    )
+    faltan = [
+        f"{fichero}:{trabajo}"
+        for fichero, trabajo, bloque in trabajos
+        if "psycopg" not in bloque
+    ]
+    assert not faltan, (
+        "estos trabajos ejecutan pytest y no instalan psycopg, asi que la "
+        "recoleccion revienta antes de la primera prueba: " + ", ".join(faltan)
+    )
 
 def test_el_trabajo_del_movil_ejecuta_sus_pruebas_y_no_solo_los_tipos() -> None:
     """`mobile:check` es `tsc --noEmit`: comprueba TIPOS, no comportamiento.
