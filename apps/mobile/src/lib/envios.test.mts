@@ -668,3 +668,35 @@ describe('los códigos que despachar hereda del almacén tienen texto', () => {
     }
   });
 });
+
+describe('marcar como entregado pregunta antes, en los dos lados', () => {
+  /** El cuerpo de un manejador `const nombre = async () => { ... };`. */
+  function cuerpo(texto: string, nombre: string): string {
+    const limpio = sinComentarios(texto);
+    const desde = limpio.indexOf(`const ${nombre} = async`);
+    assert.ok(desde > 0, `no encontré el manejador ${nombre}`);
+    return limpio.slice(desde, limpio.indexOf('\n  };', desde));
+  }
+
+  it('quien compra: confirmar que lo recibió pregunta antes de mandar', () => {
+    // LO ENCONTRÓ LA REVISIÓN INDEPENDIENTE, y el comentario decía lo contrario
+    // de lo que pasa: cuando quien compra es el primero en marcarlo, esa marca
+    // arranca su propio plazo para reclamar y el de protección del pago, y
+    // `DELIVERED` no tiene salida.
+    const manejador = cuerpo(fuente('screens', 'PedidoDeProductoScreen.tsx'), 'confirmarRecepcion');
+    const pregunta = manejador.indexOf('await confirm(');
+    const manda = manejador.indexOf('confirmarRecepcion(pedido.id)');
+    assert.ok(pregunta > 0, 'confirmar la recepción dispara sin preguntar');
+    assert.ok(manda > pregunta, 'se manda antes de preguntar');
+  });
+
+  it('quien vende: registrar la entrega pregunta antes de mandar', () => {
+    const pantalla = fuente('screens', 'PrepararPedidoScreen.tsx');
+    const manejador = cuerpo(pantalla, 'registrarEntrega');
+    const pregunta = manejador.indexOf('await confirm(');
+    const manda = manejador.indexOf('registrarEntrega(orderId)');
+    assert.ok(pregunta > 0, 'registrar la entrega dispara sin preguntar');
+    assert.ok(manda > pregunta, 'se manda antes de preguntar');
+    assert.ok(sinComentarios(pantalla).includes('onPress={() => void registrarEntrega()}'));
+  });
+});

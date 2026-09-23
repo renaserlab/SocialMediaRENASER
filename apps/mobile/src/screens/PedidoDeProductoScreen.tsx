@@ -261,14 +261,26 @@ export function PedidoDeProductoScreen() {
   };
 
   /**
-   * Confirmo que recibi mi pedido.
+   * Confirmo que recibi mi pedido. SE PREGUNTA ANTES.
    *
-   * NO SE PREGUNTA ANTES, y es deliberado: no es una accion peligrosa ni
-   * irreversible para quien la hace —no renuncia a nada, no mueve dinero y no
-   * cierra ningun plazo— y un dialogo delante la haria parecer lo contrario.
+   * AQUI DECIA LO CONTRARIO, y no era verdad. Decia que no se preguntaba
+   * porque «no renuncia a nada, no mueve dinero y no cierra ningun plazo».
+   * Cuando quien compra es el primero en marcarlo, esa marca es `delivered_at`,
+   * y desde ella corren el plazo para reclamar —que cierra su propio derecho— y
+   * el de proteccion del pago, que al vencer deja el dinero listo para quien
+   * vende. Y `DELIVERED` no tiene salida. Lo encontro la revision
+   * independiente: «dar la conformidad», con menos consecuencias, si
+   * preguntaba.
    */
-  const confirmarRecepcion = () => {
+  const confirmarRecepcion = async () => {
     if (ocupadoRef.current || pedido === null) return;
+    const seguro = await confirm({
+      title: f('envio.detalle.confirmarRecepcionPregunta'),
+      message: f('envio.detalle.confirmarRecepcionCuerpo'),
+      confirmLabel: f('envio.detalle.confirmarRecepcion'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!seguro || ocupadoRef.current) return;
     ocupadoRef.current = true;
     setOcupado(true);
     void (async () => {

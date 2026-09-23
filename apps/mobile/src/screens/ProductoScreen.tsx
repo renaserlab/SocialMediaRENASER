@@ -774,9 +774,14 @@ export function ProductoScreen() {
             <Text variant="titleMedium">
               {precio.configurado ? precio.texto : f(CLAVE_SIN_PRECIO)}
             </Text>
-            <Text variant="caption" color={colors.textMuted}>
-              {f('productos.ficha.sinComprar')}
-            </Text>
+            {/* SOLO CUANDO ES VERDAD. Se pintaba siempre, y el día que se
+                encendieran las ventas diría «todavía no se compran productos»
+                encima del botón de la bolsa. Lo decide el servidor. */}
+            {!leida.purchasable ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('productos.ficha.sinComprar')}
+              </Text>
+            ) : null}
           </View>
           <Button
             label={f(leida.saved ? 'productos.accion.quitar' : 'productos.accion.guardar')}

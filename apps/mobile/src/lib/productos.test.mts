@@ -1104,7 +1104,17 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     for (const [nombre, codigo] of PANTALLAS) {
       // `sinComprar` es justo lo contrario —la línea que dice que en Z todavía
       // no se compra— así que se quita antes de buscar «comprar» suelto.
-      const bajo = codigo.toLowerCase().split('sincomprar').join('');
+      //
+      // Y SE QUITA LA ÚNICA LECTURA PERMITIDA DE `purchasable`: la NEGADA, que
+      // solo esconde esa línea cuando ya no es verdad. Encender algo con él
+      // sigue prohibido; apagar un aviso que se ha vuelto falso no enciende
+      // nada. La prueba siguiente fija que es la única.
+      const bajo = codigo
+        .toLowerCase()
+        .split('!leida.purchasable ?')
+        .join('')
+        .split('sincomprar')
+        .join('');
       // MISMA CORRECCIÓN: la bolsa existe desde el Incremento 4, y las
       // pantallas la nombran y empujan a `/productos/carrito`. Lo que NO puede
       // aparecer en ninguna es un botón que prometa pagar, ni un `purchasable`
@@ -1120,6 +1130,18 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
         assert.ok(!bajo.includes(prohibido), `${nombre} dice «${prohibido}»`);
       }
     }
+  });
+
+  it('la ficha solo lee `purchasable` para ESCONDER el aviso de que no se compra', () => {
+    // El servidor lo calcula desde que la revisión encontró que estaba en
+    // `false` fijo: encender las ventas habría exigido tocar código. La ficha
+    // lo usa para una sola cosa, y no es un botón.
+    const ficha = PANTALLAS.find(([nombre]) => nombre === 'ProductoScreen')?.[1] ?? '';
+    const usos = ficha.split('purchasable').length - 1;
+    assert.equal(usos, 1, `la ficha lee purchasable ${usos} veces`);
+    assert.ok(ficha.includes('!leida.purchasable ? ('), 'la única lectura no es la negada');
+    const desde = ficha.indexOf('!leida.purchasable ?');
+    assert.ok(ficha.slice(desde, desde + 200).includes("productos.ficha.sinComprar"));
   });
 
   it('y el repositorio no sabe comprar: no hay ruta que llamar', () => {

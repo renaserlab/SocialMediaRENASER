@@ -537,3 +537,45 @@ async def test_sin_esquema_la_portada_no_revienta(sesiones) -> None:
         assert p.manifest == catalog.MANIFIESTO
     finally:
         esquema.olvidar()
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
+async def test_la_ficha_dice_que_se_compra_cuando_la_venta_esta_encendida(
+    sesiones, monkeypatch
+) -> None:
+    """ENCENDER STRIPE NO PUEDE EXIGIR TOCAR CODIGO.
+
+    LO ENCONTRO LA REVISION INDEPENDIENTE. La ficha llevaba `purchasable=False`
+    escrito a fuego, mientras la bolsa lo calcula de verdad. El dia que se
+    encendieran las ventas, la ficha seguiria diciendo «en Z todavia no se
+    compran productos» con el boton de la bolsa debajo y el recorrido entero
+    hasta la pasarela funcionando. Que la entrega de Stripe sea solo
+    configuracion es justamente lo que este cierre promete.
+
+    Y CON LA VENTA APAGADA SIGUE EN FALSO, que es lo que ve hoy cualquiera: la
+    prueba de arriba lo fija con la configuracion de fabrica.
+    """
+    producto_id, _, _ = await publicado(sesiones)
+    async with sesiones() as db:
+        apagada = await catalog.ficha(db, producto_id=producto_id)
+    assert apagada.purchasable is False
+
+    from app.core.config import get_settings
+
+    ajustes = get_settings()
+    for nombre, valor in (
+        ("feature_product_sales", True),
+        ("payments_enabled", True),
+        ("stripe_payments_enabled", True),
+        ("product_reservation_minutes", 30),
+        ("stripe_secret_key", "sk_test_de_mentira_para_la_prueba"),
+    ):
+        monkeypatch.setattr(ajustes, nombre, valor, raising=False)
+
+    async with sesiones() as db:
+        encendida = await catalog.ficha(db, producto_id=producto_id)
+    assert encendida.purchasable is True, (
+        "con las cinco condiciones de venta cumplidas la ficha sigue diciendo "
+        "que no se compra: encender Stripe exigiria tocar el codigo"
+    )

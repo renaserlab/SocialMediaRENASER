@@ -546,8 +546,27 @@ async def ficha(
         delivery=None,
         related=await relacionados(db, producto=producto, usuario_id=usuario_id),
         saved=producto.id in guardados,
-        purchasable=False,
+        #: SE CALCULA, COMO EN LA BOLSA, y no se escribe a fuego. Estaba en
+        #: `False` fijo: el dia que se encendieran las ventas, la ficha seguiria
+        #: diciendo «en Z todavia no se compran productos» con el recorrido
+        #: entero hasta la pasarela funcionando debajo. Encender Stripe tiene
+        #: que ser configuracion y nada mas.
+        #:
+        #: Son las MISMAS cinco condiciones que usa la ruta de pago, leidas del
+        #: mismo sitio. El inventario y la politica del pais los comprueban la
+        #: bolsa y el checkout, que son los que saben de que variante y de que
+        #: direccion se habla.
+        purchasable=_se_vende_hoy(),
     )
+
+
+def _se_vende_hoy() -> bool:
+    """Si la venta de productos fisicos esta encendida de verdad, hoy."""
+    #: Importacion local: `pedidos` importa `carts`, y aqui no hace falta nada
+    #: mas que esta pregunta.
+    from app.modules.products import pedidos
+
+    return not pedidos.por_que_no_se_puede_vender()
 
 
 async def relacionados(

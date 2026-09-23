@@ -181,6 +181,24 @@ export function PrepararPedidoScreen() {
 
   const cerrar = () => void mandar(() => ProductShipmentRepository.cerrar(orderId));
 
+  /**
+   * Registra que llegó. SE PREGUNTA ANTES, por lo mismo que despachar: no se
+   * deshace —`DELIVERED` no tiene salida— y arranca dos relojes que no son de
+   * quien vende: el plazo para reclamar de quien compró y el de protección del
+   * pago. Lo encontró la revisión independiente: estaba a un toque.
+   */
+  const registrarEntrega = async () => {
+    if (ocupadoRef.current) return;
+    const seguro = await confirm({
+      title: f('envio.preparar.confirmarEntrega'),
+      message: f('envio.preparar.confirmarEntregaCuerpo'),
+      confirmLabel: f('envio.preparar.registrarEntrega'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!seguro) return;
+    await mandar(() => ProductShipmentRepository.registrarEntrega(orderId));
+  };
+
   /** Saca el paquete del almacén. SE PREGUNTA ANTES, y se dice qué implica. */
   const despachar = async () => {
     if (ocupadoRef.current) return;
@@ -564,11 +582,7 @@ export function PrepararPedidoScreen() {
           <View style={styles.acciones}>
             <Button
               label={f('envio.preparar.registrarEntrega')}
-              onPress={() =>
-                void mandar(() =>
-                  ProductShipmentRepository.registrarEntrega(orderId),
-                )
-              }
+              onPress={() => void registrarEntrega()}
               disabled={ocupado}
               icon="check-circle"
             />
