@@ -567,3 +567,39 @@ async def test_reintentar_SI_suelta_una_referencia_que_la_pasarela_mato(
         fila = await db.get(RefundRequest, solicitud)
         assert not (fila.external_refund_id or "")
     assert await _contar(sesiones, Order, Order.status == "refunded") == 0
+
+
+@pytest.mark.asyncio
+async def test_la_barrida_tiene_por_fin_quien_la_dispare(entorno, monkeypatch):
+    """La conciliación en lote existía y nadie podía lanzarla.
+
+    EL AGUJERO QUE ESTO CIERRA. `reconciliar_estancadas` estaba escrita y
+    probada, pero no colgaba de ningún endpoint ni de ninguna tarea: la única
+    conciliación que se podía pedir era la de un expediente concreto, de uno en
+    uno. Y el caso que motiva todo esto —el webhook que se pierde y deja el
+    reembolso en `refund_processing` para siempre— es justo el que nadie va a
+    ir a buscar a mano.
+    """
+    http, identidad, sesiones = entorno
+    _usar(monkeypatch, _PasarelaDeMentira("succeeded"))
+    vieja = await _sembrar_solicitud(sesiones, antiguedad_horas=72)
+    reciente = await _sembrar_solicitud(
+        sesiones, order_id=ORDEN_2, referencia="re_2", antiguedad_horas=0
+    )
+
+    identidad["uid"] = BRUNO  # el autor del curso no gestiona devoluciones
+    assert (
+        await http.post(f"{ADMIN}/refund-requests/reconcile-stale")
+    ).status_code == 403
+
+    identidad["uid"] = JEFA
+    respuesta = await http.post(f"{ADMIN}/refund-requests/reconcile-stale")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json() == {"conciliadas": 1}
+    assert await _estado(sesiones, vieja) == "refunded"
+    # La reciente no se toca: todavía puede llegar su webhook.
+    assert await _estado(sesiones, reciente) == "refund_processing"
+
+    # Y repetirla no vuelve a revocar ni a cobrar dos veces.
+    segunda = await http.post(f"{ADMIN}/refund-requests/reconcile-stale")
+    assert segunda.json() == {"conciliadas": 0}

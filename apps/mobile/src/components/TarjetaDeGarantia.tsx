@@ -257,6 +257,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.md,
+    // 44 pt es el minimo que se puede pulsar con fiabilidad; con el relleno
+    // solo se quedaba por debajo.
+    minHeight: 44,
   },
   enlaceTexto: { fontSize: 13, fontWeight: '700' },
 });

@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
+import { StateView } from '@/components/StateView';
 import { Input } from '@/components/Input';
 import { Text } from '@/components/Text';
 import { toast } from '@/lib/toast';
@@ -33,13 +34,24 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
   const [draft, setDraft] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * No se pudo leer la lista.
+   *
+   * ES DISTINTO DE «no hay puntos», y antes no lo era: el `catch` dejaba la
+   * lista vacia y la pantalla pintaba «este curso todavia no tiene puntos
+   * destacados», que es una afirmacion sobre el curso. Un fallo de red se leia
+   * como una carencia del contenido, y encima sin forma de reintentar.
+   */
+  const [falloAlCargar, setFalloAlCargar] = useState(false);
 
   const load = useCallback(async () => {
     try {
       setItems(await CourseContentRepository.getHighlights(courseId));
+      setFalloAlCargar(false);
     } catch (error) {
       console.warn('[curso] no se pudieron cargar los puntos:', error);
       setItems([]);
+      setFalloAlCargar(true);
     }
   }, [courseId]);
 
@@ -85,7 +97,9 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
   };
 
   // Sin puntos y sin permiso para anadirlos, la seccion sobra.
-  if (items.length === 0 && !canEdit) return null;
+  // Con el fallo puesto SI se pinta aunque no se pueda editar: callarse seria
+  // volver a confundir «no hay» con «no se pudo leer».
+  if (items.length === 0 && !canEdit && !falloAlCargar) return null;
 
   return (
     <View>
@@ -105,7 +119,13 @@ export function CourseHighlights({ courseId, canEdit }: Props) {
         ) : null}
       </View>
 
-      {items.length === 0 ? (
+      {falloAlCargar ? (
+        <StateView
+          state="error"
+          description={t('highlights.loadFailed')}
+          onRetry={() => void load()}
+        />
+      ) : items.length === 0 ? (
         <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
           {t('highlights.empty')}
         </Text>

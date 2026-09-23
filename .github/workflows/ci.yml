@@ -12,9 +12,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.13'
+          # 22.15 Y NO 22.13: `module.registerHooks` —que usan cuatro
+          # baterias del movil para sustituir modulos— se anadio en
+          # 22.15. Con 22.13 esos cuatro ficheros no llegan ni a
+          # importarse: `SyntaxError`, y el fichero entero cae.
+          node-version: '22.15'
       - run: npm install
       - run: npm run mobile:check
+      # Y LAS PRUEBAS. `mobile:check` es `tsc --noEmit`: comprueba TIPOS, no
+      # comportamiento. Las 113 baterias del movil —los contratos con la API,
+      # las reglas de cada pantalla, la paridad de los tres diccionarios— no se
+      # ejecutaban en ningun sitio, asi que un cambio que rompiera la pantalla
+      # de preparar un pedido o dejara una clave sin traducir pasaba en verde.
+      # Tardan cuatro segundos.
+      - run: npm run mobile:test
 
   api:
     runs-on: ubuntu-latest
@@ -29,4 +40,83 @@ jobs:
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
       - run: pip install -r requirements.txt
+      # psycopg NO es una dependencia de la aplicacion —la API habla con la base
+      # por asyncpg— sino del ARNES de las migraciones. Diecisiete ficheros de
+      # pruebas lo importan arriba del todo, asi que sin el aqui la recoleccion
+      # revienta y esos ficheros no llegan a ejecutarse: no es que fallen, es
+      # que no se recogen. Los casos que necesitan PostgreSQL se siguen
+      # saltando en ESTE trabajo porque MIGRACIONES_DATABASE_URL no esta puesta
+      # a proposito; los ejecuta, todos, el trabajo `migraciones`.
+      - run: pip install 'psycopg[binary]'
       - run: pytest
+
+  # Las migraciones, EJECUTADAS. La suite de arriba construye el esquema desde
+  # los modelos, asi que un SQL invalido, un indice parcial mal escrito o una
+  # politica RLS rota pasarian en verde y solo darian la cara al pegarlos en el
+  # editor de Supabase, que es donde se aplican a mano.
+  #
+  # La base es un contenedor efimero del propio runner: sin credenciales, sin
+  # red hacia fuera y se destruye al terminar. La variable se llama
+  # MIGRACIONES_DATABASE_URL y NO DATABASE_URL a proposito, porque la prueba
+  # borra y recrea el esquema `public`.
+  migraciones:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: renaser_migraciones
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIGRACIONES_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/renaser_migraciones
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: pip install 'psycopg[binary]'
+      # EL ORDEN ES EL DE ESCRITURA. Aqui decia que el orden aleatorio era
+      # parte de lo que se comprobaba, y no era verdad: `pytest-randomly` no
+      # esta en `requirements.txt` ni lo instala ningun paso. Lo que SI se
+      # comprueba es que ninguna prueba se omita y que no falte ninguna; lo
+      # hace `scripts/exigir_bateria_completa.py`, el mismo guion que usa la
+      # puerta del despliegue.
+      # LAS DE PRODUCTOS TAMBIEN, y por eso estan aqui y no arriba: la
+      # verificacion de la compra del Incremento 8 y el dinero del
+      # Incremento 9 viven en claves ajenas compuestas, indices unicos
+      # parciales y disparadores, que SQLite no impone. En el trabajo
+      # principal se saltaban 92 de 100 y la integracion seguia verde.
+      # LA BATERIA ENTERA, Y NO UNA LISTA DE FICHEROS.
+      #
+      # Aqui habia una lista escrita a mano, y una lista escrita a mano se
+      # queda vieja sola: un fichero nuevo que necesite la base no falla y no
+      # se salta con un aviso, sencillamente NO SE RECOGE, y la integracion
+      # sigue verde. Ya paso dos veces. La primera dejo fuera 92 de las 100
+      # pruebas de Productos de los Incrementos 8 y 9. Se corrigio anadiendolos
+      # (5cd6d28) y la lista volvio a quedarse vieja en la misma sesion: veinte
+      # ficheros se quedaron fuera, entre ellos los Incrementos 1 a 7 enteros y
+      # `test_productos_disputas.py`, que protege la unica puerta por la que se
+      # registra un contracargo.
+      #
+      # Ejecutar todo no se puede olvidar de nada. Cuesta unos minutos mas de
+      # maquina y ahorra dar por cerrado un incremento cuya verificacion no
+      # existia. `tests/test_integracion_continua.py` vigila que no vuelva a
+      # aparecer una lista incompleta aqui.
+      - run: pytest -q --junitxml=migraciones.xml
+      # Una prueba OMITIDA no es una prueba aprobada. Sin esto, borrar la
+      # variable de entorno dejaria el job en verde sin ejecutar nada.
+      - name: Ninguna prueba de PostgreSQL puede quedar omitida ni faltar
+        run: python scripts/exigir_bateria_completa.py migraciones.xml

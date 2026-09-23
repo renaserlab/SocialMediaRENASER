@@ -934,6 +934,129 @@ async def test_un_reembolso_quita_el_acceso_de_verdad(entorno):
 
 
 @pytest.mark.asyncio
+async def test_un_reembolso_deja_el_certificado_sin_vigencia(entorno):
+    """El curso terminado y certificado, y despues devuelto.
+
+    EL CERTIFICADO NO SE BORRA: sigue existiendo, marcado como revocado y con su
+    motivo, y la verificacion publica lo dice. Borrarlo dejaria a quien lo
+    hubiera compartido sin ninguna explicacion de por que desaparecio el enlace.
+
+    Esta prueba recorre el camino ENTERO —compra por Stripe, lecciones
+    completadas, certificado emitido y webhook de reembolso firmado— porque lo
+    que hay que comprobar no es la funcion suelta, es que este enganchada.
+    """
+    from app.modules.learning.models import CourseCertificate
+
+    await _comprar_por_stripe(entorno)
+    for leccion in (LECCION_PRIVADA, LECCION_MUESTRA, LECCION_DE_TEXTO):
+        respuesta = await entorno.http.post(f"{LEARNING}/lessons/{leccion}/complete")
+        assert respuesta.status_code == 200, respuesta.text
+
+    emitido = await entorno.http.post(f"{LEARNING}/courses/{CURSO_A}/certificate")
+    assert emitido.status_code == 201, emitido.text
+    codigo = emitido.json()["public_id"]
+    assert emitido.json()["status"] == "valid"
+
+    evento = _devolucion(importe=PRECIO_A)
+    crudo = json.dumps(evento).encode("utf-8")
+    assert (
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    ).status_code == 204
+
+    publica = await entorno.http.get(f"{LEARNING}/certificates/{codigo}")
+    assert publica.status_code == 200, "el certificado sigue existiendo"
+    assert publica.json()["status"] == "revoked"
+    # Y con su motivo, no en blanco.
+    async with entorno.sesiones() as db:
+        fila = await db.scalar(select(CourseCertificate))
+        assert fila is not None
+        assert (fila.revoked_reason or "").strip() != ""
+        assert fila.revoked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_PARCIAL_no_toca_el_certificado(entorno):
+    """Devolver la mitad no es devolver.
+
+    `exigir_importe` rechaza el aviso por no conciliado, asi que no se llega a
+    revocar nada: ni el acceso, ni el certificado. Es la misma puerta que
+    protege el acceso, y aqui se comprueba que tambien cubre el certificado.
+    """
+    from app.modules.learning.models import CourseCertificate
+
+    await _comprar_por_stripe(entorno)
+    for leccion in (LECCION_PRIVADA, LECCION_MUESTRA, LECCION_DE_TEXTO):
+        assert (
+            await entorno.http.post(f"{LEARNING}/lessons/{leccion}/complete")
+        ).status_code == 200
+    codigo = (
+        await entorno.http.post(f"{LEARNING}/courses/{CURSO_A}/certificate")
+    ).json()["public_id"]
+
+    # La mitad del importe: no concilia.
+    evento = _devolucion(importe=PRECIO_A // 2)
+    crudo = json.dumps(evento).encode("utf-8")
+    await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+    publica = (await entorno.http.get(f"{LEARNING}/certificates/{codigo}")).json()
+    assert publica["status"] == "valid", "una devolucion parcial no revoca"
+    async with entorno.sesiones() as db:
+        assert (await db.scalar(select(CourseCertificate))).revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_aprobar_una_devolucion_TODAVIA_no_revoca_el_certificado(entorno):
+    """Aprobar no es haber pagado.
+
+    El certificado se retira cuando el dinero vuelve —lo hace `reembolso.aplicar`
+    con un webhook conciliado—, no cuando alguien aprueba el expediente. Entre
+    las dos cosas puede pasar de todo, incluido que el reembolso falle.
+    """
+    from app.modules.learning.models import CourseCertificate
+    from app.modules.refunds import estados
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundRequest
+
+    await _comprar_por_stripe(entorno)
+    for leccion in (LECCION_PRIVADA, LECCION_MUESTRA, LECCION_DE_TEXTO):
+        assert (
+            await entorno.http.post(f"{LEARNING}/lessons/{leccion}/complete")
+        ).status_code == 200
+    codigo = (
+        await entorno.http.post(f"{LEARNING}/courses/{CURSO_A}/certificate")
+    ).json()["public_id"]
+
+    async with entorno.sesiones() as db:
+        orden = await db.scalar(select(Order))
+        solicitud = RefundRequest(
+            user_id=ANA,
+            order_id=orden.id,
+            course_id=CURSO_A,
+            reason="other",
+            amount_minor=PRECIO_A,
+            currency="PEN",
+            status=estados.REQUESTED,
+        )
+        db.add(solicitud)
+        await db.commit()
+
+        # El camino real del expediente: recibida, en revision, aprobada.
+        for hasta in (estados.UNDER_REVIEW, estados.APPROVED):
+            await devoluciones.transicionar(
+                db, solicitud, hasta=hasta, rol="admin", actor_id=ANA
+            )
+        await db.commit()
+        assert solicitud.status == estados.APPROVED
+
+    # Aprobada, y el certificado intacto.
+    publica = (await entorno.http.get(f"{LEARNING}/certificates/{codigo}")).json()
+    assert publica["status"] == "valid"
+    async with entorno.sesiones() as db:
+        assert (await db.scalar(select(CourseCertificate))).status == "valid"
+
+
+@pytest.mark.asyncio
 async def test_un_charge_refunded_SIN_identificador_de_reembolso_no_revoca(entorno):
     """El aviso trae el cobro pero no el reembolso: no hay qué conciliar.
 
@@ -1532,3 +1655,223 @@ def test_el_rol_de_la_aplicacion_nunca_se_lee_del_token():
         "Se decide un permiso con el `role` del token, que siempre vale "
         "'authenticated'. Usa `await is_admin(db, user_id)`:\n" + "\n".join(culpables)
     )
+
+
+@pytest.mark.asyncio
+async def test_un_aviso_que_falla_al_aplicarse_conserva_su_registro(entorno, monkeypatch):
+    """Si aplicar el aviso revienta, la fila del aviso TIENE que sobrevivir.
+
+    EL FALLO QUE ESTO CAZA. La fila de `payment_events` se escribe en la misma
+    transaccion que aplica el aviso, y todavia sin confirmar. El manejador de
+    error hacia `rollback` antes de anotar el fallo —para que en PostgreSQL la
+    transaccion no quedara abortada— y con ese rollback se llevaba por delante
+    la propia fila: el `UPDATE` posterior no encontraba nada que marcar y el
+    registro anti-repeticion desaparecia. Ademas leia `_fila.id` DESPUES del
+    rollback, sobre un objeto ya caducado, que en asincrono lanza
+    `MissingGreenlet` y enmascaraba el error de verdad.
+
+    Ahora lo que se deshace es un SAVEPOINT: solo se cae lo que se intento
+    aplicar, y queda constancia de que ese cobro llego y no concedio nada.
+    """
+    await _dar_de_alta(
+        entorno.sesiones, curso=CURSO_A, provider="stripe", external="price_a"
+    )
+    pedido = (
+        await entorno.http.post(f"{PAGOS}/stripe/checkout", json={"course_id": CURSO_A})
+    ).json()["purchase_id"]
+
+    async def _reventar(*_args, **_kwargs):
+        raise RuntimeError("el saldo del propietario no se pudo escribir")
+
+    monkeypatch.setattr(router_de_pagos, "_al_confirmar_la_compra", _reventar)
+
+    evento = _sesion_pagada(order_id=pedido, importe=PRECIO_A)
+    crudo = json.dumps(evento).encode("utf-8")
+    with pytest.raises(RuntimeError):
+        await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+
+    async with entorno.sesiones() as db:
+        aviso = await db.scalar(select(PaymentEvent))
+        # La fila sigue ahi: es lo que impide que un reenvio del mismo aviso se
+        # tome por nuevo, y lo unico que deja saber que hubo un cobro.
+        assert aviso is not None
+        assert aviso.external_event_id == evento["id"]
+        assert aviso.processed_at is not None
+        assert "no se pudo escribir" in (aviso.error or "")
+
+
+@pytest.mark.asyncio
+async def test_una_devolucion_de_la_tienda_cierra_tambien_el_pedido(entorno):
+    """Play Store devuelve. El acceso se va Y el pedido queda como devuelto.
+
+    LA INCOHERENCIA QUE ESTO CIERRA. Una compra por tienda tambien abre su
+    `orders` y la deja en 'paid'. La devolucion revocaba el derecho y la compra
+    heredada, pero no tocaba el pedido, y la pantalla de compras etiqueta cada
+    linea con el estado del PEDIDO: la misma persona veia «Pagado» sobre un
+    curso al que ya no podia entrar. Por Stripe si salia «Devuelto», asi que el
+    mismo hecho se contaba de dos maneras segun donde se hubiera comprado.
+
+    Y el apunte del reembolso llevaba importe cero. Ahora lleva el del pedido,
+    que es el unico importe que el servidor conoce: lo que cobro la tienda es
+    un precio local que RevenueCat no nos reporta.
+    """
+    await _dar_de_alta(
+        entorno.sesiones, curso=CURSO_A, provider="google", external=EN_LA_TIENDA_A
+    )
+    compra = {
+        "object": "purchase",
+        "id": "purch_devuelta",
+        "customer_id": ANA,
+        "product_id": EN_REVENUECAT_A,
+        "purchased_at": 1658399423658,
+        "status": "owned",
+        "environment": "sandbox",
+        "store": "play_store",
+        "store_purchase_identifier": "GPA.devuelta",
+        "ownership": "purchased",
+    }
+    entorno.compras_de_revenuecat[ANA] = [compra]
+    concedido = await entorno.http.post(
+        f"{PAGOS}/native/sync", json={"platform": "android"}
+    )
+    assert concedido.json()["granted"] == [CURSO_A]
+
+    async with entorno.sesiones() as db:
+        pedido = await db.scalar(select(Order))
+        assert pedido.status == "paid"
+        importe_del_pedido = pedido.amount_minor
+
+    # La tienda la marca devuelta y se vuelve a sincronizar.
+    entorno.compras_de_revenuecat[ANA] = [{**compra, "status": "refunded"}]
+    devuelto = await entorno.http.post(
+        f"{PAGOS}/native/sync", json={"platform": "android"}
+    )
+    assert devuelto.json()["revoked"] == [CURSO_A]
+
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is False
+    async with entorno.sesiones() as db:
+        assert (await db.scalar(select(Order))).status == "refunded"
+        apunte = await db.scalar(
+            select(PaymentTransaction).where(PaymentTransaction.kind == "refund")
+        )
+        assert apunte is not None
+        assert apunte.amount_minor == importe_del_pedido
+
+    # Y la pantalla de compras lo cuenta como devuelto, no como pagado.
+    historial = (await entorno.http.get(f"{PAGOS}/history")).json()
+    assert [c["status"] for c in historial] == ["refunded"]
+    assert historial[0]["has_access"] is False
+
+
+@pytest.mark.asyncio
+async def test_una_disputa_se_atiende_sin_romper_el_aviso(entorno):
+    """Un contracargo: se retiene el saldo, no se toca el acceso, y responde 204.
+
+    NO HABIA NI UNA PRUEBA DE ESTA RUTA, y eso la dejo indefensa: cualquier
+    cambio en el manejo transaccional del webhook podia romperla sin que la
+    suite dijera nada. Es exactamente lo que paso al envolver la aplicacion del
+    aviso en un SAVEPOINT: `_atender_disputa` terminaba con un `commit`, y un
+    `commit` dentro de un savepoint no lo confirma, lo CIERRA; al salir del
+    bloque la transaccion ya no existia y el endpoint devolvia 500.
+
+    Lo que se comprueba, entonces, es lo que la disputa promete:
+
+      1. Responde 204: Stripe no reintenta ni acaba deshabilitando el endpoint.
+      2. El acceso NO se retira: abrir una disputa no es haberla perdido.
+      3. El aviso queda marcado como procesado y SIN error.
+    """
+    await _comprar_por_stripe(entorno)
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+
+    disputa = {
+        "id": "evt_disputa_1",
+        "type": "charge.dispute.created",
+        "livemode": False,
+        "data": {"object": {"id": "dp_1", "charge": "ch_1", "payment_intent": "pi_1"}},
+    }
+    crudo = json.dumps(disputa).encode("utf-8")
+    respuesta = await _avisar(entorno.http, disputa, firma=_firmar(crudo), cuerpo=crudo)
+    assert respuesta.status_code == 204, respuesta.text
+
+    # El acceso sigue en pie: la disputa se retiene, no se resuelve sola.
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True
+    async with entorno.sesiones() as db:
+        aviso = await db.scalar(
+            select(PaymentEvent).where(PaymentEvent.external_event_id == "evt_disputa_1")
+        )
+        assert aviso is not None
+        assert aviso.processed_at is not None
+        assert aviso.error is None, f"la disputa se anoto como fallida: {aviso.error}"
+        # Y el saldo del propietario queda RETENIDO: es lo unico que la disputa
+        # hace de verdad, y lo que obliga a pasar por el `commit` que rompia.
+        from app.modules.commerce.models import OwnerSaleBalance
+
+        # Sin comision configurada no se crea saldo —falla en cerrado—, asi que
+        # aqui no hay ninguno que congelar. Lo que importa es que la ruta se
+        # recorre entera y sale bien.
+        assert await db.scalar(select(OwnerSaleBalance)) is None
+
+
+@pytest.mark.asyncio
+async def test_si_falla_anotar_el_descuadre_el_registro_del_aviso_sobrevive(
+    entorno, monkeypatch
+):
+    """Un `rollback` dentro de un savepoint sube a la raiz y borra lo de fuera.
+
+    EL CAMINO. Llega un `charge.refunded` cuyo importe no cuadra con la orden.
+    No se aplica —en la duda no se retira el acceso— y se deja constancia
+    durable de que hay un descuadre. Si ESA anotacion falla, el manejador hacia
+    `db.rollback()`, que no se queda en el savepoint: sube hasta la raiz y se
+    lleva la fila de `payment_events`, o sea el registro anti-repeticion que
+    todo ese bloque existe para conservar.
+
+    Y NO LANZA NADA. La peticion responde con normalidad, asi que el reenvio de
+    Stripe se toma por un aviso nuevo y se vuelve a procesar entero.
+    """
+    await _comprar_por_stripe(entorno)
+
+    # Hace falta una solicitud VIVA: sin ella no hay expediente que anotar y el
+    # camino que se quiere probar ni siquiera se recorre.
+    from app.modules.refunds.models import RefundRequest
+
+    async with entorno.sesiones() as db:
+        orden = await db.scalar(select(Order))
+        db.add(
+            RefundRequest(
+                order_id=orden.id,
+                user_id=ANA,
+                course_id=CURSO_A,
+                status="approved",
+                reason="not_as_expected",
+                amount_minor=orden.amount_minor,
+                currency=orden.currency,
+            )
+        )
+        await db.commit()
+
+    async def _reventar(*_args, **_kwargs):
+        raise RuntimeError("la anotacion no se pudo escribir")
+
+    from app.modules.refunds import service as devoluciones
+
+    monkeypatch.setattr(devoluciones, "_anotar", _reventar)
+
+    # Reembolso TOTAL del cobro, pero por un importe que NO es el de la orden:
+    # 1,00 frente a 199,00. `reembolso.aplicar` levanta `NoConciliado` y es
+    # entonces cuando se intenta dejar constancia del descuadre.
+    evento = _devolucion(
+        importe=100, cobrado=100, intento="pi_1", event_id="evt_descuadre",
+        reembolso="re_descuadre",
+    )
+    crudo = json.dumps(evento).encode("utf-8")
+    respuesta = await _avisar(entorno.http, evento, firma=_firmar(crudo), cuerpo=crudo)
+    assert respuesta.status_code == 204, respuesta.text
+
+    async with entorno.sesiones() as db:
+        aviso = await db.scalar(
+            select(PaymentEvent).where(PaymentEvent.external_event_id == "evt_descuadre")
+        )
+        assert aviso is not None, "el rollback se llevo el registro anti-repeticion"
+        assert aviso.processed_at is not None
+    # Y el acceso sigue: un aviso que no cuadra no retira nada.
+    assert (await _acceso(entorno.http, CURSO_A))["has_access"] is True

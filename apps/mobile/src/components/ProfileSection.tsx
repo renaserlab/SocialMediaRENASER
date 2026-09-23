@@ -1247,6 +1247,25 @@ export function ProfileSection({
             </View>
           ))}
 
+      {/*
+        LA PUERTA A «MIS EVENTOS», en la seccion de eventos del propio perfil.
+        No se ofrece «crear evento» aqui: un evento ya no se publica al crearlo,
+        pasa por admision, y el sitio donde eso se explica es su consola.
+
+        `isOwnProfile` Y NO `canManage`: lo segundo incluye a administracion, y
+        un administrador mirando el perfil de otra persona veia un boton «Mis
+        eventos» que le llevaba a los SUYOS. Este fichero avisa dos veces de que
+        `canManage` no sirve para decisiones de identidad.
+      */}
+      {kind === 'eventos' && isOwnProfile ? (
+        <Button
+          label={t('misEventos.titulo')}
+          variant="secondary"
+          icon="calendar"
+          onPress={() => router.push('/mis-eventos' as never)}
+        />
+      ) : null}
+
       {/* Alta de un curso nuevo, debajo de los ya publicados. */}
       {kind === 'cursos' && canManage ? (
         <Button

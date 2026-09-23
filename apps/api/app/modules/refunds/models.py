@@ -99,6 +99,16 @@ class CourseRefundWindow(Base):
         CheckConstraint(
             "expires_at > first_accessed_at", name="course_refund_windows_plazo"
         ),
+        # Si está usada, tiene fecha de uso; y al revés. Estaba solo en el SQL
+        # de la 0049, así que en pruebas se podía crear una garantía consumida
+        # SIN fecha de consumo —un estado que producción rechaza— y la suite se
+        # ponía verde. Las restricciones que decide la base tienen que estar en
+        # los dos sitios o no protegen nada donde se comprueban las cosas.
+        CheckConstraint(
+            "(refund_used_at is null and refund_request_id is null) "
+            "or (refund_used_at is not null)",
+            name="course_refund_windows_uso_coherente",
+        ),
         # LA INVARIANTE NÚMERO UNO. Sin esto, dos peticiones simultáneas a la
         # primera lección crean dos ventanas y la persona tiene dos garantías.
         Index("course_refund_windows_unica", "user_id", "course_id", unique=True),
@@ -177,6 +187,13 @@ class RefundRequest(Base):
             name="refund_requests_reason",
         ),
         CheckConstraint("amount_minor >= 0", name="refund_requests_amount"),
+        # El entorno es 'sandbox' o 'production', y nada más. Estaba solo en el
+        # SQL: en pruebas se podía escribir 'live' o 'test' —lo que devuelve
+        # cualquier pasarela— y la fila entraba; en producción la rechaza.
+        CheckConstraint(
+            "environment is null or environment in ('sandbox', 'production')",
+            name="refund_requests_environment",
+        ),
         # UNA SOLICITUD VIVA POR ORDEN. Parcial: rechazadas y canceladas puede
         # haber varias —es historial—; abiertas sobre el mismo dinero, una.
         #
@@ -271,6 +288,25 @@ class RefundPolicyAcceptance(Base):
     )
     policy_version: Mapped[str] = mapped_column(String(32))
     policy_hash: Mapped[str] = mapped_column(String(64))
+
+    # ---- Por dónde se iba a comprar cuando se aceptó (migración 0054) ------- #
+    #
+    # LAS TRES SON OPCIONALES Y NO SE RELLENAN HACIA ATRÁS. Las aceptaciones
+    # anteriores a la 0054 se firmaron sin estos datos, y una fila con `provider`
+    # nulo significa exactamente eso. Inventarles un valor plausible sería
+    # escribir en un registro de consentimientos algo que nadie firmó.
+    #
+    # `provider` NO ES EL CANAL. El canal es 'android' / 'ios'; el proveedor es
+    # 'google' / 'apple' / 'stripe', y es lo que admite el CHECK de la base.
+    # Guardar el canal aquí reventaría al insertar.
+    provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    external_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: La referencia de la operación de tienda con la que se consumió. En el
+    #: checkout web esto va por `order_id`; en las tiendas la orden no existe
+    #: hasta después del cobro, así que hace falta otra forma de responder «qué
+    #: aceptó exactamente quien hizo ESTA compra».
+    operation_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     accepted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

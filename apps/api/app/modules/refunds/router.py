@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,9 @@ from app.modules.catalog.models import Course
 from app.modules.commerce import liquidacion
 from app.modules.commerce.models import Order
 from app.modules.profiles.models import Profile
+from app.modules.gobernanza import auditoria, consentimientos
+from app.modules.gobernanza import politicas as politicas_compartidas
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.refunds import esquema, estados, politica, validacion
 from app.modules.refunds import service as devoluciones
 from app.modules.refunds.models import RefundRequest
@@ -52,7 +55,7 @@ from app.modules.refunds.schemas import (
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin
+from app.shared.permissions import puede_mover_dinero
 
 logger = logging.getLogger("renaser.refunds")
 
@@ -135,6 +138,7 @@ async def refund_eligibility(
         first_accessed_at=estado.first_accessed_at,
         expires_at=estado.expires_at,
         seconds_remaining=estado.seconds_remaining,
+        guarantee_hours=devoluciones.HORAS_DE_GARANTIA,
         refund_used=estado.refund_used,
         refund_used_at=estado.refund_used_at,
         active_request_id=estado.request_id,
@@ -321,6 +325,7 @@ async def aviso_de_recompra(
 @router.post("/repurchase-acceptance", status_code=status.HTTP_204_NO_CONTENT)
 async def aceptar_recompra(
     payload: PolicyAcceptanceCreate,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -340,13 +345,91 @@ async def aceptar_recompra(
         raise ValidationAppError(
             "Esta compra no necesita aceptación.", code="refund_acceptance_not_needed"
         )
+    fecha_legible = usada.date().isoformat()
     await devoluciones.registrar_aceptacion(
         db,
         user_id=current_user.id,
         course_id=payload.course_id,
         order_id=None,
-        fecha_legible=usada.date().isoformat(),
+        fecha_legible=fecha_legible,
+        provider=payload.provider,
+        external_product_id=payload.product_id,
     )
+
+    # ------------------------------------------------------------------ #
+    # TRAZABILIDAD ADICIONAL (0050). No cambia ninguna decisión.
+    #
+    # `refund_policy_acceptances` SIGUE SIENDO LA AUTORIDAD: es la que consulta
+    # el checkout para dejar comprar, y moverla de sitio en la misma ronda en
+    # que se crea la tabla nueva sería cambiar un flujo legal y su almacén a la
+    # vez. Lo que se añade aquí es lo que a aquella le faltaba: de dónde vino la
+    # aceptación —huella de IP, prefijo de red, familia del navegador,
+    # identificador de petición— y un rastro auditable.
+    #
+    # SI ALGO DE ESTO FALLA, LA ACEPTACIÓN NO SE PIERDE: va en un savepoint. El
+    # caso concreto es que la política todavía no esté sembrada, que es lo
+    # normal hasta que alguien llame al endpoint de siembra después de aplicar
+    # la 0050. Bloquear una compra por eso sería una regresión.
+    # ------------------------------------------------------------------ #
+    origen = leer_origen(request)
+    consentimiento = None
+    try:
+        async with db.begin_nested():
+            consentimiento = await consentimientos.registrar(
+                db,
+                subject_id=current_user.id,
+                policy_type=politicas_compartidas.RECOMPRA,
+                # EL TEXTO EXACTO que se le enseñó, con su fecha dentro. La
+                # huella de la plantilla no demostraría nada.
+                texto_mostrado=(
+                    politica.texto_de_recompra(fecha_legible)
+                    + "\n"
+                    + politica.CASILLA_DE_ACEPTACION
+                ),
+                scope_kind="course",
+                scope_id=payload.course_id,
+                origen=origen,
+            )
+    except Exception:  # noqa: BLE001
+        # CUALQUIER fallo, no solo la politica sin sembrar. Capturar unicamente
+        # `PoliticaAusente` dejaba pasar el resto —un CHECK incumplido, la 0050
+        # a medias— y esos SI tumbaban la peticion entera: la aceptacion legal,
+        # que ya estaba volcada, se perdia con el `rollback` de la dependencia y
+        # la compra quedaba bloqueada. Lo accesorio no puede tumbar lo principal.
+        logger.warning(
+            "[devoluciones] la aceptacion se guardo en refund_policy_acceptances "
+            "pero no se pudo registrar el consentimiento compartido",
+            exc_info=True,
+        )
+
+    # SAVEPOINT APARTE PARA LA ANOTACION, y esta separacion es el motivo de que
+    # haya dos bloques y no uno. Compartiendo savepoint, un fallo al anotar
+    # —una tabla de auditoria a medias, un `payload` que no pasa el filtro—
+    # deshacia tambien el `consent_record` que ya se habia creado bien: se
+    # perdia la prueba del consentimiento por no poder escribir su nota. El
+    # consentimiento es el dato con valor legal; la nota es el rastro.
+    try:
+        async with db.begin_nested():
+            await auditoria.anotar(
+                db,
+                action="consent.accepted",
+                entity_type="course",
+                entity_id=payload.course_id,
+                actor_id=current_user.id,
+                actor_role="user",
+                reason="recompra sin garantia",
+                payload={
+                    "policy_type": politicas_compartidas.RECOMPRA,
+                    "consent_id": consentimiento.id if consentimiento else None,
+                },
+                origen=origen,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[devoluciones] la aceptacion quedo guardada pero no se pudo anotar "
+            "en la auditoria",
+            exc_info=True,
+        )
     await db.commit()
 
 
@@ -362,14 +445,17 @@ async def aceptar_recompra(
 async def _exigir_gestor(db: AsyncSession, current_user: AuthUser) -> None:
     """Quién puede gestionar devoluciones.
 
-    Hoy: el rol de administración que ya existe. Mañana puede ser un permiso
-    propio (`refund_manager`) y solo cambia esta función.
+    `puede_mover_dinero` y NO `is_admin`. Parecen lo mismo y no lo son:
+    `is_admin` incluye el rol `moderator`, que existe para ocultar una
+    publicación o resolver un reporte. Con él, esa misma cuenta podía aprobar y
+    ejecutar un reembolso real contra la pasarela y leer el motivo privado de
+    cualquier alumno. Moderar contenido no es administrar dinero.
 
     LO QUE NUNCA SERÁ: el autor del curso. Aprobar la devolución de lo que uno
     vende es juez y parte, y además le daría acceso al motivo privado de quien
     la pide.
     """
-    if not await is_admin(db, current_user.id):
+    if not await puede_mover_dinero(db, current_user.id):
         raise ForbiddenError("No puedes gestionar devoluciones.")
 
 
@@ -871,6 +957,12 @@ async def _conciliar_con_pasarela(
     from app.modules.refunds import reembolso
 
     referencia = solicitud.external_refund_id or ""
+    # EL IDENTIFICADOR, EN UNA CADENA, ANTES DE QUE PUEDA HABER UN `rollback`.
+    # `solicitud` es un objeto del ORM y una transaccion deshecha lo caduca: a
+    # partir de ahi leerle un atributo dispara una recarga perezosa que en
+    # asincrono lanza `MissingGreenlet` y tapa el error de verdad. Es el mismo
+    # fallo que ya se corrigio en `_aplicar_reembolso_total`.
+    id_de_la_solicitud = solicitud.id
     resultado = await proveedor_de_reembolsos().get_refund_status(referencia)
 
     if resultado.status == "succeeded":
@@ -902,7 +994,7 @@ async def _conciliar_con_pasarela(
             )
         except reembolso.NoConciliado as error:
             await db.rollback()
-            solicitud = await _cualquiera(db, solicitud.id)
+            solicitud = await _cualquiera(db, id_de_la_solicitud)
             await devoluciones._anotar(
                 db,
                 solicitud,
@@ -993,6 +1085,35 @@ async def conciliar_solicitud(
     return await _a_lectura_admin(db, solicitud, con_historial=True)
 
 
+@admin_router.post("/refund-requests/reconcile-stale")
+async def conciliar_las_estancadas(
+    horas: int = Query(default=24, ge=1, le=720),
+    limite: int = Query(default=50, ge=1, le=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """Preguntarle a la pasarela por TODOS los expedientes que llevan colgados.
+
+    POR QUE HACIA FALTA. `reconciliar_estancadas` estaba escrita y probada, y no
+    la llamaba nadie: ni un endpoint, ni una tarea. La conciliacion existia solo
+    de una en una, expediente a expediente, y justo el caso que motiva todo esto
+    —el webhook que se pierde y deja el reembolso en `refund_processing` para
+    siempre— es el que nadie va a ir a buscar a mano.
+
+    IDEMPOTENTE Y ACOTADO. `reembolso.aplicar` devuelve False si ya estaba
+    aplicado, asi que llamarlo dos veces seguidas no revoca dos veces ni avisa
+    dos veces; `horas` y `limite` acotan cuanto abarca cada pasada.
+
+    A MANO Y NO POR TEMPORIZADOR, por lo mismo que la liquidacion: la API corre
+    en varias replicas y un planificador dentro del proceso son tantas pasadas
+    como replicas. Cuando se decida colgarlo de un cron externo, este es el
+    endpoint.
+    """
+    await _exigir_gestor(db, current_user)
+    await _exigir_esquema(db)
+    return {"conciliadas": await reconciliar_estancadas(db, horas=horas, limite=limite)}
+
+
 async def reconciliar_estancadas(
     db: AsyncSession, *, horas: int = 24, limite: int = 50
 ) -> int:
@@ -1078,6 +1199,7 @@ async def _transicion(
     *,
     notes: str | None,
 ) -> None:
+    desde = solicitud.status
     try:
         await devoluciones.transicionar(
             db,
@@ -1090,7 +1212,58 @@ async def _transicion(
     except estados.TransicionInvalida as error:
         # 409 y no 500: dos administradores pulsando a la vez es algo que pasa,
         # no un fallo del servidor. El segundo se entera de que llegó tarde.
+        #
+        # Y SE AUDITA EL INTENTO RECHAZADO. Un rastro que solo apunta lo que
+        # salió bien no sirve para investigar: «alguien intentó aprobar dos
+        # veces» es exactamente lo que se quiere poder ver después.
+        # EL INTENTO RECHAZADO SE CONFIRMA APARTE, y hay que confirmarlo.
+        #
+        # `anotar` solo hace `flush`, y justo despues se lanza la excepcion:
+        # quien cierra la sesion es la dependencia, sin `commit`, asi que la fila
+        # `denied` se deshacia SIEMPRE. Era justo el caso que este bloque dice
+        # cubrir —dos personas aprobando a la vez— y no dejaba ni una fila.
+        #
+        # Y es MEJOR ESFUERZO a proposito: la transicion no se aplico, asi que no
+        # hay nada que proteger con ella, y convertir un 409 legitimo en un 500
+        # porque no se pudo escribir el rastro seria cambiar un problema pequeño
+        # por uno grande. Si falla, queda en el registro.
+        try:
+            await auditoria.anotar(
+                db,
+                action=f"refund.{hasta}",
+                entity_type="refund_request",
+                entity_id=solicitud.id,
+                actor_id=current_user.id,
+                actor_role="admin",
+                outcome="denied",
+                previous_state=desde,
+                new_state=hasta,
+                reason=str(error)[:300],
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "[devoluciones] no se pudo anotar el intento rechazado sobre %s",
+                solicitud.id,
+                exc_info=True,
+            )
         raise ValidationAppError(str(error), code="refund_invalid_transition")
+
+    # EL EXPEDIENTE YA LO ANOTA `_anotar` en `refund_request_events`, que es su
+    # máquina de estados y sigue siendo la autoridad. Esto es el rastro
+    # TRANSVERSAL: el que responde «¿qué se movió hoy y quién lo movió?» sin
+    # tener que saber que existe un módulo de devoluciones.
+    await auditoria.anotar(
+        db,
+        action=f"refund.{hasta}",
+        entity_type="refund_request",
+        entity_id=solicitud.id,
+        actor_id=current_user.id,
+        actor_role="admin",
+        previous_state=desde,
+        new_state=hasta,
+        payload={"order_id": solicitud.order_id, "course_id": solicitud.course_id},
+    )
 
 
 async def _cualquiera(db: AsyncSession, request_id: str) -> RefundRequest:

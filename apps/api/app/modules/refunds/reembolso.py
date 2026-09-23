@@ -171,6 +171,12 @@ async def aplicar(
     # 5. La matrícula y el progreso NO se tocan. Está escrito aquí, en el sitio
     #    donde alguien tendría la tentación de borrarlos «para limpiar».
 
+    # 5-bis. El certificado, si lo hubiera, deja de estar vigente. NO se borra:
+    #    sigue en el historial, marcado como revocado y con su motivo, y la
+    #    verificación pública dice que no vale. Borrarlo dejaría a quien lo
+    #    compartió sin ninguna explicación de por qué desapareció.
+    await _revocar_certificado_del_curso(db, user_id=orden.user_id, course_id=course_id)
+
     # 6. La garantía queda consumida, para siempre.
     if solicitud is not None:
         await service.consumir_garantia(db, solicitud)
@@ -202,3 +208,31 @@ async def aplicar(
         orden.id,
     )
     return True
+
+
+async def _revocar_certificado_del_curso(
+    db: AsyncSession, *, user_id: str, course_id: str
+) -> None:
+    """Deja sin vigencia el certificado de un curso devuelto.
+
+    Sin la 0059 aplicada no hay nada que revocar y no se rompe nada: el
+    reembolso sigue su curso.
+    """
+    from app.modules.learning import certificados
+    from app.modules.learning import esquema as esquema_aprendizaje
+    from app.modules.learning.models import CourseCertificate
+
+    if not await esquema_aprendizaje.hay_certificados(db):
+        return
+    fila = await db.scalar(
+        select(CourseCertificate).where(
+            CourseCertificate.user_id == user_id,
+            CourseCertificate.course_id == course_id,
+            CourseCertificate.status == "valid",
+        )
+    )
+    if fila is None:
+        return
+    await certificados.revocar(
+        db, fila, motivo="Devolución total confirmada.", actor_id=None
+    )

@@ -38,7 +38,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.modules.catalog.models import Course
 from app.modules.commerce import esquema, service as comercio
 from app.modules.commerce.models import Entitlement, PaymentTransaction, ProviderProduct
+from app.modules.gobernanza import models as _modelos_de_gobernanza  # noqa: F401
 from app.modules.payments import nativo, service
+from app.modules.refunds import models as _modelos_de_devoluciones  # noqa: F401
 from app.modules.payments.providers import PROVIDERS
 from app.modules.payments.revenuecat import RevenueCatClient, RevenueCatError
 from app.modules.payments.stripe_provider import (
@@ -213,6 +215,216 @@ async def test_una_compra_real_concede_derecho_y_matricula(sesiones):
         )
         assert acceso.tiene_acceso is True
         assert CURSO in await comercio.cursos_con_acceso(db, user_id=ANA)
+
+
+@pytest.mark.asyncio
+async def test_una_recompra_sin_aceptacion_CONCEDE_y_deja_constancia(sesiones):
+    """EL DINERO YA SE MOVIO CUANDO ESTO CORRE, y esa es la decision entera.
+
+    La aceptacion de recompra —«se que esta compra no tiene garantia»— solo se
+    exigia en el checkout web. En iOS y Android el acceso lo concede
+    `native/sync`, y ahi no se comprobaba nada: la casilla de la aplicacion era
+    la unica puerta, y una puerta que vive en el telefono no es una puerta.
+
+    PERO RECHAZAR AQUI SERIA PEOR. Google y Apple cobran antes de que nosotros
+    nos enteremos, asi que negar el acceso en la sincronizacion es cobrar y no
+    entregar. Se concede, y se deja una nota de auditoria: es lo unico que
+    convierte «la casilla se salto» en algo que alguien puede ver.
+    """
+    from app.modules.gobernanza.models import AuditEvent
+    from app.modules.refunds import service as devoluciones
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        # Ana ya uso su garantia en este curso.
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        resultado = await nativo.sincronizar(
+            db, user_id=ANA, cliente=cliente, entorno="sandbox"
+        )
+
+        assert resultado.concedidos == [CURSO], "una compra pagada SIEMPRE concede"
+        notas = list(await db.scalars(_select(AuditEvent)))
+        assert len(notas) == 1, "sin aceptacion tiene que quedar constancia"
+        assert notas[0].action == "repurchase.sin_aceptacion"
+        assert notas[0].entity_id == CURSO
+        assert notas[0].outcome == "ok", "el acceso SI se concedio: lo que falto es la aceptacion"
+
+
+@pytest.mark.asyncio
+async def test_una_recompra_con_aceptacion_no_deja_nota_de_incidencia(sesiones):
+    """El camino normal: se acepto antes de comprar, y no hay nada que reportar."""
+    from app.modules.gobernanza.models import AuditEvent
+    from app.modules.refunds import service as devoluciones
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await devoluciones.registrar_aceptacion(
+            db, user_id=ANA, course_id=CURSO, order_id=None, fecha_legible="1 de enero"
+        )
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+
+        incidencias = [
+            n
+            for n in await db.scalars(_select(AuditEvent))
+            if n.action == "repurchase.sin_aceptacion"
+        ]
+        assert incidencias == [], "con aceptacion no hay incidencia que anotar"
+
+
+@pytest.mark.asyncio
+async def test_la_aceptacion_queda_atada_a_la_orden_y_a_la_operacion(sesiones):
+    """LA MIGRACION 0054 SIRVE PARA ESTO Y PARA NADA MAS.
+
+    En el checkout web basta con `order_id`: la orden identifica la compra. En
+    las tiendas la orden no existe hasta despues del cobro, asi que sin la
+    referencia de la operacion dos recompras del mismo curso serian
+    indistinguibles y «que acepto exactamente quien hizo ESTA compra» no tendria
+    respuesta.
+
+    Y EL PROVEEDOR NO ES EL CANAL. El canal que trae RevenueCat es 'android' /
+    'ios'; el CHECK de la base admite 'google' / 'apple' / 'stripe'. Guardar el
+    canal reventaria al insertar.
+    """
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundPolicyAcceptance
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await devoluciones.registrar_aceptacion(
+            db,
+            user_id=ANA,
+            course_id=CURSO,
+            order_id=None,
+            fecha_legible="1 de enero",
+            provider="google",
+            external_product_id="z.curso.respiracion.lifetime",
+        )
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+
+        aceptaciones = list(await db.scalars(_select(RefundPolicyAcceptance)))
+        assert len(aceptaciones) == 1, "la sincronizacion no duplica la aceptacion"
+        firmada = aceptaciones[0]
+        assert firmada.order_id is not None, "tiene que quedar atada a la orden"
+        assert firmada.operation_ref, "y a la operacion de tienda"
+        assert firmada.provider == "google", "el proveedor, no el canal"
+        assert firmada.external_product_id == "z.curso.respiracion.lifetime"
+
+
+@pytest.mark.asyncio
+async def test_una_aceptacion_anterior_a_la_0054_sigue_funcionando(sesiones):
+    """LAS FILAS VIEJAS NO SE RELLENAN HACIA ATRAS, y tienen que valer igual.
+
+    Una aceptacion firmada antes de la 0054 no tiene proveedor ni producto. Eso
+    NO la invalida: se acepto, y esta fechada y con la huella del texto.
+    Inventarle un valor plausible seria escribir en un registro de
+    consentimientos algo que nadie firmo.
+    """
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundPolicyAcceptance
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        # Sin proveedor ni producto: exactamente como las de antes.
+        await devoluciones.registrar_aceptacion(
+            db, user_id=ANA, course_id=CURSO, order_id=None, fecha_legible="1 de enero"
+        )
+        await db.flush()
+
+        assert await devoluciones.tiene_aceptacion(db, user_id=ANA, course_id=CURSO)
+
+        cliente, _ = _cliente([_compra()])
+        resultado = await nativo.sincronizar(
+            db, user_id=ANA, cliente=cliente, entorno="sandbox"
+        )
+        assert resultado.concedidos == [CURSO]
+        firmada = await db.scalar(_select(RefundPolicyAcceptance))
+        assert firmada.provider is None, "no se le inventa un proveedor"
+        assert firmada.order_id is not None, "pero si se ata a la orden"
+
+
+@pytest.mark.asyncio
+async def test_sincronizar_dos_veces_no_duplica_ni_reescribe_la_aceptacion(sesiones):
+    """IDEMPOTENCIA: el movil llama a esto al comprar, al restaurar y al entrar."""
+    from app.modules.refunds import service as devoluciones
+    from app.modules.refunds.models import RefundPolicyAcceptance
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        await devoluciones.asegurar_ventana(
+            db, user_id=ANA, course_id=CURSO, order_id=None
+        )
+        ventana = await db.scalar(_select(devoluciones.CourseRefundWindow))
+        ventana.refund_used_at = devoluciones.ahora()
+        await devoluciones.registrar_aceptacion(
+            db,
+            user_id=ANA,
+            course_id=CURSO,
+            order_id=None,
+            fecha_legible="1 de enero",
+            provider="google",
+            external_product_id="z.curso.respiracion.lifetime",
+        )
+        await db.flush()
+
+        cliente, _ = _cliente([_compra()])
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+        primera = await db.scalar(_select(RefundPolicyAcceptance))
+        atada_a, operacion = primera.order_id, primera.operation_ref
+
+        await nativo.sincronizar(db, user_id=ANA, cliente=cliente, entorno="sandbox")
+        todas = list(await db.scalars(_select(RefundPolicyAcceptance)))
+        assert len(todas) == 1, "la segunda pasada no crea otra aceptacion"
+        assert todas[0].order_id == atada_a, "ni la reata a otra orden"
+        assert todas[0].operation_ref == operacion
+
+
+@pytest.mark.asyncio
+async def test_sin_garantia_usada_no_se_exige_ni_se_anota_nada(sesiones):
+    """La primera compra no tiene nada que aceptar, y no puede ensuciar nada."""
+    from app.modules.gobernanza.models import AuditEvent
+    from sqlalchemy import select as _select
+
+    async with sesiones() as db:
+        await _dar_de_alta(db)
+        cliente, _ = _cliente([_compra()])
+        resultado = await nativo.sincronizar(
+            db, user_id=ANA, cliente=cliente, entorno="sandbox"
+        )
+        assert resultado.concedidos == [CURSO]
+        assert list(await db.scalars(_select(AuditEvent))) == []
 
 
 @pytest.mark.asyncio
@@ -745,3 +957,52 @@ def test_no_hay_secretos_escritos_en_el_codigo():
 def test_stripe_esta_registrado_como_pasarela():
     assert "stripe" in PROVIDERS
     assert PROVIDERS["stripe"].name == "stripe"
+
+
+# --------------------------------------------------------------------------- #
+# El adaptador se puede importar SOLO, sin pasar antes por el puerto
+# --------------------------------------------------------------------------- #
+def test_importar_el_adaptador_de_stripe_el_primero_no_revienta() -> None:
+    """`stripe_provider` importado ANTES que `providers` tiene que funcionar.
+
+    EL CICLO. `stripe_provider` necesita `PaymentProvider` de `providers`, y
+    `providers` registraba la pasarela con un `import` al final de su propio
+    fichero. Importar el adaptador primero dejaba a Python a medio ejecutar
+    `stripe_provider`, entraba en `providers`, y al llegar a esa ultima linea
+    buscaba `StripeProvider` en un modulo todavia sin terminar: `ImportError`.
+
+    HOY NO SE NOTA porque en todos los caminos reales `providers` entra antes
+    —el router lo importa por orden alfabetico, y las pruebas montan la
+    aplicacion primero—. Pero es una bomba de relojeria en el modulo que cobra:
+    basta un modulo nuevo que importe el adaptador directamente para que la API
+    entera no arranque, y el mensaje hablaria de un ciclo, no de pagos.
+
+    SE COMPRUEBA EN UN INTERPRETE NUEVO a proposito. Dentro de esta bateria el
+    modulo ya esta en `sys.modules`, asi que cualquier comprobacion aqui dentro
+    pasaria sin demostrar nada: seria una prueba que no puede fallar.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[1]
+    guion = (
+        "from app.modules.payments.stripe_provider import StripeProvider;"
+        "from app.modules.payments.providers import get_provider;"
+        "p = get_provider('stripe');"
+        "assert p is not None, 'la pasarela no quedo registrada';"
+        "assert isinstance(p, StripeProvider), type(p);"
+        "print('ok')"
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", guion],
+        cwd=str(raiz),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert resultado.returncode == 0, (
+        "importar el adaptador antes que el puerto revienta:\n"
+        + resultado.stderr[-1500:]
+    )
+    assert "ok" in resultado.stdout

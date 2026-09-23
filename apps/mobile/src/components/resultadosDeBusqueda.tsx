@@ -249,7 +249,9 @@ export function FilaDeResultado({ fila, alAbrir }: PropsDeFila) {
           rightIcon="chevron-right"
           onPress={() => {
             alAbrir?.();
-            router.push('/events' as never);
+            // A la ficha del evento encontrado. Llevar al listado obligaba a
+            // buscarlo otra vez, ahora a ojo.
+            router.push(`/eventos/${fila.evento.id}` as never);
           }}
         />
       );

@@ -128,14 +128,19 @@ export function ComprasYDevolucionesScreen() {
 
   const retirar = async (solicitud: SolicitudDeDevolucion): Promise<void> => {
     // Cerrojo síncrono: `retirando` no está puesto hasta el siguiente render.
+    // Se cierra ANTES del diálogo: detrás no protege nada, porque los dos
+    // toques lo encuentran abierto y acaban abriendo dos diálogos.
     if (retirandoRef.current) return;
+    retirandoRef.current = true;
     const aceptado = await confirm({
       title: t('compras.retirarTitulo'),
       message: t('compras.retirarCuerpo'),
       confirmLabel: t('compras.retirar'),
     });
-    if (!aceptado) return;
-    retirandoRef.current = true;
+    if (!aceptado) {
+      retirandoRef.current = false;
+      return;
+    }
     setRetirando(solicitud.id);
     try {
       await DevolucionesRepository.cancelarSolicitud(solicitud.id);
@@ -218,6 +223,17 @@ export function ComprasYDevolucionesScreen() {
                     {formatAmount(compra.amountMinor, compra.currency)}
                   </Text>
                   <Etiqueta texto={t(`compras.estado.${compra.status}` as TranslationKey)} />
+                  {/*
+                    QUE VERSION SE COMPRO. Solo cuando consta: en las compras
+                    anteriores al versionado no hay forma de saber que contenido
+                    se vendio, y escribir «versión 1» seria inventarlo. Callarse
+                    es la respuesta honesta, y por eso no hay rama `else`.
+                  */}
+                  {compra.courseVersion !== null ? (
+                    <Text style={[styles.nota, { color: colors.textMuted }]}>
+                      {t('compras.versionAdquirida', { version: compra.courseVersion })}
+                    </Text>
+                  ) : null}
                   {/*
                     El aviso de acceso retirado va DENTRO de la fila, no en
                     lugar de ella: la compra sigue existiendo y lo que ha
@@ -372,6 +388,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.md,
+    // 44 pt es el minimo que se puede pulsar con fiabilidad; con el relleno
+    // solo se quedaba por debajo.
+    minHeight: 44,
   },
   enlaceTexto: { fontSize: 13, fontWeight: '700' },
 });

@@ -1,4 +1,4 @@
-"""Pedirle a Stripe la devolución total de un cobro.
+"""Pedirle a Stripe la devolución de un cobro, entera o en parte.
 
 Se separa de `stripe_provider.py` a propósito: aquel resuelve cobrar y
 verificar avisos, y ya es largo. Devolver dinero es una operación distinta, con
@@ -42,17 +42,59 @@ class StripeRefundProvider(RefundProvider):
     async def create_full_refund(
         self, peticion: RefundRequestToProvider
     ) -> RefundResult:
+        """El cobro ENTERO. No se manda `amount`, y es deliberado.
+
+        Stripe devuelve el cobro completo cuando se omite: mandar un número
+        abriría la puerta a un parcial por un error de cálculo, y un parcial no
+        retira el acceso pero sí saca el dinero.
+        """
+        return await self._crear(peticion, importe=None)
+
+    async def create_partial_refund(
+        self, peticion: RefundRequestToProvider
+    ) -> RefundResult:
+        """SOLO `amount_minor`, en la unidad mínima de la moneda.
+
+        EL IMPORTE SE VALIDA ANTES DE SALIR. Cero o negativo no es una
+        devolución y Stripe lo rechazaría igual, pero gastando una llamada y
+        devolviendo un error genérico; comprobarlo aquí da un código propio y
+        no toca la red.
+
+        LO QUE **NO** SE COMPRUEBA AQUÍ es que no pase de lo ya cobrado menos lo
+        ya devuelto: eso exige saber qué devoluciones hay vivas, y lo sabe el
+        servicio —`devoluciones.aprobar`, con cerrojo sobre el pedido—. Stripe
+        lo rechaza además por su cuenta. Repetir la regla en dos sitios sería
+        garantizar que un día digan cosas distintas.
+        """
+        if peticion.amount_minor <= 0:
+            return RefundResult(
+                status="failed",
+                failure_code="amount_invalid",
+                failure_message="Una devolución de cero no devuelve nada.",
+            )
+        return await self._crear(peticion, importe=peticion.amount_minor)
+
+    async def _crear(
+        self, peticion: RefundRequestToProvider, *, importe: int | None
+    ) -> RefundResult:
+        """El camino compartido. `importe=None` devuelve el cobro entero.
+
+        Todo lo que no es el campo `amount` es igual en las dos operaciones, y
+        separarlas en dos funciones completas haría que el día que se arregle
+        un fallo se arregle solo en una.
+        """
         from app.core.config import get_settings
 
         ajustes = get_settings()
-        # NO SE MANDA EL IMPORTE. Stripe devuelve el cobro ENTERO cuando se
-        # omite `amount`, y eso es exactamente lo que se quiere: mandar un
-        # número abre la puerta a un reembolso parcial por un error de cálculo,
-        # y un parcial no retira el acceso pero sí saca el dinero.
         campos = {
             "payment_intent": peticion.external_transaction_id,
             "reason": "requested_by_customer",
         }
+        if importe is not None:
+            #: EN LA UNIDAD MÍNIMA DE LA MONEDA, que es la que ya viaja por todo
+            #: el módulo: los importes se guardan en `*_minor` y no se dividen
+            #: nunca antes de salir.
+            campos["amount"] = str(int(importe))
         for clave, valor in peticion.metadata.items():
             campos[f"metadata[{clave}]"] = str(valor)
 

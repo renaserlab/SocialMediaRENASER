@@ -121,6 +121,13 @@ CAMPOS_EDITABLES = (
     "prerequisites",
 )
 
+#: Lo que la 0034 anade a un modulo y a una leccion y que el cliente puede
+#: escribir. Van aparte de `CAMPOS_EDITABLES` porque son de OTRA tabla: mezclar
+#: las tres listas haria que un `description` de modulo acabara en un `update`
+#: sobre `courses`.
+CAMPOS_EDITABLES_DE_MODULO = ("description",)
+CAMPOS_EDITABLES_DE_LECCION = ("kind", "is_preview")
+
 
 @dataclass
 class FichaDeCurso:
@@ -200,6 +207,61 @@ async def guardar(db: AsyncSession, course_id: str, cambios: dict) -> None:
     if not valores or not await esquema.hay_cursos_v2(db):
         return
     await db.execute(update(CURSOS).where(CURSOS.c.id == course_id).values(**valores))
+
+
+async def guardar_modulo(db: AsyncSession, module_id: str, cambios: dict) -> None:
+    """La descripcion de un modulo. No hace commit.
+
+    Sin la 0034 no hace nada y no falla, igual que `guardar`: que no se pueda
+    guardar de que va el bloque no puede impedir crear el bloque. Es la misma
+    degradacion que hace hoy el movil antes de mandar la fila a PostgREST.
+    """
+    valores = {k: v for k, v in cambios.items() if k in CAMPOS_EDITABLES_DE_MODULO}
+    if not valores or not await esquema.hay_cursos_v2(db):
+        return
+    await db.execute(update(MODULOS).where(MODULOS.c.id == module_id).values(**valores))
+
+
+async def guardar_leccion(db: AsyncSession, lesson_id: str, cambios: dict) -> None:
+    """El tipo y la condicion de muestra de una leccion. No hace commit.
+
+    SE ESCRIBE EN UNA SENTENCIA APARTE, DESPUES DE INSERTAR LA FILA, y no es un
+    descuido: `kind` e `is_preview` NO estan en el ORM a proposito —ver el
+    docstring del modulo— asi que el `insert` del ORM no puede llevarlas. Dos
+    sentencias en la MISMA transaccion, que es lo unico que importa: o entran
+    las dos o no entra ninguna.
+    """
+    valores = {k: v for k, v in cambios.items() if k in CAMPOS_EDITABLES_DE_LECCION}
+    if not valores or not await esquema.hay_cursos_v2(db):
+        return
+    await db.execute(
+        update(LECCIONES).where(LECCIONES.c.id == lesson_id).values(**valores)
+    )
+
+
+def ids_de_cursos_con(*, level: str | None = None, language: str | None = None):
+    """Los ids de los cursos que casan con el nivel y el idioma pedidos.
+
+    DEVUELVE UNA SUBCONSULTA, no una lista: el filtro tiene que aplicarse ANTES
+    de paginar, y traerse los ids a Python para meterlos en un `IN` seria
+    recorrer el catalogo entero en cada pagina.
+
+    Es la MISMA TABLA `courses` vista desde el otro `MetaData`. Parece un rodeo
+    y no lo es: `Course.level` no existe en el ORM justamente para que ningun
+    `select(Course)` la pida contra una base sin la 0034, asi que la unica forma
+    de filtrar por ella es nombrarla aqui.
+
+    QUIEN LLAMA COMPRUEBA `hay_cursos_v2` ANTES. No se hace dentro porque esto
+    no es `async` —es una expresion SQL, no una consulta— y porque sin la
+    migracion la respuesta correcta no es «ninguno»: es decirle al cliente que
+    ese filtro todavia no existe.
+    """
+    condiciones = []
+    if level is not None:
+        condiciones.append(CURSOS.c.level == level)
+    if language is not None:
+        condiciones.append(CURSOS.c.language == language)
+    return select(CURSOS.c.id).where(*condiciones)
 
 
 async def enviar_a_revision(db: AsyncSession, course_id: str) -> None:

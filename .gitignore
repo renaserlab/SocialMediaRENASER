@@ -39,3 +39,9 @@ respaldo_videos/
 # Volcado de la consola de arranque de una instancia EC2. Es un artefacto de
 # diagnostico, no del proyecto: sin esta linea un `git add -A` se lo lleva.
 ec2-arranque.txt
+
+# Despliegue en AWS: la evidencia de cada ejecucion (lleva la cuenta y el
+# operador) y cualquier fichero de secretos que alguien deje a mano aqui.
+infra/aws/evidencias/
+infra/aws/secretos*.json
+!infra/aws/secretos.ejemplo.json

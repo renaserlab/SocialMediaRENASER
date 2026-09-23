@@ -38,6 +38,45 @@ class PurchaseRead(BaseModel):
     purchased_at: datetime
 
 
+class EstadoDeOrdenRead(BaseModel):
+    """En qué quedó una orden concreta. Para la pantalla de vuelta del pago.
+
+    POR QUÉ EXISTE. Al volver de la pasarela, el navegador trae `?order=<id>` y
+    nada más. Sin este endpoint, la pantalla solo podía creerse ese parámetro —o
+    la ausencia de él— para decidir si felicitar a alguien por una compra. Un
+    parámetro de la barra de direcciones lo escribe cualquiera.
+
+    `has_access` va aparte de `status` A PROPÓSITO, y no es redundante: la orden
+    puede estar `paid` y el acceso todavía no concedido porque el aviso de la
+    pasarela no ha llegado. La pantalla necesita distinguir «pagado, dándote
+    acceso» de «ya puedes entrar», y esa diferencia dura segundos pero es
+    exactamente cuando la persona está mirando.
+    """
+
+    id: str
+    course_id: str
+    course_title: str = ""
+    #: 'pending', 'paid', 'failed', 'cancelled' o 'refunded'.
+    status: str
+    amount_minor: int
+    currency: str
+    #: Si el acceso ya está concedido. Lo resuelve el comercio, no la orden.
+    has_access: bool
+
+    # ---- Lo que hace falta para la constancia (no fiscal) ------------------ #
+    created_at: datetime
+    #: Cuándo se confirmó el cobro. Nulo mientras no se haya confirmado.
+    paid_at: datetime | None = None
+    provider: str = ""
+    #: Qué versión del curso se compró. Nulo en las compras anteriores al
+    #: versionado: ahí no hay forma de saberlo y decir «1» sería inventarlo.
+    course_version: int | None = None
+    #: Las horas de garantía que se prometieron en ESTA compra.
+    guarantee_hours: int | None = None
+    #: Si esta compra se hizo sabiendo que no tendría garantía.
+    repurchase_without_guarantee: bool = False
+
+
 class CourseAccessRead(BaseModel):
     """Si la persona puede ver el contenido de un curso, y por qué."""
 
@@ -126,6 +165,15 @@ class PurchaseHistoryRead(BaseModel):
     provider: str
     channel: str
     purchased_at: datetime | None = None
+    #: QUE VERSION DEL CURSO SE COMPRO, si se sabe (0050).
+    #:
+    #: `None` en todo lo anterior a esa migracion, y eso NO es un hueco que
+    #: haya que rellenar: el temario no guarda marca temporal, asi que no hay
+    #: forma de saber que contenido se vendio. La pantalla tiene que saber
+    #: distinguir «version 2» de «no consta».
+    course_version: int | None = None
+    #: La promesa de garantia que se enseño, en horas. Hoy 168 para todos.
+    guarantee_hours: int | None = None
     #: Si HOY se puede ver el curso. Va aparte del estado del pedido porque no
     #: siempre coinciden: un pedido devuelto sigue existiendo con su fecha, y
     #: lo que cambia es que el acceso ya no está.

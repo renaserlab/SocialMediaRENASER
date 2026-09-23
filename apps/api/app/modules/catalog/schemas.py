@@ -17,6 +17,12 @@ IDIOMA = "^[a-z]{2}$"
 MAX_FRASES = 12
 MAX_FRASE = 200
 
+#: Los tipos de leccion que la interfaz sabe pintar. TIENE QUE DECIR LO MISMO
+#: que `cursos_v2.TIPOS_DE_LECCION` y que el CHECK de la 0034: una leccion de un
+#: tipo que ninguna pantalla sabe abrir es una leccion rota, no una funcion
+#: adelantada.
+TIPO_DE_LECCION = "^(video|text)$"
+
 
 class _FichaDeCursoV2(BaseModel):
     """Los metadatos que anade la 0034. Todos opcionales, en alta y en edicion.
@@ -139,6 +145,11 @@ class CourseUpdate(_PrecioDeCurso, _FichaDeCursoV2):
 class EventRead(BaseModel):
     id: str
     organizer_id: str
+    #: Nombre y usuario de quien organiza. Van aquí para que la ficha no tenga
+    #: que pedir el perfil aparte solo para escribir «organiza Fulana». Vacíos
+    #: cuando el perfil no está: NO se inventa un nombre.
+    organizer_name: str = ""
+    organizer_username: str = ""
     title: str
     description: str
     starts_at: datetime | None = None
@@ -161,6 +172,30 @@ class EventRead(BaseModel):
     #: `upcoming` por defecto SOLO para que el esquema tenga un valor de
     #: respaldo; el router siempre lo escribe.
     time_state: str = "upcoming"
+    #: La curaduria: `none`, `pending`, `approved` o `rejected`. Un evento
+    #: heredado —de antes de que existiera la admision— es `none`, y no se le
+    #: regala el sello por llevar tiempo publicado.
+    selection_status: str = "none"
+    #: «Seleccionado por Z». Lo AFIRMA EL SERVIDOR y la app no lo deduce de
+    #: ninguna otra cosa: sin este campo en verdadero, el sello no se pinta.
+    seleccionado_por_z: bool = False
+    #: Cómo se accede: `FREE_RSVP`, `TICKETED` o `INVITATION_ONLY`.
+    #:
+    #: `None` SIGNIFICA «NO SE PREGUNTÓ», y solo la FICHA lo rellena. El listado
+    #: no lo trae a propósito: averiguarlo por cada fila sería una consulta por
+    #: evento en la pantalla más visitada, y devolver `FREE_RSVP` por omisión
+    #: haría que un evento con entradas apareciera como gratuito.
+    access_mode: str | None = None
+    #: El precio más barato que queda, en unidad menor. `None` cuando no hay
+    #: ninguno a la venta: entonces no se escribe «Desde», que sería un precio
+    #: sobre una lista vacía.
+    price_from_minor: int | None = None
+    #: La moneda de ese precio. ISO 4217, y solo en la FICHA de un evento con
+    #: entradas. Sin ella la pantalla escribía «S/» sobre un importe que podía
+    #: estar en dólares: un precio con la moneda equivocada es un precio falso,
+    #: y era el único sitio del incremento donde la app afirmaba algo que el
+    #: servidor no había dicho.
+    currency: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -243,6 +278,115 @@ class CourseSubmitResult(BaseModel):
     missing: list[str] = Field(default_factory=list)
 
 
+# --------------------------------------------------------------------------- #
+# El temario: modulos y lecciones.
+#
+# NINGUNA ALTA ACEPTA `sort_order`, y es la decision que ordena todo el bloque.
+# Lo elegia el cliente, y dos elementos con el mismo numero dejan el temario a
+# merced de como devuelva las filas la base: el alumno ve las lecciones bailar
+# entre dos cargas de la misma pantalla. Crear anade AL FINAL y el orden se
+# cambia en un solo sitio (`/reorder`), que reescribe la lista entera.
+# --------------------------------------------------------------------------- #
+
+
+class CourseModuleCreate(BaseModel):
+    """Alta de un modulo. Se anade al final del temario."""
+
+    title: str = Field(min_length=1, max_length=160)
+    #: De que va el bloque (0034). Sin la migracion se acepta y NO se guarda,
+    #: igual que el resto de la ficha ampliada: un campo que todavia no tiene
+    #: donde vivir no puede impedir crear el modulo.
+    description: str = Field(default="", max_length=2000)
+
+
+class CourseModuleUpdate(BaseModel):
+    """Edicion de un modulo. Renombrar es esto con `title` y nada mas.
+
+    Todo opcional: lo que no viaja no se toca. Sin `exclude_unset` en el router,
+    cambiar el titulo borraria la descripcion.
+    """
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class CourseModuleRead(BaseModel):
+    id: str
+    course_id: str
+    title: str
+    #: Vacia mientras la 0034 no este aplicada. Es la verdad, no un error.
+    description: str = ""
+    sort_order: int
+
+
+class CourseLessonCreate(BaseModel):
+    """Alta de una leccion dentro de un modulo. Se anade al final."""
+
+    title: str = Field(min_length=1, max_length=160)
+    #: El cuerpo de la leccion. En una de tipo `text` es el contenido entero,
+    #: por eso el tope es alto y no el de una descripcion.
+    body: str = Field(default="", max_length=20_000)
+    #: Ruta en `course-media`, NO una URL: la URL se firma al reproducir y
+    #: caduca. Guardar una firma seria guardar algo que manana no vale.
+    media_path: str | None = Field(default=None, max_length=500)
+    #: Un dia entero de tope. No es una regla de negocio: una leccion de mas de
+    #: veinticuatro horas es un cliente que mando milisegundos, y ese numero se
+    #: suma en la duracion que se ensena en la ficha del curso.
+    duration_seconds: int = Field(default=0, ge=0, le=86_400)
+    #: `video` o `text` (0034). Sin la migracion se acepta y no se guarda: hoy
+    #: todas son de video, que es lo que hay.
+    kind: str = Field(default="video", pattern=TIPO_DE_LECCION)
+    #: Leccion abierta sin comprar. DECIDE QUE SE VE SIN PAGAR, asi que entra en
+    #: la fotografia de la version: convertir en muestra la unica leccion de
+    #: pago de un curso ya vendido cambia el producto.
+    is_preview: bool = False
+
+
+class CourseLessonUpdate(BaseModel):
+    """Edicion de una leccion. Todo opcional; lo que no viaja no se toca.
+
+    `media_path` en `null` SI borra la ruta: es la unica forma de quitar un
+    video, y por eso el router distingue «no enviado» de «enviado vacio».
+    """
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    body: str | None = Field(default=None, max_length=20_000)
+    media_path: str | None = Field(default=None, max_length=500)
+    duration_seconds: int | None = Field(default=None, ge=0, le=86_400)
+    kind: str | None = Field(default=None, pattern=TIPO_DE_LECCION)
+    is_preview: bool | None = None
+
+
+class CourseLessonRead(BaseModel):
+    id: str
+    module_id: str
+    title: str
+    body: str = ""
+    media_path: str | None = None
+    duration_seconds: int
+    sort_order: int
+    #: Sin la 0034 todas son de video y NINGUNA es muestra. Es exactamente lo
+    #: que hay hoy, y ademas es el lado seguro: una leccion que no consta como
+    #: muestra no entrega su video sin acceso.
+    kind: str = "video"
+    is_preview: bool = False
+
+
+#: Tope de elementos en una reordenacion. Es el mismo numero para modulos y
+#: lecciones porque protege de lo mismo: un cuerpo enorme que hay que recorrer
+#: entero antes de poder rechazarlo.
+MAX_ELEMENTOS_ORDENADOS = 500
+
+
+class CourseOrder(BaseModel):
+    """El orden nuevo: la lista COMPLETA de ids, en el orden que van a quedar.
+
+    Es la lista entera y no «el que se movio»: ver `contenido.exigir_orden_completo`.
+    """
+
+    ids: list[str] = Field(min_length=1, max_length=MAX_ELEMENTOS_ORDENADOS)
+
+
 class CourseReviewDecision(BaseModel):
     """La decision de administracion sobre un curso en revision."""
 
@@ -252,3 +396,58 @@ class CourseReviewDecision(BaseModel):
     #: Obligatorio al rechazar. Un «no» sin motivo es un muro sin puerta: quien
     #: lo recibe no sabe que corregir y vuelve a enviar lo mismo.
     reason: str | None = Field(default=None, max_length=1000)
+
+
+# ---------------------------------------------------------------------------
+# Valoraciones de cursos (migración 0056)
+# ---------------------------------------------------------------------------
+
+
+class ValoracionCreate(BaseModel):
+    """Lo único que el cliente puede mandar.
+
+    NO lleva `verified`: eso lo decide el servidor mirando la compra. Un cliente
+    que pudiera marcarse como verificado convertiría la etiqueta en un adorno.
+    """
+
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ValoracionUpdate(BaseModel):
+    """Un PATCH cambia lo que trae; lo que no viene se queda como estaba.
+
+    Con el esquema de creación, subir la puntuación sin reenviar el texto lo
+    borraba en silencio.
+    """
+
+    rating: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ValoracionRead(BaseModel):
+    id: str
+    course_id: str
+    rating: int
+    comment: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    #: Perfil público mínimo de quien valora.
+    author_id: str
+    author_name: str = ""
+    author_username: str = ""
+    #: Calculada por el servidor: compró y su acceso sigue vivo.
+    verified_purchase: bool = False
+    #: Solo la ve quien la escribió, para poder editarla.
+    is_mine: bool = False
+    #: Moderada. Solo puede llegar a `True` en la propia: el listado no devuelve
+    #: las ocultas de otros. Sin esto, quien la escribió la ve publicada.
+    hidden: bool = False
+
+
+class ResumenDeValoraciones(BaseModel):
+    #: `None` cuando no hay ninguna. NO es 0: un 0,0 diría que está mal valorado.
+    average: float | None = None
+    total: int = 0
+    #: Cuántas de cada puntuación, de "1" a "5".
+    distribution: dict[str, int] = Field(default_factory=dict)

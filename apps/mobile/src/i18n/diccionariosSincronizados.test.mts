@@ -32,6 +32,7 @@ import { RESPALDOS_ES as RESPALDOS_DE_ENLACE } from '../lib/authLink.ts';
 import { RESPALDOS_ES as RESPALDOS_DE_DINERO } from '../lib/dinero.ts';
 import { RESPALDOS_ES as RESPALDOS_DE_HISTORIAS } from '../lib/historias.ts';
 import { RESPALDOS_ES as RESPALDOS_DE_GUARDADOS } from '../lib/guardados.ts';
+import { RESPALDOS_ES as RESPALDOS_DE_VALORACIONES } from '../lib/valoracionesDeCurso.ts';
 
 /**
  * Los módulos que guardan su propia copia del español.
@@ -51,6 +52,7 @@ const RESPALDOS: Array<[string, Record<string, string>]> = [
   ['lib/dinero.ts', RESPALDOS_DE_DINERO],
   ['lib/historias.ts', RESPALDOS_DE_HISTORIAS],
   ['lib/guardados.ts', RESPALDOS_DE_GUARDADOS],
+  ['lib/valoracionesDeCurso.ts', RESPALDOS_DE_VALORACIONES],
 ];
 
 type Diccionario = Record<string, string>;
@@ -71,6 +73,20 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Incremento 8 de Productos: «No» se escribe igual en los dos idiomas.
+    'resenaDeProducto.valorar.no',
+    // Incremento 5 de Productos: se escriben igual en espanol y en ingles.
+    'pedidoDeProducto.checkout.subtotal', // «Subtotal» es la misma palabra.
+    'pedidoDeProducto.checkout.total',    // «Total», tambien.
+    // Incremento 4: se escriben igual en español y en inglés.
+    'carrito.subtotal',     // «Subtotal» es la misma palabra.
+    'inventario.sku',       // «SKU» es una sigla inglesa.
+    'fotos.bandeja.peso',   // Un número y «KB».
+    // Formato puro: un numero, un separador y un importe ya formateado.
+    'entradas.subtotalDeTipo',
+    'reserva.porUnidad',
+    // «Total» se escribe igual en los dos idiomas.
+    'constancia.total',
     'home.live', // «Live» ya es la palabra inglesa.
     'home.podcast',
     'profile.podcast',
@@ -90,8 +106,234 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'circle.tabFeed',
     'circle.tabChat',
     'category.audiosOne',
+    // Formato puro: un numero, un punto medio y un texto ya traducido.
+    'finanzasEvento.hallazgoContado',
+    // «No» y «Visible» se escriben igual en los dos idiomas.
+    'politicasEvento.ternario.no',
+    'politicasAdmin.valor.no',
+    'moderacionResenas.estado.visible',
+    // Formato puro: una flecha entre dos huecos, y un número con su unidad.
+    'politicasAdmin.antesAhora',
+    'politicasAdmin.valor.horas',
+    // Formato puro: el tipo de evidencia y su dimensión, ya traducidos, con un
+    // punto medio en medio.
+    'productosAdmin.evidenciaEtiqueta',
+    // Formato puro: el contador de la galeria, «{i}/{n}».
+    'productos.ficha.galeriaContador',
+    // Proveedor de productos. Dos de formato puro —«{tipo} · {detalle}» y
+    // «{nombre}, {estado}», donde lo de dentro ya viene traducido—, «SKU», que
+    // es la misma sigla en los tres idiomas, y un numero de ejemplo.
+    'proveedorProductos.postular.documentoContado',
+    'proveedorProductos.productos.tarjeta',
+    'proveedorProductos.editar.skuEtiqueta',
+    'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Incremento 9 de Productos: se escriben IGUAL en español y en portugués.
+    'finanzaDeProducto.estado.cancelled',
+    'finanzaDeProducto.devolucion.cancelled',
+    'finanzaDeProducto.disputa.lost',
+    'finanzaDeProducto.disputa.withdrawn',
+    'finanzaDeProducto.falta.desconocido',
+    'finanzaDeProducto.panel.bloqueados',
+    'finanzaDeProducto.panel.disputas',
+    'finanzaDeProducto.panel.anular',
+    'finanzaDeProducto.panel.motivo',
+    // Incremento 8 de Productos: se escriben IGUAL en español y en portugués.
+    'resenaDeProducto.ficha.comprasVerificadas',
+    'resenaDeProducto.ficha.unaCompraVerificada',
+    'resenaDeProducto.ficha.verTodas',
+    'resenaDeProducto.lista.selloCompra',
+    'resenaDeProducto.mia.editar',
+    'resenaDeProducto.tienda.responder',
+    'resenaDeProducto.moderar.esconder',
+    'resenaDeProducto.moderar.motivo',
+    'resenaDeProducto.moderar.ocultada',
+    // Un número y «de 5»: la misma cosa en los dos idiomas.
+    'resenaDeProducto.deCinco',
+    // Incremento 7 de Productos: el portugues escribe estas EXACTAMENTE igual
+    // que el espanol. Escribirlas distintas seria escribirlas mal.
+    'incidencia.estado.APPEALED',   // «Apelado».
+    'incidencia.estado.WITHDRAWN',  // «Retirado».
+    'incidencia.abrir.contador',    // «{n} de {min} caracteres».
+    'incidencia.abrir.continuar',   // «Continuar».
+    'incidencia.detalle.apelar',    // «Apelar».
+    'incidencia.detalle.retirar',   // «Retirar».
+    // Incremento 6 de Productos: el portugues escribe estas EXACTAMENTE igual
+    // que el espanol. No son traducciones olvidadas; escribirlas distintas
+    // seria escribirlas mal.
+    'envio.estado.DISPATCHED',        // «Despachado».
+    'envio.motivo.etiqueta',          // «Motivo».
+    'envio.proveedor.pedido',         // «Pedido».
+    'envio.proveedor.unidades',       // «{n} unidades».
+    'envio.preparar.contadas',        // «{hechas} de {total}»: formato puro.
+    'envio.preparar.reabrir',         // «Reabrir».
+    'envio.preparar.despachoTitulo',  // «Despachar».
+    'envio.preparar.despachar',       // «Despachar».
+    'envio.detalle.transporte',       // «Transporte».
+    'envio.detalle.motivoDelFallo',   // «Motivo: {motivo}».
+    // Incremento 5 de Productos: el portugues las escribe igual.
+    'pedidoDeProducto.estado.CANCELLED',      // «Cancelado».
+    'pedidoDeProducto.falta.desconocido',     // «Falta algo por configurar.»
+    'pedidoDeProducto.direccion.postal_code', // «Codigo postal (opcional)».
+    'pedidoDeProducto.condiciones.horas',     // «{n} horas».
+    'pedidoDeProducto.checkout.titulo',       // «Comprar».
+    'pedidoDeProducto.checkout.subtotal',     // «Subtotal».
+    'pedidoDeProducto.checkout.total',        // «Total».
+    'pedidoDeProducto.checkout.unidades',     // «{n} unidades».
+    'pedidoDeProducto.pagar.titulo',          // «Pagar».
+    'pedidoDeProducto.detalle.entrega',       // «Entrega».
+    // Incremento 4: español y portugués comparten estas palabras enteras. No
+    // son traducciones olvidadas; escribirlas distintas sería escribirlas mal.
+    'carrito.subtotal',
+    'carrito.proveedor',            // «De {nombre}».
+    'carrito.precioAnterior',       // «Antes: …».
+    'carrito.guardadosContador',    // «{n} guardados».
+    'inventario.sku',
+    'inventario.comprometidas',
+    'inventario.ajustar',
+    'inventario.ajusteHecho',       // «Ajuste registrado».
+    'inventario.motivoDelMovimiento',
+    'inventario.movimiento.intake',       // «Entrada».
+    'inventario.movimiento.adjustment',   // «Ajuste».
+    'inventario.movimiento.reservation',  // «Reserva».
+    'fotos.bandeja.alternativo',    // «Texto alternativo: …».
+    'fotos.bandeja.peso',
+    // Políticas y moderación: palabras que se escriben exactamente igual en
+    // portugués —«Publicar», «Descartar», «Igual», «Publicada», «Evento»,
+    // «Aplicar», «Estado», «Organizador», «Publicadas», «Saldo negativo»,
+    // «Ocultar», «Oculta», «Todas», «Confirmar», «Motivo», «Ocultada»,
+    // «Avisos enviados», «caracteres», «Políticas de eventos», «Tipo»— y tres
+    // de formato puro.
+    'politicasEvento.accion.publicar',
+    'politicasEvento.cancelar.avisos',
+    'politicasEvento.descartarBoton',
+    'politicasEvento.publicarBoton',
+    'politicasAdmin.antesAhora',
+    'politicasAdmin.cambio.igual',
+    'politicasAdmin.estado.published',
+    'politicasAdmin.eventoRef',
+    'politicasAdmin.filtroAplicar',
+    'politicasAdmin.filtroEstado',
+    'politicasAdmin.filtroEvento',
+    'politicasAdmin.filtroOrganizador',
+    'politicasAdmin.filtroTipo',
+    'politicasAdmin.organizador',
+    'politicasAdmin.pestana.publicadas',
+    'politicasAdmin.sinPoliticaResumen',
+    'politicasAdmin.tipo.negative_balance',
+    'politicasAdmin.tituloPanel',
+    'politicasAdmin.valor.horas',
+    'moderacionResenas.accion.ocultar',
+    'moderacionResenas.estado.hidden',
+    'moderacionResenas.eventoRef',
+    'moderacionResenas.filtroAplicar',
+    'moderacionResenas.filtroEstado',
+    'moderacionResenas.filtroEvento',
+    'moderacionResenas.filtroTodas',
+    'moderacionResenas.mandar',
+    'moderacionResenas.motivoContador',
+    'moderacionResenas.motivoOpcional',
+    'moderacionResenas.ocultadaPor',
+    'moderacionResenas.pasoMotivo',
+    // Finanzas: once palabras que se escriben exactamente igual en portugues
+    // —«Vendido», «Transferido», «Cancelado», «Perdida», «Disputas», «Todas»,
+    // «Motivo», «Contadores», «Saldos transferidos»— y una de formato puro.
+    'finanzasEvento.bruto',
+    'finanzasEvento.contador.saldos_transferred',
+    'finanzasEvento.disputa.lost',
+    'finanzasEvento.disputasTitulo',
+    'finanzasEvento.estadoSaldo.cancelled',
+    'finanzasEvento.estadoSaldo.transferred',
+    'finanzasEvento.filtroTodas',
+    'finanzasEvento.hallazgoContado',
+    'finanzasEvento.motivoEtiqueta',
+    'finanzasEvento.saludTitulo',
+    'finanzasEvento.transferido',
+    // Entradas: «Desde», «Reserva gratuita», «Retirar» y «Retirado» se
+    // escriben exactamente igual en los dos idiomas; las dos ultimas son
+    // formato puro.
+    'evento.desde',
+    'modoDeAcceso.FREE_RSVP',
+    'entradas.retirar',
+    // «Retirar {tipo}» y «{n} de {tipo}»: el verbo y la preposicion se escriben
+    // igual en los dos idiomas, y lo demas es el nombre que puso el organizador.
+    'entradas.retirarTipo',
+    'entradas.elegidasDe',
+    // «Codigo: …», «Buscar por codigo» y «Todos» se escriben exactamente igual
+    // en los dos idiomas.
+    'miEntrada.codigoAccesible',
+    'asistentes.buscar',
+    'asistentes.todos',
+    'entradas.estado.retired',
+    'entradas.subtotalDeTipo',
+    'reserva.porUnidad',
+    // Admision de eventos. «Publicado», «Cancelado», «Editar evento»,
+    // «Titulo», «Publicar» y «Total: … de …» se escriben exactamente igual en
+    // los dos idiomas; `admisionEvento.deTope` es formato puro.
+    'estadoDeEvento.PUBLISHED',
+    'estadoDeEvento.CANCELLED',
+    'miEvento.titulo',
+    'miEvento.campoTitulo',
+    'admisionEvento.deTope',
+    'admisionEvento.total',
+    'admisionEvento.publicar',
+    'admisionEvento.publicado',
+    // «Evento», «Organizador», «inscritos», «Cancelar reserva», «Reserva
+    // cancelada», «Presencial» y «Todas» se escriben igual en los dos idiomas.
+    'evento.titulo',
+    'evento.organizadorSinNombre',
+    'evento.inscritos',
+    'evento.cancelarConfirmar',
+    'evento.reservaCancelada',
+    'evento.modalidad.presencial',
+    'eventos.todasLasModalidades',
+    // «Motivo» se escribe exactamente igual en los dos idiomas.
+    'solicitud.motivo',
+    // «Anterior», «Ver certificado», «Certificado», «Este documento certifica
+    // que», «Verificar certificado» y «Continuar» se escriben exactamente
+    // igual en los dos idiomas.
+    'evaluacion.anterior',
+    'completado.verCertificado',
+    'certificado.titulo',
+    'certificado.certificaQue',
+    'certificado.verificar',
+    'biblioteca.continuar',
+    // «Recursos», «Notas», «Guardar nota», «Nota guardada», «Editar nota» y
+    // «Notas guardadas» se escriben exactamente igual en los dos idiomas.
+    'lesson.tabResources',
+    'lesson.tabNotes',
+    'nota.guardar',
+    'nota.guardada',
+    'nota.editar',
+    'nota.guardadas',
+    // «Cursos» y «Eventos» se escriben exactamente igual en los dos idiomas.
+    'verticales.cursos',
+    // «Todos» y «Principiante» se escriben igual en los dos idiomas.
+    'cursos.nivel.todos',
+    // «Guardados», «Guardar curso» y «Requisitos» se escriben igual.
+    'cursos.guardados',
+    // «Por {nombre}» se escribe igual en los dos idiomas.
+    'curso.por',
+    // «Antes de continuar» se escribe igual en los dos idiomas.
+    'condiciones.titulo',
+    // «Curso», «Estado», «Total», «Confirmada», «Cancelada» y «Reembolsada»
+    // se escriben igual en los dos idiomas.
+    'constancia.curso',
+    // «Anterior» se escribe igual en los dos idiomas.
+    'lesson.previous',
+    'constancia.estado',
+    'constancia.total',
+    'constancia.estados.paid',
+    'constancia.estados.cancelled',
+    'constancia.estados.refunded',
+    'cursos.guardar',
+    'ficha.requisitos',
+    'cursos.nivel.beginner',
+    'verticales.eventos',
+    // «Programa» y «Restaurar compras» se escriben igual en los dos idiomas.
+    'course.headerTitle',
+    'course.restorePurchases',
     // Portugues y español escriben estas igual. Se comprueban una a una.
     // Los nombres bajo los botones de una publicacion: «Comentar» es la misma
     // palabra en los dos idiomas —«Curtir» y «Compartilhar», que si cambian, no
@@ -221,6 +463,66 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'syllabus.titleField',
     'wizard.levelBeginner',
     'wizard.language',
+    // Valoraciones de un curso: «{n} de 5» y «Retirar» se escriben exactamente
+    // igual en los dos idiomas, y «Compra verificada» tambien (el portugues
+    // dice «compra» y «verificada» con la misma grafia). El resto de la
+    // seccion SI cambia: «Avaliações», «Sem avaliações», «1 avaliação».
+    'valoracion.deCinco',
+    'valoracion.distribucionA11y',
+    'valoracion.compraVerificada',
+    'valoracion.retirarConfirmar',
+    // Productos Z: palabras y frases que el portugues escribe exactamente
+    // igual que el español —«Guardado», «Guardar», «Variantes», «De {nombre}»,
+    // «Fabricante: …», «Lote», «Documento», «Entra para guardar»— mas dos de
+    // formato puro: «{n} guardados» y el SEPARADOR DECIMAL, que en los dos
+    // idiomas es la coma (el ingles si cambia: usa el punto).
+    'productos.bolsaContador',
+    'productos.guardado',
+    'productos.separadorDecimal',
+    'productos.accion.guardar',
+    'productos.bloque.variantes',
+    'productos.ficha.creadorEs',
+    'productos.ficha.fabricante',
+    'productos.evidencia.batch',
+    'productos.evidencia.document',
+    'productos.error.sinSesion',
+    // Formato puro: el contador de la galeria, «{i}/{n}».
+    'productos.ficha.galeriaContador',
+    // Administración de productos: palabras que el portugues escribe
+    // exactamente igual que el español —«Filtrar por estado», «Todos»,
+    // «Publicar», «Suspender», «Motivo (opcional)», «Notas internas
+    // (opcional)», «Decidir», «Publicado», «Retirado», «Retirada», «Lote»,
+    // «Documento» y «Fabricante»— y tres de formato puro: «Nota: …»,
+    // «{n} de {max} caracteres» y el tipo de evidencia con su dimension.
+    'productosAdmin.filtroEstado',
+    'productosAdmin.filtroTodos',
+    'productosAdmin.publicar',
+    'productosAdmin.suspender',
+    'productosAdmin.documentoNota',
+    'productosAdmin.motivoOpcional',
+    'productosAdmin.motivoContador',
+    'productosAdmin.notasEtiqueta',
+    'productosAdmin.evidenciaEtiqueta',
+    'productosAdmin.decidir',
+    'productosAdmin.estado.published',
+    'productosAdmin.estado.removed',
+    'productosAdmin.postulacion.withdrawn',
+    'productosAdmin.evidencia.batch',
+    'productosAdmin.evidencia.document',
+    'productosAdmin.documento.manufacturer',
+    // Proveedor de productos: «Tipo de documento», «Nota», «Fabricante» y
+    // «Variantes» se escriben exactamente igual en portugues, y
+    // `opcionValorAyuda` es un numero de ejemplo.
+    //
+    // «Texto alternativo» SALIO DE ESTA LISTA con el editor de galeria de
+    // `EditarProductoScreen`: la clave ya no existe en ningun diccionario,
+    // porque las fotografias ya no se escriben a mano.
+    'proveedorProductos.postular.tipoDeDocumento',
+    'proveedorProductos.postular.notaEtiqueta',
+    'proveedorProductos.documento.manufacturer',
+    'proveedorProductos.editar.fabricanteEtiqueta',
+    'proveedorProductos.editar.variantes',
+    'proveedorProductos.editar.opcionValorAyuda',
   ]),
 };
 

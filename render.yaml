@@ -103,3 +103,25 @@ services:
       # SUPABASE_SERVICE_ROLE_KEY: sb_secret_... (solo backend)
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      # Contexto de origen de consentimientos y auditoria. SIN ESTAS DOS, LAS
+      # COLUMNAS QUEDAN VACIAS a proposito, que es mejor que llenarlas con algo
+      # que aparenta proteger y no protege.
+      #
+      # IP_HASH_SALT: minimo 32 caracteres, distinta por entorno, y NO se
+      # escribe aqui. Por debajo de ese largo el codigo la trata como si no
+      # hubiera: el espacio entero de IPv4 se recorre en minutos, asi que una
+      # sal corta se adivina junto con la direccion. Cambiarla invalida las
+      # huellas ya guardadas.
+      - key: IP_HASH_SALT
+        sync: false
+      # TRUST_PROXY_HEADERS: se pone en `true` cuando TODO el trafico entra por
+      # un proxy propio que reescribe `X-Forwarded-For`, porque solo entonces la
+      # ultima entrada de esa cabecera la ha escrito alguien de fiar. En `false`
+      # se usa la direccion del socket, que detras de un proxy es la interna de
+      # la plataforma y por eso no se guarda.
+      #
+      # CUIDADO CON DOS SALTOS. Con otro proxy delante (una CDN, por ejemplo) la
+      # ultima entrada es la del proxy interior, no la de quien pide. Antes de
+      # ponerlo en `true` hay que saber cuantos saltos hay.
+      - key: TRUST_PROXY_HEADERS
+        value: "false"

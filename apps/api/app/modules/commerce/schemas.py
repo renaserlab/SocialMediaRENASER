@@ -106,3 +106,25 @@ class OwnerSaleRead(BaseModel):
     status: str
     available_at: datetime | None = None
     buyer: Comprador | None = None
+
+
+class ResultadoDeLiquidacion(BaseModel):
+    """Lo que hizo una pasada de liquidacion. Numeros, nunca importes sueltos.
+
+    NO LLEVA IMPORTES A PROPOSITO: es un parte de trabajo, no un extracto. El
+    dinero se consulta en `/admin/owner-balances/health`, que ya lo desglosa por
+    estado.
+    """
+
+    #: Saldos que pasaron de `pending` a `eligible` en esta pasada.
+    liberados: int = 0
+    #: Intentos de transferencia lanzados contra la pasarela.
+    transferencias_intentadas: int = 0
+    #: De esos, los que la pasarela dio por completados.
+    transferencias_completadas: int = 0
+    #: Saldos elegibles que NO se intentaron, agrupados por el motivo que
+    #: devolvio `puede_transferirse`: `transfers_disabled`, `guarantee_open`,
+    #: `payout_account_not_ready`... Es lo que explica un cero.
+    omitidos: dict[str, int] = {}
+    #: Saldos en los que la pasada fallo y se dejo para la siguiente.
+    fallidos: int = 0

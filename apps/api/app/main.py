@@ -21,12 +21,31 @@ from app.modules.content.router import router as content_router
 from app.modules.content.reposts import router as reposts_router
 from app.modules.content.router_etiquetas import router as etiquetas_router
 from app.modules.commerce.router import admin_router as commerce_admin_router
+from app.modules.gobernanza.router import admin_router as gobernanza_admin_router
+from app.modules.gobernanza.router import router as gobernanza_router
 from app.modules.commerce.router import router as commerce_router
 from app.modules.identity.router import router as identity_router
+from app.modules.events.router import admin_router as events_admin_router
+from app.modules.events.order_router import admin_router as orders_admin_router
+from app.modules.events.order_router import router as orders_router
+from app.modules.events.finanzas_router import admin_router as finanzas_admin_router
+from app.modules.events.finanzas_router import router as finanzas_router
+from app.modules.events.politicas_router import admin_router as politicas_admin_router
+from app.modules.events.politicas_router import router as politicas_router
+from app.modules.events.resenas_router import admin_router as resenas_admin_router
+from app.modules.events.resenas_router import router as resenas_router
+from app.modules.events.posventa_router import admin_router as posventa_admin_router
+from app.modules.events.posventa_router import router as posventa_router
+from app.modules.events.ticket_router import admin_router as tickets_admin_router
+from app.modules.events.ticket_router import router as tickets_router
+from app.modules.events.router import router as events_router
+from app.modules.products.router import admin_router as products_admin_router
+from app.modules.products.router import router as products_router
 from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
 from app.modules.messaging.router import router as messaging_router
 from app.modules.moderation.router import router as moderation_router
+from app.modules.notifications.router import admin_router as notifications_admin_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.payments.router import router as payments_router
 from app.modules.refunds.router import admin_router as refunds_admin_router
@@ -88,6 +107,37 @@ def create_app() -> FastAPI:
                 "separados por comas."
             )
 
+    # EL IDENTIFICADOR DE LA PETICION. Lo genera aqui si no viene de fuera, lo
+    # deja en un `ContextVar` para que lo lean la auditoria y el registro sin
+    # pasarlo por veinte firmas, y lo devuelve en la respuesta para que quien
+    # reporta un fallo pueda decir cual fue el suyo.
+    @app.middleware("http")
+    async def _con_identificador(request, call_next):  # noqa: ANN001, ANN202
+        from app.modules.gobernanza.contexto import (
+            fijar_request_id,
+            identificador_admisible,
+            nuevo_request_id,
+        )
+
+        entrante = (request.headers.get("x-request-id") or "").strip()
+        # SE VALIDA CON UNA LISTA BLANCA, NO SE RECORTA. Recortar a 64 dejaba
+        # pasar el contenido entero: esta cabecera la manda cualquiera y acaba
+        # en una columna de auditoria, en cada linea de registro y —lo peor— de
+        # vuelta en una cabecera de respuesta. Un valor con caracteres de
+        # control ensucia el registro de forma que ya no se puede leer con
+        # confianza, y uno fuera de latin-1 revienta al escribir la respuesta.
+        # Lo que no encaje se descarta entero y se genera uno propio.
+        identificador = identificador_admisible(entrante) or nuevo_request_id()
+        testigo = fijar_request_id(identificador)
+        try:
+            respuesta = await call_next(request)
+        finally:
+            from app.modules.gobernanza.contexto import _peticion
+
+            _peticion.reset(testigo)
+        respuesta.headers["X-Request-Id"] = identificador
+        return respuesta
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -120,10 +170,43 @@ def create_app() -> FastAPI:
     app.include_router(stories_router, prefix=prefix)
     app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)
+    # El dominio de Eventos. La lectura publica sigue en `catalog`.
+    #
+    # LAS ENTRADAS VAN ANTES. `/events/ticket-holds/{id}` y
+    # `/events/{event_id}/ticket-types` tienen los dos tres tramos y FastAPI
+    # resuelve por orden de registro: declarado despues, un identificador de
+    # reserva podria intentar casar con la ruta de tipos.
+    # Y LOS PEDIDOS ANTES QUE LAS ENTRADAS: `/events/ticket-holds/{id}/orders`
+    # tiene cuatro tramos y `/events/ticket-holds/{id}` tres, pero
+    # `/events/orders/{id}` y `/events/{event_id}/ticket-types` vuelven a
+    # colisionar en tres. Mismo criterio: lo mas concreto, primero.
+    # La posventa PRIMERO: `/events/aftersale-cases/{id}` y
+    # `/events/{event_id}/...` vuelven a colisionar, y Starlette resuelve
+    # por orden de registro. Lo mas concreto, primero.
+    app.include_router(posventa_router, prefix=prefix)
+    app.include_router(posventa_admin_router, prefix=prefix)
+    app.include_router(orders_router, prefix=prefix)
+    app.include_router(resenas_router, prefix=prefix)
+    app.include_router(resenas_admin_router, prefix=prefix)
+    app.include_router(politicas_router, prefix=prefix)
+    app.include_router(politicas_admin_router, prefix=prefix)
+    app.include_router(finanzas_router, prefix=prefix)
+    app.include_router(finanzas_admin_router, prefix=prefix)
+    app.include_router(orders_admin_router, prefix=prefix)
+    app.include_router(tickets_router, prefix=prefix)
+    app.include_router(tickets_admin_router, prefix=prefix)
+    app.include_router(events_router, prefix=prefix)
+    # PRODUCTOS. El de administracion primero: `/admin/products` no choca con
+    # `/products/{id}`, pero declararlo antes deja el orden igual que en el
+    # resto del fichero y no hay que pensarlo dos veces.
+    app.include_router(products_admin_router, prefix=prefix)
+    app.include_router(products_router, prefix=prefix)
+    app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)
     app.include_router(live_router, prefix=prefix)
     app.include_router(notifications_router, prefix=prefix)
+    app.include_router(notifications_admin_router, prefix=prefix)
     app.include_router(moderation_router, prefix=prefix)
     app.include_router(bookings_router, prefix=prefix)
     # Resenas entre personas. Se monta siempre: sin la migracion 0030 los
@@ -141,6 +224,11 @@ def create_app() -> FastAPI:
     # La vista comercial del propietario. Sin la 0049 responde ceros.
     app.include_router(commerce_router, prefix=prefix)
     app.include_router(commerce_admin_router, prefix=prefix)
+    # Politicas versionadas, consentimientos y auditoria (0050). Se monta
+    # siempre: sin la migracion responde vacio o 404, que es la verdad, en vez
+    # de reventar.
+    app.include_router(gobernanza_router, prefix=prefix)
+    app.include_router(gobernanza_admin_router, prefix=prefix)
 
     return app
 

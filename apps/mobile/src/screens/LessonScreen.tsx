@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -10,15 +10,20 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { LessonResources } from '@/components/LessonResources';
 import { ListRow } from '@/components/ListRow';
+import { NotasDeLaLeccion } from '@/components/NotasDeLaLeccion';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { Skeleton } from '@/components/Skeleton';
 import { StateView } from '@/components/StateView';
 import { VideoPlayer } from '@/components/VideoPlayer';
+import { useCourse } from '@/hooks/useCourse';
 import { useLesson } from '@/hooks/useLesson';
+import { vecinasDe } from '@/lib/vecinasDeLaLeccion';
 import { useProgresoDeLeccion } from '@/hooks/useProgresoDeLeccion';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { CourseContentRepository } from '@/repositories/CourseContentRepository';
 import { AuthRepository } from '@/repositories/AuthRepository';
+import { LearningRepository } from '@/repositories/LearningRepository';
 import { assets } from '@/data/assets';
 import { SAMPLE_VIDEO_URL } from '@/data/media';
 import { signCourseUrls } from '@/services/storage';
@@ -33,6 +38,9 @@ export function LessonScreen() {
   const router = useRouter();
 
   const { lesson, loading, error, reload } = useLesson(id);
+  // El temario del curso: de ahi salen la anterior y la siguiente.
+  const { lessons: temario } = useCourse(lesson?.courseId);
+  const vecinas = vecinasDe(temario, id ?? '');
   /*
     Quien puede editar ESTA leccion lo decide el SERVIDOR (`can_manage`), no el
     rol de administrador. Antes se usaba `isAdmin`, asi que el autor de un curso
@@ -56,6 +64,54 @@ export function LessonScreen() {
       toast(cursoCompleto ? t('lesson.courseCompleted') : t('lesson.completed'));
     },
   });
+
+  /*
+    Las tres pestañas de la lección. El contenido estaba apilado en un solo
+    scroll, así que los recursos quedaban por debajo de todo y las notas no
+    tenían dónde ir.
+  */
+  const [pestana, setPestana] = useState(0);
+  /*
+    El segundo por el que va el vídeo AHORA. Sale del mismo aviso que ya usa el
+    progreso: no se mide nada nuevo. Sirve para que una nota pueda decir en qué
+    minuto se tomó, y es `null` mientras no haya llegado ninguno —cero diría
+    «al principio», que es una afirmación distinta—.
+  */
+  const [posicionDelVideo, setPosicionDelVideo] = useState<number | null>(null);
+  const [completandoLeccion, setCompletandoLeccion] = useState(false);
+
+  /**
+   * Darla por terminada a mano.
+   *
+   * Cerrojo sincrono antes del primer `await`: dos toques no mandan dos
+   * peticiones. El endpoint es idempotente de todos modos, pero el segundo
+   * toque no tiene por que costar un viaje.
+   */
+  const completandoRef = useRef(false);
+  const marcarCompletada = async () => {
+    if (completandoRef.current || !id) return;
+    completandoRef.current = true;
+    setCompletandoLeccion(true);
+    try {
+      const guardado = await LearningRepository.completeLesson(id);
+      toast(
+        guardado.courseCompleted
+          ? t('lesson.courseCompleted')
+          : t('lesson.completed'),
+      );
+      await reload();
+    } catch (error) {
+      notify(
+        t('common.saveFailed'),
+        error instanceof Error && error.message.trim() !== ''
+          ? error.message
+          : t('common.tryAgain'),
+      );
+    } finally {
+      completandoRef.current = false;
+      setCompletandoLeccion(false);
+    }
+  };
 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
@@ -164,7 +220,12 @@ export function LessonScreen() {
   const saveDescription = async () => {
     setSavingDescription(true);
     try {
-      await CourseContentRepository.updateLesson(lesson.id, { body: descriptionDraft.trim() });
+      // SIN `moduleId`: el detalle de la lección devuelve `module_title` pero
+      // no su id, así que lo resuelve el repositorio. Ver `moduloDeLaLeccion`.
+      await CourseContentRepository.updateLesson(
+        { courseId: lesson.courseId, lessonId: lesson.id },
+        { body: descriptionDraft.trim() },
+      );
       toast(t('lesson.descriptionSaved'));
       setEditingDescription(false);
       reload();
@@ -188,7 +249,10 @@ export function LessonScreen() {
     });
     if (!accepted) return;
     try {
-      await CourseContentRepository.removeLesson(lesson.id);
+      await CourseContentRepository.removeLesson({
+        courseId: lesson.courseId,
+        lessonId: lesson.id,
+      });
       toast(t('lesson.deleted'));
       if (router.canGoBack()) router.back();
       else router.replace('/');
@@ -222,7 +286,10 @@ export function LessonScreen() {
             // Retomar por donde iba. Es la diferencia entre «volver al curso» y
             // «volver a empezar el curso».
             startAtSeconds={lesson.progressSeconds ?? 0}
-            onProgressSeconds={alAvanzar}
+            onProgressSeconds={(segundos) => {
+              setPosicionDelVideo(segundos);
+              alAvanzar(segundos);
+            }}
             onEnded={alTerminar}
           />
         ) : (
@@ -274,10 +341,42 @@ export function LessonScreen() {
             {lesson.mentor ? t('lesson.mentorSuffix', { mentor: lesson.mentor }) : ''}
           </Text>
 
+          {/*
+            MARCAR COMO COMPLETADA. El vídeo ya la cierra solo al llegar al
+            final, pero una lección puede ser texto, o verse fuera de la app, o
+            quedarse a treinta segundos. Sin este botón no había forma de
+            terminarla a mano, y el curso no se cerraba nunca.
+
+            Solo con acceso: sin él el servidor responde 403, y el estado lo
+            decide él —aquí solo se pide—.
+          */}
+          {lesson.hasAccess ? (
+            <Button
+              label={
+                lesson.completed
+                  ? t('lesson.alreadyComplete')
+                  : t('lesson.markComplete')
+              }
+              variant="secondary"
+              disabled={lesson.completed || completandoLeccion}
+              loading={completandoLeccion}
+              onPress={() => void marcarCompletada()}
+            />
+          ) : null}
+
+          <SegmentedControl
+            options={[
+              t('lesson.description'),
+              t('lesson.tabResources'),
+              t('lesson.tabNotes'),
+            ]}
+            selectedIndex={pestana}
+            onChange={setPestana}
+          />
+
           {/* Descripcion de la leccion; solo la edita la administracion. */}
-          {lesson.summary || canManage ? (
+          {pestana === 0 && (lesson.summary || canManage) ? (
             <>
-              <View style={[styles.divider, { backgroundColor: colors.border }]} />
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
                   {t('lesson.description')}
@@ -302,8 +401,57 @@ export function LessonScreen() {
             </>
           ) : null}
 
+          {pestana === 1 ? (
+            <LessonResources
+              lessonId={lesson.id}
+              courseId={lesson.courseId}
+              canEdit={canManage}
+            />
+          ) : null}
+
+          {/*
+            NOTAS. Solo para quien tiene el curso: sin acceso el servidor
+            responde 403 y no hay nada que apuntar. La pestaña entera se calla
+            si esta instalación no tiene la migración 0057.
+          */}
+          {pestana === 2 ? (
+            lesson.hasAccess ? (
+              <>
+                <Text style={[styles.bodyText, { color: colors.textMuted }]}>
+                  {t('nota.privadas')}
+                </Text>
+                <NotasDeLaLeccion
+                  leccionId={lesson.id}
+                  posicionActual={posicionDelVideo}
+                />
+              </>
+            ) : (
+              <Text style={[styles.bodyText, { color: colors.textMuted }]}>
+                {t('nota.necesitaAcceso')}
+              </Text>
+            )
+          ) : null}
+
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <LessonResources lessonId={lesson.id} courseId={lesson.courseId} canEdit={canManage} />
+          <View style={styles.vecinas}>
+            <Button
+              label={t('lesson.previous')}
+              variant="ghost"
+              disabled={!vecinas.anterior}
+              onPress={() =>
+                vecinas.anterior && router.replace(`/lesson/${vecinas.anterior}`)
+              }
+            />
+            <Button
+              label={t('lesson.next')}
+              variant="ghost"
+              disabled={!vecinas.siguiente}
+              onPress={() =>
+                vecinas.siguiente && router.replace(`/lesson/${vecinas.siguiente}`)
+              }
+            />
+          </View>
+
         </View>
       </ScrollView>
 
@@ -351,6 +499,7 @@ const styles = StyleSheet.create({
   duration: {
     fontSize: 13,
   },
+  vecinas: { flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
   divider: {
     height: 1,
     marginVertical: spacing.sm,

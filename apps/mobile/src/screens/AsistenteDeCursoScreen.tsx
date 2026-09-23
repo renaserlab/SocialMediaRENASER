@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -35,6 +35,7 @@ import {
 import { confirm, notify } from '@/lib/confirm';
 import { aCentavos, aTextoEditable } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
+import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { LearningRepository, type RequisitosDeCurso } from '@/repositories/LearningRepository';
 import { pickImage, signMediaUrls, uploadPostMedia, type PickedMedia } from '@/services/storage';
@@ -175,6 +176,32 @@ export function AsistenteDeCursoScreen() {
   };
 
   /**
+   * Cerrojo SÍNCRONO de las acciones que escriben. `guardando` es estado, y el
+   * estado no está puesto hasta el siguiente render: entre el primer toque y
+   * ese render caben más toques, y cada uno subía otra vez la portada y volvía
+   * a guardar el curso. En «publicar» el resultado era pedir dos publicaciones
+   * del mismo curso.
+   *
+   * Envuelve solo los puntos de entrada que salen de un botón. `guardar` queda
+   * fuera a propósito: la llaman desde dentro `publicar`, `irARevisar`,
+   * `enviarARevision` y `salir`, y si tomara el cerrojo se bloquearía a sí
+   * misma.
+   */
+  const ocupadoRef = useRef(false);
+  /** El `salir` del render actual, para que el Atras fisico use el vigente. */
+  const ultimoSalir = useRef<() => Promise<void>>(async () => {});
+
+  const enSerie = async (accion: () => Promise<unknown>): Promise<void> => {
+    if (ocupadoRef.current) return;
+    ocupadoRef.current = true;
+    try {
+      await accion();
+    } finally {
+      ocupadoRef.current = false;
+    }
+  };
+
+  /**
    * Guarda lo escrito en el curso. Devuelve si salió bien.
    *
    * Se manda TODO el borrador y no solo el paso actual: el servidor distingue
@@ -296,26 +323,72 @@ export function AsistenteDeCursoScreen() {
     }
   };
 
-  /** Salir sin perder lo escrito: se pregunta y se guarda si se quiere. */
-  const salir = async () => {
-    const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
-    if (guardando) return;
-    const aceptado = await confirm({
-      title: t('wizard.saveBeforeLeaving'),
-      message: t('wizard.saveBeforeLeavingBody'),
-      confirmLabel: t('wizard.saveAndLeave'),
-      cancelLabel: t('wizard.leaveWithoutSaving'),
+  /**
+   * Salir sin perder lo escrito: se pregunta y se guarda si se quiere.
+   *
+   * VA POR `enSerie` COMO LAS DEMAS. `guardando` es estado y no esta puesto
+   * hasta el siguiente render, y esta es justo la funcion que ahora dispara la
+   * tecla Atras: dos pulsaciones rapidas apilaban dos dialogos y, aceptando los
+   * dos, subian la portada dos veces y guardaban el curso dos veces.
+   */
+  /**
+   * La salida de los estados en los que NO hay borrador (cargando y error).
+   *
+   * Se separa de `salir()` a proposito: aquella pregunta si se guarda antes de
+   * irse, y preguntarlo cuando no se ha llegado a cargar nada seria ofrecer
+   * guardar el vacio.
+   */
+  const volverSinBorrador = () =>
+    router.canGoBack() ? router.back() : router.replace('/');
+
+  const salir = () =>
+    enSerie(async () => {
+      const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
+      const aceptado = await confirm({
+        title: t('wizard.saveBeforeLeaving'),
+        message: t('wizard.saveBeforeLeavingBody'),
+        confirmLabel: t('wizard.saveAndLeave'),
+        cancelLabel: t('wizard.leaveWithoutSaving'),
+      });
+      if (aceptado) {
+        if (!(await guardar(true))) return;
+      }
+      volver();
     });
-    if (aceptado) {
-      if (!(await guardar(true))) return;
-    }
-    volver();
-  };
+
+  /*
+    EL ATRAS FISICO DE ANDROID TAMBIEN PASA POR `salir()`.
+
+    Hasta ahora la pregunta de «¿guardo antes de salir?» colgaba solo del boton
+    Atras de la cabecera. La tecla del telefono no pasa por ahi: la atendia la
+    maquina de `navigation/atras.ts`, que veia una ruta anterior y volvia sin
+    mas, y lo escrito en el paso actual se perdia sin avisar. Es la forma mas
+    comun de salir de una pantalla en Android.
+
+    `salir` se redefine en cada render —cierra sobre el borrador—, asi que se
+    guarda en una referencia y el registro se hace UNA vez: el registro es una
+    pila, y volver a montarlo en cada render lo subiria a la cima constantemente.
+  */
+  ultimoSalir.current = salir;
+  useFocusEffect(
+    // AL FOCO Y NO AL MONTAJE. Una pantalla de pila sigue MONTADA cuando se
+    // navega por encima de ella, y el registro es una pila que no sabe quien
+    // tiene el foco: `cerrarCapaSuperior` llama al ultimo registrado, se este
+    // mirando o no. Atado al montaje, el Atras de otra pantalla acababa
+    // ejecutando la despedida de este asistente, que ni siquiera se ve.
+    useCallback(() => registrarSalidaPropia(() => void ultimoSalir.current()), []),
+  );
 
   if (cargando) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title={t('catalog.editCourse')} />
+        {/*
+          ATRAS TAMBIEN MIENTRAS CARGA. Esta pantalla vive fuera de `(tabs)`:
+          sin barra inferior, el encabezado es la unica salida, y sin el una
+          carga que no termina deja encerrado. Aqui no se pregunta «¿guardo
+          antes de salir?» porque todavia no hay borrador que guardar.
+        */}
+        <AppHeader title={t('catalog.editCourse')} onBack={volverSinBorrador} />
         <StateView state="loading" />
       </View>
     );
@@ -324,7 +397,8 @@ export function AsistenteDeCursoScreen() {
   if (fallo) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader title={t('catalog.editCourse')} />
+        {/* Y en el error con mas razon: nada que guardar y nada que ver. */}
+        <AppHeader title={t('catalog.editCourse')} onBack={volverSinBorrador} />
         <StateView state="error" description={fallo} onRetry={() => void cargar()} />
       </View>
     );
@@ -350,6 +424,14 @@ export function AsistenteDeCursoScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.pasos}
           keyboardShouldPersistTaps="handled"
+          /*
+            QUE NO CREZCA. Un `ScrollView` trae `flexGrow: 1` de serie y aqui es
+            hermano del cuerpo, que ocupa `flex: 1`: los dos se repartian el alto
+            libre y los pasos salian como columnas en vez de pildoras. Es el
+            mismo defecto arreglado en `AccesosAVerticales` y en la portada de
+            Cursos.
+          */
+          style={styles.carrilDePasos}
         >
           {PASOS.map((p, i) => {
             const activo = p.id === paso;
@@ -670,7 +752,9 @@ export function AsistenteDeCursoScreen() {
               <Button
                 label={accion === 'publicar' ? t('course.publish') : t('wizard.sendForReview')}
                 loading={guardando}
-                onPress={() => void (accion === 'publicar' ? publicar() : enviarARevision())}
+                onPress={() =>
+                  void enSerie(accion === 'publicar' ? publicar : enviarARevision)
+                }
                 style={styles.mitad}
               />
             )
@@ -679,11 +763,13 @@ export function AsistenteDeCursoScreen() {
               label={t('wizard.saveAndContinue')}
               loading={guardando}
               onPress={() =>
-                void (siguiente.id === 'revisar'
-                  ? irARevisar()
-                  : guardar().then((bien) => {
-                      if (bien) setPaso(siguiente.id);
-                    }))
+                void enSerie(() =>
+                  siguiente.id === 'revisar'
+                    ? irARevisar()
+                    : guardar().then((bien) => {
+                        if (bien) setPaso(siguiente.id);
+                      }),
+                )
               }
               style={styles.mitad}
             />
@@ -696,7 +782,17 @@ export function AsistenteDeCursoScreen() {
 }
 
 const styles = StyleSheet.create({
-  pasos: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  carrilDePasos: { flexGrow: 0 },
+  pasos: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    // Y que no se estiren: en una fila el eje cruzado es el vertical, y sin
+    // esto cada paso crece hasta el alto del carril. El `minHeight: 40` de
+    // `paso` es entonces el que manda, que es lo que se queria.
+    alignItems: 'flex-start',
+  },
   paso: {
     flexDirection: 'row',
     alignItems: 'center',

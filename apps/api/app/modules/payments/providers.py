@@ -35,7 +35,10 @@ class CheckoutRequest:
     """Lo que se le pide a la pasarela para iniciar un cobro."""
 
     purchase_id: str
-    course_title: str
+    #: Qué se está cobrando, tal y como lo verá quien paga. Se llamaba
+    #: `course_title` porque Cursos fue el primero en usar este puerto; ahora lo
+    #: usan también las entradas de un evento, y el nombre lo dice.
+    concepto: str
     #: En la unidad MENOR de la moneda (céntimos). Nunca en decimales: los
     #: flotantes pierden precisión y en dinero eso acaba en descuadres.
     amount_minor: int
@@ -92,6 +95,27 @@ class PaymentEvent:
     environment: str = "sandbox"
     #: El cuerpo verificado, para dejarlo en `payment_events.payload`.
     payload: Mapping[str, object] = field(default_factory=dict)
+    #: A QUÉ DOMINIO pertenece el cobro: '' para una compra de curso —que es
+    #: lo que había cuando este puerto se escribió— y 'evento' para una orden de
+    #: entradas. Sale de la metadata que se le adjunta al abrir el cobro, nunca
+    #: de un campo que el proveedor rellene por su cuenta.
+    #:
+    #: EXISTE PARA NO ADIVINAR. Sin él, el webhook tendría que buscar el
+    #: identificador en la tabla de pedidos de Cursos, no encontrarlo, y probar
+    #: en la de eventos: un aviso legítimo de un dominio quedaría registrado
+    #: como «pedido inexistente» del otro.
+    dominio: str = ""
+
+    #: El identificador REAL de la disputa (`dp_...`), solo en avisos de
+    #: contracargo. Vacío en todo lo demás.
+    #:
+    #: NO VALE LA REFERENCIA DEL COBRO en su lugar: un mismo cobro puede tener
+    #: más de una disputa a lo largo del tiempo, y usando la del cobro como
+    #: clave la segunda actualizaría la primera en vez de abrirse. Y es lo
+    #: único que permite cruzar nuestra fila con el panel de la pasarela
+    #: cuando alguien tenga que conciliar a mano.
+    dispute_id: str = ""
+
     #: El identificador REAL del reembolso (`re_...`), solo en avisos de
     #: devolución. Vacío en todo lo demás.
     #:
@@ -186,13 +210,38 @@ PROVIDERS: dict[str, PaymentProvider] = {
 }
 
 
+def registrar_pasarelas() -> None:
+    """Da de alta las pasarelas concretas. La llama `payments/__init__.py`.
+
+    POR QUÉ NO SE HACE AL FINAL DE ESTE FICHERO, que es donde estaba. El módulo
+    de Stripe necesita `PaymentProvider` y `CheckoutRequest`, definidos aquí
+    arriba; y este fichero necesitaba `StripeProvider`, definido allí. Los dos
+    se necesitaban, así que el ORDEN DE IMPORTACIÓN decidía si la aplicación
+    arrancaba: entrando por `providers` funcionaba, y entrando por
+    `stripe_provider` Python encontraba este fichero a medio ejecutar y
+    levantaba `ImportError` hablando de un ciclo, no de pagos.
+
+    No se notaba porque en todos los caminos reales `providers` entra primero.
+    Pero bastaba un módulo nuevo que importara el adaptador directamente para
+    que no arrancara la API entera, y el mensaje no habría señalado a esto.
+
+    Llamarla desde el `__init__` del paquete rompe el ciclo sin perder nada:
+    Python ejecuta ese fichero ANTES que cualquier submódulo, así que cuando
+    alguien llega aquí o a `stripe_provider`, el registro ya está hecho y
+    `PROVIDERS` está completo. **Y sigue siendo ansioso**: el diccionario no
+    depende de que alguien haya preguntado antes.
+
+    Es idempotente: volver a llamarla no crea una segunda instancia.
+    """
+    if "stripe" in PROVIDERS:
+        return
+    from app.modules.payments.stripe_provider import StripeProvider
+
+    PROVIDERS["stripe"] = StripeProvider()
 def get_provider(name: str) -> PaymentProvider | None:
+    """La pasarela que se llama así, o `None` si no hay ninguna.
+
+    NO INVENTA NINGUNA: un nombre desconocido devuelve `None` y quien llama
+    decide qué hacer con eso.
+    """
     return PROVIDERS.get(name)
-
-
-# Se registra al final y con importación local para no morder la cola: el
-# módulo de Stripe necesita `CheckoutRequest` y `PaymentProvider`, que se
-# definen justo arriba.
-from app.modules.payments.stripe_provider import StripeProvider  # noqa: E402
-
-PROVIDERS["stripe"] = StripeProvider()

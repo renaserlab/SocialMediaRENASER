@@ -10,24 +10,42 @@ Las dos tienen que decir lo mismo. `tests/test_muro_de_pago.py` las compara.
 """
 
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Header, Query, status
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
+from app.core.exceptions import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationAppError,
+)
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import cursos_v2
-from app.modules.catalog.models import Course
+from app.modules.catalog import cursos_v2, versiones
+from app.modules.catalog.contenido import id_idempotente
+from app.modules.gobernanza import auditoria
+from app.modules.catalog.models import Course, CourseVersion
 from app.modules.commerce import esquema as esquema_comercio
 from app.modules.commerce import service as comercio_service
-from app.modules.learning import progreso
+from app.modules.learning import esquema as esquema_aprendizaje
+from app.modules.learning import certificados, evaluacion, finalizacion, progreso
 from app.modules.learning.models import (
+    CourseCertificate,
     CourseLesson,
     CourseModule,
+    CourseQuiz,
+    LessonNote,
     LessonProgress,
     Purchase,
+    QuizAnswer,
+    QuizAttempt,
+    QuizOption,
+    QuizQuestion,
 )
 from app.modules.learning.schemas import (
     CourseDetailRead,
@@ -38,6 +56,22 @@ from app.modules.learning.schemas import (
     LessonRead,
     ModuleRead,
     MyCourseRead,
+    CertificadoRead,
+    EnvioDeIntento,
+    EvaluacionDeAutorRead,
+    EvaluacionGuardada,
+    EvaluacionRead,
+    IntentoRead,
+    NotaCreate,
+    NotaRead,
+    NotaUpdate,
+    FinalizacionRead,
+    MotivoDeRevocacion,
+    OpcionDeAutorRead,
+    OpcionRead,
+    PreguntaDeAutorRead,
+    PreguntaRead,
+    VerificacionPublicaRead,
 )
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import temas_de_curso
@@ -45,7 +79,7 @@ from app.modules.recommendations.signals import registrar_senal
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import is_admin
+from app.shared.permissions import is_admin, require_owner_or_strict_admin
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
@@ -273,9 +307,12 @@ async def get_course_detail(
 
     temas = await temas_de_curso.leer(db, [course.id])
     ficha = await cursos_v2.leer_una(db, course.id)
+    autor = await db.get(Profile, course.author_id)
     return CourseDetailRead(
         id=course.id,
         author_id=course.author_id,
+        author_name=autor.full_name if autor else None,
+        author_username=autor.username if autor else None,
         title=course.title,
         description=course.description,
         cover_path=course.cover_path,
@@ -513,6 +550,45 @@ async def grant_beta_access(
     return {"granted": True, "already_granted": not es_nuevo}
 
 
+async def _evaluaciones_de(
+    db: AsyncSession, uid: str, course_ids: list[str]
+) -> tuple[set[str], set[str]]:
+    """Que cursos EXIGEN evaluacion y en cuales la aprobo esta persona.
+
+    Dos consultas para la lista entera. Preguntarlo curso a curso serian dos por
+    cada uno, y esto es la biblioteca completa de alguien.
+    """
+    if not course_ids or not await esquema_aprendizaje.hay_evaluaciones(db):
+        return set(), set()
+
+    exigen: dict[str, str] = {
+        quiz.course_id: quiz.id
+        for quiz in await db.scalars(
+            select(CourseQuiz).where(
+                CourseQuiz.course_id.in_(course_ids),
+                CourseQuiz.status == "published",
+            )
+        )
+    }
+    if not exigen:
+        return set(), set()
+
+    por_quiz = {qid: cid for cid, qid in exigen.items()}
+    aprobados = {
+        por_quiz[qid]
+        for qid in await db.scalars(
+            select(QuizAttempt.quiz_id).where(
+                QuizAttempt.quiz_id.in_(por_quiz.keys()),
+                QuizAttempt.user_id == uid,
+                QuizAttempt.status == "submitted",
+                QuizAttempt.passed.is_(True),
+            )
+        )
+        if qid in por_quiz
+    }
+    return set(exigen.keys()), aprobados
+
+
 @router.get("/me/courses", response_model=list[MyCourseRead])
 async def my_courses(
     current_user: AuthUser = Depends(get_current_user),
@@ -576,14 +652,27 @@ async def my_courses(
             )
         )
 
+    # TERMINAR ES LA MISMA REGLA AQUI QUE EN `/completion`. Contar solo lecciones
+    # dejaba la biblioteca diciendo «Finalizados» sobre un curso cuya evaluacion
+    # no se ha aprobado, mientras la pantalla de finalizacion decia que no y el
+    # certificado se rechazaba. Dos respuestas a la misma pregunta.
+    #
+    # En DOS consultas para todos los cursos, no una por curso: esta pantalla es
+    # la biblioteca entera de alguien.
+    exigen, aprobados = await _evaluaciones_de(db, uid, [c.id for c in cursos])
+
     salida: list[MyCourseRead] = []
     for curso in cursos:
         lecciones = por_curso.get(curso.id, [])
         completadas = [lid for lid in lecciones if lid in hechas]
         pendiente = next((lid for lid in lecciones if lid not in hechas), None)
+        contenido_hecho = bool(lecciones) and len(completadas) >= len(lecciones)
+        terminado = contenido_hecho and (
+            curso.id not in exigen or curso.id in aprobados
+        )
         if not lecciones:
             estado = "not_started"
-        elif len(completadas) >= len(lecciones):
+        elif terminado:
             estado = "completed"
         elif completadas:
             estado = "in_progress"
@@ -791,25 +880,11 @@ async def _guardar_progreso(
 
     await db.flush()
 
-    lecciones = list(
-        await db.scalars(
-            select(CourseLesson.id)
-            .join(CourseModule, CourseModule.id == CourseLesson.module_id)
-            .where(CourseModule.course_id == curso.id)
-        )
-    )
-    hechas: set[str] = set()
-    if lecciones:
-        hechas = set(
-            await db.scalars(
-                select(LessonProgress.lesson_id).where(
-                    LessonProgress.user_id == uid,
-                    LessonProgress.completed.is_(True),
-                    LessonProgress.lesson_id.in_(lecciones),
-                )
-            )
-        )
-    curso_completo = bool(lecciones) and len(hechas) >= len(lecciones)
+    # TERMINAR EL CURSO NO ES SOLO VER LAS LECCIONES. Si hay evaluacion final
+    # publicada, hace falta ademas un intento aprobado; la regla entera vive en
+    # `finalizacion.py` y aqui se pregunta, no se repite.
+    estado = await finalizacion.registrar(db, user_id=uid, course_id=curso.id)
+    curso_completo = estado.terminado
 
     # Solo al cruzar la linea, no cada vez que se guarda un segundo.
     if curso_completo and not ya_estaba_completa and fila.completed:
@@ -829,7 +904,7 @@ async def _guardar_progreso(
         progress_seconds=fila.progress_seconds,
         completed=fila.completed,
         course_completed=curso_completo,
-        course_progress_percent=progreso.porcentaje(len(hechas), len(lecciones)),
+        course_progress_percent=estado.porcentaje,
     )
 
 
@@ -1192,3 +1267,954 @@ async def _estado_comercial(
         elif situacion in VIVOS and resultado.get(uid) != "refunded":
             resultado[uid] = "under_review"
     return resultado
+
+
+# --------------------------------------------------------------------------- #
+# Notas privadas de una lección (0057)
+#
+# PRIVADAS SIN EXCEPCIONES. No hay ruta para leer las de otro: ni el autor del
+# curso, ni moderación, ni administración. Por eso ninguna de estas funciones
+# acepta un `user_id` y todas filtran por `current_user.id`.
+# --------------------------------------------------------------------------- #
+
+
+async def _exigir_notas(db: AsyncSession) -> None:
+    if not await esquema_aprendizaje.hay_notas(db):
+        raise ServiceUnavailableError(
+            "Las notas todavía no están disponibles.",
+            code="lesson_notes_not_available",
+        )
+
+
+def _a_nota(fila: LessonNote, version: int | None) -> NotaRead:
+    return NotaRead(
+        id=fila.id,
+        lesson_id=fila.lesson_id,
+        course_id=fila.course_id,
+        body=fila.body,
+        position_seconds=fila.position_seconds,
+        course_version=version,
+        created_at=fila.created_at,
+        updated_at=fila.updated_at,
+    )
+
+
+async def _versiones_de(db: AsyncSession, ids: set[str]) -> dict[str, int]:
+    """El número legible de cada versión, en UNA consulta."""
+    limpios = {i for i in ids if i}
+    if not limpios:
+        return {}
+    filas = await db.execute(
+        select(CourseVersion.id, CourseVersion.version).where(
+            CourseVersion.id.in_(limpios)
+        )
+    )
+    return {vid: numero for vid, numero in filas}
+
+
+async def _mi_nota(db: AsyncSession, note_id: str, uid: str) -> LessonNote:
+    """La nota propia, o 404. Nunca 403: decir «existe pero no es tuya» ya
+    cuenta algo de lo que otra persona escribió."""
+    fila = await db.get(LessonNote, ensure_uuid(note_id, "Nota no encontrada."))
+    if fila is None or fila.user_id != uid:
+        raise NotFoundError("Nota no encontrada.")
+    return fila
+
+
+@router.get("/lessons/{lesson_id}/notes", response_model=list[NotaRead])
+async def listar_notas(
+    lesson_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[NotaRead]:
+    """Mis notas de esta lección, de la más reciente a la más vieja."""
+    await _exigir_notas(db)
+    lid = ensure_uuid(lesson_id, "Lección no encontrada.")
+
+    filas = list(
+        await db.scalars(
+            select(LessonNote)
+            .where(LessonNote.user_id == current_user.id, LessonNote.lesson_id == lid)
+            # Desempate por id: sin él, dos del mismo instante bailan entre cargas.
+            .order_by(LessonNote.created_at.desc(), LessonNote.id.desc())
+        )
+    )
+    numeros = await _versiones_de(db, {f.course_version_id for f in filas})
+    return [_a_nota(f, numeros.get(f.course_version_id)) for f in filas]
+
+
+@router.post(
+    "/lessons/{lesson_id}/notes",
+    response_model=NotaRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_nota(
+    lesson_id: str,
+    payload: NotaCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> NotaRead:
+    """Apuntar algo en esta lección.
+
+    PIDE ACCESO al contenido del curso: tomar apuntes de una lección que no se
+    puede abrir no es un caso real, y sin esta comprobación cualquiera podría
+    escribir filas asociadas a cualquier curso.
+
+    UN DOBLE TOQUE NO CREA DOS NOTAS: con `Idempotency-Key` el id se DERIVA de
+    la clave, así que la segunda inserción choca contra la clave primaria y se
+    devuelve la que ya estaba. Lo sostiene la base, no un `if`.
+    """
+    await _exigir_notas(db)
+    leccion, _modulo, curso = await _leccion_con_curso(db, lesson_id)
+    if not await _tiene_acceso(db, current_user.id, curso):
+        raise ForbiddenError(
+            "Necesitas acceso al curso para tomar notas.",
+            code="lesson_notes_access_required",
+        )
+
+    texto = payload.body.strip()
+    if not texto:
+        raise ValidationAppError(
+            "La nota no puede estar vacía.", code="lesson_note_empty"
+        )
+
+    derivado = id_idempotente(f"nota:{leccion.id}", current_user.id, idempotency_key)
+    if derivado is not None:
+        existente = await db.get(LessonNote, derivado)
+        if existente is not None:
+            numeros = await _versiones_de(db, {existente.course_version_id})
+            return _a_nota(existente, numeros.get(existente.course_version_id))
+
+    version = await versiones.vigente(db, curso.id)
+    fila = LessonNote(
+        user_id=current_user.id,
+        course_id=curso.id,
+        lesson_id=leccion.id,
+        course_version_id=version.id if version is not None else None,
+        body=texto,
+        position_seconds=payload.position_seconds,
+    )
+    if derivado is not None:
+        fila.id = derivado
+    db.add(fila)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existente = await db.get(LessonNote, derivado) if derivado else None
+        if existente is None:
+            raise
+        numeros = await _versiones_de(db, {existente.course_version_id})
+        return _a_nota(existente, numeros.get(existente.course_version_id))
+
+    await db.refresh(fila)
+    return _a_nota(fila, version.version if version is not None else None)
+
+
+@router.patch("/notes/{note_id}", response_model=NotaRead)
+async def editar_nota(
+    note_id: str,
+    payload: NotaUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotaRead:
+    """Corregir una nota propia. La versión anotada NO se toca: dice cuándo se
+    estudió, no cuándo se editó."""
+    await _exigir_notas(db)
+    fila = await _mi_nota(db, note_id, current_user.id)
+
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        raise ValidationAppError(
+            "No hay nada que cambiar.", code="lesson_note_no_changes"
+        )
+    if "body" in cambios:
+        texto = (cambios["body"] or "").strip()
+        if not texto:
+            raise ValidationAppError(
+                "La nota no puede estar vacía.", code="lesson_note_empty"
+            )
+        fila.body = texto
+    if "position_seconds" in cambios:
+        fila.position_seconds = cambios["position_seconds"]
+
+    await db.commit()
+    await db.refresh(fila)
+    numeros = await _versiones_de(db, {fila.course_version_id})
+    return _a_nota(fila, numeros.get(fila.course_version_id))
+
+
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def retirar_nota(
+    note_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Borrar una nota propia. Es suya: se borra de verdad, no se oculta."""
+    await _exigir_notas(db)
+    fila = await _mi_nota(db, note_id, current_user.id)
+    await db.delete(fila)
+    await db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# Evaluación final del curso (0058)
+#
+# LA RESPUESTA CORRECTA NO SALE DE AQUÍ mientras se responde. La garantía no es
+# «acordarse de no incluirla»: son DOS familias de esquemas, y el del alumno
+# —`OpcionRead`— ni siquiera declara el campo.
+# --------------------------------------------------------------------------- #
+
+
+async def _exigir_evaluaciones(db: AsyncSession) -> None:
+    if not await esquema_aprendizaje.hay_evaluaciones(db):
+        raise ServiceUnavailableError(
+            "La evaluación todavía no está disponible.",
+            code="course_quiz_not_available",
+        )
+
+
+async def _exigir_autoria_de_la_evaluacion(
+    db: AsyncSession, curso: Course, current_user: AuthUser, accion: str
+) -> None:
+    """Quien puede TOCAR las respuestas correctas de un curso.
+
+    NO ES `_puede_gestionar`, que incluye a `moderator`. Moderar existe para
+    ocultar contenido y resolver reportes, no para decidir quien se certifica:
+    quien cambia la alternativa correcta cambia quien aprueba, y con ello quien
+    obtiene un certificado verificable. Eso es del autor, o de administracion
+    con poder real —la misma que mueve dinero—, y queda anotado.
+    """
+    if curso.author_id != current_user.id:
+        await require_owner_or_strict_admin(
+            db,
+            curso.author_id,
+            current_user,
+            "Solo el autor del curso puede administrar su evaluación.",
+        )
+        # Solo se anota cuando NO es el autor: que alguien edite lo suyo no es
+        # un hecho que investigar.
+        await auditoria.anotar(
+            db,
+            actor_id=current_user.id,
+            action=f"course_quiz.{accion}",
+            entity_type="course",
+            entity_id=curso.id,
+            payload={"author_id": curso.author_id},
+        )
+
+
+async def _curso_o_404(db: AsyncSession, course_id: str) -> Course:
+    curso = await db.get(Course, ensure_uuid(course_id, "Curso no encontrado."))
+    if curso is None or curso.status == "deleted":
+        raise NotFoundError("Curso no encontrado.")
+    return curso
+
+
+async def _preguntas_con_opciones(
+    db: AsyncSession, quiz_id: str
+) -> list[tuple[QuizQuestion, list[QuizOption]]]:
+    """El cuestionario entero en DOS consultas, no una por pregunta."""
+    preguntas = list(
+        await db.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.quiz_id == quiz_id)
+            .order_by(QuizQuestion.sort_order, QuizQuestion.id)
+        )
+    )
+    if not preguntas:
+        return []
+    opciones: dict[str, list[QuizOption]] = {}
+    for opcion in await db.scalars(
+        select(QuizOption)
+        .where(QuizOption.question_id.in_([p.id for p in preguntas]))
+        .order_by(QuizOption.sort_order, QuizOption.id)
+    ):
+        opciones.setdefault(opcion.question_id, []).append(opcion)
+    return [(p, opciones.get(p.id, [])) for p in preguntas]
+
+
+def _a_intento(fila: QuizAttempt, version: int | None = None) -> IntentoRead:
+    return IntentoRead(
+        id=fila.id,
+        status=fila.status,
+        score_percent=fila.score_percent,
+        passed=fila.passed,
+        started_at=fila.started_at,
+        submitted_at=fila.submitted_at,
+        course_version=version,
+    )
+
+
+async def _quiz_del_curso(db: AsyncSession, course_id: str) -> CourseQuiz | None:
+    return await db.scalar(select(CourseQuiz).where(CourseQuiz.course_id == course_id))
+
+
+async def _mejor_intento(
+    db: AsyncSession, *, quiz_id: str, user_id: str
+) -> QuizAttempt | None:
+    """El mejor enviado. Es el que cuenta para terminar el curso: reintentar no
+    puede empeorar lo que ya se consiguió."""
+    return await db.scalar(
+        select(QuizAttempt)
+        .where(
+            QuizAttempt.quiz_id == quiz_id,
+            QuizAttempt.user_id == user_id,
+            QuizAttempt.status == "submitted",
+        )
+        .order_by(QuizAttempt.score_percent.desc(), QuizAttempt.submitted_at.desc())
+        .limit(1)
+    )
+
+
+@router.get("/courses/{course_id}/quiz/draft", response_model=EvaluacionDeAutorRead)
+async def borrador_de_evaluacion(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EvaluacionDeAutorRead:
+    """La evaluación CON las respuestas correctas. Solo quien gestiona el curso.
+
+    ESTE GET ESCRIBE, y es a propósito: es la única puerta de toda la API por la
+    que sale `is_correct`, así que cuando la abre alguien que no es el autor
+    tiene que quedar constancia. `anotar` solo hace `flush` y nadie confirma por
+    una petición de lectura, así que el `commit` va aquí: sin él la nota se
+    deshacía al cerrar la sesión y la puerta quedaba sin rastro.
+    """
+    await _exigir_evaluaciones(db)
+    curso = await _curso_o_404(db, course_id)
+    await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "read_draft")
+    await db.commit()
+    return await _leer_borrador(db, curso)
+
+
+async def _leer_borrador(db: AsyncSession, curso: Course) -> EvaluacionDeAutorRead:
+    """El borrador, SIN comprobar permiso y sin anotar nada.
+
+    Lo llaman `guardar` y `publicar` para devolver el estado nuevo: pasar por el
+    endpoint dejaba una segunda nota `read_draft` en cada escritura, escrita
+    después del `commit` y por tanto descartada. Una nota que no se guarda y un
+    hecho que no ocurrió.
+    """
+    quiz = await _quiz_del_curso(db, curso.id)
+    if quiz is None:
+        raise NotFoundError(
+            "Este curso todavía no tiene evaluación.", code="course_quiz_not_found"
+        )
+
+    filas = await _preguntas_con_opciones(db, quiz.id)
+    return EvaluacionDeAutorRead(
+        id=quiz.id,
+        course_id=quiz.course_id,
+        title=quiz.title,
+        pass_percent=quiz.pass_percent,
+        status=quiz.status,
+        questions=[
+            PreguntaDeAutorRead(
+                id=p.id,
+                prompt=p.prompt,
+                sort_order=p.sort_order,
+                options=[
+                    OpcionDeAutorRead(id=o.id, body=o.body, is_correct=o.is_correct)
+                    for o in opciones
+                ],
+            )
+            for p, opciones in filas
+        ],
+        blocking_reason=evaluacion.motivo_para_no_publicar(
+            [(p.id, [o.is_correct for o in opciones]) for p, opciones in filas]
+        ),
+    )
+
+
+@router.put("/courses/{course_id}/quiz", response_model=EvaluacionDeAutorRead)
+async def guardar_evaluacion(
+    course_id: str,
+    payload: EvaluacionGuardada,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EvaluacionDeAutorRead:
+    """Guardar la evaluación entera.
+
+    SE REEMPLAZA COMPLETA, y a propósito: media evaluación guardada —preguntas
+    nuevas con las alternativas viejas— es peor que ninguna.
+
+    LOS INTENTOS YA ENVIADOS NO SE TOCAN. Guardan su nota, así que reescribir
+    las preguntas no cambia lo que alguien sacó el mes pasado. Sus respuestas
+    sí se van con las opciones borradas —son de esas opciones— pero la nota,
+    que es lo que decide el certificado, se queda.
+    """
+    await _exigir_evaluaciones(db)
+    curso = await _curso_o_404(db, course_id)
+    await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "written")
+
+    for pregunta in payload.questions:
+        if sum(1 for o in pregunta.options if o.is_correct) > 1:
+            raise ValidationAppError(
+                "Cada pregunta tiene una sola respuesta correcta.",
+                code="quiz_multiple_correct",
+            )
+
+    quiz = await _quiz_del_curso(db, curso.id)
+    if quiz is None:
+        quiz = CourseQuiz(course_id=curso.id)
+        db.add(quiz)
+        await db.flush()
+    quiz.title = payload.title.strip()
+    quiz.pass_percent = payload.pass_percent
+
+    # Borrar y volver a escribir: las respuestas de un intento ABIERTO apuntan a
+    # opciones que dejan de existir, y eso es correcto —la evaluación cambió—.
+    await db.execute(
+        delete(QuizQuestion).where(QuizQuestion.quiz_id == quiz.id)
+    )
+    for posicion, pregunta in enumerate(payload.questions):
+        fila = QuizQuestion(
+            quiz_id=quiz.id, prompt=pregunta.prompt.strip(), sort_order=posicion
+        )
+        db.add(fila)
+        await db.flush()
+        for orden, opcion in enumerate(pregunta.options):
+            db.add(
+                QuizOption(
+                    question_id=fila.id,
+                    body=opcion.body.strip(),
+                    is_correct=opcion.is_correct,
+                    sort_order=orden,
+                )
+            )
+    await db.flush()
+    # UNA EVALUACIÓN PUBLICADA SIEMPRE SE PUEDE APROBAR. Vaciarla o dejar una
+    # pregunta sin respuesta correcta la volvía imposible de aprobar SIN dejar
+    # de ser obligatoria, y con eso el curso entero se quedaba sin poder
+    # terminarse para todos sus alumnos. Vuelve a borrador, que es lo que es, y
+    # el estado sale en la respuesta para que quien la editó lo vea.
+    if quiz.status == "published":
+        filas = await _preguntas_con_opciones(db, quiz.id)
+        if (
+            evaluacion.motivo_para_no_publicar(
+                [(p.id, [o.is_correct for o in opciones]) for p, opciones in filas]
+            )
+            is not None
+        ):
+            quiz.status = "draft"
+    await db.commit()
+    return await _leer_borrador(db, curso)
+
+
+@router.post("/courses/{course_id}/quiz/publish", response_model=EvaluacionDeAutorRead)
+async def publicar_evaluacion(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EvaluacionDeAutorRead:
+    """Ponerla delante del alumno. Se comprueba ANTES de tocar el estado."""
+    await _exigir_evaluaciones(db)
+    curso = await _curso_o_404(db, course_id)
+    await _exigir_autoria_de_la_evaluacion(db, curso, current_user, "published")
+
+    quiz = await _quiz_del_curso(db, curso.id)
+    if quiz is None:
+        raise NotFoundError(
+            "Este curso todavía no tiene evaluación.", code="course_quiz_not_found"
+        )
+
+    filas = await _preguntas_con_opciones(db, quiz.id)
+    motivo = evaluacion.motivo_para_no_publicar(
+        [(p.id, [o.is_correct for o in opciones]) for p, opciones in filas]
+    )
+    if motivo is not None:
+        raise ValidationAppError(
+            "La evaluación todavía no está lista para publicarse.", code=motivo
+        )
+
+    quiz.status = "published"
+    await db.commit()
+    return await _leer_borrador(db, curso)
+
+
+@router.get("/courses/{course_id}/quiz", response_model=EvaluacionRead)
+async def evaluacion_publicada(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EvaluacionRead:
+    """La evaluación, SIN soluciones, para quien tiene el curso."""
+    await _exigir_evaluaciones(db)
+    curso = await _curso_o_404(db, course_id)
+    if not await _tiene_acceso(db, current_user.id, curso):
+        raise ForbiddenError(
+            "Necesitas acceso al curso para hacer la evaluación.",
+            code="course_quiz_access_required",
+        )
+
+    quiz = await _quiz_del_curso(db, curso.id)
+    if quiz is None or quiz.status != "published":
+        raise NotFoundError(
+            "Este curso no tiene evaluación publicada.", code="course_quiz_not_found"
+        )
+
+    filas = await _preguntas_con_opciones(db, quiz.id)
+    abierto = await db.scalar(
+        select(QuizAttempt).where(
+            QuizAttempt.quiz_id == quiz.id,
+            QuizAttempt.user_id == current_user.id,
+            QuizAttempt.status == "in_progress",
+        )
+    )
+    mejor = await _mejor_intento(db, quiz_id=quiz.id, user_id=current_user.id)
+    return EvaluacionRead(
+        id=quiz.id,
+        course_id=quiz.course_id,
+        title=quiz.title,
+        pass_percent=quiz.pass_percent,
+        questions=[
+            PreguntaRead(
+                id=p.id,
+                prompt=p.prompt,
+                sort_order=p.sort_order,
+                options=[OpcionRead(id=o.id, body=o.body) for o in opciones],
+            )
+            for p, opciones in filas
+        ],
+        open_attempt=_a_intento(abierto) if abierto is not None else None,
+        best_attempt=_a_intento(mejor) if mejor is not None else None,
+    )
+
+
+@router.post(
+    "/courses/{course_id}/quiz/attempts",
+    response_model=IntentoRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def empezar_intento(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IntentoRead:
+    """Empezar, o retomar el que ya estaba abierto.
+
+    UN SOLO INTENTO ABIERTO por persona y evaluación, y lo sostiene un índice
+    único parcial: dos toques a la vez no abren dos, el segundo choca contra el
+    índice y se devuelve el que ya había.
+    """
+    await _exigir_evaluaciones(db)
+    curso = await _curso_o_404(db, course_id)
+    if not await _tiene_acceso(db, current_user.id, curso):
+        raise ForbiddenError(
+            "Necesitas acceso al curso para hacer la evaluación.",
+            code="course_quiz_access_required",
+        )
+
+    quiz = await _quiz_del_curso(db, curso.id)
+    if quiz is None or quiz.status != "published":
+        raise NotFoundError(
+            "Este curso no tiene evaluación publicada.", code="course_quiz_not_found"
+        )
+
+    abierto = await db.scalar(
+        select(QuizAttempt).where(
+            QuizAttempt.quiz_id == quiz.id,
+            QuizAttempt.user_id == current_user.id,
+            QuizAttempt.status == "in_progress",
+        )
+    )
+    if abierto is not None:
+        return _a_intento(abierto)
+
+    version = await versiones.vigente(db, curso.id)
+    fila = QuizAttempt(
+        quiz_id=quiz.id,
+        user_id=current_user.id,
+        course_id=curso.id,
+        course_version_id=version.id if version is not None else None,
+    )
+    db.add(fila)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        abierto = await db.scalar(
+            select(QuizAttempt).where(
+                QuizAttempt.quiz_id == quiz.id,
+                QuizAttempt.user_id == current_user.id,
+                QuizAttempt.status == "in_progress",
+            )
+        )
+        if abierto is None:
+            raise
+        return _a_intento(abierto)
+
+    await db.refresh(fila)
+    return _a_intento(fila, version.version if version is not None else None)
+
+
+@router.post("/quiz-attempts/{attempt_id}/submit", response_model=IntentoRead)
+async def enviar_intento(
+    attempt_id: str,
+    payload: EnvioDeIntento,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IntentoRead:
+    """Enviar las respuestas. LA NOTA LA PONE EL SERVIDOR.
+
+    UN INTENTO ENVIADO NO SE MODIFICA: el segundo envío responde 409 con la
+    nota que ya tenía, en vez de recalcularla. Así un doble toque no produce
+    dos resultados distintos ni permite ir probando respuestas.
+    """
+    await _exigir_evaluaciones(db)
+    intento = await db.get(
+        QuizAttempt, ensure_uuid(attempt_id, "Intento no encontrado.")
+    )
+    if intento is None or intento.user_id != current_user.id:
+        raise NotFoundError("Intento no encontrado.")
+    if intento.status == "submitted":
+        raise ConflictError(
+            "Este intento ya se envió.",
+            code="quiz_attempt_already_submitted",
+            details={"score_percent": intento.score_percent, "passed": intento.passed},
+        )
+
+    quiz = await db.get(CourseQuiz, intento.quiz_id)
+    if quiz is None:
+        raise NotFoundError("Intento no encontrado.")
+
+    filas = await _preguntas_con_opciones(db, quiz.id)
+    correctas = {
+        pregunta.id: next((o.id for o in opciones if o.is_correct), "")
+        for pregunta, opciones in filas
+    }
+    validas = {
+        pregunta.id: {o.id for o in opciones} for pregunta, opciones in filas
+    }
+
+    elegidas: dict[str, str] = {}
+    for respuesta in payload.answers:
+        if respuesta.question_id not in validas:
+            raise ValidationAppError(
+                "Esa pregunta no es de esta evaluación.", code="quiz_question_unknown"
+            )
+        if respuesta.option_id not in validas[respuesta.question_id]:
+            raise ValidationAppError(
+                "Esa alternativa no es de esa pregunta.", code="quiz_option_unknown"
+            )
+        elegidas[respuesta.question_id] = respuesta.option_id
+
+    nota, aprobado = evaluacion.califica(elegidas, correctas, quiz.pass_percent)
+
+    await db.execute(delete(QuizAnswer).where(QuizAnswer.attempt_id == intento.id))
+    for pregunta_id, opcion_id in elegidas.items():
+        db.add(
+            QuizAnswer(
+                attempt_id=intento.id, question_id=pregunta_id, option_id=opcion_id
+            )
+        )
+    intento.status = "submitted"
+    intento.score_percent = nota
+    intento.passed = aprobado
+    intento.submitted_at = datetime.now(timezone.utc)
+    await db.flush()
+    # Aprobar puede ser lo ULTIMO que faltaba: si el curso queda terminado con
+    # este intento, la fecha se anota ahora y no cuando alguien vuelva a tocar
+    # una leccion que ya estaba completa.
+    await finalizacion.registrar(
+        db, user_id=current_user.id, course_id=intento.course_id
+    )
+    await db.commit()
+    await db.refresh(intento)
+    return _a_intento(intento)
+
+
+@router.get("/courses/{course_id}/quiz/attempts", response_model=list[IntentoRead])
+async def historial_de_intentos(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[IntentoRead]:
+    """Mis intentos, del más reciente al más viejo. Solo los propios."""
+    await _exigir_evaluaciones(db)
+    curso = await _curso_o_404(db, course_id)
+    quiz = await _quiz_del_curso(db, curso.id)
+    if quiz is None:
+        return []
+
+    filas = list(
+        await db.scalars(
+            select(QuizAttempt)
+            .where(
+                QuizAttempt.quiz_id == quiz.id,
+                QuizAttempt.user_id == current_user.id,
+            )
+            .order_by(QuizAttempt.started_at.desc(), QuizAttempt.id.desc())
+        )
+    )
+    numeros = await _versiones_de(db, {f.course_version_id for f in filas})
+    return [_a_intento(f, numeros.get(f.course_version_id)) for f in filas]
+
+
+# --------------------------------------------------------------------------- #
+# Finalización y certificado (0059)
+#
+# NADA DE ESTO LO DECIDE EL CLIENTE. Que un curso esté terminado se deduce de
+# las lecciones y de la evaluación; el certificado se emite contra ese hecho.
+# --------------------------------------------------------------------------- #
+
+
+async def _exigir_certificados(db: AsyncSession) -> None:
+    if not await esquema_aprendizaje.hay_certificados(db):
+        raise ServiceUnavailableError(
+            "Los certificados todavía no están disponibles.",
+            code="course_certificates_not_available",
+        )
+
+
+async def _certificado_de(
+    db: AsyncSession, *, user_id: str, course_id: str
+) -> CourseCertificate | None:
+    if not await esquema_aprendizaje.hay_certificados(db):
+        return None
+    return await db.scalar(
+        select(CourseCertificate).where(
+            CourseCertificate.user_id == user_id,
+            CourseCertificate.course_id == course_id,
+        )
+    )
+
+
+def _a_certificado(fila: CourseCertificate) -> CertificadoRead:
+    return CertificadoRead(
+        public_id=fila.public_id,
+        course_id=fila.course_id,
+        course_title=fila.course_title,
+        display_name=fila.display_name,
+        author_name=fila.author_name,
+        course_version=fila.course_version,
+        completed_at=fila.completed_at,
+        issued_at=fila.issued_at,
+        status=fila.status,
+        verify_url=certificados.direccion_de_verificacion(fila.public_id),
+    )
+
+
+@router.get("/courses/{course_id}/completion", response_model=FinalizacionRead)
+async def estado_de_finalizacion(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FinalizacionRead:
+    """Si este curso está terminado, y qué falta si no lo está.
+
+    Se registra la fecha aquí también: quien abre esta pantalla después de
+    aprobar la evaluación tiene el curso terminado desde ese momento, y no
+    tiene por qué volver a tocar una lección para que quede anotado.
+    """
+    curso = await _curso_o_404(db, course_id)
+    if not await _tiene_acceso(db, current_user.id, curso):
+        raise ForbiddenError(
+            "No tienes acceso a este curso.", code="course_access_required"
+        )
+
+    estado = await finalizacion.registrar(
+        db, user_id=current_user.id, course_id=curso.id
+    )
+    await db.commit()
+    certificado = await _certificado_de(
+        db, user_id=current_user.id, course_id=curso.id
+    )
+    return FinalizacionRead(
+        course_id=curso.id,
+        course_title=curso.title,
+        lessons_total=estado.lecciones_totales,
+        lessons_completed=estado.lecciones_hechas,
+        progress_percent=estado.porcentaje,
+        quiz_required=estado.exige_evaluacion,
+        quiz_best_score=estado.mejor_nota,
+        quiz_passed=estado.evaluacion_aprobada,
+        completed=estado.terminado,
+        completed_at=estado.terminado_en,
+        certificate_public_id=(
+            certificado.public_id if certificado is not None else None
+        ),
+    )
+
+
+@router.post(
+    "/courses/{course_id}/certificate",
+    response_model=CertificadoRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def emitir_certificado(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CertificadoRead:
+    """Emitir el certificado de un curso terminado.
+
+    NO SE EMITE POR UNA AFIRMACIÓN DEL CLIENTE: se vuelve a calcular la
+    finalización aquí. Y hace falta acceso vigente en el momento de emitir:
+    quien devolvió el curso no se lleva un certificado de camino a la puerta.
+
+    UNO POR PERSONA Y CURSO. La segunda llamada devuelve el que ya existe, y lo
+    sostiene el índice único: dos toques a la vez no emiten dos.
+    """
+    await _exigir_certificados(db)
+    curso = await _curso_o_404(db, course_id)
+    if not await _tiene_acceso(db, current_user.id, curso):
+        raise ForbiddenError(
+            "Necesitas acceso vigente al curso para obtener el certificado.",
+            code="certificate_access_required",
+        )
+
+    existente = await _certificado_de(
+        db, user_id=current_user.id, course_id=curso.id
+    )
+    if existente is not None and existente.status == "valid":
+        return _a_certificado(existente)
+
+    estado = await finalizacion.registrar(
+        db, user_id=current_user.id, course_id=curso.id
+    )
+    await db.commit()
+    if not estado.terminado or estado.terminado_en is None:
+        raise ValidationAppError(
+            "Todavía no has terminado este curso.",
+            code="certificate_course_not_completed",
+            details={
+                "lessons_total": estado.lecciones_totales,
+                "lessons_completed": estado.lecciones_hechas,
+                "quiz_required": estado.exige_evaluacion,
+                "quiz_passed": estado.evaluacion_aprobada,
+            },
+        )
+
+    perfil = await db.get(Profile, current_user.id)
+    autor = await db.get(Profile, curso.author_id)
+    version = await versiones.vigente(db, curso.id)
+
+    # REVOCADO Y VUELTO A GANAR. Quien devolvió el curso, lo compró otra vez y
+    # volvió a terminarlo tiene derecho al certificado; sin esto se quedaba con
+    # el revocado para siempre, porque solo puede haber uno por persona y curso.
+    # NO se pierde nada: la revocación y esta reposición quedan las dos en
+    # auditoría.
+    if existente is not None:
+        await certificados.reponer(
+            db, existente, actor_id=current_user.id, completado_en=estado.terminado_en
+        )
+        await db.commit()
+        await db.refresh(existente)
+        return _a_certificado(existente)
+
+    fila = CourseCertificate(
+        public_id=certificados.nuevo_codigo_publico(),
+        user_id=current_user.id,
+        course_id=curso.id,
+        # Copia del momento de la emisión. Si el perfil no tiene nombre se usa
+        # el usuario; lo que no se hace es dejarlo vacío ni inventarlo.
+        display_name=certificados.nombre_para_el_certificado(perfil),
+        course_title=curso.title,
+        author_name=certificados.nombre_para_el_certificado(autor) if autor else "",
+        course_version=version.version if version is not None else None,
+        completed_at=estado.terminado_en,
+    )
+    db.add(fila)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existente = await _certificado_de(
+            db, user_id=current_user.id, course_id=curso.id
+        )
+        if existente is None:
+            raise
+        return _a_certificado(existente)
+
+    await db.refresh(fila)
+    return _a_certificado(fila)
+
+
+@router.get("/me/certificates", response_model=list[CertificadoRead])
+async def mis_certificados(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CertificadoRead]:
+    """Los míos, del más reciente al más viejo. Los revocados TAMBIÉN salen:
+    desaparecer sin decir nada es peor que decir que no está vigente."""
+    await _exigir_certificados(db)
+    filas = await db.scalars(
+        select(CourseCertificate)
+        .where(CourseCertificate.user_id == current_user.id)
+        .order_by(CourseCertificate.issued_at.desc(), CourseCertificate.id.desc())
+    )
+    return [_a_certificado(f) for f in filas]
+
+
+@router.get("/certificates/{public_id}", response_model=VerificacionPublicaRead)
+async def verificar_certificado(
+    public_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> VerificacionPublicaRead:
+    """Verificación PÚBLICA. Sin sesión.
+
+    NO SE PUEDE RECORRER: el código lo genera `secrets` y no es correlativo, así
+    que no hay una lista que enumerar. Un código que no existe responde 404,
+    igual que uno mal escrito: distinguirlos diría cuáles existen.
+
+    Lo que sale es lo justo para verificar. Ni correo, ni identificador de
+    usuario, ni orden, ni importe.
+    """
+    await _exigir_certificados(db)
+    fila = await db.scalar(
+        select(CourseCertificate).where(CourseCertificate.public_id == public_id.strip())
+    )
+    if fila is None:
+        raise NotFoundError(
+            "No encontramos ningún certificado con ese código.",
+            code="certificate_not_found",
+        )
+    return VerificacionPublicaRead(
+        public_id=fila.public_id,
+        display_name=fila.display_name,
+        course_title=fila.course_title,
+        author_name=fila.author_name,
+        course_version=fila.course_version,
+        completed_at=fila.completed_at,
+        issued_at=fila.issued_at,
+        status=fila.status,
+    )
+
+
+@router.post("/admin/certificates/{public_id}/revoke", response_model=CertificadoRead)
+async def revocar_certificado(
+    public_id: str,
+    payload: MotivoDeRevocacion,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CertificadoRead:
+    """Revocar por fraude, error o invalidación documentada.
+
+    REVOCAR NO BORRA: la fila se queda, con su motivo y su fecha, y la
+    verificación pública dice que no está vigente. Y queda en auditoría: es una
+    decisión sobre el logro de otra persona.
+    """
+    await _exigir_certificados(db)
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo administración puede revocar un certificado.")
+
+    fila = await db.scalar(
+        select(CourseCertificate).where(CourseCertificate.public_id == public_id.strip())
+    )
+    if fila is None:
+        raise NotFoundError(
+            "No encontramos ningún certificado con ese código.",
+            code="certificate_not_found",
+        )
+    if fila.status == "revoked":
+        return _a_certificado(fila)
+
+    await certificados.revocar(
+        db, fila, motivo=payload.reason.strip(), actor_id=current_user.id
+    )
+    await db.commit()
+    await db.refresh(fila)
+    return _a_certificado(fila)

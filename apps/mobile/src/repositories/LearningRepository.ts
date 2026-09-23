@@ -156,21 +156,77 @@ async function firmarPortadas(courses: Course[]): Promise<Course[]> {
  * `services/repositories/*`, que apuntaban a una tabla `lessons` inexistente
  * (se llama `course_lessons`) y devolvian la fila sin mapear.
  */
+/**
+ * Los filtros que el catalogo sabe aplicar EN EL SERVIDOR.
+ *
+ * La lista es corta a proposito: son exactamente los que existen. La
+ * duracion y la garantia no estan porque no hay columna que filtrar —la
+ * garantia ademas es de 168 horas para todos, asi que no separaria nada—, y
+ * el objetivo tampoco, porque no hay taxonomia de objetivos en el modelo.
+ */
+export type FiltrosDeCatalogo = {
+  texto?: string;
+  nivel?: 'beginner' | 'intermediate' | 'advanced';
+  /** Codigo de dos letras, como lo guarda el curso. */
+  idioma?: string;
+};
 export const LearningRepository = {
   /** El catalogo publico: SOLO cursos publicados. */
   /**
    * El catálogo público.
    *
+   * @param filtros los que el SERVIDOR sabe aplicar. La duración NO está, y no
+   *   por olvido: no existe esa columna. Lo único que hay es `duration_seconds`
+   *   por lección, y sumarla en cada página del catálogo o desnormalizarla en
+   *   `courses` son las dos una migración.
+   *
    * @param limite cuántos traer. Sin indicarlo NO se manda el parámetro y el
    *   servidor decide, que es lo que pasaba antes: hay quien lo llama para
    *   filtrar por autor en el cliente y necesita la lista entera.
    */
-  async listCourses(limite?: number): Promise<Course[]> {
-    const consulta = limite ? `?limit=${limite}` : '';
+  async listCourses(
+    limite?: number,
+    filtros?: FiltrosDeCatalogo,
+  ): Promise<Course[]> {
+    /*
+      LOS FILTROS VIAJAN AL SERVIDOR, no se aplican sobre lo que llega. Filtrando
+      aqui sobre la pagina recibida, pedir «avanzado» devuelve los avanzados QUE
+      HUBIERA en los veinte primeros y la pantalla jura que no hay mas.
+
+      Sin filtros no se manda ni un parametro de mas: el catalogo tiene que
+      seguir devolviendo exactamente lo de siempre.
+    */
+    const partes: string[] = [];
+    if (limite) partes.push(`limit=${limite}`);
+    if (filtros?.texto?.trim()) partes.push(`q=${encodeURIComponent(filtros.texto.trim())}`);
+    if (filtros?.nivel) partes.push(`level=${filtros.nivel}`);
+    if (filtros?.idioma) partes.push(`language=${filtros.idioma}`);
+    const consulta = partes.length > 0 ? `?${partes.join('&')}` : '';
     const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses${consulta}`, {
       auth: false,
     });
     return firmarPortadas(dtos.map(toCourseFromSummary));
+  },
+
+  /** Los cursos que esta persona guardo, del mas reciente al mas antiguo. */
+  async savedCourses(limite = 24): Promise<Course[]> {
+    const dtos = await apiRequest<CourseDto[]>(
+      `${API_V1}/catalog/courses/saved?limit=${limite}`,
+    );
+    return firmarPortadas(dtos.map(toCourseFromSummary));
+  },
+
+  /** Guardar y quitar son idempotentes: repetirlos deja el mismo estado. */
+  async saveCourse(courseId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/catalog/courses/${courseId}/saved`, {
+      method: 'PUT',
+    });
+  },
+
+  async unsaveCourse(courseId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/catalog/courses/${courseId}/saved`, {
+      method: 'DELETE',
+    });
   },
 
   /**
@@ -202,6 +258,27 @@ export const LearningRepository = {
   },
 
   /** Edita un curso. Solo su autor o la administracion (lo verifica el backend). */
+  /** El numero de la version publicada, o null si el curso no tiene. */
+  async publishedVersion(
+    courseId: string,
+  ): Promise<{ version: number; contentHash: string } | null> {
+    const dto = await apiRequest<{ version: number; content_hash: string }>(
+      `${API_V1}/catalog/courses/${courseId}/version`,
+      { auth: false },
+    );
+    // La huella es lo que el editor manda en `If-Match`: sin ella el 409 de
+    // conflicto no se dispara nunca.
+    return { version: dto.version, contentHash: dto.content_hash };
+  },
+
+  /** Borra el curso. El servidor lo niega con 409 si ya tiene alumnos. */
+  async deleteCourse(courseId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/catalog/courses/${courseId}`, {
+      method: 'DELETE',
+    });
+    invalidar('cursos');
+  },
+
   async updateCourse(courseId: string, cambios: DatosDeCurso): Promise<Course> {
     const dto = await apiRequest<CourseDto>(`${API_V1}/catalog/courses/${courseId}`, {
       method: 'PATCH',
@@ -410,6 +487,32 @@ export const LearningRepository = {
         completed,
       }),
     });
+    return {
+      lessonId: dto.lesson_id,
+      progressSeconds: dto.progress_seconds,
+      completed: dto.completed,
+      courseCompleted: dto.course_completed,
+      courseProgressPercent: dto.course_progress_percent,
+    };
+  },
+
+  /**
+   * Darla por terminada a mano.
+   *
+   * El vídeo ya la cierra solo al llegar al final, pero una lección puede ser
+   * texto, o verse fuera de la aplicación, o quedarse a treinta segundos. Lo
+   * decide el servidor: aquí solo se pide.
+   *
+   * Idempotente: pedirlo dos veces deja el mismo estado.
+   */
+  async completeLesson(lessonId: string): Promise<ProgresoGuardado> {
+    const dto = await apiRequest<{
+      lesson_id: string;
+      progress_seconds: number;
+      completed: boolean;
+      course_completed: boolean;
+      course_progress_percent: number;
+    }>(`${API_V1}/learning/lessons/${lessonId}/complete`, { method: 'POST' });
     return {
       lessonId: dto.lesson_id,
       progressSeconds: dto.progress_seconds,

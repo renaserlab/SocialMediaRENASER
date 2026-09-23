@@ -2,22 +2,52 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func, literal, select
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from sqlalchemy import delete, func, literal, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     ConflictError,
+    ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.catalog import cursos_v2, esquema, eventos
-from app.modules.catalog.models import Course, Event, EventRegistration
+from app.modules.catalog import (
+    contenido,
+    cursos_v2,
+    esquema,
+    eventos,
+    valoraciones,
+    versiones,
+)
+from app.modules.catalog.models import (
+    Course,
+    CourseReview,
+    Event,
+    EventRegistration,
+    SavedCourse,
+)
+from app.modules.commerce import esquema as esquema_comercio
+from app.modules.commerce.service import _insert as _insert_de_comercio
 from app.modules.catalog.schemas import (
+    ResumenDeValoraciones,
+    ValoracionCreate,
+    ValoracionRead,
+    ValoracionUpdate,
+    IDIOMA,
+    NIVEL,
     CoursePublishResult,
     CourseCreate,
+    CourseLessonCreate,
+    CourseLessonRead,
+    CourseLessonUpdate,
+    CourseModuleCreate,
+    CourseModuleRead,
+    CourseModuleUpdate,
+    CourseOrder,
     CourseRead,
     CourseRequirements,
     CourseReviewDecision,
@@ -28,13 +58,28 @@ from app.modules.catalog.schemas import (
     EventUpdate,
 )
 from app.modules.learning.models import CourseLesson, CourseModule
+from app.modules.events import esquema as esquema_de_eventos
+from app.modules.events import inventory as inventario
+from app.modules.events import states as estados_de_evento
+from app.modules.events import ticketing as entradas
+from app.modules.events import service as servicio_de_eventos
+from app.modules.events.models import EventOperations
+from app.modules.gobernanza import auditoria
+from app.modules.profiles.models import Profile
+from app.modules.gobernanza.schemas import VersionDeCurso
+from app.modules.gobernanza.contexto import leer_origen
 from app.modules.recommendations import cache as memoria_del_recomendador
 from app.modules.recommendations import temas_de_curso
 from app.modules.recommendations.models import CourseTopic
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
-from app.shared.permissions import require_admin, require_owner_or_admin
+from app.shared.permissions import (
+    is_admin,
+    require_admin,
+    require_owner_or_admin,
+    require_owner_or_strict_admin,
+)
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -45,12 +90,26 @@ async def create_event(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    """Publica un evento o una cita. Queda a nombre de quien lo organiza.
+    """Crea un evento a nombre de quien lo organiza. NACE BORRADOR.
+
+    ANTES NACIA PUBLICADO, y eso era autopublicacion: cualquiera con una cuenta
+    ponia un evento en el catalogo sin que nadie lo revisara. El blueprint lo
+    prohibe en su primera decision cerrada, y ademas era la puerta mas ancha que
+    tenia la aplicacion.
+
+    LA RUTA SE MANTIENE por compatibilidad con los binarios ya instalados: lo
+    que cambia es que el evento no se ve hasta que la admision lo aprueba. Para
+    llevarlo por el flujo entero —enviar, revisar, publicar— esta `/events`.
 
     Lo que protege esto de verdad es el servidor, no la interfaz: que la app
-    oculte un boton no impide llamar al endpoint a mano. Por eso editar sigue
-    comprobandose aqui contra el organizador.
+    oculte un boton no impide llamar al endpoint a mano.
     """
+    # SIN LA 0060 NO SE CREA NADA. El evento naceria borrador y no habria por
+    # donde enviarlo a revision: quedaria un evento invisible que su organizador
+    # da por publicado. Un 503 con su codigo dice lo que pasa; un 201 sobre algo
+    # que nadie va a ver, no.
+    await esquema_de_eventos.exigir_eventos_v2(db)
+
     event = Event(
         organizer_id=current_user.id,
         title=payload.title,
@@ -61,9 +120,18 @@ async def create_event(
         cover_path=payload.cover_path,
         whatsapp_url=payload.whatsapp_url,
         event_type=payload.event_type,
-        status="published",
+        status="draft",
     )
     db.add(event)
+    await db.flush()
+    db.add(
+        EventOperations(
+            event_id=event.id,
+            workflow_status=estados_de_evento.BORRADOR,
+            selection_status="none",
+            origin="events_v2",
+        )
+    )
     await db.commit()
     await db.refresh(event)
     return _to_event_read(event, 0, 0)
@@ -76,20 +144,33 @@ async def update_event(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
+    """Edita un evento. LAS MISMAS REGLAS que `PATCH /events/{id}`.
+
+    ESTA RUTA ERA LA PUERTA DE ATRAS. Comprobaba `require_owner_or_admin` y
+    escribia los campos, y nada mas: con ella se reescribia el titulo, la
+    descripcion y el recinto de un evento YA APROBADO Y PUBLICADO. Seguia
+    publicado, con su sello, sobre contenido que nadie habia revisado, sin
+    version nueva y sin una linea de auditoria. Ademas `require_owner_or_admin`
+    incluye `moderator`, asi que curaduria podia reescribir el contenido publico
+    de cualquier evento ajeno, algo que ninguna ruta del modulo nuevo concede.
+
+    Ahora delega en el servicio, que exige ser SU organizador —ajeno responde
+    404— y que el evento siga siendo borrador o condicional. Lo que ya se
+    reviso se cambia publicando una version nueva.
+    """
+    await esquema_de_eventos.exigir_eventos_v2(db)
     ensure_uuid(event_id, "Evento no encontrado.")
-    event = await db.get(Event, event_id)
-    if event is None:
-        raise NotFoundError("Evento no encontrado.")
-    await require_owner_or_admin(
-        db, event.organizer_id, current_user, "No puedes editar este evento."
-    )
     # `exclude_unset` distingue "no enviado" de "enviado vacio", igual que en
     # el perfil: sin ello, editar el titulo borraria el resto de campos.
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(event, field, value)
-    await db.commit()
-    await db.refresh(event)
-    return _to_event_read(event, 0, 0)
+    exp = await servicio_de_eventos.actualizar_borrador(
+        db,
+        evento_id=event_id,
+        datos=payload.model_dump(exclude_unset=True),
+        usuario=current_user,
+    )
+    return _to_event_read(
+        exp.evento, exp.inscritos, 0, operacion=exp.operacion
+    )
 
 
 @router.patch("/courses/{course_id}", response_model=CourseRead)
@@ -295,11 +376,25 @@ async def _guardar_temas(
 
 
 def _to_event_read(
-    event: Event, count: int, reserved: int, momento: datetime | None = None
+    event: Event,
+    count: int,
+    reserved: int,
+    momento: datetime | None = None,
+    organizador: Profile | None = None,
+    operacion: EventOperations | None = None,
 ) -> EventRead:
+    # EL SELLO SOLO SI EL SERVIDOR LO CONFIRMA. Sin fila operativa —evento
+    # heredado, o la 0060 todavia sin aplicar— es `none`, y la app no lo pinta.
+    seleccion = operacion.selection_status if operacion is not None else "none"
     return EventRead(
+        selection_status=seleccion,
+        seleccionado_por_z=seleccion == "approved",
         id=event.id,
         organizer_id=event.organizer_id,
+        # Vacíos si no hay perfil. El servidor manda '' y la pantalla decide qué
+        # hacer con eso; inventar un nombre sería peor que no escribir ninguno.
+        organizer_name=(organizador.full_name or "") if organizador else "",
+        organizer_username=(organizador.username or "") if organizador else "",
         title=event.title,
         description=event.description,
         starts_at=event.starts_at,
@@ -320,10 +415,21 @@ def _to_event_read(
 
 
 async def _registrations_count(db: AsyncSession, event_id: str) -> int:
+    """Los inscritos que OCUPAN SITIO.
+
+    Contaba TODAS las filas, y el árbitro del aforo cuenta solo las
+    `confirmed` (ver `events/inventory.ACTIVAS`). `event_registrations.status`
+    admite `waitlist` desde la 0001: en cuanto exista una, la ficha diría un
+    número y el aforo aplicaría otro. Dos formas de contar la misma cosa es una
+    de más.
+    """
     value = await db.scalar(
         select(func.count())
         .select_from(EventRegistration)
-        .where(EventRegistration.event_id == event_id)
+        .where(
+            EventRegistration.event_id == event_id,
+            EventRegistration.status.in_(inventario.ACTIVAS),
+        )
     )
     return value or 0
 
@@ -331,6 +437,8 @@ async def _registrations_count(db: AsyncSession, event_id: str) -> int:
 @router.get("/events", response_model=list[EventRead])
 async def list_events(
     when: str = Query(default=eventos.TODOS, pattern=eventos.CUANDO),
+    q: str | None = Query(default=None, max_length=120),
+    event_type: str | None = Query(default=None, pattern="^(online|presential|live)$"),
     page: Page = Depends(pagination_params),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
@@ -364,7 +472,11 @@ async def list_events(
     count_sq = (
         select(func.count())
         .select_from(EventRegistration)
-        .where(EventRegistration.event_id == Event.id)
+        .where(
+            EventRegistration.event_id == Event.id,
+            # Las mismas que cuenta el aforo. Ver `_registrations_count`.
+            EventRegistration.status.in_(inventario.ACTIVAS),
+        )
         .scalar_subquery()
     )
     reserved_sq = (
@@ -384,6 +496,20 @@ async def list_events(
     grupo = eventos.condicion(when, momento)
     if grupo is not None:
         consulta = consulta.where(grupo)
+    # BUSCAR Y FILTRAR AQUÍ, no sobre la página ya descargada: filtrar en el
+    # teléfono deja fuera todo lo que no cupo en la primera página, y el
+    # resultado depende de cuánto se haya bajado.
+    if q and q.strip():
+        patron = f"%{q.strip()}%"
+        consulta = consulta.where(
+            or_(
+                Event.title.ilike(patron),
+                Event.description.ilike(patron),
+                Event.location.ilike(patron),
+            )
+        )
+    if event_type:
+        consulta = consulta.where(Event.event_type == event_type)
     rows = (
         await db.execute(
             consulta.order_by(*eventos.orden(momento))
@@ -391,7 +517,106 @@ async def list_events(
             .offset(page.offset)
         )
     ).all()
-    return [_to_event_read(*row, momento=momento) for row in rows]
+    if not rows:
+        return []
+    # Los organizadores en UNA consulta: uno por fila sería N+1 en cada página.
+    organizadores = {
+        perfil.id: perfil
+        for perfil in await db.scalars(
+            select(Profile).where(
+                Profile.id.in_({fila[0].organizer_id for fila in rows})
+            )
+        )
+    }
+    # Las filas operativas de la pagina, en UNA consulta. Una por evento seria
+    # N+1 en el listado mas visitado de la aplicacion.
+    operaciones = (
+        await servicio_de_eventos.operaciones_de(db, [fila[0].id for fila in rows])
+        if await esquema_de_eventos.hay_eventos_v2(db)
+        else {}
+    )
+    return [
+        _to_event_read(
+            *fila,
+            momento=momento,
+            organizador=organizadores.get(fila[0].organizer_id),
+            operacion=operaciones.get(fila[0].id),
+        )
+        for fila in rows
+    ]
+
+
+@router.get("/events/{event_id}", response_model=EventRead)
+async def get_event(
+    event_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> EventRead:
+    """La ficha de UN evento.
+
+    NO EXISTÍA, y por eso todo —Explorar, la búsqueda, el listado— llevaba al
+    listado entero: tocar un evento concreto abría la lista donde ese evento
+    era una fila más.
+
+    SE LEE SIN SESIÓN: un evento publicado es público, igual que el catálogo.
+    Lo que cambia con sesión es `reserved_by_me`, que sin ella es `false`
+    porque no hay a quién preguntárselo.
+
+    SOLO LOS PUBLICADOS. Un borrador responde 404 y no 403: decir «existe pero
+    no puedes verlo» cuenta que alguien está preparando algo.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    uid = current_user.id if current_user else None
+    momento = eventos.ahora()
+
+    evento = await db.get(Event, event_id)
+    if evento is None or evento.status != "published":
+        raise NotFoundError("Evento no encontrado.")
+
+    inscritos = await _registrations_count(db, evento.id)
+    mia = 0
+    if uid:
+        mia = int(
+            bool(
+                await db.scalar(
+                    select(EventRegistration.event_id).where(
+                        EventRegistration.event_id == evento.id,
+                        EventRegistration.user_id == uid,
+                    )
+                )
+            )
+        )
+    organizador = await db.get(Profile, evento.organizer_id)
+    operacion = (
+        await servicio_de_eventos.operacion_de(db, evento.id)
+        if await esquema_de_eventos.hay_eventos_v2(db)
+        else None
+    )
+    ficha = _to_event_read(
+        evento,
+        inscritos,
+        mia,
+        momento=momento,
+        organizador=organizador,
+        operacion=operacion,
+    )
+    # EL MODO DE ACCESO Y EL PRECIO DESDE, solo en la FICHA. Preguntarlo por
+    # cada fila del listado seria una consulta por evento en la pantalla mas
+    # visitada, y este es un evento.
+    if await esquema_de_eventos.hay_entradas(db):
+        ajustes = await entradas.configuracion(db, evento.id)
+        ficha.access_mode = entradas.modo_de_acceso(ajustes)
+        if entradas.vende_entradas(ajustes):
+            # CON LA DISPONIBILIDAD DELANTE. «Desde S/ 10» de un tipo del que no
+            # queda ni una entrada es un precio que nadie puede pagar: quien
+            # entra por ese reclamo se encuentra con el siguiente, más caro.
+            libre = await entradas.disponibilidad(db, evento)
+            ficha.price_from_minor = entradas.precio_desde(
+                await entradas.tipos_de(db, evento.id, solo_a_la_venta=True),
+                libre.por_tipo,
+            )
+            ficha.currency = ajustes.currency if ajustes else None
+    return ficha
 
 
 @router.post("/events/{event_id}/reserve", response_model=EventRead)
@@ -400,34 +625,31 @@ async def reserve_event(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    event = await db.get(Event, event_id)
-    if event is None or event.status != "published":
-        raise NotFoundError("Evento no encontrado.")
+    """Apunta a alguien a un evento gratuito.
 
-    existing = await db.get(
-        EventRegistration, {"event_id": event_id, "user_id": current_user.id}
+    EL AFORO LO ARBITRA LA BASE, no este endpoint. Contar y despues insertar
+    —que es lo que habia aqui— deja pasar a dos personas al ultimo sitio: las
+    dos leen el mismo numero antes de que ninguna haya escrito. Ahora la fila
+    del evento se bloquea y todo ocurre dentro de esa transaccion; el detalle
+    esta en `events/inventory.py`.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    momento = eventos.ahora()
+    resultado = await inventario.reservar(
+        db, evento_id=event_id, usuario_id=current_user.id, momento=momento
     )
-    if existing is None:
-        # NO SE RESERVA ALGO QUE YA TERMINO. La interfaz dejo de ofrecerlo al
-        # separar los eventos por fecha, pero la interfaz no es la proteccion:
-        # una peticion directa —o un binario viejo, que sigue enseñando el boton
-        # porque no sabe distinguir— apuntaba a este endpoint y se apuntaba a un
-        # evento del mes pasado.
-        #
-        # Se comprueba SOLO al crear la reserva. Quien ya la tenia recibe la
-        # misma respuesta de siempre: el evento paso, pero su reserva existio y
-        # negarla ahora seria reescribir el pasado.
-        if eventos.estado_de(event, eventos.ahora()) == eventos.ANTERIOR:
-            raise ConflictError("Ese evento ya terminó.")
-        if event.capacity is not None:
-            count = await _registrations_count(db, event_id)
-            if count >= event.capacity:
-                raise ConflictError("El evento alcanzó su capacidad máxima.")
-        db.add(EventRegistration(event_id=event_id, user_id=current_user.id))
-        await db.commit()
-
-    count = await _registrations_count(db, event_id)
-    return _to_event_read(event, count, 1)
+    organizador = await db.get(Profile, resultado.evento.organizer_id)
+    # CON SU OPERACION. Sin ella la respuesta decia `selection_status: none` y
+    # el sello desaparecia al reservar: el mismo evento contaba dos cosas
+    # distintas segun por que ruta se preguntara.
+    return _to_event_read(
+        resultado.evento,
+        resultado.inscritos,
+        1,
+        momento=momento,
+        organizador=organizador,
+        operacion=resultado.operacion,
+    )
 
 
 @router.delete("/events/{event_id}/reserve", response_model=EventRead)
@@ -436,21 +658,121 @@ async def cancel_reservation(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventRead:
-    event = await db.get(Event, event_id)
-    if event is None:
-        raise NotFoundError("Evento no encontrado.")
-    existing = await db.get(
-        EventRegistration, {"event_id": event_id, "user_id": current_user.id}
+    """Devuelve la plaza. Cancelar lo que no existe no es un error.
+
+    Toma EL MISMO cerrojo que reservar: sin el, el hueco que se libera podria
+    contarse dos veces.
+    """
+    ensure_uuid(event_id, "Evento no encontrado.")
+    momento = eventos.ahora()
+    resultado = await inventario.cancelar(
+        db, evento_id=event_id, usuario_id=current_user.id
     )
-    if existing is not None:
-        await db.delete(existing)
-        await db.commit()
-    count = await _registrations_count(db, event_id)
-    return _to_event_read(event, count, 0)
+    organizador = await db.get(Profile, resultado.evento.organizer_id)
+    return _to_event_read(
+        resultado.evento,
+        resultado.inscritos,
+        0,
+        momento=momento,
+        organizador=organizador,
+        operacion=resultado.operacion,
+    )
+
+
+def _patron_de_busqueda(texto: str) -> str:
+    """El texto buscado, convertido en un patron de `LIKE` que no muerde.
+
+    `%` y `_` SON COMODINES EN SQL. Sin escaparlos, buscar «%» devuelve el
+    catalogo entero y «a_a» encuentra «ana», «ala» y «aja»: quien busca no sabe
+    que ha escrito un comodin y la lista le miente sin avisar. La barra
+    invertida se escapa primero, porque si no la que se anade despues se
+    duplicaria.
+
+    Es la misma regla que `messaging/router.py` aplica a la bandeja. Se repite y
+    no se comparte a proposito: sacarla a `shared/` es tocar dos modulos mas
+    para ahorrar una linea.
+    """
+    limpio = texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{limpio}%"
+
+
+async def _exigir_guardados(db: AsyncSession) -> None:
+    if not await esquema.hay_guardados(db):
+        raise ServiceUnavailableError(
+            "Guardar cursos todavía no está disponible.",
+            code="saved_courses_not_available",
+        )
+
+
+@router.get("/courses/saved", response_model=list[CourseRead])
+async def cursos_guardados(
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseRead]:
+    """Los cursos que esta persona guardó, del más reciente al más antiguo."""
+    await _exigir_guardados(db)
+    cursos = list(
+        await db.scalars(
+            select(Course)
+            .join(SavedCourse, SavedCourse.course_id == Course.id)
+            .where(SavedCourse.user_id == current_user.id, Course.status == "published")
+            # Orden determinista: sin el desempate por id, dos guardados del
+            # mismo instante pueden salir en distinto orden en cada página.
+            .order_by(SavedCourse.created_at.desc(), Course.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+    )
+    return await _leer_cursos(db, cursos)
+
+
+@router.put("/courses/{course_id}/saved", status_code=status.HTTP_204_NO_CONTENT)
+async def guardar_curso(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Guarda el curso. Llamarlo dos veces deja el mismo resultado."""
+    await _exigir_guardados(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    curso = await db.get(Course, cid)
+    if curso is None or curso.status != "published":
+        # Guardar un borrador ajeno diría que existe.
+        raise NotFoundError("Curso no encontrado.")
+
+    # La clave primaria compuesta es la que impide el duplicado; el
+    # `on conflict do nothing` recoge la carrera sin romper la transacción.
+    await db.execute(
+        _insert_de_comercio(db)(SavedCourse.__table__)
+        .values(user_id=current_user.id, course_id=cid)
+        .on_conflict_do_nothing()
+    )
+    await db.commit()
+
+
+@router.delete("/courses/{course_id}/saved", status_code=status.HTTP_204_NO_CONTENT)
+async def quitar_curso_guardado(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Lo quita. Quitar algo que no estaba tampoco es un error."""
+    await _exigir_guardados(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    await db.execute(
+        delete(SavedCourse).where(
+            SavedCourse.user_id == current_user.id, SavedCourse.course_id == cid
+        )
+    )
+    await db.commit()
 
 
 @router.get("/courses", response_model=list[CourseRead])
 async def list_courses(
+    q: str | None = Query(default=None, max_length=120),
+    level: str | None = Query(default=None, pattern=NIVEL),
+    language: str | None = Query(default=None, pattern=IDIOMA),
     page: Page = Depends(pagination_params),
     db: AsyncSession = Depends(get_db),
 ) -> list[CourseRead]:
@@ -460,12 +782,48 @@ async def list_courses(
     con un parametro convertiria el listado publico en un endpoint que devuelve
     cosas distintas segun quien pregunte, que es como se cuela un borrador en la
     pantalla de otra persona.
+
+    LOS FILTROS SE APLICAN ANTES DE PAGINAR, y ese es todo el punto. Filtrando
+    en el movil sobre la pagina que llega, pedir «avanzado» devuelve los cursos
+    avanzados QUE HUBIERA en los veinte primeros: la pantalla ensena tres
+    resultados y jura que no hay mas. Aqui la base filtra y despues corta.
+
+    SIN NINGUN PARAMETRO, LA CONSULTA ES LA DE SIEMPRE. Ni un `where` de mas: lo
+    que devuelve hoy el catalogo tiene que seguir devolviendo exactamente lo
+    mismo, o el filtro habria cambiado la pantalla de inicio de todo el mundo.
     """
+    consulta = select(Course).where(Course.status == "published")
+
+    texto = (q or "").strip()
+    if texto:
+        patron = _patron_de_busqueda(texto)
+        # Titulo Y descripcion: buscar solo en el titulo deja fuera el curso que
+        # se llama «Fundamentos» y explica en la descripcion que es de cocina.
+        consulta = consulta.where(
+            or_(
+                Course.title.ilike(patron, escape="\\"),
+                Course.description.ilike(patron, escape="\\"),
+            )
+        )
+
+    if level is not None or language is not None:
+        # 503 Y NO UNA LISTA VACIA NI EL CATALOGO ENTERO. Sin la 0034 esas
+        # columnas no existen: devolver todo seria mentir —el filtro no se
+        # aplico— y devolver vacio haria pensar que no hay cursos de ese nivel.
+        # La funcion existe, todavia no esta montada, y eso es un 503; es lo
+        # mismo que ya responde la revision de cursos.
+        if not await esquema.hay_cursos_v2(db):
+            raise ServiceUnavailableError(
+                "Filtrar por nivel o idioma todavía no está disponible.",
+                code="course_filters_not_available",
+            )
+        consulta = consulta.where(
+            Course.id.in_(cursos_v2.ids_de_cursos_con(level=level, language=language))
+        )
+
     cursos = list(
         await db.scalars(
-            select(Course)
-            .where(Course.status == "published")
-            .order_by(Course.created_at.desc())
+            consulta.order_by(Course.created_at.desc())
             .limit(page.limit)
             .offset(page.offset)
         )
@@ -494,7 +852,7 @@ async def list_my_courses(
             .offset(page.offset)
         )
     )
-    return await _leer_cursos(db, cursos)
+    return await _leer_cursos(db, cursos, con_revision=True)
 
 
 async def _requisitos_que_faltan(db: AsyncSession, course: Course) -> list[str]:
@@ -609,6 +967,7 @@ async def _requisitos_de_cobro(
 @router.post("/courses/{course_id}/publish", response_model=CoursePublishResult)
 async def publish_course(
     course_id: str,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CoursePublishResult:
@@ -646,7 +1005,28 @@ async def publish_course(
             id=course.id, status=course.status, published=False, missing=faltan
         )
 
+    anterior = course.status
     course.status = "published"
+
+    # LA VERSIÓN Y EL CAMBIO DE ESTADO, EN LA MISMA TRANSACCIÓN. Publicar deja
+    # de ser solo mover una columna: congela lo que el curso ofrece en ese
+    # momento, y esa fotografía es lo que la orden de mañana va a señalar. Si se
+    # confirmara el estado sin la versión, habría un curso publicado del que no
+    # se puede decir qué ofrecía. Con la 0050 sin aplicar devuelve `None` y todo
+    # sigue exactamente como antes.
+    version = await versiones.asegurar_version(db, course, publicada_por=current_user.id)
+    await auditoria.anotar(
+        db,
+        action="course.published",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        previous_state=anterior,
+        new_state="published",
+        payload={"version": version.version if version else None},
+        origen=leer_origen(request),
+    )
     await db.commit()
     # El curso acaba de ENTRAR en el universo de candidatos del recomendador, y
     # eso no es un cambio de esta persona: es un cambio del catalogo. La memoria
@@ -790,7 +1170,9 @@ async def review_queue(
     cursos = list(await db.scalars(select(Course).where(Course.id.in_(ids))))
     # El orden lo decide la cola (quien lleva mas esperando), no la base.
     por_id = {c.id: c for c in cursos}
-    return await _leer_cursos(db, [por_id[i] for i in ids if i in por_id])
+    return await _leer_cursos(
+        db, [por_id[i] for i in ids if i in por_id], con_revision=True
+    )
 
 
 @router.post("/courses/{course_id}/review", response_model=CourseRead)
@@ -838,6 +1220,7 @@ async def review_course(
 @router.post("/courses/{course_id}/unpublish", response_model=CourseRead)
 async def unpublish_course(
     course_id: str,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseRead:
@@ -856,7 +1239,22 @@ async def unpublish_course(
     await require_owner_or_admin(
         db, course.author_id, current_user, "No puedes retirar este curso."
     )
+    anterior = course.status
     course.status = "hidden"
+    # La versión deja de ser la vigente. NO SE BORRA: es lo que alguien compró,
+    # y borrarla dejaría órdenes apuntando a nada. Pasa a historial.
+    await versiones.retirar_vigente(db, course.id)
+    await auditoria.anotar(
+        db,
+        action="course.unpublished",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        previous_state=anterior,
+        new_state="hidden",
+        origen=leer_origen(request),
+    )
     await db.commit()
     await db.refresh(course)
     # La otra mitad de lo mismo: retirarlo lo saca del universo de candidatos.
@@ -866,16 +1264,961 @@ async def unpublish_course(
     return await _leer_curso(db, course)
 
 
+@router.delete("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def borrar_curso(
+    course_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Borra un curso, y solo si nadie lo compró.
+
+    El móvil lo borraba directamente contra PostgREST: sin comprobar
+    compradores, sin auditoría y sin transacción. La RLS se lo permitía al
+    autor, así que un curso vendido podía desaparecer con su contenido.
+    """
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    course = await db.get(Course, cid)
+    if course is None:
+        raise NotFoundError("Curso no encontrado.")
+    # NO `_curso_gestionable`: ese admite `moderator`, que existe para
+    # ocultar una publicación, no para hacer desaparecer un curso entero.
+    await require_owner_or_strict_admin(
+        db, course.author_id, current_user, "No puedes borrar este curso."
+    )
+
+    if await _tiene_compradores(db, course.id):
+        raise ConflictError(
+            "Este curso ya tiene alumnos: no se puede borrar. Retíralo del "
+            "catálogo si no quieres que se siga vendiendo.",
+            code="course_has_buyers",
+        )
+
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        action="course.deleted",
+        entity_type="course",
+        entity_id=course.id,
+        reason=(
+            "borrado por su autor"
+            if course.author_id == current_user.id
+            else "borrado por administración"
+        ),
+        payload={"course_status": course.status},
+    )
+    await db.delete(course)
+    await db.commit()
+
+
+async def _tiene_compradores(db: AsyncSession, course_id: str) -> bool:
+    """Si este curso llegó a venderse, o siquiera a poder venderse.
+
+    Se responde que SÍ en cuanto existe su producto de comercio, aunque no haya
+    ni una venta: `commerce_products.course_id` es `RESTRICT`, así que borrar el
+    curso reventaría contra la clave ajena y saldría un 500 en vez de un 409.
+
+    Y una orden `refunded` cuenta: tras una devolución total la orden queda así y
+    el derecho `revoked`, pero alguien pagó por ese curso y su expediente cuelga
+    de él.
+    """
+    from app.modules.learning.models import Purchase
+
+    if await db.scalar(
+        select(Purchase.id).where(Purchase.course_id == course_id).limit(1)
+    ):
+        return True
+
+    if not await esquema_comercio.hay_comercio(db):
+        return False
+
+    from app.modules.commerce.models import CommerceProduct
+
+    producto = await db.scalar(
+        select(CommerceProduct.id).where(CommerceProduct.course_id == course_id)
+    )
+    if producto is None:
+        return False
+    # El producto ya basta: la clave ajena es RESTRICT.
+    return True
+
+
+async def _exigir_valoraciones(db: AsyncSession) -> None:
+    if not await esquema.hay_valoraciones(db):
+        raise ServiceUnavailableError(
+            "Las valoraciones todavía no están disponibles.",
+            code="course_reviews_not_available",
+        )
+
+
+def _a_valoracion(fila, autor, verificada: bool, mia: bool) -> ValoracionRead:
+    return ValoracionRead(
+        id=fila.id,
+        course_id=fila.course_id,
+        rating=fila.rating,
+        comment=fila.comment,
+        created_at=fila.created_at,
+        updated_at=fila.updated_at,
+        author_id=fila.user_id,
+        author_name=autor.full_name if autor else "",
+        author_username=autor.username if autor else "",
+        verified_purchase=verificada,
+        is_mine=mia,
+        hidden=fila.status == "hidden",
+    )
+
+
+@router.get("/courses/{course_id}/reviews", response_model=list[ValoracionRead])
+async def listar_valoraciones(
+    course_id: str,
+    page: Page = Depends(pagination_params),
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ValoracionRead]:
+    """Las valoraciones visibles de un curso, de la mas reciente a la mas vieja."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    yo = current_user.id if current_user else None
+
+    filas = list(
+        await db.scalars(
+            select(CourseReview)
+            # La propia se ve SIEMPRE, aunque este oculta: si no, quien la
+            # escribio no puede editarla y el 409 la deja sin salida.
+            .where(
+                CourseReview.course_id == cid,
+                or_(CourseReview.status == "visible", CourseReview.user_id == yo),
+            )
+            # Desempate por id: sin el, dos del mismo instante bailan entre paginas.
+            .order_by(CourseReview.created_at.desc(), CourseReview.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+    )
+    if not filas:
+        return []
+
+    # Los autores en UNA consulta: uno por fila seria N+1 en cada pagina.
+    autores = {
+        perfil.id: perfil
+        for perfil in await db.scalars(
+            select(Profile).where(Profile.id.in_({f.user_id for f in filas}))
+        )
+    }
+    # El sello, tambien en UNA consulta: preguntarlo fila a fila eran dos
+    # sentencias por valoracion, y este endpoint es publico y admite limit=100.
+    verificados = await valoraciones.quienes_compraron(
+        db, course_id=cid, user_ids={f.user_id for f in filas}
+    )
+    return [
+        _a_valoracion(
+            fila,
+            autores.get(fila.user_id),
+            fila.user_id in verificados,
+            fila.user_id == yo,
+        )
+        for fila in filas
+    ]
+
+
+@router.get(
+    "/courses/{course_id}/reviews/summary", response_model=ResumenDeValoraciones
+)
+async def resumen_de_valoraciones(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ResumenDeValoraciones:
+    """Promedio, total y distribucion. Solo con las visibles."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    return ResumenDeValoraciones(**await valoraciones.resumen(db, cid))
+
+
+@router.post(
+    "/courses/{course_id}/reviews",
+    response_model=ValoracionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_valoracion(
+    course_id: str,
+    payload: ValoracionCreate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ValoracionRead:
+    """Valorar un curso comprado. Una por persona y curso."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+
+    permitido, motivo = await valoraciones.puede_valorar(
+        db, user_id=current_user.id, course_id=cid
+    )
+    if not permitido:
+        if motivo == "course_not_found":
+            raise NotFoundError("Curso no encontrado.")
+        raise ValidationAppError("No puedes valorar este curso todavía.", code=motivo)
+
+    fila = CourseReview(
+        course_id=cid,
+        user_id=current_user.id,
+        rating=payload.rating,
+        comment=payload.comment,
+    )
+    db.add(fila)
+    try:
+        await db.commit()
+    except IntegrityError:
+        # La unicidad la sostiene la base, no un `if`: dos peticiones a la vez
+        # no pueden crear dos votos de la misma persona.
+        await db.rollback()
+        raise ConflictError(
+            "Ya valoraste este curso. Edita tu valoración.",
+            code="course_review_exists",
+        ) from None
+
+    await db.refresh(fila)
+    autor = await db.get(Profile, current_user.id)
+    return _a_valoracion(fila, autor, True, True)
+
+
+@router.patch("/courses/{course_id}/reviews/{review_id}", response_model=ValoracionRead)
+async def editar_valoracion(
+    course_id: str,
+    review_id: str,
+    payload: ValoracionUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ValoracionRead:
+    """Editar la propia. Nadie edita la de otro, ni siquiera administracion."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    fila = await db.get(
+        CourseReview, ensure_uuid(review_id, "Valoración no encontrada.")
+    )
+    # Identificadores cruzados: una valoracion de otro curso no vale.
+    if fila is None or fila.course_id != cid:
+        raise NotFoundError("Valoración no encontrada.")
+    if fila.user_id != current_user.id:
+        raise ForbiddenError("Solo puedes editar tu propia valoración.")
+
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        raise ValidationAppError(
+            "No hay nada que cambiar.", code="course_review_no_changes"
+        )
+    if "rating" in cambios:
+        if cambios["rating"] is None:
+            raise ValidationAppError(
+                "La puntuación no puede quedar vacía.",
+                code="course_review_rating_required",
+            )
+        fila.rating = cambios["rating"]
+    # Solo se toca el texto si viene: un PATCH sin `comment` no lo borra.
+    if "comment" in cambios:
+        fila.comment = cambios["comment"]
+    await db.commit()
+    await db.refresh(fila)
+    autor = await db.get(Profile, current_user.id)
+    verificada = await valoraciones.tiene_acceso_ahora(
+        db, user_id=fila.user_id, course_id=cid
+    )
+    return _a_valoracion(fila, autor, verificada, True)
+
+
+@router.delete(
+    "/courses/{course_id}/reviews/{review_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def retirar_valoracion(
+    course_id: str,
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Retirar la propia."""
+    await _exigir_valoraciones(db)
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    fila = await db.get(
+        CourseReview, ensure_uuid(review_id, "Valoración no encontrada.")
+    )
+    if fila is None or fila.course_id != cid:
+        raise NotFoundError("Valoración no encontrada.")
+    if fila.user_id != current_user.id:
+        raise ForbiddenError("Solo puedes retirar tu propia valoración.")
+    if fila.status == "hidden":
+        # Borrarla y publicar de nuevo deshace la moderacion: el 409 de unicidad
+        # deja de saltar y vuelve una valoracion visible con el mismo texto.
+        raise ConflictError(
+            "Esta valoración está en revisión y no se puede retirar.",
+            code="course_review_moderated",
+        )
+    await db.delete(fila)
+    await db.commit()
+
+
+@router.post(
+    "/courses/{course_id}/reviews/{review_id}/hide", response_model=ValoracionRead
+)
+async def ocultar_valoracion(
+    course_id: str,
+    review_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ValoracionRead:
+    """Moderar: ocultar o restaurar. NO cambia la puntuacion ni el autor."""
+    await _exigir_valoraciones(db)
+    if not await is_admin(db, current_user.id):
+        raise ForbiddenError("Solo moderación puede ocultar una valoración.")
+    cid = ensure_uuid(course_id, "Curso no encontrado.")
+    fila = await db.get(
+        CourseReview, ensure_uuid(review_id, "Valoración no encontrada.")
+    )
+    if fila is None or fila.course_id != cid:
+        raise NotFoundError("Valoración no encontrada.")
+
+    fila.status = "hidden" if fila.status == "visible" else "visible"
+    await auditoria.anotar(
+        db,
+        actor_id=current_user.id,
+        action="course_review.moderated",
+        entity_type="course_review",
+        entity_id=fila.id,
+        new_state=fila.status,
+        payload={"course_id": cid},
+    )
+    await db.commit()
+    await db.refresh(fila)
+    autor = await db.get(Profile, fila.user_id)
+    return _a_valoracion(fila, autor, False, False)
+
+
+@router.get("/courses/{course_id}/version", response_model=VersionDeCurso)
+async def version_publicada(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> VersionDeCurso:
+    """Qué ofrece hoy este curso, congelado.
+
+    NO PIDE SESIÓN: es la ficha de un curso publicado, lo mismo que ya devuelve
+    el catálogo. Lo que aporta es que esto NO CAMBIA cuando el autor edita: es
+    la fotografía que la orden de mañana va a señalar.
+
+    404 cuando el curso no tiene versión todavía, que es el caso de todos los
+    que no se han republicado desde la 0050. No se inventa una al vuelo: sería
+    afirmar que eso es lo que se publicó.
+    """
+    ensure_uuid(course_id, "Curso no encontrado.")
+    version = await versiones.vigente(db, course_id)
+    if version is None:
+        raise NotFoundError(
+            "Este curso todavía no tiene una versión publicada.",
+            code="course_version_not_available",
+        )
+    return VersionDeCurso(
+        id=version.id,
+        course_id=version.course_id,
+        version=version.version,
+        status=version.status,
+        published_at=version.published_at,
+        content_hash=version.content_hash,
+        # LA DISTINCIÓN QUE NO SE PUEDE PERDER: una versión reconstruida por el
+        # backfill dice lo que el curso ES hoy, no lo que se vendió.
+        reconstruida=version.origin == "backfill",
+        snapshot=dict(version.snapshot or {}),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# EL TEMARIO: modulos y lecciones.
+#
+# POR QUE EXISTE ESTE BLOQUE. El editor del movil escribia `course_modules` y
+# `course_lessons` directamente contra PostgREST porque la API no ofrecia otro
+# camino. La RLS decidia quien podia escribir, asi que no era un agujero de
+# permisos; era un agujero de RASTRO: un autor reescribia el temario de un curso
+# ya vendido y no quedaba ni una linea diciendo que habia pasado.
+#
+# QUE NO HACE ESTE BLOQUE, y es igual de importante: NO crea versiones. Una
+# version nace al PUBLICAR (`versiones.asegurar_version`) y la vigente es
+# INMUTABLE —la 0050 lo impone con un disparador, no con un comentario—. Editar
+# el temario de un curso publicado deja el rastro y no toca la fotografia; lo
+# que el alumno compro sigue diciendo lo que decia.
+# --------------------------------------------------------------------------- #
+
+
+def _titulo(valor: str) -> str:
+    """El titulo sin espacios sueltos, y nunca vacio.
+
+    `min_length=1` deja pasar «   », y un modulo titulado con espacios se pinta
+    como una fila en blanco que parece un fallo de la aplicacion. Se limpia al
+    escribir y no al leer, porque lo que se guarda es lo que despues se ensena.
+    """
+    limpio = valor.strip()
+    if not limpio:
+        raise ValidationAppError("El título no puede estar vacío.")
+    return limpio
+
+
+async def _modulo_del_curso(
+    db: AsyncSession, course: Course, module_id: str
+) -> CourseModule:
+    """El modulo, si de verdad es de ESTE curso.
+
+    Comprobar solo que el modulo existe dejaria editar el de otro curso pasando
+    su id por la URL: el permiso se valido sobre el curso de la ruta, no sobre
+    el dueno del modulo. Es la misma clase de fallo que arreglar un `where` de
+    menos en una consulta.
+    """
+    ensure_uuid(module_id, "Módulo no encontrado.")
+    modulo = await db.get(CourseModule, module_id)
+    if modulo is None or modulo.course_id != course.id:
+        raise NotFoundError("Módulo no encontrado.")
+    return modulo
+
+
+async def _leccion_del_modulo(
+    db: AsyncSession, modulo: CourseModule, lesson_id: str
+) -> CourseLesson:
+    """La leccion, si de verdad es de ESE modulo. Mismo motivo que arriba."""
+    ensure_uuid(lesson_id, "Lección no encontrada.")
+    leccion = await db.get(CourseLesson, lesson_id)
+    if leccion is None or leccion.module_id != modulo.id:
+        raise NotFoundError("Lección no encontrada.")
+    return leccion
+
+
+async def _leer_modulo(db: AsyncSession, modulo: CourseModule) -> CourseModuleRead:
+    descripciones = await cursos_v2.descripciones_de_modulos(db, [modulo.id])
+    return CourseModuleRead(
+        id=modulo.id,
+        course_id=modulo.course_id,
+        title=modulo.title,
+        description=descripciones.get(modulo.id, ""),
+        sort_order=modulo.sort_order,
+    )
+
+
+async def _leer_leccion(db: AsyncSession, leccion: CourseLesson) -> CourseLessonRead:
+    tipo, muestra = (await cursos_v2.tipos_de_lecciones(db, [leccion.id])).get(
+        leccion.id, ("video", False)
+    )
+    return CourseLessonRead(
+        id=leccion.id,
+        module_id=leccion.module_id,
+        title=leccion.title,
+        body=leccion.body or "",
+        media_path=leccion.media_path,
+        duration_seconds=leccion.duration_seconds,
+        sort_order=leccion.sort_order,
+        kind=tipo,
+        is_preview=muestra,
+    )
+
+
+@router.post(
+    "/courses/{course_id}/modules",
+    response_model=CourseModuleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_course_module(
+    course_id: str,
+    payload: CourseModuleCreate,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", max_length=200
+    ),
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseModuleRead:
+    """Anade un modulo AL FINAL del temario.
+
+    UN DOBLE TOQUE NO CREA DOS MODULOS si el cliente manda `Idempotency-Key`. Y
+    no porque se mire antes si existe —eso lo pasan dos peticiones a la vez—
+    sino porque el id de la fila se deriva de la clave: la segunda insercion
+    choca contra la clave primaria y se devuelve el modulo que ya estaba, con el
+    mismo 201 que la primera vez.
+
+    LA POSICION NO LA ELIGE EL CLIENTE. Ver `contenido.siguiente_posicion`.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    propuesto = contenido.id_idempotente(course.id, current_user.id, idempotency_key)
+
+    if propuesto is not None:
+        repetido = await db.scalar(
+            select(CourseModule).where(
+                CourseModule.id == propuesto, CourseModule.course_id == course.id
+            )
+        )
+        if repetido is not None:
+            return await _leer_modulo(db, repetido)
+
+    modulo = CourseModule(
+        course_id=course.id,
+        title=_titulo(payload.title),
+        sort_order=await contenido.siguiente_posicion(
+            db, CourseModule.sort_order, CourseModule.course_id == course.id
+        ),
+    )
+    if propuesto is not None:
+        modulo.id = propuesto
+    try:
+        # DENTRO DEL SAVEPOINT, igual que en `versiones.asegurar_version`: con el
+        # `add` fuera, el objeto pertenece a la transaccion exterior y deshacer
+        # el savepoint no lo saca, asi que el commit de despues lo escribiria
+        # igualmente.
+        async with db.begin_nested():
+            db.add(modulo)
+            await db.flush()
+    except IntegrityError:
+        # Otra peticion con la misma clave llego antes. La suya es la buena.
+        repetido = await db.scalar(
+            select(CourseModule).where(
+                CourseModule.id == propuesto, CourseModule.course_id == course.id
+            )
+        )
+        if repetido is None:
+            # No fue la idempotencia: es un fallo de verdad y quien llama tiene
+            # que enterarse en vez de recibir un 201 sin modulo detras.
+            raise
+        return await _leer_modulo(db, repetido)
+
+    await cursos_v2.guardar_modulo(db, modulo.id, {"description": payload.description})
+    await auditoria.anotar(
+        db,
+        action="course.module_created",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={"module_id": modulo.id, **contenido.nota_de_contexto(course, version)},
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_modulo(db, modulo)
+
+
+@router.patch(
+    "/courses/{course_id}/modules/{module_id}", response_model=CourseModuleRead
+)
+async def update_course_module(
+    course_id: str,
+    module_id: str,
+    payload: CourseModuleUpdate,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseModuleRead:
+    """Edita un modulo. RENOMBRAR ES ESTO con `title` y nada mas.
+
+    No hay un endpoint aparte para renombrar: seria la misma escritura, el mismo
+    permiso y el mismo rastro con otro nombre, y el dia que uno cambie el otro
+    se queda atras.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+
+    # `exclude_unset` distingue «no enviado» de «enviado vacio»: sin ello,
+    # cambiar el titulo borraria la descripcion.
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        # Un PATCH vacio no es una edicion. Anotarlo llenaria el rastro de ruido
+        # justo donde hace falta poder leerlo.
+        return await _leer_modulo(db, modulo)
+
+    if "title" in cambios:
+        modulo.title = _titulo(cambios["title"])
+    if "description" in cambios:
+        await cursos_v2.guardar_modulo(
+            db, modulo.id, {"description": cambios["description"]}
+        )
+
+    await auditoria.anotar(
+        db,
+        action="course.module_updated",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        # LOS NOMBRES DE LOS CAMPOS, NO SU CONTENIDO. El rastro sirve para saber
+        # que se toco; archivar el texto convertiria `audit_events` en una copia
+        # del curso, y ese payload se sirve por `GET /admin/audit-events`.
+        payload={
+            "module_id": modulo.id,
+            "fields": sorted(cambios),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_modulo(db, modulo)
+
+
+@router.post(
+    "/courses/{course_id}/modules/reorder", response_model=list[CourseModuleRead]
+)
+async def reorder_course_modules(
+    course_id: str,
+    payload: CourseOrder,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseModuleRead]:
+    """Deja los modulos EN ESTE orden. `ids` es la lista completa y definitiva.
+
+    Se reescribe la posicion de TODOS y no solo la del que se movio: dos
+    `sort_order` empatados dejan el temario a merced de como devuelva las filas
+    la base, que es lo mismo que no tener orden.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+
+    modulos = {
+        m.id: m
+        for m in await db.scalars(
+            select(CourseModule).where(CourseModule.course_id == course.id)
+        )
+    }
+    contenido.exigir_orden_completo(list(modulos), payload.ids)
+
+    for posicion, ident in enumerate(payload.ids):
+        modulos[ident].sort_order = posicion
+
+    await auditoria.anotar(
+        db,
+        action="course.modules_reordered",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "total": len(payload.ids),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return [await _leer_modulo(db, modulos[ident]) for ident in payload.ids]
+
+
+@router.delete(
+    "/courses/{course_id}/modules/{module_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_course_module(
+    course_id: str,
+    module_id: str,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Borra un modulo y las lecciones que colgaban de el.
+
+    LAS LECCIONES SE BORRAN A MANO Y NO SE DEJA SOLO EN LA CASCADA. No es
+    desconfianza de la clave foranea: es que hay que CONTARLAS para poder
+    anotarlas. «Se borro un modulo» y «se borraron un modulo y siete lecciones
+    de un curso publicado» no son el mismo hecho, y el segundo es el que alguien
+    va a querer reconstruir dentro de seis meses.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+
+    cuantas = (
+        await db.scalar(
+            select(func.count())
+            .select_from(CourseLesson)
+            .where(CourseLesson.module_id == modulo.id)
+        )
+    ) or 0
+    await db.execute(delete(CourseLesson).where(CourseLesson.module_id == modulo.id))
+    await db.delete(modulo)
+
+    await auditoria.anotar(
+        db,
+        action="course.module_deleted",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lessons": cuantas,
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/courses/{course_id}/modules/{module_id}/lessons",
+    response_model=CourseLessonRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_course_lesson(
+    course_id: str,
+    module_id: str,
+    payload: CourseLessonCreate,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", max_length=200
+    ),
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseLessonRead:
+    """Anade una leccion AL FINAL del modulo. Misma idempotencia que el modulo.
+
+    `kind` e `is_preview` se guardan en una sentencia aparte porque no estan en
+    el ORM (ver `cursos_v2`); van en la MISMA transaccion, asi que o entra la
+    leccion con su tipo o no entra nada.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+    propuesto = contenido.id_idempotente(modulo.id, current_user.id, idempotency_key)
+
+    if propuesto is not None:
+        repetida = await db.scalar(
+            select(CourseLesson).where(
+                CourseLesson.id == propuesto, CourseLesson.module_id == modulo.id
+            )
+        )
+        if repetida is not None:
+            return await _leer_leccion(db, repetida)
+
+    leccion = CourseLesson(
+        module_id=modulo.id,
+        title=_titulo(payload.title),
+        body=payload.body,
+        media_path=payload.media_path,
+        duration_seconds=payload.duration_seconds,
+        sort_order=await contenido.siguiente_posicion(
+            db, CourseLesson.sort_order, CourseLesson.module_id == modulo.id
+        ),
+    )
+    if propuesto is not None:
+        leccion.id = propuesto
+    try:
+        async with db.begin_nested():
+            db.add(leccion)
+            await db.flush()
+    except IntegrityError:
+        repetida = await db.scalar(
+            select(CourseLesson).where(
+                CourseLesson.id == propuesto, CourseLesson.module_id == modulo.id
+            )
+        )
+        if repetida is None:
+            raise
+        return await _leer_leccion(db, repetida)
+
+    await cursos_v2.guardar_leccion(
+        db, leccion.id, {"kind": payload.kind, "is_preview": payload.is_preview}
+    )
+    await auditoria.anotar(
+        db,
+        action="course.lesson_created",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lesson_id": leccion.id,
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_leccion(db, leccion)
+
+
+@router.patch(
+    "/courses/{course_id}/modules/{module_id}/lessons/{lesson_id}",
+    response_model=CourseLessonRead,
+)
+async def update_course_lesson(
+    course_id: str,
+    module_id: str,
+    lesson_id: str,
+    payload: CourseLessonUpdate,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CourseLessonRead:
+    """Edita una leccion.
+
+    `media_path` en `null` SI borra la ruta: es la unica forma de quitar un
+    video. Por eso se mira lo ENVIADO y no lo que vale distinto de `None`.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+    leccion = await _leccion_del_modulo(db, modulo, lesson_id)
+
+    cambios = payload.model_dump(exclude_unset=True)
+    if not cambios:
+        return await _leer_leccion(db, leccion)
+
+    if "title" in cambios:
+        leccion.title = _titulo(cambios["title"])
+    for campo in ("body", "media_path", "duration_seconds"):
+        if campo in cambios:
+            setattr(leccion, campo, cambios[campo])
+    ficha = {
+        k: v
+        for k, v in cambios.items()
+        if k in cursos_v2.CAMPOS_EDITABLES_DE_LECCION
+    }
+    if ficha:
+        await cursos_v2.guardar_leccion(db, leccion.id, ficha)
+
+    await auditoria.anotar(
+        db,
+        action="course.lesson_updated",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lesson_id": leccion.id,
+            "fields": sorted(cambios),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return await _leer_leccion(db, leccion)
+
+
+@router.post(
+    "/courses/{course_id}/modules/{module_id}/lessons/reorder",
+    response_model=list[CourseLessonRead],
+)
+async def reorder_course_lessons(
+    course_id: str,
+    module_id: str,
+    payload: CourseOrder,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CourseLessonRead]:
+    """Deja las lecciones DE ESE MODULO en este orden. Lista completa, como arriba.
+
+    El orden se reescribe dentro de un modulo y no en todo el curso: mover una
+    leccion de modulo es otra operacion, y mezclarlas dejaria que una
+    reordenacion cambiara a que bloque pertenece cada cosa sin decirlo.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+
+    lecciones = {
+        x.id: x
+        for x in await db.scalars(
+            select(CourseLesson).where(CourseLesson.module_id == modulo.id)
+        )
+    }
+    contenido.exigir_orden_completo(list(lecciones), payload.ids)
+
+    for posicion, ident in enumerate(payload.ids):
+        lecciones[ident].sort_order = posicion
+
+    await auditoria.anotar(
+        db,
+        action="course.lessons_reordered",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "total": len(payload.ids),
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return [await _leer_leccion(db, lecciones[ident]) for ident in payload.ids]
+
+
+@router.delete(
+    "/courses/{course_id}/modules/{module_id}/lessons/{lesson_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_course_lesson(
+    course_id: str,
+    module_id: str,
+    lesson_id: str,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=200),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Borra una leccion. El progreso de quien la estaba viendo cae con ella.
+
+    Lo hace la cascada de `lesson_progress` en la base, no este codigo: es un
+    dato de OTRO modulo y borrarlo desde aqui seria el catalogo escribiendo en
+    las tablas de aprendizaje.
+    """
+    course = await _curso_gestionable(db, course_id, current_user, "editar")
+    version = await contenido.exigir_version_esperada(db, course.id, if_match)
+    modulo = await _modulo_del_curso(db, course, module_id)
+    leccion = await _leccion_del_modulo(db, modulo, lesson_id)
+
+    await db.delete(leccion)
+    await auditoria.anotar(
+        db,
+        action="course.lesson_deleted",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=current_user.id,
+        actor_role="user",
+        payload={
+            "module_id": modulo.id,
+            "lesson_id": lesson_id,
+            **contenido.nota_de_contexto(course, version),
+        },
+        origen=leer_origen(request),
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 async def _leer_curso(db: AsyncSession, course: Course) -> CourseRead:
-    return (await _leer_cursos(db, [course]))[0]
+    # Todos los que llegan aqui son del autor o de administracion: crear,
+    # editar, revisar y retirar. Por eso si va el expediente.
+    return (await _leer_cursos(db, [course], con_revision=True))[0]
 
 
-async def _leer_cursos(db: AsyncSession, cursos: list[Course]) -> list[CourseRead]:
+async def _leer_cursos(
+    db: AsyncSession, cursos: list[Course], *, con_revision: bool = False
+) -> list[CourseRead]:
     """Los cursos con sus temas y su ficha, en UNA consulta de cada cosa.
 
     Una por curso convertiria el catalogo en veinte viajes para pintar unas
     etiquetas. Con la ficha de la 0034 el riesgo es el mismo, asi que se lee en
     lote igual que los temas.
+
+    `con_revision` DECIDE SI SE MANDA EL EXPEDIENTE DE REVISION, y viene apagado
+    a proposito. `rejection_reason` lo escribe administracion en texto libre
+    —«contenido copiado de X, el autor no acredita...»— y estaba saliendo en
+    `GET /catalog/courses`, que no pide sesion: bastaba con que un curso
+    publicado se reenviara a revision y se rechazara para que cualquiera leyera
+    el motivo. Las fechas de envio y revision van con el porque describen la
+    misma gestion interna.
+
+    El detalle de `learning` ya lo trataba asi; esto solo pone de acuerdo al
+    listado con el. Apagado por defecto para que anadir un endpoint nuevo no
+    vuelva a abrirlo por descuido: quien lo necesite lo pide.
     """
     ids = [c.id for c in cursos]
     temas = await temas_de_curso.leer(db, ids)
@@ -895,8 +2238,9 @@ async def _leer_cursos(db: AsyncSession, cursos: list[Course]) -> list[CourseRea
         leido.target_audience = ficha.target_audience
         leido.prerequisites = ficha.prerequisites
         leido.review_status = ficha.review_status
-        leido.submitted_at = ficha.submitted_at
-        leido.reviewed_at = ficha.reviewed_at
-        leido.rejection_reason = ficha.rejection_reason
+        if con_revision:
+            leido.submitted_at = ficha.submitted_at
+            leido.reviewed_at = ficha.reviewed_at
+            leido.rejection_reason = ficha.rejection_reason
         salida.append(leido)
     return salida

@@ -20,6 +20,31 @@ no ocurre es la tarea de fondo que sale de la maquina.
 
 from __future__ import annotations
 
+import os
+
+# ------------------------------------------------------------------------- #
+# LA BASE DE DATOS, ANTES DE IMPORTAR NADA DE `app`.
+#
+# `apps/api/.env` existe en la maquina de desarrollo y su `DATABASE_URL` apunta
+# al POOLER DE SUPABASE DE PRODUCCION. `app/shared/database.py` construye el
+# motor al importarse, leyendo esa variable: cualquier prueba que se olvide de
+# sustituir `get_db` —hoy todas lo hacen, pero basta una nueva— abriria una
+# sesion contra la base real. No conecta hasta que alguien la usa, y esa es
+# exactamente la clase de bomba que no avisa hasta que estalla.
+#
+# Se fija aqui y no en una fixture porque una fixture llega TARDE: el motor ya
+# se creo cuando pytest importo el modulo de prueba. Y por eso este bloque va
+# antes de los `from app...` de mas abajo, que son los que arrastran el modulo
+# de base de datos.
+#
+# Se ESCRIBE la variable en vez de comprobarla y fallar: una comprobacion
+# obligaria a cada persona a preparar su entorno antes de poder ejecutar las
+# pruebas, y lo que hace falta es que ejecutarlas sea inofensivo por defecto.
+# Cada prueba sigue levantando su propio motor en memoria, como hasta ahora;
+# esto solo decide a donde apunta el que NADIE deberia estar usando.
+# ------------------------------------------------------------------------- #
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+
 import pytest
 
 from app.core.config import get_settings

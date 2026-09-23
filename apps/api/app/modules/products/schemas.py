@@ -1,0 +1,1519 @@
+"""Los contratos de Productos: qué entra y qué sale.
+
+DOS PRINCIPIOS QUE SE VEN EN CADA MOLDE:
+
+  1. LO QUE NO EXISTE VIAJA NULO, no en cero y no con un valor razonable. Un
+     precio nulo es «sin precio configurado» y una valoración nula es «todavía
+     nadie ha valorado»; ceros en su lugar se leen como decisiones tomadas.
+  2. LO INTERNO NO SALE. La nota del evaluador y las notas internas de una
+     postulación no están en ningún molde de lectura pública.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from app.modules.products.catalog import MANIFIESTO, SELLO
+from app.modules.products.models import DIMENSIONES, RAZONES_EXIGIDAS
+
+# --------------------------------------------------------------------------- #
+# Catálogo
+# --------------------------------------------------------------------------- #
+class TarjetaRead(BaseModel):
+    """Lo que se enseña en una lista (blueprint §3.1)."""
+
+    product_id: str
+    name: str
+    seller_id: str
+    seller_name: str
+    #: `null` es SIN PRECIO CONFIGURADO. Nunca cero.
+    price_minor: int | None = None
+    currency: str | None = None
+    #: La ruta en el almacenamiento. Se guarda la RUTA y nunca una URL: una
+    #: firmada caduca, y guardarla haría que la imagen dejara de cargar sin que
+    #: nadie tocara nada.
+    image_path: str | None = None
+    #: LA URL FIRMADA, emitida al servir esta respuesta y con vencimiento.
+    #: `null` cuando no hay fotografía APROBADA o el almacenamiento no contesta:
+    #: la pantalla enseña entonces el texto alternativo, que es la verdad.
+    image_url: str | None = None
+    image_alt: str | None = None
+    #: UNO SOLO (§3.1). Hoy solo puede ser `origin`.
+    trust: str | None = None
+    trust_value: str | None = None
+    saved: bool = False
+
+
+class CreadorRead(BaseModel):
+    seller_id: str
+    profile_id: str
+    name: str
+    #: Su propuesta: el resumen de su producto más reciente. Puede no haberlo.
+    proposal: str | None = None
+    product_id: str
+
+
+class PortadaRead(BaseModel):
+    """La portada de Productos Z (§3)."""
+
+    manifest: str = MANIFIESTO
+    seleccion: list[TarjetaRead] = Field(default_factory=list)
+    para_ti: list[TarjetaRead] = Field(default_factory=list)
+    #: `false` SIEMPRE hoy: no hay recomendador de productos, y llamar «para ti»
+    #: a lo más reciente sería mentir con el título.
+    personalized: bool = False
+    creadores: list[CreadorRead] = Field(default_factory=list)
+    #: `false` significa que las migraciones de Productos no están aplicadas en
+    #: esta base. No es «no hay productos».
+    disponible: bool = True
+
+
+class BusquedaRead(BaseModel):
+    items: list[TarjetaRead] = Field(default_factory=list)
+    #: El identificador del último producto de esta página, o `null` si se
+    #: acabó. NO es un número de página: paginar por desplazamiento repite y se
+    #: salta filas cuando alguien publica a mitad.
+    next_cursor: str | None = None
+
+
+class CategoriaRead(BaseModel):
+    id: str
+    slug: str
+    name: str
+    position: int
+
+
+class CategoriasRead(BaseModel):
+    #: VACÍO significa que la empresa no ha definido las categorías. No es un
+    #: fallo, y la pantalla lo dice así.
+    items: list[CategoriaRead] = Field(default_factory=list)
+
+
+class MediaRead(BaseModel):
+    """Una fotografía de la galería pública. SOLO SALEN LAS APROBADAS."""
+
+    id: str
+    kind: str
+    storage_path: str
+    alt_text: str | None = None
+    #: Firmada ahora y con vencimiento. `null` si no se pudo firmar.
+    url: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+class FotoDelProveedor(BaseModel):
+    """La misma fotografía vista por quien la subió: CON su estado.
+
+    Aquí sí viaja `status` y el motivo del rechazo, porque es lo único que le
+    permite corregirla. En el catálogo no aparece ninguna de las dos cosas.
+    """
+
+    id: str
+    kind: str
+    storage_path: str
+    alt_text: str | None = None
+    position: int = 0
+    status: str
+    content_type: str | None = None
+    byte_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+    url: str | None = None
+    reviewed_at: datetime | None = None
+    rejection_reason: str | None = None
+    created_at: datetime | None = None
+
+
+class OrdenDeLasFotos(BaseModel):
+    """TODAS las fotografías, en el orden que se quiere. Una lista parcial
+    dejaría las que faltan en una posición que nadie eligió."""
+
+    media_ids: list[str] = Field(min_length=1, max_length=20)
+
+
+class DecisionDeLaFoto(BaseModel):
+    approved: bool
+    #: OBLIGATORIO al rechazar: sin motivo no se puede corregir.
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class FotoPendiente(BaseModel):
+    """Una fila de la bandeja de quien revisa fotografías."""
+
+    id: str
+    product_id: str
+    version_id: str
+    product_name: str
+    alt_text: str | None = None
+    storage_path: str
+    url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    byte_size: int | None = None
+    content_type: str | None = None
+    created_at: datetime | None = None
+
+
+class VarianteRead(BaseModel):
+    id: str
+    sku: str
+    name: str
+    options: dict[str, Any] = Field(default_factory=dict)
+    price_delta_minor: int = 0
+
+
+class RazonRead(BaseModel):
+    """Una de las tres razones, CON de qué evidencia sale (§4.1)."""
+
+    position: int
+    text: str
+    evidence_kind: str
+    evidence_dimension: str
+
+
+class FichaRead(BaseModel):
+    """El detalle, en el orden inalterable del blueprint §4."""
+
+    product_id: str
+    version_id: str
+    version: str
+    name: str
+    summary: str | None = None
+    description: str | None = None
+    materials: str | None = None
+    origin_country: str | None = None
+    manufacturer: str | None = None
+    price_minor: int | None = None
+    currency: str | None = None
+    #: La huella de lo publicado. Es lo que hace demostrable qué se evaluó.
+    content_sha256: str
+    published_at: datetime | None = None
+    status: str
+
+    seller_id: str
+    seller_name: str
+    seller_profile_id: str
+
+    gallery: list[MediaRead] = Field(default_factory=list)
+    variants: list[VarianteRead] = Field(default_factory=list)
+    reasons: list[RazonRead] = Field(default_factory=list)
+    seal: str = SELLO
+    #: El informe que abre el sello. `null` si la admisión no está desplegada.
+    evaluation_id: str | None = None
+    #: `null` PORQUE NO HAY RESEÑAS DE PRODUCTOS todavía. No es cero, y la
+    #: pantalla no puede inventarse «4,8».
+    rating: dict[str, Any] | None = None
+    #: `null` porque no hay transportista, ni cobertura, ni condiciones
+    #: aprobadas de entrega y devolución.
+    delivery: dict[str, Any] | None = None
+    related: list[TarjetaRead] = Field(default_factory=list)
+    saved: bool = False
+    #: HOY SIEMPRE `false`. No existe la compra física, y un botón que prometa
+    #: comprar sin ella es una promesa que no se puede cumplir.
+    purchasable: bool = False
+
+
+class InformeRead(BaseModel):
+    """El informe de evaluación que abre el sello. Sin notas internas."""
+
+    evaluation_id: str
+    version_id: str
+    seal: str = SELLO
+    decision: str
+    #: EN CENTÉSIMAS DE PUNTO: 9 000 son 90,00.
+    score_total: int | None = None
+    decided_at: datetime | None = None
+    dimensions: dict[str, Any] = Field(default_factory=dict)
+
+
+class GuardadoRead(BaseModel):
+    saved: bool
+    #: Cuántos tiene guardados ahora. La bolsa enseña contador solo si hay algo.
+    count: int
+
+
+# --------------------------------------------------------------------------- #
+# Proveedor: la postulación
+# --------------------------------------------------------------------------- #
+class DocumentoRequest(BaseModel):
+    kind: str
+    #: La RUTA del almacenamiento, no una URL.
+    storage_path: str | None = Field(default=None, max_length=512)
+    note: str | None = Field(default=None, max_length=2_000)
+
+
+class PostulacionRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=120)
+    proposal: str = Field(min_length=20, max_length=4_000)
+    documents: list[DocumentoRequest] = Field(default_factory=list)
+
+
+class DocumentoRead(BaseModel):
+    id: str
+    kind: str
+    storage_path: str | None = None
+    note: str | None = None
+
+
+class PostulacionRead(BaseModel):
+    id: str
+    status: str
+    display_name: str
+    proposal: str
+    submitted_at: datetime | None = None
+    decided_at: datetime | None = None
+    #: El motivo que se le ENSEÑA. Las notas internas no salen de aquí.
+    decision_reason: str | None = None
+    documents: list[DocumentoRead] = Field(default_factory=list)
+
+
+class EstadoDelProveedor(BaseModel):
+    """Lo que la pantalla necesita para no adivinar nada.
+
+    `puede_postular` distingue «ya eres responsable comercial» de «tu
+    postulación está en revisión», que no es lo mismo que «no puedes».
+    """
+
+    #: `null` = no tiene capacidad comercial. `pending`/`active`/`suspended`.
+    seller_status: str | None = None
+    seller_id: str | None = None
+    application: PostulacionRead | None = None
+    puede_postular: bool = False
+    disponible: bool = True
+
+
+# --------------------------------------------------------------------------- #
+# Proveedor: el producto
+# --------------------------------------------------------------------------- #
+class VarianteRequest(BaseModel):
+    sku: str = Field(min_length=2, max_length=48)
+    name: str = Field(min_length=1, max_length=80)
+    options: dict[str, Any] = Field(default_factory=dict)
+    #: CON TOPE POR LOS DOS LADOS. Sin el de abajo el precio efectivo sale
+    #: negativo; sin el de arriba el total deja de caber en el `double` con el
+    #: que JavaScript lee el JSON.
+    price_delta_minor: int = Field(default=0, ge=-10_000_000, le=10_000_000)
+
+
+class VersionRequest(BaseModel):
+    """Lo que se escribe de una versión. Todo opcional menos el nombre.
+
+    El PRECIO va con su MONEDA o no va: un importe sin moneda no es un importe.
+    """
+
+    version: str | None = Field(default=None, max_length=32)
+    name: str = Field(min_length=3, max_length=140)
+    summary: str | None = Field(default=None, max_length=300)
+    description: str | None = Field(default=None, max_length=8_000)
+    materials: str | None = Field(default=None, max_length=2_000)
+    origin_country: str | None = Field(default=None, max_length=2)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    price_minor: int | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    variants: list[VarianteRequest] = Field(default_factory=list)
+
+
+class ProductoNuevoRequest(VersionRequest):
+    category_id: str | None = None
+
+
+class VersionRead(BaseModel):
+    id: str
+    version: str
+    status: str
+    name: str
+    summary: str | None = None
+    description: str | None = None
+    materials: str | None = None
+    origin_country: str | None = None
+    manufacturer: str | None = None
+    price_minor: int | None = None
+    currency: str | None = None
+    content_sha256: str
+    published_at: datetime | None = None
+    effective_to: datetime | None = None
+    variants: list[VarianteRead] = Field(default_factory=list)
+    #: CON ESTADO: quien vende necesita saber cuáles están pendientes y por qué
+    #: se rechazó una. El catálogo usa `MediaRead`, que no lleva ninguna de las
+    #: dos cosas.
+    gallery: list[FotoDelProveedor] = Field(default_factory=list)
+
+
+class ProductoDelProveedor(BaseModel):
+    """El producto como lo ve quien lo vende, con lo que puede hacer ahora."""
+
+    id: str
+    status: str
+    category_id: str | None = None
+    published_at: datetime | None = None
+    suspension_reason: str | None = None
+    created_at: datetime
+    draft: VersionRead | None = None
+    published: VersionRead | None = None
+    #: Lo que ESTE actor puede hacer. Para pintar botones, no para decidir: el
+    #: servidor vuelve a comprobarlo en cada ruta.
+    acciones: list[str] = Field(default_factory=list)
+    #: Por qué todavía no se puede publicar, como CÓDIGO. `null` = se puede.
+    bloqueo: str | None = None
+
+
+class MotivoRequest(BaseModel):
+    motivo: str | None = Field(default=None, max_length=2_000)
+
+
+# --------------------------------------------------------------------------- #
+# Administración
+# --------------------------------------------------------------------------- #
+class DecisionDePostulacion(BaseModel):
+    aceptar: bool
+    #: Obligatorio para rechazar: un «no» sin motivo no se le puede enseñar a
+    #: nadie, y la base también lo exige.
+    motivo: str | None = Field(default=None, max_length=2_000)
+    notas: str | None = Field(default=None, max_length=4_000)
+
+
+class PuntuacionRequest(BaseModel):
+    #: De 0 a 100. La ponderación la hace el servidor con el peso de la matriz.
+    score: int = Field(ge=0, le=100)
+    note: str | None = Field(default=None, max_length=2_000)
+
+
+class EvidenciaRequest(BaseModel):
+    dimension: str
+    kind: str
+    summary: str = Field(min_length=10, max_length=1_000)
+    storage_path: str | None = Field(default=None, max_length=512)
+
+
+class RazonRequest(BaseModel):
+    #: La evidencia de ESTA evaluación de la que sale la razón.
+    evidence_id: str
+    text: str = Field(min_length=10, max_length=240)
+
+
+class RazonesRequest(BaseModel):
+    #: Como mucho tres (§4.1). Que estén las tres al publicar lo comprueba el
+    #: servidor.
+    razones: list[RazonRequest] = Field(default_factory=list, max_length=RAZONES_EXIGIDAS)
+
+
+class DecisionDeEvaluacion(BaseModel):
+    """Lo único que se decide a mano es si hay una falla crítica.
+
+    Qué significa la puntuación lo dice la matriz del blueprint, no quien pulsa.
+    """
+
+    critical_failure: str | None = None
+    notes: str | None = Field(default=None, max_length=4_000)
+
+
+class PuntuacionRead(BaseModel):
+    dimension: str
+    score: int
+    #: CONGELADO al puntuar. La matriz puede cambiar; lo decidido no.
+    weight: int
+    note: str | None = None
+
+
+class EvidenciaRead(BaseModel):
+    id: str
+    dimension: str
+    kind: str
+    summary: str
+    storage_path: str | None = None
+
+
+class EvaluacionRead(BaseModel):
+    id: str
+    product_id: str
+    version_id: str
+    evaluator_id: str
+    status: str
+    score_total: int | None = None
+    decision: str | None = None
+    critical_failure: str | None = None
+    decided_at: datetime | None = None
+    scores: list[PuntuacionRead] = Field(default_factory=list)
+    evidence: list[EvidenciaRead] = Field(default_factory=list)
+    reasons: list[RazonRead] = Field(default_factory=list)
+    #: Los pesos de la matriz, para que la pantalla no los copie.
+    matriz: dict[str, int] = Field(default_factory=lambda: dict(DIMENSIONES))
+    #: Por qué todavía no se puede decidir, como CÓDIGO. `null` = se puede.
+    bloqueo: str | None = None
+    #: Qué falta exactamente: dimensiones sin puntuar o sin evidencia.
+    faltan: list[str] = Field(default_factory=list)
+
+
+class TransicionRequest(BaseModel):
+    hasta: str
+    motivo: str | None = Field(default=None, max_length=2_000)
+
+
+class ProductoDeAdministracion(ProductoDelProveedor):
+    seller_id: str
+    seller_name: str
+    seller_profile_id: str
+
+
+__all__ = [
+    "BusquedaRead",
+    "CategoriaRead",
+    "CategoriasRead",
+    "CreadorRead",
+    "DecisionDeEvaluacion",
+    "DecisionDePostulacion",
+    "DocumentoRead",
+    "DocumentoRequest",
+    "EstadoDelProveedor",
+    "EvaluacionRead",
+    "EvidenciaRead",
+    "EvidenciaRequest",
+    "FichaRead",
+    "GuardadoRead",
+    "InformeRead",
+    "MediaRead",
+    "MediaRequest",
+    "MotivoRequest",
+    "PortadaRead",
+    "PostulacionRead",
+    "PostulacionRequest",
+    "ProductoDeAdministracion",
+    "ProductoDelProveedor",
+    "ProductoNuevoRequest",
+    "PuntuacionRead",
+    "PuntuacionRequest",
+    "RazonRead",
+    "RazonRequest",
+    "RazonesRequest",
+    "TarjetaRead",
+    "TransicionRequest",
+    "VarianteRead",
+    "VarianteRequest",
+    "VersionRead",
+    "VersionRequest",
+]
+
+
+# --------------------------------------------------------------------------- #
+# Inventario (0074)
+# --------------------------------------------------------------------------- #
+class ExistenciasRead(BaseModel):
+    """Lo que hay de un SKU. `available` LO CALCULA EL SERVIDOR."""
+
+    sku: str
+    on_hand: int
+    reserved: int
+    available: int
+
+
+class UnidadDeInventario(BaseModel):
+    """Una variante con su inventario, o con la constancia de que no tiene.
+
+    `stock` en `null` NO ES CERO: es que nadie cargó existencias de ese SKU. La
+    pantalla lo dice con esas palabras, porque «agotado» mandaría a quien vende
+    a buscar un problema que no existe.
+    """
+
+    variant_id: str
+    sku: str
+    name: str
+    options: dict[str, Any] = Field(default_factory=dict)
+    price_delta_minor: int = 0
+    stock: ExistenciasRead | None = None
+
+
+class InventarioRead(BaseModel):
+    product_id: str
+    version_id: str | None = None
+    units: list[UnidadDeInventario] = Field(default_factory=list)
+    #: `false` significa que la 0074 no está aplicada en esta base.
+    disponible: bool = True
+
+
+class MovimientoRead(BaseModel):
+    """Una línea del historial. SOLO SE AÑADEN: ninguna se edita ni se borra."""
+
+    id: str
+    sku: str
+    kind: str
+    quantity: int
+    on_hand_after: int
+    reserved_after: int
+    available_after: int
+    reason: str | None = None
+    actor_id: str | None = None
+    actor_role: str
+    created_at: datetime
+
+
+class EntradaRequest(BaseModel):
+    sku: str = Field(min_length=1, max_length=48)
+    quantity: int = Field(gt=0, le=1_000_000)
+    reason: str | None = Field(default=None, max_length=500)
+    #: LA CLAVE DE IDEMPOTENCIA. Sin ella, un doble toque carga el doble.
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+class AjusteRequest(BaseModel):
+    sku: str = Field(min_length=1, max_length=48)
+    #: CON SIGNO: es el único movimiento que puede restar.
+    quantity: int = Field(le=1_000_000, ge=-1_000_000)
+    #: OBLIGATORIO. Es el único que cambia el número sin que haya pasado nada
+    #: fuera del sistema.
+    reason: str = Field(min_length=3, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+# --------------------------------------------------------------------------- #
+# Carrito (0075)
+# --------------------------------------------------------------------------- #
+class LineaDelCarrito(BaseModel):
+    """Una línea, con lo que el servidor sabe de ella AHORA."""
+
+    item_id: str
+    product_id: str
+    version_id: str
+    variant_id: str
+    name: str
+    variant_name: str | None = None
+    sku: str | None = None
+    seller_id: str
+    seller_name: str
+    image_path: str | None = None
+    image_url: str | None = None
+    alt_text: str | None = None
+    quantity: int
+    #: El precio de AHORA. `null` es «sin precio configurado», nunca gratis.
+    unit_price_minor: int | None = None
+    currency: str | None = None
+    line_total_minor: int | None = None
+    #: Lo que se veía al añadir. SOLO PARA AVISAR de que cambió.
+    seen_price_minor: int
+    seen_currency: str
+    #: `null` cuando ese SKU no tiene inventario cargado. No es cero.
+    available: int | None = None
+    #: Códigos, no frases: la pantalla los traduce.
+    issues: list[str] = Field(default_factory=list)
+    purchasable: bool = False
+    added_at: datetime | None = None
+
+
+class CarritoRead(BaseModel):
+    """La bolsa entera. TODOS los importes los calcula el servidor."""
+
+    items: list[LineaDelCarrito] = Field(default_factory=list)
+    currency: str | None = None
+    #: `null` cuando no hay nada comprable. Un cero con moneda parecería una
+    #: compra de cero.
+    subtotal_minor: int | None = None
+    units: int = 0
+    lines: int = 0
+    blocked_lines: int = 0
+    #: SIEMPRE `false`. No existe la compra física: no hay checkout, ni pedido,
+    #: ni pago, y la pantalla no pinta ningún botón que lo prometa.
+    purchasable: bool = False
+    #: `false` significa que la 0075 no está aplicada en esta base.
+    disponible: bool = True
+
+
+class AnadirAlCarrito(BaseModel):
+    product_id: str
+    variant_id: str
+    quantity: int = Field(default=1, ge=1, le=1_000)
+
+
+class CantidadDeLaLinea(BaseModel):
+    #: CERO QUITA LA LÍNEA. Es un destino, no un paso: mandar lo mismo dos veces
+    #: deja lo mismo.
+    quantity: int = Field(ge=0, le=1_000)
+
+
+class ContadoresRead(BaseModel):
+    """Los dos contadores del encabezado, SEPARADOS.
+
+    La bolsa cuenta UNIDADES del carrito; guardados cuenta PRODUCTOS marcados.
+    Juntarlos haría que el número no quisiera decir nada concreto.
+    """
+
+    cart_units: int = 0
+    saved_products: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# Condiciones de venta (0077)
+# --------------------------------------------------------------------------- #
+class CondicionesRead(BaseModel):
+    """Lo que se le ensena a quien compra ANTES de pagar.
+
+    LOS PLAZOS VIAJAN NULOS cuando nadie los ha decidido. Un cero en
+    `withdrawal_days` diria que no hay derecho a desistir, que es una afirmacion
+    legal; un nulo dice lo que pasa de verdad: que falta decidirlo.
+    """
+
+    policy_id: str
+    country_code: str
+    version: int
+    seller_entity: str
+    currency: str
+    terms: str
+    terms_sha256: str
+    incident_report_hours: int | None = None
+    return_shipment_days: int | None = None
+    withdrawal_days: int | None = None
+    buyer_pays_return_for_remorse: bool | None = None
+    seller_pays_return_for_defect: bool | None = None
+    warranty_rules_url: str | None = None
+    effective_at: datetime | None = None
+
+
+class PoliticaRead(CondicionesRead):
+    """La misma, con lo que solo ve administracion."""
+
+    status: str
+    published_at: datetime | None = None
+
+
+class PublicarPolitica(BaseModel):
+    """Publicar la version siguiente de un pais. NADA TIENE VALOR POR DEFECTO.
+
+    Los cinco plazos y banderas son obligatorios porque el CHECK de la base
+    tampoco deja publicar sin ellos: una politica a medias no puede regir una
+    venta. La VERSION no esta aqui: la pone el servidor.
+    """
+
+    country_code: str = Field(min_length=2, max_length=2)
+    seller_entity: str = Field(min_length=2, max_length=200)
+    currency: str = Field(min_length=3, max_length=3)
+    terms: str = Field(min_length=50)
+    incident_report_hours: int = Field(ge=1, le=8760)
+    return_shipment_days: int = Field(ge=1, le=365)
+    withdrawal_days: int = Field(ge=0, le=365)
+    buyer_pays_return_for_remorse: bool
+    seller_pays_return_for_defect: bool
+    warranty_rules_url: str | None = None
+    effective_at: datetime | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Preparacion del checkout
+# --------------------------------------------------------------------------- #
+class GrupoDelCarrito(BaseModel):
+    """Lo del carrito que es de un mismo proveedor. UN PEDIDO, UN PROVEEDOR."""
+
+    seller_id: str
+    seller_name: str
+    item_ids: list[str] = Field(default_factory=list)
+    units: int = 0
+    currency: str | None = None
+    subtotal_minor: int | None = None
+    purchasable: bool = False
+    issues: list[str] = Field(default_factory=list)
+
+
+class PreparacionRead(BaseModel):
+    """Si hoy se puede comprar, y QUE FALTA si no.
+
+    `pending_configuration` no es un detalle tecnico que se oculte: es la
+    respuesta honesta a «por que no puedo comprar». La pantalla dice «pendiente
+    de configuracion» en vez de pintar un boton que no lleva a ningun sitio.
+    """
+
+    disponible: bool = False
+    pending_configuration: list[str] = Field(default_factory=list)
+    countries_with_policy: list[str] = Field(default_factory=list)
+    groups: list[GrupoDelCarrito] = Field(default_factory=list)
+    open_order_id: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# El pedido (0078)
+# --------------------------------------------------------------------------- #
+class DireccionRequest(BaseModel):
+    """La direccion de ESTE envio. NI COORDENADAS NI DOCUMENTO DE IDENTIDAD."""
+
+    recipient_name: str = Field(min_length=2, max_length=150)
+    phone: str = Field(min_length=5, max_length=30)
+    country_code: str = Field(min_length=2, max_length=2)
+    region: str = Field(min_length=1, max_length=120)
+    city: str = Field(min_length=1, max_length=120)
+    district: str | None = Field(default=None, max_length=120)
+    address_line: str = Field(min_length=5, max_length=300)
+    reference: str | None = Field(default=None, max_length=300)
+    postal_code: str | None = Field(default=None, max_length=20)
+    instructions: str | None = Field(default=None, max_length=500)
+
+
+class DireccionRead(DireccionRequest):
+    pass
+
+
+class PedidoRequest(BaseModel):
+    """Crear el pedido. NO LLEVA IMPORTES, y es deliberado.
+
+    El subtotal y el total los calcula el servidor con los precios de ahora. Un
+    campo `total` aqui seria el cliente diciendo cuanto paga.
+
+    LA ACEPTACION VIAJA CON LA HUELLA del texto que se ensenó: si entre leerlo y
+    pulsar comprar se publico otra version, el servidor lo nota y para.
+    """
+
+    seller_id: str
+    address: DireccionRequest
+    policy_id: str
+    policy_terms_sha256: str = Field(min_length=64, max_length=64)
+
+
+class LineaDelPedido(BaseModel):
+    """Una linea COMPRADA. Todo copiado: releerlo haria que un pedido de hace
+    un mes cambiara de contenido cuando el proveedor republica."""
+
+    id: str
+    product_id: str
+    version_id: str
+    variant_id: str
+    sku: str
+    name: str
+    variant_name: str | None = None
+    unit_price_minor: int
+    quantity: int
+    subtotal_minor: int
+
+
+class EventoDelPedido(BaseModel):
+    """Un cambio de estado. SIN DATOS PERSONALES."""
+
+    from_status: str | None = None
+    to_status: str
+    actor_role: str
+    reason: str | None = None
+    created_at: datetime
+
+
+class LineaPreparadaRead(BaseModel):
+    """Una linea del pedido con lo que lleva metido en la caja.
+
+    `ordered_quantity` es lo que se compro y NO CAMBIA NUNCA; `prepared_quantity`
+    es lo que quien empaqueta lleva contado, y empieza en cero. Cero aqui es
+    «todavia ninguna», no «no hay»: la linea existe y hay que meterla.
+    """
+
+    order_item_id: str
+    sku: str
+    name: str
+    variant_name: str | None = None
+    ordered_quantity: int
+    prepared_quantity: int = 0
+
+
+class EnvioRead(BaseModel):
+    """El envio de un pedido pagado.
+
+    `exists = false` SIGNIFICA QUE NADIE LO HA TOCADO, no que falte nada: la
+    fila nace con la primera accion y hasta entonces el envio esta pendiente de
+    preparacion, que es exactamente lo que se contesta.
+
+    NI FECHA PREVISTA, NI COSTE, NI ENLACE DE SEGUIMIENTO. No hay transportista
+    elegido: `carrier_name` y `tracking_reference` son lo que escribio quien
+    despacho, y NULO significa que no lo dijo.
+    """
+
+    order_id: str
+    status: str
+    exists: bool = False
+    carrier_name: str | None = None
+    tracking_reference: str | None = None
+    prepared_at: datetime | None = None
+    ready_at: datetime | None = None
+    dispatched_at: datetime | None = None
+    delivered_at: datetime | None = None
+    failed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    #: QUIEN AFIRMA QUE LLEGO: `seller` o `buyer`. Administracion no puede.
+    delivered_source: str | None = None
+    #: CONFIRMAR QUE LLEGO NO ES DAR LA CONFORMIDAD. Lo segundo libera dinero y
+    #: no existe todavia.
+    buyer_confirmed_at: datetime | None = None
+    #: LA CONFORMIDAD (Incremento 9). NO es lo mismo que la de arriba:
+    #: confirmar que llego no es decir que esta bien, y ESTO SI libera el
+    #: dinero. La pantalla las pinta como dos cosas distintas.
+    conformity_at: datetime | None = None
+    failure_reason: str | None = None
+    cancellation_reason: str | None = None
+    items: list[LineaPreparadaRead] = Field(default_factory=list)
+    history: list[EventoDelPedido] = Field(default_factory=list)
+    #: LO QUE ESTE ACTOR PUEDE HACER AHORA. Para pintar botones, nunca para
+    #: decidir: quien decide es el servidor con la fila delante.
+    available_transitions: list[str] = Field(default_factory=list)
+
+
+class PedidoRead(BaseModel):
+    """El pedido entero, para quien lo hizo."""
+
+    id: str
+    status: str
+    seller_id: str
+    seller_name: str | None = None
+    currency: str
+    subtotal_minor: int
+    total_minor: int
+    #: NULOS mientras no haya pasado. `null` es «todavia no», no cero.
+    reserved_until: datetime | None = None
+    paid_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    expired_at: datetime | None = None
+    failed_at: datetime | None = None
+    review_reason: str | None = None
+    policy: CondicionesRead | None = None
+    address: DireccionRead | None = None
+    items: list[LineaDelPedido] = Field(default_factory=list)
+    history: list[EventoDelPedido] = Field(default_factory=list)
+    #: EL SEGUIMIENTO, DENTRO DEL PEDIDO. Una ruta aparte obligaria a la
+    #: pantalla a dos viajes para pintar una sola ficha, y a ensenar el pedido
+    #: sin su estado de envio mientras llega el segundo.
+    #:
+    #: NULO CUANDO NO HAY NADA QUE ENVIAR: un pedido sin pagar, vencido o
+    #: cancelado no tiene envio, y contestar «pendiente de preparacion» ahi
+    #: haria creer que va a salir algo.
+    shipment: EnvioRead | None = None
+    #: LOS CASOS DE ESTE PEDIDO, por lo mismo que el seguimiento: quien abrio
+    #: una reclamacion tiene que verla donde esta el pedido del que habla, y no
+    #: a base de buscarla en otra lista.
+    #:
+    #: SOLO EL RESUMEN. La descripcion y el historial se leen entrando al caso,
+    #: que es donde el servidor vuelve a comprobar quien puede.
+    #:
+    #: VACIA MIENTRAS LA 0080 NO ESTE APLICADA, y no 503: un pedido no puede
+    #: dejar de pintarse porque falte una migracion de posventa.
+    incidents: list["IncidenciaResumen"] = Field(default_factory=list)
+    created_at: datetime
+
+
+class PedidoResumen(BaseModel):
+    """Una fila de «Mis pedidos»."""
+
+    id: str
+    status: str
+    seller_name: str | None = None
+    currency: str
+    total_minor: int
+    units: int = 0
+    reserved_until: datetime | None = None
+    created_at: datetime
+
+
+class PedidoDelProveedor(BaseModel):
+    """Lo MINIMO que necesita quien tiene que preparar el paquete.
+
+    NO LLEVA NI EL COBRO NI EL COMPRADOR. Un proveedor no necesita saber con
+    que tarjeta se pago ni quien es la persona que compro: necesita saber que
+    mandar y a donde.
+    """
+
+    id: str
+    status: str
+    currency: str
+    total_minor: int
+    paid_at: datetime | None = None
+    address: DireccionRead | None = None
+    items: list[LineaDelPedido] = Field(default_factory=list)
+    created_at: datetime
+
+
+class CheckoutProductoRead(BaseModel):
+    """A donde mandar a quien paga.
+
+    LA VUELTA DEL NAVEGADOR NO CONFIRMA DINERO: quien vuelva por `return_url`
+    tiene que preguntarle el estado al servidor.
+    """
+
+    order_id: str
+    checkout_url: str
+    provider: str
+    amount_minor: int
+    currency: str
+
+
+class VencimientoRead(BaseModel):
+    """Cuantos pedidos solto el barrido. Idempotente: llamarlo dos veces
+    seguidas devuelve cero la segunda porque ya no queda nada que vencer."""
+
+    expired: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# El envio (0079)
+# --------------------------------------------------------------------------- #
+class LineaPreparadaRequest(BaseModel):
+    """Cuantas unidades de una linea se han metido ya."""
+
+    order_item_id: str
+    prepared_quantity: int = Field(ge=0, le=1000)
+
+
+class PrepararRequest(BaseModel):
+    """La lista de comprobacion de quien empaqueta.
+
+    SE PUEDE MANDAR PARCIAL: solo las lineas que cambiaron. Las que no vengan se
+    quedan como estaban, porque quien empaqueta cuenta una caja cada vez.
+    """
+
+    items: list[LineaPreparadaRequest] = Field(default_factory=list, max_length=200)
+
+
+class DespacharRequest(BaseModel):
+    """Los datos del despacho. LOS DOS SON OPCIONALES.
+
+    Mientras la empresa no elija transportista, lo unico honesto es dejar que
+    quien despacha escriba lo que tenga, y que si no tiene nada no escriba nada.
+    Un valor por defecto se acabaria leyendo como el nombre de la empresa de
+    transporte.
+    """
+
+    carrier_name: str | None = Field(default=None, max_length=120)
+    tracking_reference: str | None = Field(default=None, max_length=120)
+
+
+class MotivoDelEnvio(BaseModel):
+    """Los saltos que deshacen trabajo o cuentan una mala noticia llevan motivo.
+
+    Sin el porque, el historial no sirve para nada: ni a quien compro, que no
+    sabe si volver a estar en casa, ni a quien vende, que no sabe si reintentar.
+
+    SE LLAMABA `MotivoRequest`, Y ESE NOMBRE YA ESTABA COGIDO 600 LINEAS MAS
+    ARRIBA. Python rebindea el nombre sin avisar: el router importaba
+    `MotivoRequest` y se quedaba con este, asi que `/admin/products/{id}/suspend`
+    —que es de otro incremento y lee `cuerpo.motivo`— paso a exigir `reason` y
+    dejo de funcionar por completo. Lo encontro la revision independiente.
+
+    El campo se llama distinto que el del otro (`reason` frente a `motivo`) y
+    aqui es OBLIGATORIO, asi que no son intercambiables ni por casualidad.
+    """
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class TransicionDeEnvioRequest(MotivoDelEnvio):
+    """Lo que administracion puede mover, y SIEMPRE con motivo.
+
+    HEREDA DEL MOLDE DEL ENVIO, que es el que lleva `reason` y lo exige. Antes
+    heredaba de `MotivoRequest` y funcionaba por accidente: el nombre estaba
+    definido dos veces en este fichero y aqui resolvia al de mas abajo.
+    """
+
+    to: str
+
+
+class PedidoDelProveedorConEnvio(PedidoDelProveedor):
+    """El pedido del proveedor con el estado de su paquete."""
+
+    shipment: EnvioRead | None = None
+
+
+class EnvioPendienteRead(BaseModel):
+    """Una fila de la cola de administracion. SIN DATOS PERSONALES.
+
+    Ni direccion, ni nombre de quien compro, ni importe. Lo que hace falta para
+    saber si un paquete esta parado es de quien es, en que estado esta y cuanto
+    lleva asi.
+
+    NI EL MOTIVO DE UNA ENTREGA FALLIDA. Es texto libre que escribe quien
+    vende, y lo primero que escribe cualquiera al reportar una entrega fallida
+    es donde fue y a quien buscaba. Que la entrega fallo se sabe por `status`,
+    que es lo que hace falta para decidir si ese paquete necesita a alguien.
+
+    `waiting_hours` ES UN HECHO, NO UN JUICIO. Ninguna politica publicada fija
+    un plazo de despacho, asi que esto NO dice «atrasado»: dice cuanto tiempo ha
+    pasado, y quien mira decide.
+    """
+
+    order_id: str
+    seller_id: str
+    seller_name: str | None = None
+    status: str
+    paid_at: datetime | None = None
+    dispatched_at: datetime | None = None
+    units: int = 0
+    waiting_hours: int | None = None
+
+
+# --------------------------------------------------------------------------- #
+# La incidencia (0080)
+# --------------------------------------------------------------------------- #
+class PruebaRead(BaseModel):
+    """Una evidencia del caso. LA URL SE FIRMA AL PINTAR y no se guarda.
+
+    `url` viaja nula cuando el almacenamiento no contesta o no esta
+    configurado: el expediente se abre igual con la lista de pruebas y sin las
+    imagenes, porque un caso que no se puede leer porque un tercero esta caido
+    es peor que uno que se lee a medias.
+    """
+
+    id: str
+    uploaded_role: str
+    content_type: str
+    byte_size: int
+    width: int
+    height: int
+    caption: str | None = None
+    url: str | None = None
+    created_at: datetime
+
+
+class PasoDelCaso(BaseModel):
+    """Un paso del expediente. SOLO SE ANADE.
+
+    AQUI SI VA EL TEXTO LIBRE: este expediente lo leen quien reclama, quien
+    responde y quien resuelve, que son las tres personas que ya conocen el caso.
+    Lo que NO puede pasar es que salga de aqui a una lista general.
+    """
+
+    from_status: str | None = None
+    to_status: str
+    actor_role: str
+    note: str | None = None
+    created_at: datetime
+
+
+class IncidenciaRead(BaseModel):
+    """El expediente entero.
+
+    ABRIR NO ES APROBAR Y RESOLVER NO ES PAGAR. `status` dice donde esta el
+    caso; `resolution` dice que se decidio; y `financial_effect` nace PENDIENTE
+    porque mover el dinero es del Incremento 9 y no existe.
+
+    NO HAY NINGUN IMPORTE. Ni cuanto se devuelve, ni cuanto se pago: una
+    resolucion de esta version dice QUE se decidio, no CUANTO.
+    """
+
+    id: str
+    order_id: str
+    order_item_id: str | None = None
+    reason: str
+    description: str
+    status: str
+    #: LAS 48 HORAS DEL PROVEEDOR, ya calculadas. NULO mientras la pelota no sea
+    #: suya: no puede correrle el plazo mientras espera evidencia.
+    seller_response_due_at: datetime | None = None
+    seller_responded_at: datetime | None = None
+    #: LO QUE PROPUSO, que no es lo que se decidio.
+    seller_proposal: str | None = None
+    resolution: str | None = None
+    resolved_at: datetime | None = None
+    #: `PENDING` o `NOT_APPLICABLE`. NUNCA «hecho»: nadie lo ejecuta.
+    financial_effect: str | None = None
+    appeal_due_at: datetime | None = None
+    appealed_at: datetime | None = None
+    appeals_used: int = 0
+    withdrawn_at: datetime | None = None
+    evidence: list[PruebaRead] = Field(default_factory=list)
+    history: list[PasoDelCaso] = Field(default_factory=list)
+    #: LO QUE ESTE ACTOR PUEDE HACER AHORA. Para pintar botones, nunca para
+    #: decidir: quien decide es el servidor con la fila bloqueada delante.
+    available_transitions: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class IncidenciaResumen(BaseModel):
+    """Una fila de una lista de casos. SIN LA DESCRIPCION NI EL HISTORIAL.
+
+    Lo que hace falta para elegir cual abrir es de que pedido es, por que se
+    abrio y en que estado esta. El texto de lo que le paso a alguien se lee
+    entrando al caso, que es donde se comprueba quien puede.
+    """
+
+    id: str
+    order_id: str
+    order_item_id: str | None = None
+    reason: str
+    status: str
+    seller_response_due_at: datetime | None = None
+    resolution: str | None = None
+    created_at: datetime
+
+
+#: `PedidoRead` la nombra entre comillas porque esta definido mas arriba —el
+#: pedido es del Incremento 5 y la incidencia del 7—, y aqui es donde esa
+#: referencia adelantada se cierra. Explicito y no por casualidad: dejarselo a
+#: la reconstruccion perezosa haria que el fallo saliera en la primera peticion
+#: de un pedido y no al importar el modulo.
+PedidoRead.model_rebuild()
+
+
+class AbrirIncidencia(BaseModel):
+    """Abrir un caso. LA DESCRIPCION LLEVA 20 CARACTERES COMO MINIMO.
+
+    Es literal del blueprint §10, y no es un capricho: «no funciona» a secas no
+    le permite a quien responde saber que mirar.
+    """
+
+    reason: str
+    description: str = Field(min_length=20, max_length=2000)
+    #: NULO SOLO PARA LA ENTREGA NEGADA: no hay una linea concreta de la que
+    #: quejarse porque no llego nada.
+    order_item_id: str | None = None
+
+
+class RespuestaDelProveedor(BaseModel):
+    """Lo que PROPONE quien vende. PROPONER NO ES RESOLVER.
+
+    Las cinco salidas mueven dinero, mueven mercancia o niegan la reclamacion, y
+    ninguna de las tres la decide en solitario quien tiene el conflicto.
+    """
+
+    proposal: str
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class NotaDelCaso(BaseModel):
+    """Los pasos que llevan explicacion. Sin el porque no se puede revisar."""
+
+    note: str = Field(min_length=3, max_length=1000)
+
+
+class ResolverIncidencia(NotaDelCaso):
+    """La resolucion que registra Z. NUNCA `REQUEST_MORE_EVIDENCE`.
+
+    Pedir mas evidencia es un paso, no una salida: un expediente al que se le
+    pide mas evidencia no esta resuelto, y contarlo como resuelto daria un
+    numero falso.
+    """
+
+    resolution: str
+
+
+class EscaladaRead(BaseModel):
+    """Cuantos casos mando a mediacion el barrido. Idempotente: llamarlo dos
+    veces seguidas devuelve cero la segunda porque ya no queda ninguno."""
+
+    escalated: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# Resenas verificadas (Incremento 8)
+# --------------------------------------------------------------------------- #
+class ResenaRequest(BaseModel):
+    """Lo UNICO que manda quien opina.
+
+    NO VIAJA NI EL PRODUCTO NI LA FECHA DE ENTREGA NI EL PEDIDO. Todo lo que
+    verifica la compra lo pone el servidor leyendo la linea, y la base lo vuelve
+    a comprobar con sus tres claves ajenas. Si el cliente pudiera mandarlos,
+    «compra verificada» seria un campo de formulario.
+    """
+
+    overall: int = Field(ge=1, le=5)
+    quality: int = Field(ge=1, le=5)
+    fidelity: int = Field(ge=1, le=5)
+    functioning: int = Field(ge=1, le=5)
+    value_for_money: int = Field(ge=1, le=5)
+    recommends: bool
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class ResenaEditRequest(BaseModel):
+    """Editar la propia. Todo opcional: se cambia lo que se mande."""
+
+    overall: int | None = Field(default=None, ge=1, le=5)
+    quality: int | None = Field(default=None, ge=1, le=5)
+    fidelity: int | None = Field(default=None, ge=1, le=5)
+    functioning: int | None = Field(default=None, ge=1, le=5)
+    value_for_money: int | None = Field(default=None, ge=1, le=5)
+    recommends: bool | None = None
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class RespuestaDelProveedorRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=1000)
+
+
+class ModeracionDeResena(BaseModel):
+    """Esconder o restaurar. NUNCA reescribir."""
+
+    hidden: bool
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class RespuestaAResenaRead(BaseModel):
+    id: str
+    body: str
+    created_at: datetime
+
+
+class ResenaRead(BaseModel):
+    """Una resena publicada. SIN el pedido ni la linea que la respaldan.
+
+    `order_id`, `order_item_id` y las dos fechas atan a una persona con una
+    compra concreta —su importe, su direccion, su dia— y el sello ya dice lo
+    unico que el lector necesita saber. En la PROPIA si viaja la linea, porque
+    quien la escribio tiene que poder volver a su pedido.
+    """
+
+    id: str
+    product_id: str
+    author_id: str
+    overall: int
+    quality: int
+    fidelity: int
+    functioning: int
+    value_for_money: int
+    recommends: bool
+    comment: str | None = None
+    #: Siempre `True`: una resena existe porque hubo una compra entregada. Va
+    #: explicito para que la pantalla no tenga que deducirlo.
+    compra_verificada: bool = True
+    reply: RespuestaAResenaRead | None = None
+    created_at: datetime
+    updated_at: datetime
+    #: Solo viaja en la PROPIA y en la de moderacion: en la lista publica no
+    #: hace falta, porque las escondidas ni siquiera salen.
+    status: str | None = None
+    order_item_id: str | None = None
+
+
+class DistribucionRead(BaseModel):
+    """Cuantas resenas hay de cada estrella. Cinco claves, siempre."""
+
+    uno: int = 0
+    dos: int = 0
+    tres: int = 0
+    cuatro: int = 0
+    cinco: int = 0
+
+
+class ResumenDeResenas(BaseModel):
+    """Lo que la ficha del producto ensena.
+
+    `average` y `adjusted` son NULOS cuando no hay ni una resena. No son cero:
+    un producto sin opiniones no tiene una puntuacion de 0,0; no tiene
+    puntuacion, y pintar cinco estrellas vacias dice algo que nadie ha dicho.
+    """
+
+    product_id: str
+    total: int = 0
+    average: float | None = None
+    adjusted: float | None = None
+    distribution: DistribucionRead = DistribucionRead()
+    #: Porcentaje que recomienda, en puntos basicos para no perder decimales.
+    #: NULO si no hay resenas.
+    recommend_bps: int | None = None
+    quality: float | None = None
+    fidelity: float | None = None
+    functioning: float | None = None
+    value_for_money: float | None = None
+    #: El previo de la formula del blueprint, y si salio de un promedio de
+    #: categoria de verdad. Hoy NO: de donde sale ese promedio es una decision
+    #: que nadie ha tomado, asi que se usa el valor por defecto escrito en el
+    #: blueprint y se dice que es por defecto.
+    category_average: float
+    category_configured: bool = False
+
+
+class LineaValorable(BaseModel):
+    """Una linea entregada de un pedido, con su resena si ya la tiene."""
+
+    order_item_id: str
+    order_id: str
+    product_id: str
+    name: str
+    variant_name: str | None = None
+    quantity: int
+    delivered_at: datetime
+    review_id: str | None = None
+    can_review: bool = False
+    reason: str | None = None
+
+
+class MovimientoDeModeracion(BaseModel):
+    """Una fila del historial. SOLO SE ANADE."""
+
+    id: str
+    review_id: str | None = None
+    reply_id: str | None = None
+    actor_id: str | None = None
+    from_status: str | None = None
+    to_status: str
+    reason: str | None = None
+    created_at: datetime
+
+
+# --------------------------------------------------------------------------- #
+# Finanzas (Incremento 9)
+# --------------------------------------------------------------------------- #
+class SaldoDeProductoRead(BaseModel):
+    """Un movimiento: la fotografia inmutable de una venta cobrada.
+
+    LOS IMPORTES VIAJAN EN UNIDAD MENOR Y CON SU MONEDA. Un numero sin moneda no
+    significa nada: 19 900 soles y 19 900 dolares son el mismo numero y distinto
+    dinero. Y no se formatea aqui: formatear es de la pantalla, que sabe el
+    idioma de quien mira.
+    """
+
+    id: str
+    order_id: str
+    status: str
+    currency: str
+    gross_minor: int
+    platform_fee_minor: int
+    provider_fee_minor: int
+    net_minor: int
+    #: Que reglas de comision se aplicaron. NUNCA se recalcula con las de hoy.
+    fee_rules_version: str
+    #: Cuanto de este saldo esta retenido ahora mismo.
+    held_minor: int = 0
+    #: Cuando deja de estar protegido. NULO = todavia no se sabe, y eso no es un
+    #: error: es que el paquete no ha llegado o la politica no fija el plazo.
+    available_at: datetime | None = None
+    #: Por que no se libera. NULO = nada lo impide.
+    block: str | None = None
+    block_detail: str | None = None
+    created_at: datetime
+
+
+class ResumenFinancieroDeProductos(BaseModel):
+    """Lo que ve quien vende, sumado.
+
+    SIN COMISION CONFIGURADA NO HAY BALANCE, Y SE DICE. `fee_configured` en
+    falso significa que la empresa no ha decidido cuanto se queda Z: la pantalla
+    escribe «pendiente de configuracion» en vez de un 0,00 que se leeria como
+    «vendiste y no cobraste».
+    """
+
+    #: NULA si no hay ventas, o si hay mas de una moneda: sumar dos monedas
+    #: distintas da un numero que no significa nada.
+    currency: str | None = None
+    gross_minor: int = 0
+    platform_fee_minor: int = 0
+    net_minor: int = 0
+    held_minor: int = 0
+    available_minor: int = 0
+    sales: int = 0
+    fee_configured: bool = False
+    by_status: dict[str, int] = {}
+
+
+class CuentaDeCobroRead(BaseModel):
+    """La cuenta donde se le pagaria a quien vende.
+
+    NO HAY RUTA PARA CREARLA, y no es un olvido: darse de alta en Stripe Connect
+    exige una cuenta de la empresa verificada y una decision de quien cobra, y
+    ninguna de las dos existe. La pantalla lo dice con palabras.
+    """
+
+    configured: bool = False
+    payouts_enabled: bool = False
+    onboarding_status: str | None = None
+    #: Que falta para que esto funcione, en codigos. Vacio = nada.
+    missing: list[str] = []
+
+
+class ReservaDeProductoRead(BaseModel):
+    """Un importe retenido, con su motivo y su expediente."""
+
+    id: str
+    balance_id: str
+    amount_minor: int
+    currency: str
+    reason: str
+    status: str
+    incident_id: str | None = None
+    created_at: datetime
+    released_at: datetime | None = None
+
+
+class DevolucionDeProductoRead(BaseModel):
+    """El dinero que vuelve. APROBAR NO ES PAGAR.
+
+    `confirmed_at` es lo UNICO que dice que el dinero salio. Un `approved` es
+    una decision; un `requested` es una peticion; y `failed` dice por que no se
+    pudo, con el codigo que dio la pasarela.
+    """
+
+    id: str
+    order_id: str
+    incident_id: str | None = None
+    balance_id: str | None = None
+    amount_minor: int
+    currency: str
+    kind: str
+    status: str
+    provider: str
+    decision_reason: str
+    requested_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    failed_at: datetime | None = None
+    failure_code: str | None = None
+    created_at: datetime
+
+
+class AprobarDevolucion(BaseModel):
+    """EL IMPORTE LO TECLEA UNA PERSONA. No hay formula: cuanto se devuelve en
+    cada una de las cinco salidas es una decision que la empresa no ha tomado."""
+
+    amount_minor: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=1000)
+    incident_id: str | None = None
+
+
+class MotivoFinanciero(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class DisputaDeProductoRead(BaseModel):
+    """Un contracargo. QUIEN ASUME LA PERDIDA NO ESTA DECIDIDO: bloquea y avisa."""
+
+    id: str
+    order_id: str
+    balance_id: str | None = None
+    provider: str
+    external_dispute_id: str
+    amount_minor: int
+    currency: str
+    reason: str | None = None
+    status: str
+    opened_at: datetime
+    due_at: datetime | None = None
+    closed_at: datetime | None = None
+
+
+class MovimientoDeDevolucion(BaseModel):
+    """Una fila del historial de una devolucion. SOLO SE ANADE."""
+
+    id: str
+    from_status: str | None = None
+    to_status: str
+    actor_id: str | None = None
+    actor_role: str
+    reason: str | None = None
+    provider_reference: str | None = None
+    created_at: datetime
+
+
+class SaludFinancieraDeProductos(BaseModel):
+    """El panel de administracion financiera, en numeros.
+
+    NO TRAE NI UN IMPORTE FORMATEADO NI UN PORCENTAJE: son cuentas de filas, que
+    es lo que se puede afirmar sin decidir nada.
+    """
+
+    fee_configured: bool = False
+    transfers_enabled: bool = False
+    refunds_enabled: bool = False
+    balances_pending: int = 0
+    balances_eligible: int = 0
+    balances_blocked: int = 0
+    reserves_held: int = 0
+    refunds_in_flight: int = 0
+    disputes_open: int = 0
+    #: Que falta para que esto pueda mover dinero. Vacio = nada.
+    missing: list[str] = []
+
+
+class LiberacionRead(BaseModel):
+    """Cuantos saldos paso el barrido. IDEMPOTENTE: la segunda vez da cero."""
+
+    looked: int = 0
+    released: int = 0
+    blocked: int = 0

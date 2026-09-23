@@ -1,0 +1,448 @@
+"""El cobro de una entrada, a través del puerto compartido de pagos.
+
+ESTE MÓDULO NO CONOCE STRIPE. Habla con `payments.providers.PaymentProvider`,
+que es la misma interfaz que usa Cursos: dos operaciones, iniciar el cobro y
+verificar el aviso de vuelta. Si mañana la empresa elige otra pasarela, aquí no
+se toca nada.
+
+NADA DE ESTO ESTÁ ENCENDIDO. `FEATURE_EVENT_PAYMENTS` nace apagada y
+`EVENT_PAYMENTS_PROVIDER` nace en `none`. Con cualquiera de las dos así, iniciar
+un pago responde 503 con un código estable en vez de fallar al llamar a una
+pasarela que no está configurada. No hay credenciales en el repositorio y no se
+simula ningún cobro: una orden solo se paga con un aviso verificado de verdad.
+
+QUÉ DECIDE EL SERVIDOR Y QUÉ NO DECIDE NADIE MÁS. El importe, la moneda y el
+concepto salen de la orden, que se escribió con los precios congelados en la
+reserva. El cliente no manda `amount`: si lo mandara, mandaría el precio.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from sqlalchemy import select
+
+from app.core.config import get_settings
+from app.modules.events import inventory, orders
+from app.modules.events.models import ORDEN_EN_CURSO, ORDEN_PROCESANDO, EventOrder
+from app.modules.payments.providers import CheckoutRequest, get_provider
+
+logger = logging.getLogger("renaser.events")
+
+#: El valor de `metadata.dominio` que marca un cobro como de entradas. El
+#: webhook compartido lo usa para saber a quién entregarle el aviso sin tener
+#: que buscar el identificador en la tabla equivocada primero.
+DOMINIO = "evento"
+
+#: Estados de aviso que hablan de dinero que VUELVE. No emiten, no revocan y no
+#: cambian el pedido: se anotan para que una persona los concilie.
+#:
+#: Devolver el importe y retirar la entrada son DOS decisiones distintas, y la
+#: segunda no existe todavia: la politica de cancelacion de un evento —plazos,
+#: penalizacion, quien decide— es del Incremento 5 y nadie la ha aprobado.
+#: Revocar aqui por iniciativa propia seria inventarsela.
+DINERO_QUE_VUELVE = frozenset(
+    {
+        "refunded",
+        "refund_procesando",
+        "refund_parcial",
+        "refund_fallido",
+        "disputa_abierta",
+        "disputa_fondos_retirados",
+        "disputa_cerrada",
+    }
+)
+
+#: UNA DISPUTA NO ES UNA DEVOLUCIÓN. La abre el banco del titular, el dinero se
+#: retira fuera de nuestro circuito y todavía se puede ganar. Bloquea el saldo y
+#: avisa; no retira el acceso de nadie.
+ESTADOS_DE_DISPUTA = frozenset(
+    {"disputa_abierta", "disputa_fondos_retirados", "disputa_cerrada"}
+)
+
+#: Cómo se llama cada uno en el expediente. `disputa_cerrada` es `closed` y NO
+#: «ganada» ni «perdida»: la pasarela avisa igual de las dos, y decidir cuál fue
+#: mirando el nombre del aviso sería inventárselo.
+_ESTADO_DE_DISPUTA = {
+    "disputa_abierta": "open",
+    "disputa_fondos_retirados": "needs_response",
+    "disputa_cerrada": "closed",
+}
+
+
+@dataclass(frozen=True)
+class IntentoDePago:
+    """A dónde mandar a quien paga, y con qué referencia."""
+
+    checkout_url: str
+    provider: str
+    provider_reference: str
+
+
+def proveedor_configurado() -> str:
+    """Qué pasarela cobra las entradas hoy: `none` o su nombre."""
+    ajustes = get_settings()
+    if not ajustes.feature_event_payments:
+        return "none"
+    nombre = (ajustes.event_payments_provider or "none").strip().lower()
+    return nombre if nombre != "none" and get_provider(nombre) is not None else "none"
+
+
+def exigir_pagos_disponibles() -> None:
+    """Sin bandera o sin pasarela, 503 con un código estable.
+
+    NO SE INTENTA LLAMAR para descubrirlo. Fallar dentro del SDK deja al cliente
+    con un error de la pasarela sobre algo que es una decisión nuestra.
+    """
+    if proveedor_configurado() == "none":
+        raise orders.PagosNoDisponibles()
+
+
+def referencia_de_operacion(orden: EventOrder) -> str:
+    """La referencia interna del intento de cobro, para conciliar.
+
+    DETERMINISTA Y ATADA A LA ORDEN: se guarda en `operation_ref` y no cambia
+    entre reintentos, así que sirve para cruzar un cobro con su pedido cuando
+    algo hay que revisarlo a mano.
+
+    NO ES la clave de idempotencia que viaja a la pasarela. Esa la construye el
+    adaptador del proveedor a partir del pedido, el importe y la moneda, y es
+    igualmente determinista: reintentar tras un timeout devuelve el MISMO cobro
+    en vez de abrir otro. Cambiarla porque «esta vez seguro que falló» es
+    exactamente cómo se cobra dos veces.
+    """
+    return f"evt-ord-{orden.id}"
+
+
+async def iniciar_pago(
+    db: AsyncSession,
+    *,
+    orden: EventOrder,
+    titulo_del_evento: str,
+    correo: str,
+    return_url: str,
+    cancel_url: str,
+) -> IntentoDePago:
+    """Abre el cobro en la pasarela y deja la orden en `PAYMENT_PROCESSING`.
+
+    NO MARCA NADA COMO PAGADO. Abrir un checkout no es cobrar: quien decide eso
+    es el aviso verificado, y hasta entonces la orden sigue debiendo dinero y la
+    reserva sigue apartando el aforo.
+    """
+    exigir_pagos_disponibles()
+    if orden.status not in ORDEN_EN_CURSO:
+        raise orders.OrdenNoPagable(f"Ese pedido está {orden.status}.")
+    if int(orden.total_minor) <= 0:
+        # Una orden gratuita se confirma sola al crearse; llegar aquí significa
+        # que algo la dejó pendiente, y abrir un cobro de cero no lo arregla.
+        raise orders.OrdenNoPagable("Ese pedido no tiene nada que cobrar.")
+
+    nombre = proveedor_configurado()
+    proveedor = get_provider(nombre)
+    assert proveedor is not None  # `proveedor_configurado` ya lo comprobó
+
+    ajustes = get_settings()
+    sesion = await proveedor.create_checkout(
+        CheckoutRequest(
+            purchase_id=orden.id,
+            concepto=f"Entradas · {titulo_del_evento}"[:120],
+            # DEL SERVIDOR, SIEMPRE. La orden guarda los precios congelados en
+            # la reserva; el cliente no manda un importe porque no le toca.
+            amount_minor=int(orden.total_minor),
+            currency=orden.currency,
+            user_email=correo,
+            return_url=return_url,
+            cancel_url=cancel_url,
+            metadata={
+                "order_id": orden.id,
+                "dominio": DOMINIO,
+                "event_id": orden.event_id,
+                "buyer_id": orden.buyer_id,
+            },
+        )
+    )
+
+    # BAJO CERROJO Y RECOMPROBANDO, porque entre leer la orden y llegar aquí ha
+    # habido una llamada HTTP a la pasarela que puede tardar segundos. Sin esto,
+    # quien cancelara el pedido en ese hueco se encontraba con
+    # `PAYMENT_PROCESSING` escrito encima de su `CANCELLED`, `cancelled_at`
+    # todavía puesto, el CHECK de la base rechazando la transacción y un 500.
+    async with inventory.espera_traducida(db):
+        fresca = await db.scalar(
+            select(EventOrder)
+            .where(EventOrder.id == orden.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    if fresca is None or fresca.status not in ORDEN_EN_CURSO:
+        await db.rollback()
+        raise orders.OrdenNoPagable(
+            "Ese pedido dejó de admitir un pago mientras se abría el cobro."
+        )
+
+    fresca.provider = nombre
+    fresca.environment = ajustes.payments_environment
+    fresca.operation_ref = referencia_de_operacion(fresca)
+    fresca.status = ORDEN_PROCESANDO
+    fresca.updated_at = orders.ahora()
+    await db.commit()
+
+    return IntentoDePago(
+        checkout_url=sesion.checkout_url,
+        provider=nombre,
+        provider_reference=sesion.provider_reference,
+    )
+
+
+async def es_de_entradas(db: AsyncSession, evento) -> bool:
+    """Si este cobro es de un pedido de entradas, MIRANDO NUESTRAS TABLAS.
+
+    POR QUE NO BASTA LA METADATA. Al abrir el checkout le adjuntamos
+    `dominio=evento`, y esa metadata sobrevive al `charge` porque tambien se
+    copia en el `payment_intent`. Pero un aviso de DEVOLUCION o de DISPUTA no
+    trae el cobro: trae el objeto `refund` o el objeto `dispute`, que tienen
+    metadata PROPIA —vacia si el reembolso se hizo desde el panel de Stripe—.
+    Ese aviso llegaba sin dominio, caia en la rama de Cursos, no encontraba
+    ningun pedido suyo y se marcaba como atendido: dinero devuelto de un evento
+    sin un solo rastro de que hubiera algo que conciliar.
+
+    La referencia del cobro SI sobrevive en los tres objetos, y es la que
+    guardamos en `external_payment_id` al confirmar. Preguntarselo a nuestra
+    propia tabla no depende de lo que Stripe decida propagar.
+    """
+    referencia = (getattr(evento, "provider_transaction_id", "") or "").strip()
+    if not referencia:
+        return False
+    # SIN LA 0062 NO HAY TABLA QUE MIRAR. Se responde que no y el aviso sigue
+    # su camino de siempre, en vez de reventar con un 500.
+    from app.modules.events import esquema
+
+    if not await esquema.hay_ordenes(db):
+        return False
+    return (
+        await db.scalar(
+            select(EventOrder.id).where(
+                # `provider` PRIMERO, y no por gusto: el unico indice que sirve
+                # esta consulta es `(provider, environment, external_payment_id)`
+                # y sin su primera columna PostgreSQL no puede buscar, solo
+                # recorrer. Ademas es cierto: se esta atendiendo un aviso de
+                # esta pasarela.
+                EventOrder.provider == "stripe",
+                EventOrder.external_payment_id == referencia,
+                EventOrder.environment == evento.environment,
+            )
+        )
+    ) is not None
+
+
+async def atender_aviso(db: AsyncSession, evento) -> str | None:
+    """Entrega un aviso YA VERIFICADO a la orden que le corresponde.
+
+    Quien llama —el webhook compartido— comprobó la firma, guardó el aviso en
+    crudo contra el índice anti-repetición y abrió un savepoint. Aquí solo se
+    decide si este aviso confirma, tumba o no significa nada para la orden.
+
+    Devuelve una NOTA cuando el aviso necesita que lo mire una persona, o
+    `None` cuando queda cerrado. No lanza por un aviso que no nos incumbe: hacer
+    fallar el webhook por eso lo pone a reintentar en bucle.
+    """
+    if evento.status == "paid":
+        try:
+            resultado = await orders.confirmar_pago(
+                db,
+                orden_id=evento.purchase_id,
+                provider="stripe",
+                environment=evento.environment,
+                external_payment_id=evento.provider_transaction_id,
+                amount_minor=evento.amount_minor,
+                currency=evento.currency,
+            )
+        except Exception:
+            # Se registra con el identificador del cobro, NUNCA con el del
+            # comprador ni con la credencial de ninguna entrada.
+            logger.exception(
+                "[eventos] no se pudo confirmar la orden del cobro %s",
+                evento.provider_transaction_id,
+            )
+            raise
+        # EL SALDO DE LA VENTA. Idempotente por pedido, y devuelve `None` sin
+        # ruido cuando falta la comision o el esquema: eso no es un fallo del
+        # cobro, es una decision que la empresa no ha tomado.
+        from app.modules.events import finanzas
+
+        orden = await db.get(EventOrder, evento.purchase_id)
+        if orden is not None:
+            await finanzas.registrar_venta(db, orden=orden)
+        _ = resultado.estrenada
+        return None
+
+    if evento.status in ("failed", "cancelled"):
+        # FALLO TERMINAL, y solo eso. Un timeout o un error de red no llegan
+        # por aquí: la pasarela no manda un aviso firmado por haberse caído.
+        await orders.marcar_fallida(
+            db, orden_id=evento.purchase_id, motivo=evento.event_type or evento.status
+        )
+        return None
+
+    if evento.status in DINERO_QUE_VUELVE:
+        return await _atender_dinero_que_vuelve(db, evento)
+
+    # 'pendiente' e 'ignorado'. Ninguno emite una entrada.
+    return None
+
+
+async def _atender_dinero_que_vuelve(db: AsyncSession, evento) -> str | None:
+    """Un aviso de devolucion o de disputa, ya verificado y ya repartido aqui.
+
+    LO QUE DECIDE ESTO Y LO QUE NO. Aqui se localiza el pedido, se abre o se
+    recupera su expediente y se le entrega el aviso al servicio de efectos.
+    Las condiciones de si se retira el acceso NO estan aqui: estan en
+    `efectos.revocar_por_devolucion`, una sola vez, y esta funcion no puede
+    saltarselas.
+
+    UNA DISPUTA NO ES UNA DEVOLUCION. La abre el banco del titular, el dinero
+    se retira fuera de nuestro circuito y ganarla es posible: bloquea, no
+    revoca, y nunca llama al camino que retira el acceso.
+    """
+    from app.modules.events import efectos, esquema, posventa
+
+    referencia = (evento.provider_transaction_id or "").strip()
+
+    if not await esquema.hay_posventa(db):
+        # Sin la 0064/0065 no hay donde abrir un expediente. Se anota para
+        # conciliar a mano, que es lo que se hacia antes de que existieran.
+        logger.info(
+            "[eventos] devolucion sin esquema de posventa (%s): %s",
+            evento.event_type,
+            referencia,
+        )
+        return (
+            f"Devolucion o disputa de un pedido de entradas ({evento.event_type})."
+            " Sin el esquema de posventa: pendiente de conciliar a mano."
+        )
+
+    pedido = await db.scalar(
+        select(EventOrder).where(
+            EventOrder.provider == "stripe",
+            EventOrder.external_payment_id == referencia,
+            EventOrder.environment == evento.environment,
+        )
+    )
+    if pedido is None:
+        # Llego repartido aqui por la referencia, asi que esto solo pasa si el
+        # pedido desaparecio entre medias. No se inventa ninguno.
+        logger.warning("[eventos] devolucion sin pedido: %s", referencia)
+        return (
+            f"Devolucion de un cobro de entradas sin pedido ({evento.event_type})."
+            " Pendiente de conciliar a mano."
+        )
+
+    caso = await posventa.para_el_aviso(
+        db, orden=pedido, tipo_de_aviso=evento.event_type or evento.status
+    )
+
+    if evento.status in ESTADOS_DE_DISPUTA:
+        # EXPEDIENTE DE DISPUTA PROPIO, y el importe bloqueado. Quien asume la
+        # perdida es una decision que nadie ha tomado: no se descuenta nada de
+        # ningun otro saldo y no se revoca ninguna entrada.
+        from app.modules.events import finanzas
+
+        await finanzas.abrir_o_actualizar_disputa(
+            db,
+            externa=referencia,
+            entorno=evento.environment,
+            estado=_ESTADO_DE_DISPUTA.get(evento.status, "open"),
+            orden=pedido,
+            importe_minor=evento.amount_minor,
+            moneda=evento.currency,
+            motivo=evento.event_type,
+        )
+        await efectos.aplicar(
+            db,
+            caso=caso,
+            efecto=efectos.BLOQUEADA,
+            actor_id=None,
+            motivo=f"disputa: {evento.event_type}",
+        )
+        return (
+            f"Disputa sobre un pedido de entradas ({evento.event_type})."
+            " Importe bloqueado; quien asume la perdida no esta decidido."
+        )
+
+    # Una devolucion. `refunded` es la unica CONFIRMADA y total; las demas son
+    # avances del expediente que no confirman nada.
+    #
+    # EL SALDO SE MUEVE PRIMERO, Y APARTE DEL EFECTO SOBRE LA ENTRADA. Son dos
+    # decisiones distintas: que la politica de entradas diga «retener» no
+    # significa que el dinero siga siendo del organizador. Antes no lo movia
+    # NADIE —las funciones de Cursos filtran por `order_id`, nulo en un saldo de
+    # evento— y una venta reembolsada volvia a estar disponible al vencer la
+    # retencion.
+    from app.modules.events import finanzas as _finanzas
+
+    await _finanzas.atender_devolucion(
+        db,
+        orden=pedido,
+        importe_devuelto_minor=evento.amount_minor,
+        moneda=evento.currency,
+        confirmada=evento.status == "refunded",
+        referencia=referencia,
+    )
+
+    resultado = await efectos.revocar_por_devolucion(
+        db,
+        caso=caso,
+        importe_devuelto_minor=evento.amount_minor,
+        moneda=evento.currency,
+        referencia=referencia,
+        confirmada=evento.status == "refunded",
+    )
+
+    if resultado.efecto == efectos.REVOCADA:
+        await _cerrar_expediente(db, caso=caso, referencia=referencia)
+        return None
+
+    return (
+        f"Devolucion de un pedido de entradas ({evento.event_type})."
+        f" Las entradas quedan {resultado.efecto}: pendiente de revisar."
+    )
+
+
+async def _cerrar_expediente(db: AsyncSession, *, caso, referencia: str) -> None:
+    """Lleva el expediente hasta `resolved`, y solo el SISTEMA puede hacerlo.
+
+    Aprobar no es haber pagado: el unico que puede declarar el dinero devuelto
+    es este camino, que llega desde un aviso verificado del proveedor.
+    """
+    from app.modules.events import posventa
+    from app.modules.events import posventa_estados as maquina
+    from app.modules.events.posventa_models import (
+        DEVOLUCION_EN_CURSO,
+        DEVOLUCION_PENDIENTE,
+        RESUELTO,
+    )
+
+    camino = {
+        maquina.ENVIADO: [DEVOLUCION_EN_CURSO],
+    }
+    # Se avanza paso a paso por la maquina; los saltos que no existen se
+    # saltan en silencio porque el expediente puede venir de cualquier estado.
+    for destino in (DEVOLUCION_PENDIENTE, DEVOLUCION_EN_CURSO, RESUELTO):
+        if not maquina.existe(caso.status, destino):
+            continue
+        if maquina.SISTEMA not in maquina.quienes(caso.status, destino):
+            # Un paso que exige a una persona no lo da el webhook.
+            continue
+        movimiento = await posventa.transicionar(
+            db,
+            expediente_id=caso.id,
+            hasta=destino,
+            actor_id=None,
+            actor_rol=maquina.SISTEMA,
+            motivo="devolucion confirmada por el proveedor",
+            referencia=referencia,
+        )
+        caso = movimiento.expediente

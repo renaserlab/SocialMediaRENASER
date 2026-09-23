@@ -91,6 +91,26 @@ async def hay_cursos_v2(db: AsyncSession) -> bool:
     return _cache["cursos_v2"]
 
 
+async def hay_guardados(db: AsyncSession) -> bool:
+    """Si la 0055 esta aplicada: `saved_courses`."""
+    if "guardados" not in _cache:
+        conexion = await db.connection()
+        _cache["guardados"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("saved_courses")
+        )
+    return _cache["guardados"]
+
+
+async def hay_valoraciones(db: AsyncSession) -> bool:
+    """Si la 0056 esta aplicada: `course_reviews`."""
+    if "valoraciones" not in _cache:
+        conexion = await db.connection()
+        _cache["valoraciones"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("course_reviews")
+        )
+    return _cache["valoraciones"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 
