@@ -67,6 +67,27 @@ test('las actualizaciones van al proyecto de Expo de la app', () => {
   assert.equal(app.expo.updates?.url, `https://u.expo.dev/${proyecto}`);
 });
 
+test('.easignore cubre todo lo que ignora .gitignore', () => {
+  // Si `.easignore` existe, EAS lo usa EN LUGAR de `.gitignore`: una linea
+  // nueva en `.gitignore` que no se copie aqui (un `.env`, unos secretos, unas
+  // evidencias) acabaria subida a los servidores de compilacion de Expo.
+  const repo = join(RAIZ, '..', '..');
+  const reglas = (fichero: string) =>
+    new Set(
+      readFileSync(join(repo, fichero), 'utf8')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#')),
+    );
+  const git = reglas('.gitignore');
+  const eas = reglas('.easignore');
+  const faltan = [...git].filter((r) => !eas.has(r));
+  assert.deepEqual(faltan, [], `.easignore no copia estas reglas de .gitignore: ${faltan.join(', ')}`);
+  for (const local of ['.claude/', '.github/agents/', '.github/hooks/', '.github/skills/']) {
+    assert.ok(eas.has(local), `.easignore deberia excluir ${local}`);
+  }
+});
+
 test('la version de ejecucion sale de la huella del codigo nativo', () => {
   // Con una version fija (o `appVersion`, que aqui siempre es 1.0.0) una
   // actualizacion de JavaScript llegaria a binarios con modulos nativos

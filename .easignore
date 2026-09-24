@@ -1,0 +1,69 @@
+# QUE NO SUBE `eas build` A LOS SERVIDORES DE EXPO.
+#
+# Si este fichero existe, EAS lo usa EN LUGAR de `.gitignore`: no suma los dos.
+# Por eso la primera parte es una copia literal del `.gitignore` de la raiz
+# (la prueba `perfilesDeCompilacion.test.mts` falla si se desincronizan) y la
+# segunda, lo que git ignora por otras vias que EAS no lee.
+#
+# Motivo: el 23/09/2026 `eas build:inspect` mostro que el paquete llevaba
+# `.claude/` (con una copia entera del repositorio en `.claude/worktrees/`,
+# ignorada solo desde `.git/info/exclude`) y las carpetas locales de
+# herramientas de `.github/`. Nada de eso hace falta para compilar la app.
+
+# ---- Copia de .gitignore ----------------------------------------------------
+node_modules/
+.expo/
+.dist/
+dist/
+web-build/
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+.DS_Store
+coverage/
+apps/mobile/android/
+apps/mobile/ios/
+
+# IDE / tooling
+.gemini/
+.idea/
+
+# npm workspaces: only the root lockfile is tracked
+apps/*/package-lock.json
+
+# Bases de datos locales de desarrollo (SQLite)
+*.db
+
+# Datos reales de la empresa para las paginas legales (no versionar)
+legal/datos.json
+legal/publicar/
+
+# Red de seguridad: el script de videos ya guarda sus copias FUERA del
+# proyecto, pero si alguien apunta `RESPALDO_VIDEOS_DIR` aqui dentro, que no
+# acaben en el repositorio. Son cientos de megas de contenido, no codigo.
+respaldo_videos/
+.vercel
+.env*
+
+# Volcado de la consola de arranque de una instancia EC2. Es un artefacto de
+# diagnostico, no del proyecto: sin esta linea un `git add -A` se lo lleva.
+ec2-arranque.txt
+
+# Despliegue en AWS: la evidencia de cada ejecucion (lleva la cuenta y el
+# operador) y cualquier fichero de secretos que alguien deje a mano aqui.
+infra/aws/evidencias/
+infra/aws/secretos*.json
+!infra/aws/secretos.ejemplo.json
+
+# ---- Lo que git ignora por otras vias --------------------------------------
+# apps/mobile/.gitignore (generado por expo-cli)
+apps/mobile/expo-env.d.ts
+# .git/info/exclude y carpetas locales de herramientas, sin versionar
+.claude/
+.github/agents/
+.github/hooks/
+.github/skills/
