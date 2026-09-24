@@ -17,7 +17,7 @@ la ficha en `docs/FICHA_PLAY_STORE.md`.
 | Qué | Dónde |
 | --- | --- |
 | La API de RenaserLab en los tres perfiles (`development`, `preview`, `production`) | `apps/mobile/eas.json`, vigilado por `src/config/perfilesDeCompilacion.test.mts` |
-| `expo-updates` con un canal por perfil y versión de ejecución por huella | `app.json` y `eas.json` |
+| `expo-updates` con un canal por perfil; versión de ejecución = `expo.version` | `app.json` y `eas.json` |
 | Paquete `com.renaser.zeta`, `targetSdkVersion` 36 (Play pide 35 o más) | `app.json` |
 | `versionCode` que sube solo en cada build (`appVersionSource: remote`) | `eas.json` |
 | Borrar la cuenta desde la app y desde la web | *Ajustes › Eliminar cuenta* y `/eliminar-cuenta.html` |
@@ -188,8 +188,17 @@ Probar primero en el canal `preview`, con `--channel preview --environment previ
 sobre el APK interno.
 
 La app descarga la actualización al abrirse y la aplica **la siguiente vez**
-que se abre. Una actualización solo llega a las builds con la misma huella
-nativa: nunca a una build a la que le falte un módulo.
+que se abre. Una actualización llega a **todas** las builds con la misma
+`expo.version` de `app.json` (hoy `1.0.0`).
+
+> **Al cambiar algo nativo** (un módulo nuevo, un permiso, las opciones de un
+> plugin) hay que **subir `expo.version`** antes de compilar. Si no, una
+> actualización posterior llegaría a builds sin ese módulo y la app se cerraría
+> al abrirse. La prueba `perfilesDeCompilacion.test.mts` guarda la lista nativa
+> de cada versión y falla si cambia sin subirla.
+>
+> Se descartó calcularla por huella (`fingerprint`): el 23/09/2026 las dos
+> primeras builds fallaron porque la huella local y la de EAS no coincidían.
 
 ---
 
