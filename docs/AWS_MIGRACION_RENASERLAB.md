@@ -3,13 +3,14 @@
 Rama `Edson`, 23 de septiembre de 2026. Plantillas en `infra/aws/`, guion en
 `infra/aws/deploy-renaserlab.ps1`.
 
-> **Estado (23/09/2026, 14:43): PLATAFORMA NUEVA OPERATIVA, SIN TRÁFICO.** Las
-> dos pilas existen en RenaserLab con el perfil `costo-controlado` y la imagen
-> `sha-4b4dbdf`. La URL temporal es `https://dzqncwhehxai0.cloudfront.net` y
-> responde con datos. Tras restablecer la contraseña de la base, **la
-> producción de la cuenta anterior devuelve 500 en todo lo que lee datos**:
-> sigue con la contraseña antigua. El tráfico, GitHub y la cuenta anterior no
-> se han tocado. Ver §12.
+> **Estado (23/09/2026, 19:27): RENASERLAB ES PRODUCCIÓN. LA CUENTA ANTERIOR
+> SE DIO DE BAJA.** La cuenta de Ricardo se cerró al agotarse sus créditos, que
+> es el motivo de esta migración. El PR #2 está fusionado y `main` despliega en
+> RenaserLab: las variables de GitHub apuntan allí y el primer despliegue
+> (`sha-c85a1d3`) salió sin corte. La web de Vercel ya usa la API nueva. **Las
+> apps móviles repartidas siguen apuntando a la API vieja** y solo se arreglan
+> con una build nueva. Las vías B y la vuelta atrás a la cuenta anterior de §7 y
+> §8 ya no existen. Ver §13.
 
 ---
 
@@ -312,6 +313,11 @@ ella.
 
 ## 7. El corte de tráfico
 
+> **Superado (23/09/2026).** La cuenta anterior se dio de baja: la vía B es
+> imposible y el CI ya despliega en RenaserLab. Queda la vía A (builds nuevas
+> con la URL nueva, hecha en `eas.json`) y la C (dominio propio) como paso
+> siguiente. Lo que sigue se conserva como registro. Ver §13.
+
 **No se ha hecho nada de esto.** `-Accion PrepararCorte` escribe el plan con
 los valores reales, pero cada paso necesita autorización expresa.
 
@@ -366,6 +372,11 @@ APIs en versiones distintas.
 
 La cuenta anterior no se toca durante toda esta fase: **es el plan de vuelta
 atrás.**
+
+> **Superado (23/09/2026).** Con la cuenta anterior dada de baja, las filas «el
+> corte (vía B)» y «el CI» ya no tienen a dónde volver. La vuelta atrás de una
+> versión sigue siendo `-Accion VolverAtras` o el flujo con `etiqueta`, ahora
+> siempre dentro de RenaserLab.
 
 ---
 
@@ -497,3 +508,30 @@ repositorio salvo lo que se dice.
   cuenta anterior dejó de poder abrir conexiones (500 desde ~14:40). La próxima
   rotación tiene que hacerse a la vez en todos los entornos que comparten la
   base.
+
+---
+
+## 13. La cuenta anterior se dio de baja
+
+La cuenta de Ricardo (la que tenía producción y el entorno aparcado de
+Talento) se dio de baja al agotarse sus créditos. Eso cierra las vías que
+dependían de ella y deja esto:
+
+| Qué | Estado |
+| --- | --- |
+| API | En RenaserLab, desplegada desde `main` por GitHub. `sha-c85a1d3` el 23/09 a las 19:27, sin corte. |
+| Web (Vercel) | Construida desde `main` con `EXPO_PUBLIC_API_URL` de la API nueva. |
+| Datos | **Nada se pierde.** Base y archivos están en Supabase: 372 objetos en Storage, 0 URLs de AWS en la base y la API no usa S3. |
+| Apps móviles ya repartidas | **Sin servicio.** Llevan grabada `d33u17ka1rcaax.cloudfront.net`, que pertenece a la cuenta dada de baja y nadie puede redirigir. Solo se arreglan instalando una build nueva. |
+| Builds nuevas | `eas.json` apunta a la API nueva en los tres perfiles, con prueba que lo vigila, y llevan `expo-updates` para que el próximo cambio de dirección no dependa de la tienda. |
+| Talento | Su entorno aparcado en esa cuenta se pierde. Talento sigue en Render; se recrea en RenaserLab cuando exista el dominio. |
+| Flujo de GitHub | Sus valores por defecto pasan a los de RenaserLab. Volver a poner el rol de la cuenta anterior ya no es una vuelta atrás. |
+
+**Lo que evita que esto se repita es la vía C.** Con un dominio propio
+(`api.<dominio>`), las apps llaman a un nombre que controla la empresa y la
+siguiente mudanza es cambiar un registro DNS. Con `expo-updates` ya dentro, las
+apps pasarán a ese dominio con una actualización, sin volver a la tienda.
+
+Pendiente de quien administraba la cuenta anterior: la API vieja seguía
+respondiendo `/health` el 23/09. Que confirme que esas máquinas no generan
+cobros.
