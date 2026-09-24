@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 
+import { AccesoDeCreador } from '@/components/AccesoDeCreador';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
@@ -39,6 +40,7 @@ import { contadorDeGuardados, contadorDeLaBolsa } from '@/lib/carrito';
 import { ProductCartRepository } from '@/repositories/ProductCartRepository';
 import { ProductCatalogRepository } from '@/repositories/ProductCatalogRepository';
 import { pedirPerfil } from '@/services/cachePerfil';
+import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
@@ -249,6 +251,7 @@ export function ProductosScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const f = useClaveDeProductos();
+  const conSesion = useAuthStore((state) => state.status === 'authenticated');
 
   const [portada, setPortada] = useState<Portada | null>(null);
   const [enLaBolsa, setEnLaBolsa] = useState<number | null>(null);
@@ -531,6 +534,22 @@ export function ProductosScreen() {
           {f('productos.buscador')}
         </Text>
       </Pressable>
+
+      {/*
+        POSTULAR, DONDE SE COMPRA. La única entrada era el menú ⋮ del propio
+        perfil. El título es la frase del blueprint («Postula tu producto»):
+        «Vende en Z» está prohibida (ver `proveedorDeProductos.test.mts`). Lleva a «Mis productos», que a quien todavía no es proveedor le
+        ofrece postular y a quien ya lo es, crear: la decisión la toma esa
+        pantalla con la respuesta del servidor, no esta fila.
+      */}
+      {conSesion ? (
+        <AccesoDeCreador
+          icono="package"
+          titulo={t('proveedorProductos.marca.postula')}
+          detalle={t('creadores.productoDetalle')}
+          onPress={() => router.push('/proveedor/productos' as never)}
+        />
+      ) : null}
 
       {/* EL MANIFIESTO, COMO TEXTO: centrado, gris y pequeño. */}
       <Text variant="caption" color={colors.textMuted} style={styles.manifiesto}>

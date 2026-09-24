@@ -86,6 +86,7 @@ export function ProfileScreen() {
   const currentUser = useAppStore((state) => state.user);
   const setProfileImage = useAppStore((state) => state.setProfileImage);
   const authStatus = useAuthStore((state) => state.status);
+  const esAdministracion = useAppStore((state) => state.user?.isAdmin === true);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
   // Seguir, escribir y bloquear necesitan cuenta: se pide al usarlos.
@@ -1051,7 +1052,7 @@ export function ProfileScreen() {
       />
 
       <BottomSheet visible={optionsVisible} onClose={() => setOptionsVisible(false)}>
-        <Text style={[styles.sheetTitle, { color: colors.text }]}>Opciones</Text>
+        <Text style={[styles.sheetTitle, { color: colors.text }]}>{t('profile.opciones')}</Text>
         <ListRow
           title={t('profile.saved')}
           leftIcon="bookmark"
@@ -1109,6 +1110,37 @@ export function ProfileScreen() {
                 onPress={() => {
                   setOptionsVisible(false);
                   router.push(rutaDelProveedor(estadoDeProveedor) as never);
+                }}
+              />
+            ) : null}
+            {/*
+              MIS EVENTOS. Se había quedado sin ningún enlace desde que salió
+              el acceso «Eventos» de la fila circular: el alta, las entradas,
+              las ventas y la cola de revisión solo se abrían escribiendo la
+              ruta. Vuelve aquí y como «Organiza un evento» en Eventos.
+            */}
+            <ListRow
+              title={t('misEventos.titulo')}
+              leftIcon="calendar"
+              onPress={() => {
+                setOptionsVisible(false);
+                router.push('/mis-eventos' as never);
+              }}
+            />
+            {/*
+              ADMINISTRACIÓN, en un solo sitio. Las colas estaban colgadas unas
+              de otras (Perfil › Mis eventos › Eventos por revisar › Productos…)
+              y la de cursos ni existía. Se pinta con `isAdmin` para no poner
+              una puerta inútil a todo el mundo; el permiso lo sigue decidiendo
+              el servidor en cada cola.
+            */}
+            {esAdministracion ? (
+              <ListRow
+                title={t('panelAdmin.titulo')}
+                leftIcon="shield"
+                onPress={() => {
+                  setOptionsVisible(false);
+                  router.push('/admin' as never);
                 }}
               />
             ) : null}

@@ -4,6 +4,7 @@ import { notify } from '@/lib/confirm';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AccesoDeCreador } from '@/components/AccesoDeCreador';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
@@ -56,6 +57,7 @@ export function EventsScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const conSesion = useAuthStore((state) => state.status === 'authenticated');
   const demoReserved = useAppStore((state) => state.reservedEventIds);
   const demoToggle = useAppStore((state) => state.toggleReservation);
 
@@ -322,6 +324,21 @@ export function EventsScreen() {
                   })}
                 </ScrollView>
               </SinCambioDeSeccion>
+              {/*
+                ORGANIZAR UN EVENTO, DONDE SE BUSCAN EVENTOS. «Mis eventos» —y
+                con él el formulario de alta, las entradas y la cola de
+                revisión— se había quedado sin ningún enlace desde que se quitó
+                el acceso «Eventos» del perfil: solo se llegaba escribiendo la
+                ruta. Crear un evento es libre; publicarlo pasa por revisión.
+              */}
+              {conSesion ? (
+                <AccesoDeCreador
+                  icono="calendar"
+                  titulo={t('creadores.eventoTitulo')}
+                  detalle={t('creadores.eventoDetalle')}
+                  onPress={() => router.push('/mis-eventos' as never)}
+                />
+              ) : null}
             </React.Fragment>
           ) : null}
 
