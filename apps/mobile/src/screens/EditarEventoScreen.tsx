@@ -39,6 +39,7 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
+import { usePublicacionFlexible } from '@/hooks/usePublicacionFlexible';
 
 const MODALIDADES = [
   { valor: 'presential' as const, clave: 'evento.modalidad.presencial' },
@@ -107,6 +108,8 @@ function aCampos(evento: EventoDelOrganizador): CamposDelBorrador {
  */
 export function EditarEventoScreen() {
   const { t } = useTranslation();
+  /** MODO FLEXIBLE: enviar publica, y bastan diez caracteres de descripción. */
+  const flexible = usePublicacionFlexible();
   const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -169,7 +172,7 @@ export function EditarEventoScreen() {
   })();
   const ocupado = guardando || enviando;
   const sinGuardar = hayCambiosSinGuardar(campos, guardado);
-  const faltante = motivoParaNoEnviar(campos);
+  const faltante = motivoParaNoEnviar(campos, { flexible });
 
   const cuerpo = () => ({
     title: campos.title.trim(),
@@ -240,11 +243,12 @@ export function EditarEventoScreen() {
       notify(t('miEvento.noSePuedeEnviar'), t(faltante as TranslationKey));
       return;
     }
-    // ENVIAR NO PUBLICA, y se dice ANTES. Después ya es tarde para explicarlo.
+    // ENVIAR NO PUBLICA —salvo en modo flexible, donde SÍ— y se dice ANTES.
+    // Después ya es tarde para explicarlo.
     const aceptado = await confirm({
-      title: t('miEvento.enviarTitulo'),
-      message: t('miEvento.enviarCuerpo'),
-      confirmLabel: t('miEvento.enviar'),
+      title: flexible ? t('miEvento.publicarTitulo') : t('miEvento.enviarTitulo'),
+      message: flexible ? t('miEvento.publicarCuerpo') : t('miEvento.enviarCuerpo'),
+      confirmLabel: flexible ? t('miEvento.publicar') : t('miEvento.enviar'),
     });
     if (!aceptado) return;
 
@@ -258,7 +262,12 @@ export function EditarEventoScreen() {
       const datos = await EventOrganizerRepository.enviarARevision(id);
       setEvento(datos);
       setGuardado(aCampos(datos));
-      toast(t('miEvento.enviado'));
+      // Lo dice el SERVIDOR, no la bandera: si publicó, fue publicado.
+      toast(
+        datos.workflow_status === 'PUBLISHED'
+          ? t('miEvento.publicadoAhora')
+          : t('miEvento.enviado'),
+      );
     } catch (error) {
       notify(
         t('common.saveFailed'),
@@ -634,7 +643,7 @@ export function EditarEventoScreen() {
             </Text>
           ) : null}
           <Button
-            label={t('miEvento.enviar')}
+            label={flexible ? t('miEvento.publicar') : t('miEvento.enviar')}
             onPress={() => void enviar()}
             loading={enviando}
             disabled={ocupado || faltante !== null}

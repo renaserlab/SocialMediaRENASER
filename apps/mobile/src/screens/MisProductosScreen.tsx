@@ -24,7 +24,10 @@ import {
   fechaLegible,
   hayQueRecargar,
   precioLegible,
+  publicaAlEnviar,
   sePuedeEditarProducto,
+  sePuedePostularProducto,
+  sonCambiosDeUnPublicado,
   versionQueSeEnsena,
   type EstadoDelProveedor,
   type ProductoDelProveedor,
@@ -143,18 +146,40 @@ export function MisProductosScreen() {
     }
   };
 
-  /** «Postula tu producto»: lo manda a admisión y deja de ser editable. */
+  /** El texto del botón de enviar: postular, o publicar en modo flexible. */
+  const etiquetaDeEnviar = (producto: ProductoDelProveedor) =>
+    publicaAlEnviar(producto)
+      ? f(
+          sonCambiosDeUnPublicado(producto)
+            ? 'proveedorProductos.productos.publicarCambios'
+            : 'proveedorProductos.productos.publicar',
+        )
+      : f('proveedorProductos.marca.postula');
+
+  /**
+   * «Postula tu producto»: lo manda a admisión y deja de ser editable. En
+   * MODO FLEXIBLE lo publica (o publica sus cambios) y sigue siendo editable.
+   */
   const postular = (producto: ProductoDelProveedor) =>
     void conCerrojo(async () => {
+      const publicaYa = publicaAlEnviar(producto);
       const aceptado = await confirm({
-        title: f('proveedorProductos.productos.postularTitulo'),
+        title: publicaYa
+          ? f('proveedorProductos.productos.publicarTitulo')
+          : f('proveedorProductos.productos.postularTitulo'),
         // EL AVISO VA ANTES: al postular deja de poder editarse.
-        message: f('proveedorProductos.productos.postularAviso'),
-        confirmLabel: f('proveedorProductos.marca.postula'),
+        message: publicaYa
+          ? f('proveedorProductos.productos.publicarAviso')
+          : f('proveedorProductos.productos.postularAviso'),
+        confirmLabel: etiquetaDeEnviar(producto),
       });
       if (!aceptado) return;
-      await ProductSellerRepository.postularProducto(producto.id);
-      toast(f('proveedorProductos.productos.postulado'));
+      const resultado = await ProductSellerRepository.postularProducto(producto.id);
+      toast(
+        resultado.status === 'published'
+          ? f('proveedorProductos.productos.publicadoAhora')
+          : f('proveedorProductos.productos.postulado'),
+      );
       await cargar();
     });
 
@@ -358,9 +383,13 @@ export function MisProductosScreen() {
           disabled={ocupado}
         />
 
-        {acciones.includes('submitted') ? (
+        {sePuedePostularProducto(producto) ? (
           <Button
-            label={f(claveDeAccionDeProducto('submitted'))}
+            label={
+              publicaAlEnviar(producto)
+                ? etiquetaDeEnviar(producto)
+                : f(claveDeAccionDeProducto('submitted'))
+            }
             onPress={() => postular(producto)}
             disabled={ocupado}
           />

@@ -130,10 +130,19 @@ export function fechaDeInicio(dia: string, hora: string): Date | null {
  * participantes no tienen dónde escribirse todavía, así que exigirlos sería un
  * requisito imposible de cumplir.
  */
-export function motivoParaNoEnviar(campos: CamposDelBorrador): string | null {
+export function motivoParaNoEnviar(
+  campos: CamposDelBorrador,
+  { flexible = false }: { flexible?: boolean } = {},
+): string | null {
   if (campos.title.trim() === '') return 'miEvento.faltaTitulo';
-  if (campos.description.trim().length < 40) return 'miEvento.faltaDescripcion';
-  if (campos.promise.trim() === '') return 'miEvento.faltaPromesa';
+  // MODO FLEXIBLE (`MINIMO_DE_DESCRIPCION_FLEXIBLE` del servidor): basta una
+  // frase de 10 caracteres y la promesa es opcional, porque nadie evalúa.
+  if (flexible) {
+    if (campos.description.trim().length < 10) return 'miEvento.faltaDescripcionCorta';
+  } else {
+    if (campos.description.trim().length < 40) return 'miEvento.faltaDescripcion';
+    if (campos.promise.trim() === '') return 'miEvento.faltaPromesa';
+  }
   if (campos.category.trim() === '') return 'miEvento.faltaCategoria';
   if (campos.dia.trim() === '') return 'miEvento.faltaFecha';
   if (campos.hora.trim() === '') return 'miEvento.faltaHora';

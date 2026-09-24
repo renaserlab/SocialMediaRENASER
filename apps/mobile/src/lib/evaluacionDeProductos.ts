@@ -100,6 +100,8 @@ export type DocumentoRead = {
   kind: string;
   storage_path: string | null;
   note: string | null;
+  /** Enlace firmado de diez minutos para abrirlo (0085). */
+  url?: string | null;
 };
 
 /** `PostulacionRead`. Las notas internas NO salen de aquí, a propósito. */
@@ -1290,6 +1292,10 @@ const CLAVES_DE_ERROR: Record<string, string> = {
     'productosAdmin.error.seller_application_document_empty',
   seller_application_document_path_invalid:
     'productosAdmin.error.seller_application_document_path_invalid',
+  seller_application_document_too_big:
+    'productosAdmin.error.seller_application_document_too_big',
+  seller_application_document_type_invalid:
+    'productosAdmin.error.seller_application_document_type_invalid',
   seller_application_document_note_too_long:
     'productosAdmin.error.seller_application_document_note_too_long',
   seller_already_active: 'productosAdmin.error.seller_already_active',

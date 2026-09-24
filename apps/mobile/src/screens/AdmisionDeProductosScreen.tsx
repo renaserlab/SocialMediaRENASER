@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
@@ -512,6 +512,17 @@ export function AdmisionDeProductosScreen() {
                               nota: documento.note,
                             })}
                           </Text>
+                        ) : null}
+                        {/* Desde la 0085 el archivo se sube de verdad y el
+                            servidor manda un enlace firmado de diez minutos:
+                            quien revisa lo abre, no se lo imagina. */}
+                        {documento.url ? (
+                          <Button
+                            label={f('productosAdmin.abrirDocumento')}
+                            variant="ghost"
+                            icon="external-link"
+                            onPress={() => void Linking.openURL(documento.url as string)}
+                          />
                         ) : null}
                       </View>
                     ))

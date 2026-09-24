@@ -18,6 +18,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import { pedirDestacados } from '@/services/cachePerfil';
 
 export function NotificationsScreen() {
@@ -181,7 +182,13 @@ export function NotificationsScreen() {
                 sesion.
               */
               onPress={() =>
-                item.entityType === 'booking'
+                /*
+                  Un aviso al creador (su evento, curso, postulación o
+                  producto) lleva a donde se ve o se corrige lo decidido.
+                */
+                rutaDelAviso(item.type ?? '', item.entityId) !== null
+                  ? router.push(rutaDelAviso(item.type ?? '', item.entityId) as never)
+                  : item.entityType === 'booking'
                   ? router.push('/agenda' as never)
                   : /*
                       Si el aviso se refiere a una PUBLICACION, se abre la

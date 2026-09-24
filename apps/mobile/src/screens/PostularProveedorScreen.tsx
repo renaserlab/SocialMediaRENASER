@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -17,7 +18,6 @@ import {
   LARGO_DEL_NOMBRE,
   LARGO_DE_LA_NOTA,
   LARGO_DE_LA_PROPUESTA,
-  LARGO_DE_LA_RUTA,
   MAXIMO_DE_DOCUMENTOS,
   claveDeErrorDeProveedor,
   claveDeErrorPorEstado,
@@ -189,6 +189,55 @@ export function PostularProveedorScreen() {
     });
   };
 
+  /**
+   * Sube el archivo de UN documento. OPCIONAL: se puede postular sin ninguno.
+   *
+   * GUARDA ANTES lo escrito (sin esta tarjeta, que todavía no tiene archivo):
+   * el servidor cuelga el documento de la postulación en borrador, y sin
+   * guardarla no existe. Después el formulario se recarga con lo que devuelve
+   * el servidor, que ya trae la ruta que él mismo generó.
+   */
+  const subirArchivo = (indice: number) =>
+    void conCerrojo(async () => {
+      if (formulario === null) return;
+      const documento = formulario.documentos[indice];
+      if (documento === undefined) return;
+      const otros = formulario.documentos.filter((_, otro) => otro !== indice);
+      const { peticion, fallos: encontrados } = peticionDePostulacion({
+        ...formulario,
+        documentos: otros,
+      });
+      if (peticion === null) {
+        setFallos(encontrados);
+        notify(f('proveedorProductos.postular.noSePudo'), f('proveedorProductos.postular.guardaAntes'));
+        return;
+      }
+      await ProductSellerRepository.guardarPostulacion(peticion);
+
+      const eleccion = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      const elegido = eleccion.canceled ? undefined : eleccion.assets?.[0];
+      if (elegido === undefined) return;
+      const tipoDeArchivo = elegido.mimeType ?? 'application/octet-stream';
+      // EN EL TELÉFONO VIAJA COMO `{uri, name, type}`; en la web, el `File` de
+      // verdad. Es lo mismo que hacen las fotos (`lib/elegirImagen.ts`).
+      const archivo =
+        Platform.OS === 'web' && elegido.file
+          ? elegido.file
+          : ({ uri: elegido.uri, name: elegido.name, type: tipoDeArchivo } as unknown as Blob);
+      const postulacion = await ProductSellerRepository.subirDocumento({
+        archivo,
+        nombre: elegido.name,
+        tipo: documento.kind,
+        nota: documento.nota,
+      });
+      setFormulario(formularioDePostulacionDesde(postulacion));
+      toast(f('proveedorProductos.postular.documentoSubido'));
+    });
+
   const enviar = () =>
     void conCerrojo(async () => {
       const aceptado = await confirm({
@@ -198,8 +247,14 @@ export function PostularProveedorScreen() {
         confirmLabel: f('proveedorProductos.postular.enviar'),
       });
       if (!aceptado) return;
-      await ProductSellerRepository.enviarPostulacion();
-      toast(f('proveedorProductos.postular.enviada'));
+      const resultado = await ProductSellerRepository.enviarPostulacion();
+      // MODO FLEXIBLE: el servidor la acepta al enviarla. Se dice lo que pasó,
+      // no lo que se pidió.
+      toast(
+        resultado.status === 'accepted'
+          ? f('proveedorProductos.postular.aceptadaAlMomento')
+          : f('proveedorProductos.postular.enviada'),
+      );
       await cargar();
     });
 
@@ -364,24 +419,30 @@ export function PostularProveedorScreen() {
               ))}
             </View>
 
-            <Input
-              label={f('proveedorProductos.postular.rutaEtiqueta')}
-              placeholder={f('proveedorProductos.postular.rutaAyuda')}
-              value={documento.ruta}
-              onChangeText={(ruta) => {
-                const copia = [...documentos];
-                copia[indice] = { ...documento, ruta };
-                setFormulario({ ...formulario, documentos: copia });
-              }}
-              maxLength={LARGO_DE_LA_RUTA[1]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!ocupado}
-            />
-            {/* SE GUARDA LA RUTA, NO UN ENLACE. Se dice aquí, no al fallar. */}
-            <Text variant="caption" color={colors.textMuted}>
-              {f('proveedorProductos.postular.rutaCuerpo')}
-            </Text>
+            {/*
+              EL ARCHIVO SE SUBE, NO SE ESCRIBE SU RUTA. Antes había un campo
+              para teclear la ruta del almacenamiento: no había depósito, nadie
+              podía abrir nada y la ruta podía apuntar a cualquier sitio. Ahora
+              se elige el archivo y la ruta la pone el servidor (0085).
+            */}
+            {documento.ruta.trim() !== '' ? (
+              <Text variant="caption" weight="700">
+                {f('proveedorProductos.postular.archivoAdjunto')}
+              </Text>
+            ) : (
+              <>
+                <Button
+                  label={f('proveedorProductos.postular.subirDocumento')}
+                  variant="secondary"
+                  icon="upload"
+                  onPress={() => subirArchivo(indice)}
+                  disabled={ocupado}
+                />
+                <Text variant="caption" color={colors.textMuted}>
+                  {f('proveedorProductos.postular.subirDocumentoAyuda')}
+                </Text>
+              </>
+            )}
 
             <Input
               label={f('proveedorProductos.postular.notaEtiqueta')}
