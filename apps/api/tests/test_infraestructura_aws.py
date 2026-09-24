@@ -225,6 +225,20 @@ def test_el_flujo_de_despliegue_no_lleva_la_cuenta_escrita() -> None:
         assert f"vars.{variable}" in flujo, f"el flujo no lee {variable} de las variables"
 
 
+def test_los_valores_por_defecto_del_flujo_no_son_los_de_la_cuenta_dada_de_baja() -> None:
+    """Sin variables, el flujo va a RenaserLab y con el prefijo de Z.
+
+    La cuenta de Ricardo se dio de baja en septiembre de 2026. Sus nombres
+    (`renaser-plataforma-produccion`, `renaser/api`) ya no existen, y en
+    RenaserLab `renaser-*` es el prefijo de otros productos de la cuenta.
+    """
+    flujo = FLUJO.read_text(encoding="utf-8")
+    assert "vars.AWS_PILA_PLATAFORMA || 'zexcelencia-plataforma-produccion'" in flujo
+    assert "vars.AWS_REPOSITORIO_ECR || 'zexcelencia/api'" in flujo
+    for viejo in ("|| 'renaser-plataforma-produccion'", "|| 'renaser/api'"):
+        assert viejo not in flujo, f"el flujo sigue cayendo en {viejo}"
+
+
 def test_ningun_fichero_de_despliegue_lleva_una_cuenta_de_aws() -> None:
     """Ni la anterior ni la nueva: la cuenta entra por el entorno del guion.
 
