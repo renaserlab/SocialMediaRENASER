@@ -1,0 +1,67 @@
+-- 0083 · Publicar solo por la API: eventos, cursos y directos.
+--
+-- SIN APLICAR. Escrita el 23/09/2026; se aplica a mano en el editor SQL de
+-- Supabase cuando se autorice, como el resto.
+--
+-- QUÉ PASÓ. Verificado ese día contra la base de producción (solo lectura):
+--
+--     select tablename, policyname, cmd, qual from pg_policies
+--      where tablename in ('events', 'courses', 'live_sessions')
+--        and cmd in ('ALL', 'UPDATE', 'INSERT');
+--     -> events         events_write         ALL  organizer_id = auth.uid() or is_admin()
+--        courses        courses_write        ALL  author_id    = auth.uid() or is_admin()
+--        live_sessions  live_sessions_write  ALL  host_id      = auth.uid() or is_admin()
+--
+-- Y `anon` / `authenticated` conservan los privilegios de tabla que Supabase
+-- concede por defecto (insert, update, delete, truncate…). Ningún trigger
+-- vigila `status`: el de cursos (`guardar_revision_de_curso`) solo protege las
+-- columnas de la revisión.
+--
+-- Es decir: con su propio JWT y la clave anónima —la que va dentro de la app—
+-- un organizador podía hacer
+--
+--     PATCH /rest/v1/events?id=eq.<suyo>   {"status": "published"}
+--
+-- y su evento salía en el catálogo (`GET /catalog/events` filtra por
+-- `status = 'published'`) sin pasar por la admisión: ni evaluación, ni
+-- decisión, ni publicación de administración. Lo mismo un autor con su curso,
+-- aunque la revisión estuviera pendiente o rechazada, y un anfitrión con el
+-- estado o la sala de su emisión. Y como `is_admin()` es `role in ('moderator',
+-- 'admin')`, moderación podía publicar lo de cualquiera, algo que la API
+-- reserva a administración.
+--
+-- POR QUÉ SE PUEDE CERRAR ENTERO. Nadie escribe estas tres tablas por
+-- PostgREST: la app solo LEE `courses` (la columna `highlights`) y todo lo
+-- demás pasa por FastAPI, que se conecta como el dueño de la base y no depende
+-- de estos privilegios. Se quitan los de escritura —incluido `truncate`, QUE LA
+-- RLS NO CONTROLA— y se deja `select`, que siguen necesitando la lectura de la
+-- app y el tiempo real de los directos (`supabase_realtime` publica
+-- `live_sessions`).
+--
+-- NO SE TOCAN las políticas `*_write`: sin privilegio de escritura ya no
+-- escriben, y siguen haciendo de política de LECTURA (el dueño ve sus
+-- borradores). Tampoco las de módulos, lecciones, temas y recursos de lección:
+-- son contenido, no el estado de publicación, y los recursos de lección la app
+-- sí los escribe directamente.
+--
+-- NO TOCA NI UNA FILA. Solo permisos. Es idempotente.
+--
+-- VERIFICACIÓN (después de aplicarla; debe salir solo SELECT):
+--
+--     select table_name, grantee, privilege_type
+--       from information_schema.role_table_grants
+--      where table_schema = 'public'
+--        and table_name in ('events', 'courses', 'live_sessions')
+--        and grantee in ('anon', 'authenticated')
+--      order by 1, 2, 3;
+--
+-- ROLLBACK:
+--   grant insert, update, delete, truncate, references, trigger on
+--     public.events, public.courses, public.live_sessions
+--     to anon, authenticated;
+
+revoke insert, update, delete, truncate, references, trigger on
+  public.events,
+  public.courses,
+  public.live_sessions
+from anon, authenticated;
