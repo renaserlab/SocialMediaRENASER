@@ -131,6 +131,20 @@ class ReactionTotals(BaseModel):
     totals: dict[str, int]
 
 
+class LiveAvailability(BaseModel):
+    """Si en este momento se puede emitir con imagen.
+
+    Es lo que consulta la app antes de ofrecer «Vivo». Sin esto la app llevaba
+    la respuesta escrita a fuego (`FEATURE_LIVE = false`) y encender los
+    directos exigía otra build aunque el servidor ya tuviera proveedor.
+    """
+
+    #: `True` solo con un proveedor real registrado (configuración completa).
+    video: bool
+    #: `'100ms'` o `'none'`. Nunca viaja nada de la cuenta.
+    provider: str
+
+
 class LiveCredential(BaseModel):
     """Permiso temporal para entrar en la sala del proveedor.
 

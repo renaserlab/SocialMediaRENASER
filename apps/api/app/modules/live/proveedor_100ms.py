@@ -120,6 +120,23 @@ class Proveedor100ms(ProveedorDeDirecto):
         """
         if not room_id:
             return
+        # PRIMERO SE ECHA A QUIEN SIGUE DENTRO. Deshabilitar solo cierra la
+        # puerta a los que llegan: sin esto, terminar la emisión en Z dejaba al
+        # público viendo —y la sala facturando— hasta que cada uno cerraba la
+        # app. Un 404 aquí es «no había nadie», no un fallo.
+        try:
+            await self._cliente.terminar_sala_activa(
+                room_id=room_id, motivo="La transmisión terminó."
+            )
+        except ErrorDe100ms as error:
+            if error.estado != 404:
+                logger.warning(
+                    "[live] no se pudo vaciar la sala %s (%s); se deshabilita igual",
+                    room_id,
+                    error.codigo,
+                )
+        # Y DESPUÉS SE DESHABILITA, aunque `lock` ya lo haga: si la llamada de
+        # arriba falló, esta es la que impide que entre alguien más.
         try:
             await self._cliente.deshabilitar_sala(room_id=room_id)
         except ErrorDe100ms as error:

@@ -50,8 +50,16 @@ class _Doble(ProveedorDeDirecto):
     def __init__(self) -> None:
         self.credenciales: list[tuple[str, str, bool]] = []
         self.cerradas: list[str] = []
+        self.abiertas: list[str] = []
+        #: Para simular que el proveedor no responde al abrir la sala.
+        self.falla_al_abrir = False
 
     async def abrir_sala(self, *, session_id: str, titulo: str) -> SalaCreada:
+        if self.falla_al_abrir:
+            raise providers.ErrorDeProveedor(
+                "sin respuesta", codigo="network_timeout"
+            )
+        self.abiertas.append(session_id)
         return SalaCreada(room_id=f"room_{session_id}")
 
     async def cerrar_sala(self, *, room_id: str) -> None:
@@ -258,16 +266,95 @@ async def test_una_emision_cancelada_tampoco(entorno):
 
 @pytest.mark.asyncio
 async def test_sin_sala_del_proveedor_se_dice_claro(entorno):
-    """Antes de que exista sala no hay nada a lo que conectarse."""
-    http, sesiones, _identidad, _doble = entorno
+    """Si el proveedor SIGUE sin poder abrirla, no hay nada a lo que conectarse."""
+    http, sesiones, _identidad, doble = entorno
     sesion_id = await _emision(http)
     async with sesiones() as db:
         sesion = await db.get(LiveSession, sesion_id)
         sesion.provider_room_id = None
         await db.commit()
+    doble.falla_al_abrir = True
     respuesta = await http.post(f"{LIVE}/sessions/{sesion_id}/credential")
     assert respuesta.status_code == 503
     assert respuesta.json()["error"]["code"] == "live_provider_not_configured"
+    assert doble.credenciales == []
+
+
+@pytest.mark.asyncio
+async def test_una_emision_en_directo_sin_sala_la_recupera_al_pedir_credencial(entorno):
+    """EL AGUJERO QUE SE CIERRA. Nacer en directo con el proveedor caído dejaba
+    la emisión sin sala para siempre: `/start` no vuelve a pasar por una emisión
+    que ya está `live`, y la credencial contestaba 503 en cada intento."""
+    http, sesiones, _identidad, doble = entorno
+    doble.falla_al_abrir = True
+    respuesta = await http.post(f"{LIVE}/sessions", json={"title": "Charla"})
+    assert respuesta.status_code == 201, respuesta.text
+    sesion_id = respuesta.json()["id"]
+    async with sesiones() as db:
+        assert (await db.get(LiveSession, sesion_id)).provider_room_id is None
+
+    doble.falla_al_abrir = False
+    respuesta = await http.post(f"{LIVE}/sessions/{sesion_id}/credential")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["room_id"] == f"room_{sesion_id}"
+    async with sesiones() as db:
+        assert (await db.get(LiveSession, sesion_id)).provider_room_id == f"room_{sesion_id}"
+
+
+@pytest.mark.asyncio
+async def test_una_emision_PROGRAMADA_no_abre_sala_al_pedir_credencial(entorno):
+    """Solo se repara lo que está en directo: una programada todavía no tiene
+    sala a propósito, y abrirla ya facturaría horas antes de empezar."""
+    http, _sesiones, _identidad, doble = entorno
+    respuesta = await http.post(
+        f"{LIVE}/sessions",
+        json={"title": "Mañana", "scheduled_for": "2099-01-01T10:00:00Z"},
+    )
+    assert respuesta.status_code == 201, respuesta.text
+    sesion_id = respuesta.json()["id"]
+    respuesta = await http.post(f"{LIVE}/sessions/{sesion_id}/credential")
+    assert respuesta.status_code == 503
+    assert doble.abiertas == []
+
+
+@pytest.mark.asyncio
+async def test_nacer_en_directo_respeta_el_techo_de_emisiones_simultaneas(entorno):
+    """Antes solo lo miraba `/start`, y el camino de «Vivo» en la app —crear sin
+    fecha, que nace ya emitiendo— se lo saltaba."""
+    http, _sesiones, identidad, _doble = entorno
+    ajustes = get_settings()
+    anterior = ajustes.live_max_concurrent
+    ajustes.live_max_concurrent = 1
+    try:
+        primera = await http.post(f"{LIVE}/sessions", json={"title": "Una"})
+        assert primera.status_code == 201, primera.text
+
+        identidad["uid"] = BRUNO
+        segunda = await http.post(f"{LIVE}/sessions", json={"title": "Otra"})
+        assert segunda.status_code == 409, segunda.text
+        assert segunda.json()["error"]["code"] == "live_too_many_concurrent"
+
+        # Programar sí se puede: no ocupa sala hasta que empiece.
+        programada = await http.post(
+            f"{LIVE}/sessions",
+            json={"title": "Luego", "scheduled_for": "2099-01-01T10:00:00Z"},
+        )
+        assert programada.status_code == 201, programada.text
+    finally:
+        ajustes.live_max_concurrent = anterior
+
+
+@pytest.mark.asyncio
+async def test_la_disponibilidad_dice_si_hay_video(entorno):
+    """Es lo que mira la app antes de ofrecer «Vivo»."""
+    http, _sesiones, _identidad, _doble = entorno
+    respuesta = await http.get(f"{LIVE}/availability")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json() == {"video": True, "provider": "100ms"}
+
+    providers.PROVEEDORES.pop("100ms")
+    respuesta = await http.get(f"{LIVE}/availability")
+    assert respuesta.json() == {"video": False, "provider": "none"}
 
 
 @pytest.mark.asyncio

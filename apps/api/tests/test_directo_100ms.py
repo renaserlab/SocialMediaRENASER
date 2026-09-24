@@ -316,9 +316,58 @@ async def test_cerrar_dos_veces_no_falla():
     """Terminar una emisión no puede depender de que el proveedor responda: si
     fallara, la sala se quedaría «en directo» para siempre en la pantalla de
     todo el mundo."""
-    proveedor, _ = _proveedor([_respuesta(200, {}), _respuesta(404, {})])
+    # Cada cierre son dos llamadas: vaciar la sala activa y deshabilitarla. La
+    # segunda vez ya no hay nadie dentro ni sala que deshabilitar: dos 404.
+    proveedor, _ = _proveedor(
+        [_respuesta(200, {}), _respuesta(200, {}), _respuesta(404, {}), _respuesta(404, {})]
+    )
     assert await proveedor.cerrar_sala(room_id="room_1") is None
     assert await proveedor.cerrar_sala(room_id="room_1") is None
+
+
+@pytest.mark.asyncio
+async def test_terminar_echa_a_quien_sigue_dentro_y_despues_deshabilita():
+    """Deshabilitar solo cierra la puerta a quien llega: el público que ya
+    estaba seguía viendo —y la sala facturando— hasta cerrar la app."""
+    proveedor, http = _proveedor([_respuesta(200, {}), _respuesta(200, {})])
+    await proveedor.cerrar_sala(room_id="room_1")
+    assert http.peticiones == [
+        (
+            "POST",
+            "https://api.100ms.test/v2/active-rooms/room_1/end-room",
+            {"reason": "La transmisión terminó.", "lock": True},
+        ),
+        ("POST", "https://api.100ms.test/v2/rooms/room_1", {"enabled": False}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sin_nadie_dentro_se_deshabilita_igual():
+    """100ms contesta 404 a `end-room` cuando no hay sesión activa: es lo normal
+    al terminar una emisión que ya se había vaciado, no un fallo."""
+    proveedor, http = _proveedor([_respuesta(404, {}), _respuesta(200, {})])
+    assert await proveedor.cerrar_sala(room_id="room_1") is None
+    assert [url for _m, url, _c in http.peticiones][-1].endswith("/rooms/room_1")
+
+
+@pytest.mark.asyncio
+async def test_si_vaciar_falla_por_red_se_deshabilita_igual():
+    """Si la primera llamada no responde, la segunda es la que impide que entre
+    alguien más."""
+    class _PrimeroCae:
+        def __init__(self) -> None:
+            self.peticiones: list[str] = []
+
+        async def request(self, metodo, url, **_kw):
+            self.peticiones.append(url)
+            if url.endswith("/end-room"):
+                raise httpx.ConnectTimeout("sin respuesta")
+            return _respuesta(200, {})
+
+    http = _PrimeroCae()
+    proveedor = Proveedor100ms(CONFIG, cliente=Cliente100ms(CONFIG, cliente_http=http))
+    assert await proveedor.cerrar_sala(room_id="room_1") is None
+    assert http.peticiones[-1].endswith("/rooms/room_1")
 
 
 @pytest.mark.asyncio

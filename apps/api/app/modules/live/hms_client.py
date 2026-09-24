@@ -126,7 +126,7 @@ def token_de_sala(
 
 
 class Cliente100ms:
-    """Las cuatro llamadas HTTP que necesita el módulo."""
+    """Las cinco llamadas HTTP que necesita el módulo."""
 
     def __init__(
         self,
@@ -178,6 +178,23 @@ class Cliente100ms:
         falta para poder conciliar después qué pasó.
         """
         return await self._pedir("POST", f"/rooms/{room_id}", json={"enabled": False})
+
+    async def terminar_sala_activa(self, *, room_id: str, motivo: str) -> dict:
+        """Echa a todos los que siguen dentro y bloquea la sala.
+
+        `deshabilitar_sala` solo impide que entre alguien NUEVO: quien ya estaba
+        conectado seguía viendo y oyendo (y el anfitrión, emitiendo y facturando)
+        hasta cerrar la app. Esto termina la sesión activa para todos y, con
+        `lock`, deja la sala deshabilitada en la misma llamada.
+
+        Sin sesión activa (nadie dentro) 100ms contesta 404: es lo normal al
+        terminar una emisión que ya se había vaciado, y quien llama lo trata así.
+        """
+        return await self._pedir(
+            "POST",
+            f"/active-rooms/{room_id}/end-room",
+            json={"reason": motivo[:100], "lock": True},
+        )
 
     # ------------------------------------------------------------------ #
 
