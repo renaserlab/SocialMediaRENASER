@@ -978,6 +978,26 @@ async def test_la_cola_de_revision_trae_lo_enviado(entorno):
 
 
 @pytest.mark.asyncio
+async def test_un_evento_aprobado_sigue_en_la_cola_hasta_publicarlo(entorno):
+    """Aprobado no es publicado. Antes salía de la cola al aprobarlo, y si
+    administración cerraba la revisión sin pulsar «Publicar», el evento se
+    quedaba aprobado sin ninguna lista desde la que volver a encontrarlo."""
+    http, identidad, _ = entorno
+    ident = await _hasta_publicar(http, identidad)  # aprobado, sin publicar
+
+    identidad["uid"] = CURADORA
+    cola = {e["id"]: e for e in (await http.get(f"{ADMIN}/pending")).json()}
+    assert ident in cola
+    assert cola[ident]["workflow_status"] == "APPROVED"
+
+    identidad["uid"] = ADMINISTRA
+    assert (await http.post(f"{ADMIN}/{ident}/publish")).status_code == 200
+    identidad["uid"] = CURADORA
+    cola = {e["id"] for e in (await http.get(f"{ADMIN}/pending")).json()}
+    assert ident not in cola
+
+
+@pytest.mark.asyncio
 async def test_la_cola_dice_cual_ya_esta_evaluado(entorno):
     """La cola decía «sin evaluar» en TODAS las filas, tuvieran puntaje o no.
 

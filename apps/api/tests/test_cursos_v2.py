@@ -578,6 +578,23 @@ async def test_solo_la_administracion_resuelve_una_revision(entorno):
 
 
 @pytest.mark.asyncio
+async def test_administracion_tampoco_revisa_su_propio_curso(entorno):
+    """La misma regla que eventos y productos. Sin ella, quien administraba
+    podía crear un curso, aprobárselo y publicarlo sin que nadie más lo viera."""
+    http, sesiones, identidad = entorno
+    identidad["uid"] = ADMIN
+    curso = await _listo_para_revision(http, sesiones)
+    await http.post(f"{CATALOGO}/courses/{curso['id']}/submit")
+    respuesta = await http.post(
+        f"{CATALOGO}/courses/{curso['id']}/review", json={"decision": "approve"}
+    )
+    assert respuesta.status_code == 403, respuesta.text
+    assert respuesta.json()["error"]["code"] == "course_self_review_not_allowed"
+    mio = (await http.get(f"{CATALOGO}/courses/mine")).json()[0]
+    assert mio["review_status"] == "pending_review"
+
+
+@pytest.mark.asyncio
 async def test_aprobar_deja_constancia_y_no_publica(entorno):
     """Aprobar y publicar son de dos personas distintas."""
     http, sesiones, identidad = entorno

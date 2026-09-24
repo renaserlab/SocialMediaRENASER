@@ -855,7 +855,12 @@ async def _con_decisiones(db: AsyncSession, expedientes: list[Expediente]) -> No
 
 #: Lo que espera una decisión. `CONDITIONAL` entra: tiene un pendiente y sigue
 #: siendo trabajo de curaduría, no del olvido.
-PENDIENTES = (states.ENVIADO, states.CONDICIONAL)
+#:
+#: `APPROVED` TAMBIÉN: aprobado todavía no es publicado, y publicar es otro
+#: paso de administración. Antes salía de la cola al aprobarlo, así que quien
+#: cerraba la pantalla de revisión antes de pulsar «Publicar» dejaba el evento
+#: aprobado para siempre, sin ninguna lista desde la que volver a encontrarlo.
+PENDIENTES = (states.ENVIADO, states.CONDICIONAL, states.APROBADO)
 
 
 async def pendientes(

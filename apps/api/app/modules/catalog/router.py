@@ -1197,6 +1197,14 @@ async def review_course(
     course = await db.get(Course, course_id)
     if course is None or course.status == "deleted":
         raise NotFoundError("Curso no encontrado.")
+    # NADIE REVISA LO SUYO, administración incluida. Es la misma regla que ya
+    # siguen eventos y productos; aquí faltaba, y quien administraba podía
+    # crear un curso, aprobárselo y publicarlo sin que otra persona lo viera.
+    if course.author_id == current_user.id:
+        raise ForbiddenError(
+            "No puedes revisar tu propio curso: tiene que hacerlo otra persona.",
+            code="course_self_review_not_allowed",
+        )
 
     aprobado = payload.decision == "approve"
     motivo = (payload.reason or "").strip()
