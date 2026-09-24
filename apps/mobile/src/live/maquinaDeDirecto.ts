@@ -562,6 +562,12 @@ export type SesionDeDirecto = {
     camaraFrontal: boolean;
     publicando: boolean;
   }) => void;
+  /**
+   * Llega (o deja de llegar) imagen o sonido de OTRA persona. Es lo que pone
+   * «en directo» a quien solo mira; sin esto se quedaba en «conectado» para
+   * siempre, porque `publicando` es solo lo propio y un espectador no publica.
+   */
+  laSalaCambioDePistasAjenas: (hayMediosAjenos: boolean) => void;
   laSalaSeCayo: (recuperable: boolean) => void;
 
   /* Gestos. */
@@ -585,7 +591,12 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
   let permisoCamara: PermisoDeMedios = 'noHaceFalta';
   let permisoMicrofono: PermisoDeMedios = 'noHaceFalta';
   let conexion: ConexionDeSala = 'sinIniciar';
-  let hayMedios = false;
+  /** Lo PROPIO: esta persona esta emitiendo. */
+  let publicandoAqui = false;
+  /** Lo AJENO: llega imagen o sonido de otra persona. */
+  let mediosAjenos = false;
+  /** Hay algo circulando, sea lo propio o lo ajeno. */
+  const hayMedios = (): boolean => publicandoAqui || mediosAjenos;
   let quedanReintentos = false;
   let intentos = 0;
   let puedePublicar = false;
@@ -617,7 +628,7 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       permisoCamara,
       permisoMicrofono,
       conexion,
-      hayMedios,
+      hayMedios: hayMedios(),
       quedanReintentos,
     }),
     camara,
@@ -845,7 +856,8 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
           void entorno.salirDeLaSala();
         }
         conexion = 'sinIniciar';
-        hayMedios = false;
+        publicandoAqui = false;
+        mediosAjenos = false;
         camara = false;
         microfono = false;
         publicar();
@@ -891,7 +903,13 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       camara = medios.camara;
       microfono = medios.microfono;
       camaraFrontal = medios.camaraFrontal;
-      hayMedios = medios.publicando;
+      publicandoAqui = medios.publicando;
+      publicar();
+    },
+
+    laSalaCambioDePistasAjenas(hay) {
+      if (destruida) return;
+      mediosAjenos = hay;
       publicar();
     },
 
@@ -899,7 +917,8 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       if (destruida) return;
       dentroDeLaSala = false;
       conexion = 'perdida';
-      hayMedios = false;
+      publicandoAqui = false;
+      mediosAjenos = false;
       if (!recuperable) {
         /*
           Token caducado, expulsion, sala cerrada por el proveedor: volver a

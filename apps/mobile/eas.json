@@ -14,7 +14,8 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
         "EXPO_PUBLIC_API_URL": "https://dzqncwhehxai0.cloudfront.net",
         "EXPO_PUBLIC_WEB_URL": "https://social-media-renaser.vercel.app",
-        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500",
+        "EXPO_PUBLIC_FEATURE_LIVE": "on"
       }
     },
     "preview": {
@@ -33,7 +34,8 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
         "EXPO_PUBLIC_API_URL": "https://dzqncwhehxai0.cloudfront.net",
         "EXPO_PUBLIC_WEB_URL": "https://social-media-renaser.vercel.app",
-        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500",
+        "EXPO_PUBLIC_FEATURE_LIVE": "on"
       }
     },
     "preview-ios-simulator": {
@@ -58,7 +60,8 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
         "EXPO_PUBLIC_API_URL": "https://dzqncwhehxai0.cloudfront.net",
         "EXPO_PUBLIC_WEB_URL": "https://social-media-renaser.vercel.app",
-        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500",
+        "EXPO_PUBLIC_FEATURE_LIVE": "on"
       }
     }
   },

@@ -449,6 +449,56 @@ describe('los eventos de la sala', () => {
     assert.equal(banco.ultimaVista().camara, true);
   });
 
+  it('QUIEN MIRA pasa a «en directo» en cuanto llega imagen o sonido del anfitrion', async () => {
+    /*
+      EL FALLO QUE CIERRA ESTO. `hayMedios` solo salia de `publicando`, que es
+      lo PROPIO, y un espectador no publica: se quedaba en «conectado, esperando
+      al anfitrion» con el anfitrion emitiendo delante. Lo ajeno entra por
+      `laSalaCambioDePistasAjenas`.
+    */
+    const banco = await bancoConectado();
+    assert.equal(banco.estado(), 'conectado');
+
+    banco.sesion.laSalaCambioDePistasAjenas(true);
+    assert.equal(banco.estado(), 'en_directo');
+
+    // El anfitrion apaga camara Y microfono: ya no llega nada.
+    banco.sesion.laSalaCambioDePistasAjenas(false);
+    assert.equal(banco.estado(), 'conectado');
+  });
+
+  it('lo propio y lo ajeno se suman: apagar lo propio no apaga lo que llega', async () => {
+    const banco = await bancoConectado();
+    banco.sesion.laSalaCambioDePistasAjenas(true);
+    banco.sesion.laSalaCambioDeMedios({
+      camara: true,
+      microfono: true,
+      camaraFrontal: true,
+      publicando: true,
+    });
+    banco.sesion.laSalaCambioDeMedios({
+      camara: false,
+      microfono: false,
+      camaraFrontal: true,
+      publicando: false,
+    });
+    assert.equal(banco.estado(), 'en_directo');
+  });
+
+  it('una caida borra tambien lo ajeno: tras reconectar no se da por visto', async () => {
+    const banco = await bancoConectado();
+    banco.sesion.laSalaCambioDePistasAjenas(true);
+    banco.sesion.laSalaSeCayo(true);
+    await respirar();
+    assert.equal(banco.estado(), 'error_recuperable');
+
+    // El reintento de verdad: credencial nueva, entrar, conectar.
+    banco.correrElReloj();
+    await respirar();
+    banco.sesion.laSalaConecto();
+    assert.equal(banco.estado(), 'conectado', 'hasta que la sala vuelva a contar que llega algo');
+  });
+
   it('la mala calidad se dice, no se disimula', async () => {
     const banco = await bancoConectado();
     banco.sesion.laSalaCambioDeCalidad(false);

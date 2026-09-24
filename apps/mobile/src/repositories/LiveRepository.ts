@@ -384,6 +384,25 @@ export const LiveRepository = {
 
   /** Atajo: `true` si esta credencial da video de verdad. */
   hayVideo: hayVideoEnLaCredencial,
+
+  /**
+   * Si el servidor tiene proveedor de video ahora mismo.
+   *
+   * Lo pregunta «Vivo» antes de ofrecer emitir: encender los directos es
+   * configuracion del servidor, no otra version de la app. Cualquier fallo
+   * cuenta como «no hay»: ofrecer emitir sin saberlo es prometer una sala
+   * que puede no tener imagen.
+   */
+  async disponibilidad(): Promise<boolean> {
+    try {
+      const dto = await apiRequest<{ video?: unknown }>(`${API_V1}/live/availability`, {
+        auth: false,
+      });
+      return dto?.video === true;
+    } catch {
+      return false;
+    }
+  },
 };
 
 /**

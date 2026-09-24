@@ -1,17 +1,24 @@
+import { createElement } from 'react';
 import {
   HMSConfig,
   HMSSDK,
   HMSUpdateListenerActions,
+  HMSVideoViewMode,
   type HMSLocalAudioTrack,
   type HMSLocalVideoTrack,
+  type HMSPeer,
 } from '@100mslive/react-native-hms';
 
 import {
   SalaNoDisponible,
   mediosApagados,
+  sinPistas,
   type CredencialDeVideo,
   type EstadoDeMedios,
   type EventoDeSala,
+  type PistaDeVideo,
+  type PistasDeSala,
+  type PropsDeVistaDePista,
   type SalaDeVideo,
 } from '@/live/salaDeVideo';
 
@@ -38,6 +45,11 @@ import {
  * 3. **Nada queda encendido.** `destruir` apaga las dos pistas, se va de la
  *    sala y libera la instancia del SDK, en ese orden y sin depender de que
  *    ninguna de las tres cosas salga bien.
+ * 4. **Se ve algo.** Hasta el 23/09/2026 el adaptador conectaba pero nunca
+ *    contaba que pistas habia, asi que la pantalla no tenia nada que dibujar y
+ *    quien miraba se quedaba en «esperando al anfitrion». Ahora cada cambio de
+ *    pista o de participante recalcula la lista y la manda (`pistas`), y
+ *    `VistaDePista` dibuja cualquiera de ellas con `sdk.HmsView`.
  */
 
 /** Cuánto se espera a que el SDK conteste antes de darlo por perdido. */
@@ -51,10 +63,35 @@ class SalaDe100ms implements SalaDeVideo {
   private oyentes = new Set<(evento: EventoDeSala) => void>();
   private destruida = false;
   private entrando: Promise<void> | null = null;
+  private ultimasPistas: PistasDeSala = sinPistas();
+  /**
+   * Cada recalculo de pistas lleva un numero. `getRemotePeers` es asincrono y
+   * dos cambios seguidos pueden contestar en desorden: sin esto, una lista
+   * vieja que llega tarde pisaria a la nueva y se veria a alguien que ya se fue.
+   */
+  private generacionDePistas = 0;
+
+  /**
+   * Dibuja una pista con el `HmsView` de ESTA instancia del SDK.
+   *
+   * Es un campo y no un metodo para que su identidad no cambie entre renders:
+   * React desmontaria y volveria a montar la vista de video en cada pintado.
+   * Sin SDK (antes de entrar, despues de salir) no pinta nada.
+   */
+  readonly VistaDePista = ({ pistaId, espejo, estilo }: PropsDeVistaDePista) => {
+    const HmsView = this.sdk?.HmsView;
+    if (!HmsView || !pistaId) return null;
+    return createElement(HmsView, {
+      trackId: pistaId,
+      mirror: espejo,
+      scaleType: HMSVideoViewMode.ASPECT_FILL,
+      style: estilo as never,
+    });
+  };
 
   async unirse(
     credencial: CredencialDeVideo,
-    opciones: { publicar: boolean },
+    opciones: { publicar: boolean; nombre?: string },
   ): Promise<void> {
     if (this.destruida) throw new SalaNoDisponible('La sala ya se cerró.');
     // UNA SOLA ENTRADA. Dos pulsaciones seguidas, o un reintento que se cruza
@@ -62,13 +99,17 @@ class SalaDe100ms implements SalaDeVideo {
     // una conexion huerfana consumiendo camara y datos.
     if (this.entrando) return this.entrando;
 
-    this.entrando = this.entrar(credencial, opciones.publicar).finally(() => {
+    this.entrando = this.entrar(credencial, opciones.publicar, opciones.nombre).finally(() => {
       this.entrando = null;
     });
     return this.entrando;
   }
 
-  private async entrar(credencial: CredencialDeVideo, publicar: boolean): Promise<void> {
+  private async entrar(
+    credencial: CredencialDeVideo,
+    publicar: boolean,
+    nombre: string | undefined,
+  ): Promise<void> {
     const sdk = await HMSSDK.build();
     if (this.destruida) {
       // Se desmontó mientras construíamos. Se suelta lo que se acaba de crear
@@ -97,7 +138,9 @@ class SalaDe100ms implements SalaDeVideo {
         .join(
           new HMSConfig({
             authToken: credencial.token,
-            username: credencial.salaId || 'z',
+            // El nombre de la persona. Antes era el id de la sala para todos,
+            // asi que en el panel de 100ms nadie se distinguia de nadie.
+            username: nombre?.trim() || 'Z',
           }),
         )
         .catch((error: unknown) => {
@@ -124,9 +167,65 @@ class SalaDe100ms implements SalaDeVideo {
     }
     this.avisar({ tipo: 'conectado' });
     this.avisar({ tipo: 'medios', medios: this.medios() });
+    // Quien entra cuando la emision ya empezo no recibe un ON_TRACK_UPDATE por
+    // lo que ya estaba: hay que preguntar que hay nada mas entrar.
+    void this.refrescarPistas();
+  }
+
+  /**
+   * Recalcula las pistas desde el SDK y avisa si cambiaron.
+   *
+   * SE RECALCULA ENTERA en cada cambio en vez de aplicar el diff del evento:
+   * con dos o tres participantes cuesta nada y no hay forma de que un evento
+   * perdido deje la lista descuadrada para el resto de la emision.
+   */
+  private async refrescarPistas(): Promise<void> {
+    const sdk = this.sdk;
+    if (this.destruida || !sdk) return;
+    const generacion = ++this.generacionDePistas;
+    let pares: HMSPeer[];
+    try {
+      const [local, remotos] = await Promise.all([sdk.getLocalPeer(), sdk.getRemotePeers()]);
+      pares = [...(local ? [local] : []), ...(remotos ?? [])];
+    } catch {
+      // Una lectura fallida no borra lo que ya se veia: llegara otro evento.
+      return;
+    }
+    if (this.destruida || generacion !== this.generacionDePistas) return;
+
+    const video: PistaDeVideo[] = [];
+    let hayMediosAjenos = false;
+    for (const par of pares) {
+      const local = par.isLocal === true;
+      const pista = par.videoTrack;
+      const videoApagado = !pista || silenciada(pista);
+      if (pista?.trackId) {
+        video.push({
+          id: pista.trackId,
+          local,
+          papel: par.role?.name ?? '',
+          silenciada: videoApagado,
+        });
+      }
+      const audio = par.audioTrack;
+      const audioApagado = !audio || silenciada(audio);
+      if (!local && (!videoApagado || !audioApagado)) hayMediosAjenos = true;
+    }
+
+    const nuevas: PistasDeSala = { video, hayMediosAjenos };
+    if (JSON.stringify(nuevas) === JSON.stringify(this.ultimasPistas)) return;
+    this.ultimasPistas = nuevas;
+    this.avisar({ tipo: 'pistas', pistas: this.pistas() });
   }
 
   private escuchar(sdk: HMSSDK): void {
+    // Alguien entra o sale, enciende o apaga la camara o el microfono.
+    sdk.addEventListener(HMSUpdateListenerActions.ON_TRACK_UPDATE, () => {
+      void this.refrescarPistas();
+    });
+    sdk.addEventListener(HMSUpdateListenerActions.ON_PEER_UPDATE, () => {
+      void this.refrescarPistas();
+    });
     sdk.addEventListener(HMSUpdateListenerActions.RECONNECTING, () => {
       this.avisar({ tipo: 'reconectando' });
     });
@@ -144,6 +243,9 @@ class SalaDe100ms implements SalaDeVideo {
     const sdk = this.sdk;
     this.sdk = null;
     this.estado = mediosApagados();
+    this.ultimasPistas = sinPistas();
+    // Invalida cualquier recalculo en vuelo: su respuesta ya no es de nadie.
+    this.generacionDePistas += 1;
     if (!sdk) return;
     await this.soltar(sdk);
   }
@@ -193,6 +295,13 @@ class SalaDe100ms implements SalaDeVideo {
     // Copia: quien la reciba no puede cambiar el estado de la sala escribiendo
     // en el objeto que le dieron.
     return { ...this.estado };
+  }
+
+  pistas(): PistasDeSala {
+    return {
+      video: this.ultimasPistas.video.map((pista) => ({ ...pista })),
+      hayMediosAjenos: this.ultimasPistas.hayMediosAjenos,
+    };
   }
 
   alOcurrir(oyente: (evento: EventoDeSala) => void): () => void {
@@ -253,6 +362,21 @@ class SalaDe100ms implements SalaDeVideo {
         // Un oyente que revienta no puede llevarse por delante a los demás.
       }
     }
+  }
+}
+
+/**
+ * Si una pista esta silenciada. `isMute()` es lo que documenta el SDK; `mute`
+ * es el valor que trae el objeto cuando la pista llega serializada del puente
+ * nativo. Ante la duda, NO silenciada: mejor un panel que intenta pintar que
+ * uno negro sobre alguien que si esta emitiendo.
+ */
+function silenciada(pista: { isMute?: () => boolean | undefined; mute?: boolean }): boolean {
+  try {
+    const valor = typeof pista.isMute === 'function' ? pista.isMute() : undefined;
+    return (valor ?? pista.mute) === true;
+  } catch {
+    return pista.mute === true;
   }
 }
 

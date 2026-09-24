@@ -196,7 +196,11 @@ describe('EL SDK NATIVO ESTA AISLADO EN UN SOLO FICHERO', () => {
       // explicar donde vive. Documentarlo no es importarlo.
       const texto = sinComentarios(fuente(rel));
       for (const nombre of [PAQUETE, ...PROHIBIDOS]) {
-        const importa = new RegExp(`from\s*['"]${nombre.replace(/[/@]/g, '\$&')}`).test(texto);
+        // Barra DOBLE en `\\s`: dentro de una plantilla, una sola se queda en
+        // una `s` suelta, el patron buscaba «froms» y esta comprobacion no
+        // podia fallar nunca (corregido el 23/09/2026, comprobado importando
+        // el SDK en `ModoVivo`).
+        const importa = new RegExp(`from\\s*['"]${nombre.replace(/[/@]/g, '\\$&')}`).test(texto);
         assert.equal(importa, false, `${rel} importa ${nombre}`);
       }
     }
@@ -256,8 +260,17 @@ describe('los modulos probados con Node siguen sin importar nada', () => {
       (`allowImportingTsExtensions` esta apagado) y sin ella Node no resuelve la
       ruta: por eso van sin imports y con el entorno inyectado.
     */
+    /*
+      `import type` SI se permite, y solo eso: desaparece al ejecutar (Node lo
+      borra al quitar los tipos), asi que no saca a nadie del runner. Hace falta
+      desde que la sala expone el componente que dibuja una pista
+      (`ComponentType` de React), el 23/09/2026. Cualquier otro `import`, aunque
+      sea de un solo valor, sigue fallando aqui.
+    */
     for (const rel of ['live/salaDeVideo.ts', 'live/maquinaDeDirecto.ts', 'live/reintentos.ts']) {
-      const importaciones = [...fuente(rel).matchAll(/^\s*import\s.+$/gm)].map((m) => m[0]);
+      const importaciones = [...fuente(rel).matchAll(/^\s*import\s.+$/gm)]
+        .map((m) => m[0])
+        .filter((linea) => !/^\s*import\s+type\s/.test(linea));
       assert.deepEqual(importaciones, [], `${rel} ha dejado de ser autonomo`);
     }
   });
