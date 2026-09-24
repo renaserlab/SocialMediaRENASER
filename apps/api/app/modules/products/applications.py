@@ -18,6 +18,7 @@ DOS PUERTAS QUE NO SON DE ROL:
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select, update
@@ -30,6 +31,7 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.modules.gobernanza import auditoria
+from app.modules.notifications import decisiones as avisos
 from app.modules.products import esquema, permissions
 from app.modules.products.models import (
     DOCUMENTOS,
@@ -147,7 +149,7 @@ async def guardar(
     propuesta = _exigir_texto(
         "proposal", proposal, LARGO_DE_LA_PROPUESTA, "seller_application_proposal_invalid"
     )
-    limpios = _exigir_documentos(documentos)
+    limpios = _exigir_documentos(documentos, usuario_id)
 
     # YA ES RESPONSABLE COMERCIAL: no hay nada que postular.
     vendedor = await permissions.vendedor_de(db, usuario_id)
@@ -190,7 +192,13 @@ async def guardar(
     return viva
 
 
-def _exigir_documentos(crudos: list[dict] | None) -> list[dict]:
+#: El depósito de la 0085: privado, sin políticas, solo por la API.
+DEPOSITO_DE_DOCUMENTOS = "seller-documents"
+#: 10 MB, igual que el límite del depósito.
+MAXIMO_BYTES_DEL_DOCUMENTO = 10 * 1024 * 1024
+
+
+def _exigir_documentos(crudos: list[dict] | None, usuario_id: str = "") -> list[dict]:
     if not crudos:
         return []
     if len(crudos) > MAXIMO_DE_DOCUMENTOS:
@@ -218,6 +226,15 @@ def _exigir_documentos(crudos: list[dict] | None) -> list[dict]:
         if ruta is not None and "://" in ruta:
             raise ValidationAppError(
                 "Se guarda la ruta del almacenamiento, no una URL.",
+                code="seller_application_document_path_invalid",
+            )
+        if ruta is not None and usuario_id and not ruta.startswith(f"{usuario_id}/"):
+            # SOLO RUTAS PROPIAS. Antes se aceptaba cualquier texto, y con los
+            # enlaces firmados de la 0085 eso permitiría que administración
+            # recibiera un enlace a un archivo ajeno. Las rutas las genera
+            # `subir_documento`; aquí solo vuelven las que ya son de esta persona.
+            raise ValidationAppError(
+                "Sube el archivo desde la aplicación.",
                 code="seller_application_document_path_invalid",
             )
         if nota is not None and len(nota) > 2_000:
@@ -251,6 +268,96 @@ async def _reemplazar_documentos(
             )
         )
     await db.flush()
+
+
+async def subir_documento(
+    db: AsyncSession,
+    *,
+    usuario_id: str,
+    kind: str,
+    nota: str | None,
+    datos: bytes,
+    declarado: str | None,
+) -> SellerApplication:
+    """Sube un documento a la postulación en borrador. OPCIONAL: se puede
+    postular sin ninguno.
+
+    SE MIRAN LOS BYTES, no la extensión: un PDF empieza por `%PDF-` y una foto
+    la abre `media.medir`, igual que las de producto. La RUTA LA PONE EL
+    SERVIDOR (`<perfil>/<postulación>/<uuid>.<ext>`), así que nadie puede
+    apuntar a un archivo ajeno. El ARCHIVO PRIMERO: si la subida falla, no queda
+    una fila que promete un documento que no existe.
+    """
+    # Import local: `media` importa el catálogo de productos y este módulo se
+    # carga antes en algunos caminos.
+    from app.modules.products import media
+    from app.shared import storage
+
+    await esquema.exigir_admision(db)
+    postulacion = await mia(db, usuario_id=usuario_id)
+    if postulacion is None:
+        raise PostulacionNoEncontrada(
+            "Guarda primero tu postulación y después sube los documentos."
+        )
+    if postulacion.status not in EDITABLES:
+        raise PostulacionNoEditable(
+            "Tu postulación ya se envió y no se puede cambiar.",
+            details={"status": postulacion.status},
+        )
+    tipo = (kind or "").strip()
+    if tipo not in DOCUMENTOS:
+        raise ValidationAppError(
+            "Ese tipo de documento no existe.",
+            code="seller_application_document_kind_invalid",
+            details={"allowed": list(DOCUMENTOS)},
+        )
+    limpia = (nota or "").strip() or None
+    if limpia is not None and len(limpia) > 2_000:
+        raise ValidationAppError(
+            "La nota del documento es demasiado larga.",
+            code="seller_application_document_note_too_long",
+        )
+    ya = await documentos_de(db, postulacion_id=postulacion.id)
+    if len(ya) >= MAXIMO_DE_DOCUMENTOS:
+        raise ValidationAppError(
+            "Demasiados documentos en una sola postulación.",
+            code="seller_application_documents_too_many",
+            details={"max": MAXIMO_DE_DOCUMENTOS},
+        )
+    if not datos:
+        raise ValidationAppError("El archivo está vacío.", code="seller_application_document_empty")
+    if len(datos) > MAXIMO_BYTES_DEL_DOCUMENTO:
+        raise ValidationAppError(
+            "El documento pesa demasiado (máximo 10 MB).",
+            code="seller_application_document_too_big",
+        )
+    if datos[:5] == b"%PDF-":
+        tipo_de_contenido, extension = "application/pdf", "pdf"
+    else:
+        try:
+            medida = media.medir(datos, declarado=declarado)
+        except Exception:
+            raise ValidationAppError(
+                "Sube un PDF o una foto (JPEG, PNG o WebP).",
+                code="seller_application_document_type_invalid",
+            ) from None
+        tipo_de_contenido = medida.content_type
+        extension = media.EXTENSION_DE_LA_IMAGEN.get(tipo_de_contenido, "jpg")
+
+    ruta = f"{usuario_id}/{postulacion.id}/{uuid.uuid4()}.{extension}"
+    await storage.subir_objeto(DEPOSITO_DE_DOCUMENTOS, ruta, datos, tipo_de_contenido)
+    db.add(
+        SellerApplicationDocument(
+            application_id=postulacion.id,
+            created_by=usuario_id,
+            kind=tipo,
+            storage_path=ruta,
+            note=limpia,
+        )
+    )
+    postulacion.updated_at = ahora()
+    await db.flush()
+    return postulacion
 
 
 async def enviar(
@@ -477,14 +584,70 @@ async def decidir(
         reason=razon,
         payload={"seller_id": vendedor.id if vendedor is not None else None},
     )
+    await avisos.avisar(
+        db,
+        user_id=postulacion.profile_id,
+        tipo="seller_application_accepted" if aceptar else "seller_application_rejected",
+        entidad="seller_application",
+        entidad_id=postulacion.id,
+        titulo=postulacion.display_name,
+        motivo=None if aceptar else razon,
+    )
     return postulacion, vendedor
+
+
+async def aceptar_al_enviar(
+    db: AsyncSession, *, postulacion: SellerApplication
+) -> ProductSeller:
+    """MODO FLEXIBLE: la postulación se acepta en cuanto se envía.
+
+    Decide EL SISTEMA (`decided_by` y `activated_by` nulos, como admite la
+    0071) y queda en la auditoría como tal. `decidir` no sirve: exige que
+    quien decide sea otra persona y de administración.
+    """
+    momento = ahora()
+    await _mover(
+        db,
+        postulacion=postulacion,
+        desde=POSTULACION_ENVIADA,
+        hasta=POSTULACION_ACEPTADA,
+        valores={
+            "decided_at": momento,
+            "decided_by": None,
+            "decision_reason": None,
+            "updated_at": momento,
+            "submitted_at": postulacion.submitted_at or momento,
+        },
+    )
+    vendedor = await _activar(db, postulacion=postulacion, usuario_id=None, momento=momento)
+    await auditoria.anotar(
+        db,
+        actor_id=None,
+        action="seller_application.decide",
+        entity_type="seller_application",
+        entity_id=postulacion.id,
+        actor_role="system",
+        previous_state=POSTULACION_ENVIADA,
+        new_state=POSTULACION_ACEPTADA,
+        payload={"seller_id": vendedor.id, "modo": "publicacion_flexible"},
+    )
+    await avisos.avisar(
+        db,
+        user_id=postulacion.profile_id,
+        tipo="seller_application_accepted",
+        entidad="seller_application",
+        entidad_id=postulacion.id,
+        titulo=postulacion.display_name,
+        automatico=True,
+    )
+    return vendedor
 
 
 async def _activar(
     db: AsyncSession,
     *,
     postulacion: SellerApplication,
-    usuario_id: str,
+    usuario_id: str | None,
     momento: datetime,
 ) -> ProductSeller:
     """Crea o reactiva la capacidad comercial. IDEMPOTENTE por perfil."""

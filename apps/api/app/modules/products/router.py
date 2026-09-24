@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +35,9 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.core.config import get_settings
 from app.modules.gobernanza import auditoria
+from app.modules.notifications import decisiones as avisos
 from app.modules.products import applications, carts, catalog, esquema, evaluations
 from app.modules.products import envios
 from app.modules.products import estados_de_envio
@@ -487,10 +489,19 @@ async def _galeria_del_proveedor(
     ]
 
 
+def _flexible() -> bool:
+    return get_settings().publicacion_flexible
+
+
 async def _del_proveedor(
     db: AsyncSession, producto: Product, *, actor: str
 ) -> ProductoDelProveedor:
-    bloqueo = await service.por_que_no_se_publica(db, producto=producto)
+    flexible = _flexible()
+    bloqueo = (
+        await service.por_que_no_se_publica_directo(db, producto=producto)
+        if flexible and actor == maquina.PROVEEDOR
+        else await service.por_que_no_se_publica(db, producto=producto)
+    )
     return ProductoDelProveedor(
         id=producto.id,
         status=producto.status,
@@ -506,12 +517,29 @@ async def _del_proveedor(
         ),
         acciones=list(maquina.siguientes(producto.status, actor)),
         bloqueo=bloqueo[0] if bloqueo is not None else None,
+        editable=service.se_puede_editar(producto, flexible=flexible),
+        publicacion_directa=flexible,
     )
 
 
-def _postulacion(
+async def _postulacion(
     postulacion: applications.SellerApplication, documentos: list
 ) -> PostulacionRead:
+    """La postulación con sus documentos, y un enlace firmado para abrirlos.
+
+    FIRMADOS AL LEER Y CORTOS (diez minutos): administración los abre desde la
+    bandeja y quien postula ve lo que subió. Solo se firman rutas del depósito
+    de la 0085, que son las que genera `subir_documento`.
+    """
+    enlaces: dict[str, str] = {}
+    rutas = [d.storage_path for d in documentos if d.storage_path]
+    if rutas and almacenamiento.storage_configured():
+        try:
+            enlaces = await almacenamiento.firmar_objetos(
+                applications.DEPOSITO_DE_DOCUMENTOS, rutas, segundos=600
+            )
+        except Exception:  # pragma: no cover - sin enlace, se ve la ruta igual
+            enlaces = {}
     return PostulacionRead(
         id=postulacion.id,
         status=postulacion.status,
@@ -522,7 +550,11 @@ def _postulacion(
         decision_reason=postulacion.decision_reason,
         documents=[
             DocumentoRead(
-                id=d.id, kind=d.kind, storage_path=d.storage_path, note=d.note
+                id=d.id,
+                kind=d.kind,
+                storage_path=d.storage_path,
+                note=d.note,
+                url=enlaces.get(d.storage_path) if d.storage_path else None,
             )
             for d in documentos
         ],
@@ -636,7 +668,7 @@ async def mi_postulacion(
         seller_status=vendedor.status if vendedor is not None else None,
         seller_id=vendedor.id if vendedor is not None else None,
         application=(
-            _postulacion(postulacion, documentos) if postulacion is not None else None
+            await _postulacion(postulacion, documentos) if postulacion is not None else None
         ),
         puede_postular=disponible and not activo and not viva,
         disponible=disponible,
@@ -658,7 +690,36 @@ async def guardar_postulacion(
         documentos=[d.model_dump() for d in cuerpo.documents],
     )
     await db.commit()
-    return _postulacion(
+    return await _postulacion(
+        postulacion,
+        await applications.documentos_de(db, postulacion_id=postulacion.id),
+    )
+
+
+@router.post("/seller/application/documents", response_model=PostulacionRead)
+async def subir_documento_de_postulacion(
+    archivo: UploadFile = File(..., alias="file"),
+    kind: str = Form(...),
+    note: str | None = Form(default=None),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PostulacionRead:
+    """Sube un documento (PDF o foto) a la postulación en borrador. OPCIONAL.
+
+    Antes había que ESCRIBIR la ruta del almacenamiento a mano y no existía
+    depósito: solo funcionaba el campo de notas.
+    """
+    datos = await archivo.read(applications.MAXIMO_BYTES_DEL_DOCUMENTO + 1)
+    postulacion = await applications.subir_documento(
+        db,
+        usuario_id=current_user.id,
+        kind=kind,
+        nota=note,
+        datos=datos,
+        declarado=archivo.content_type,
+    )
+    await db.commit()
+    return await _postulacion(
         postulacion,
         await applications.documentos_de(db, postulacion_id=postulacion.id),
     )
@@ -675,8 +736,12 @@ async def enviar_postulacion(
     await applications.enviar(
         db, postulacion_id=postulacion.id, usuario_id=current_user.id
     )
+    if _flexible():
+        # MODO FLEXIBLE: aceptada al enviarla. Quien postula puede crear
+        # productos en el acto, sin esperar a que administración la mire.
+        await applications.aceptar_al_enviar(db, postulacion=postulacion)
     await db.commit()
-    return _postulacion(
+    return await _postulacion(
         postulacion,
         await applications.documentos_de(db, postulacion_id=postulacion.id),
     )
@@ -694,7 +759,7 @@ async def retirar_postulacion(
         db, postulacion_id=postulacion.id, usuario_id=current_user.id
     )
     await db.commit()
-    return _postulacion(
+    return await _postulacion(
         postulacion,
         await applications.documentos_de(db, postulacion_id=postulacion.id),
     )
@@ -762,6 +827,7 @@ async def guardar_borrador(
         usuario_id=current_user.id,
         datos=cuerpo.model_dump(),
         variantes=[v.model_dump() for v in cuerpo.variants],
+        flexible=_flexible(),
     )
     await db.commit()
     producto = await permisos.exigir_mio(
@@ -776,10 +842,20 @@ async def postular_producto(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProductoDelProveedor:
-    """«Postula tu producto». Lo manda a admisión y deja de ser editable."""
+    """«Postula tu producto». Lo manda a admisión y deja de ser editable.
+
+    EN MODO FLEXIBLE PUBLICA: el borrador —el producto nuevo o los cambios de
+    uno ya publicado— sale al catálogo en el acto (`publicar_sin_admision`).
+    """
     ensure_uuid(product_id, "Producto no encontrado.")
     await permisos.exigir_vendedor_activo(db, current_user.id)
     await permisos.exigir_mio(db, producto_id=product_id, user_id=current_user.id)
+    if _flexible():
+        producto, _ = await service.publicar_sin_admision(
+            db, producto_id=product_id, usuario_id=current_user.id
+        )
+        await db.commit()
+        return await _del_proveedor(db, producto, actor=maquina.PROVEEDOR)
     producto = await service.transicionar(
         db,
         producto_id=product_id,
@@ -2288,7 +2364,7 @@ async def bandeja_de_postulaciones(
     await permisos.exigir_evaluador(db, current_user.id)
     await esquema.exigir_admision(db)
     return [
-        _postulacion(
+        await _postulacion(
             p, await applications.documentos_de(db, postulacion_id=p.id)
         )
         for p in await applications.bandeja(db, estado=estado, limite=limit)
@@ -2308,7 +2384,7 @@ async def tomar_postulacion(
         db, postulacion_id=application_id, usuario_id=current_user.id
     )
     await db.commit()
-    return _postulacion(
+    return await _postulacion(
         postulacion,
         await applications.documentos_de(db, postulacion_id=postulacion.id),
     )
@@ -2320,6 +2396,7 @@ async def tomar_postulacion(
 async def decidir_postulacion(
     application_id: str,
     cuerpo: DecisionDePostulacion,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostulacionRead:
@@ -2336,7 +2413,14 @@ async def decidir_postulacion(
         notas=cuerpo.notas,
     )
     await db.commit()
-    return _postulacion(
+    avisos.empujar(
+        background,
+        user_id=postulacion.profile_id,
+        tipo="seller_application_accepted" if cuerpo.aceptar else "seller_application_rejected",
+        entidad="seller_application",
+        entidad_id=postulacion.id,
+    )
+    return await _postulacion(
         postulacion,
         await applications.documentos_de(db, postulacion_id=postulacion.id),
     )
@@ -3074,6 +3158,7 @@ async def transicionar(
 @admin_router.post("/{product_id}/publish", response_model=ProductoDelProveedor)
 async def publicar(
     product_id: str,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProductoDelProveedor:
@@ -3084,6 +3169,13 @@ async def publicar(
         db, producto_id=product_id, usuario_id=current_user.id
     )
     await db.commit()
+    avisos.empujar(
+        background,
+        user_id=await service.perfil_del_vendedor(db, producto),
+        tipo="product_published",
+        entidad="product",
+        entidad_id=producto.id,
+    )
     return await _del_proveedor(db, producto, actor=maquina.ADMINISTRACION)
 
 
@@ -3091,6 +3183,7 @@ async def publicar(
 async def suspender(
     product_id: str,
     cuerpo: MotivoRequest,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProductoDelProveedor:
@@ -3120,7 +3213,26 @@ async def suspender(
         actor_rol=maquina.ADMINISTRACION,
         motivo=cuerpo.motivo,
     )
+    vendedor = await service.perfil_del_vendedor(db, producto)
+    vigente = await service.vigente_de(db, producto_id=producto.id)
+    avisado = await avisos.avisar(
+        db,
+        user_id=vendedor,
+        tipo="product_suspended",
+        entidad="product",
+        entidad_id=producto.id,
+        titulo=vigente.name if vigente is not None else None,
+        motivo=cuerpo.motivo,
+    )
     await db.commit()
+    if avisado:
+        avisos.empujar(
+            background,
+            user_id=vendedor,
+            tipo="product_suspended",
+            entidad="product",
+            entidad_id=producto.id,
+        )
     return await _del_proveedor(db, producto, actor=maquina.ADMINISTRACION)
 
 
@@ -3165,6 +3277,7 @@ async def fotos_pendientes(
 async def decidir_foto(
     media_id: str,
     cuerpo: DecisionDeLaFoto,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FotoPendiente:
@@ -3193,6 +3306,7 @@ async def decidir_foto(
     #: no un 403 genérico.
     await permisos.exigir_ajeno(db, producto=producto, user_id=current_user.id)
 
+    estado_anterior = fila.status
     decidida = await fotos.decidir(
         db,
         media_id=media_id,
@@ -3200,6 +3314,21 @@ async def decidir_foto(
         motivo=cuerpo.reason,
         actor_id=current_user.id,
     )
+    # SOLO UN RECHAZO QUE CAMBIA ALGO se avisa: aprobar es lo esperado, y
+    # repetir un rechazo no puede mandar otro aviso.
+    vendedor = None
+    if not cuerpo.approved and estado_anterior != decidida.status:
+        vendedor = await service.perfil_del_vendedor(db, producto)
+        if not await avisos.avisar(
+            db,
+            user_id=vendedor,
+            tipo="product_photo_rejected",
+            entidad="product",
+            entidad_id=producto.id,
+            titulo=version.name,
+            motivo=cuerpo.reason,
+        ):
+            vendedor = None
     await auditoria.anotar(
         db,
         actor_id=current_user.id,
@@ -3212,6 +3341,14 @@ async def decidir_foto(
         payload={"media_id": media_id},
     )
     await db.commit()
+    if vendedor is not None:
+        avisos.empujar(
+            background,
+            user_id=vendedor,
+            tipo="product_photo_rejected",
+            entidad="product",
+            entidad_id=producto.id,
+        )
     firmadas = await fotos.firmar([decidida.storage_path])
     return FotoPendiente(
         id=decidida.id,
