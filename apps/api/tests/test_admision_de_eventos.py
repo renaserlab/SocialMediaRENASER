@@ -1132,3 +1132,153 @@ async def test_sin_la_migracion_0060_las_rutas_responden_503(entorno):
     # Y el catálogo sigue funcionando exactamente igual.
     assert (await http.get(f"{CATALOGO}/events")).status_code == 200
     assert (await http.get(f"{CATALOGO}/events/{HEREDADO}")).status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Modo flexible y avisos al organizador (24/09/2026)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def flexible(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "publicacion_flexible", True, raising=False)
+
+
+@pytest.fixture
+def pushes(monkeypatch):
+    """Los push que se habrían mandado, sin salir a la red."""
+    from app.modules.notifications import decisiones
+
+    enviados: list[str] = []
+
+    def _retener(_background, *, user_ids, notification_type, **_kw):
+        enviados.extend(f"{uid}:{notification_type}" for uid in user_ids)
+
+    monkeypatch.setattr(decisiones, "encolar_push", _retener)
+    return enviados
+
+
+async def _avisos_de(sesiones, usuario: str) -> list[tuple[str, dict]]:
+    from app.modules.notifications.models import Notification
+
+    async with sesiones() as db:
+        filas = (
+            await db.execute(
+                select(Notification).where(Notification.user_id == usuario)
+                .order_by(Notification.created_at.asc())
+            )
+        ).scalars().all()
+    return [(n.type, n.payload or {}) for n in filas]
+
+
+@pytest.mark.asyncio
+async def test_en_modo_flexible_enviar_publica_sin_esperar_a_nadie(entorno, flexible):
+    http, identidad, sesiones = entorno
+    creado = await http.post(EVENTOS, json=_borrador())
+    ident = creado.json()["id"]
+    enviado = await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+    assert enviado.status_code == 200, enviado.text
+    assert enviado.json()["workflow_status"] == "PUBLISHED"
+
+    listado = await http.get(f"{CATALOGO}/events")
+    publicado = {e["id"]: e for e in listado.json()}
+    assert ident in publicado
+    # SIN SELLO: nadie lo evaluó. «Seleccionado por Z» exige una aprobación real.
+    assert publicado[ident]["seleccionado_por_z"] is False
+
+    avisos = await _avisos_de(sesiones, ORG)
+    assert avisos == [("event_published", {"title": "Cena de autor en Barranco", "automatic": True})]
+
+
+@pytest.mark.asyncio
+async def test_en_modo_flexible_basta_una_descripcion_corta_y_sin_promesa(entorno, flexible):
+    http, _identidad, _ = entorno
+    creado = await http.post(
+        EVENTOS, json=_borrador(description="Cena en casa.", promise="")
+    )
+    ident = creado.json()["id"]
+    enviado = await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+    assert enviado.status_code == 200, enviado.text
+    assert enviado.json()["workflow_status"] == "PUBLISHED"
+
+
+@pytest.mark.asyncio
+async def test_en_modo_flexible_lo_ya_enviado_se_publica_al_reenviar(entorno):
+    """Lo que se envió ANTES de encender el modo no se queda en la cola."""
+    from app.core.config import get_settings
+
+    http, identidad, _ = entorno
+    ident = await _crea_y_envia(http, identidad)
+    ajustes = get_settings()
+    anterior = ajustes.publicacion_flexible
+    ajustes.publicacion_flexible = True
+    try:
+        identidad["uid"] = ORG
+        enviado = await http.post(f"{EVENTOS}/{ident}/submit", json={"motivo": ""})
+        assert enviado.status_code == 200, enviado.text
+        assert enviado.json()["workflow_status"] == "PUBLISHED"
+    finally:
+        ajustes.publicacion_flexible = anterior
+
+
+@pytest.mark.asyncio
+async def test_sin_modo_flexible_la_descripcion_corta_sigue_sin_bastar(entorno):
+    http, _identidad, _ = entorno
+    creado = await http.post(EVENTOS, json=_borrador(description="Cena en casa."))
+    enviado = await http.post(
+        f"{EVENTOS}/{creado.json()['id']}/submit", json={"motivo": ""}
+    )
+    assert enviado.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_el_organizador_se_entera_del_rechazo_con_su_motivo(entorno, pushes):
+    http, identidad, sesiones = entorno
+    ident = await _crea_y_envia(http, identidad)
+    await _evalua(http, identidad, ident, NO_LLEGA)
+    identidad["uid"] = ADMINISTRA
+    respuesta = await http.post(
+        f"{ADMIN}/{ident}/decision",
+        json={"decision": "rejected", "motivo": "El recinto no está confirmado."},
+    )
+    assert respuesta.status_code == 200, respuesta.text
+
+    avisos = await _avisos_de(sesiones, ORG)
+    assert avisos == [
+        (
+            "event_admission_rejected",
+            {"title": "Cena de autor en Barranco", "reason": "El recinto no está confirmado."},
+        )
+    ]
+    assert pushes == [f"{ORG}:event_admission_rejected"]
+
+
+@pytest.mark.asyncio
+async def test_aprobar_y_publicar_avisan_dos_veces_sin_motivo(entorno, pushes):
+    http, identidad, sesiones = entorno
+    ident = await _hasta_publicar(http, identidad)
+    identidad["uid"] = ADMINISTRA
+    assert (await http.post(f"{ADMIN}/{ident}/publish")).status_code == 200
+
+    tipos = [tipo for tipo, _ in await _avisos_de(sesiones, ORG)]
+    assert tipos == ["event_admission_approved", "event_published"]
+    assert pushes == [f"{ORG}:event_admission_approved", f"{ORG}:event_published"]
+
+
+@pytest.mark.asyncio
+async def test_suspender_avisa_con_el_motivo(entorno, pushes):
+    http, identidad, sesiones = entorno
+    ident = await _hasta_publicar(http, identidad)
+    identidad["uid"] = ADMINISTRA
+    await http.post(f"{ADMIN}/{ident}/publish")
+    respuesta = await http.post(
+        f"{ADMIN}/{ident}/suspend", json={"motivo": "Denuncias de asistentes."}
+    )
+    assert respuesta.status_code == 200, respuesta.text
+    ultimo = (await _avisos_de(sesiones, ORG))[-1]
+    assert ultimo == (
+        "event_suspended",
+        {"title": "Cena de autor en Barranco", "reason": "Denuncias de asistentes."},
+    )

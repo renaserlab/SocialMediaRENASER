@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from sqlalchemy import delete, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,7 +64,9 @@ from app.modules.events import states as estados_de_evento
 from app.modules.events import ticketing as entradas
 from app.modules.events import service as servicio_de_eventos
 from app.modules.events.models import EventOperations
+from app.core.config import get_settings
 from app.modules.gobernanza import auditoria
+from app.modules.notifications import decisiones as avisos
 from app.modules.profiles.models import Profile
 from app.modules.gobernanza.schemas import VersionDeCurso
 from app.modules.gobernanza.contexto import leer_origen
@@ -855,7 +857,18 @@ async def list_my_courses(
     return await _leer_cursos(db, cursos, con_revision=True)
 
 
-async def _requisitos_que_faltan(db: AsyncSession, course: Course) -> list[str]:
+#: Descripcion minima con revision y en modo flexible (`publicacion_flexible`).
+MINIMO_DE_DESCRIPCION = 30
+MINIMO_DE_DESCRIPCION_FLEXIBLE = 10
+
+
+def _flexible() -> bool:
+    return get_settings().publicacion_flexible
+
+
+async def _requisitos_que_faltan(
+    db: AsyncSession, course: Course, *, flexible: bool = False
+) -> list[str]:
     """Lo que le falta a este curso para poder publicarse, en frases.
 
     Se devuelven TODAS de una vez y no la primera: corregir de una en una,
@@ -877,10 +890,11 @@ async def _requisitos_que_faltan(db: AsyncSession, course: Course) -> list[str]:
 
     if not (course.title or "").strip():
         faltan.append("Ponle un título al curso.")
-    if len((course.description or "").strip()) < 30:
+    minimo = MINIMO_DE_DESCRIPCION_FLEXIBLE if flexible else MINIMO_DE_DESCRIPCION
+    if len((course.description or "").strip()) < minimo:
         faltan.append(
-            "Escribe una descripción de al menos 30 caracteres: es lo que lee "
-            "quien decide si empezarlo."
+            f"Escribe una descripción de al menos {minimo} caracteres: es lo que "
+            "lee quien decide si empezarlo."
         )
 
     if hay_v2:
@@ -889,7 +903,9 @@ async def _requisitos_que_faltan(db: AsyncSession, course: Course) -> list[str]:
         # lista de requisitos de la ficha nueva se estrena entera o no se
         # estrena, para que nadie se encuentre un curso que ayer podia publicar
         # y hoy no, sin que haya cambiado nada en su curso.
-        if not [h for h in (course.highlights or []) if (h or "").strip()]:
+        # En modo flexible es opcional: ayuda a vender el curso, pero exigirlo
+        # para poder publicar era de lo que hacia parecer estricta la app.
+        if not flexible and not [h for h in (course.highlights or []) if (h or "").strip()]:
             faltan.append(
                 "Escribe al menos un resultado de aprendizaje: qué sabrá hacer "
                 "alguien al terminarlo."
@@ -983,13 +999,19 @@ async def publish_course(
     """
     course = await _curso_gestionable(db, course_id, current_user, "publicar")
     ficha = await cursos_v2.leer_una(db, course.id)
+    flexible = _flexible()
 
-    faltan = await _requisitos_que_faltan(db, course)
+    faltan = await _requisitos_que_faltan(db, course, flexible=flexible)
     # Con la 0034 puesta, publicar exige que alguien de la casa lo haya mirado.
     # No es mezclar los dos ejes: `status` sigue significando visibilidad y
     # `review_status` sigue significando revision. Lo que se dice aqui es que
-    # uno es condicion del otro, que es la regla del producto.
-    if await esquema.hay_cursos_v2(db) and ficha.review_status != cursos_v2.APROBADO:
+    # uno es condicion del otro, que es la regla del producto. En MODO FLEXIBLE
+    # no: se modera despues (administracion puede retirarlo).
+    if (
+        not flexible
+        and await esquema.hay_cursos_v2(db)
+        and ficha.review_status != cursos_v2.APROBADO
+    ):
         # `.get` con respaldo: un valor raro en la columna —escrito a mano, o de
         # una version futura— no puede tumbar la peticion con un KeyError. Se
         # dice que falta la revision, que es cierto en cualquier caso.
@@ -1097,7 +1119,7 @@ async def course_requirements(
     """
     course = await _curso_gestionable(db, course_id, current_user, "revisar")
     ficha = await cursos_v2.leer_una(db, course.id)
-    faltan = await _requisitos_que_faltan(db, course)
+    faltan = await _requisitos_que_faltan(db, course, flexible=_flexible())
     return CourseRequirements(
         id=course.id,
         status=course.status,
@@ -1111,6 +1133,7 @@ async def course_requirements(
 @router.post("/courses/{course_id}/submit", response_model=CourseSubmitResult)
 async def submit_course_for_review(
     course_id: str,
+    request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CourseSubmitResult:
@@ -1127,6 +1150,10 @@ async def submit_course_for_review(
     course = await _curso_gestionable(db, course_id, current_user, "enviar a revisión")
     await _exigir_revision_disponible(db)
     ficha = await cursos_v2.leer_una(db, course.id)
+    flexible = _flexible()
+
+    if flexible:
+        return await _aprobar_y_publicar_al_enviar(db, course, current_user, request)
 
     if ficha.review_status == cursos_v2.EN_REVISION:
         # Insistir no adelanta la cola, y reescribir `submitted_at` mandaria al
@@ -1148,6 +1175,64 @@ async def submit_course_for_review(
     await db.commit()
     return CourseSubmitResult(
         id=course.id, review_status=cursos_v2.EN_REVISION, submitted=True
+    )
+
+
+async def _aprobar_y_publicar_al_enviar(
+    db: AsyncSession, course: Course, current_user: AuthUser, request: Request
+) -> CourseSubmitResult:
+    """MODO FLEXIBLE: enviar aprueba y publica, en una transaccion.
+
+    Aprueba EL SISTEMA (`reviewed_by` nulo) y queda en la auditoria como tal.
+    Lo que ya estaba en revision de antes de encender el modo entra igual: pulsar
+    «Publicar» no puede contestar «ya esta en revision».
+    """
+    faltan = await _requisitos_que_faltan(db, course, flexible=True)
+    if faltan:
+        ficha = await cursos_v2.leer_una(db, course.id)
+        return CourseSubmitResult(
+            id=course.id,
+            review_status=ficha.review_status,
+            submitted=False,
+            missing=faltan,
+        )
+
+    await cursos_v2.enviar_a_revision(db, course.id)
+    await cursos_v2.resolver_revision(db, course.id, aprobado=True, revisor_id=None)
+    anterior = course.status
+    course.status = "published"
+    version = await versiones.asegurar_version(db, course, publicada_por=current_user.id)
+    await auditoria.anotar(
+        db,
+        action="course.published",
+        entity_type="course",
+        entity_id=course.id,
+        actor_id=None,
+        actor_role="system",
+        previous_state=anterior,
+        new_state="published",
+        payload={
+            "version": version.version if version else None,
+            "modo": "publicacion_flexible",
+        },
+        origen=leer_origen(request),
+    )
+    await avisos.avisar(
+        db,
+        user_id=course.author_id,
+        tipo="course_published",
+        entidad="course",
+        entidad_id=course.id,
+        titulo=course.title,
+        automatico=True,
+    )
+    await db.commit()
+    memoria_del_recomendador.invalidar_tipo("cursos")
+    return CourseSubmitResult(
+        id=course.id,
+        review_status=cursos_v2.APROBADO,
+        submitted=True,
+        published=True,
     )
 
 
@@ -1179,6 +1264,7 @@ async def review_queue(
 async def review_course(
     course_id: str,
     payload: CourseReviewDecision,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CourseRead:
@@ -1213,6 +1299,7 @@ async def review_course(
             "Explica por qué se rechaza: quien lo recibe necesita saber qué corregir."
         )
 
+    antes = (await cursos_v2.leer_una(db, course.id)).review_status
     await cursos_v2.resolver_revision(
         db,
         course.id,
@@ -1220,7 +1307,27 @@ async def review_course(
         revisor_id=current_user.id,
         motivo=motivo or None,
     )
+    destino = cursos_v2.APROBADO if aprobado else cursos_v2.RECHAZADO
+    tipo = "course_review_approved" if aprobado else "course_review_rejected"
+    # SOLO SI CAMBIO ALGO: repetir la misma decision no puede mandar otro aviso.
+    avisado = antes != destino and await avisos.avisar(
+        db,
+        user_id=course.author_id,
+        tipo=tipo,
+        entidad="course",
+        entidad_id=course.id,
+        titulo=course.title,
+        motivo=None if aprobado else motivo,
+    )
     await db.commit()
+    if avisado:
+        avisos.empujar(
+            background,
+            user_id=course.author_id,
+            tipo=tipo,
+            entidad="course",
+            entidad_id=course.id,
+        )
     await db.refresh(course)
     return await _leer_curso(db, course)
 

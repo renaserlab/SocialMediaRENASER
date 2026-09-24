@@ -64,6 +64,25 @@ class Settings(BaseSettings):
         "https://social-media-renaser.vercel.app/verificar"
     )
 
+    # --- Publicación ---
+    #: MODO FLEXIBLE (`PUBLICACION_FLEXIBLE`). Apagado de fábrica: todo pasa por
+    #: revisión, como dice el blueprint. Encendido —la versión de pruebas del
+    #: 24/09/2026 lo pide— nadie espera a administración:
+    #:
+    #: - enviar un evento o un curso lo PUBLICA al momento;
+    #: - la postulación de proveedor se ACEPTA al enviarla;
+    #: - las fotos de producto se APRUEBAN al subirlas;
+    #: - enviar un producto lo PUBLICA, y uno publicado se puede editar y
+    #:   volver a publicar;
+    #: - los mínimos de texto se relajan (descripciones de 10 caracteres).
+    #:
+    #: Administración sigue pudiendo suspender o retirar después: pasa de
+    #: revisar ANTES a moderar DESPUÉS. Lo publicado así NO recibe el sello
+    #: «Seleccionado por Z» ni entra en la «Selección Z» de productos, que
+    #: exigen una evaluación de verdad. La app lo consulta en
+    #: `GET /platform/config` para decir «Publicar» y no «Enviar a revisión».
+    publicacion_flexible: bool = False
+
     # --- Eventos ---
     #: Cuanto espera una reserva a que se suelte el cerrojo del evento, en
     #: milisegundos. CERO lo desactiva.

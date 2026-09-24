@@ -30,6 +30,7 @@ from app.modules.events.models import (
     EventVersion,
 )
 from app.modules.gobernanza import auditoria
+from app.modules.notifications import decisiones as avisos
 
 #: Lo que la versión congela. Es lo que el organizador se compromete a entregar,
 #: y por eso NO lleva ni la portada ni el enlace al grupo: cambiar una imagen no
@@ -319,17 +320,31 @@ def campos_cambiados(anterior: dict[str, Any] | None, nueva: dict[str, Any]) -> 
     return sorted(k for k in nueva if anterior.get(k) != nueva.get(k))
 
 
-def motivo_para_no_enviar(evento: Event, operacion: EventOperations) -> str | None:
-    """Lo mínimo para que otra persona pueda revisarlo.
+#: Descripción mínima con revisión y en modo flexible. En flexible basta con
+#: una frase: nadie tiene que evaluarla, y 40 caracteres obligatorios era de
+#: lo primero que hacía parecer estricta la app a quien la probaba.
+MINIMO_DE_DESCRIPCION = 40
+MINIMO_DE_DESCRIPCION_FLEXIBLE = 10
+
+
+def motivo_para_no_enviar(
+    evento: Event, operacion: EventOperations, *, flexible: bool = False
+) -> str | None:
+    """Lo mínimo para que otra persona pueda revisarlo (o para publicarlo, en
+    modo flexible: ver `Settings.publicacion_flexible`).
 
     NO se comprueba nada que no se pueda guardar. Pedir un programa detallado
     cuando no hay columna donde escribirlo sería un requisito imposible.
     """
     if not (evento.title or "").strip():
         return "Falta el título."
-    if len((evento.description or "").strip()) < 40:
+    minimo = MINIMO_DE_DESCRIPCION_FLEXIBLE if flexible else MINIMO_DE_DESCRIPCION
+    if len((evento.description or "").strip()) < minimo:
+        if flexible:
+            return f"Escribe una descripción de al menos {minimo} caracteres."
         return "La descripción es demasiado corta para poder revisarla."
-    if not (operacion.promise or "").strip():
+    # La promesa ayuda a quien EVALÚA; sin evaluación, es opcional.
+    if not flexible and not (operacion.promise or "").strip():
         return "Falta la promesa: qué vivirá quien vaya."
     if not (operacion.category or "").strip():
         return "Falta la categoría."
@@ -355,19 +370,37 @@ def motivo_para_no_enviar(evento: Event, operacion: EventOperations) -> str | No
     return None
 
 
+#: Desde donde se publica al enviar en modo flexible. Incluye lo que se envió
+#: ANTES de encender el modo (SUBMITTED, APPROVED): pulsar «Publicar» otra vez
+#: tiene que publicarlo, no contestar que ya está en revisión.
+_PUBLICABLES_AL_ENVIAR = frozenset(
+    {states.BORRADOR, states.CONDICIONAL, states.ENVIADO, states.APROBADO}
+)
+
+
 async def enviar_a_revision(
-    db: AsyncSession, *, evento_id: str, usuario: AuthUser, motivo: str = ""
+    db: AsyncSession,
+    *,
+    evento_id: str,
+    usuario: AuthUser,
+    motivo: str = "",
+    flexible: bool = False,
 ) -> Expediente:
     """Congela una versión y la manda a curaduría.
 
-    ENVIAR NO PUBLICA NADA. El evento pasa a `SUBMITTED`, que no es visible y no
-    vende, y a partir de aquí lo que se revisa es la versión, no el borrador.
+    ENVIAR NO PUBLICA NADA, salvo en modo flexible (`publicacion_flexible`):
+    entonces la versión nace publicada y el evento sale al catálogo en la misma
+    transacción (ver `_publicar_al_enviar`).
     """
     evento = await _exigir_evento(db, evento_id)
     permissions.exigir_organizador(evento, usuario)
     operacion = await _tomar_el_turno(db, evento_id)
 
     estado_de_partida = operacion.workflow_status
+    if flexible and estado_de_partida in _PUBLICABLES_AL_ENVIAR:
+        return await _publicar_al_enviar(
+            db, evento=evento, operacion=operacion, usuario=usuario, motivo=motivo
+        )
     destino = _destino("submit", estado_de_partida)
     fallo = motivo_para_no_enviar(evento, operacion)
     if fallo is not None:
@@ -411,6 +444,101 @@ async def enviar_a_revision(
         new_state=destino,
         reason=motivo.strip() or None,
         payload={"version": numero},
+    )
+    await db.commit()
+    await db.refresh(operacion)
+    return await expediente(db, evento_id)
+
+
+async def _publicar_al_enviar(
+    db: AsyncSession,
+    *,
+    evento: Event,
+    operacion: EventOperations,
+    usuario: AuthUser,
+    motivo: str,
+) -> Expediente:
+    """MODO FLEXIBLE: enviar publica. Una transacción, sin decisión inventada.
+
+    NO SE ESCRIBE UNA DECISIÓN «APROBADA». La base la rechaza sin una
+    evaluación de 85 o más (`event_admission_decisions_umbral`) y, además,
+    aprobar pone el sello «Seleccionado por Z», que aquí nadie ha concedido:
+    `selection_status` se queda como estaba. Lo que sí queda es la auditoría,
+    con el sistema como actor, para poder distinguir después qué se publicó
+    así. Administración puede suspenderlo igual que cualquier otro.
+    """
+    evento_id = evento.id
+    estado_de_partida = operacion.workflow_status
+    fallo = motivo_para_no_enviar(evento, operacion, flexible=True)
+    if fallo is not None:
+        raise ValidationAppError(fallo)
+
+    bloqueos = documentos_que_bloquean(await documentos_de(db, evento_id), ahora())
+    if bloqueos:
+        raise ConflictError(
+            "No se publica con requisitos pendientes: " + ", ".join(bloqueos)
+        )
+
+    anterior = await ultima_version(db, evento_id)
+    if anterior is not None and anterior.status != "superseded":
+        anterior.status = "superseded"
+        # La vieja deja de ser la vigente ANTES de insertar la nueva: el índice
+        # parcial de la 0060 admite una sola versión no superada por evento.
+        await db.flush()
+
+    foto = _foto(evento, operacion)
+    numero = (anterior.version + 1) if anterior is not None else 1
+    db.add(
+        EventVersion(
+            event_id=evento_id,
+            version=numero,
+            status="published",
+            snapshot=foto,
+            changed_fields=campos_cambiados(anterior.snapshot if anterior else None, foto),
+            reason=motivo.strip(),
+            created_by=usuario.id,
+        )
+    )
+
+    momento = ahora()
+    operacion.workflow_status = states.PUBLICADO
+    operacion.current_version = numero
+    operacion.submitted_at = momento
+    operacion.published_at = momento
+    operacion.updated_at = momento
+    evento.status = "published"
+
+    await auditoria.anotar(
+        db,
+        actor_id=usuario.id,
+        actor_role="user",
+        action="event.submitted",
+        entity_type="event",
+        entity_id=evento_id,
+        previous_state=estado_de_partida,
+        new_state=states.PUBLICADO,
+        reason=motivo.strip() or None,
+        payload={"version": numero, "modo": "publicacion_flexible"},
+    )
+    await auditoria.anotar(
+        db,
+        actor_id=None,
+        actor_role="system",
+        action="event.published",
+        entity_type="event",
+        entity_id=evento_id,
+        previous_state=estado_de_partida,
+        new_state=states.PUBLICADO,
+        payload={"version": numero, "modo": "publicacion_flexible"},
+    )
+    await avisos.avisar(
+        db,
+        user_id=evento.organizer_id,
+        tipo="event_published",
+        entidad="event",
+        entidad_id=evento_id,
+        titulo=evento.title,
+        automatico=True,
     )
     await db.commit()
     await db.refresh(operacion)
@@ -507,6 +635,14 @@ async def evaluar(
     return evaluacion
 
 
+#: El aviso que recibe el organizador por cada decisión (`notifications/decisiones.py`).
+TIPO_DE_AVISO_POR_DECISION = {
+    admission.APROBADO: "event_admission_approved",
+    admission.CONDICIONAL: "event_admission_conditional",
+    admission.RECHAZADO: "event_admission_rejected",
+    admission.CAMBIOS: "event_admission_changes",
+}
+
 #: Acción de la máquina de estados por decisión de admisión.
 _ACCION_POR_DECISION = {
     admission.APROBADO: "approve",
@@ -597,6 +733,19 @@ async def decidir(
             "selection_status": operacion.selection_status,
         },
     )
+    evento = await db.get(Event, evento_id)
+    if evento is not None:
+        await avisos.avisar(
+            db,
+            user_id=evento.organizer_id,
+            tipo=TIPO_DE_AVISO_POR_DECISION[decision],
+            entidad="event",
+            entidad_id=evento_id,
+            titulo=evento.title,
+            # Aprobar no necesita explicarse; lo demás, sí: el motivo es lo
+            # que le dice al organizador qué corregir.
+            motivo=None if decision == admission.APROBADO else motivo,
+        )
     await db.commit()
     return await expediente(db, evento_id)
 
@@ -661,6 +810,14 @@ async def publicar(
         new_state=destino,
         payload={"version": operacion.current_version},
     )
+    await avisos.avisar(
+        db,
+        user_id=evento.organizer_id,
+        tipo="event_published",
+        entidad="event",
+        entidad_id=evento_id,
+        titulo=evento.title,
+    )
     await db.commit()
     return await expediente(db, evento_id)
 
@@ -697,6 +854,16 @@ async def cambiar_visibilidad(
         new_state=destino,
         reason=motivo.strip() or None,
     )
+    if accion == "suspend":
+        await avisos.avisar(
+            db,
+            user_id=evento.organizer_id,
+            tipo="event_suspended",
+            entidad="event",
+            entidad_id=evento_id,
+            titulo=evento.title,
+            motivo=motivo,
+        )
     await db.commit()
     return await expediente(db, evento_id)
 

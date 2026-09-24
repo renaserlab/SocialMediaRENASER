@@ -48,6 +48,7 @@ from app.modules.moderation.router import router as moderation_router
 from app.modules.notifications.router import admin_router as notifications_admin_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.payments.router import router as payments_router
+from app.modules.plataforma.router import router as plataforma_router
 from app.modules.refunds.router import admin_router as refunds_admin_router
 from app.modules.refunds.router import router as refunds_router
 from app.modules.profiles.router import router as profiles_router
@@ -154,6 +155,7 @@ def create_app() -> FastAPI:
 
     prefix = settings.api_v1_prefix
     app.include_router(identity_router, prefix=prefix)
+    app.include_router(plataforma_router, prefix=prefix)
     app.include_router(profiles_router, prefix=prefix)
     app.include_router(social_graph_router, prefix=prefix)
     app.include_router(content_router, prefix=prefix)
