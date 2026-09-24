@@ -129,5 +129,14 @@ async def test_sin_credenciales_avisa_y_no_llama(monkeypatch):
 
 
 def test_los_buckets_declarados_son_los_que_usa_el_movil():
-    """Si el movil sube a un bucket nuevo, hay que anadirlo aqui o quedara sin limpiar."""
-    assert set(storage.USER_BUCKETS) == {"post-media", "avatars", "course-media"}
+    """Si el movil sube a un bucket nuevo, hay que anadirlo aqui o quedara sin limpiar.
+
+    `seller-documents` (0085) guarda los documentos de la postulacion bajo
+    `<perfil>/...`: al borrar la cuenta se van con ella.
+    """
+    assert set(storage.USER_BUCKETS) == {
+        "post-media",
+        "avatars",
+        "course-media",
+        "seller-documents",
+    }
