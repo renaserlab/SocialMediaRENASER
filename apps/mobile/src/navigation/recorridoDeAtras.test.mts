@@ -428,7 +428,7 @@ describe('las capas se cierran antes que la pantalla', () => {
 describe('lo que NO debe tocar la navegacion', () => {
   it('un toast no crea otra entrada de historial', () => {
     /*
-      El aviso «Presiona otra vez para salir» se pinta con el mismo toast que
+      El aviso «Presiona una vez más para salir de la aplicación» se pinta con el mismo toast que
       «Publicado» o «Guardado». Si un toast entrara en el historial, cada aviso
       dejaria un paso fantasma y Atras dejaria de deshacer navegacion para
       deshacer avisos.

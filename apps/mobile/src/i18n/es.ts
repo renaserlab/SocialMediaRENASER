@@ -12,7 +12,7 @@ export const es = {
   'tabs.messages': 'Mensajes',
   'tabs.profile': 'Perfil',
   // Aviso al pulsar Atras en la raiz de la aplicacion (solo Android).
-  'app.pressAgainToExit': 'Presiona otra vez para salir',
+  'app.pressAgainToExit': 'Presiona una vez más para salir de la aplicación',
 
   // Inicio
   'home.forYou': 'Para ti',

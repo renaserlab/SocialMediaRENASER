@@ -8,7 +8,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'tabs.messages': 'Messages',
   'tabs.profile': 'Profile',
   // Aviso al pulsar Atras en la raiz de la aplicacion (solo Android).
-  'app.pressAgainToExit': 'Press again to exit',
+  'app.pressAgainToExit': 'Press once more to exit the app',
 
   'home.forYou': 'For you',
   'home.following': 'Following',

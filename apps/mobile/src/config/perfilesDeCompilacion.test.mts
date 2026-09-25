@@ -31,7 +31,12 @@ const app = leerJson<{
     updates?: { url?: string };
     extra?: { eas?: { projectId?: string } };
     plugins: (string | [string, unknown])[];
-    android: { permissions?: string[]; blockedPermissions?: string[] };
+    android: {
+      permissions?: string[];
+      blockedPermissions?: string[];
+      edgeToEdgeEnabled?: boolean;
+      predictiveBackGestureEnabled?: boolean;
+    };
   };
 }>('app.json');
 const paquete = leerJson<{ dependencies: Record<string, string> }>('package.json');
@@ -262,6 +267,11 @@ const NATIVO_POR_VERSION: Record<string, { dependencias: string[]; plugins: stri
   },
 };
 
+// 1.1.1: dependencias, plugins y permisos iguales que 1.1.0. Sube por el
+// MANIFIESTO: `predictiveBackGestureEnabled` pasa a `false` (ver la prueba del
+// boton Atras, abajo), que solo llega a los telefonos con un binario nuevo.
+NATIVO_POR_VERSION['1.1.1'] = NATIVO_POR_VERSION['1.1.0'];
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];
@@ -287,4 +297,26 @@ test('si cambia algo nativo, cambia expo.version', () => {
     `Lo nativo cambio y expo.version sigue en ${version}. Una actualizacion llegaria a builds sin ` +
       'esos modulos. Sube expo.version en app.json y añade su entrada a NATIVO_POR_VERSION.',
   );
+});
+
+test('el boton Atras de Android le llega a la aplicacion', () => {
+  /*
+    CON EL GESTO PREDICTIVO ENCENDIDO, ATRAS CERRABA LA APLICACION DESDE
+    CUALQUIER PANTALLA. `predictiveBackGestureEnabled: true` escribe
+    `android:enableOnBackInvokedCallback="true"` en el manifiesto, y desde
+    Android 13 el sistema manda entonces la pulsacion a su propio despachador.
+    React Native 0.81 solo lo conecta con `BackHandler` en Android 16: en 13, 14
+    y 15 la pulsacion no llega a JavaScript, Android hace lo que haria sin
+    aplicacion delante —cerrarla— y ni la navegacion de expo-router ni
+    `useSalidaConDoblePulsacion` («Presiona una vez más para salir de la aplicación») llegan a
+    enterarse (https://github.com/expo/expo/issues/39092).
+
+    Estuvo encendido desde la carga inicial del proyecto, y por eso arreglar la
+    logica de Atras en JavaScript no cambio nada en los telefonos. Es del
+    manifiesto: solo se corrige con un binario nuevo (1.1.1), no con `eas update`.
+  */
+  assert.equal(app.expo.android.predictiveBackGestureEnabled, false);
+  // Y la razon por la que las pantallas respetan la zona segura de abajo:
+  // `AppScreen` lo da por hecho (ver `bordesPorOmision`).
+  assert.equal(app.expo.android.edgeToEdgeEnabled, true);
 });

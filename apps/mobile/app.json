@@ -2,7 +2,7 @@
   "expo": {
     "name": "Z",
     "slug": "z-app",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "z",
@@ -35,7 +35,7 @@
       },
       "package": "com.renaser.zeta",
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": true,
+      "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.MODIFY_AUDIO_SETTINGS",
