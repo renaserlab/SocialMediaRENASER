@@ -289,8 +289,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 44,
-    marginTop: spacing.lg,
-    marginBottom: spacing.md,
+    // Mas junto al resto del perfil (25/09/2026); el alto tactil de 44 se queda.
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
   },
   tituloDeSeccion: { flex: 1 },
   lista: { gap: spacing.sm },

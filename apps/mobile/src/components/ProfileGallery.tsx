@@ -233,7 +233,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { marginTop: spacing.lg },
+  wrap: { marginTop: spacing.sm },
   tabs: { marginBottom: spacing.md },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },

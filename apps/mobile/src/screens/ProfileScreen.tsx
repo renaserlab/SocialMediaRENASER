@@ -7,6 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { perfilVisto } from '@/services/senales';
 
 import { haptics } from '@/lib/haptics';
+import { toast } from '@/lib/toast';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -17,11 +18,13 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { BookSessionSheet } from '@/components/BookSessionSheet';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
+import { EditarPerfilSheet } from '@/components/EditarPerfilSheet';
 import { ListRow } from '@/components/ListRow';
 import { OfertaDelPerfil } from '@/components/OfertaDelPerfil';
 import { ProfileGallery } from '@/components/ProfileGallery';
 import { ProfileSection, type ProfileSectionKind } from '@/components/ProfileSection';
 import { StateView } from '@/components/StateView';
+import { useFormularioDePerfil } from '@/hooks/useFormularioDePerfil';
 import { useProfilePosts } from '@/hooks/useProfilePosts';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { assets } from '@/data/assets';
@@ -434,12 +437,48 @@ export function ProfileScreen() {
   };
 
   /*
+    LA BANDEJA «EDITAR PERFIL» (25/09/2026): la abre el lapiz junto a la foto y
+    reune foto, nombre, usuario, biografia y audio de presentacion.
+
+    El borrador vive AQUI y no en la bandeja: cambiar la foto desde ella pasa
+    por `ConfirmarRecorte`, que sustituye al perfil entero un momento y desmonta
+    la bandeja. Con el estado en este componente, lo escrito sigue al volver.
+  */
+  const [editandoPerfil, setEditandoPerfil] = useState(false);
+  const formularioDePerfil = useFormularioDePerfil();
+  const [avisoDeFoto, setAvisoDeFoto] = useState<string | null>(null);
+  const [avisoAlGuardar, setAvisoAlGuardar] = useState<string | null>(null);
+
+  const abrirEdicion = () => {
+    haptics.light();
+    formularioDePerfil.reiniciar();
+    setAvisoDeFoto(null);
+    setAvisoAlGuardar(null);
+    setEditandoPerfil(true);
+  };
+
+  const guardarPerfilEditado = async () => {
+    setAvisoAlGuardar(null);
+    const resultado = await formularioDePerfil.guardar();
+    if (resultado.ok) {
+      setEditandoPerfil(false);
+      toast(t('editProfile.saved'));
+    } else if (resultado.motivo === 'servidor') {
+      // Dentro de la bandeja: un aviso encima de un Modal no se ve en iOS.
+      setAvisoAlGuardar(`${t('common.saveFailed')}. ${resultado.mensaje}`);
+    }
+  };
+
+  /*
     LO ELEGIDO ESPERA CONFIRMACION ANTES DE SUBIRSE. El recorte lo hace el
     editor NATIVO del sistema —`ImagePicker` con `allowsEditing`, no tematizable
     desde aqui—; esto es solo la confirmacion propia del paso siguiente.
+
+    `desdeLaBandeja`: la foto se eligio en la bandeja «Editar perfil», y al
+    terminar (confirmando o cancelando) se vuelve a ella, no al selector.
   */
   const [porConfirmar, setPorConfirmar] = useState<
-    { kind: 'avatar' | 'cover'; media: PickedMedia } | null
+    { kind: 'avatar' | 'cover'; media: PickedMedia; desdeLaBandeja?: boolean } | null
   >(null);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   const subiendoRef = React.useRef(false);
@@ -453,6 +492,8 @@ export function ProfileScreen() {
     try {
       await setProfileImage(porConfirmar.kind, porConfirmar.media);
       setPorConfirmar(null);
+      // Se habia salido de la bandeja para confirmar el recorte: se vuelve a ella.
+      if (porConfirmar.desdeLaBandeja) setEditandoPerfil(true);
     } catch (error) {
       setPorConfirmar(null);
       await afterSheetClose();
@@ -519,6 +560,46 @@ export function ProfileScreen() {
     }
   };
 
+  /*
+    LA FOTO DESDE LA BANDEJA «EDITAR PERFIL».
+
+    El mismo camino que `applyPhoto` —el selector se abre ENCIMA de la hoja
+    abierta, por lo que se explica ahi—, con dos diferencias: si no se elige
+    nada la bandeja sigue abierta, porque se estaba editando; y un fallo se
+    cuenta dentro de ella, porque encima de un Modal no se ve ningun aviso. La
+    confirmacion del recorte si necesita la bandeja cerrada (es una pantalla),
+    asi que se cierra, se espera a que termine de cerrarse y al acabar se vuelve.
+  */
+  const elegirFotoDesdeLaBandeja = async (source: 'gallery' | 'camera') => {
+    setAvisoDeFoto(null);
+    try {
+      const picked =
+        source === 'gallery'
+          ? await pickImage({ aspect: [1, 1] })
+          : await takePhoto({ aspect: [1, 1] });
+      if (!picked) return;
+      setEditandoPerfil(false);
+      await afterSheetClose();
+      setPorConfirmar({ kind: 'avatar', media: picked, desdeLaBandeja: true });
+    } catch (error) {
+      const titulo =
+        error instanceof PermisoDenegadoError
+          ? t('profile.permissionMissing')
+          : t('profile.photoChangeFailed');
+      setAvisoDeFoto(error instanceof Error && error.message ? `${titulo}. ${error.message}` : titulo);
+    }
+  };
+
+  const quitarFotoDesdeLaBandeja = async () => {
+    setAvisoDeFoto(null);
+    try {
+      await setProfileImage('avatar', null);
+    } catch (error) {
+      const titulo = t('profile.photoRemoveFailed');
+      setAvisoDeFoto(error instanceof Error && error.message ? `${titulo}. ${error.message}` : titulo);
+    }
+  };
+
   const openChat = async () => {
     // Escribir abre una conversacion, y una conversacion tiene dos partes.
     let autorizado = false;
@@ -559,8 +640,10 @@ export function ProfileScreen() {
         alCancelar={() => {
           if (subiendoFoto) return;
           setPorConfirmar(null);
-          // Vuelve al selector de foto, que es de donde se venia.
-          setEditingPhoto(porConfirmar.kind);
+          // Vuelve a donde se venia: la bandeja «Editar perfil» o el selector
+          // de foto.
+          if (porConfirmar.desdeLaBandeja) setEditandoPerfil(true);
+          else setEditingPhoto(porConfirmar.kind);
         }}
       />
     );
@@ -730,25 +813,42 @@ export function ProfileScreen() {
             con esta persona, y para eso lo primero que necesita es verla.
           */}
           <View style={styles.identidad}>
-            <Pressable
-              onPress={isPublic ? undefined : () => openPhotoSheet('avatar')}
-              disabled={isPublic}
-              accessibilityRole={isPublic ? undefined : 'button'}
-              accessibilityLabel={isPublic ? undefined : t('profile.changeAvatar')}
-              style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
-            >
-              <Avatar size={104} image={avatarSource} />
+            <View>
+              <Pressable
+                onPress={isPublic ? undefined : () => openPhotoSheet('avatar')}
+                disabled={isPublic}
+                accessibilityRole={isPublic ? undefined : 'button'}
+                accessibilityLabel={isPublic ? undefined : t('profile.changeAvatar')}
+                style={({ pressed }) => ({ opacity: pressed && !isPublic ? 0.85 : 1 })}
+              >
+                <Avatar size={104} image={avatarSource} />
+              </Pressable>
+              {/*
+                EL LAPIZ, JUNTO A LA FOTO (25/09/2026). Sustituye al boton
+                «Editar perfil» de debajo de las cifras y a la camara que habia
+                aqui: abre la bandeja con foto, nombre, usuario, biografia y
+                audio. Es un `Pressable` aparte, no parte de la foto, para que
+                su toque no lo recoja la foto (que sigue abriendo el selector).
+              */}
               {!isPublic && (
-                <View
-                  style={[
+                <Pressable
+                  onPress={abrirEdicion}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('profile.editProfile')}
+                  style={({ pressed }) => [
                     styles.avatarEditBtn,
-                    { backgroundColor: colors.text, borderColor: colors.background },
+                    {
+                      backgroundColor: colors.text,
+                      borderColor: colors.background,
+                      opacity: pressed ? 0.8 : 1,
+                    },
                   ]}
                 >
-                  <Feather name="camera" size={13} color={colors.background} />
-                </View>
+                  <Feather name="edit-2" size={14} color={colors.background} />
+                </Pressable>
               )}
-            </Pressable>
+            </View>
 
             <Text style={[styles.name, styles.centrado, { color: colors.text }]}>
               {profileData.fullName}
@@ -792,55 +892,52 @@ export function ProfileScreen() {
             escribir se deciden en cuanto se sabe a quién se está mirando, así
             que quedan al alcance sin desplazar, y la presentación (descripción,
             audio, lo que aporta) sigue entera y sin cortes justo debajo.
+
+            SOLO EN PERFILES AJENOS. El propio llevaba aquí «Editar perfil»;
+            desde el 25/09/2026 lo sustituye el lápiz de la foto, y una fila
+            vacía solo dejaría hueco.
           */}
-          <View style={styles.actionRow}>
-              {isPublic ? (
-                blocked ? (
-                  // Bloqueado: no tiene sentido ofrecer seguir ni escribir.
-                  <Button
-                    label={t('blocked.unblock')}
-                    variant="secondary"
-                    loading={blockBusy}
-                    onPress={() => void toggleBlock()}
-                    style={styles.actionBtn}
-                  />
-                ) : (
-                  <React.Fragment>
-                    <Button
-                      label={following ? t('profile.unfollow') : t('profile.follow')}
-                      variant={following ? 'secondary' : 'primary'}
-                      loading={followBusy}
-                      onPress={toggleFollow}
-                      style={styles.actionBtn}
-                    />
-                    <Button
-                      label={t('profile.message')}
-                      variant="secondary"
-                      loading={chatBusy}
-                      onPress={openChat}
-                      style={styles.actionBtn}
-                    />
-                    <Pressable
-                      onPress={() => void toggleBlock()}
-                      disabled={blockBusy}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('profile.blockPerson')}
-                      style={[styles.blockBtn, { borderColor: colors.border }]}
-                    >
-                      <Feather name="slash" size={17} color={colors.textMuted} />
-                    </Pressable>
-                  </React.Fragment>
-                )
-              ) : (
+          {isPublic ? (
+            <View style={styles.actionRow}>
+              {blocked ? (
+                // Bloqueado: no tiene sentido ofrecer seguir ni escribir.
                 <Button
-                  label={t('profile.editProfile')}
+                  label={t('blocked.unblock')}
                   variant="secondary"
-                  onPress={() => router.push('/edit-profile' as never)}
+                  loading={blockBusy}
+                  onPress={() => void toggleBlock()}
                   style={styles.actionBtn}
                 />
+              ) : (
+                <React.Fragment>
+                  <Button
+                    label={following ? t('profile.unfollow') : t('profile.follow')}
+                    variant={following ? 'secondary' : 'primary'}
+                    loading={followBusy}
+                    onPress={toggleFollow}
+                    style={styles.actionBtn}
+                  />
+                  <Button
+                    label={t('profile.message')}
+                    variant="secondary"
+                    loading={chatBusy}
+                    onPress={openChat}
+                    style={styles.actionBtn}
+                  />
+                  <Pressable
+                    onPress={() => void toggleBlock()}
+                    disabled={blockBusy}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('profile.blockPerson')}
+                    style={[styles.blockBtn, { borderColor: colors.border }]}
+                  >
+                    <Feather name="slash" size={17} color={colors.textMuted} />
+                  </Pressable>
+                </React.Fragment>
               )}
-          </View>
+            </View>
+          ) : null}
 
           {/*
             PERFIL BLOQUEADO: LO MINIMO PARA PODER DESHACERLO, Y NADA MAS.
@@ -913,13 +1010,19 @@ export function ProfileScreen() {
             Va dentro de este bloque y no fuera porque es contenido de la
             persona: en un perfil bloqueado desaparece con todo lo demás, en vez
             de repetir aquí la comprobación del bloqueo.
+
+            SOLO EN PERFILES AJENOS (25/09/2026). El propio se graba, se
+            reemplaza y se quita en la bandeja «Editar perfil»; aquí la tarjeta
+            de «Graba tu presentación» ocupaba la ficha que ven los demás.
           */}
-          <AudioDePresentacion
-            rutaDelAudio={profileData.introAudioPath}
-            duracionS={profileData.introAudioDurationS}
-            esPropio={!isPublic}
-            nombre={profileData.fullName}
-          />
+          {isPublic ? (
+            <AudioDePresentacion
+              rutaDelAudio={profileData.introAudioPath}
+              duracionS={profileData.introAudioDurationS}
+              esPropio={false}
+              nombre={profileData.fullName}
+            />
+          ) : null}
 
           {/*
             LO QUE ESTA PERSONA PUEDE APORTAR.
@@ -1148,12 +1251,18 @@ export function ProfileScreen() {
                 }}
               />
             ) : null}
+            {/*
+              La misma bandeja que el lápiz de la foto. Se espera a que el menú
+              termine de cerrarse: en iOS no se abre una hoja sobre otra que aún
+              se está cerrando.
+            */}
             <ListRow
               title={t('profile.editProfile')}
               leftIcon="edit-3"
-              onPress={() => {
+              onPress={async () => {
                 setOptionsVisible(false);
-                router.push('/edit-profile' as never);
+                await afterSheetClose();
+                abrirEdicion();
               }}
             />
             <ListRow
@@ -1215,6 +1324,26 @@ export function ProfileScreen() {
           />
         )}
       </BottomSheet>
+
+      {!isPublic ? (
+        <EditarPerfilSheet
+          visible={editandoPerfil}
+          onClose={() => setEditandoPerfil(false)}
+          formulario={formularioDePerfil}
+          avatar={avatarSource}
+          tieneFotoPropia={!!currentUser?.avatarUrl}
+          alElegirFoto={(origen) => void elegirFotoDesdeLaBandeja(origen)}
+          alQuitarFoto={() => void quitarFotoDesdeLaBandeja()}
+          avisoDeFoto={avisoDeFoto}
+          audio={{
+            ruta: profileData.introAudioPath,
+            duracionS: profileData.introAudioDurationS,
+            nombre: profileData.fullName,
+          }}
+          avisoAlGuardar={avisoAlGuardar}
+          alGuardar={() => void guardarPerfilEditado()}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1383,9 +1512,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     bottom: 0,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1397,7 +1526,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: spacing.sm,
   },
-  profileBlock: { padding: spacing.lg },
+  /*
+    MAS JUNTO (25/09/2026). Se pidio que foto, nombre, cifras, descripcion, lo
+    que aporta y los accesos estuvieran mas apegados: los huecos eran la suma
+    de margenes de cada bloque (del usuario a las cifras habia 28 puntos). Se
+    recortan los margenes, no los tamaños de letra ni los blancos tactiles.
+  */
+  profileBlock: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg },
   identidad: { alignItems: 'center', gap: spacing.xs },
   centrado: { textAlign: 'center' },
   /*
@@ -1412,10 +1547,10 @@ const styles = StyleSheet.create({
   metricas: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.lg,
-    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   blockBtn: {
     width: 44,
     height: 44,
@@ -1426,7 +1561,7 @@ const styles = StyleSheet.create({
   },
   actionBtn: { minWidth: 100, minHeight: 40, height: 40 },
   // `stats` se conserva: lo usa la ficha de otros perfiles.
-  name: { fontSize: 21, fontWeight: '900', marginTop: spacing.sm },
+  name: { fontSize: 21, fontWeight: '900', marginTop: spacing.xs },
   username: { fontSize: 13, marginTop: 2 },
   statBox: { alignItems: 'center', flex: 1 },
   /*
@@ -1442,8 +1577,8 @@ const styles = StyleSheet.create({
   bio: {
     fontSize: 13,
     lineHeight: 19,
-    marginTop: spacing.md,
-    marginBottom: spacing.lg,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
     maxWidth: 420,
     alignSelf: 'center',
   },
@@ -1459,7 +1594,7 @@ const styles = StyleSheet.create({
   bloqueadoTitulo: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
   bloqueadoTexto: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
   audioBtn: { width: '100%', marginBottom: spacing.lg },
-  shortcuts: { flexDirection: 'row', marginVertical: spacing.md, gap: spacing.sm },
+  shortcuts: { flexDirection: 'row', marginVertical: spacing.sm, gap: spacing.sm },
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },
   shortcutIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Formas de la espera. Mismas medidas que las piezas que sustituyen.

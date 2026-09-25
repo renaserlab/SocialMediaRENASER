@@ -921,6 +921,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'editProfile.username': 'Username',
   'editProfile.bio': 'Bio',
   'editProfile.bioPlaceholder': 'Tell the community about yourself',
+  'editProfile.introSection': 'Intro audio',
+  'editProfile.saved': 'Profile updated',
 
   'editPost.pickerFailed': 'The picker could not be opened.',
   'editPost.emptyPost': 'The post cannot be left empty.',
@@ -1016,6 +1018,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'intro.saved': 'Intro saved',
   'intro.saveFailed': 'Your intro could not be saved.',
   'intro.removeTitle': 'Remove your intro',
+  'intro.removeAsk': 'Remove your intro?',
   'intro.removeBody':
     'Are you sure you want to remove your intro audio? You can record another one whenever you want.',
   'intro.remove': 'Remove',

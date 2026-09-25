@@ -985,6 +985,8 @@ export const es = {
   'editProfile.username': 'Nombre de usuario',
   'editProfile.bio': 'Biografía',
   'editProfile.bioPlaceholder': 'Cuéntale a la comunidad sobre ti',
+  'editProfile.introSection': 'Audio de presentación',
+  'editProfile.saved': 'Perfil actualizado',
 
   // Editar publicación
   'editPost.pickerFailed': 'No se pudo abrir el selector.',
@@ -1089,6 +1091,7 @@ export const es = {
   'intro.saved': 'Presentación guardada',
   'intro.saveFailed': 'No se pudo guardar tu presentación.',
   'intro.removeTitle': 'Quitar tu presentación',
+  'intro.removeAsk': '¿Quitar tu presentación?',
   'intro.removeBody':
     '¿Seguro que quieres quitar tu audio de presentación? Podrás grabar otro cuando quieras.',
   'intro.remove': 'Quitar',

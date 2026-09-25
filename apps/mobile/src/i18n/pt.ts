@@ -924,6 +924,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'editProfile.username': 'Nome de usuário',
   'editProfile.bio': 'Biografia',
   'editProfile.bioPlaceholder': 'Conte para a comunidade sobre você',
+  'editProfile.introSection': 'Áudio de apresentação',
+  'editProfile.saved': 'Perfil atualizado',
 
   'editPost.pickerFailed': 'Não foi possível abrir o seletor.',
   'editPost.emptyPost': 'A publicação não pode ficar vazia.',
@@ -1019,6 +1021,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'intro.saved': 'Apresentação salva',
   'intro.saveFailed': 'Não foi possível salvar sua apresentação.',
   'intro.removeTitle': 'Remover sua apresentação',
+  'intro.removeAsk': 'Remover sua apresentação?',
   'intro.removeBody':
     'Tem certeza de que quer remover seu áudio de apresentação? Você pode gravar outro quando quiser.',
   'intro.remove': 'Remover',

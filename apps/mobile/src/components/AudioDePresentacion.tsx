@@ -62,6 +62,16 @@ type Props = {
   esPropio: boolean;
   /** Nombre de quien presenta, para el texto. */
   nombre?: string;
+  /**
+   * Se pinta dentro de una hoja (`BottomSheet`, que es un `Modal`): desde el
+   * 25/09/2026 el audio propio se graba en la bandeja «Editar perfil».
+   *
+   * Encima de un Modal abierto no se ve nada mas: en iOS el dialogo de
+   * `confirm()` no sale y no resuelve nunca, y los `toast` quedan DEBAJO de la
+   * hoja. Asi que, en una hoja, quitar se confirma aqui mismo y «guardada» o
+   * «quitada» se dicen dentro de la tarjeta.
+   */
+  enHoja?: boolean;
 };
 
 /**
@@ -75,13 +85,31 @@ type Props = {
  * Lo que se guarda es la RUTA del archivo en el almacen, nunca el audio en la
  * base de datos ni una URL firmada (caducan). La firma se pide al reproducir.
  */
-export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre }: Props) {
+export function AudioDePresentacion({
+  rutaDelAudio,
+  duracionS,
+  esPropio,
+  nombre,
+  enHoja = false,
+}: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const setUser = useAppStore((state) => state.setUser);
   useBackgroundAudio();
 
   const [aviso, setAviso] = useState<string | null>(null);
+  /** Lo que salio bien, dicho dentro de la tarjeta (solo en una hoja). */
+  const [hecho, setHecho] = useState<string | null>(null);
+  /** En una hoja, «quitar» pide una segunda pulsacion aqui mismo. */
+  const [confirmandoQuitar, setConfirmandoQuitar] = useState(false);
+
+  const avisarHecho = useCallback(
+    (texto: string) => {
+      if (enHoja) setHecho(texto);
+      else toast(texto);
+    },
+    [enHoja],
+  );
 
   /* ------------------------------------------------------------ escuchar - */
   const [urlFirmada, setUrlFirmada] = useState<string | null>(null);
@@ -242,6 +270,8 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
     if (enCurso.current) return;
     enCurso.current = true;
     setAviso(null);
+    setHecho(null);
+    setConfirmandoQuitar(false);
     setFase('preparando');
     try {
       /*
@@ -316,7 +346,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
         introAudioDurationS: Math.max(1, Math.round(duracionMs / 1000)),
       });
       setUser(perfil);
-      toast(t('intro.saved'));
+      avisarHecho(t('intro.saved'));
     } catch (e) {
       console.warn('[intro] no se pudo guardar la presentacion', e);
       setAviso(t('intro.saveFailed'));
@@ -324,7 +354,7 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       enCurso.current = false;
       setFase('inactiva');
     }
-  }, [grabadora, msGrabados, setUser, t]);
+  }, [grabadora, msGrabados, setUser, avisarHecho, t]);
 
   /*
     Corte automatico al llegar al minuto. Sin el, la grabacion sigue y despues
@@ -390,7 +420,30 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
     ),
   );
 
+  const quitar = useCallback(async () => {
+    setConfirmandoQuitar(false);
+    setHecho(null);
+    setBorrando(true);
+    try {
+      const perfil = await ProfileRepository.updateMyProfile({ introAudioPath: null });
+      setUser(perfil);
+      cancelar();
+      setUrlFirmada(null);
+      avisarHecho(t('intro.removed'));
+    } catch (e) {
+      console.warn('[intro] no se pudo quitar la presentacion', e);
+      setAviso(t('intro.removeFailed'));
+    } finally {
+      setBorrando(false);
+    }
+  }, [setUser, cancelar, avisarHecho, t]);
+
   const borrar = useCallback(async () => {
+    // En una hoja, la pregunta va en la propia tarjeta (ver `enHoja`).
+    if (enHoja) {
+      setConfirmandoQuitar(true);
+      return;
+    }
     const seguro = await confirm({
       title: t('intro.removeTitle'),
       message: t('intro.removeBody'),
@@ -398,20 +451,8 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
       destructive: true,
     });
     if (!seguro) return;
-    setBorrando(true);
-    try {
-      const perfil = await ProfileRepository.updateMyProfile({ introAudioPath: null });
-      setUser(perfil);
-      cancelar();
-      setUrlFirmada(null);
-      toast(t('intro.removed'));
-    } catch (e) {
-      console.warn('[intro] no se pudo quitar la presentacion', e);
-      setAviso(t('intro.removeFailed'));
-    } finally {
-      setBorrando(false);
-    }
-  }, [setUser, cancelar, t]);
+    await quitar();
+  }, [enHoja, quitar, t]);
 
   const duracion = useMemo(() => {
     if (grabando) return reloj(msGrabados / 1000);
@@ -511,6 +552,42 @@ export function AudioDePresentacion({ rutaDelAudio, duracionS, esPropio, nombre 
         </View>
       ) : null}
 
+      {confirmandoQuitar ? (
+        <View style={styles.confirmar}>
+          <Text variant="caption" weight="700" color={colors.text} style={styles.confirmarTexto}>
+            {t('intro.removeAsk')}
+          </Text>
+          <Pressable
+            onPress={() => setConfirmandoQuitar(false)}
+            disabled={borrando}
+            hitSlop={6}
+            style={[styles.confirmarBoton, { borderColor: colors.border }]}
+            accessibilityRole="button"
+          >
+            <Text variant="caption" weight="700" color={colors.text}>
+              {t('common.cancel')}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void quitar()}
+            disabled={borrando}
+            hitSlop={6}
+            style={[styles.confirmarBoton, { borderColor: colors.danger }]}
+            accessibilityRole="button"
+          >
+            <Text variant="caption" weight="700" color={colors.danger}>
+              {t('intro.remove')}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {hecho && !aviso ? (
+        <Text variant="caption" color={colors.textMuted} style={styles.aviso}>
+          {hecho}
+        </Text>
+      ) : null}
+
       {aviso ? (
         <Pressable
           onPress={abrirAjustes}
@@ -549,4 +626,19 @@ const styles = StyleSheet.create({
   acciones: { flexDirection: 'row', gap: spacing.sm },
   accion: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   aviso: { width: '100%', paddingTop: spacing.sm },
+  confirmar: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+  },
+  confirmarTexto: { flex: 1 },
+  confirmarBoton: {
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    minHeight: 32,
+    justifyContent: 'center',
+  },
 });
