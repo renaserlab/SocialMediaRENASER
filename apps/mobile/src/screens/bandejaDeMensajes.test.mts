@@ -383,3 +383,21 @@ test('el mapeador no revienta si la API todavia no manda las etiquetas', () => {
   const mapeador = fuente('mappers/messageMapper.ts');
   assert.match(mapeador, /labels: dto\.labels \?\? \[\]/);
 });
+
+// ---------------------------------------------------------------------------
+// 11. «Filtros» va a la derecha de las etiquetas (pedido el 25/09/2026)
+// ---------------------------------------------------------------------------
+
+test('el boton de filtros va a la derecha de los chips de etiquetas', () => {
+  const pantalla = fuente('screens/MessagesScreen.tsx');
+  const fila = pantalla.slice(pantalla.indexOf('<View style={styles.filaDeFiltros}>'));
+  const chips = fila.indexOf('<ChipsDeEtiquetas');
+  const filtros = fila.indexOf('<FiltrosDeBandeja');
+  assert.ok(chips > 0 && filtros > 0, 'la fila de filtros ya no tiene sus dos piezas');
+  assert.ok(
+    chips < filtros,
+    'Filtros volvio a la izquierda: se pidio a la derecha de «+ Crear etiqueta».',
+  );
+  // Arriba y no centrado: debajo de los chips puede ir el texto de ayuda.
+  assert.match(pantalla, /filaDeFiltros: \{ flexDirection: 'row', alignItems: 'flex-start'/);
+});

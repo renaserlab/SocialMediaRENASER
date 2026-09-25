@@ -424,16 +424,14 @@ export function MessagesScreen() {
         <View style={styles.controles}>
           <BuscadorDeConversaciones alBuscar={alBuscar} />
 
+          {/*
+            PRIMERO LAS ETIQUETAS Y «FILTROS» A LA DERECHA (pedido el 25/09/2026:
+            antes iba a la izquierda y el texto de ayuda de las etiquetas se
+            partía a su lado). Los chips del CRM, en su propia fila desplazable,
+            desaparecen enteros sin la 0045; entonces «Filtros» queda solo, a la
+            derecha.
+          */}
           <View style={styles.filaDeFiltros}>
-            <FiltrosDeBandeja
-              seleccionado={consulta.filtro}
-              alSeleccionar={alFiltrar}
-              respuestasAHistorias={respuestasAHistorias}
-            />
-            {/*
-              Los chips del CRM, a la derecha del botón de filtros y en su propia
-              fila desplazable. Desaparecen enteros sin la 0045.
-            */}
             <View style={styles.chips}>
               <ChipsDeEtiquetas
                 etiquetas={etiquetas.etiquetas}
@@ -441,6 +439,13 @@ export function MessagesScreen() {
                 alSeleccionar={alEtiquetar}
                 disponible={etiquetas.disponible}
                 alGestionar={abrirGestorDeLaLista}
+              />
+            </View>
+            <View style={styles.filtros}>
+              <FiltrosDeBandeja
+                seleccionado={consulta.filtro}
+                alSeleccionar={alFiltrar}
+                respuestasAHistorias={respuestasAHistorias}
               />
             </View>
           </View>
@@ -579,8 +584,13 @@ const styles = StyleSheet.create({
   // sobresale; el resto de la cabecera respeta el mismo margen que las filas.
   cabecera: { marginHorizontal: -spacing.lg },
   controles: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm },
-  filaDeFiltros: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Arriba y no al centro: debajo de los chips puede ir el texto de ayuda, y
+  // «Filtros» tiene que quedar a la altura de los chips, no a media altura.
+  filaDeFiltros: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   // `flex: 1` y `minWidth: 0`: sin esto, una fila de etiquetas larga empuja el
   // botón de filtros fuera de la pantalla en vez de desplazarse por dentro.
   chips: { flex: 1, minWidth: 0 },
+  // Las mismas medidas que la fila de chips (`Chip` mide 44 y la fila lleva
+  // `spacing.sm` arriba y abajo): así el botón queda centrado con ellos.
+  filtros: { minHeight: 44 + spacing.sm * 2, justifyContent: 'center' },
 });
