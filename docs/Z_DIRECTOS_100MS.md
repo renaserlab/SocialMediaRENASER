@@ -97,10 +97,20 @@ Todo en `apps/api/.env.example`, sin un solo valor real.
 | `HMS_APP_SECRET` | **Secreto.** Firma los tokens. Solo backend. |
 | `HMS_TEMPLATE_ID` | La plantilla: roles, calidad y grabación. |
 | `HMS_WEBHOOK_SECRET` | Lo que se declara como cabecera al dar de alta el webhook. |
-| `HMS_REGION` | Región, si la cuenta la fija. |
+| `HMS_REGION` | Región de cada sala: `us`, `eu` o `in`. Vacía, la de la plantilla (el panel la deja en la del espacio de trabajo y no la cambia). Con el público en Perú: `us`. |
 | `LIVE_CREDENTIAL_TTL_SECONDS` | Cuánto dura la credencial de sala. |
 | `LIVE_MAX_CONCURRENT` | Techo de emisiones simultáneas. |
 | `LIVE_MAX_DURATION_MINUTES` | Duración máxima. |
+
+**En la app** (desde el 23/09/2026) hay dos llaves, y hacen falta las dos:
+
+| Dónde | Qué |
+|---|---|
+| `EXPO_PUBLIC_FEATURE_LIVE=on` en cada perfil de `eas.json` | La BUILD sabe hacer directos: lleva el SDK y los permisos nativos (versión 1.1.0 en adelante). La web no la lleva. |
+| `GET /api/v1/live/availability` → `{video, provider}` | El SERVIDOR tiene 100ms configurado. «Vivo» lo pregunta antes de ofrecer emitir. |
+
+Encender o apagar los directos es, por tanto, cambiar la configuración del
+**servidor** (§16) y renovar las máquinas; la app no necesita otra versión.
 
 **Reglas que no se negocian:**
 
@@ -389,11 +399,12 @@ que salga a la red de un tercero falla los lunes por motivos que no son nuestros
 
 ## 12. Activación progresiva
 
-**Preparada, no ejecutada.** Hoy está en el paso 1.
+**Preparada, no ejecutada.** Hoy (23/09/2026) está entre el 2 y el 3: el código
+completo está en `Edson` y falta conectar la cuenta (§16).
 
-1. **Bandera apagada.** ← estamos aquí
-2. Desarrollo contra los dobles.
-3. Cuenta de desarrollo de 100ms y plantilla creada.
+1. **Bandera apagada.**
+2. Desarrollo contra los dobles. ← hecho, incluido pintar el vídeo
+3. Cuenta de 100ms y plantilla creada. ← siguiente (§16)
 4. Prueba interna, solo administración.
 5. Un creador autorizado.
 6. Un grupo pequeño de espectadores.
@@ -460,26 +471,26 @@ autenticidad de los avisos es por cabecera y no por firma.
 
 ## 15. Lo que falta
 
-### Depende de la cuenta de 100ms
+### Hecho el 23/09/2026 (rama `Edson`)
 
-1. Cuenta creada y verificada.
-2. **Plantilla** con los cuatro roles: `host`, `moderator`, `guest`, `viewer`.
-   Si allí se llaman de otra forma, se cambia `roles.py` y nada más.
-3. Clave de acceso y secreto de la aplicación.
-4. Webhook dado de alta apuntando a `/api/v1/live/webhook/100ms`, con su cabecera
-   de autorización.
-5. Decidir calidad inicial y confirmar que la grabación queda **desactivada**.
+- **El vídeo se ve.** El adaptador conectaba pero nunca contaba qué pistas había,
+  así que la pantalla no dibujaba nada y quien miraba se quedaba en «esperando
+  al anfitrión». Ahora escucha `ON_TRACK_UPDATE` / `ON_PEER_UPDATE`, publica las
+  pistas y `LiveScreen` las dibuja con `sdk.HmsView` (`salaDeVideo100ms.ts`).
+  Quien emite ve su cámara; quien mira, la del anfitrión.
+- **Quien mira pasa a «en directo»** cuando llega imagen o sonido ajeno
+  (`laSalaCambioDePistasAjenas`), no solo cuando publica él mismo.
+- **El nombre de cada persona** viaja al entrar (antes era el id de la sala).
+- **Terminar echa al público** (`end-room` con `lock`) antes de deshabilitar.
+- **El techo de emisiones** se aplica también al nacer en directo.
+- **Una emisión en directo sin sala se repara** al pedir credencial.
+- **Permisos nativos** que pide 100ms (Bluetooth, estado de red; red local en
+  iOS) → la app sube a **1.1.0**: los directos necesitan esa build nueva.
+- `FEATURE_LIVE` de la app deja de ser `false` a fuego (ver §3).
+
+### Depende de la cuenta de 100ms → §16
 
 ### Depende de una decisión
-
-- **El SDK móvil.** `@100mslive/react-native-hms` es un módulo **nativo** y no
-  declara `codegenConfig`, así que en un proyecto con la Nueva Arquitectura
-  activada —como este— depende de la capa de interoperabilidad. Añadirlo:
-  - obliga a **Development Build**: deja de funcionar en Expo Go;
-  - cambia lo que produce una compilación de EAS;
-  - no se puede verificar sin compilar.
-
-  Por eso **no se ha añadido**. Es una decisión de build, no de código.
 
 - **Deduplicado persistente de avisos**, que exigiría una migración.
 
@@ -487,4 +498,75 @@ autenticidad de los avisos es por cabecera y no por firma.
 
 **Nada de esto se ha probado contra una cuenta real de 100ms ni en un
 dispositivo.** Las pruebas automáticas usan dobles, que es lo correcto, pero no
-sustituyen a dos teléfonos y una sala de verdad.
+sustituyen a dos teléfonos y una sala de verdad. Riesgo concreto: el SDK usa un
+componente de vista antiguo y el proyecto tiene la Nueva Arquitectura activada;
+funciona por la capa de interoperabilidad de React Native, pero solo un
+teléfono real confirma que la imagen se pinta. Lista de QA en
+`docs/Z_QA_FISICO_PENDIENTE.md` §5.
+
+---
+
+## 16. Conectar la cuenta de 100ms, paso a paso
+
+### A. En el panel de 100ms (dashboard.100ms.live)
+
+1. **Plantilla nueva** (*Templates › Create template*), de vídeo en tiempo real.
+   Los roles tienen que llamarse **exactamente** así:
+
+   | Rol | Publica | Se suscribe a | Para qué |
+   |---|---|---|---|
+   | `host` | audio y vídeo | `host`, `moderator`, `guest` | quien emite |
+   | `moderator` | audio y vídeo | `host`, `moderator`, `guest` | administración |
+   | `guest` | audio y vídeo | `host`, `moderator`, `guest` | invitados (hoy no se usa) |
+   | `viewer` | **nada** | `host`, `moderator`, `guest` | el público |
+
+   `viewer` tiene que ser un rol **en tiempo real (WebRTC)**, no un espectador
+   HLS: la app entra siempre con `sdk.join`.
+2. En la plantilla: **grabación desactivada**, **HLS y RTMP desactivados** (no
+   hay código que los use) y calidad de vídeo de `host` a 720p o menos.
+3. Copiar el **Template ID** (*Template › Settings*).
+4. *Developer*: copiar el **App Access Key** y el **App Secret**. El secreto no
+   se pega en ningún chat ni documento.
+5. *Developer › Webhooks*:
+   - URL: `https://dzqncwhehxai0.cloudfront.net/api/v1/live/webhook/100ms`
+     (o el dominio propio de la API, cuando exista);
+   - una cabecera `Authorization` con un valor largo inventado: es el
+     `HMS_WEBHOOK_SECRET` de abajo. Para generarlo en PowerShell:
+     `-join ((1..48) | % { '{0:x}' -f (Get-Random -Max 16) })`;
+   - eventos: sesión abierta y cerrada, entrada y salida de participantes, y
+     fallo de sesión.
+
+### B. En el fichero de secretos (fuera del repositorio)
+
+Añadir a `C:\Users\Edwincito\zexcelencia-secretos.json`:
+
+```json
+"FEATURE_LIVE": "true",
+"LIVE_PROVIDER": "100ms",
+"HMS_APP_ACCESS_KEY": "...",
+"HMS_APP_SECRET": "...",
+"HMS_TEMPLATE_ID": "...",
+"HMS_WEBHOOK_SECRET": "...",
+"HMS_REGION": "us"
+```
+
+Opcionales: `LIVE_MAX_CONCURRENT` (3), `LIVE_MAX_DURATION_MINUTES` (180),
+`LIVE_CREDENTIAL_TTL_SECONDS` (3600).
+
+### C. En AWS (quien opera, con autorización)
+
+```powershell
+$env:RENASERLAB_AWS_ACCOUNT_ID = '302277511407'
+.\infra\aws\deploy-renaserlab.ps1 -Accion Secretos -ArchivoDeSecretos C:\Users\Edwincito\zexcelencia-secretos.json
+.\infra\aws\deploy-renaserlab.ps1 -Accion Renovar
+```
+
+Las máquinas leen el secreto solo al arrancar: sin `Renovar` no cambia nada.
+Comprobar `GET /api/v1/live/availability` → `{"video": true, "provider": "100ms"}`
+y, en el registro de la API, «Proveedor de directo: 100ms».
+
+### D. En los teléfonos
+
+Build **1.1.0** (APK `preview` para probar; AAB `production` para la tienda).
+Las builds 1.0.0 no ofrecen «Vivo»: no llevan los permisos. Prueba con dos
+teléfonos: uno emite desde *Crear › Vivo*, el otro entra desde la pestaña Live.

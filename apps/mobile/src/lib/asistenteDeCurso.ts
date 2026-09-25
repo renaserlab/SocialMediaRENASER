@@ -225,7 +225,11 @@ export function avisoDeRevision(
 export function accionFinal(
   reviewAvailable: boolean,
   reviewStatus: string | undefined,
+  flexible = false,
 ): 'enviar' | 'publicar' | 'esperar' {
+  // MODO FLEXIBLE: publicar no exige revisión en el servidor, así que se
+  // ofrece siempre publicar, también lo que estaba esperando revisión.
+  if (flexible) return 'publicar';
   if (!reviewAvailable) return 'publicar';
   if (reviewStatus === 'approved') return 'publicar';
   if (reviewStatus === 'pending_review') return 'esperar';

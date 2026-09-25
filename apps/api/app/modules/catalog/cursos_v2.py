@@ -286,13 +286,15 @@ async def resolver_revision(
     course_id: str,
     *,
     aprobado: bool,
-    revisor_id: str,
+    revisor_id: str | None,
     motivo: str | None = None,
 ) -> None:
     """Aprueba o rechaza. No hace commit.
 
     Queda escrito QUIEN reviso y CUANDO: una decision sobre el trabajo de otra
-    persona sin firma no se puede ni explicar ni revisar.
+    persona sin firma no se puede ni explicar ni revisar. `revisor_id=None`
+    solo lo usa el MODO FLEXIBLE, donde aprueba el sistema: la columna admite
+    nulo y la auditoria lo apunta como tal.
     """
     await db.execute(
         update(CURSOS)

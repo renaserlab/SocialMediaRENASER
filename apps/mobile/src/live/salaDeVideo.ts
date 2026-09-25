@@ -1,33 +1,25 @@
 /**
- * LA SALA DE VIDEO: el unico sitio por donde entrara el SDK nativo.
+ * LA SALA DE VIDEO: el unico sitio por donde entra el SDK nativo.
  *
- * POR QUE ESTE FICHERO EXISTE. Hoy no hay proveedor de directo instalado en la
- * aplicacion. El backend ya sabe repartir credenciales
- * (`POST /live/sessions/{id}/credential`), pero el paquete que de verdad
- * publica y reproduce video —100ms, LiveKit o el que se apruebe— todavia no
- * esta en `package.json`, y esa decision es del cliente, no del codigo.
+ * POR QUE ESTE FICHERO EXISTE. La pantalla y la maquina de estados hablan con
+ * este contrato, no con el SDK. La implementacion de verdad es
+ * `salaDeVideo100ms.ts` (100ms), que se registra la primera vez que alguien
+ * abre una transmision (`registro100ms.native.ts`); mientras no se registra,
+ * o en web y en las pruebas, se usa la sala FALSA de abajo, que no finge nada:
+ * dice que no hay video. Cambiar de proveedor es escribir otro adaptador.
  *
- * La forma barata de esperar seria dejar la pantalla sin nada y escribirlo todo
- * el dia que llegue el SDK. La forma que no obliga a rehacer nada es esta: se
- * fija AHORA el contrato que la pantalla va a consumir, se implementa una sala
- * FALSA que cumple ese contrato sin hacer nada, y el dia que entre el paquete
- * se escribe una segunda implementacion y se registra. Ni la pantalla ni la
- * maquina de estados se tocan.
+ * LO QUE LA PANTALLA NECESITA PARA PINTAR (añadido cuando se enchufo 100ms, que
+ * hasta entonces conectaba pero no ensenaba nada): la lista de PISTAS DE VIDEO
+ * con quien las emite, y un COMPONENTE que dibuja una pista por su id. El
+ * componente lo da el adaptador porque solo el sabe dibujar las suyas (en 100ms
+ * es `sdk.HmsView`, atado a la instancia del SDK).
  *
- * ASI SE ENCHUFA EL SDK, y no hay mas pasos:
- *
- *   // src/live/salaDeVideo100ms.ts  (fichero NUEVO, no existe todavia)
- *   import { HMSSDK } from '@100mslive/react-native-hms';
- *   export function crearSala100ms(): SalaDeVideo { ... }
- *
- *   // en el arranque de la aplicacion, UNA linea:
- *   registrarFabricaDeSala(crearSala100ms);
- *
- * NO IMPORTA NADA, a proposito. Ni React, ni React Native, ni el repositorio.
- * Es lo que permite ejecutarlo tal cual con `node --test` (ver
- * `salaDeVideo.test.mts`) y lo que garantiza que la implementacion falsa se
- * comprueba de verdad en vez de darse por buena.
+ * NO IMPORTA NADA EN TIEMPO DE EJECUCION, a proposito. Ni React, ni React
+ * Native, ni el repositorio: el unico `import` es de TIPOS, que desaparece al
+ * ejecutar. Es lo que permite ejecutarlo tal cual con `node --test` (ver
+ * `salaDeVideo.test.mts`).
  */
+import type { ComponentType } from 'react';
 
 /* ------------------------------------------------------------------------- *
  * LA CREDENCIAL. Lo que responde el backend, ya leido y comprobado.
@@ -137,6 +129,62 @@ export function mediosApagados(): EstadoDeMedios {
   return { camara: false, microfono: false, camaraFrontal: true, publicando: false };
 }
 
+/** Una pista de video de la sala, ya traducida del SDK. */
+export type PistaDeVideo = {
+  /** Lo que el componente de la sala necesita para dibujarla. */
+  id: string;
+  /** La de este telefono (vista previa de quien emite). */
+  local: boolean;
+  /** Papel de quien la emite en la sala: `host`, `moderator`, `guest`... */
+  papel: string;
+  /** Camara apagada: la pista existe pero no hay imagen. */
+  silenciada: boolean;
+};
+
+/** Lo que circula por la sala, ademas de lo propio. */
+export type PistasDeSala = {
+  video: PistaDeVideo[];
+  /**
+   * Llega imagen O SONIDO de otra persona. Es lo que pone «en directo» a quien
+   * solo mira: un anfitrion con la camara apagada que sigue hablando esta
+   * emitiendo igual.
+   */
+  hayMediosAjenos: boolean;
+};
+
+export function sinPistas(): PistasDeSala {
+  return { video: [], hayMediosAjenos: false };
+}
+
+/**
+ * La pista que ocupa el panel grande.
+ *
+ * - Quien EMITE ve su propia camara: es la vista previa con la que se encuadra.
+ * - Quien MIRA ve al anfitrion. Si el anfitrion tiene la camara apagada, a
+ *   quien mas este publicando con imagen (moderacion o invitados) antes que un
+ *   panel negro. Nunca su propia pista: quien mira no publica.
+ *
+ * `null` = no hay imagen que ensenar, y la pantalla pinta el cartel del estado.
+ */
+export function elegirPistaPrincipal(
+  pistas: readonly PistaDeVideo[],
+  { emito }: { emito: boolean },
+): PistaDeVideo | null {
+  const conImagen = pistas.filter((pista) => !pista.silenciada && pista.id !== '');
+  if (emito) return conImagen.find((pista) => pista.local) ?? null;
+  const ajenas = conImagen.filter((pista) => !pista.local);
+  return ajenas.find((pista) => pista.papel === 'host') ?? ajenas[0] ?? null;
+}
+
+/** Props del componente que dibuja una pista. */
+export type PropsDeVistaDePista = {
+  pistaId: string;
+  /** Espejo para la camara frontal propia, como un espejo de verdad. */
+  espejo: boolean;
+  /** Estilo de React Native. `unknown` para no importar React Native aqui. */
+  estilo?: unknown;
+};
+
 /**
  * Lo que la sala cuenta hacia fuera.
  *
@@ -152,6 +200,8 @@ export type EventoDeSala =
   /** La conexion aguanta pero va mal. `buena: false` = imagen a trompicones. */
   | { tipo: 'calidad'; buena: boolean }
   | { tipo: 'medios'; medios: EstadoDeMedios }
+  /** Cambiaron las pistas: alguien entro, salio, encendio o apago la camara. */
+  | { tipo: 'pistas'; pistas: PistasDeSala }
   /**
    * Se acabo la conexion. `recuperable` decide si se vuelve a intentar: una
    * caida de red lo es; un token caducado o una expulsion, no.
@@ -170,11 +220,15 @@ export interface SalaDeVideo {
   /** Quien la implementa. `'ninguno'` en la falsa. Solo para diagnostico. */
   readonly proveedor: string;
   /**
-   * Entra en la sala. `publicar` decide si ademas se emite.
+   * Entra en la sala. `publicar` decide si ademas se emite; `nombre` es como
+   * aparece esta persona para los demas (antes era el id de la sala para todos).
    *
    * Rechaza con `SalaNoDisponible` cuando no hay proveedor instalado.
    */
-  unirse(credencial: CredencialDeVideo, opciones: { publicar: boolean }): Promise<void>;
+  unirse(
+    credencial: CredencialDeVideo,
+    opciones: { publicar: boolean; nombre?: string },
+  ): Promise<void>;
   /** Sale de la sala. Nunca lanza: salir siempre tiene que poder ocurrir. */
   salir(): Promise<void>;
   /** Enciende o apaga la camara. Devuelve como quedaron los medios. */
@@ -184,6 +238,13 @@ export interface SalaDeVideo {
   cambiarCamara(): Promise<EstadoDeMedios>;
   /** Lo que hay encendido ahora, sin preguntar al SDK. */
   medios(): EstadoDeMedios;
+  /** Las ultimas pistas conocidas. Copia: escribir en ella no cambia la sala. */
+  pistas(): PistasDeSala;
+  /**
+   * Dibuja una pista por su id, o `null` si esta sala no sabe dibujar (la
+   * falsa). Solo pinta pistas de ESTA sala.
+   */
+  readonly VistaDePista: ComponentType<PropsDeVistaDePista> | null;
   /** Suscribe un oyente. Devuelve como quitarlo. */
   alOcurrir(oyente: (evento: EventoDeSala) => void): () => void;
   /**
@@ -225,7 +286,7 @@ export function esSalaNoDisponible(error: unknown): boolean {
 }
 
 /* ------------------------------------------------------------------------- *
- * LA IMPLEMENTACION FALSA. La unica que existe hoy.
+ * LA IMPLEMENTACION FALSA. La que se usa sin SDK (web, pruebas, sin registrar).
  * ------------------------------------------------------------------------- */
 
 /**
@@ -282,6 +343,13 @@ export function crearSalaFalsa(): SalaDeVideo {
     medios() {
       return { ...estado };
     },
+
+    pistas() {
+      // Sin proveedor no hay pistas, y no se inventa ninguna.
+      return sinPistas();
+    },
+
+    VistaDePista: null,
 
     alOcurrir(oyente) {
       if (destruida) return () => {};

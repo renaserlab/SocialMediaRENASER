@@ -66,7 +66,8 @@ from app.modules.products.models import (
     ProductSeller,
     ProductVersion,
 )
-from app.modules.products.states import EDITABLES
+from app.core.config import get_settings
+from app.modules.products.states import EDITABLES, EN_CATALOGO
 from app.shared import storage
 
 logger = logging.getLogger("renaser.products")
@@ -223,8 +224,15 @@ def _id_derivado(version_id: str, actor_id: str, clave: str | None) -> str | Non
 # El borrador de quien vende
 # --------------------------------------------------------------------------- #
 async def _borrador_editable(db: AsyncSession, *, producto: Product) -> ProductVersion:
-    """La versión borrador del producto, si todavía se puede tocar."""
-    if producto.status not in EDITABLES:
+    """La versión borrador del producto, si todavía se puede tocar.
+
+    En MODO FLEXIBLE también la de un producto publicado: es la edición que se
+    abrió sobre la vigente y que todavía no se ha publicado.
+    """
+    flexible = get_settings().publicacion_flexible
+    if producto.status not in EDITABLES and not (
+        flexible and producto.status in EN_CATALOGO
+    ):
         raise ConflictError(
             "Solo se cambian las fotografías de un borrador.",
             code="product_not_editable",
@@ -265,11 +273,13 @@ async def subir(
     actor_id: str,
     clave: str | None = None,
 ) -> ProductMedia:
-    """Guarda una fotografía del borrador. Nace PENDIENTE de aprobación.
+    """Guarda una fotografía del borrador. Nace PENDIENTE de aprobación (o
+    aprobada, en modo flexible).
 
     EL TEXTO ALTERNATIVO ES OBLIGATORIO. No es un adorno de accesibilidad: es lo
     único que queda cuando la imagen no carga, y es lo que lee quien no ve.
     """
+    aprobar_al_subir = get_settings().publicacion_flexible
     await esquema.exigir_fotografias(db)
     version = await _borrador_editable(db, producto=producto)
 
@@ -323,7 +333,11 @@ async def subir(
         alt_text=alt,
         position=int(siguiente),
         created_by=actor_id,
-        status=FOTO_PENDIENTE,
+        # MODO FLEXIBLE: nace aprobada. Nadie la va a mirar antes de publicar,
+        # y una foto pendiente no se firma en el catálogo: el producto saldría
+        # sin imagen. Administración puede rechazarla después.
+        status=FOTO_APROBADA if aprobar_al_subir else FOTO_PENDIENTE,
+        reviewed_at=datetime.now(timezone.utc) if aprobar_al_subir else None,
         content_type=medida.content_type,
         byte_size=medida.byte_size,
         width=medida.width,

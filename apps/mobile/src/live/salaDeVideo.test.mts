@@ -5,6 +5,7 @@ import {
   PAPELES_EN_SALA,
   crearSalaDeVideo,
   crearSalaFalsa,
+  elegirPistaPrincipal,
   esSalaNoDisponible,
   hayProveedorDeVideo,
   hayVideoEnLaCredencial,
@@ -13,6 +14,7 @@ import {
   SalaNoDisponible,
   type CredencialDeVideo,
   type EventoDeSala,
+  type PistaDeVideo,
   type SalaDeVideo,
 } from './salaDeVideo.ts';
 
@@ -235,5 +237,42 @@ describe('el registro: como entrara el SDK sin tocar nada mas', () => {
     registrarFabricaDeSala(null);
     assert.equal(hayProveedorDeVideo(), false);
     assert.equal(crearSalaDeVideo().proveedor, 'ninguno');
+  });
+});
+
+describe('que pista ocupa el panel grande', () => {
+  const pista = (p: Partial<PistaDeVideo> & { id: string }): PistaDeVideo => ({
+    local: false,
+    papel: 'viewer',
+    silenciada: false,
+    ...p,
+  });
+  const propia = pista({ id: 'mia', local: true, papel: 'host' });
+  const anfitrion = pista({ id: 'anfitrion', papel: 'host' });
+  const moderadora = pista({ id: 'moderadora', papel: 'moderator' });
+
+  it('quien EMITE ve su propia camara, que es con la que se encuadra', () => {
+    assert.equal(elegirPistaPrincipal([anfitrion, propia], { emito: true })?.id, 'mia');
+  });
+
+  it('quien MIRA ve al anfitrion, nunca su propia pista', () => {
+    assert.equal(elegirPistaPrincipal([propia, moderadora, anfitrion], { emito: false })?.id, 'anfitrion');
+  });
+
+  it('con la camara del anfitrion apagada, quien mas emita con imagen antes que negro', () => {
+    const apagado = { ...anfitrion, silenciada: true };
+    assert.equal(elegirPistaPrincipal([apagado, moderadora], { emito: false })?.id, 'moderadora');
+  });
+
+  it('sin nadie con imagen, null: la pantalla pinta el cartel del estado', () => {
+    assert.equal(elegirPistaPrincipal([], { emito: false }), null);
+    assert.equal(elegirPistaPrincipal([{ ...anfitrion, silenciada: true }], { emito: false }), null);
+    assert.equal(elegirPistaPrincipal([{ ...propia, silenciada: true }], { emito: true }), null);
+  });
+
+  it('la sala falsa no inventa pistas ni sabe dibujarlas', () => {
+    const sala = crearSalaFalsa();
+    assert.deepEqual(sala.pistas(), { video: [], hayMediosAjenos: false });
+    assert.equal(sala.VistaDePista, null);
   });
 });

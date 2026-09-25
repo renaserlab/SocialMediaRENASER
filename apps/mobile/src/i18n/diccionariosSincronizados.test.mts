@@ -224,6 +224,10 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'politicasAdmin.tipo.negative_balance',
     'politicasAdmin.tituloPanel',
     'politicasAdmin.valor.horas',
+    // Panel de administración y revisión de cursos: «Políticas de eventos» y
+    // «de {autor}» se escriben igual en portugués.
+    'panelAdmin.politicas',
+    'revisionCursos.de',
     'moderacionResenas.accion.ocultar',
     'moderacionResenas.estado.hidden',
     'moderacionResenas.eventoRef',

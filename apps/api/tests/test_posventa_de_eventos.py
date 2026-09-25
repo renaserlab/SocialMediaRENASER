@@ -1361,9 +1361,26 @@ async def test_dos_revisores_no_resuelven_el_mismo_caso(sesiones) -> None:
     quien = await _persona(sesiones, "gestor")
 
     barrera = asyncio.Barrier(2)
+    # LAS DOS LEEN ANTES DE QUE NINGUNA ESCRIBA. Sin esto, la carrera la decide
+    # el planificador: en una maquina lenta una termina antes de que la otra
+    # lea, la segunda ve `under_review` y falla por `SaltoInexistente`, y la
+    # prueba ya no ejercita el `where status = :desde`, que es lo que protege.
+    leido = asyncio.Barrier(2)
 
     async def resuelve():
         async with sesiones() as db:
+            leer = db.get
+            primera = True
+
+            async def leer_y_esperar(*args, **kwargs):
+                nonlocal primera
+                fila = await leer(*args, **kwargs)
+                if primera:
+                    primera = False
+                    await leido.wait()
+                return fila
+
+            db.get = leer_y_esperar
             await barrera.wait()
             try:
                 m = await posventa.transicionar(

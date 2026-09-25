@@ -224,7 +224,7 @@ def test_la_ultima_migracion_es_la_que_dice_la_documentacion(aplicadas) -> None:
     # cambio ya traia la 0052: en verde aqui, porque el modulo entero se salta
     # sin PostgreSQL, y en rojo la primera vez que CI tuviera uno, que es
     # exactamente cuando se ejercitan por primera vez la 0051 y la 0052.
-    assert aplicadas[-1].startswith("0082_"), (
+    assert aplicadas[-1].startswith("0085_"), (
         f"la ultima migracion es {aplicadas[-1]}: actualiza los modelos, "
         "la documentacion y esta prueba en el mismo cambio"
     )
@@ -609,3 +609,30 @@ def test_una_version_publicada_no_se_puede_reescribir(conexion, aplicadas) -> No
         # daba por rechazada la operacion por la razon equivocada.
         with pytest.raises(psycopg.errors.RestrictViolation), conexion.cursor() as cur:
             cur.execute(sentencia, argumentos)
+
+
+@SIN_POSTGRES
+def test_eventos_cursos_y_directos_no_se_escriben_por_postgrest(conexion, aplicadas) -> None:
+    """La 0083, EJERCIDA: tras todas las migraciones, `anon` y `authenticated`
+    solo pueden LEER `events`, `courses` y `live_sessions`.
+
+    El prólogo concede `all` por defecto, como Supabase, así que antes de la
+    0083 aquí salían insert, update, delete y truncate: con ellos un organizador
+    se publicaba su evento con un PATCH a PostgREST, sin admisión. Y la lectura
+    tiene que seguir: la app lee `courses` y el tiempo real de los directos
+    necesita `select` sobre `live_sessions`.
+    """
+    with conexion.cursor() as cur:
+        cur.execute(
+            "select table_name, grantee, privilege_type "
+            "from information_schema.role_table_grants "
+            "where table_schema = 'public' "
+            "and table_name in ('events', 'courses', 'live_sessions') "
+            "and grantee in ('anon', 'authenticated')"
+        )
+        filas = cur.fetchall()
+    escrituras = sorted(f for f in filas if f[2] != "SELECT")
+    assert escrituras == [], f"siguen pudiendo escribir: {escrituras}"
+    lecturas = {(tabla, rol) for tabla, rol, privilegio in filas if privilegio == "SELECT"}
+    for tabla in ("events", "courses", "live_sessions"):
+        assert (tabla, "authenticated") in lecturas, f"{tabla} perdió la lectura"

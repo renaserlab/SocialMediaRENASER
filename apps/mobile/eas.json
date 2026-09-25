@@ -7,17 +7,20 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "development",
         "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
-        "EXPO_PUBLIC_API_URL": "https://d33u17ka1rcaax.cloudfront.net",
+        "EXPO_PUBLIC_API_URL": "https://dzqncwhehxai0.cloudfront.net",
         "EXPO_PUBLIC_WEB_URL": "https://social-media-renaser.vercel.app",
-        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500",
+        "EXPO_PUBLIC_FEATURE_LIVE": "on"
       }
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "autoIncrement": true,
       "android": {
         "buildType": "apk"
@@ -29,9 +32,10 @@
         "EXPO_PUBLIC_APP_ENV": "preview",
         "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
-        "EXPO_PUBLIC_API_URL": "https://d33u17ka1rcaax.cloudfront.net",
+        "EXPO_PUBLIC_API_URL": "https://dzqncwhehxai0.cloudfront.net",
         "EXPO_PUBLIC_WEB_URL": "https://social-media-renaser.vercel.app",
-        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500",
+        "EXPO_PUBLIC_FEATURE_LIVE": "on"
       }
     },
     "preview-ios-simulator": {
@@ -42,6 +46,7 @@
     },
     "production": {
       "distribution": "store",
+      "channel": "production",
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
@@ -53,9 +58,10 @@
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_SUPABASE_URL": "https://jbdlqzimfwyrmmatztqu.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi",
-        "EXPO_PUBLIC_API_URL": "https://d33u17ka1rcaax.cloudfront.net",
+        "EXPO_PUBLIC_API_URL": "https://dzqncwhehxai0.cloudfront.net",
         "EXPO_PUBLIC_WEB_URL": "https://social-media-renaser.vercel.app",
-        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500"
+        "EXPO_PUBLIC_MAX_UPLOAD_MB": "500",
+        "EXPO_PUBLIC_FEATURE_LIVE": "on"
       }
     }
   },

@@ -42,6 +42,7 @@ import { pickImage, signMediaUrls, uploadPostMedia, type PickedMedia } from '@/s
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
+import { usePublicacionFlexible } from '@/hooks/usePublicacionFlexible';
 
 const NIVELES = ['beginner', 'intermediate', 'advanced'] as const;
 const CLAVES_DE_NIVEL = ['wizard.levelBeginner', 'wizard.levelIntermediate', 'wizard.levelAdvanced'] as const;
@@ -84,6 +85,8 @@ const VACIO: BorradorDeCurso = {
  */
 export function AsistenteDeCursoScreen() {
   const { t } = useTranslation();
+  /** MODO FLEXIBLE: se publica sin revisión (lo dice el servidor). */
+  const flexible = usePublicacionFlexible();
   const { colors } = useAppTheme();
   /* Cuanto hay que dejar abajo para que el boton de publicar se pueda pulsar. */
   const espacioInferior = useEspacioInferior();
@@ -407,8 +410,9 @@ export function AsistenteDeCursoScreen() {
   const indice = Math.max(0, PASOS.findIndex((p) => p.id === paso));
   const anterior = PASOS[indice - 1];
   const siguiente = PASOS[indice + 1];
-  const aviso = avisoDeRevision(reviewStatus, motivoDeRechazo, t);
-  const accion = accionFinal(requisitos?.reviewAvailable ?? false, reviewStatus);
+  // En modo flexible no hay revisión que contar: se publica al momento.
+  const aviso = flexible ? null : avisoDeRevision(reviewStatus, motivoDeRechazo, t);
+  const accion = accionFinal(requisitos?.reviewAvailable ?? false, reviewStatus, flexible);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -492,7 +496,7 @@ export function AsistenteDeCursoScreen() {
       */}
       <SinTecladoDelante>
       <AppScreen contentStyle={[styles.contenido, { paddingBottom: espacioInferior + spacing.xxxl }]}>
-        {reviewStatus !== 'draft' ? (
+        {aviso !== null && reviewStatus !== 'draft' ? (
           <View style={[styles.aviso, { borderColor: colors.border }]}>
             <Feather name={aviso.icono} size={16} color={colors.text} />
             <View style={styles.textoDeAviso}>

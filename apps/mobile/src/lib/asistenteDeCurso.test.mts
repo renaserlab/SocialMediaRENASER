@@ -242,3 +242,13 @@ test('un movimiento imposible devuelve LA MISMA lista, para no escribir nada', (
   assert.equal(moviendo(ids, 1, 1), ids);
   assert.equal(moviendo(ids, 5, 0), ids);
 });
+
+test('en modo flexible la acción final es publicar, esté como esté la revisión', () => {
+  {
+    for (const estado of ['draft', 'pending_review', 'rejected', 'approved', undefined]) {
+      assert.equal(accionFinal(true, estado, true), 'publicar', String(estado));
+    }
+    // Sin el modo, lo de siempre.
+    assert.equal(accionFinal(true, 'pending_review'), 'esperar');
+  }
+});

@@ -257,6 +257,9 @@ class DocumentoRead(BaseModel):
     kind: str
     storage_path: str | None = None
     note: str | None = None
+    #: Enlace firmado de pocos minutos para abrirlo (0085). `null` si no hay
+    #: archivo, o si el almacenamiento no está configurado.
+    url: str | None = None
 
 
 class PostulacionRead(BaseModel):
@@ -315,6 +318,9 @@ class VersionRequest(BaseModel):
     price_minor: int | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     variants: list[VarianteRequest] = Field(default_factory=list)
+    #: La categoría vive en el PRODUCTO, no en la versión: se cambia aquí sin
+    #: abrir versión nueva. `null` = no se toca.
+    category_id: str | None = None
 
 
 class ProductoNuevoRequest(VersionRequest):
@@ -359,6 +365,11 @@ class ProductoDelProveedor(BaseModel):
     acciones: list[str] = Field(default_factory=list)
     #: Por qué todavía no se puede publicar, como CÓDIGO. `null` = se puede.
     bloqueo: str | None = None
+    #: Si quien vende puede editarlo ahora (en modo flexible, también publicado).
+    editable: bool = False
+    #: MODO FLEXIBLE: «enviar» publica al momento. La app dice «Publicar» y
+    #: «Publicar cambios» en vez de «Postula tu producto».
+    publicacion_directa: bool = False
 
 
 class MotivoRequest(BaseModel):

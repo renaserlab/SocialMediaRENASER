@@ -126,7 +126,7 @@ def token_de_sala(
 
 
 class Cliente100ms:
-    """Las cuatro llamadas HTTP que necesita el módulo."""
+    """Las cinco llamadas HTTP que necesita el módulo."""
 
     def __init__(
         self,
@@ -147,16 +147,21 @@ class Cliente100ms:
         por nombre repetido y el adaptador recupera la que ya existe. Esa es la
         idempotencia, y la garantiza el proveedor, no una comprobación nuestra
         que dos procesos pasarían a la vez.
+
+        LA REGIÓN VA EN CADA SALA. Sin ella, la sala hereda la de la plantilla,
+        que el panel fija a la del espacio de trabajo (India) y no deja cambiar.
+        Con el público en Perú eso es latencia de sobra; `HMS_REGION=us` la
+        acerca. Vacía, no se envía y manda la plantilla, como hasta ahora.
         """
-        return await self._pedir(
-            "POST",
-            "/rooms",
-            json={
-                "name": nombre,
-                "description": descripcion[:1000],
-                "template_id": self._config.template_id,
-            },
-        )
+        cuerpo: dict[str, str] = {
+            "name": nombre,
+            "description": descripcion[:1000],
+            "template_id": self._config.template_id,
+        }
+        region = self._config.region.strip().lower()
+        if region:
+            cuerpo["region"] = region
+        return await self._pedir("POST", "/rooms", json=cuerpo)
 
     async def sala_por_nombre(self, *, nombre: str) -> dict | None:
         """La sala que ya existe con ese nombre, o `None`."""
@@ -178,6 +183,23 @@ class Cliente100ms:
         falta para poder conciliar después qué pasó.
         """
         return await self._pedir("POST", f"/rooms/{room_id}", json={"enabled": False})
+
+    async def terminar_sala_activa(self, *, room_id: str, motivo: str) -> dict:
+        """Echa a todos los que siguen dentro y bloquea la sala.
+
+        `deshabilitar_sala` solo impide que entre alguien NUEVO: quien ya estaba
+        conectado seguía viendo y oyendo (y el anfitrión, emitiendo y facturando)
+        hasta cerrar la app. Esto termina la sesión activa para todos y, con
+        `lock`, deja la sala deshabilitada en la misma llamada.
+
+        Sin sesión activa (nadie dentro) 100ms contesta 404: es lo normal al
+        terminar una emisión que ya se había vaciado, y quien llama lo trata así.
+        """
+        return await self._pedir(
+            "POST",
+            f"/active-rooms/{room_id}/end-room",
+            json={"reason": motivo[:100], "lock": True},
+        )
 
     # ------------------------------------------------------------------ #
 

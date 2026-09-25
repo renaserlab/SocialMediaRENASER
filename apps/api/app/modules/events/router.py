@@ -13,13 +13,15 @@ CADA TRANSICIÓN, UNA ACCIÓN CON NOMBRE. No hay ningún `PATCH` que acepte
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import AuthUser, get_current_user
 from app.modules.events import admission, cambios, esquema, permissions, service, states
+from app.modules.notifications import decisiones as avisos
 from app.modules.events.schemas import (
     CambioPublicadoRequest,
     CambioRegistradoRead,
@@ -239,11 +241,15 @@ async def enviar_a_revision(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventoDelOrganizador:
-    """Congela una versión y la manda a revisión. NO publica nada."""
+    """Congela una versión y la manda a revisión. En modo flexible, la publica."""
     await esquema.exigir_eventos_v2(db)
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.enviar_a_revision(
-        db, evento_id=evento_id, usuario=current_user, motivo=payload.motivo
+        db,
+        evento_id=evento_id,
+        usuario=current_user,
+        motivo=payload.motivo,
+        flexible=get_settings().publicacion_flexible,
     )
     return _del_organizador(exp)
 
@@ -404,10 +410,22 @@ async def evaluar(
     return _expediente(await service.expediente(db, evento_id))
 
 
+def _empujar(background: BackgroundTasks, exp: service.Expediente, tipo: str) -> None:
+    """El push al organizador, después del commit que ya hizo el servicio."""
+    avisos.empujar(
+        background,
+        user_id=exp.evento.organizer_id,
+        tipo=tipo,
+        entidad="event",
+        entidad_id=exp.evento.id,
+    )
+
+
 @admin_router.post("/{evento_id}/request-changes", response_model=ExpedienteRead)
 async def pedir_correcciones(
     evento_id: str,
     payload: MotivoObligatorio,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteRead:
@@ -429,6 +447,7 @@ async def pedir_correcciones(
         motivo=payload.motivo,
         usuario=current_user,
     )
+    _empujar(background, exp, service.TIPO_DE_AVISO_POR_DECISION[admission.CAMBIOS])
     return _expediente(exp)
 
 
@@ -436,6 +455,7 @@ async def pedir_correcciones(
 async def decidir(
     evento_id: str,
     payload: DecisionCreate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteRead:
@@ -452,20 +472,21 @@ async def decidir(
             "Para pedir correcciones está /request-changes, que no exige "
             "administración."
         )
-    return _expediente(
-        await service.decidir(
-            db,
-            evento_id=evento_id,
-            decision=payload.decision,
-            motivo=payload.motivo,
-            usuario=current_user,
-        )
+    exp = await service.decidir(
+        db,
+        evento_id=evento_id,
+        decision=payload.decision,
+        motivo=payload.motivo,
+        usuario=current_user,
     )
+    _empujar(background, exp, service.TIPO_DE_AVISO_POR_DECISION[payload.decision])
+    return _expediente(exp)
 
 
 @admin_router.post("/{evento_id}/publish", response_model=ExpedienteRead)
 async def publicar(
     evento_id: str,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteRead:
@@ -477,13 +498,16 @@ async def publicar(
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.expediente(db, evento_id)
     await permissions.exigir_admision(db, exp.evento, current_user)
-    return _expediente(await service.publicar(db, evento_id=evento_id, usuario=current_user))
+    exp = await service.publicar(db, evento_id=evento_id, usuario=current_user)
+    _empujar(background, exp, "event_published")
+    return _expediente(exp)
 
 
 @admin_router.post("/{evento_id}/suspend", response_model=ExpedienteRead)
 async def suspender(
     evento_id: str,
     payload: MotivoObligatorio,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteRead:
@@ -495,15 +519,15 @@ async def suspender(
     ensure_uuid(evento_id, "Evento no encontrado.")
     exp = await service.expediente(db, evento_id)
     await permissions.exigir_admision(db, exp.evento, current_user)
-    return _expediente(
-        await service.cambiar_visibilidad(
-            db,
-            evento_id=evento_id,
-            accion="suspend",
-            motivo=payload.motivo,
-            usuario=current_user,
-        )
+    exp = await service.cambiar_visibilidad(
+        db,
+        evento_id=evento_id,
+        accion="suspend",
+        motivo=payload.motivo,
+        usuario=current_user,
     )
+    _empujar(background, exp, "event_suspended")
+    return _expediente(exp)
 
 
 @admin_router.post("/{evento_id}/resume", response_model=ExpedienteRead)

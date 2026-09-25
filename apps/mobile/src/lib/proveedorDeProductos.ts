@@ -75,6 +75,8 @@ export type DocumentoDeLaPostulacion = {
   /** La RUTA del almacenamiento, no una URL. `null` = solo hay nota. */
   storage_path: string | null;
   note: string | null;
+  /** Enlace firmado de diez minutos para abrirlo (0085). `null` = sin archivo. */
+  url?: string | null;
 };
 
 /** La postulación, tal como la manda `PostulacionRead`. */
@@ -162,6 +164,10 @@ export type ProductoDelProveedor = {
   acciones: string[];
   /** Por qué todavía no se puede publicar, como CÓDIGO. `null` = se puede. */
   bloqueo: string | null;
+  /** Si quien vende puede editarlo ahora (en modo flexible, también publicado). */
+  editable?: boolean;
+  /** MODO FLEXIBLE: «enviar» publica al momento (y «Publicar cambios»). */
+  publicacion_directa?: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -473,9 +479,29 @@ export function accionesOfrecidas(producto: ProductoDelProveedor): AccionDeProdu
   return ACCIONES_CON_RUTA.filter((accion) => dice.includes(accion));
 }
 
-/** «Postula tu producto»: manda el borrador a admisión. */
+/** Estados en los que ya no se publica nada, ni en modo flexible. */
+const SIN_PUBLICACION = ['suspended', 'removed'];
+
+/**
+ * «Postula tu producto»: manda el borrador a admisión. En MODO FLEXIBLE
+ * (`publicacion_directa`) el mismo botón PUBLICA, y basta con tener un
+ * borrador —el producto nuevo o los cambios de uno publicado—.
+ */
 export function sePuedePostularProducto(producto: ProductoDelProveedor): boolean {
+  if (producto.publicacion_directa === true) {
+    return producto.draft !== null && !SIN_PUBLICACION.includes(producto.status);
+  }
   return accionesOfrecidas(producto).includes('submitted');
+}
+
+/** Si «enviar» publica al momento (modo flexible del servidor). */
+export function publicaAlEnviar(producto: ProductoDelProveedor | null): boolean {
+  return producto?.publicacion_directa === true;
+}
+
+/** Si lo que se va a publicar son CAMBIOS de un producto que ya se ve. */
+export function sonCambiosDeUnPublicado(producto: ProductoDelProveedor | null): boolean {
+  return producto !== null && producto.published !== null && producto.draft !== null;
 }
 
 /** Devolverlo a borrador. Solo mientras nadie lo haya mirado. */
@@ -484,12 +510,17 @@ export function sePuedeRetirarProducto(producto: ProductoDelProveedor): boolean 
 }
 
 /**
- * Si se puede abrir el editor. SOLO EN BORRADOR.
+ * Si se puede abrir el editor.
+ *
+ * Lo dice el servidor (`editable`): con revisión, solo en borrador; en MODO
+ * FLEXIBLE, también publicado. Sin ese dato —un servidor anterior— se cae a
+ * la regla de siempre, `states.EDITABLES`.
  *
  * No se mira `acciones`: un producto en `submitted` tiene la acción `draft`
- * —retirarlo— y seguiría sin ser editable. Lo que decide es `states.EDITABLES`.
+ * —retirarlo— y seguiría sin ser editable.
  */
 export function sePuedeEditarProducto(producto: ProductoDelProveedor): boolean {
+  if (typeof producto.editable === 'boolean') return producto.editable;
   return (PRODUCTOS_EDITABLES as readonly string[]).includes(producto.status);
 }
 
@@ -516,7 +547,74 @@ export function precioLegible(version: Version | null): string | null {
   const { price_minor: importe, currency: moneda } = version;
   if (importe === null || importe === undefined) return null;
   if (moneda === null || moneda === undefined || moneda.trim() === '') return null;
-  return `${importe} ${moneda.trim().toUpperCase()}`;
+  const codigo = moneda.trim().toUpperCase();
+  return `${importeComoTexto(importe, codigo)} ${codigo}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* El precio, como lo escribe una persona                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Las monedas que se ofrecen en el formulario. Cualquier otra de tres letras
+ * sigue siendo válida si llega del servidor, pero no se ofrece: elegir entre
+ * tres es más cómodo que escribir un código.
+ */
+export const MONEDAS_OFRECIDAS = ['PEN', 'USD', 'EUR'] as const;
+
+/**
+ * Cuántos decimales tiene cada moneda (ISO 4217). La inmensa mayoría, dos; las
+ * de esta tabla, otro número. Es lo que permite escribir «49.90» y guardar
+ * 4990, y que el yen, que no tiene céntimos, se escriba sin ellos.
+ */
+const DECIMALES_DISTINTOS_DE_DOS: Record<string, number> = {
+  JPY: 0, KRW: 0, CLP: 0, PYG: 0, ISK: 0, VND: 0, UGX: 0, XAF: 0, XOF: 0,
+  BHD: 3, KWD: 3, OMR: 3, JOD: 3, TND: 3, LYD: 3, IQD: 3,
+};
+
+export function decimalesDeLaMoneda(moneda: string | null | undefined): number {
+  const codigo = (moneda ?? '').trim().toUpperCase();
+  return DECIMALES_DISTINTOS_DE_DOS[codigo] ?? 2;
+}
+
+/**
+ * Lo escrito («49.90», «49,90», «50») en unidades MENORES, que es lo que pide
+ * el contrato. Misma regla que `dinero.aCentavos` de los cursos: con coma o
+ * con punto, sin signo ni símbolos, y compuesto con enteros —nunca
+ * `Number(x) * 100`, que en coma flotante pierde un céntimo—.
+ *
+ * `conSigno` es para la diferencia de precio de una variante, que puede ser
+ * negativa.
+ */
+export function importeEscrito(
+  texto: string | null | undefined,
+  moneda: string | null | undefined,
+  { conSigno = false }: { conSigno?: boolean } = {},
+): number | null | 'invalido' {
+  const limpio = (texto ?? '').trim().replace(/\s/g, '');
+  if (limpio === '') return null;
+  const negativo = conSigno && limpio.startsWith('-');
+  const cuerpo = negativo ? limpio.slice(1) : limpio;
+  const decimales = decimalesDeLaMoneda(moneda);
+  const formato =
+    decimales === 0 ? /^\d+$/ : new RegExp(`^\\d+(?:[.,]\\d{1,${decimales}})?$`);
+  if (!formato.test(cuerpo)) return 'invalido';
+  const [enteros, fraccion = ''] = cuerpo.replace(',', '.').split('.');
+  const valor = Number(enteros) * 10 ** decimales + Number(fraccion.padEnd(decimales, '0') || '0');
+  if (!Number.isSafeInteger(valor)) return 'invalido';
+  return negativo ? -valor : valor;
+}
+
+/** Unidades menores → lo que se escribe en el formulario: 4990 PEN → «49.90». */
+export function importeComoTexto(menores: number, moneda: string | null | undefined): string {
+  const decimales = decimalesDeLaMoneda(moneda);
+  const signo = menores < 0 ? '-' : '';
+  const absoluto = Math.abs(Math.round(menores));
+  if (decimales === 0) return `${signo}${absoluto}`;
+  const divisor = 10 ** decimales;
+  const enteros = Math.floor(absoluto / divisor);
+  const resto = String(absoluto % divisor).padStart(decimales, '0');
+  return `${signo}${enteros}.${resto}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -748,9 +846,15 @@ export type FormularioDeProducto = {
   materiales: string;
   pais: string;
   fabricante: string;
-  /** El importe en unidades MENORES, como lo pide el contrato. */
+  /**
+   * El importe como lo escribe una persona: «49.90» o «49,90». Se convierte a
+   * unidades MENORES al mandarlo (`importeEscrito`). Antes se escribía ya en
+   * céntimos («4990») y nadie que probaba la app lo adivinaba.
+   */
   precio: string;
   moneda: string;
+  /** La categoría elegida (`category_id`), o vacío. Vive en el producto. */
+  categoria: string;
   variantes: VarianteEscrita[];
 };
 
@@ -771,6 +875,7 @@ export function formularioDeProductoVacio(): FormularioDeProducto {
     fabricante: '',
     precio: '',
     moneda: '',
+    categoria: '',
     variantes: [],
   };
 }
@@ -803,7 +908,10 @@ function valorDeOpcion(valor: unknown): string {
  * Lo que la versión NO trae sigue vacío. Un `price_minor` nulo deja el precio
  * en blanco: escribir «0» ahí convertiría «sin precio» en «gratis» al guardar.
  */
-export function formularioDeProductoDesde(version: Version): FormularioDeProducto {
+export function formularioDeProductoDesde(
+  version: Version,
+  categoria: string | null = null,
+): FormularioDeProducto {
   return {
     version: version.version ?? '',
     nombre: version.name ?? '',
@@ -815,8 +923,9 @@ export function formularioDeProductoDesde(version: Version): FormularioDeProduct
     precio:
       version.price_minor === null || version.price_minor === undefined
         ? ''
-        : String(version.price_minor),
+        : importeComoTexto(version.price_minor, version.currency),
     moneda: version.currency ?? '',
+    categoria: categoria ?? '',
     variantes: (version.variants ?? []).map((v) => ({
       sku: v.sku ?? '',
       nombre: v.name ?? '',
@@ -827,7 +936,7 @@ export function formularioDeProductoDesde(version: Version): FormularioDeProduct
       diferencia:
         v.price_delta_minor === null || v.price_delta_minor === undefined
           ? ''
-          : String(v.price_delta_minor),
+          : importeComoTexto(v.price_delta_minor, version.currency),
     })),
     // `version.gallery` NO SE COPIA AL FORMULARIO. Se lee para enseñar cuántas
     // fotografías hay y en qué estado están, pero no hay ningún campo que las
@@ -865,6 +974,8 @@ export type PeticionDeVersion = {
   manufacturer?: string;
   price_minor?: number;
   currency?: string;
+  /** Vive en el producto; `VersionRequest.category_id` desde el 24/09/2026. */
+  category_id?: string;
   variants?: PeticionDeVariante[];
   /*
     SIN `gallery`. `VersionRequest` no lo tiene desde la 0073, y Pydantic
@@ -963,8 +1074,8 @@ export function validarProducto(formulario: FormularioDeProducto): Fallo[] {
   }
 
   // EL PRECIO VA CON SU MONEDA O NO VA.
-  const precio = enteroEscrito(formulario.precio);
   const moneda = (formulario.moneda ?? '').trim();
+  const precio = importeEscrito(formulario.precio, moneda);
   if (precio === 'invalido' || (typeof precio === 'number' && precio < 0)) {
     fallos.push({ campo: 'precio', codigo: 'product_price_invalid' });
   }
@@ -1012,7 +1123,7 @@ export function validarProducto(formulario: FormularioDeProducto): Fallo[] {
       }
       skus.add(sku);
     }
-    if (enteroEscrito(variante.diferencia) === 'invalido') {
+    if (importeEscrito(variante.diferencia, formulario.moneda, { conSigno: true }) === 'invalido') {
       fallos.push({ campo: 'variante', codigo: 'product_variant_delta_invalid', indice });
     }
   });
@@ -1076,15 +1187,17 @@ export function peticionDeVersion(formulario: FormularioDeProducto): {
 
   // LOS DOS O NINGUNO. `validarProducto` ya lo ha exigido; esto lo hace
   // imposible también si alguien llamara solo a esta función.
-  const precio = enteroEscrito(formulario.precio);
   const moneda = util(formulario.moneda);
+  const precio = importeEscrito(formulario.precio, moneda);
   if (typeof precio === 'number' && moneda !== null) {
     peticion.price_minor = precio;
     peticion.currency = moneda.toUpperCase();
   }
+  const categoria = util(formulario.categoria);
+  if (categoria !== null) peticion.category_id = categoria;
 
   const variantes = (formulario.variantes ?? []).map((variante) => {
-    const diferencia = enteroEscrito(variante.diferencia);
+    const diferencia = importeEscrito(variante.diferencia, moneda, { conSigno: true });
     return {
       sku: (variante.sku ?? '').trim(),
       name: (variante.nombre ?? '').trim(),
@@ -1163,6 +1276,8 @@ export function claveDeErrorDeProveedor(
     seller_application_document_kind_invalid: 'proveedorProductos.error.tipoDeDocumentoInvalido',
     seller_application_document_empty: 'proveedorProductos.error.documentoVacio',
     seller_application_document_path_invalid: 'proveedorProductos.error.rutaDeDocumentoInvalida',
+    seller_application_document_too_big: 'proveedorProductos.error.documentoPesado',
+    seller_application_document_type_invalid: 'proveedorProductos.error.documentoTipo',
     seller_application_document_note_too_long: 'proveedorProductos.error.notaLarga',
     seller_application_reject_needs_reason: 'proveedorProductos.error.rechazoSinMotivo',
     seller_application_reason_too_long: 'proveedorProductos.error.motivoLargo',

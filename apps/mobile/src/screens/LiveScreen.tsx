@@ -29,6 +29,11 @@ import {
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
 import {
+  elegirPistaPrincipal,
+  type PistasDeSala,
+  type SalaDeVideo,
+} from '@/live/salaDeVideo';
+import {
   LiveRepository,
   REACCIONES,
   reaccionesVacias,
@@ -195,10 +200,25 @@ function fechaYHora(iso: string | null): string {
 
 /* ------------------------------------------------------------- El video ---- */
 
+/** Estados en los que hay sala y tiene sentido ensenar imagen si la hay. */
+const ESTADOS_CON_IMAGEN: readonly EstadoDeDirecto[] = [
+  'en_directo',
+  'conectado',
+  'conexion_lenta',
+  'reconectando',
+];
+
 /**
- * El hueco del video, que hoy sigue sin ser un video.
+ * El hueco del video.
  *
- * YA NO DECIDE NADA. Antes esta funcion tenia su propia escalera de `if` sobre
+ * CON IMAGEN, LA IMAGEN. En los estados con sala, si hay una pista que ensenar
+ * (`elegirPistaPrincipal`: la propia para quien emite, la del anfitrion para
+ * quien mira) se dibuja con el componente de la sala. Encima, un aviso pequeno
+ * si la conexion va lenta o se esta recuperando: la imagen se congela y sin
+ * decirlo parece que el telefono se ha colgado.
+ *
+ * SIN IMAGEN, EL CARTEL DEL ESTADO, como siempre. Y aqui NO SE DECIDE NADA
+ * mas. Antes esta funcion tenia su propia escalera de `if` sobre
  * el estado de la emision y sobre `reproduccionDisponible`, y esa escalera era
  * imposible de comprobar sin abrir la aplicacion. Ahora el estado lo decide
  * `live/maquinaDeDirecto.ts` —catorce estados, probados uno a uno— y aqui solo
@@ -209,9 +229,50 @@ function fechaYHora(iso: string | null): string {
  * y la hora a la que termino. El cartel generico sigue estando debajo por si no
  * hay fecha.
  */
-function PanelDeVideo({ emision, estado }: { emision: Emision; estado: EstadoDeDirecto }) {
+function PanelDeVideo({
+  emision,
+  estado,
+  pistas,
+  VistaDePista,
+  emito,
+  camaraFrontal,
+}: {
+  emision: Emision;
+  estado: EstadoDeDirecto;
+  pistas: PistasDeSala;
+  VistaDePista: SalaDeVideo['VistaDePista'];
+  /** Esta persona tiene permiso de publicar: ve su propia camara. */
+  emito: boolean;
+  camaraFrontal: boolean;
+}) {
   const { t } = useTranslation();
   const cartel = cartelDelEstado(estado, emision.puedeGestionar);
+
+  const pista = ESTADOS_CON_IMAGEN.includes(estado)
+    ? elegirPistaPrincipal(pistas.video, { emito })
+    : null;
+  if (pista && VistaDePista) {
+    const aviso =
+      estado === 'conexion_lenta' || estado === 'reconectando' ? t(cartel.titulo as TranslationKey) : null;
+    return (
+      <View style={[estilos.panelConImagen, { borderColor: media.border }]}>
+        <VistaDePista
+          pistaId={pista.id}
+          // Espejo solo en la camara frontal PROPIA: a los demas se les ve
+          // como son, y la trasera no se refleja.
+          espejo={pista.local && camaraFrontal}
+          estilo={StyleSheet.absoluteFill}
+        />
+        {aviso ? (
+          <View style={estilos.avisoSobreImagen}>
+            <Text variant="caption" weight="700" color={media.text}>
+              {aviso}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
 
   let detalle = t(cartel.cuerpo as TranslationKey);
   if (estado === 'programado' && emision.programadaParaIso) {
@@ -257,9 +318,9 @@ function AvisoDeVideo({
  * SOLO SE PINTAN SI EL SERVIDOR AUTORIZO A PUBLICAR (`can_publish` de la
  * credencial). No basta con `can_manage`: gestionar una emision —terminarla,
  * moderar el chat— y emitir video son dos permisos distintos, y quien decide el
- * segundo es el proveedor, no la pantalla. Hoy `can_publish` no llega nunca en
- * true, asi que esta fila no aparece: un boton de microfono sobre una sala que
- * no existe es exactamente el tipo de maqueta que este modulo no hace.
+ * segundo es el servidor al firmar la credencial de 100ms, no la pantalla. Sin
+ * proveedor configurado `can_publish` no llega en true y esta fila no aparece:
+ * un boton de microfono sobre una sala sin video es una maqueta.
  *
  * `ocupado` deshabilita los cuatro a la vez. Es el freno de la doble pulsacion,
  * y lo lleva la maquina: aqui solo se obedece.
@@ -730,7 +791,7 @@ export function LiveScreen() {
     [emisionId, t],
   );
 
-  const { vista, sesion } = useSesionDeDirecto({
+  const { vista, sesion, pistas, VistaDePista } = useSesionDeDirecto({
     emisionId,
     estadoDeSesion: emision?.estado ?? null,
     esAnfitrion: puedeGestionar,
@@ -854,7 +915,14 @@ export function LiveScreen() {
           </View>
 
           {/* Video (o la verdad sobre por que no lo hay) */}
-          <PanelDeVideo emision={emision} estado={vista.estado} />
+          <PanelDeVideo
+            emision={emision}
+            estado={vista.estado}
+            pistas={pistas}
+            VistaDePista={VistaDePista}
+            emito={vista.puedePublicar}
+            camaraFrontal={vista.camaraFrontal}
+          />
 
           {/*
             La salida del estado, cuando la hay. Un cartel que solo explica el
@@ -1127,6 +1195,25 @@ const estilos = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  // Vertical, como se graba con el telefono en la mano. El alto lo pone la
+  // proporcion y no un numero, para que quepa igual en un telefono pequeno.
+  panelConImagen: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    width: '100%',
+    aspectRatio: 3 / 4,
+    backgroundColor: '#000',
+  },
+  avisoSobreImagen: {
+    position: 'absolute',
+    top: spacing.sm,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.6)',
   },
   filaDeGestion: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.sm },
   filaDeControles: {

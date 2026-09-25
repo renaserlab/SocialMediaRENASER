@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
@@ -20,7 +21,7 @@ import {
   LARGO_DE_LA_VERSION,
   LARGO_DE_LOS_MATERIALES,
   MAXIMO_DE_VARIANTES,
-  accionesOfrecidas,
+  MONEDAS_OFRECIDAS,
   claveDeErrorDeProveedor,
   claveDeErrorPorEstado,
   claveDeFallo,
@@ -32,7 +33,10 @@ import {
   hayQueRecargar,
   opcionVacia,
   peticionDeVersion,
+  publicaAlEnviar,
   sePuedeEditarProducto,
+  sePuedePostularProducto,
+  sonCambiosDeUnPublicado,
   validarProducto,
   varianteVacia,
   versionEnBorrador,
@@ -40,7 +44,10 @@ import {
   type FormularioDeProducto,
   type ProductoDelProveedor,
 } from '@/lib/proveedorDeProductos';
+import { ProductCatalogRepository } from '@/repositories/ProductCatalogRepository';
 import { ProductSellerRepository } from '@/repositories/ProductSellerRepository';
+import type { Categoria } from '@/lib/productos';
+import { usePublicacionFlexible } from '@/hooks/usePublicacionFlexible';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
@@ -92,6 +99,23 @@ export function EditarProductoScreen() {
   );
 
   const esNuevo = typeof productId !== 'string' || productId === '';
+  /** Para el texto de un producto NUEVO; uno existente lo dice el servidor. */
+  const flexible = usePublicacionFlexible();
+  /** Las categorías activas (0084). Vacío = no se pudieron leer o no hay. */
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  useEffect(() => {
+    let vigente = true;
+    ProductCatalogRepository.categorias()
+      .then((respuesta) => {
+        if (vigente) setCategorias(respuesta.items ?? []);
+      })
+      .catch(() => {
+        /* Sin categorías se puede guardar igual: es un dato opcional. */
+      });
+    return () => {
+      vigente = false;
+    };
+  }, []);
 
   const [producto, setProducto] = useState<ProductoDelProveedor | null>(null);
   const [formulario, setFormulario] = useState<FormularioDeProducto>(
@@ -128,12 +152,19 @@ export function EditarProductoScreen() {
       /*
         SE CARGA LO QUE HAY, Y NADA MÁS. Lo que el borrador no trae sigue vacío:
         rellenarlo con un valor de partida cambiaría, al guardar, un dato que
-        nadie tocó. Sin borrador el formulario nace en blanco —no se copia la
-        versión publicada, porque lo publicado no se reescribe— y el servidor
-        abrirá una versión nueva al guardar.
+        nadie tocó.
+
+        EDITAR UN PUBLICADO (modo flexible) parte de LO PUBLICADO: es lo que la
+        persona quiere cambiar, y un formulario en blanco la obligaría a
+        reescribirlo todo. Al guardar, el servidor abre una versión nueva sobre
+        la vigente, que sigue en el catálogo hasta publicar los cambios.
       */
+      const base =
+        borrador ?? (sePuedeEditarProducto(leido) ? (leido.published ?? null) : null);
       setFormulario(
-        borrador !== null ? formularioDeProductoDesde(borrador) : formularioDeProductoVacio(),
+        base !== null
+          ? formularioDeProductoDesde(base, leido.category_id)
+          : { ...formularioDeProductoVacio(), categoria: leido.category_id ?? '' },
       );
       setFallos([]);
     } catch (error) {
@@ -197,18 +228,36 @@ export function EditarProductoScreen() {
     });
   };
 
-  /** «Postula tu producto»: lo manda a admisión y deja de ser editable. */
+  /**
+   * «Postula tu producto»: lo manda a admisión y deja de ser editable. En
+   * MODO FLEXIBLE (`publicacion_directa`) el mismo botón PUBLICA —el producto
+   * o sus cambios— y sigue siendo editable.
+   */
+  const publicaYa = publicaAlEnviar(producto);
+  const sonCambios = sonCambiosDeUnPublicado(producto);
+  const etiquetaDeEnviar = publicaYa
+    ? f(sonCambios ? 'proveedorProductos.productos.publicarCambios' : 'proveedorProductos.productos.publicar')
+    : f('proveedorProductos.marca.postula');
   const postular = () => {
     if (producto === null) return;
     void conCerrojo(async () => {
       const aceptado = await confirm({
-        title: f('proveedorProductos.productos.postularTitulo'),
-        message: f('proveedorProductos.productos.postularAviso'),
-        confirmLabel: f('proveedorProductos.marca.postula'),
+        title: publicaYa
+          ? f('proveedorProductos.productos.publicarTitulo')
+          : f('proveedorProductos.productos.postularTitulo'),
+        message: publicaYa
+          ? f('proveedorProductos.productos.publicarAviso')
+          : f('proveedorProductos.productos.postularAviso'),
+        confirmLabel: etiquetaDeEnviar,
       });
       if (!aceptado) return;
-      await ProductSellerRepository.postularProducto(producto.id);
-      toast(f('proveedorProductos.productos.postulado'));
+      const resultado = await ProductSellerRepository.postularProducto(producto.id);
+      // Lo dice el SERVIDOR: si quedó publicado, fue publicado.
+      toast(
+        resultado.status === 'published'
+          ? f('proveedorProductos.productos.publicadoAhora')
+          : f('proveedorProductos.productos.postulado'),
+      );
       await cargar();
     });
   };
@@ -305,8 +354,8 @@ export function EditarProductoScreen() {
   };
 
   const variantes = formulario.variantes;
-  const sePuedePostular =
-    producto !== null && accionesOfrecidas(producto).includes('submitted');
+  // En modo flexible basta con tener un borrador; con revisión, lo de siempre.
+  const sePuedePostular = producto !== null && sePuedePostularProducto(producto);
 
   return (
     <AppScreen contentStyle={styles.contenido}>
@@ -319,9 +368,12 @@ export function EditarProductoScreen() {
         <Text variant="caption" color={colors.textMuted}>
           {f('proveedorProductos.editar.cuerpo')}
         </Text>
-        {/* CREAR NO ES PUBLICAR, y se dice antes de escribir nada. */}
+        {/* CREAR NO ES PUBLICAR, y se dice antes de escribir nada. En modo
+            flexible, lo que se dice es cómo se publica. */}
         <Text variant="caption" color={colors.textMuted}>
-          {f('proveedorProductos.editar.sinPublicar')}
+          {publicaYa || (producto === null && flexible)
+            ? f('proveedorProductos.editar.sinPublicarFlexible')
+            : f('proveedorProductos.editar.sinPublicar')}
         </Text>
       </View>
 
@@ -420,23 +472,83 @@ export function EditarProductoScreen() {
           label={f('proveedorProductos.editar.precioEtiqueta')}
           placeholder={f('proveedorProductos.editar.precioAyuda')}
           value={formulario.precio}
-          onChangeText={(precio) => setFormulario({ ...formulario, precio })}
+          onChangeText={(precio) =>
+            setFormulario({
+              ...formulario,
+              precio,
+              // Quien escribe un precio sin moneda la verá elegida (PEN) y la
+              // puede cambiar: sin esto, guardar fallaba con «falta la moneda».
+              moneda:
+                formulario.moneda === '' && precio.trim() !== '' ? 'PEN' : formulario.moneda,
+            })
+          }
           error={mensajeDe('precio')}
-          keyboardType="number-pad"
+          keyboardType="decimal-pad"
           editable={!ocupado}
         />
-        <Input
-          label={f('proveedorProductos.editar.monedaEtiqueta')}
-          placeholder={f('proveedorProductos.editar.monedaAyuda')}
-          value={formulario.moneda}
-          onChangeText={(moneda) => setFormulario({ ...formulario, moneda })}
-          error={mensajeDe('moneda')}
-          maxLength={3}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          editable={!ocupado}
-        />
+        <Text variant="caption" weight="700">
+          {f('proveedorProductos.editar.monedaEtiqueta')}
+        </Text>
+        <View style={styles.chips}>
+          {[
+            ...MONEDAS_OFRECIDAS,
+            // Una moneda que llegó del servidor y no está en la lista se sigue
+            // enseñando: no se puede perder un dato por no ofrecerlo.
+            ...(formulario.moneda !== '' &&
+            !(MONEDAS_OFRECIDAS as readonly string[]).includes(formulario.moneda.toUpperCase())
+              ? [formulario.moneda.toUpperCase()]
+              : []),
+          ].map((codigo) => (
+            <Chip
+              key={codigo}
+              label={codigo}
+              rol="radio"
+              selected={formulario.moneda.toUpperCase() === codigo}
+              disabled={ocupado}
+              onPress={() =>
+                setFormulario({
+                  ...formulario,
+                  moneda: formulario.moneda.toUpperCase() === codigo ? '' : codigo,
+                })
+              }
+            />
+          ))}
+        </View>
+        {mensajeDe('moneda') ? (
+          <Text variant="caption" color={colors.danger}>
+            {mensajeDe('moneda')}
+          </Text>
+        ) : null}
       </View>
+
+      {/* LA CATEGORÍA: dónde lo encontrará quien busca. Opcional. */}
+      {categorias.length > 0 ? (
+        <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+          <Text variant="secondary" weight="700">
+            {f('proveedorProductos.editar.categoriaTitulo')}
+          </Text>
+          <Text variant="caption" color={colors.textMuted}>
+            {f('proveedorProductos.editar.categoriaAyuda')}
+          </Text>
+          <View style={styles.chips}>
+            {categorias.map((categoria) => (
+              <Chip
+                key={categoria.id}
+                label={categoria.name}
+                rol="radio"
+                selected={formulario.categoria === categoria.id}
+                disabled={ocupado}
+                onPress={() =>
+                  setFormulario({
+                    ...formulario,
+                    categoria: formulario.categoria === categoria.id ? '' : categoria.id,
+                  })
+                }
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
 
       {/* Variantes. SIN EXISTENCIAS: cuántas hay es inventario, y no existe. */}
       <View style={[styles.tarjeta, { borderColor: colors.border }]}>
@@ -658,8 +770,8 @@ export function EditarProductoScreen() {
       {sePuedePostular ? (
         <>
           <Button
-            label={f('proveedorProductos.marca.postula')}
-            variant="secondary"
+            label={etiquetaDeEnviar}
+            variant={publicaYa ? 'primary' : 'secondary'}
             icon="send"
             onPress={postular}
             disabled={ocupado}
@@ -676,6 +788,7 @@ export function EditarProductoScreen() {
 const styles = StyleSheet.create({
   contenido: { padding: spacing.lg, gap: spacing.md },
   campo: { gap: spacing.xs },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   tarjeta: {
     gap: spacing.sm,
     borderWidth: 1,

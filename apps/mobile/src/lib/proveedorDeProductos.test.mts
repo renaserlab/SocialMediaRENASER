@@ -288,8 +288,18 @@ describe('los formularios nacen vacíos', () => {
     const formulario = formularioDeProductoDesde(
       version({ price_minor: 0, currency: 'PEN' }),
     );
-    assert.equal(formulario.precio, '0');
+    assert.equal(formulario.precio, '0.00');
     assert.equal(formulario.moneda, 'PEN');
+  });
+
+  it('el precio se carga en la unidad MAYOR, como se escribe', () => {
+    // 4990 céntimos se editan como «49.90»: es lo que la persona escribió.
+    const formulario = formularioDeProductoDesde(
+      version({ price_minor: 4990, currency: 'PEN' }),
+      'cat-1',
+    );
+    assert.equal(formulario.precio, '49.90');
+    assert.equal(formulario.categoria, 'cat-1');
   });
 
   it('la postulación se carga tal cual, documentos incluidos', () => {
@@ -356,7 +366,7 @@ describe('lo que no se escribió no viaja', () => {
       ...conNombre(),
       resumen: '  Una tinaja hecha a mano.  ',
       pais: 'pe',
-      precio: '4990',
+      precio: '49.90',
       moneda: 'pen',
       version: ' 2 ',
     });
@@ -482,8 +492,33 @@ describe('el precio va con su moneda o no va', () => {
     );
   });
 
-  it('un precio con decimales se rechaza: el contrato pide un entero', () => {
-    for (const escrito of ['49.90', '49,90', '4e3', 'mucho']) {
+  it('el precio se escribe con decimales y viaja en unidades menores', () => {
+    // Antes se escribía ya en céntimos («4990») y nadie lo adivinaba. Ahora,
+    // como en los cursos: con coma o con punto, y el contrato recibe 4990.
+    for (const escrito of ['49.90', '49,90', ' 49,9 ']) {
+      const { peticion } = peticionDeVersion({ ...conNombre(), precio: escrito, moneda: 'PEN' });
+      assert.equal(peticion?.price_minor, 4990, escrito);
+    }
+    assert.equal(
+      peticionDeVersion({ ...conNombre(), precio: '50', moneda: 'PEN' }).peticion?.price_minor,
+      5000,
+    );
+  });
+
+  it('el yen no tiene céntimos: se escribe entero', () => {
+    assert.equal(
+      peticionDeVersion({ ...conNombre(), precio: '4990', moneda: 'JPY' }).peticion?.price_minor,
+      4990,
+    );
+    assert.ok(
+      codigosDe(validarProducto({ ...conNombre(), precio: '49.90', moneda: 'JPY' })).includes(
+        'product_price_invalid',
+      ),
+    );
+  });
+
+  it('un precio que no es un importe se rechaza', () => {
+    for (const escrito of ['49.999', '4e3', 'mucho', '1.2.3']) {
       assert.ok(
         codigosDe(
           validarProducto({ ...conNombre(), precio: escrito, moneda: 'PEN' }),
@@ -504,11 +539,12 @@ describe('el precio va con su moneda o no va', () => {
     }
   });
 
-  it('el precio nunca se convierte a la unidad mayor al enseñarlo', () => {
+  it('el precio se enseña en la unidad mayor, con los decimales de su moneda', () => {
     // Cuántos decimales tiene una moneda depende de la moneda —el yen no tiene
-    // ninguno— y el servidor no manda ese dato. Se enseña como se escribió.
-    assert.equal(precioLegible(version({ price_minor: 4990, currency: 'pen' })), '4990 PEN');
-    assert.equal(precioLegible(version({ price_minor: 0, currency: 'PEN' })), '0 PEN');
+    // ninguno—, así que se mira en la tabla ISO en vez de suponer dos.
+    assert.equal(precioLegible(version({ price_minor: 4990, currency: 'pen' })), '49.90 PEN');
+    assert.equal(precioLegible(version({ price_minor: 0, currency: 'PEN' })), '0.00 PEN');
+    assert.equal(precioLegible(version({ price_minor: 4990, currency: 'JPY' })), '4990 JPY');
   });
 
   it('sin precio configurado NO se enseña «gratis» ni un cero', () => {
@@ -648,8 +684,8 @@ describe('el validador del producto dice lo mismo que el servidor', () => {
     assert.equal(repetido?.indice, 1);
   });
 
-  it('una diferencia de precio que no es entera se rechaza', () => {
-    for (const escrito of ['1.5', 'mucho', '1,5']) {
+  it('una diferencia de precio que no es un importe se rechaza', () => {
+    for (const escrito of ['1.555', 'mucho', '1,5,5']) {
       assert.ok(
         codigosDe(
           validarProducto({
@@ -666,9 +702,19 @@ describe('el validador del producto dice lo mismo que el servidor', () => {
     assert.deepEqual(
       validarProducto({
         ...conNombre(),
-        variantes: [{ sku: 'TIN-38', nombre: 'Mediana', opciones: [], diferencia: '-500' }],
+        variantes: [{ sku: 'TIN-38', nombre: 'Mediana', opciones: [], diferencia: '-5.00' }],
       }),
       [],
+    );
+    // Y viaja en unidades menores, con su signo.
+    assert.equal(
+      peticionDeVersion({
+        ...conNombre(),
+        precio: '20',
+        moneda: 'PEN',
+        variantes: [{ sku: 'TIN-38', nombre: 'Mediana', opciones: [], diferencia: '-5.00' }],
+      }).peticion?.variants?.[0]?.price_delta_minor,
+      -500,
     );
   });
 
@@ -1697,10 +1743,12 @@ describe('lo que las pantallas y el repositorio tienen escrito', () => {
     assert.ok(!repositorio.includes('/admin/'));
   });
 
-  it('el repositorio tiene EXACTAMENTE las diez rutas del proveedor', () => {
+  it('el repositorio tiene EXACTAMENTE las once rutas del proveedor', () => {
     const metodos = [
       'async estado(',
       'async guardarPostulacion(',
+      // Subir un documento de la postulación (0085, 24/09/2026).
+      'async subirDocumento(',
       'async enviarPostulacion(',
       'async retirarPostulacion(',
       'async misProductos(',

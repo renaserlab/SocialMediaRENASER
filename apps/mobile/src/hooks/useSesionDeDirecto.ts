@@ -13,8 +13,15 @@ import {
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
 import { esperaAntesDeReintentar } from '@/live/reintentos';
-import { crearSalaDeVideo, type CredencialDeVideo, type SalaDeVideo } from '@/live/salaDeVideo';
+import {
+  crearSalaDeVideo,
+  sinPistas,
+  type CredencialDeVideo,
+  type PistasDeSala,
+  type SalaDeVideo,
+} from '@/live/salaDeVideo';
 import { fallo, LiveRepository } from '@/repositories/LiveRepository';
+import { useAppStore } from '@/store/useAppStore';
 
 /**
  * El cable entre la maquina de directo y React. Aqui NO se decide nada.
@@ -46,6 +53,10 @@ export type SesionEnPantalla = {
   vista: VistaDeDirecto;
   /** Los gestos. Es la propia maquina, sin envolver. */
   sesion: SesionDeDirecto;
+  /** Las pistas de video que hay en la sala ahora mismo. */
+  pistas: PistasDeSala;
+  /** Dibuja una pista de ESTA sala, o `null` si la sala no sabe dibujar. */
+  VistaDePista: SalaDeVideo['VistaDePista'];
 };
 
 export function useSesionDeDirecto({
@@ -58,6 +69,7 @@ export function useSesionDeDirecto({
   const [vista, setVista] = useState<VistaDeDirecto>(() =>
     vistaInicialDeDirecto(estadoDeSesion),
   );
+  const [pistas, setPistas] = useState<PistasDeSala>(sinPistas);
 
   /*
     Lo que cambia en cada render entra por una referencia y NO por las
@@ -107,7 +119,12 @@ export function useSesionDeDirecto({
       // La credencial viaja OPACA por la maquina —que no debe saber su forma— y
       // se vuelve a abrir aqui, que es donde el SDK la va a usar.
       unirseALaSala: (credencial, publicar) =>
-        sala.unirse(credencial as CredencialDeVideo, { publicar }),
+        sala.unirse(credencial as CredencialDeVideo, {
+          publicar,
+          // Como aparece para los demas. Se lee al entrar, no al montar: el
+          // perfil puede llegar despues que la pantalla.
+          nombre: useAppStore.getState().user?.fullName,
+        }),
       salirDeLaSala: () => sala.salir(),
       alternarCamaraEnLaSala: async (encendida) => {
         await sala.alternarCamara(encendida);
@@ -175,7 +192,13 @@ export function useSesionDeDirecto({
         case 'medios':
           maquina.laSalaCambioDeMedios(evento.medios);
           break;
+        case 'pistas':
+          setPistas(evento.pistas);
+          maquina.laSalaCambioDePistasAjenas(evento.pistas.hayMediosAjenos);
+          break;
         case 'desconectado':
+          // Fuera de la sala no queda ninguna pista que dibujar.
+          setPistas(sinPistas());
           maquina.laSalaSeCayo(evento.recuperable);
           break;
       }
@@ -201,5 +224,5 @@ export function useSesionDeDirecto({
     motor.maquina.cambiaLaSesion(estadoDeSesion);
   }, [motor, estadoDeSesion]);
 
-  return { vista, sesion: motor.maquina };
+  return { vista, sesion: motor.maquina, pistas, VistaDePista: motor.sala.VistaDePista };
 }

@@ -1,6 +1,8 @@
 import { traduceEnElIdiomaActual } from '@/i18n';
 import { formatRelativeTime } from '@/mappers/postMapper';
 import { textoDeReacciones } from '@/lib/reacciones';
+import { avisoAlCreador, detalleDelAviso } from '@/lib/avisosAlCreador';
+import type { TranslationKey } from '@/i18n';
 
 export type NotificationActorDto = {
   id: string;
@@ -27,14 +29,26 @@ export type NotificationDto = {
    * guarda el COMENTARIO en `entity_id` —para no deduplicar de mas— y trae aqui
    * la publicacion, que es a donde lleva al tocarlo.
    */
-  payload?: { postId?: string } | null;
+  /** `postId` en los comentarios; `title`/`reason`/`automatic` en los avisos al creador. */
+  payload?: { postId?: string; title?: string; reason?: string; automatic?: boolean } | null;
 };
 
 export type NotificationItem = {
   id: string;
   title: string;
   subtitle: string;
-  icon: 'bell' | 'award' | 'message-square' | 'calendar' | 'at-sign';
+  icon:
+    | 'bell'
+    | 'award'
+    | 'message-square'
+    | 'calendar'
+    | 'at-sign'
+    | 'check-circle'
+    | 'x-circle'
+    | 'alert-triangle'
+    | 'edit-3'
+    | 'eye-off'
+    | 'image';
   time: string;
   read: boolean;
   actorId?: string;
@@ -49,6 +63,8 @@ export type NotificationItem = {
   entityId?: string | null;
   /** A que publicacion lleva, cuando `entityId` no es ella. */
   postId?: string | null;
+  /** El `type` del servidor: decide a dónde lleva tocarlo. */
+  type?: string;
 };
 
 export function toNotificationItem(dto: NotificationDto): NotificationItem {
@@ -154,6 +170,19 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       subtitle = t('notif.sessionCompletedBody', { actor });
       icon = 'calendar';
       break;
+    default: {
+      /*
+        AVISOS AL CREADOR (desde el 24/09/2026): su evento, curso, postulación
+        o producto. Sin actor —decide la plataforma—, así que el texto no es
+        «Alguien…» sino el nombre de lo decidido y, si lo hay, el motivo.
+      */
+      const aviso = avisoAlCreador(dto.type);
+      if (aviso !== null) {
+        title = t(aviso.titulo as TranslationKey);
+        subtitle = detalleDelAviso(dto.payload) || title;
+        icon = aviso.icono;
+      }
+    }
   }
 
   return {
@@ -167,5 +196,6 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
     entityType: dto.entity_type,
     entityId: dto.entity_id,
     postId: dto.payload?.postId ?? null,
+    type: dto.type,
   };
 }

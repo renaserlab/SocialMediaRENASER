@@ -1159,13 +1159,16 @@ describe('las pantallas no escriben a mano nada que decida el servidor', () => {
     assert.ok(ADMISION.includes('tomarPostulacion'));
   });
 
-  it('la admisión no abre el contenido de ningún documento', () => {
-    // De un documento se dice que se presentó; su contenido no se lee en una lista,
-    // y menos el de una cuenta bancaria.
+  it('la admisión abre un documento SOLO con el enlace firmado del servidor', () => {
+    // Hasta la 0085 no había depósito: se decía que se presentó y nada más.
+    // Ahora el archivo existe y el servidor firma un enlace de diez minutos.
+    // Se abre ESE, bajo demanda —no se pinta el contenido en la lista, y menos
+    // el de una cuenta bancaria— y nunca uno construido a partir de la ruta.
     const limpio = sinComentarios(ADMISION);
     assert.ok(limpio.includes('productosAdmin.documentoPresentado'));
-    assert.ok(!limpio.includes('Linking'));
-    assert.ok(!limpio.includes('openURL'));
+    assert.ok(limpio.includes('Linking.openURL(documento.url'));
+    assert.ok(!/\$\{documento\.storage_path/.test(limpio));
+    assert.ok(!/storage_path\s*\+/.test(limpio));
     assert.ok(!limpio.includes('WebBrowser'));
   });
 

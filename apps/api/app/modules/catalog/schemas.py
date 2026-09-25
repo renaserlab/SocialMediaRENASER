@@ -276,6 +276,9 @@ class CourseSubmitResult(BaseModel):
     review_status: str
     submitted: bool
     missing: list[str] = Field(default_factory=list)
+    #: MODO FLEXIBLE: enviar lo aprobo y lo publico en el acto. La app lo usa
+    #: para decir «publicado» y no «enviado a revision».
+    published: bool = False
 
 
 # --------------------------------------------------------------------------- #

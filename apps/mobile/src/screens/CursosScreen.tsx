@@ -4,8 +4,10 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AccesoDeCreador } from '@/components/AccesoDeCreador';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
@@ -18,6 +20,7 @@ import type { FiltrosDeCatalogo } from '@/repositories/LearningRepository';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { useAuthStore } from '@/store/useAuthStore';
 import type { Course, MyCourse } from '@/types';
 
 /**
@@ -51,6 +54,9 @@ export function CursosScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
+  const conSesion = useAuthStore((state) => state.status === 'authenticated');
+  /** La hoja de alta de un curso. Al crearlo, ella misma abre el asistente. */
+  const [creandoCurso, setCreandoCurso] = useState(false);
 
   const [enCurso, setEnCurso] = useState<MyCourse[]>([]);
   const [catalogo, setCatalogo] = useState<Course[]>([]);
@@ -224,6 +230,25 @@ export function CursosScreen() {
           </Pressable>
         ) : null}
       </View>
+
+      {/*
+        CREAR UN CURSO, DONDE SE BUSCAN CURSOS. Solo se podía desde el perfil
+        (Cursos › «Agregar curso»). Es la misma hoja: crea el borrador y abre el
+        asistente, donde se completa y se envía a revisión.
+      */}
+      {conSesion ? (
+        <View style={styles.accesoDeCreador}>
+          <AccesoDeCreador
+            icono="book"
+            titulo={t('creadores.cursoTitulo')}
+            detalle={t('creadores.cursoDetalle')}
+            onPress={() => setCreandoCurso(true)}
+          />
+        </View>
+      ) : null}
+      {creandoCurso ? (
+        <CreateCatalogSheet kind="curso" visible onClose={() => setCreandoCurso(false)} />
+      ) : null}
 
       {/*
         Blindada contra el carrusel de secciones, como toda lista horizontal
@@ -416,6 +441,7 @@ export function CursosScreen() {
 }
 
 const styles = StyleSheet.create({
+  accesoDeCreador: { marginHorizontal: spacing.md, marginBottom: spacing.sm },
   contenido: { paddingBottom: spacing.xl, gap: spacing.lg },
   buscador: {
     flexDirection: 'row',

@@ -62,6 +62,23 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     # una notificación»: quien lo lee en la pantalla de bloqueo tiene que poder
     # decidir si abre la aplicación sin abrirla.
     "post_mention": ("Te etiquetaron", "{actor} te etiquetó en una publicación."),
+    # Decisiones sobre lo que creó cada persona (`decisiones.py`). Sin actor:
+    # decide la plataforma. El texto no nombra el elemento porque la plantilla
+    # no lo recibe; la bandeja sí lo dice, con su título.
+    "event_admission_approved": ("Evento aprobado", "Tu evento pasó la revisión."),
+    "event_admission_conditional": ("Evento aprobado con condiciones", "Revisa qué falta en tu evento."),
+    "event_admission_rejected": ("Evento no aprobado", "Revisa el motivo en Mis eventos."),
+    "event_admission_changes": ("Tu evento necesita cambios", "Revisa las correcciones en Mis eventos."),
+    "event_published": ("Evento publicado", "Tu evento ya se ve en Z."),
+    "event_suspended": ("Evento suspendido", "Revisa el motivo en Mis eventos."),
+    "course_review_approved": ("Curso aprobado", "Ya puedes publicar tu curso."),
+    "course_review_rejected": ("Curso no aprobado", "Revisa el motivo en tu curso."),
+    "course_published": ("Curso publicado", "Tu curso ya se ve en Z."),
+    "seller_application_accepted": ("Postulación aceptada", "Ya puedes crear tus productos."),
+    "seller_application_rejected": ("Postulación no aceptada", "Revisa el motivo en tu postulación."),
+    "product_published": ("Producto publicado", "Tu producto ya se ve en Z."),
+    "product_suspended": ("Producto suspendido", "Revisa el motivo en Mis productos."),
+    "product_photo_rejected": ("Foto no aprobada", "Revisa las fotos de tu producto."),
 }
 
 #: Canal de Android por tipo. Permite que el usuario silencie las
@@ -87,6 +104,27 @@ CHANNELS: dict[str, str] = {
     # actuando sobre contenido, y quien silencie ese canal espera silenciar
     # tambien esto.
     "post_mention": "interacciones",
+    # Decisiones sobre lo propio: «contenido», con las devoluciones y las
+    # sesiones. Silenciar los «me gusta» no puede silenciar esto.
+    **{
+        tipo: "contenido"
+        for tipo in (
+            "event_admission_approved",
+            "event_admission_conditional",
+            "event_admission_rejected",
+            "event_admission_changes",
+            "event_published",
+            "event_suspended",
+            "course_review_approved",
+            "course_review_rejected",
+            "course_published",
+            "seller_application_accepted",
+            "seller_application_rejected",
+            "product_published",
+            "product_suspended",
+            "product_photo_rejected",
+        )
+    },
 }
 
 

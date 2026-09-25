@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
@@ -8,6 +8,7 @@ import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { describeError } from '@/lib/describeError';
+import { asegurarProveedorDeVideo } from '@/live/registro100ms';
 import { hayProveedorDeVideo } from '@/live/salaDeVideo';
 import { LiveRepository } from '@/repositories/LiveRepository';
 import { palette, radius, spacing } from '@/theme/tokens';
@@ -22,21 +23,56 @@ type Props = {
 };
 
 /**
+ * Si se puede emitir con imagen: `null` mientras se pregunta.
+ *
+ * Hacen falta LAS DOS COSAS: que el servidor tenga proveedor
+ * (`/live/availability`) y que este telefono tenga el SDK cargado. Una sin la
+ * otra es un boton de «emitir» que abre una sala sin imagen, que es prometer
+ * una cosa y entregar otra.
+ */
+function useDirectoDisponible(): boolean | null {
+  const [disponible, setDisponible] = useState<boolean | null>(FEATURE_LIVE ? null : false);
+  useEffect(() => {
+    if (!FEATURE_LIVE) return;
+    let vigente = true;
+    // Se carga aqui, al abrir «Vivo», y no al arrancar la app: quien abre este
+    // modo va a emitir, y la mayoria de las sesiones de Z no emiten nunca.
+    asegurarProveedorDeVideo();
+    void LiveRepository.disponibilidad().then((hayServidor) => {
+      if (vigente) setDisponible(hayServidor && hayProveedorDeVideo());
+    });
+    return () => {
+      vigente = false;
+    };
+  }, []);
+  return disponible;
+}
+
+/**
  * Modo "Vivo" de Crear.
  *
- * CON `FEATURE_LIVE` APAGADO —que es como esta hoy— no emite nada, y lo dice.
- * El backend ya tiene sala, chat y reacciones, pero sigue sin haber proveedor
- * de video: dar un boton de «emitir» que abre una sala sin imagen es prometer
- * una cosa y entregar otra. El detalle del bloqueo esta junto a `FEATURE_LIVE`
- * en `config/features.ts`.
+ * SIN DIRECTOS DISPONIBLES no emite nada, y lo dice: build sin
+ * `EXPO_PUBLIC_FEATURE_LIVE=on`, servidor sin 100ms configurado, o un telefono
+ * que no carga el SDK (ver `config/features.ts`).
  *
- * Con el encendido, el camino que se activa es el de abajo: se crea la emision
- * —sin `scheduled_for`, o sea que nace ya en directo— y se abre su sala.
+ * Con ellos, se crea la emision —sin `scheduled_for`, o sea que nace ya en
+ * directo— y se abre su sala.
  */
 export function ModoVivo({ pie, alGrabarReel }: Props) {
   const { t } = useTranslation();
   const espacioInferior = useEspacioInferior();
-  if (!FEATURE_LIVE) {
+  const disponible = useDirectoDisponible();
+  if (disponible === null) {
+    return (
+      <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+        <View style={styles.centro}>
+          <ActivityIndicator color={media.text} />
+        </View>
+        {pie ? <View style={styles.pie}>{pie}</View> : null}
+      </View>
+    );
+  }
+  if (!disponible) {
     return (
       <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
         <View style={styles.centro}>

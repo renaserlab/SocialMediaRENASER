@@ -40,34 +40,25 @@ import { comprasHabilitadas } from '@/services/comprasConfig';
 export const FEATURE_PURCHASES = comprasHabilitadas();
 
 /**
- * Transmisiones en vivo.
+ * Transmisiones en vivo: el INTERRUPTOR DE LA BUILD.
  *
- * En `false` la pestana "Live" del Inicio existe y explica con claridad que
- * todavia no hay transmisiones, en lugar de inventarse una.
+ * Sale de `EXPO_PUBLIC_FEATURE_LIVE` (`on` para encender), que se fija por
+ * perfil en `eas.json`. La web no la lleva: en un navegador no hay SDK nativo
+ * de 100ms, asi que ni se emite ni se ve.
  *
- * Por que esta apagado: FALTA EL VIDEO. La sala si existe ya —`live_sessions`
- * y `live_messages` con RLS, chat y reacciones en tiempo real, moderacion y
- * limites anti-abuso, todo en el backend—, pero no hay proveedor de directo
- * contratado, asi que no hay ni punto de ingesta (RTMP/WHIP) ni reparto en
- * tiempo real. Lo unico parecido que hay es HLS de VIDEO YA GRABADO —el backend
- * empaqueta cada video subido y firma su playlist en `/media/{id}/hls/...`—,
- * que no tiene nada que ver.
+ * ENCENDIDO NO QUIERE DECIR «HAY DIRECTOS». Quiere decir que esta build sabe
+ * hacerlos (lleva el SDK y los permisos nativos, version 1.1.0 en adelante).
+ * Si hay video de verdad lo decide EL SERVIDOR: «Vivo» pregunta
+ * `GET /live/availability`, que solo dice que si con 100ms configurado. Asi
+ * encender o apagar los directos es cambiar la configuracion del servidor, sin
+ * publicar otra app.
  *
- * Y LO QUE NUNCA SE VUELVE A HACER: la pantalla `/live/[id]` que hubo aqui
+ * Hasta el 23/09/2026 esto era `false` escrito a fuego, con el comentario de
+ * que faltaba contratar proveedor. Ya no falta: el adaptador es
+ * `live/salaDeVideo100ms.ts` y el backend firma las credenciales de 100ms.
+ *
+ * LO QUE NUNCA SE VUELVE A HACER: la pantalla `/live/[id]` que hubo aqui
  * reproducia un video de ejemplo con un chat guardado en memoria y un contador
- * de espectadores inventado. Eso es una maqueta, y ensenarla como si fuera un
- * directo es exactamente lo que el documento prohibe. Se borro a proposito.
- *
- * Que falta para encenderlo (bloqueo externo, no de codigo):
- *   1. Un proveedor de directo (LiveKit, Mux, Cloudflare Stream o similar) con
- *      cuenta, claves y coste asumido.
- *   2. Que `POST /live/sessions/{id}/credential` devuelva credencial de
- *      publicacion/visionado en vez del 503 `live_provider_not_configured` de
- *      hoy, y que la respuesta traiga `playback_available` en true.
- *
- * El resto ya esta escrito: `repositories/LiveRepository.ts` habla con el
- * dominio entero, `services/directoEnVivo.ts` lleva el tiempo real y
- * `screens/LiveScreen.tsx` pinta la sala. Mientras `playback_available` sea
- * false, esa pantalla dice que no hay video en lugar de fingir uno.
+ * de espectadores inventado. Eso es una maqueta, y se borro a proposito.
  */
-export const FEATURE_LIVE = false;
+export const FEATURE_LIVE = process.env.EXPO_PUBLIC_FEATURE_LIVE === 'on';

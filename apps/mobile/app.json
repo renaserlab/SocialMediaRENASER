@@ -2,23 +2,30 @@
   "expo": {
     "name": "Z",
     "slug": "z-app",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "z",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/66fb7bea-7810-43c5-bf1d-58f6f50cb0ba"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.renaser.zeta",
       "infoPlist": {
-        "NSCameraUsageDescription": "Z utiliza la cámara para hacer una foto o un vídeo y publicarlo.",
+        "NSCameraUsageDescription": "Z utiliza la cámara para hacer una foto o un vídeo y publicarlo, y para emitir en directo.",
         "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSMicrophoneUsageDescription": "Z usa el micrófono para grabar el sonido de los vídeos de tus historias."
+        "NSMicrophoneUsageDescription": "Z usa el micrófono para grabar el sonido de los vídeos de tus historias y para emitir en directo.",
+        "NSLocalNetworkUsageDescription": "Z usa la red local para conectar las transmisiones en directo."
       }
     },
     "android": {
@@ -35,7 +42,11 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.WAKE_LOCK",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CHANGE_NETWORK_STATE"
       ],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
@@ -84,8 +95,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Z usa la cámara para que puedas tomar fotos y grabar vídeos para tus historias.",
-          "microphonePermission": "Z usa el micrófono para grabar el sonido de los vídeos de tus historias.",
+          "cameraPermission": "Z usa la cámara para que puedas tomar fotos y grabar vídeos para tus historias, y para emitir en directo.",
+          "microphonePermission": "Z usa el micrófono para grabar el sonido de los vídeos de tus historias y para emitir en directo.",
           "recordAudioAndroid": true
         }
       ],

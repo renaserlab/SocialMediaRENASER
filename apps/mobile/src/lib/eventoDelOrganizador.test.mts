@@ -405,3 +405,19 @@ describe('el sello Z, en la ficha pública', () => {
     assert.ok(mapper.includes('seleccionadoPorZ: dto.seleccionado_por_z === true'));
   });
 });
+
+describe('en modo flexible bastan diez caracteres y la promesa es opcional', () => {
+  it('lo mismo que el servidor: una frase corta y sin promesa se publica', () => {
+    const corto = completo({ description: 'Cena en casa.', promise: '' });
+    assert.equal(motivoParaNoEnviar(corto, { flexible: true }), null);
+    // Sin el modo, sigue haciendo falta todo.
+    assert.equal(motivoParaNoEnviar(corto), 'miEvento.faltaDescripcion');
+  });
+
+  it('menos de diez caracteres tampoco vale en flexible', () => {
+    assert.equal(
+      motivoParaNoEnviar(completo({ description: 'Cena.' }), { flexible: true }),
+      'miEvento.faltaDescripcionCorta',
+    );
+  });
+});

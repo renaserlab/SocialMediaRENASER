@@ -282,6 +282,27 @@ async def test_si_no_existe_se_crea_con_el_id_de_la_emision_como_nombre():
     _metodo, _url, cuerpo = http.peticiones[-1]
     assert cuerpo["name"] == "sesion_1"
     assert cuerpo["template_id"] == "plantilla_de_prueba"
+    # Sin HMS_REGION no se manda: manda la plantilla, como siempre.
+    assert "region" not in cuerpo
+
+
+@pytest.mark.asyncio
+async def test_con_region_configurada_la_sala_se_crea_en_esa_region():
+    """El panel deja la plantilla en la región del espacio de trabajo (India) y
+    no permite cambiarla; la región de cada sala sí se elige al crearla."""
+    config = Configuracion100ms(
+        access_key="clave_de_prueba",
+        app_secret="secreto_de_prueba",
+        template_id="plantilla_de_prueba",
+        api_base="https://api.100ms.test/v2",
+        region=" US ",
+    )
+    http = _Http([_respuesta(200, {"data": []}), _respuesta(200, {"id": "room_us"})])
+    proveedor = Proveedor100ms(config, cliente=Cliente100ms(config, cliente_http=http))
+    sala = await proveedor.abrir_sala(session_id="sesion_1", titulo="Charla")
+    assert sala.room_id == "room_us"
+    _metodo, _url, cuerpo = http.peticiones[-1]
+    assert cuerpo["region"] == "us"
 
 
 @pytest.mark.asyncio
@@ -316,9 +337,58 @@ async def test_cerrar_dos_veces_no_falla():
     """Terminar una emisión no puede depender de que el proveedor responda: si
     fallara, la sala se quedaría «en directo» para siempre en la pantalla de
     todo el mundo."""
-    proveedor, _ = _proveedor([_respuesta(200, {}), _respuesta(404, {})])
+    # Cada cierre son dos llamadas: vaciar la sala activa y deshabilitarla. La
+    # segunda vez ya no hay nadie dentro ni sala que deshabilitar: dos 404.
+    proveedor, _ = _proveedor(
+        [_respuesta(200, {}), _respuesta(200, {}), _respuesta(404, {}), _respuesta(404, {})]
+    )
     assert await proveedor.cerrar_sala(room_id="room_1") is None
     assert await proveedor.cerrar_sala(room_id="room_1") is None
+
+
+@pytest.mark.asyncio
+async def test_terminar_echa_a_quien_sigue_dentro_y_despues_deshabilita():
+    """Deshabilitar solo cierra la puerta a quien llega: el público que ya
+    estaba seguía viendo —y la sala facturando— hasta cerrar la app."""
+    proveedor, http = _proveedor([_respuesta(200, {}), _respuesta(200, {})])
+    await proveedor.cerrar_sala(room_id="room_1")
+    assert http.peticiones == [
+        (
+            "POST",
+            "https://api.100ms.test/v2/active-rooms/room_1/end-room",
+            {"reason": "La transmisión terminó.", "lock": True},
+        ),
+        ("POST", "https://api.100ms.test/v2/rooms/room_1", {"enabled": False}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sin_nadie_dentro_se_deshabilita_igual():
+    """100ms contesta 404 a `end-room` cuando no hay sesión activa: es lo normal
+    al terminar una emisión que ya se había vaciado, no un fallo."""
+    proveedor, http = _proveedor([_respuesta(404, {}), _respuesta(200, {})])
+    assert await proveedor.cerrar_sala(room_id="room_1") is None
+    assert [url for _m, url, _c in http.peticiones][-1].endswith("/rooms/room_1")
+
+
+@pytest.mark.asyncio
+async def test_si_vaciar_falla_por_red_se_deshabilita_igual():
+    """Si la primera llamada no responde, la segunda es la que impide que entre
+    alguien más."""
+    class _PrimeroCae:
+        def __init__(self) -> None:
+            self.peticiones: list[str] = []
+
+        async def request(self, metodo, url, **_kw):
+            self.peticiones.append(url)
+            if url.endswith("/end-room"):
+                raise httpx.ConnectTimeout("sin respuesta")
+            return _respuesta(200, {})
+
+    http = _PrimeroCae()
+    proveedor = Proveedor100ms(CONFIG, cliente=Cliente100ms(CONFIG, cliente_http=http))
+    assert await proveedor.cerrar_sala(room_id="room_1") is None
+    assert http.peticiones[-1].endswith("/rooms/room_1")
 
 
 @pytest.mark.asyncio

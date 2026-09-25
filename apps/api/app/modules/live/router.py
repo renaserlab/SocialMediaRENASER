@@ -43,6 +43,7 @@ from app.modules.live import limites, providers, roles, webhooks
 from app.modules.live.models import LiveMessage, LiveReactionTotal, LiveSession
 from app.modules.live.schemas import (
     REACCIONES,
+    LiveAvailability,
     LiveCredential,
     LiveMessageCreate,
     LiveMessageRead,
@@ -211,6 +212,22 @@ async def _leer(
 # --------------------------------------------------------------------------- #
 # La sala
 # --------------------------------------------------------------------------- #
+@router.get("/availability", response_model=LiveAvailability)
+async def disponibilidad() -> LiveAvailability:
+    """Si hay proveedor de video real ahora mismo.
+
+    SIN SESION Y SIN BASE. Solo mira que proveedor se registro al arrancar, que
+    es lo mismo que decide si `/credential` puede firmar. Asi encender o apagar
+    los directos es cambiar la configuracion del servidor y reiniciar, sin
+    publicar otra version de la app.
+    """
+    activo = providers.proveedor_activo()
+    return LiveAvailability(
+        video=activo is not None,
+        provider=activo.nombre if activo is not None else "none",
+    )
+
+
 @router.get("/sessions", response_model=list[LiveSessionRead])
 async def listar(
     include_ended: bool = Query(default=False),
@@ -273,6 +290,11 @@ async def crear(
     await _exigir_esquema(db)
 
     programada = payload.scheduled_for is not None
+    if not programada:
+        # El mismo techo que `/start`. Antes solo lo miraba empezar una
+        # programada, y el camino frecuente —pulsar «emitir» y nacer ya en
+        # directo, que es el de «Vivo» en la app— se lo saltaba entero.
+        await _exigir_hueco_para_emitir(db)
     sesion = LiveSession(
         host_id=current_user.id,
         title=payload.title.strip(),
@@ -339,6 +361,28 @@ async def _emisiones_vivas(db: AsyncSession) -> int:
         )
         or 0
     )
+
+
+async def _exigir_hueco_para_emitir(db: AsyncSession) -> None:
+    """EL TECHO DE EMISIONES SIMULTANEAS, antes de que nazca una mas en directo.
+
+    Cada sala viva cuesta minutos de proveedor, asi que un fallo o un abuso no
+    puede traducirse en una factura. Se cuenta despues de caducar las que se
+    pasaron de tiempo: una emision abandonada no puede bloquear a las demas
+    para siempre.
+    """
+    ajustes = get_settings()
+    if ajustes.live_max_concurrent <= 0:
+        return
+    vivas = await db.scalars(select(LiveSession).where(LiveSession.status == "live"))
+    for otra in vivas.all():
+        await _caducar_si_toca(db, otra)
+    if await _emisiones_vivas(db) >= ajustes.live_max_concurrent:
+        raise ConflictError(
+            "Hay demasiadas transmisiones en directo ahora mismo. "
+            "Inténtalo en unos minutos.",
+            code="live_too_many_concurrent",
+        )
 
 
 async def _mover_estado(
@@ -472,23 +516,7 @@ async def empezar(
             code="live_already_finished",
         )
 
-    # EL TECHO DE EMISIONES SIMULTANEAS. Cada sala viva cuesta minutos de
-    # proveedor, asi que un fallo o un abuso no puede traducirse en una factura.
-    # Se cuenta despues de caducar las que se pasaron de tiempo: una emision
-    # abandonada no puede bloquear a las demas para siempre.
-    ajustes = get_settings()
-    if ajustes.live_max_concurrent > 0:
-        vivas = await db.scalars(
-            select(LiveSession).where(LiveSession.status == "live")
-        )
-        for otra in vivas.all():
-            await _caducar_si_toca(db, otra)
-        if await _emisiones_vivas(db) >= ajustes.live_max_concurrent:
-            raise ConflictError(
-                "Hay demasiadas transmisiones en directo ahora mismo. "
-                "Inténtalo en unos minutos.",
-                code="live_too_many_concurrent",
-            )
+    await _exigir_hueco_para_emitir(db)
 
     # LA SALA PRIMERO. Si se abriera despues del cambio de estado, una emision
     # podria quedar `live` sin sala y con el proveedor no notandolo.
@@ -887,6 +915,22 @@ async def credencial(
     # vueltas contra una puerta cerrada.
     if sesion.status in ("ended", "cancelled"):
         raise ConflictError("Esta transmisión ya terminó.", code="live_not_joinable")
+
+    # UNA EMISION EN DIRECTO SIN SALA SE REPARA AQUI. `_abrir_sala` no deja que
+    # un fallo del proveedor impida emitir, y promete que la sala «se recupera
+    # sola en el siguiente intento»; pero una emision que nacio en directo no
+    # vuelve a pasar por `/start`, asi que ese intento no llegaba nunca y la
+    # credencial contestaba 503 para siempre. Pedir credencial es justo el
+    # momento: el anfitrion y el publico pasan por aqui al abrir la pantalla.
+    if (
+        sesion.status == "live"
+        and not sesion.provider_room_id
+        and providers.hay_proveedor_real()
+    ):
+        await _abrir_sala(sesion)
+        if sesion.provider_room_id:
+            await db.commit()
+            await db.refresh(sesion)
 
     if not providers.hay_proveedor_real() or not sesion.provider_room_id:
         raise ServiceUnavailableError(

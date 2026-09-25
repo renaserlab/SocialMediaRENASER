@@ -50,13 +50,17 @@ concurrency:
 # A QUE CUENTA SE DESPLIEGA lo deciden las variables del repositorio, no este
 # fichero. Mudar la API de cuenta de AWS es cambiar tres variables en GitHub
 # (AWS_ROLE_ARN, AWS_PILA_PLATAFORMA y AWS_REPOSITORIO_ECR), no editar el
-# flujo. Los valores por defecto son los de la cuenta en la que corre hoy
-# produccion: mientras nadie cambie las variables, nada cambia de sitio. Ver
-# docs/AWS_MIGRACION_RENASERLAB.md.
+# flujo. Ver docs/AWS_MIGRACION_RENASERLAB.md.
+#
+# Los valores por defecto son los de RenaserLab, donde corre produccion desde
+# el 23/09/2026. Antes eran `renaser-plataforma-produccion` y `renaser/api`, de
+# la cuenta de Ricardo, que se dio de baja: si alguien borrara las variables,
+# el flujo iria a buscar nombres que ya no existen en ninguna cuenta nuestra y,
+# en RenaserLab, `renaser-*` es el prefijo de OTROS productos.
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  PILA_PLATAFORMA: ${{ vars.AWS_PILA_PLATAFORMA || 'renaser-plataforma-produccion' }}
-  REPOSITORIO_ECR: ${{ vars.AWS_REPOSITORIO_ECR || 'renaser/api' }}
+  PILA_PLATAFORMA: ${{ vars.AWS_PILA_PLATAFORMA || 'zexcelencia-plataforma-produccion' }}
+  REPOSITORIO_ECR: ${{ vars.AWS_REPOSITORIO_ECR || 'zexcelencia/api' }}
 
 jobs:
 

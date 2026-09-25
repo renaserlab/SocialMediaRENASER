@@ -364,15 +364,21 @@ async def test_la_busqueda_pagina_por_cursor_sin_repetir(sesiones) -> None:
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
-async def test_las_categorias_nacen_vacias(sesiones) -> None:
-    """LA EMPRESA NO LAS HA DEFINIDO. Vacío no es un fallo: es la verdad."""
+async def test_las_categorias_iniciales_son_las_de_la_0084(sesiones) -> None:
+    """Nacían vacías y el formulario no podía ofrecer ninguna. Desde la 0084 hay
+    una lista inicial (un punto de partida que la empresa puede cambiar), en su
+    orden, y una nueva se suma a ella."""
     async with sesiones() as db:
-        assert await catalog.categorias(db) == []
+        iniciales = await catalog.categorias(db)
+    slugs = [c.slug for c in iniciales]
+    assert slugs[0] == "libros-y-cuadernos"
+    assert slugs[-1] == "otros", "«Otros» va siempre al final"
+    assert len(slugs) == 10
 
     real = await categoria(sesiones, "cocina")
     producto_id, _, _ = await publicado(sesiones, categoria_id=real)
     async with sesiones() as db:
-        assert len(await catalog.categorias(db)) == 1
+        assert len(await catalog.categorias(db)) == len(iniciales) + 1
         items, _ = await catalog.buscar(db, category_id=real)
         assert [t.product_id for t in items] == [producto_id]
 

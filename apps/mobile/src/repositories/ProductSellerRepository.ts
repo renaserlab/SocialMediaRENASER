@@ -52,6 +52,30 @@ export const ProductSellerRepository = {
   },
 
   /** La retira quien la escribió. Solo antes de que se decida. */
+  /**
+   * Sube un documento (PDF o foto) a la postulación en BORRADOR. Opcional.
+   *
+   * La ruta la pone el servidor (`<perfil>/<postulación>/<uuid>`): antes había
+   * que escribirla a mano y no existía dónde guardar el archivo (0085).
+   */
+  async subirDocumento(opciones: {
+    archivo: Blob | File;
+    nombre: string;
+    tipo: string;
+    nota?: string;
+  }): Promise<Postulacion> {
+    const formulario = new FormData();
+    formulario.append('file', opciones.archivo as Blob, opciones.nombre);
+    formulario.append('kind', opciones.tipo);
+    if (opciones.nota && opciones.nota.trim() !== '') formulario.append('note', opciones.nota.trim());
+    return apiRequest<Postulacion>(`${API_V1}/products/seller/application/documents`, {
+      method: 'POST',
+      body: formulario,
+      // Un PDF escaneado tarda más que una respuesta normal.
+      timeoutMs: 120_000,
+    });
+  },
+
   async retirarPostulacion(): Promise<Postulacion> {
     return apiRequest<Postulacion>(`${API_V1}/products/seller/application/withdraw`, {
       method: 'POST',

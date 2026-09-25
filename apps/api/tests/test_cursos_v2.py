@@ -540,6 +540,8 @@ async def test_un_curso_completo_se_envia_a_revision(entorno):
         "review_status": "pending_review",
         "submitted": True,
         "missing": [],
+        # Sin modo flexible, enviar NO publica.
+        "published": False,
     }
 
 
@@ -575,6 +577,23 @@ async def test_solo_la_administracion_resuelve_una_revision(entorno):
             f"{CATALOGO}/courses/{curso['id']}/review", json={"decision": "approve"}
         )
     ).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_administracion_tampoco_revisa_su_propio_curso(entorno):
+    """La misma regla que eventos y productos. Sin ella, quien administraba
+    podía crear un curso, aprobárselo y publicarlo sin que nadie más lo viera."""
+    http, sesiones, identidad = entorno
+    identidad["uid"] = ADMIN
+    curso = await _listo_para_revision(http, sesiones)
+    await http.post(f"{CATALOGO}/courses/{curso['id']}/submit")
+    respuesta = await http.post(
+        f"{CATALOGO}/courses/{curso['id']}/review", json={"decision": "approve"}
+    )
+    assert respuesta.status_code == 403, respuesta.text
+    assert respuesta.json()["error"]["code"] == "course_self_review_not_allowed"
+    mio = (await http.get(f"{CATALOGO}/courses/mine")).json()[0]
+    assert mio["review_status"] == "pending_review"
 
 
 @pytest.mark.asyncio
@@ -987,3 +1006,108 @@ async def test_sin_la_0034_ninguna_leccion_es_muestra(sin_0034):
     assert all(l["is_preview"] is False for l in lecciones)
     assert all(l["kind"] == "video" for l in lecciones)
     assert all(l["media_path"] is None for l in lecciones)
+
+
+# --------------------------------------------------------------------------- #
+# Modo flexible y avisos al autor (24/09/2026)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def flexible(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "publicacion_flexible", True, raising=False)
+
+
+@pytest.fixture
+def pushes(monkeypatch):
+    from app.modules.notifications import decisiones
+
+    enviados: list[str] = []
+
+    def _retener(_background, *, user_ids, notification_type, **_kw):
+        enviados.extend(f"{uid}:{notification_type}" for uid in user_ids)
+
+    monkeypatch.setattr(decisiones, "encolar_push", _retener)
+    return enviados
+
+
+async def _avisos(sesiones, usuario: str) -> list[tuple[str, dict]]:
+    from sqlalchemy import select
+
+    from app.modules.notifications.models import Notification
+
+    async with sesiones() as db:
+        filas = (
+            await db.execute(
+                select(Notification).where(Notification.user_id == usuario)
+                .order_by(Notification.created_at.asc())
+            )
+        ).scalars().all()
+    return [(n.type, n.payload or {}) for n in filas]
+
+
+@pytest.mark.asyncio
+async def test_en_modo_flexible_enviar_aprueba_y_publica(entorno, flexible):
+    http, sesiones, identidad = entorno
+    curso = await _listo_para_revision(http, sesiones)
+    cuerpo = (await http.post(f"{CATALOGO}/courses/{curso['id']}/submit")).json()
+    assert cuerpo["published"] is True
+    assert cuerpo["review_status"] == "approved"
+
+    publicados = {c["id"] for c in (await http.get(f"{CATALOGO}/courses")).json()}
+    assert curso["id"] in publicados
+    avisos = await _avisos(sesiones, identidad["uid"])
+    assert [t for t, _ in avisos] == ["course_published"]
+    assert avisos[0][1]["automatic"] is True
+
+
+@pytest.mark.asyncio
+async def test_en_modo_flexible_bastan_diez_caracteres_y_sin_resultados(entorno, flexible):
+    http, sesiones, _identidad = entorno
+    curso = await _listo_para_revision(http, sesiones, description="Curso corto", highlights=[])
+    cuerpo = (await http.post(f"{CATALOGO}/courses/{curso['id']}/submit")).json()
+    assert cuerpo["missing"] == []
+    assert cuerpo["published"] is True
+
+
+@pytest.mark.asyncio
+async def test_en_modo_flexible_se_publica_sin_revision_desde_publicar(entorno, flexible):
+    http, sesiones, _identidad = entorno
+    curso = await _listo_para_revision(http, sesiones)
+    respuesta = (await http.post(f"{CATALOGO}/courses/{curso['id']}/publish")).json()
+    assert respuesta["published"] is True, respuesta
+
+
+@pytest.mark.asyncio
+async def test_el_autor_se_entera_del_rechazo_con_su_motivo_una_sola_vez(entorno, pushes):
+    http, sesiones, identidad = entorno
+    autora = identidad["uid"]
+    curso = await _listo_para_revision(http, sesiones)
+    await http.post(f"{CATALOGO}/courses/{curso['id']}/submit")
+    identidad["uid"] = ADMIN
+    cuerpo = {"decision": "reject", "reason": "Faltan lecciones con contenido."}
+    for _ in range(2):  # la segunda vez no cambia nada: no avisa otra vez
+        respuesta = await http.post(f"{CATALOGO}/courses/{curso['id']}/review", json=cuerpo)
+        assert respuesta.status_code == 200, respuesta.text
+
+    avisos = await _avisos(sesiones, autora)
+    assert avisos == [
+        (
+            "course_review_rejected",
+            {"title": curso["title"], "reason": "Faltan lecciones con contenido."},
+        )
+    ]
+    assert pushes == [f"{autora}:course_review_rejected"]
+
+
+@pytest.mark.asyncio
+async def test_aprobar_avisa_sin_motivo(entorno, pushes):
+    http, sesiones, identidad = entorno
+    autora = identidad["uid"]
+    await _aprobado(http, sesiones, identidad)
+    avisos = await _avisos(sesiones, autora)
+    assert [t for t, p in avisos] == ["course_review_approved"]
+    assert "reason" not in avisos[0][1]
+    assert pushes == [f"{autora}:course_review_approved"]

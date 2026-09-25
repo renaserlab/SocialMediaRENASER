@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError, ConflictError, ValidationAppError
 from app.modules.gobernanza import auditoria
+from app.modules.notifications import decisiones as avisos
 from app.modules.products import esquema, permissions
 from app.modules.products import states as maquina
 from app.modules.products.models import (
@@ -38,6 +39,7 @@ from app.modules.products.models import (
     DECISION_APROBADO,
     EVALUACION_DECIDIDA,
     FOTO_APROBADA,
+    FOTO_PENDIENTE,
     PUBLICADO,
     RAZONES_EXIGIDAS,
     RETIRADO,
@@ -266,13 +268,7 @@ async def crear(
     vendedor = await permissions.exigir_vendedor_activo(db, usuario_id)
 
     if category_id is not None:
-        # UNA CATEGORÍA QUE NO EXISTE NO SE INVENTA. La tabla nace vacía a
-        # propósito: las categorías iniciales las decide la empresa.
-        categoria = await db.get(ProductCategory, category_id)
-        if categoria is None or not categoria.active:
-            raise ValidationAppError(
-                "Esa categoría no existe.", code="product_category_invalid"
-            )
+        await _exigir_categoria(db, category_id)
 
     limpio = _exigir_textos(datos)
     limpias = _exigir_variantes(variantes)
@@ -310,6 +306,30 @@ async def crear(
     return producto, version
 
 
+async def _exigir_categoria(db: AsyncSession, category_id: str) -> ProductCategory:
+    """UNA CATEGORÍA QUE NO EXISTE NO SE INVENTA: tiene que existir y estar
+    activa. Las iniciales las siembra la 0084."""
+    categoria = await db.get(ProductCategory, category_id)
+    if categoria is None or not categoria.active:
+        raise ValidationAppError(
+            "Esa categoría no existe.", code="product_category_invalid"
+        )
+    return categoria
+
+
+def se_puede_editar(producto: Product, *, flexible: bool) -> bool:
+    """Si quien vende puede tocar su producto ahora.
+
+    Con revisión, solo el borrador: editar lo que alguien evalúa cambia el
+    objeto de la evaluación. En MODO FLEXIBLE también lo publicado: se abre una
+    versión nueva sobre la vigente, que sigue en el catálogo hasta que se
+    publiquen los cambios.
+    """
+    if producto.status in maquina.EDITABLES:
+        return True
+    return flexible and producto.status in maquina.EN_CATALOGO
+
+
 async def borrador_de(db: AsyncSession, *, producto_id: str) -> ProductVersion | None:
     """La versión borrador de ese producto. Una como mucho, y lo impone un
     índice parcial de la 0070."""
@@ -338,24 +358,35 @@ async def guardar_borrador(
     usuario_id: str,
     datos: dict[str, Any],
     variantes: list[dict] | None = None,
+    flexible: bool = False,
 ) -> ProductVersion:
     """Reescribe el borrador, o abre uno nuevo sobre lo publicado.
 
-    SOLO MIENTRAS EL PRODUCTO SEA EDITABLE. Editar lo que alguien está evaluando
-    cambia el objeto de la evaluación a mitad de camino, y el sello acabaría
-    puesto sobre un texto que el evaluador no vio.
+    SOLO MIENTRAS EL PRODUCTO SEA EDITABLE (`se_puede_editar`). Editar lo que
+    alguien está evaluando cambia el objeto de la evaluación a mitad de camino,
+    y el sello acabaría puesto sobre un texto que el evaluador no vio. En modo
+    flexible, lo publicado también se edita: la versión nueva nace con la
+    galería de la vigente y el catálogo sigue enseñando la vigente hasta que se
+    publiquen los cambios.
+
+    LA CATEGORÍA va en el producto y no en la versión (no es parte de la
+    huella), así que se cambia aquí sin abrir versión nueva por ella.
     """
     await esquema.exigir_dominio(db)
     await permissions.exigir_vendedor_activo(db, usuario_id)
     producto = await permissions.exigir_mio(
         db, producto_id=producto_id, user_id=usuario_id
     )
-    if producto.status not in maquina.EDITABLES:
+    if not se_puede_editar(producto, flexible=flexible):
         raise ConflictError(
             "Este producto no se puede editar en su estado actual.",
             code="product_not_editable",
             details={"status": producto.status},
         )
+    categoria = datos.get("category_id")
+    if isinstance(categoria, str) and categoria.strip():
+        await _exigir_categoria(db, categoria.strip())
+        producto.category_id = categoria.strip()
 
     limpio = _exigir_textos(datos)
     limpias = _exigir_variantes(variantes)
@@ -382,6 +413,11 @@ async def guardar_borrador(
         )
         db.add(borrador)
         await db.flush()
+        if vigente is not None:
+            # LA GALERÍA VIAJA CON LA EDICIÓN. Sin esto, editar la descripción
+            # de un producto publicado dejaba la versión nueva sin una sola
+            # foto y no se podía volver a publicar.
+            await _copiar_galeria(db, desde=vigente, hacia=borrador)
     else:
         if nombre_de_la_version:
             vigente = await vigente_de(db, producto_id=producto_id)
@@ -400,6 +436,34 @@ async def guardar_borrador(
     producto.updated_at = ahora()
     await db.flush()
     return borrador
+
+
+async def _copiar_galeria(
+    db: AsyncSession, *, desde: ProductVersion, hacia: ProductVersion
+) -> None:
+    """Copia las filas de la galería (no los archivos: apuntan al mismo objeto,
+    y `media.quitar` ya no borra un archivo que otra versión sigue usando)."""
+    for foto in await galeria_de(db, version_id=desde.id):
+        db.add(
+            ProductMedia(
+                version_id=hacia.id,
+                kind=foto.kind,
+                storage_path=foto.storage_path,
+                alt_text=foto.alt_text,
+                position=foto.position,
+                created_by=foto.created_by,
+                status=foto.status,
+                content_type=foto.content_type,
+                byte_size=foto.byte_size,
+                width=foto.width,
+                height=foto.height,
+                checksum_sha256=foto.checksum_sha256,
+                reviewed_at=foto.reviewed_at,
+                reviewed_by=foto.reviewed_by,
+                rejection_reason=foto.rejection_reason,
+            )
+        )
+    await db.flush()
 
 
 def _siguiente_version(vigente: ProductVersion | None) -> str:
@@ -679,6 +743,14 @@ async def publicar(
         actor_rol=maquina.ADMINISTRACION,
     )
 
+    await avisos.avisar(
+        db,
+        user_id=await perfil_del_vendedor(db, producto),
+        tipo="product_published",
+        entidad="product",
+        entidad_id=producto_id,
+        titulo=borrador.name,
+    )
     await auditoria.anotar(
         db,
         actor_id=usuario_id,
@@ -700,6 +772,145 @@ async def publicar(
         producto_id,
     )
     return producto, borrador
+
+
+async def por_que_no_se_publica_directo(
+    db: AsyncSession, *, producto: Product
+) -> tuple[str, dict] | None:
+    """MODO FLEXIBLE: lo único que impide publicar es no tener qué enseñar.
+
+    Una versión borrador (lo que se publica) y al menos una foto: las fotos se
+    aprueban al subirlas en este modo, y las que quedaran pendientes de antes
+    se aprueban al publicar.
+    """
+    if producto.status in (SUSPENDIDO, RETIRADO):
+        return "product_not_publishable", {"status": producto.status}
+    borrador = await borrador_de(db, producto_id=producto.id)
+    if borrador is None:
+        return "product_version_missing", {}
+    fotos = await db.scalar(
+        select(func.count())
+        .select_from(ProductMedia)
+        .where(ProductMedia.version_id == borrador.id)
+    )
+    if not fotos:
+        return "product_media_required", {}
+    return None
+
+
+async def publicar_sin_admision(
+    db: AsyncSession, *, producto_id: str, usuario_id: str
+) -> tuple[Product, ProductVersion]:
+    """MODO FLEXIBLE: quien vende publica su borrador. Sin evaluación.
+
+    Es `publicar` sin sus tres exigencias de admisión (evaluación aprobada,
+    tres razones, publicador ajeno): la base no las impone, las impone el
+    código, y en este modo se modera DESPUÉS (administración puede suspender).
+    Lo que sí se respeta, porque lo exige la base: la versión vigente se
+    supera en la misma transacción y el producto apunta a su versión publicada
+    antes de cambiar de estado.
+
+    Lo publicado así NO entra en la «Selección Z» de la portada, que exige una
+    evaluación aprobada (`catalog.py`), y no lleva razones que enseñar.
+    """
+    await esquema.exigir_dominio(db)
+    await permissions.exigir_vendedor_activo(db, usuario_id)
+    producto = await permissions.exigir_mio(
+        db, producto_id=producto_id, user_id=usuario_id
+    )
+    falta = await por_que_no_se_publica_directo(db, producto=producto)
+    if falta is not None:
+        codigo, detalles = falta
+        raise ConflictError(
+            "Este producto todavía no puede publicarse.",
+            code=codigo,
+            details=detalles,
+        )
+
+    borrador = await borrador_de(db, producto_id=producto_id)
+    momento = ahora()
+    # Las fotos que se subieron ANTES de encender el modo siguen pendientes.
+    await db.execute(
+        update(ProductMedia)
+        .where(
+            ProductMedia.version_id == borrador.id,
+            ProductMedia.status == FOTO_PENDIENTE,
+        )
+        .values(status=FOTO_APROBADA, reviewed_at=momento, reviewed_by=None)
+    )
+
+    vigente = await vigente_de(db, producto_id=producto_id)
+    if vigente is not None:
+        vigente.status = VERSION_SUPERADA
+        vigente.effective_to = momento
+        await db.flush()
+
+    borrador.status = VERSION_PUBLICADA
+    borrador.published_at = momento
+    borrador.published_by = usuario_id
+    borrador.effective_from = momento
+    await db.flush()
+
+    producto.published_version_id = borrador.id
+    await db.flush()
+
+    desde = producto.status
+    if desde not in maquina.EN_CATALOGO:
+        # EL ESTADO, SIN LA MÁQUINA: no hay arista de borrador a publicado a
+        # propósito (la del flujo con revisión). Mismo UPDATE CONDICIONAL que
+        # `transicionar`, para que dos toques no cuenten dos.
+        async with db.begin_nested() as punto:
+            cambiadas = await db.execute(
+                update(Product)
+                .where(Product.id == producto_id, Product.status == desde)
+                .values(status=PUBLICADO, published_at=momento, updated_at=momento)
+            )
+            if cambiadas.rowcount != 1:
+                await punto.rollback()
+        if cambiadas.rowcount != 1:
+            raise ConflictError(
+                "Alguien movió este producto a la vez. Vuelve a mirarlo.",
+                code="product_changed",
+                details={"expected": desde},
+            )
+        await db.refresh(producto)
+    else:
+        producto.updated_at = momento
+        await db.flush()
+
+    await auditoria.anotar(
+        db,
+        actor_id=None,
+        actor_role="system",
+        action="product.publish",
+        entity_type="product_version",
+        entity_id=borrador.id,
+        previous_state=desde,
+        new_state=VERSION_PUBLICADA,
+        payload={
+            "product_id": producto_id,
+            "version": borrador.version,
+            "content_sha256": borrador.content_sha256,
+            "superseded": vigente.id if vigente is not None else None,
+            "modo": "publicacion_flexible",
+        },
+    )
+    await avisos.avisar(
+        db,
+        user_id=usuario_id,
+        tipo="product_published",
+        entidad="product",
+        entidad_id=producto_id,
+        titulo=borrador.name,
+        automatico=True,
+    )
+    return producto, borrador
+
+
+async def perfil_del_vendedor(db: AsyncSession, producto: Product) -> str | None:
+    """A quién avisar de lo que pasa con este producto."""
+    vendedor = await db.get(ProductSeller, producto.seller_id)
+    return vendedor.profile_id if vendedor is not None else None
 
 
 async def mis_productos(

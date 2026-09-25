@@ -40,6 +40,7 @@ SOLO_CORRIGEN = (
     "0052_cerrar_lectura_directa_de_datos_sensibles.sql",
     "0053_cerrar_el_comercio_por_postgrest.sql",
     "0054_aceptacion_de_recompra_en_las_tiendas.sql",
+    "0083_publicar_solo_por_la_api.sql",
 )
 
 
@@ -597,3 +598,22 @@ def test_cada_check_con_nombre_del_sql_esta_en_los_modelos(migraciones) -> None:
                 if check not in nombres:
                     faltan.append(f"{tabla}: CHECK «{check}» solo esta en {nombre}")
     assert not faltan, "restricciones sin replicar en los modelos:\n  " + "\n  ".join(faltan)
+
+
+def test_eventos_cursos_y_directos_solo_se_escriben_por_la_api() -> None:
+    """La 0083 quita a `anon` y `authenticated` la escritura de las tres tablas
+    cuyo `status` decide qué se publica, y les deja la lectura.
+
+    Sin esto, un organizador publicaba su evento con un PATCH a PostgREST y la
+    clave anónima de la app, sin pasar por la admisión (verificado contra la
+    base el 23/09/2026). Si alguien «simplifica» la 0083 a un `revoke all`, la
+    app pierde la lectura de `courses` y los directos, el tiempo real.
+    """
+    sql = _sin_comentarios((MIGRACIONES / "0083_publicar_solo_por_la_api.sql").read_text(encoding="utf-8"))
+    normal = " ".join(sql.lower().split())
+    assert (
+        "revoke insert, update, delete, truncate, references, trigger on "
+        "public.events, public.courses, public.live_sessions from anon, authenticated;"
+    ) in normal
+    assert "revoke all" not in normal
+    assert "revoke select" not in normal
