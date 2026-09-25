@@ -50,6 +50,9 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "refund_rejected": ("Solicitud rechazada", "Revisa el motivo en tus compras."),
     "refund_refunded": ("Devolución completada", "El importe vuelve a tu método de pago."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
+    # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
+    # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
+    "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
     "session_booked": ("Nueva solicitud de sesión", "{actor} quiere agendar contigo."),
     # Cada respuesta lleva su propio texto. Con un unico tipo para todo, a
     # quien le rechazaban una sesion le llegaba «reservó una sesión contigo».
@@ -94,6 +97,9 @@ CHANNELS: dict[str, str] = {
     "refund_rejected": "contenido",
     "refund_refunded": "contenido",
     "follow": "interacciones",
+    # Con los seguidores y los «me gusta»: es alguien a quien sigues haciendo
+    # algo, no una gestion tuya.
+    "live_started": "interacciones",
     "session_booked": "contenido",
     "session_accepted": "contenido",
     "session_rejected": "contenido",

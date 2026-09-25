@@ -27,7 +27,7 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response, status
 from sqlalchemy import func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,7 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.live import limites, providers, roles, webhooks
+from app.modules.live import avisos, limites, providers, roles, webhooks
 from app.modules.live.models import LiveMessage, LiveReactionTotal, LiveSession
 from app.modules.live.schemas import (
     REACCIONES,
@@ -53,9 +53,10 @@ from app.modules.live.schemas import (
     ReactionFlush,
     ReactionTotals,
 )
+from app.modules.notifications.push import encolar_push
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import esquema
-from app.modules.social_graph.models import UserBlock
+from app.modules.social_graph.models import Follow, UserBlock
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import is_admin
@@ -269,11 +270,78 @@ async def listar(
     return await _leer(db, filas, uid)
 
 
+@router.get("/sessions/following", response_model=list[LiveSessionRead])
+async def en_vivo_de_quien_sigo(
+    limit: int = Query(default=5, ge=1, le=20),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LiveSessionRead]:
+    """Quien de las personas a las que sigo esta emitiendo AHORA.
+
+    Es lo que pregunta la aplicacion al abrirse y al volver del segundo plano
+    para ensenar el aviso «Juan está transmitiendo en vivo», como en TikTok
+    (ver `avisos.py`). Por eso solo `live`: una emision anunciada no se puede
+    ver todavia, y una terminada ya no.
+
+    DECLARADA ANTES de `/sessions/{session_id}`: FastAPI prueba las rutas en
+    orden, y al reves «following» se tomaria por el identificador de una
+    emision.
+    """
+    if not await esquema.hay_directos(db):
+        return []
+
+    uid = current_user.id
+    consulta = select(LiveSession).where(
+        LiveSession.status == "live",
+        LiveSession.host_id.in_(
+            select(Follow.following_id).where(Follow.follower_id == uid)
+        ),
+    )
+    bloqueados = await _bloqueados(db, uid)
+    if bloqueados:
+        consulta = consulta.where(LiveSession.host_id.not_in(list(bloqueados)))
+
+    candidatas = list(
+        await db.scalars(
+            consulta.order_by(LiveSession.started_at.desc().nulls_last()).limit(limit)
+        )
+    )
+    # Una emision abandonada (el movil de quien emitia se quedo sin bateria)
+    # sigue `live` hasta que alguien la mira: aqui se la mira, y si se paso del
+    # tope se cierra en vez de anunciarla.
+    vivas = [s for s in candidatas if not await _caducar_si_toca(db, s)]
+    return await _leer(db, vivas, uid)
+
+
+async def _avisar_de_que_empieza(
+    db: AsyncSession, background: BackgroundTasks, sesion: LiveSession
+) -> None:
+    """Aviso en la bandeja de cada seguidor y push, cuando una emision EMPIEZA.
+
+    Va DESPUES de guardar la emision y de construir la respuesta: los avisos
+    hacen su propio commit (o rollback) y no pueden tocar ni lo guardado ni lo
+    que se devuelve. Las reglas —cada cuanto, a quien, que pasa si falla— estan
+    en `avisos.py`.
+    """
+    destinatarios = await avisos.avisar_a_seguidores(db, sesion=sesion)
+    if not destinatarios:
+        return
+    anfitrion = await db.get(Profile, sesion.host_id)
+    encolar_push(
+        background,
+        user_ids=destinatarios,
+        notification_type=avisos.TIPO,
+        actor_name=anfitrion.full_name if anfitrion else None,
+        data={"type": avisos.TIPO, "liveId": sesion.id},
+    )
+
+
 @router.post(
     "/sessions", response_model=LiveSessionRead, status_code=status.HTTP_201_CREATED
 )
 async def crear(
     payload: LiveSessionCreate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LiveSessionRead:
@@ -311,7 +379,12 @@ async def crear(
 
     await db.commit()
     await db.refresh(sesion)
-    return (await _leer(db, [sesion], current_user.id))[0]
+    respuesta = (await _leer(db, [sesion], current_user.id))[0]
+    # Nace emitiendo: se avisa a quien sigue a esta persona. Una programada no
+    # avisa aqui, sino al empezar (ver `empezar`).
+    if not programada:
+        await _avisar_de_que_empieza(db, background, sesion)
+    return respuesta
 
 
 async def _caducar_si_toca(db: AsyncSession, sesion: LiveSession) -> bool:
@@ -494,6 +567,7 @@ async def editar(
 @router.post("/sessions/{session_id}/start", response_model=LiveSessionRead)
 async def empezar(
     session_id: str,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LiveSessionRead:
@@ -527,7 +601,11 @@ async def empezar(
         raise ConflictError(
             "Esta transmisión ya cambió de estado.", code="live_state_changed"
         )
-    return (await _leer(db, [sesion], current_user.id))[0]
+    respuesta = (await _leer(db, [sesion], current_user.id))[0]
+    # Solo quien de verdad la paso a emitir llega aqui (el UPDATE condicional
+    # de arriba): dos «empezar» a la vez no avisan dos veces.
+    await _avisar_de_que_empieza(db, background, sesion)
+    return respuesta
 
 
 @router.post("/sessions/{session_id}/end", response_model=LiveSessionRead)
