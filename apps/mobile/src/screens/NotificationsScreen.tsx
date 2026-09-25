@@ -4,6 +4,7 @@ import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
@@ -110,7 +111,7 @@ export function NotificationsScreen() {
     : 'content';
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader
         title={t('settings.notifications')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
@@ -215,7 +216,7 @@ export function NotificationsScreen() {
         />
       </StateView>
       )}
-    </View>
+    </AppScreen>
   );
 }
 

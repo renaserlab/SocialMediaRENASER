@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '@/components/AppHeader';
 import { BuscadorDeConversaciones } from '@/components/BuscadorDeConversaciones';
 import { ChipsDeEtiquetas } from '@/components/ChipsDeEtiquetas';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { FilaDeConversacion } from '@/components/FilaDeConversacion';
 import { FiltrosDeBandeja } from '@/components/FiltrosDeBandeja';
 import { GestorDeEtiquetas } from '@/components/GestorDeEtiquetas';
@@ -82,6 +83,9 @@ export function MessagesScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
+  /* Lo que ocupa la capsula flotante. Antes eran 120 escritos a mano: con los
+     tres botones de Android la capsula ya mide 118 y en otros aparatos mas. */
+  const espacioInferior = useEspacioInferior();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
   const demoConversations = useAppStore((state) => state.conversations);
@@ -532,7 +536,7 @@ export function MessagesScreen() {
           <FlashList
             data={datos}
             keyExtractor={keyExtractor}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, { paddingBottom: espacioInferior + spacing.lg }]}
             refreshControl={controlDeRecarga}
             ListHeaderComponent={cabecera}
             onEndReached={cargarMas}
@@ -568,7 +572,7 @@ export function MessagesScreen() {
 }
 
 const styles = StyleSheet.create({
-  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
+  listContent: { paddingHorizontal: spacing.lg },
   cargandoMas: { paddingVertical: spacing.lg, alignItems: 'center' },
   // Las historias se pintan de borde a borde (tienen su propio relleno), así que
   // se compensa el margen de la lista con un margen negativo. Es lo único que

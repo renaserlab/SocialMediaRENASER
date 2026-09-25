@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -198,7 +199,7 @@ export function LibraryScreen() {
           : 'empty';
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader title={t('library.title')} onBack={volver} />
       <View style={styles.header}>
         <SegmentedControl
@@ -274,7 +275,7 @@ export function LibraryScreen() {
           />
         )}
       </StateView>
-    </View>
+    </AppScreen>
   );
 }
 

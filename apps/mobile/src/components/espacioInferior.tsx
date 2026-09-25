@@ -59,14 +59,49 @@ export function ProveedorDeEspacioInferior({ children }: { children: React.React
 }
 
 /**
+ * Si esto se pinta dentro del grupo de pestañas, debajo de la capsula.
+ *
+ * Lo pregunta `AppScreen` para decidir si reserva la zona segura: dentro de
+ * las pestañas ya la aparta la capsula, fuera no la aparta nadie.
+ */
+export function useDentroDeLasPestanas(): boolean {
+  return useContext(EspacioDeLaBarra) !== null;
+}
+
+/**
+ * Un antepasado YA dejo fuera la zona segura de abajo.
+ *
+ * `AppScreen`, fuera de las pestañas, termina su contenido donde empiezan los
+ * botones de Android. Lo que cuelga de ella ya no mide desde el canto de la
+ * pantalla, asi que volver a sumar la zona segura dejaria el hueco doble.
+ *
+ * OJO CON LOS `Modal`: se pintan en otra ventana que SI llega al canto, pero
+ * heredan el contexto de React. Por eso `BottomSheet` y el visor de imagenes
+ * miran `insets.bottom` directamente y no esta cuenta.
+ */
+const ZonaSeguraReservada = createContext(false);
+
+/** Lo usa `AppScreen` cuando aparta la zona segura de abajo. */
+export function ReservaDeZonaSegura({ children }: { children: React.ReactNode }) {
+  return <ZonaSeguraReservada.Provider value>{children}</ZonaSeguraReservada.Provider>;
+}
+
+/**
  * Cuanto hay que reservar abajo para que un control se pueda ver Y pulsar.
  *
  * Dentro de las pestañas: la capsula flotante entera (que ya incluye la zona
  * segura). Fuera: solo la zona segura, con un minimo para que un boton no quede
- * pegado al canto en un aparato sin muesca.
+ * pegado al canto en un aparato sin muesca. Y si `AppScreen` ya aparto la zona
+ * segura, solo ese minimo.
+ *
+ * OJO: la respuesta depende de DONDE se llama. En el componente que pinta el
+ * `AppScreen` —por encima de el— todavia no hay reserva y se sumaria dos veces;
+ * esas pantallas no necesitan esta cuenta, porque `AppScreen` ya lo hace.
  */
 export function useEspacioInferior(): number {
   const conBarra = useContext(EspacioDeLaBarra);
+  const reservada = useContext(ZonaSeguraReservada);
   const insets = useSafeAreaInsets();
-  return conBarra ?? Math.max(insets.bottom, spacing.sm) + spacing.sm;
+  const desdeElCanto = conBarra ?? Math.max(insets.bottom, spacing.sm) + spacing.sm;
+  return reservada ? Math.max(desdeElCanto - insets.bottom, spacing.sm) : desdeElCanto;
 }

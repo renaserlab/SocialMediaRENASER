@@ -7,6 +7,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { AudioScrubber } from '@/components/AudioScrubber';
 import { Button } from '@/components/Button';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
@@ -33,6 +34,8 @@ export function AudioScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
+  /* Vive en las pestañas: lo ultimo no puede quedar debajo de la capsula. */
+  const espacioInferior = useEspacioInferior();
 
   const currentUser = useAppStore((state) => state.user);
   const isAdmin = currentUser?.isAdmin === true;
@@ -127,7 +130,7 @@ export function AudioScreen() {
         title={t('audio.inviteTitle')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
-      <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+      <AppScreen contentStyle={{ paddingBottom: espacioInferior + spacing.xl }}>
         <View style={styles.container}>
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>
             {audio ? audio.body : t('audio.basedOnQuiz')}

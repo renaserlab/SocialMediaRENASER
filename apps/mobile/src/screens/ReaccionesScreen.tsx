@@ -1,10 +1,9 @@
 import React from 'react';
-import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { ListaDeReacciones } from '@/components/ListaDeReacciones';
-import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
 
 /**
@@ -22,12 +21,11 @@ import { useTranslation } from '@/i18n/useTranslation';
  */
 export function ReaccionesScreen() {
   const { t } = useTranslation();
-  const { colors } = useAppTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader
         title={t('post.reactions')}
         // Si se llega desde un aviso puede no haber a donde volver: en ese caso
@@ -39,6 +37,6 @@ export function ReaccionesScreen() {
         }
       />
       <ListaDeReacciones postId={id} />
-    </View>
+    </AppScreen>
   );
 }

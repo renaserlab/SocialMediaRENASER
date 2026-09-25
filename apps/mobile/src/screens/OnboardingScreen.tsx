@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
@@ -228,7 +229,7 @@ export function OnboardingScreen() {
 
   if (carga !== 'listo') {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         <AppHeader title="Z" onBack={editando ? () => router.back() : salir} />
         <View style={styles.centro}>
           <StateView
@@ -241,12 +242,12 @@ export function OnboardingScreen() {
             onAction={carga === 'error' ? salir : undefined}
           />
         </View>
-      </View>
+      </AppScreen>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader title={editando ? t('onboarding.yourPreferences') : 'Z'} onBack={atras} />
 
       {/* Progreso: cuantas preguntas quedan, sin tener que contarlas. */}
@@ -406,7 +407,7 @@ export function OnboardingScreen() {
           </Pressable>
         ) : null}
       </View>
-    </View>
+    </AppScreen>
   );
 }
 

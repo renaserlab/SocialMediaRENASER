@@ -21,7 +21,7 @@ export function ConfirmationScreen() {
   const firstLessonId = (lessons.find((l) => !l.completed) ?? lessons[0])?.id;
 
   return (
-    <AppScreen contentStyle={styles.screen} edges={['top', 'left', 'right']}>
+    <AppScreen contentStyle={styles.screen} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.content}>
         <View style={[styles.check, { borderColor: colors.text }]}>
           <Feather name="check" size={54} color={colors.text} />

@@ -12,6 +12,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AudioDePresentacion } from '@/components/AudioDePresentacion';
 import { AppScreen } from '@/components/AppScreen';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BookSessionSheet } from '@/components/BookSessionSheet';
 import { Button } from '@/components/Button';
@@ -81,6 +82,9 @@ export function ProfileScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
+  /* Lo que ocupa la capsula flotante. Antes eran 120 escritos a mano: con los
+     tres botones de Android la capsula ya mide 118 y en otros aparatos mas. */
+  const espacioInferior = useEspacioInferior();
   const { id, section } = useLocalSearchParams<{ id?: string; section?: string }>();
 
   const currentUser = useAppStore((state) => state.user);
@@ -709,7 +713,7 @@ export function ProfileScreen() {
           id ? () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/home')) : undefined
         }
       />
-      <AppScreen contentStyle={{ paddingBottom: 120 }}>
+      <AppScreen contentStyle={{ paddingBottom: espacioInferior + spacing.lg }}>
         {/*
           Sin foto de portada. Ocupaba el primer tercio de la pantalla con una
           imagen que casi nadie cambiaba, y empujaba hacia abajo lo que de

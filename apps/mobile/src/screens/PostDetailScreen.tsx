@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
@@ -12,13 +13,11 @@ import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
 import type { Post } from '@/types';
 import { spacing } from '@/theme/tokens';
-import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export function PostDetailScreen() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { colors } = useAppTheme();
   const router = useRouter();
   const enFeed = useAppStore((state) => state.posts.find((p) => p.id === id));
   const currentUserId = useAppStore((state) => state.user?.id ?? null);
@@ -74,7 +73,7 @@ export function PostDetailScreen() {
 
   if (!post) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         <AppHeader title={t('post.single')} onBack={goBack} />
         {estado === 'cargando' ? (
           <StateView state="loading" />
@@ -94,12 +93,12 @@ export function PostDetailScreen() {
             description={t('post.unavailableBody')}
           />
         )}
-      </View>
+      </AppScreen>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader title={t('post.single')} onBack={goBack} />
       <SinTecladoDelante>
         <ScrollView
@@ -119,7 +118,7 @@ export function PostDetailScreen() {
           />
         </ScrollView>
       </SinTecladoDelante>
-    </View>
+    </AppScreen>
   );
 }
 

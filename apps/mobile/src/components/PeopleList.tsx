@@ -5,6 +5,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 
 import { Button } from '@/components/Button';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
@@ -80,6 +81,9 @@ export function PeopleList({
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
+  /* En Seguidores y Seguidos la capsula flotante tapaba la ultima fila; en
+     Reacciones, fuera de las pestañas, basta con el margen. */
+  const espacioInferior = useEspacioInferior();
 
   if (loading) {
     return (
@@ -120,7 +124,7 @@ export function PeopleList({
     <FlashList
       data={people}
       keyExtractor={(item: PersonRow) => item.id}
-      contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}
+      contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: espacioInferior + spacing.lg }}
       renderItem={({ item }: { item: PersonRow }) => (
         <View style={[styles.row, { borderBottomColor: colors.border }]}>
           <Pressable
