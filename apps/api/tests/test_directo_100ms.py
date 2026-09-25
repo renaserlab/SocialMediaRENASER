@@ -282,6 +282,27 @@ async def test_si_no_existe_se_crea_con_el_id_de_la_emision_como_nombre():
     _metodo, _url, cuerpo = http.peticiones[-1]
     assert cuerpo["name"] == "sesion_1"
     assert cuerpo["template_id"] == "plantilla_de_prueba"
+    # Sin HMS_REGION no se manda: manda la plantilla, como siempre.
+    assert "region" not in cuerpo
+
+
+@pytest.mark.asyncio
+async def test_con_region_configurada_la_sala_se_crea_en_esa_region():
+    """El panel deja la plantilla en la región del espacio de trabajo (India) y
+    no permite cambiarla; la región de cada sala sí se elige al crearla."""
+    config = Configuracion100ms(
+        access_key="clave_de_prueba",
+        app_secret="secreto_de_prueba",
+        template_id="plantilla_de_prueba",
+        api_base="https://api.100ms.test/v2",
+        region=" US ",
+    )
+    http = _Http([_respuesta(200, {"data": []}), _respuesta(200, {"id": "room_us"})])
+    proveedor = Proveedor100ms(config, cliente=Cliente100ms(config, cliente_http=http))
+    sala = await proveedor.abrir_sala(session_id="sesion_1", titulo="Charla")
+    assert sala.room_id == "room_us"
+    _metodo, _url, cuerpo = http.peticiones[-1]
+    assert cuerpo["region"] == "us"
 
 
 @pytest.mark.asyncio

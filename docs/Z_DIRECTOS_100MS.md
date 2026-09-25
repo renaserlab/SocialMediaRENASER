@@ -97,7 +97,7 @@ Todo en `apps/api/.env.example`, sin un solo valor real.
 | `HMS_APP_SECRET` | **Secreto.** Firma los tokens. Solo backend. |
 | `HMS_TEMPLATE_ID` | La plantilla: roles, calidad y grabación. |
 | `HMS_WEBHOOK_SECRET` | Lo que se declara como cabecera al dar de alta el webhook. |
-| `HMS_REGION` | Región, si la cuenta la fija. |
+| `HMS_REGION` | Región de cada sala: `us`, `eu` o `in`. Vacía, la de la plantilla (el panel la deja en la del espacio de trabajo y no la cambia). Con el público en Perú: `us`. |
 | `LIVE_CREDENTIAL_TTL_SECONDS` | Cuánto dura la credencial de sala. |
 | `LIVE_MAX_CONCURRENT` | Techo de emisiones simultáneas. |
 | `LIVE_MAX_DURATION_MINUTES` | Duración máxima. |
@@ -546,7 +546,8 @@ Añadir a `C:\Users\Edwincito\zexcelencia-secretos.json`:
 "HMS_APP_ACCESS_KEY": "...",
 "HMS_APP_SECRET": "...",
 "HMS_TEMPLATE_ID": "...",
-"HMS_WEBHOOK_SECRET": "..."
+"HMS_WEBHOOK_SECRET": "...",
+"HMS_REGION": "us"
 ```
 
 Opcionales: `LIVE_MAX_CONCURRENT` (3), `LIVE_MAX_DURATION_MINUTES` (180),
