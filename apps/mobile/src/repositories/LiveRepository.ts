@@ -220,6 +220,20 @@ export const LiveRepository = {
   },
 
   /**
+   * Quien de las personas a las que sigo esta emitiendo AHORA.
+   *
+   * Es lo que pregunta el aviso «Juan está transmitiendo en vivo» al abrir la
+   * aplicacion (`AvisoDeDirectoSeguido`). Solo emisiones vivas: el servidor no
+   * devuelve ni las anunciadas ni las terminadas. Pide sesion.
+   */
+  async enVivoDeQuienSigo(limite = 5): Promise<Emision[]> {
+    const dtos = await apiRequest<EmisionDto[]>(
+      `${API_V1}/live/sessions/following?limit=${limite}`,
+    );
+    return dtos.map(aEmision);
+  },
+
+  /**
    * Crea una emision.
    *
    * OJO con `programadaParaIso`: sin el, la emision nace YA en directo. No es

@@ -17,9 +17,11 @@ import {
 } from '@expo-google-fonts/inter';
 
 import { AppErrorFallback } from '@/components/AppErrorFallback';
+import { AvisoDeDirectoSeguido } from '@/components/AvisoDeDirectoSeguido';
 import { DialogHost } from '@/components/DialogHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
+import { useAbrirDesdeElPush } from '@/hooks/useAbrirDesdeElPush';
 import { useSalidaConDoblePulsacion } from '@/hooks/useSalidaConDoblePulsacion';
 import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
@@ -83,6 +85,11 @@ export default function RootLayout() {
   // el boton existe en toda la aplicacion, no solo en las pestañas.
   useSalidaConDoblePulsacion();
 
+  // Tocar un push lleva a lo que anuncia (hoy, el directo de «Juan está
+  // transmitiendo en vivo»). En la raiz porque el push puede abrir la
+  // aplicacion desde cerrada, con cualquier pantalla por debajo.
+  useAbrirDesdeElPush();
+
   /*
     El segundo valor es el error de carga: si la fuente falla (sin red, cache
     vacia) hay que continuar igualmente con la tipografia del sistema.
@@ -141,6 +148,11 @@ export default function RootLayout() {
         <Stack
           screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }}
         />
+        {/*
+          «Juan está transmitiendo en vivo» al entrar, como en TikTok. Antes que
+          el dialogo y el toast para quedar por debajo de ellos.
+        */}
+        <AvisoDeDirectoSeguido />
         {/* Dialogo de confirmaciones y avisos: uno solo para toda la app. */}
         <DialogHost />
         {/* Toast de exito. Va despues para quedar por encima del dialogo. */}
