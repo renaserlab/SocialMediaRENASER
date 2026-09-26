@@ -77,6 +77,16 @@ const AIRE = 10;
  */
 const ALTURA_DE_LA_INFORMACION = 62;
 
+/*
+  Zona de toque del corazon y de su numero, que son dos botones apilados.
+
+  Se amplian hacia FUERA, nunca hacia el otro: el corazon hacia arriba y los
+  lados, el numero hacia abajo y los lados. Si se solaparan, un toque entre los
+  dos podria dar «me gusta» queriendo ver la lista, o al reves.
+*/
+const AREA_DEL_CORAZON = { top: 8, left: 10, right: 10, bottom: 0 } as const;
+const AREA_DEL_NUMERO = { top: 0, left: 16, right: 16, bottom: 12 } as const;
+
 type Props = {
   short: ReelItem;
   /** Solo el item visible reproduce (autoplay por viewport). */
@@ -116,6 +126,18 @@ type Props = {
    * quitar nada.
    */
   alDescartar?: (postId: string) => void;
+  /**
+   * Abrir los comentarios en una HOJA, sin salir del video. Antes se iba a la
+   * pantalla `/comments/{id}` y se perdia el video de vista, que es lo que se
+   * reporto: tiene que subir la misma bandeja que en Explorar.
+   *
+   * La hoja la monta el feed y no la celda: una sola para toda la lista, y
+   * ningun `useState` en una celda que FlashList recicla para otro video.
+   * `total` es el numero que se esta ensenando, para que la hoja diga lo mismo.
+   */
+  alAbrirComentarios: (postId: string, total: number) => void;
+  /** Quien reacciono, en la misma hoja que en Explorar. Tambien la monta el feed. */
+  alVerReacciones: (postId: string) => void;
 };
 
 function ShortVideoItemBase({
@@ -128,6 +150,8 @@ function ShortVideoItemBase({
   onForcedMute,
   espacioInferior = 0,
   alDescartar,
+  alAbrirComentarios,
+  alVerReacciones,
 }: Props) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -188,6 +212,16 @@ function ShortVideoItemBase({
   const liked = useAppStore((state) => state.likedPostIds.includes(short.id));
   const likes = useAppStore((state) => state.likeCounts[short.id] ?? short.likes);
   const toggleLikePost = useAppStore((state) => state.toggleLikePost);
+  /*
+    LOS COMENTARIOS, TAMBIEN DEL ESTADO COMPARTIDO. Es la misma publicacion que
+    en Explorar: si se comenta alli, aqui tiene que subir el numero, y al reves.
+    `short.comments` es lo que dijo el servidor al cargar este feed; lo anotado
+    es lo ultimo que se comento desde este telefono. Vale el mayor, como el
+    total de la hoja (`lib/comentarios`): si alguien mas comento despues, lo
+    trae el feed al recargar; si se comento aqui, lo trae lo anotado.
+  */
+  const comentariosAnotados = useAppStore((state) => state.commentCounts[short.id]);
+  const comentarios = Math.max(comentariosAnotados ?? 0, short.comments);
   // Reaccionar queda asociado a una cuenta. Mismo gesto que en el muro
   // (`PostCard`): se pide al usarlo, no al entrar en la aplicacion.
   const requireAuth = useRequireAuth();
@@ -286,25 +320,48 @@ function ShortVideoItemBase({
           <ExpoImage source={short.avatarUrl ? { uri: short.avatarUrl } : assets.avatar} style={styles.avatar} contentFit="cover" />
         </Pressable>
 
-        <Pressable
-          onPress={toggleLike}
-          style={styles.sidebarItem}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: liked }}
-          accessibilityLabel="Dar me gusta"
-        >
-          <Feather name="heart" size={28} color={liked ? media.danger : media.text} />
-          <Text style={[styles.sidebarLabel, { color: media.text }]}>{likes}</Text>
-        </Pressable>
+        {/*
+          DOS DESTINOS, como en la tarjeta de Explorar (`AccionDePublicacion`):
+          el corazon reacciona y el NUMERO abre quien reacciono. Antes eran un
+          solo boton y en Inicio no habia forma de ver esa lista.
+
+          El aspecto no cambia —corazon y numero debajo—: lo que cambia es que
+          son dos pulsables. El area de cada uno la amplia `hitSlop`, sin mover
+          nada de sitio. Sin reacciones no hay lista y el numero deja de ser
+          pulsable, igual que en Explorar.
+        */}
+        <View style={styles.sidebarItem}>
+          <Pressable
+            onPress={toggleLike}
+            hitSlop={AREA_DEL_CORAZON}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: liked }}
+            accessibilityLabel="Dar me gusta"
+          >
+            <Feather name="heart" size={28} color={liked ? media.danger : media.text} />
+          </Pressable>
+          {likes > 0 ? (
+            <Pressable
+              onPress={() => alVerReacciones(short.id)}
+              hitSlop={AREA_DEL_NUMERO}
+              accessibilityRole="button"
+              accessibilityLabel={t('post.whoReacted')}
+            >
+              <Text style={[styles.sidebarLabel, { color: media.text }]}>{likes}</Text>
+            </Pressable>
+          ) : (
+            <Text style={[styles.sidebarLabel, { color: media.text }]}>{likes}</Text>
+          )}
+        </View>
 
         <Pressable
-          onPress={() => router.push(`/comments/${short.id}` as never)}
+          onPress={() => alAbrirComentarios(short.id, comentarios)}
           style={styles.sidebarItem}
           accessibilityRole="button"
           accessibilityLabel={t('post.comments')}
         >
           <Feather name="message-square" size={28} color={media.text} />
-          <Text style={[styles.sidebarLabel, { color: media.text }]}>{short.comments}</Text>
+          <Text style={[styles.sidebarLabel, { color: media.text }]}>{comentarios}</Text>
         </Pressable>
 
         <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel={t('post.share')}>

@@ -37,17 +37,30 @@ const comentariosDeMuestra: ComentarioConAvatar[] = [
  * Lo usan la PANTALLA (`/comments/[id]`, que es a donde llevan los avisos y los
  * enlaces) y la HOJA que se abre desde una publicación. Las dos necesitan lo
  * mismo; lo que cambia es el marco.
+ *
+ * `totalConocido`: cuántos comentarios dice quien abre la hoja que hay. Hace
+ * falta en el feed de vídeo de Inicio, cuya publicación puede no estar en el
+ * muro: sin él, el título contaría solo la primera página («20» con 35).
+ * Si la publicación está en el muro, manda el contador del muro, como antes.
  */
-export function useComentarios(postId: string | undefined | null) {
+export function useComentarios(postId: string | undefined | null, totalConocido?: number) {
   const { t } = useTranslation();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUser = useAppStore((state) => state.user);
   const requireAuth = useRequireAuth();
   const setPosts = useAppStore((state) => state.setPosts);
+  const anotarComentarios = useAppStore((state) => state.anotarComentarios);
 
-  const contadorDelMuro = useAppStore(
+  const enElMuro = useAppStore(
     (state) => state.posts.find((post) => post.id === postId)?.commentsCount,
   );
+  /*
+    Sin `totalConocido` (Explorar, la pantalla) todo sigue como antes. Con él
+    vale el mayor: el muro pudo cargarse antes que el feed de vídeo, y el
+    título de la hoja no puede decir menos que el botón que la abrió.
+  */
+  const contadorDelMuro =
+    totalConocido === undefined ? enElMuro : Math.max(enElMuro ?? 0, totalConocido);
 
   const [estado, setEstado] = useState<EstadoDeComentarios<ComentarioConAvatar>>(() =>
     estadoInicial(),
@@ -107,10 +120,15 @@ export function useComentarios(postId: string | undefined | null) {
    *
    * En el almacen, para la tarjeta que se esta viendo; y `invalidar` para
    * Inicio y Perfil, que llevan su propia lista y no se enteran de esto.
+   *
+   * `total` es el que ya cuadro la hoja. Se anota aparte de `posts` porque el
+   * video de Inicio puede no estar en el muro, y aun asi tiene que ensenar el
+   * mismo numero que Explorar: es la misma publicacion.
    */
   const sumarAlContadorDelMuro = useCallback(
-    (delta: number) => {
+    (delta: number, total: number) => {
       if (delta === 0 || !postId) return;
+      anotarComentarios(postId, total);
       invalidar('comentarios');
       const { posts } = useAppStore.getState();
       if (!posts.some((post) => post.id === postId)) return;
@@ -125,7 +143,7 @@ export function useComentarios(postId: string | undefined | null) {
         ),
       );
     },
-    [postId, setPosts],
+    [anotarComentarios, postId, setPosts],
   );
 
   const enviar = useCallback(async () => {
@@ -174,7 +192,7 @@ export function useComentarios(postId: string | undefined | null) {
 
       setEstado(resultado.estado);
       setInputText(resultado.texto);
-      sumarAlContadorDelMuro(resultado.delta);
+      sumarAlContadorDelMuro(resultado.delta, resultado.estado.total);
       // Se deja de responder solo cuando el envío salió: si falló, el destino
       // sigue puesto y se puede reintentar sin volver a elegirlo.
       if (resultado.delta > 0) setRespondiendo(null);

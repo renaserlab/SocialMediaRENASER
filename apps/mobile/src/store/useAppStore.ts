@@ -128,6 +128,16 @@ type AppState = {
    * NO se persiste: es una foto del servidor, no una preferencia.
    */
   saveCounts: Record<string, number>;
+  /**
+   * Cuántos comentarios tiene cada publicación, según lo último que se
+   * comentó DESDE ESTE TELÉFONO. Mismo motivo que `likeCounts`: el feed de
+   * vídeo de Inicio tiene su propia cola y no ve `posts`, así que comentar en
+   * Explorar dejaba el número de Inicio donde estaba (y al revés).
+   *
+   * Lo escribe `useComentarios` al publicar, con el total que ya cuadró la
+   * hoja. NO se persiste: es una foto del servidor, no una preferencia.
+   */
+  commentCounts: Record<string, number>;
   reservedEventIds: string[];
   conversations: Conversation[];
 
@@ -211,6 +221,8 @@ type AppState = {
    * que Inicio y Explorar se pisen sin borrarse el estado.
    */
   aplicarLikesDelServidor: (idsDeLaTanda: string[], idsConMeGusta: string[], contadores?: Record<string, number>) => void;
+  /** Anota cuántos comentarios tiene ya una publicación (ver `commentCounts`). */
+  anotarComentarios: (postId: string, total: number) => void;
   /**
    * Guarda o quita de guardados, y DICE COMO ACABO.
    *
@@ -273,6 +285,7 @@ export const useAppStore = create<AppState>()(
       savedPostIds: [],
       likeCounts: {},
       saveCounts: {},
+      commentCounts: {},
       reservedEventIds: [],
       conversations: backendEnabled ? [] : conversations,
 
@@ -584,6 +597,8 @@ export const useAppStore = create<AppState>()(
           likeCounts: contadores ? { ...state.likeCounts, ...contadores } : state.likeCounts,
         }));
       },
+      anotarComentarios: (postId, total) =>
+        set((state) => ({ commentCounts: { ...state.commentCounts, [postId]: total } })),
       toggleSavePost: async (postId) => {
         const estado = get();
         const wasSaved = estado.savedPostIds.includes(postId);
@@ -891,6 +906,7 @@ export const useAppStore = create<AppState>()(
           savedPostIds: [],
           likeCounts: {},
           saveCounts: {},
+          commentCounts: {},
           reservedEventIds: [],
           conversations,
           dismissedGuides: [],
