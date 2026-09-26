@@ -8,7 +8,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'tabs.messages': 'Messages',
   'tabs.profile': 'Profile',
   // Aviso al pulsar Atras en la raiz de la aplicacion (solo Android).
-  'app.pressAgainToExit': 'Press again to exit',
+  'app.pressAgainToExit': 'Press once more to exit the app',
 
   'home.forYou': 'For you',
   'home.following': 'Following',
@@ -50,6 +50,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
     'When someone starts a live broadcast, it will show up here. In the meantime, there is plenty to discover on Z.',
   'live.discover': 'Discover content',
   'live.badgeLive': 'LIVE',
+  'live.watchNow': 'Watch',
+  'live.noticeA11y': "Open {actor}'s live",
   'live.badgeScheduled': 'SCHEDULED',
   'live.badgeEnded': 'ENDED',
   'live.badgeCancelled': 'CANCELLED',
@@ -303,6 +305,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'notif.generic': 'Notification',
   'notif.followTitle': 'New follower',
   'notif.followBody': '{actor} started following you',
+  'notif.liveTitle': 'Live',
+  'notif.liveBody': '{actor} is live now',
   'notif.likeTitle': 'New like',
   'notif.likeOne': '{actor} liked your post',
   'notif.likeTwo': '{actor} and 1 other person reacted to your post',
@@ -921,6 +925,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'editProfile.username': 'Username',
   'editProfile.bio': 'Bio',
   'editProfile.bioPlaceholder': 'Tell the community about yourself',
+  'editProfile.introSection': 'Intro audio',
+  'editProfile.saved': 'Profile updated',
 
   'editPost.pickerFailed': 'The picker could not be opened.',
   'editPost.emptyPost': 'The post cannot be left empty.',
@@ -1016,6 +1022,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'intro.saved': 'Intro saved',
   'intro.saveFailed': 'Your intro could not be saved.',
   'intro.removeTitle': 'Remove your intro',
+  'intro.removeAsk': 'Remove your intro?',
   'intro.removeBody':
     'Are you sure you want to remove your intro audio? You can record another one whenever you want.',
   'intro.remove': 'Remove',

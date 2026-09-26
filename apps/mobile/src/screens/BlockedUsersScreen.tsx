@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Avatar } from '@/components/Avatar';
 import { StateView } from '@/components/StateView';
@@ -71,7 +72,7 @@ export function BlockedUsersScreen() {
     status === 'loading' ? 'loading' : status === 'error' ? 'error' : people.length ? 'content' : 'empty';
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader
         title={t('settings.blocked')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
@@ -125,7 +126,7 @@ export function BlockedUsersScreen() {
           ))
         )}
       </ScrollView>
-    </View>
+    </AppScreen>
   );
 }
 

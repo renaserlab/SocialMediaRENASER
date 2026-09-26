@@ -8,7 +8,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'tabs.messages': 'Mensagens',
   'tabs.profile': 'Perfil',
   // Aviso al pulsar Atras en la raiz de la aplicacion (solo Android).
-  'app.pressAgainToExit': 'Pressione novamente para sair',
+  'app.pressAgainToExit': 'Pressione mais uma vez para sair do aplicativo',
 
   'home.forYou': 'Para você',
   'home.following': 'Seguindo',
@@ -51,6 +51,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
     'Quando alguém começar uma transmissão ao vivo, ela aparecerá aqui. Enquanto isso, há muito para descobrir no Z.',
   'live.discover': 'Descobrir conteúdo',
   'live.badgeLive': 'AO VIVO',
+  'live.watchNow': 'Assistir',
+  'live.noticeA11y': 'Abrir a transmissão de {actor}',
   'live.badgeScheduled': 'AGENDADA',
   'live.badgeEnded': 'TERMINOU',
   'live.badgeCancelled': 'CANCELADA',
@@ -305,6 +307,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'notif.generic': 'Notificação',
   'notif.followTitle': 'Novo seguidor',
   'notif.followBody': '{actor} começou a seguir você',
+  'notif.liveTitle': 'Ao vivo',
+  'notif.liveBody': '{actor} está transmitindo ao vivo',
   'notif.likeTitle': 'Nova curtida',
   'notif.likeOne': '{actor} curtiu sua publicação',
   'notif.likeTwo': '{actor} e mais 1 pessoa reagiram à sua publicação',
@@ -924,6 +928,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'editProfile.username': 'Nome de usuário',
   'editProfile.bio': 'Biografia',
   'editProfile.bioPlaceholder': 'Conte para a comunidade sobre você',
+  'editProfile.introSection': 'Áudio de apresentação',
+  'editProfile.saved': 'Perfil atualizado',
 
   'editPost.pickerFailed': 'Não foi possível abrir o seletor.',
   'editPost.emptyPost': 'A publicação não pode ficar vazia.',
@@ -1019,6 +1025,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'intro.saved': 'Apresentação salva',
   'intro.saveFailed': 'Não foi possível salvar sua apresentação.',
   'intro.removeTitle': 'Remover sua apresentação',
+  'intro.removeAsk': 'Remover sua apresentação?',
   'intro.removeBody':
     'Tem certeza de que quer remover seu áudio de apresentação? Você pode gravar outro quando quiser.',
   'intro.remove': 'Remover',

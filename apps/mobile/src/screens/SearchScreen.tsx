@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
@@ -203,7 +204,7 @@ export function SearchScreen() {
   }, [buscando, estado.resultados, estado.ampliando, recents, verMas, textosDeBusqueda, t]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader
         title={t('search.title')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/explore'))}
@@ -292,7 +293,7 @@ export function SearchScreen() {
           return <FilaDeResultado fila={row} alAbrir={() => persistRecent(query)} />;
         }}
       />
-    </View>
+    </AppScreen>
   );
 }
 

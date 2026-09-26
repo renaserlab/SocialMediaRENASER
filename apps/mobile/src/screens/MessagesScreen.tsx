@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '@/components/AppHeader';
 import { BuscadorDeConversaciones } from '@/components/BuscadorDeConversaciones';
 import { ChipsDeEtiquetas } from '@/components/ChipsDeEtiquetas';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { FilaDeConversacion } from '@/components/FilaDeConversacion';
 import { FiltrosDeBandeja } from '@/components/FiltrosDeBandeja';
 import { GestorDeEtiquetas } from '@/components/GestorDeEtiquetas';
@@ -82,6 +83,9 @@ export function MessagesScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
+  /* Lo que ocupa la capsula flotante. Antes eran 120 escritos a mano: con los
+     tres botones de Android la capsula ya mide 118 y en otros aparatos mas. */
+  const espacioInferior = useEspacioInferior();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
   const demoConversations = useAppStore((state) => state.conversations);
@@ -420,16 +424,14 @@ export function MessagesScreen() {
         <View style={styles.controles}>
           <BuscadorDeConversaciones alBuscar={alBuscar} />
 
+          {/*
+            PRIMERO LAS ETIQUETAS Y «FILTROS» A LA DERECHA (pedido el 25/09/2026:
+            antes iba a la izquierda y el texto de ayuda de las etiquetas se
+            partía a su lado). Los chips del CRM, en su propia fila desplazable,
+            desaparecen enteros sin la 0045; entonces «Filtros» queda solo, a la
+            derecha.
+          */}
           <View style={styles.filaDeFiltros}>
-            <FiltrosDeBandeja
-              seleccionado={consulta.filtro}
-              alSeleccionar={alFiltrar}
-              respuestasAHistorias={respuestasAHistorias}
-            />
-            {/*
-              Los chips del CRM, a la derecha del botón de filtros y en su propia
-              fila desplazable. Desaparecen enteros sin la 0045.
-            */}
             <View style={styles.chips}>
               <ChipsDeEtiquetas
                 etiquetas={etiquetas.etiquetas}
@@ -437,6 +439,13 @@ export function MessagesScreen() {
                 alSeleccionar={alEtiquetar}
                 disponible={etiquetas.disponible}
                 alGestionar={abrirGestorDeLaLista}
+              />
+            </View>
+            <View style={styles.filtros}>
+              <FiltrosDeBandeja
+                seleccionado={consulta.filtro}
+                alSeleccionar={alFiltrar}
+                respuestasAHistorias={respuestasAHistorias}
               />
             </View>
           </View>
@@ -532,7 +541,7 @@ export function MessagesScreen() {
           <FlashList
             data={datos}
             keyExtractor={keyExtractor}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, { paddingBottom: espacioInferior + spacing.lg }]}
             refreshControl={controlDeRecarga}
             ListHeaderComponent={cabecera}
             onEndReached={cargarMas}
@@ -568,15 +577,20 @@ export function MessagesScreen() {
 }
 
 const styles = StyleSheet.create({
-  listContent: { paddingHorizontal: spacing.lg, paddingBottom: 120 },
+  listContent: { paddingHorizontal: spacing.lg },
   cargandoMas: { paddingVertical: spacing.lg, alignItems: 'center' },
   // Las historias se pintan de borde a borde (tienen su propio relleno), así que
   // se compensa el margen de la lista con un margen negativo. Es lo único que
   // sobresale; el resto de la cabecera respeta el mismo margen que las filas.
   cabecera: { marginHorizontal: -spacing.lg },
   controles: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm },
-  filaDeFiltros: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Arriba y no al centro: debajo de los chips puede ir el texto de ayuda, y
+  // «Filtros» tiene que quedar a la altura de los chips, no a media altura.
+  filaDeFiltros: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   // `flex: 1` y `minWidth: 0`: sin esto, una fila de etiquetas larga empuja el
   // botón de filtros fuera de la pantalla en vez de desplazarse por dentro.
   chips: { flex: 1, minWidth: 0 },
+  // Las mismas medidas que la fila de chips (`Chip` mide 44 y la fila lleva
+  // `spacing.sm` arriba y abajo): así el botón queda centrado con ellos.
+  filtros: { minHeight: 44 + spacing.sm * 2, justifyContent: 'center' },
 });

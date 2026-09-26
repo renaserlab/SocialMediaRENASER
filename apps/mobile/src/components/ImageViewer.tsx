@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/Text';
 import { palette, spacing } from '@/theme/tokens';
@@ -48,6 +49,7 @@ type Props = {
  */
 export function ImageViewer({ uri, onClose, caption }: Props) {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const escala = useSharedValue(1);
   const escalaBase = useSharedValue(1);
   const x = useSharedValue(0);
@@ -184,15 +186,24 @@ export function ImageViewer({ uri, onClose, caption }: Props) {
           <Feather name="x" size={24} color={media.text} />
         </Pressable>
 
+        {/*
+          Medidos desde encima de los botones de Android: el `Modal` tambien se
+          pinta de canto a canto (la app es `edgeToEdgeEnabled`), y con los tres
+          botones —48 px— la ayuda, a 32 del borde, quedaba debajo de ellos.
+        */}
         {caption ? (
-          <View style={styles.pie} pointerEvents="none">
+          <View style={[styles.pie, { bottom: 76 + insets.bottom }]} pointerEvents="none">
             <Text variant="body" color={media.text} style={styles.pieTexto}>
               {caption}
             </Text>
           </View>
         ) : null}
 
-        <Text variant="secondary" color={media.textMuted} style={styles.ayuda}>
+        <Text
+          variant="secondary"
+          color={media.textMuted}
+          style={[styles.ayuda, { bottom: 32 + insets.bottom }]}
+        >
           {t('media.pinchToZoom')}
         </Text>
       </GestureHandlerRootView>

@@ -48,7 +48,8 @@ export type NotificationItem = {
     | 'alert-triangle'
     | 'edit-3'
     | 'eye-off'
-    | 'image';
+    | 'image'
+    | 'radio';
   time: string;
   read: boolean;
   actorId?: string;
@@ -169,6 +170,16 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       title = t('notif.sessionCompletedTitle');
       subtitle = t('notif.sessionCompletedBody', { actor });
       icon = 'calendar';
+      break;
+    /*
+      Alguien a quien sigues empezó un directo (desde el 25/09/2026, como en
+      TikTok). Queda en la bandeja aunque el directo ya haya terminado: al
+      tocarlo se abre la emisión, y si terminó, su pantalla lo dice.
+    */
+    case 'live_started':
+      title = t('notif.liveTitle');
+      subtitle = t('notif.liveBody', { actor });
+      icon = 'radio';
       break;
     default: {
       /*

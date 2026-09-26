@@ -12,7 +12,7 @@ export const es = {
   'tabs.messages': 'Mensajes',
   'tabs.profile': 'Perfil',
   // Aviso al pulsar Atras en la raiz de la aplicacion (solo Android).
-  'app.pressAgainToExit': 'Presiona otra vez para salir',
+  'app.pressAgainToExit': 'Presiona una vez más para salir de la aplicación',
 
   // Inicio
   'home.forYou': 'Para ti',
@@ -57,6 +57,8 @@ export const es = {
     'Cuando alguien empiece un directo, aparecerá aquí. Mientras tanto, hay mucho que descubrir en Z.',
   'live.discover': 'Descubrir contenido',
   'live.badgeLive': 'EN VIVO',
+  'live.watchNow': 'Ver',
+  'live.noticeA11y': 'Abrir el directo de {actor}',
   'live.badgeScheduled': 'PROGRAMADA',
   'live.badgeEnded': 'TERMINÓ',
   'live.badgeCancelled': 'CANCELADA',
@@ -330,6 +332,8 @@ export const es = {
   'notif.generic': 'Notificación',
   'notif.followTitle': 'Nuevo seguidor',
   'notif.followBody': '{actor} te empezó a seguir',
+  'notif.liveTitle': 'En vivo',
+  'notif.liveBody': '{actor} está transmitiendo en vivo',
   'notif.likeTitle': 'Nuevo me gusta',
   'notif.likeOne': 'A {actor} le gustó tu publicación',
   'notif.likeTwo': '{actor} y 1 persona más reaccionaron a tu publicación',
@@ -985,6 +989,8 @@ export const es = {
   'editProfile.username': 'Nombre de usuario',
   'editProfile.bio': 'Biografía',
   'editProfile.bioPlaceholder': 'Cuéntale a la comunidad sobre ti',
+  'editProfile.introSection': 'Audio de presentación',
+  'editProfile.saved': 'Perfil actualizado',
 
   // Editar publicación
   'editPost.pickerFailed': 'No se pudo abrir el selector.',
@@ -1089,6 +1095,7 @@ export const es = {
   'intro.saved': 'Presentación guardada',
   'intro.saveFailed': 'No se pudo guardar tu presentación.',
   'intro.removeTitle': 'Quitar tu presentación',
+  'intro.removeAsk': '¿Quitar tu presentación?',
   'intro.removeBody':
     '¿Seguro que quieres quitar tu audio de presentación? Podrás grabar otro cuando quieras.',
   'intro.remove': 'Quitar',

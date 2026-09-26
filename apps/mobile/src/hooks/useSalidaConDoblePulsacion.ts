@@ -32,6 +32,11 @@ import { cerrarCapaSuperior, hayCapaAbierta } from '@/navigation/capasAbiertas';
  *     retroceso. Es al reves (esta explicado en `navigation/atras.ts`). Ya no
  *     depende del orden: cuando toca volver, se vuelve.
  *
+ * Y AUN ASI ATRAS SEGUIA CERRANDO LA APLICACION EN LOS TELEFONOS, porque la
+ * pulsacion ni siquiera llegaba aqui: con `predictiveBackGestureEnabled` en
+ * `app.json`, Android 13 a 15 se la queda antes de `BackHandler`. Apagado desde
+ * la 1.1.1; la prueba que lo vigila esta en `config/perfilesDeCompilacion`.
+ *
  * Solo Android: en iOS no hay boton Atras, y en el navegador el retroceso lo
  * lleva el historial del propio navegador, que no debe tocarse.
  */

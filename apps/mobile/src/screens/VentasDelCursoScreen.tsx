@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
@@ -142,28 +143,28 @@ export function VentasDelCursoScreen() {
 
   if (prohibido) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         {cabecera}
         <StateView state="empty" icon="lock" description={t('gestion.sinPermiso')} />
-      </View>
+      </AppScreen>
     );
   }
 
   if (cargando) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         {cabecera}
         <StateView state="loading" />
-      </View>
+      </AppScreen>
     );
   }
 
   if (error) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         {cabecera}
         <StateView state="error" description={error} onRetry={() => void cargar()} />
-      </View>
+      </AppScreen>
     );
   }
 
@@ -211,7 +212,7 @@ export function VentasDelCursoScreen() {
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       {cabecera}
       <FlatList
         data={ventas}
@@ -273,7 +274,7 @@ export function VentasDelCursoScreen() {
           ) : null
         }
       />
-    </View>
+    </AppScreen>
   );
 }
 

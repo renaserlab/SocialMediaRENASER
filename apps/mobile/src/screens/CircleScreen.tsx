@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { useEspacioInferior } from '@/components/espacioInferior';
 import { Card } from '@/components/Card';
 import { PostCard } from '@/components/PostCard';
 import { Input } from '@/components/Input';
@@ -38,6 +39,8 @@ export function CircleScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
+  /* Vive en las pestañas: lo ultimo no puede quedar debajo de la capsula. */
+  const espacioInferior = useEspacioInferior();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // Círculo vía la capa de repositorio (mock hoy, backend mañana).
@@ -100,7 +103,7 @@ export function CircleScreen() {
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
       <SinTecladoDelante>
-      <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
+      <AppScreen contentStyle={{ paddingBottom: espacioInferior + spacing.xl }}>
         <View style={styles.header}>
           <Image source={assets.circle} style={[styles.circleImage, { borderColor: colors.border }]} />
           <Text style={[styles.title, { color: colors.text }]}>{circle.name}</Text>

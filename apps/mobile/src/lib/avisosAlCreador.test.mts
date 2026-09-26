@@ -55,3 +55,10 @@ test('el detalle nombra lo decidido y el motivo, si lo hay', () => {
   assert.equal(detalleDelAviso(null), '');
   assert.equal(detalleDelAviso({ title: 42 }), '', 'lo que no es texto no se pinta');
 });
+
+test('«está transmitiendo en vivo» lleva al directo, siga o no emitiendo', () => {
+  assert.equal(rutaDelAviso('live_started', 'l1'), '/live/l1');
+  // Sin emisión no hay a dónde ir: mejor no mover a nadie que abrir /live/.
+  assert.equal(rutaDelAviso('live_started', null), null);
+  assert.equal(rutaDelAviso('live_started', '  '), null);
+});

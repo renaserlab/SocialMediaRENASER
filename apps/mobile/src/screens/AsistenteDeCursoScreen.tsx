@@ -8,7 +8,6 @@ import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
-import { useEspacioInferior } from '@/components/espacioInferior';
 import { Input } from '@/components/Input';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
@@ -88,8 +87,6 @@ export function AsistenteDeCursoScreen() {
   /** MODO FLEXIBLE: se publica sin revisión (lo dice el servidor). */
   const flexible = usePublicacionFlexible();
   const { colors } = useAppTheme();
-  /* Cuanto hay que dejar abajo para que el boton de publicar se pueda pulsar. */
-  const espacioInferior = useEspacioInferior();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -490,12 +487,12 @@ export function AsistenteDeCursoScreen() {
         botones de publicar quedaban tapados en los otros cinco flujos, solo que
         el estorbo aqui es el teclado y alli la barra flotante.
 
-        `paddingBottom` sale de `useEspacioInferior`: fuera de las pestañas no
-        hay capsula, pero si zona segura, y el boton no puede quedar pegado al
-        indicador de inicio.
+        La zona segura de abajo la aparta el propio `AppScreen` (fuera de las
+        pestañas lo hace siempre). Antes se sumaba aqui con
+        `useEspacioInferior`, y con la reserva de `AppScreen` salia el doble.
       */}
       <SinTecladoDelante>
-      <AppScreen contentStyle={[styles.contenido, { paddingBottom: espacioInferior + spacing.xxxl }]}>
+      <AppScreen contentStyle={[styles.contenido, { paddingBottom: spacing.xxxl }]}>
         {aviso !== null && reviewStatus !== 'draft' ? (
           <View style={[styles.aviso, { borderColor: colors.border }]}>
             <Feather name={aviso.icono} size={16} color={colors.text} />

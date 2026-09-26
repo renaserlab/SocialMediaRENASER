@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { Avatar } from '@/components/Avatar';
 import { Chip } from '@/components/Chip';
@@ -225,15 +226,15 @@ export function EstudiantesDelCursoScreen() {
 
   if (prohibido) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         {cabecera}
         <StateView state="empty" icon="lock" description={t('gestion.sinPermiso')} />
-      </View>
+      </AppScreen>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       {cabecera}
       <FlatList
         data={alumnos}
@@ -299,7 +300,7 @@ export function EstudiantesDelCursoScreen() {
           ) : null
         }
       />
-    </View>
+    </AppScreen>
   );
 }
 

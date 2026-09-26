@@ -130,7 +130,7 @@ export type EntornoDeAtras = {
   puedeVolver: () => boolean;
   /** Deshacer la ultima navegacion. */
   volver: () => void;
-  /** Mostrar «Presiona otra vez para salir». */
+  /** Mostrar «Presiona una vez más para salir de la aplicación». */
   avisar: () => void;
 };
 

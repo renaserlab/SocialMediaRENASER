@@ -91,6 +91,9 @@ export function rutaDelAviso(
     case 'product_suspended':
     case 'product_photo_rejected':
       return id ? `/proveedor/productos/${id}` : '/proveedor/productos';
+    // «Juan está transmitiendo en vivo»: al directo, siga o no en emisión.
+    case 'live_started':
+      return id ? `/live/${id}` : null;
     default:
       return null;
   }

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { PostCard } from '@/components/PostCard';
 import { StateView } from '@/components/StateView';
@@ -11,7 +12,6 @@ import { AuthRepository } from '@/repositories/AuthRepository';
 import { PostRepository } from '@/repositories/PostRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
-import { useAppTheme } from '@/theme/useAppTheme';
 import type { Post } from '@/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -38,7 +38,6 @@ const POR_PAGINA = 20;
  */
 export function SavedScreen() {
   const { t } = useTranslation();
-  const { colors } = useAppTheme();
   const router = useRouter();
   const currentUserId = useAppStore((state) => state.user?.id);
 
@@ -110,7 +109,7 @@ export function SavedScreen() {
   const estado = estadoDeGuardados(guardadas, fallo);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader
         title={t('profile.saved')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))}
@@ -132,7 +131,7 @@ export function SavedScreen() {
           showsVerticalScrollIndicator={false}
         />
       </StateView>
-    </View>
+    </AppScreen>
   );
 }
 

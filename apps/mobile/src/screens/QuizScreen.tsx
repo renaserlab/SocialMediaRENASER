@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
@@ -73,8 +74,20 @@ export function QuizScreen() {
 
   const choose = (value: QuizArea) => answerQuiz(question.id, value);
 
+  /*
+    LA RAIZ RESPETA ARRIBA Y ABAJO, y no el `AppScreen` de en medio.
+
+    La barra de arriba (cerrar / anterior) y el pie («Siguiente») estan FUERA
+    del `AppScreen`, que solo envuelve las preguntas. Con la zona segura puesta
+    en el `AppScreen`, el hueco de la barra de estado salia entre el progreso y
+    las preguntas, mientras el boton de cerrar quedaba debajo de la hora, y el
+    pie debajo de los botones de Android (la aplicacion es `edgeToEdgeEnabled`).
+  */
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      edges={['top', 'bottom', 'left', 'right']}
+    >
       <View style={styles.topBar}>
         <Pressable
           onPress={() => index === 0 ? (router.canGoBack() ? router.back() : router.replace('/')) : goTo(index - 1)}
@@ -103,7 +116,7 @@ export function QuizScreen() {
         />
       </View>
 
-      <AppScreen scroll edges={['top', 'left', 'right']}>
+      <AppScreen scroll edges={['left', 'right']}>
         <Animated.View
           style={[
             styles.content,
@@ -181,7 +194,7 @@ export function QuizScreen() {
           {selected ? t('quiz.canChange') : t('quiz.pickOne')}
         </Text>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

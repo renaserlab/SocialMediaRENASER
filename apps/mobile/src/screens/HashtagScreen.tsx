@@ -3,6 +3,7 @@ import { RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { PostCard } from '@/components/PostCard';
 import { StateView } from '@/components/StateView';
@@ -132,7 +133,7 @@ export function HashtagScreen() {
   const cuantas = detalle?.posts_count ?? 0;
 
   return (
-    <View style={[styles.raiz, { backgroundColor: colors.background }]}>
+    <AppScreen scroll={false}>
       <AppHeader title={`#${titulo}`} back />
       <StateView
         state={
@@ -178,12 +179,11 @@ export function HashtagScreen() {
           }
         />
       </StateView>
-    </View>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  raiz: { flex: 1 },
   lista: { paddingBottom: 120 },
   cabecera: {
     paddingHorizontal: spacing.lg,

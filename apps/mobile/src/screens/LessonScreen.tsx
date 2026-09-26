@@ -4,6 +4,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
@@ -187,7 +188,7 @@ export function LessonScreen() {
       su hueco, sin que nada salte.
     */
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         <AppHeader title={t('lesson.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <View
           style={[
@@ -203,16 +204,16 @@ export function LessonScreen() {
           <Skeleton width="100%" height={13} />
           <Skeleton width="85%" height={13} />
         </View>
-      </View>
+      </AppScreen>
     );
   }
 
   if (error || !lesson) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppScreen scroll={false}>
         <AppHeader title={t('lesson.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <StateView state="error" description={error ?? undefined} onRetry={reload} />
-      </View>
+      </AppScreen>
     );
   }
 
@@ -262,7 +263,7 @@ export function LessonScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <AppScreen scroll={false}>
       <AppHeader
         title={t('lesson.headerTitle')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
@@ -476,7 +477,7 @@ export function LessonScreen() {
           style={{ marginTop: spacing.lg }}
         />
       </BottomSheet>
-    </View>
+    </AppScreen>
   );
 }
 
