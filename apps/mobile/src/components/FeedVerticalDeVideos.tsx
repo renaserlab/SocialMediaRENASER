@@ -11,6 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { Feather } from '@expo/vector-icons';
 
+import { CommentsSheet } from '@/components/CommentsSheet';
+import { ReaccionesSheet } from '@/components/ReaccionesSheet';
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
 import { Text } from '@/components/Text';
 import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
@@ -252,6 +254,29 @@ export function FeedVerticalDeVideos({
     [quitarDelFeed],
   );
 
+  /*
+    COMENTARIOS Y REACCIONES, EN HOJA Y SIN SALIR DEL VIDEO.
+
+    Son LAS MISMAS hojas que abre la tarjeta de Explorar (`PostCard`): el mismo
+    contenido, la misma consulta por id de publicacion y el mismo seguir desde
+    la lista. Como el id del video ES el de la publicacion, lo que se comenta
+    aqui aparece alli y al reves.
+
+    Viven en el feed y no en cada celda: una sola pareja para toda la lista, y
+    ningun estado dentro de una celda que FlashList recicla para otro video.
+    Las funciones son estables (`useCallback` sin dependencias) porque viajan a
+    todas las celdas, que estan memoizadas para no redibujarse al deslizar.
+  */
+  const [comentandoEn, setComentandoEn] = useState<{ postId: string; total: number } | null>(null);
+  const [reaccionesDe, setReaccionesDe] = useState<string | null>(null);
+  const abrirComentarios = useCallback(
+    (postId: string, total: number) => setComentandoEn({ postId, total }),
+    [],
+  );
+  const cerrarComentarios = useCallback(() => setComentandoEn(null), []);
+  const verReacciones = useCallback((postId: string) => setReaccionesDe(postId), []);
+  const cerrarReacciones = useCallback(() => setReaccionesDe(null), []);
+
   const refrescar = useCallback(async () => {
     setRefrescando(true);
     try {
@@ -334,6 +359,8 @@ export function FeedVerticalDeVideos({
             onForcedMute={alForzarSilencio}
             espacioInferior={espacioInferior}
             alDescartar={descartarVideo}
+            alAbrirComentarios={abrirComentarios}
+            alVerReacciones={verReacciones}
           />
         )}
         pagingEnabled
@@ -354,6 +381,18 @@ export function FeedVerticalDeVideos({
             progressBackgroundColor={media.background}
           />
         }
+      />
+
+      <CommentsSheet
+        postId={comentandoEn?.postId ?? null}
+        totalConocido={comentandoEn?.total}
+        visible={comentandoEn !== null}
+        onClose={cerrarComentarios}
+      />
+      <ReaccionesSheet
+        postId={reaccionesDe}
+        visible={reaccionesDe !== null}
+        onClose={cerrarReacciones}
       />
     </View>
   );

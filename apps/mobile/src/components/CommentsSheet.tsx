@@ -22,10 +22,18 @@ const PARTE_DE_LA_PANTALLA = 0.75;
  * abierta. Cada tarjeta del muro monta esta hoja; con el hook fuera, abrir el
  * feed pediría los comentarios de todas las publicaciones visibles.
  */
-function Cuerpo({ postId, onClose }: { postId: string; onClose: () => void }) {
+function Cuerpo({
+  postId,
+  totalConocido,
+  onClose,
+}: {
+  postId: string;
+  totalConocido?: number;
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
-  const comentarios = useComentarios(postId);
+  const comentarios = useComentarios(postId, totalConocido);
 
   /*
     Cerrar ANTES de navegar, igual que en la hoja de reacciones: si no, el Modal
@@ -55,10 +63,17 @@ function Cuerpo({ postId, onClose }: { postId: string; onClose: () => void }) {
 
 export function CommentsSheet({
   postId,
+  totalConocido,
   visible,
   onClose,
 }: {
   postId: string | null;
+  /**
+   * Cuántos comentarios dice quien la abre que hay. Solo lo pasa el feed de
+   * vídeo de Inicio, cuya publicación puede no estar en el muro (ver
+   * `useComentarios`).
+   */
+  totalConocido?: number;
   visible: boolean;
   onClose: () => void;
 }) {
@@ -72,7 +87,7 @@ export function CommentsSheet({
     */
     <BottomSheet visible={visible} onClose={onClose} desplazable={false}>
       <View style={[styles.contenedor, { height: height * PARTE_DE_LA_PANTALLA }]}>
-        {visible && postId ? <Cuerpo postId={postId} onClose={onClose} /> : null}
+        {visible && postId ? <Cuerpo postId={postId} totalConocido={totalConocido} onClose={onClose} /> : null}
       </View>
     </BottomSheet>
   );
