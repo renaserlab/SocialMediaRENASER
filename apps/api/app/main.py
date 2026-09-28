@@ -41,6 +41,8 @@ from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
 from app.modules.products.router import admin_router as products_admin_router
 from app.modules.products.router import router as products_router
+from app.modules.services.router import admin_router as services_admin_router
+from app.modules.services.router import router as services_router
 from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
 from app.modules.messaging.router import router as messaging_router
@@ -203,6 +205,10 @@ def create_app() -> FastAPI:
     # resto del fichero y no hay que pensarlo dos veces.
     app.include_router(products_admin_router, prefix=prefix)
     app.include_router(products_router, prefix=prefix)
+    # SERVICIOS. Se monta siempre, pero con `FEATURE_SERVICES` apagada (lo de
+    # fabrica) cada ruta contesta 503 `services_disabled` sin tocar la base.
+    app.include_router(services_admin_router, prefix=prefix)
+    app.include_router(services_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

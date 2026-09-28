@@ -204,6 +204,16 @@ class Settings(BaseSettings):
     #: que se pudiera comprar; solo dejaria de ser verdad que no se puede.
     feature_product_sales: bool = False
 
+    #: Z SERVICIOS. APAGADA de fabrica, y apagada no se ve nada: las rutas de
+    #: `/services` y `/admin/services` contestan 503 `services_disabled` sin
+    #: tocar la base, y la app no muestra ninguna entrada. Hoy solo gobierna la
+    #: admision del prestador (Incremento 1).
+    #:
+    #: NO ESTA ATADA A NADA MAS. Ni a pagos, ni a Stripe, ni a reservas: cada
+    #: una de esas cosas tendra su propia bandera cuando exista, igual que
+    #: `feature_products` y `feature_product_sales`.
+    feature_services: bool = False
+
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:
     #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay
