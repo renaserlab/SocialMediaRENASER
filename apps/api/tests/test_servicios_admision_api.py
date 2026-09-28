@@ -656,6 +656,76 @@ async def test_volver_a_postular_tras_un_rechazo_es_otra_postulacion(entorno, en
     assert (await http.get(MIA)).json()["id"] == nueva.json()["id"]
 
 
+@pytest.mark.asyncio
+async def test_tras_retirarse_la_nueva_postulacion_empieza_vacia(entorno, encendida) -> None:
+    """La nueva no hereda en silencio documentos, credenciales ni la política
+    aceptada. La retirada lo conserva todo para consulta."""
+    from app.modules.services.models import ServiceProviderCredential
+
+    http, _, sesiones, _ = entorno
+    politica = await _publicar_terminos(sesiones)
+    primera = (await _iniciar(http)).json()
+    async with sesiones() as db:
+        solicitud = await db.get(ServiceProviderApplication, primera["id"])
+        documento = ServiceProviderDocument(
+            provider_id=solicitud.provider_id,
+            application_id=solicitud.id,
+            kind="identity",
+            storage_path=f"{PRESTADORA}/{solicitud.id}/dni.pdf",
+            content_type="application/pdf",
+            byte_size=2048,
+            created_at=_ahora(),
+        )
+        db.add(documento)
+        await db.flush()
+        db.add(
+            ServiceProviderCredential(
+                provider_id=solicitud.provider_id,
+                application_id=solicitud.id,
+                kind="certification",
+                title="Guitarra clásica",
+                issuer="Conservatorio",
+                evidence_document_id=documento.id,
+                created_at=_ahora(),
+                updated_at=_ahora(),
+            )
+        )
+        momento = _ahora()
+        solicitud.summary = RESUMEN
+        solicitud.terms_policy_id = politica.id
+        solicitud.terms_sha256 = politica.body_sha256
+        solicitud.terms_accepted_at = momento
+        solicitud.truthfulness_declared_at = momento
+        solicitud.submitted_at = momento
+        solicitud.last_submitted_at = momento
+        solicitud.status = "withdrawn"
+        await db.commit()
+
+    retirada = (await http.get(MIA)).json()
+    assert retirada["status"] == "withdrawn"
+    assert retirada["editable"] is False
+    assert len(retirada["documents"]) == 1 and len(retirada["credentials"]) == 1
+    r = await http.patch(MIA, json={"summary": RESUMEN + " Otra vez."})
+    assert r.status_code == 409
+
+    nueva = await _iniciar(http)
+    assert nueva.status_code == 201
+    cuerpo = nueva.json()
+    assert cuerpo["id"] != primera["id"]
+    assert cuerpo["status"] == "draft"
+    assert cuerpo["documents"] == [] and cuerpo["credentials"] == []
+    assert cuerpo["terms_accepted_at"] is None
+    assert cuerpo["summary"] is None
+
+    # La retirada lo conserva.
+    async with sesiones() as db:
+        assert len(list(await db.scalars(select(ServiceProviderDocument)))) == 1
+        assert len(list(await db.scalars(select(ServiceProviderCredential)))) == 1
+        vieja = await db.get(ServiceProviderApplication, primera["id"])
+        assert vieja.status == "withdrawn"
+        assert vieja.terms_policy_id == politica.id
+
+
 # =========================================================================== #
 # 4. Administración: bandeja, detalle e historial
 # =========================================================================== #

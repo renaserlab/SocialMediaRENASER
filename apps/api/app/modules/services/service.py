@@ -85,8 +85,8 @@ async def prestador_de(db: AsyncSession, usuario_id: str) -> ServiceProvider | N
 
 
 async def _actual(db: AsyncSession, prestador_id: str) -> ServiceProviderApplication | None:
-    """La viva si la hay; si no, la última (rechazada). Es lo que el prestador
-    tiene que ver: su expediente en curso o el motivo del último rechazo."""
+    """La viva si la hay; si no, la última (rechazada o retirada). Es lo que el
+    prestador tiene que ver: su expediente en curso o cómo acabó el último."""
     viva = await db.scalar(
         select(ServiceProviderApplication).where(
             ServiceProviderApplication.provider_id == prestador_id,
@@ -117,10 +117,14 @@ async def expediente_de(
             .order_by(ServiceProviderDocument.created_at, ServiceProviderDocument.id)
         )
     )
+    # LAS PRESENTADAS EN ESTA POSTULACIÓN, no todas las del prestador. Tras
+    # una retirada o un rechazo, la postulación nueva NO hereda en silencio lo
+    # que se presentó en la anterior: ni documentos, ni credenciales, ni la
+    # política aceptada. La anterior las conserva para consulta.
     credenciales = list(
         await db.scalars(
             select(ServiceProviderCredential)
-            .where(ServiceProviderCredential.provider_id == solicitud.provider_id)
+            .where(ServiceProviderCredential.application_id == solicitud.id)
             .order_by(ServiceProviderCredential.created_at, ServiceProviderCredential.id)
         )
     )
@@ -218,8 +222,8 @@ async def iniciar(
     """La postulación viva, o una nueva. IDEMPOTENTE.
 
     Devuelve el expediente y si acaba de nacer. Si ya hay una viva, se devuelve
-    esa y no se toca nada. Si la última está rechazada, nace otra: volver a
-    postular es otra postulación.
+    esa y no se toca nada. Si la última está rechazada o retirada, nace otra:
+    volver a postular es otra postulación, que empieza vacía.
 
     DOS PETICIONES A LA VEZ no crean dos: la base tiene un prestador por perfil
     y una postulación viva por prestador. La que pierde la carrera se deshace y
