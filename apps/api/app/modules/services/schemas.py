@@ -173,6 +173,19 @@ class SolicitudEnviar(_Entrada):
     declare_truthfulness: Literal[True]
 
 
+class SolicitudRetirar(_Entrada):
+    """Retirar la postulación PROPIA. Solo quien postula, antes de la decisión.
+
+    Exige confirmación explícita. El motivo es opcional y es lo que queda en la
+    nota visible del historial: nunca lleva nada interno de Z. Es final: la
+    postulación queda solo para consulta y se puede empezar otra nueva, que NO
+    hereda la política aceptada ni los documentos de esta.
+    """
+
+    confirm: Literal[True]
+    reason: str | None = Field(default=None, min_length=3, max_length=500)
+
+
 class _Decision(_Entrada):
     #: Lo que solo ve Z.
     internal_note: str | None = Field(default=None, max_length=4000)
@@ -593,4 +606,5 @@ __all__ = [
     "SolicitudPrivadaRead",
     "SolicitudRechazar",
     "SolicitudResumenRead",
+    "SolicitudRetirar",
 ]

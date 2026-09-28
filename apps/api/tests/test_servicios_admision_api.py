@@ -230,18 +230,38 @@ def test_ninguna_ruta_de_la_aplicacion_esta_duplicada() -> None:
 def test_los_contratos_del_1b_estan_fijados_y_sin_ruta() -> None:
     """Contrato sí, ruta no: nada responde «éxito» sin hacer nada."""
     rutas = set(_rutas(create_app()))
-    assert len(CONTRATOS_DEL_BLOQUE_1B) == 9
+    assert len(CONTRATOS_DEL_BLOQUE_1B) == 10
     for contrato in CONTRATOS_DEL_BLOQUE_1B:
         assert (contrato.metodo, API + contrato.ruta) not in rutas, contrato.ruta
         assert contrato.entrada is not None and contrato.salida is not None
         assert "status" not in contrato.entrada.model_fields
-        if contrato.salto is not None:
-            assert contrato.salto in service.states.TRANSICIONES, contrato.salto
-    # Cada salto del mapa tiene su acción: no queda ninguno sin contrato.
-    saltos = {c.salto for c in CONTRATOS_DEL_BLOQUE_1B if c.salto}
-    assert saltos | {("resubmitted", "under_review"), ("suspended", "under_review")} == set(
-        service.states.TRANSICIONES
-    )
+        for salto in contrato.saltos:
+            assert salto in service.states.TRANSICIONES, salto
+    # Cada salto del mapa tiene EXACTAMENTE una acción: ninguno sin contrato y
+    # ninguno repartido entre dos.
+    todos = [s for c in CONTRATOS_DEL_BLOQUE_1B for s in c.saltos]
+    assert len(todos) == len(set(todos))
+    assert set(todos) == set(service.states.TRANSICIONES)
+
+
+def test_retirarse_tiene_su_propia_accion_y_solo_del_prestador() -> None:
+    retirar = [c for c in CONTRATOS_DEL_BLOQUE_1B if c.ruta.endswith("/withdraw")]
+    assert len(retirar) == 1
+    assert retirar[0].ruta.startswith("/services/provider/")
+    assert {h for _, h in retirar[0].saltos} == {"withdrawn"}
+    assert {d for d, _ in retirar[0].saltos} == service.states.RETIRABLES
+    # Ninguna acción de administración lleva a `withdrawn`.
+    for contrato in CONTRATOS_DEL_BLOQUE_1B:
+        if contrato.ruta.startswith("/admin/"):
+            assert all(h != "withdrawn" for _, h in contrato.saltos)
+
+
+def test_retirarse_exige_confirmacion_y_el_motivo_es_opcional_y_corto() -> None:
+    for cuerpo in ({}, {"confirm": False}, {"confirm": True, "reason": "x" * 501}):
+        with pytest.raises(ValidationError):
+            schemas.SolicitudRetirar.model_validate(cuerpo)
+    assert schemas.SolicitudRetirar.model_validate({"confirm": True}).reason is None
+    schemas.SolicitudRetirar.model_validate({"confirm": True, "reason": "Me mudo de ciudad."})
 
 
 @pytest.mark.parametrize(
@@ -252,6 +272,7 @@ def test_los_contratos_del_1b_estan_fijados_y_sin_ruta() -> None:
         schemas.DocumentoRegistrar,
         schemas.CredencialRegistrar,
         schemas.SolicitudEnviar,
+        schemas.SolicitudRetirar,
         schemas.RevisionIniciar,
         schemas.CorreccionesSolicitar,
         schemas.SolicitudAprobar,

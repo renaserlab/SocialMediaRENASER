@@ -3,14 +3,14 @@
 Lógica pura, sin base: lo que se defiende aquí es el MAPA, que es lo que decide
 quién entra a ofrecer servicios en Z.
 
-  1. Son exactamente los ocho estados del bloque.
+  1. Son exactamente los nueve estados: los ocho del Bloque 1A y `withdrawn`.
   2. Cada salto existe solo para quien le toca: aprobar, rechazar y suspender
      son de administración; curaduría revisa y pide correcciones; quien postula
-     envía y reenvía, y nada más.
+     envía, reenvía y SE RETIRA, y nada más.
   3. Toda combinación fuera del mapa es imposible (409), aunque la pida un
      administrador.
   4. No hay callejones: todo estado se alcanza desde el borrador y todo estado
-     no final tiene salida. `rejected` es el único final.
+     no final tiene salida. `rejected` y `withdrawn` son los únicos finales.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from app.modules.services.states import (
 )
 
 
-def test_son_exactamente_los_ocho_estados_del_bloque() -> None:
+def test_son_exactamente_los_nueve_estados() -> None:
     assert {e.upper() for e in states.ESTADOS} == {
         "DRAFT",
         "SUBMITTED",
@@ -41,8 +41,9 @@ def test_son_exactamente_los_ocho_estados_del_bloque() -> None:
         "APPROVED",
         "REJECTED",
         "SUSPENDED",
+        "WITHDRAWN",
     }
-    assert len(states.ESTADOS) == len(set(states.ESTADOS)) == 8
+    assert len(states.ESTADOS) == len(set(states.ESTADOS)) == 9
 
 
 def test_el_mapa_es_el_aprobado_salto_a_salto() -> None:
@@ -57,6 +58,11 @@ def test_el_mapa_es_el_aprobado_salto_a_salto() -> None:
         ("under_review", "rejected"): {ADMINISTRACION},
         ("approved", "suspended"): {ADMINISTRACION},
         ("suspended", "under_review"): {REVISOR, ADMINISTRACION},
+        ("draft", "withdrawn"): {PRESTADOR},
+        ("submitted", "withdrawn"): {PRESTADOR},
+        ("under_review", "withdrawn"): {PRESTADOR},
+        ("changes_requested", "withdrawn"): {PRESTADOR},
+        ("resubmitted", "withdrawn"): {PRESTADOR},
     }
 
 
@@ -78,7 +84,7 @@ def test_toda_combinacion_fuera_del_mapa_es_imposible_incluso_para_administracio
         for d, h in product(states.ESTADOS, states.ESTADOS)
         if (d, h) not in states.TRANSICIONES
     ]
-    assert len(fuera) == 64 - len(states.TRANSICIONES)
+    assert len(fuera) == 81 - len(states.TRANSICIONES)
     for desde, hasta in fuera:
         for actor in states.ACTORES:
             with pytest.raises(SaltoInexistente) as error:
@@ -116,9 +122,40 @@ def test_decidir_es_solo_de_administracion() -> None:
             assert REVISOR not in states.quienes(desde, hasta)
 
 
-def test_quien_postula_solo_envia_y_reenvia() -> None:
+def test_quien_postula_solo_envia_reenvia_y_se_retira() -> None:
     suyos = {k for k, v in states.TRANSICIONES.items() if PRESTADOR in v}
-    assert suyos == {("draft", "submitted"), ("changes_requested", "resubmitted")}
+    assert suyos == {
+        ("draft", "submitted"),
+        ("changes_requested", "resubmitted"),
+        ("draft", "withdrawn"),
+        ("submitted", "withdrawn"),
+        ("under_review", "withdrawn"),
+        ("changes_requested", "withdrawn"),
+        ("resubmitted", "withdrawn"),
+    }
+
+
+def test_retirarse_es_solo_del_prestador_y_antes_de_la_decision() -> None:
+    assert states.RETIRABLES == {
+        "draft", "submitted", "under_review", "changes_requested", "resubmitted",
+    }
+    for desde in states.RETIRABLES:
+        states.exigir(desde, "withdrawn", PRESTADOR)
+        # Administración NO retira en nombre de nadie: es un 403, no un 409.
+        for otro in (REVISOR, ADMINISTRACION, SISTEMA):
+            with pytest.raises(SaltoNoPermitido):
+                states.exigir(desde, "withdrawn", otro)
+    for desde in ("approved", "rejected", "suspended", "withdrawn"):
+        with pytest.raises(SaltoInexistente):
+            states.exigir(desde, "withdrawn", PRESTADOR)
+
+
+def test_retirarse_no_es_rechazar_ni_suspender() -> None:
+    """Mismo punto de partida, dueños distintos: Z decide, el prestador se va."""
+    assert states.quienes("under_review", "withdrawn") == {PRESTADOR}
+    assert states.quienes("under_review", "rejected") == {ADMINISTRACION}
+    assert not states.existe("approved", "withdrawn")
+    assert states.existe("approved", "suspended")
 
 
 def test_el_sistema_no_decide_nada_en_este_bloque() -> None:
@@ -144,9 +181,11 @@ def test_un_actor_desconocido_no_da_ningun_paso() -> None:
         states.exigir("draft", "submitted", "superadmin")
 
 
-def test_rechazada_es_el_unico_final() -> None:
-    assert states.FINALES == {"rejected"}
-    assert states.siguientes("rejected", ADMINISTRACION) == ()
+def test_rechazada_y_retirada_son_los_unicos_finales() -> None:
+    assert states.FINALES == {"rejected", "withdrawn"}
+    for final in states.FINALES:
+        for actor in states.ACTORES:
+            assert states.siguientes(final, actor) == ()
     con_salida = {d for d, _ in states.TRANSICIONES}
     assert con_salida == set(states.ESTADOS) - states.FINALES
 
@@ -174,8 +213,8 @@ def test_solo_se_edita_en_borrador_y_al_corregir() -> None:
         assert states.es_editable(estado) is (estado in {"draft", "changes_requested"})
 
 
-def test_solo_el_rechazo_libera_el_hueco_de_la_postulacion_viva() -> None:
-    assert states.VIVAS == set(states.ESTADOS) - {"rejected"}
+def test_solo_el_rechazo_y_la_retirada_liberan_el_hueco() -> None:
+    assert states.VIVAS == set(states.ESTADOS) - {"rejected", "withdrawn"}
 
 
 def test_lo_que_espera_a_z() -> None:
@@ -189,5 +228,6 @@ def test_siguientes_depende_de_quien_mira() -> None:
         "rejected",
     )
     assert states.siguientes("under_review", REVISOR) == ("changes_requested",)
-    assert states.siguientes("under_review", PRESTADOR) == ()
-    assert states.siguientes("draft", PRESTADOR) == ("submitted",)
+    assert states.siguientes("under_review", PRESTADOR) == ("withdrawn",)
+    assert states.siguientes("draft", PRESTADOR) == ("submitted", "withdrawn")
+    assert states.siguientes("approved", PRESTADOR) == ()

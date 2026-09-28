@@ -4,8 +4,13 @@ DOS MITADES:
 
   * ESTÁTICA (corre siempre): la 0086 es aditiva, no trae nada de reservas ni
     dinero, activa RLS y cierra privilegios en todas sus tablas, y el SQL y los
-    modelos dicen lo mismo —tablas, columnas y cada CHECK con su nombre—. El
-    mapa de saltos de la base es el de `states.TRANSICIONES`.
+    modelos dicen lo mismo —tablas, columnas y cada CHECK con su nombre—.
+
+    LA 0086 ES HISTÓRICA: está aplicada en Supabase (verificada el 28/09/2026)
+    y no se edita. Sus propias definiciones son las del Bloque 1A, con ocho
+    estados; la 0087 amplía cinco CHECK, la función de saltos y un índice para
+    `withdrawn`. Los modelos reflejan la base EFECTIVA (0086 + 0087), y eso es
+    lo que se compara aquí; lo que la 0087 cambia se prueba en su fichero.
   * POSTGRESQL (con `MIGRACIONES_DATABASE_URL`): desde cero con todas las
     anteriores, y lo que SQLite no puede probar: claves ajenas, índices
     parciales, disparadores, RLS, privilegios, el historial que solo se añade,
@@ -106,10 +111,24 @@ def _pares(texto: str, desde: str, hasta: str) -> set[tuple[str, str]]:
 # =========================================================================== #
 # 1. Estática: aditiva, cerrada y alineada con los modelos
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_la_numeracion() -> None:
+def test_esta_entre_la_0085_y_la_0087() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == "0086_servicios_admision.sql"
-    assert nombres[-2].startswith("0085_")
+    posicion = nombres.index("0086_servicios_admision.sql")
+    assert nombres[posicion - 1].startswith("0085_")
+    assert nombres[posicion + 1].startswith("0087_")
+
+
+def test_la_0086_no_ha_cambiado_desde_que_se_aplico() -> None:
+    """Aplicada en Supabase y verificada sin divergencias el 28/09/2026. Si
+    esta huella cambia, alguien editó una migración histórica: lo que haga
+    falta va en una migración nueva."""
+    import hashlib
+
+    contenido = ARCHIVO.read_bytes().replace(b"\r\n", b"\n")
+    cabecera = f"blob {len(contenido)}\0".encode()
+    assert hashlib.sha1(cabecera + contenido).hexdigest() == (
+        "882084132e161d143ff69707ad3f92b7cd68eedb"
+    )
 
 
 def test_es_aditiva_y_no_toca_nada_existente() -> None:
@@ -161,9 +180,27 @@ def test_los_modelos_tienen_las_mismas_columnas_que_el_sql() -> None:
         assert del_sql == del_modelo, (tabla, del_sql ^ del_modelo)
 
 
+def _anadidos_despues(tabla: str) -> set[str]:
+    """Los CHECK que las migraciones POSTERIORES añaden o sustituyen en esa
+    tabla (`alter table ... add constraint X check`)."""
+    nombres: set[str] = set()
+    for ruta in sorted(MIGRACIONES.glob("*.sql")):
+        if ruta.name <= ARCHIVO.name:
+            continue
+        sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
+        nombres |= set(
+            re.findall(
+                rf"alter\s+table\s+public\.{tabla}\s+add\s+constraint\s+([a-z_0-9]+)\s+check",
+                sql,
+            )
+        )
+    return nombres
+
+
 def test_cada_check_con_nombre_esta_en_los_dos_sitios() -> None:
     for tabla, cuerpo in _bloques().items():
         del_sql = set(re.findall(r"constraint\s+([a-z_0-9]+)\s+check", cuerpo))
+        del_sql |= _anadidos_despues(tabla)
         del_modelo = {
             c.name
             for c in MODELOS[tabla].__table__.constraints
@@ -189,26 +226,23 @@ def test_los_indices_con_nombre_estan_en_los_dos_sitios() -> None:
     assert del_sql == del_modelo, del_sql ^ del_modelo
 
 
-def test_el_mapa_de_saltos_de_la_base_es_el_de_states() -> None:
-    esperado = set(states.TRANSICIONES)
+def test_el_mapa_de_la_0086_es_el_del_bloque_1a() -> None:
+    """Los nueve saltos de entonces: el mapa de hoy sin los de la retirada."""
+    esperado = {k for k in states.TRANSICIONES if k[1] != states.RETIRADA}
+    assert len(esperado) == 9
     historial = _bloques()["service_provider_application_events"]
     assert _pares(historial, "from_status", "to_status") == esperado
     disparador = SQL[SQL.index("service_provider_applications_salto_valido()") :]
     disparador = disparador[: disparador.index("$$;")]
     assert _pares(disparador, "old.status", "new.status") == esperado
-    # Y el modelo genera la misma condición desde el mapa.
-    modelo = next(
-        c.sqltext.text
-        for c in ServiceProviderApplicationEvent.__table__.constraints
-        if c.name == "service_provider_application_events_salto_permitido"
-    )
-    assert _pares(modelo, "from_status", "to_status") == esperado
 
 
-def test_los_ocho_estados_son_los_mismos_en_la_base() -> None:
+def test_los_ocho_estados_de_la_0086() -> None:
     cuerpo = _bloques()["service_provider_applications"]
     estados = re.search(r"status\s+in\s*\(([^)]*)\)", cuerpo).group(1)
-    assert set(re.findall(r"'([a-z_]+)'", estados)) == set(states.ESTADOS)
+    assert set(re.findall(r"'([a-z_]+)'", estados)) == set(states.ESTADOS) - {
+        states.RETIRADA
+    }
 
 
 def test_no_siembra_ninguna_politica_ni_crea_depositos() -> None:
@@ -327,9 +361,17 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
         "and table_name like 'service\\_%%'",
     )}
     assert tablas == set(MODELOS)
+    # Reejecutar la 0086 sobre una base que ya tiene la 0087 le devuelve su
+    # función de saltos de ocho estados: por eso la 0087 dice que, si pasa,
+    # hay que volver a ejecutarla. Se comprueba el procedimiento entero.
     with pg.cursor() as cur:
         cur.execute(ARCHIVO.read_text(encoding="utf-8"))
         cur.execute(ARCHIVO.read_text(encoding="utf-8"))
+        cur.execute((MIGRACIONES / "0087_servicios_retirada.sql").read_text(encoding="utf-8"))
+    assert "withdrawn" in _uno(
+        pg,
+        "select pg_get_functiondef('public.service_provider_applications_salto_valido()'::regprocedure)",
+    )
 
 
 @SIN_POSTGRES

@@ -1,10 +1,11 @@
-"""Las tablas de la admisión de Servicios (migración 0086).
+"""Las tablas de la admisión de Servicios (migraciones 0086 y 0087).
 
 LO QUE DECLARA EL ORM TIENE QUE DECLARARLO TAMBIÉN LA BASE, y al revés. Las
 pruebas montan SQLite desde `Base.metadata`: un CHECK que solo viva en el `.sql`
-es invisible para la suite. Por eso cada CHECK de la 0086 está aquí con SU
-MISMO NOMBRE y la misma expresión (`tests/test_servicios_migracion_0086.py` lo
-comprueba), escrita con funciones que existen en los dos motores: `length`,
+es invisible para la suite. Por eso cada CHECK está aquí con SU MISMO NOMBRE y
+la misma expresión que en la base TAL Y COMO QUEDA tras la 0087 (que amplía la
+0086 para `withdrawn`; `tests/test_servicios_migracion_0086.py` y `_0087.py` lo
+comprueban), escrita con funciones que existen en los dos motores: `length`,
 `trim`, `ltrim`, `upper`, `coalesce`.
 
 Los disparadores no se pueden declarar aquí —nadie se admite a sí mismo, el
@@ -14,6 +15,7 @@ cascada—. Se prueban contra PostgreSQL de verdad.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, datetime
 
 from sqlalchemy import (
@@ -47,7 +49,7 @@ _MAYUSCULAS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _HEXADECIMAL = "0123456789abcdef"
 
 
-def _lista(valores: tuple[str, ...] | frozenset[str]) -> str:
+def _lista(valores: Iterable[str]) -> str:
     return ", ".join(repr(v) for v in valores)
 
 
@@ -331,8 +333,10 @@ class ServiceProviderApplication(Base):
             "internal_notes is null or length(internal_notes) <= 4000",
             name="service_provider_applications_notas",
         ),
+        # 0087: un borrador RETIRADO no tiene por qué estar completo; todo lo
+        # demás fuera de `draft` exige lo mismo que en la 0086.
         CheckConstraint(
-            f"status = '{states.BORRADOR}' or ("
+            f"status in ({_lista((states.BORRADOR, states.RETIRADA))}) or ("
             "summary is not null and submitted_at is not null"
             " and last_submitted_at is not null and terms_policy_id is not null"
             " and terms_sha256 is not null and terms_accepted_at is not null"
@@ -358,12 +362,13 @@ class ServiceProviderApplication(Base):
             + ") or applicant_message is not null",
             name="service_provider_applications_con_motivo",
         ),
+        # 0087: el rechazo Y LA RETIRADA liberan el hueco.
         Index(
             "service_provider_applications_una_viva",
             "provider_id",
             unique=True,
-            postgresql_where=text(f"status <> '{states.RECHAZADA}'"),
-            sqlite_where=text(f"status <> '{states.RECHAZADA}'"),
+            postgresql_where=text(f"status not in ({_lista(sorted(states.FINALES))})"),
+            sqlite_where=text(f"status not in ({_lista(sorted(states.FINALES))})"),
         ),
         Index(
             "service_provider_applications_bandeja",
@@ -706,6 +711,12 @@ class ServiceProviderApplicationEvent(Base):
         CheckConstraint(
             condicion_de_saltos(),
             name="service_provider_application_events_salto_permitido",
+        ),
+        # 0087: un evento hacia `withdrawn` lo firma quien postula, nunca Z.
+        # Que sea EL DUEÑO lo impone un disparador (solo en PostgreSQL).
+        CheckConstraint(
+            f"to_status <> '{states.RETIRADA}' or actor_role = '{states.PRESTADOR}'",
+            name="service_provider_application_events_retira_el_prestador",
         ),
         Index(
             "service_provider_application_events_una_por_clave",

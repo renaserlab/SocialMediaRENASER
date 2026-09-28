@@ -1,8 +1,8 @@
 """Las rutas de la admisión de Servicios (Bloque 1A).
 
 SOLO SE REGISTRAN LAS QUE RESPONDEN DE VERDAD. Las operaciones del Bloque 1B
-—enviar, reenviar, registrar documentos y credenciales, y las decisiones de
-Z— tienen su contrato fijado en `CONTRATOS_DEL_BLOQUE_1B` y NINGUNA RUTA: un
+—enviar, reenviar, retirarse, registrar documentos y credenciales, y las
+decisiones de Z— tienen su contrato fijado en `CONTRATOS_DEL_BLOQUE_1B` y NINGUNA RUTA: un
 endpoint que respondiera «éxito» sin hacer nada, o siempre 500, sería peor que
 no tenerlo. Una prueba comprueba que no existen hasta que se implementen.
 
@@ -50,6 +50,7 @@ from app.modules.services.schemas import (
     SolicitudPrivadaRead,
     SolicitudRechazar,
     SolicitudResumenRead,
+    SolicitudRetirar,
 )
 from app.shared.database import get_db
 
@@ -234,7 +235,9 @@ class Contrato:
     ruta: str
     entrada: type[BaseModel] | None
     salida: type[BaseModel] | None
-    salto: tuple[str, str] | None
+    #: Los pasos de `states.TRANSICIONES` que ejecuta la acción. Vacío = no
+    #: cambia el estado.
+    saltos: tuple[tuple[str, str], ...]
     idempotente_por: str
     para_que: str
 
@@ -243,49 +246,60 @@ _P = "/services/provider/application"
 _A = "/admin/services/applications/{application_id}"
 
 #: Lo que el Bloque 1B implementará, con su forma ya decidida. NO SE REGISTRA.
-#: `salto` es el paso de `states.TRANSICIONES` que ejecuta cada acción.
+#: Entre todos cubren TODOS los saltos del mapa; una prueba lo comprueba.
 CONTRATOS_DEL_BLOQUE_1B: tuple[Contrato, ...] = (
     Contrato(
-        "POST", f"{_P}/documents", DocumentoRegistrar, DocumentoPrivadoRead, None,
+        "POST", f"{_P}/documents", DocumentoRegistrar, DocumentoPrivadoRead, (),
         "storage_path única", "Registrar los metadatos de un documento ya subido.",
     ),
     Contrato(
-        "POST", f"{_P}/credentials", CredencialRegistrar, CredencialPrivadaRead, None,
+        "POST", f"{_P}/credentials", CredencialRegistrar, CredencialPrivadaRead, (),
         "cabecera Idempotency-Key", "Declarar una credencial profesional.",
     ),
     Contrato(
         "POST", f"{_P}/submit", SolicitudEnviar, SolicitudPrivadaRead,
-        (states.BORRADOR, states.ENVIADA),
+        ((states.BORRADOR, states.ENVIADA),),
         "estado: enviar lo ya enviado devuelve lo mismo", "Enviar la postulación.",
     ),
     Contrato(
         "POST", f"{_P}/resubmit", SolicitudEnviar, SolicitudPrivadaRead,
-        (states.CORRECCIONES_PEDIDAS, states.REENVIADA),
+        ((states.CORRECCIONES_PEDIDAS, states.REENVIADA),),
         "estado", "Reenviar tras corregir.",
     ),
     Contrato(
+        "POST", f"{_P}/withdraw", SolicitudRetirar, SolicitudPrivadaRead,
+        tuple((desde, states.RETIRADA) for desde in sorted(states.RETIRABLES)),
+        "estado: retirar lo ya retirado devuelve lo mismo, sin otro evento; "
+        "y cabecera Idempotency-Key",
+        "Retirar la postulación propia. Solo el prestador; registra auditoría.",
+    ),
+    Contrato(
         "POST", f"{_A}/start-review", RevisionIniciar, SolicitudAdminRead,
-        (states.ENVIADA, states.EN_REVISION),
-        "cabecera Idempotency-Key", "Tomar la postulación (también reenviada o suspendida).",
+        (
+            (states.ENVIADA, states.EN_REVISION),
+            (states.REENVIADA, states.EN_REVISION),
+            (states.SUSPENDIDA, states.EN_REVISION),
+        ),
+        "cabecera Idempotency-Key", "Tomar una postulación enviada, reenviada o suspendida.",
     ),
     Contrato(
         "POST", f"{_A}/request-changes", CorreccionesSolicitar, SolicitudAdminRead,
-        (states.EN_REVISION, states.CORRECCIONES_PEDIDAS),
+        ((states.EN_REVISION, states.CORRECCIONES_PEDIDAS),),
         "cabecera Idempotency-Key", "Devolverla con lo que hay que corregir.",
     ),
     Contrato(
         "POST", f"{_A}/approve", SolicitudAprobar, SolicitudAdminRead,
-        (states.EN_REVISION, states.APROBADA),
+        ((states.EN_REVISION, states.APROBADA),),
         "cabecera Idempotency-Key", "Aprobar. Solo administración.",
     ),
     Contrato(
         "POST", f"{_A}/reject", SolicitudRechazar, SolicitudAdminRead,
-        (states.EN_REVISION, states.RECHAZADA),
+        ((states.EN_REVISION, states.RECHAZADA),),
         "cabecera Idempotency-Key", "Rechazar con motivo. Solo administración.",
     ),
     Contrato(
         "POST", f"{_A}/suspend", PrestadorSuspender, SolicitudAdminRead,
-        (states.APROBADA, states.SUSPENDIDA),
+        ((states.APROBADA, states.SUSPENDIDA),),
         "cabecera Idempotency-Key", "Suspender con motivo. Solo administración.",
     ),
 )

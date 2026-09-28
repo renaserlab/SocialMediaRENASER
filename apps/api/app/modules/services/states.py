@@ -8,7 +8,7 @@ DOS PREGUNTAS DISTINTAS, igual que en Productos y en la posventa de eventos:
     ¿existe ese salto?   -> si no, 409: es una combinación imposible
     ¿TÚ puedes darlo?    -> si no, 403: es un permiso que falta
 
-LOS OCHO ESTADOS DEL BLOQUE 1A:
+LOS NUEVE ESTADOS (ocho del Bloque 1A, migración 0086, y `withdrawn`, 0087):
 
     draft ──▶ submitted ──▶ under_review ──▶ approved ──▶ suspended
                                   │  ▲  ▲                     │
@@ -16,6 +16,9 @@ LOS OCHO ESTADOS DEL BLOQUE 1A:
                                   │  └── resubmitted ◀── changes_requested
                                   ├──▶ changes_requested
                                   └──▶ rejected (final)
+
+    draft, submitted, under_review, changes_requested, resubmitted
+          ──▶ withdrawn (final): la retira QUIEN POSTULA, nadie más
 
 DECISIONES QUE AQUÍ SE TOMAN EN CERRADO, y por qué:
 
@@ -30,11 +33,16 @@ DECISIONES QUE AQUÍ SE TOMAN EN CERRADO, y por qué:
      suspendió por un motivo.
   4. `rejected` ES FINAL para esa postulación. Volver a postular es otra
      postulación, y la base solo lo permite cuando la anterior está rechazada.
-  5. NO HAY `withdrawn` (retirada por el prestador) en este bloque: el mapa
-     aprobado no lo trae. Añadirlo es un salto más aquí y en la migración.
+  5. RETIRARSE (`withdrawn`) ES DEL PRESTADOR DUEÑO Y DE NADIE MÁS, antes de
+     la decisión: desde `draft`, `submitted`, `under_review`,
+     `changes_requested` y `resubmitted`. Nunca desde `approved` (dejar de
+     operar es la baja del prestador, otro flujo), `rejected`, `suspended` ni
+     `withdrawn`. Es final, conserva documentos, credenciales e historial, y
+     libera el hueco para una postulación NUEVA e independiente. No equivale a
+     rechazo ni a suspensión, y administración no la ejecuta en su nombre.
 
-EL MISMO MAPA VIVE EN LA MIGRACIÓN 0086, en un disparador de la postulación y
-en un CHECK del historial. Una prueba compara los dos.
+EL MISMO MAPA VIVE EN LA BASE, en un disparador de la postulación y en un
+CHECK del historial (0086, ampliados por la 0087). Una prueba compara los dos.
 
 La EJECUCIÓN de los saltos (escribir el estado, el historial y los avisos) es
 del Bloque 1B. Aquí solo el mapa, los validadores y los errores.
@@ -55,8 +63,9 @@ REENVIADA = "resubmitted"
 APROBADA = "approved"
 RECHAZADA = "rejected"
 SUSPENDIDA = "suspended"
+RETIRADA = "withdrawn"
 
-#: En el orden en que se recorren. Es el mismo CHECK de la migración.
+#: En el orden en que se recorren. Es el mismo CHECK de la base (0087).
 ESTADOS: tuple[str, ...] = (
     BORRADOR,
     ENVIADA,
@@ -66,6 +75,7 @@ ESTADOS: tuple[str, ...] = (
     APROBADA,
     RECHAZADA,
     SUSPENDIDA,
+    RETIRADA,
 )
 
 # --------------------------------------------------------------------------- #
@@ -95,10 +105,19 @@ TRANSICIONES: dict[tuple[str, str], frozenset[str]] = {
     # Permanencia: la suspensión se investiga.
     (APROBADA, SUSPENDIDA): frozenset({ADMINISTRACION}),
     (SUSPENDIDA, EN_REVISION): frozenset({REVISOR, ADMINISTRACION}),
+    # Retirarse: SOLO quien postula, y solo antes de la decisión.
+    (BORRADOR, RETIRADA): frozenset({PRESTADOR}),
+    (ENVIADA, RETIRADA): frozenset({PRESTADOR}),
+    (EN_REVISION, RETIRADA): frozenset({PRESTADOR}),
+    (CORRECCIONES_PEDIDAS, RETIRADA): frozenset({PRESTADOR}),
+    (REENVIADA, RETIRADA): frozenset({PRESTADOR}),
 }
 
 #: Los que no llevan a ningún sitio.
-FINALES = frozenset({RECHAZADA})
+FINALES = frozenset({RECHAZADA, RETIRADA})
+
+#: Desde dónde se puede retirar. Derivado del mapa, no escrito aparte.
+RETIRABLES = frozenset(d for (d, h) in TRANSICIONES if h == RETIRADA)
 
 #: DONDE QUIEN POSTULA PUEDE SEGUIR ESCRIBIENDO. Ni `submitted` ni nada
 #: posterior: editar lo que alguien está revisando cambia el objeto de la
@@ -106,7 +125,8 @@ FINALES = frozenset({RECHAZADA})
 EDITABLES = frozenset({BORRADOR, CORRECCIONES_PEDIDAS})
 
 #: LAS QUE OCUPAN EL HUECO de la postulación viva del prestador. Es el índice
-#: `service_provider_applications_una_viva` de la 0086.
+#: `service_provider_applications_una_viva` (0086, ampliado por la 0087): el
+#: rechazo y la retirada lo liberan.
 VIVAS = frozenset(set(ESTADOS) - FINALES)
 
 #: LAS QUE ESPERAN A Z. Es lo que la bandeja enseña por defecto.
@@ -128,7 +148,7 @@ class SaltoNoPermitido(AppError):
 
 
 class EstadoDesconocido(AppError):
-    """Un estado que no es ninguno de los ocho. Error de programación."""
+    """Un estado que no es ninguno de los nueve. Error de programación."""
 
     status_code = 422
     code = "service_application_status_unknown"
@@ -211,6 +231,8 @@ __all__ = [
     "PRESTADOR",
     "RECHAZADA",
     "REENVIADA",
+    "RETIRABLES",
+    "RETIRADA",
     "REVISOR",
     "SISTEMA",
     "SUSPENDIDA",
