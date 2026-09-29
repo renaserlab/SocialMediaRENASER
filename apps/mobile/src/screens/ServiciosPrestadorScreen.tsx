@@ -153,6 +153,17 @@ export function ServiciosPrestadorScreen() {
         ) : null}
       </View>
 
+      {/* Prestador ACTIVO: su catálogo (Incremento 2). Lo decide el servidor. */}
+      {solicitud.provider.status === 'active' ? (
+        <ListRow
+          title={f('servicios.catalogo.misServicios')}
+          subtitle={f('servicios.catalogo.entradaCuerpo')}
+          leftIcon="layers"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/servicios/prestador/catalogo' as never)}
+        />
+      ) : null}
+
       {solicitud.applicant_message ? (
         <View style={[tarjeta, { borderColor: colors.primary }]}>
           <Text weight="700">{f('servicios.prestador.mensajeDeZ')}</Text>
