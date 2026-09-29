@@ -654,3 +654,45 @@ reservas.
 
 `VerificationScreen.tsx` sigue siendo estado local del teléfono y no se tocó:
 la verificación real de credenciales es la de Servicios.
+
+## Servicios · Incremento 2: catálogo y publicación (29/09/2026)
+
+Backend real y detrás de `FEATURE_SERVICES` (apagada); sin la 0090 aplicada,
+cada vista dice que Servicios aún no está disponible. Ninguna se alcanza solo
+escribiendo la URL: lo vigila `serviciosCatalogoVistas.test.mts`.
+
+### El prestador
+
+Perfil › «Ofrecer un servicio» › en la postulación, «Mis servicios» (solo con
+el prestador activo). Pantallas en `app/servicios/prestador/catalogo/*`.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Mis servicios | `MisServiciosScreen` | `GET /services/provider/services` (cursor) |
+| 2 | Crear servicio | `NuevoServicioScreen` | `GET /services/categories`, `POST /services/provider/services` |
+| 3 | Estado, observaciones y acciones | `ServicioDelPrestadorScreen` | `GET …/{id}`, `POST …/{id}/draft`, `POST …/draft/withdraw` |
+| 4 | Completar información | `EditarServicioScreen` | `PATCH …/{id}/draft` |
+| 5 | Agregar imágenes | `ImagenesDelServicioScreen` | `POST …/draft/images`, `PUT …/images/order`, `DELETE …/images/{img}` |
+| 6 | Revisar requisitos y enviar (o reenviar) | `EnviarServicioScreen` | `GET …/draft/requirements`, `POST …/draft/submit` |
+| 7 | Historial visible | `HistorialDelServicioScreen` | `GET …/{id}/history` |
+| 8 | Ficha pública | `FichaDeServicioScreen` (`app/servicios/ficha/[serviceId]`) | `GET /services/catalog/{id}` |
+
+### Administración
+
+Panel de administración › Servicios › «Catálogo de servicios» y «Categorías de
+servicios». Pantallas en `app/admin/servicios/catalogo/*` y
+`app/admin/servicios/categorias`.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Bandeja, colas, filtros y cursor | `AdminCatalogoScreen` | `GET /admin/services/catalog` |
+| 2 | Propuesta frente a lo publicado y decisiones | `AdminServicioDelCatalogoScreen` | `GET …/{id}`, las siete decisiones (`start-review`, `request-changes`, `approve`, `publish`, `suspend`, `reinstate`, `retire`) |
+| 3 | Una versión | `AdminVersionDelServicioScreen` | `GET …/{id}/versions/{version}` |
+| 4 | Historial completo | `AdminHistorialDelCatalogoScreen` | `GET …/{id}/history` |
+| 5 | Categorías | `AdminCategoriasDeServiciosScreen` | `GET/POST/PATCH /admin/services/categories…`, `…/activate`, `…/deactivate` |
+
+### Lo que sigue sin existir, a propósito
+
+Búsqueda, recomendaciones, filtros públicos, guardados, perfil profesional
+público, disponibilidad, reservas, pagos, atención, mensajes, incidencias y
+reseñas. La ficha pública no tiene botón de contratar.

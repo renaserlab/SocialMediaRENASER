@@ -2427,3 +2427,81 @@ Límites:
 Reservado para después: servicios y variantes; disponibilidad calculada en el
 servidor; reservas con retención de hueco; pagos y transferencias; incidencias;
 valoraciones verificadas.
+
+## Z Servicios, Incremento 2 — catálogo y publicación de servicios (29/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte II. **Implementado y probado; pendiente de aplicar y verificar la 0090 y
+de hacer el QA físico.** Nada de lo que sigue se presenta como política
+definitiva si la empresa no lo confirmó.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Un prestador aprobado y activo crea servicios; nadie más | `service_provider_not_active` en la API y, además, la base (un servicio nace de un prestador activo) |
+| Borradores que se completan a medias | `PATCH …/draft` con solo lo que cambia; `missing` dice qué falta |
+| Enviar congela la versión | La base impide editar el contenido fuera del borrador |
+| Revisión, observaciones, corrección y reenvío | Pedir cambios con motivo visible y campos; el prestador corrige en una versión nueva (`resubmitted`) |
+| Aprobación y publicación | Dos pasos, de administración; una sola publicada por servicio |
+| Editar lo publicado no cambia lo visible | Borrador nuevo; lo publicado sigue hasta que Z publique la nueva |
+| Suspender saca del público | 404 en la ficha; reactivar y retirar, con motivo |
+| Permisos | Prestador, moderación y administración; nadie decide lo propio; lo ajeno es 404 |
+| Imágenes protegidas | Depósito privado, ruta del servidor, URL firmada que caduca |
+| Vistas conectadas | 13 pantallas, todas alcanzables desde otra vista, detrás de `FEATURE_SERVICES` |
+
+### Decisiones tomadas en el código (provisionales)
+
+Se derivan del pedido o de patrones ya aprobados en Cursos, Eventos y
+Productos, y **se pueden cambiar sin migración** salvo donde se indica:
+
+1. **Aprobar y publicar son dos pasos**, ambos de administración.
+   Moderación inicia la revisión y pide cambios. No hay publicación
+   automática.
+2. **Pedir cambios cierra la versión**; corregir es abrir otra que sale de
+   ella. El historial conserva las dos (lo impone la 0090).
+3. **Publicar no reactiva** un servicio suspendido; levantar la suspensión es
+   otra decisión, con motivo.
+4. **Retirar es definitivo** (lo impone la 0090).
+5. **Una categoría inactiva** no admite servicios nuevos ni envíos; no se
+   borra y los servicios que la usan la siguen nombrando (lo impone la 0090).
+6. **La ficha pública** enseña del prestador solo su nombre público.
+7. **No se exige volver a aceptar condiciones** para publicar servicios: las
+   del Incremento 1 son para ser prestador.
+8. **Borrar la cuenta del prestador** se lleva sus servicios y sus imágenes.
+   Hoy no hay reservas ni pagos que lo impidan; cuando existan, habrá que
+   revisarlo (S8).
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| C1 | **Categorías iniciales** | No se siembra ninguna. Sin categorías nadie puede crear un servicio, y la app lo dice. Las crea administración desde la app |
+| C2 | Categorías **prohibidas o reguladas** (salud, legal, financiera…) y qué exigen | No hay lista ni bloqueo automático; administración puede desactivar una categoría |
+| C3 | **Documentos adicionales por categoría** para publicar | No se piden. La admisión exige los del país (S3) |
+| C4 | **Modalidades permitidas** | `SERVICES_CATALOG_MODALITIES`: las tres (virtual, presencial, a domicilio) |
+| C5 | **Monedas y países** | `SERVICES_CATALOG_CURRENCIES=PEN`. Una categoría puede limitarse a un país; sin país, vale para todos |
+| C6 | **Precio «desde»** y precio a consultar | `SERVICES_CATALOG_PRICE_MODELS`: los cuatro (gratis, fijo, desde, a consultar) |
+| C7 | **Duración mínima y máxima** | `SERVICES_CATALOG_MIN/MAX_DURATION_MINUTES`: 5 y 1440 (los límites técnicos) |
+| C8 | **Límite de imágenes** | `SERVICES_CATALOG_MAX_IMAGES=8`; 5 MB por imagen (límite técnico del depósito) |
+| C9 | **Quién publica tras aprobar** | Administración, a mano (decisión 1) |
+| C10 | **Motivos de suspensión** (lista cerrada o texto libre) | Texto libre obligatorio que el prestador lee |
+| C11 | **Política para volver a publicar** tras una suspensión o una retirada | Tras suspender: administración la levanta con motivo. Tras retirar: no se puede |
+| C12 | **Conservación de versiones e imágenes** superadas o retiradas | Se conservan mientras exista la cuenta del prestador; se borran con ella |
+| C13 | **Información pública del prestador** en la ficha | Solo el nombre público |
+| C14 | Pauta para que los **motivos** escritos por el personal no nombren a nadie | Se guardan tal cual; la auditoría no los copia |
+| C15 | ¿Puede la URL firmada de una imagen pública llevar el **identificador del perfil** del prestador en su ruta? (igual que Productos, que además publica `seller_profile_id`) | Sí: la ruta es `<perfil>/<servicio>/<versión>/<id>`, y así la barre la baja de cuenta. Cambiarlo exige otro prefijo y otro barrido, y conviene decidirlo **antes** de aplicar la 0090 |
+| C16 | Monedas que ofrece el formulario | Ofrece PEN, USD y EUR (las de Productos); si se elige una no configurada, al guardar aparece «Z no admite esa moneda por ahora» y no se puede enviar |
+
+### Límites del Incremento 2 y lo reservado para después
+
+Límites: no hay búsqueda, recomendaciones, filtros públicos, guardados,
+disponibilidad, horarios, reservas, pagos, atención, mensajes,
+reprogramaciones, cancelaciones, incidencias, reseñas, saldos ni
+transferencias; ninguna tabla los anticipa. La ficha pública no tiene botón de
+contratar. Tocar el push de un aviso abre la app sin llevar al servicio, como
+los demás avisos al creador (la bandeja sí lleva).
+
+Reservado para después: disponibilidad calculada en el servidor; reservas con
+retención de hueco; pagos y transferencias; atención e incidencias;
+valoraciones verificadas.

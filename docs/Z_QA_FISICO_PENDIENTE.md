@@ -1335,3 +1335,120 @@ PostgreSQL y con la API local de verdad (`Z_BAJA_DE_CUENTA.md` §15), pero
 - [ ] Una cuenta que compró una entrada **pagada** (cuando se enciendan los
       pagos): no se borra, y dice que escriba a soporte.
 - [ ] Doble toque en «Sí, eliminar»: una sola baja, sin errores.
+
+## Z Servicios · Incremento 2 — catálogo y publicación de servicios (29/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** Las pruebas
+automáticas cubren la API, PostgreSQL y el código de las pantallas, no un
+aparato, ni el selector de imágenes, ni el lector de pantalla.
+
+Antes de empezar:
+
+- **Aplicar la 0090** en la base del entorno de pruebas y verificarla
+  (`Z_SERVICIOS_ARQUITECTURA.md` §26–§27). **Reiniciar la API** después.
+- La API de ese entorno tiene que correr el código de `Edson` (sin desplegar).
+- Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
+- Tener un prestador **aprobado** por la admisión del Incremento 1.
+
+Hacen falta **tres cuentas**: el prestador (`user` con su postulación
+aprobada), una de administración (`admin`) y una de moderación (`moderator`).
+Si se puede, en dos teléfonos distintos (Android e iPhone) y una prueba en el
+navegador.
+
+### Con la bandera apagada, que es como se entrega
+
+- [ ] El perfil, la postulación y el panel de administración son exactamente
+      los de antes: no aparecen «Mis servicios», «Catálogo de servicios» ni
+      «Categorías de servicios».
+- [ ] Cursos, Eventos y Productos se comportan igual que antes.
+
+### Sin la 0090 (solo en una base de pruebas que no la tenga)
+
+- [ ] Con la bandera encendida, «Mis servicios» dice que Servicios aún no está
+      disponible, sin error rojo ni reintento. Tras aplicar la 0090 **y
+      reiniciar la API**, funciona.
+
+### Administración: categorías
+
+- [ ] Panel › Servicios › Categorías de servicios: vacía, con el texto de que
+      sin categorías nadie puede crear servicios.
+- [ ] Crear una categoría de primer nivel y otra dentro de ella; el
+      identificador mal escrito (mayúsculas, espacios) se señala antes de
+      enviar; uno repetido lo rechaza el servidor con palabras.
+- [ ] Editar el nombre en inglés y en portugués; el identificador no se puede
+      cambiar.
+- [ ] Moderación ve las categorías pero **no** puede crearlas ni cambiarlas.
+- [ ] Desactivar pide confirmación; la categoría deja de ofrecerse al crear un
+      servicio.
+
+### El prestador
+
+- [ ] Quien **no** es prestador activo no ve «Mis servicios» en su
+      postulación.
+- [ ] Mis servicios vacío → Crear servicio → elegir categoría → nace el
+      borrador y se abre «Completar información».
+- [ ] Solo se ofrecen las categorías del país del prestador (o de todos), y no
+      las que están dentro de una categoría desactivada.
+- [ ] Completar a medias y guardar: no pide nada; debajo aparece lo que falta.
+- [ ] Salir con cambios sin guardar pregunta antes; «Descartar» vuelve sin
+      guardar.
+- [ ] Precio: «Gratis» no pide importe; «Precio fijo» pide importe y moneda;
+      «120,50» se guarda como 120.50; un importe de cero o con letras se
+      señala antes de enviar.
+- [ ] Presencial o a domicilio piden la zona; virtual no.
+- [ ] Imágenes: sin descripción no deja elegir; con ella, abre la galería. Una
+      imagen de más de 5 MB o un GIF se rechazan con palabras. Permiso de
+      fotos denegado: el aviso lo dice.
+- [ ] La primera imagen es la portada; «Usar como portada», subir y bajar
+      funcionan; quitar pregunta antes.
+- [ ] Revisar y enviar: cada cosa que falta lleva a donde se arregla; el botón
+      solo se activa sin faltantes; «Así se verá» coincide con lo escrito.
+- [ ] Enviar pide confirmación; después ya no se puede editar (la pantalla lo
+      dice) y se puede retirar la versión (pide confirmación).
+- [ ] Doble toque en enviar, crear y subir: una sola vez.
+
+### La revisión
+
+- [ ] A moderación y administración les llega «Nuevo servicio para revisar»;
+      tocarlo abre la revisión.
+- [ ] Bandeja: por revisar, filtros por estado de la versión, modalidad y
+      categoría; «Ver más».
+- [ ] Moderación inicia la revisión y pide cambios con motivo y campos; **no**
+      ve «Aprobar» ni «Publicar».
+- [ ] Al prestador le llega «Tu servicio necesita cambios»; tocarlo abre su
+      servicio con el motivo y los campos. No ve la nota interna.
+- [ ] En «Mis servicios», ese servicio conserva su título y dice «Con cambios
+      pedidos», con otro icono.
+- [ ] «Corregir y reenviar» abre la versión 2 con el contenido y las imágenes
+      de la 1, y los campos señalados marcados; reenviar.
+- [ ] Administración aprueba (el público todavía no lo ve) y publica; al
+      prestador le llega «Tu servicio está publicado», que abre la ficha.
+- [ ] Una administradora que también es prestadora abre su propio servicio en
+      la bandeja: «es tuyo», sin decisiones.
+
+### La ficha y lo publicado
+
+- [ ] La ficha enseña portada, imágenes, precio con el código de la moneda,
+      duración, modalidad, qué incluye y qué no, y el nombre público del
+      prestador. No hay botón de contratar.
+- [ ] Editar lo publicado abre la versión 2; la ficha sigue enseñando la 1
+      hasta que Z publique la 2. En la revisión se marca lo que cambia.
+- [ ] Suspender (con motivo, confirmación destructiva): la ficha dice que no
+      lo encontramos; el prestador lee el motivo. Levantar la suspensión la
+      devuelve.
+- [ ] Retirar del catálogo: definitivo; el prestador ya no puede editarlo.
+- [ ] Con el servicio suspendido, publicar una versión corregida: la
+      confirmación avisa de que **no** se verá todavía; al prestador le llega
+      «Tu versión nueva está lista», que abre su servicio (no la ficha).
+      Levantar la suspensión la hace visible.
+
+### Accesibilidad, idiomas y cuenta
+
+- [ ] Con TalkBack y VoiceOver, cada imagen se lee por su descripción, y las
+      opciones de categoría, modalidad, precio y moneda se anuncian como
+      botones de opción.
+- [ ] En inglés y en portugués no queda ningún texto en español ni ningún
+      código interno.
+- [ ] Borrar la cuenta del prestador (Ajustes › Eliminar cuenta): sus
+      servicios desaparecen de la bandeja y la ficha deja de existir; el
+      enlace de una imagen abierta antes deja de funcionar.

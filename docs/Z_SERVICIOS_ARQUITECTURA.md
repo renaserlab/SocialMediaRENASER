@@ -1,8 +1,9 @@
-# Z Servicios · Incremento 1: dominio base y admisión de prestadores
+# Z Servicios: admisión de prestadores (Incremento 1) y catálogo (Incremento 2)
 
 Qué se construyó, qué impone la base, qué se decidió en cerrado y qué sigue
-esperando a una persona. Escrito el 29/09/2026 al cerrar el Incremento 1 en la
-rama `Edson`.
+esperando a una persona. La Parte I se escribió el 29/09/2026 al cerrar el
+Incremento 1 en la rama `Edson`; la **Parte II** (§18 en adelante), el mismo
+día, con el Incremento 2 implementado y probado.
 
 ## Estado, en siete líneas
 
@@ -12,7 +13,9 @@ rama `Edson`.
 | **Migraciones 0086, 0087 y 0088** | **APLICADAS** en Supabase y verificadas en sesión de solo lectura con **cero divergencias** (la 0088, el 29/09/2026: §9). Son históricas: no se editan |
 | **Migración 0089** (plataforma) | **APLICADA** en Supabase y verificada en solo lectura el 29/09/2026: **sin divergencias** (`Z_BAJA_DE_CUENTA.md` §15). Hace que borrar la cuenta funcione sin borrar la historia (§12) |
 | **`FEATURE_SERVICES`** | **apagada.** Todas las rutas contestan 503 `services_disabled` sin mirar la base |
-| **Pagos, reservas, catálogo** | **no existen** en este incremento, y ninguna tabla los anticipa. Los pagos de la plataforma siguen **apagados** |
+| **Incremento 2 (catálogo)** | **implementado y probado; pendiente de aplicar y verificar la 0090 y de hacer el QA físico** (Parte II, §18) |
+| **Migración 0090** | **SIN APLICAR** en Supabase; probada solo en PostgreSQL local desechable. Cómo aplicarla y verificarla: §26 y §27 |
+| **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
 | **QA físico** | pendiente: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
@@ -433,6 +436,9 @@ La tabla completa está en `Z_BAJA_DE_CUENTA.md` §14.
 
 ## 17. Punto exacto de continuación hacia el Incremento 2
 
+> **Actualización (29/09/2026):** el Incremento 2 ya se implementó en `Edson`
+> (Parte II). Lo de abajo es la foto del cierre del Incremento 1.
+
 **No se empezó el Incremento 2.** Antes de abrirlo, una persona tiene que:
 
 1. ~~Aplicar la 0089 y verificarla~~ **Hecho el 29/09/2026** (sin
@@ -451,3 +457,452 @@ El Incremento 2 empieza donde termina la admisión: un `service_providers` en
 para él y para los siguientes (servicios y variantes, disponibilidad, reservas,
 pagos, incidencias y valoraciones) está en `Z_REQUISITOS_Y_DECISIONES.md`,
 «Límites del Incremento 1». Nada de eso tiene tabla, ruta ni pantalla todavía.
+
+---
+
+# Parte II · Incremento 2: catálogo y publicación de servicios
+
+Escrito el 29/09/2026 en la rama `Edson`. **Implementado y probado; pendiente
+de aplicar y verificar la 0090 y de hacer el QA físico.** No está cerrado.
+
+## 18. Estado del Incremento 2
+
+| | |
+|---|---|
+| **Qué hace** | Un prestador **activo** crea servicios, los completa, sube imágenes y los envía; Z los revisa, pide cambios, aprueba y publica; el público ve solo lo publicado. Editar lo publicado abre una versión nueva sin tocar la visible. Suspender, reactivar y retirar |
+| **Migración 0090** | **Escrita y probada solo en PostgreSQL local desechable. SIN APLICAR** en Supabase. Pasos y verificación en §26 y §27 |
+| **Sin la 0090** | Todas las rutas del catálogo contestan **503 `services_not_ready`** (la puerta de esquema, §24). La admisión del Incremento 1 no cambia |
+| **`FEATURE_SERVICES`** | **apagada.** Con ella apagada, las 30 rutas nuevas contestan 503 `services_disabled` sin mirar la base, y la app no enseña ninguna entrada nueva |
+| **Dinero** | **ninguno.** El precio se registra y se enseña; no hay cobro, comisión, saldo, reserva ni agenda |
+| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
+| **QA físico** | pendiente: `Z_QA_FISICO_PENDIENTE.md`, sección «Incremento 2» |
+
+## 19. Lo que NO es
+
+No es un directorio con búsqueda, ni recomendaciones, ni filtros públicos, ni
+guardados, ni disponibilidad, horarios, reservas, pagos, atención, mensajes,
+reprogramaciones, cancelaciones, incidencias, reseñas ni saldos. Ninguna tabla
+los anticipa. La ficha pública de un servicio existe y se alcanza desde el
+servicio propio, desde la revisión del equipo y desde el aviso de
+«publicado»; **no hay botón de contratar**.
+
+## 20. El modelo (5 tablas nuevas, 0090)
+
+| Tabla | Para qué |
+|---|---|
+| `service_categories` | Dos niveles como mucho (`parent_id`). `slug` único y fijo, nombre en es y, si se quiere, en en/pt; país opcional; `active`/`inactive`. **No se borran**: se desactivan. No se siembra ninguna |
+| `services` | La **identidad estable**: prestador, categoría y estado (`draft`, `published`, `suspended`, `retired`). La categoría solo cambia mientras nunca se publicó |
+| `service_versions` | El **contenido**, versionado: título, resumen, descripción, modalidad, duración, capacidad, precio (modelo, importe en unidades menores y moneda), alcance, qué incluye y qué no, requisitos, condiciones y zona. `based_on_version_id` dice de cuál salió |
+| `service_version_images` | Las imágenes **de una versión**, con texto alternativo, posición, portada, tipo, peso, medidas y huella. La ruta la pone el servidor |
+| `service_events` | El historial. **Solo se añade.** Motivo visible y nota interna separados; `Idempotency-Key` con índice único |
+
+Todas con **RLS activa, cero políticas y cero privilegios** para `anon` y
+`authenticated`. El depósito `service-media` es **privado**, de 5 MB, solo
+JPEG, PNG y WebP. Los identificadores del personal (quién revisó, decidió o
+publicó) **no tienen clave ajena**, igual que en la 0086 (S10): la historia
+sobrevive a la cuenta.
+
+## 21. Estados y saltos
+
+**El servicio**: `draft → published` (al publicar su primera versión),
+`published ↔ suspended`, y `draft | published | suspended → retired`
+(definitivo). Todos, de administración.
+
+**La versión**:
+
+| Salto | Quién |
+|---|---|
+| `draft → submitted` | prestador |
+| `submitted → under_review` | moderación o administración |
+| `under_review → changes_requested` | moderación o administración, **con motivo visible** |
+| `under_review → approved` | solo administración |
+| `approved → published` | solo administración (aprobar **no** publica) |
+| `published → superseded` | el sistema, al publicar la siguiente |
+| `draft | submitted | under_review | approved → withdrawn` | el prestador (o el sistema al retirar el servicio) |
+
+El mapa vive en `catalogo_estados.py` y **el mismo** lo impone la base
+(`service_versions_salto_valido`, `services_salto_valido`); una prueba compara
+los dos, salto a salto.
+
+**Corregir es abrir otra versión.** Pedir cambios cierra la versión
+(`changes_requested`); el prestador abre un borrador que copia el contenido y
+las imágenes de la última y lo reenvía: el historial lo llama `resubmitted`.
+
+**Lo publicado no se toca.** Editar un servicio publicado abre un borrador
+nuevo; el público sigue viendo la versión publicada hasta que Z publique la
+nueva, que supera a la anterior en la misma transacción. Publicar una versión
+de un servicio **suspendido** no lo reactiva: levantar la suspensión es otra
+decisión, con motivo.
+
+## 22. Lo que impone la base (y no solo el código)
+
+- Una versión nace en borrador; solo da los saltos del mapa; **fuera del
+  borrador su contenido está congelado** (solo cambian el estado y sus fechas).
+- Enviar exige portada, qué incluye y qué no, un prestador activo y una
+  categoría activa (además de lo que exige el código, §23).
+- **Una abierta y una publicada** por servicio (índices únicos parciales), y
+  un servicio publicado o suspendido tiene exactamente una versión publicada
+  (comprobado al confirmar la transacción).
+- Las imágenes solo cambian en un borrador, y su ruta empieza por
+  `<perfil del prestador>/<servicio>/`.
+- **Nadie revisa, aprueba ni publica su propio servicio**, ni siendo admin.
+- El historial no se reescribe; nada se borra suelto, solo en cascada desde la
+  cuenta del prestador.
+- Pedir cambios, suspender, reactivar y retirar llevan motivo visible.
+
+## 23. Qué hace falta para enviar
+
+Lo decide **una sola función**, `catalogo_requisitos.faltantes`, y la app solo
+lo pinta (`missing`). Códigos estables: prestador activo, categoría activa,
+título, resumen, descripción, modalidad (y que esté permitida), duración (y en
+rango), modelo de precio (y permitido), importe y moneda cuando el modelo los
+lleva (y moneda permitida), alcance, qué incluye, qué no, requisitos, zona
+fuera de lo virtual, portada, y no pasar del máximo de imágenes.
+
+**«Sin configurar» no es gratis**: el precio sin modelo impide enviar; «gratis»
+se elige. Un modelo sin importe (gratis, a consultar) **no admite** importe:
+el servidor lo rechaza y borra el que hubiera.
+
+## 24. La API (30 rutas) y la puerta de esquema
+
+- **Prestador** (`/services/provider/services…`): listar (cursor), crear
+  (idempotente), leer, abrir borrador, editar el borrador (PATCH, nunca un
+  estado), qué falta, subir, ordenar y quitar imágenes, enviar, retirar la
+  versión y su historial visible. Más `GET /services/categories`: las que
+  quien pregunta puede usar (activas, de su país o de todos, sin madre
+  inactiva). Solo un prestador **activo** abre borradores, edita y sube
+  imágenes.
+- **Público**: `GET /services/catalog/{id}`. Solo lo publicado, de un
+  prestador activo; lo demás es el mismo 404.
+- **Administración** (`/admin/services/catalog…` y `/admin/services/categories…`):
+  bandeja con colas y filtros (cursor), el servicio con la propuesta, lo
+  publicado y qué cambia (`changed_fields`, con los mismos nombres que se
+  señalan al pedir cambios; las imágenes cuentan), cualquier versión, el
+  historial completo, las siete decisiones y las categorías (alta, edición,
+  activar, desactivar).
+- Un servicio sin versión abierta ni publicada (volvió con cambios, o se
+  retiró la versión) se nombra por su **última** versión, y
+  `last_version_status` dice si hay cambios pedidos.
+- Cada alta y cada salto llevan `Idempotency-Key`. Cada decisión bloquea la
+  fila del servicio (`FOR UPDATE`): dos a la vez dan un 200 y un 409.
+- Lo ajeno es 404. Los errores tienen código estable y la app los traduce.
+
+**La puerta** (`esquema.hay_catalogo`) exige, antes de contestar nada, las
+cinco tablas con todas las columnas de los modelos, los **12 disparadores con
+su función y su forma exacta, activos**, los **5 índices únicos**, RLS en las
+cinco tablas y el depósito privado. Recuerda el resultado hasta que la API se
+reinicia: **tras aplicar la 0090 hay que reiniciar la API**.
+
+## 25. Imágenes, avisos y auditoría
+
+- **Imágenes**: el archivo viaja a la API, que abre la imagen (bytes reales,
+  no la extensión), pone la ruta `<perfil>/<servicio>/<versión>/<id>.<ext>`
+  y la guarda en el depósito privado. La primera es la portada. Al abrir un
+  borrador nuevo se copian las filas con **la misma ruta**; quitar una imagen
+  solo borra el archivo si ninguna otra versión lo usa (lo publicado conserva
+  la suya), y **después de confirmar** la base. Si la base falla después de
+  subir, el archivo recién subido se borra; con `Idempotency-Key`, un
+  reintento pisa el archivo de un intento que no llegó a contestar. Salen
+  siempre como **URL firmada que caduca**; ninguna respuesta lleva la ruta
+  como campo, pero la URL firmada la contiene, **con el identificador del
+  perfil** (igual que en Productos; decisión C15). Al borrar la cuenta del
+  prestador, sus servicios caen en cascada y el barrido de `USER_BUCKETS` se
+  lleva `service-media/<perfil>/`.
+- **Avisos** (bandeja y push, es/en/pt), cada uno en su propio punto de
+  guardado: un aviso que falla no deshace la decisión. Al prestador: revisión
+  iniciada, cambios pedidos, aprobado, publicado, **publicado en un servicio
+  que sigue suspendido** (no dice «ya se ve» ni lleva a la ficha), suspendido,
+  reactivado y retirado. Al equipo: enviado, reenviado y retirado de la
+  revisión. Once tipos en total.
+- **Auditoría**: `service.<acción>` en `audit_events`, con la función con la
+  que se actuó y datos mínimos (versión, si hubo nota, los campos señalados).
+  **Nunca** copia textos libres.
+
+## 26. Cómo aplicar la 0090
+
+1. Comprobar que el fichero es el completo:
+   `supabase/migrations/0090_servicios_catalogo_y_publicacion.sql`, 978
+   líneas, que empieza por «-- SIN APLICAR» y termina en
+   «notify pgrst, 'reload schema';» y «commit;».
+2. Pegarlo **entero** en el editor SQL de Supabase y ejecutarlo. Es **una
+   única transacción**:
+   - primero comprueba la 0086–0089 (tablas, columnas y funciones que usa); si
+     falta algo, se detiene sin crear nada;
+   - crea las cinco tablas, los disparadores, el depósito y cierra los
+     permisos;
+   - al final se **verifica a sí misma** (depósito, RLS, cero permisos, cero
+     políticas, los 12 disparadores con su forma y los 5 índices **únicos**) y
+     aborta entera si algo no cuadra;
+   - se puede ejecutar dos veces.
+3. **Reiniciar la API.** La puerta recuerda el «no» del arranque: sin
+   reinicio, el catálogo seguiría contestando 503.
+4. Verificarla en solo lectura (§27).
+5. Con `FEATURE_SERVICES` **apagada**, nada cambia para nadie. Encenderla es
+   otra decisión, y antes va el QA físico.
+
+Si hubiera que deshacerla con las tablas **vacías**, el procedimiento está en
+la cabecera del propio fichero.
+
+## 27. Verificar la 0090 (solo lectura)
+
+```sql
+begin transaction read only;
+select current_setting('transaction_read_only');           -- 'on'
+savepoint sonda;
+create temp table sonda_de_escritura (x int);              -- TIENE que fallar con 25006
+rollback to savepoint sonda;
+
+-- 1. Cinco tablas, con RLS, sin políticas y sin privilegios sueltos.
+select c.relname, c.relrowsecurity,
+       (select count(*) from pg_policy p where p.polrelid = c.oid) as politicas
+  from pg_class c
+ where c.relnamespace = 'public'::regnamespace
+   and c.relname in ('service_categories', 'services', 'service_versions',
+                     'service_version_images', 'service_events')
+ order by 1;
+-- → 5 filas, t, 0
+select count(*) from information_schema.table_privileges
+ where table_schema = 'public' and grantee in ('anon', 'authenticated')
+   and table_name in ('service_categories', 'services', 'service_versions',
+                      'service_version_images', 'service_events');
+-- → 0
+
+-- 2. Los 12 disparadores: función, forma exacta y activos.
+select c.relname, t.tgname, p.proname, t.tgtype, t.tgenabled
+  from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_proc p on p.oid = t.tgfoid
+ where not t.tgisinternal and c.relnamespace = 'public'::regnamespace
+   and c.relname in ('service_categories', 'services', 'service_versions',
+                     'service_version_images', 'service_events')
+ order by 1, 2;
+-- → las 12 filas de la tabla de abajo, todas con tgenabled 'O'
+
+-- 3. Los cinco índices, únicos.
+select i.indexrelid::regclass, i.indisunique from pg_index i
+ where i.indexrelid in (
+   to_regclass('public.service_versions_una_abierta'),
+   to_regclass('public.service_versions_una_publicada'),
+   to_regclass('public.service_version_images_una_portada'),
+   to_regclass('public.services_una_por_clave'),
+   to_regclass('public.service_events_una_por_clave'));
+-- → 5 filas, t
+
+-- 4. El depósito privado.
+select id, public, file_size_limit, allowed_mime_types
+  from storage.buckets where id = 'service-media';
+-- → service-media | f | 5242880 | {image/jpeg,image/png,image/webp}
+
+-- 5. Las funciones, por su huella (tabla de abajo).
+select proname, md5(regexp_replace(replace(prosrc, E'\r', ''), '\s+', ' ', 'g'))
+  from pg_proc where pronamespace = 'public'::regnamespace
+   and proname in ('service_categories_dos_niveles', 'services_salto_valido',
+     'service_versions_salto_valido', 'service_version_images_solo_en_borrador',
+     'servicios_catalogo_nadie_se_publica', 'servicios_catalogo_historial_inmutable',
+     'servicios_catalogo_coherente')
+ order by 1;
+
+-- 6. Recién aplicada: vacía (no se siembra ninguna categoría).
+select (select count(*) from public.service_categories) as categorias,
+       (select count(*) from public.services) as servicios;
+-- → 0 | 0
+
+rollback;
+```
+
+Los 12 disparadores esperados:
+
+| Tabla | Disparador | Función | tgtype | tgenabled |
+|---|---|---|---|---|
+| `service_categories` | `service_categories_dos_niveles` | `service_categories_dos_niveles` | `31` | `O` |
+| `service_events` | `service_events_ajena` | `servicios_catalogo_nadie_se_publica` | `7` | `O` |
+| `service_events` | `service_events_inmutables` | `servicios_catalogo_historial_inmutable` | `19` | `O` |
+| `service_events` | `service_events_solo_en_cascada` | `servicios_borrado_solo_en_cascada` | `11` | `O` |
+| `service_version_images` | `service_version_images_solo_en_borrador` | `service_version_images_solo_en_borrador` | `31` | `O` |
+| `service_versions` | `service_versions_ajena` | `servicios_catalogo_nadie_se_publica` | `23` | `O` |
+| `service_versions` | `service_versions_coherente` | `servicios_catalogo_coherente` | `21` | `O` |
+| `service_versions` | `service_versions_saltos` | `service_versions_salto_valido` | `23` | `O` |
+| `service_versions` | `service_versions_solo_en_cascada` | `servicios_borrado_solo_en_cascada` | `11` | `O` |
+| `services` | `services_coherente` | `servicios_catalogo_coherente` | `21` | `O` |
+| `services` | `services_saltos` | `services_salto_valido` | `23` | `O` |
+| `services` | `services_solo_en_cascada` | `servicios_borrado_solo_en_cascada` | `11` | `O` |
+
+Las huellas esperadas de las siete funciones nuevas:
+
+| Función | Huella tras la 0090 |
+|---|---|
+| `service_categories_dos_niveles` | `d09691eae2b7f1412d02daeefac4d8b2` |
+| `service_version_images_solo_en_borrador` | `8d9bc80fba608e1913f3dde54d229ef0` |
+| `service_versions_salto_valido` | `218b636da96797ccb7cdbddccff22586` |
+| `services_salto_valido` | `9390e721cb1abcb47ee1f65e45ef6da8` |
+| `servicios_catalogo_coherente` | `acc5be2ca2b5016886ea5029753afd10` |
+| `servicios_catalogo_historial_inmutable` | `8bcd4309a3b2b9c625550053fe9f05f8` |
+| `servicios_catalogo_nadie_se_publica` | `e29d76b60f10b418513497f0a6d5f768` |
+
+Después, con la API **reiniciada**: `GET /services/categories` con una sesión
+de prueba contesta 503 `services_disabled` mientras la bandera siga apagada
+(lo esperado); con la bandera encendida **solo en un entorno de pruebas**,
+contesta 200 y una lista vacía.
+
+## 28. Las vistas
+
+**Prestador** (`app/servicios/prestador/catalogo/*`). Perfil › «Ofrecer un
+servicio» (con la bandera) › en la postulación, «Mis servicios» (solo con el
+prestador **activo**). Siete pantallas:
+
+- **Mis servicios**: lista con estado y versión en curso, cursor;
+- **Crear servicio**: la categoría (radios), y nace el borrador;
+- **El servicio**: estado, lo último que dijo Z con los campos señalados, la
+  versión en curso, lo publicado, y lo que se puede hacer (`can_*`): completar
+  información, imágenes, revisar y enviar, editar o «Corregir y reenviar»,
+  retirar la versión, historial y ficha pública;
+- **Completar información**, por secciones (lo básico, cómo se presta, precio,
+  qué incluye), con los campos señalados por Z marcados y aviso al salir sin
+  guardar;
+- **Imágenes**: texto alternativo antes de elegir, portada, orden y quitar;
+- **Revisar y enviar**: lo que falta (pedido al servidor, cada cosa lleva a
+  donde se arregla), cómo se verá, y el envío o reenvío;
+- **Historial** visible.
+
+**Público**: la **ficha** (`app/servicios/ficha/[serviceId]`), sin botón de
+contratar.
+
+**Administración** (`app/admin/servicios/catalogo/*` y
+`app/admin/servicios/categorias`). Panel de administración › Servicios ›
+«Catálogo de servicios» y «Categorías de servicios» (con la bandera):
+
+- **bandeja** con colas, estado de la versión, modalidad, categoría y cursor;
+- **el servicio**: propuesta con lo que cambia marcado, lo publicado para
+  comparar, versiones, las decisiones que ofrece el servidor (`actions`) con
+  motivo y nota interna, confirmación en todas, «es tuyo» sin acciones;
+- **una versión** cualquiera;
+- **historial completo** con función, notas internas y campos;
+- **categorías**: alta, edición (sin slug ni estado), madre, activar y
+  desactivar.
+
+Todas: carga, vacío, error con reintento («aún no eres prestador activo»
+lleva a la postulación), cerrojo contra el doble toque, relectura tras un 409
+o un envío incompleto, cero textos en duro (348 claves nuevas en es/en/pt con
+los mismos huecos) y ninguna escritura directa a la base ni al almacenamiento.
+
+## 29. Decisiones
+
+Tomadas en el código (provisionales, revisables sin migración salvo donde se
+indica): aprobar y publicar son **dos pasos**, ambos de administración;
+moderación inicia la revisión y pide cambios; pedir cambios **cierra** la
+versión y se corrige en otra; publicar no reactiva un servicio suspendido;
+retirar es **definitivo**; una categoría inactiva no admite servicios nuevos
+ni envíos, pero no se borra y los servicios que la usan la siguen nombrando;
+la ficha pública enseña del prestador **solo su nombre público**; no se exige
+volver a aceptar condiciones para publicar servicios.
+
+**Pendientes de la empresa**, con lo que pasa mientras tanto: en
+[`Z_REQUISITOS_Y_DECISIONES.md`](Z_REQUISITOS_Y_DECISIONES.md), «Incremento 2»
+(C1–C16). Lo configurable está en `SERVICES_CATALOG_*`
+(`apps/api/.env.example`); sus valores de fábrica son los **límites técnicos**
+de la 0090, no una política.
+
+## 30. Pruebas, mutaciones y revisión (29/09/2026)
+
+**Pruebas nuevas del catálogo:**
+
+| Batería | Qué vigila | Resultado |
+|---|---|---|
+| `test_servicios_catalogo_reglas.py` (sin base) | el mapa de estados es el aprobado y **el mismo** que imponen los disparadores; qué falta para enviar; la configuración; ninguna entrada admite un estado | 26 pasan |
+| `test_servicios_migracion_0090.py` (PostgreSQL) | la 0090 desde cero, cerrada; los modelos son la base; cada regla de la base (saltos, congelado, portada, imágenes, nadie se publica, historial, una abierta y una publicada, categorías, cascada de la cuenta); sobre la 0089 con datos no toca nada; reejecutable; un fallo a mitad no deja nada; sin la 0089 se niega; un índice que no es único la aborta | 28 pasan |
+| `test_servicios_catalogo_api.py` (PostgreSQL) | la API real con el Storage en memoria: el recorrido entero desde la admisión hasta el público, permisos, lo ajeno, concurrencia, idempotencia, imágenes, auditoría, avisos, bandeja, categorías, la bandera, la puerta de esquema y la baja de la cuenta | 45 pasan |
+| `serviciosCatalogo.test.mts` (móvil) | los valores cerrados son los del servidor (leídos de su código); cada código de error y cada clave en es/en/pt; el formulario; imágenes; decisiones; categorías | 45 pasan |
+| `serviciosCatalogoVistas.test.mts` (móvil) | las 13 vistas con ruta y alcanzables desde otra; estados; cerrojo; confirmaciones; las 30 rutas del servidor, ni una más ni una menos; idempotencia; ningún estado en las peticiones; los 11 avisos | 55 pasan |
+
+**Mutaciones: 40 de 40 en rojo.** Las 20 pedidas, cuatro del teléfono, una del
+arreglo de la nota interna y quince que deshacen, uno por uno, los arreglos
+de la revisión. Cada una rompe una protección en una copia LF desechable, se
+comprueba que una prueba **adecuada** se pone roja, y se restaura. Cuatro
+salieron verdes en la primera pasada y cada una destapó una prueba débil, ya
+reforzada:
+
+- editar una versión **publicada** en la base (la prueba solo congelaba una
+  enviada);
+- omitir el motivo en el **dominio** (solo lo exigía el formulario);
+- **ocultar el historial** (un «ninguno trae nota interna» sobre una lista
+  vacía también pasaba);
+- **filtrar notas internas** al prestador (la única nota interna del
+  recorrido iba en un paso que ya tiene motivo visible). Esta destapó además
+  un fallo real: iniciar la revisión **perdía** la nota interna.
+
+**Revisión independiente** (solo lectura, adversarial): ningún hallazgo
+bloqueante ni alto; cuatro medios y nueve bajos. Corregidos, con prueba capaz
+de fallar:
+
+| # | Hallazgo | Severidad | Arreglo |
+|---|---|---|---|
+| M1 | `changed_fields` hablaba el idioma de las columnas (`price_minor`) y no el de la app; las imágenes no contaban | media | vocabulario de `requisitos.CAMPOS` e imágenes comparadas |
+| M3 | publicar la versión de un servicio **suspendido** avisaba «ya se puede ver» y llevaba a un 404 | media | aviso propio (`service_catalog_published_suspended`) que lleva al servicio; confirmación de administración con otro texto |
+| M4 | un servicio con cambios pedidos salía «sin título» y sin decir que había algo que hacer | media | se nombra por su última versión; `last_version_status` |
+| B1 | iniciar la revisión perdía la nota interna | baja | se guarda (lo encontró también una mutación) |
+| B2 | se ofrecían categorías de otro país | baja | `GET /services/categories` filtra por el país del prestador y quita las hijas de una madre inactiva |
+| B3 | quitar una imagen borraba el archivo antes de confirmar la base | baja | se borra después del `commit` |
+| B4 | con `Idempotency-Key`, un archivo huérfano de un intento sin respuesta bloqueaba los reintentos | baja | con clave, la subida pisa |
+| B5 | un prestador suspendido seguía abriendo borradores, editando y subiendo | baja | solo un prestador activo escribe |
+| B6 | crear sin clave devolvía **otro** servicio si la base protestaba; cualquier choque al crear una categoría se llamaba «slug repetido» | baja | se relanza el error de verdad |
+| B7 | un servicio que pasa a virtual conservaba la zona en lo público | baja | se limpia |
+| B8 | «Se crea un borrador que solo ves tú» (también lo ve el equipo) | baja | texto corregido |
+| B9 | «Ver más» en la bandeja podía mezclar un filtro viejo | baja | se descarta la página de otro filtro |
+| — | una subcategoría activa bajo una madre inactiva admitía servicios | baja | ya no |
+
+**Aceptados y documentados:**
+- **M2**: la URL firmada de una imagen pública lleva el identificador del
+  perfil en su ruta. Es el patrón de Productos (que además publica
+  `seller_profile_id`), y cambiarlo exige otro barrido en la baja de cuenta:
+  decisión **C15**, mejor antes de aplicar la 0090.
+- **B2, resto**: el formulario ofrece PEN, USD y EUR aunque la configuración de
+  fábrica solo admite PEN. Al guardar, `missing` lo dice con palabras (**C16**).
+- Las imágenes de un borrador **retirado** se conservan hasta la baja de la
+  cuenta (la 0090 no deja tocar las imágenes fuera de un borrador): **C12**.
+
+**Validación final** (29/09/2026, sobre `8a3e519`):
+
+| Comprobación | Resultado |
+|---|---|
+| Backend **con** PostgreSQL (0001–0090 desde cero, todas las verticales) | **3910 pasan**, 0 fallan, 0 omitidas (17 min 56 s) |
+| Backend **sin** PostgreSQL | **2925 pasan**, 985 omitidas (las que necesitan la base), 0 fallan |
+| Móvil, en la copia de trabajo | 3378 pruebas en 127 baterías: **3375 pasan**; las 3 que fallan son de Eventos (`eventoDelOrganizador`, `finanzasDeEventos`, `moderacionDeResenas`), no se tocaron y fallan **solo por CRLF** |
+| Móvil, en una copia LF | 3356 de 3357: esas tres pasan; la única que falla allí es `recorridoDeAtras`, porque la copia no tiene `node_modules` (en la de trabajo pasa) |
+| `tsc --noEmit` | limpio |
+| Expo Doctor | 18 de 18 |
+| Exportación web | correcta |
+| Traducciones | 348 claves nuevas en es, en y pt, con los mismos huecos |
+| Rutas | 159 en la app, ninguna duplicada; 487 operaciones en la API, ninguna repetida (30 del catálogo) |
+| `git diff --check` y secretos | limpio; ningún secreto en lo añadido |
+| Escritura directa desde el móvil | ninguna a las tablas ni al depósito del catálogo |
+| `FEATURE_SERVICES` | apagada por defecto (`config.py`, `.env.example`, y el móvil solo la enciende con un `true` exacto) |
+| Cursos, Eventos y Productos | sus baterías, dentro de las de arriba, en verde |
+
+**Riesgos de integración** (no comprobables sin aplicar la 0090):
+- **la puerta lee `storage.buckets`**, y es la primera vez que la API lo
+  hace. Si el rol con el que conecta la API no pudiera leerlo, el catálogo
+  contestaría 503 `services_not_ready` con la 0090 bien aplicada, y el
+  registro diría «no se pudo comprobar la 0090». **No está comprobado**: tras
+  aplicarla y reiniciar, es lo primero que mirar si el catálogo no responde;
+- la 0090 se probó en PostgreSQL 16 local; Supabase corre la 17.6. Lo que usa
+  es estándar, pero la verificación de §27 es la que manda;
+- el depósito `service-media` lo crea la 0090 insertando en
+  `storage.buckets`; si el proyecto ya tuviera uno con ese nombre, la 0090 lo
+  deja privado, de 5 MB y solo con imágenes (lo corrige, no se niega).
+  Ninguna política de `storage.objects` de las migraciones del repositorio lo
+  alcanza; una creada a mano en Supabase no la ve ninguna prueba;
+- tocar el push de un aviso abre la app, no el servicio (como los demás avisos
+  al creador); la bandeja sí lleva.
+
+## 31. Punto exacto para empezar el Incremento 3
+
+**No se empezó el Incremento 3.** Antes, una persona tiene que:
+
+1. **Aplicar la 0090** y verificarla (§26–§27); reiniciar la API.
+2. **Hacer el QA físico** del catálogo (`Z_QA_FISICO_PENDIENTE.md`), con la
+   bandera encendida solo en el entorno de pruebas.
+3. **Decidir al menos C1** (categorías iniciales) y C5 (monedas y países): sin
+   categorías nadie puede crear un servicio.
+
+El Incremento 3 parte de `services` publicados con su versión publicada
+(`service_versions.status = 'published'`), que es lo único que puede dar por
+supuesto. Lo que viene después (disponibilidad, reservas, pagos, atención,
+incidencias, reseñas) sigue sin tabla, ruta ni pantalla.
