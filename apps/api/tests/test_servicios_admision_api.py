@@ -1182,3 +1182,214 @@ async def test_una_aprobada_que_vuelve_a_revision_no_se_retira(entorno, encendid
     assert (await http.get(MIA)).json()["can_withdraw"] is False
     r = await http.post(f"{MIA}/withdraw", json={"confirm": True})
     assert r.status_code == 409 and _codigo(r) == "service_application_already_decided"
+
+
+# =========================================================================== #
+# Hallazgos de la revisión independiente (29/09/2026), reproducidos aquí
+# =========================================================================== #
+async def _con_credencial_respaldada(http, quien) -> tuple[str, str]:
+    """(documento de evidencia, credencial declarada con él)."""
+    await _publicar(http, quien)
+    await _listo_para_enviar(http, quien)
+    r = await _documento(http, kind="professional_license", datos=PDF, nombre="lic.pdf", tipo="application/pdf")
+    evidencia = next(d["id"] for d in r.json()["documents"] if d["kind"] == "professional_license")
+    r = await http.post(
+        f"{MIA}/credentials",
+        json={"kind": "professional_license", "title": "Licencia", "issuer": "Colegio", "number": "ABC12345",
+              "evidence_document_id": evidencia},
+        headers={"Idempotency-Key": "credencial-respaldada-1"},
+    )
+    assert r.status_code == 201, r.text
+    return evidencia, r.json()["credentials"][0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_H1_la_evidencia_de_una_credencial_no_se_retira(entorno, encendida, almacen) -> None:
+    """Retirar el documento que respalda una credencial dejaba verificarla sin
+    evidencia (y el archivo borrado). Ahora no se retira: se cambia la
+    evidencia o se quita la credencial antes."""
+    http, quien, sesiones, _ = entorno
+    evidencia, credencial = await _con_credencial_respaldada(http, quien)
+    vista = (await http.get(MIA)).json()
+    assert next(d for d in vista["documents"] if d["id"] == evidencia)["can_remove"] is False
+    r = await http.delete(f"{MIA}/documents/{evidencia}")
+    assert r.status_code == 409 and _codigo(r) == "service_document_in_use"
+    assert not almacen.borrados
+    # Quitada la credencial, el documento ya se puede retirar.
+    assert (await http.delete(f"{MIA}/credentials/{credencial}")).status_code == 200
+    assert (await http.delete(f"{MIA}/documents/{evidencia}")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_H1_reemplazar_la_evidencia_mueve_la_credencial_al_nuevo(entorno, encendida, almacen) -> None:
+    http, quien, sesiones, _ = entorno
+    evidencia, credencial = await _con_credencial_respaldada(http, quien)
+    r = await http.post(
+        f"{MIA}/documents/{evidencia}/replace", files={"file": ("lic2.pdf", PDF + b"%v2", "application/pdf")}
+    )
+    assert r.status_code == 200, r.text
+    nuevo = next(d["id"] for d in r.json()["documents"] if d["kind"] == "professional_license")
+    assert r.json()["credentials"][0]["evidence_document_id"] == nuevo != evidencia
+    assert "credential_evidence" not in r.json()["missing"]
+
+
+@pytest.mark.asyncio
+async def test_H1_sin_evidencia_activa_ni_se_envia_ni_se_verifica(entorno, encendida, almacen) -> None:
+    """Defensa en profundidad: si la evidencia ya no está activa (por cualquier
+    camino), enviar pide evidencia y verificar se niega."""
+    from datetime import datetime, timezone
+
+    http, quien, sesiones, _ = entorno
+    evidencia, credencial = await _con_credencial_respaldada(http, quien)
+
+    async def ciclo(valor: str) -> None:
+        async with sesiones() as db:
+            doc = await db.get(ServiceProviderDocument, evidencia)
+            doc.lifecycle = valor
+            doc.lifecycle_changed_at = None if valor == "active" else datetime.now(timezone.utc)
+            await db.commit()
+
+    await ciclo("removed")
+    vista = (await http.get(MIA)).json()
+    assert "credential_evidence" in vista["missing"] and vista["can_submit"] is False
+    r = await http.post(f"{MIA}/submit", json={"declare_truthfulness": True})
+    assert r.status_code == 422 and "credential_evidence" in r.json()["error"]["details"]["missing"]
+
+    # Y aunque llegara a revisión, verificar la exige disponible.
+    await ciclo("active")
+    assert (await http.post(f"{MIA}/submit", json={"declare_truthfulness": True})).status_code == 200
+    _como(quien, MODERADOR)
+    solicitud = (await http.get(BANDEJA)).json()["items"][0]["id"]
+    await http.post(f"{BANDEJA}/{solicitud}/start-review", json={})
+    await ciclo("removed")
+    r = await http.post(f"{BANDEJA}/{solicitud}/credentials/{credencial}/verify")
+    assert r.status_code == 422 and _codigo(r) == "service_credential_evidence_required"
+
+
+@pytest.mark.asyncio
+async def test_M1_vaciar_el_resumen_tras_enviar_es_422_y_no_500(entorno, encendida, almacen) -> None:
+    http, quien, _, _ = entorno
+    await _publicar(http, quien)
+    solicitud = await _en_revision(http, quien)
+    await http.post(f"{BANDEJA}/{solicitud}/request-changes", json={"message": "Amplía el resumen."})
+    _como(quien, PRESTADORA)
+    r = await http.patch(MIA, json={"summary": None})
+    assert r.status_code == 422 and _codigo(r) == "service_application_field_required"
+    assert r.json()["error"]["details"]["fields"] == ["summary"]
+    # En borrador sí se puede vaciar.
+    _como(quien, OTRA)
+    await http.post(MIA, json={"provider_type": "individual", "display_name": "Olga"})
+    await http.patch(MIA, json={"summary": RESUMEN})
+    assert (await http.patch(MIA, json={"summary": None})).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_L1_un_fallo_de_red_del_almacenamiento_es_503(entorno, encendida, almacen, monkeypatch) -> None:
+    import httpx
+
+    from app.shared import storage
+
+    http, quien, _, _ = entorno
+    await http.post(MIA, json={"provider_type": "individual", "display_name": "Ana"})
+
+    async def sin_red(*a, **k):
+        raise httpx.ConnectTimeout("sin red")
+
+    monkeypatch.setattr(storage, "subir_objeto", sin_red)
+    r = await _documento(http)
+    assert r.status_code == 503 and _codigo(r) == "service_storage_failed"
+    monkeypatch.setattr(storage, "subir_objeto", almacen.subir)
+    documento = (await _documento(http)).json()["documents"][0]["id"]
+    monkeypatch.setattr(storage, "firmar_objetos", sin_red)
+    r = await http.post(f"{MIA}/documents/{documento}/view")
+    assert r.status_code == 503 and _codigo(r) == "service_storage_failed"
+
+
+@pytest.mark.asyncio
+async def test_L2_si_algo_falla_tras_subir_el_archivo_se_borra(entorno, encendida, almacen, monkeypatch) -> None:
+    from app.modules.gobernanza import auditoria
+
+    http, quien, sesiones, _ = entorno
+    await http.post(MIA, json={"provider_type": "individual", "display_name": "Ana"})
+    original = auditoria.anotar
+
+    async def falla(db, **kw):
+        if kw.get("action") in ("service_document.uploaded", "service_document.replaced"):
+            raise RuntimeError("fallo simulado de la auditoría")
+        return await original(db, **kw)
+
+    monkeypatch.setattr(auditoria, "anotar", falla)
+    with pytest.raises(RuntimeError):
+        await _documento(http)
+    async with sesiones() as db:
+        assert not list(await db.scalars(select(ServiceProviderDocument)))
+    assert almacen.objetos == {} and len(almacen.borrados) == 1
+
+
+@pytest.mark.asyncio
+async def test_L4_quien_revisa_y_postula_no_lee_las_notas_internas_de_la_suya(entorno, encendida, almacen) -> None:
+    http, quien, _, _ = entorno
+    await _publicar(http, quien)
+    solicitud = (await _enviada(http, quien, uid=MODERADOR))["id"]
+    _como(quien, JEFA)
+    await http.post(f"{BANDEJA}/{solicitud}/start-review", json={"internal_note": "NOTA-SOBRE-MODE"})
+    _como(quien, MODERADOR)
+    detalle = await http.get(f"{BANDEJA}/{solicitud}")
+    assert detalle.json()["is_own"] is True
+    assert "NOTA-SOBRE-MODE" not in detalle.text
+    historial = await http.get(f"{BANDEJA}/{solicitud}/history")
+    assert historial.status_code == 200 and "NOTA-SOBRE-MODE" not in historial.text
+    # Quien no es el dueño sí las lee.
+    _como(quien, JEFA)
+    assert "NOTA-SOBRE-MODE" in (await http.get(f"{BANDEJA}/{solicitud}/history")).text
+
+
+@pytest.mark.asyncio
+async def test_L5_volver_a_postular_mira_la_politica_de_su_categoria(entorno, encendida, almacen) -> None:
+    http, quien, _, _ = entorno
+    _como(quien, JEFA)
+    r = await http.post(
+        f"{ADMIN}/policies/provider-terms/draft",
+        json={"country_code": "PE", "category": "musica", "title": "Condiciones música", "body": TEXTO,
+              "parameters": {"reapplication_after_rejection": "allowed"}},
+    )
+    await http.post(f"{ADMIN}/policies/{r.json()['id']}/publish")
+    _como(quien, PRESTADORA)
+    await http.post(MIA, json={"provider_type": "individual", "display_name": "Ana Guitarra"})
+    await http.patch(MIA, json={
+        "legal_name": "Ana María Quispe", "country_code": "PE", "summary": RESUMEN, "requested_category": "musica",
+    })
+    await _documento(http)
+    terminos = (await http.get(TERMINOS)).json()
+    await http.post(f"{MIA}/terms", json={"terms_policy_id": terminos["policy_id"], "terms_sha256": terminos["sha256"]})
+    r = await http.post(f"{MIA}/submit", json={"declare_truthfulness": True})
+    assert r.status_code == 200, r.text
+    solicitud = r.json()["id"]
+    _como(quien, MODERADOR)
+    await http.post(f"{BANDEJA}/{solicitud}/start-review", json={})
+    _como(quien, JEFA)
+    assert (await http.post(f"{BANDEJA}/{solicitud}/reject", json={"message": "No cumple."})).status_code == 200
+    _como(quien, PRESTADORA)
+    r = await http.post(MIA, json={"provider_type": "individual", "display_name": "Ana"})
+    assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_L7_los_reemplazos_tienen_tope(entorno, encendida, almacen) -> None:
+    from app.modules.services import documentos
+
+    http, quien, _, _ = entorno
+    await http.post(MIA, json={"provider_type": "individual", "display_name": "Ana"})
+    documento = (await _documento(http)).json()["documents"][0]["id"]
+    ultimo = None
+    for i in range(80):
+        r = await http.post(
+            f"{MIA}/documents/{documento}/replace",
+            files={"file": ("x.pdf", PDF + str(i).encode(), "application/pdf")},
+        )
+        ultimo = r
+        if r.status_code != 200:
+            break
+        documento = r.json()["documents"][0]["id"]
+    assert ultimo.status_code == 422 and _codigo(ultimo) == "service_document_too_many"
+    assert len(almacen.objetos) == getattr(documentos, "MAXIMO_POR_POSTULACION", -1)

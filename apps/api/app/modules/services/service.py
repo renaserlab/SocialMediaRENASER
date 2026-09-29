@@ -170,12 +170,21 @@ async def expediente_de(
     )
 
 
-async def la_mia(db: AsyncSession, usuario_id: str) -> Expediente:
-    """El expediente propio, o 404."""
+async def la_mia(db: AsyncSession, usuario_id: str, *, bloquear: bool = False) -> Expediente:
+    """El expediente propio, o 404.
+
+    `bloquear=True` para ESCRIBIR: bloquea la fila de la postulación antes de
+    leer nada más. Sin el bloqueo, un cambio que se colaba mientras se enviaba
+    la postulación la modificaba después de congelar el envío.
+    """
     prestador = await prestador_de(db, usuario_id)
     solicitud = await _actual(db, prestador.id) if prestador is not None else None
     if solicitud is None:
         raise SolicitudNoEncontrada()
+    if bloquear:
+        from app.modules.services import admision
+
+        solicitud = await admision.bloquear(db, solicitud.id)
     return await expediente_de(db, solicitud)
 
 
@@ -308,6 +317,10 @@ async def iniciar(
     return await expediente_de(db, solicitud), True
 
 
+#: Lo que la base exige a una postulación que ya se envió.
+OBLIGATORIOS_TRAS_ENVIAR = frozenset({"summary"})
+
+
 async def actualizar_borrador(
     db: AsyncSession, *, usuario_id: str, cambios: dict[str, object]
 ) -> Expediente:
@@ -325,9 +338,19 @@ async def actualizar_borrador(
             details={"fields": sorted(desconocidos)},
         )
 
-    expediente = await la_mia(db, usuario_id)
+    expediente = await la_mia(db, usuario_id, bloquear=True)
     if not states.es_editable(expediente.solicitud.status):
         raise SolicitudNoEditable(details={"status": expediente.solicitud.status})
+    # Lo que una postulación ENVIADA tiene que tener (0086/0087,
+    # `enviada_completa`) no se vacía al corregirla: sería un 500 en la base.
+    if expediente.solicitud.status != states.BORRADOR:
+        vaciados = sorted(c for c in OBLIGATORIOS_TRAS_ENVIAR if c in cambios and cambios[c] is None)
+        if vaciados:
+            raise ValidationAppError(
+                "Ese dato no se puede vaciar una vez enviada la postulación.",
+                code="service_application_field_required",
+                details={"fields": vaciados},
+            )
 
     ahora = _ahora()
     tocado_prestador = False

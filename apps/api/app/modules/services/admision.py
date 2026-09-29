@@ -418,7 +418,9 @@ async def exigir_que_pueda_repostular(
         return
     if not prestador.country_code:
         raise RepostulacionNoConfigurada()
-    vigente = await politicas.vigente(db, pais=prestador.country_code)
+    vigente = await politicas.vigente(
+        db, pais=prestador.country_code, categoria=ultima.requested_category
+    )
     decision = ((vigente.parameters if vigente else None) or {}).get(
         "reapplication_after_rejection"
     )

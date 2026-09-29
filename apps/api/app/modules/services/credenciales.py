@@ -278,7 +278,16 @@ async def revisar(
     texto = (nota or "").strip()[:1000] or None
     ahora = _ahora()
     if accion == "verify":
-        if credencial.evidence_document_id is None:
+        evidencia = (
+            await db.get(ServiceProviderDocument, credencial.evidence_document_id)
+            if credencial.evidence_document_id
+            else None
+        )
+        if (
+            evidencia is None
+            or evidencia.application_id != credencial.application_id
+            or evidencia.lifecycle == RETIRADO
+        ):
             raise CredencialInvalida(
                 "No se verifica una credencial sin evidencia.",
                 code="service_credential_evidence_required",

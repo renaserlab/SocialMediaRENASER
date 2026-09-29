@@ -366,6 +366,7 @@ class DocumentoPrivadoRead(BaseModel):
         *,
         editable: bool = False,
         enviado: bool = False,
+        en_uso: bool = False,
     ) -> "DocumentoPrivadoRead":
         activo = documento.lifecycle == ACTIVO
         return cls(
@@ -376,7 +377,7 @@ class DocumentoPrivadoRead(BaseModel):
             review_status=documento.review_status,
             review_note=documento.review_note,
             created_at=documento.created_at,
-            can_remove=editable and activo and not enviado,
+            can_remove=editable and activo and not enviado and not en_uso,
             can_replace=editable and activo,
         )
 
@@ -557,6 +558,11 @@ class SolicitudPrivadaRead(BaseModel):
         solicitud = expediente.solicitud
         editable = states.es_editable(solicitud.status)
         aceptada = expediente.politica_aceptada
+        # Lo que respalda una credencial activa no se ofrece para quitar: el
+        # servidor lo negaría (`service_document_in_use`).
+        evidencias = {
+            c.evidence_document_id for c in expediente.credenciales if c.lifecycle == ACTIVO
+        }
         return cls(
             id=solicitud.id,
             status=solicitud.status,
@@ -580,7 +586,10 @@ class SolicitudPrivadaRead(BaseModel):
             ),
             documents=[
                 DocumentoPrivadoRead.desde(
-                    d, editable=editable, enviado=d.id in expediente.documentos_enviados
+                    d,
+                    editable=editable,
+                    enviado=d.id in expediente.documentos_enviados,
+                    en_uso=d.id in evidencias,
                 )
                 for d in expediente.documentos
             ],
@@ -700,7 +709,9 @@ class SolicitudAdminRead(BaseModel):
             decided_by=solicitud.decided_by,
             suspended_at=solicitud.suspended_at,
             applicant_message=solicitud.applicant_message,
-            internal_notes=solicitud.internal_notes,
+            # Lo propio, sin notas internas: quien postula no las lee aunque
+            # sea del equipo de Z.
+            internal_notes=None if propia else solicitud.internal_notes,
             observed_fields=list(expediente.campos_observados),
             documents=[DocumentoAdminRead.desde(d) for d in expediente.documentos],
             replaced_documents=[DocumentoAdminRead.desde(d) for d in expediente.reemplazados],
@@ -788,15 +799,17 @@ class EventoAdminRead(BaseModel):
     created_at: datetime | None = None
 
     @classmethod
-    def desde(cls, evento: ServiceProviderApplicationEvent) -> "EventoAdminRead":
+    def desde(
+        cls, evento: ServiceProviderApplicationEvent, *, sin_notas: bool = False
+    ) -> "EventoAdminRead":
         return cls(
             id=evento.id,
             from_status=evento.from_status,
             to_status=evento.to_status,
-            actor_id=evento.actor_id,
+            actor_id=None if sin_notas else evento.actor_id,
             actor_role=evento.actor_role,
             visible_note=evento.visible_note,
-            internal_note=evento.internal_note,
+            internal_note=None if sin_notas else evento.internal_note,
             details=dict(evento.details or {}),
             created_at=evento.created_at,
         )

@@ -168,12 +168,19 @@ def para_enviar(
         if estado_visible_de_credencial(c, hoy) not in ("rejected", "expired")
     }
     faltan += [f"credential:{k}" for k in credenciales if k not in vivas]
-    if any(
-        c.evidence_document_id is None
-        for c in activas
-        if estado_visible_de_credencial(c, hoy) not in ("rejected", "expired")
-    ):
-        faltan.append("credential_evidence")
+    # LA EVIDENCIA TIENE QUE ESTAR: sin documento, o con uno que ya no está
+    # activo (una credencial aún por verificar). Una VERIFICADA puede apuntar
+    # a un documento reemplazado: es el que Z miró, y se conserva.
+    activos = {d.id for d in evidencia.documentos_activos}
+    for c in activas:
+        visible = estado_visible_de_credencial(c, hoy)
+        if visible in ("rejected", "expired"):
+            continue
+        if c.evidence_document_id is None or (
+            visible in ("pending", "observed") and c.evidence_document_id not in activos
+        ):
+            faltan.append("credential_evidence")
+            break
 
     if terminos_consultables:
         faltan += _terminos(s, vigente)

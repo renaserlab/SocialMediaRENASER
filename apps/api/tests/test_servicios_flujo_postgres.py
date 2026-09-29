@@ -421,3 +421,99 @@ async def test_borrar_la_cuenta_se_lleva_lo_que_creo_la_api(entorno) -> None:
         "and action = 'service_application.approved'",
         s=solicitud,
     ) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Hallazgos de la revisión independiente (29/09/2026)
+# --------------------------------------------------------------------------- #
+async def test_M2_escribir_espera_al_bloqueo_y_no_cambia_lo_ya_enviado(entorno) -> None:
+    """Las escrituras de quien postula leían su postulación SIN bloquearla: un
+    PATCH o una subida que se colaba mientras se enviaba cambiaba lo enviado
+    después de congelarlo. Ahora esperan al bloqueo de la fila y, cuando les
+    toca, ven que ya está enviada."""
+    app, motor = entorno
+    jefa, ana = await _persona(motor, "admin"), await _persona(motor)
+    pais = await _publicar(app, jefa)
+    async with _cliente(app, ana) as http:
+        r = await http.post(MIA, json={"provider_type": "individual", "display_name": "Ana"})
+        solicitud = r.json()["id"]
+        await http.patch(
+            MIA,
+            json={"legal_name": "Ana María Quispe", "country_code": pais,
+                  "summary": "Clases de guitarra clásica en persona y en línea desde hace años."},
+        )
+        await http.post(f"{MIA}/documents", data={"kind": "identity"}, files={"file": ("dni.png", PNG, "image/png")})
+        terminos = (await http.get(f"{API}/services/provider/terms")).json()
+        await http.post(f"{MIA}/terms", json={"terms_policy_id": terminos["policy_id"], "terms_sha256": terminos["sha256"]})
+
+    # Otra transacción tiene la fila (como un envío a medias).
+    conexion = await motor.connect()
+    transaccion = await conexion.begin()
+    await conexion.execute(
+        text("select id from service_provider_applications where id = cast(:s as uuid) for update"),
+        {"s": solicitud},
+    )
+
+    async def cambiar():
+        async with _cliente(app, ana) as http:
+            return await http.patch(MIA, json={"legal_name": "Cambiado tras enviar"})
+
+    async def subir():
+        async with _cliente(app, ana) as http:
+            return await http.post(
+                f"{MIA}/documents", data={"kind": "other"}, files={"file": ("otro.png", PNG + b"x", "image/png")}
+            )
+
+    tareas = [asyncio.create_task(cambiar()), asyncio.create_task(subir())]
+    await asyncio.sleep(0.8)
+    assert not any(t.done() for t in tareas), "escribieron sin esperar al bloqueo"
+    # El «envío» termina: la postulación deja de ser editable.
+    await conexion.execute(
+        text("update service_provider_applications set status = 'submitted', submitted_at = now(), "
+             "last_submitted_at = now(), truthfulness_declared_at = now() where id = cast(:s as uuid)"),
+        {"s": solicitud},
+    )
+    await transaccion.commit()
+    await conexion.close()
+    parche, subida = await asyncio.gather(*tareas)
+    assert parche.status_code == 409, parche.text
+    assert subida.status_code == 409, subida.text
+    assert await _uno(
+        motor,
+        "select p.legal_name from service_providers p join service_provider_applications a "
+        "on a.provider_id = p.id where a.id = cast(:s as uuid)",
+        s=solicitud,
+    ) == "Ana María Quispe"
+    assert await _uno(
+        motor, "select count(*) from service_provider_documents where application_id = cast(:s as uuid)", s=solicitud
+    ) == 1
+
+
+async def test_L6_dos_borradores_o_dos_publicaciones_a_la_vez_no_dan_500(entorno) -> None:
+    app, motor = entorno
+    jefa, otra = await _persona(motor, "admin"), await _persona(motor, "admin")
+    pais = next(_PAISES)
+
+    async def borrador(uid: str):
+        async with _cliente(app, uid) as http:
+            return await http.post(
+                f"{ADMIN}/policies/provider-terms/draft",
+                json={"country_code": pais, "title": "Condiciones", "body": TEXTO},
+            )
+
+    borradores = await asyncio.gather(borrador(jefa), borrador(otra))
+    assert sorted(r.status_code for r in borradores) == [200, 201], [r.text for r in borradores]
+    assert borradores[0].json()["id"] == borradores[1].json()["id"]
+    politica = borradores[0].json()["id"]
+
+    async def publicar(uid: str):
+        async with _cliente(app, uid) as http:
+            return await http.post(f"{ADMIN}/policies/{politica}/publish")
+
+    publicaciones = await asyncio.gather(publicar(jefa), publicar(otra))
+    assert [r.status_code for r in publicaciones] == [200, 200], [r.text for r in publicaciones]
+    assert await _uno(
+        motor,
+        "select count(*) from service_policies where country_code = :p and status = 'published'",
+        p=pais,
+    ) == 1

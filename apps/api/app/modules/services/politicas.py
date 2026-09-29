@@ -29,6 +29,7 @@ import hashlib
 from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
@@ -154,14 +155,24 @@ async def vigente(
     return candidatas[0]
 
 
-async def por_id(db: AsyncSession, politica_id: str) -> ServicePolicy:
+async def por_id(db: AsyncSession, politica_id: str, *, bloquear: bool = False) -> ServicePolicy:
+    """`bloquear=True` para publicar: dos publicaciones a la vez se ponen en
+    fila, y la segunda ve la versión ya publicada."""
     from uuid import UUID
 
     try:
         UUID(politica_id)
     except ValueError:
         raise PoliticaNoEncontrada() from None
-    politica = await db.get(ServicePolicy, politica_id)
+    if bloquear:
+        politica = await db.scalar(
+            select(ServicePolicy)
+            .where(ServicePolicy.id == politica_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    else:
+        politica = await db.get(ServicePolicy, politica_id)
     if politica is None:
         raise PoliticaNoEncontrada()
     return politica
@@ -234,8 +245,24 @@ async def borrador(
         created_at=ahora,
         updated_at=ahora,
     )
-    db.add(politica)
-    await db.flush()
+    try:
+        async with db.begin_nested():
+            db.add(politica)
+            await db.flush()
+    except IntegrityError:
+        # DOS A LA VEZ: la otra petición creó el borrador (o la versión)
+        # primero. Se devuelve el que ganó, como si ya estuviera.
+        ganador = await db.scalar(
+            select(ServicePolicy).where(
+                ServicePolicy.kind == POLITICA_TERMINOS_DEL_PRESTADOR,
+                ServicePolicy.country_code == pais,
+                ServicePolicy.category.is_(None) if categoria is None else ServicePolicy.category == categoria,
+                ServicePolicy.status == POLITICA_BORRADOR,
+            )
+        )
+        if ganador is None:
+            raise
+        return ganador, False
     return politica, True
 
 

@@ -29,7 +29,7 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -42,6 +42,7 @@ from app.core.exceptions import (
 from app.modules.services import states
 from app.modules.services.models import (
     ACTIVO,
+    CREDENCIAL_DECLARADA,
     DOCUMENTO_ACEPTADO,
     DOCUMENTO_OBSERVADO,
     DOCUMENTO_PENDIENTE,
@@ -51,6 +52,7 @@ from app.modules.services.models import (
     TIPOS_DE_DOCUMENTO,
     ServiceProviderApplication,
     ServiceProviderApplicationSubmission,
+    ServiceProviderCredential,
     ServiceProviderDocument,
 )
 
@@ -60,6 +62,10 @@ DEPOSITO = "service-provider-documents"
 SEGUNDOS_DE_LA_FIRMA = 120
 #: Tope de documentos ACTIVOS por postulación.
 MAXIMO_ACTIVOS = 20
+#: Tope de documentos GUARDADOS por postulación, contando reemplazados y
+#: retirados. No es una regla de negocio: es la barrera contra reemplazar sin
+#: fin, que dejaría cientos de archivos de 10 MB. Tres veces los activos.
+MAXIMO_POR_POSTULACION = 3 * MAXIMO_ACTIVOS
 
 
 class DocumentoNoEncontrado(NotFoundError):
@@ -80,6 +86,13 @@ class DocumentoYaEnviado(ConflictError):
 class DocumentoInvalido(ValidationAppError):
     code = "service_document_invalid"
     message = "El documento no es válido."
+
+
+class DocumentoEnUso(ConflictError):
+    """Respalda una credencial activa: retirarlo la dejaría sin evidencia."""
+
+    code = "service_document_in_use"
+    message = "Este documento respalda una credencial: cambia su evidencia o quita la credencial antes."
 
 
 class AlmacenamientoNoConfigurado(ServiceUnavailableError):
@@ -187,12 +200,39 @@ async def enviados(db: AsyncSession, solicitud_id: str) -> set[str]:
 async def _guardar_archivo(ruta: str, datos: bytes, tipo: str) -> None:
     from app.shared import storage
 
+    import httpx
+
     try:
         await storage.subir_objeto(DEPOSITO, ruta, datos, tipo)
     except storage.StorageNoConfigurado:
         raise AlmacenamientoNoConfigurado() from None
-    except storage.StorageFallo:
+    except (storage.StorageFallo, httpx.HTTPError):
         raise AlmacenamientoFallo() from None
+
+
+async def _exigir_hueco(db: AsyncSession, solicitud_id: str) -> None:
+    guardados = await db.scalar(
+        select(func.count())
+        .select_from(ServiceProviderDocument)
+        .where(ServiceProviderDocument.application_id == solicitud_id)
+    )
+    if (guardados or 0) >= MAXIMO_POR_POSTULACION:
+        raise DocumentoInvalido(
+            "Demasiados documentos en una sola postulación.",
+            code="service_document_too_many",
+            details={"max": MAXIMO_POR_POSTULACION},
+        )
+
+
+async def _registrar_o_borrar(db: AsyncSession, documento: ServiceProviderDocument) -> None:
+    """La fila del archivo recién subido. Si no se puede escribir, el archivo
+    se borra: sin su fila no es de nadie y nada lo encontraría."""
+    try:
+        db.add(documento)
+        await db.flush()
+    except BaseException:
+        await borrar_archivo(documento.storage_path)
+        raise
 
 
 async def subir(
@@ -224,6 +264,7 @@ async def subir(
             code="service_document_too_many",
             details={"max": MAXIMO_ACTIVOS},
         )
+    await _exigir_hueco(db, solicitud.id)
 
     # EL ARCHIVO PRIMERO: si la subida falla, no queda una fila que promete un
     # documento que no existe.
@@ -242,8 +283,7 @@ async def subir(
         lifecycle=ACTIVO,
         created_at=_ahora(),
     )
-    db.add(documento)
-    await db.flush()
+    await _registrar_o_borrar(db, documento)
     return documento, True
 
 
@@ -261,6 +301,7 @@ async def reemplazar(
     if documento.lifecycle != ACTIVO:
         raise DocumentoBloqueado(details={"lifecycle": documento.lifecycle})
     contenido, extension = detectar(datos, declarado)
+    await _exigir_hueco(db, solicitud.id)
     ruta = f"{usuario_id}/{solicitud.id}/{uuid.uuid4()}.{extension}"
     await _guardar_archivo(ruta, datos, contenido)
     ahora = _ahora()
@@ -277,11 +318,22 @@ async def reemplazar(
         lifecycle=ACTIVO,
         created_at=ahora,
     )
-    db.add(nuevo)
-    await db.flush()
+    await _registrar_o_borrar(db, nuevo)
     documento.lifecycle = REEMPLAZADO
     documento.lifecycle_changed_at = ahora
     documento.replaced_by = nuevo.id
+    # LA EVIDENCIA SIGUE AL REEMPLAZO en las credenciales que aún se pueden
+    # cambiar (declaradas). Una ya verificada sigue apuntando al que Z miró,
+    # que se conserva como evidencia.
+    for credencial in await db.scalars(
+        select(ServiceProviderCredential).where(
+            ServiceProviderCredential.evidence_document_id == documento.id,
+            ServiceProviderCredential.lifecycle == ACTIVO,
+            ServiceProviderCredential.status == CREDENCIAL_DECLARADA,
+        )
+    ):
+        credencial.evidence_document_id = nuevo.id
+        credencial.updated_at = ahora
     await db.flush()
     return nuevo
 
@@ -304,6 +356,16 @@ async def retirar(
         raise DocumentoBloqueado(details={"lifecycle": documento.lifecycle})
     if documento.id in await enviados(db, solicitud.id):
         raise DocumentoYaEnviado()
+    en_uso = await db.scalar(
+        select(func.count())
+        .select_from(ServiceProviderCredential)
+        .where(
+            ServiceProviderCredential.evidence_document_id == documento.id,
+            ServiceProviderCredential.lifecycle == ACTIVO,
+        )
+    )
+    if en_uso:
+        raise DocumentoEnUso()
     documento.lifecycle = RETIRADO
     documento.lifecycle_changed_at = _ahora()
     await db.flush()
@@ -327,13 +389,15 @@ async def firmar(documento: ServiceProviderDocument) -> str:
     """Un enlace para MIRARLO AHORA. Nunca se guarda ni se lista."""
     from app.shared import storage
 
+    import httpx
+
     try:
         firmadas = await storage.firmar_objetos(
             DEPOSITO, [documento.storage_path], segundos=SEGUNDOS_DE_LA_FIRMA
         )
     except storage.StorageNoConfigurado:
         raise AlmacenamientoNoConfigurado() from None
-    except storage.StorageFallo:
+    except (storage.StorageFallo, httpx.HTTPError):
         raise AlmacenamientoFallo() from None
     enlace = firmadas.get(documento.storage_path)
     if not enlace:
@@ -372,6 +436,8 @@ async def revisar(
 
 
 __all__ = [
+    "DocumentoEnUso",
+    "MAXIMO_POR_POSTULACION",
     "AlmacenamientoFallo",
     "AlmacenamientoNoConfigurado",
     "DEPOSITO",

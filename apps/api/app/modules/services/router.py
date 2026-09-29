@@ -275,7 +275,7 @@ async def subir_documento(
 
     La ruta la pone el servidor. Reintentar con el mismo archivo devuelve el
     mismo documento (200). Solo en `draft` o `changes_requested`."""
-    expediente = await service.la_mia(db, current_user.id)
+    expediente = await service.la_mia(db, current_user.id, bloquear=True)
     documento, nuevo = await documentos.subir(
         db,
         solicitud=expediente.solicitud,
@@ -285,16 +285,17 @@ async def subir_documento(
         declarado=archivo.content_type,
     )
     ruta = documento.storage_path
-    if nuevo:
-        await admision.auditar(
-            db, accion="service_document.uploaded", entidad="service_provider_document",
-            entidad_id=documento.id, actor_id=current_user.id, funcion=states.PRESTADOR,
-            datos={"application_id": expediente.solicitud.id, "kind": documento.kind},
-        )
     try:
+        if nuevo:
+            await admision.auditar(
+                db, accion="service_document.uploaded", entidad="service_provider_document",
+                entidad_id=documento.id, actor_id=current_user.id, funcion=states.PRESTADOR,
+                datos={"application_id": expediente.solicitud.id, "kind": documento.kind},
+            )
         await db.commit()
-    except Exception:
-        # El archivo ya subió: sin su fila no es de nadie. Se borra.
+    except BaseException:
+        # El archivo ya subió: sin su fila no es de nadie. Se borra, falle lo
+        # que falle entre la subida y el commit.
         await db.rollback()
         if nuevo:
             await documentos.borrar_archivo(ruta)
@@ -316,7 +317,7 @@ async def reemplazar_documento(
     db: AsyncSession = Depends(get_db),
 ) -> SolicitudPrivadaRead:
     """Sube uno nuevo del mismo tipo; el anterior queda como evidencia."""
-    expediente = await service.la_mia(db, current_user.id)
+    expediente = await service.la_mia(db, current_user.id, bloquear=True)
     anterior = await documentos.uno(
         db, solicitud_id=expediente.solicitud.id, documento_id=document_id
     )
@@ -329,18 +330,18 @@ async def reemplazar_documento(
         declarado=archivo.content_type,
     )
     ruta = nuevo.storage_path
-    await admision.auditar(
-        db, accion="service_document.replaced", entidad="service_provider_document",
-        entidad_id=nuevo.id, actor_id=current_user.id, funcion=states.PRESTADOR,
-        datos={
-            "application_id": expediente.solicitud.id,
-            "replaces": anterior.id,
-            "kind": nuevo.kind,
-        },
-    )
     try:
+        await admision.auditar(
+            db, accion="service_document.replaced", entidad="service_provider_document",
+            entidad_id=nuevo.id, actor_id=current_user.id, funcion=states.PRESTADOR,
+            datos={
+                "application_id": expediente.solicitud.id,
+                "replaces": anterior.id,
+                "kind": nuevo.kind,
+            },
+        )
         await db.commit()
-    except Exception:
+    except BaseException:
         await db.rollback()
         await documentos.borrar_archivo(ruta)
         raise
@@ -357,7 +358,7 @@ async def retirar_documento(
     db: AsyncSession = Depends(get_db),
 ) -> SolicitudPrivadaRead:
     """Retira un documento que NUNCA se envió (y borra su archivo)."""
-    expediente = await service.la_mia(db, current_user.id)
+    expediente = await service.la_mia(db, current_user.id, bloquear=True)
     documento = await documentos.uno(
         db, solicitud_id=expediente.solicitud.id, documento_id=document_id
     )
@@ -407,7 +408,7 @@ async def registrar_credencial(
     db: AsyncSession = Depends(get_db),
 ) -> SolicitudPrivadaRead:
     """Declara una credencial. Con la misma `Idempotency-Key`, la misma."""
-    expediente = await service.la_mia(db, current_user.id)
+    expediente = await service.la_mia(db, current_user.id, bloquear=True)
     credencial, nueva = await credenciales.crear(
         db, solicitud=expediente.solicitud, datos=cuerpo.model_dump(), clave=clave
     )
@@ -434,7 +435,7 @@ async def editar_credencial(
     db: AsyncSession = Depends(get_db),
 ) -> SolicitudPrivadaRead:
     """Edita una credencial declarada (y así se corrige una observada)."""
-    expediente = await service.la_mia(db, current_user.id)
+    expediente = await service.la_mia(db, current_user.id, bloquear=True)
     credencial = await credenciales.una(
         db, solicitud_id=expediente.solicitud.id, credencial_id=credential_id
     )
@@ -460,7 +461,7 @@ async def retirar_credencial(
     db: AsyncSession = Depends(get_db),
 ) -> SolicitudPrivadaRead:
     """Retira una credencial que NUNCA se envió."""
-    expediente = await service.la_mia(db, current_user.id)
+    expediente = await service.la_mia(db, current_user.id, bloquear=True)
     credencial = await credenciales.una(
         db, solicitud_id=expediente.solicitud.id, credencial_id=credential_id
     )
@@ -611,7 +612,7 @@ async def publicar_condiciones(
     """Publica el borrador y supera la anterior en la misma transacción. Las
     aceptaciones ya hechas siguen apuntando a la versión que se aceptó."""
     politica = await politicas.publicar(
-        db, politica=await politicas.por_id(db, policy_id), autor_id=current_user.id
+        db, politica=await politicas.por_id(db, policy_id, bloquear=True), autor_id=current_user.id
     )
     await admision.auditar(
         db, accion="service_policy.published", entidad="service_policy",
@@ -682,12 +683,20 @@ async def detalle_de_postulacion(
 )
 async def historial_completo(
     application_id: str,
+    current_user: AuthUser = Depends(get_current_user),
     _funcion: str = Depends(funcion_de_revision),
     _disponible: None = Depends(servicios_disponibles),
     db: AsyncSession = Depends(get_db),
 ) -> list[EventoAdminRead]:
+    """Todo el historial. Quien mira SU PROPIA postulación (alguien del equipo
+    que también postula) no lee las notas internas que Z escribió sobre ella."""
     solicitud = await service.por_id(db, application_id)
-    return [EventoAdminRead.desde(e) for e in await service.historial(db, solicitud.id)]
+    expediente = await service.expediente_de(db, solicitud)
+    propia = expediente.prestador.profile_id == current_user.id
+    return [
+        EventoAdminRead.desde(e, sin_notas=propia)
+        for e in await service.historial(db, solicitud.id)
+    ]
 
 
 @admin_router.post(
