@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.config import get_settings
 from app.core.security import AuthUser, get_current_user
 from app.main import create_app
+from app.modules.identity import baja
 from app.modules.services import esquema
 from app.shared import storage
 from app.shared.database import get_db
@@ -175,6 +176,7 @@ async def entorno(base_aplicada, monkeypatch):
         lambda **kw: _ClienteReal(transport=httpx.MockTransport(almacen.responder), **kw),
     )
     esquema.olvidar()
+    baja.olvidar()
 
     motor = create_async_engine(_url_async(), pool_size=10, max_overflow=5)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
@@ -195,6 +197,7 @@ async def entorno(base_aplicada, monkeypatch):
         app.dependency_overrides.clear()
         await motor.dispose()
         esquema.olvidar()
+        baja.olvidar()
 
 
 def _cliente(app, uid: str) -> AsyncClient:

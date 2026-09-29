@@ -8,6 +8,9 @@ personal cae en cascada y en los historiales quien actuó pasa a NULL (0089).
 
 EL ORDEN, Y POR QUÉ:
 
+  0. Se comprueba que la base tiene la 0089 COMPLETA (`_hay_0089`). Si no, o
+     si no se puede comprobar, 503 y no se toca nada: con la versión a medias
+     de la 0089 borrar se llevaba en cascada órdenes en las que se movió dinero.
   1. Se apuntan sus conversaciones: sus adjuntos de chat no van bajo su
      carpeta, y después de borrar ya no se podría saber cuáles eran.
   2. Se borra en la base SIN CONFIRMAR, y se fuerzan ya las comprobaciones
@@ -74,9 +77,10 @@ class ArchivosSinBorrar(ServiceUnavailableError):
 
 
 class BajaNoDisponible(ServiceUnavailableError):
-    """La base no tiene la 0089: un fallo de restricción puede ser el choque de
-    la auditoría que la 0089 resuelve, y no una venta. Decir «tienes ventas»
-    sería mentir."""
+    """La base no tiene la 0089 COMPLETA (o no se pudo comprobar). Sin ella,
+    borrar puede chocar con un historial —y un choque no es una venta: decir
+    «tienes ventas» sería mentir— o, peor, llevarse en cascada una orden en la
+    que se movió dinero. No se toca nada."""
 
     code = "account_deletion_unavailable"
     message = "No podemos borrar tu cuenta en este momento. Sigue activa: inténtalo más tarde."
@@ -138,22 +142,94 @@ async def _conversaciones(db: AsyncSession, usuario_id: str) -> tuple[list[str],
     return suyas, enteras
 
 
+#: Lo que la baja necesita de la base, mirado en el catálogo pieza a pieza: no
+#: el número de la migración ni una fila de un historial de migraciones, sino
+#: cada protección de la 0089 de la que depende que borrar sea seguro. Una base
+#: con la 0089 a medias (la versión de `c6d3cd6` no traía los frenos de las
+#: órdenes con dinero) tiene que dar NO.
+_LO_QUE_NECESITA_LA_BAJA = text(
+    """
+    select
+      -- La excepción que deja anular a la persona en los historiales.
+      to_regprocedure('public.es_anonimizacion_por_baja(jsonb, jsonb, text[])') is not null
+      -- Cada disparador en SU tabla, llamando a SU función, con su forma
+      -- (27 = before update or delete, por fila; 11 = before delete, por fila)
+      -- y activo en las sesiones normales ('O' u 'A'; no 'D' ni 'R').
+      and (
+        select count(*)
+          from (values
+            ('public.audit_events', 'audit_events_solo_anadir',
+             'public.auditoria_solo_anadir()', 27),
+            ('public.event_orders', 'event_orders_con_dinero_no_se_borran',
+             'public.event_orders_con_dinero_no_se_borran()', 11),
+            ('public.orders', 'orders_con_dinero_no_se_borran',
+             'public.orders_con_dinero_no_se_borran()', 11)
+          ) as e(tabla, disparador, funcion, tipo)
+         where exists (
+           select 1
+             from pg_catalog.pg_trigger t
+            where t.tgrelid = to_regclass(e.tabla)
+              and t.tgname = e.disparador
+              and t.tgfoid = to_regprocedure(e.funcion)
+              and t.tgtype = e.tipo
+              and t.tgenabled in ('O', 'A')
+              and not t.tgisinternal
+         )
+      ) = 3
+      -- El consentimiento: admite NULL, y TODA clave sobre su sujeto va a
+      -- `profiles` con `on delete set null`.
+      and exists (
+        select 1
+          from pg_catalog.pg_attribute a
+         where a.attrelid = to_regclass('public.consent_records')
+           and a.attname = 'subject_id'
+           and not a.attisdropped
+           and not a.attnotnull
+      )
+      and coalesce((
+        select bool_and(c.confdeltype = 'n' and c.confrelid = to_regclass('public.profiles'))
+          from pg_catalog.pg_constraint c
+          join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
+         where c.contype = 'f'
+           and c.conrelid = to_regclass('public.consent_records')
+           and a.attname = 'subject_id'
+      ), false)
+    """
+)
+
+#: La respuesta se guarda en la memoria del proceso, también el «no», como la
+#: puerta de Servicios (`services/esquema.py`). SE INVALIDA AL REINICIAR LA
+#: API: después de aplicar una migración (o de tocar el esquema a mano) hay que
+#: reiniciarla. Un error al mirar NO se guarda: ni se da por buena la base ni
+#: se deja la baja cerrada hasta el próximo reinicio por un fallo pasajero.
+_cache: dict[str, bool] = {}
+
+
+def olvidar() -> None:
+    """Para las pruebas: cada una monta (o desmonta) su propia base."""
+    _cache.clear()
+
+
 async def _hay_0089(db: AsyncSession) -> bool:
-    if (await db.connection()).dialect.name != "postgresql":
-        return True
-    return bool(
-        await db.scalar(
-            text(
-                "select to_regprocedure("
-                "'public.es_anonimizacion_por_baja(jsonb, jsonb, text[])') is not null"
-            )
-        )
-    )
+    """¿Tiene la base TODO lo de la 0089 que la baja necesita? Ante la duda, no."""
+    try:
+        if (await db.connection()).dialect.name != "postgresql":
+            return True  # SQLite (pruebas): no hay disparadores que proteger
+        if "baja" not in _cache:
+            _cache["baja"] = bool(await db.scalar(_LO_QUE_NECESITA_LA_BAJA))
+            if not _cache["baja"]:
+                logger.warning("La base no tiene la 0089 completa: la baja de cuentas contesta 503.")
+        return _cache["baja"]
+    except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
+        logger.warning("No se pudo comprobar la 0089: la baja de cuentas contesta 503.", exc_info=True)
+        return False
 
 
 async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     """Borra la cuenta. Devuelve las conversaciones que se fueron enteras con
     ella, para `retirar_conversaciones` después de contestar."""
+    if not await _hay_0089(db):
+        raise BajaNoDisponible()
     suyas, enteras = await _conversaciones(db, usuario_id)
     postgres = (await db.connection()).dialect.name == "postgresql"
 
@@ -179,8 +255,8 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
             "La cuenta %s no se puede borrar sola: %s (%s, %s)",
             usuario_id, sqlstate, tabla or "?", restriccion or "?",
         )
-        if not await _hay_0089(db):
-            raise BajaNoDisponible() from None
+        # Con la 0089 completa (comprobado arriba), un choque así es un
+        # registro que hay que conservar, no el de la auditoría.
         raise CuentaConRegistrosQueConservar(details={"reason": _area(tabla)}) from None
 
     try:

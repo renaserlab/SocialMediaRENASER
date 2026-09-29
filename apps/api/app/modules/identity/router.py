@@ -47,8 +47,8 @@ async def delete_my_account(
       reclamos que la plataforma conserva; no se ha tocado nada.
     - 503 `account_deletion_storage_failed`: sus archivos no se pudieron
       borrar; la cuenta sigue activa y se puede reintentar.
-    - 503 `account_deletion_unavailable`: la base aun no tiene la 0089 y algo
-      lo impidio; la cuenta sigue activa.
+    - 503 `account_deletion_unavailable`: la base no tiene la 0089 completa
+      (o no se pudo comprobar); no se ha tocado nada y la cuenta sigue activa.
 
     La identidad sale del token ya validado, nunca de un id recibido: solo se
     puede borrar la cuenta propia.

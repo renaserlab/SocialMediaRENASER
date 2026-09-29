@@ -8,7 +8,9 @@ PostgreSQL, que es la suite de siempre:
   - borra la cuenta y SUS archivos, no los de otra persona;
   - si Storage no contesta, no borra nada y responde 503;
   - si la base lo impide, responde 409 y NO TOCA NINGÚN ARCHIVO;
-  - sin la 0089, ese fallo no se presenta como «tienes ventas» (503);
+  - sin la 0089 completa, 503 antes de tocar nada;
+  - la puerta de la 0089 se cierra ante cualquier fallo al mirar y guarda
+    su respuesta hasta el próximo reinicio;
   - repetir es seguro.
 """
 
@@ -19,7 +21,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -154,10 +156,12 @@ async def test_si_la_base_lo_impide_es_409_y_no_se_toca_ningun_archivo(entorno) 
     assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
 
 
-async def test_sin_la_0089_un_choque_no_se_presenta_como_ventas(entorno, monkeypatch) -> None:
-    """Antes de aplicar la 0089, el choque de la auditoría también es un 23xxx.
-    Decir «tienes ventas» sería mentir: 503 y la cuenta sigue."""
+async def test_sin_la_0089_completa_no_se_toca_nada(entorno, monkeypatch) -> None:
+    """Sin la 0089 completa, borrar podría chocar con un historial (y decir
+    «tienes ventas» sería mentir) o llevarse una orden con dinero. La puerta va
+    PRIMERO: 503, la cuenta sigue y no se ha borrado ningún archivo."""
     app, sesiones, almacen, estado = entorno
+    _archivos(almacen)
 
     async def _sin_0089(db):
         return False
@@ -165,8 +169,12 @@ async def test_sin_la_0089_un_choque_no_se_presenta_como_ventas(entorno, monkeyp
     monkeypatch.setattr(baja, "_hay_0089", _sin_0089)
     estado["chocar"]()
     r = await _borrar(app)
-    assert r.status_code == 503 and r.json()["error"]["code"] == "account_deletion_unavailable", r.text
+    assert r.status_code == 503, r.text
+    assert r.json()["error"] == {
+        "code": "account_deletion_unavailable", "message": baja.BajaNoDisponible.message, "details": None,
+    }
     assert await _existe(sesiones, ANA)
+    assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
 
 
 async def test_repetir_la_baja_es_seguro(entorno) -> None:
@@ -203,3 +211,85 @@ async def test_lo_de_despues_de_confirmar_nunca_se_escapa(monkeypatch, caplog) -
         await baja.retirar_conversaciones(ANA, ["c-1", "c-2"])
     registro = " ".join(r.getMessage() for r in caplog.records)
     assert "c-1" in registro and "c-2" in registro
+
+
+# --------------------------------------------------------------------------- #
+# La puerta de la 0089, sin base: cerrada ante la duda, y lo que recuerda
+# --------------------------------------------------------------------------- #
+class _SesionDePuerta:
+    """Lo que la puerta usa de la sesión. `respuestas`: lo que contesta cada
+    consulta, en orden; una excepción se lanza."""
+
+    def __init__(self, *respuestas, conexion_rota: bool = False) -> None:
+        self.respuestas = list(respuestas)
+        self.consultas = 0
+        self.conexion_rota = conexion_rota
+
+    async def connection(self):
+        from types import SimpleNamespace
+
+        if self.conexion_rota:
+            raise OSError("la base no contesta")
+        return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    async def scalar(self, sentencia):
+        self.consultas += 1
+        respuesta = self.respuestas.pop(0)
+        if isinstance(respuesta, Exception):
+            raise respuesta
+        return respuesta
+
+
+@pytest.fixture()
+def puerta_limpia():
+    baja.olvidar()
+    yield
+    baja.olvidar()
+
+
+@pytest.mark.parametrize(
+    "fallo",
+    [
+        IntegrityError("select", {}, _Original("x")),
+        DBAPIError("select", {}, Exception("timeout")),
+        RuntimeError("inesperado"),
+    ],
+)
+async def test_la_puerta_se_cierra_si_falla_al_mirar(puerta_limpia, fallo, caplog) -> None:
+    import logging
+
+    sesion = _SesionDePuerta(fallo, True)
+    with caplog.at_level(logging.WARNING):
+        assert await baja._hay_0089(sesion) is False
+    assert "No se pudo comprobar la 0089" in caplog.text
+    # El fallo NO se recuerda: la siguiente vez vuelve a mirar.
+    assert await baja._hay_0089(sesion) is True
+    assert sesion.consultas == 2
+
+
+async def test_la_puerta_se_cierra_si_no_hay_conexion(puerta_limpia) -> None:
+    assert await baja._hay_0089(_SesionDePuerta(conexion_rota=True)) is False
+
+
+async def test_la_puerta_recuerda_el_si_y_el_no_hasta_olvidar(puerta_limpia) -> None:
+    """Como la de Servicios: se mira una vez por proceso. Tras aplicar una
+    migración hay que reiniciar la API (`olvidar` hace lo mismo en pruebas)."""
+    si = _SesionDePuerta(1)
+    assert await baja._hay_0089(si) is True and await baja._hay_0089(si) is True
+    assert si.consultas == 1
+    baja.olvidar()
+    no = _SesionDePuerta(False)
+    assert await baja._hay_0089(no) is False and await baja._hay_0089(no) is False
+    assert no.consultas == 1
+
+
+async def test_la_puerta_no_mira_el_numero_de_la_migracion() -> None:
+    """Mira capacidades del catálogo, no un número ni un historial de
+    migraciones (que en Supabase ni se rellena al pegar el SQL a mano)."""
+    sql = str(baja._LO_QUE_NECESITA_LA_BAJA).lower()
+    assert "schema_migrations" not in sql and "0089" not in sql
+    for pieza in (
+        "es_anonimizacion_por_baja", "auditoria_solo_anadir", "event_orders_con_dinero_no_se_borran",
+        "orders_con_dinero_no_se_borran", "tgenabled", "tgtype", "confdeltype", "attnotnull",
+    ):
+        assert pieza in sql, pieza
