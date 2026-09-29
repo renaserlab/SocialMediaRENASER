@@ -73,6 +73,12 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Servicios, Incremento 2: formato puro (un importe ya formateado, o un
+    // número con «min» y «h», que son símbolos del sistema internacional).
+    'servicios.catalogo.precio.fixed',
+    'servicios.catalogo.duracion.minutos',
+    'servicios.catalogo.duracion.horas',
+    'servicios.catalogo.duracion.horasYMinutos',
     // Incremento 8 de Productos: «No» se escribe igual en los dos idiomas.
     'resenaDeProducto.valorar.no',
     // Incremento 5 de Productos: se escriben igual en espanol y en ingles.
@@ -129,6 +135,31 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Servicios, Incremento 2: el portugués escribe estas palabras EXACTAMENTE
+    // igual («Publicado», «Enviada», «Virtual», «Presencial», «Título»,
+    // «Prestador», «Sistema», «Publicar», «Suspender», «Todos», «País»…).
+    'servicios.catalogo.estado.published',
+    'servicios.catalogo.version.submitted',
+    'servicios.catalogo.version.published',
+    'servicios.catalogo.version.withdrawn',
+    'servicios.catalogo.modalidad.virtual',
+    'servicios.catalogo.modalidad.in_person',
+    'servicios.catalogo.campo.title',
+    'servicios.catalogo.suceso.published',
+    'servicios.catalogo.funcion.provider',
+    'servicios.catalogo.funcion.system',
+    'servicios.catalogo.admin.accion.publish',
+    'servicios.catalogo.admin.accion.suspend',
+    'servicios.catalogo.cola.published',
+    'servicios.catalogo.cola.retired',
+    'servicios.catalogo.cola.all',
+    'servicios.catalogo.categorias.pais',
+    // Y formato puro: un importe ya formateado, «min» y «h», «{n} de {total}».
+    'servicios.catalogo.precio.fixed',
+    'servicios.catalogo.duracion.minutos',
+    'servicios.catalogo.duracion.horas',
+    'servicios.catalogo.duracion.horasYMinutos',
+    'servicios.catalogo.imagenes.posicion',
     // Incremento 9 de Productos: se escriben IGUAL en español y en portugués.
     'finanzaDeProducto.estado.cancelled',
     'finanzaDeProducto.devolucion.cancelled',

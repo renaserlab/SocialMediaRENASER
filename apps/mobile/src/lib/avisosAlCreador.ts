@@ -60,6 +60,18 @@ const AVISOS: Record<string, AvisoAlCreador> = {
   service_application_submitted: { titulo: 'notif.servicioEnviadaTitle', icono: 'inbox', cuerpo: 'notif.servicioEnviadaBody' },
   service_application_resubmitted: { titulo: 'notif.servicioReenviadaTitle', icono: 'inbox', cuerpo: 'notif.servicioReenviadaBody' },
   service_application_withdrawn_review: { titulo: 'notif.servicioRetiradaEquipoTitle', icono: 'inbox', cuerpo: 'notif.servicioRetiradaEquipoBody' },
+  // El catálogo de Servicios (Incremento 2). A quien ofrece el servicio:
+  service_catalog_review_started: { titulo: 'notif.servicioCatalogoRevisionTitle', icono: 'clock', cuerpo: 'notif.servicioCatalogoRevisionBody' },
+  service_catalog_changes_requested: { titulo: 'notif.servicioCatalogoCambiosTitle', icono: 'edit-3', cuerpo: 'notif.servicioCatalogoCambiosBody' },
+  service_catalog_approved: { titulo: 'notif.servicioCatalogoAprobadoTitle', icono: 'check-circle', cuerpo: 'notif.servicioCatalogoAprobadoBody' },
+  service_catalog_published: { titulo: 'notif.servicioCatalogoPublicadoTitle', icono: 'check-circle', cuerpo: 'notif.servicioCatalogoPublicadoBody' },
+  service_catalog_suspended: { titulo: 'notif.servicioCatalogoSuspendidoTitle', icono: 'eye-off', cuerpo: 'notif.servicioCatalogoSuspendidoBody' },
+  service_catalog_reinstated: { titulo: 'notif.servicioCatalogoReactivadoTitle', icono: 'check-circle', cuerpo: 'notif.servicioCatalogoReactivadoBody' },
+  service_catalog_retired: { titulo: 'notif.servicioCatalogoRetiradoTitle', icono: 'x-circle', cuerpo: 'notif.servicioCatalogoRetiradoBody' },
+  // Y al equipo de Z:
+  service_catalog_submitted: { titulo: 'notif.servicioCatalogoEnviadoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoEnviadoBody' },
+  service_catalog_resubmitted: { titulo: 'notif.servicioCatalogoReenviadoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoReenviadoBody' },
+  service_catalog_withdrawn_review: { titulo: 'notif.servicioCatalogoRetiradoEquipoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoRetiradoEquipoBody' },
 };
 
 /** El título y el icono de un aviso al creador, o `null` si no lo es. */
@@ -134,6 +146,21 @@ export function rutaDelAviso(
     case 'service_application_resubmitted':
     case 'service_application_withdrawn_review':
       return id ? `/admin/servicios/${id}` : '/admin/servicios';
+    // El catálogo: lo publicado, a su ficha pública; lo demás, al servicio
+    // propio, donde se lee el motivo y se corrige; el equipo, a la revisión.
+    case 'service_catalog_published':
+      return id ? `/servicios/ficha/${id}` : '/servicios/prestador/catalogo';
+    case 'service_catalog_review_started':
+    case 'service_catalog_changes_requested':
+    case 'service_catalog_approved':
+    case 'service_catalog_suspended':
+    case 'service_catalog_reinstated':
+    case 'service_catalog_retired':
+      return id ? `/servicios/prestador/catalogo/${id}` : '/servicios/prestador/catalogo';
+    case 'service_catalog_submitted':
+    case 'service_catalog_resubmitted':
+    case 'service_catalog_withdrawn_review':
+      return id ? `/admin/servicios/catalogo/${id}` : '/admin/servicios/catalogo';
     // «Juan está transmitiendo en vivo»: al directo, siga o no en emisión.
     case 'live_started':
       return id ? `/live/${id}` : null;
