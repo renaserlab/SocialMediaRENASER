@@ -38,6 +38,11 @@ USER_BUCKETS = (
 
 _TIMEOUT = httpx.Timeout(15.0)
 
+#: Hasta dónde se baja en las carpetas al borrar una cuenta. Los documentos de
+#: postulación van en `<perfil>/<postulación>/<archivo>`: dos niveles bastan, y
+#: el tope evita recorrer sin fin una estructura que no esperamos.
+PROFUNDIDAD_MAXIMA = 4
+
 
 def storage_configured() -> bool:
     """True si hay credenciales para operar sobre Storage."""
@@ -50,8 +55,16 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {key}", "apikey": key}
 
 
-async def _list_prefix(client: httpx.AsyncClient, bucket: str, prefix: str) -> list[str]:
-    """Nombres de los ficheros que cuelgan de `prefix` dentro de `bucket`."""
+async def _list_prefix(
+    client: httpx.AsyncClient, bucket: str, prefix: str, profundidad: int = 0
+) -> list[str]:
+    """Nombres de los ficheros que cuelgan de `prefix` dentro de `bucket`.
+
+    EL LISTADO DE STORAGE NO ES RECURSIVO: una carpeta llega como una entrada
+    con `id` nulo, y borrar su nombre no borra nada (se borran nombres exactos).
+    Los documentos de postulación viven en `<perfil>/<postulación>/<archivo>`:
+    sin bajar a las carpetas, el borrado de la cuenta los dejaba en el depósito.
+    """
     url = f"{get_settings().supabase_url}/storage/v1/object/list/{bucket}"
     nombres: list[str] = []
     pagina = 0
@@ -67,7 +80,17 @@ async def _list_prefix(client: httpx.AsyncClient, bucket: str, prefix: str) -> l
         lote = respuesta.json()
         if not lote:
             break
-        nombres.extend(f"{prefix}/{item['name']}" for item in lote if item.get("name"))
+        for item in lote:
+            nombre = item.get("name")
+            if not nombre:
+                continue
+            ruta = f"{prefix}/{nombre}"
+            # Carpeta: `id` presente y nulo. Se baja, con tope.
+            if "id" in item and item["id"] is None:
+                if profundidad < PROFUNDIDAD_MAXIMA:
+                    nombres.extend(await _list_prefix(client, bucket, ruta, profundidad + 1))
+                continue
+            nombres.append(ruta)
         if len(lote) < 100:
             break
         pagina += 1
@@ -210,10 +233,11 @@ async def borrar_objeto(bucket: str, ruta: str) -> bool:
             json={"prefixes": [ruta]},
         )
     if respuesta.status_code >= 400:
+        # SIN LA RUTA: lleva el perfil y la postulación, y un documento de
+        # identidad no tiene por qué quedar señalado en un registro.
         logger.warning(
-            "No se pudo borrar %s/%s: Storage devolvio %s",
+            "No se pudo borrar un objeto de %s: Storage devolvio %s",
             bucket,
-            ruta,
             respuesta.status_code,
         )
         return False

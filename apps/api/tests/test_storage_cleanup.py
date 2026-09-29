@@ -142,3 +142,91 @@ def test_los_buckets_declarados_son_los_que_usa_el_movil():
         "seller-documents",
         "service-provider-documents",
     }
+
+
+class _SupabaseFalso:
+    """Se comporta como el listado de Supabase: NO es recursivo. Una carpeta
+    llega como una entrada con `id: null`, y borrar quita nombres exactos."""
+
+    def __init__(self, objetos):
+        self.objetos = objetos
+        self.pedidos_de_borrado = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def post(self, url, headers=None, json=None):
+        bucket = url.rsplit("/", 1)[-1]
+        prefijo = json["prefix"].rstrip("/") + "/"
+        nivel = {}
+        for nombre in self.objetos.get(bucket, []):
+            if nombre.startswith(prefijo):
+                resto = nombre[len(prefijo):]
+                cabeza = resto.split("/", 1)[0]
+                nivel[cabeza] = None if "/" in resto else f"id-{cabeza}"
+        pagina = [{"name": k, "id": v} for k, v in sorted(nivel.items())]
+        desde = json.get("offset", 0)
+        return _RespuestaFalsa(pagina[desde : desde + json["limit"]])
+
+    async def request(self, metodo, url, headers=None, json=None):
+        bucket = url.rsplit("/", 1)[-1]
+        self.pedidos_de_borrado.append(list(json["prefixes"]))
+        self.objetos[bucket] = [n for n in self.objetos.get(bucket, []) if n not in json["prefixes"]]
+        return _RespuestaFalsa({})
+
+
+@pytest.mark.asyncio
+async def test_baja_tambien_las_carpetas_de_postulaciones(monkeypatch, con_credenciales):
+    """Los documentos de Servicios (y los de proveedor de Productos) van en
+    `<perfil>/<postulacion>/<archivo>`. El listado de Supabase no es
+    recursivo: sin bajar a las carpetas, el borrado de la cuenta pedia borrar
+    la CARPETA —que no es un objeto— y los documentos de identidad se quedaban."""
+    cliente = _SupabaseFalso(
+        {
+            "service-provider-documents": ["u-1/app-1/dni.png", "u-1/app-1/poder.pdf", "u-1/app-2/dni.pdf"],
+            "seller-documents": ["u-1/app-9/ruc.pdf"],
+            "post-media": ["u-1/foto.jpg", "u-2/ajena.jpg"],
+        }
+    )
+    _instalar_cliente(monkeypatch, cliente)
+
+    total = await storage.delete_user_files("u-1")
+
+    assert total == 5
+    assert cliente.objetos["service-provider-documents"] == []
+    assert cliente.objetos["seller-documents"] == []
+    assert cliente.objetos["post-media"] == ["u-2/ajena.jpg"]
+    for pedido in cliente.pedidos_de_borrado:
+        assert all(r.startswith("u-1/") and r.rsplit("/", 1)[-1] for r in pedido)
+
+
+def test_la_profundidad_de_la_bajada_tiene_tope():
+    assert 1 <= storage.PROFUNDIDAD_MAXIMA <= 5
+
+
+@pytest.mark.asyncio
+async def test_si_no_se_puede_borrar_un_objeto_el_registro_no_dice_la_ruta(monkeypatch, con_credenciales, caplog):
+    import logging
+
+    class _Respuesta:
+        status_code = 500
+
+    class _Cliente:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def request(self, *a, **k):
+            return _Respuesta()
+
+    monkeypatch.setattr(storage.httpx, "AsyncClient", lambda **_: _Cliente())
+    ruta = "11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/abc.pdf"
+    with caplog.at_level(logging.WARNING):
+        assert await storage.borrar_objeto("service-provider-documents", ruta) is False
+    assert caplog.records, "el fallo se registra"
+    assert not any(ruta in r.getMessage() or "abc.pdf" in r.getMessage() for r in caplog.records)
