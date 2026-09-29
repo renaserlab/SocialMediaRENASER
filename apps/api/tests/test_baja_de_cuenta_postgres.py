@@ -29,7 +29,8 @@ import pytest_asyncio
 from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
 from app.core.security import AuthUser, get_current_user
@@ -1120,6 +1121,445 @@ async def test_una_persona_en_todas_las_verticales_a_la_vez(entorno) -> None:
         ("event_order_policy_acceptances", "accepted_by"), ("course_versions", "published_by"),
     ):
         assert await _uno(motor, f"select count(*) from public.{tabla} where {columna} = cast(:u as uuid)", u=ana) == 0, tabla
+
+
+# =========================================================================== #
+# 7b. EL RECORRIDO INTEGRAL: una persona en todo a la vez
+# =========================================================================== #
+#: Historiales de dinero y moderación que se siembran con Ana como actora.
+HISTORIALES_SEMBRADOS = (
+    ("product_review_moderation", "review_id, to_status", "gen_random_uuid(), 'hidden'"),
+    ("product_refund_events", "refund_id, to_status, actor_role", "gen_random_uuid(), 'approved', 'admin'"),
+    ("product_dispute_events", "dispute_id, to_status, actor_role", "gen_random_uuid(), 'opened', 'admin'"),
+    ("event_dispute_events", "dispute_id, to_status, actor_role", "gen_random_uuid(), 'opened', 'admin'"),
+    ("event_aftersale_case_events", "case_id, to_status, actor_role", "gen_random_uuid(), 'opened', 'admin'"),
+)
+
+#: Donde el móvil y la API dejan lo de una persona, bajo `<perfil>/`.
+DEPOSITOS_PROPIOS = ("post-media", "avatars", "course-media", "seller-documents", "service-provider-documents")
+
+
+async def _huella_completa(app, motor, almacen) -> dict:
+    """Ana, presente A LA VEZ en todo lo que la baja toca: auditoría,
+    consentimientos, Cursos, Eventos, Productos, Comercio, Servicios (aprobada,
+    con documentos, credencial, historial y envíos congelados), historiales de
+    dinero y moderación, avisos, chat, y archivos privados e imágenes en todos
+    los depósitos, con subcarpetas. Alrededor, lo de otras personas que la
+    baja no puede tocar."""
+    sesiones = async_sessionmaker(motor, expire_on_commit=False)
+    jefa, moderador, ana, bea, carla = (
+        await _persona(motor, "admin"), await _persona(motor, "moderator"),
+        await _persona(motor), await _persona(motor), await _persona(motor),
+    )
+    h: dict = {"jefa": jefa, "moderador": moderador, "ana": ana, "bea": bea, "carla": carla}
+
+    # Servicios, por la API: su alta, sus documentos, su credencial y su envío
+    # escriben la auditoría con Ana como actora.
+    h["solicitud"] = await _llevar(app, ana, "approved", jefa=jefa, moderador=moderador)
+    h["consentimientos"] = [
+        await _consentimiento(sesiones, ana, consumido=True),
+        await _consentimiento(sesiones, ana, consumido=False),
+    ]
+    # Cursos: el suyo sin ventas, alumna de otro, y la versión que publicó de ese otro.
+    h["curso_de_ana"], _ = await _curso(motor, ana)
+    h["curso_de_bea"], h["version_de_bea"] = await _curso(motor, bea, publico=ana)
+    await _alumno(motor, ana, h["curso_de_bea"])
+    # Eventos: asiste con una orden de pruebas (sin dinero de verdad), su reseña
+    # moderada, modera la de Carla y creó y publicó una política global.
+    h["evento"], tipo = await _evento(motor, bea)
+    h["resena_de_ana"] = await _asistencia(motor, h["evento"], tipo, ana, organizador=bea)
+    await _moderar_resena_de_evento(motor, h["resena_de_ana"], moderador)
+    h["resena_de_carla"] = await _asistencia(motor, h["evento"], tipo, carla, organizador=bea)
+    await _moderar_resena_de_evento(motor, h["resena_de_carla"], ana)
+    h["politica"] = str(await _escribir(
+        motor,
+        "insert into public.event_policies (policy_type, scope, version, params_sha256, status, published_at, "
+        "created_by, published_by) values ('negative_balance', 'global', cast(:v as text), repeat('d', 64), "
+        "'superseded', now(), cast(:a as uuid), cast(:a as uuid)) returning id",
+        v=f"recorrido-{ana[:8]}", a=ana,
+    ))
+    # Productos: postuló como vendedora (documento privado), sin catálogo, y
+    # guardó un producto de Carla.
+    postulacion = str(await _escribir(
+        motor,
+        "insert into public.seller_applications (profile_id, status, display_name, proposal, submitted_at) "
+        "values (cast(:u as uuid), 'submitted', 'Tienda Ana', 'Vendo cerámica hecha a mano en Cusco.', now()) returning id",
+        u=ana,
+    ))
+    h["ruc"] = f"{ana}/{postulacion}/ruc.pdf"
+    await _escribir(
+        motor,
+        "insert into public.seller_application_documents (application_id, kind, storage_path, created_by) "
+        "values (cast(:a as uuid), 'tax_data', cast(:r as text), cast(:u as uuid))",
+        a=postulacion, r=h["ruc"], u=ana,
+    )
+    await _escribir(
+        motor, "insert into public.product_sellers (profile_id, display_name) values (cast(:u as uuid), 'Tienda Ana')", u=ana
+    )
+    almacen.poner("seller-documents", h["ruc"])
+    tienda_de_carla = str(await _escribir(
+        motor, "insert into public.product_sellers (profile_id, display_name) values (cast(:u as uuid), 'Tienda') returning id",
+        u=carla,
+    ))
+    h["producto_de_carla"] = str(await _escribir(
+        motor, "insert into public.products (seller_id, created_by) values (cast(:s as uuid), cast(:u as uuid)) returning id",
+        s=tienda_de_carla, u=carla,
+    ))
+    await _escribir(
+        motor, "insert into public.saved_products (user_id, product_id) values (cast(:u as uuid), cast(:p as uuid))",
+        u=ana, p=h["producto_de_carla"],
+    )
+    # Comercio: un pedido que nunca se cobró y un acceso de la beta al curso de Bea.
+    h["oferta"] = str(await _escribir(
+        motor, "insert into public.commerce_products (kind, course_id) values ('course_lifetime', cast(:c as uuid)) returning id",
+        c=h["curso_de_bea"],
+    ))
+    await _escribir(
+        motor,
+        "insert into public.orders (user_id, commerce_product_id, provider, channel, status, amount_minor, currency) "
+        "values (cast(:u as uuid), cast(:p as uuid), 'stripe', 'web', 'pending', 4900, 'PEN')",
+        u=ana, p=h["oferta"],
+    )
+    await _escribir(
+        motor,
+        "insert into public.entitlements (user_id, commerce_product_id, status, source_provider) "
+        "values (cast(:u as uuid), cast(:p as uuid), 'active', 'beta')",
+        u=ana, p=h["oferta"],
+    )
+    # Historiales de dinero y de moderación de Productos y Eventos.
+    h["sembrados"] = {}
+    for tabla, columnas, valores in HISTORIALES_SEMBRADOS:
+        h["sembrados"][tabla] = str(uuid.uuid4())
+        await _sembrar(
+            motor, f"insert into public.{tabla} (id, actor_id, {columnas}) values (cast(:f as uuid), cast(:a as uuid), {valores})",
+            f=h["sembrados"][tabla], a=ana,
+        )
+    # Avisos, chat y lo que el móvil sube, de Ana y de Bea.
+    await _escribir(
+        motor, "insert into public.notifications (user_id, type, payload) values (cast(:u as uuid), 'follow', '{}')", u=ana
+    )
+    h["aviso_a_bea"] = str(await _escribir(
+        motor,
+        "insert into public.notifications (user_id, actor_id, type, payload) "
+        "values (cast(:b as uuid), cast(:a as uuid), 'follow', '{}') returning id",
+        a=ana, b=bea,
+    ))
+    _, h["conversacion_de_bea"] = await _chat(motor, almacen, ana, bea)
+    _archivos_de(almacen, ana)
+    _archivos_de(almacen, bea)
+    # Los documentos de Servicios, por su ruta EN LA BASE (la que se firmaría).
+    h["documentos"] = [str(r) for (r,) in await _filas(
+        motor, "select storage_path from public.service_provider_documents where application_id = cast(:s as uuid)",
+        s=h["solicitud"],
+    )]
+
+    # Que el montaje no pase por vacío.
+    assert all(n >= 1 for n in (await _restos_de_servicios(motor, h["solicitud"])).values())
+    assert len(h["documentos"]) == 2 and all(almacen.de(d, ana) for d in DEPOSITOS_PROPIOS)
+    assert any(r.count("/") >= 3 for r in almacen.de("post-media", ana)), "sin subcarpetas"
+    assert await _uno(motor, "select count(*) from public.audit_events where actor_id = cast(:u as uuid)", u=ana) >= 5
+    return h
+
+
+def _archivos(almacen, uid: str) -> dict[str, list[str]]:
+    return {
+        **{d: almacen.de(d, uid) for d in DEPOSITOS_PROPIOS},
+        "message-media": sorted(r for r in almacen.objetos.get("message-media", {}) if f"/{uid}/" in r),
+    }
+
+
+async def _huerfanos(motor) -> dict[str, int]:
+    """Filas hijas sin madre, por cada clave ajena de `public` (MATCH SIMPLE)."""
+    consultas = await _filas(
+        motor,
+        "select c.conrelid::regclass::text || '.' || c.conname, "
+        "  format('select count(*) from %s h where %s and not exists (select 1 from %s m where %s)', "
+        "    c.conrelid::regclass, "
+        "    (select string_agg(format('h.%I is not null', a.attname), ' and ') from unnest(c.conkey) k(n) "
+        "       join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.n), "
+        "    c.confrelid::regclass, "
+        "    (select string_agg(format('m.%I = h.%I', b.attname, a.attname), ' and ') "
+        "       from unnest(c.conkey, c.confkey) k(n, r) "
+        "       join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.n "
+        "       join pg_attribute b on b.attrelid = c.confrelid and b.attnum = k.r)) "
+        "from pg_constraint c join pg_class t on t.oid = c.conrelid "
+        "where c.contype = 'f' and t.relnamespace = 'public'::regnamespace",
+    )
+    salida = {}
+    for clave, sql in consultas:
+        if n := await _uno(motor, sql):
+            salida[clave] = n
+    return salida
+
+
+async def _que_la_nombra(motor, uid: str) -> dict[str, int]:
+    """Filas que aún apuntan a `uid` por una clave ajena a su perfil o a su usuario."""
+    columnas = await _filas(
+        motor,
+        "select c.conrelid::regclass::text, a.attname::text from pg_constraint c "
+        "join pg_class t on t.oid = c.conrelid "
+        "join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1] "
+        "where c.contype = 'f' and array_length(c.conkey, 1) = 1 "
+        "and c.confrelid in ('public.profiles'::regclass, 'auth.users'::regclass) "
+        "and t.relnamespace = 'public'::regnamespace",
+    )
+    salida = {}
+    for tabla, columna in columnas:
+        if n := await _uno(motor, f'select count(*) from {tabla} where "{columna}" = cast(:u as uuid)', u=uid):
+            salida[f"{tabla}.{columna}"] = n
+    return salida
+
+
+async def _cuanto_la_nombra(motor, uid: str) -> dict[str, int]:
+    """Lo que tiene que seguir intacto cuando la baja NO se hace."""
+    return {
+        "auditoria": await _uno(motor, "select count(*) from public.audit_events where actor_id = cast(:u as uuid)", u=uid),
+        "consentimientos": await _uno(
+            motor, "select count(*) from public.consent_records where subject_id = cast(:u as uuid)", u=uid
+        ),
+        "pedidos": await _uno(motor, "select count(*) from public.orders where user_id = cast(:u as uuid)", u=uid),
+        "ordenes_de_evento": await _uno(
+            motor, "select count(*) from public.event_orders where buyer_id = cast(:u as uuid)", u=uid
+        ),
+        **(await _que_la_nombra(motor, uid)),
+    }
+
+
+async def test_recorrido_integral_la_cuenta_se_va_y_la_historia_se_queda(entorno) -> None:
+    """El recorrido que se repitió tras aplicar la 0089 en Supabase, por el
+    endpoint real: Storage falla primero (503, nada tocado); después llegan dos
+    peticiones a la vez, una de ellas nombrando a otra persona (la identidad
+    sale del token). Lo suyo cae, sus archivos se van y ya no se pueden firmar,
+    la historia se queda entera sin nombrarla, ninguna clave ajena se rompe, lo
+    ajeno no se toca y repetir es seguro."""
+    import asyncio
+
+    app, motor, almacen = entorno
+    h = await _huella_completa(app, motor, almacen)
+    ana, bea = h["ana"], h["bea"]
+    archivos = _archivos(almacen, ana)
+    de_bea = _archivos(almacen, bea)
+    cuanto = await _cuanto_la_nombra(motor, ana)
+    auditoria = await _filas(
+        motor,
+        "select id, to_jsonb(a) - 'actor_id' from public.audit_events a where actor_id = cast(:u as uuid) order by id", u=ana,
+    )
+    moderacion_de_carla = await _uno(
+        motor, "select id from public.event_review_moderation where review_id = cast(:r as uuid)", r=h["resena_de_carla"]
+    )
+    #: Tabla → (columnas de persona, filas que se conservan).
+    conservado = {
+        "consent_records": (("subject_id",), h["consentimientos"]),
+        "course_versions": (("published_by",), [h["version_de_bea"]]),
+        "event_policies": (("created_by", "published_by"), [h["politica"]]),
+        "event_review_moderation": (("actor_id",), [str(moderacion_de_carla)]),
+        **{t: (("actor_id",), [f]) for t, f in h["sembrados"].items()},
+    }
+
+    async def _sin_persona(tabla: str, columnas: tuple[str, ...], ids: list[str]) -> list:
+        return await _filas(
+            motor,
+            f"select id, to_jsonb(t) - cast(:quitar as text[]) from public.{tabla} t "
+            "where id = any(cast(:ids as uuid[])) order by id",
+            quitar=list(columnas), ids=ids,
+        )
+
+    antes = {t: await _sin_persona(t, c, ids) for t, (c, ids) in conservado.items()}
+    huerfanos_antes = await _huerfanos(motor)
+
+    # 1. Storage no contesta al listar: 503 con su contrato y NADA tocado.
+    almacen.fallar_en = {"avatars"}
+    r = await _borrar_cuenta(app, ana)
+    assert r.status_code == 503, r.text
+    assert r.json()["error"] == {
+        "code": "account_deletion_storage_failed", "message": baja.ArchivosSinBorrar.message, "details": None,
+    }
+    assert await _existe(motor, ana) and almacen.borrados == []
+    assert _archivos(almacen, ana) == archivos and await _cuanto_la_nombra(motor, ana) == cuanto
+    almacen.fallar_en = set()
+
+    # 2. Dos a la vez; la segunda pide borrar a Bea: solo cuenta el token.
+    async def _nombrando_a_bea() -> httpx.Response:
+        async with _cliente(app, ana) as http:
+            return await http.request("DELETE", ME, params={"user_id": bea}, json={"user_id": bea})
+
+    respuestas = await asyncio.gather(_borrar_cuenta(app, ana), _nombrando_a_bea())
+
+    assert [x.status_code for x in respuestas] == [204, 204], [x.text for x in respuestas]
+    assert all(x.content == b"" for x in respuestas)
+    assert not await _existe(motor, ana)
+    for otra in (bea, h["carla"], h["jefa"], h["moderador"]):
+        assert await _existe(motor, otra)
+
+    # 3. Lo suyo, fuera: Servicios entero (postulación, documentos, credencial,
+    #    historial y envíos congelados), Productos, Comercio, Cursos, Eventos
+    #    (su orden de pruebas incluida), avisos.
+    assert await _restos_de_servicios(motor, h["solicitud"]) == {t: 0 for t, _ in SERVICIOS}
+    for tabla, columna in (
+        ("seller_applications", "profile_id"), ("product_sellers", "profile_id"), ("saved_products", "user_id"),
+        ("orders", "user_id"), ("entitlements", "user_id"), ("course_enrollments", "user_id"),
+        ("course_reviews", "user_id"), ("event_orders", "buyer_id"), ("event_tickets", "owner_id"),
+        ("event_reviews", "author_id"), ("notifications", "user_id"), ("courses", "author_id"),
+    ):
+        assert await _uno(motor, f"select count(*) from public.{tabla} where {columna} = cast(:u as uuid)", u=ana) == 0, tabla
+    assert await _uno(
+        motor, "select count(*) from public.event_review_moderation where review_id = cast(:r as uuid)", r=h["resena_de_ana"]
+    ) == 0
+
+    # 4. Nada apunta ya a ella, y la baja no ha roto ninguna clave ajena.
+    assert await _que_la_nombra(motor, ana) == {}
+    assert await _huerfanos(motor) == huerfanos_antes
+
+    # 5. Sus archivos privados e imágenes, en todos los depósitos y carpetas,
+    #    se han ido y NO SE PUEDEN FIRMAR; los de Bea siguen.
+    assert _archivos(almacen, ana) == {d: [] for d in archivos}
+    for deposito, rutas in archivos.items():
+        assert await storage.firmar_objetos(deposito, rutas) == {}, deposito
+    assert await storage.firmar_objetos("service-provider-documents", h["documentos"]) == {}
+    assert _archivos(almacen, bea) == {**de_bea, "message-media": [
+        r for r in de_bea["message-media"] if r.startswith(f"{h['conversacion_de_bea']}/")
+    ]}
+
+    # 6. La historia se queda ENTERA y deja de nombrarla: lo permitido pasa a NULL.
+    assert await _filas(
+        motor,
+        "select id, to_jsonb(a) - 'actor_id' from public.audit_events a where id = any(cast(:ids as uuid[])) order by id",
+        ids=[str(i) for i, _ in auditoria],
+    ) == auditoria
+    assert await _uno(
+        motor, "select count(*) from public.audit_events where id = any(cast(:ids as uuid[])) and actor_id is null",
+        ids=[str(i) for i, _ in auditoria],
+    ) == len(auditoria)
+    for tabla, (columnas, ids) in conservado.items():
+        assert await _sin_persona(tabla, columnas, ids) == antes[tabla], tabla
+        for columna in columnas:
+            assert await _uno(
+                motor, f"select count(*) from public.{tabla} where id = any(cast(:ids as uuid[])) and {columna} is null",
+                ids=ids,
+            ) == len(ids), f"{tabla}.{columna}"
+
+    # 7. Lo de las demás personas, intacto.
+    assert await _uno(motor, "select count(*) from public.courses where id = cast(:c as uuid)", c=h["curso_de_bea"]) == 1
+    assert await _uno(motor, "select count(*) from public.events where id = cast(:e as uuid)", e=h["evento"]) == 1
+    assert await _uno(
+        motor, "select count(*) from public.event_reviews where id = cast(:r as uuid)", r=h["resena_de_carla"]
+    ) == 1
+    assert await _uno(
+        motor, "select count(*) from public.products where id = cast(:p as uuid)", p=h["producto_de_carla"]
+    ) == 1
+    assert await _uno(motor, "select actor_id is null from public.notifications where id = cast(:n as uuid)", n=h["aviso_a_bea"])
+    assert await _uno(
+        motor, "select count(*) from public.audit_events where entity_id = cast(:s as uuid) and actor_id = cast(:m as uuid)",
+        s=h["solicitud"], m=h["moderador"],
+    ) >= 1
+
+    # 8. Repetir es seguro.
+    r = await _borrar_cuenta(app, ana)
+    assert r.status_code == 204 and r.content == b"", r.text
+
+
+async def test_recorrido_integral_con_dinero_real_no_se_toca_nada(entorno) -> None:
+    """La misma persona con dinero de verdad: una compra de curso cobrada en
+    `production` sin saldo del vendedor y una entrada pagada con Stripe. Las
+    órdenes se conservan: 409 con su contrato, y ni la base ni un solo archivo
+    cambian."""
+    app, motor, almacen = entorno
+    h = await _huella_completa(app, motor, almacen)
+    ana, bea = h["ana"], h["bea"]
+    compra = str(await _escribir(
+        motor,
+        "insert into public.orders (user_id, commerce_product_id, provider, channel, status, amount_minor, currency, "
+        "paid_at) values (cast(:u as uuid), cast(:p as uuid), 'stripe', 'web', 'paid', 4900, 'PEN', now()) returning id",
+        u=ana, p=h["oferta"],
+    ))
+    otro_evento, otro_tipo = await _evento(motor, bea)
+    await _asistencia(motor, otro_evento, otro_tipo, ana, organizador=bea, stripe=True)
+    assert await _filas(
+        motor, "select environment, exists (select 1 from public.owner_sale_balances b where b.order_id = o.id) "
+        "from public.orders o where id = cast(:o as uuid)", o=compra,
+    ) == [("production", False)]
+    archivos = _archivos(almacen, ana)
+    cuanto = await _cuanto_la_nombra(motor, ana)
+    assert cuanto["pedidos"] == 2 and cuanto["ordenes_de_evento"] == 2
+
+    r = await _borrar_cuenta(app, ana)
+
+    assert r.status_code == 409, r.text
+    error = r.json()["error"]
+    assert error["code"] == "account_deletion_blocked"
+    assert error["message"] == baja.CuentaConRegistrosQueConservar.message
+    assert error["details"] in ({"reason": "courses"}, {"reason": "events"})
+    assert await _existe(motor, ana)
+    assert almacen.borrados == [] and _archivos(almacen, ana) == archivos
+    assert await _cuanto_la_nombra(motor, ana) == cuanto
+    assert all(n >= 1 for n in (await _restos_de_servicios(motor, h["solicitud"])).values())
+
+
+async def test_recorrido_integral_un_fallo_de_la_base_no_se_da_por_borrado(entorno) -> None:
+    """Si la base falla a mitad (no por una restricción), la respuesta es un
+    error, la cuenta sigue y no se ha tocado ningún archivo. Si lo que falla es
+    la CONFIRMACIÓN, tampoco se contesta 204: la cuenta sigue (sus archivos ya
+    no, como dice `baja.py`) y repetir la petición termina la baja."""
+    app, motor, almacen = entorno
+    h = await _huella_completa(app, motor, almacen)
+    ana = h["ana"]
+    archivos = _archivos(almacen, ana)
+    cuanto = await _cuanto_la_nombra(motor, ana)
+
+    def _sin_propagar() -> AsyncClient:
+        return AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+            headers={"x-prueba-usuario": ana},
+        )
+
+    # 1. Un error de la base a mitad del borrado.
+    await _escribir(
+        motor,
+        "create function public.prueba_la_base_falla() returns trigger language plpgsql as $$ "
+        f"begin if old.user_id = '{ana}'::uuid then raise exception 'la base falla a mitad de la baja'; end if; "
+        "return old; end $$",
+    )
+    await _escribir(
+        motor,
+        "create trigger prueba_la_base_falla before delete on public.notifications "
+        "for each row execute function public.prueba_la_base_falla()",
+    )
+    try:
+        async with _sin_propagar() as http:
+            r = await http.delete(ME)
+    finally:
+        await _escribir(motor, "drop trigger prueba_la_base_falla on public.notifications")
+        await _escribir(motor, "drop function public.prueba_la_base_falla()")
+    assert r.status_code == 500, r.text
+    assert await _existe(motor, ana)
+    assert almacen.borrados == [] and _archivos(almacen, ana) == archivos
+    assert await _cuanto_la_nombra(motor, ana) == cuanto
+
+    # 2. Falla la confirmación (se cae la conexión).
+    class _SinConfirmar(AsyncSession):
+        async def commit(self) -> None:
+            raise OperationalError("COMMIT", {}, Exception("se cayó la conexión"))
+
+    sin_confirmar = async_sessionmaker(motor, expire_on_commit=False, class_=_SinConfirmar)
+
+    async def _db():
+        async with sin_confirmar() as db:
+            yield db
+
+    normal = app.dependency_overrides[get_db]
+    app.dependency_overrides[get_db] = _db
+    try:
+        async with _sin_propagar() as http:
+            r = await http.delete(ME)
+    finally:
+        app.dependency_overrides[get_db] = normal
+    assert r.status_code == 500, r.text
+    assert await _existe(motor, ana)
+    assert await _cuanto_la_nombra(motor, ana) == cuanto
+
+    r = await _borrar_cuenta(app, ana)
+    assert r.status_code == 204, r.text
+    assert not await _existe(motor, ana) and _archivos(almacen, ana) == {d: [] for d in archivos}
 
 
 # =========================================================================== #
