@@ -140,6 +140,9 @@ export const es = {
   'settings.deleteAccountBlocked': 'No podemos cerrar tu cuenta todavía',
   'settings.deleteAccountBlockedBody':
     'Tiene ventas, pedidos o reclamos que debemos conservar. Escríbenos y la cerramos contigo.',
+  'settings.deleteAccountUnknown': 'No pudimos confirmar el borrado',
+  'settings.deleteAccountUnknownBody':
+    'Vuelve a intentarlo cuando tengas conexión: si tu cuenta ya se eliminó, se cerrará la sesión.',
   'settings.notificationsOff': 'Permiso desactivado',
   'settings.notificationsOffBody':
     'Activa las notificaciones de Z en los ajustes del teléfono para recibir avisos.',

@@ -79,6 +79,13 @@ export function SettingsScreen() {
         notify(t('settings.deleteAccountBlocked'), t('settings.deleteAccountBlockedBody'));
         return;
       }
+      // SIN RESPUESTA NO SE SABE. La baja pudo terminar en el servidor aunque
+      // aquí se cortara la espera: decir «tu cuenta sigue activa» podría ser
+      // falso. Repetir es seguro (si ya se borró, responde bien y se sale).
+      if (error instanceof ApiError && (error.code === 'timeout' || error.code === 'network_error')) {
+        notify(t('settings.deleteAccountUnknown'), t('settings.deleteAccountUnknownBody'));
+        return;
+      }
       notify(t('settings.deleteAccountFailed'), t('settings.deleteAccountFailedBody'));
     }
   };

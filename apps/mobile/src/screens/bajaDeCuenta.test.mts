@@ -51,9 +51,24 @@ describe('Borrar la cuenta', () => {
     assert.ok(!rama.includes('deleteAccountFailedBody'));
   });
 
+  it('sin respuesta NO afirma que la cuenta sigue activa (la baja pudo terminar)', () => {
+    const rama = bloque(manejador, "error.code === 'timeout'", 'return;');
+    assert.ok(manejador.includes("error.code === 'network_error'"));
+    assert.ok(rama.includes("t('settings.deleteAccountUnknown')"));
+    assert.ok(rama.includes("t('settings.deleteAccountUnknownBody')"));
+    assert.ok(!rama.includes('deleteAccountFailedBody'));
+  });
+
   it('cualquier otro fallo sigue diciendo que la cuenta sigue activa', () => {
-    const despues = manejador.slice(manejador.indexOf("error.code === 'account_deletion_blocked'"));
+    const despues = manejador.slice(manejador.indexOf("error.code === 'timeout'"));
     assert.ok(despues.includes("t('settings.deleteAccountFailedBody')"));
+  });
+
+  it('la baja espera más que una petición normal: borra archivos antes de confirmar', () => {
+    const borrar = bloque(REPOSITORIO, 'async deleteAccount()', '\n  },');
+    const espera = /timeoutMs:\s*([\d_]+)/.exec(borrar);
+    assert.ok(espera, 'la baja lleva su propia espera');
+    assert.ok(Number(espera[1].replace(/_/g, '')) >= 60_000);
   });
 
   it('solo se sale a la portada si el servidor la borró', () => {
@@ -73,8 +88,9 @@ describe('Borrar la cuenta', () => {
   it('los textos nuevos existen en los tres idiomas', () => {
     for (const idioma of ['es', 'en', 'pt']) {
       const textos = fuente(`i18n/${idioma}.ts`);
-      assert.ok(textos.includes("'settings.deleteAccountBlocked':"), idioma);
-      assert.ok(textos.includes("'settings.deleteAccountBlockedBody':"), idioma);
+      for (const clave of ['deleteAccountBlocked', 'deleteAccountBlockedBody', 'deleteAccountUnknown', 'deleteAccountUnknownBody']) {
+        assert.ok(textos.includes(`'settings.${clave}':`), `${idioma}: ${clave}`);
+      }
     }
   });
 });

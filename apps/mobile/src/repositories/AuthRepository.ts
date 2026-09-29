@@ -152,7 +152,9 @@ export const AuthRepository = {
    * quedaria a medio eliminar.
    */
   async deleteAccount(): Promise<void> {
-    await apiRequest<void>(`${API_V1}/auth/me`, { method: 'DELETE' });
+    // Espera larga a proposito: la baja borra los archivos de la cuenta antes
+    // de confirmar, y con mucho contenido tarda mas que una peticion normal.
+    await apiRequest<void>(`${API_V1}/auth/me`, { method: 'DELETE', timeoutMs: 90_000 });
     if (supabase) await supabase.auth.signOut();
   },
 
