@@ -4945,6 +4945,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'servicios.error.parametrosInvalidos': 'One of the terms settings isn\'t valid.',
   'servicios.error.documentoNoEncontrado': 'We couldn\'t find that document.',
   'servicios.error.documentoBloqueado': 'That document can no longer be changed.',
+  'servicios.error.documentoEnUso': 'This document supports a credential: change its evidence or remove the credential first.',
+  'servicios.error.datoObligatorio': 'That detail can\'t be left empty once the application has been submitted.',
   'servicios.error.documentoEnviado': 'What was already submitted can\'t be removed: replace it.',
   'servicios.error.documentoVacio': 'The file is empty.',
   'servicios.error.documentoPesado': 'The file is too large: the maximum is 10 MB.',

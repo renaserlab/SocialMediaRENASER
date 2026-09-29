@@ -5062,6 +5062,8 @@ export const es = {
   'servicios.error.parametrosInvalidos': 'Algún parámetro de las condiciones no es válido.',
   'servicios.error.documentoNoEncontrado': 'No encontramos ese documento.',
   'servicios.error.documentoBloqueado': 'Ese documento ya no se puede cambiar.',
+  'servicios.error.documentoEnUso': 'Este documento respalda una credencial: cambia su evidencia o quita la credencial antes.',
+  'servicios.error.datoObligatorio': 'Ese dato no se puede dejar vacío una vez enviada la postulación.',
   'servicios.error.documentoEnviado': 'Lo ya enviado no se retira: reemplázalo.',
   'servicios.error.documentoVacio': 'El archivo está vacío.',
   'servicios.error.documentoPesado': 'El archivo pesa demasiado: el máximo es 10 MB.',

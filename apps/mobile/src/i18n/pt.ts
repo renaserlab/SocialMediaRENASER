@@ -4950,6 +4950,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'servicios.error.parametrosInvalidos': 'Algum parâmetro das condições não é válido.',
   'servicios.error.documentoNoEncontrado': 'Não encontrámos esse documento.',
   'servicios.error.documentoBloqueado': 'Esse documento já não pode ser alterado.',
+  'servicios.error.documentoEnUso': 'Este documento comprova uma credencial: altere a prova ou remova a credencial antes.',
+  'servicios.error.datoObligatorio': 'Esse dado não pode ficar vazio depois de enviada a candidatura.',
   'servicios.error.documentoEnviado': 'O que já foi enviado não se retira: substitua-o.',
   'servicios.error.documentoVacio': 'O ficheiro está vazio.',
   'servicios.error.documentoPesado': 'O ficheiro é demasiado grande: o máximo é 10 MB.',
