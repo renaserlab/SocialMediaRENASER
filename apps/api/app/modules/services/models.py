@@ -1,10 +1,11 @@
-"""Las tablas de la admisión de Servicios (migraciones 0086 y 0087).
+"""Las tablas de la admisión de Servicios (migraciones 0086, 0087 y 0088).
 
 LO QUE DECLARA EL ORM TIENE QUE DECLARARLO TAMBIÉN LA BASE, y al revés. Las
 pruebas montan SQLite desde `Base.metadata`: un CHECK que solo viva en el `.sql`
 es invisible para la suite. Por eso cada CHECK está aquí con SU MISMO NOMBRE y
-la misma expresión que en la base TAL Y COMO QUEDA tras la 0087 (que amplía la
-0086 para `withdrawn`; `tests/test_servicios_migracion_0086.py` y `_0087.py` lo
+la misma expresión que en la base TAL Y COMO QUEDA tras la 0088 (la 0087 amplía
+la 0086 para `withdrawn`; la 0088 añade el ciclo de vida, los envíos congelados
+y la coherencia con el prestador; `tests/test_servicios_migracion_00*.py` lo
 comprueban), escrita con funciones que existen en los dos motores: `length`,
 `trim`, `ltrim`, `upper`, `coalesce`.
 
@@ -362,6 +363,12 @@ class ServiceProviderApplication(Base):
             + ") or applicant_message is not null",
             name="service_provider_applications_con_motivo",
         ),
+        # 0088: retirarse es ANTES de la decisión. Una aprobada que se suspende
+        # vuelve a `under_review`, pero ya tiene `decided_at`.
+        CheckConstraint(
+            f"status <> '{states.RETIRADA}' or decided_at is null",
+            name="service_provider_applications_retirada_antes_de_decidir",
+        ),
         # 0087: el rechazo Y LA RETIRADA liberan el hueco.
         Index(
             "service_provider_applications_una_viva",
@@ -408,6 +415,13 @@ DOCUMENTO_ACEPTADO = "accepted"
 DOCUMENTO_OBSERVADO = "rejected"
 ESTADOS_DE_DOCUMENTO = (DOCUMENTO_PENDIENTE, DOCUMENTO_ACEPTADO, DOCUMENTO_OBSERVADO)
 
+#: EL CICLO DE VIDA (0088). Nada se borra: se reemplaza o se retira.
+ACTIVO = "active"
+REEMPLAZADO = "replaced"
+RETIRADO = "removed"
+CICLO_DE_DOCUMENTO = (ACTIVO, REEMPLAZADO, RETIRADO)
+CICLO_DE_CREDENCIAL = (ACTIVO, RETIRADO)
+
 
 class ServiceProviderDocument(Base):
     """Un documento presentado. La ruta NUNCA sale en una respuesta."""
@@ -436,6 +450,12 @@ class ServiceProviderDocument(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    #: 0088: `active`, `replaced` (por `replaced_by`) o `removed`.
+    lifecycle: Mapped[str] = mapped_column(String(16), server_default=text(f"'{ACTIVO}'"))
+    lifecycle_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    replaced_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("storage_path", name="service_provider_documents_ruta_unica"),
@@ -493,6 +513,33 @@ class ServiceProviderDocument(Base):
             "application_id",
             "kind",
             "created_at",
+        ),
+        # 0088
+        ForeignKeyConstraint(
+            ["replaced_by", "provider_id"],
+            ["service_provider_documents.id", "service_provider_documents.provider_id"],
+            ondelete="CASCADE",
+            name="service_provider_documents_reemplazado_por",
+        ),
+        CheckConstraint(
+            f"lifecycle in ({_lista(CICLO_DE_DOCUMENTO)})",
+            name="service_provider_documents_ciclo",
+        ),
+        CheckConstraint(
+            f"(lifecycle = '{ACTIVO}') = (lifecycle_changed_at is null)",
+            name="service_provider_documents_ciclo_con_fecha",
+        ),
+        CheckConstraint(
+            f"(lifecycle = '{REEMPLAZADO}') = (replaced_by is not null)"
+            " and (replaced_by is null or replaced_by <> id)",
+            name="service_provider_documents_reemplazo_coherente",
+        ),
+        Index(
+            "service_provider_documents_activos",
+            "application_id",
+            "kind",
+            postgresql_where=text(f"lifecycle = '{ACTIVO}'"),
+            sqlite_where=text(f"lifecycle = '{ACTIVO}'"),
         ),
     )
 
@@ -559,8 +606,30 @@ class ServiceProviderCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    #: 0088: `active` o `removed`; y OBSERVADA = `declared` + `observed_at`.
+    lifecycle: Mapped[str] = mapped_column(String(16), server_default=text(f"'{ACTIVO}'"))
+    lifecycle_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
+        # 0088
+        CheckConstraint(
+            f"lifecycle in ({_lista(CICLO_DE_CREDENCIAL)})",
+            name="service_provider_credentials_ciclo",
+        ),
+        CheckConstraint(
+            f"(lifecycle = '{ACTIVO}') = (lifecycle_changed_at is null)",
+            name="service_provider_credentials_ciclo_con_fecha",
+        ),
+        CheckConstraint(
+            f"observed_at is null or (status = '{CREDENCIAL_DECLARADA}'"
+            " and review_note is not null)",
+            name="service_provider_credentials_observada_coherente",
+        ),
         ForeignKeyConstraint(
             ["application_id", "provider_id"],
             [
@@ -682,6 +751,9 @@ class ServiceProviderApplicationEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    #: 0088: lo VISIBLE que acompaña al paso, p. ej. `{"fields": [...]}` al pedir
+    #: correcciones. Nunca notas internas.
+    details: Mapped[dict] = mapped_column(_parametros, server_default=text("'{}'"))
 
     __table_args__ = (
         CheckConstraint(
@@ -735,7 +807,78 @@ class ServiceProviderApplicationEvent(Base):
     )
 
 
+# --------------------------------------------------------------------------- #
+# 7. Los envíos congelados (0088): SOLO SE AÑADEN
+# --------------------------------------------------------------------------- #
+ENVIO_INICIAL = "submitted"
+REENVIO = "resubmitted"
+
+
+class ServiceProviderApplicationSubmission(Base):
+    """Lo que se envió en cada envío o reenvío, y las condiciones aceptadas."""
+
+    __tablename__ = "service_provider_application_submissions"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    application_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("service_provider_applications.id", ondelete="CASCADE"),
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))
+    terms_policy_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("service_policies.id", ondelete="RESTRICT")
+    )
+    terms_version: Mapped[int] = mapped_column(Integer)
+    terms_sha256: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(_parametros)
+    snapshot_sha256: Mapped[str] = mapped_column(String(64))
+    submitted_by: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            "sequence",
+            name="service_provider_application_submissions_una_por_secuencia",
+        ),
+        CheckConstraint(
+            "sequence >= 1", name="service_provider_application_submissions_secuencia"
+        ),
+        CheckConstraint(
+            f"kind in ({_lista((ENVIO_INICIAL, REENVIO))})",
+            name="service_provider_application_submissions_tipo",
+        ),
+        CheckConstraint(
+            "terms_version >= 1", name="service_provider_application_submissions_version"
+        ),
+        CheckConstraint(
+            _es_huella("terms_sha256", nula=False),
+            name="service_provider_application_submissions_huella_de_terminos",
+        ),
+        CheckConstraint(
+            _es_huella("snapshot_sha256", nula=False),
+            name="service_provider_application_submissions_huella_del_envio",
+        ),
+        Index(
+            "service_provider_application_submissions_de_la_postulacion",
+            "application_id",
+            text("sequence desc"),
+        ),
+    )
+
+
 __all__ = [
+    "ACTIVO",
+    "CICLO_DE_CREDENCIAL",
+    "CICLO_DE_DOCUMENTO",
+    "ENVIO_INICIAL",
+    "REEMPLAZADO",
+    "REENVIO",
+    "RETIRADO",
+    "ServiceProviderApplicationSubmission",
     "CREDENCIAL_DECLARADA",
     "CREDENCIAL_VERIFICADA",
     "DOCUMENTO_PENDIENTE",

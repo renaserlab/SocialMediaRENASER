@@ -132,11 +132,13 @@ def test_los_buckets_declarados_son_los_que_usa_el_movil():
     """Si el movil sube a un bucket nuevo, hay que anadirlo aqui o quedara sin limpiar.
 
     `seller-documents` (0085) guarda los documentos de la postulacion bajo
-    `<perfil>/...`: al borrar la cuenta se van con ella.
+    `<perfil>/...`: al borrar la cuenta se van con ella. Igual
+    `service-provider-documents` (0088), los de las postulaciones de Servicios.
     """
     assert set(storage.USER_BUCKETS) == {
         "post-media",
         "avatars",
         "course-media",
         "seller-documents",
+        "service-provider-documents",
     }

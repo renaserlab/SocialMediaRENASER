@@ -18,7 +18,7 @@ LO QUE DEFIENDEN ESTAS PRUEBAS:
      historial.
 
 Las pruebas de PostgreSQL necesitan `MIGRACIONES_DATABASE_URL`. EL ORDEN
-IMPORTA: las primeras comparten una base montada entera (0001–0087); las del
+IMPORTA: las primeras comparten una base montada entera (0001–última); las del
 final (los escenarios) la vuelven a montar a su manera, por eso van al final.
 """
 
@@ -122,10 +122,12 @@ def _n(texto: str) -> str:
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0086() -> None:
+def test_sigue_a_la_0086_y_la_0088_va_despues() -> None:
+    """Era la última cuando se aplicó; ahora la sigue la 0088, que la exige."""
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2] == ANTERIOR.name
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1] == ANTERIOR.name
+    assert nombres[posicion + 1].startswith("0088_")
 
 
 def test_es_una_unica_transaccion() -> None:
@@ -383,15 +385,33 @@ def _llevar(pg, solicitud: str, estado: str, *, admin: str, politica: tuple[str,
             _hacer(pg, "update service_provider_applications set status = 'resubmitted', "
                        "last_submitted_at = now() where id = %s", solicitud)
         elif paso == "approved":
-            _hacer(pg, "update service_provider_applications set status = 'approved', "
-                       "decided_at = now(), decided_by = %s where id = %s", admin, solicitud)
+            # Desde la 0088 la base exige, al confirmar, que el prestador de una
+            # aprobada esté activo: los dos cambios van en la misma transacción.
+            with pg.transaction():
+                _hacer(pg, "update service_provider_applications set status = 'approved', "
+                           "decided_at = now(), decided_by = %s where id = %s", admin, solicitud)
+                _prestador_en(pg, solicitud, "active")
         elif paso == "rejected":
             _hacer(pg, "update service_provider_applications set status = 'rejected', decided_at = now(), "
                        "decided_by = %s, applicant_message = 'No se pudo verificar.' where id = %s",
                    admin, solicitud)
         elif paso == "suspended":
-            _hacer(pg, "update service_provider_applications set status = 'suspended', suspended_at = now(), "
-                       "applicant_message = 'Suspensión preventiva.' where id = %s", solicitud)
+            with pg.transaction():
+                _hacer(pg, "update service_provider_applications set status = 'suspended', suspended_at = now(), "
+                           "applicant_message = 'Suspensión preventiva.' where id = %s", solicitud)
+                _prestador_en(pg, solicitud, "suspended")
+
+
+def _prestador_en(pg, solicitud: str, estado: str) -> None:
+    """El prestador de la postulación, en el estado que le corresponde (0088)."""
+    _hacer(
+        pg,
+        "update service_providers set status = %s, "
+        "activated_at = coalesce(activated_at, case when %s = 'active' then now() end), "
+        "suspended_at = case when %s = 'suspended' then now() else suspended_at end "
+        "where id = (select provider_id from service_provider_applications where id = %s)",
+        estado, estado, estado, solicitud,
+    )
 
 
 def _retirar(pg, solicitud: str, perfil: str, desde: str) -> None:

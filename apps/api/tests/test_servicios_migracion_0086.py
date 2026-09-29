@@ -9,8 +9,11 @@ DOS MITADES:
     LA 0086 ES HISTÓRICA: está aplicada en Supabase (verificada el 28/09/2026)
     y no se edita. Sus propias definiciones son las del Bloque 1A, con ocho
     estados; la 0087 amplía cinco CHECK, la función de saltos y un índice para
-    `withdrawn`. Los modelos reflejan la base EFECTIVA (0086 + 0087), y eso es
-    lo que se compara aquí; lo que la 0087 cambia se prueba en su fichero.
+    `withdrawn`, y la 0088 AÑADE columnas, restricciones e índices (ciclo de
+    vida de la evidencia) y una tabla nueva. Los modelos reflejan la base
+    EFECTIVA (0086 + las posteriores), y eso es lo que se compara aquí: lo de
+    la 0086 más lo que las posteriores le añaden a SUS tablas. Lo que cada una
+    cambia se prueba en su fichero.
   * POSTGRESQL (con `MIGRACIONES_DATABASE_URL`): desde cero con todas las
     anteriores, y lo que SQLite no puede probar: claves ajenas, índices
     parciales, disparadores, RLS, privilegios, el historial que solo se añade,
@@ -176,25 +179,66 @@ def test_los_modelos_tienen_las_mismas_columnas_que_el_sql() -> None:
             nombre = re.match(r"^([a-z_][a-z_0-9]*)\s+[a-z]", parte)
             if nombre and nombre.group(1) not in {"constraint", "primary", "unique", "check", "foreign"}:
                 del_sql.add(nombre.group(1))
+        del_sql |= _columnas_anadidas_despues(tabla)
         del_modelo = {c.name for c in MODELOS[tabla].__table__.columns}
         assert del_sql == del_modelo, (tabla, del_sql ^ del_modelo)
 
 
-def _anadidos_despues(tabla: str) -> set[str]:
-    """Los CHECK que las migraciones POSTERIORES añaden o sustituyen en esa
-    tabla (`alter table ... add constraint X check`)."""
-    nombres: set[str] = set()
-    for ruta in sorted(MIGRACIONES.glob("*.sql")):
-        if ruta.name <= ARCHIVO.name:
-            continue
-        sql = _sin_comentarios(ruta.read_text(encoding="utf-8"))
-        nombres |= set(
-            re.findall(
-                rf"alter\s+table\s+public\.{tabla}\s+add\s+constraint\s+([a-z_0-9]+)\s+check",
-                sql,
-            )
+def _posteriores() -> str:
+    """El SQL, sin comentarios, de las migraciones POSTERIORES a la 0086."""
+    return "\n".join(
+        _sin_comentarios(ruta.read_text(encoding="utf-8")).replace("\r\n", "\n")
+        for ruta in sorted(MIGRACIONES.glob("*.sql"))
+        if ruta.name > ARCHIVO.name
+    )
+
+
+def _anadidos_despues(tabla: str, clase: str = r"check") -> set[str]:
+    """Las restricciones que las migraciones POSTERIORES añaden o sustituyen en
+    esa tabla (`alter table ... add constraint X check|unique|foreign key`)."""
+    return set(
+        re.findall(
+            rf"alter\s+table\s+public\.{tabla}\s+add\s+constraint\s+([a-z_0-9]+)\s+(?:{clase})",
+            _posteriores(),
         )
-    return nombres
+    )
+
+
+def _columnas_anadidas_despues(tabla: str) -> set[str]:
+    """`alter table public.X add column if not exists Y` de las posteriores."""
+    return set(
+        re.findall(
+            rf"alter\s+table\s+public\.{tabla}\s+add\s+column\s+if\s+not\s+exists\s+([a-z_0-9]+)\s",
+            _posteriores(),
+        )
+    )
+
+
+def _indices_anadidos_despues() -> set[str]:
+    """Los índices que las posteriores crean sobre las tablas de la 0086."""
+    return {
+        nombre
+        for nombre, tabla in re.findall(
+            r"create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?([a-z_0-9]+)\s+on\s+public\.([a-z_0-9]+)",
+            _posteriores(),
+        )
+        if tabla in MODELOS
+    }
+
+
+def test_las_posteriores_solo_anaden_a_las_tablas_de_la_0086() -> None:
+    """Ninguna migración posterior borra una columna, una tabla o un índice de
+    la 0086: si lo hiciera, la comparación de abajo lo escondería."""
+    posteriores = _posteriores()
+    for tabla in MODELOS:
+        assert not re.search(
+            rf"alter\s+table\s+public\.{tabla}\s+(?:drop\s+column|rename|alter\s+column)",
+            posteriores,
+        ), tabla
+        assert not re.search(rf"drop\s+table\s+(?:if\s+exists\s+)?public\.{tabla}\b", posteriores)
+    assert _columnas_anadidas_despues("service_provider_documents") == {
+        "lifecycle", "lifecycle_changed_at", "replaced_by",
+    }
 
 
 def test_cada_check_con_nombre_esta_en_los_dos_sitios() -> None:
@@ -212,6 +256,7 @@ def test_cada_check_con_nombre_esta_en_los_dos_sitios() -> None:
 def test_las_restricciones_unicas_y_ajenas_con_nombre_estan_en_los_dos_sitios() -> None:
     for tabla, cuerpo in _bloques().items():
         del_sql = set(re.findall(r"constraint\s+([a-z_0-9]+)\s+(?:unique|foreign\s+key)", cuerpo))
+        del_sql |= _anadidos_despues(tabla, r"unique|foreign\s+key")
         del_modelo = {
             c.name
             for c in MODELOS[tabla].__table__.constraints
@@ -222,6 +267,7 @@ def test_las_restricciones_unicas_y_ajenas_con_nombre_estan_en_los_dos_sitios() 
 
 def test_los_indices_con_nombre_estan_en_los_dos_sitios() -> None:
     del_sql = set(re.findall(r"create\s+(?:unique\s+)?index\s+if\s+not\s+exists\s+([a-z_0-9]+)", SQL))
+    del_sql |= _indices_anadidos_despues()
     del_modelo = {i.name for m in MODELOS.values() for i in m.__table__.indexes}
     assert del_sql == del_modelo, del_sql ^ del_modelo
 
@@ -360,14 +406,19 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
         "select table_name from information_schema.tables where table_schema = 'public' "
         "and table_name like 'service\\_%%'",
     )}
-    assert tablas == set(MODELOS)
+    # Las seis de la 0086 y la de los envíos congelados (0088).
+    assert tablas == set(MODELOS) | {"service_provider_application_submissions"}
     # Reejecutar la 0086 sobre una base que ya tiene la 0087 le devuelve su
     # función de saltos de ocho estados: por eso la 0087 dice que, si pasa,
-    # hay que volver a ejecutarla. Se comprueba el procedimiento entero.
+    # hay que volver a ejecutarla (y la 0088 después). Se comprueba el
+    # procedimiento entero.
     with pg.cursor() as cur:
         cur.execute(ARCHIVO.read_text(encoding="utf-8"))
         cur.execute(ARCHIVO.read_text(encoding="utf-8"))
         cur.execute((MIGRACIONES / "0087_servicios_retirada.sql").read_text(encoding="utf-8"))
+        cur.execute(
+            (MIGRACIONES / "0088_servicios_documentos_y_envios.sql").read_text(encoding="utf-8")
+        )
     assert "withdrawn" in _uno(
         pg,
         "select pg_get_functiondef('public.service_provider_applications_salto_valido()'::regprocedure)",
@@ -427,6 +478,11 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         ("service_provider_credentials", "service_provider_applications", "c"),
         ("service_provider_credentials", "service_provider_documents", "c"),
         ("service_provider_application_events", "service_provider_applications", "c"),
+        # 0088: el reemplazo es un documento de la misma persona, y el envío
+        # congelado cuelga de su postulación y apunta a la versión aceptada.
+        ("service_provider_documents", "service_provider_documents", "c"),
+        ("service_provider_application_submissions", "service_provider_applications", "c"),
+        ("service_provider_application_submissions", "service_policies", "r"),
     }
     assert ajenas == esperadas
     # Quién actuó NO tiene clave ajena: un `set null` sería reescribir historia.
