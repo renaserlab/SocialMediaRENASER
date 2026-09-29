@@ -13,7 +13,7 @@ LO QUE DEFIENDEN:
   2. DOS DECISIONES A LA VEZ sobre la misma postulación: gana una, la otra
      recibe un 409 y el historial tiene UN solo evento de decisión.
   3. DOS ENVÍOS A LA VEZ, o dos altas a la vez, no crean dos de nada.
-  4. BORRAR LA CUENTA se lleva lo que la API creó.
+  4. BORRAR LA CUENTA se lleva lo que la API creó (desde la 0089).
 """
 
 from __future__ import annotations
@@ -383,19 +383,12 @@ async def test_dos_envios_a_la_vez_desde_el_borrador_solo_envian_uno(entorno) ->
     ) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "HALLAZGO DE PLATAFORMA, previo a Servicios (0050): `audit_events` es de "
-        "solo añadir, pero su `actor_id` es `on delete set null`. Borrar el perfil "
-        "de alguien que aparece como actor en la auditoría pide un UPDATE que el "
-        "disparador rechaza, y `DELETE /me` falla. Afecta ya a Eventos, Catálogo y "
-        "Comercio; con Servicios, a cada prestador. Arreglarlo toca la regla de "
-        "inmutabilidad de la auditoría aplicada en producción: no se decide aquí. "
-        "Cuando se arregle, esta prueba pasará y `strict` obligará a quitar la marca."
-    ),
-)
 async def test_borrar_la_cuenta_se_lleva_lo_que_creo_la_api(entorno) -> None:
+    """Fue una `xfail` estricta hasta la 0089: `audit_events` es de solo añadir
+    pero su `actor_id` es `on delete set null`, y borrar el perfil de quien
+    figuraba en la auditoría pedía un UPDATE que el disparador rechazaba. La
+    0089 admite esa puesta a NULL y solo esa. El recorrido completo por
+    `DELETE /auth/me` está en `test_baja_de_cuenta_postgres.py`."""
     app, motor = entorno
     jefa, moderador, dora = await _persona(motor, "admin"), await _persona(motor, "moderator"), await _persona(motor)
     pais = await _publicar(app, jefa)

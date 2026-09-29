@@ -144,10 +144,12 @@ class ConsentRecord(Base):
     __tablename__ = "consent_records"
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
-    #: `RESTRICT` y no `CASCADE`: borrar un perfil no puede borrar la prueba de
-    #: lo que esa persona aceptó antes de pagar.
-    subject_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="RESTRICT"), index=True
+    #: `SET NULL` desde la 0089 (antes `RESTRICT`), y nunca `CASCADE`: borrar un
+    #: perfil no puede borrar la prueba de lo que esa persona aceptó antes de
+    #: pagar, pero la prueba tampoco puede impedir que se vaya. Se queda,
+    #: anónima. Siempre nace con persona: NULL solo lo pone la baja de la cuenta.
+    subject_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), index=True, nullable=True
     )
     policy_version_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("policy_versions.id", ondelete="RESTRICT")

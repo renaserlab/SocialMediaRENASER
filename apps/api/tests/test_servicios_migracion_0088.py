@@ -93,10 +93,13 @@ def _nombres_de(sql: str) -> set[str]:
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0087() -> None:
+def test_sigue_a_la_0087_y_la_0089_va_despues() -> None:
+    """Era la última cuando se aplicó (29/09/2026); ahora la sigue la 0089,
+    que la exige."""
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2] == ANTERIORES[1].name
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1] == ANTERIORES[1].name
+    assert nombres[posicion + 1].startswith("0089_")
 
 
 def test_la_0087_no_ha_cambiado_desde_que_se_aplico() -> None:
