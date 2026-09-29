@@ -266,17 +266,19 @@ La correspondencia vista por vista está en
 
 | Suite | Resultado |
 |---|---|
-| Backend completo con PostgreSQL real (docker `postgres:16`) | **3631 pasan, 1 xfail estricta (§12), 0 fallan, 0 omitidas**. Línea base antes de Servicios: 3449 |
-| Servicios sobre SQLite | API: 43 · estados y saltos: 40 |
-| Servicios sobre PostgreSQL | 0086: 29 · 0087: 30 · 0088: 30 · flujo y concurrencia: 4 + 1 xfail |
+| Backend completo con PostgreSQL real (docker `postgres:16`) | **3645 pasan, 1 xfail estricta (§12), 0 fallan, 0 omitidas** (tras las correcciones de §15). Línea base antes de Servicios: 3449 |
+| Backend completo sin PostgreSQL | 2818 pasan y 814 omitidas (las de PostgreSQL), antes de §15 |
+| Servicios sobre SQLite | API: 52 · estados y saltos: 40 · almacenamiento: 3 nuevas |
+| Servicios sobre PostgreSQL | 0086: 29 · 0087: 30 · 0088: 30 · flujo y concurrencia: 6 + 1 xfail |
 | Móvil completo | **3270/3270** en copia LF (en la copia CRLF de Windows fallan las 3 de siempre, ajenas a Servicios). Línea base: 3178 |
 | Móvil de Servicios | 92: lógica contra el código del servidor (32) y vistas, contratos, bandera y avisos (60) |
 | TypeScript (`tsc --noEmit`) | limpio |
 | Expo Doctor | 18/18 |
 | Exportación web | correcta, con las rutas de Servicios en el paquete |
 
-**Mutaciones: 21/21 cazadas.** Cada una se aplicó en una copia aparte, se
-corrieron las pruebas que la deben detectar y se restauró. Son:
+**Mutaciones: 23/23 cazadas** (repetidas tras las correcciones de §15). Cada
+una se aplicó en una copia aparte, se corrieron las pruebas que la deben
+detectar y se restauró. Son:
 
 - permitir autoaprobación;
 - transición ilegal;
@@ -294,6 +296,8 @@ corrieron las pruebas que la deben detectar y se restauró. Son:
 - mostrar notas internas;
 - ignorar `FEATURE_SERVICES`;
 - retirar tras la decisión;
+- quitar la evidencia de una credencial (H1);
+- escribir sin bloquear la postulación (M2);
 - en el móvil:
   - Servicios encendido si el servidor calla;
   - la entrada del perfil sin bandera;
@@ -302,3 +306,36 @@ corrieron las pruebas que la deben detectar y se restauró. Son:
 
 La carrera de dos decisiones simultáneas no es determinista por sí sola. La
 mutación del bloqueo la cazan también los envíos simultáneos.
+
+## 15. Revisión independiente (29/09/2026)
+
+Revisión hecha por otra sesión, con otro criterio, sobre `891cffe..93ef55c`. No
+hubo bloqueantes. Encontró **1 alto, 3 medios y 7 bajos**. **Cada uno se
+reprodujo con una prueba que fallaba antes de corregirlo**, y esas pruebas
+quedan en la suite.
+
+| # | Hallazgo | Corrección |
+|---|---|---|
+| **H1** | Se podía quitar el documento que respaldaba una credencial (el archivo se borraba) y después verificarla y aprobar | Un documento que respalda una credencial activa no se quita (`service_document_in_use`) ni se ofrece para quitar. Reemplazarlo mueve la evidencia de las credenciales declaradas. Enviar exige una evidencia activa y verificar la exige disponible |
+| M1 | Vaciar el resumen al corregir daba un 500 (CHECK `enviada_completa`) | 422 `service_application_field_required` |
+| M2 | Las escrituras de quien postula no bloqueaban la fila: un cambio colado durante el envío alteraba lo ya congelado | Todas las escrituras bloquean la postulación antes de leerla. Probado contra PostgreSQL con un bloqueo real |
+| M3 | El borrado de la cuenta no bajaba a las carpetas del depósito: los documentos en `<perfil>/<postulación>/…` se quedaban. **También afectaba a `seller-documents` (0085)** | `delete_user_files` baja a las carpetas (tope de 4 niveles), probado con una imitación del listado no recursivo de Storage. **Conviene confirmarlo una vez contra el proyecto real** |
+| L1 | Un fallo de red del almacenamiento daba 500 | 503 `service_storage_failed` |
+| L2 | Si algo fallaba entre la subida y el commit, el archivo quedaba huérfano | Se borra, falle lo que falle en ese tramo |
+| L3 | Un fallo al borrar un objeto dejaba su ruta en el registro | El registro dice el depósito y el estado, no la ruta |
+| L4 | Alguien del equipo que también postula leía las notas internas de su propia postulación | Lo propio sale sin notas internas ni autores |
+| L5 | Volver a postular tras un rechazo no miraba la política de la categoría | Mira la de su categoría |
+| L6 | Dos borradores o dos publicaciones de condiciones a la vez daban 500 | El segundo recibe el que ganó; publicar bloquea la fila |
+| L7 | Reemplazar no tenía tope y cada archivo se guardaba | Tope de 60 documentos guardados por postulación (tres veces los 20 activos): es una barrera técnica, no una regla de negocio |
+
+Lo que la revisión comprobó y dio por bueno:
+
+- la seguridad del depósito;
+- permisos y autorrevisión;
+- la 0088 (RLS, una sola transacción, reejecutable);
+- que los mapas de saltos del código y de la base coinciden;
+- concurrencia de las decisiones, idempotencia y privacidad del prestador;
+- que el historial y los envíos solo se añaden;
+- avisos, sin textos en duro ni códigos crudos;
+- compatibilidad: servidor viejo con app nueva, API antes de la 0088 (503),
+  y bandera apagada.
