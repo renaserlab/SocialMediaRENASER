@@ -510,3 +510,53 @@ async def test_L6_dos_borradores_o_dos_publicaciones_a_la_vez_no_dan_500(entorno
         "select count(*) from service_policies where country_code = :p and status = 'published'",
         p=pais,
     ) == 1
+
+
+async def test_L6b_dos_borradores_del_mismo_pais_nunca_son_dos(entorno) -> None:
+    """La carrera que hacía intermitente a L6 (1 de cada 10 o 20 veces): la
+    otra petición confirma su borrador JUSTO entre las dos consultas de
+    `politicas.borrador` («¿hay ya un borrador?» y «¿cuál es la versión más
+    alta?»). La segunda creaba entonces la versión 2: dos borradores del mismo
+    país, los dos con 201. Aquí esa intercalación se fuerza."""
+    from app.modules.services import politicas
+
+    _, motor = entorno
+    jefa = await _persona(motor, "admin")
+    pais = next(_PAISES)
+    sesiones = async_sessionmaker(motor, expire_on_commit=False)
+    en_pausa, seguir = asyncio.Event(), asyncio.Event()
+
+    async def crear(db) -> tuple[str, bool]:
+        politica, nueva = await politicas.borrador(
+            db, pais=pais, categoria=None, titulo="Condiciones", texto=TEXTO, parametros=None, autor_id=jefa
+        )
+        await db.commit()
+        return politica.id, nueva
+
+    async with sesiones() as primera, sesiones() as segunda:
+        consultar = primera.scalar
+        pausada = False
+
+        async def consultar_y_esperar(*args, **kwargs):
+            nonlocal pausada
+            resultado = await consultar(*args, **kwargs)
+            if not pausada:  # justo después de «¿hay ya un borrador?»
+                pausada = True
+                en_pausa.set()
+                await seguir.wait()
+            return resultado
+
+        primera.scalar = consultar_y_esperar
+        tarea_primera = asyncio.create_task(crear(primera))
+        await en_pausa.wait()
+        tarea_segunda = asyncio.create_task(crear(segunda))
+        # Sin serializar, la segunda termina aquí; serializada, espera a la primera.
+        await asyncio.wait({tarea_segunda}, timeout=2)
+        seguir.set()
+        resultados = await asyncio.gather(tarea_primera, tarea_segunda)
+
+    assert sorted(nueva for _, nueva in resultados) == [False, True], resultados
+    assert resultados[0][0] == resultados[1][0]
+    assert await _uno(
+        motor, "select count(*) from service_policies where country_code = :p and status = 'draft'", p=pais
+    ) == 1

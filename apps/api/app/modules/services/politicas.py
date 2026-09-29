@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -212,7 +212,18 @@ async def borrador(
 
     Si ya hay un borrador, se devuelve ESE y no se toca: editarlo es otra
     acción. La versión nueva es la siguiente a la más alta que exista.
+
+    DOS A LA VEZ, EN FILA. La base garantiza una VERSIÓN por país y categoría,
+    no un borrador: si la otra petición confirmaba el suyo justo entre las dos
+    consultas de abajo, esta creaba la versión siguiente y quedaban dos
+    borradores del mismo país. Un bloqueo de la transacción por tipo, país y
+    categoría hace que la segunda espere y encuentre el de la primera.
     """
+    if (await db.connection()).dialect.name == "postgresql":
+        await db.execute(
+            text("select pg_advisory_xact_lock(hashtextextended(:clave, 0))"),
+            {"clave": f"service_policies:{POLITICA_TERMINOS_DEL_PRESTADOR}:{pais}:{categoria or ''}"},
+        )
     existente = await db.scalar(
         select(ServicePolicy).where(
             ServicePolicy.kind == POLITICA_TERMINOS_DEL_PRESTADOR,
