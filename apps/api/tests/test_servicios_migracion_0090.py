@@ -394,6 +394,17 @@ def test_lo_enviado_no_se_reescribe(completa) -> None:
     # Cambiar el estado (lo que hace la revisión) sí.
     _hacer(pg, "update public.service_versions set status = 'under_review', review_started_at = now(), "
                "reviewed_by = %s where id = %s", str(uuid.uuid4()), version)
+    # Tampoco lo aprobado ni lo PUBLICADO: lo que ve el público es exactamente
+    # lo que se revisó.
+    _hacer(pg, "update public.service_versions set status = 'approved', decided_at = now(), "
+               "decided_by = %s where id = %s", str(uuid.uuid4()), version)
+    assert "congelado" in _falla(
+        pg, "update public.service_versions set summary = 'Otra promesa distinta.' where id = %s", version
+    )
+    _, _, _, publicada = _publicada(pg, str(uuid.uuid4()))
+    for cambio in ("title = 'Otro título'", "price_minor = 1", "includes = '[\"Otra cosa\"]'",
+                   "location_area = 'Otra zona'"):
+        assert "congelado" in _falla(pg, f"update public.service_versions set {cambio} where id = %s", publicada), cambio
 
 
 @SIN_POSTGRES
@@ -619,6 +630,25 @@ def test_un_fallo_a_mitad_no_deja_nada(pg) -> None:
     for tabla in TABLAS:
         assert _uno(pg, "select to_regclass(%s)", f"public.{tabla}") is None, tabla
     assert _uno(pg, "select count(*) from storage.buckets where id = 'service-media'") == 0
+
+
+@SIN_POSTGRES
+def test_se_niega_a_terminar_con_un_indice_que_no_es_unico(pg) -> None:
+    """La verificación final no se conforma con el NOMBRE del índice: uno que
+    no sea único permitiría dos publicadas, y la 0090 no se da por buena."""
+    _montar(pg, hasta="0089")
+    viciada = TEXTO.replace(
+        "create unique index if not exists service_versions_una_publicada",
+        "create index if not exists service_versions_una_publicada",
+    )
+    assert viciada != TEXTO
+    import psycopg
+
+    with pytest.raises(psycopg.Error) as error:
+        _hacer(pg, viciada)
+    assert "índices únicos" in str(error.value) and "service_versions_una_publicada" in str(error.value)
+    _hacer(pg, "rollback")
+    assert _uno(pg, "select to_regclass('public.services')") is None
 
 
 @SIN_POSTGRES

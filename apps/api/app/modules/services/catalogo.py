@@ -723,12 +723,13 @@ async def _paso_de_version(
 
 
 async def iniciar_revision(
-    db: AsyncSession, *, actor_id: str, funcion: str, servicio_id: str, version_id: str, clave: str | None
+    db: AsyncSession, *, actor_id: str, funcion: str, servicio_id: str, version_id: str,
+    nota_interna: str | None, clave: str | None,
 ) -> Resultado:
     return await _paso_de_version(
         db, actor_id=actor_id, funcion=funcion, servicio_id=servicio_id, version_id=version_id,
         hasta=estados.EN_REVISION, accion="review_started", clave=clave,
-        aviso=avisos.SERVICIO_EN_REVISION,
+        nota_interna=_nota(nota_interna, obligatoria=False), aviso=avisos.SERVICIO_EN_REVISION,
     )
 
 

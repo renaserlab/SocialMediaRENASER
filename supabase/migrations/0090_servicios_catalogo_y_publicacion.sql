@@ -961,7 +961,12 @@ begin
       'service_version_images_una_portada', 'services_una_por_clave',
       'service_events_una_por_clave'
     ]) as i
-   where to_regclass('public.' || i) is null;
+   -- Que EXISTAN no basta: un índice con ese nombre que no sea único no
+   -- impide dos publicadas ni dos abiertas.
+   where not exists (
+     select 1 from pg_catalog.pg_index x
+      where x.indexrelid = to_regclass('public.' || i) and x.indisunique
+   );
   if faltan is not null then
     raise exception 'La 0090 no dejó los índices únicos %', faltan;
   end if;

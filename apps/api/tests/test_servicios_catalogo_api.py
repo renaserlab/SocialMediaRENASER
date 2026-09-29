@@ -328,7 +328,10 @@ async def test_recorrido_completo_desde_la_admision_hasta_el_publico(entorno) ->
     ) == 1
 
     base = f"{BANDEJA}/{ident}/versions/{v1['id']}"
-    assert (await _accion(app, moderador, f"{base}/start-review")).status_code == 200
+    # Una nota interna en un paso SIN motivo visible: es la que más fácil se
+    # colaría al prestador.
+    r = await _accion(app, moderador, f"{base}/start-review", {"internal_note": "Mirar la categoría con calma"})
+    assert r.status_code == 200, r.text
     # Pedir cambios SIN motivo no.
     r = await _accion(app, moderador, f"{base}/request-changes", {"note": ""})
     assert r.status_code == 422
@@ -344,8 +347,23 @@ async def test_recorrido_completo_desde_la_admision_hasta_el_publico(entorno) ->
     assert propio["last_observation"]["note"] == "Aclara qué incluye el plan mensual."
     assert propio["last_observation"]["fields"] == ["includes"]
     assert propio["can_open_draft"] and propio["open_version"] is None
-    assert "Revisar a fondo" not in json.dumps(propio) + json.dumps(historial)
+    for secreto in ("Revisar a fondo", "Mirar la categoría con calma"):
+        assert secreto not in json.dumps(propio) + json.dumps(historial), secreto
+    # El historial NO está vacío (un «ninguno trae nota interna» sobre una
+    # lista vacía también pasaría): cada paso, en orden, con el motivo visible.
+    assert [e["action"] for e in historial] == ["created", "submitted", "review_started", "changes_requested"]
+    assert historial[2]["note"] is None
+    assert historial[-1]["note"] == "Aclara qué incluye el plan mensual."
+    assert historial[-1]["fields"] == ["includes"] and historial[-1]["version"] == 1
     assert all("actor_id" not in e and "internal_note" not in e for e in historial)
+    # El equipo, en cambio, ve quién actuó, en calidad de qué y la nota interna.
+    async with _cliente(app, jefa) as http:
+        completo = (await http.get(f"{BANDEJA}/{ident}/history")).json()
+    pedido = completo[-1]
+    assert pedido["action"] == "changes_requested" and pedido["internal_note"] == "Revisar a fondo"
+    # También la del paso sin motivo visible: se guarda, no se pierde.
+    assert completo[2]["action"] == "review_started" and completo[2]["internal_note"] == "Mirar la categoría con calma"
+    assert pedido["actor_id"] == moderador and pedido["actor_role"] == "reviewer"
 
     # Corrige en una versión NUEVA que sale de la observada, con sus imágenes.
     r = await _accion(app, ana, f"{MIOS}/{ident}/draft")
@@ -483,6 +501,37 @@ async def test_suspender_reactivar_y_retirar_con_motivo(entorno) -> None:
         ) == 1, tipo
 
 
+async def test_el_motivo_lo_exige_el_dominio_no_solo_el_formulario(entorno) -> None:
+    """Pedir cambios, suspender, reactivar y retirar sin motivo se rechazan en
+    el DOMINIO, aunque un formulario futuro deje pasar el campo vacío."""
+    from app.modules.services import catalogo
+    from app.modules.services.states import REVISOR
+
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    enviado = await _enviado(app, perfil, jefa)
+    ident, version = enviado["id"], enviado["open_version"]["id"]
+    assert (await _accion(app, moderador, f"{BANDEJA}/{ident}/versions/{version}/start-review")).status_code == 200
+    publicado = (await _publicado(app, await _prestador(motor), jefa, moderador))["id"]
+    for nota in (None, "   ", "ok"):
+        async with AsyncSession(motor, expire_on_commit=False) as db:
+            with pytest.raises(catalogo.MotivoRequerido):
+                await catalogo.pedir_cambios(
+                    db, actor_id=moderador, funcion=REVISOR, servicio_id=ident, version_id=version,
+                    nota=nota, campos=None, nota_interna="Solo interna", clave=None,
+                )
+            for paso in (catalogo.suspender, catalogo.reactivar, catalogo.retirar_servicio):
+                with pytest.raises(catalogo.MotivoRequerido):
+                    await paso(db, actor_id=jefa, servicio_id=publicado, nota=nota, nota_interna="Solo interna", clave=None)
+            await db.rollback()
+    # Nada cambió.
+    assert await _filas(
+        motor, "select status from public.service_versions where id = cast(:v as uuid)", v=version,
+    ) == [("under_review",)]
+    assert await _uno(motor, "select status from public.services where id = cast(:s as uuid)", s=publicado) == "published"
+
+
 async def test_un_prestador_suspendido_desaparece_del_publico(entorno) -> None:
     app, motor, _ = entorno
     jefa, moderador = await _equipo(motor)
@@ -513,6 +562,38 @@ async def test_nadie_revisa_ni_publica_lo_suyo(entorno) -> None:
     async with _cliente(app, jefa) as http:
         detalle = (await http.get(f"{BANDEJA}/{servicio['id']}")).json()
     assert detalle["own"] and detalle["actions"] == []
+
+
+async def test_solo_se_aprueba_lo_revisado_y_solo_se_publica_lo_aprobado(entorno) -> None:
+    """Saltarse un paso es un 409 que no cambia nada, lo pida quien lo pida."""
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    # Un borrador que nunca se envió.
+    borrador = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()
+    r = await _accion(app, jefa, f"{BANDEJA}/{borrador['id']}/versions/{borrador['open_version']['id']}/publish")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "service_catalog_transition_invalid"
+    # Uno enviado: ni se aprueba ni se publica sin revisar.
+    servicio = await _enviado(app, perfil, jefa)
+    ident = servicio["id"]
+    base = f"{BANDEJA}/{ident}/versions/{servicio['open_version']['id']}"
+    for paso in ("approve", "publish"):
+        r = await _accion(app, jefa, f"{base}/{paso}")
+        assert r.status_code == 409 and r.json()["error"]["code"] == "service_catalog_transition_invalid", paso
+    # En revisión: se aprueba, pero todavía no se publica.
+    assert (await _accion(app, moderador, f"{base}/start-review")).status_code == 200
+    r = await _accion(app, jefa, f"{base}/publish")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "service_catalog_transition_invalid"
+    # Nada cambió: ni la versión, ni el servicio, ni el público, ni el historial.
+    assert await _filas(
+        motor, "select v.status, s.status from public.service_versions v join public.services s on s.id = v.service_id "
+               "where v.service_id = cast(:s as uuid)", s=ident,
+    ) == [("under_review", "draft")]
+    assert (await _ficha(app, ident)).status_code == 404
+    assert await _uno(
+        motor, "select count(*) from public.service_events where service_id in (cast(:a as uuid), cast(:b as uuid)) "
+               "and action in ('approved', 'published')", a=ident, b=borrador["id"],
+    ) == 0
 
 
 # =========================================================================== #

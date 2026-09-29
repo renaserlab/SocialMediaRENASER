@@ -413,7 +413,7 @@ async def iniciar_revision(
 ) -> ServicioAdminRead:
     await catalogo.iniciar_revision(
         db, actor_id=current_user.id, funcion=funcion, servicio_id=_id(service_id),
-        version_id=_version_id(version_id), clave=clave,
+        version_id=_version_id(version_id), nota_interna=cuerpo.internal_note, clave=clave,
     )
     await db.commit()
     return await _admin_fresco(db, service_id, current_user.id, funcion)
