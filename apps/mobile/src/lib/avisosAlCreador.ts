@@ -14,7 +14,21 @@ export type AvisoAlCreador = {
   /** Clave de `i18n` del título. */
   titulo: string;
   /** Icono de Feather. */
-  icono: 'check-circle' | 'x-circle' | 'alert-triangle' | 'edit-3' | 'eye-off' | 'image';
+  icono:
+    | 'check-circle'
+    | 'x-circle'
+    | 'alert-triangle'
+    | 'edit-3'
+    | 'eye-off'
+    | 'image'
+    | 'clock'
+    | 'inbox';
+  /**
+   * Clave del texto de debajo cuando el servidor NO manda título ni motivo.
+   * Los avisos de Servicios van con `payload` vacío a propósito: el detalle se
+   * lee en la postulación, no en la bandeja.
+   */
+  cuerpo?: string;
 };
 
 const AVISOS: Record<string, AvisoAlCreador> = {
@@ -32,6 +46,20 @@ const AVISOS: Record<string, AvisoAlCreador> = {
   product_published: { titulo: 'notif.productPublishedTitle', icono: 'check-circle' },
   product_suspended: { titulo: 'notif.productSuspendedTitle', icono: 'eye-off' },
   product_photo_rejected: { titulo: 'notif.productPhotoRejectedTitle', icono: 'image' },
+  // Z Servicios (`services/avisos.py`). A quien postula:
+  service_application_review_started: { titulo: 'notif.servicioRevisionTitle', icono: 'clock', cuerpo: 'notif.servicioRevisionBody' },
+  service_application_changes_requested: { titulo: 'notif.servicioCambiosTitle', icono: 'edit-3', cuerpo: 'notif.servicioCambiosBody' },
+  service_application_approved: { titulo: 'notif.servicioAprobadaTitle', icono: 'check-circle', cuerpo: 'notif.servicioAprobadaBody' },
+  service_application_rejected: { titulo: 'notif.servicioRechazadaTitle', icono: 'x-circle', cuerpo: 'notif.servicioRechazadaBody' },
+  service_application_suspended: { titulo: 'notif.servicioSuspendidaTitle', icono: 'eye-off', cuerpo: 'notif.servicioSuspendidaBody' },
+  service_application_withdrawn: { titulo: 'notif.servicioRetiradaTitle', icono: 'check-circle', cuerpo: 'notif.servicioRetiradaBody' },
+  service_document_observed: { titulo: 'notif.servicioDocumentoTitle', icono: 'alert-triangle', cuerpo: 'notif.servicioDocumentoBody' },
+  service_credential_observed: { titulo: 'notif.servicioCredencialObservadaTitle', icono: 'alert-triangle', cuerpo: 'notif.servicioCredencialObservadaBody' },
+  service_credential_rejected: { titulo: 'notif.servicioCredencialRechazadaTitle', icono: 'x-circle', cuerpo: 'notif.servicioCredencialRechazadaBody' },
+  // Al equipo de Z:
+  service_application_submitted: { titulo: 'notif.servicioEnviadaTitle', icono: 'inbox', cuerpo: 'notif.servicioEnviadaBody' },
+  service_application_resubmitted: { titulo: 'notif.servicioReenviadaTitle', icono: 'inbox', cuerpo: 'notif.servicioReenviadaBody' },
+  service_application_withdrawn_review: { titulo: 'notif.servicioRetiradaEquipoTitle', icono: 'inbox', cuerpo: 'notif.servicioRetiradaEquipoBody' },
 };
 
 /** El título y el icono de un aviso al creador, o `null` si no lo es. */
@@ -91,6 +119,21 @@ export function rutaDelAviso(
     case 'product_suspended':
     case 'product_photo_rejected':
       return id ? `/proveedor/productos/${id}` : '/proveedor/productos';
+    // Z Servicios: quien postula, a su postulación; el equipo, al expediente.
+    case 'service_application_review_started':
+    case 'service_application_changes_requested':
+    case 'service_application_approved':
+    case 'service_application_rejected':
+    case 'service_application_suspended':
+    case 'service_application_withdrawn':
+    case 'service_document_observed':
+    case 'service_credential_observed':
+    case 'service_credential_rejected':
+      return '/servicios/prestador';
+    case 'service_application_submitted':
+    case 'service_application_resubmitted':
+    case 'service_application_withdrawn_review':
+      return id ? `/admin/servicios/${id}` : '/admin/servicios';
     // «Juan está transmitiendo en vivo»: al directo, siga o no en emisión.
     case 'live_started':
       return id ? `/live/${id}` : null;
