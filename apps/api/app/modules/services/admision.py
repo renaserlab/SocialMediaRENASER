@@ -613,8 +613,11 @@ async def retirar(
         funcion=states.PRESTADOR,
         desde=desde,
         hasta=states.RETIRADA,
-        motivo=nota,
-        datos={"event_id": evento.id, "idempotency": clave},
+        # SIN LA NOTA. La escribe quien postula, con sus palabras, y la
+        # auditoría sobrevive a su cuenta (0089). La nota se queda en el
+        # historial de la postulación, que se va con la cuenta.
+        motivo=None,
+        datos={"event_id": evento.id, "idempotency": clave, "with_note": bool(nota)},
     )
     await avisos.avisar(
         db,

@@ -720,6 +720,27 @@ async def test_servicios_en_cada_estado(entorno, estado) -> None:
     ) == len(mia)
 
 
+async def test_la_retirada_no_deja_la_nota_de_quien_postula_en_la_auditoria(entorno) -> None:
+    """La auditoría sobrevive a la cuenta; la nota de retirada es texto libre de
+    quien postula y no le hace falta para rastrear nada."""
+    app, motor, almacen = entorno
+    jefa, moderador, ana = await _persona(motor, "admin"), await _persona(motor, "moderator"), await _persona(motor)
+    solicitud = await _llevar(app, ana, "submitted", jefa=jefa, moderador=moderador)
+    async with _cliente(app, ana) as http:
+        r = await http.post(f"{MIA}/withdraw", json={"confirm": True, "reason": "Me mudo con mi familia a Arequipa"})
+        assert r.status_code == 200, r.text
+    assert (await _borrar_cuenta(app, ana)).status_code == 204
+    filas = await _filas(
+        motor,
+        "select coalesce(reason, ''), payload::text from public.audit_events "
+        "where entity_id = cast(:s as uuid) and action = 'service_application.withdrawn'",
+        s=solicitud,
+    )
+    assert len(filas) == 1
+    assert "Arequipa" not in filas[0][0] + filas[0][1]
+    assert '"with_note": true' in filas[0][1]
+
+
 async def test_quien_decidio_se_va_y_la_postulacion_ajena_se_queda(entorno) -> None:
     app, motor, almacen = entorno
     jefa, moderador, ana = await _persona(motor, "admin"), await _persona(motor, "moderator"), await _persona(motor)
