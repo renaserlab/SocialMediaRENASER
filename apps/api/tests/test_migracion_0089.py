@@ -75,7 +75,12 @@ SUSTITUIDAS = (
     "event_aftersale_case_events_solo_anadir",
     "event_order_policy_acceptances_solo_anadir",
 )
-NUEVAS = ("es_anonimizacion_por_baja", "auditoria_solo_anadir")
+NUEVAS = (
+    "es_anonimizacion_por_baja",
+    "auditoria_solo_anadir",
+    "event_orders_con_dinero_no_se_borran",
+    "orders_con_dinero_no_se_borran",
+)
 
 #: Huella git (`blob`) de las migraciones aplicadas que la 0089 toca por
 #: `create or replace` o que exige. Si una cambia, ya no es la que se aplicó.
@@ -149,7 +154,9 @@ def test_toca_solo_las_funciones_y_la_tabla_que_dice() -> None:
     funciones = set(re.findall(r"create\s+or\s+replace\s+function\s+public\.([a-z_]+)\(", codigo))
     assert funciones == set(SUSTITUIDAS) | set(NUEVAS)
     assert set(re.findall(r"alter\s+table\s+public\.([a-z_]+)", codigo)) == {"consent_records"}
-    assert re.findall(r"create\s+or\s+replace\s+trigger\s+([a-z_]+)", codigo) == ["audit_events_solo_anadir"]
+    assert re.findall(r"create\s+or\s+replace\s+trigger\s+([a-z_]+)", codigo) == [
+        "audit_events_solo_anadir", "event_orders_con_dinero_no_se_borran", "orders_con_dinero_no_se_borran",
+    ]
 
 
 # =========================================================================== #
@@ -658,7 +665,7 @@ def test_un_fallo_a_mitad_no_deja_nada(pg) -> None:
 
     _montar(pg, hasta="0088")
     antes = _foto(pg)
-    corte = SQL.index("-- 8. Verificación")
+    corte = SQL.index("-- 9. Verificación")
     rota = SQL[:corte] + "do $$ begin raise exception 'fallo provocado a mitad'; end $$;\n" + SQL[corte:]
     with pytest.raises(psycopg.Error, match="fallo provocado a mitad"):
         _aplicar_0089(pg, rota)
@@ -753,3 +760,82 @@ def test_los_modelos_coinciden(pg) -> None:
             f"public.{tabla}", columna,
         )
         assert (clave.ondelete or "").upper() == {"n": "SET NULL", "r": "RESTRICT", "c": "CASCADE"}[accion], tabla
+
+
+# --- 2.5 Hallazgos de la revisión independiente (29/09/2026) --------------- #
+def _orden_de_evento(pg, comprador: str, *, pagada: bool, stripe: bool) -> str:
+    """Una orden de evento con sus madres sembradas (el circuito de pago está
+    apagado); lo que se prueba es su borrado."""
+    orden = str(uuid.uuid4())
+    with pg.transaction():
+        _hacer(pg, "set local session_replication_role = replica")
+        _hacer(
+            pg,
+            "insert into public.event_orders (id, event_id, buyer_id, hold_id, status, currency, subtotal_minor, "
+            "total_minor, provider, external_payment_id, idempotency_key, paid_at) values (%s, gen_random_uuid(), %s, "
+            "gen_random_uuid(), %s, 'PEN', 100, 100, %s, %s, 'k', %s)",
+            orden, comprador, "PAID" if pagada else "PENDING_PAYMENT", "stripe" if stripe else "none",
+            f"pi_{orden[:8]}" if (stripe and pagada) else None, "2026-09-29" if pagada else None,
+        )
+    return orden
+
+
+@SIN_POSTGRES
+def test_R1_una_orden_con_dinero_no_se_borra_y_sin_dinero_si(pg) -> None:
+    _montar(pg)
+    comprador = _persona(pg)
+    pagada = _orden_de_evento(pg, comprador, pagada=True, stripe=True)
+    gratis = _orden_de_evento(pg, comprador, pagada=True, stripe=False)
+    pendiente = _orden_de_evento(pg, comprador, pagada=False, stripe=False)
+    error = _rechaza(pg, "delete from public.event_orders where id = %s", pagada)
+    assert "movió dinero" in error
+    for orden in (gratis, pendiente):
+        with pg.transaction(force_rollback=True):
+            _hacer(pg, "set local session_replication_role = origin")
+            _hacer(pg, "delete from public.event_orders where id = %s", orden)
+    # Y la de un curso, pagada o devuelta.
+    with pg.transaction():
+        _hacer(pg, "set local session_replication_role = replica")
+        curso = str(uuid.uuid4())
+        _hacer(
+            pg,
+            "insert into public.orders (id, user_id, commerce_product_id, provider, channel, status, amount_minor, "
+            "currency) values (%s, %s, gen_random_uuid(), 'stripe', 'web', 'refunded', 4900, 'PEN')",
+            curso, comprador,
+        )
+    _rechaza(pg, "delete from public.orders where id = %s", curso)
+
+
+@SIN_POSTGRES
+def test_R10_un_disparador_cambiado_de_forma_se_niega(pg) -> None:
+    """Mismo nombre y misma función, pero solo `before delete`: el UPDATE se
+    quedaría sin vigilar. La 0089 mira también la forma (`tgtype`)."""
+    import psycopg
+
+    _montar(pg, hasta="0088")
+    _hacer(pg, "drop trigger audit_events_solo_anadir on public.audit_events")
+    _hacer(
+        pg,
+        "create trigger audit_events_solo_anadir before delete on public.audit_events "
+        "for each row execute function public.impedir_reescritura()",
+    )
+    antes = _foto(pg)
+    with pytest.raises(psycopg.Error, match="audit_events.audit_events_solo_anadir"):
+        _aplicar_0089(pg)
+    assert _foto(pg) == antes
+
+
+@SIN_POSTGRES
+def test_R10_una_segunda_clave_sobre_el_sujeto_del_consentimiento_se_niega(pg) -> None:
+    import psycopg
+
+    _montar(pg, hasta="0088")
+    _hacer(
+        pg,
+        "alter table public.consent_records add constraint z_segunda foreign key (subject_id) "
+        "references public.profiles(id) on delete restrict",
+    )
+    antes = _foto(pg)
+    with pytest.raises(psycopg.Error, match="una sola clave ajena"):
+        _aplicar_0089(pg)
+    assert _foto(pg) == antes

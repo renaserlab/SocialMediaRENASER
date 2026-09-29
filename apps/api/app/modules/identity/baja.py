@@ -13,13 +13,18 @@ EL ORDEN, Y POR QUÉ:
   2. Se borra en la base SIN CONFIRMAR, y se fuerzan ya las comprobaciones
      diferidas. Si algo lo impide —una venta, un saldo, un pedido—, la
      transacción se deshace y NO SE HA TOCADO NINGÚN ARCHIVO: 409.
-  3. Se borran los archivos. Si Storage falla, la transacción se deshace: la
-     cuenta sigue entera y responde 503. Primero se lista todo: si Storage no
-     contesta ahí, no se ha borrado ningún archivo. Si falla ya borrando,
-     puede faltar alguno de los que sí se borraron; repetir la petición
-     termina el trabajo.
+  3. Se borran SUS archivos (los de nadie más). Si Storage falla, la
+     transacción se deshace: la cuenta sigue entera y responde 503. Primero
+     se lista todo: si Storage no contesta ahí, no se ha borrado ningún
+     archivo. Si falla ya borrando, puede faltar alguno de los que sí se
+     borraron; repetir la petición termina el trabajo.
   4. Se confirma. Si la confirmación fallara (se cae la conexión), la cuenta
      sigue y sus archivos ya no: repetir la petición la borra.
+  5. DESPUÉS de confirmar, lo de las demás personas en las conversaciones que
+     creó y que se han ido enteras con ella. Antes de confirmar no: si la baja
+     se deshiciera, esas conversaciones volverían sin sus adjuntos. Si esto
+     falla, la cuenta YA está borrada (204) y se registra qué conversaciones
+     retirar a mano; nadie puede abrir esos archivos desde la aplicación.
 
 Antes era al revés: primero los archivos, sin mirar si fallaban, y después la
 base. Una cuenta que la base no dejaba borrar se quedaba viva y sin sus
@@ -63,6 +68,15 @@ class CuentaConRegistrosQueConservar(ConflictError):
 class ArchivosSinBorrar(ServiceUnavailableError):
     code = "account_deletion_storage_failed"
     message = "No pudimos borrar tus archivos. Tu cuenta sigue activa: inténtalo de nuevo."
+
+
+class BajaNoDisponible(ServiceUnavailableError):
+    """La base no tiene la 0089: un fallo de restricción puede ser el choque de
+    la auditoría que la 0089 resuelve, y no una venta. Decir «tienes ventas»
+    sería mentir."""
+
+    code = "account_deletion_unavailable"
+    message = "No podemos borrar tu cuenta en este momento. Sigue activa: inténtalo más tarde."
 
 
 #: De qué área es la fila que impidió el borrado. Solo para decirlo con
@@ -121,16 +135,30 @@ async def _conversaciones(db: AsyncSession, usuario_id: str) -> tuple[list[str],
     return suyas, enteras
 
 
+async def _hay_0089(db: AsyncSession) -> bool:
+    if (await db.connection()).dialect.name != "postgresql":
+        return True
+    return bool(
+        await db.scalar(
+            text(
+                "select to_regprocedure("
+                "'public.es_anonimizacion_por_baja(jsonb, jsonb, text[])') is not null"
+            )
+        )
+    )
+
+
 async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> None:
     suyas, enteras = await _conversaciones(db, usuario_id)
+    postgres = (await db.connection()).dialect.name == "postgresql"
 
     try:
         await db.execute(delete(Profile).where(Profile.id == usuario_id))
-        # Cross-schema y sin modelo ORM: SQL parametrizado. `profiles` cuelga
-        # de `auth.users` en cascada; se borra aparte igualmente para no
-        # depender de esa clave, y el orden da igual dentro de la transacción.
-        await db.execute(text("DELETE FROM auth.users WHERE id = :uid"), {"uid": usuario_id})
-        if (await db.connection()).dialect.name == "postgresql":
+        if postgres:
+            # Cross-schema y sin modelo ORM: SQL parametrizado. `profiles`
+            # cuelga de `auth.users` en cascada; se borra aparte igualmente para
+            # no depender de esa clave. Solo existe en PostgreSQL (Supabase).
+            await db.execute(text("DELETE FROM auth.users WHERE id = :uid"), {"uid": usuario_id})
             # Lo diferido (cuadres de órdenes, coherencia de Servicios) se
             # comprueba AHORA, antes de tocar los archivos: si no, podría fallar
             # al confirmar con los archivos ya borrados.
@@ -146,15 +174,28 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> None:
             "La cuenta %s no se puede borrar sola: %s (%s, %s)",
             usuario_id, sqlstate, tabla or "?", restriccion or "?",
         )
+        if not await _hay_0089(db):
+            raise BajaNoDisponible() from None
         raise CuentaConRegistrosQueConservar(details={"reason": _area(tabla)}) from None
 
     try:
-        await storage.delete_user_files(
-            usuario_id, conversaciones=suyas, conversaciones_enteras=enteras
-        )
+        # Lo suyo en TODAS sus conversaciones, también en las que creó.
+        await storage.delete_user_files(usuario_id, conversaciones=suyas + enteras)
     except (storage.StorageFallo, storage.StorageNoConfigurado):
         await db.rollback()
         logger.warning("Baja de %s deshecha: no se pudieron borrar sus archivos", usuario_id)
         raise ArchivosSinBorrar() from None
 
     await db.commit()
+
+    try:
+        await storage.borrar_conversaciones(enteras)
+    except (storage.StorageFallo, storage.StorageNoConfigurado):
+        # La cuenta ya no existe; lo que queda son adjuntos de otras personas
+        # en conversaciones borradas, que nadie puede abrir. Se dice cuáles
+        # (identificadores, nunca rutas) para retirarlos a mano.
+        logger.error(
+            "Baja de %s hecha, pero quedan adjuntos de %d conversaciones borradas "
+            "por retirar de message-media: %s",
+            usuario_id, len(enteras), ", ".join(enteras),
+        )

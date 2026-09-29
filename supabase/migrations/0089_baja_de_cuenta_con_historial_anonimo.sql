@@ -59,15 +59,23 @@
 --   5. `audit_events` deja de compartir `impedir_reescritura()` (que siguen
 --      usando `consent_records` y `policy_versions` para NO BORRAR) y usa su
 --      propia función, con el mismo nombre de disparador.
+--   6. UNA ORDEN EN LA QUE SE MOVIÓ DINERO NO SE BORRA (`event_orders` y
+--      `orders`). Las dos caen en cascada con quien compró, y lo único que lo
+--      frenaba era el saldo del vendedor (`owner_sale_balances`, `restrict`),
+--      que NO SE CREA sin comisión configurada (`PLATFORM_FEE_BPS=-1`, el valor
+--      por defecto). Sin este freno, una compra pagada desaparecía con la
+--      cuenta, y con ella la referencia del cobro: un contracargo posterior no
+--      tendría a qué agarrarse. Hallado en la revisión del 29/09/2026.
 --
 -- LO QUE NO HACE, Y ES DELIBERADO:
 --
 --   * No borra ni reescribe ninguna fila, ni de auditoría ni de nada.
 --   * No quita ningún `restrict` de ventas, saldos, transferencias, pedidos,
 --     incidencias, disputas o decisiones de personal: una cuenta con esas
---     obligaciones SIGUE SIN PODER BORRARSE SOLA, y la API responde un 409
---     que lo explica en vez de un 500. Qué hacer con esos registros (plazo de
---     retención, anonimización de pedidos) es una decisión de la empresa.
+--     obligaciones —o con una orden pagada (6)— SIGUE SIN PODER BORRARSE
+--     SOLA, y la API responde un 409 que lo explica en vez de un 500. Qué
+--     hacer con esos registros (plazo de retención, anonimización de pedidos)
+--     es una decisión de la empresa.
 --   * No limpia `ip_hash`, `ip_prefix` ni `user_agent_family`: son datos de
 --     seguridad y su retención también es una decisión pendiente.
 --   * No concede nada a `anon` ni a `authenticated`, ni toca la RLS.
@@ -142,31 +150,61 @@ begin
   -- 1.3 Las madres de las cascadas que se admiten.
   select string_agg(t, ', ') into faltan
     from unnest(array[
-      'courses', 'events', 'event_reviews', 'event_review_replies', 'event_orders', 'profiles'
+      'courses', 'events', 'event_reviews', 'event_review_replies', 'event_orders', 'orders', 'profiles'
     ]) as t
    where to_regclass('public.' || t) is null;
   if faltan is not null then
     raise exception 'La 0089 no encontró las tablas %', faltan;
   end if;
 
-  -- 1.4 Cada disparador, en su tabla y llamando a su función.
+  -- 1.3b Lo que mira el freno de las órdenes con dinero (sección 8).
+  select string_agg(format('%s.%s', e.tabla, e.columna), ', ') into faltan
+    from (values
+      ('event_orders', 'provider'), ('event_orders', 'status'), ('event_orders', 'paid_at'),
+      ('event_orders', 'external_payment_id'), ('orders', 'status'), ('orders', 'paid_at')
+    ) as e(tabla, columna)
+   where not exists (
+     select 1 from information_schema.columns c
+      where c.table_schema = 'public' and c.table_name = e.tabla and c.column_name = e.columna
+   );
+  if faltan is not null then
+    raise exception 'La 0089 no encontró las columnas de las órdenes: %', faltan;
+  end if;
+
+  -- 1.3c UNA SOLA clave ajena sobre `consent_records.subject_id`: la que se
+  --      sustituye. Otra (`restrict`, puesta a mano) seguiría frenando la baja
+  --      aunque esta migración dijera haberla cambiado.
+  if (select count(*)
+        from pg_constraint c
+        join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
+       where c.contype = 'f'
+         and c.conrelid = 'public.consent_records'::regclass
+         and a.attname = 'subject_id') <> 1 then
+    raise exception 'La 0089 esperaba una sola clave ajena sobre consent_records.subject_id';
+  end if;
+
+  -- 1.4 Cada disparador, en su tabla, llamando a su función y con su forma
+  --     exacta: `tgtype` codifica fila o sentencia, antes o después y los
+  --     eventos (27 = before update or delete, por fila; 19 = before update;
+  --     11 = before delete). Uno cambiado a mano a solo `before delete`
+  --     dejaría el UPDATE sin vigilar aunque conservara nombre y función.
   select string_agg(format('%s.%s', e.tabla, e.disparador), ', ') into faltan
     from (values
-      ('audit_events', 'audit_events_solo_anadir', 'impedir_reescritura|auditoria_solo_anadir'),
-      ('consent_records', 'consent_records_inmutable', 'sellar_consumo_una_vez'),
-      ('consent_records', 'consent_records_no_se_borra', 'impedir_reescritura'),
-      ('course_versions', 'course_versions_inmutable', 'impedir_reescritura_de_version'),
-      ('event_versions', 'event_versions_inmutables', 'impedir_reescritura_de_version_de_evento'),
-      ('event_policies', 'event_policies_inmutable', 'event_policies_publicada_es_inmutable'),
-      ('event_policies', 'event_policies_no_se_borra', 'event_policies_publicada_no_se_borra'),
-      ('event_review_moderation', 'event_review_moderation_inmutable', 'event_review_moderation_solo_anadir'),
-      ('product_review_moderation', 'product_review_moderation_inmutable', 'product_review_moderation_solo_anadir'),
-      ('product_refund_events', 'product_refund_events_inmutables', 'product_finanzas_solo_se_anaden'),
-      ('product_dispute_events', 'product_dispute_events_inmutables', 'product_finanzas_solo_se_anaden'),
-      ('event_dispute_events', 'event_dispute_events_inmutable', 'event_dispute_events_solo_anadir'),
-      ('event_aftersale_case_events', 'event_aftersale_case_events_inmutables', 'event_aftersale_case_events_solo_anadir'),
-      ('event_order_policy_acceptances', 'event_order_policy_acceptances_inmutable', 'event_order_policy_acceptances_solo_anadir')
-    ) as e(tabla, disparador, funciones)
+      ('audit_events', 'audit_events_solo_anadir', 'impedir_reescritura|auditoria_solo_anadir', 27),
+      ('consent_records', 'consent_records_inmutable', 'sellar_consumo_una_vez', 19),
+      ('consent_records', 'consent_records_no_se_borra', 'impedir_reescritura', 11),
+      ('course_versions', 'course_versions_inmutable', 'impedir_reescritura_de_version', 27),
+      ('event_versions', 'event_versions_inmutables', 'impedir_reescritura_de_version_de_evento', 27),
+      ('event_policies', 'event_policies_inmutable', 'event_policies_publicada_es_inmutable', 19),
+      ('event_policies', 'event_policies_no_se_borra', 'event_policies_publicada_no_se_borra', 11),
+      ('event_review_moderation', 'event_review_moderation_inmutable', 'event_review_moderation_solo_anadir', 27),
+      ('product_review_moderation', 'product_review_moderation_inmutable', 'product_review_moderation_solo_anadir', 27),
+      ('product_refund_events', 'product_refund_events_inmutables', 'product_finanzas_solo_se_anaden', 27),
+      ('product_dispute_events', 'product_dispute_events_inmutables', 'product_finanzas_solo_se_anaden', 27),
+      ('event_dispute_events', 'event_dispute_events_inmutable', 'event_dispute_events_solo_anadir', 27),
+      ('event_aftersale_case_events', 'event_aftersale_case_events_inmutables', 'event_aftersale_case_events_solo_anadir', 27),
+      ('event_order_policy_acceptances', 'event_order_policy_acceptances_inmutable', 'event_order_policy_acceptances_solo_anadir', 27)
+    ) as e(tabla, disparador, funciones, tipo)
    where not exists (
      select 1
        from pg_trigger t
@@ -175,6 +213,7 @@ begin
         and t.tgrelid = to_regclass('public.' || e.tabla)
         and t.tgname = e.disparador
         and t.tgenabled = 'O'
+        and t.tgtype = e.tipo
         and p.pronamespace = 'public'::regnamespace
         and p.proname = any (string_to_array(e.funciones, '|'))
    );
@@ -536,8 +575,8 @@ end;
 $$;
 
 -- Las aceptaciones se van con su orden. La orden de un comprador cae en cascada
--- con su cuenta (`event_orders.buyer_id`); si movió dinero, los saldos, los
--- expedientes y las disputas la sujetan y la cuenta no se borra.
+-- con su cuenta (`event_orders.buyer_id`) SOLO si no movió dinero: una orden
+-- pagada no se borra (sección 8), y la aceptación se queda con ella.
 create or replace function public.event_order_policy_acceptances_solo_anadir()
 returns trigger
 language plpgsql
@@ -597,7 +636,68 @@ end;
 $$;
 
 -- ------------------------------------------------------------------------- --
--- 8. Verificación.
+-- 8. Una orden en la que se movió dinero no se borra.
+-- ------------------------------------------------------------------------- --
+--
+-- Las dos órdenes caen en cascada con la cuenta de quien compró
+-- (`event_orders.buyer_id`, `orders.user_id`). Eso está bien para lo que no
+-- movió dinero —una reserva caducada, una entrada gratuita, un pago que nunca
+-- empezó— y mal para lo que sí: el pedido lleva el importe y la referencia del
+-- cobro, y es lo que hace falta para conciliar y para contestar un contracargo.
+-- Lo único que lo frenaba era el saldo del vendedor, que sin comisión
+-- configurada no se crea.
+--
+-- ANTES DEL BORRADO, fila a fila, y con la tabla en el error: la API lo
+-- convierte en 409 `account_deletion_blocked` con su área (`events` o
+-- `courses`), sin haber tocado ningún archivo.
+create or replace function public.event_orders_con_dinero_no_se_borran()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if old.provider <> 'none'
+     and (old.paid_at is not null
+          or old.external_payment_id is not null
+          or old.status in ('PAYMENT_PROCESSING', 'PAID')) then
+    raise exception 'Una orden de evento en la que se movió dinero no se borra'
+      using errcode = 'restrict_violation', table = 'event_orders';
+  end if;
+  return old;
+end;
+$$;
+
+create or replace function public.orders_con_dinero_no_se_borran()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if old.paid_at is not null or old.status in ('paid', 'refunded') then
+    raise exception 'Una orden de curso en la que se movió dinero no se borra'
+      using errcode = 'restrict_violation', table = 'orders';
+  end if;
+  return old;
+end;
+$$;
+
+revoke all on function public.event_orders_con_dinero_no_se_borran() from public;
+revoke all on function public.event_orders_con_dinero_no_se_borran() from anon, authenticated;
+revoke all on function public.orders_con_dinero_no_se_borran() from public;
+revoke all on function public.orders_con_dinero_no_se_borran() from anon, authenticated;
+
+create or replace trigger event_orders_con_dinero_no_se_borran
+  before delete on public.event_orders
+  for each row execute function public.event_orders_con_dinero_no_se_borran();
+
+create or replace trigger orders_con_dinero_no_se_borran
+  before delete on public.orders
+  for each row execute function public.orders_con_dinero_no_se_borran();
+
+-- ------------------------------------------------------------------------- --
+-- 9. Verificación.
 -- ------------------------------------------------------------------------- --
 do $$
 declare
@@ -618,6 +718,13 @@ begin
        and t.tgenabled = 'O'
   ) then
     raise exception 'La 0089 no dejó la auditoría con su disparador';
+  end if;
+
+  if (select count(*) from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+       where not t.tgisinternal and t.tgenabled = 'O' and t.tgtype = 11
+         and ((t.tgrelid = 'public.event_orders'::regclass and p.proname = 'event_orders_con_dinero_no_se_borran')
+           or (t.tgrelid = 'public.orders'::regclass and p.proname = 'orders_con_dinero_no_se_borran'))) <> 2 then
+    raise exception 'La 0089 no dejó los frenos de las órdenes con dinero';
   end if;
 
   -- Los que NO se tocan siguen sin dejar borrar.
@@ -654,7 +761,9 @@ begin
     from unnest(array['anon', 'authenticated']) as r(rol)
    cross join unnest(array[
      'public.es_anonimizacion_por_baja(jsonb, jsonb, text[])',
-     'public.auditoria_solo_anadir()'
+     'public.auditoria_solo_anadir()',
+     'public.event_orders_con_dinero_no_se_borran()',
+     'public.orders_con_dinero_no_se_borran()'
    ]) as f(firma)
    where has_function_privilege(r.rol, f.firma, 'execute');
   if expuestas > 0 then

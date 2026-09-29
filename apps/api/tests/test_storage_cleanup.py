@@ -212,7 +212,9 @@ async def test_baja_tambien_las_carpetas_de_postulaciones(monkeypatch, con_crede
 
 
 def test_la_profundidad_de_la_bajada_tiene_tope():
-    assert 1 <= storage.PROFUNDIDAD_MAXIMA <= 5
+    """Holgado (lo más hondo que escribe la aplicación son cuatro niveles),
+    pero con tope. Pasarlo NO se calla: ver la prueba de la carpeta honda."""
+    assert 4 <= storage.PROFUNDIDAD_MAXIMA <= 32
 
 
 @pytest.mark.asyncio
@@ -302,8 +304,9 @@ async def test_se_borra_en_lotes_de_cien(monkeypatch, con_credenciales):
 
 @pytest.mark.asyncio
 async def test_los_adjuntos_de_chat_se_barren_por_conversacion(monkeypatch, con_credenciales):
-    """`message-media` va en `<conversacion>/<quien sube>/<archivo>`: lo suyo en
-    cada conversación y, de las que se van enteras, todo."""
+    """`message-media` va en `<conversacion>/<quien sube>/<archivo>`. Antes de
+    confirmar la baja, SOLO lo suyo en cada conversación; lo de las demás
+    personas en las que se van enteras, después (`borrar_conversaciones`)."""
     cliente = _SupabaseFalso({
         "message-media": [
             "c-ajena/u-1/foto.jpg", "c-ajena/u-1/notas/voz.m4a", "c-ajena/u-2/suya.jpg",
@@ -313,9 +316,14 @@ async def test_los_adjuntos_de_chat_se_barren_por_conversacion(monkeypatch, con_
     })
     _instalar_cliente(monkeypatch, cliente)
 
-    total = await storage.delete_user_files("u-1", conversaciones=["c-ajena"], conversaciones_enteras=["c-propia"])
+    total = await storage.delete_user_files("u-1", conversaciones=["c-ajena", "c-propia"])
 
-    assert total == 4
+    assert total == 3
+    assert cliente.objetos["message-media"] == [
+        "c-ajena/u-2/suya.jpg", "c-propia/u-2/b.jpg", "c-otra/u-2/nada-que-ver.jpg",
+    ]
+
+    assert await storage.borrar_conversaciones(["c-propia"]) == 1
     assert cliente.objetos["message-media"] == ["c-ajena/u-2/suya.jpg", "c-otra/u-2/nada-que-ver.jpg"]
 
 
@@ -339,3 +347,79 @@ async def test_sin_credenciales_en_produccion_no_se_da_por_borrado(monkeypatch):
 
     with pytest.raises(storage.StorageNoConfigurado):
         await storage.delete_user_files("u")
+
+
+@pytest.mark.asyncio
+async def test_una_carpeta_mas_honda_que_el_tope_no_se_calla(monkeypatch, con_credenciales):
+    """Antes se saltaba en silencio y la baja respondía 204 con el archivo
+    dentro. Ahora no se borra nada y se dice."""
+    hondo = "u-1/" + "/".join(f"n{i}" for i in range(storage.PROFUNDIDAD_MAXIMA + 2)) + "/x.jpg"
+    cliente = _SupabaseFalso({"post-media": ["u-1/foto.jpg", hondo]})
+    _instalar_cliente(monkeypatch, cliente)
+
+    with pytest.raises(storage.BorradoIncompleto):
+        await storage.delete_user_files("u-1")
+    assert cliente.pedidos_de_borrado == []
+
+
+@pytest.mark.asyncio
+async def test_los_listados_van_a_la_vez_con_limite(monkeypatch, con_credenciales):
+    """Cada carpeta es una petición: de una en una, cien vídeos procesados
+    superaban lo que espera el teléfono."""
+    import asyncio
+
+    carpetas = [f"u-1/derived/m{i}/feed.mp4" for i in range(40)]
+    cliente = _SupabaseFalso({"post-media": carpetas})
+    en_vuelo = {"ahora": 0, "maximo": 0}
+    original = cliente.post
+
+    async def post(url, headers=None, json=None):
+        en_vuelo["ahora"] += 1
+        en_vuelo["maximo"] = max(en_vuelo["maximo"], en_vuelo["ahora"])
+        await asyncio.sleep(0.01)
+        try:
+            return await original(url, headers=headers, json=json)
+        finally:
+            en_vuelo["ahora"] -= 1
+
+    cliente.post = post
+    _instalar_cliente(monkeypatch, cliente)
+
+    assert await storage.delete_user_files("u-1") == 40
+    assert 2 <= en_vuelo["maximo"] <= storage.LISTADOS_A_LA_VEZ
+
+
+@pytest.mark.asyncio
+async def test_borrar_una_carpeta_sin_dueno(monkeypatch, con_credenciales):
+    cliente = _SupabaseFalso({"post-media": [
+        "u-1/derived/m1/feed.mp4", "u-1/derived/m1/hls/a.ts", "u-1/derived/m2/feed.mp4",
+    ]})
+    _instalar_cliente(monkeypatch, cliente)
+
+    assert await storage.borrar_carpeta("post-media", "u-1/derived/m1") == 2
+    assert cliente.objetos["post-media"] == ["u-1/derived/m2/feed.mp4"]
+
+
+#: Depósitos que la baja NO barre, y por qué. Uno nuevo en una migración que no
+#: esté aquí ni en `USER_BUCKETS` ni sea el de chat pone esta prueba en rojo.
+NO_SE_BARREN = {
+    "product-media": "va bajo el vendedor y el producto; un vendedor con productos no puede darse de baja solo (409)",
+    "product-incidents": "va bajo la incidencia; una incidencia impide la baja (409)",
+    "audio-private": "ningún código escribe en él",
+}
+
+
+def test_cada_deposito_de_las_migraciones_tiene_quien_lo_barra():
+    """No es una copia de la constante: los depósitos salen de las migraciones."""
+    import re
+    from pathlib import Path
+
+    migraciones = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
+    depositos = set()
+    for ruta in migraciones.glob("*.sql"):
+        texto = ruta.read_text(encoding="utf-8")
+        for bloque in re.findall(r"insert\s+into\s+storage\.buckets[^;]*", texto, flags=re.I):
+            depositos |= set(re.findall(r"\(\s*'([a-z0-9-]+)'\s*,", bloque))
+    assert "service-provider-documents" in depositos and "message-media" in depositos
+    sin_dueno = depositos - set(storage.USER_BUCKETS) - {storage.DEPOSITO_DE_CHAT} - set(NO_SE_BARREN)
+    assert not sin_dueno, f"nadie barre estos depósitos al borrar una cuenta: {sorted(sin_dueno)}"

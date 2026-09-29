@@ -20,6 +20,7 @@ tampoco (ver `modules/identity/baja.py`).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
@@ -46,16 +47,26 @@ _TIMEOUT = httpx.Timeout(15.0)
 
 #: Adjuntos de chat (0033). NO van bajo `<perfil>/`: van bajo
 #: `<conversacion>/<quien sube>/<archivo>`, así que se barren conversación a
-#: conversación (ver `delete_user_files`).
+#: conversación (ver `delete_user_files` y `borrar_conversaciones`).
 DEPOSITO_DE_CHAT = "message-media"
 
 #: Cuántos nombres se piden borrar en una sola petición.
 LOTE_DE_BORRADO = 100
 
-#: Hasta dónde se baja en las carpetas al borrar una cuenta. Los documentos de
-#: postulación van en `<perfil>/<postulación>/<archivo>`: dos niveles bastan, y
-#: el tope evita recorrer sin fin una estructura que no esperamos.
-PROFUNDIDAD_MAXIMA = 4
+#: Cuántas peticiones de listado van a la vez. El listado no es recursivo:
+#: una cuenta con doscientos vídeos procesados son cientos de carpetas, y de
+#: una en una la baja tardaba más de lo que el teléfono espera.
+LISTADOS_A_LA_VEZ = 8
+
+#: Hasta dónde se baja en las carpetas. Lo más hondo que escribe la aplicación
+#: es `<perfil>/derived/<medio>/hls/<archivo>` (cuatro niveles); el tope es
+#: holgado a propósito. PASARLO NO SE CALLA: una carpeta más honda es una que
+#: no se sabe borrar, y la baja se detiene antes de borrar nada.
+PROFUNDIDAD_MAXIMA = 16
+
+
+class CarpetaDemasiadoHonda(ValueError):
+    """Hay carpetas por debajo de `PROFUNDIDAD_MAXIMA`: no se pueden barrer."""
 
 
 def storage_configured() -> bool:
@@ -70,7 +81,11 @@ def _headers() -> dict[str, str]:
 
 
 async def _list_prefix(
-    client: httpx.AsyncClient, bucket: str, prefix: str, profundidad: int = 0
+    client: httpx.AsyncClient,
+    bucket: str,
+    prefix: str,
+    profundidad: int = 0,
+    turnos: asyncio.Semaphore | None = None,
 ) -> list[str]:
     """Nombres de los ficheros que cuelgan de `prefix` dentro de `bucket`.
 
@@ -78,18 +93,23 @@ async def _list_prefix(
     con `id` nulo, y borrar su nombre no borra nada (se borran nombres exactos).
     Los documentos de postulación viven en `<perfil>/<postulación>/<archivo>`:
     sin bajar a las carpetas, el borrado de la cuenta los dejaba en el depósito.
+
+    Las subcarpetas se listan A LA VEZ, con `turnos` como límite.
     """
+    turnos = turnos or asyncio.Semaphore(LISTADOS_A_LA_VEZ)
     url = f"{get_settings().supabase_url}/storage/v1/object/list/{bucket}"
     nombres: list[str] = []
+    carpetas: list[str] = []
     pagina = 0
     while True:
         # El listado viene paginado; sin recorrerlo entero, una cuenta con mucho
         # contenido dejaria ficheros sin borrar.
-        respuesta = await client.post(
-            url,
-            headers=_headers(),
-            json={"prefix": prefix, "limit": 100, "offset": pagina * 100},
-        )
+        async with turnos:
+            respuesta = await client.post(
+                url,
+                headers=_headers(),
+                json={"prefix": prefix, "limit": 100, "offset": pagina * 100},
+            )
         respuesta.raise_for_status()
         lote = respuesta.json()
         if not lote:
@@ -99,40 +119,56 @@ async def _list_prefix(
             if not nombre:
                 continue
             ruta = f"{prefix}/{nombre}"
-            # Carpeta: `id` presente y nulo. Se baja, con tope.
+            # Carpeta: `id` presente y nulo.
             if "id" in item and item["id"] is None:
-                if profundidad < PROFUNDIDAD_MAXIMA:
-                    nombres.extend(await _list_prefix(client, bucket, ruta, profundidad + 1))
+                if profundidad >= PROFUNDIDAD_MAXIMA:
+                    raise CarpetaDemasiadoHonda(bucket)
+                carpetas.append(ruta)
                 continue
             nombres.append(ruta)
         if len(lote) < 100:
             break
         pagina += 1
+    for sub in await asyncio.gather(
+        *(_list_prefix(client, bucket, c, profundidad + 1, turnos) for c in carpetas)
+    ):
+        nombres.extend(sub)
     return nombres
 
 
-async def delete_user_files(
-    user_id: str,
-    *,
-    conversaciones: Sequence[str] = (),
-    conversaciones_enteras: Sequence[str] = (),
-) -> int:
+async def _borrar_nombres(client: httpx.AsyncClient, bucket: str, rutas: list[str]) -> int:
+    for desde in range(0, len(rutas), LOTE_DE_BORRADO):
+        respuesta = await client.request(
+            "DELETE",
+            f"{get_settings().supabase_url}/storage/v1/object/{bucket}",
+            headers=_headers(),
+            json={"prefixes": rutas[desde : desde + LOTE_DE_BORRADO]},
+        )
+        respuesta.raise_for_status()
+    return len(rutas)
+
+
+async def delete_user_files(user_id: str, *, conversaciones: Sequence[str] = ()) -> int:
     """Borra todo lo que haya subido `user_id`. Devuelve cuantos ficheros quito.
 
     - En cada depósito de `USER_BUCKETS`, todo lo que cuelga de `<perfil>/`,
       bajando a las carpetas.
-    - En `message-media`, lo suyo dentro de cada conversación en la que está
-      (`<conversacion>/<perfil>/`) y, de las conversaciones que se van enteras
-      con la cuenta (las que creó), todo (`<conversacion>/`): sus mensajes
-      desaparecen y sus adjuntos no pueden quedarse sin dueño.
+    - En `message-media`, lo suyo dentro de cada una de sus conversaciones
+      (`<conversacion>/<perfil>/`).
+
+    SOLO LO SUYO. Lo de las demás personas en las conversaciones que se van
+    enteras con la cuenta lo retira `borrar_conversaciones`, y DESPUÉS de
+    confirmar la baja: si la baja se deshiciera, esas conversaciones
+    volverían, y sus adjuntos no pueden haberse perdido por el camino.
 
     UN ARCHIVO QUE YA NO ESTÁ NO ES UN FALLO: Storage borra nombres exactos y
     los que no encuentra simplemente no los devuelve. Repetir es seguro.
 
     SI ALGO FALLA, LANZA `BorradoIncompleto`, y el mensaje solo nombra
     depósitos, nunca rutas: llevan el perfil y la postulación. Si falla al
-    LISTAR, no se ha borrado nada. Si falla al BORRAR, se intentan los demás
-    depósitos y lo ya borrado no vuelve: repetir termina el trabajo.
+    LISTAR (o hay carpetas más hondas que el tope), no se ha borrado nada. Si
+    falla al BORRAR, se intentan los demás depósitos y lo ya borrado no
+    vuelve: repetir termina el trabajo.
 
     SIN CREDENCIALES, en producción LANZA `StorageNoConfigurado`: una cuenta
     no puede darse por borrada con sus archivos dentro. Fuera de producción
@@ -153,21 +189,27 @@ async def delete_user_files(
 
     objetivos = [(bucket, user_id) for bucket in USER_BUCKETS]
     objetivos += [(DEPOSITO_DE_CHAT, f"{c}/{user_id}") for c in conversaciones]
-    objetivos += [(DEPOSITO_DE_CHAT, str(c)) for c in conversaciones_enteras]
 
     borrados = 0
     fallidos: list[str] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        # PRIMERO SE LISTA TODO. Si un depósito no contesta, no se borra nada:
-        # la cuenta sigue entera, con todos sus archivos, y se puede reintentar.
+        # PRIMERO SE LISTA TODO, y a la vez. Si un depósito no contesta, no se
+        # borra nada: la cuenta sigue entera, con todos sus archivos.
+        turnos = asyncio.Semaphore(LISTADOS_A_LA_VEZ)
+        listados = await asyncio.gather(
+            *(_list_prefix(client, bucket, prefijo, 0, turnos) for bucket, prefijo in objetivos),
+            return_exceptions=True,
+        )
         pendientes: list[tuple[str, list[str]]] = []
-        for bucket, prefijo in objetivos:
-            try:
-                pendientes.append((bucket, await _list_prefix(client, bucket, prefijo)))
-            except (httpx.HTTPError, ValueError):
+        for (bucket, _), listado in zip(objetivos, listados):
+            if isinstance(listado, (httpx.HTTPError, ValueError)):
                 # SIN LA RUTA NI LA EXCEPCIÓN: las dos pueden llevarla.
                 logger.warning("No se pudo listar lo de %s en %s", user_id, bucket)
                 fallidos.append(bucket)
+            elif isinstance(listado, BaseException):
+                raise listado
+            else:
+                pendientes.append((bucket, listado))
         if fallidos:
             raise BorradoIncompleto(
                 "No se pudieron listar los archivos en: " + ", ".join(sorted(set(fallidos)))
@@ -177,16 +219,7 @@ async def delete_user_files(
         # limpiar los demás; lo ya borrado no vuelve, y repetir termina.
         for bucket, rutas in pendientes:
             try:
-                for desde in range(0, len(rutas), LOTE_DE_BORRADO):
-                    lote = rutas[desde : desde + LOTE_DE_BORRADO]
-                    respuesta = await client.request(
-                        "DELETE",
-                        f"{get_settings().supabase_url}/storage/v1/object/{bucket}",
-                        headers=_headers(),
-                        json={"prefixes": lote},
-                    )
-                    respuesta.raise_for_status()
-                    borrados += len(lote)
+                borrados += await _borrar_nombres(client, bucket, rutas)
             except httpx.HTTPError:
                 logger.warning("No se pudo borrar lo de %s en %s", user_id, bucket)
                 fallidos.append(bucket)
@@ -198,6 +231,44 @@ async def delete_user_files(
     if borrados:
         logger.info("Borrados %d archivos de Storage de %s", borrados, user_id)
     return borrados
+
+
+async def borrar_conversaciones(conversaciones: Sequence[str]) -> int:
+    """Retira TODO lo de `message-media/<conversacion>/` de conversaciones que
+    YA NO EXISTEN (se borraron en cascada con la cuenta que las creó).
+
+    Se llama después de confirmar la baja. Sin conversación no hay miembros, y
+    la política de lectura de `message-media` exige ser miembro: lo que quede
+    aquí no lo puede abrir nadie desde la aplicación. Si falla, lanza
+    `BorradoIncompleto` y quien llama lo registra para retirarlo a mano.
+    """
+    if not conversaciones:
+        return 0
+    _exigir_configurado()
+    borrados = 0
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        turnos = asyncio.Semaphore(LISTADOS_A_LA_VEZ)
+        try:
+            for conversacion in conversaciones:
+                rutas = await _list_prefix(client, DEPOSITO_DE_CHAT, str(conversacion), 0, turnos)
+                borrados += await _borrar_nombres(client, DEPOSITO_DE_CHAT, rutas)
+        except (httpx.HTTPError, ValueError):
+            raise BorradoIncompleto(
+                "No se pudieron retirar los adjuntos de conversaciones borradas"
+            ) from None
+    return borrados
+
+
+async def borrar_carpeta(bucket: str, prefijo: str) -> int:
+    """Borra todo lo que cuelga de `bucket/prefijo`, bajando a las carpetas.
+
+    Para lo que se subió y se quedó sin dueño: el procesado de un vídeo que
+    terminó después de que se borrara la cuenta o la publicación.
+    """
+    _exigir_configurado()
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        rutas = await _list_prefix(client, bucket, prefijo)
+        return await _borrar_nombres(client, bucket, rutas)
 
 
 # --------------------------------------------------------------------------- #

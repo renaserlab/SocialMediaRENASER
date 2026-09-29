@@ -85,6 +85,8 @@ class StorageDeMentira:
         self.fallar_en: set[str] = set()
         #: Depósitos que se dejan listar pero no borrar.
         self.fallar_al_borrar_en: set[str] = set()
+        #: Prefijos EXACTOS cuyo listado falla (una conversación entera, p. ej.).
+        self.fallar_al_listar: set[tuple[str, str]] = set()
         self.borrados: list[tuple[str, list[str]]] = []
 
     def poner(self, deposito: str, *rutas: str) -> None:
@@ -101,7 +103,7 @@ class StorageDeMentira:
         cuerpo = json.loads(peticion.content or b"{}") if peticion.method != "POST" or camino.startswith(("list/", "sign/")) else {}
         if peticion.method == "POST" and camino.startswith("list/"):
             deposito = camino[len("list/"):]
-            if deposito in self.fallar_en:
+            if deposito in self.fallar_en or (deposito, cuerpo["prefix"]) in self.fallar_al_listar:
                 return httpx.Response(500, json={"error": "caído"})
             prefijo = cuerpo["prefix"].rstrip("/") + "/"
             nivel: dict[str, str | None] = {}
@@ -507,7 +509,9 @@ async def _evento(motor, organizador: str) -> tuple[str, str]:
     return evento, tipo
 
 
-async def _asistencia(motor, evento: str, tipo: str, asistente: str, *, organizador: str) -> str:
+async def _asistencia(
+    motor, evento: str, tipo: str, asistente: str, *, organizador: str, stripe: bool = False
+) -> str:
     """Reserva, orden gratuita pagada con su entrada, aceptación de la política,
     acceso y reseña con respuesta del organizador. Devuelve la reseña."""
     # La reserva y sus líneas, EN LA MISMA TRANSACCIÓN: el cuadre es diferido.
@@ -537,8 +541,9 @@ async def _asistencia(motor, evento: str, tipo: str, asistente: str, *, organiza
             "cast(:u as uuid), cast(:t as uuid), 'General', md5(random()::text) || md5(random()::text)) returning id"
         ), {"e": evento, "o": orden, "l": linea, "u": asistente, "t": tipo})).scalar())
         await c.execute(text(
-            "update public.event_orders set status = 'PAID', paid_at = now() where id = cast(:o as uuid)"
-        ), {"o": orden})
+            "update public.event_orders set status = 'PAID', paid_at = now(), "
+            "provider = cast(:p as text), external_payment_id = cast(:x as text) where id = cast(:o as uuid)"
+        ), {"o": orden, "p": "stripe" if stripe else "none", "x": f"pi_prueba_{orden[:8]}" if stripe else None})
     politica = await _uno(
         motor, "select id from public.event_policies where event_id = cast(:e as uuid) limit 1", e=evento
     )
@@ -885,7 +890,9 @@ async def test_comercio_compra_sin_saldo_se_va_y_con_saldo_se_frena(entorno) -> 
         o=orden, c=curso, a=autor,
     )
     r = await _borrar_cuenta(app, con_saldo)
-    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "earnings"}, r.text
+    # Lo primero que frena es la propia orden pagada (0089); el saldo también
+    # lo haría (`owner_sale_balances.order_id`, `restrict`).
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "courses"}, r.text
     assert await _existe(motor, con_saldo)
     r = await _borrar_cuenta(app, autor)
     assert r.status_code == 409 and r.json()["error"]["code"] == "account_deletion_blocked", r.text
@@ -1153,3 +1160,151 @@ async def test_sin_credenciales_de_storage_en_produccion_no_se_borra(entorno, mo
     r = await _borrar_cuenta(app, ana)
     assert r.status_code == 503 and r.json()["error"]["code"] == "account_deletion_storage_failed", r.text
     assert await _existe(motor, ana)
+
+
+async def test_dos_bajas_a_la_vez_de_la_misma_cuenta(entorno) -> None:
+    """La segunda espera al bloqueo de la fila del perfil y, cuando entra, no
+    encuentra nada que borrar: las dos responden 204 y no queda nada."""
+    import asyncio
+
+    app, motor, almacen = entorno
+    jefa, moderador, ana = await _persona(motor, "admin"), await _persona(motor, "moderator"), await _persona(motor)
+    solicitud = await _llevar(app, ana, "submitted", jefa=jefa, moderador=moderador)
+    _archivos_de(almacen, ana)
+
+    respuestas = await asyncio.gather(_borrar_cuenta(app, ana), _borrar_cuenta(app, ana))
+
+    assert [r.status_code for r in respuestas] == [204, 204], [r.text for r in respuestas]
+    assert not await _existe(motor, ana)
+    assert await _restos_de_servicios(motor, solicitud) == {t: 0 for t, _ in SERVICIOS}
+    assert _cuantos(almacen, ana) == 0
+
+
+# =========================================================================== #
+# 9. Hallazgos de la revisión independiente (29/09/2026)
+# =========================================================================== #
+async def test_R1_una_orden_de_evento_pagada_no_se_va_con_quien_compro(entorno) -> None:
+    """ALTA. Sin comisión configurada (el valor por defecto) una venta no crea
+    saldo, y nada frenaba la cascada `event_orders.buyer_id`: la orden pagada,
+    con la referencia del cobro, desaparecía con la cuenta. Ahora 409, y nada
+    se toca. Una orden GRATUITA sí se va (la prueba de Eventos de arriba)."""
+    app, motor, almacen = entorno
+    organizador, compradora = await _persona(motor), await _persona(motor)
+    evento, tipo = await _evento(motor, organizador)
+    await _asistencia(motor, evento, tipo, compradora, organizador=organizador, stripe=True)
+    assert await _uno(motor, "select count(*) from public.owner_sale_balances where event_id = cast(:e as uuid)", e=evento) == 0
+    _archivos_de(almacen, compradora)
+
+    r = await _borrar_cuenta(app, compradora)
+
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "events"}, r.text
+    assert await _existe(motor, compradora)
+    assert await _uno(
+        motor, "select count(*) from public.event_orders where buyer_id = cast(:u as uuid) and status = 'PAID'", u=compradora
+    ) == 1
+    assert almacen.borrados == [] and _cuantos(almacen, compradora) == 5
+
+
+async def test_R1_una_orden_de_curso_pagada_sin_saldo_tampoco(entorno) -> None:
+    app, motor, almacen = entorno
+    autor, comprador = await _persona(motor), await _persona(motor)
+    curso, _ = await _curso(motor, autor)
+    producto = str(await _escribir(
+        motor, "insert into public.commerce_products (kind, course_id) values ('course_lifetime', cast(:c as uuid)) returning id",
+        c=curso,
+    ))
+    await _escribir(
+        motor,
+        "insert into public.orders (user_id, commerce_product_id, provider, channel, status, amount_minor, currency, paid_at) "
+        "values (cast(:u as uuid), cast(:p as uuid), 'stripe', 'web', 'paid', 4900, 'PEN', now())",
+        u=comprador, p=producto,
+    )
+    r = await _borrar_cuenta(app, comprador)
+    assert r.status_code == 409 and r.json()["error"]["details"] == {"reason": "courses"}, r.text
+    assert await _uno(motor, "select count(*) from public.orders where user_id = cast(:u as uuid)", u=comprador) == 1
+
+
+async def test_R2_los_textos_del_equipo_sobre_quien_postula_no_quedan_en_la_auditoria(entorno) -> None:
+    """MEDIA. El mensaje de una decisión y las notas sobre documentos y
+    credenciales las escribe el equipo SOBRE quien postula (a veces con un
+    número de documento) y la auditoría sobrevive a su cuenta."""
+    app, motor, almacen = entorno
+    jefa, moderador, ana = await _persona(motor, "admin"), await _persona(motor, "moderator"), await _persona(motor)
+    solicitud = await _llevar(app, ana, "under_review", jefa=jefa, moderador=moderador)
+    async with _cliente(app, moderador) as mod:
+        detalle = (await mod.get(f"{BANDEJA}/{solicitud}")).json()
+        documento = detalle["documents"][0]["id"]
+        credencial = detalle["credentials"][0]["id"]
+        r = await mod.post(f"{BANDEJA}/{solicitud}/documents/{documento}/observe", json={"note": "El DNI 45872145 está vencido"})
+        assert r.status_code == 200, r.text
+        r = await mod.post(f"{BANDEJA}/{solicitud}/credentials/{credencial}/observe", json={"note": "Colegiatura 4587 ilegible"})
+        assert r.status_code == 200, r.text
+        r = await mod.post(f"{BANDEJA}/{solicitud}/request-changes", json={"message": "Ana, sube el DNI 45872145 vigente"})
+        assert r.status_code == 200, r.text
+    assert (await _borrar_cuenta(app, ana)).status_code == 204
+
+    filas = await _filas(
+        motor,
+        "select action, coalesce(reason, ''), payload::text from public.audit_events "
+        "where action in ('service_document.observed', 'service_credential.observed', "
+        "'service_application.changes_requested') and (entity_id = cast(:s as uuid) "
+        "or payload->>'application_id' = cast(:s as text))",
+        s=solicitud,
+    )
+    assert {f[0] for f in filas} == {
+        "service_document.observed", "service_credential.observed", "service_application.changes_requested",
+    }
+    for accion, motivo, carga in filas:
+        assert motivo == "", accion
+        assert "45872145" not in carga and "4587" not in carga and "Ana" not in carga, accion
+        assert '"with_note": true' in carga or '"with_message": true' in carga, accion
+
+
+async def test_R5_si_la_baja_se_deshace_los_adjuntos_ajenos_siguen(entorno) -> None:
+    """MEDIA. Los adjuntos de Bea en la conversación que creó Ana se borraban
+    ANTES de confirmar: si otro depósito fallaba, la baja se deshacía y la
+    conversación volvía sin ellos. Ahora se retiran después de confirmar."""
+    app, motor, almacen = entorno
+    ana, bea = await _persona(motor), await _persona(motor)
+    propia, ajena = await _chat(motor, almacen, ana, bea)
+    _archivos_de(almacen, ana)
+    almacen.fallar_al_borrar_en = {"course-media"}
+
+    r = await _borrar_cuenta(app, ana)
+
+    assert r.status_code == 503, r.text
+    assert await _existe(motor, ana)
+    assert almacen.de("message-media", f"{propia}/{bea}") == [f"{propia}/{bea}/foto.jpg", f"{propia}/{bea}/nota/voz.m4a"]
+    assert almacen.de("message-media", f"{ajena}/{bea}") == [f"{ajena}/{bea}/foto.jpg", f"{ajena}/{bea}/nota/voz.m4a"]
+
+    almacen.fallar_al_borrar_en = set()
+    assert (await _borrar_cuenta(app, ana)).status_code == 204
+    assert almacen.de("message-media", propia) == []
+    assert len(almacen.de("message-media", f"{ajena}/{bea}")) == 2
+
+
+async def test_R5_si_falla_lo_de_despues_la_cuenta_ya_esta_borrada_y_se_registra(entorno, caplog) -> None:
+    import logging
+
+    app, motor, almacen = entorno
+    ana, bea = await _persona(motor), await _persona(motor)
+    propia, _ = await _chat(motor, almacen, ana, bea)
+    almacen.fallar_al_listar = {("message-media", propia)}
+
+    with caplog.at_level(logging.ERROR):
+        r = await _borrar_cuenta(app, ana)
+
+    assert r.status_code == 204, r.text
+    assert not await _existe(motor, ana)
+    assert almacen.de("message-media", f"{propia}/{ana}") == []
+    assert almacen.de("message-media", f"{propia}/{bea}") != []
+    registro = " ".join(x.getMessage() for x in caplog.records if x.levelno >= logging.ERROR)
+    assert propia in registro and "foto.jpg" not in registro
+
+
+async def test_R8_la_base_de_pruebas_tiene_la_0089(entorno) -> None:
+    from app.modules.identity import baja
+
+    _, motor, _ = entorno
+    async with async_sessionmaker(motor)() as db:
+        assert await baja._hay_0089(db) is True

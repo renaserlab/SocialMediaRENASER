@@ -716,6 +716,23 @@ CAMPOS_DERIVADOS = (
 )
 
 
+async def _retirar_derivados(media: PostMedia) -> None:
+    """Borra `<dueño>/derived/<medio>/`, lo haya llegado a anotar o no (una
+    subida pudo terminar justo antes de un fallo). Si no hay nada, es un
+    listado vacío.
+
+    Mejor esfuerzo: esto corre en segundo plano y no tiene a quién contestar.
+    Un fallo se registra sin la ruta.
+    """
+    from app.shared import storage
+
+    carpeta = f"{media.storage_path.split('/', 1)[0]}/derived/{media.id}"
+    try:
+        await storage.borrar_carpeta(BUCKET, carpeta)
+    except Exception:  # noqa: BLE001
+        logger.warning("No se pudieron retirar los derivados huérfanos del medio %s", media.id)
+
+
 async def process_media(media_id: str) -> None:
     """Procesa UN medio recien subido. Pensado para BackgroundTasks.
 
@@ -765,8 +782,18 @@ async def process_media(media_id: str) -> None:
     # Se guarda AUNQUE el estado sea `failed`: si se generaron el poster y el
     # MP4 y solo fallo el HLS, tirar los dos primeros seria absurdo.
     async with SessionLocal() as db:
-        fila = await db.get(PostMedia, media_id)
+        # CON BLOQUEO, y es lo que cierra una carrera con la baja de la cuenta
+        # (o el borrado de la publicación): si se está borrando, esto espera a
+        # que termine; y si la fila ya no está, lo que acaba de subirse a
+        # `derived/` no tiene dueño. El barrido de la baja pudo pasar ANTES de
+        # que se subiera, así que se retira aquí.
+        fila = (
+            await db.scalars(
+                select(PostMedia).where(PostMedia.id == media_id).with_for_update()
+            )
+        ).first()
         if fila is None:
+            await _retirar_derivados(media)
             return
         for campo in CAMPOS_DERIVADOS:
             valor = getattr(media, campo, None)
