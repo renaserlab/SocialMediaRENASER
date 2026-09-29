@@ -30,6 +30,7 @@ import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { assets } from '@/data/assets';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ProductSellerRepository } from '@/repositories/ProductSellerRepository';
+import { useServiciosEncendido } from '@/hooks/useServiciosEncendido';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import {
   esProveedorActivo,
@@ -94,6 +95,8 @@ export function ProfileScreen() {
   const setProfileImage = useAppStore((state) => state.setProfileImage);
   const authStatus = useAuthStore((state) => state.status);
   const esAdministracion = useAppStore((state) => state.user?.isAdmin === true);
+  /* Z SERVICIOS: su entrada solo existe con `FEATURE_SERVICES` encendida. */
+  const serviciosEncendido = useServiciosEncendido();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
   // Seguir, escribir y bloquear necesitan cuenta: se pide al usarlos.
@@ -1217,6 +1220,21 @@ export function ProfileScreen() {
                 onPress={() => {
                   setOptionsVisible(false);
                   router.push(rutaDelProveedor(estadoDeProveedor) as never);
+                }}
+              />
+            ) : null}
+            {/*
+              Z SERVICIOS: «Ofrecer un servicio». SOLO con la bandera
+              encendida en el servidor (`FEATURE_SERVICES`); apagada, el menú
+              queda exactamente como estaba.
+            */}
+            {serviciosEncendido ? (
+              <ListRow
+                title={t('servicios.entrada')}
+                leftIcon="briefcase"
+                onPress={() => {
+                  setOptionsVisible(false);
+                  router.push('/servicios/prestador' as never);
                 }}
               />
             ) : null}
