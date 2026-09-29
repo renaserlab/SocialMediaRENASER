@@ -717,8 +717,15 @@ async def _decidir(
         funcion=funcion,
         desde=desde,
         hasta=hasta,
-        motivo=mensaje,
-        datos={"event_id": evento.id, "idempotency": clave, "provider_status": prestador.status},
+        # SIN EL TEXTO. Lo escribe el equipo SOBRE quien postula (a veces con
+        # un número de documento), y la auditoría sobrevive a su cuenta
+        # (0089). El mensaje vive en el historial de la postulación, que se va
+        # con ella; aquí queda que lo hubo.
+        motivo=None,
+        datos={
+            "event_id": evento.id, "idempotency": clave, "provider_status": prestador.status,
+            "with_message": bool(mensaje),
+        },
     )
     await avisos.avisar(
         db,
@@ -746,8 +753,9 @@ async def revisar_documento(
     await auditar(
         db, accion="service_document.accepted" if aceptar else "service_document.observed",
         entidad="service_provider_document", entidad_id=documento.id, actor_id=actor_id,
-        funcion=funcion, motivo=None if aceptar else documento.review_note,
-        datos={"application_id": solicitud.id, "kind": documento.kind},
+        # Sin la nota, por lo mismo que en los saltos: se queda en el documento.
+        funcion=funcion, motivo=None,
+        datos={"application_id": solicitud.id, "kind": documento.kind, "with_note": bool(documento.review_note)},
     )
     if not aceptar:
         await avisos.avisar(
@@ -774,8 +782,8 @@ async def revisar_credencial(
     await auditar(
         db, accion=f"service_credential.{nombres[accion]}",
         entidad="service_provider_credential", entidad_id=credencial.id, actor_id=actor_id,
-        funcion=funcion, motivo=credencial.review_note,
-        datos={"application_id": solicitud.id, "kind": credencial.kind},
+        funcion=funcion, motivo=None,
+        datos={"application_id": solicitud.id, "kind": credencial.kind, "with_note": bool(credencial.review_note)},
     )
     if accion in ("observe", "reject"):
         marca = int((credencial.observed_at or credencial.updated_at or _ahora()).timestamp())
