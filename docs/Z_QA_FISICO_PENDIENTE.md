@@ -1190,9 +1190,13 @@ aparato, ni el selector de archivos, ni el lector de pantalla.
 
 Antes de empezar:
 
-- La **0088** ya está aplicada (29/09/2026). Aplicar la **0089** en la base de
-  pruebas (`Z_BAJA_DE_CUENTA.md` §10) antes de probar la eliminación de cuenta.
-- Reiniciar la API.
+- La **0088** y la **0089** ya están aplicadas en Supabase (29/09/2026; la
+  0089, verificada sin divergencias). Si se usa otra base de pruebas,
+  aplicarle la **0089 completa** (`Z_BAJA_DE_CUENTA.md` §10) antes de probar
+  la eliminación de cuenta.
+- La API de ese entorno tiene que correr el código de `Edson` (todavía sin
+  desplegar). Reiniciarla después de cualquier migración: la puerta de la
+  baja recuerda lo que vio al arrancar.
 - Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
 - Publicar unas condiciones del prestador para el país de prueba, desde
   Administración › Servicios › Condiciones del prestador.
@@ -1296,10 +1300,16 @@ administración (`admin`). Si se puede, una tercera de moderación
 
 ### Eliminación de cuenta
 
-**Solo con la 0089 aplicada** (sin ella, `DELETE /me` sigue fallando para
-quien figura en un historial). Corregido en el código y probado contra
-PostgreSQL (`Z_BAJA_DE_CUENTA.md`), pero **no en un teléfono**. Usar cuentas
-de prueba desechables, nunca una real.
+**Con la 0089 completa** (en Supabase lo está desde el 29/09/2026) **y la API
+con el código de `Edson`**. Corregido en el código y probado contra
+PostgreSQL y con la API local de verdad (`Z_BAJA_DE_CUENTA.md` §15), pero
+**no en un teléfono**. Usar cuentas de prueba desechables, nunca una real.
+
+- [ ] En un entorno con la 0089 a medias (sin los frenos de las órdenes con
+      dinero) y la API reiniciada: la baja **no se hace** (503
+      `account_deletion_unavailable`), el teléfono dice «No se pudo eliminar
+      la cuenta · Inténtalo de nuevo en unos momentos. Tu cuenta sigue
+      activa.», y no se pierde ningún archivo. Solo en una base de pruebas.
 
 - [ ] Borrar la cuenta de quien postuló, desde Ajustes › Eliminar cuenta:
   - la app vuelve a la portada y la sesión se cierra;

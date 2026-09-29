@@ -8,12 +8,13 @@ rama `Edson`.
 
 | | |
 |---|---|
-| **Incremento 1** | **implementado y probado; pendiente únicamente de aplicar y verificar la 0089 y del QA físico** (§16). Admisión completa del prestador: condiciones versionadas, borrador, documentos privados, credenciales, envío, revisión, correcciones, reenvío, aprobación, rechazo, suspensión y retirada |
+| **Incremento 1** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§16). Admisión completa del prestador: condiciones versionadas, borrador, documentos privados, credenciales, envío, revisión, correcciones, reenvío, aprobación, rechazo, suspensión y retirada |
 | **Migraciones 0086, 0087 y 0088** | **APLICADAS** en Supabase y verificadas en sesión de solo lectura con **cero divergencias** (la 0088, el 29/09/2026: §9). Son históricas: no se editan |
-| **Migración 0089** (plataforma) | **escrita y probada en PostgreSQL local, SIN APLICAR.** Hace que borrar la cuenta funcione sin borrar la historia (§12, `Z_BAJA_DE_CUENTA.md`) |
+| **Migración 0089** (plataforma) | **APLICADA** en Supabase y verificada en solo lectura el 29/09/2026: **sin divergencias** (`Z_BAJA_DE_CUENTA.md` §15). Hace que borrar la cuenta funcione sin borrar la historia (§12) |
 | **`FEATURE_SERVICES`** | **apagada.** Todas las rutas contestan 503 `services_disabled` sin mirar la base |
-| **Pagos, reservas, catálogo** | **no existen** en este incremento, y ninguna tabla los anticipa |
-| **Bloqueo para encender** | **Resuelto en el código** (0089 + `DELETE /auth/me`, §12). Queda aplicar la 0089 y verificarla |
+| **Pagos, reservas, catálogo** | **no existen** en este incremento, y ninguna tabla los anticipa. Los pagos de la plataforma siguen **apagados** |
+| **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
+| **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
 | **QA físico** | pendiente: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
 
 ## 1. Lo que NO es
@@ -216,7 +217,7 @@ teléfono pone el texto en su idioma); el push, con el idioma del dispositivo.
 - Personas de una empresa, teléfono verificado, antivirus, retención de
   documentos tras un rechazo o una retirada.
 
-## 12. `DELETE /me` y la auditoría: resuelto (pendiente de aplicar la 0089)
+## 12. `DELETE /me` y la auditoría: resuelto (0089 aplicada el 29/09/2026)
 
 `audit_events` (0050) es de solo añadir, pero su `actor_id` es
 `on delete set null`. Borrar el perfil de alguien que figuraba como actor pedía
@@ -236,8 +237,10 @@ persona. Se implementó en tres partes:
 
 La prueba que era una xfail estricta ahora pasa. El detalle, el inventario, la
 política de retención y cómo aplicar y verificar la 0089 están en
-[`Z_BAJA_DE_CUENTA.md`](Z_BAJA_DE_CUENTA.md). **No encender Servicios en
-producción antes de aplicar la 0089.**
+[`Z_BAJA_DE_CUENTA.md`](Z_BAJA_DE_CUENTA.md). La 0089 **ya está aplicada y
+verificada** en Supabase (§15 de ese documento). **No encender Servicios en
+producción antes de desplegar el código de `Edson`** (la puerta endurecida de
+la baja) y de pasar el QA físico.
 
 ## 13. Las vistas
 
@@ -405,12 +408,37 @@ cerrado y **no queda nada alto ni bloqueante**. Los que dependen de una
 decisión de la empresa quedan como S8–S14 en `Z_REQUISITOS_Y_DECISIONES.md`.
 La tabla completa está en `Z_BAJA_DE_CUENTA.md` §14.
 
+**Tras aplicar la 0089 en Supabase (29/09/2026, tarde).** El detalle está en
+`Z_BAJA_DE_CUENTA.md` §15.
+
+- **Primera aplicación**: la versión de `c6d3cd6`, sin los frenos de las
+  órdenes con dinero. La verificación de solo lectura lo detectó y la versión
+  completa se ejecutó encima.
+- **Segunda verificación**: **0089 sin divergencias**.
+  - El esquema público coincide entero con el repositorio.
+  - Los cuatro objetos que faltaban están, definición por definición.
+  - Las transacciones de la 0089 no escribieron datos.
+  - Hay 0 órdenes de Cursos y 0 de Eventos.
+- **La puerta de la baja (`_hay_0089`)** decía que sí con la versión a medias.
+  Ahora mira cada protección, va antes de tocar nada y se cierra ante la duda.
+- **Recorrido integral** de `DELETE /auth/me`, con una persona en todas las
+  verticales: verde. La API local de verdad reconoce la 0089 completa y
+  rechaza la base a medias.
+- **Servicios: L6 era intermitente por una carrera real** (dos borradores de
+  condiciones del mismo país). Corregido con un bloqueo de la transacción,
+  sin tocar el esquema.
+- **Mutaciones**: 31 de 31.
+- **Batería completa, tras el arreglo**: 3809 pasan con PostgreSQL (0
+  fallan, 0 omitidas); 2887 pasan sin él (922 omitidas).
+
 ## 17. Punto exacto de continuación hacia el Incremento 2
 
 **No se empezó el Incremento 2.** Antes de abrirlo, una persona tiene que:
 
-1. **Aplicar la 0089** y verificarla en solo lectura (`Z_BAJA_DE_CUENTA.md`
-   §10–11), y reiniciar la API.
+1. ~~Aplicar la 0089 y verificarla~~ **Hecho el 29/09/2026** (sin
+   divergencias, `Z_BAJA_DE_CUENTA.md` §15). Queda **desplegar el código de
+   `Edson`** cuando se apruebe: ese despliegue reinicia la API de producción,
+   que es lo que hace que la puerta de la baja vea la 0089 completa.
    Antes de encender los pagos, decidir **S8** (Google Play exige poder
    borrar la cuenta desde la app).
 2. **Hacer el QA físico** de Servicios y de la eliminación de cuenta
