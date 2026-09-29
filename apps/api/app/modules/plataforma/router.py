@@ -18,8 +18,16 @@ router = APIRouter(prefix="/platform", tags=["platform"])
 class PlatformConfig(BaseModel):
     #: Ver `Settings.publicacion_flexible`: si enviar publica al momento.
     publicacion_flexible: bool
+    #: Ver `Settings.feature_services`: si la app enseña las entradas de Z
+    #: Servicios. AÑADIDO, no sustituido: una app vieja lo ignora, y una app
+    #: nueva frente a un servidor viejo no lo recibe y lo toma como apagado.
+    feature_services: bool = False
 
 
 @router.get("/config", response_model=PlatformConfig)
 async def configuracion() -> PlatformConfig:
-    return PlatformConfig(publicacion_flexible=get_settings().publicacion_flexible)
+    ajustes = get_settings()
+    return PlatformConfig(
+        publicacion_flexible=ajustes.publicacion_flexible,
+        feature_services=ajustes.feature_services,
+    )

@@ -44,8 +44,9 @@ DECISIONES QUE AQUÍ SE TOMAN EN CERRADO, y por qué:
 EL MISMO MAPA VIVE EN LA BASE, en un disparador de la postulación y en un
 CHECK del historial (0086, ampliados por la 0087). Una prueba compara los dos.
 
-La EJECUCIÓN de los saltos (escribir el estado, el historial y los avisos) es
-del Bloque 1B. Aquí solo el mapa, los validadores y los errores.
+La EJECUCIÓN de los saltos (escribir el estado, el historial, el envío
+congelado, la auditoría y los avisos) vive en `admision.py`. Aquí solo el mapa,
+los validadores y los errores.
 """
 
 from __future__ import annotations

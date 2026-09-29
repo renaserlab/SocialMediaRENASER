@@ -230,6 +230,72 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("There is a decision on your case", "Open it to read it."),
         "pt": ("Há uma decisão sobre seu caso", "Abra-o para lê-la."),
     },
+    # ------------------------------------------------------------------ #
+    # Admisión de prestadores de Servicios
+    #
+    # NINGUNO LLEVA DATOS: ni documentos, ni motivos, ni notas. Dicen qué
+    # pasó; el detalle se lee en la postulación, con sesión.
+    # ------------------------------------------------------------------ #
+    "service_application_review_started": {
+        "es": ("Tu postulación está en revisión", "El equipo de Z la está revisando."),
+        "en": ("Your application is under review", "The Z team is reviewing it."),
+        "pt": ("Sua candidatura está em análise", "A equipe da Z está analisando."),
+    },
+    "service_application_changes_requested": {
+        "es": ("Hay que corregir tu postulación", "Ábrela para ver qué falta."),
+        "en": ("Your application needs changes", "Open it to see what is missing."),
+        "pt": ("Sua candidatura precisa de ajustes", "Abra-a para ver o que falta."),
+    },
+    "service_application_approved": {
+        "es": ("Tu postulación fue aprobada", "Ya eres prestador de Servicios en Z."),
+        "en": ("Your application was approved", "You are now a service provider on Z."),
+        "pt": ("Sua candidatura foi aprovada", "Agora você é prestador de serviços na Z."),
+    },
+    "service_application_rejected": {
+        "es": ("Hay una decisión sobre tu postulación", "Ábrela para leer el motivo."),
+        "en": ("There is a decision on your application", "Open it to read the reason."),
+        "pt": ("Há uma decisão sobre sua candidatura", "Abra-a para ler o motivo."),
+    },
+    "service_application_suspended": {
+        "es": ("Tu cuenta de prestador está suspendida", "Ábrela para leer el motivo."),
+        "en": ("Your provider account is suspended", "Open it to read the reason."),
+        "pt": ("Sua conta de prestador está suspensa", "Abra-a para ler o motivo."),
+    },
+    "service_application_withdrawn": {
+        "es": ("Retiraste tu postulación", "Puedes empezar otra cuando quieras."),
+        "en": ("You withdrew your application", "You can start a new one anytime."),
+        "pt": ("Você retirou sua candidatura", "Você pode começar outra quando quiser."),
+    },
+    "service_document_observed": {
+        "es": ("Un documento necesita cambios", "Ábrelo para ver qué corregir."),
+        "en": ("A document needs changes", "Open it to see what to fix."),
+        "pt": ("Um documento precisa de ajustes", "Abra-o para ver o que corrigir."),
+    },
+    "service_credential_observed": {
+        "es": ("Una credencial necesita cambios", "Ábrela para ver qué corregir."),
+        "en": ("A credential needs changes", "Open it to see what to fix."),
+        "pt": ("Uma credencial precisa de ajustes", "Abra-a para ver o que corrigir."),
+    },
+    "service_credential_rejected": {
+        "es": ("Una credencial no fue aceptada", "Ábrela para leer el motivo."),
+        "en": ("A credential was not accepted", "Open it to read the reason."),
+        "pt": ("Uma credencial não foi aceita", "Abra-a para ler o motivo."),
+    },
+    "service_application_submitted": {
+        "es": ("Nueva postulación de prestador", "Hay una postulación esperando revisión."),
+        "en": ("New provider application", "An application is waiting for review."),
+        "pt": ("Nova candidatura de prestador", "Há uma candidatura aguardando análise."),
+    },
+    "service_application_resubmitted": {
+        "es": ("Una postulación se reenvió", "Trae las correcciones que pediste."),
+        "en": ("An application was resubmitted", "It includes the changes you asked for."),
+        "pt": ("Uma candidatura foi reenviada", "Ela traz os ajustes que você pediu."),
+    },
+    "service_application_withdrawn_review": {
+        "es": ("Una postulación se retiró", "Quien postuló la retiró antes de la decisión."),
+        "en": ("An application was withdrawn", "The applicant withdrew it before a decision."),
+        "pt": ("Uma candidatura foi retirada", "Quem se candidatou a retirou antes da decisão."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

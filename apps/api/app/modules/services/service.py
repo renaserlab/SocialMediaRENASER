@@ -1,12 +1,9 @@
-"""Los casos de uso de la admisión de Servicios que existen en el Bloque 1A.
+"""Los casos de uso de LECTURA y del BORRADOR de la admisión de Servicios.
 
-LO QUE HAY: empezar o recuperar la postulación propia, leerla, cambiar el
-borrador, leer el historial, y en administración la bandeja, el detalle y el
-historial completo. Ninguno cambia el estado de una postulación.
-
-LO QUE NO HAY TODAVÍA (Bloque 1B): enviar, reenviar, registrar documentos y
-credenciales, y las decisiones de Z. Sus contratos están en `schemas` y su mapa
-en `states`; aquí no se simulan.
+LO QUE HAY AQUÍ: empezar o recuperar la postulación propia, leer el
+expediente, cambiar el borrador, el historial, y en administración la bandeja,
+el detalle, los envíos y el historial completo. NINGUNO cambia el estado de
+una postulación: los saltos viven todos en `admision`.
 
 LA IDENTIDAD SALE SIEMPRE DEL TOKEN, nunca del cuerpo: todas las funciones del
 prestador reciben `usuario_id` y solo tocan lo suyo.
@@ -14,8 +11,8 @@ prestador reciben `usuario_id` y solo tocan lo suyo.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
@@ -23,14 +20,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ValidationAppError
-from app.modules.services import politicas, states
+from app.modules.services import credenciales, documentos, politicas, requisitos, states
 from app.modules.services.models import (
-    DOCUMENTO_OBSERVADO,
-    EMPRESA,
-    POLITICA_TERMINOS_DEL_PRESTADOR,
+    ACTIVO,
+    RETIRADO,
+    ServicePolicy,
     ServiceProvider,
     ServiceProviderApplication,
     ServiceProviderApplicationEvent,
+    ServiceProviderApplicationSubmission,
     ServiceProviderCredential,
     ServiceProviderDocument,
 )
@@ -67,12 +65,25 @@ class CursorInvalido(ValidationAppError):
 class Expediente:
     solicitud: ServiceProviderApplication
     prestador: ServiceProvider
+    #: ACTIVOS. Los reemplazados van aparte, solo para administración.
     documentos: list[ServiceProviderDocument]
     credenciales: list[ServiceProviderCredential]
+    reemplazados: list[ServiceProviderDocument] = field(default_factory=list)
+    #: Los identificadores ya enviados alguna vez: esos no se retiran.
+    documentos_enviados: set[str] = field(default_factory=set)
+    credenciales_enviadas: set[str] = field(default_factory=set)
+    envios: list[ServiceProviderApplicationSubmission] = field(default_factory=list)
+    #: Lo que Z señaló en la última petición de correcciones.
+    campos_observados: list[str] = field(default_factory=list)
+    politica_aceptada: ServicePolicy | None = None
 
 
 def _ahora() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def hoy() -> date:
+    return _ahora().date()
 
 
 # --------------------------------------------------------------------------- #
@@ -106,33 +117,56 @@ async def _actual(db: AsyncSession, prestador_id: str) -> ServiceProviderApplica
     )
 
 
+async def _campos_observados(db: AsyncSession, solicitud: ServiceProviderApplication) -> list[str]:
+    if solicitud.status != states.CORRECCIONES_PEDIDAS:
+        return []
+    pedido = await db.scalar(
+        select(ServiceProviderApplicationEvent)
+        .where(
+            ServiceProviderApplicationEvent.application_id == solicitud.id,
+            ServiceProviderApplicationEvent.to_status == states.CORRECCIONES_PEDIDAS,
+        )
+        .order_by(ServiceProviderApplicationEvent.created_at.desc())
+        .limit(1)
+    )
+    campos = ((pedido.details if pedido else None) or {}).get("fields", [])
+    return [c for c in campos if c in requisitos.CAMPOS_OBSERVABLES]
+
+
 async def expediente_de(
     db: AsyncSession, solicitud: ServiceProviderApplication
 ) -> Expediente:
+    """El expediente de ESA postulación. Nada de otra postulación se cuela."""
     prestador = await db.get(ServiceProvider, solicitud.provider_id)
-    documentos = list(
+    todos = await documentos.de_la_solicitud(db, solicitud.id, solo_activos=False)
+    envios = list(
         await db.scalars(
-            select(ServiceProviderDocument)
-            .where(ServiceProviderDocument.application_id == solicitud.id)
-            .order_by(ServiceProviderDocument.created_at, ServiceProviderDocument.id)
+            select(ServiceProviderApplicationSubmission)
+            .where(ServiceProviderApplicationSubmission.application_id == solicitud.id)
+            .order_by(ServiceProviderApplicationSubmission.sequence)
         )
     )
-    # LAS PRESENTADAS EN ESTA POSTULACIÓN, no todas las del prestador. Tras
-    # una retirada o un rechazo, la postulación nueva NO hereda en silencio lo
-    # que se presentó en la anterior: ni documentos, ni credenciales, ni la
-    # política aceptada. La anterior las conserva para consulta.
-    credenciales = list(
-        await db.scalars(
-            select(ServiceProviderCredential)
-            .where(ServiceProviderCredential.application_id == solicitud.id)
-            .order_by(ServiceProviderCredential.created_at, ServiceProviderCredential.id)
-        )
-    )
+    enviados_d: set[str] = set()
+    enviadas_c: set[str] = set()
+    for envio in envios:
+        foto = envio.snapshot or {}
+        enviados_d |= {str(d.get("id")) for d in foto.get("documents", []) if isinstance(d, dict)}
+        enviadas_c |= {str(c.get("id")) for c in foto.get("credentials", []) if isinstance(c, dict)}
     return Expediente(
         solicitud=solicitud,
         prestador=prestador,
-        documentos=documentos,
-        credenciales=credenciales,
+        documentos=[d for d in todos if d.lifecycle == ACTIVO],
+        credenciales=await credenciales.de_la_solicitud(db, solicitud.id),
+        reemplazados=[d for d in todos if d.lifecycle not in (ACTIVO, RETIRADO)],
+        documentos_enviados=enviados_d,
+        credenciales_enviadas=enviadas_c,
+        envios=envios,
+        campos_observados=await _campos_observados(db, solicitud),
+        politica_aceptada=(
+            await db.get(ServicePolicy, solicitud.terms_policy_id)
+            if solicitud.terms_policy_id
+            else None
+        ),
     )
 
 
@@ -160,57 +194,45 @@ async def historial(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Lo que falta para enviar (el validador que el Bloque 1B hará cumplir)
-# --------------------------------------------------------------------------- #
-def faltantes(expediente: Expediente, *, terminos_publicados: bool | None) -> list[str]:
-    """Códigos traducibles de lo que falta. Vacío = completo.
-
-    `terminos_publicados` en `None` significa «no se pudo mirar» (sin país no
-    se sabe qué política rige); no se inventa ni un sí ni un no.
-
-    LO QUE NO SE PIDE AQUÍ, porque la empresa no lo ha cerrado: qué documentos
-    exige cada categoría, el teléfono verificado y la cuenta de cobro (que
-    espera a que exista dinero). Se añaden cuando se decidan.
-    """
-    prestador = expediente.prestador
-    solicitud = expediente.solicitud
-    presentados = {
-        d.kind for d in expediente.documentos if d.review_status != DOCUMENTO_OBSERVADO
-    }
-
-    faltan: list[str] = []
-    if not prestador.legal_name:
-        faltan.append("legal_name")
-    if not prestador.country_code:
-        faltan.append("country_code")
-    if not solicitud.summary:
-        faltan.append("summary")
-    if "identity" not in presentados:
-        faltan.append("document:identity")
-    if prestador.provider_type == EMPRESA:
-        if not prestador.tax_id:
-            faltan.append("tax_id")
-        if not prestador.representative_name:
-            faltan.append("representative_name")
-        if "legal_representation" not in presentados:
-            faltan.append("document:legal_representation")
-    if terminos_publicados is False:
-        faltan.append("provider_terms_not_published")
-    return faltan
+def _evidencia(expediente: Expediente) -> requisitos.Evidencia:
+    return requisitos.Evidencia(
+        solicitud=expediente.solicitud,
+        prestador=expediente.prestador,
+        documentos=expediente.documentos,
+        credenciales=expediente.credenciales,
+    )
 
 
 async def faltantes_de(db: AsyncSession, expediente: Expediente) -> list[str]:
-    publicados: bool | None = None
-    if expediente.prestador.country_code:
-        politica = await politicas.vigente(
-            db,
-            tipo=POLITICA_TERMINOS_DEL_PRESTADOR,
-            pais=expediente.prestador.country_code,
-            categoria=expediente.solicitud.requested_category,
+    """Lo que falta para ENVIAR o REENVIAR, como códigos. Vacío = se puede."""
+    prestador = expediente.prestador
+    solicitud = expediente.solicitud
+    vigente = (
+        await politicas.vigente(db, pais=prestador.country_code, categoria=solicitud.requested_category)
+        if prestador.country_code
+        else None
+    )
+    faltan = requisitos.para_enviar(
+        _evidencia(expediente),
+        vigente=vigente,
+        hoy=hoy(),
+        terminos_consultables=bool(prestador.country_code),
+    )
+    if solicitud.status == states.CORRECCIONES_PEDIDAS:
+        faltan += requisitos.correcciones_pendientes(
+            _evidencia(expediente),
+            campos_observados=expediente.campos_observados,
+            ultimo_envio=expediente.envios[-1].snapshot if expediente.envios else None,
+            hoy=hoy(),
         )
-        publicados = politica is not None
-    return faltantes(expediente, terminos_publicados=publicados)
+    return faltan
+
+
+def bloqueos_para_aprobar(expediente: Expediente) -> list[str]:
+    """Lo que impide aprobar, medido contra la política ACEPTADA."""
+    return requisitos.para_aprobar(
+        _evidencia(expediente), aceptada=expediente.politica_aceptada, hoy=hoy()
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -222,18 +244,23 @@ async def iniciar(
     """La postulación viva, o una nueva. IDEMPOTENTE.
 
     Devuelve el expediente y si acaba de nacer. Si ya hay una viva, se devuelve
-    esa y no se toca nada. Si la última está rechazada o retirada, nace otra:
-    volver a postular es otra postulación, que empieza vacía.
+    esa y no se toca nada. Si la última está RETIRADA, nace otra, vacía. Si está
+    RECHAZADA, volver a postular lo decide la política vigente
+    (`reapplication_after_rejection`); sin esa decisión, no se inventa.
 
     DOS PETICIONES A LA VEZ no crean dos: la base tiene un prestador por perfil
     y una postulación viva por prestador. La que pierde la carrera se deshace y
     devuelve la que ganó.
     """
+    from app.modules.services import admision
+
     prestador = await prestador_de(db, usuario_id)
     if prestador is not None:
         actual = await _actual(db, prestador.id)
         if actual is not None and actual.status in states.VIVAS:
             return await expediente_de(db, actual), False
+        if actual is not None:
+            await admision.exigir_que_pueda_repostular(db, prestador=prestador, ultima=actual)
 
     ahora = _ahora()
     try:
@@ -262,6 +289,7 @@ async def iniciar(
                 to_status=states.BORRADOR,
                 actor_id=usuario_id,
                 actor_role=states.PRESTADOR,
+                details={},
                 created_at=ahora,
             )
         )
@@ -269,6 +297,14 @@ async def iniciar(
     except IntegrityError:
         await db.rollback()
         return await la_mia(db, usuario_id), False
+    await admision.auditar(
+        db,
+        accion="service_application.created",
+        entidad="service_application",
+        entidad_id=solicitud.id,
+        actor_id=usuario_id,
+        funcion=states.PRESTADOR,
+    )
     return await expediente_de(db, solicitud), True
 
 
@@ -312,7 +348,7 @@ async def actualizar_borrador(
 
 
 # --------------------------------------------------------------------------- #
-# Administración (solo lectura en este bloque)
+# Administración (lectura)
 # --------------------------------------------------------------------------- #
 def _orden():
     """La bandeja ordena por el último envío; un borrador, por su creación."""
@@ -402,14 +438,16 @@ __all__ = [
     "CAMPOS_DEL_PRESTADOR",
     "CursorInvalido",
     "Expediente",
+    "LIMITE_MAXIMO",
     "SolicitudNoEditable",
     "actualizar_borrador",
     "bandeja",
+    "bloqueos_para_aprobar",
     "cursor_de",
     "expediente_de",
-    "faltantes",
     "faltantes_de",
     "historial",
+    "hoy",
     "iniciar",
     "la_mia",
     "por_id",
