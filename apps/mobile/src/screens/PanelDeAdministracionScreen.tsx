@@ -69,6 +69,8 @@ export const SECCION_DE_SERVICIOS: { titulo: TranslationKey; entradas: Entrada[]
   entradas: [
     { titulo: 'panelAdmin.serviciosAdmision', icono: 'briefcase', ruta: '/admin/servicios' },
     { titulo: 'panelAdmin.serviciosCondiciones', icono: 'file-text', ruta: '/admin/servicios/condiciones' },
+    { titulo: 'panelAdmin.serviciosCatalogo', icono: 'layers', ruta: '/admin/servicios/catalogo' },
+    { titulo: 'panelAdmin.serviciosCategorias', icono: 'grid', ruta: '/admin/servicios/categorias' },
   ],
 };
 
