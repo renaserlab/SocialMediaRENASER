@@ -41,6 +41,8 @@ from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
 from app.modules.products.router import admin_router as products_admin_router
 from app.modules.products.router import router as products_router
+from app.modules.services.catalogo_router import admin_router as services_catalog_admin_router
+from app.modules.services.catalogo_router import router as services_catalog_router
 from app.modules.services.router import admin_router as services_admin_router
 from app.modules.services.router import router as services_router
 from app.modules.learning.router import router as learning_router
@@ -209,6 +211,11 @@ def create_app() -> FastAPI:
     # fabrica) cada ruta contesta 503 `services_disabled` sin tocar la base.
     app.include_router(services_admin_router, prefix=prefix)
     app.include_router(services_router, prefix=prefix)
+    # El catálogo (Incremento 2). Sus rutas no chocan con las de la admisión:
+    # `/services/provider/services`, `/services/categories`,
+    # `/services/catalog/{id}` y `/admin/services/{catalog,categories}`.
+    app.include_router(services_catalog_admin_router, prefix=prefix)
+    app.include_router(services_catalog_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

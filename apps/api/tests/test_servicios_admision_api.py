@@ -315,9 +315,44 @@ RUTAS_DE_SERVICIOS = {
 }
 
 
-def test_estan_exactamente_las_rutas_del_incremento_1() -> None:
+#: El catálogo (Incremento 2): `tests/test_servicios_catalogo_api.py` lo prueba.
+RUTAS_DEL_CATALOGO = {
+    ("GET", "/services/categories"),
+    ("GET", "/services/provider/services"),
+    ("POST", "/services/provider/services"),
+    ("GET", "/services/provider/services/{service_id}"),
+    ("POST", "/services/provider/services/{service_id}/draft"),
+    ("PATCH", "/services/provider/services/{service_id}/draft"),
+    ("GET", "/services/provider/services/{service_id}/draft/requirements"),
+    ("POST", "/services/provider/services/{service_id}/draft/images"),
+    ("PUT", "/services/provider/services/{service_id}/draft/images/order"),
+    ("DELETE", "/services/provider/services/{service_id}/draft/images/{image_id}"),
+    ("POST", "/services/provider/services/{service_id}/draft/submit"),
+    ("POST", "/services/provider/services/{service_id}/draft/withdraw"),
+    ("GET", "/services/provider/services/{service_id}/history"),
+    ("GET", "/services/catalog/{service_id}"),
+    ("GET", "/admin/services/catalog"),
+    ("GET", "/admin/services/catalog/{service_id}"),
+    ("GET", "/admin/services/catalog/{service_id}/versions/{version_id}"),
+    ("GET", "/admin/services/catalog/{service_id}/history"),
+    ("POST", "/admin/services/catalog/{service_id}/versions/{version_id}/start-review"),
+    ("POST", "/admin/services/catalog/{service_id}/versions/{version_id}/request-changes"),
+    ("POST", "/admin/services/catalog/{service_id}/versions/{version_id}/approve"),
+    ("POST", "/admin/services/catalog/{service_id}/versions/{version_id}/publish"),
+    ("POST", "/admin/services/catalog/{service_id}/suspend"),
+    ("POST", "/admin/services/catalog/{service_id}/reinstate"),
+    ("POST", "/admin/services/catalog/{service_id}/retire"),
+    ("GET", "/admin/services/categories"),
+    ("POST", "/admin/services/categories"),
+    ("PATCH", "/admin/services/categories/{category_id}"),
+    ("POST", "/admin/services/categories/{category_id}/activate"),
+    ("POST", "/admin/services/categories/{category_id}/deactivate"),
+}
+
+
+def test_estan_exactamente_las_rutas_del_incremento_1_y_del_catalogo() -> None:
     rutas = {(m, p[len(API):]) for m, p in _rutas(create_app()) if "/services" in p}
-    assert rutas == RUTAS_DE_SERVICIOS
+    assert rutas == RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO
 
 
 def test_ninguna_ruta_de_la_aplicacion_esta_duplicada() -> None:
