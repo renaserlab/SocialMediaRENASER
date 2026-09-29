@@ -2356,3 +2356,67 @@ todas las claves literales y encontró esa y ninguna otra.
   lleva el `author_id` de quien opinó junto al sello de compra verificada. El
   último puede ser una decisión de producto y la justificación escrita no la
   cubre: queda para quien decida qué se enseña de quien opina.
+
+---
+
+## Z Servicios, Incremento 1 — admisión de prestadores (29/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md).
+Aquí va lo que es decisión: la tomada, la derivada de reglas ya dadas y la que
+sigue esperando a la empresa.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Una persona o empresa postula, acepta las condiciones vigentes y entrega datos, documentos y credenciales | Rutas `/services/provider/*` y diez pantallas del prestador |
+| Envía, recibe observaciones, corrige, reenvía, se retira y conoce el resultado | Saltos explícitos con historial visible y avisos |
+| Z revisa, verifica evidencia, pide correcciones, aprueba, rechaza o suspende | Rutas `/admin/services/*` y cuatro pantallas de administración |
+| Historial, permisos y auditoría | Historial que solo se añade (lo impone la base), auditoría en `audit_events` y permisos en el servidor |
+| Documentos privados | Depósito sin políticas; ruta puesta por el servidor; enlaces de 120 s |
+| `FEATURE_SERVICES` apagada no cambia nada | 503 sin tocar la base; ninguna entrada en la app |
+
+### Decisiones derivadas (no se inventó ninguna regla)
+
+1. **Retirarse es antes de la decisión, también después de una suspensión.**
+   Una aprobada que se suspende vuelve a `under_review`, pero ya se decidió.
+   Deriva de «solo antes de la decisión» y de «no desde suspended». Lo imponen
+   el código (`service_application_already_decided`) y la 0088
+   (`retirada_antes_de_decidir`).
+2. **Suspender se levanta pasando por revisión**, nunca de golpe.
+3. **Sin condiciones publicadas no se envía**, y la pantalla lo dice. No se
+   siembra ningún texto.
+4. **Volver a postular tras un rechazo lo decide la política.** Sin el
+   parámetro, el servidor contesta `409 service_reapplication_not_configured`:
+   la ausencia no es ni un sí ni un no. La empresa lo decide al publicar sus
+   condiciones, desde Administración.
+5. **Documentos y credenciales exigidos por país**: mínimo fijo (identidad; en
+   empresa, además, representación legal) más lo que exija la política.
+6. **Roles**: se reutilizan `moderator` (revisa) y `admin` (decide). No se
+   crearon Operaciones ni Cumplimiento.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| S1 | Texto de las condiciones del prestador por país | Nadie puede enviar su postulación |
+| S2 | ¿Se puede volver a postular tras un rechazo? | `service_reapplication_not_configured` |
+| S3 | Documentos y credenciales adicionales por país o categoría | Solo se pide el mínimo |
+| S4 | Personas de una empresa (más de un representante) y teléfono verificado | No existen |
+| S5 | Análisis antivirus de los documentos | Solo se valida el formato por firma y el tamaño |
+| S6 | Retención de documentos tras un rechazo o una retirada | Se conservan (evidencia) hasta que se borra la cuenta |
+| S7 | **Borrado de cuenta frente a la auditoría inmutable** (plataforma, 0050) | `DELETE /me` falla para quien figura como actor: **bloquea encender Servicios en producción** |
+
+### Límites del Incremento 1 y lo reservado para después
+
+Límites:
+- no hay catálogo de servicios, precio, agenda, reserva, pago, incidencia ni
+  reseña;
+- la vista pública del prestador existe en el contrato, pero ninguna ruta la
+  sirve;
+- tocar el push de un aviso abre la app, sin llevar a la postulación, igual
+  que los demás avisos al creador.
+
+Reservado para después: servicios y variantes; disponibilidad calculada en el
+servidor; reservas con retención de hueco; pagos y transferencias; incidencias;
+valoraciones verificadas.

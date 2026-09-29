@@ -92,8 +92,11 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. La última
-escrita y la última aplicada son la misma: la **0082** (finanzas de Productos).
+antes de usarla, y sigue funcionando cuando no lo está. Al 29/09/2026 la
+última **aplicada** es la **0087** (retirada de postulaciones de Servicios) y la
+última **escrita** es la **0088** (documentos y envíos de Servicios), **pendiente
+de aplicación manual**; ver [`Z_SERVICIOS_ARQUITECTURA.md` §9](Z_SERVICIOS_ARQUITECTURA.md).
+Hasta el 22/09/2026 la última escrita y aplicada era la **0082** (finanzas de Productos).
 De la 0070 en adelante son la vertical de Productos, y las cuatro que quedaban
 —0079 envíos, 0080 reclamaciones, 0081 valoraciones y 0082 finanzas— se
 aplicaron a mano y se verificaron después contra la base gestionada en una
@@ -147,6 +150,7 @@ Todas nacen apagadas y se encienden por entorno.
 | `feature_product_sales` | Comprar un producto físico. **Encenderla sola no basta**: ver `pedidos.por_que_no_se_puede_vender`. |
 | `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
+| `feature_services` | Z Servicios: la admisión de prestadores (Incremento 1). Apagada, sus rutas contestan 503 `services_disabled` y la app no enseña ninguna entrada. **No enciende pagos, reservas ni catálogo.** Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
 | `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |
 

@@ -597,3 +597,60 @@ Lo que sostiene, y por qué:
 - **Despublicar al guardar se dice.** Si lo guardado ya no se puede aprobar, el
   servidor la devuelve a borrador: eso deja a los alumnos sin poder hacerla y no
   puede pasar bajo un toast verde.
+
+---
+
+## Servicios · Incremento 1: admisión de prestadores (29/09/2026)
+
+Lo que la sección 7 marcaba como «no existe» para el alta profesional y las
+credenciales **ya existe**, con backend real y detrás de `FEATURE_SERVICES`
+(apagada). Las filas de arriba se dejan como estaban: son la foto del
+8/09/2026.
+
+### Quien postula
+
+Pantallas en `app/servicios/prestador/*`; la entrada es «Ofrecer un servicio»
+en el menú del perfil.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Entrada «Ofrecer un servicio» | menú del perfil (solo con la bandera) | `GET /platform/config` |
+| 2 | Explicación inicial | `ServiciosPrestadorScreen` (sin postulación) | `GET /services/provider/application` (404 = aún no) |
+| 3 | Persona o empresa | `ServiciosInicioScreen` | `POST /services/provider/application` |
+| 4 | Información básica | `ServiciosDatosScreen` | `PATCH /services/provider/application` |
+| 5 | Condiciones del prestador | `ServiciosCondicionesScreen` | `GET /services/provider/terms`, `POST …/application/terms` |
+| 6 | Documentos | `ServiciosDocumentosScreen` | `POST …/documents`, `…/{id}/replace`, `DELETE …/{id}`, `…/{id}/view` |
+| 7 | Credenciales | `ServiciosCredencialesScreen` + `ServiciosCredencialScreen` | `POST/PATCH/DELETE …/credentials` |
+| 8 | Resumen | `ServiciosResumenScreen` | `GET …/application` (`missing`) |
+| 9 | Confirmación y envío | `ServiciosResumenScreen` | `POST …/submit` |
+| 10 | Estado de la postulación | `ServiciosPrestadorScreen` | `GET …/application` |
+| 11 | Observaciones y correcciones | `ServiciosPrestadorScreen` (mensaje y campos) | `applicant_message`, `observed_fields` |
+| 12 | Reenvío | `ServiciosResumenScreen` | `POST …/resubmit` |
+| 13 | Historial visible | `ServiciosHistorialScreen` | `GET …/application/history` |
+| 14 | Retirada con confirmación | `ServiciosRetirarScreen` | `POST …/withdraw` |
+
+### Administración
+
+Pantallas en `app/admin/servicios/*`; se entra por Panel de administración ›
+Servicios, solo con la bandera.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1–3 | Bandeja, filtros y paginación | `AdminServiciosScreen` | `GET /admin/services/applications` (cursor, `status`, `provider_type`) |
+| 4–6 | Detalle, documentos y credenciales, visualización temporal | `AdminServicioScreen` | `GET …/{id}`, `POST …/documents/{doc}/view` (120 s, auditado) |
+| 7 | Historial completo | `AdminServicioHistorialScreen` | `GET …/{id}/history` |
+| 8 | Inicio de revisión | `AdminServicioScreen` | `POST …/start-review` |
+| 9 | Solicitud de correcciones | `AdminServicioScreen` | `POST …/request-changes` |
+| 10–12 | Aprobación, rechazo, suspensión | `AdminServicioScreen` | `POST …/approve`, `…/reject`, `…/suspend` |
+| 13 | Retorno a revisión | `AdminServicioScreen` («Devolver a revisión») | `POST …/start-review` desde `suspended` |
+| 14 | Condiciones del prestador | `AdminServiciosCondicionesScreen` | `GET/POST/PATCH /admin/services/policies…`, `…/preview`, `…/publish` |
+
+### Lo que sigue sin existir, a propósito
+
+Todo lo demás de la sección 4 y de la 7: catálogo de servicios, búsqueda,
+perfil profesional público, disponibilidad, reservas, pagos, incidencias y
+rendimiento. Ninguna pantalla de este incremento enseña precios, catálogo ni
+reservas.
+
+`VerificationScreen.tsx` sigue siendo estado local del teléfono y no se tocó:
+la verificación real de credenciales es la de Servicios.

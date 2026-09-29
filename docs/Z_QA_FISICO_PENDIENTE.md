@@ -1179,3 +1179,126 @@ Se deja escrito para que nadie lo marque por error:
 - [ ] ~~El impuesto y el comprobante~~ — no hay entidad legal decidida.
 - [ ] ~~La transferencia a quien vende~~ — no existe el alta de cuenta conectada.
 - [ ] ~~Quien absorbe un contracargo perdido~~ — sin decidir.
+
+---
+
+## Z Servicios · Incremento 1 — admisión de prestadores (29/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** Las pruebas
+automáticas cubren la API, PostgreSQL y el código de las pantallas, pero no un
+aparato, ni el selector de archivos, ni el lector de pantalla.
+
+Antes de empezar:
+
+- Aplicar la **0088** en la base de pruebas.
+- Reiniciar la API.
+- Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
+- Publicar unas condiciones del prestador para el país de prueba, desde
+  Administración › Servicios › Condiciones del prestador.
+
+Hacen falta **dos cuentas en dos teléfonos**: quien postula (`user`) y una de
+administración (`admin`). Si se puede, una tercera de moderación
+(`moderator`), para ver que no aprueba.
+
+### Con la bandera apagada, que es como se entrega
+
+- [ ] El menú del perfil es **exactamente** el de antes: no aparece «Ofrecer un servicio».
+- [ ] El panel de administración es exactamente el de antes: no aparece la sección Servicios.
+- [ ] Cursos, Eventos y Productos se comportan igual que antes.
+
+### Quien postula
+
+- [ ] Perfil › «Ofrecer un servicio» abre la explicación. No aparece ningún
+      precio, catálogo ni reserva.
+- [ ] Persona o empresa, más el nombre. Tocar «Continuar» dos veces seguidas
+      crea UNA sola postulación.
+- [ ] Información básica: se guarda y, al volver atrás, sigue ahí. Con
+      «Empresa» aparecen el registro tributario y el representante.
+- [ ] Condiciones:
+  - sin país, lo pide;
+  - sin condiciones publicadas, lo dice con palabras;
+  - con ellas, enseña la versión y la huella;
+  - aceptar exige marcar «He leído».
+- [ ] Documentos:
+  - subir una **foto hecha con la cámara**;
+  - subir un **PDF**;
+  - un archivo de más de 10 MB lo rechaza **antes** de subirlo;
+  - «Ver» abre el documento, y el enlace deja de servir **a los 2 minutos**.
+- [ ] Documentos: reemplazar uno; quitar uno que no se ha enviado.
+- [ ] Credenciales:
+  - declarar una con número: después solo se ve `••••` y los 4 últimos;
+  - elegir la evidencia;
+  - editarla;
+  - quitarla.
+- [ ] Resumen:
+  - enseña lo que falta en palabras, nunca un código;
+  - «Enviar» no se activa sin la declaración de veracidad.
+- [ ] Enviar con **conexión cortada** a mitad: dice que no hay conexión y, al
+      reintentar, **no** envía dos veces.
+- [ ] Tras enviar ya no se puede editar nada. El estado dice «Enviada».
+
+### Administración (segundo teléfono)
+
+- [ ] Panel › Servicios › Postulaciones: la bandeja enseña la enviada. Los
+      filtros de estado y tipo funcionan. «Ver más» pagina sin repetir filas.
+- [ ] Tomar para revisión. Abrir cada documento («Ver», 2 minutos) y la
+      evidencia de la credencial.
+- [ ] Observar un documento con motivo. Sin motivo, no deja.
+- [ ] Pedir correcciones:
+  - marcar un dato;
+  - pide confirmación;
+  - un doble toque decide una sola vez.
+- [ ] Con moderación: puede tomar y pedir correcciones, pero **no** aprobar,
+      rechazar ni suspender. Esos botones no aparecen.
+
+### Correcciones y reenvío (primer teléfono)
+
+- [ ] Llega el aviso «Z te pidió correcciones». Al tocarlo, abre la postulación.
+- [ ] Se ven el mensaje de Z y el dato por corregir. Reemplazar el documento
+      observado y corregir el dato.
+- [ ] Reenviar sin corregir lo pedido: dice qué falta. Corregido, se reenvía.
+
+### Decisiones
+
+- [ ] Aprobar sin aceptar todos los documentos: dice qué lo impide.
+- [ ] Aprobar con todo aceptado: quien postula recibe el aviso y ve «Aprobada».
+- [ ] Suspender (con motivo): el estado del prestador pasa a suspendido. Llega
+      el aviso.
+- [ ] Devolver a revisión la suspendida: el botón dice «Devolver a revisión».
+- [ ] En ese momento quien postula **no** puede retirarse: no aparece la opción.
+- [ ] Rechazar (con motivo): quien postula ve el motivo.
+- [ ] Postular de nuevo tras un rechazo:
+  - si las condiciones no lo deciden, lo dice;
+  - si lo permiten, empieza una nueva.
+- [ ] Dos personas de administración deciden **a la vez** sobre la misma
+      postulación: una gana y la otra ve «esto cambió mientras tanto», con el
+      estado real.
+
+### Retirada
+
+- [ ] Retirar desde el borrador, desde enviada y desde «correcciones pedidas»:
+      pide confirmación y explica que es definitivo.
+- [ ] Tras retirarse, la nueva postulación empieza vacía: sin documentos ni
+      condiciones aceptadas.
+
+### Idiomas, accesibilidad y web
+
+- [ ] Todo el recorrido, en español, en inglés y en portugués. Ningún texto sale
+      en otro idioma ni como código.
+- [ ] Con el lector de pantalla (TalkBack/VoiceOver):
+  - los grupos de opciones se anuncian como botones de opción;
+  - los botones desactivados se anuncian desactivados.
+- [ ] Modo oscuro: se lee todo.
+- [ ] Web: el mismo recorrido en el navegador. Subir un archivo abre el
+      selector del sistema.
+- [ ] Atrás de Android en cada paso: no pierde lo escrito ni reenvía nada.
+
+### Eliminación de cuenta
+
+- [ ] **NO PROBAR con una cuenta que haya postulado** hasta que se resuelva el
+      choque de `DELETE /me` con `audit_events`: hoy falla. Es un fallo de
+      plataforma, previo a Servicios (ver `Z_SERVICIOS_ARQUITECTURA.md` §12).
+- [ ] Cuando esté resuelto:
+  - borrar la cuenta de quien postuló;
+  - su postulación, documentos y archivos desaparecen;
+  - lo que decidió administración sigue en su auditoría.
