@@ -9,6 +9,7 @@ import { DELETE_ACCOUNT_URL } from '@/config/legal';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
+import { ApiError } from '@/services/api';
 import { notifyLocally, requestNotificationPermission } from '@/services/notifications';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -70,7 +71,14 @@ export function SettingsScreen() {
     try {
       await deleteAccount();
       router.replace('/');
-    } catch {
+    } catch (error) {
+      // BLOQUEADA NO ES «INTÉNTALO DE NUEVO». La cuenta tiene ventas, pedidos
+      // o reclamos que hay que conservar: repetir no cambia nada, hay que
+      // escribir a soporte. Cualquier otro fallo sí se arregla reintentando.
+      if (error instanceof ApiError && error.code === 'account_deletion_blocked') {
+        notify(t('settings.deleteAccountBlocked'), t('settings.deleteAccountBlockedBody'));
+        return;
+      }
       notify(t('settings.deleteAccountFailed'), t('settings.deleteAccountFailedBody'));
     }
   };

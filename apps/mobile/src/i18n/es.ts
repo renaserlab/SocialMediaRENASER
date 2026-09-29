@@ -137,6 +137,9 @@ export const es = {
   'settings.deleteAccountFailed': 'No se pudo eliminar la cuenta',
   'settings.deleteAccountFailedBody':
     'Inténtalo de nuevo en unos momentos. Tu cuenta sigue activa.',
+  'settings.deleteAccountBlocked': 'No podemos cerrar tu cuenta todavía',
+  'settings.deleteAccountBlockedBody':
+    'Tiene ventas, pedidos o reclamos que debemos conservar. Escríbenos y la cerramos contigo.',
   'settings.notificationsOff': 'Permiso desactivado',
   'settings.notificationsOffBody':
     'Activa las notificaciones de Z en los ajustes del teléfono para recibir avisos.',

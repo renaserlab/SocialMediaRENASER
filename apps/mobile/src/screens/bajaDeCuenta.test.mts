@@ -1,0 +1,80 @@
+/**
+ * Borrar la cuenta desde Ajustes: lo que el teléfono tiene que decir cuando el
+ * servidor NO la borra.
+ *
+ * Se comprueba sobre el TEXTO de los ficheros, como `devolucionesYGarantia`:
+ * las pruebas corren con el runner de Node, sin renderizador.
+ *
+ * DESDE LA 0089 (29/09/2026) `DELETE /auth/me` tiene tres respuestas:
+ *
+ *  - 204: borrada. El móvil cierra la sesión.
+ *  - 409 `account_deletion_blocked`: la cuenta tiene ventas, pedidos o
+ *    reclamos que se conservan. REINTENTAR NO SIRVE, y decir «inténtalo en
+ *    unos momentos» es mentir: hay que escribir a soporte.
+ *  - 503 `account_deletion_storage_failed` (o cualquier otro fallo): la cuenta
+ *    sigue activa y reintentar sí lo arregla.
+ *
+ * Y en ningún fallo se cierra la sesión: la cuenta sigue viva.
+ */
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+function fuente(rel: string): string {
+  return readFileSync(join(SRC, rel), 'utf8').replace(/\r\n/g, '\n');
+}
+
+const AJUSTES = fuente('screens/SettingsScreen.tsx');
+const REPOSITORIO = fuente('repositories/AuthRepository.ts');
+const ALMACEN = fuente('store/useAuthStore.ts');
+
+function bloque(texto: string, desde: string, hasta: string): string {
+  const inicio = texto.indexOf(desde);
+  assert.notEqual(inicio, -1, `No se encontró «${desde}».`);
+  const fin = texto.indexOf(hasta, inicio + desde.length);
+  assert.notEqual(fin, -1, `No se encontró «${hasta}» después de «${desde}».`);
+  return texto.slice(inicio, fin);
+}
+
+describe('Borrar la cuenta', () => {
+  const manejador = bloque(AJUSTES, 'const handleDeleteAccount', '\n  };\n');
+
+  it('una cuenta bloqueada NO se presenta como «inténtalo de nuevo»', () => {
+    const rama = bloque(manejador, "error.code === 'account_deletion_blocked'", 'return;');
+    assert.ok(manejador.includes('error instanceof ApiError'), 'lee el código del error del servidor');
+    assert.ok(rama.includes("t('settings.deleteAccountBlocked')"));
+    assert.ok(rama.includes("t('settings.deleteAccountBlockedBody')"));
+    assert.ok(!rama.includes('deleteAccountFailedBody'));
+  });
+
+  it('cualquier otro fallo sigue diciendo que la cuenta sigue activa', () => {
+    const despues = manejador.slice(manejador.indexOf("error.code === 'account_deletion_blocked'"));
+    assert.ok(despues.includes("t('settings.deleteAccountFailedBody')"));
+  });
+
+  it('solo se sale a la portada si el servidor la borró', () => {
+    assert.ok(
+      /await deleteAccount\(\);\s*router\.replace\('\/'\);/.test(manejador),
+      'la navegación va DESPUÉS del borrado y dentro del try',
+    );
+  });
+
+  it('el borrado va primero al servidor y la sesión se cierra solo si respondió bien', () => {
+    const borrar = bloque(REPOSITORIO, 'async deleteAccount()', '\n  },');
+    assert.ok(borrar.indexOf("method: 'DELETE'") < borrar.indexOf('signOut()'));
+    const limpiar = bloque(ALMACEN, 'async deleteAccount()', 'clearSignedUrlCache');
+    assert.ok(limpiar.includes('await AuthRepository.deleteAccount();'));
+  });
+
+  it('los textos nuevos existen en los tres idiomas', () => {
+    for (const idioma of ['es', 'en', 'pt']) {
+      const textos = fuente(`i18n/${idioma}.ts`);
+      assert.ok(textos.includes("'settings.deleteAccountBlocked':"), idioma);
+      assert.ok(textos.includes("'settings.deleteAccountBlockedBody':"), idioma);
+    }
+  });
+});

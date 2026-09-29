@@ -124,6 +124,9 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'settings.deleteAccountYes': 'Sim, excluir',
   'settings.deleteAccountFailed': 'Não foi possível excluir a conta',
   'settings.deleteAccountFailedBody': 'Tente de novo em instantes. Sua conta continua ativa.',
+  'settings.deleteAccountBlocked': 'Ainda não podemos encerrar sua conta',
+  'settings.deleteAccountBlockedBody':
+    'Ela tem vendas, pedidos ou reclamações que precisamos manter. Escreva para nós e encerramos com você.',
   'settings.notificationsOff': 'Permissão desativada',
   'settings.notificationsOffBody':
     'Ative as notificações do Z nas configurações do telefone para receber avisos.',

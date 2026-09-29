@@ -123,6 +123,9 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'settings.deleteAccountYes': 'Yes, delete it',
   'settings.deleteAccountFailed': 'Could not delete the account',
   'settings.deleteAccountFailedBody': 'Try again in a moment. Your account is still active.',
+  'settings.deleteAccountBlocked': 'We can’t close your account yet',
+  'settings.deleteAccountBlockedBody':
+    'It has sales, orders or claims we need to keep. Write to us and we’ll close it with you.',
   'settings.notificationsOff': 'Permission turned off',
   'settings.notificationsOffBody':
     'Turn on notifications for Z in your phone settings to receive alerts.',
