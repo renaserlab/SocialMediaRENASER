@@ -11,11 +11,17 @@ huerfano e imposible de localizar. Hay que pedirselo a la API de Storage.
 
 Esa API exige la clave `service_role`, que da acceso total y por eso vive
 UNICAMENTE en el backend, nunca en la aplicacion movil.
+
+SI ALGO NO SE PUEDE BORRAR, SE DICE. `delete_user_files` lanza
+`BorradoIncompleto` en vez de tragarse el fallo: quien borra la cuenta lo hace
+ANTES de confirmar la transaccion y, si los archivos no se van, la cuenta
+tampoco (ver `modules/identity/baja.py`).
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import httpx
 
@@ -37,6 +43,14 @@ USER_BUCKETS = (
 )
 
 _TIMEOUT = httpx.Timeout(15.0)
+
+#: Adjuntos de chat (0033). NO van bajo `<perfil>/`: van bajo
+#: `<conversacion>/<quien sube>/<archivo>`, así que se barren conversación a
+#: conversación (ver `delete_user_files`).
+DEPOSITO_DE_CHAT = "message-media"
+
+#: Cuántos nombres se piden borrar en una sola petición.
+LOTE_DE_BORRADO = 100
 
 #: Hasta dónde se baja en las carpetas al borrar una cuenta. Los documentos de
 #: postulación van en `<perfil>/<postulación>/<archivo>`: dos niveles bastan, y
@@ -97,48 +111,90 @@ async def _list_prefix(
     return nombres
 
 
-async def delete_user_files(user_id: str) -> int:
+async def delete_user_files(
+    user_id: str,
+    *,
+    conversaciones: Sequence[str] = (),
+    conversaciones_enteras: Sequence[str] = (),
+) -> int:
     """Borra todo lo que haya subido `user_id`. Devuelve cuantos ficheros quito.
 
-    No propaga errores: si Storage falla, el borrado de la cuenta ya ha ocurrido
-    en la base de datos y sería peor dejarlo a medias devolviendo un error al
-    cliente. Se registra el fallo para poder repasarlo.
+    - En cada depósito de `USER_BUCKETS`, todo lo que cuelga de `<perfil>/`,
+      bajando a las carpetas.
+    - En `message-media`, lo suyo dentro de cada conversación en la que está
+      (`<conversacion>/<perfil>/`) y, de las conversaciones que se van enteras
+      con la cuenta (las que creó), todo (`<conversacion>/`): sus mensajes
+      desaparecen y sus adjuntos no pueden quedarse sin dueño.
+
+    UN ARCHIVO QUE YA NO ESTÁ NO ES UN FALLO: Storage borra nombres exactos y
+    los que no encuentra simplemente no los devuelve. Repetir es seguro.
+
+    SI ALGO FALLA, LANZA `BorradoIncompleto`, y el mensaje solo nombra
+    depósitos, nunca rutas: llevan el perfil y la postulación. Si falla al
+    LISTAR, no se ha borrado nada. Si falla al BORRAR, se intentan los demás
+    depósitos y lo ya borrado no vuelve: repetir termina el trabajo.
+
+    SIN CREDENCIALES, en producción LANZA `StorageNoConfigurado`: una cuenta
+    no puede darse por borrada con sus archivos dentro. Fuera de producción
+    (desarrollo, pruebas) avisa y sigue, porque ahí no hay nada que borrar.
     """
     if not storage_configured():
+        if get_settings().is_production:
+            raise StorageNoConfigurado(
+                "Falta SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY: no se pueden "
+                "borrar los archivos de la cuenta."
+            )
         logger.warning(
             "No se pueden borrar los archivos de %s: falta "
-            "SUPABASE_SERVICE_ROLE_KEY o SUPABASE_URL. Quedaran huerfanos en "
-            "Storage y habra que limpiarlos a mano.",
+            "SUPABASE_SERVICE_ROLE_KEY o SUPABASE_URL.",
             user_id,
         )
         return 0
 
+    objetivos = [(bucket, user_id) for bucket in USER_BUCKETS]
+    objetivos += [(DEPOSITO_DE_CHAT, f"{c}/{user_id}") for c in conversaciones]
+    objetivos += [(DEPOSITO_DE_CHAT, str(c)) for c in conversaciones_enteras]
+
     borrados = 0
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            for bucket in USER_BUCKETS:
-                try:
-                    rutas = await _list_prefix(client, bucket, user_id)
-                    if not rutas:
-                        continue
+    fallidos: list[str] = []
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        # PRIMERO SE LISTA TODO. Si un depósito no contesta, no se borra nada:
+        # la cuenta sigue entera, con todos sus archivos, y se puede reintentar.
+        pendientes: list[tuple[str, list[str]]] = []
+        for bucket, prefijo in objetivos:
+            try:
+                pendientes.append((bucket, await _list_prefix(client, bucket, prefijo)))
+            except (httpx.HTTPError, ValueError):
+                # SIN LA RUTA NI LA EXCEPCIÓN: las dos pueden llevarla.
+                logger.warning("No se pudo listar lo de %s en %s", user_id, bucket)
+                fallidos.append(bucket)
+        if fallidos:
+            raise BorradoIncompleto(
+                "No se pudieron listar los archivos en: " + ", ".join(sorted(set(fallidos)))
+            )
+
+        # Después se borra, en lotes. Un depósito que falle aquí no impide
+        # limpiar los demás; lo ya borrado no vuelve, y repetir termina.
+        for bucket, rutas in pendientes:
+            try:
+                for desde in range(0, len(rutas), LOTE_DE_BORRADO):
+                    lote = rutas[desde : desde + LOTE_DE_BORRADO]
                     respuesta = await client.request(
                         "DELETE",
                         f"{get_settings().supabase_url}/storage/v1/object/{bucket}",
                         headers=_headers(),
-                        json={"prefixes": rutas},
+                        json={"prefixes": lote},
                     )
                     respuesta.raise_for_status()
-                    borrados += len(rutas)
-                except httpx.HTTPError:
-                    # Un bucket que falle no debe impedir limpiar los demas.
-                    logger.exception(
-                        "Fallo al borrar los archivos de %s en el bucket %s",
-                        user_id,
-                        bucket,
-                    )
-    except Exception:  # noqa: BLE001 - nunca debe tumbar el borrado de cuenta
-        logger.exception("Fallo inesperado limpiando Storage de %s", user_id)
+                    borrados += len(lote)
+            except httpx.HTTPError:
+                logger.warning("No se pudo borrar lo de %s en %s", user_id, bucket)
+                fallidos.append(bucket)
 
+    if fallidos:
+        raise BorradoIncompleto(
+            "No se pudieron borrar los archivos en: " + ", ".join(sorted(set(fallidos)))
+        )
     if borrados:
         logger.info("Borrados %d archivos de Storage de %s", borrados, user_id)
     return borrados
@@ -161,6 +217,10 @@ class StorageNoConfigurado(RuntimeError):
 
 class StorageFallo(RuntimeError):
     """Storage contesto algo que no es un exito."""
+
+
+class BorradoIncompleto(StorageFallo):
+    """Al borrar una cuenta, algún depósito no se dejó listar o borrar."""
 
 
 def _exigir_configurado() -> None:

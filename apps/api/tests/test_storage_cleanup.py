@@ -108,16 +108,24 @@ async def test_recorre_todas_las_paginas(monkeypatch, con_credenciales):
 
 
 @pytest.mark.asyncio
-async def test_un_fallo_de_storage_no_rompe_el_borrado(monkeypatch, con_credenciales):
-    """La cuenta ya se ha borrado: fallar aqui no puede propagar una excepcion."""
+async def test_un_fallo_de_storage_se_dice_y_no_borra_nada(monkeypatch, con_credenciales):
+    """CAMBIO DE CONTRATO (0089, 29/09/2026). Antes esto NO lanzaba: la cuenta
+    ya estaba borrada y el fallo se tragaba, así que la baja contestaba 204 con
+    los archivos dentro. Ahora la baja borra los archivos ANTES de confirmar, y
+    un fallo de Storage tiene que llegarle para deshacerla."""
 
     class ClienteQueFalla(_ClienteFalso):
         async def post(self, *a, **k):
             raise httpx.ConnectError("sin red")
 
-    _instalar_cliente(monkeypatch, ClienteQueFalla({}))
+    cliente = ClienteQueFalla({})
+    _instalar_cliente(monkeypatch, cliente)
 
-    assert await storage.delete_user_files("u") == 0  # no lanza
+    with pytest.raises(storage.BorradoIncompleto) as error:
+        await storage.delete_user_files("u")
+    assert cliente.borrados == []
+    # El mensaje nombra depósitos, nunca rutas.
+    assert "u/" not in str(error.value)
 
 
 @pytest.mark.asyncio
@@ -230,3 +238,104 @@ async def test_si_no_se_puede_borrar_un_objeto_el_registro_no_dice_la_ruta(monke
         assert await storage.borrar_objeto("service-provider-documents", ruta) is False
     assert caplog.records, "el fallo se registra"
     assert not any(ruta in r.getMessage() or "abc.pdf" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_si_un_deposito_no_se_deja_listar_no_se_borra_en_ninguno(monkeypatch, con_credenciales):
+    """Se lista todo antes de borrar nada: con Storage a medias, la cuenta se
+    queda entera y con todos sus archivos."""
+    cliente = _SupabaseFalso({"post-media": ["u-1/foto.jpg"], "avatars": ["u-1/a.jpg"]})
+
+    async def post(url, headers=None, json=None):
+        if url.endswith("/avatars"):
+            raise httpx.ConnectError("sin red")
+        return await _SupabaseFalso.post(cliente, url, headers=headers, json=json)
+
+    cliente.post = post
+    _instalar_cliente(monkeypatch, cliente)
+
+    with pytest.raises(storage.BorradoIncompleto):
+        await storage.delete_user_files("u-1")
+    assert cliente.pedidos_de_borrado == []
+    assert cliente.objetos["post-media"] == ["u-1/foto.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_si_un_deposito_no_se_deja_borrar_se_limpian_los_demas_y_se_dice(monkeypatch, con_credenciales):
+    cliente = _SupabaseFalso({"post-media": ["u-1/foto.jpg"], "avatars": ["u-1/a.jpg"]})
+
+    async def request(metodo, url, headers=None, json=None):
+        if url.endswith("/post-media"):
+            return _RespuestaQueFalla()
+        return await _SupabaseFalso.request(cliente, metodo, url, headers=headers, json=json)
+
+    cliente.request = request
+    _instalar_cliente(monkeypatch, cliente)
+
+    with pytest.raises(storage.BorradoIncompleto) as error:
+        await storage.delete_user_files("u-1")
+    assert "post-media" in str(error.value)
+    assert cliente.objetos["avatars"] == []
+    assert cliente.objetos["post-media"] == ["u-1/foto.jpg"]
+
+
+class _RespuestaQueFalla(_RespuestaFalsa):
+    def __init__(self):
+        super().__init__({})
+
+    def raise_for_status(self):
+        raise httpx.HTTPStatusError("500", request=httpx.Request("DELETE", "https://x"), response=httpx.Response(500))
+
+
+@pytest.mark.asyncio
+async def test_se_borra_en_lotes_de_cien(monkeypatch, con_credenciales):
+    """Un solo DELETE con miles de nombres es una petición que Storage puede
+    rechazar entera."""
+    muchos = [f"u-1/f{i:03}.jpg" for i in range(250)]
+    cliente = _SupabaseFalso({"post-media": list(muchos)})
+    _instalar_cliente(monkeypatch, cliente)
+
+    assert await storage.delete_user_files("u-1") == 250
+    assert [len(p) for p in cliente.pedidos_de_borrado] == [100, 100, 50]
+    assert cliente.objetos["post-media"] == []
+
+
+@pytest.mark.asyncio
+async def test_los_adjuntos_de_chat_se_barren_por_conversacion(monkeypatch, con_credenciales):
+    """`message-media` va en `<conversacion>/<quien sube>/<archivo>`: lo suyo en
+    cada conversación y, de las que se van enteras, todo."""
+    cliente = _SupabaseFalso({
+        "message-media": [
+            "c-ajena/u-1/foto.jpg", "c-ajena/u-1/notas/voz.m4a", "c-ajena/u-2/suya.jpg",
+            "c-propia/u-1/a.jpg", "c-propia/u-2/b.jpg",
+            "c-otra/u-2/nada-que-ver.jpg",
+        ],
+    })
+    _instalar_cliente(monkeypatch, cliente)
+
+    total = await storage.delete_user_files("u-1", conversaciones=["c-ajena"], conversaciones_enteras=["c-propia"])
+
+    assert total == 4
+    assert cliente.objetos["message-media"] == ["c-ajena/u-2/suya.jpg", "c-otra/u-2/nada-que-ver.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_lo_que_ya_no_esta_no_es_un_fallo(monkeypatch, con_credenciales):
+    """Storage borra nombres exactos y no se queja de los que no existen:
+    repetir la baja es seguro."""
+    cliente = _SupabaseFalso({"post-media": ["u-1/foto.jpg"]})
+    _instalar_cliente(monkeypatch, cliente)
+
+    assert await storage.delete_user_files("u-1") == 1
+    assert await storage.delete_user_files("u-1") == 0
+
+
+@pytest.mark.asyncio
+async def test_sin_credenciales_en_produccion_no_se_da_por_borrado(monkeypatch):
+    monkeypatch.setattr(storage, "storage_configured", lambda: False)
+    monkeypatch.setattr(
+        storage, "get_settings", lambda: type("S", (), {"is_production": True})()
+    )
+
+    with pytest.raises(storage.StorageNoConfigurado):
+        await storage.delete_user_files("u")
