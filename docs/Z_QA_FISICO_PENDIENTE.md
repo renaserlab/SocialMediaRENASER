@@ -1190,7 +1190,8 @@ aparato, ni el selector de archivos, ni el lector de pantalla.
 
 Antes de empezar:
 
-- Aplicar la **0088** en la base de pruebas.
+- La **0088** ya está aplicada (29/09/2026). Aplicar la **0089** en la base de
+  pruebas (`Z_BAJA_DE_CUENTA.md` §10) antes de probar la eliminación de cuenta.
 - Reiniciar la API.
 - Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
 - Publicar unas condiciones del prestador para el país de prueba, desde
@@ -1295,10 +1296,32 @@ administración (`admin`). Si se puede, una tercera de moderación
 
 ### Eliminación de cuenta
 
-- [ ] **NO PROBAR con una cuenta que haya postulado** hasta que se resuelva el
-      choque de `DELETE /me` con `audit_events`: hoy falla. Es un fallo de
-      plataforma, previo a Servicios (ver `Z_SERVICIOS_ARQUITECTURA.md` §12).
-- [ ] Cuando esté resuelto:
-  - borrar la cuenta de quien postuló;
-  - su postulación, documentos y archivos desaparecen;
-  - lo que decidió administración sigue en su auditoría.
+**Solo con la 0089 aplicada** (sin ella, `DELETE /me` sigue fallando para
+quien figura en un historial). Corregido en el código y probado contra
+PostgreSQL (`Z_BAJA_DE_CUENTA.md`), pero **no en un teléfono**. Usar cuentas
+de prueba desechables, nunca una real.
+
+- [ ] Borrar la cuenta de quien postuló, desde Ajustes › Eliminar cuenta:
+  - la app vuelve a la portada y la sesión se cierra;
+  - su postulación, sus documentos y sus archivos desaparecen: el enlace de un
+    documento abierto antes deja de funcionar;
+  - volver a entrar con esa cuenta no es posible.
+- [ ] Desde administración, lo que se decidió sobre esa postulación sigue en
+      la auditoría, sin nombrar a quien postuló.
+- [ ] Borrar la cuenta de alguien de moderación o administración que decidió
+      algo: se borra; sus decisiones siguen, sin su nombre.
+- [ ] Una cuenta que haya enviado adjuntos por chat: tras borrarla, la otra
+      persona ya no ve esos adjuntos, y los suyos propios siguen.
+- [ ] Una cuenta con un producto creado (vendedor): **no se borra**, y el
+      teléfono dice que tiene ventas, pedidos o reclamos y que escriba a
+      soporte, **no** «inténtalo de nuevo». Revisar el texto en los tres
+      idiomas.
+- [ ] Sin conexión a mitad del borrado: el aviso dice que **no se pudo
+      confirmar** (no que la cuenta sigue activa), y al reintentar con
+      conexión se borra o se cierra la sesión si ya estaba borrada.
+- [ ] Una cuenta con muchos vídeos: la baja termina sin cortarse (espera de
+      hasta 90 s). Un vídeo recién subido que se está procesando: tras la
+      baja no queda su miniatura ni su versión reducida.
+- [ ] Una cuenta que compró una entrada **pagada** (cuando se enciendan los
+      pagos): no se borra, y dice que escriba a soporte.
+- [ ] Doble toque en «Sí, eliminar»: una sola baja, sin errores.

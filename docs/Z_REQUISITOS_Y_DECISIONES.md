@@ -2405,7 +2405,14 @@ sigue esperando a la empresa.
 | S4 | Personas de una empresa (más de un representante) y teléfono verificado | No existen |
 | S5 | Análisis antivirus de los documentos | Solo se valida el formato por firma y el tamaño |
 | S6 | Retención de documentos tras un rechazo o una retirada | Se conservan (evidencia) hasta que se borra la cuenta |
-| S7 | **Borrado de cuenta frente a la auditoría inmutable** (plataforma, 0050) | `DELETE /me` falla para quien figura como actor: **bloquea encender Servicios en producción** |
+| S7 | ~~Borrado de cuenta frente a la auditoría inmutable~~ **Decidida el 29/09/2026** (regla en `Z_BAJA_DE_CUENTA.md` §1): se borran los datos personales y los archivos privados; lo histórico se conserva y deja de nombrar a la persona | **Implementada** en la 0089 y en `DELETE /auth/me`. La 0089 está **sin aplicar**: hasta entonces `DELETE /me` sigue fallando para quien figura en un historial |
+| S8 | Cuentas con ventas, saldos, transferencias, pedidos, incidencias, disputas, decisiones de personal con `restrict` **u órdenes pagadas con dinero de verdad** (0089): plazo de conservación, si se anonimizan (conservar la orden y dejar a quien compró en `NULL`) y el proceso de soporte. **Prioritaria antes de encender los pagos: Google Play exige poder borrar la cuenta desde la app** (se pueden conservar los registros de las transacciones) | `DELETE /me` responde 409 `account_deletion_blocked` sin tocar nada, y el móvil pide escribir a soporte |
+| S9 | Cuánto se conservan la huella y el prefijo de IP y la familia de navegador de `audit_events` y `consent_records` | Se conservan con el registro, sin la persona |
+| S10 | ¿Se anulan también los identificadores del personal en el historial, los envíos y las condiciones de Servicios? (sin clave ajena por diseño de la 0086) | Quedan como identificadores sin perfil detrás. Anularlos es el mismo mecanismo de la 0089 con una clave ajena nueva |
+| S11 | Pauta para que los motivos escritos por el personal al decidir no nombren a nadie (quedan en `audit_events.reason`) | Se conservan tal cual |
+| S12 | ¿Se borran con la cuenta la nota y el tema que alguien escribió al reservar una sesión, que están en la notificación de la otra persona? (plataforma, anterior a Servicios) | Se quedan en la bandeja de quien la recibió; el actor pasa a `NULL` |
+| S13 | Puentes identificador↔correo que sobreviven a la baja: el cuerpo crudo de los avisos de Stripe (`payment_events.payload`) y el registro de Supabase Auth (`auth.audit_log_entries`). ¿Se depuran, y cuándo? | Hoy los dos tienen 0 filas (29/09/2026). Se llenarán al encender los pagos |
+| S14 | Motivos libres del organizador en la auditoría de Eventos (enviar, cambiar, cancelar), que sobreviven a su cuenta | Se conservan; propuesto como tarea aparte. En Servicios ya no se copian textos libres a la auditoría |
 
 ### Límites del Incremento 1 y lo reservado para después
 

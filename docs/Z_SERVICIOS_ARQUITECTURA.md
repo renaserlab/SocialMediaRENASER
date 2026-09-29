@@ -8,12 +8,12 @@ rama `Edson`.
 
 | | |
 |---|---|
-| **Incremento 1** | **implementado e integrable.** Admisión completa del prestador: condiciones versionadas, borrador, documentos privados, credenciales, envío, revisión, correcciones, reenvío, aprobación, rechazo, suspensión y retirada |
-| **Migraciones 0086 y 0087** | **APLICADAS** en Supabase y verificadas en sesión de solo lectura con **cero divergencias**. Son históricas: no se editan |
-| **Migración 0088** | **escrita y probada en PostgreSQL local, SIN APLICAR.** Hay que aplicarla a mano (§9) |
+| **Incremento 1** | **implementado y probado; pendiente únicamente de aplicar y verificar la 0089 y del QA físico** (§16). Admisión completa del prestador: condiciones versionadas, borrador, documentos privados, credenciales, envío, revisión, correcciones, reenvío, aprobación, rechazo, suspensión y retirada |
+| **Migraciones 0086, 0087 y 0088** | **APLICADAS** en Supabase y verificadas en sesión de solo lectura con **cero divergencias** (la 0088, el 29/09/2026: §9). Son históricas: no se editan |
+| **Migración 0089** (plataforma) | **escrita y probada en PostgreSQL local, SIN APLICAR.** Hace que borrar la cuenta funcione sin borrar la historia (§12, `Z_BAJA_DE_CUENTA.md`) |
 | **`FEATURE_SERVICES`** | **apagada.** Todas las rutas contestan 503 `services_disabled` sin mirar la base |
 | **Pagos, reservas, catálogo** | **no existen** en este incremento, y ninguna tabla los anticipa |
-| **Bloqueo para encender** | `DELETE /me` falla para quien figura como actor en `audit_events` (fallo de plataforma de la 0050, §12). Con Servicios afectaría a cada prestador |
+| **Bloqueo para encender** | **Resuelto en el código** (0089 + `DELETE /auth/me`, §12). Queda aplicar la 0089 y verificarla |
 | **QA físico** | pendiente: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
 
 ## 1. Lo que NO es
@@ -164,7 +164,14 @@ caracteres; la misma clave para otra acción es `409 idempotency_key_reused`).
 - **Sin antivirus**: los bytes se validan por firma de formato y tamaño, no se
   analizan. Queda como endurecimiento posterior.
 
-## 9. Migraciones: cómo aplicar la 0088
+## 9. Migraciones
+
+**La 0088 está aplicada** (29/09/2026) y se verificó ese mismo día en una
+única sesión de solo lectura: `transaction_read_only = on`, sonda de escritura
+rechazada con 25006 y `ROLLBACK`. Se comparó definición por definición con el
+repositorio y con los modelos, y no hay divergencias ni filas incoherentes
+(detalle en `Z_BAJA_DE_CUENTA.md` §9). Lo que sigue es cómo se aplicó, por si
+hay que repetirlo en otra base:
 
 1. Comprobar que la 0086 y la 0087 están (lo comprueba también la 0088).
 2. Ejecutar `supabase/migrations/0088_servicios_documentos_y_envios.sql`
@@ -209,20 +216,28 @@ teléfono pone el texto en su idioma); el push, con el idioma del dispositivo.
 - Personas de una empresa, teléfono verificado, antivirus, retención de
   documentos tras un rechazo o una retirada.
 
-## 12. Hallazgo de plataforma: `DELETE /me` y la auditoría
+## 12. `DELETE /me` y la auditoría: resuelto (pendiente de aplicar la 0089)
 
 `audit_events` (0050) es de solo añadir, pero su `actor_id` es
-`on delete set null`. Borrar el perfil de alguien que figura como actor pide
-un `UPDATE` que el disparador rechaza, y `DELETE /me` falla. **Es previo a
-Servicios** y ya afecta a Eventos, Catálogo y Comercio. Con Servicios, cada
-prestador figura como actor. La misma 0050 tiene otros choques del borrado de
-cuenta con tablas inmutables (`consent_records.subject_id` es
-`on delete restrict`, y `course_versions.published_by` choca con su
-disparador): **es una decisión de retención frente a borrado de toda la
-plataforma**, y tocar la inmutabilidad aplicada en producción no se decidió
-aquí. Lo demuestra
-`test_servicios_flujo_postgres.py::test_borrar_la_cuenta_se_lleva_lo_que_creo_la_api`
-(xfail estricta). **No encender Servicios en producción antes de resolverlo.**
+`on delete set null`. Borrar el perfil de alguien que figuraba como actor pedía
+un `UPDATE` que el disparador rechazaba (23001), y `DELETE /me` fallaba. Con
+Servicios, cada prestador y cada persona del equipo figura como actor.
+
+**La regla la decidió la empresa el 29/09/2026**: se borran los datos
+personales y los archivos privados; lo histórico se conserva sin nombrar a la
+persona. Se implementó en tres partes:
+
+- **La 0089**: admite exactamente una cosa, anular al actor en la cascada de la
+  baja de su perfil. Lo hace en `audit_events` y en otras doce columnas con el
+  mismo choque, en Cursos, Eventos, Productos y consentimientos.
+- **`DELETE /auth/me`, todo o nada**: los archivos se borran antes de
+  confirmar, y un bloqueo legítimo devuelve 409 sin tocar nada.
+- En Servicios, la nota de retirada ya no queda en la auditoría.
+
+La prueba que era una xfail estricta ahora pasa. El detalle, el inventario, la
+política de retención y cómo aplicar y verificar la 0089 están en
+[`Z_BAJA_DE_CUENTA.md`](Z_BAJA_DE_CUENTA.md). **No encender Servicios en
+producción antes de aplicar la 0089.**
 
 ## 13. Las vistas
 
@@ -339,3 +354,72 @@ Lo que la revisión comprobó y dio por bueno:
 - avisos, sin textos en duro ni códigos crudos;
 - compatibilidad: servidor viejo con app nueva, API antes de la 0088 (503),
   y bandera apagada.
+
+## 16. Cierre técnico (29/09/2026): la baja de cuenta y la 0089
+
+Lo que quedaba para poder encender Servicios era el choque de §12. Se cerró
+en la rama `Edson`; el detalle está en
+[`Z_BAJA_DE_CUENTA.md`](Z_BAJA_DE_CUENTA.md).
+
+| Suite | Resultado |
+|---|---|
+| Backend completo con PostgreSQL real (docker `postgres:16`, 0001–0089) | **3775 pasan, 0 fallan, 0 omitidas, ninguna xfail**. Antes del cierre: 3645 + 1 xfail |
+| Backend completo sin PostgreSQL | **2881 pasan, 894 omitidas** (las de PostgreSQL) |
+| Baja de cuenta por el endpoint, contra PostgreSQL | 42 (`test_baja_de_cuenta_postgres.py`) |
+| La 0089 y la inmutabilidad | 53 (`test_migracion_0089.py`) |
+| El servicio de baja sin PostgreSQL | 18 (`test_baja_de_cuenta.py`) |
+| Storage y procesado de medios | 21 + 26 |
+| Móvil completo (copia LF) | **3278/3278** |
+| TypeScript, Expo Doctor, exportación web | limpio · 18/18 · correcta |
+| Paridad es/en/pt, rutas duplicadas (457 de la API, 145 del móvil) | sin diferencias · ninguna |
+| `git diff --check`, secretos, atribución de IA | limpios |
+
+**Mutaciones: 42/42 cazadas**, cada una por la prueba que debe cazarla y
+ninguna por una selección vacía. Rompen, una por una:
+
+- la excepción de la auditoría: editarla toda, cambiar un actor por otro,
+  tocar el actor y otra columna a la vez, restaurar un actor anónimo, no
+  mirar si el perfil existe, no mirar la profundidad;
+- las cascadas: borrar una versión de curso suelta, borrar la historia en
+  cascada, saltarse el borrado de una credencial;
+- la migración: debilitar la RLS, conceder permisos, quitar la precondición
+  de las huellas, la de la forma de los disparadores o la de la clave única;
+- Storage: no bajar a las carpetas, callar un error, olvidar un depósito,
+  dejar los adjuntos de chat, listar de uno en uno, saltar carpetas hondas,
+  cortar las demás conversaciones al fallar una, dejar tareas colgando;
+- el servicio: borrar los archivos antes que la base, un bloqueo legítimo
+  como 500, borrar lo ajeno antes de confirmar, callar el fallo de después,
+  dejar escapar una excepción, «tienes ventas» sin la 0089, `auth.users`
+  fuera de PostgreSQL;
+- las órdenes con dinero: de evento, de curso, las de pruebas y el checkout
+  abandonado;
+- Servicios: copiar a la auditoría el mensaje del equipo;
+- el procesado de medios: no retirar los derivados, no bloquear la fila;
+- el modelo del consentimiento desalineado de la base;
+- el móvil: la cuenta bloqueada como «inténtalo de nuevo», la espera corta,
+  y el «sigue activa» sin respuesta o con el 504 del CDN.
+
+**Revisión independiente, en dos pasadas.** La primera encontró 1 hallazgo
+alto, 5 medios y 6 bajos; la segunda, 2 medios y 6 bajos más. El alto está
+cerrado y **no queda nada alto ni bloqueante**. Los que dependen de una
+decisión de la empresa quedan como S8–S14 en `Z_REQUISITOS_Y_DECISIONES.md`.
+La tabla completa está en `Z_BAJA_DE_CUENTA.md` §14.
+
+## 17. Punto exacto de continuación hacia el Incremento 2
+
+**No se empezó el Incremento 2.** Antes de abrirlo, una persona tiene que:
+
+1. **Aplicar la 0089** y verificarla en solo lectura (`Z_BAJA_DE_CUENTA.md`
+   §10–11), y reiniciar la API.
+   Antes de encender los pagos, decidir **S8** (Google Play exige poder
+   borrar la cuenta desde la app).
+2. **Hacer el QA físico** de Servicios y de la eliminación de cuenta
+   (`Z_QA_FISICO_PENDIENTE.md`).
+3. **Decidir S1** (el texto de las condiciones por país): sin él nadie puede
+   enviar, y el Incremento 2 parte de prestadores aprobados.
+
+El Incremento 2 empieza donde termina la admisión: un `service_providers` en
+`active` es lo único que el Incremento 2 puede dar por supuesto. Lo reservado
+para él y para los siguientes (servicios y variantes, disponibilidad, reservas,
+pagos, incidencias y valoraciones) está en `Z_REQUISITOS_Y_DECISIONES.md`,
+«Límites del Incremento 1». Nada de eso tiene tabla, ruta ni pantalla todavía.

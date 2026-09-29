@@ -93,9 +93,11 @@ Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
 antes de usarla, y sigue funcionando cuando no lo está. Al 29/09/2026 la
-última **aplicada** es la **0087** (retirada de postulaciones de Servicios) y la
-última **escrita** es la **0088** (documentos y envíos de Servicios), **pendiente
-de aplicación manual**; ver [`Z_SERVICIOS_ARQUITECTURA.md` §9](Z_SERVICIOS_ARQUITECTURA.md).
+última **aplicada** es la **0088** (documentos y envíos de Servicios), verificada
+ese día en solo lectura sin divergencias, y la última **escrita** es la **0089**
+(borrar una cuenta sin borrar la historia), **pendiente de aplicación manual**;
+ver [`Z_BAJA_DE_CUENTA.md` §10–11](Z_BAJA_DE_CUENTA.md). Las aplicadas no se
+editan: las pruebas vigilan su huella git.
 Hasta el 22/09/2026 la última escrita y aplicada era la **0082** (finanzas de Productos).
 De la 0070 en adelante son la vertical de Productos, y las cuatro que quedaban
 —0079 envíos, 0080 reclamaciones, 0081 valoraciones y 0082 finanzas— se
