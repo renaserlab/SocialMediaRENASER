@@ -161,7 +161,9 @@ begin
   select string_agg(format('%s.%s', e.tabla, e.columna), ', ') into faltan
     from (values
       ('event_orders', 'provider'), ('event_orders', 'status'), ('event_orders', 'paid_at'),
-      ('event_orders', 'external_payment_id'), ('orders', 'status'), ('orders', 'paid_at')
+      ('event_orders', 'external_payment_id'), ('event_orders', 'environment'),
+      ('event_orders', 'updated_at'), ('orders', 'status'), ('orders', 'paid_at'),
+      ('orders', 'environment')
     ) as e(tabla, columna)
    where not exists (
      select 1 from information_schema.columns c
@@ -647,6 +649,12 @@ $$;
 -- Lo único que lo frenaba era el saldo del vendedor, que sin comisión
 -- configurada no se crea.
 --
+-- SOLO DINERO DE VERDAD (`production`): una orden de pruebas (`sandbox`) no se
+-- concilia ni admite contracargos, y no puede impedir que alguien que probó la
+-- beta se vaya. Y un pago EN CURSO solo mientras todavía puede cobrarse: la
+-- sesión de cobro de Stripe caduca a las 24 horas; pasado ese margen, un
+-- checkout abandonado no frena la baja.
+--
 -- ANTES DEL BORRADO, fila a fila, y con la tabla en el error: la API lo
 -- convierte en 409 `account_deletion_blocked` con su área (`events` o
 -- `courses`), sin haber tocado ningún archivo.
@@ -658,9 +666,11 @@ set search_path = public, pg_temp
 as $$
 begin
   if old.provider <> 'none'
+     and old.environment = 'production'
      and (old.paid_at is not null
           or old.external_payment_id is not null
-          or old.status in ('PAYMENT_PROCESSING', 'PAID')) then
+          or old.status = 'PAID'
+          or (old.status = 'PAYMENT_PROCESSING' and old.updated_at > now() - interval '25 hours')) then
     raise exception 'Una orden de evento en la que se movió dinero no se borra'
       using errcode = 'restrict_violation', table = 'event_orders';
   end if;
@@ -675,7 +685,8 @@ security invoker
 set search_path = public, pg_temp
 as $$
 begin
-  if old.paid_at is not null or old.status in ('paid', 'refunded') then
+  if old.environment = 'production'
+     and (old.paid_at is not null or old.status in ('paid', 'refunded')) then
     raise exception 'Una orden de curso en la que se movió dinero no se borra'
       using errcode = 'restrict_violation', table = 'orders';
   end if;

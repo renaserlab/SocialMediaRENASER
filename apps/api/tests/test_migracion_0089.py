@@ -763,7 +763,10 @@ def test_los_modelos_coinciden(pg) -> None:
 
 
 # --- 2.5 Hallazgos de la revisión independiente (29/09/2026) --------------- #
-def _orden_de_evento(pg, comprador: str, *, pagada: bool, stripe: bool) -> str:
+def _orden_de_evento(
+    pg, comprador: str, *, pagada: bool, stripe: bool, entorno: str = "production",
+    estado: str | None = None, hace: str = "0 hours",
+) -> str:
     """Una orden de evento con sus madres sembradas (el circuito de pago está
     apagado); lo que se prueba es su borrado."""
     orden = str(uuid.uuid4())
@@ -772,10 +775,11 @@ def _orden_de_evento(pg, comprador: str, *, pagada: bool, stripe: bool) -> str:
         _hacer(
             pg,
             "insert into public.event_orders (id, event_id, buyer_id, hold_id, status, currency, subtotal_minor, "
-            "total_minor, provider, external_payment_id, idempotency_key, paid_at) values (%s, gen_random_uuid(), %s, "
-            "gen_random_uuid(), %s, 'PEN', 100, 100, %s, %s, 'k', %s)",
-            orden, comprador, "PAID" if pagada else "PENDING_PAYMENT", "stripe" if stripe else "none",
-            f"pi_{orden[:8]}" if (stripe and pagada) else None, "2026-09-29" if pagada else None,
+            "total_minor, provider, environment, external_payment_id, idempotency_key, paid_at, updated_at) "
+            "values (%s, gen_random_uuid(), %s, gen_random_uuid(), %s, 'PEN', 100, 100, %s, %s, %s, 'k', %s, "
+            "now() - cast(%s as interval))",
+            orden, comprador, estado or ("PAID" if pagada else "PENDING_PAYMENT"), "stripe" if stripe else "none",
+            entorno, f"pi_{orden[:8]}" if (stripe and pagada) else None, "2026-09-29" if pagada else None, hace,
         )
     return orden
 
@@ -785,25 +789,33 @@ def test_R1_una_orden_con_dinero_no_se_borra_y_sin_dinero_si(pg) -> None:
     _montar(pg)
     comprador = _persona(pg)
     pagada = _orden_de_evento(pg, comprador, pagada=True, stripe=True)
+    cobrando = _orden_de_evento(pg, comprador, pagada=False, stripe=True, estado="PAYMENT_PROCESSING", hace="2 hours")
     gratis = _orden_de_evento(pg, comprador, pagada=True, stripe=False)
     pendiente = _orden_de_evento(pg, comprador, pagada=False, stripe=False)
-    error = _rechaza(pg, "delete from public.event_orders where id = %s", pagada)
-    assert "movió dinero" in error
-    for orden in (gratis, pendiente):
+    de_pruebas = _orden_de_evento(pg, comprador, pagada=True, stripe=True, entorno="sandbox")
+    abandonada = _orden_de_evento(pg, comprador, pagada=False, stripe=True, estado="PAYMENT_PROCESSING", hace="2 days")
+    for orden in (pagada, cobrando):
+        assert "movió dinero" in _rechaza(pg, "delete from public.event_orders where id = %s", orden)
+    # Sin dinero de verdad sí se va: gratuita, pendiente, de pruebas o un
+    # checkout abandonado que ya no puede cobrarse (la sesión caduca a las 24 h).
+    for orden in (gratis, pendiente, de_pruebas, abandonada):
         with pg.transaction(force_rollback=True):
             _hacer(pg, "set local session_replication_role = origin")
             _hacer(pg, "delete from public.event_orders where id = %s", orden)
     # Y la de un curso, pagada o devuelta.
     with pg.transaction():
         _hacer(pg, "set local session_replication_role = replica")
-        curso = str(uuid.uuid4())
-        _hacer(
-            pg,
-            "insert into public.orders (id, user_id, commerce_product_id, provider, channel, status, amount_minor, "
-            "currency) values (%s, %s, gen_random_uuid(), 'stripe', 'web', 'refunded', 4900, 'PEN')",
-            curso, comprador,
-        )
+        curso, de_pruebas = str(uuid.uuid4()), str(uuid.uuid4())
+        for ident, entorno in ((curso, "production"), (de_pruebas, "sandbox")):
+            _hacer(
+                pg,
+                "insert into public.orders (id, user_id, commerce_product_id, provider, channel, environment, status, "
+                "amount_minor, currency) values (%s, %s, gen_random_uuid(), 'stripe', 'web', %s, 'refunded', 4900, 'PEN')",
+                ident, comprador, entorno,
+            )
     _rechaza(pg, "delete from public.orders where id = %s", curso)
+    with pg.transaction(force_rollback=True):
+        _hacer(pg, "delete from public.orders where id = %s", de_pruebas)
 
 
 @SIN_POSTGRES

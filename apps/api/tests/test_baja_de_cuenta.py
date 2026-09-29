@@ -188,3 +188,18 @@ async def test_repetir_la_baja_es_seguro(entorno) -> None:
 )
 async def test_el_area_del_bloqueo_nunca_dice_la_tabla(tabla, area) -> None:
     assert baja._area(tabla) == area
+
+
+async def test_lo_de_despues_de_confirmar_nunca_se_escapa(monkeypatch, caplog) -> None:
+    """Cualquier fallo al retirar lo ajeno (no solo los de Storage) se registra:
+    la cuenta ya está borrada y nada de esto puede convertirse en un error."""
+    import logging
+
+    async def revienta(conversaciones):
+        raise AttributeError("respuesta inesperada")
+
+    monkeypatch.setattr(storage, "borrar_conversaciones", revienta)
+    with caplog.at_level(logging.ERROR):
+        await baja.retirar_conversaciones(ANA, ["c-1", "c-2"])
+    registro = " ".join(r.getMessage() for r in caplog.records)
+    assert "c-1" in registro and "c-2" in registro

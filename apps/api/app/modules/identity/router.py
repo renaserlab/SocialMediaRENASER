@@ -6,7 +6,7 @@ del token, util para que la app confirme su sesion contra el API, y permite
 que una persona borre su propia cuenta.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,7 @@ async def me(current_user: AuthUser = Depends(get_current_user)) -> SessionInfo:
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_my_account(
+    segundo_plano: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -52,4 +53,6 @@ async def delete_my_account(
     La identidad sale del token ya validado, nunca de un id recibido: solo se
     puede borrar la cuenta propia.
     """
-    await baja.borrar_cuenta(db, current_user.id)
+    enteras = await baja.borrar_cuenta(db, current_user.id)
+    # Lo ajeno de las conversaciones que se fueron enteras, tras contestar.
+    segundo_plano.add_task(baja.retirar_conversaciones, current_user.id, enteras)

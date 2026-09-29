@@ -129,9 +129,15 @@ async def _list_prefix(
         if len(lote) < 100:
             break
         pagina += 1
-    for sub in await asyncio.gather(
-        *(_list_prefix(client, bucket, c, profundidad + 1, turnos) for c in carpetas)
-    ):
+    # Se espera a TODAS aunque una falle: si no, las demás seguirían vivas con
+    # el cliente ya cerrado. Después se relanza el primer fallo.
+    subcarpetas = await asyncio.gather(
+        *(_list_prefix(client, bucket, c, profundidad + 1, turnos) for c in carpetas),
+        return_exceptions=True,
+    )
+    for sub in subcarpetas:
+        if isinstance(sub, BaseException):
+            raise sub
         nombres.extend(sub)
     return nombres
 
@@ -233,30 +239,33 @@ async def delete_user_files(user_id: str, *, conversaciones: Sequence[str] = ())
     return borrados
 
 
-async def borrar_conversaciones(conversaciones: Sequence[str]) -> int:
+async def borrar_conversaciones(conversaciones: Sequence[str]) -> list[str]:
     """Retira TODO lo de `message-media/<conversacion>/` de conversaciones que
-    YA NO EXISTEN (se borraron en cascada con la cuenta que las creó).
+    YA NO EXISTEN (se borraron en cascada con la cuenta que las creó), y
+    devuelve las que NO se pudieron retirar.
 
     Se llama después de confirmar la baja. Sin conversación no hay miembros, y
     la política de lectura de `message-media` exige ser miembro: lo que quede
-    aquí no lo puede abrir nadie desde la aplicación. Si falla, lanza
-    `BorradoIncompleto` y quien llama lo registra para retirarlo a mano.
+    aquí no lo puede abrir nadie desde la aplicación.
+
+    CADA CONVERSACIÓN POR SU LADO, y a la vez: una que falle (Storage caído, o
+    una carpeta más honda que el tope que otro miembro creó bajo la suya) no
+    impide retirar las demás, y solo ella queda en la lista.
     """
     if not conversaciones:
-        return 0
+        return []
     _exigir_configurado()
-    borrados = 0
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         turnos = asyncio.Semaphore(LISTADOS_A_LA_VEZ)
-        try:
-            for conversacion in conversaciones:
-                rutas = await _list_prefix(client, DEPOSITO_DE_CHAT, str(conversacion), 0, turnos)
-                borrados += await _borrar_nombres(client, DEPOSITO_DE_CHAT, rutas)
-        except (httpx.HTTPError, ValueError):
-            raise BorradoIncompleto(
-                "No se pudieron retirar los adjuntos de conversaciones borradas"
-            ) from None
-    return borrados
+
+        async def una(conversacion: str) -> None:
+            rutas = await _list_prefix(client, DEPOSITO_DE_CHAT, str(conversacion), 0, turnos)
+            await _borrar_nombres(client, DEPOSITO_DE_CHAT, rutas)
+
+        resultados = await asyncio.gather(
+            *(una(c) for c in conversaciones), return_exceptions=True
+        )
+    return [str(c) for c, r in zip(conversaciones, resultados) if isinstance(r, BaseException)]
 
 
 async def borrar_carpeta(bucket: str, prefijo: str) -> int:

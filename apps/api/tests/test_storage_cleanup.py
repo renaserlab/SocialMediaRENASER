@@ -323,7 +323,7 @@ async def test_los_adjuntos_de_chat_se_barren_por_conversacion(monkeypatch, con_
         "c-ajena/u-2/suya.jpg", "c-propia/u-2/b.jpg", "c-otra/u-2/nada-que-ver.jpg",
     ]
 
-    assert await storage.borrar_conversaciones(["c-propia"]) == 1
+    assert await storage.borrar_conversaciones(["c-propia"]) == []
     assert cliente.objetos["message-media"] == ["c-ajena/u-2/suya.jpg", "c-otra/u-2/nada-que-ver.jpg"]
 
 
@@ -423,3 +423,43 @@ def test_cada_deposito_de_las_migraciones_tiene_quien_lo_barra():
     assert "service-provider-documents" in depositos and "message-media" in depositos
     sin_dueno = depositos - set(storage.USER_BUCKETS) - {storage.DEPOSITO_DE_CHAT} - set(NO_SE_BARREN)
     assert not sin_dueno, f"nadie barre estos depósitos al borrar una cuenta: {sorted(sin_dueno)}"
+
+
+@pytest.mark.asyncio
+async def test_una_conversacion_que_falla_no_impide_retirar_las_demas(monkeypatch, con_credenciales):
+    cliente = _SupabaseFalso({"message-media": ["c-1/u-2/a.jpg", "c-2/u-2/b.jpg", "c-3/u-2/c.jpg"]})
+
+    async def post(url, headers=None, json=None):
+        if json["prefix"] == "c-2":
+            raise httpx.ConnectError("sin red")
+        return await _SupabaseFalso.post(cliente, url, headers=headers, json=json)
+
+    cliente.post = post
+    _instalar_cliente(monkeypatch, cliente)
+
+    assert await storage.borrar_conversaciones(["c-1", "c-2", "c-3"]) == ["c-2"]
+    assert cliente.objetos["message-media"] == ["c-2/u-2/b.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_un_listado_que_falla_no_deja_tareas_colgando(monkeypatch, con_credenciales):
+    """`gather` sin esperar a todas dejaba las subcarpetas hermanas corriendo
+    con el cliente ya cerrado."""
+    import asyncio
+
+    cliente = _SupabaseFalso({"post-media": [f"u-1/m{i}/x.jpg" for i in range(6)]})
+
+    async def post(url, headers=None, json=None):
+        if json["prefix"] == "u-1/m0":
+            raise httpx.ConnectError("sin red")
+        if json["prefix"].startswith("u-1/m"):
+            await asyncio.sleep(0.05)
+        return await _SupabaseFalso.post(cliente, url, headers=headers, json=json)
+
+    cliente.post = post
+    _instalar_cliente(monkeypatch, cliente)
+    antes = set(asyncio.all_tasks())
+
+    with pytest.raises(storage.BorradoIncompleto):
+        await storage.delete_user_files("u-1")
+    assert set(asyncio.all_tasks()) - antes - {asyncio.current_task()} == set()

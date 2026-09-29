@@ -20,11 +20,14 @@ EL ORDEN, Y POR QUÉ:
      borraron; repetir la petición termina el trabajo.
   4. Se confirma. Si la confirmación fallara (se cae la conexión), la cuenta
      sigue y sus archivos ya no: repetir la petición la borra.
-  5. DESPUÉS de confirmar, lo de las demás personas en las conversaciones que
-     creó y que se han ido enteras con ella. Antes de confirmar no: si la baja
-     se deshiciera, esas conversaciones volverían sin sus adjuntos. Si esto
-     falla, la cuenta YA está borrada (204) y se registra qué conversaciones
-     retirar a mano; nadie puede abrir esos archivos desde la aplicación.
+  5. DESPUÉS de confirmar, y en segundo plano cuando ya se ha contestado 204,
+     lo de las demás personas en las conversaciones que creó y que se han ido
+     enteras con ella (`retirar_conversaciones`). Antes de confirmar no: si la
+     baja se deshiciera, esas conversaciones volverían sin sus adjuntos. En
+     segundo plano porque la respuesta tiene que llegar antes de que el CDN
+     corte (60 s). Si falla, la cuenta YA está borrada y se registra qué
+     conversaciones retirar a mano; nadie puede abrir esos archivos desde la
+     aplicación.
 
 Antes era al revés: primero los archivos, sin mirar si fallaban, y después la
 base. Una cuenta que la base no dejaba borrar se quedaba viva y sin sus
@@ -148,7 +151,9 @@ async def _hay_0089(db: AsyncSession) -> bool:
     )
 
 
-async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> None:
+async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
+    """Borra la cuenta. Devuelve las conversaciones que se fueron enteras con
+    ella, para `retirar_conversaciones` después de contestar."""
     suyas, enteras = await _conversaciones(db, usuario_id)
     postgres = (await db.connection()).dialect.name == "postgresql"
 
@@ -187,15 +192,25 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> None:
         raise ArchivosSinBorrar() from None
 
     await db.commit()
+    return enteras
 
+
+async def retirar_conversaciones(usuario_id: str, conversaciones: list[str]) -> None:
+    """Lo de las demás personas en las conversaciones que se fueron enteras
+    con la cuenta. Corre DESPUÉS de contestar: la cuenta ya no existe, y nada
+    de aquí puede convertirse en un error para quien la borró."""
+    if not conversaciones:
+        return
     try:
-        await storage.borrar_conversaciones(enteras)
-    except (storage.StorageFallo, storage.StorageNoConfigurado):
-        # La cuenta ya no existe; lo que queda son adjuntos de otras personas
-        # en conversaciones borradas, que nadie puede abrir. Se dice cuáles
-        # (identificadores, nunca rutas) para retirarlos a mano.
+        fallidas = await storage.borrar_conversaciones(conversaciones)
+    except Exception:  # noqa: BLE001 - cualquier fallo: la baja ya está hecha
+        fallidas = list(conversaciones)
+    if fallidas:
+        # Adjuntos de otras personas en conversaciones borradas, que nadie
+        # puede abrir. Se dice cuáles (identificadores, nunca rutas) para
+        # retirarlos a mano.
         logger.error(
             "Baja de %s hecha, pero quedan adjuntos de %d conversaciones borradas "
             "por retirar de message-media: %s",
-            usuario_id, len(enteras), ", ".join(enteras),
+            usuario_id, len(fallidas), ", ".join(fallidas),
         )

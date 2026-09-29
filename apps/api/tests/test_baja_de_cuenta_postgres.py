@@ -542,8 +542,10 @@ async def _asistencia(
         ), {"e": evento, "o": orden, "l": linea, "u": asistente, "t": tipo})).scalar())
         await c.execute(text(
             "update public.event_orders set status = 'PAID', paid_at = now(), "
-            "provider = cast(:p as text), external_payment_id = cast(:x as text) where id = cast(:o as uuid)"
-        ), {"o": orden, "p": "stripe" if stripe else "none", "x": f"pi_prueba_{orden[:8]}" if stripe else None})
+            "provider = cast(:p as text), external_payment_id = cast(:x as text), "
+            "environment = cast(:e as text) where id = cast(:o as uuid)"
+        ), {"o": orden, "p": "stripe" if stripe else "none", "x": f"pi_prueba_{orden[:8]}" if stripe else None,
+            "e": "production" if stripe else "sandbox"})
     politica = await _uno(
         motor, "select id from public.event_policies where event_id = cast(:e as uuid) limit 1", e=evento
     )
