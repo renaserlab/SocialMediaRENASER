@@ -163,6 +163,12 @@ async def test_con_la_0089_completa_la_puerta_esta_abierta(entorno) -> None:
         pytest.param((_CLAVE, _clave("cascade")), id="consentimiento_con_cascade"),
         pytest.param((_CLAVE,), id="consentimiento_sin_clave"),
         pytest.param(
+            (_CLAVE,
+             "alter table public.consent_records add constraint consent_records_subject_id_fkey "
+             "foreign key (subject_id) references auth.users(id) on delete set null"),
+            id="consentimiento_con_la_clave_a_otra_tabla",
+        ),
+        pytest.param(
             ("alter table public.consent_records add constraint otra_clave_del_sujeto "
              "foreign key (subject_id) references public.profiles(id) on delete restrict",),
             id="consentimiento_con_una_segunda_clave_restrict",
