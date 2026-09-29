@@ -296,6 +296,58 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("An application was withdrawn", "The applicant withdrew it before a decision."),
         "pt": ("Uma candidatura foi retirada", "Quem se candidatou a retirou antes da decisão."),
     },
+    # Z Servicios · catálogo (Incremento 2). Sin títulos ni motivos: quien lo
+    # abre lee el detalle en el servicio.
+    "service_catalog_review_started": {
+        "es": ("Revisamos tu servicio", "El equipo de Z empezó a revisar lo que enviaste."),
+        "en": ("We're reviewing your service", "The Z team started reviewing what you submitted."),
+        "pt": ("Estamos revisando seu serviço", "A equipe da Z começou a revisar o que você enviou."),
+    },
+    "service_catalog_changes_requested": {
+        "es": ("Tu servicio necesita cambios", "Ábrelo para leer qué corregir."),
+        "en": ("Your service needs changes", "Open it to read what to fix."),
+        "pt": ("Seu serviço precisa de ajustes", "Abra-o para ler o que corrigir."),
+    },
+    "service_catalog_approved": {
+        "es": ("Tu servicio fue aprobado", "Falta que el equipo de Z lo publique."),
+        "en": ("Your service was approved", "The Z team still has to publish it."),
+        "pt": ("Seu serviço foi aprovado", "Falta a equipe da Z publicá-lo."),
+    },
+    "service_catalog_published": {
+        "es": ("Tu servicio está publicado", "Ya se puede ver en Z."),
+        "en": ("Your service is published", "It can now be seen on Z."),
+        "pt": ("Seu serviço está publicado", "Já pode ser visto na Z."),
+    },
+    "service_catalog_suspended": {
+        "es": ("Tu servicio fue suspendido", "Ábrelo para leer el motivo."),
+        "en": ("Your service was suspended", "Open it to read the reason."),
+        "pt": ("Seu serviço foi suspenso", "Abra-o para ler o motivo."),
+    },
+    "service_catalog_reinstated": {
+        "es": ("Tu servicio vuelve a estar visible", "El equipo de Z levantó la suspensión."),
+        "en": ("Your service is visible again", "The Z team lifted the suspension."),
+        "pt": ("Seu serviço está visível de novo", "A equipe da Z retirou a suspensão."),
+    },
+    "service_catalog_retired": {
+        "es": ("Tu servicio salió del catálogo", "Ábrelo para leer el motivo."),
+        "en": ("Your service left the catalog", "Open it to read the reason."),
+        "pt": ("Seu serviço saiu do catálogo", "Abra-o para ler o motivo."),
+    },
+    "service_catalog_submitted": {
+        "es": ("Nuevo servicio para revisar", "Un prestador envió un servicio."),
+        "en": ("New service to review", "A provider submitted a service."),
+        "pt": ("Novo serviço para revisar", "Um prestador enviou um serviço."),
+    },
+    "service_catalog_resubmitted": {
+        "es": ("Un servicio volvió corregido", "Trae los cambios que pediste."),
+        "en": ("A service came back corrected", "It includes the changes you requested."),
+        "pt": ("Um serviço voltou corrigido", "Traz os ajustes que você pediu."),
+    },
+    "service_catalog_withdrawn_review": {
+        "es": ("Un servicio se retiró de la revisión", "El prestador lo retiró antes de publicarse."),
+        "en": ("A service was withdrawn from review", "The provider withdrew it before publication."),
+        "pt": ("Um serviço foi retirado da revisão", "O prestador o retirou antes da publicação."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

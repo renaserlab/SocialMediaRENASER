@@ -34,13 +34,16 @@ logger = logging.getLogger(__name__)
 #: bajo `<id de usuario>/<nombre>`, de modo que ese prefijo delimita todo lo que
 #: pertenece a una persona (ver `services/storage.ts` en el movil).
 #: `seller-documents` (0085) sigue la misma regla: `<perfil>/<postulación>/...`,
-#: y `service-provider-documents` (0088, Servicios) también.
+#: y `service-provider-documents` (0088, Servicios) también. Las imágenes del
+#: catálogo de Servicios (`service-media`, 0090) van bajo
+#: `<perfil>/<servicio>/<versión>/`: el perfil del prestador, primero.
 USER_BUCKETS = (
     "post-media",
     "avatars",
     "course-media",
     "seller-documents",
     "service-provider-documents",
+    "service-media",
 )
 
 _TIMEOUT = httpx.Timeout(15.0)

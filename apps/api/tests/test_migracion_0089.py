@@ -107,10 +107,13 @@ def _sin_comentarios(sql: str) -> str:
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_sigue_a_la_0088_y_es_la_ultima() -> None:
+def test_sigue_a_la_0088_y_la_0090_va_despues() -> None:
+    """Era la última cuando se aplicó (29/09/2026); la sigue la 0090 (el
+    catálogo de Servicios), que la exige."""
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0088_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0088_")
+    assert nombres[posicion + 1].startswith("0090_")
 
 
 @pytest.mark.parametrize("nombre", sorted(APLICADAS))

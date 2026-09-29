@@ -214,6 +214,22 @@ class Settings(BaseSettings):
     #: `feature_products` y `feature_product_sales`.
     feature_services: bool = False
 
+    #: EL CATALOGO DE SERVICIOS (Incremento 2): lo que la empresa TODAVIA NO HA
+    #: DECIDIDO, configurable y documentado (`docs/Z_SERVICIOS_ARQUITECTURA.md`).
+    #: Los valores de fabrica son los LIMITES TECNICOS de la 0090, no una
+    #: decision comercial: aceptan todo lo que la base admite. Listas separadas
+    #: por comas.
+    services_catalog_modalities: str = "virtual,in_person,at_home"
+    #: `from` («desde») lo permite el blueprint; `on_request` es el precio no
+    #: publicado. Quitar uno aqui lo deja fuera de los envios nuevos.
+    services_catalog_price_models: str = "free,fixed,from,on_request"
+    #: SIN MONEDA CONFIGURADA NO SE ENVIA un precio con importe. PEN es la del
+    #: pais inicial recomendado por la arquitectura (PE).
+    services_catalog_currencies: str = "PEN"
+    services_catalog_min_duration_minutes: int = 5
+    services_catalog_max_duration_minutes: int = 1440
+    services_catalog_max_images: int = 8
+
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:
     #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay

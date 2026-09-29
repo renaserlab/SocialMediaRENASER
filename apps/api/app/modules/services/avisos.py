@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger("renaser.services")
 
 ENTIDAD = "service_application"
+#: El catálogo (Incremento 2): el aviso apunta al SERVICIO, no a la versión.
+ENTIDAD_SERVICIO = "service"
 
 # A quien postula.
 REVISION_INICIADA = "service_application_review_started"
@@ -48,6 +50,34 @@ ENVIADA = "service_application_submitted"
 REENVIADA = "service_application_resubmitted"
 RETIRADA_EN_REVISION = "service_application_withdrawn_review"
 
+# EL CATÁLOGO (Incremento 2). Al prestador, sobre su servicio:
+SERVICIO_EN_REVISION = "service_catalog_review_started"
+SERVICIO_CAMBIOS_PEDIDOS = "service_catalog_changes_requested"
+SERVICIO_APROBADO = "service_catalog_approved"
+SERVICIO_PUBLICADO = "service_catalog_published"
+SERVICIO_SUSPENDIDO = "service_catalog_suspended"
+SERVICIO_REACTIVADO = "service_catalog_reinstated"
+SERVICIO_RETIRADO = "service_catalog_retired"
+# Y al equipo de Z:
+SERVICIO_ENVIADO = "service_catalog_submitted"
+SERVICIO_REENVIADO = "service_catalog_resubmitted"
+SERVICIO_RETIRADO_EN_REVISION = "service_catalog_withdrawn_review"
+
+TIPOS_DEL_CATALOGO = frozenset(
+    {
+        SERVICIO_EN_REVISION,
+        SERVICIO_CAMBIOS_PEDIDOS,
+        SERVICIO_APROBADO,
+        SERVICIO_PUBLICADO,
+        SERVICIO_SUSPENDIDO,
+        SERVICIO_REACTIVADO,
+        SERVICIO_RETIRADO,
+        SERVICIO_ENVIADO,
+        SERVICIO_REENVIADO,
+        SERVICIO_RETIRADO_EN_REVISION,
+    }
+)
+
 TIPOS = frozenset(
     {
         REVISION_INICIADA,
@@ -63,6 +93,7 @@ TIPOS = frozenset(
         REENVIADA,
         RETIRADA_EN_REVISION,
     }
+    | TIPOS_DEL_CATALOGO
 )
 
 #: Tope de destinatarios del equipo. Hoy hay uno; esto evita que un error de
@@ -88,8 +119,12 @@ async def avisar(
     tipo: str,
     solicitud_id: str,
     suceso_id: str,
+    entidad: str = ENTIDAD,
 ) -> bool:
-    """Bandeja + push para UNA persona. Nunca lanza. Devuelve si quedó algo."""
+    """Bandeja + push para UNA persona. Nunca lanza. Devuelve si quedó algo.
+
+    `solicitud_id` es la entidad a la que lleva el aviso: la postulación o,
+    en el catálogo (`entidad=ENTIDAD_SERVICIO`), el servicio."""
     if tipo not in TIPOS or not usuario_id:
         return False
     escrito = False
@@ -102,7 +137,7 @@ async def avisar(
                 user_id=usuario_id,
                 actor_id=None,
                 type=tipo,
-                entity_type=ENTIDAD,
+                entity_type=entidad,
                 entity_id=solicitud_id,
                 payload={},
             )
@@ -147,11 +182,17 @@ async def avisar_al_equipo(
     solicitud_id: str,
     suceso_id: str,
     excepto: set[str],
+    entidad: str = ENTIDAD,
 ) -> int:
     enviados = 0
     for revisor in await equipo(db, excepto=excepto):
         if await avisar(
-            db, usuario_id=revisor, tipo=tipo, solicitud_id=solicitud_id, suceso_id=suceso_id
+            db,
+            usuario_id=revisor,
+            tipo=tipo,
+            solicitud_id=solicitud_id,
+            suceso_id=suceso_id,
+            entidad=entidad,
         ):
             enviados += 1
     return enviados
@@ -164,14 +205,26 @@ __all__ = [
     "CREDENCIAL_RECHAZADA",
     "DOCUMENTO_OBSERVADO",
     "ENTIDAD",
+    "ENTIDAD_SERVICIO",
     "ENVIADA",
     "RECHAZADA",
     "REENVIADA",
     "RETIRADA",
     "RETIRADA_EN_REVISION",
     "REVISION_INICIADA",
+    "SERVICIO_APROBADO",
+    "SERVICIO_CAMBIOS_PEDIDOS",
+    "SERVICIO_ENVIADO",
+    "SERVICIO_EN_REVISION",
+    "SERVICIO_PUBLICADO",
+    "SERVICIO_REACTIVADO",
+    "SERVICIO_REENVIADO",
+    "SERVICIO_RETIRADO",
+    "SERVICIO_RETIRADO_EN_REVISION",
+    "SERVICIO_SUSPENDIDO",
     "SUSPENDIDA",
     "TIPOS",
+    "TIPOS_DEL_CATALOGO",
     "avisar",
     "avisar_al_equipo",
     "equipo",
