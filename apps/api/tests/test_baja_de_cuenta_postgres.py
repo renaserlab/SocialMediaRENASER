@@ -1308,3 +1308,57 @@ async def test_R8_la_base_de_pruebas_tiene_la_0089(entorno) -> None:
     _, motor, _ = entorno
     async with async_sessionmaker(motor)() as db:
         assert await baja._hay_0089(db) is True
+
+
+async def test_R4_el_procesado_que_acaba_durante_la_baja_retira_sus_derivados(entorno, monkeypatch) -> None:
+    """MEDIA. Un vídeo se transcodifica durante minutos. Si la baja está a
+    medio confirmar cuando el procesado guarda, antes lo leía como vivo y, al
+    escribir, chocaba con la fila ya borrada: los derivados recién subidos se
+    quedaban sin dueño. Ahora espera al bloqueo, ve que ya no está y los
+    retira."""
+    import asyncio
+
+    from app.modules.content import media_processing as mp
+
+    app, motor, almacen = entorno
+    ana = await _persona(motor)
+    publicacion = str(await _escribir(
+        motor, "insert into public.posts (author_id, body) values (cast(:u as uuid), '') returning id", u=ana
+    ))
+    medio = str(await _escribir(
+        motor,
+        "insert into public.post_media (post_id, storage_path, media_type) "
+        "values (cast(:p as uuid), cast(:r as text), 'video') returning id",
+        p=publicacion, r=f"{ana}/video.mp4",
+    ))
+    baja = await motor.connect()
+    transaccion = await baja.begin()
+
+    async def procesar(client, media):
+        media.feed_path = f"{ana}/derived/{media.id}/feed.mp4"
+        # La baja empieza mientras se procesa y todavía no se ha confirmado.
+        await baja.execute(text("delete from public.profiles where id = cast(:u as uuid)"), {"u": ana})
+
+        async def confirmar_luego():
+            await asyncio.sleep(0.5)
+            await transaccion.commit()
+
+        asyncio.create_task(confirmar_luego())
+
+    retiradas: list[tuple[str, str]] = []
+
+    async def borrar_carpeta(bucket, prefijo):
+        retiradas.append((bucket, prefijo))
+        return 1
+
+    monkeypatch.setattr(mp, "SessionLocal", async_sessionmaker(motor, expire_on_commit=False))
+    monkeypatch.setattr(mp, "processing_configured", lambda: True)
+    monkeypatch.setattr(mp, "_process_video", procesar)
+    monkeypatch.setattr(storage, "borrar_carpeta", borrar_carpeta)
+    try:
+        await mp.process_media(medio)
+    finally:
+        await baja.close()
+
+    assert retiradas == [("post-media", f"{ana}/derived/{medio}")]
+    assert await _uno(motor, "select count(*) from public.post_media where id = cast(:m as uuid)", m=medio) == 0
