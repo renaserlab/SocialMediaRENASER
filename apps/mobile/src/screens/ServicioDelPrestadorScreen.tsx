@@ -113,7 +113,7 @@ export function ServicioDelPrestadorScreen() {
       <AppHeader title={titulo} onBack={volver} />
 
       <View style={tarjeta} accessibilityRole="summary">
-        <Text variant="titleMedium">{mostrada?.title ?? f('servicios.catalogo.sinTitulo')}</Text>
+        <Text variant="titleMedium">{s.title ?? mostrada?.title ?? f('servicios.catalogo.sinTitulo')}</Text>
         <Text variant="caption" color={colors.textMuted}>
           {nombreDeLaCategoria(s.category, idioma)}
         </Text>

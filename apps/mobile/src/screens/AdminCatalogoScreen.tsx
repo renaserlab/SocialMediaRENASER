@@ -100,9 +100,12 @@ export function AdminCatalogoScreen() {
 
   const verMas = async () => {
     if (!cursor || masCargando) return;
+    // Si mientras tanto cambió un filtro, esta página es de otra lista.
+    const este = pedido.current;
     setMasCargando(true);
     try {
       const pagina = await ServiceCatalogAdminRepository.bandeja({ ...filtros, cursor });
+      if (este !== pedido.current) return;
       setFilas((actuales) => juntar(actuales ?? [], pagina.items));
       setCursor(pagina.next_cursor);
     } catch (error) {

@@ -213,6 +213,8 @@ describe('ningún código del catálogo llega crudo a la pantalla', () => {
       ...C.COLAS.map((c) => C.claveDeLaCola(c)),
       ...['provider', 'reviewer', 'admin', 'system', 'otra'].map((f) => C.claveDeLaFuncion(f)),
       ...['submitted', 'under_review', 'approved', 'draft'].map((e) => `servicios.catalogo.versionCuerpo.${e}`),
+      'servicios.catalogo.admin.confirmar.publishSuspendido',
+      'servicios.catalogo.admin.explica.publishSuspendido',
       C.claveDelEstadoDelServicio('nuevo'), C.claveDelCuerpoDelEstado('nuevo'), C.claveDelEstadoDeLaVersion('nuevo'),
       C.claveDeLaModalidad('nuevo'), C.claveDeLaModalidad(null), C.claveDelModeloDePrecio('nuevo'),
       C.claveDelModeloDePrecio(null), C.claveDelRequisito('nuevo'), C.claveDelCampo('nuevo'),
@@ -409,7 +411,8 @@ describe('las imágenes', () => {
 // =========================================================================== //
 describe('el servicio propio', () => {
   const servicio = (parcial: Partial<ServicioPrivado> = {}): ServicioPrivado => ({
-    id: 's1', status: 'published', category: categoria(), created_at: '', updated_at: '',
+    id: 's1', status: 'published', title: 'Asesoría contable', last_version_status: 'published',
+    category: categoria(), created_at: '', updated_at: '',
     first_published_at: '2026-09-01T00:00:00Z', published_at: null, suspended_at: null, retired_at: null,
     published_version: version({ id: 'v1', status: 'published' }), open_version: null, last_observation: null,
     missing: [], can_edit: false, can_submit: false, can_withdraw: false, can_open_draft: true,
@@ -419,6 +422,13 @@ describe('el servicio propio', () => {
   it('se enseña la versión abierta y, sin ella, la publicada', () => {
     assert.equal(C.versionQueSeEnsena(servicio())?.id, 'v1');
     assert.equal(C.versionQueSeEnsena(servicio({ open_version: version({ id: 'v2' }) }))?.id, 'v2');
+  });
+
+  it('la lista enseña la versión abierta y, sin ella, los cambios pedidos', () => {
+    assert.equal(C.estadoDeVersionQueSeEnsena({ open_version_status: 'submitted', last_version_status: 'submitted' }), 'submitted');
+    assert.equal(C.estadoDeVersionQueSeEnsena({ open_version_status: null, last_version_status: 'changes_requested' }), 'changes_requested');
+    assert.equal(C.estadoDeVersionQueSeEnsena({ open_version_status: null, last_version_status: 'published' }), null);
+    assert.equal(C.estadoDeVersionQueSeEnsena({ open_version_status: null, last_version_status: null }), null);
   });
 
   it('está en manos de Z mientras la versión abierta espera', () => {

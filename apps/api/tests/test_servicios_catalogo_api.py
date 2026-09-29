@@ -919,3 +919,233 @@ async def test_la_baja_del_prestador_se_lleva_sus_servicios_e_imagenes(entorno) 
         motor, "select count(*) from public.audit_events where entity_id = cast(:s as uuid) and actor_id is null",
         s=ident,
     ) >= 1
+
+
+# =========================================================================== #
+# 12. Lo que encontró la revisión independiente (29/09/2026)
+# =========================================================================== #
+async def test_lo_que_cambia_se_dice_con_los_campos_que_la_app_sabe_pintar(entorno) -> None:
+    """`changed_fields` habla el vocabulario de pedir cambios: el precio es uno
+    (modelo, importe y moneda), la duración es `duration`, y las imágenes
+    cuentan. Antes salía `price_minor`, que la app pintaba como «Otro dato»."""
+    from app.modules.services.catalogo_requisitos import CAMPOS
+
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _publicado(app, perfil, jefa, moderador))["id"]
+    await _accion(app, perfil, f"{MIOS}/{ident}/draft")
+
+    async def cambia() -> list[str]:
+        async with _cliente(app, jefa) as http:
+            return (await http.get(f"{BANDEJA}/{ident}")).json()["changed_fields"]
+
+    assert await cambia() == []
+    assert (await _editar(app, perfil, ident, price_minor=15000)).status_code == 200
+    assert await cambia() == ["price"]
+    assert (await _editar(app, perfil, ident, duration_minutes=90)).status_code == 200
+    assert await cambia() == ["duration", "price"]
+    # Una imagen nueva que pasa a ser la portada: también es un cambio.
+    borrador = (await _imagen(app, perfil, ident, PNG_AZUL, alt="Otra vista del escritorio")).json()
+    nueva = next(i["id"] for i in borrador["open_version"]["images"] if not i["is_cover"])
+    orden = [nueva] + [i["id"] for i in borrador["open_version"]["images"] if i["id"] != nueva]
+    async with _cliente(app, perfil) as http:
+        r = await http.put(f"{MIOS}/{ident}/draft/images/order", json={"image_ids": orden, "cover_id": nueva})
+    assert r.status_code == 200, r.text
+    campos = await cambia()
+    assert campos == ["duration", "price", "images"]
+    assert set(campos) <= set(CAMPOS)
+
+
+async def test_publicar_la_version_de_un_suspendido_no_dice_que_ya_se_ve(entorno) -> None:
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _publicado(app, perfil, jefa, moderador))["id"]
+    assert (await _accion(app, jefa, f"{BANDEJA}/{ident}/suspend", {"note": "Revisamos un reclamo."})).status_code == 200
+    await _accion(app, perfil, f"{MIOS}/{ident}/draft")
+    await _editar(app, perfil, ident, title="Diagnóstico contable corregido")
+    v2 = (await _accion(app, perfil, f"{MIOS}/{ident}/draft/submit")).json()["open_version"]["id"]
+    base = f"{BANDEJA}/{ident}/versions/{v2}"
+    for paso, quien in (("start-review", moderador), ("approve", jefa), ("publish", jefa)):
+        assert (await _accion(app, quien, f"{base}/{paso}")).status_code == 200, paso
+    async with _cliente(app, jefa) as http:
+        detalle = (await http.get(f"{BANDEJA}/{ident}")).json()
+    assert detalle["status"] == "suspended" and not detalle["publicly_visible"]
+    tipos = [f[0] for f in await _filas(
+        motor, "select type from public.notifications where user_id = cast(:u as uuid) "
+               "and type like 'service_catalog_published%' order by created_at", u=perfil,
+    )]
+    # La v1 avisó «publicado»; la v2, publicada en suspenso, avisa otra cosa.
+    assert tipos == ["service_catalog_published", "service_catalog_published_suspended"]
+
+
+async def test_un_servicio_con_cambios_pedidos_sigue_teniendo_nombre(entorno) -> None:
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    servicio = await _enviado(app, perfil, jefa)
+    ident = servicio["id"]
+    base = f"{BANDEJA}/{ident}/versions/{servicio['open_version']['id']}"
+    assert (await _accion(app, moderador, f"{base}/start-review")).status_code == 200
+    assert (await _accion(app, moderador, f"{base}/request-changes", {"note": "Aclara el alcance."})).status_code == 200
+    async with _cliente(app, perfil) as http:
+        lista = (await http.get(MIOS)).json()["items"]
+        propio = (await http.get(f"{MIOS}/{ident}")).json()
+    fila = next(s for s in lista if s["id"] == ident)
+    assert fila["title"] == CONTENIDO["title"] and fila["cover_url"]
+    assert fila["open_version_status"] is None and fila["last_version_status"] == "changes_requested"
+    assert propio["title"] == CONTENIDO["title"] and propio["last_version_status"] == "changes_requested"
+    async with _cliente(app, jefa) as http:
+        cola = (await http.get(f"{BANDEJA}?queue=draft")).json()["items"]
+        detalle = (await http.get(f"{BANDEJA}/{ident}")).json()
+    assert next(s for s in cola if s["id"] == ident)["title"] == CONTENIDO["title"]
+    assert detalle["title"] == CONTENIDO["title"]
+
+
+async def test_las_categorias_que_se_ofrecen_son_las_que_se_pueden_usar(entorno) -> None:
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor, pais="PE")
+    global_ = await _categoria(app, jefa)
+    peruana = await _categoria(app, jefa, country_code="PE")
+    chilena = await _categoria(app, jefa, country_code="CL")
+    madre = await _categoria(app, jefa)
+    hija = await _categoria(app, jefa, parent_id=madre["id"])
+    async with _cliente(app, jefa) as http:
+        assert (await http.post(f"{ADMIN}/categories/{madre['id']}/deactivate")).status_code == 200
+    async with _cliente(app, perfil) as http:
+        ofrecidas = {c["id"] for c in (await http.get(CATEGORIAS)).json()}
+    assert {global_["id"], peruana["id"]} <= ofrecidas
+    assert chilena["id"] not in ofrecidas
+    # La hija de una madre inactiva no se ofrece… ni se puede usar.
+    assert hija["id"] not in ofrecidas and madre["id"] not in ofrecidas
+    r = await _crear(app, perfil, hija["id"])
+    assert r.status_code == 409 and r.json()["error"]["code"] == "service_category_inactive"
+
+
+async def test_un_prestador_suspendido_no_sigue_escribiendo_en_su_catalogo(entorno) -> None:
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    await _sembrar(
+        motor, "update public.service_providers set status = 'suspended', suspended_at = now() "
+               "where profile_id = cast(:u as uuid)", u=perfil,
+    )
+    for r in (
+        await _editar(app, perfil, ident, title="Otro título más largo"),
+        await _imagen(app, perfil, ident),
+        await _accion(app, perfil, f"{MIOS}/{ident}/draft"),
+    ):
+        assert r.status_code == 403 and r.json()["error"]["code"] == "service_provider_not_active", r.text
+    assert await _uno(motor, "select title from public.service_versions where service_id = cast(:s as uuid)", s=ident) is None
+
+
+async def test_lo_virtual_no_guarda_zona(entorno) -> None:
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    r = await _editar(app, perfil, ident, modality="in_person", location_area="Miraflores, Lima")
+    assert r.json()["open_version"]["location_area"] == "Miraflores, Lima"
+    r = await _editar(app, perfil, ident, modality="virtual")
+    assert r.status_code == 200 and r.json()["open_version"]["location_area"] is None
+
+
+async def test_quitar_una_imagen_borra_el_archivo_solo_despues_de_confirmar(entorno, monkeypatch) -> None:
+    app, motor, almacen = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    imagen = (await _imagen(app, perfil, ident)).json()["open_version"]["images"][0]["id"]
+    antes = almacen.de("service-media", perfil)
+    assert len(antes) == 1
+    original = AsyncSession.commit
+
+    async def falla(self):  # noqa: ANN001
+        raise RuntimeError("la base se cayó al confirmar")
+
+    monkeypatch.setattr(AsyncSession, "commit", falla)
+    with pytest.raises(RuntimeError):
+        async with _cliente(app, perfil) as http:
+            await http.delete(f"{MIOS}/{ident}/draft/images/{imagen}")
+    monkeypatch.setattr(AsyncSession, "commit", original)
+    # La fila sigue (no se confirmó) y su archivo también.
+    assert await _uno(
+        motor, "select count(*) from public.service_version_images where id = cast(:i as uuid)", i=imagen
+    ) == 1
+    assert almacen.de("service-media", perfil) == antes
+    # Y cuando sí se confirma, el archivo se va.
+    async with _cliente(app, perfil) as http:
+        assert (await http.delete(f"{MIOS}/{ident}/draft/images/{imagen}")).status_code == 200
+    assert almacen.de("service-media", perfil) == []
+
+
+async def test_con_clave_la_subida_pisa_un_archivo_huerfano_del_intento_anterior(entorno, monkeypatch) -> None:
+    from app.modules.services import catalogo_imagenes
+
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    vistas: list[bool] = []
+    original = catalogo_imagenes.storage.subir_objeto
+
+    async def espia(*args, sobrescribir: bool = False, **kwargs):  # noqa: ANN002, ANN003
+        vistas.append(sobrescribir)
+        return await original(*args, sobrescribir=sobrescribir, **kwargs)
+
+    monkeypatch.setattr(catalogo_imagenes.storage, "subir_objeto", espia)
+    assert (await _imagen(app, perfil, ident, clave="subida-con-clave-1")).status_code == 201
+    assert (await _imagen(app, perfil, ident, PNG_AZUL)).status_code == 201
+    # Con clave, la ruta sale de la clave y se pisa; sin clave, la ruta es nueva.
+    assert vistas == [True, False]
+
+
+async def test_crear_sin_clave_no_devuelve_otro_servicio_si_la_base_protesta(entorno, monkeypatch) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    from app.modules.services import catalogo
+    from app.modules.services.catalogo_models import ServiceCategory
+
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    assert (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).status_code == 201
+    inactiva = await _categoria(app, jefa)
+    async with _cliente(app, jefa) as http:
+        assert (await http.post(f"{ADMIN}/categories/{inactiva['id']}/deactivate")).status_code == 200
+
+    async def sin_mirar(db, categoria_id, prestador):  # noqa: ANN001
+        return await db.get(ServiceCategory, categoria_id)
+
+    # Como si la categoría se desactivara entre la comprobación y el INSERT: la
+    # base protesta. Antes, sin clave, se devolvía el PRIMER servicio.
+    monkeypatch.setattr(catalogo, "categoria_utilizable", sin_mirar)
+    with pytest.raises(IntegrityError):
+        await _crear(app, perfil, inactiva["id"])
+    assert await _uno(
+        motor, "select count(*) from public.services s join public.service_providers p on p.id = s.provider_id "
+               "where p.profile_id = cast(:u as uuid)", u=perfil,
+    ) == 1
+
+
+async def test_un_choque_de_la_base_al_crear_categoria_no_se_llama_slug_repetido(entorno, monkeypatch) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    from app.modules.services import categorias
+
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    madre = await _categoria(app, jefa)
+    hija = await _categoria(app, jefa, parent_id=madre["id"])
+
+    async def sin_mirar(db, categoria_id, madre_id):  # noqa: ANN001
+        return None
+
+    # Tres niveles los impide la base (disparador). Sin la comprobación previa,
+    # el choque NO es un slug repetido y no se disfraza de uno.
+    monkeypatch.setattr(categorias, "_exigir_jerarquia", sin_mirar)
+    with pytest.raises(IntegrityError):
+        await _categoria(app, jefa, parent_id=hija["id"])

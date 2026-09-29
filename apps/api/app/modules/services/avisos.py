@@ -58,6 +58,8 @@ SERVICIO_PUBLICADO = "service_catalog_published"
 SERVICIO_SUSPENDIDO = "service_catalog_suspended"
 SERVICIO_REACTIVADO = "service_catalog_reinstated"
 SERVICIO_RETIRADO = "service_catalog_retired"
+#: Se publicó una versión nueva de un servicio que sigue SUSPENDIDO.
+SERVICIO_PUBLICADO_EN_SUSPENSO = "service_catalog_published_suspended"
 # Y al equipo de Z:
 SERVICIO_ENVIADO = "service_catalog_submitted"
 SERVICIO_REENVIADO = "service_catalog_resubmitted"
@@ -72,6 +74,7 @@ TIPOS_DEL_CATALOGO = frozenset(
         SERVICIO_SUSPENDIDO,
         SERVICIO_REACTIVADO,
         SERVICIO_RETIRADO,
+        SERVICIO_PUBLICADO_EN_SUSPENSO,
         SERVICIO_ENVIADO,
         SERVICIO_REENVIADO,
         SERVICIO_RETIRADO_EN_REVISION,

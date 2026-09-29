@@ -113,6 +113,13 @@ export function AdminServicioDelCatalogoScreen() {
   const vista = mirando === 'publicada' && publicada ? publicada : (propuesta ?? publicada);
   const tarjeta = [styles.tarjeta, { borderColor: colors.border }];
 
+  /**
+   * El texto de una decisión. Publicar la versión de un servicio SUSPENDIDO
+   * no lo hace visible: la confirmación no puede decir «lo verán todos».
+   */
+  const textoDe = (tipo: 'confirmar' | 'explica', a: string) =>
+    f(`servicios.catalogo.admin.${tipo}.${a === 'publish' && s.status === 'suspended' ? 'publishSuspendido' : a}`);
+
   const abrirDecision = (a: string) => {
     setAccion(a);
     setMotivo('');
@@ -131,7 +138,7 @@ export function AdminServicioDelCatalogoScreen() {
     void correr(async () => {
       const si = await confirm({
         title: f(claveDeLaAccion(esta)),
-        message: f(`servicios.catalogo.admin.confirmar.${esta}`),
+        message: textoDe('confirmar', esta),
         confirmLabel: f(claveDeLaAccion(esta)),
         destructive: esDestructiva(esta),
       });
@@ -155,7 +162,7 @@ export function AdminServicioDelCatalogoScreen() {
 
       <View style={tarjeta}>
         <Text variant="titleMedium">
-          {propuesta?.title ?? publicada?.title ?? f('servicios.catalogo.sinTitulo')}
+          {s.title ?? propuesta?.title ?? publicada?.title ?? f('servicios.catalogo.sinTitulo')}
         </Text>
         <Text variant="secondary">
           {`${f(claveDelEstadoDelServicio(s.status))} · ${nombreDeLaCategoria(s.category, idioma)}`}
@@ -243,7 +250,7 @@ export function AdminServicioDelCatalogoScreen() {
       {accion !== null ? (
         <View style={[styles.tarjeta, { borderColor: esDestructiva(accion) ? colors.danger : colors.primary }]}>
           <Text weight="700">{f(claveDeLaAccion(accion))}</Text>
-          <Text variant="secondary">{f(`servicios.catalogo.admin.explica.${accion}`)}</Text>
+          <Text variant="secondary">{textoDe('explica', accion)}</Text>
           {exigeMotivo(accion) ? (
             <Input
               label={f('servicios.catalogo.admin.motivo')}

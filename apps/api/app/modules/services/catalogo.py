@@ -42,6 +42,7 @@ from app.modules.services.catalogo_models import (
     ServiceCategory,
     ServiceEvent,
     ServiceVersion,
+    VIRTUAL,
     ServiceVersionImage,
 )
 from app.modules.services.models import PRESTADOR_ACTIVO, ServiceProvider
@@ -194,6 +195,13 @@ async def prestador_activo(db: AsyncSession, usuario_id: str) -> ServiceProvider
     return prestador
 
 
+def exigir_activo(prestador: ServiceProvider) -> None:
+    """Escribir en el catálogo es de un prestador ACTIVO: uno suspendido
+    por la admisión no sigue abriendo borradores ni subiendo imágenes."""
+    if prestador.status != PRESTADOR_ACTIVO:
+        raise PrestadorNoActivo()
+
+
 async def mio(
     db: AsyncSession, usuario_id: str, servicio_id: str, *, bloquear_fila: bool = True
 ) -> tuple[Service, ServiceProvider]:
@@ -253,6 +261,10 @@ async def categoria_utilizable(
         raise CategoriaNoEncontrada()
     if categoria.status != CATEGORIA_ACTIVA:
         raise CategoriaInactiva()
+    if categoria.parent_id is not None:
+        madre = await db.get(ServiceCategory, categoria.parent_id)
+        if madre is None or madre.status != CATEGORIA_ACTIVA:
+            raise CategoriaInactiva()
     if categoria.country_code and categoria.country_code != prestador.country_code:
         raise CategoriaNoDisponible()
     return categoria
@@ -433,6 +445,10 @@ async def crear(
             await db.flush()
     except IntegrityError:
         # La otra petición con la misma clave ganó: se devuelve la suya.
+        # SIN CLAVE no hay «la otra»: el error es de verdad (una categoría
+        # que se desactivó a la vez, por ejemplo) y no se disfraza.
+        if clave is None:
+            raise
         previo = await db.scalar(
             select(Service).where(Service.provider_id == prestador.id, Service.creation_key == clave)
         )
@@ -466,7 +482,8 @@ async def crear(
 async def abrir_borrador(db: AsyncSession, *, usuario_id: str, servicio_id: str) -> Resultado:
     """El borrador abierto, o uno NUEVO que sale de la última versión cerrada
     (la que volvió con cambios, o la publicada). IDEMPOTENTE."""
-    servicio, _ = await mio(db, usuario_id, servicio_id)
+    servicio, prestador = await mio(db, usuario_id, servicio_id)
+    exigir_activo(prestador)
     if servicio.status == estados.SERVICIO_RETIRADO:
         raise ServicioRetirado()
     actual = await abierta(db, servicio.id)
@@ -534,6 +551,7 @@ async def editar_borrador(
 ) -> tuple[Service, ServiceVersion]:
     """Solo lo que llega, solo en el borrador, y NUNCA un estado."""
     servicio, prestador = await mio(db, usuario_id, servicio_id)
+    exigir_activo(prestador)
     if servicio.status == estados.SERVICIO_RETIRADO:
         raise ServicioRetirado()
     version = await abierta(db, servicio.id)
@@ -561,6 +579,10 @@ async def editar_borrador(
             raise PrecioInvalido(details={"price_model": version.price_model})
         version.price_minor = None
         version.currency = None
+    # LO VIRTUAL NO TIENE ZONA: se limpia, igual que el importe de lo gratis.
+    # La pantalla la esconde, así que nadie podría vaciarla a mano.
+    if version.modality == VIRTUAL:
+        version.location_area = None
 
     version.updated_at = ahora
     servicio.updated_at = ahora
@@ -824,7 +846,14 @@ async def publicar(
         funcion=ADMINISTRACION, desde=desde_servicio, hasta=servicio.status,
         datos={"superseded": anterior.version} if anterior is not None else None,
     )
-    await _avisar_al_dueno(db, servicio, avisos.SERVICIO_PUBLICADO, evento)
+    # Un servicio SUSPENDIDO sigue fuera del público: el aviso no puede decir
+    # «ya se puede ver en Z» ni llevar a una ficha que contesta 404.
+    aviso = (
+        avisos.SERVICIO_PUBLICADO
+        if servicio.status == estados.SERVICIO_PUBLICADO
+        else avisos.SERVICIO_PUBLICADO_EN_SUSPENSO
+    )
+    await _avisar_al_dueno(db, servicio, aviso, evento)
     return Resultado(servicio, version, evento, False)
 
 
@@ -969,11 +998,49 @@ async def publico(db: AsyncSession, servicio_id: str) -> tuple[Service, ServiceV
     return fila[0], fila[1], fila[2], fila[3]
 
 
-def campos_distintos(propuesta: ServiceVersion, vigente: ServiceVersion | None) -> list[str]:
-    """Qué cambia la propuesta respecto de lo publicado (para compararlas)."""
+#: Cada columna del contenido → el campo que se señala (`requisitos.CAMPOS`).
+#: Es el MISMO vocabulario que pedir cambios y que la app sabe pintar: el
+#: precio es uno (modelo, importe y moneda), y la duración se llama así.
+_CAMPO_SENALABLE = {
+    "title": "title",
+    "summary": "summary",
+    "description": "description",
+    "modality": "modality",
+    "duration_minutes": "duration",
+    "capacity": "capacity",
+    "price_model": "price",
+    "price_minor": "price",
+    "currency": "price",
+    "scope": "scope",
+    "includes": "includes",
+    "excludes": "excludes",
+    "requirements": "requirements",
+    "conditions": "conditions",
+    "location_area": "location_area",
+}
+
+
+def _firma_de_imagenes(imagenes: list[ServiceVersionImage]) -> list[tuple]:
+    return sorted((i.storage_path, i.position, i.is_cover, i.alt_text) for i in imagenes)
+
+
+def campos_distintos(
+    propuesta: ServiceVersion,
+    vigente: ServiceVersion | None,
+    imagenes_propuesta: list[ServiceVersionImage] | None = None,
+    imagenes_vigente: list[ServiceVersionImage] | None = None,
+) -> list[str]:
+    """Qué cambia la propuesta respecto de lo publicado, con los nombres de
+    `requisitos.CAMPOS` y en su orden. Las imágenes cuentan: una portada
+    nueva, otro orden o otra descripción es un cambio que se revisa."""
     if vigente is None:
         return []
-    return [c for c in _CONTENIDO if getattr(propuesta, c) != getattr(vigente, c)]
+    cambian = {
+        _CAMPO_SENALABLE[c] for c in _CONTENIDO if getattr(propuesta, c) != getattr(vigente, c)
+    }
+    if _firma_de_imagenes(imagenes_propuesta or []) != _firma_de_imagenes(imagenes_vigente or []):
+        cambian.add("images")
+    return [c for c in requisitos.CAMPOS if c in cambian]
 
 
 async def contar_versiones(db: AsyncSession, servicio_id: str) -> int:

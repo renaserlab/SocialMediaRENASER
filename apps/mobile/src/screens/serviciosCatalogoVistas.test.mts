@@ -14,7 +14,7 @@
  *     servidor —ni una más, ni una menos—, con `Idempotency-Key` en cada alta y
  *     cada salto, y ninguno manda un estado.
  *  4. NINGUNA ESCRITURA DIRECTA a la base ni al almacenamiento.
- *  5. LOS 10 AVISOS del catálogo tienen título, texto y destino.
+ *  5. LOS 11 AVISOS del catálogo tienen título, texto y destino.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -232,6 +232,8 @@ describe('cada vista se comporta', () => {
     assert.match(detalle, /s\.own \?/);
     assert.match(detalle, /cuerpoDeLaDecision\(esta, \{ motivo, notaInterna, campos \}\)/);
     assert.match(detalle, /resaltar=\{vista === propuesta \? s\.changed_fields : \[\]\}/, 'se marca lo que cambia');
+    // Publicar la versión de un suspendido no promete que lo verán todos.
+    assert.match(detalle, /a === 'publish' && s\.status === 'suspended' \? 'publishSuspendido' : a/);
   });
 
   it('cada salto lleva una clave por intento, que se renueva tras el éxito', () => {
@@ -256,6 +258,9 @@ describe('cada vista se comporta', () => {
       assert.match(codigo, /juntar\(/, nombre);
       assert.match(codigo, /este !== pedido\.current/, nombre);
     }
+    // «Ver más» tampoco mezcla una página del filtro anterior.
+    const verMas = pantalla('AdminCatalogoScreen').split('const verMas = async')[1]?.split('\n  };')[0] ?? '';
+    assert.match(verMas, /const este = pedido\.current;[\s\S]*if \(este !== pedido\.current\) return;/);
     const bandeja = pantalla('AdminCatalogoScreen');
     for (const filtro of ['COLAS.map', 'FILTROS_DE_VERSION.map', 'FILTROS_DE_MODALIDAD.map', 'categoriasEnArbol(categorias).map']) {
       assert.ok(bandeja.includes(filtro), filtro);
@@ -383,8 +388,8 @@ describe('los avisos del catálogo', () => {
   const bloque = avisos.slice(avisos.indexOf('TIPOS_DEL_CATALOGO = frozenset'), avisos.indexOf('TIPOS = frozenset'));
   const tipos = [...bloque.matchAll(/([A-Z_]{4,}),/g)].map((m) => constantes.get(m[1] as string) as string);
 
-  it('los 10 tipos del servidor tienen título, texto y destino en los tres idiomas', () => {
-    assert.equal(tipos.length, 10);
+  it('los 11 tipos del servidor tienen título, texto y destino en los tres idiomas', () => {
+    assert.equal(tipos.length, 11);
     for (const tipo of tipos) {
       const aviso = avisoAlCreador(tipo);
       assert.ok(aviso, `sin aviso: ${tipo}`);
@@ -400,6 +405,8 @@ describe('los avisos del catálogo', () => {
     assert.equal(rutaDelAviso('service_catalog_published', 's1'), '/servicios/ficha/s1');
     assert.equal(rutaDelAviso('service_catalog_changes_requested', 's1'), '/servicios/prestador/catalogo/s1');
     assert.equal(rutaDelAviso('service_catalog_suspended', null), '/servicios/prestador/catalogo');
+    // Publicada en un servicio suspendido: al servicio propio, no a una ficha que da 404.
+    assert.equal(rutaDelAviso('service_catalog_published_suspended', 's1'), '/servicios/prestador/catalogo/s1');
     assert.equal(rutaDelAviso('service_catalog_submitted', 's1'), '/admin/servicios/catalogo/s1');
     assert.equal(rutaDelAviso('service_catalog_withdrawn_review', null), '/admin/servicios/catalogo');
   });

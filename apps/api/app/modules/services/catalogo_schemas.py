@@ -392,6 +392,12 @@ class ObservacionRead(BaseModel):
 class ServicioPrivadoRead(BaseModel):
     id: str
     status: str
+    #: El título que lo nombra: el de la abierta, si no el de la publicada,
+    #: y si no el de la última (una que volvió con cambios, o retirada).
+    title: str | None
+    #: El estado de la ÚLTIMA versión, abierta o no: `changes_requested`
+    #: dice que hay algo que corregir aunque no haya ninguna abierta.
+    last_version_status: str | None
     category: CategoriaRead
     created_at: datetime
     updated_at: datetime
@@ -418,6 +424,7 @@ class ServicioResumenRead(BaseModel):
     title: str | None
     category: CategoriaPublicaRead
     open_version_status: str | None
+    last_version_status: str | None
     has_published_version: bool
     cover_url: str | None
     updated_at: datetime
@@ -496,6 +503,8 @@ class VersionEnListaRead(BaseModel):
 class ServicioAdminRead(BaseModel):
     id: str
     status: str
+    #: Como en la vista del prestador: abierta, publicada o la última.
+    title: str | None
     category: CategoriaRead
     provider: PrestadorEnServicioRead
     created_at: datetime

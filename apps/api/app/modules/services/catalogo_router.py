@@ -30,6 +30,7 @@ from app.modules.services import (
     categorias,
     esquema,
 )
+from app.modules.services import service as admision_service
 from app.modules.services.catalogo_models import PESO_MAXIMO_DE_LA_IMAGEN
 from app.modules.services.catalogo_schemas import (
     CambiosPedir,
@@ -98,9 +99,18 @@ async def categorias_activas(
     _disponible: None = Depends(catalogo_disponible),
     db: AsyncSession = Depends(get_db),
 ) -> list[CategoriaRead]:
-    """Las categorías ACTIVAS, en su orden. Sin ninguna, no se puede crear un
-    servicio (y la app lo dice)."""
-    return [CategoriaRead.desde(c) for c in await categorias.todas(db, solo_activas=True)]
+    """Las categorías que QUIEN PREGUNTA puede usar: activas, de su país o de
+    todos, y sin madre inactiva. Sin ninguna, no se puede crear un servicio
+    (y la app lo dice)."""
+    prestador = await admision_service.prestador_de(db, current_user.id)
+    pais = prestador.country_code if prestador is not None else None
+    activas = await categorias.todas(db, solo_activas=True)
+    ids = {c.id for c in activas}
+    return [
+        CategoriaRead.desde(c)
+        for c in activas
+        if c.country_code in (None, pais) and (c.parent_id is None or c.parent_id in ids)
+    ]
 
 
 # =========================================================================== #
@@ -265,8 +275,11 @@ async def quitar_imagen(
     versión (la publicada, por ejemplo) lo sigue usando."""
     if not vistas.es_uuid(image_id):
         raise imagenes.ImagenNoEncontrada()
-    await imagenes.quitar(db, usuario_id=current_user.id, servicio_id=_id(service_id), imagen_id=image_id)
+    ruta = await imagenes.quitar(db, usuario_id=current_user.id, servicio_id=_id(service_id), imagen_id=image_id)
     await db.commit()
+    # Confirmada la base, el archivo (si nadie más lo nombra).
+    if ruta is not None:
+        await imagenes.borrar_archivo(ruta)
     return await _mio_fresco(db, current_user.id, service_id)
 
 

@@ -333,6 +333,11 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("Your service left the catalog", "Open it to read the reason."),
         "pt": ("Seu serviço saiu do catálogo", "Abra-o para ler o motivo."),
     },
+    "service_catalog_published_suspended": {
+        "es": ("Tu versión nueva está lista", "El servicio sigue suspendido: se verá cuando Z levante la suspensión."),
+        "en": ("Your new version is ready", "The service is still suspended: it will be visible when Z lifts the suspension."),
+        "pt": ("Sua nova versão está pronta", "O serviço continua suspenso: ficará visível quando a Z retirar a suspensão."),
+    },
     "service_catalog_submitted": {
         "es": ("Nuevo servicio para revisar", "Un prestador envió un servicio."),
         "en": ("New service to review", "A provider submitted a service."),

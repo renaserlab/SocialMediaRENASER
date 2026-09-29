@@ -232,6 +232,10 @@ export type Observacion = {
 export type ServicioPrivado = {
   id: string;
   status: string;
+  /** El título que lo nombra: la abierta, la publicada o la última. */
+  title: string | null;
+  /** El estado de la ÚLTIMA versión: `changes_requested` = hay algo que corregir. */
+  last_version_status: string | null;
   category: Categoria;
   created_at: string;
   updated_at: string;
@@ -256,6 +260,7 @@ export type ServicioResumen = {
   title: string | null;
   category: CategoriaPublica;
   open_version_status: string | null;
+  last_version_status: string | null;
   has_published_version: boolean;
   cover_url: string | null;
   updated_at: string;
@@ -300,6 +305,7 @@ export type VersionEnLista = {
 export type ServicioAdmin = {
   id: string;
   status: string;
+  title: string | null;
   category: Categoria;
   provider: PrestadorEnServicio;
   created_at: string;
@@ -814,6 +820,18 @@ export function portada<T extends { is_cover: boolean; position?: number }>(imag
 /** La versión que se edita o se revisa ahora; si no hay, la publicada. */
 export function versionQueSeEnsena(servicio: Pick<ServicioPrivado, 'open_version' | 'published_version'>): Version | null {
   return servicio.open_version ?? servicio.published_version ?? null;
+}
+
+/**
+ * El estado de versión que merece una línea en la lista: el de la abierta y,
+ * si no hay, «con cambios pedidos» cuando Z devolvió la última (hay algo que
+ * hacer). Lo demás ya lo dice el estado del servicio.
+ */
+export function estadoDeVersionQueSeEnsena(
+  resumen: Pick<ServicioResumen, 'open_version_status' | 'last_version_status'>,
+): string | null {
+  if (resumen.open_version_status) return resumen.open_version_status;
+  return resumen.last_version_status === 'changes_requested' ? 'changes_requested' : null;
 }
 
 /** Si la versión abierta está en manos de Z (enviada, en revisión o aprobada). */

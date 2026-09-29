@@ -88,7 +88,10 @@ async def crear(db: AsyncSession, *, actor_id: str, datos: dict) -> ServiceCateg
             db.add(categoria)
             await db.flush()
     except IntegrityError:
-        raise SlugRepetido() from None
+        # Solo es «slug repetido» si de verdad lo está; otro choque no se disfraza.
+        if await db.scalar(select(ServiceCategory.id).where(ServiceCategory.slug == categoria.slug)):
+            raise SlugRepetido() from None
+        raise
     await admision.auditar(
         db, accion="service_category.created", entidad=ENTIDAD, entidad_id=categoria.id,
         actor_id=actor_id, funcion=ADMINISTRACION, datos={"slug": categoria.slug},

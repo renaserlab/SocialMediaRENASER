@@ -14,6 +14,7 @@ import { fechaCorta } from '@/lib/serviciosAdmision';
 import {
   claveDelEstadoDeLaVersion,
   claveDelEstadoDelServicio,
+  estadoDeVersionQueSeEnsena,
   juntar,
   nombreDeLaCategoria,
   type FalloDelCatalogo,
@@ -102,14 +103,23 @@ export function MisServiciosScreen() {
           <View style={styles.lista}>
             {filas.map((s) => {
               const partes = [f(claveDelEstadoDelServicio(s.status))];
-              if (s.open_version_status) partes.push(f(claveDelEstadoDeLaVersion(s.open_version_status)));
+              const deVersion = estadoDeVersionQueSeEnsena(s);
+              if (deVersion) partes.push(f(claveDelEstadoDeLaVersion(deVersion)));
               partes.push(nombreDeLaCategoria(s.category, idioma));
               return (
                 <ListRow
                   key={s.id}
                   title={s.title ?? f('servicios.catalogo.sinTitulo')}
                   subtitle={`${partes.join(' · ')} · ${fechaCorta(s.updated_at)}`}
-                  leftIcon={s.status === 'published' ? 'eye' : s.status === 'suspended' ? 'eye-off' : 'edit-3'}
+                  leftIcon={
+                    deVersion === 'changes_requested'
+                      ? 'alert-circle'
+                      : s.status === 'published'
+                        ? 'eye'
+                        : s.status === 'suspended'
+                          ? 'eye-off'
+                          : 'edit-3'
+                  }
                   rightIcon="chevron-right"
                   onPress={() => router.push(`/servicios/prestador/catalogo/${s.id}` as never)}
                 />

@@ -123,6 +123,7 @@ async def subir(
 ) -> tuple[ServiceVersionImage, bool]:
     """`(imagen, nueva)`. Un reintento con la misma clave devuelve la misma."""
     servicio, prestador = await catalogo.mio(db, usuario_id, servicio_id)
+    catalogo.exigir_activo(prestador)
     version = await _borrador(db, servicio)
     alt = _alternativo(alt_text)
 
@@ -144,7 +145,12 @@ async def subir(
 
     # EL ARCHIVO PRIMERO: si falla, no queda una fila que promete una imagen.
     try:
-        await storage.subir_objeto(DEPOSITO, ruta, datos, medida.content_type)
+        # CON CLAVE, LA RUTA SALE DE LA CLAVE: si un intento anterior dejó el
+        # archivo escrito pero sin respuesta, el reintento lo pisa en vez de
+        # chocar con él para siempre. Sin clave, la ruta es nueva y no se pisa.
+        await storage.subir_objeto(
+            DEPOSITO, ruta, datos, medida.content_type, sobrescribir=bool(clave and clave.strip())
+        )
     except (storage.StorageNoConfigurado, storage.StorageFallo):
         raise AlmacenamientoNoDisponible() from None
     except Exception:  # noqa: BLE001 - httpx y compañía
@@ -226,9 +232,12 @@ async def borrar_archivo(ruta: str) -> None:
         logger.warning("[servicios] no se pudo borrar una imagen del depósito")
 
 
-async def quitar(db: AsyncSession, *, usuario_id: str, servicio_id: str, imagen_id: str) -> bool:
-    """Quita una imagen del borrador. BORRA EL ARCHIVO SOLO SI NADIE MÁS LO
-    NOMBRA: la versión publicada puede compartirlo."""
+async def quitar(db: AsyncSession, *, usuario_id: str, servicio_id: str, imagen_id: str) -> str | None:
+    """Quita la fila de una imagen del borrador y devuelve la ruta del archivo
+    que hay que borrar, o `None` si otra versión (la publicada) lo sigue
+    nombrando. EL ARCHIVO SE BORRA DESPUÉS DE CONFIRMAR (`borrar_archivo`):
+    si la base fallara, la fila volvería y apuntaría a un archivo que ya no
+    está."""
     servicio, _ = await catalogo.mio(db, usuario_id, servicio_id)
     version = await _borrador(db, servicio)
     fila = await db.get(ServiceVersionImage, imagen_id)
@@ -246,9 +255,7 @@ async def quitar(db: AsyncSession, *, usuario_id: str, servicio_id: str, imagen_
             siguiente.is_cover = True
             await db.flush()
     version.updated_at = _ahora()
-    if not compartida:
-        await borrar_archivo(ruta)
-    return not compartida
+    return None if compartida else ruta
 
 
 async def firmar(rutas: list[str]) -> dict[str, str]:

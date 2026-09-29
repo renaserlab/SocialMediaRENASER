@@ -68,6 +68,7 @@ const AVISOS: Record<string, AvisoAlCreador> = {
   service_catalog_suspended: { titulo: 'notif.servicioCatalogoSuspendidoTitle', icono: 'eye-off', cuerpo: 'notif.servicioCatalogoSuspendidoBody' },
   service_catalog_reinstated: { titulo: 'notif.servicioCatalogoReactivadoTitle', icono: 'check-circle', cuerpo: 'notif.servicioCatalogoReactivadoBody' },
   service_catalog_retired: { titulo: 'notif.servicioCatalogoRetiradoTitle', icono: 'x-circle', cuerpo: 'notif.servicioCatalogoRetiradoBody' },
+  service_catalog_published_suspended: { titulo: 'notif.servicioCatalogoPublicadoSuspendidoTitle', icono: 'eye-off', cuerpo: 'notif.servicioCatalogoPublicadoSuspendidoBody' },
   // Y al equipo de Z:
   service_catalog_submitted: { titulo: 'notif.servicioCatalogoEnviadoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoEnviadoBody' },
   service_catalog_resubmitted: { titulo: 'notif.servicioCatalogoReenviadoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoReenviadoBody' },
@@ -156,6 +157,8 @@ export function rutaDelAviso(
     case 'service_catalog_suspended':
     case 'service_catalog_reinstated':
     case 'service_catalog_retired':
+    // Publicada en un servicio SUSPENDIDO: la ficha contestaría 404.
+    case 'service_catalog_published_suspended':
       return id ? `/servicios/prestador/catalogo/${id}` : '/servicios/prestador/catalogo';
     case 'service_catalog_submitted':
     case 'service_catalog_resubmitted':

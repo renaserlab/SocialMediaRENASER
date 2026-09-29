@@ -65,7 +65,9 @@ def _cursor(momento, ident: str) -> str:
 
 
 async def _versiones(db: AsyncSession, servicios: list[str]) -> dict[str, dict[str, ServiceVersion]]:
-    """`servicio -> {"abierta": v, "publicada": v}` en una consulta."""
+    """`servicio -> {"abierta": v, "publicada": v, "ultima": v}` en dos
+    consultas. La ÚLTIMA (por número) nombra al servicio cuando no hay abierta
+    ni publicada: la que volvió con cambios, o una retirada."""
     resultado: dict[str, dict[str, ServiceVersion]] = {s: {} for s in servicios}
     if not servicios:
         return resultado
@@ -78,7 +80,23 @@ async def _versiones(db: AsyncSession, servicios: list[str]) -> dict[str, dict[s
     for v in filas:
         clave = "publicada" if v.status == estados.PUBLICADA else "abierta"
         resultado[v.service_id][clave] = v
+    numeros = (
+        select(ServiceVersion.service_id, func.max(ServiceVersion.version).label("n"))
+        .where(ServiceVersion.service_id.in_(servicios))
+        .group_by(ServiceVersion.service_id)
+        .subquery()
+    )
+    for v in await db.scalars(
+        select(ServiceVersion).join(
+            numeros, and_(ServiceVersion.service_id == numeros.c.service_id, ServiceVersion.version == numeros.c.n)
+        )
+    ):
+        resultado[v.service_id]["ultima"] = v
     return resultado
+
+
+def _la_que_nombra(par: dict[str, ServiceVersion]) -> ServiceVersion | None:
+    return par.get("abierta") or par.get("publicada") or par.get("ultima")
 
 
 async def _imagenes(db: AsyncSession, versiones: list[str]) -> dict[str, list[ServiceVersionImage]]:
@@ -141,6 +159,7 @@ async def _visible(db: AsyncSession, servicio: Service, publicada: ServiceVersio
 async def privada(db: AsyncSession, servicio: Service, prestador: ServiceProvider) -> ServicioPrivadoRead:
     par = (await _versiones(db, [servicio.id]))[servicio.id]
     abierta, vigente = par.get("abierta"), par.get("publicada")
+    nombra, ultima = _la_que_nombra(par), par.get("ultima")
     imgs = await _imagenes(db, [v.id for v in (abierta, vigente) if v is not None])
     firmadas = await imagenes.firmar(sorted({i.storage_path for lista in imgs.values() for i in lista}))
     categoria = await db.get(ServiceCategory, servicio.category_id)
@@ -149,6 +168,8 @@ async def privada(db: AsyncSession, servicio: Service, prestador: ServiceProvide
     return ServicioPrivadoRead(
         id=servicio.id,
         status=servicio.status,
+        title=nombra.title if nombra else None,
+        last_version_status=ultima.status if ultima else None,
         category=CategoriaRead.desde(categoria),
         created_at=servicio.created_at,
         updated_at=servicio.updated_at,
@@ -196,7 +217,7 @@ async def _resumenes(db: AsyncSession, filas: list[Service]) -> list[ServicioRes
             select(ServiceCategory).where(ServiceCategory.id.in_({s.category_id for s in filas}))
         )
     } if filas else {}
-    mostradas = {s: (par.get("abierta") or par.get("publicada")) for s, par in versiones.items()}
+    mostradas = {s: _la_que_nombra(par) for s, par in versiones.items()}
     imgs = await _imagenes(db, [v.id for v in mostradas.values() if v is not None])
     portadas = {
         vid: next((i for i in lista if i.is_cover), None) for vid, lista in imgs.items()
@@ -214,6 +235,7 @@ async def _resumenes(db: AsyncSession, filas: list[Service]) -> list[ServicioRes
                 title=mostrada.title if mostrada else None,
                 category=CategoriaPublicaRead.desde(categorias[s.category_id]),
                 open_version_status=par["abierta"].status if "abierta" in par else None,
+                last_version_status=par["ultima"].status if "ultima" in par else None,
                 has_published_version="publicada" in par,
                 cover_url=firmadas.get(portada.storage_path) if portada else None,
                 updated_at=s.updated_at,
@@ -249,6 +271,7 @@ async def admin(db: AsyncSession, servicio: Service, *, usuario_id: str, funcion
     prestador = await db.get(ServiceProvider, servicio.provider_id)
     par = (await _versiones(db, [servicio.id]))[servicio.id]
     abierta, vigente = par.get("abierta"), par.get("publicada")
+    nombra = _la_que_nombra(par)
     imgs = await _imagenes(db, [v.id for v in (abierta, vigente) if v is not None])
     firmadas = await imagenes.firmar(sorted({i.storage_path for lista in imgs.values() for i in lista}))
     categoria = await db.get(ServiceCategory, servicio.category_id)
@@ -261,6 +284,7 @@ async def admin(db: AsyncSession, servicio: Service, *, usuario_id: str, funcion
     return ServicioAdminRead(
         id=servicio.id,
         status=servicio.status,
+        title=nombra.title if nombra else None,
         category=CategoriaRead.desde(categoria),
         provider=PrestadorEnServicioRead.desde(prestador),
         created_at=servicio.created_at,
@@ -271,7 +295,9 @@ async def admin(db: AsyncSession, servicio: Service, *, usuario_id: str, funcion
         retired_at=servicio.retired_at,
         published_version=await _version_read(db, vigente, imgs.get(vigente.id, []) if vigente else [], firmadas),
         proposed_version=await _version_read(db, abierta, imgs.get(abierta.id, []) if abierta else [], firmadas),
-        changed_fields=catalogo.campos_distintos(abierta, vigente) if abierta is not None else [],
+        changed_fields=catalogo.campos_distintos(
+            abierta, vigente, imgs.get(abierta.id, []), imgs.get(vigente.id, []) if vigente else []
+        ) if abierta is not None else [],
         versions=[
             VersionEnListaRead(
                 id=v.id, version=v.version, status=v.status, submitted_at=v.submitted_at,
@@ -347,9 +373,11 @@ async def bandeja(
             select(ServiceCategory).where(ServiceCategory.id.in_({f[0].category_id for f in filas}))
         )
     } if filas else {}
+    # Sin abierta ni publicada, la última lo nombra (una que volvió con cambios).
+    ultimas = await _versiones(db, [s.id for s, _, a, v in filas if a is None and v is None])
     items = []
     for s, p, a, v in filas:
-        mostrada = a or v
+        mostrada = a or v or ultimas.get(s.id, {}).get("ultima")
         items.append(
             ServicioAdminResumenRead(
                 id=s.id,
