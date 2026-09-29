@@ -51,16 +51,24 @@ describe('Borrar la cuenta', () => {
     assert.ok(!rama.includes('deleteAccountFailedBody'));
   });
 
-  it('sin respuesta NO afirma que la cuenta sigue activa (la baja pudo terminar)', () => {
-    const rama = bloque(manejador, "error.code === 'timeout'", 'return;');
-    assert.ok(manejador.includes("error.code === 'network_error'"));
+  it('sin respuesta de la API NO afirma que la cuenta sigue activa (la baja pudo terminar)', () => {
+    const rama = bloque(manejador, 'sinSaberComoTermino(error)', 'return;');
     assert.ok(rama.includes("t('settings.deleteAccountUnknown')"));
     assert.ok(rama.includes("t('settings.deleteAccountUnknownBody')"));
     assert.ok(!rama.includes('deleteAccountFailedBody'));
   });
 
+  it('«no se sabe» = sin respuesta, o un 5xx que no es uno de los dos 503 de la API (el 504 del CDN)', () => {
+    const regla = bloque(AJUSTES, 'function sinSaberComoTermino', '\n}\n');
+    assert.ok(/error\.status === 0/.test(regla));
+    assert.ok(/error\.status >= 500/.test(regla));
+    const conocidos = bloque(AJUSTES, 'const BAJA_NO_HECHA', ';');
+    assert.ok(conocidos.includes("'account_deletion_storage_failed'"));
+    assert.ok(conocidos.includes("'account_deletion_unavailable'"));
+  });
+
   it('cualquier otro fallo sigue diciendo que la cuenta sigue activa', () => {
-    const despues = manejador.slice(manejador.indexOf("error.code === 'timeout'"));
+    const despues = manejador.slice(manejador.indexOf('sinSaberComoTermino(error)'));
     assert.ok(despues.includes("t('settings.deleteAccountFailedBody')"));
   });
 

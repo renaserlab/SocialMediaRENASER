@@ -16,6 +16,14 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
+/** Códigos con los que la API garantiza que la cuenta NO se borró. */
+const BAJA_NO_HECHA = ['account_deletion_storage_failed', 'account_deletion_unavailable'];
+
+function sinSaberComoTermino(error: ApiError): boolean {
+  if (error.status === 0) return true; // se cortó la espera o no hubo conexión
+  return error.status >= 500 && !BAJA_NO_HECHA.includes(error.code);
+}
+
 export function SettingsScreen() {
   const { colors, mode } = useAppTheme();
   const { t, language } = useTranslation();
@@ -79,10 +87,12 @@ export function SettingsScreen() {
         notify(t('settings.deleteAccountBlocked'), t('settings.deleteAccountBlockedBody'));
         return;
       }
-      // SIN RESPUESTA NO SE SABE. La baja pudo terminar en el servidor aunque
-      // aquí se cortara la espera: decir «tu cuenta sigue activa» podría ser
-      // falso. Repetir es seguro (si ya se borró, responde bien y se sale).
-      if (error instanceof ApiError && (error.code === 'timeout' || error.code === 'network_error')) {
+      // SIN RESPUESTA DEL SERVIDOR NO SE SABE. La baja pudo terminar aunque
+      // aquí se cortara la espera, o aunque el CDN contestara 502/504 porque
+      // tardó más de 60 s: decir «tu cuenta sigue activa» podría ser falso.
+      // Solo los dos 503 que la API conoce garantizan que la cuenta sigue.
+      // Repetir es seguro (si ya se borró, responde bien y se sale).
+      if (error instanceof ApiError && sinSaberComoTermino(error)) {
         notify(t('settings.deleteAccountUnknown'), t('settings.deleteAccountUnknownBody'));
         return;
       }
