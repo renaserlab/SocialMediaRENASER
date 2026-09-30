@@ -214,6 +214,10 @@ async def test_solo_sale_lo_publicado_de_un_prestador_activo_en_una_categoria_ac
     pagina = await _lista(app, limit=50)
     assert _ids(pagina) == [visible], [i["title"] for i in pagina["items"]]
     _sin_privado(pagina, "Motivo del equipo", "Aclara el alcance")
+    # La portada sale SIEMPRE como URL firmada, nunca como la ruta del depósito.
+    for item in pagina["items"]:
+        assert "/object/sign/" in item["cover"]["url"] and "token=" in item["cover"]["url"], item["cover"]
+        assert perfil not in item["cover"]["url"].split("/object/sign/")[0]
     for ident in [*ocultos.values(), de_suspendido, en_inactiva, bajo_madre, de_otro_pais]:
         r = await _get(app, f"{CATALOGO}/{ident}")
         assert r.status_code == 404 and r.json()["error"]["code"] == "service_not_found", ident
@@ -354,6 +358,17 @@ async def test_credencial_verificada_publica_y_privada(mundo) -> None:
     )
     assert _ids(await _lista(app, credential_verified="true")) == []
     assert (await _get(app, f"{CATALOGO}/{con}")).json()["provider"]["trust"]["credential_verified"] is False
+    # Vigente otra vez, pero RECHAZADA (o solo declarada): tampoco cuenta.
+    for estado in ("rejected", "declared"):
+        await _sembrar(
+            motor, "update public.service_provider_credentials set expires_on = current_date + 30, status = :e, "
+                   "review_note = case when :e = 'rejected' then 'No coincide con el registro.' end, "
+                   "verified_at = null, verified_by = null "
+                   "where provider_id = (select id from public.service_providers where profile_id = cast(:u as uuid))",
+            u=verificada, e=estado,
+        )
+        assert _ids(await _lista(app, credential_verified="true")) == [], estado
+        assert (await _get(app, f"{CATALOGO}/{con}")).json()["provider"]["trust"]["credential_verified"] is False
 
 
 # =========================================================================== #
