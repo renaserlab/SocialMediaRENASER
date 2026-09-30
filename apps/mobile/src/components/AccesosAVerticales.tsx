@@ -4,6 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { Text } from '@/components/Text';
+import { useServiciosEncendido } from '@/hooks/useServiciosEncendido';
 import { useTranslation } from '@/i18n/useTranslation';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { spacing } from '@/theme/tokens';
@@ -12,12 +13,12 @@ import { useAppTheme } from '@/theme/useAppTheme';
 /**
  * Los cuatro accesos de la referencia: Cursos, Eventos, Servicios y Productos.
  *
- * UNA DE LAS CUATRO NO EXISTE TODAVÍA, y eso se dice en vez de disimularse.
- * Servicios no tiene ni pantalla ni endpoints —ver
- * `docs/Z_MATRIZ_DE_VISTAS.md`—, así que su acceso avisa de que aún no está en
- * lugar de llevar a una pantalla con datos inventados o a una compra que no se
- * puede completar. Un acceso que promete algo que no hay cuesta más confianza
- * que un acceso que dice «todavía no».
+ * SERVICIOS DEPENDE DE `FEATURE_SERVICES` (Incremento 3). Encendida en el
+ * servidor, lleva a su catálogo (`/servicios`). Apagada —lo de fábrica— el
+ * acceso sigue exactamente como antes: avisa de que aún no está, sin llevar a
+ * ninguna pantalla y sin preguntar nada a la API de Servicios (la bandera se
+ * lee de `/platform/config`, que ya se pedía). Un acceso que promete algo que
+ * no hay cuesta más confianza que uno que dice «todavía no».
  *
  * PRODUCTOS YA LLEVA A SU CATÁLOGO. Tiene pantalla (`/productos`) y API
  * (`/products`), y su portada resuelve por sí misma el caso de que las
@@ -38,14 +39,16 @@ type Vertical = {
    * Se escribe como literal para que expo-router la compruebe: si mañana
    * alguien renombra `/cursos`, esto no compila en vez de fallar al tocarlo.
    */
-  ruta: '/cursos' | '/events' | '/productos' | null;
+  ruta: '/cursos' | '/events' | '/servicios' | '/productos' | null;
+  /** Solo lleva a su ruta con `FEATURE_SERVICES` encendida en el servidor. */
+  conBandera?: true;
 };
 
 const VERTICALES: readonly Vertical[] = [
   { clave: 'cursos', icono: 'book-open', ruta: '/cursos' },
   { clave: 'eventos', icono: 'calendar', ruta: '/events' },
-  // Sin pantalla y sin endpoints. Ver la matriz de vistas.
-  { clave: 'servicios', icono: 'briefcase', ruta: null },
+  // El catálogo de Z Servicios (Incremento 3), solo con la bandera encendida.
+  { clave: 'servicios', icono: 'briefcase', ruta: '/servicios', conBandera: true },
   // YA TIENE PANTALLA Y ENDPOINTS: el catálogo de Productos Z (`/products`).
   { clave: 'productos', icono: 'shopping-bag', ruta: '/productos' },
 ];
@@ -59,6 +62,7 @@ export function AccesosAVerticales({
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
+  const serviciosEncendido = useServiciosEncendido();
 
   return (
     /*
@@ -84,7 +88,7 @@ export function AccesosAVerticales({
       >
       {VERTICALES.map((vertical) => {
         const nombre = t(`verticales.${vertical.clave}`);
-        const disponible = vertical.ruta !== null;
+        const disponible = vertical.ruta !== null && (!vertical.conBandera || serviciosEncendido);
         return (
           <Pressable
             key={vertical.clave}

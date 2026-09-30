@@ -147,7 +147,8 @@ describe('cada vista se comporta', () => {
       assert.match(codigo, /<AppHeader\s+title=\{/);
       assert.match(codigo, /<StateView state="loading" \/>/);
       assert.match(codigo, /<EstadoDelCatalogo fallo=\{fallo\} onRetry=\{\(\) => void cargar\(\)\} \/>/);
-      assert.match(codigo, /useTextosDeServicios\('catalogo'\)/, 'los errores del catálogo se traducen como del catálogo');
+      // 'descubrimiento' (Incremento 3) traduce los del catálogo y, antes, los suyos.
+      assert.match(codigo, /useTextosDeServicios\('(?:catalogo|descubrimiento)'\)/, 'los errores del catálogo se traducen como del catálogo');
       for (const atributo of ['label="', 'title="', 'description="', 'placeholder="', 'actionLabel="']) {
         assert.ok(!codigo.includes(atributo), `${nombre} escribe ${atributo}…" en duro`);
       }
@@ -270,8 +271,13 @@ describe('cada vista se comporta', () => {
 
   it('la ficha pública no promete reservar ni pagar', () => {
     const ficha = pantalla('FichaDeServicioScreen');
-    assert.ok(!/reserv|pag(ar|o)|compr|checkout|book/i.test(ficha));
-    assert.ok(!/<Button/.test(ficha), 'sin botones de acción');
+    // «bookmark» es el icono de guardar, no una reserva.
+    assert.ok(!/reserv|pag(ar|o)|compr|checkout|book(?!mark)/i.test(ficha));
+    // UN solo botón desde el Incremento 3: guardar, que no reserva nada.
+    const botones = ficha.match(/<Button\b[\s\S]*?\/>/g) ?? [];
+    assert.equal(botones.length, 1, 'un solo botón: guardar');
+    assert.match(botones[0] as string, /icon="bookmark"/);
+    assert.match(botones[0] as string, /alternarGuardado/);
   });
 
   it('accesibilidad: las opciones excluyentes son radios, y cada imagen se describe', () => {
