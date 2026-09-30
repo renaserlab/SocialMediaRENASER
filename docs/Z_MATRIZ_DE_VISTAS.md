@@ -657,9 +657,12 @@ la verificación real de credenciales es la de Servicios.
 
 ## Servicios · Incremento 2: catálogo y publicación (29/09/2026)
 
-Backend real y detrás de `FEATURE_SERVICES` (apagada); sin la 0090 aplicada,
-cada vista dice que Servicios aún no está disponible. Ninguna se alcanza solo
-escribiendo la URL: lo vigila `serviciosCatalogoVistas.test.mts`.
+Backend real y detrás de `FEATURE_SERVICES` (apagada). La 0090 está
+**aplicada en Supabase y verificada sin divergencias** (29/09/2026); sin ella,
+cada vista diría que Servicios aún no está disponible. Ninguna se alcanza solo
+escribiendo la URL: lo vigila `serviciosCatalogoVistas.test.mts`. **Técnicamente
+cerrado; únicamente queda el QA físico.** El código está en `Edson`, sin
+desplegar.
 
 ### El prestador
 
@@ -690,6 +693,20 @@ servicios». Pantallas en `app/admin/servicios/catalogo/*` y
 | 3 | Una versión | `AdminVersionDelServicioScreen` | `GET …/{id}/versions/{version}` |
 | 4 | Historial completo | `AdminHistorialDelCatalogoScreen` | `GET …/{id}/history` |
 | 5 | Categorías | `AdminCategoriasDeServiciosScreen` | `GET/POST/PATCH /admin/services/categories…`, `…/activate`, `…/deactivate` |
+
+### A dónde llevan los avisos
+
+| Avisos | En la bandeja, lleva a | Tocar el push |
+|---|---|---|
+| Revisión iniciada, cambios pedidos, aprobado, suspendido, reactivado, retirado, publicado en un servicio suspendido (al prestador) | Estado, observaciones y acciones (`ServicioDelPrestadorScreen`) | abre la app |
+| Publicado (al prestador) | Ficha pública (`FichaDeServicioScreen`) | abre la app |
+| Enviado, reenviado, retirado de la revisión (al equipo) | Propuesta y decisiones (`AdminServicioDelCatalogoScreen`) | abre la app |
+
+Si el destino ya no existe o no hay permiso, la vista lo dice
+(`EstadoDelCatalogo`: no encontrado, sin permiso, no disponible). Que el push
+no lleve al destino es una limitación de la cola de entregas y de
+`rutaDelPush`, común a los avisos al creador: `Z_SERVICIOS_ARQUITECTURA.md`
+§32.
 
 ### Lo que sigue sin existir, a propósito
 

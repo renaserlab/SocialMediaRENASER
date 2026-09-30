@@ -2431,9 +2431,10 @@ valoraciones verificadas.
 ## Z Servicios, Incremento 2 — catálogo y publicación de servicios (29/09/2026)
 
 El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
-Parte II. **Implementado y probado; pendiente de aplicar y verificar la 0090 y
-de hacer el QA físico.** Nada de lo que sigue se presenta como política
-definitiva si la empresa no lo confirmó.
+Parte II. **Técnicamente cerrado el 29/09/2026: la 0090 está aplicada y
+verificada sin divergencias (§32); únicamente queda pendiente el QA físico.**
+`FEATURE_SERVICES` sigue apagada y el código, sin desplegar. Nada de lo que
+sigue se presenta como política definitiva si la empresa no lo confirmó.
 
 ### Requisitos cumplidos
 
@@ -2490,7 +2491,7 @@ Productos, y **se pueden cambiar sin migración** salvo donde se indica:
 | C12 | **Conservación de versiones e imágenes** superadas o retiradas | Se conservan mientras exista la cuenta del prestador; se borran con ella |
 | C13 | **Información pública del prestador** en la ficha | Solo el nombre público |
 | C14 | Pauta para que los **motivos** escritos por el personal no nombren a nadie | Se guardan tal cual; la auditoría no los copia |
-| C15 | ¿Puede la URL firmada de una imagen pública llevar el **identificador del perfil** del prestador en su ruta? (igual que Productos, que además publica `seller_profile_id`) | Sí: la ruta es `<perfil>/<servicio>/<versión>/<id>`, y así la barre la baja de cuenta. Cambiarlo exige otro prefijo y otro barrido, y conviene decidirlo **antes** de aplicar la 0090 |
+| C15 | ¿Acepta la empresa que la URL firmada de una imagen lleve el **UUID del perfil** del prestador en su ruta, o exige una **ruta opaca**? (igual que Productos, que además publica `seller_profile_id`) | Se acepta provisionalmente. El depósito `service-media` es **privado** (verificado en Supabase el 29/09/2026) y ninguna política de `storage.objects` lo alcanza. Las imágenes solo salen como **URL firmada que caduca en 3600 s**: no hay ruta pública permanente, y ninguna respuesta lleva la ruta como campo. Pero la URL contiene `<perfil>/<servicio>/<versión>/<id>.<ext>`, y así la barre la baja de cuenta. **Hoy no hay ningún archivo** (0 objetos): si se decide una ruta opaca, se cambia **antes de encender Servicios** sin migrar contenido (la ruta en `catalogo_imagenes.py`, el prefijo que la 0090 exige a las filas, con otra migración, y el barrido de la baja). Detalle: `Z_SERVICIOS_ARQUITECTURA.md` §32 |
 | C16 | Monedas que ofrece el formulario | Ofrece PEN, USD y EUR (las de Productos); si se elige una no configurada, al guardar aparece «Z no admite esa moneda por ahora» y no se puede enviar |
 
 ### Límites del Incremento 2 y lo reservado para después
@@ -2500,7 +2501,12 @@ disponibilidad, horarios, reservas, pagos, atención, mensajes,
 reprogramaciones, cancelaciones, incidencias, reseñas, saldos ni
 transferencias; ninguna tabla los anticipa. La ficha pública no tiene botón de
 contratar. Tocar el push de un aviso abre la app sin llevar al servicio, como
-los demás avisos al creador (la bandeja sí lleva).
+los demás avisos al creador (la bandeja sí lleva al servicio o a la revisión,
+y si ya no existe o no hay permiso lo dice sin romperse). Revisado el
+29/09/2026 (`Z_SERVICIOS_ARQUITECTURA.md` §32): **no bloquea el Incremento 2**.
+El blueprint (§23) pide `deepLink` en cada notificación, y hay que resolverlo
+**antes de los avisos de reservas**. La tarea es que la cola de entregas mande
+el tipo y la entidad y que `rutaDelPush` reutilice `rutaDelAviso`.
 
 Reservado para después: disponibilidad calculada en el servidor; reservas con
 retención de hueco; pagos y transferencias; atención e incidencias;

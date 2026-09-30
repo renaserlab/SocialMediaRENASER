@@ -1340,12 +1340,16 @@ PostgreSQL y con la API local de verdad (`Z_BAJA_DE_CUENTA.md` §15), pero
 
 **Nada de esta sección está comprobado en un teléfono.** Las pruebas
 automáticas cubren la API, PostgreSQL y el código de las pantallas, no un
-aparato, ni el selector de imágenes, ni el lector de pantalla.
+aparato, ni el selector de imágenes, ni el lector de pantalla. **Es lo único
+que queda del Incremento 2**: la 0090 está aplicada en Supabase y verificada
+sin divergencias (29/09/2026), y la puerta de esquema la reconoce con el rol
+real de la API (`Z_SERVICIOS_ARQUITECTURA.md` §32).
 
 Antes de empezar:
 
-- **Aplicar la 0090** en la base del entorno de pruebas y verificarla
-  (`Z_SERVICIOS_ARQUITECTURA.md` §26–§27). **Reiniciar la API** después.
+- La 0090 ya está aplicada y verificada en Supabase. En otra base de pruebas,
+  aplicarla y verificarla (`Z_SERVICIOS_ARQUITECTURA.md` §26–§27) y
+  **reiniciar la API** después.
 - La API de ese entorno tiene que correr el código de `Edson` (sin desplegar).
 - Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
 - Tener un prestador **aprobado** por la admisión del Incremento 1.
@@ -1410,7 +1414,7 @@ navegador.
 ### La revisión
 
 - [ ] A moderación y administración les llega «Nuevo servicio para revisar»;
-      tocarlo abre la revisión.
+      tocarlo **en la bandeja** abre la revisión.
 - [ ] Bandeja: por revisar, filtros por estado de la versión, modalidad y
       categoría; «Ver más».
 - [ ] Moderación inicia la revisión y pide cambios con motivo y campos; **no**
@@ -1441,6 +1445,20 @@ navegador.
       confirmación avisa de que **no** se verá todavía; al prestador le llega
       «Tu versión nueva está lista», que abre su servicio (no la ficha).
       Levantar la suspensión la hace visible.
+
+### Los avisos: bandeja y push
+
+- [ ] En la bandeja, cada aviso del catálogo lleva a su sitio: los del
+      prestador, a su servicio; «publicado», a la ficha; los del equipo, a
+      la revisión.
+- [ ] Un aviso de un servicio que ya no se ve (suspendido o retirado después)
+      o abierto con otra cuenta: la pantalla dice «No encontramos ese
+      servicio» o que no hay permiso, sin error rojo ni pantalla en blanco.
+- [ ] **Tocar el push** (con la app cerrada y en segundo plano) abre la
+      aplicación **sin llevar al servicio**. Es la limitación conocida
+      (`Z_SERVICIOS_ARQUITECTURA.md` §32), la misma que en los demás avisos
+      al creador: anotar si alguien lo espera distinto, no como fallo.
+- [ ] El push llega en el idioma del teléfono (es, en, pt) y sin códigos.
 
 ### Accesibilidad, idiomas y cuenta
 
