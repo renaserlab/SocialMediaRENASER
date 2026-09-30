@@ -256,7 +256,6 @@ async def vista_previa(
             db, usuario_id=current_user.id, servicio_id=_id(service_id), desde=from_date, hasta=to_date,
             modalidad=modality,
         ),
-        con_motivos=True,
     )
 
 
@@ -300,7 +299,6 @@ async def disponibilidad(
             db, servicio_id=_id(service_id), mira=_mira(current_user), desde=from_date, hasta=to_date,
             modalidad=modality,
         ),
-        con_motivos=False,
     )
 
 

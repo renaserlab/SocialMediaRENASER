@@ -316,16 +316,17 @@ class CalendarioRead(BaseModel):
     days: list[DiaRead]
     next: HorarioRead | None
     #: Solo en la vista previa del prestador: por qué el público no ve horarios.
+    #: Lo decide el dominio: la consulta pública nunca los rellena.
     issues: list[str] = []
 
     @classmethod
-    def desde(cls, c: dominio.Calendario, *, con_motivos: bool) -> "CalendarioRead":
+    def desde(cls, c: dominio.Calendario) -> "CalendarioRead":
         return cls(
             timezone=c.zona, status=c.estado, modality=c.modalidad, duration_minutes=c.duracion,
             today=c.hoy, last_date=c.ultima, from_date=c.desde, to_date=c.hasta,
             days=[DiaRead(date=f, count=n) for f, n in c.dias],
             next=HorarioRead.desde(c.proximo, c.zona) if c.proximo and c.zona else None,
-            issues=c.motivos if con_motivos else [],
+            issues=c.motivos,
         )
 
 
