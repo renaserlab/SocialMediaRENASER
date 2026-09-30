@@ -1,6 +1,6 @@
 """La migración 0092: la disponibilidad y la agenda del prestador (Incremento 4).
 
-1. ESTÁTICA: es la última y sigue a la 0091, está APLICADA (su huella en
+1. ESTÁTICA: sigue a la 0091 (y la sigue la 0093), está APLICADA (su huella en
    `APLICADAS`: no se edita más), una sola transacción que
    comprueba lo anterior antes de crear nada, no concede permisos ni toca otra
    tabla, la única extensión es `btree_gist`, sus límites son los de
@@ -58,10 +58,11 @@ TABLAS = (
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0091() -> None:
+def test_sigue_a_la_0091_y_la_sigue_la_0093() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0091_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0091_")
+    assert nombres[posicion + 1].startswith("0093_")
 
 
 def test_esta_aplicada_y_ya_no_se_edita() -> None:

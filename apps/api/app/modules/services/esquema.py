@@ -632,22 +632,414 @@ async def exigir_agenda(db: AsyncSession) -> None:
         raise ServiciosSinMigracion()
 
 
+# --------------------------------------------------------------------------- #
+# La reserva (Incremento 5, migración 0093)
+# --------------------------------------------------------------------------- #
+TABLAS_DE_LA_RESERVA = (
+    "service_holds",
+    "service_orders",
+    "service_bookings",
+    "service_booking_intakes",
+    "service_booking_acceptances",
+    "service_booking_events",
+)
+
+
+class ReservaApagada(ServiceUnavailableError):
+    code = "service_booking_disabled"
+    message = "La contratación de servicios todavía no está disponible."
+
+
+def reserva_encendida() -> bool:
+    """La bandera de Servicios Y la de la contratación (arquitectura §17)."""
+    ajustes = get_settings()
+    return bool(ajustes.feature_services and ajustes.feature_service_booking)
+
+
+#: LO QUE LA 0093 IMPONE Y EL CÓDIGO DA POR HECHO, por DEFINICIÓN:
+#:
+#:  * cada columna con su tipo y su NOT NULL, y NINGUNA MÁS;
+#:  * las claves primarias, las veintiuna ajenas con su acción al borrar, y
+#:    las únicas (el código de la reserva, un pedido y una retención por
+#:    reserva, una aceptación de cada tipo por pedido);
+#:  * LA EXCLUSIÓN escrita tal cual: ES la autoridad de la doble reserva, y el
+#:    código no vuelve a comprobarla. Y los cuarenta y dos CHECK, validados y
+#:    por su definición (una huella de todos juntos);
+#:  * los índices con su definición (los tres únicos y parciales de las
+#:    plazas y la retención activa, y el de la `Idempotency-Key`), y TODOS los
+#:    de las seis tablas válidos, listos y vivos;
+#:  * los quince disparadores activos con su función, su forma y sus
+#:    argumentos (los tres que comprueban al CONFIRMAR, diferidos), y las
+#:    siete funciones sin SECURITY DEFINER, con su `search_path` y su cuerpo;
+#:  * el tipo `booking_terms` en `service_policies`;
+#:  * RLS sin políticas, y nadie de fuera con permisos: ni `anon` ni
+#:    `authenticated` (tampoco por PUBLIC), en una tabla, una columna o una
+#:    función.
+#:
+#: No el número de la migración.
+_LO_QUE_NECESITA_LA_RESERVA = text(
+    r"""
+    with
+    tablas(t) as (
+      select to_regclass('public.' || n)
+        from (values ('service_holds'), ('service_orders'), ('service_bookings'),
+                     ('service_booking_intakes'), ('service_booking_acceptances'),
+                     ('service_booking_events')) v(n)
+    ),
+    columnas(tabla, columna, tipo, obligatoria) as (values
+      ('service_holds', 'id', 'uuid', true),
+      ('service_holds', 'service_id', 'uuid', true),
+      ('service_holds', 'version_id', 'uuid', true),
+      ('service_holds', 'client_id', 'uuid', false),
+      ('service_holds', 'status', 'text', true),
+      ('service_holds', 'starts_at', 'timestamp with time zone', true),
+      ('service_holds', 'ends_at', 'timestamp with time zone', true),
+      ('service_holds', 'occupied_from', 'timestamp with time zone', true),
+      ('service_holds', 'occupied_until', 'timestamp with time zone', true),
+      ('service_holds', 'timezone', 'text', true),
+      ('service_holds', 'local_date', 'date', true),
+      ('service_holds', 'modality', 'text', true),
+      ('service_holds', 'capacity', 'integer', true),
+      ('service_holds', 'seat', 'integer', true),
+      ('service_holds', 'expires_at', 'timestamp with time zone', true),
+      ('service_holds', 'created_at', 'timestamp with time zone', true),
+      ('service_holds', 'updated_at', 'timestamp with time zone', true),
+      ('service_holds', 'consumed_at', 'timestamp with time zone', false),
+      ('service_holds', 'released_at', 'timestamp with time zone', false),
+      ('service_holds', 'expired_at', 'timestamp with time zone', false),
+      ('service_orders', 'id', 'uuid', true),
+      ('service_orders', 'service_id', 'uuid', true),
+      ('service_orders', 'version_id', 'uuid', true),
+      ('service_orders', 'provider_id', 'uuid', true),
+      ('service_orders', 'client_id', 'uuid', false),
+      ('service_orders', 'status', 'text', true),
+      ('service_orders', 'payment_status', 'text', true),
+      ('service_orders', 'payment_provider', 'text', true),
+      ('service_orders', 'environment', 'text', true),
+      ('service_orders', 'price_model', 'text', true),
+      ('service_orders', 'price_minor', 'bigint', false),
+      ('service_orders', 'currency', 'character(3)', false),
+      ('service_orders', 'total_minor', 'bigint', true),
+      ('service_orders', 'title_snapshot', 'text', true),
+      ('service_orders', 'provider_name_snapshot', 'text', true),
+      ('service_orders', 'created_at', 'timestamp with time zone', true),
+      ('service_orders', 'confirmed_at', 'timestamp with time zone', true),
+      ('service_bookings', 'id', 'uuid', true),
+      ('service_bookings', 'booking_code', 'text', true),
+      ('service_bookings', 'order_id', 'uuid', true),
+      ('service_bookings', 'hold_id', 'uuid', true),
+      ('service_bookings', 'service_id', 'uuid', true),
+      ('service_bookings', 'version_id', 'uuid', true),
+      ('service_bookings', 'provider_id', 'uuid', true),
+      ('service_bookings', 'client_id', 'uuid', false),
+      ('service_bookings', 'status', 'text', true),
+      ('service_bookings', 'starts_at', 'timestamp with time zone', true),
+      ('service_bookings', 'ends_at', 'timestamp with time zone', true),
+      ('service_bookings', 'occupied_from', 'timestamp with time zone', true),
+      ('service_bookings', 'occupied_until', 'timestamp with time zone', true),
+      ('service_bookings', 'timezone', 'text', true),
+      ('service_bookings', 'local_date', 'date', true),
+      ('service_bookings', 'modality', 'text', true),
+      ('service_bookings', 'duration_minutes', 'integer', true),
+      ('service_bookings', 'buffer_before_minutes', 'integer', true),
+      ('service_bookings', 'buffer_after_minutes', 'integer', true),
+      ('service_bookings', 'capacity', 'integer', true),
+      ('service_bookings', 'seat', 'integer', true),
+      ('service_bookings', 'title_snapshot', 'text', true),
+      ('service_bookings', 'provider_name_snapshot', 'text', true),
+      ('service_bookings', 'location_area_snapshot', 'text', false),
+      ('service_bookings', 'created_at', 'timestamp with time zone', true),
+      ('service_bookings', 'confirmed_at', 'timestamp with time zone', true),
+      ('service_booking_intakes', 'booking_id', 'uuid', true),
+      ('service_booking_intakes', 'client_id', 'uuid', true),
+      ('service_booking_intakes', 'note', 'text', false),
+      ('service_booking_intakes', 'district', 'text', false),
+      ('service_booking_intakes', 'address_line', 'text', false),
+      ('service_booking_intakes', 'address_reference', 'text', false),
+      ('service_booking_intakes', 'created_at', 'timestamp with time zone', true),
+      ('service_booking_acceptances', 'id', 'uuid', true),
+      ('service_booking_acceptances', 'order_id', 'uuid', true),
+      ('service_booking_acceptances', 'kind', 'text', true),
+      ('service_booking_acceptances', 'policy_id', 'uuid', false),
+      ('service_booking_acceptances', 'policy_version', 'integer', false),
+      ('service_booking_acceptances', 'version_id', 'uuid', false),
+      ('service_booking_acceptances', 'sha256', 'text', true),
+      ('service_booking_acceptances', 'accepted_by', 'uuid', false),
+      ('service_booking_acceptances', 'accepted_at', 'timestamp with time zone', true),
+      ('service_booking_events', 'id', 'uuid', true),
+      ('service_booking_events', 'service_id', 'uuid', true),
+      ('service_booking_events', 'hold_id', 'uuid', false),
+      ('service_booking_events', 'booking_id', 'uuid', false),
+      ('service_booking_events', 'action', 'text', true),
+      ('service_booking_events', 'from_status', 'text', false),
+      ('service_booking_events', 'to_status', 'text', true),
+      ('service_booking_events', 'actor_id', 'uuid', false),
+      ('service_booking_events', 'actor_role', 'text', true),
+      ('service_booking_events', 'idempotency_key', 'text', false),
+      ('service_booking_events', 'details', 'jsonb', true),
+      ('service_booking_events', 'created_at', 'timestamp with time zone', true)
+    ),
+    primarias(tabla, columna) as (values
+      ('service_holds', 'id'), ('service_orders', 'id'), ('service_bookings', 'id'),
+      ('service_booking_intakes', 'booking_id'), ('service_booking_acceptances', 'id'),
+      ('service_booking_events', 'id')
+    ),
+    claves(tabla, columna, madre, columna_madre, al_borrar) as (values
+      ('service_booking_acceptances', 'order_id', 'service_orders', 'id', 'c'),
+      ('service_booking_acceptances', 'policy_id', 'service_policies', 'id', 'r'),
+      ('service_booking_acceptances', 'version_id', 'service_versions', 'id', 'c'),
+      ('service_booking_events', 'booking_id', 'service_bookings', 'id', 'c'),
+      ('service_booking_events', 'hold_id', 'service_holds', 'id', 'c'),
+      ('service_booking_events', 'service_id', 'services', 'id', 'c'),
+      ('service_booking_intakes', 'booking_id', 'service_bookings', 'id', 'c'),
+      ('service_booking_intakes', 'client_id', 'profiles', 'id', 'c'),
+      ('service_bookings', 'client_id', 'profiles', 'id', 'n'),
+      ('service_bookings', 'hold_id', 'service_holds', 'id', 'c'),
+      ('service_bookings', 'order_id', 'service_orders', 'id', 'c'),
+      ('service_bookings', 'provider_id', 'service_providers', 'id', 'c'),
+      ('service_bookings', 'service_id', 'services', 'id', 'c'),
+      ('service_bookings', 'version_id', 'service_versions', 'id', 'c'),
+      ('service_holds', 'client_id', 'profiles', 'id', 'n'),
+      ('service_holds', 'service_id', 'services', 'id', 'c'),
+      ('service_holds', 'version_id', 'service_versions', 'id', 'c'),
+      ('service_orders', 'client_id', 'profiles', 'id', 'n'),
+      ('service_orders', 'provider_id', 'service_providers', 'id', 'c'),
+      ('service_orders', 'service_id', 'services', 'id', 'c'),
+      ('service_orders', 'version_id', 'service_versions', 'id', 'c')
+    ),
+    unicas(tabla, nombre, definicion) as (values
+      ('service_bookings', 'service_bookings_codigo_unico', 'UNIQUE (booking_code)'),
+      ('service_bookings', 'service_bookings_un_pedido', 'UNIQUE (order_id)'),
+      ('service_bookings', 'service_bookings_una_retencion', 'UNIQUE (hold_id)'),
+      ('service_booking_acceptances', 'service_booking_acceptances_una', 'UNIQUE (order_id, kind)')
+    ),
+    disparadores(tabla, nombre, funcion, tipo, argumentos, diferido) as (values
+      ('service_booking_acceptances', 'service_booking_acceptances_inmutables',
+       'servicios_catalogo_historial_inmutable()', 19, '', false),
+      ('service_booking_acceptances', 'service_booking_acceptances_solo_en_cascada',
+       'servicios_borrado_solo_en_cascada()', 11, 'service_orders\000order_id\000', false),
+      ('service_booking_events', 'service_booking_events_inmutables',
+       'servicios_catalogo_historial_inmutable()', 19, '', false),
+      ('service_booking_events', 'service_booking_events_solo_en_cascada',
+       'servicios_borrado_solo_en_cascada()', 11, 'services\000service_id\000', false),
+      ('service_booking_intakes', 'service_booking_intakes_inmutables',
+       'servicios_catalogo_historial_inmutable()', 19, '', false),
+      ('service_bookings', 'service_bookings_coherentes', 'servicios_reserva_coherente()', 5, '', true),
+      ('service_bookings', 'service_bookings_inmutables', 'servicios_reserva_inmutable()', 19, '', false),
+      ('service_bookings', 'service_bookings_por_venir', 'servicios_reserva_por_venir()', 11, '', false),
+      ('service_bookings', 'service_bookings_solo_en_cascada',
+       'servicios_borrado_solo_en_cascada()', 11, 'services\000service_id\000', false),
+      ('service_holds', 'service_holds_con_reserva', 'servicios_retencion_con_reserva()', 21, '', true),
+      ('service_holds', 'service_holds_salto_valido', 'servicios_retencion_salto_valido()', 19, '', false),
+      ('service_holds', 'service_holds_solo_en_cascada',
+       'servicios_borrado_solo_en_cascada()', 11, 'services\000service_id\000', false),
+      ('service_orders', 'service_orders_completos', 'servicios_pedido_completo()', 5, '', true),
+      ('service_orders', 'service_orders_inmutables', 'servicios_pedido_inmutable()', 19, '', false),
+      ('service_orders', 'service_orders_solo_en_cascada',
+       'servicios_borrado_solo_en_cascada()', 11, 'services\000service_id\000', false)
+    ),
+    funciones(firma, huella) as (values
+      ('servicios_retencion_salto_valido()', 'c6e5fc3f207d179c3cfaf83a5eec674d'),
+      ('servicios_reserva_inmutable()', 'ee4296a90773dc6c6ed5d8b4b4888c30'),
+      ('servicios_reserva_por_venir()', '04866976d50afaba1f4d3cf619f757c9'),
+      ('servicios_pedido_inmutable()', '5cf2314427c599c56e03f65b2cde390c'),
+      ('servicios_reserva_coherente()', 'e0e28efb6dc74ef022088d8d35316452'),
+      ('servicios_pedido_completo()', 'cc9c226e1db6ce82b07111e5b1c86286'),
+      ('servicios_retencion_con_reserva()', '300e468e16528fa1d0b95b149148b95a')
+    )
+    select
+      -- Cada columna con su tipo y su NOT NULL, y ni una más.
+      (select count(*) from columnas e
+         join pg_catalog.pg_attribute a
+           on a.attrelid = to_regclass('public.' || e.tabla) and a.attname = e.columna
+          and a.attnum > 0 and not a.attisdropped
+        where pg_catalog.format_type(a.atttypid, a.atttypmod) = e.tipo and a.attnotnull = e.obligatoria
+      ) = 91
+      and (select count(*) from pg_catalog.pg_attribute a
+            where a.attrelid in (select t from tablas) and a.attnum > 0 and not a.attisdropped) = 91
+      and (select count(*) from primarias e
+             join pg_catalog.pg_index i on i.indrelid = to_regclass('public.' || e.tabla)
+             join pg_catalog.pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+            where i.indisprimary and i.indnatts = 1 and a.attname = e.columna) = 6
+      -- Las ajenas con su acción al borrar, validadas, y ninguna más.
+      and (select count(*) from claves e
+             join pg_catalog.pg_constraint c
+               on c.conrelid = to_regclass('public.' || e.tabla)
+              and c.confrelid = to_regclass('public.' || e.madre)
+             join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+             join pg_catalog.pg_attribute m on m.attrelid = c.confrelid and m.attnum = c.confkey[1]
+            where c.contype = 'f' and c.confdeltype = e.al_borrar and c.convalidated
+              and cardinality(c.conkey) = 1 and a.attname = e.columna and m.attname = e.columna_madre) = 21
+      and (select count(*) from pg_catalog.pg_constraint c
+            where c.contype = 'f' and c.conrelid in (select t from tablas)) = 21
+      and (select count(*) from unicas e
+             join pg_catalog.pg_constraint c
+               on c.conrelid = to_regclass('public.' || e.tabla) and c.conname = e.nombre
+            where c.contype = 'u' and pg_catalog.pg_get_constraintdef(c.oid) = e.definicion) = 4
+      -- LA EXCLUSIÓN, TAL CUAL: es la autoridad de la doble reserva.
+      and exists (
+        select 1 from pg_catalog.pg_constraint c
+         where c.conrelid = to_regclass('public.service_holds') and c.conname = 'service_holds_sin_cruces'
+           and c.contype = 'x' and c.convalidated
+           and pg_catalog.pg_get_constraintdef(c.oid) =
+               'EXCLUDE USING gist (service_id WITH =, tstzrange(occupied_from, occupied_until, ''[)''::text) '
+               'WITH &&, starts_at WITH <>) WHERE ((status = ANY (ARRAY[''active''::text, ''consumed''::text])))'
+      )
+      -- Los CHECK, validados y POR SU DEFINICIÓN (la huella de los 42).
+      and (select count(*) from pg_catalog.pg_constraint c
+            where c.contype = 'c' and c.convalidated and c.conrelid in (select t from tablas)) = 42
+      and (select md5(string_agg(c.conname || ':' || regexp_replace(pg_catalog.pg_get_constraintdef(c.oid), '\s+', ' ', 'g'),
+                                 '|' order by c.conname))
+             from pg_catalog.pg_constraint c
+            where c.contype = 'c' and c.conrelid in (select t from tablas))
+          = '6c4de3c313d93485fa1dd96dd23ea773'
+      -- Los índices por su definición, y TODOS válidos, listos y vivos.
+      and (select count(*) from pg_catalog.pg_index i
+            where i.indrelid in (select t from tablas)
+              and pg_catalog.pg_get_indexdef(i.indexrelid) in (
+                'CREATE INDEX service_booking_events_de_la_reserva ON public.service_booking_events '
+                'USING btree (booking_id, created_at, id)',
+                'CREATE INDEX service_booking_events_de_la_retencion ON public.service_booking_events '
+                'USING btree (hold_id, created_at, id)',
+                'CREATE INDEX service_bookings_de_la_persona ON public.service_bookings '
+                'USING btree (client_id, starts_at, id)',
+                'CREATE INDEX service_bookings_del_prestador ON public.service_bookings '
+                'USING btree (provider_id, starts_at, id)',
+                'CREATE INDEX service_bookings_del_servicio ON public.service_bookings '
+                'USING btree (service_id, starts_at)',
+                'CREATE INDEX service_holds_de_la_persona ON public.service_holds USING btree (client_id, status)',
+                'CREATE INDEX service_holds_ocupan ON public.service_holds USING btree (service_id, occupied_until) '
+                'WHERE (status = ANY (ARRAY[''active''::text, ''consumed''::text]))',
+                'CREATE INDEX service_holds_por_vencer ON public.service_holds USING btree (expires_at) '
+                'WHERE (status = ''active''::text)',
+                'CREATE INDEX service_orders_de_la_persona ON public.service_orders '
+                'USING btree (client_id, created_at DESC, id DESC)',
+                'CREATE INDEX service_orders_del_prestador ON public.service_orders '
+                'USING btree (provider_id, created_at DESC, id DESC)',
+                'CREATE UNIQUE INDEX service_booking_events_una_por_clave ON public.service_booking_events '
+                'USING btree (actor_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)',
+                'CREATE UNIQUE INDEX service_holds_una_activa ON public.service_holds '
+                'USING btree (service_id, client_id) WHERE (status = ''active''::text)',
+                'CREATE UNIQUE INDEX service_holds_una_plaza ON public.service_holds '
+                'USING btree (service_id, starts_at, seat) '
+                'WHERE (status = ANY (ARRAY[''active''::text, ''consumed''::text]))',
+                'CREATE UNIQUE INDEX service_holds_una_por_persona ON public.service_holds '
+                'USING btree (service_id, starts_at, client_id) '
+                'WHERE (status = ANY (ARRAY[''active''::text, ''consumed''::text]))'
+              )) = 14
+      and (select count(*) from pg_catalog.pg_index i where i.indrelid in (select t from tablas)) = 25
+      and not exists (select 1 from pg_catalog.pg_index i
+                       where i.indrelid in (select t from tablas)
+                         and not (i.indisvalid and i.indisready and i.indislive))
+      -- Los disparadores con su función, su forma y sus argumentos; los tres
+      -- que comprueban al confirmar, DIFERIDOS.
+      and (select count(*) from disparadores e
+             join pg_catalog.pg_trigger g
+               on g.tgrelid = to_regclass('public.' || e.tabla) and g.tgname = e.nombre
+            where not g.tgisinternal and g.tgenabled in ('O', 'A')
+              and g.tgfoid = to_regprocedure('public.' || e.funcion) and g.tgtype = e.tipo
+              and pg_catalog.encode(g.tgargs, 'escape') = e.argumentos
+              and g.tgdeferrable = e.diferido and g.tginitdeferred = e.diferido) = 15
+      and (select count(*) from pg_catalog.pg_trigger g
+            where not g.tgisinternal and g.tgrelid in (select t from tablas)) = 15
+      and (select count(*) from funciones e
+             join pg_catalog.pg_proc p on p.oid = to_regprocedure('public.' || e.firma)
+            where not p.prosecdef and p.proconfig = array['search_path=public, pg_temp']
+              and md5(replace(p.prosrc, E'\r', '')) = e.huella) = 7
+      -- Las condiciones de contratación, un tipo más de las políticas.
+      and exists (
+        select 1 from pg_catalog.pg_constraint c
+         where c.conrelid = to_regclass('public.service_policies') and c.conname = 'service_policies_tipo'
+           and c.convalidated
+           and pg_catalog.pg_get_constraintdef(c.oid) =
+               'CHECK ((kind = ANY (ARRAY[''provider_terms''::text, ''booking_terms''::text])))'
+      )
+      and exists (select 1 from pg_catalog.pg_extension x where x.extname = 'btree_gist')
+      and (select count(*) from pg_catalog.pg_class c
+            where c.oid in (select t from tablas) and c.relrowsecurity) = 6
+      and not exists (select 1 from pg_catalog.pg_policy p where p.polrelid in (select t from tablas))
+      -- Permisos EFECTIVOS: cubren también lo concedido a PUBLIC.
+      and not exists (
+        select 1 from pg_catalog.pg_roles r, tablas
+         where r.rolname in ('anon', 'authenticated')
+           and (pg_catalog.has_table_privilege(
+                  r.oid, tablas.t, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                or pg_catalog.has_any_column_privilege(r.oid, tablas.t, 'SELECT, INSERT, UPDATE, REFERENCES'))
+      )
+      and not exists (
+        select 1 from pg_catalog.pg_roles r, funciones e
+         where r.rolname in ('anon', 'authenticated')
+           and pg_catalog.has_function_privilege(r.oid, to_regprocedure('public.' || e.firma), 'EXECUTE')
+      )
+    """
+)
+
+
+def _columnas_de_la_reserva(sync) -> bool:  # noqa: ANN001
+    from app.modules.services import reserva_models
+
+    tablas = reserva_models.Base.metadata.tables
+    inspector = inspect(sync)
+    for tabla in TABLAS_DE_LA_RESERVA:
+        if not inspector.has_table(tabla):
+            return False
+        hay = {c["name"] for c in inspector.get_columns(tabla)}
+        if not {c.name for c in tablas[tabla].columns} <= hay:
+            return False
+    return True
+
+
+async def hay_reservas(db: AsyncSession) -> bool:
+    """¿Tiene la base la 0093 COMPLETA? Ante la duda, no. Como el resto: el
+    «sí» y el «no» se recuerdan hasta reiniciar; un error al mirar, no."""
+    if "reserva" not in _cache:
+        try:
+            conexion = await db.connection()
+            completa = await conexion.run_sync(_columnas_de_la_reserva)
+            if completa and conexion.dialect.name == "postgresql":
+                completa = bool(await db.scalar(_LO_QUE_NECESITA_LA_RESERVA))
+        except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
+            logger.warning("Servicios: no se pudo comprobar la 0093; la reserva contesta 503.", exc_info=True)
+            return False
+        _cache["reserva"] = completa
+        if not completa:
+            logger.warning("Servicios: falta la 0093 completa. La reserva contesta 503.")
+    return _cache["reserva"]
+
+
+async def exigir_reservas(db: AsyncSession) -> None:
+    """La agenda (y con ella el catálogo y la admisión), la bandera de la
+    contratación y, además, la 0093. Las banderas, sin tocar la base."""
+    if not encendido():
+        raise ServiciosApagados()
+    if not reserva_encendida():
+        raise ReservaApagada()
+    await exigir_agenda(db)
+    if not await hay_reservas(db):
+        raise ServiciosSinMigracion()
+
+
 __all__ = [
     "COLUMNAS_DE_LA_0088",
+    "ReservaApagada",
     "ServiciosApagados",
     "ServiciosSinMigracion",
     "TABLAS_DEL_CATALOGO",
     "TABLAS_DE_ADMISION",
     "TABLAS_DE_LA_AGENDA",
+    "TABLAS_DE_LA_RESERVA",
     "encendido",
     "exigir_agenda",
     "exigir_catalogo",
     "exigir_guardados",
+    "exigir_reservas",
     "exigir_servicios",
     "hay_admision",
     "hay_agenda",
     "hay_catalogo",
     "hay_guardados",
+    "hay_reservas",
     "olvidar",
     "olvidar_guardados",
+    "reserva_encendida",
 ]

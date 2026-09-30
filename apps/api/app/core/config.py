@@ -239,6 +239,28 @@ class Settings(BaseSettings):
     services_agenda_notice_minutes: int = 120
     services_agenda_horizon_days: int = 60
 
+    #: LA CONTRATACIÓN DE SERVICIOS (Incremento 5). SU PROPIA BANDERA, como
+    #: pide la arquitectura de Servicios (§17, `feature_service_booking`): con
+    #: `feature_services` encendida y esta apagada se ven horarios, pero no se
+    #: retiene ni se reserva nada (503 `service_booking_disabled`).
+    feature_service_booking: bool = False
+    #: EL COBRO DE UN SERVICIO (reglas §22). NO EXISTE adaptador de pago para
+    #: Servicios: aunque se encendieran las dos, un servicio con precio sigue
+    #: contestando `service_booking_payments_not_configured`. Están aquí para
+    #: que nadie tenga que inventarlas el día que exista el cobro.
+    feature_service_payments: bool = False
+    service_payments_provider: str = "none"
+    #: PROVISIONALES del documento de reglas de la reserva (§6.1 y §6.5), no
+    #: una decisión tomada aquí: cuántos minutos aparta una retención y cuántas
+    #: activas puede tener una persona a la vez.
+    services_booking_hold_minutes: int = 10
+    services_booking_max_active_holds: int = 3
+    #: Qué modalidades se CONFIRMAN SOLAS. A domicilio no: según las reglas
+    #: (§3.2) y la política provisional del alcance (§3) la acepta el
+    #: prestador, y esa aceptación todavía no existe (se contesta 409
+    #: `service_booking_provider_confirmation_required`). Lista separada por comas.
+    services_booking_instant_modalities: str = "virtual,in_person"
+
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:
     #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay

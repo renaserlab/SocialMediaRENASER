@@ -408,7 +408,7 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
     )}
     # Las seis de la 0086 y la de los envíos congelados (0088).
     # 0088: los envíos; 0090: el catálogo (`services` no casa con `service_%`);
-    # 0092: la agenda.
+    # 0092: la agenda; 0093: la reserva.
     assert tablas == set(MODELOS) | {
         "service_provider_application_submissions",
         "service_categories",
@@ -420,6 +420,12 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
         "service_schedule_exceptions",
         "service_schedule_blocks",
         "service_schedule_events",
+        "service_holds",
+        "service_orders",
+        "service_bookings",
+        "service_booking_intakes",
+        "service_booking_acceptances",
+        "service_booking_events",
     }
     # Reejecutar la 0086 sobre una base que ya tiene la 0087 le devuelve su
     # función de saltos de ocho estados: por eso la 0087 dice que, si pasa,
@@ -480,7 +486,7 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         """,
     )
     ajenas = {(de, a, borrar) for de, a, borrar in filas}
-    # a = no action, r = restrict, c = cascade
+    # a = no action, r = restrict, c = cascade, n = set null
     esperadas = {
         ("service_providers", "profiles", "c"),
         ("service_provider_applications", "service_providers", "c"),
@@ -510,6 +516,30 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         ("service_schedule_exceptions", "service_schedules", "c"),
         ("service_schedule_blocks", "service_schedules", "c"),
         ("service_schedule_events", "services", "c"),
+        # 0093: la reserva cuelga del servicio y cae en cascada con él (si no
+        # está POR VENIR: eso lo impide un disparador). Quien contrata queda
+        # en NULL con su baja; lo que escribió para la atención se va con él.
+        ("service_holds", "services", "c"),
+        ("service_holds", "service_versions", "c"),
+        ("service_holds", "profiles", "n"),
+        ("service_orders", "services", "c"),
+        ("service_orders", "service_versions", "c"),
+        ("service_orders", "service_providers", "c"),
+        ("service_orders", "profiles", "n"),
+        ("service_bookings", "service_orders", "c"),
+        ("service_bookings", "service_holds", "c"),
+        ("service_bookings", "services", "c"),
+        ("service_bookings", "service_versions", "c"),
+        ("service_bookings", "service_providers", "c"),
+        ("service_bookings", "profiles", "n"),
+        ("service_booking_intakes", "service_bookings", "c"),
+        ("service_booking_intakes", "profiles", "c"),
+        ("service_booking_acceptances", "service_orders", "c"),
+        ("service_booking_acceptances", "service_policies", "r"),
+        ("service_booking_acceptances", "service_versions", "c"),
+        ("service_booking_events", "services", "c"),
+        ("service_booking_events", "service_holds", "c"),
+        ("service_booking_events", "service_bookings", "c"),
     }
     assert ajenas == esperadas
     # Quién actuó NO tiene clave ajena: un `set null` sería reescribir historia.
@@ -519,6 +549,8 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         ("service_provider_documents", "reviewed_by"),
         ("service_provider_credentials", "verified_by"),
         ("service_policies", "published_by"),
+        ("service_booking_events", "actor_id"),
+        ("service_booking_acceptances", "accepted_by"),
     ):
         assert not _todos(
             pg,

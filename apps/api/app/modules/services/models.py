@@ -67,7 +67,10 @@ def _es_pais(columna: str) -> str:
 # 1. Políticas versionadas
 # --------------------------------------------------------------------------- #
 POLITICA_TERMINOS_DEL_PRESTADOR = "provider_terms"
-TIPOS_DE_POLITICA = (POLITICA_TERMINOS_DEL_PRESTADOR,)
+#: Las condiciones de CONTRATACIÓN de Z (Incremento 5, 0093): las acepta
+#: quien contrata un servicio, por país. Las publica la empresa.
+POLITICA_CONDICIONES_DE_CONTRATACION = "booking_terms"
+TIPOS_DE_POLITICA = (POLITICA_TERMINOS_DEL_PRESTADOR, POLITICA_CONDICIONES_DE_CONTRATACION)
 
 POLITICA_BORRADOR = "draft"
 POLITICA_PUBLICADA = "published"
@@ -890,6 +893,7 @@ __all__ = [
     "FORMATOS_DE_DOCUMENTO",
     "PERSONA_NATURAL",
     "POLITICA_PUBLICADA",
+    "POLITICA_CONDICIONES_DE_CONTRATACION",
     "POLITICA_TERMINOS_DEL_PRESTADOR",
     "PRESTADOR_ACTIVO",
     "PRESTADOR_PENDIENTE",
