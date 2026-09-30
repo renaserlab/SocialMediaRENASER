@@ -45,6 +45,11 @@ APLICADAS = {
     # Aplicada en Supabase y verificada sin divergencias el 29/09/2026
     # (Z_SERVICIOS_ARQUITECTURA.md §32): desde entonces tampoco se edita.
     "0090_servicios_catalogo_y_publicacion.sql": "9abe063feab11a7f99c2e5c4cdf87989c47e1137",
+    # Ejecutada a mano en Supabase y verificada en solo lectura, sin
+    # divergencias, el 29/09/2026 (Z_SERVICIOS_ARQUITECTURA.md §49): desde
+    # entonces tampoco se edita. Su cabecera dice «SIN APLICAR» a propósito,
+    # como la de la 0090: cambiarla sería editar lo aplicado.
+    "0091_servicios_guardados.sql": "d867002671b75413a5edd3e478cf76d879b28521",
 }
 
 
