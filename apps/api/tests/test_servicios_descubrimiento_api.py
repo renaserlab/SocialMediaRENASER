@@ -758,8 +758,76 @@ async def test_la_puerta_de_los_guardados_mira_lo_que_hace_falta(mundo) -> None:
          "foreign key (service_id) references public.services(id) on delete cascade"),
         # Una columna con otro tipo.
         ("alter table public.saved_services alter column title_at_save type varchar(20)",),
+        # Nulable, o sin el `now()` del que depende guardar (sería un 500).
+        ("alter table public.saved_services alter column title_at_save drop not null",),
+        ("alter table public.saved_services alter column created_at drop default",),
+        # El título: sin comprobación, con otro límite o sin validar.
+        ("alter table public.saved_services drop constraint saved_services_titulo",),
+        ("alter table public.saved_services drop constraint saved_services_titulo",
+         "alter table public.saved_services add constraint saved_services_titulo "
+         "check (length(trim(title_at_save)) between 1 and 3000)"),
+        ("alter table public.saved_services drop constraint saved_services_titulo",
+         "alter table public.saved_services add constraint saved_services_titulo "
+         "check (length(trim(title_at_save)) between 1 and 300) not valid"),
+        # Una clave ajena sin validar.
+        ("alter table public.saved_services drop constraint saved_services_service_id_fkey",
+         "alter table public.saved_services add constraint saved_services_service_id_fkey "
+         "foreign key (service_id) references public.services(id) on delete cascade not valid"),
+        # Los índices, por definición: otro orden, otras columnas, parcial,
+        # único (dos personas no podrían guardar lo mismo), de otro tipo o no válido.
+        ("drop index public.saved_services_mios",
+         "create index saved_services_mios on public.saved_services (profile_id, created_at, service_id)"),
+        ("drop index public.saved_services_del_servicio",
+         "create index saved_services_del_servicio on public.saved_services (profile_id)"),
+        ("drop index public.saved_services_del_servicio",
+         "create index saved_services_del_servicio on public.saved_services (service_id) where title_at_save <> ''"),
+        ("drop index public.saved_services_del_servicio",
+         "create unique index saved_services_del_servicio on public.saved_services (service_id)"),
+        ("drop index public.saved_services_del_servicio",
+         "create index saved_services_del_servicio on public.saved_services using hash (service_id)"),
+        ("update pg_catalog.pg_index set indisvalid = false "
+         "where indexrelid = 'public.saved_services_mios'::regclass",),
+        # RLS con una política, o alguien de fuera con permisos.
+        ("create policy abierta on public.saved_services for select to authenticated using (true)",),
+        ("grant select on public.saved_services to anon",),
+        ("grant insert on public.saved_services to authenticated",),
+        ("grant references on public.saved_services to authenticated",),
+        ("grant select on public.saved_services to public",),
+        ("grant select (title_at_save) on public.saved_services to authenticated",),
+        ("grant update (title_at_save) on public.saved_services to public",),
     ):
         assert await _puerta_de_guardados(motor, *cambios) is False, cambios
+    # Control: lo que la puerta NO debe exigir. `service_role` (la clave del
+    # servidor) puede tener permisos, y el orden físico de las filas da igual.
+    for cambios in (
+        ("grant all on public.saved_services to service_role",),
+        ("cluster public.saved_services using saved_services_mios",),
+    ):
+        assert await _puerta_de_guardados(motor, *cambios) is True, cambios
+
+
+async def test_un_error_al_mirar_la_0091_es_503_y_no_se_recuerda(mundo, monkeypatch) -> None:
+    """Una excepción DURANTE la inspección: la puerta dice que no sin recordarlo
+    y guardar contesta 503 `services_not_ready`, nunca 500. Al dejar de fallar
+    responde sin reiniciar."""
+    app, motor, _ = mundo
+    jefa, moderador = await _equipo(motor)
+    categoria = (await _categoria(app, jefa))["id"]
+    ident = await _publicado(app, await _prestador(motor), jefa, moderador, categoria, title="Inspección rota")
+    quien = await _persona(motor)
+    esquema.olvidar()
+    buena = esquema._LO_QUE_NECESITAN_LOS_GUARDADOS
+    monkeypatch.setattr(esquema, "_LO_QUE_NECESITAN_LOS_GUARDADOS", text("select 1 / 0 = 1"))
+    async with _cliente(app, quien) as http:
+        for metodo, ruta in (("POST", f"{CATALOGO}/{ident}/save"), ("GET", GUARDADOS)):
+            r = await http.request(metodo, ruta)
+            assert r.status_code == 503 and r.json()["error"]["code"] == "services_not_ready", (ruta, r.text)
+    assert "guardados" not in esquema._cache
+    assert _ids(await _lista(app, quien)) == [ident]  # el catálogo no depende de la 0091
+    monkeypatch.setattr(esquema, "_LO_QUE_NECESITAN_LOS_GUARDADOS", buena)
+    async with _cliente(app, quien) as http:
+        assert (await http.post(f"{CATALOGO}/{ident}/save")).status_code == 200
+    assert esquema._cache["guardados"] is True
 
 
 async def test_si_la_tabla_desaparece_con_la_api_en_marcha_el_catalogo_no_cae(mundo) -> None:

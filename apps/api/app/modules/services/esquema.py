@@ -238,19 +238,24 @@ async def exigir_catalogo(db: AsyncSession) -> None:
 # --------------------------------------------------------------------------- #
 # Los guardados (Incremento 3, migración 0091)
 # --------------------------------------------------------------------------- #
-#: LO QUE LA 0091 IMPONE Y EL CÓDIGO DA POR HECHO: la clave (perfil, servicio)
-#: que hace que guardar dos veces sea guardar una, las dos claves ajenas en
-#: cascada (una a cada tabla), el tipo de cada columna, sus dos índices y RLS.
-#: No el número de la migración. (Que no tenga políticas ni permisos sueltos lo
-#: verifica la propia migración, como en la 0090.)
+#: LO QUE LA 0091 IMPONE Y EL CÓDIGO DA POR HECHO, por DEFINICIÓN y no por
+#: nombre: la clave (perfil, servicio) que hace que guardar dos veces sea
+#: guardar una; las dos claves ajenas en cascada (una a cada tabla); cada
+#: columna con su tipo, NOT NULL y, en `created_at`, `now()` (guardar no la
+#: manda: sin ese valor sería un 500); el título entre 1 y 300; los dos índices
+#: con sus columnas y su orden, válidos, listos y sin condición; RLS sin
+#: políticas; y nadie de fuera con permisos: ni `anon` ni `authenticated`
+#: (tampoco por PUBLIC), en la tabla o en una columna. Una lista ajena
+#: legible por PostgREST sería una fuga, no un detalle. No el número de la
+#: migración.
 _LO_QUE_NECESITAN_LOS_GUARDADOS = text(
-    """
+    r"""
     select
       exists (
         select 1 from pg_catalog.pg_index i
          where i.indexrelid = to_regclass('public.saved_services_pkey')
            and i.indrelid = to_regclass('public.saved_services')
-           and i.indisprimary and i.indisunique and i.indnatts = 2
+           and i.indisprimary and i.indisunique and i.indisvalid and i.indnatts = 2
            and (select array_agg(a.attname::text order by k.ord)
                   from unnest(i.indkey) with ordinality k(attnum, ord)
                   join pg_catalog.pg_attribute a
@@ -261,23 +266,66 @@ _LO_QUE_NECESITAN_LOS_GUARDADOS = text(
         select count(*) = 2 and count(distinct c.confrelid) = 2
           from pg_catalog.pg_constraint c
          where c.conrelid = to_regclass('public.saved_services')
-           and c.contype = 'f' and c.confdeltype = 'c'
+           and c.contype = 'f' and c.confdeltype = 'c' and c.convalidated
            and c.confrelid in (to_regclass('public.profiles'), to_regclass('public.services'))
       )
       and (
         select count(*) from pg_catalog.pg_attribute a
-         where a.attrelid = to_regclass('public.saved_services') and not a.attisdropped
-           and (a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)) in (
-             ('profile_id', 'uuid'), ('service_id', 'uuid'), ('title_at_save', 'text'),
-             ('created_at', 'timestamp with time zone')
+          left join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+         where a.attrelid = to_regclass('public.saved_services') and a.attnum > 0 and not a.attisdropped
+           and a.attnotnull
+           and (a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod),
+                coalesce(pg_catalog.pg_get_expr(d.adbin, d.adrelid), '')) in (
+             ('profile_id', 'uuid', ''), ('service_id', 'uuid', ''), ('title_at_save', 'text', ''),
+             ('created_at', 'timestamp with time zone', 'now()')
            )
       ) = 4
-      and to_regclass('public.saved_services_mios') is not null
-      and to_regclass('public.saved_services_del_servicio') is not null
+      and exists (
+        select 1 from pg_catalog.pg_constraint c
+         where c.conrelid = to_regclass('public.saved_services')
+           and c.conname = 'saved_services_titulo' and c.contype = 'c'
+           -- Sin espacios ni paréntesis: lo que cambie de una versión a otra
+           -- de PostgreSQL al escribirla, no lo que dice. Una sin validar no
+           -- coincide: su definición termina en «NOT VALID».
+           and regexp_replace(pg_catalog.pg_get_constraintdef(c.oid), '[\s()]', '', 'g')
+               = 'CHECKlengthTRIMBOTHFROMtitle_at_save>=1ANDlengthTRIMBOTHFROMtitle_at_save<=300'
+      )
+      and (
+        select count(*) from pg_catalog.pg_index i
+          join pg_catalog.pg_class x on x.oid = i.indexrelid
+          join pg_catalog.pg_am m on m.oid = x.relam
+         where i.indrelid = to_regclass('public.saved_services')
+           and m.amname = 'btree' and not i.indisunique
+           and i.indisvalid and i.indisready and i.indislive
+           and i.indpred is null and i.indexprs is null
+           and (x.relname, (select array_agg(a.attname::text
+                                  || case when i.indoption[k.ord - 1] & 1 = 1 then ' desc' else '' end
+                                  order by k.ord)
+                              from unnest(i.indkey) with ordinality k(attnum, ord)
+                              join pg_catalog.pg_attribute a
+                                on a.attrelid = i.indrelid and a.attnum = k.attnum)) in (
+             ('saved_services_mios', array['profile_id', 'created_at desc', 'service_id desc']),
+             ('saved_services_del_servicio', array['service_id'])
+           )
+      ) = 2
       and coalesce(
         (select c.relrowsecurity from pg_catalog.pg_class c
           where c.oid = to_regclass('public.saved_services')),
         false
+      )
+      and not exists (
+        select 1 from pg_catalog.pg_policy p where p.polrelid = to_regclass('public.saved_services')
+      )
+      -- Permisos EFECTIVOS: cubren también lo concedido a PUBLIC (todo rol
+      -- tiene lo de PUBLIC).
+      and not exists (
+        select 1 from pg_catalog.pg_roles r
+         where r.rolname in ('anon', 'authenticated')
+           and (pg_catalog.has_table_privilege(
+                  r.oid, to_regclass('public.saved_services'),
+                  'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                or pg_catalog.has_any_column_privilege(
+                  r.oid, to_regclass('public.saved_services'), 'SELECT, INSERT, UPDATE, REFERENCES'))
       )
     """
 )
