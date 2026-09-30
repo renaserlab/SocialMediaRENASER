@@ -519,18 +519,20 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         # 0093: la reserva cuelga del servicio y cae en cascada con él (si no
         # está POR VENIR: eso lo impide un disparador). Quien contrata queda
         # en NULL con su baja; lo que escribió para la atención se va con él.
+        # Las claves al PRESTADOR no borran nada (y se comprueban al
+        # confirmar): su baja llega aquí por un solo camino, el del servicio.
         ("service_holds", "services", "c"),
         ("service_holds", "service_versions", "c"),
         ("service_holds", "profiles", "n"),
         ("service_orders", "services", "c"),
         ("service_orders", "service_versions", "c"),
-        ("service_orders", "service_providers", "c"),
+        ("service_orders", "service_providers", "a"),
         ("service_orders", "profiles", "n"),
         ("service_bookings", "service_orders", "c"),
         ("service_bookings", "service_holds", "c"),
         ("service_bookings", "services", "c"),
         ("service_bookings", "service_versions", "c"),
-        ("service_bookings", "service_providers", "c"),
+        ("service_bookings", "service_providers", "a"),
         ("service_bookings", "profiles", "n"),
         ("service_booking_intakes", "service_bookings", "c"),
         ("service_booking_intakes", "profiles", "c"),

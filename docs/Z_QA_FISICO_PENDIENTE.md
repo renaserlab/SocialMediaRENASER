@@ -1648,3 +1648,109 @@ Antes de empezar:
 - [ ] Todas las áreas táctiles se tocan con el pulgar (fechas y horarios de
       al menos 44 puntos).
 - [ ] En inglés y portugués no queda ningún texto en español ni códigos.
+
+## Z Servicios · Incremento 5 — reserva y contratación (30/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono, y la 0093 NO está
+aplicada en Supabase.** Las pruebas automáticas cubren la migración, el
+dominio, las carreras contra PostgreSQL, la API, el recorrido integral con la
+API real reiniciada (63 de 63 comprobaciones) y el código de las pantallas
+(`Z_SERVICIOS_ARQUITECTURA.md` §76).
+
+Antes de empezar:
+
+- **Aplicar la 0093** en la base del QA y verificarla
+  (`Z_SERVICIOS_ARQUITECTURA.md` §74–§75), y **reiniciar la API** después:
+  la puerta recuerda el «no».
+- La API de ese entorno corre el código de `Edson` con `FEATURE_SERVICES=true`
+  y `FEATURE_SERVICE_BOOKING=true` **solo allí**. `FEATURE_SERVICE_PAYMENTS`
+  apagada y `SERVICE_PAYMENTS_PROVIDER=none`, como en todas partes.
+- En administración, **publicar unas condiciones de contratación de prueba**
+  para el país del prestador de ese entorno (no las de producción: el texto
+  real es de la empresa, F9).
+- Un prestador aprobado con: un servicio **gratuito** en línea (60 min, 15 de
+  descanso, agenda de 09:00 a 12:00), uno con **precio fijo**, uno **a
+  consultar** y uno **de grupo** (2 plazas). Dos personas sin prestador, con
+  dos teléfonos.
+
+### Con una bandera apagada o sin la 0093
+
+- [ ] Con `FEATURE_SERVICE_BOOKING` apagada: los horarios se ven como en el
+      Incremento 4, con «Todavía no se puede contratar desde Z» y sin
+      «Continuar». «Mis reservas» dice que las reservas aún no están
+      disponibles. Nada se rompe.
+- [ ] Con la bandera encendida y SIN la 0093: igual; en administración,
+      «Nuevo borrador» de las condiciones de contratación dice que no se
+      pudo, sin cerrarse la app.
+
+### Contratar lo gratuito
+
+- [ ] Ficha › «Ver horarios» › elegir las 09:00: «Elegido, todavía no
+      apartado» y «Apartar este horario y continuar».
+- [ ] Continuar: «Tus datos» con la cuenta atrás desde 10:00 («Apartado para
+      ti…»). En línea no pide dirección.
+- [ ] En el otro teléfono, ese día ya no ofrece las 09:00.
+- [ ] Escribir una nota › «Revisar el resumen»: servicio, día y hora con su
+      zona, modalidad, duración, «Gratis», versión y huella de las
+      condiciones. «Leer las condiciones completas» y volver: las casillas
+      siguen como estaban.
+- [ ] «Confirmar» sin marcar las casillas: apagado. Marcarlas y confirmar:
+      «Tu reserva está confirmada», el código y «No se cobró nada».
+- [ ] Con la casilla marcada, publicar desde administración otra versión de
+      las condiciones y volver al resumen (o salir de la app y volver): la
+      casilla aparece **sin marcar**, con la versión nueva; «Confirmar»,
+      apagado hasta volver a marcarla.
+- [ ] Doble toque en «Confirmar» o en «Apartar»: una sola reserva y una sola
+      retención.
+- [ ] Mis reservas › «Por venir»: la reserva; su detalle, con lo aceptado y
+      el historial («Horario apartado», «Se confirmó la reserva»).
+- [ ] La bandeja de avisos: «Tu reserva está confirmada» lleva a la reserva.
+      El prestador recibe «Tienes una reserva nueva», que lleva a la de su
+      bandeja. Ningún aviso dice la nota.
+
+### Lo que se detiene, vence o cambia
+
+- [ ] Precio fijo: se aparta, el resumen dice «Todavía no se puede pagar en
+      Z» y no hay «Confirmar»; «Soltar este horario» lo libera. Nada se cobra
+      ni se pide una tarjeta.
+- [ ] «A consultar»: los horarios no ofrecen «Continuar».
+- [ ] Dejar vencer los 10 minutos en «Tus datos»: «El tiempo para confirmar
+      terminó» y «Elegir otro horario». El otro teléfono vuelve a ver la hora.
+- [ ] Con el teléfono con la hora mal puesta (adelantada 1 hora), la cuenta
+      atrás sigue diciendo 10 minutos.
+- [ ] Los dos teléfonos tocan «Apartar» a la vez en el mismo horario: uno lo
+      consigue; al otro le dice «Otra persona tomó ese horario» y vuelve a
+      elegir.
+- [ ] El grupo de 2 plazas: dos personas lo consiguen; la tercera, no.
+- [ ] Mientras alguien lee el resumen, publicar en administración otra
+      versión de las condiciones: al confirmar, «Algo cambió…» y el resumen
+      enseña la versión nueva.
+- [ ] Sin condiciones publicadas para el país: el resumen dice «Todavía no
+      hay condiciones de contratación» y no se confirma.
+- [ ] Con la app cerrada a mitad (en «Tus datos»), al volver lo escrito no
+      está (a propósito) y la retención sigue o venció, según el tiempo.
+
+### El prestador y administración
+
+- [ ] Área del prestador › «Reservas de mis servicios»: la reserva, con el
+      nombre público de quien contrata y su nota; nunca su correo ni su
+      teléfono. Otro prestador no la ve (no aparece; con el enlace, «No
+      encontramos esa reserva»).
+- [ ] Con el prestador **suspendido** desde administración: su área sigue
+      enseñando «Reservas de mis servicios» y sus reservas por venir.
+- [ ] Administración › Servicios › «Reservas y retenciones»: reservas y
+      retenciones por estado, sin nombres, notas ni direcciones. «Liberar las
+      vencidas» pide confirmación y dice cuántas marcó; repetirlo, 0.
+- [ ] Administración › «Condiciones de contratación»: crear, editar,
+      previsualizar y publicar sin campos de documentos ni credenciales.
+- [ ] Una persona con una reserva por venir intenta borrar su cuenta: no se
+      puede todavía, y se le dice.
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: la cuenta atrás no se anuncia cada segundo,
+      sí al vencer; las casillas de las condiciones se anuncian como casillas;
+      las pestañas «Por venir» y «Pasadas», como opciones.
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos
+      (`service_…`, `hold_…`), ni un «0» o «Gratis» donde el precio es a
+      consultar.

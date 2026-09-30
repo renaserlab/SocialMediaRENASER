@@ -781,3 +781,47 @@ y se dice que el horario no queda apartado.
 Reservas, retenciones, contratación, pagos, mensajes por reserva, check-in,
 sesiones, incidencias, devoluciones, reseñas que crear, finanzas y calendarios
 externos. La ficha sigue sin botón de contratar.
+
+## Servicios · Incremento 5: reserva y contratación (30/09/2026)
+
+Backend real detrás de `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` (las dos
+apagadas). Usa la **0093, SIN APLICAR** (`Z_SERVICIOS_ARQUITECTURA.md` §74);
+el código sigue sin desplegar y ninguna de estas vistas se probó todavía en un
+teléfono (QA físico pendiente). Sin la 0093 o con la contratación apagada, los
+horarios no ofrecen «Continuar» (`booking_available` es falso) y las rutas
+contestan 503. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
+`serviciosReservaVistas.test.mts`.
+
+Servicios › ficha › «Ver horarios» › elegir › «Apartar este horario y
+continuar» › tus datos › resumen (⇄ condiciones) › reserva confirmada. Y
+Servicios › «Mis reservas»; área del prestador › «Reservas de mis servicios»;
+administración de Servicios › «Reservas y retenciones» y «Condiciones de
+contratación».
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Selección del horario, con «Continuar» solo si el servidor deja | `HorariosDelServicioScreen` (`app/servicios/horarios/[serviceId].tsx`) | `GET …/availability` (`booking_available`), `POST /services/catalog/{id}/holds` |
+| 2 | Tus datos: nota y, a domicilio, la dirección; cuenta atrás | `DatosDeLaContratacionScreen` (`app/servicios/contratar/[holdId]/index.tsx`) | `GET /services/holds/{id}/checkout`, `POST …/release` |
+| 3 | Resumen: servicio, horario, modalidad, precio, condiciones, por qué no | `ResumenDeLaContratacionScreen` (`…/[holdId]/resumen`) | `GET …/checkout`, `POST …/confirm`, `POST …/release` |
+| 4 | Condiciones completas (de Z y del servicio), con versión y huella | `CondicionesDeLaContratacionScreen` (`…/[holdId]/condiciones`) | `GET …/checkout` |
+| 5 | Confirmada / con precio, detenida | `ReservaScreen` con `?confirmada=1` / el estado «Todavía no se puede pagar en Z» del resumen | `POST …/confirm` (201 / 503) |
+| 6 | Mis reservas (por venir, pasadas) | `MisReservasScreen` (`app/servicios/reservas/index.tsx`) | `GET /services/me/bookings` |
+| 7–8 | Detalle, lo aceptado e historial | `ReservaScreen` (`app/servicios/reservas/[bookingId].tsx`) | `GET /services/me/bookings/{id}` |
+| 9 | Reservas de mis servicios (prestador activo o suspendido) | `ReservasDelPrestadorScreen` (`app/servicios/prestador/reservas/index.tsx`) | `GET /services/provider/bookings` |
+| 10 | Detalle limitado del prestador | `ReservaDelPrestadorScreen` (`…/prestador/reservas/[bookingId]`) | `GET /services/provider/bookings/{id}` |
+| 11 | Supervisión de reservas y retenciones (A04) y el barrido | `AdminReservasDeServiciosScreen` (`app/admin/servicios/reservas.tsx`) | `GET /admin/services/bookings`, `GET /admin/services/holds`, `POST /admin/services/holds/expire` |
+| + | Condiciones de contratación | `AdminServiciosCondicionesScreen tipo="booking_terms"` (`app/admin/servicios/condiciones-de-contratacion.tsx`) | `GET /admin/services/policies?kind=booking_terms`, `POST …/booking-terms/draft`, editar, previsualizar y publicar |
+
+### A dónde llevan los avisos
+
+| Aviso | A quién | Destino |
+|---|---|---|
+| `service_booking_confirmed` | Quien contrata | `/servicios/reservas/{id}` |
+| `service_booking_received` | El prestador | `/servicios/prestador/reservas/{id}` |
+
+### Lo que sigue sin existir, a propósito
+
+Cobro, pasarela, «pendiente de pago», cancelar, reprogramar, la aceptación del
+prestador (a domicilio), recordatorios, aviso de vencimiento, mensajes por
+reserva, asistencia, reseñas de lo contratado, comprobantes, devoluciones y
+finanzas del prestador. El push abre la aplicación, no la reserva.

@@ -93,7 +93,10 @@ Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
 antes de usarla, y sigue funcionando cuando no lo está. Al 30/09/2026 la
-última **escrita y aplicada** es la **0092** (disponibilidad y agenda,
+última **escrita** es la **0093** (reserva y contratación, Incremento 5 de
+Servicios), **SIN APLICAR**: probada solo contra PostgreSQL local; los pasos
+para aplicarla y verificarla están en [`Z_SERVICIOS_ARQUITECTURA.md` §74–§75](Z_SERVICIOS_ARQUITECTURA.md),
+y al aplicarla hay que **reiniciar la API**. La última **escrita y aplicada** es la **0092** (disponibilidad y agenda,
 Incremento 4 de Servicios), ejecutada a mano y verificada ese día en solo
 lectura **sin divergencias**, también con la puerta de esquema y el rol real
 de la API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §61](Z_SERVICIOS_ARQUITECTURA.md).
@@ -161,7 +164,13 @@ Todas nacen apagadas y se encienden por entorno.
 | `feature_product_sales` | Comprar un producto físico. **Encenderla sola no basta**: ver `pedidos.por_que_no_se_puede_vender`. |
 | `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
-| `feature_services` | Z Servicios: la admisión de prestadores, el catálogo, el descubrimiento y la agenda (Incrementos 1–4). **Apagada por defecto** (`False`). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni reservas**, que no existen: la agenda enseña horarios posibles y no aparta ninguno. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
+| `feature_services` | Z Servicios: la admisión de prestadores, el catálogo, el descubrimiento, la agenda y la reserva (Incrementos 1–5). **Apagada por defecto** (`False`). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni la contratación**: esta necesita además `feature_service_booking`. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
+| `feature_service_booking` | Contratar Servicios: apartar un horario, confirmar lo **gratuito** y consultar reservas (Incremento 5). **Apagada por defecto.** Necesita `feature_services` y la 0093; apagada, sus rutas contestan 503 `service_booking_disabled` sin mirar la base y los horarios no ofrecen «Continuar». **No cobra nada.** |
+| `feature_service_payments` | Cobrar un servicio. **Apagada.** Encenderla no basta: no hay adaptador (`ADAPTADORES_DE_COBRO` vacío) y la 0093 solo admite pedidos gratuitos. Lo que tiene precio contesta 503 `service_booking_payments_not_configured`. |
+| `service_payments_provider` | La pasarela de Servicios. **`none`**. |
+| `services_booking_hold_minutes` | Cuánto dura un horario apartado. **10** (provisional; decisión F1). |
+| `services_booking_max_active_holds` | Cuántos horarios apartados a la vez por persona. **3** (provisional; decisión F2). |
+| `services_booking_instant_modalities` | Modalidades que se confirman sin el prestador. **`virtual,in_person`**: a domicilio necesita su aprobación, que no existe (decisión F3). |
 | `services_agenda_notice_minutes` | Antelación mínima de un horario de Servicios. **120** (provisional del documento de reglas; decisión E1). |
 | `services_agenda_horizon_days` | Hasta cuántos días por delante se ofrecen horarios. **60** (provisional; decisión E2). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |

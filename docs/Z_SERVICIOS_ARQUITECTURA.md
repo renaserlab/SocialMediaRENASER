@@ -1,4 +1,4 @@
-# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2), descubrimiento (Incremento 3) y agenda (Incremento 4)
+# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2), descubrimiento (Incremento 3), agenda (Incremento 4) y reserva (Incremento 5)
 
 Qué se construyó, qué impone la base, qué se decidió en cerrado y qué sigue
 esperando a una persona. La Parte I se escribió el 29/09/2026 al cerrar el
@@ -7,7 +7,9 @@ día, con el Incremento 2 implementado y probado; la **Parte III** (§33 en
 adelante), también ese día, con el Incremento 3 implementado y probado; y la
 **Parte IV** (§50 en adelante), el 30/09/2026, con el Incremento 4
 implementado y probado y, ese mismo día, técnicamente cerrado con la 0092
-aplicada y verificada (§61).
+aplicada y verificada (§61); y la **Parte V** (§62 en adelante), también el
+30/09/2026, con el Incremento 5 implementado y probado y la **0093 sin
+aplicar**.
 
 ## Estado
 
@@ -23,10 +25,12 @@ aplicada y verificada (§61).
 | **Migración 0091** | **APLICADA** a mano en Supabase y verificada el 29/09/2026 en solo lectura: **sin divergencias** (§49). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
 | **Incremento 4 (disponibilidad y agenda)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§61). Agenda por servicio, semana, excepciones, bloqueos privados y horarios calculados por el servidor |
 | **Migración 0092** | **APLICADA** a mano en Supabase y verificada el 30/09/2026 en solo lectura: **sin divergencias** (§61). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita. Al desplegar `Edson`, reiniciar la API |
-| **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa: la agenda enseña horarios posibles y no aparta ninguno. Los pagos de la plataforma siguen **apagados** |
+| **Incremento 5 (reserva y contratación)** | **implementado y probado; pendiente de aplicar y verificar la migración 0093 y de realizar el QA físico** (§62). Retener, resumen, condiciones versionadas, confirmar lo gratuito, mis reservas, la bandeja del prestador y la supervisión |
+| **Migración 0093** | **SIN APLICAR.** Probada solo en PostgreSQL local. Pasos en §74 y verificación en §75. Al aplicarla, reiniciar la API |
+| **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
-| **QA físico** | pendiente de los cuatro incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
+| **QA físico** | pendiente de los cinco incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
 
 ## 1. Lo que NO es
 
@@ -2429,3 +2433,497 @@ cambiarla sería editar lo aplicado.
   Servicios (D6).
 - El **push** de un aviso todavía no lleva al destino (§32).
 - **No se empezó el Incremento 5** (§60).
+
+# Parte V · Incremento 5: reserva y contratación protegida
+
+Escrito el 30/09/2026 en la rama `Edson`, con el Incremento 5 **implementado y
+probado** y la **0093 SIN APLICAR**. Nada de esta parte está en Supabase ni en
+producción. **No está cerrado**: falta aplicar y verificar la 0093 (§74, §75)
+y el QA físico (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 5»).
+
+## 62. Estado del Incremento 5
+
+| | |
+|---|---|
+| **Qué hace** | Una persona elige un horario de un servicio público, lo **aparta** unos minutos, escribe solo lo necesario, revisa servicio, horario, modalidad, precio y condiciones, **acepta una versión concreta** de las condiciones y **confirma**: nacen juntos el pedido, la reserva, lo aceptado y el historial. Consulta sus reservas y su detalle; el prestador, las de sus servicios; administración, lo operativo |
+| **Migración 0093** | **SIN APLICAR.** Probada solo contra PostgreSQL 17 local (§76). Pasos exactos en §74; verificación en §75 |
+| **Sin la 0093** | Las 12 rutas de la reserva y la de las condiciones de contratación contestan **503 `services_not_ready`**, sin escribir nada; el calendario público dice `booking_available: false` y la app no ofrece «Continuar». Los Incrementos 1–4 siguen igual |
+| **Banderas** | `FEATURE_SERVICES` **apagada**; `FEATURE_SERVICE_BOOKING` **apagada** (nueva); `FEATURE_SERVICE_PAYMENTS` **apagada** (nueva); `SERVICE_PAYMENTS_PROVIDER=none` (nueva). Con Servicios apagado: 503 `services_disabled`; con la contratación apagada: 503 `service_booking_disabled`. Las dos, **antes de mirar la base** |
+| **Dinero** | **Ninguno.** Solo se contrata lo **gratuito**. Lo que tiene precio se aparta y se detiene: 503 `service_booking_payments_not_configured`, sin pedido ni reserva. «A consultar» y «desde» no se apartan (409). La base **no admite** un pedido con precio, cobro o pasarela |
+| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
+| **QA físico** | **pendiente** (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 5») |
+| **Incremento 6** | **no se empezó** (§78) |
+
+## 63. El modelo (6 tablas, 0093)
+
+| Tabla | Qué es |
+|---|---|
+| `service_holds` | **La retención: el registro que OCUPA.** Servicio, versión, persona, inicio y fin, lo que ocupa con preparación y descanso (`occupied_from`/`occupied_until`), zona, fecha local, modalidad, capacidad y plaza **congeladas**, vencimiento. Estados `active` → `consumed` / `released` / `expired` |
+| `service_orders` | **El pedido**: lo comercial. Solo `free`, `payment_status = not_required`, `payment_provider = none`, sin importe ni moneda y total 0; entorno `sandbox`/`production` congelado; título y prestador congelados |
+| `service_bookings` | **La reserva**: la cita, con su código (`ABCD-2345`, sin 0/O/1/I) y su **fotografía**: servicio, versión, prestador, persona, inicio y fin, ocupación, zona, fecha local, modalidad, duración, separación antes y después, capacidad y plaza, título, prestador y zona pública |
+| `service_booking_intakes` | **Lo que pide la atención**: una nota y, a domicilio, distrito, dirección y referencia. Privado: solo quien contrata y su prestador |
+| `service_booking_acceptances` | **Lo aceptado**: las condiciones de Z (id, versión y huella de `service_policies`) y las del servicio (la versión publicada y su huella), con quién y cuándo |
+| `service_booking_events` | **El historial**, solo se añade: acción, de qué estado a cuál, quién (persona o sistema), la clave de idempotencia (única por persona) y detalles **sin nota ni dirección** |
+
+La fotografía del precio está en el pedido (modelo, importe, moneda, total,
+estado del pago, pasarela y entorno); la de las condiciones, en lo aceptado.
+Juntas cubren todo lo que el incremento pide congelar. **Una reserva nunca
+lee la versión de hoy**: cambiar el servicio no cambia la reserva.
+
+**Las claves de pedidos y reservas al prestador no borran nada y se
+comprueban al confirmar la transacción** (`deferrable initially deferred`).
+La baja de quien presta llega a sus pedidos y reservas por **un solo
+camino**, el del servicio (como en la 0090). Con dos caminos en cascada, el
+orden de los disparadores (el de sus OID, distinto en cada base) decidía si
+la baja funcionaba (hallazgo R4 de la revisión, §76).
+
+## 64. La doble reserva la impide la BASE
+
+Una sola autoridad para «qué está ocupado»: **las retenciones `active` y
+`consumed`**. Una retención confirmada no desaparece: pasa a `consumed` y
+sigue ocupando por su reserva.
+
+- **Exclusión `service_holds_sin_cruces`** (`btree_gist`): dos sesiones
+  **distintas** (otro inicio) del mismo servicio no pueden ocupar a la vez,
+  contando preparación y descanso **congelados**.
+- **`service_holds_una_plaza`**: una plaza no se da dos veces; **CHECK** plaza
+  ≤ capacidad congelada.
+- **`service_holds_una_por_persona`**: una persona, una plaza por sesión.
+- **`service_holds_una_activa`**: una persona, una retención activa por
+  servicio (elegir otro horario del mismo servicio suelta el anterior en la
+  misma transacción, y solo si el nuevo se consigue).
+- **Disparadores diferidos** (al confirmar la transacción): ningún pedido sin
+  su reserva ni sin las condiciones de Z aceptadas; ninguna reserva sin su
+  retención consumida y su pedido confirmado (y coherentes entre sí); ninguna
+  retención consumida sin su reserva. Una interrupción entre el pedido y la
+  reserva no deja nada: se deshace todo.
+- **Saltos de estado** con su disparador: `active` → `consumed` | `released`
+  | `expired`; los finales no vuelven. Lo contratado no se reescribe ni se
+  borra suelto.
+
+El cálculo público (`agenda_calculo.horarios_del_dia`) es el **mismo** que
+revalida al retener y al confirmar: lee las ocupaciones (una sesión ajena que
+se cruza con su separación quita el horario; la misma sesión cuenta plazas) y
+nunca ofrece un horario que la base rechazaría (prueba con 300 agendas al
+azar). La base es la última palabra: si dos llegan a la vez, una gana y la
+otra recibe **409 `service_slot_not_available`**.
+
+**Orden de los cerrojos**: la fila del servicio (`FOR NO KEY UPDATE`, con
+`lock_timeout` de 5 s: si no llega, **409 `service_booking_busy`**, nunca un
+500) → la fila de la retención → un cerrojo de la persona, para su tope y
+para su clave de idempotencia.
+
+- **`FOR NO KEY UPDATE` y no `FOR UPDATE`**: sigue en fila con las demás
+  contrataciones y con quien edita el servicio, pero no choca con la
+  comprobación de una clave ajena (`FOR KEY SHARE`). El barrido bloquea una
+  retención, la vence y después escribe su línea del historial; con `FOR
+  UPDATE`, quien tenía el servicio y esperaba esa retención y el barrido se
+  esperaban el uno al otro (40P01, y un 500). Hallazgo R2.
+- **La persona, en fila también al confirmar y al soltar**: la misma clave a
+  la vez en dos retenciones de servicios distintos no compartía ningún otro
+  cerrojo y la segunda chocaba con el índice único (23505, y un 500).
+  Hallazgo R3.
+- **Última red**: un 55P03 o un 40P01 son 409 `service_booking_busy`.
+
+## 65. Retener, soltar, vencer y confirmar
+
+**Retener** (`POST /services/catalog/{id}/holds`): el horario se vuelve a
+calcular con la agenda de ahora; antes, las retenciones vencidas de ese
+servicio se marcan vencidas **en la misma transacción**. 201 con la
+retención, su `expires_at`, la hora del servidor y `seconds_left`. La misma
+clave con lo mismo devuelve la misma (200, **sin alargarla**); con otra cosa,
+**409 `idempotency_key_reused`**. El mismo horario ya apartado por la misma
+persona con otra clave: **409 `service_hold_already_active`** con su id. Tope
+de retenciones activas por persona (3, configurable): **409
+`service_hold_limit_reached`**.
+
+**Vencer**: lo decide la HORA, no una limpieza. Una `active` cuyo plazo pasó
+se lee `expired`, no ocupa en el cálculo, no se confirma (**409
+`service_hold_expired`**) y se marca al retener otra del mismo servicio. El
+**barrido** (`POST /admin/services/holds/expire`, solo administración) marca
+las vencidas por lotes (200, hasta 1000) con `SKIP LOCKED` y deja su línea
+(`hold_expired`, actor `system`); repetirlo no hace nada. **Nadie lo llama
+todavía**: sin cron, Lambda ni EventBridge (decisión de la empresa, F13).
+
+**Soltar** (`POST /services/holds/{id}/release`): 200; soltar lo soltado o lo
+vencido es lo mismo; lo reservado no se suelta (409).
+
+**Resumen** (`GET /services/holds/{id}/checkout`): solo lectura. Servicio y
+horario **de la retención**, precio, forma de contratar (`free`, `paid`,
+`quote_required`, `price_not_closed`), si se puede confirmar y por qué no
+(`blockers`), las condiciones de Z **vigentes** (id, versión, título, texto,
+huella), las del servicio (texto y huella), si pide dirección y los largos.
+
+**Confirmar** (`POST /services/holds/{id}/confirm`): en fila con el servicio,
+se comprueba OTRA VEZ todo: la retención (suya, activa, a tiempo), el
+servicio (público para esa persona), **la misma versión** que retuvo (si no,
+**409 `service_booking_version_changed`**), el precio (solo gratis), la
+modalidad (se confirma sola), las condiciones (**las vigentes, por su id y su
+huella**; si cambiaron, **409 `service_booking_terms_changed`**; si no hay,
+**409 `service_booking_terms_unavailable`**), los datos y EL HORARIO (el
+cálculo de ahora, sin contarse a sí misma; la antelación y el horizonte, desde
+que se retuvo; y **una sesión que ya empezó no se confirma**, aunque la
+retención siga viva: 409 `service_slot_not_available`, hallazgo R6). Nacen el
+pedido, la reserva (con código único), los datos de
+la atención, lo aceptado, la retención consumida, la línea del historial y los
+dos avisos. La misma clave con lo mismo: la misma reserva (200). Confirmar
+otra vez con otra clave: **409 `service_hold_already_consumed`** con el id de
+la reserva.
+
+## 66. Estados: una autoridad, en la base
+
+| | Estados | Quién cambia | Finales |
+|---|---|---|---|
+| Retención | `active`, `consumed`, `released`, `expired` | Confirmar (persona), soltar (persona), vencer (sistema: al retener otra o al barrer) | `consumed`, `released`, `expired` |
+| Pedido | `confirmed` | Nace confirmado (solo gratis) | sí |
+| Reserva | `confirmed` | Nace confirmada | sí |
+
+No hay `pending_payment` porque **no hay cobro**: la base no admite un pedido
+con precio (§68). No hay cancelación: la política es de la empresa (F6) y
+llegará con su propio estado y su historial. Cada salto: una función del
+dominio, su comprobación en la base, su línea en el historial con el actor y
+su idempotencia.
+
+## 67. Las condiciones de contratación
+
+Un **tipo nuevo** de `service_policies`: `booking_terms` (la 0093 amplía su
+CHECK, como la 0086 prevé). Se escriben y publican con las mismas rutas y la
+misma pantalla que las del prestador (`/admin/services/policies?kind=booking_terms`,
+`POST /admin/services/policies/booking-terms/draft`), **sin parámetros**. Una
+por país del prestador; publicar una supera la anterior en la misma
+transacción.
+
+**Sin una publicada para el país del prestador no se confirma ninguna
+reserva.** **No se publicó ninguna**: el texto es de la empresa (F9). La
+persona acepta **una versión concreta** (id + huella); si se publica otra
+mientras lee, confirmar da 409 y la app vuelve a enseñar la nueva. **En la app,
+la casilla «Acepto» guarda la versión y la huella que se veían al marcarla**,
+no un «sí»: si el resumen trae otras, aparece sin marcar y no se manda nada
+(antes, un borrador marcado con la v1 confirmaba la v2 sin que nadie la
+aceptara; hallazgo R1). Lo aceptado queda en `service_booking_acceptances`
+para siempre.
+
+La creación del borrador exige la 0093 (sin ella, 503; antes de la revisión
+era un 500 por el CHECK de la 0086) y **no** la bandera de la contratación: la
+empresa puede preparar el texto antes de abrirla.
+
+## 68. El dinero: nada se cobra, y nada se finge
+
+- `feature_service_payments=False`, `service_payments_provider="none"` y
+  **ningún adaptador** (`ADAPTADORES_DE_COBRO = {}`): `cobro_disponible()` es
+  falso, y lo sería aunque se encendieran las banderas.
+- **Gratuito**: pedido `free`, `not_required`, `none`, total 0.
+- **Precio fijo**: se aparta (para que la persona vea el resumen), se detiene:
+  503 `service_booking_payments_not_configured`; ni pedido, ni reserva, ni un
+  «pagado». La retención vence sola o se suelta.
+- **«Desde»**: 409 `service_booking_price_not_closed`; **«a consultar»**: 409
+  `service_booking_quote_required`. Ninguno se aparta, y la app no ofrece
+  «Continuar». **Nunca se tratan como gratis ni como 0.**
+- **La base** solo admite pedidos `free` / `not_required` / `none` sin importe:
+  aunque el código fallara, no podría guardarse un cobro fingido.
+- Ninguna tabla de dinero de la plataforma (`orders`, `payment_*`,
+  `owner_*`, `refund_requests`, `product_*`, `event_orders`, `bookings`) cambia
+  (lo comprueban las pruebas y el recorrido).
+
+## 69. Privacidad
+
+- **Solo lo necesario**: una nota opcional (500) y, **a domicilio**, distrito
+  (100), dirección (200) y referencia opcional (200). En línea o presencial,
+  una dirección es un **422**: no se guarda lo que no hace falta.
+- **A domicilio no se confirma sola** hoy (`SERVICES_BOOKING_INSTANT_MODALITIES
+  = virtual,in_person`): 409 `service_booking_provider_confirmation_required`
+  (F3). Probado encendiéndolo solo en la prueba.
+- La nota y la dirección **solo** las ven quien contrata y su prestador, y
+  solo en una reserva válida. Nunca en el historial, los avisos, la
+  administración, lo público ni la ruta de la app (viajan en memoria).
+- El prestador ve la **identidad pública** de quien contrata (usuario y
+  nombre), **nunca** correo ni teléfono.
+- **Lo ajeno es 404** (retención, reserva, detalle del prestador); sin sesión,
+  401; administración, solo `admin` (403 el resto).
+- **La baja**: una reserva **por venir** impide borrar la cuenta de quien
+  contrata o de quien presta (409 `account_deletion_blocked`); con las
+  pasadas, quien contrata queda en `NULL` y su nota y su dirección se borran.
+  La baja de **quien presta** se lleva, como en la 0090, sus servicios y con
+  ellos sus reservas **pasadas**, incluido lo que aceptó quien contrató: si
+  eso debe conservarse es una decisión de la empresa (F21).
+
+## 70. La API (12 rutas + 1) y la puerta
+
+| Ruta | Quién | Qué |
+|---|---|---|
+| `POST /services/catalog/{id}/holds` | persona | Apartar (Idempotency-Key) |
+| `GET /services/holds/{id}` | persona | La retención, con `server_now` y `seconds_left` |
+| `POST /services/holds/{id}/release` | persona | Soltar (Idempotency-Key) |
+| `GET /services/holds/{id}/checkout` | persona | El resumen |
+| `POST /services/holds/{id}/confirm` | persona | Contratar lo gratuito; con precio, 503 (Idempotency-Key) |
+| `GET /services/me/bookings` | persona | Mis reservas (`upcoming`/`past`, cursor) |
+| `GET /services/me/bookings/{id}` | persona | Detalle, lo aceptado e historial |
+| `GET /services/provider/bookings` | prestador | Las de sus servicios (cursor) |
+| `GET /services/provider/bookings/{id}` | prestador | Detalle limitado |
+| `GET /admin/services/holds` | admin | Retenciones por estado (cursor) |
+| `GET /admin/services/bookings` | admin | Reservas (cursor), sin nada privado |
+| `POST /admin/services/holds/expire` | admin | El barrido (lotes) |
+| `POST /admin/services/policies/booking-terms/draft` | admin | Borrador de las condiciones de contratación |
+
+- **Paginación por cursor** con orden total estable (`starts_at`, `id`):
+  por venir de la más próxima; pasadas de la más reciente. Un cursor inválido
+  es 422.
+- **Idempotency-Key obligatoria** en retener, soltar y confirmar (sin ella,
+  422 `idempotency_key_required`); una por persona en la base. El barrido no
+  la lleva: no tiene identidad y repetirlo no hace nada.
+- **Códigos estables** (22), traducidos en la app; **ningún 500** (las
+  carreras, los cerrojos y la puerta están probados).
+- **La puerta `hay_reservas`**: 91 columnas, 6 claves primarias, 21 claves
+  foráneas con sus reglas de borrado (diferidas solo las dos al prestador),
+  4 restricciones únicas, la exclusión
+  palabra por palabra, 42 CHECK con su huella, 14 definiciones de índice y los
+  25 índices válidos y listos, 15 disparadores (3 diferidos) con su función,
+  7 funciones por su huella, el CHECK de los tipos de política, `btree_gist`,
+  RLS, sin políticas ni privilegios. Recuerda el «sí» y el «no» hasta
+  reiniciar; un error al mirar no se recuerda (503).
+
+## 71. Vistas y navegación (móvil)
+
+| # | Vista | Ruta |
+|---|---|---|
+| 1 | Horarios (Inc. 4) con «Continuar» (aparta) | `/servicios/horarios/[serviceId]` |
+| 2 | Tus datos | `/servicios/contratar/[holdId]` |
+| 3 | Resumen y confirmación | `/servicios/contratar/[holdId]/resumen` |
+| 4 | Condiciones completas | `/servicios/contratar/[holdId]/condiciones` |
+| 5 | Reserva confirmada / con precio, detenida | la reserva con `?confirmada=1` / el estado «todavía no se puede pagar» del resumen |
+| 6 | Mis reservas | `/servicios/reservas` |
+| 7–8 | Detalle e historial | `/servicios/reservas/[bookingId]` |
+| 9 | Reservas de mis servicios | `/servicios/prestador/reservas` |
+| 10 | Detalle limitado del prestador | `/servicios/prestador/reservas/[bookingId]` |
+| 11 | Supervisión (A04) | `/admin/servicios/reservas` |
+| + | Condiciones de contratación (administración) | `/admin/servicios/condiciones-de-contratacion` |
+
+- **Elegido ≠ apartado ≠ reservado**: tres palabras y tres estados en los
+  tres idiomas.
+- **La cuenta atrás es la del servidor**: `seconds_left` menos lo que pasó
+  desde que llegó la respuesta; un teléfono con la hora mal no cambia nada. Se
+  anuncia al vencer, no cada segundo.
+- **Antes de confirmar se vuelve a leer el resumen**; si cambiaron las
+  condiciones (las de Z o las del servicio, por versión o huella) o ya no se
+  puede, no se manda nada. **La casilla «Acepto» es de la versión que se ve**.
+- **Un 409 que invalida el horario vuelve a elegir**; uno ya apartado sigue
+  con esa retención.
+- **Claves**: una por horario elegido (renovada tras apartar); una por
+  petición al confirmar (repetir lo mismo usa la misma).
+- **Doble toque**: cerrojo y botón apagado.
+- **Nota y dirección en memoria**, nunca en la ruta; se olvidan al confirmar o
+  soltar.
+- Carga, vacío, error con reintento, sin sesión y sin permiso en cada vista;
+  ningún código interno ni cero inventado; es/en/pt con los mismos huecos.
+- **Ninguna escritura directa** a la base desde el teléfono.
+
+Entradas: «Mis reservas» en Servicios; «Reservas de mis servicios» en el área
+del prestador **activo o suspendido** (suspenderlo no cancela sus reservas por
+venir; hallazgo R7); «Condiciones de contratación» y «Reservas y
+retenciones» en la administración de Servicios; y los avisos.
+
+## 72. Avisos
+
+`service_booking_confirmed` (a quien contrata) y `service_booking_received`
+(al prestador), con la entidad `service_booking` y el id de la reserva;
+**sin fecha, nota ni dirección**; textos en es/en/pt en el servidor y en la
+app; idempotentes por suceso. En la bandeja, tocarlos lleva a la reserva (la
+propia o la de la bandeja del prestador). **El push** sigue abriendo solo la
+aplicación: el contrato actual de la cola no lleva datos de destino (§32).
+No hay aviso de vencimiento (F12).
+
+## 73. Concurrencia (probada con PostgreSQL de verdad)
+
+| Caso | Resultado |
+|---|---|
+| 10 personas a la vez por el mismo horario | 1 lo consigue; 9 → 409 `service_slot_not_available` |
+| La misma clave 4 veces a la vez | Una retención |
+| La misma clave con otro contenido | 409 `idempotency_key_reused` |
+| Confirmar dos (o cinco) veces a la vez | Una reserva; el resto 409 |
+| Confirmar mientras vence (barrido) o se suelta | O reservada (retención consumida) o no (vencida/soltada); nunca las dos |
+| Capacidad agotada / grupo de 2 con 6 a la vez | 409 / 2 lo consiguen, plazas 1 y 2 |
+| Confirmar mientras el prestador bloquea ese horario | O se reserva o 409; nunca un 500 ni media reserva |
+| Leer mientras se retiene, vence y se barre | Nunca un 500 |
+| Interrupción entre pedido y reserva | La transacción no se confirma (disparadores diferidos) |
+| Dos conexiones con sesiones que se pisan | La base rechaza la segunda |
+| El barrido a medias (retención vencida, sin su línea) con quien espera esa retención: confirmar, soltar o retener | Sin interbloqueo: 409 `service_hold_expired` / 200 / 201 (antes, 40P01 y un 500) |
+| La misma clave a la vez en dos retenciones de servicios distintos (confirmar o soltar) | Una gana; la otra 409 `idempotency_key_reused` (antes, 23505 y un 500) |
+
+## 74. Cómo aplicar la 0093
+
+**No se aplicó.** Cuando la empresa lo decida:
+
+1. Comprobar que la base tiene la **0086–0092** (la 0093 se niega sin ellas y
+   sin `btree_gist`, que la 0092 ya instaló).
+2. Pegar el fichero **entero** en el editor SQL de Supabase y ejecutarlo: es
+   una sola transacción, comprueba lo anterior antes de crear nada y verifica
+   lo que dejó; si algo falla, no queda nada. Es reejecutable.
+3. **Reiniciar la API** (o desplegar `Edson`, que la reinicia): la puerta
+   recuerda el «no».
+4. Verificar (§75) en una sesión de solo lectura, también con el rol real de
+   la API (la puerta tiene que decir «sí»).
+5. Registrar su huella en `APLICADAS` (`test_servicios_migracion_0090.py`) y
+   repetir el recorrido de cierre.
+6. **Después**, y solo si la empresa lo decide: publicar las condiciones de
+   contratación del país (F9) y encender `FEATURE_SERVICE_BOOKING` (con
+   `FEATURE_SERVICES`). Sin condiciones publicadas no se confirma nada.
+
+**Rollback**: el de la cabecera del fichero, en una transacción: borra
+retenciones, reservas y pedidos de Servicios y los **borradores** de las
+condiciones de contratación; las **publicadas no se borran** (la 0086 no deja
+borrar una política publicada: son la evidencia de lo aceptado) y, si queda
+alguna, el CHECK de los tipos de política se queda ampliado, que no molesta.
+Después, reiniciar la API. Probado con condiciones publicadas y sin ellas
+(antes fallaba justo cuando haría falta; hallazgo R5).
+
+## 75. Verificar la 0093 (solo lectura)
+
+En una transacción `BEGIN READ ONLY`, tras comprobar que una escritura se
+rechaza (25006), y terminando con `ROLLBACK`:
+
+```sql
+-- 1. La puerta, con el rol de la API: tiene que decir true
+--    (la consulta de esquema.hay_reservas, _LO_QUE_NECESITA_LA_RESERVA).
+-- 2. Las seis tablas, con RLS y sin políticas.
+select c.relname, c.relrowsecurity,
+       (select count(*) from pg_policy p where p.polrelid = c.oid) as politicas
+  from pg_class c
+ where c.relname in ('service_holds', 'service_orders', 'service_bookings', 'service_booking_intakes',
+                     'service_booking_acceptances', 'service_booking_events')
+   and c.relnamespace = 'public'::regnamespace;
+-- 3. La exclusión, tal cual.
+select conname, pg_get_constraintdef(oid) from pg_constraint where conname = 'service_holds_sin_cruces';
+-- 4. Los tres disparadores diferidos.
+select tgname, tgdeferrable, tginitdeferred from pg_trigger
+ where tgname in ('service_bookings_coherentes', 'service_orders_completos', 'service_holds_con_reserva');
+-- 5. El tipo de las políticas.
+select pg_get_constraintdef(oid) from pg_constraint where conname = 'service_policies_tipo';
+-- 6. Nadie de fuera con permisos (0 filas).
+select table_name, grantee, privilege_type from information_schema.table_privileges
+ where table_schema = 'public' and table_name like 'service\_%' and table_name in (
+       'service_holds', 'service_orders', 'service_bookings', 'service_booking_intakes',
+       'service_booking_acceptances', 'service_booking_events')
+   and grantee in ('anon', 'authenticated', 'PUBLIC');
+-- 7. Las dos claves al prestador: sin borrar nada (a) y diferidas (t, t).
+select conrelid::regclass, conname, confdeltype, condeferrable, condeferred from pg_constraint
+ where contype = 'f' and confrelid = 'public.service_providers'::regclass
+   and conrelid in ('public.service_orders'::regclass, 'public.service_bookings'::regclass);
+-- 8. Vacías recién aplicada, y ninguna condición de contratación publicada.
+select (select count(*) from public.service_holds) as retenciones,
+       (select count(*) from public.service_bookings) as reservas,
+       (select count(*) from public.service_policies where kind = 'booking_terms') as condiciones;
+```
+
+Y comparar el esquema entero con una referencia local 0001–0093, como en §61.
+
+## 76. Pruebas, mutaciones y revisión (30/09/2026)
+
+Todo contra un PostgreSQL 17 **local y desechable** (contenedor de pruebas,
+`127.0.0.1`); **nada tocó Supabase**. Resultados del 30/09/2026 sobre el
+código final (tras las correcciones de la revisión).
+
+| Qué | Dónde | Resultado |
+|---|---|---|
+| A. La migración | `test_servicios_migracion_0093.py` (26) | Desde cero; sobre la 0092 con datos (no toca nada); reejecutarla deja lo mismo; un fallo a mitad no deja nada; se niega a terminar incompleta y sin cada dependencia; igual al modelo (ORM en un esquema aparte); RLS, cero políticas y cero privilegios; estados, CHECK, índices, disparadores y funciones; la 0086–0092 intactas; la baja de quien presta en **los dos órdenes** de disparadores; el **rollback** de la cabecera con condiciones publicadas y sin ellas |
+| B. El dominio | `test_servicios_reserva_api.py` (44), `test_servicios_reserva_calculo.py` (11) | Gratuito, con precio (503, sin escribir nada) y «a consultar»/«desde» (409); aceptación versionada; fotografía; todos los estados; lo vencido no se confirma aunque nadie lo barra; **lo que ya empezó no se confirma**; aislamiento de personas y prestadores; bloqueos entre personas; servicio suspendido o retirado; categoría desactivada; prestador suspendido; agenda cambiada; horario bloqueado; versión nueva; condiciones que cambian; separación congelada |
+| C. Carreras (PostgreSQL de verdad) | las mismas | §73, incluidas las dos nuevas de la revisión (el barrido a medias, sin azar, y la misma clave en dos retenciones a la vez) |
+| D. HTTP | `test_servicios_reserva_api.py`, `test_servicios_admision_api.py` (53) | Roles; 401/403/404/409/422/503; ningún 500; cursores; idempotencia; banderas apagadas (503 **sin mirar la base**); la puerta con 30 alteraciones de la 0093 |
+| E. Móvil | `serviciosReserva.test.mts` (32), `serviciosReservaVistas.test.mts` (46) y las demás de Servicios | Navegación y entradas; cuenta atrás del servidor; doble toque; volver de las condiciones; cambiar de horario; vencer con la pantalla abierta; horario tomado (409 → volver a elegir); sin dirección fuera de «a domicilio»; pagos apagados; gratuito; «a consultar»; carga, vacío y error; tres idiomas; ninguna escritura directa; **la casilla «Acepto» es de la versión que se ve** |
+| F. Regresión | | Backend **con PostgreSQL: 4166 aprobadas, 0 fallidas, 0 omitidas**; **sin PostgreSQL: 3040 aprobadas, 0 fallidas** (1126 omitidas por necesitar PostgreSQL); **móvil 3563/3563**; `tsc --noEmit` limpio; **Expo Doctor 18/18**; exportación web correcta (4 páginas, sin `.env`); **522 operaciones de la API sin duplicadas** (100 de Servicios); `git diff --check` limpio; ningún secreto en el cambio; es/en/pt con las mismas claves y huecos |
+| Recorrido con la API real | proceso aparte, base local desechable | **63/63 comprobaciones**: antes de la 0093 (503, nunca 500), aplicarla con la API en marcha (sigue en 503: recuerda el «no»), reejecutarla, **reiniciar** y de punta a punta (condiciones, retener, resumen, confirmar, consultar, prestador, supervisión, barrido, precio, «a consultar», lo ajeno, la baja, carreras, banderas apagadas) |
+| Mutaciones dirigidas | 48 | **48/48 muertas** (§ abajo) |
+
+### Mutaciones
+
+48 mutaciones dirigidas (37 del bloque 5E y 11 de la revisión), cada una
+aplicada sola, con sus pruebas verdes antes de mutar, y restaurada:
+**48/48 muertas**. Dos sobrevivieron la primera vez y NO se maquillaron:
+
+- **M03** (no congelar la separación al retener) **sobrevivía**: la prueba era
+  débil. Se añadió `test_la_separacion_se_congela_al_retener_y_sigue_ocupando`,
+  que la mata sola.
+- **M10** sobrevivía porque la mutación estaba mal planteada (alteraba las dos
+  respuestas por igual): se rehízo para leer el título de la versión actual y
+  muere.
+
+Las 11 de la revisión (M29–M36, MM10–MM12) mueren por el motivo esperado; M34
+y M35 se comprobaron a mano: `service_orders no se borra` y `Una política
+published de Servicios no se borra`.
+
+### Hallazgos y correcciones
+
+Cada uno **reproducido** con una prueba que fallaba sobre el código anterior,
+**corregido** y **vuelto a verificar** (y su mutación, muerta). Commits
+`1197841` y `440c91c`.
+
+| # | Origen | Gravedad | Hallazgo | Reproducción (antes) | Corrección |
+|---|---|---|---|---|---|
+| E1 | Recorrido | Media | Crear el borrador de las condiciones de contratación sin la 0093 daba **500** (el CHECK de la 0086); con la 0093 a medias, 201 | la batería de la 0093 alterada: 201 en vez de 503 | 503 `services_not_ready` (puerta propia, sin la bandera) |
+| E2 | Batería completa | Media | Las banderas de dinero nuevas no estaban en `.env.example` | `test_toda_palanca_de_dinero_esta_en_el_ejemplo_de_entorno` fallaba | Documentadas, apagadas / `none` |
+| R1 | Revisión | **Alta** | La casilla «Acepto» era un «sí» sin versión: un borrador marcado con la v1 confirmaba la v2 | guion y prueba: la v2 salía como aceptada | La casilla guarda versión y huella; con otras, sin marcar |
+| R2 | Revisión | Media | Interbloqueo del barrido con retener, confirmar o soltar (40P01 → 500) | 3 pruebas deterministas: `deadlock detected` | Servicio `FOR NO KEY UPDATE`; 40P01 → 409 `service_booking_busy` |
+| R3 | Revisión | Baja | La misma clave a la vez en dos retenciones: 23505 → 500 | 2 pruebas: `service_booking_events_una_por_clave` | La persona en fila antes de mirar su clave: 409 |
+| R4 | Revisión | Media | La baja de quien presta dependía del orden de los disparadores (OID) | 2 pruebas forzando el orden: `service_orders no se borra` | Claves al prestador diferidas y sin borrar: un solo camino |
+| R5 | Revisión | Baja | El rollback de la cabecera fallaba con condiciones publicadas | prueba: `Una política published … no se borra` | Solo borradores; el tipo se estrecha si no queda ninguna |
+| R6 | Revisión | Baja | Se podía confirmar una sesión ya empezada (antelación < retención) | prueba: 201 un minuto después de empezar | 409 `service_slot_not_available` |
+| R7 | Revisión | Baja | Un prestador suspendido perdía «Reservas de mis servicios» | prueba de la vista | Activo o suspendido |
+
+La primera batería completa con PostgreSQL tras R4 falló en **una** prueba:
+`test_claves_ajenas_y_su_comportamiento_al_borrar` (la de la 0086, que lista
+las claves ajenas de todo Servicios) esperaba todavía la cascada de las dos
+claves al prestador. Se actualizó esa expectativa (`a`, sin acción) y la
+batería completa se repitió entera: 4166 de 4166.
+
+La revisión confirmó como correctos (sin cambio): la doble reserva (exclusión,
+plazas, una por persona, una activa, reemplazo con SAVEPOINT), los
+vencimientos, las zonas horarias y los cursores, la fotografía, el dinero, la
+privacidad, la idempotencia y los avisos, los recuentos de la puerta y que
+todas las rutas y claves de texto existen.
+
+## 77. Riesgos
+
+- **La 0093 no está en Supabase.** Hasta aplicarla, la reserva contesta 503
+  y el calendario no ofrece continuar; nada se rompe. Al aplicarla,
+  **reiniciar la API**.
+- **Sin condiciones publicadas, nada se confirma**: es lo correcto hasta que
+  la empresa escriba el texto (F9), pero encender la bandera sin publicarlas
+  deja a la gente en «todavía no hay condiciones».
+- **El barrido no lo llama nadie** (F13). No hace falta para la corrección
+  (el vencimiento lo decide la hora), pero sin él las vencidas quedan `active`
+  en la base hasta que alguien retiene en ese servicio: la supervisión lo
+  dice por su estado efectivo.
+- **Cambiar la agenda no toca las reservas** (E11/F10): un bloqueo o una
+  excepción sobre una reserva confirmada no la cancela ni avisa. Borrar un
+  bloqueo nunca deja una reserva sin protección: las reservas se protegen
+  solas (la retención consumida ocupa en la base).
+- **A domicilio no se contrata** hasta que la empresa decida la aceptación
+  del prestador (F3).
+- **Pagos**: la base no admite pedidos con precio. Encenderlos exigirá una
+  migración nueva (estados `pending_payment`, importe, pasarela), un
+  adaptador y su revisión: no basta con una bandera.
+- **Un servicio muy disputado** espera como mucho 5 s por la fila del servicio
+  y contesta 409 `service_booking_busy`: con el volumen previsto, no ocurre.
+- **La baja de quien presta borra sus reservas pasadas** y lo que aceptó
+  quien contrató (por el camino del servicio, como desde la 0090). Hasta que
+  la empresa decida qué se conserva (F21), borrar la cuenta de un prestador
+  con reservas pasadas se lleva esa evidencia.
+- **C15** (D6) sigue pendiente antes de encender Servicios, y el **push**
+  sigue sin llevar al destino (§32).
+
+## 78. Qué queda para el Incremento 6 (no empezado)
+
+Cancelar y reprogramar (con su política, F6), la aceptación del prestador y
+lo que queda pendiente de ella (a domicilio, F3), el cobro real (estados de
+pago, pasarela, comisión, costo de pasarela, comprobantes, devoluciones:
+F14–F17) con su migración, recordatorios y avisos de vencimiento, el
+planificador del barrido (F13), asistencia y cierre de la atención, reseñas
+de lo contratado y posventa.
+
+## 79. Estado y punto exacto de continuación
+
+- **Incremento 5 de Z Servicios implementado y probado; pendiente de aplicar
+  y verificar la migración 0093 y de realizar el QA físico.**
+- `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`
+  **apagadas**; `SERVICE_PAYMENTS_PROVIDER=none`; **no hubo despliegue**.
+- Decisiones **F1–F21** de la empresa (`Z_REQUISITOS_Y_DECISIONES.md`).
+- **No se empezó el Incremento 6.**

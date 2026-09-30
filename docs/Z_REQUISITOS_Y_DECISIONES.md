@@ -2689,3 +2689,92 @@ aplicación (tarea abierta).
 - **Producción**: cuando se despliegue `Edson`, reiniciar la API (el
   despliegue lo hace): la puerta recuerda el «no».
 - **Pendiente**: el QA físico (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 4»).
+
+## Z Servicios, Incremento 5 — reserva y contratación protegida (30/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte V (§62 en adelante). **Implementado y probado el 30/09/2026 en `Edson`;
+pendiente de aplicar y verificar la migración 0093 y de realizar el QA
+físico.** La 0093 **no se aplicó** en Supabase. El código sigue **sin
+desplegar**; `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y
+`FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la pasarela, `none`. Nada de lo
+que sigue se presenta como política definitiva si la empresa no lo confirmó:
+F1–F21 son suyas.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Elegir un horario disponible | El de siempre (Incremento 4): calculado por el servidor, ahora descontando lo ocupado |
+| Obtener una retención temporal | 10 minutos (provisional, F1), con la hora del servidor; la misma clave no la alarga |
+| Completar solo lo necesario | Nota opcional; a domicilio, distrito y dirección (referencia opcional). Nada más |
+| Revisar servicio, horario, modalidad, precio y condiciones | El resumen del servidor, con la fotografía de la retención y lo que impide confirmar |
+| Aceptar una versión concreta de las condiciones | Por su id y su huella; si cambian mientras se leen, 409 y se vuelven a enseñar |
+| Confirmar | Nacen juntos pedido, reserva, datos de la atención, lo aceptado, el historial y los avisos |
+| Reserva y pedido consistentes | Disparadores diferidos: ninguno sin el otro ni sin lo aceptado; una interrupción no deja nada |
+| Consultar estado y detalle | Mis reservas (por venir y pasadas, por cursor), detalle con lo aceptado y el historial |
+| Impedir la doble reserva, también a la vez | La base: exclusión con separación congelada, plaza única, una por persona, capacidad. Probado con 10 a la vez |
+| Sin dinero real | Solo gratis; con precio se detiene sin fingir un cobro; «a consultar» y «desde» no se contratan; la base no admite un pedido con precio |
+| Privacidad | Solo lo necesario; la dirección solo a domicilio y solo para su prestador; lo ajeno es 404 |
+| Supervisión (A04) | Reservas y retenciones operativas, sin datos privados, y el barrido |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **La retención es la que ocupa**: al confirmar pasa a `consumed` y sigue
+   ocupando por su reserva. Así una sola restricción de la base cubre lo
+   apartado y lo reservado.
+2. **Solo lo gratuito se confirma.** Lo que tiene precio fijo se aparta (para
+   enseñar el resumen) y se detiene con un 503 claro; sin pedido ni reserva.
+3. **«A consultar» y «desde» no se apartan**: no hay precio que aceptar.
+4. **A domicilio no se confirma sola** (necesita al prestador, F3): no se
+   aparta y la app no ofrece continuar.
+5. **Una retención activa por servicio y persona**: elegir otro horario suelta
+   el anterior en la misma transacción; el mismo horario no se renueva.
+6. **El vencimiento lo decide la hora**; el barrido solo ordena la base.
+7. **La antelación y el horizonte se miden desde que se retuvo**: un horario
+   apartado a tiempo no caduca por los minutos que se tarda en leer.
+8. **Cambiar la agenda o el servicio no toca las reservas**: la reserva
+   guarda su fotografía y su separación congelada.
+9. **Las condiciones de contratación son un tipo más de `service_policies`**,
+   por país del prestador, con las mismas rutas y la misma pantalla, sin
+   parámetros.
+10. **Sin cancelación ni reprogramación**: no hay política (F6).
+11. **Sin aviso de vencimiento** (F12); sí de reserva confirmada y recibida.
+12. **El prestador ve la identidad pública** de quien contrata, lo que
+    escribió y, a domicilio, la dirección; nunca correo ni teléfono.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| F1 | **Cuánto dura una retención** | 10 minutos, `SERVICES_BOOKING_HOLD_MINUTES` (1–60) |
+| F2 | **Cuántos horarios puede tener apartados una persona** | 3 a la vez (uno por servicio), `SERVICES_BOOKING_MAX_ACTIVE_HOLDS` (1–20) |
+| F3 | **Confirmación automática o aprobación del prestador**, por modalidad | Automática en línea y presencial; **a domicilio necesita aprobación, que no existe**: no se contrata. `SERVICES_BOOKING_INSTANT_MODALITIES=virtual,in_person` |
+| F4 | **Qué datos se piden** | Nota opcional (500); a domicilio, distrito (100) y dirección (200), referencia opcional (200). Ni teléfono, ni correo, ni documento |
+| F5 | **Qué ve el prestador de quien contrata** (teléfono, dirección, correo) | Usuario y nombre públicos, lo que escribió y, a domicilio, la dirección. Nunca correo ni teléfono |
+| F6 | **Cancelación y reprogramación**: quién, hasta cuándo, con qué consecuencias | No existen: ni la persona ni el prestador cancelan desde la app |
+| F7 | **Antelación y horizonte de la contratación** | Los de la agenda (E1: 2 horas; E2: 60 días), medidos desde que se retuvo |
+| F8 | **Capacidad visible** («quedan N plazas») | La API la devuelve; la app no la enseña (E5) |
+| F9 | **El texto de las condiciones de contratación**, por país | **No hay ninguno publicado.** Sin él, ninguna reserva se confirma. Lo escribe y publica la empresa desde administración |
+| F10 | **Qué pasa con una reserva si cambia la agenda** (E11) | Nada: la reserva sigue, sin cancelarse ni avisar. Un bloqueo nuevo encima no la toca |
+| F11 | **Feriados** (E4) | Los marca el prestador; una reserva ya hecha no se toca |
+| F12 | **Avisar cuando vence lo apartado** | No se avisa: la app lo dice en pantalla |
+| F13 | **Quién llama al barrido y cada cuánto** (cron, Lambda, EventBridge) | Nadie: la ruta existe y está protegida; el vencimiento no depende de ella |
+| F14 | **«A consultar» y «desde»**: cómo se cotizan | No se contratan desde Z |
+| F15 | **Monedas y países** | Las condiciones son por país del prestador; el precio es el de la versión, solo informativo |
+| F16 | **Comprobantes** | No se emiten: lo gratuito no tiene importe |
+| F17 | **Comisión de Z y costo de la pasarela** | Sin definir; no hay cobro |
+| F18 | **Devoluciones** | No aplican: nada se cobra |
+| F19 | **Identidad de quien contrata** | Una cuenta de Z con sesión; sin verificación adicional |
+| F20 | **Conservación de la evidencia** (lo aceptado, el pedido, el historial) | Se guarda sin plazo; con la baja, la persona queda en `NULL` y su nota y su dirección se borran. Plazo legal por decidir |
+| F21 | **La baja de QUIEN PRESTA con reservas pasadas** | Hoy se lleva sus servicios y con ellos sus reservas pasadas, pedidos, historial y lo que aceptó quien contrató (el camino de borrado de la 0090, por un solo camino desde la revisión del 30/09). Conservarlo (dejar al prestador en `NULL`, como a quien contrata) exige alterar la clave de la 0090 y una decisión legal |
+
+Siguen siendo de la empresa, además: **E1–E12** (agenda), **C15** antes de
+encender Servicios (D6) y el **destino del push** de un aviso.
+
+### Límites del Incremento 5 y lo que queda para el 6
+
+No hay cobro, pasarela, estados de pago, comisión, comprobantes,
+devoluciones, cancelación, reprogramación, aceptación del prestador,
+recordatorios, aviso de vencimiento, planificador del barrido, asistencia,
+reseñas de lo contratado ni posventa. **El Incremento 6 no se empezó.**
