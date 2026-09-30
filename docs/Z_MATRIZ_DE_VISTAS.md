@@ -713,3 +713,34 @@ no lleve al destino es una limitación de la cola de entregas y de
 Búsqueda, recomendaciones, filtros públicos, guardados, perfil profesional
 público, disponibilidad, reservas, pagos, atención, mensajes, incidencias y
 reseñas. La ficha pública no tiene botón de contratar.
+
+## Servicios · Incremento 3: descubrimiento y confianza (29/09/2026)
+
+Backend real y detrás de `FEATURE_SERVICES` (apagada). Guardar necesita la
+0091 (**sin aplicar**); sin ella, lo demás funciona y guardar dice que aún no
+está disponible. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
+`serviciosDescubrimientoVistas.test.mts`.
+
+Explorar › «Servicios» (solo con la bandera) › catálogo › ficha › perfil del
+prestador; y catálogo › Guardados.
+
+De lo que la sección del Incremento 2 deja «sin existir», este incremento hace
+la búsqueda, las recomendaciones (con su razón), los filtros públicos, los
+guardados y el perfil público del prestador. El resto sigue sin existir.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Entrada, búsqueda, categorías, filtros, orden, sugerencias y resultados | `ServiciosScreen` (`app/servicios/index.tsx`) | `GET /services/catalog`, `GET /services/public-categories`, `GET /services/suggestions`, guardar y quitar |
+| 2 | Ficha completa (ampliada) | `FichaDeServicioScreen` (`app/servicios/ficha/[serviceId]`) | `GET /services/catalog/{id}`, guardar y quitar |
+| 3 | Perfil público del prestador | `PrestadorPublicoScreen` (`app/servicios/prestadores/[providerId]`) | `GET /services/providers/{id}`, `GET …/{id}/services` |
+| 4 | Servicios guardados | `ServiciosGuardadosScreen` (`app/servicios/guardados.tsx`) | `GET /services/saved`, `DELETE …/{id}/save` |
+
+Los filtros son una hoja inferior dentro del catálogo, y viven en la ruta.
+Las sugerencias son una sección del catálogo, que solo aparece si hay una
+razón.
+
+### Lo que sigue sin existir, a propósito
+
+Disponibilidad, agenda, reservas, contratación, pagos, mensajes por reserva,
+check-in, sesiones, incidencias, devoluciones, crear o responder reseñas y
+finanzas. La ficha no tiene botón de contratar.

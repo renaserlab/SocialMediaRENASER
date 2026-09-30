@@ -1,11 +1,12 @@
-# Z Servicios: admisión de prestadores (Incremento 1) y catálogo (Incremento 2)
+# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2) y descubrimiento (Incremento 3)
 
 Qué se construyó, qué impone la base, qué se decidió en cerrado y qué sigue
 esperando a una persona. La Parte I se escribió el 29/09/2026 al cerrar el
 Incremento 1 en la rama `Edson`; la **Parte II** (§18 en adelante), el mismo
-día, con el Incremento 2 implementado y probado.
+día, con el Incremento 2 implementado y probado; la **Parte III** (§33 en
+adelante), también ese día, con el Incremento 3 implementado y probado.
 
-## Estado, en siete líneas
+## Estado
 
 | | |
 |---|---|
@@ -15,10 +16,12 @@ día, con el Incremento 2 implementado y probado.
 | **`FEATURE_SERVICES`** | **apagada.** Todas las rutas contestan 503 `services_disabled` sin mirar la base |
 | **Incremento 2 (catálogo)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§32) |
 | **Migración 0090** | **APLICADA** en Supabase el 29/09/2026 y verificada ese día en solo lectura: **sin divergencias** (§32). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
+| **Incremento 3 (descubrimiento y confianza)** | **implementado y probado; pendiente de aplicar y verificar la 0091 y de hacer el QA físico** (§33). Catálogo público, búsqueda, filtros, orden, perfil público del prestador, señales de confianza, guardados y sugerencias con su razón |
+| **Migración 0091** | **ESCRITA, SIN APLICAR** en Supabase. Solo crea `saved_services`. Sin ella, todo el descubrimiento funciona salvo guardar (503 controlado). Pasos: §44–§45; **reiniciar la API** después |
 | **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
-| **QA físico** | pendiente: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
+| **QA físico** | pendiente de los tres incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
 
 ## 1. Lo que NO es
 
@@ -907,7 +910,13 @@ comprobó después está en §32):
 
 ## 31. Punto exacto para empezar el Incremento 3
 
-**No se empezó el Incremento 3.** Antes, una persona tiene que:
+> **Actualización (29/09/2026):** el Incremento 3 ya está implementado y
+> probado (Parte III, §33). Esta sección se conserva como se escribió al
+> cerrar el Incremento 2; lo que sigue pendiente de ella (QA físico,
+> decisiones C1, C5 y C15, el destino del push) se recoge en §48.
+
+Cuando se escribió, **no se había empezado el Incremento 3**. Antes, una
+persona tenía que:
 
 1. ~~Aplicar la 0090 y verificarla~~ **Hecho el 29/09/2026** (§32, sin
    divergencias). Queda **desplegar el código de `Edson`** cuando se apruebe:
@@ -1132,3 +1141,500 @@ No se cambió nada durante esta verificación.
 
 **Queda pendiente únicamente el QA físico** (`Z_QA_FISICO_PENDIENTE.md`,
 «Incremento 2»).
+
+---
+
+# Parte III · Incremento 3: descubrimiento y confianza
+
+Escrito el 29/09/2026 en la rama `Edson`. **Implementado y probado; pendiente
+de aplicar y verificar la 0091 y de hacer el QA físico.** No está cerrado.
+
+## 33. Estado del Incremento 3
+
+| | |
+|---|---|
+| **Qué hace** | Cualquiera descubre servicios desde Explorar. Puede: <ul><li>buscarlos por lo que necesita;</li><li>filtrarlos y ordenarlos;</li><li>abrir su ficha y conocer al prestador, con lo que Z comprobó de él;</li><li>guardarlos para después.</li></ul>Las sugerencias llevan su razón. Termina **antes** de reservar o contratar |
+| **Migración 0091** | **Escrita y probada solo en PostgreSQL local desechable. SIN APLICAR** en Supabase. Solo crea `saved_services`. Pasos y verificación: §44–§45 |
+| **Sin la 0091** | Buscar, filtrar, la ficha, el perfil y las sugerencias funcionan; **guardar, quitar y la lista de guardados** contestan 503 `services_not_ready`. Nunca un 500 |
+| **`FEATURE_SERVICES`** | **apagada.** Las 8 rutas nuevas contestan 503 `services_disabled`. El acceso «Servicios» de Explorar sigue como antes: avisa de que aún no está |
+| **Dinero, reservas, reseñas** | **ninguno.** El precio se enseña; no hay reserva, pago, agenda ni reseña que crear |
+| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
+| **QA físico** | pendiente: `Z_QA_FISICO_PENDIENTE.md`, sección «Incremento 3» |
+
+## 34. Matriz de alcance (blueprint, capturas y datos)
+
+| Requisito (blueprint / capturas) | Datos que existen | Decisión | Incremento 3 |
+|---|---|---|---|
+| S01 Entrada a Servicios desde Explorar | la vertical ya estaba en Explorar | solo con la bandera | **sí**: el acceso lleva a `/servicios` |
+| S01 «¿Qué necesitas resolver?» + ejemplos | texto | sin IA (prohibida aquí) | **sí**, como búsqueda; sin interpretación ni voz |
+| S01 «Frecuentes» (máx. 4) + «Ver más» | categorías; **no** hay datos de uso | «frecuentes» no se puede afirmar | **sí**, como «Categorías», en su orden; «Ver todas» |
+| S01 Recomendados con razón | guardados, fecha de publicación | criterio pendiente | **sí**, dos razones de verdad (§40) |
+| S02 Taxonomía | categorías de dos niveles | — | **sí** (chips, madre incluye hijas) |
+| S03 Resultados por servicio | versión publicada | — | **sí** |
+| S03 Orden «ajuste + disponibilidad + calidad» | no hay disponibilidad ni calidad | registrado | relevancia (con búsqueda) o recientes |
+| S04 Filtros: modalidad, zona, precio cerrado/rango/cotización, credencial | sí | — | **sí** |
+| S04 Filtros: híbrida, radio, fecha/hora, calificación, idioma, accesibilidad, urgente | **no existen** | — | **no** (no se inventan) |
+| S04 Orden: precio menor/mayor | sí, por moneda | sin mezclar monedas | **sí**, exige moneda |
+| S04 Orden: mejor valorados, disponibilidad | no | — | **no** |
+| S05 Perfil: identidad, sellos, servicios, credenciales, reputación, contacto | nombre público, tipo, admisión, identidad y credencial verificadas | qué credenciales se publican: **pendiente** | **sí**, sin nombre ni número de credencial; sin foto propia; sin contacto (Inc. 4+) |
+| S06 Ficha en su orden | contenido de la versión publicada | — | **sí**, sin disponibilidad, cancelación ni pago (no existen) |
+| S06 / §17 Calificación y reseñas | **no existen** reseñas verificadas | origen futuro pendiente | **sección vacía honesta**; media `null` |
+| Guardados («solo servicios y profesionales») | — | profesionales guardados: no | **sí**, servicios |
+| §23 `deepLink` en notificaciones | bandeja sí; push no (§32) | — | sin cambios (tarea abierta) |
+
+**Diferencias registradas:**
+- el blueprint pide un orden por «ajuste, disponibilidad y calidad», y hoy no
+  hay ninguna de esas señales;
+- «frecuentes» exige datos de uso que no existen;
+- el perfil del blueprint abre la evidencia de cada sello y muestra el número
+  parcial de la credencial, y no está decidido qué se publica.
+
+Se conservó la seguridad: no se inventa nada y se registra la decisión.
+
+## 35. Lo que NO es
+
+No hay:
+- disponibilidad, agenda, franjas, retenciones ni reservas;
+- contratación, pagos ni mensajes por reserva;
+- reprogramaciones, cancelaciones, check-in ni sesiones por 100ms;
+- incidencias ni devoluciones;
+- crear, responder ni moderar reseñas, finanzas ni transferencias.
+
+Tampoco hay:
+- IA, embeddings ni un buscador externo;
+- un segundo recomendador;
+- una aplicación aparte.
+
+## 36. Lo público: UNA autoridad
+
+`descubrimiento.condiciones_publicas()` decide qué servicio se puede ver. La
+usan el catálogo, la búsqueda, la ficha, el perfil, las sugerencias y los
+guardados. Un servicio es público si cumple **todo** esto:
+
+- está **publicado**, con su versión **publicada**;
+- su prestador está **activo**;
+- su categoría está **activa**, y también su madre;
+- si la categoría es de un país, es el del prestador;
+- tiene **portada**;
+- y no hay un **bloqueo** entre quien mira y el prestador, en ningún sentido
+  (como en la búsqueda global).
+
+La ficha del Incremento 2 tenía su propia copia sin la categoría activa. Ahora
+comparten esta. **Cambio de la decisión provisional 5 del Incremento 2**: una
+categoría desactivada saca del público los servicios que la usan. Los
+servicios no se borran, y al reactivarla vuelven.
+
+El móvil nunca recibe nada privado para esconderlo después.
+
+## 37. Búsqueda
+
+- **Solo PostgreSQL**, con las palabras de la búsqueda global
+  (`search.normalizacion`): quita las palabras vacías, incluidos verbos de
+  intención como «necesito» o «quiero», y trata los plurales.
+- **Tildes, eñe y cedilla se pliegan en los dos lados**: la palabra y, EN LA
+  BASE, la columna (`translate`, mayúsculas incluidas). Así «cafe» encuentra
+  «Café», «peru» a «Perú» y «diseno» a «Diseño».
+- El `_` que se escriba separa palabras; nunca llega a `LIKE` como comodín.
+- **Ni extensiones nuevas ni índices**. `pg_trgm` ya existe (0040), pero no
+  hacía falta.
+- **Cada palabra tiene que aparecer** en algún sitio: título, categoría o su
+  madre (en es, en y pt), resumen, descripción, nombre del prestador, zona
+  (fuera de lo virtual) o una palabra de modalidad («virtual», «online»,
+  «presencial», «domicilio», también en plural).
+- **Relevancia con pesos DOMINANTES**: título 64; categoría y resumen 8;
+  descripción, prestador, zona y modalidad 1.
+  - Cada nivel pesa más que todo el de abajo junto: coincidir en tres sitios
+    secundarios no adelanta a quien coincide en el título.
+  - Se suma por palabra, en SQL, con desempate total.
+  - Cada resultado dice **dónde** coincidió (`reason_fields`).
+- Sin ninguna palabra de dos letras o más (una letra, o solo `_`) es un
+  422 `service_catalog_query_too_short`. El móvil aplica la misma regla antes
+  de preguntar y, si el servidor la rechaza, lo explica con «Limpiar
+  filtros», nunca con «Reintentar».
+
+## 38. Filtros y orden
+
+| Filtro | Parámetro | Regla |
+|---|---|---|
+| Categoría | `category_id` | incluye sus subcategorías |
+| Modalidad | `modality` | `virtual`, `in_person`, `at_home` |
+| Precio | `price` | `free`, `priced` (con importe) u `on_request`. **Gratis no es «sin precio»** |
+| Moneda y rango | `currency`, `min_price`, `max_price` | en **unidades menores** de esa moneda. **Sin moneda no hay rango**. Nunca se mezclan ni se convierten. Un precio «desde» cuenta por su importe mínimo, y la app lo dice |
+| Zona | `area` | texto, sobre la zona general (nunca una dirección) |
+| Credencial | `credential_verified` | Z verificó al menos una credencial **vigente** |
+
+**Orden**: `relevance` (con búsqueda), `recent` (primera publicación),
+`price_asc` y `price_desc`.
+- El orden por precio **exige** moneda y solo incluye lo que tiene importe.
+- No hay «más popular», «mejor valorado» ni «más contratado»: no hay datos.
+- Cada orden tiene un **desempate total** (`id`).
+- El cursor es opaco y **lleva su orden**: uno de otro orden, o manipulado,
+  es 422 `invalid_cursor`.
+- Un filtro que no se entiende es 422 `service_catalog_filter_invalid`, con
+  el campo en `details`.
+- Un rango o un orden por precio sin moneda es 422
+  `service_catalog_currency_required`.
+
+**En el móvil** los filtros viven en la ruta (`/servicios?q=…&categoria=…`):
+«Atrás» y un enlace los conservan, y limpiarlos devuelve el catálogo.
+
+## 39. Ficha, perfil, confianza y reseñas
+
+- **Ficha** (`GET /services/catalog/{id}`, la del Incremento 2 ampliada), en
+  el orden del blueprint:
+  - el contenido;
+  - quien lo ofrece, que lleva a su perfil;
+  - **lo que Z comprobó**;
+  - «servicio revisado y aprobado por Z», con la fecha;
+  - «lo declara el prestador»;
+  - las reseñas;
+  - guardar;
+  - más servicios del prestador y de la categoría, **con su razón** (quien
+    ofrece el servicio no ve lo suyo como «más de este prestador»).
+
+  **Sin botón de contratar.**
+- **Perfil público** (`GET /services/providers/{id}` y
+  `…/{id}/services`). Muestra:
+  - el nombre público y el tipo (profesional independiente o empresa);
+  - lo que Z comprobó;
+  - las categorías, modalidades y zonas generales de lo publicado;
+  - las reseñas (ninguna todavía) y sus servicios.
+
+  Un prestador sin nada público, o suspendido, es 404: no se puede recorrer
+  la lista de admitidos. **Nunca** sale el nombre legal, los documentos, el
+  número o el nombre de la credencial, el contacto, el perfil social ni las
+  notas.
+- **Confianza.** Solo lo verdadero, nombrando exactamente qué comprobó Z:
+  - «Prestador admitido por Z desde mm/aaaa»;
+  - «Identidad verificada por Z»: documento de identidad aceptado en la
+    admisión;
+  - «Credencial profesional verificada por Z y vigente», con el mismo «hoy»
+    UTC que la admisión.
+
+  Debajo, siempre: «Estas comprobaciones no garantizan el resultado del
+  servicio».
+- **Reseñas**: `count: 0`, `average: null`.
+  - «Todavía no hay reseñas verificadas».
+  - Ni estrellas, ni «0.0», ni las reseñas de perfiles
+    (`profile_reviews`), cursos, eventos o productos.
+  - Llegan en el Incremento 6.
+
+## 40. Guardados y sugerencias
+
+- **Guardar** (`POST /services/catalog/{id}/save`) y **quitar**
+  (`DELETE …/save`) son **idempotentes**. Guardar a la vez es `on conflict do
+  nothing` sobre la clave `(perfil, servicio)`.
+  - Solo se guarda lo público; quitar vale siempre.
+  - No reserva nada, no avisa al prestador y **no se cuenta** en ninguna
+    parte pública.
+- **La lista** (`GET /services/saved`, por cursor) va de lo más reciente a lo
+  más antiguo. Lo que ya no está disponible (suspendido, retirado, prestador
+  fuera, categoría inactiva, bloqueo) queda con `available: false`, sin
+  tarjeta y con el **título que tenía al guardarse** (`title_at_save`), para
+  poder quitarlo. Nunca con el título vivo, que puede ser el de una versión
+  que no llegó a verse. Nunca parece contratable.
+- **Sugerencias** (`GET /services/suggestions`). No es un recomendador
+  nuevo: se reutiliza el contrato del existente (un **código** de razón que la
+  app traduce, nunca una frase) y el grafo social (bloqueos). Hay dos
+  señales:
+  - `similar_to_saved`: de la categoría (o la familia) de lo guardado;
+  - `recently_published`: primera publicación en los últimos 30 días.
+
+  Nunca lo propio de quien mira ni lo ya guardado, y cada servicio sale en
+  una sola sección. **Sin señal no hay sección**: nunca se rellena con
+  cualquier cosa.
+
+  No se usó «prestador seguido»: revelaría quién es en la red social el
+  prestador. En la ficha, `same_provider` y `same_category`. En la búsqueda,
+  `matches_search` con los campos.
+
+## 41. La API (8 rutas nuevas) y la puerta
+
+| Ruta | Sesión | Para qué |
+|---|---|---|
+| `GET /services/catalog` | opcional | catálogo, búsqueda, filtros y orden, por cursor |
+| `GET /services/public-categories` | opcional | categorías con algo público (y sus madres) |
+| `GET /services/suggestions` | opcional | secciones con razón |
+| `GET /services/providers/{id}` | opcional | perfil público |
+| `GET /services/providers/{id}/services` | opcional | sus servicios, por cursor |
+| `POST /services/catalog/{id}/save` | obligatoria | guardar |
+| `DELETE /services/catalog/{id}/save` | obligatoria | quitar |
+| `GET /services/saved` | obligatoria | la lista propia |
+
+La ficha sigue en `GET /services/catalog/{id}`, ahora con sesión opcional
+(para `saved` y los bloqueos). Todas pasan primero por la bandera y la
+0090.
+
+La **puerta de la 0091** (`esquema.hay_guardados`) exige:
+- la tabla con las columnas del modelo y **sus tipos**;
+- la clave primaria `(profile_id, service_id)`;
+- las **dos** claves ajenas en cascada, una a `profiles` y otra a `services`;
+- sus dos índices;
+- RLS.
+
+No mira el número de la migración. Sin la 0091 completa, guardar es 503.
+Como la del catálogo, recuerda el sí y el no hasta reiniciar, y un error al
+mirar no se recuerda. Además, los guardados se LEEN en un punto de guardado:
+si la tabla desapareciera con la API en marcha, el catálogo sigue (sin
+marcar guardados) y la puerta vuelve a mirar.
+
+Cada página hace un **número fijo de consultas**, sea cual sea su tamaño:
+- la página;
+- las portadas;
+- las credenciales;
+- los guardados;
+- y una sola firma de imágenes.
+
+## 42. Vistas y navegación
+
+**Acceso:** Explorar › «Servicios», solo con la bandera encendida. Apagada,
+avisa de que aún no está, como antes.
+
+- **Servicios** (`/servicios`):
+  - la pregunta y la búsqueda;
+  - las categorías (cuatro y «Ver todas»);
+  - los filtros en una hoja inferior, con su número;
+  - el orden;
+  - sin búsqueda, las **sugerencias**;
+  - los resultados con «Ver más»;
+  - en la cabecera, **Guardados**.
+- **Ficha** (`/servicios/ficha/[id]`), la del Incremento 2 ampliada.
+- **Perfil del prestador** (`/servicios/prestadores/[id]`), desde la ficha.
+- **Guardados** (`/servicios/guardados`), desde la cabecera de Servicios.
+
+Todas tienen carga, «Ver más», estado vacío, error con reintento (sin
+conexión, no disponible, sin permiso), «no lo encontramos», atrás con
+respaldo, sin textos en duro (100 claves nuevas en es, en y pt), lector de
+pantalla y áreas táctiles de 44.
+
+La tarjeta de servicio es la misma en todas. Muestra:
+- la portada, o su texto alternativo;
+- el título y el prestador;
+- la categoría, la modalidad y la zona;
+- el precio; «a consultar» y «sin precio» no son lo mismo;
+- «Prestador con credencial verificada», solo si es verdad (la insignia es
+  del prestador, no del servicio: D15);
+- el motivo;
+- el marcador de guardar.
+
+**Avisos:** sin cambios. La bandeja sigue llevando a su destino, y el push
+solo abre la app (§32, tarea abierta).
+
+## 43. Decisiones
+
+**Tomadas en el código** (provisionales):
+- la categoría inactiva saca del público (§36); quien lo ofrece lo ve como
+  «no visible» y la confirmación de administración lo avisa;
+- el rango de precio incluye los «desde» por su importe mínimo;
+- la insignia de la tarjeta es del prestador: «Prestador con credencial
+  verificada»;
+- las categorías se muestran en su orden, no como «frecuentes»;
+- sin búsqueda, el orden es «recientes»;
+- el orden por precio y el rango exigen moneda;
+- el perfil muestra el tipo de prestador y la fecha de admisión (mes y año),
+  pero no foto ni presentación: no hay un campo público propio, y el resumen
+  de la postulación es de la admisión;
+- se oculta a quien está bloqueado, en los dos sentidos;
+- los guardados no disponibles quedan con el título que tenían al
+  guardarse;
+- «publicado recientemente» son 30 días (`DIAS_DE_RECIENTE`).
+
+**Pendientes de la empresa**: `Z_REQUISITOS_Y_DECISIONES.md`, «Incremento 3»
+(D1–D15).
+
+## 44. Cómo aplicar la 0091
+
+1. Comprobar que el fichero es el completo:
+   `supabase/migrations/0091_servicios_guardados.sql`, que empieza por
+   «-- 0091» y termina en «notify pgrst, 'reload schema';» y «commit;».
+2. Pegarlo **entero** en el editor SQL de Supabase y ejecutarlo. Es una
+   única transacción:
+   - comprueba la 0086–0090;
+   - crea `saved_services`;
+   - se verifica al final: la clave, las cascadas, los índices, la RLS, cero
+     políticas y cero permisos;
+   - se puede ejecutar dos veces.
+3. **Reiniciar la API**: la puerta recuerda el «no» del arranque.
+4. Verificarla en solo lectura (§45).
+
+## 45. Verificar la 0091 (solo lectura)
+
+```sql
+begin transaction read only;
+select current_setting('transaction_read_only');   -- 'on'
+savepoint sonda;
+create temp table sonda_de_escritura (x int);      -- TIENE que fallar con 25006
+rollback to savepoint sonda;
+
+-- La tabla (profile_id uuid, service_id uuid, title_at_save text,
+-- created_at timestamptz), con RLS, sin políticas ni permisos sueltos.
+select c.relrowsecurity, (select count(*) from pg_policy p where p.polrelid = c.oid)
+  from pg_class c where c.oid = 'public.saved_services'::regclass;          -- t | 0
+select count(*) from information_schema.table_privileges
+ where table_schema = 'public' and table_name = 'saved_services'
+   and grantee in ('anon', 'authenticated');                                -- 0
+
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'saved_services'
+ order by ordinal_position;
+  -- profile_id uuid · service_id uuid · title_at_save text · created_at timestamp with time zone
+select pg_get_constraintdef(oid) from pg_constraint
+ where conname = 'saved_services_titulo';
+  -- CHECK (((length(TRIM(BOTH FROM title_at_save)) >= 1) AND (length(TRIM(BOTH FROM title_at_save)) <= 300)))
+
+-- La clave (perfil, servicio) y las dos cascadas.
+select a.attname from pg_index i join pg_attribute a
+    on a.attrelid = i.indrelid and a.attnum = any (i.indkey)
+ where i.indexrelid = 'public.saved_services_pkey'::regclass and i.indisprimary
+ order by a.attnum;                                                         -- profile_id, service_id
+select confrelid::regclass, confdeltype from pg_constraint
+ where conrelid = 'public.saved_services'::regclass and contype = 'f';      -- profiles c · services c
+
+-- Los índices y, recién aplicada, vacía.
+select indexname from pg_indexes where tablename = 'saved_services' order by 1;
+  -- saved_services_del_servicio, saved_services_mios, saved_services_pkey
+select count(*) from public.saved_services;                                 -- 0
+rollback;
+```
+
+## 46. Pruebas, mutaciones, revisión y validación (29/09/2026)
+
+### Pruebas nuevas
+
+| Dónde | Qué |
+|---|---|
+| `test_servicios_descubrimiento_api.py` (PostgreSQL, 19) | Solo sale lo público (cada estado no publicado, publicado con una versión nueva en borrador o en revisión, suspendido, retirado, prestador fuera, categoría o madre inactiva, categoría de otro país; la portada siempre firmada), y quien lo ofrece ve «no visible»; búsqueda por cada campo, `_`, plurales de modalidad, tildes en palabras cortas y pesos dominantes; filtros combinados sin mezclar monedas; credencial vencida, rechazada o declarada; cursor estable en los cuatro órdenes (también la relevancia con puntuaciones distintas); ficha y perfil sin nada privado ni reseñas de otra vertical; guardar, quitar y la lista con el título al guardar; bloqueos; la bandera; la puerta de la 0091 (tipos, una clave a cada tabla); la tabla que desaparece con la API en marcha; sin la 0091; número fijo de consultas; el recorrido entero |
+| `test_servicios_descubrimiento_reglas.py` (sin base, 30) | Filtros, cursor y sus topes, `_` y tildes, pesos dominantes, campos privados ausentes, reseñas `null`, códigos de razón |
+| `test_servicios_migracion_0091.py` (11) | Es la última y sigue a la 0090; una sola transacción que comprueba antes de crear; no concede ni toca otra tabla; nada de dinero, reservas ni popularidad; desde cero, cerrada (RLS, cero políticas, cero privilegios) e igual al modelo; sin duplicados, con el título obligatorio (ni vacío ni de más de 300) y en cascada con la cuenta y el servicio; sobre la 0090 con datos no toca nada; reejecutarla deja lo mismo; un fallo a mitad no deja nada; se niega sin la clave, sin RLS o sin la 0090 |
+| `serviciosDescubrimiento.test.mts` y `serviciosDescubrimientoVistas.test.mts` (móvil) | Filtros en la ruta, reglas iguales a las del servidor, órdenes posibles, juntar sin repetir, textos sin códigos; las vistas solo se alcanzan desde Explorar con la bandera, el 422 con «Limpiar filtros», una sola acción de guardar, sin botón de contratar |
+
+**Concurrencia**, contra PostgreSQL de verdad:
+- `test_guardar_a_la_vez_y_guardar_y_quitar_a_la_vez`: cuatro «guardar» a la
+  vez contestan 200 y dejan una sola fila; «guardar» y «quitar» cruzados
+  contestan todos 200 y dejan cero o una fila, nunca dos;
+- `test_publicar_mientras_se_pagina_no_repite_ni_salta`: publicar un servicio
+  entre dos páginas no repite ni salta ninguno;
+- `test_suspender_o_desactivar_mientras_se_consulta`: con la suspensión a la
+  vez que la ficha, la ficha es 200 o 404 y después, 404; con la categoría
+  desactivándose a la vez que la lista, la lista es 200 y después, vacía.
+
+### Mutaciones
+
+**20 mutaciones del incremento** (M1–M20), **20 de 20 en rojo** sobre el código
+final: mostrar borradores, suspendidos o prestadores suspendidos; exponer
+notas internas o una ruta privada; mezclar monedas; convertir sin moneda;
+tratar `null` como 0 en el móvil; inventar un promedio; guardados duplicados;
+filtrar en el móvil; omitir la categoría inactiva; ignorar la bandera; aceptar
+una migración incompleta; recomendaciones sin razón; incluir lo propio; romper
+el cursor estable; introducir N+1; credencial no verificada como verificada;
+reutilizar reseñas de otra vertical. En la primera pasada, M1 (mostrar
+borradores) sobrevivió: la prueba no tenía un servicio publicado con un
+borrador encima. Se añadió y se pone roja.
+
+**15 mutaciones de la revisión** (R1–R15), **15 de 15 en rojo**: ver abajo.
+Las 35 se repitieron sobre el código final, con el árbol restaurado después.
+
+### Revisión independiente
+
+**Revisión independiente** (solo lectura, adversarial, sobre una copia limpia
+de `9a9d1c1`). Resultado: nada bloqueante, **un hallazgo alto**, cinco medios
+y una docena de bajos. Cada uno se reprodujo, se clasificó y, si era del
+alcance, se corrigió con una prueba capaz de ponerse roja. **15 mutaciones más**
+(R1–R15) deshacen esos arreglos uno por uno: **15 de 15 en rojo** sobre el
+código final. En la primera pasada la R14 (el 422 pintado como error con
+«Reintentar») sobrevivió: la prueba solo miraba que existiera el estado, no
+que el 422 fuera a él. Se reforzó y ahora se pone roja. La R15 quita de la 0091
+la comprobación del título al guardar; la prueba de la migración la exige.
+
+| # | Hallazgo | Severidad | Arreglo |
+|---|---|---|---|
+| 1 | La lista de guardados enseñaba el título **vivo** de un servicio no disponible: el de una versión publicada durante una suspensión (que nunca se vio) o lo que cambiara después de un bloqueo | **alta** | la 0091 (sin aplicar) guarda `title_at_save`, el título público al guardar, y es lo único que sale cuando no está disponible |
+| 2 | El `_` que escribe la persona llegaba a `LIKE` como comodín: «____» traía todo el catálogo con un motivo inventado | media | el guion bajo separa palabras; «____» es «escribe al menos dos letras» |
+| 3 | La relevancia sumaba pesos: coincidir en categoría, resumen y descripción adelantaba a quien coincide en el título | media | pesos dominantes (64 / 8 / 1): cada nivel pesa más que todo el de abajo |
+| 4 | Las tildes solo se toleraban en palabras de cinco letras o más: «cafe», «peru» y «diseno» no encontraban nada | media | en PostgreSQL, la columna se pliega con `translate` (tildes, eñe y cedilla, mayúsculas incluidas), igual que la palabra |
+| 5 | Desactivar una categoría despublicaba en silencio | media | quien lo ofrece ve «no visible» (misma autoridad), la confirmación de administración lo avisa, y queda como decisión D13 |
+| 6 | C15 se amplía: cada tarjeta del catálogo, también sin sesión, lleva en la URL firmada el identificador del perfil | media | **no se cambió** (decisión de la empresa); corregido el texto que decía lo contrario y documentado el riesgo mayor (§47, D6) |
+| 7 | Un 422 al cargar se pintaba como error con «reintentar», y la regla de «dos letras» del móvil no era la del servidor | baja | se explica con su texto y «Limpiar filtros»; mismas reglas que el servidor; un enlace contradictorio no deja un orden por precio sin moneda |
+| 8 | Un rollback de la 0091 sin reiniciar tumbaba el catálogo con sesión; la puerta no miraba los tipos ni que las claves fueran a tablas distintas | baja | los guardados se leen en un punto de guardado y, si fallan, la puerta vuelve a mirar; la puerta exige tipos y una clave a cada tabla; el rollback dice «reiniciar» |
+| 9 | Un cursor con números enormes acababa en 404 | baja | topes: es `invalid_cursor` |
+| 10 | Las sugerencias metían todos los guardados como parámetros | baja | subconsultas |
+| 11 | La insignia «Credencial verificada» es del prestador, no del servicio | baja | el texto dice «Prestador con credencial verificada» (D15) |
+| 12 | «virtuales» no contaba como la modalidad | baja | se mira la palabra y su singular |
+| 13 | La prestadora veía lo suyo en «Más de este prestador» | baja | ya no |
+| 14 | El icono de Guardados se anunciaba como «Acción derecha»; los chips que navegan, como casillas | baja | `rightLabel` en `AppHeader` y chips con papel de botón |
+| 15 | Un rango incluía los precios «desde» sin decirlo | baja | la hoja de filtros lo dice (D14) |
+| 16 | Volver de una ficha reiniciaba la lista | baja | se carga al cambiar los filtros, no al volver |
+| 17 | Pruebas débiles (cursor de relevancia solo con empates, sin orden en `price_desc` ni `recent`, sin `_`, sin tildes cortas) | baja | añadidas |
+
+Verificado como correcto por la revisión: una sola autoridad de lo público
+(y `catalogo.publico` retirado sin referencias), bloqueos en los dos sentidos,
+sin N+1, monedas separadas, reseñas sin inventar, guardar idempotente, las dos
+puertas, el cursor atado a su orden, la 0091 y el orden del historial.
+
+### Validación final
+
+| Comprobación | Resultado |
+|---|---|
+| Backend **con** PostgreSQL (0001–0091 desde cero) | **3981 pasan**, 0 fallan, 0 omitidas (18 min 24 s). La prueba de la 0091 que exige el título se añadió después y pasa (11 de 11 en su fichero) |
+| Backend **sin** PostgreSQL | **2962 pasan**, 1019 omitidas (las que necesitan la base), 0 fallan (9 min 26 s) |
+| Móvil, árbol real (CRLF) | **3434 de 3434**, salida 0 |
+| `tsc --noEmit` | limpio |
+| Expo Doctor | **18 de 18** |
+| Exportación web | correcta; las rutas nuevas están en el paquete |
+| Paridad de textos es / en / pt | la vigila `diccionariosSincronizados.test.mts` (verde) |
+| Rutas de la API | **499** (método y ruta), **ninguna duplicada**; 66 de Servicios |
+| `git diff --check` | limpio |
+| Secretos en el diff | ninguno |
+| Escrituras directas del móvil a Supabase | ninguna |
+| Migraciones 0086–0090 | sin tocar (las pruebas vigilan su huella git) |
+| Cursos, Eventos, Productos, Explorar, Incrementos 1 y 2 | verdes en las suites completas |
+| `FEATURE_SERVICES` | **apagada** por defecto |
+| Código | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
+
+## 47. Riesgos de integración
+
+- **La 0091 sin aplicar**:
+  - Si se despliega el código antes, todo el descubrimiento funciona salvo
+    guardar (503 controlado).
+  - Si se aplica después, **hay que reiniciar la API**.
+- **Categorías inactivas**: desde este incremento, desactivar una categoría
+  **saca del público** sus servicios publicados. Es la regla pedida: quien lo
+  ofrece lo ve como «no visible» y la confirmación de administración lo avisa,
+  pero no hay aviso a la prestadora ni recuento previo (D13).
+- **C15, AMPLIADO.** Con el catálogo público, cada tarjeta, también sin
+  sesión, lleva en la URL firmada de su portada la ruta
+  `<perfil>/<servicio>/…`. Quien recorra el catálogo puede enlazar cada
+  prestador con el identificador de su perfil social. Hoy no hay archivos
+  (0 en `service-media`): **conviene decidir una ruta opaca antes de encender
+  Servicios** (D6).
+- **El rollback de la 0091** exige reiniciar la API (lo dice el fichero).
+- **Rendimiento de la búsqueda**:
+  - `LIKE` con comodines no usa índices. Con el volumen de hoy es inmediato.
+  - Si el catálogo crece mucho, el siguiente paso es un índice de trigramas
+    (la 0040 ya instala `pg_trgm`) en una migración nueva. No hace falta
+    ahora.
+- **Relevancia y cursor**: si el contenido de un servicio cambia entre dos
+  páginas (se publica una versión nueva), su puntuación puede cambiar. Nunca
+  se duplica en pantalla, porque el móvil junta sin repetir; lo peor es que
+  una tarjeta cambie de sitio. Con «recientes» y por precio no pasa.
+- **El push** sigue sin llevar al destino (§32), igual que antes.
+
+## 48. Punto exacto para empezar el Incremento 4
+
+**No se empezó el Incremento 4.** Antes, una persona tiene que:
+
+1. **Aplicar la 0091** y verificarla (§44–§45); reiniciar la API.
+2. Desplegar `Edson` cuando se apruebe y **hacer el QA físico** de los
+   Incrementos 1, 2 y 3.
+3. Decidir al menos **C1** (categorías iniciales) y **C5** (monedas y
+   países), que siguen de §31; **D1–D4** y **D13**; y **C15** (D6), esta
+   última antes de encender Servicios.
+4. Antes de los avisos de reservas, que el push de la cola **lleve su
+   destino** (§32, «Navegación de los avisos»): hoy solo abre la app.
+
+El Incremento 4 (disponibilidad y reservas) parte de:
+- un servicio **público** según `condiciones_publicas()`;
+- su ficha, como punto de entrada para reservar;
+- y el hueco que la ficha deja para la barra de reserva.
+
+Todo lo de reservas, agenda y pago sigue sin tabla, ruta ni pantalla.

@@ -2511,3 +2511,78 @@ el tipo y la entidad y que `rutaDelPush` reutilice `rutaDelAviso`.
 Reservado para después: disponibilidad calculada en el servidor; reservas con
 retención de hueco; pagos y transferencias; atención e incidencias;
 valoraciones verificadas.
+
+## Z Servicios, Incremento 3 — descubrimiento y confianza (29/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte III (§33 en adelante). **Implementado y probado; pendiente de aplicar y
+verificar la 0091 y de hacer el QA físico.** Nada de lo que sigue se presenta
+como política definitiva si la empresa no lo confirmó.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Descubrir Servicios desde Explorar | El acceso «Servicios» lleva a `/servicios` con `FEATURE_SERVICES` encendida; apagada, avisa como antes |
+| Buscar por lo que se necesita | PostgreSQL con las palabras de la búsqueda global: mayúsculas, tildes (también en palabras cortas: «cafe» encuentra «Café»), espacios, plurales, varias palabras; título primero |
+| Filtros comprensibles | Categoría (con hijas), modalidad, gratis, con precio en una moneda (y rango), a consultar, zona y credencial verificada |
+| Entender una oferta | La ficha en el orden del blueprint, con lo que declara el prestador separado de lo que comprobó Z |
+| Saber que el prestador fue admitido por Z | «Prestador admitido por Z desde mm/aaaa», «Identidad verificada por Z» y «Credencial profesional verificada por Z y vigente», solo si son verdad |
+| Credenciales públicas | Solo que existe una verificada y vigente; ni su nombre ni su número (decisión pendiente, D4) |
+| Otros servicios del prestador | En la ficha y en su perfil público |
+| Guardar sin contratar | Idempotente, privado, sin aviso al prestador y sin contador público |
+| Explicar por qué se muestra algo | Un código de razón en cada sugerencia y en cada resultado de búsqueda (dónde coincidió) |
+| Sin resultados, datos ni reseñas | Estados vacíos honestos; media de reseñas `null`, nunca «0.0» |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **Una categoría desactivada saca del público** los servicios que la usan
+   (cambia la decisión 5 del Incremento 2, por el requisito de este). No se
+   borran, y al reactivarla vuelven.
+2. **Las categorías se muestran en su orden**, no como «frecuentes»: no hay
+   datos de uso que lo sostengan.
+3. **Sin búsqueda, lo más reciente primero.** Con búsqueda, relevancia (título
+   > categoría y resumen > descripción, prestador, zona y modalidad), con
+   pesos que dominan: cada nivel pesa más que todo el de abajo junto.
+4. **Ordenar por precio y el rango exigen una moneda**; no se convierte nada.
+5. **Quien está bloqueado** con el prestador, en cualquier sentido, no ve sus
+   servicios ni su perfil (la regla de la búsqueda global).
+6. **El perfil público** muestra el nombre público, el tipo (profesional o
+   empresa) y la fecha de admisión (mes y año). No hay foto ni presentación
+   propias: el avatar social no se enlaza sin decisión (D8) y el resumen de la
+   postulación es de la admisión.
+7. **Un servicio guardado que deja de estar disponible** queda en la lista con
+   el título que tenía AL GUARDARSE, sin contenido ni enlace, y se puede
+   quitar (D7). Nunca el título vivo de algo que no es público.
+8. **Sugerencias**: parecido a lo guardado, y publicado en los últimos 30 días.
+   No se usa «prestador seguido» (revelaría su perfil social).
+9. **Sin reseñas de servicio** hasta el Incremento 6. Las reseñas de perfil
+   (`profile_reviews`) no se mezclan ni se enseñan como del servicio.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| D1 | **Categorías destacadas** en la entrada de Servicios | Las de primer nivel, en su orden (`sort_order`), cuatro y «Ver todas» |
+| D2 | **Orden editorial** («seleccionados por Z») | No existe; sin búsqueda, recientes |
+| D3 | **Filtros visibles** | Modalidad, precio (gratis / con precio en una moneda y rango / a consultar), zona y credencial verificada. Ninguno sin datos (fecha, calificación, idioma, urgencia) |
+| D4 | **Credenciales públicas**: nombre, emisor, número parcial, país, vigencia | Solo «credencial profesional verificada por Z y vigente», sin detalle |
+| D5 | **Qué significa comercialmente «verificado por Z»** | Se nombra exactamente lo comprobado (admisión, identidad, credencial vigente, servicio aprobado) y se dice que no garantiza el resultado |
+| D6 | **C15**: el UUID del perfil en la ruta firmada de las imágenes | Sigue igual (§32). **Con el catálogo público el riesgo crece**: cada tarjeta, también sin sesión, lo lleva en su URL firmada. Sin archivos todavía, se puede cambiar antes de encender sin migrar nada; es lo recomendable |
+| D7 | **Guardados que dejan de estar disponibles** | Se quedan con el título que tenían al guardarse y «ya no está disponible», sin contenido; se pueden quitar |
+| D8 | **Información pública de persona frente a empresa** (foto, nombre legal o comercial, ciudad) | Solo el nombre público y el tipo; sin foto ni ciudad |
+| D9 | **Criterio de las recomendaciones** | Parecido a lo guardado y publicado en 30 días; cada una con su razón. Sin señal, nada |
+| D10 | **Mostrar la fecha de incorporación** | Se muestra el mes y el año de la admisión |
+| D11 | **Origen futuro de las calificaciones** | Reseñas verificadas de atenciones (Incremento 6), separadas de las reseñas de perfil |
+| D12 | **Texto legal de las señales de confianza** | «Estas comprobaciones no garantizan el resultado del servicio», bajo cada bloque |
+| D13 | **Qué pasa al desactivar una categoría con servicios publicados** | Dejan de verse en el catálogo (el requisito del Incremento 3); quien los ofrece los ve «no visibles» y la confirmación de administración lo avisa. Sin aviso a la prestadora ni recuento previo |
+| D14 | **Si un rango de precio incluye los precios «desde»** | Sí, por su importe mínimo, y la hoja de filtros lo dice |
+| D15 | **La insignia de credencial en las tarjetas** | Es del prestador, no del servicio: «Prestador con credencial verificada». Si la empresa decide relacionar credenciales con categorías, podrá ser del servicio |
+
+### Límites del Incremento 3
+
+No hay disponibilidad, agenda, reservas, contratación, pagos, mensajes por
+reserva, cancelaciones, check-in, sesiones, incidencias, devoluciones, reseñas
+que crear, finanzas ni transferencias. Ni IA, ni motores externos de
+búsqueda, ni un segundo recomendador. La ficha no tiene botón de contratar.
+El push de un aviso sigue abriendo solo la aplicación (tarea abierta).

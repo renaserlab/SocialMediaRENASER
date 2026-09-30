@@ -1470,3 +1470,90 @@ navegador.
 - [ ] Borrar la cuenta del prestador (Ajustes › Eliminar cuenta): sus
       servicios desaparecen de la bandeja y la ficha deja de existir; el
       enlace de una imagen abierta antes deja de funcionar.
+
+## Z Servicios · Incremento 3 — descubrimiento y confianza (29/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** Las pruebas
+automáticas cubren la API contra PostgreSQL y el código de las pantallas.
+
+Antes de empezar:
+
+- **Aplicar la 0091** en la base del entorno de pruebas y verificarla
+  (`Z_SERVICIOS_ARQUITECTURA.md` §44–§45). **Reiniciar la API** después.
+- La API de ese entorno corre el código de `Edson` y tiene
+  `FEATURE_SERVICES=true` **solo allí**.
+- Tener al menos dos prestadores aprobados con servicios publicados en dos
+  categorías, uno con una credencial verificada y otro sin ella; un servicio
+  gratis, uno a consultar y uno con precio.
+
+### Con la bandera apagada
+
+- [ ] Explorar › «Servicios» sigue avisando de que aún no está, sin abrir
+      nada. Cursos, Eventos y Productos, igual que antes.
+
+### Entrar y buscar
+
+- [ ] Explorar › «Servicios» abre el catálogo; «Atrás» vuelve a Explorar.
+- [ ] Sin buscar: las categorías (cuatro y «Ver todas») y, si hay, las
+      sugerencias con su razón; si no hay ninguna razón, no sale la sección.
+- [ ] Buscar con mayúsculas, sin tildes y con espacios de más da lo mismo,
+      también en palabras cortas («cafe» encuentra «Café», «peru» a
+      «Perú»); varias palabras acotan; una sola letra o solo guiones bajos
+      avisan sin buscar.
+- [ ] Un servicio con la palabra en el título sale antes que otro que la
+      tiene en la categoría, el resumen y la descripción.
+- [ ] Abrir un enlace con una búsqueda que el servidor no acepta: se explica
+      y ofrece «Limpiar filtros», nunca «Reintentar».
+- [ ] Cada resultado dice dónde coincidió (título, categoría…).
+- [ ] Sin resultados: el texto lo dice y «Limpiar filtros» devuelve todo.
+
+### Filtros y orden
+
+- [ ] Abrir filtros, elegir modalidad, «Con precio», una moneda y un rango;
+      aplicar: el botón dice cuántos hay y los resultados cambian.
+- [ ] Un rango sin moneda o «desde» mayor que «hasta» se avisan antes.
+- [ ] La hoja de filtros avisa de que el rango incluye los precios «desde»
+      por su importe mínimo.
+- [ ] Gratis y a consultar no piden moneda ni rango.
+- [ ] Ordenar por precio solo aparece con una moneda.
+- [ ] Abrir una ficha y volver: la búsqueda y los filtros siguen ahí.
+- [ ] «Ver más» trae la página siguiente sin repetir tarjetas.
+
+### Ficha, prestador y confianza
+
+- [ ] La ficha: contenido, quien lo ofrece (lleva a su perfil), «Lo que Z
+      comprobó» solo con lo verdadero, «servicio revisado y aprobado por Z»
+      con fecha, qué declara el prestador, y «Todavía no hay reseñas
+      verificadas» sin estrellas. Sin botón de contratar.
+- [ ] Más servicios del prestador y de la misma categoría, con su razón.
+      Quien ofrece el servicio no ve lo suyo como «más de este prestador».
+- [ ] La insignia de la tarjeta dice «Prestador con credencial verificada».
+- [ ] Administración desactiva una categoría con servicios publicados: la
+      confirmación avisa de que dejan de verse; el catálogo ya no los
+      muestra; la prestadora los ve como «no visibles»; al reactivarla
+      vuelven.
+- [ ] El perfil del prestador: nombre, tipo, lo que Z comprobó, categorías,
+      modalidades, zonas y servicios. Nunca documentos, números ni contacto.
+- [ ] Un prestador con todo suspendido: «No encontramos a ese prestador».
+
+### Guardados
+
+- [ ] Guardar desde la tarjeta y desde la ficha; el marcador cambia. Doble
+      toque: una sola vez.
+- [ ] Cabecera › Guardados: la lista, lo más reciente primero, «Solo tú ves
+      esta lista».
+- [ ] Suspender un servicio guardado: en la lista sale «Ya no está
+      disponible», sin imagen ni enlace, y se puede quitar.
+- [ ] Mientras sigue suspendido, publicar una versión con otro título: la
+      lista sigue enseñando el título que tenía al guardarse.
+- [ ] Guardar no avisa al prestador (ningún aviso nuevo en su bandeja).
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: cada tarjeta se anuncia con título,
+      prestador y precio; el marcador dice «Guardar» o «Quitar de
+      guardados»; las opciones de filtro se anuncian como opciones; el
+      icono de la cabecera se anuncia como «Guardados» y los chips que
+      navegan (categorías, «Ver todas»), como botones.
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos.
+- [ ] En web y móvil, la hoja de filtros se desplaza y se cierra.
