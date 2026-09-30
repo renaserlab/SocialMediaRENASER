@@ -65,6 +65,15 @@ export function leerFallo(error: unknown): FalloDeCarga {
   return error instanceof ApiError ? falloDeCarga(error.status, error.code) : 'error';
 }
 
+/**
+ * Una búsqueda o un filtro que el servidor NO ACEPTA (422 del descubrimiento):
+ * se explica con su texto y se ofrece limpiar. «Reintentar» no arreglaría
+ * nada. `null` si es otro fallo.
+ */
+export function leerConsultaInvalida(error: unknown): string | null {
+  return error instanceof ApiError && error.status === 422 ? claveDeErrorDelDescubrimiento(error.code) : null;
+}
+
 /** Lo mismo para el catálogo, que distingue «aún no eres prestador activo». */
 export function leerFalloDelCatalogo(error: unknown): FalloDelCatalogo {
   return error instanceof ApiError ? falloDelCatalogo(error.status, error.code) : 'error';

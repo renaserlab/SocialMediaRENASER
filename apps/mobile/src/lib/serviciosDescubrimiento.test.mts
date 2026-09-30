@@ -212,6 +212,19 @@ describe('la consulta', () => {
     assert.equal(D.revisarFiltros({ ...D.SIN_FILTROS, moneda: 'PEN', minimo: 'diez' })?.clave, 'servicios.descubrir.error.importe');
     assert.equal(D.revisarFiltros({ ...D.SIN_FILTROS, moneda: 'PEN', minimo: '300', maximo: '100' })?.clave, 'servicios.descubrir.error.rango');
     assert.equal(D.revisarFiltros({ ...D.SIN_FILTROS, q: 'ok' }), null);
+    // Las mismas reglas que el servidor: alguna PALABRA de dos letras, y el
+    // guion bajo separa (no es un comodín).
+    for (const q of ['a b', 'y o', '____', 'a_b']) {
+      assert.equal(D.revisarFiltros({ ...D.SIN_FILTROS, q })?.clave, 'servicios.descubrir.error.consultaCorta', q);
+    }
+    assert.equal(D.revisarFiltros({ ...D.SIN_FILTROS, zona: '__' })?.campo, 'zona');
+  });
+
+  it('un enlace contradictorio no deja un orden por precio sin moneda', () => {
+    const f = D.filtrosDesdeRuta({ precio: 'free', moneda: 'PEN', minimo: '10', orden: 'price_asc' });
+    assert.deepEqual([f.precio, f.moneda, f.minimo], ['free', null, '']);
+    assert.ok(!D.ordenesPosibles({ ...D.SIN_FILTROS, precio: 'free', moneda: 'PEN' }).includes('price_asc'));
+    assert.ok(D.consultaDelCatalogo(f, null).includes('sort=recent'));
   });
 });
 

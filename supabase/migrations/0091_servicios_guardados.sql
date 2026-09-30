@@ -22,14 +22,15 @@
 --   * Borrar la cuenta de quien guarda se lleva su lista; borrar la del
 --     prestador se lleva sus servicios y, con ellos, las filas que los nombran.
 --   * Un servicio que deja de estar publicado conserva la fila: la app lo
---     enseña como «ya no está disponible», sin contenido ni forma de contratar.
+--     enseña como «ya no está disponible», con el título que tenía AL
+--     GUARDARSE (`title_at_save`), sin contenido ni forma de contratar.
 --   * RLS activa y ningún permiso para `anon` ni `authenticated`: solo la API.
 --
 -- UNA ÚNICA TRANSACCIÓN, que primero comprueba la 0086–0090 y al final
 -- verifica lo que dejó. REEJECUTABLE: `if not exists`.
 --
 -- ROLLBACK: `drop table public.saved_services;` (la lista de cada persona se
--- pierde; nada más depende de ella).
+-- pierde; nada más depende de ella) y REINICIAR LA API, que recuerda el «sí».
 
 begin;
 
@@ -70,6 +71,13 @@ create table if not exists public.saved_services (
     references public.profiles(id) on delete cascade,
   service_id uuid not null
     references public.services(id) on delete cascade,
+  -- EL TÍTULO QUE ERA PÚBLICO AL GUARDAR. Si el servicio deja de estar
+  -- disponible, la lista enseña ESTE, para poder reconocerlo y quitarlo:
+  -- nunca el título vivo, que puede ser el de una versión que no llegó a
+  -- verse (publicada durante una suspensión) o posterior a un bloqueo.
+  title_at_save text not null
+    constraint saved_services_titulo
+    check (length(trim(title_at_save)) between 1 and 300),
   created_at timestamptz not null default now(),
 
   constraint saved_services_pkey primary key (profile_id, service_id)
@@ -110,7 +118,7 @@ begin
     raise exception 'La 0091 no dejó la clave (profile_id, service_id)';
   end if;
 
-  if (select count(*) from pg_catalog.pg_constraint c
+  if (select count(distinct c.confrelid) from pg_catalog.pg_constraint c
        where c.conrelid = 'public.saved_services'::regclass
          and c.contype = 'f' and c.confdeltype = 'c'
          and c.confrelid in ('public.profiles'::regclass, 'public.services'::regclass)) <> 2 then

@@ -107,6 +107,39 @@ def test_el_cursor_lleva_su_orden_y_se_valida() -> None:
             d.leer_cursor(malo, orden)
 
 
+def test_un_cursor_con_numeros_enormes_es_invalido_y_no_un_404() -> None:
+    ident = "5b7e2f7a-8d1c-4a55-9d61-0c3f1e2a4b6c"
+    momento = "2026-09-01T10:00:00+00:00"
+    for orden, claves in (
+        ("price_asc", [10**30, ident]),
+        ("price_desc", [-1, ident]),
+        ("relevance", [2**40, momento, ident]),
+        ("relevance", [-5, momento, ident]),
+    ):
+        with pytest.raises(CursorInvalido):
+            d.leer_cursor(d.cursor_de(orden, claves), orden)
+    assert d.leer_cursor(d.cursor_de("price_asc", [d.IMPORTE_MAXIMO, ident]), "price_asc")[0] == d.IMPORTE_MAXIMO
+
+
+def test_el_guion_bajo_separa_y_las_tildes_se_pliegan_del_todo() -> None:
+    assert d.filtros(q="contabilidad__pymes").terminos == ("contabilidad", "pymes")
+    assert d.filtros(q="Diseño GRÁFICO").terminos == ("diseno", "grafico")
+    assert d.filtros(q="Café Perú").terminos == ("cafe", "peru")
+    for consulta in ("____", "a_b", "_ _"):
+        with pytest.raises(d.ConsultaMuyCorta):
+            d.filtros(q=consulta)
+    with pytest.raises(d.FiltroInvalido):
+        d.filtros(zona="__")
+
+
+def test_los_pesos_son_dominantes() -> None:
+    """Cada nivel pesa más que TODO el de abajo junto: título > categoría y
+    resumen > descripción, prestador, zona y modalidad."""
+    inferiores = d.PESO_DESCRIPCION + d.PESO_PRESTADOR + d.PESO_ZONA + d.PESO_MODALIDAD
+    assert min(d.PESO_CATEGORIA, d.PESO_RESUMEN) > inferiores
+    assert d.PESO_TITULO > d.PESO_CATEGORIA + d.PESO_RESUMEN + inferiores
+
+
 def test_las_respuestas_publicas_no_tienen_sitio_para_lo_privado() -> None:
     prohibidas = {
         "storage_path", "internal_note", "visible_note", "legal_name", "tax_id", "profile_id", "status",

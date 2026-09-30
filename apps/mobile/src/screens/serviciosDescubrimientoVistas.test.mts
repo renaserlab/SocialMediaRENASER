@@ -110,6 +110,20 @@ describe('cada vista se comporta', () => {
     });
   }
 
+  it('una búsqueda que el servidor no acepta se explica y se limpia, sin «reintentar»', () => {
+    const codigo = pantalla('ServiciosScreen');
+    assert.match(codigo, /const invalida = leerConsultaInvalida\(error\);/);
+    // El 422 va a su propio estado y SOLO lo demás cae en el fallo con «reintentar».
+    assert.match(codigo, /if \(invalida\) setConsultaInvalida\(invalida\);\s*else setFallo\(leerFalloDelCatalogo\(error\)\);/);
+    assert.match(codigo, /consultaInvalida !== null \? \(\s*<StateView[\s\S]*?onAction=\{\(\) => aplicar\(SIN_FILTROS\)\}/);
+  });
+
+  it('volver de una ficha conserva la lista: se carga al cambiar los filtros, no al enfocar', () => {
+    const codigo = pantalla('ServiciosScreen');
+    assert.ok(!/useFocusEffect/.test(codigo));
+    assert.match(codigo, /useEffect\(\(\) => \{\s*void cargar\(\);\s*\}, \[cargar\]\);/);
+  });
+
   it('el perfil dice «no lo encontramos» con palabras propias', () => {
     const codigo = pantalla('PrestadorPublicoScreen');
     assert.match(codigo, /fallo === 'noEncontrada'/);
@@ -198,6 +212,13 @@ describe('accesibilidad', () => {
     assert.equal((tarjeta.match(/accessibilityRole="button"/g) ?? []).length, 2);
     assert.match(tarjeta, /minWidth: 44, minHeight: 44/);
     assert.match(tarjeta, /accessibilityLabel=\{tarjeta\.cover\.alt_text\}/);
+  });
+
+  it('el acceso a Guardados tiene nombre y los chips que navegan son botones', () => {
+    const codigo = pantalla('ServiciosScreen');
+    assert.match(codigo, /rightLabel=\{f\('servicios\.descubrir\.guardados\.abrir'\)\}/);
+    assert.match(codigo, /f\('servicios\.descubrir\.verTodas'\)\}\s*rol="button"/);
+    assert.match(pantalla('PrestadorPublicoScreen'), /label=\{nombreDeLaCategoria\(c, idioma\)\}\s*rol="button"/);
   });
 
   it('las opciones de los filtros se anuncian como botones de opción', () => {

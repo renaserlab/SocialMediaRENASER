@@ -119,6 +119,7 @@ export function PrestadorPublicoScreen() {
                   <Chip
                     key={c.id}
                     label={nombreDeLaCategoria(c, idioma)}
+                    rol="button"
                     onPress={() => router.push({ pathname: '/servicios', params: { categoria: c.id } } as never)}
                   />
                 ))}

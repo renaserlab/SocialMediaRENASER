@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
@@ -74,6 +75,8 @@ from app.modules.services.service import CursorInvalido
 from app.modules.services.service import hoy as _hoy
 from app.modules.social_graph.service import blocked_either_way
 
+logger = logging.getLogger("renaser.services")
+
 POR_PAGINA = 20
 LIMITE_MAXIMO = 50
 #: Cuántas tarjetas lleva cada sección de sugerencias y de «relacionados».
@@ -105,14 +108,28 @@ MOTIVOS = (MOTIVO_BUSQUEDA, MOTIVO_GUARDADOS, MOTIVO_RECIENTE, MOTIVO_MISMO_PRES
 #: Cuánto suma que un término aparezca en cada sitio. Enteros, para que el
 #: cursor compare puntuaciones sin decimales. El ORDEN es la decisión: primero
 #: el título; después la categoría y el resumen; después la descripción, el
-#: prestador, la zona y la modalidad.
-PESO_TITULO = 8
-PESO_CATEGORIA = 4
-PESO_RESUMEN = 4
-PESO_DESCRIPCION = 2
-PESO_PRESTADOR = 2
-PESO_ZONA = 2
-PESO_MODALIDAD = 2
+#: prestador, la zona y la modalidad. PESOS DOMINANTES: cada nivel pesa más que
+#: TODO el nivel de abajo junto (64 > 8+8; 8 > 1+1+1+1), para que coincidir en
+#: tres sitios secundarios no adelante a quien coincide en el título.
+PESO_TITULO = 64
+PESO_CATEGORIA = 8
+PESO_RESUMEN = 8
+PESO_DESCRIPCION = 1
+PESO_PRESTADOR = 1
+PESO_ZONA = 1
+PESO_MODALIDAD = 1
+
+#: Topes del cursor: un cursor tocado con números enormes es un cursor inválido.
+PUNTOS_MAXIMOS = 10_000
+IMPORTE_MAXIMO = 10_000_000_000
+
+#: Cómo se pliegan las tildes EN LA BASE (PostgreSQL): `translate` de cada
+#: letra acentuada, mayúscula o minúscula, a la suya sin tilde; la eñe a «n» y
+#: la cedilla a «c». Las palabras buscadas se pliegan igual (`_plegar`), así que
+#: «cafe» encuentra «Café», «peru» a «Perú» y «diseno» a «Diseño».
+_CON_TILDE = "áàäâãéèëêíìïîóòöôõúùüûñçÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ"
+_SIN_TILDE = "aaaaaeeeeiiiiooooouuuuncaaaaaeeeeiiiiooooouuuunc"
+_PLIEGUE = str.maketrans(_CON_TILDE, _SIN_TILDE)
 
 #: Palabras que nombran una modalidad (ya plegadas, como las devuelve
 #: `normalizacion.terminos`).
@@ -174,6 +191,27 @@ def _uuid_valido(valor: str) -> bool:
     return True
 
 
+def _plegar(palabra: str) -> str:
+    return palabra.translate(_PLIEGUE).lower()
+
+
+def _terminos(texto: str) -> tuple[str, ...]:
+    """Las palabras de la búsqueda global, plegadas del todo y SIN `_`.
+
+    El guion bajo pasa por `normalizacion` (es parte de `\\w`) y en un `LIKE`
+    es un comodín: «____» encontraría el catálogo entero con un motivo
+    inventado. Aquí separa palabras, como cualquier otro signo. El `%` ya no
+    llega: la normalización lo trata como separador.
+    """
+    salida: list[str] = []
+    for termino in normalizacion.terminos(texto):
+        for trozo in termino.split("_"):
+            palabra = _plegar(trozo)
+            if len(palabra) >= normalizacion.MIN_LONGITUD and palabra not in salida:
+                salida.append(palabra)
+    return tuple(salida[: normalizacion.MAX_TERMINOS])
+
+
 def filtros(
     *,
     q: str | None = None,
@@ -192,7 +230,7 @@ def filtros(
     texto = " ".join((q or "").split())
     terminos: tuple[str, ...] = ()
     if texto:
-        terminos = tuple(normalizacion.terminos(texto))
+        terminos = _terminos(texto)
         if not terminos:
             raise ConsultaMuyCorta()
 
@@ -228,7 +266,7 @@ def filtros(
     if zona_texto:
         if len(zona_texto) > 80:
             raise FiltroInvalido(details={"field": "area"})
-        terminos_de_zona = tuple(normalizacion.terminos(zona_texto))
+        terminos_de_zona = _terminos(zona_texto)
         if not terminos_de_zona:
             raise FiltroInvalido(details={"field": "area"})
 
@@ -271,11 +309,11 @@ def leer_cursor(cursor: str, orden: str) -> list:
             return [_momento(momento), _ident(ident)]
         if orden == ORDEN_RELEVANCIA:
             puntos, momento, ident = claves
-            if not isinstance(puntos, int) or isinstance(puntos, bool):
+            if not isinstance(puntos, int) or isinstance(puntos, bool) or not 0 <= puntos <= PUNTOS_MAXIMOS:
                 raise ValueError
             return [puntos, _momento(momento), _ident(ident)]
         importe, ident = claves
-        if not isinstance(importe, int) or isinstance(importe, bool):
+        if not isinstance(importe, int) or isinstance(importe, bool) or not 0 <= importe <= IMPORTE_MAXIMO:
             raise ValueError
         return [importe, _ident(ident)]
     except (ValueError, TypeError, KeyError, binascii.Error, UnicodeDecodeError):
@@ -349,17 +387,30 @@ def _credencial_vigente(hoy: date):
     )
 
 
-def _coincide(columna, patrones: list[str]):
-    return or_(*(func.lower(columna).like(p) for p in patrones))
+def _coincide(columna, patrones: list[str], *, plegada: bool):
+    """`plegada`: en PostgreSQL la columna se pliega igual que la palabra
+    (tildes, eñe, cedilla y mayúsculas fuera), y basta el patrón exacto. En
+    otra base (SQLite, solo en desarrollo) queda la búsqueda global de siempre:
+    minúsculas y el patrón que tolera las vocales con tilde."""
+    texto = func.lower(func.translate(columna, _CON_TILDE, _SIN_TILDE)) if plegada else func.lower(columna)
+    return or_(*(texto.like(p) for p in patrones))
 
 
-def _patrones(termino: str) -> list[str]:
+def _patrones(termino: str, *, plegada: bool) -> list[str]:
     salida: list[str] = []
     for forma in sorted(normalizacion.raices(termino)):
-        for patron in normalizacion.patrones(forma):
+        for patron in ([f"%{forma}%"] if plegada else normalizacion.patrones(forma)):
             if patron not in salida:
                 salida.append(patron)
     return salida
+
+
+def _modalidad_de(termino: str) -> str | None:
+    """«virtuales», «presenciales»: la palabra o su singular."""
+    for forma in sorted(normalizacion.raices(termino)):
+        if forma in MODALIDAD_POR_PALABRA:
+            return MODALIDAD_POR_PALABRA[forma]
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -380,15 +431,25 @@ class Tarjeta:
 
 
 async def _guardados_de(db: AsyncSession, mira: str | None, servicios: list[str]) -> set[str]:
+    """Cuáles de `servicios` guardó quien mira. SIN TUMBAR LA PÁGINA: si la
+    tabla desaparece con la API en marcha (un rollback de la 0091 sin
+    reiniciar), se lee en un punto de guardado, se contesta «ninguno» y la
+    puerta vuelve a mirar en la siguiente petición."""
     if not mira or not servicios or not await esquema.hay_guardados(db):
         return set()
-    return set(
-        await db.scalars(
-            select(SavedService.service_id).where(
-                SavedService.profile_id == mira, SavedService.service_id.in_(servicios)
+    try:
+        async with db.begin_nested():
+            return set(
+                await db.scalars(
+                    select(SavedService.service_id).where(
+                        SavedService.profile_id == mira, SavedService.service_id.in_(servicios)
+                    )
+                )
             )
-        )
-    )
+    except Exception:  # noqa: BLE001 - los guardados nunca tumban el catálogo
+        logger.warning("Servicios: no se pudieron leer los guardados; la puerta volverá a mirar.", exc_info=True)
+        esquema.olvidar_guardados()
+        return set()
 
 
 async def _con_credencial(db: AsyncSession, prestadores: list[str]) -> set[str]:
@@ -467,24 +528,28 @@ async def catalogo(
     madre = aliased(ServiceCategory)
     coincidencias: dict[str, list] = {c: [] for c in _CAMPOS_BUSCADOS}
     puntos = literal(0)
+    plegada = (await db.connection()).dialect.name == "postgresql"
+
+    def coincide(columna, patrones):
+        return _coincide(columna, patrones, plegada=plegada)
 
     if f.terminos:
         consulta = consulta.outerjoin(madre, madre.id == ServiceCategory.parent_id)
         for termino in f.terminos:
-            p = _patrones(termino)
+            p = _patrones(termino, plegada=plegada)
             por_campo = {
-                "title": _coincide(ServiceVersion.title, p),
+                "title": coincide(ServiceVersion.title, p),
                 "category": or_(
-                    _coincide(ServiceCategory.name, p), _coincide(ServiceCategory.name_en, p),
-                    _coincide(ServiceCategory.name_pt, p), _coincide(madre.name, p),
-                    _coincide(madre.name_en, p), _coincide(madre.name_pt, p),
+                    coincide(ServiceCategory.name, p), coincide(ServiceCategory.name_en, p),
+                    coincide(ServiceCategory.name_pt, p), coincide(madre.name, p),
+                    coincide(madre.name_en, p), coincide(madre.name_pt, p),
                 ),
-                "summary": _coincide(ServiceVersion.summary, p),
-                "description": _coincide(ServiceVersion.description, p),
-                "provider": _coincide(ServiceProvider.display_name, p),
-                "area": and_(ServiceVersion.modality != VIRTUAL, _coincide(ServiceVersion.location_area, p)),
+                "summary": coincide(ServiceVersion.summary, p),
+                "description": coincide(ServiceVersion.description, p),
+                "provider": coincide(ServiceProvider.display_name, p),
+                "area": and_(ServiceVersion.modality != VIRTUAL, coincide(ServiceVersion.location_area, p)),
             }
-            modalidad = MODALIDAD_POR_PALABRA.get(termino)
+            modalidad = _modalidad_de(termino)
             if modalidad is not None:
                 por_campo["modality"] = ServiceVersion.modality == modalidad
             # CADA PALABRA TIENE QUE APARECER EN ALGÚN SITIO. Una frase de dos
@@ -521,7 +586,8 @@ async def catalogo(
         consulta = consulta.where(ServiceVersion.price_minor <= f.maximo)
     for termino in f.zona:
         consulta = consulta.where(
-            ServiceVersion.modality != VIRTUAL, _coincide(ServiceVersion.location_area, _patrones(termino))
+            ServiceVersion.modality != VIRTUAL,
+            coincide(ServiceVersion.location_area, _patrones(termino, plegada=plegada)),
         )
     if f.con_credencial:
         consulta = consulta.where(
@@ -689,14 +755,18 @@ async def ficha(db: AsyncSession, servicio_id: str, *, mira: str | None) -> Fich
     servicio, version, prestador, categoria = await publico(db, servicio_id, mira=mira)
     guardados = await _guardados_de(db, mira, [servicio.id])
     ajenos = [] if mira is None else [ServiceProvider.profile_id != mira]
-    del_prestador = (
-        await db.execute(
-            base(mira)
-            .where(ServiceProvider.id == prestador.id, Service.id != servicio.id)
-            .order_by(Service.first_published_at.desc(), Service.id.desc())
-            .limit(RELACIONADOS)
-        )
-    ).all()
+    # «MÁS DE ESTE PRESTADOR» es para quien lo conoce desde fuera: a la propia
+    # prestadora mirando su ficha no se le sugiere lo suyo.
+    del_prestador = []
+    if mira is None or prestador.profile_id != mira:
+        del_prestador = (
+            await db.execute(
+                base(mira)
+                .where(ServiceProvider.id == prestador.id, Service.id != servicio.id)
+                .order_by(Service.first_published_at.desc(), Service.id.desc())
+                .limit(RELACIONADOS)
+            )
+        ).all()
     # RELACIONADOS: de la misma categoría, de OTROS prestadores, y nunca lo
     # propio de quien mira (un prestador no necesita que le sugieran lo suyo).
     relacionados = (
@@ -800,15 +870,17 @@ async def servicios_del_prestador(
 # --------------------------------------------------------------------------- #
 async def guardar(db: AsyncSession, *, mira: str, servicio_id: str) -> None:
     """IDEMPOTENTE Y SIN CARRERAS: `on conflict do nothing` en la clave
-    (perfil, servicio). Solo se guarda lo público; guardar no avisa a nadie."""
-    await publico(db, servicio_id, mira=mira)
+    (perfil, servicio). Solo se guarda lo público; guardar no avisa a nadie.
+    Se anota el título PÚBLICO de ese momento, que es el que se enseñará si un
+    día deja de estar disponible."""
+    _, version, _, _ = await publico(db, servicio_id, mira=mira)
     if (await db.connection()).dialect.name == "postgresql":
         from sqlalchemy.dialects.postgresql import insert
     else:
         from sqlalchemy.dialects.sqlite import insert
     await db.execute(
         insert(SavedService)
-        .values(profile_id=mira, service_id=servicio_id)
+        .values(profile_id=mira, service_id=servicio_id, title_at_save=version.title)
         .on_conflict_do_nothing(index_elements=["profile_id", "service_id"])
     )
 
@@ -836,16 +908,14 @@ async def guardados(
     db: AsyncSession, *, mira: str, cursor: str | None, limite: int = POR_PAGINA
 ) -> tuple[list[Guardado], str | None]:
     """Lo que guardó esta persona, lo más reciente primero. LO QUE YA NO ES
-    PÚBLICO SE QUEDA, pero sin contenido: solo su título y «ya no está
-    disponible», para que se pueda quitar. Nunca parece contratable."""
+    PÚBLICO SE QUEDA, pero sin contenido: solo el título que tenía AL
+    GUARDARSE y «ya no está disponible», para que se pueda quitar. Nunca el
+    título vivo de algo que no es público (una versión publicada durante una
+    suspensión, o lo que cambió después de un bloqueo). Nunca parece
+    contratable."""
     tope = max(1, min(int(limite), LIMITE_MAXIMO))
-    consulta = (
-        select(SavedService.service_id, SavedService.created_at, ServiceVersion.title)
-        .outerjoin(
-            ServiceVersion,
-            and_(ServiceVersion.service_id == SavedService.service_id, ServiceVersion.status == estados.PUBLICADA),
-        )
-        .where(SavedService.profile_id == mira)
+    consulta = select(SavedService.service_id, SavedService.created_at, SavedService.title_at_save).where(
+        SavedService.profile_id == mira
     )
     if cursor:
         t, i = leer_cursor(cursor, ORDEN_RECIENTE)
@@ -897,15 +967,17 @@ async def sugerencias(db: AsyncSession, *, mira: str | None, ahora: datetime | N
     vistos: set[str] = set()
     ajenos = [] if mira is None else [ServiceProvider.profile_id != mira]
 
-    guardados_ids: list[str] = []
+    # LO GUARDADO COMO SUBCONSULTA, no como lista de parámetros: con miles de
+    # guardados, una lista `IN` pasaría del tope de parámetros de la base.
+    suyos = None
     if mira and await esquema.hay_guardados(db):
-        guardados_ids = list(await db.scalars(select(SavedService.service_id).where(SavedService.profile_id == mira)))
-    if guardados_ids:
+        suyos = select(SavedService.service_id).where(SavedService.profile_id == mira)
+    if suyos is not None and await db.scalar(select(exists().where(SavedService.profile_id == mira))):
         # ALIAS PROPIOS: con `Service` o `ServiceCategory` a secas, la
         # subconsulta se correlacionaría con la de fuera y dejaría de ser
         # «las categorías de lo guardado».
         guardado, suya = aliased(Service), aliased(ServiceCategory)
-        cats = select(guardado.category_id).where(guardado.id.in_(guardados_ids))
+        cats = select(guardado.category_id).where(guardado.id.in_(suyos))
         madres = select(suya.parent_id).where(suya.id.in_(cats), suya.parent_id.is_not(None))
         familia = or_(
             Service.category_id.in_(cats),
@@ -916,7 +988,7 @@ async def sugerencias(db: AsyncSession, *, mira: str | None, ahora: datetime | N
         filas = (
             await db.execute(
                 base(mira)
-                .where(familia, Service.id.not_in(guardados_ids), *ajenos)
+                .where(familia, Service.id.not_in(suyos), *ajenos)
                 .order_by(Service.first_published_at.desc(), Service.id.desc())
                 .limit(POR_SECCION)
             )
@@ -928,10 +1000,11 @@ async def sugerencias(db: AsyncSession, *, mira: str | None, ahora: datetime | N
             vistos.update(f[0].id for f in filas)
 
     desde = ahora - timedelta(days=DIAS_DE_RECIENTE)
-    excluidos = list(vistos | set(guardados_ids))
     consulta = base(mira).where(Service.first_published_at >= desde, *ajenos)
-    if excluidos:
-        consulta = consulta.where(Service.id.not_in(excluidos))
+    if vistos:
+        consulta = consulta.where(Service.id.not_in(sorted(vistos)))
+    if suyos is not None:
+        consulta = consulta.where(Service.id.not_in(suyos))
     filas = (
         await db.execute(
             consulta.order_by(Service.first_published_at.desc(), Service.id.desc()).limit(POR_SECCION)

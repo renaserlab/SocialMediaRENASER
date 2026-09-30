@@ -179,14 +179,18 @@ function texto(valor: unknown): string {
 export function filtrosDesdeRuta(params: Record<string, unknown>): Filtros {
   const categoria = texto(params.categoria);
   const moneda = texto(params.moneda).trim().toUpperCase();
+  const precio = uno(TIPOS_DE_PRECIO, texto(params.precio));
+  // «Gratis» y «a consultar» no tienen importe: una moneda o un rango con
+  // ellos es un enlace contradictorio, y se descartan.
+  const sinImporte = precio === 'free' || precio === 'on_request';
   return {
     q: texto(params.q).slice(0, LARGO_MAXIMO_DE_BUSQUEDA),
     categoria: UUID.test(categoria) ? categoria : null,
     modalidad: uno(MODALIDADES, texto(params.modalidad)),
-    precio: uno(TIPOS_DE_PRECIO, texto(params.precio)),
-    moneda: (MONEDAS as readonly string[]).includes(moneda) ? moneda : null,
-    minimo: texto(params.minimo).slice(0, 20),
-    maximo: texto(params.maximo).slice(0, 20),
+    precio,
+    moneda: !sinImporte && (MONEDAS as readonly string[]).includes(moneda) ? moneda : null,
+    minimo: sinImporte ? '' : texto(params.minimo).slice(0, 20),
+    maximo: sinImporte ? '' : texto(params.maximo).slice(0, 20),
     zona: texto(params.zona).slice(0, LARGO_MAXIMO_DE_ZONA),
     conCredencial: texto(params.credencial) === '1',
     orden: uno(ORDENES, texto(params.orden)),
@@ -240,7 +244,7 @@ export function ordenesPosibles(f: Filtros): Orden[] {
   const salida: Orden[] = [];
   if (f.q.trim()) salida.push('relevance');
   salida.push('recent');
-  if (f.moneda) salida.push('price_asc', 'price_desc');
+  if (f.moneda && f.precio !== 'free' && f.precio !== 'on_request') salida.push('price_asc', 'price_desc');
   return salida;
 }
 
@@ -258,10 +262,19 @@ function menores(valor: string, moneda: string | null): number | null | 'invalid
   return importeEscrito(valor, moneda);
 }
 
+/** Las palabras de dos letras o más, como las cuenta el servidor (el `_`
+ *  también separa). «a b» no tiene ninguna. */
+function palabrasUtiles(texto: string): string[] {
+  return texto.split(/[^\p{L}\p{N}]+|_/u).filter((p) => p.length >= 2);
+}
+
 export function revisarFiltros(f: Filtros): FalloDeFiltro | null {
   const q = f.q.trim();
-  if (q && q.replace(/[^\p{L}\p{N}]/gu, '').length < 2) {
+  if (q && palabrasUtiles(q).length === 0) {
     return { campo: 'q', clave: 'servicios.descubrir.error.consultaCorta' };
+  }
+  if (f.zona.trim() && palabrasUtiles(f.zona).length === 0) {
+    return { campo: 'zona', clave: 'servicios.descubrir.error.filtro' };
   }
   const minimo = menores(f.minimo, f.moneda);
   const maximo = menores(f.maximo, f.moneda);

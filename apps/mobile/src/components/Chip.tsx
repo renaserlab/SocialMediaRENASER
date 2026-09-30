@@ -32,7 +32,7 @@ type ChipProps = {
    * alumnos, ventas y devoluciones son de eleccion unica y se anunciaban como
    * casillas: parecia que se podian acumular.
    */
-  rol?: 'checkbox' | 'radio';
+  rol?: 'checkbox' | 'radio' | 'button';
 };
 
 export function Chip({

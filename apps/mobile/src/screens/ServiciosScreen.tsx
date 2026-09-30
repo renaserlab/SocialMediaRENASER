@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
@@ -42,7 +42,7 @@ import {
   type SeccionDeSugerencias,
   type TarjetaDeServicio as Tarjeta,
 } from '@/lib/serviciosDescubrimiento';
-import { leerFalloDelCatalogo, useTextosDeServicios } from '@/hooks/useServicios';
+import { leerConsultaInvalida, leerFalloDelCatalogo, useTextosDeServicios } from '@/hooks/useServicios';
 import { ServiceDiscoveryRepository } from '@/repositories/ServiceDiscoveryRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -77,6 +77,7 @@ export function ServiciosScreen() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [secciones, setSecciones] = useState<SeccionDeSugerencias[]>([]);
   const [fallo, setFallo] = useState<FalloDelCatalogo | null>(null);
+  const [consultaInvalida, setConsultaInvalida] = useState<string | null>(null);
   const [masCargando, setMasCargando] = useState(false);
   const [guardando, setGuardando] = useState<string | null>(null);
   const [hoja, setHoja] = useState<Filtros | null>(null);
@@ -94,6 +95,7 @@ export function ServiciosScreen() {
   const cargar = useCallback(async () => {
     const este = ++pedido.current;
     setFallo(null);
+    setConsultaInvalida(null);
     setItems(null);
     try {
       const [pagina, cats, sugerencias] = await Promise.all([
@@ -107,17 +109,20 @@ export function ServiciosScreen() {
       setCategorias(cats);
       setSecciones(sugerencias.sections);
     } catch (error) {
-      if (este === pedido.current) setFallo(leerFalloDelCatalogo(error));
+      if (este !== pedido.current) return;
+      const invalida = leerConsultaInvalida(error);
+      if (invalida) setConsultaInvalida(invalida);
+      else setFallo(leerFalloDelCatalogo(error));
     }
     // `clave` resume los filtros: cambiar uno vuelve a pedir desde el principio.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clave]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void cargar();
-    }, [cargar]),
-  );
+  // AL CAMBIAR LOS FILTROS, no al volver a la pantalla: volver de una ficha
+  // conserva las páginas ya cargadas y la posición.
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
 
   const verMas = async () => {
     if (!cursor || masCargando) return;
@@ -196,6 +201,7 @@ export function ServiciosScreen() {
         title={f('servicios.descubrir.titulo')}
         onBack={volver}
         rightIcon="bookmark"
+        rightLabel={f('servicios.descubrir.guardados.abrir')}
         onRightPress={() => router.push('/servicios/guardados' as never)}
       />
       <Text variant="title" accessibilityRole="header">
@@ -240,6 +246,7 @@ export function ServiciosScreen() {
             {categorias.length > visibles.length || todas ? (
               <Chip
                 label={todas ? f('servicios.descubrir.verMenos') : f('servicios.descubrir.verTodas')}
+                rol="button"
                 onPress={() => setTodas(!todas)}
               />
             ) : null}
@@ -261,7 +268,16 @@ export function ServiciosScreen() {
         </View>
       ) : null}
 
-      {fallo !== null ? (
+      {consultaInvalida !== null ? (
+        <StateView
+          state="empty"
+          icon="alert-circle"
+          title={f(consultaInvalida)}
+          description={f('servicios.descubrir.consultaInvalidaCuerpo')}
+          actionLabel={f('servicios.descubrir.limpiar')}
+          onAction={() => aplicar(SIN_FILTROS)}
+        />
+      ) : fallo !== null ? (
         <EstadoDelCatalogo fallo={fallo} onRetry={() => void cargar()} />
       ) : items === null ? (
         <StateView state="loading" />

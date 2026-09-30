@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Uuid, func, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Text, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
@@ -28,9 +28,14 @@ class SavedService(Base):
     service_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("services.id", ondelete="CASCADE"), primary_key=True
     )
+    #: El título PÚBLICO al guardar: lo que se enseña si deja de estar disponible.
+    title_at_save: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
+        CheckConstraint(
+            "length(trim(title_at_save)) between 1 and 300", name="saved_services_titulo"
+        ),
         Index("saved_services_mios", "profile_id", text("created_at desc"), text("service_id desc")),
         Index("saved_services_del_servicio", "service_id"),
     )

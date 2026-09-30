@@ -41,7 +41,7 @@ from app.modules.services.catalogo_schemas import (
     VersionEnListaRead,
     VersionRead,
 )
-from app.modules.services.models import PRESTADOR_ACTIVO, ServiceProvider
+from app.modules.services.models import ServiceProvider
 from app.modules.services.service import CursorInvalido, _cursor_partido
 
 LIMITE_MAXIMO = 50
@@ -146,11 +146,14 @@ async def _observacion(db: AsyncSession, servicio_id: str) -> ObservacionRead | 
 
 
 async def _visible(db: AsyncSession, servicio: Service, publicada: ServiceVersion | None) -> bool:
+    """Lo decide la misma autoridad que el catálogo público (Incremento 3):
+    si la categoría se desactiva, quien lo ofrece ve «no visible», no un
+    «publicado» que nadie encuentra."""
     if servicio.status not in estados.VISIBLE_AL_PUBLICO or publicada is None:
         return False
-    return (
-        await db.scalar(select(ServiceProvider.status).where(ServiceProvider.id == servicio.provider_id))
-    ) == PRESTADOR_ACTIVO
+    from app.modules.services import descubrimiento
+
+    return bool(await db.scalar(select(descubrimiento.base().where(Service.id == servicio.id).exists())))
 
 
 # --------------------------------------------------------------------------- #

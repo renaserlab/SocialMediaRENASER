@@ -1,9 +1,11 @@
 """Lo que devuelve el descubrimiento de Servicios. SOLO LO PÚBLICO.
 
-Ninguna respuesta lleva rutas de almacenamiento, notas, motivos del equipo,
-estados internos, documentos, números de credencial, el nombre legal, el
-perfil social del prestador ni cuántas personas guardaron algo. Las imágenes
-salen como URL firmada que caduca.
+Ninguna respuesta lleva, como campo, rutas de almacenamiento, notas, motivos
+del equipo, estados internos, documentos, números de credencial, el nombre
+legal ni cuántas personas guardaron algo. Las imágenes salen como URL
+firmada que caduca; ESA URL CONTIENE la ruta `<perfil>/<servicio>/…`, con el
+identificador del perfil del prestador (decisión C15/D6, pendiente: una ruta
+opaca antes de encender Servicios lo evitaría).
 
 LA CONFIANZA NOMBRA EXACTAMENTE LO QUE Z COMPROBÓ: que admitió al prestador
 (y cuándo), que verificó su identidad, que verificó al menos una credencial

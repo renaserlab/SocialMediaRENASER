@@ -62,9 +62,11 @@ def test_no_concede_ni_toca_otra_tabla() -> None:
 
 
 def test_no_trae_dinero_reservas_ni_popularidad() -> None:
-    codigo = SQL.lower()
+    # Las comprobaciones del final cuentan filas del catálogo (`count(...)`):
+    # eso no es un contador. Lo que no puede haber es una COLUMNA que lo sea.
+    codigo = re.sub(r"count\([^)]*\)", "", SQL.lower())
     for palabra in ("stripe", "payment", "booking", "slot", "rating", "count", "popular", "score"):
-        assert palabra not in codigo.replace("count(*)", ""), palabra
+        assert palabra not in codigo, palabra
 
 
 # =========================================================================== #
@@ -115,15 +117,15 @@ def test_guardar_dos_veces_es_imposible_y_todo_cae_en_cascada(pg) -> None:  # no
     admin = _persona(pg, "admin")
     perfil, prestador, servicio, _ = _publicada(pg, admin)
     quien = _persona(pg)
-    _hacer(pg, "insert into public.saved_services (profile_id, service_id) values (%s, %s)", quien, servicio)
+    _hacer(pg, "insert into public.saved_services (profile_id, service_id, title_at_save) values (%s, %s, 'Asesoría')", quien, servicio)
     with pytest.raises(psycopg.errors.UniqueViolation):
-        _hacer(pg, "insert into public.saved_services (profile_id, service_id) values (%s, %s)", quien, servicio)
+        _hacer(pg, "insert into public.saved_services (profile_id, service_id, title_at_save) values (%s, %s, 'Asesoría')", quien, servicio)
     # La cuenta de quien guarda se va y su lista con ella.
     _hacer(pg, "delete from auth.users where id = %s", quien)
     assert _uno(pg, "select count(*) from public.saved_services where service_id = %s", servicio) == 0
     # La del prestador se lleva sus servicios y, con ellos, lo que los nombra.
     otra = _persona(pg)
-    _hacer(pg, "insert into public.saved_services (profile_id, service_id) values (%s, %s)", otra, servicio)
+    _hacer(pg, "insert into public.saved_services (profile_id, service_id, title_at_save) values (%s, %s, 'Asesoría')", otra, servicio)
     _hacer(pg, "delete from auth.users where id = %s", perfil)
     assert _uno(pg, "select count(*) from public.saved_services where profile_id = %s", otra) == 0
 

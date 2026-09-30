@@ -211,8 +211,22 @@ async def test_solo_sale_lo_publicado_de_un_prestador_activo_en_una_categoria_ac
     await _sembrar(motor, "update public.service_categories set country_code = 'CL' where id = cast(:c as uuid)",
                    c=otro_pais)
 
+    # Publicados con una versión NUEVA en curso (borrador, y otra en revisión):
+    # se ven UNA vez y con lo publicado; lo que está en curso no sale.
+    assert (await _accion(app, perfil, f"{MIOS}/{visible}/draft")).status_code == 201
+    assert (await _editar(app, perfil, visible, title="Borrador en curso sin publicar")).status_code == 200
+    en_revision = await _publicado(app, perfil, jefa, moderador, categoria, title="Publicado con revisión en curso")
+    v2 = (await _accion(app, perfil, f"{MIOS}/{en_revision}/draft")).json()["open_version"]["id"]
+    assert (await _editar(app, perfil, en_revision, title="Versión en revisión sin publicar")).status_code == 200
+    assert (await _accion(app, perfil, f"{MIOS}/{en_revision}/draft/submit")).status_code == 200
+    base = f"{BANDEJA}/{en_revision}/versions/{v2}"
+    assert (await _accion(app, moderador, f"{base}/start-review")).status_code == 200
+
     pagina = await _lista(app, limit=50)
-    assert _ids(pagina) == [visible], [i["title"] for i in pagina["items"]]
+    assert sorted(_ids(pagina)) == sorted([visible, en_revision]), [i["title"] for i in pagina["items"]]
+    assert {i["title"] for i in pagina["items"]} == {"Servicio visible del catálogo", "Publicado con revisión en curso"}
+    assert _ids(await _lista(app, q="sin publicar")) == []
+    assert (await _get(app, f"{CATALOGO}/{visible}")).json()["title"] == "Servicio visible del catálogo"
     _sin_privado(pagina, "Motivo del equipo", "Aclara el alcance")
     # La portada sale SIEMPRE como URL firmada, nunca como la ruta del depósito.
     for item in pagina["items"]:
@@ -221,6 +235,13 @@ async def test_solo_sale_lo_publicado_de_un_prestador_activo_en_una_categoria_ac
     for ident in [*ocultos.values(), de_suspendido, en_inactiva, bajo_madre, de_otro_pais]:
         r = await _get(app, f"{CATALOGO}/{ident}")
         assert r.status_code == 404 and r.json()["error"]["code"] == "service_not_found", ident
+    # Quien lo ofrece NO ve «publicado y visible» en lo que la categoría inactiva
+    # sacó del público: lo decide la misma autoridad.
+    async with _cliente(app, perfil) as http:
+        for ident in (en_inactiva, bajo_madre):
+            privado = (await http.get(f"{MIOS}/{ident}")).json()
+            assert privado["status"] == "published" and privado["publicly_visible"] is False, ident
+        assert (await http.get(f"{MIOS}/{visible}")).json()["publicly_visible"] is True
     # Las categorías que se ofrecen como filtro: solo la que tiene algo público.
     categorias = (await _get(app, CATEGORIAS)).json()
     assert [c["id"] for c in categorias] == [categoria]
@@ -273,6 +294,45 @@ async def test_buscar_por_titulo_categoria_descripcion_prestador_y_zona(mundo) -
     # Una letra no es una búsqueda.
     r = await _get(app, CATALOGO, q="a")
     assert r.status_code == 422 and r.json()["error"]["code"] == "service_catalog_query_too_short"
+    # El guion bajo NO es un comodín: «____» no trae el catálogo entero ni
+    # inventa dónde coincidió; «contabilidad__» es «contabilidad».
+    for consulta in ("____", "a_b"):
+        r = await _get(app, CATALOGO, q=consulta)
+        assert r.status_code == 422 and r.json()["error"]["code"] == "service_catalog_query_too_short", consulta
+    assert set(_ids(await _lista(app, q="contabilidad__"))) == {por_titulo, por_descripcion}
+    r = await _get(app, CATALOGO, area="__")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "service_catalog_filter_invalid"
+    # La modalidad, también en plural (y sin que el texto la nombre).
+    assert _ids(await _lista(app, q="arreglos presenciales")) == []
+
+
+async def test_tildes_en_palabras_cortas_y_relevancia_dominante(mundo) -> None:
+    app, motor, _ = mundo
+    jefa, moderador = await _equipo(motor)
+    categoria = (await _categoria(app, jefa, name="Diseño gráfico"))["id"]
+    otra = (await _categoria(app, jefa, name="Negocio"))["id"]
+    ana = await _prestador(motor)
+    cafe = await _publicado(app, ana, jefa, moderador, otra, title="Cata de café de especialidad")
+    peru = await _publicado(app, ana, jefa, moderador, otra, title="Rutas por el Perú profundo")
+    diseno = await _publicado(app, ana, jefa, moderador, categoria, title="Identidad para marcas")
+    # Tildes y eñe en palabras cortas, en los dos sentidos.
+    for consulta, esperado in (("cafe", cafe), ("CAFÉ", cafe), ("peru", peru), ("PERÚ", peru),
+                               ("diseno grafico", diseno), ("diseño", diseno)):
+        assert _ids(await _lista(app, q=consulta)) == [esperado], consulta
+    # «virtuales» es la modalidad virtual aunque ningún texto diga «virtual».
+    assert _ids(await _lista(app, q="cata virtuales")) == [cafe]
+    # EL TÍTULO MANDA: uno que solo coincide en el título va antes que otro que
+    # coincide en la categoría, el resumen y la descripción a la vez.
+    solo_titulo = await _publicado(app, ana, jefa, moderador, otra, title="Asesoría en marketing digital",
+                                   summary="Una sesión para ordenar tus campañas del mes.",
+                                   description="Revisamos tus anuncios y te dejamos un plan claro para seguir.")
+    marketing = (await _categoria(app, jefa, name="Marketing"))["id"]
+    tres_sitios = await _publicado(app, ana, jefa, moderador, marketing, title="Plan de redes para tu negocio",
+                                   summary="Marketing de contenidos para pequeños negocios del barrio.",
+                                   description="Una sesión de marketing para ordenar tus publicaciones.")
+    pagina = await _lista(app, q="marketing")
+    assert _ids(pagina) == [solo_titulo, tres_sitios], [i["title"] for i in pagina["items"]]
+    assert set(pagina["items"][1]["reason_fields"]) == {"category", "summary", "description"}
 
 
 # =========================================================================== #
@@ -397,9 +457,26 @@ async def test_cursor_estable_en_cada_orden(mundo) -> None:
             if not cursor:
                 break
         assert sorted(vistos) == sorted(idents) and len(vistos) == len(set(vistos)), orden
+        # Y en SU orden, página a página igual que de una vez.
+        de_una_vez = await _lista(app, sort=orden, limit=50, **extra)
+        assert vistos == _ids(de_una_vez), orden
+        precios = [i["price"]["amount_minor"] for i in de_una_vez["items"]]
         if orden == "price_asc":
-            precios = [i["price"]["amount_minor"] for i in (await _lista(app, sort=orden, limit=50, **extra))["items"]]
             assert precios == sorted(precios)
+        if orden == "price_desc":
+            assert precios == sorted(precios, reverse=True)
+    # Relevancia con puntuaciones DISTINTAS entre páginas: el título primero.
+    fuerte = await _publicado(app, ana, jefa, moderador, categoria, title="Asesoría contable completa")
+    flojo = await _publicado(app, ana, jefa, moderador, categoria, title="Otro servicio",
+                             description="Incluye una asesoría breve sobre cuentas y un repaso contable.")
+    vistos, cursor = [], None
+    for _ in range(10):
+        pagina = await _lista(app, q="asesoria contable", limit=1, cursor=cursor)
+        vistos += _ids(pagina)
+        cursor = pagina["next_cursor"]
+        if not cursor:
+            break
+    assert vistos[0] == fuerte and vistos[-1] == flojo and len(vistos) == len(set(vistos)), vistos
     # Un cursor de otro orden, o basura, es un 422 y no una página cualquiera.
     otro = (await _lista(app, sort="recent", limit=2))["next_cursor"]
     for malo in (otro, "basura", "eyJvIjoicmVjZW50In0"):
@@ -449,6 +526,9 @@ async def test_ficha_y_perfil_sin_nada_privado_ni_resenas_inventadas(mundo) -> N
     assert [(i["id"], i["reason"]) for i in ficha["related"]] == [(vecino, "same_category")]
     assert ficha["provider"]["trust"]["identity_verified"] is False  # sembrado sin admisión
     _sin_privado(ficha, "Muy buena atención", ana)
+
+    # La propia prestadora no ve «más de este prestador» sobre lo suyo.
+    assert (await _get(app, f"{CATALOGO}/{principal}", ana)).json()["more_from_provider"] == []
 
     proveedor = ficha["provider"]["id"]
     perfil = (await _get(app, f"{PRESTADORES}/{proveedor}")).json()
@@ -515,6 +595,24 @@ async def test_guardar_quitar_y_la_lista_propia(mundo) -> None:
     assert suspendido == {"service_id": uno, "saved_at": suspendido["saved_at"], "available": False,
                           "title": "Uno", "service": None}
     assert next(i for i in lista["items"] if i["service_id"] == dos)["available"] is True
+    # Mientras sigue suspendido se publica una versión NUEVA (publicar no
+    # reactiva): su título nunca fue público y NO puede salir en la lista.
+    v2 = (await _accion(app, ana, f"{MIOS}/{uno}/draft")).json()["open_version"]["id"]
+    assert (await _editar(app, ana, uno, title="Título que nunca fue público")).status_code == 200
+    assert (await _accion(app, ana, f"{MIOS}/{uno}/draft/submit")).status_code == 200
+    base = f"{BANDEJA}/{uno}/versions/{v2}"
+    for paso, quien in (("start-review", moderador), ("approve", jefa), ("publish", jefa)):
+        assert (await _accion(app, quien, f"{base}/{paso}")).status_code == 200, paso
+    lista = (await _get(app, GUARDADOS, lucia)).json()
+    assert next(i for i in lista["items"] if i["service_id"] == uno)["title"] == "Uno"
+    assert "nunca fue público" not in json.dumps(lista, ensure_ascii=False)
+    # Si la prestadora bloquea a Lucía, lo guardado deja de estar disponible y
+    # conserva el título que tenía; nada de lo que cambie después.
+    await _sembrar(motor, "insert into public.user_blocks (blocker_id, blocked_id) values "
+                          "(cast(:a as uuid), cast(:b as uuid))", a=ana, b=lucia)
+    bloqueado = next(i for i in (await _get(app, GUARDADOS, lucia)).json()["items"] if i["service_id"] == dos)
+    assert bloqueado["available"] is False and bloqueado["title"] == "Dos" and bloqueado["service"] is None
+    await _sembrar(motor, "delete from public.user_blocks")
     # Quitar: idempotente, y vale aunque ya no sea público.
     async with _cliente(app, lucia) as http:
         for _ in range(2):
@@ -654,8 +752,37 @@ async def test_la_puerta_de_los_guardados_mira_lo_que_hace_falta(mundo) -> None:
         ("drop index public.saved_services_mios",),
         ("alter table public.saved_services disable row level security",),
         ("alter table public.saved_services drop column created_at",),
+        # Las dos claves a la MISMA tabla no son «una a cada una».
+        ("alter table public.saved_services drop constraint saved_services_profile_id_fkey",
+         "alter table public.saved_services add constraint saved_services_profile_id_fkey "
+         "foreign key (service_id) references public.services(id) on delete cascade"),
+        # Una columna con otro tipo.
+        ("alter table public.saved_services alter column title_at_save type varchar(20)",),
     ):
         assert await _puerta_de_guardados(motor, *cambios) is False, cambios
+
+
+async def test_si_la_tabla_desaparece_con_la_api_en_marcha_el_catalogo_no_cae(mundo) -> None:
+    """Un rollback de la 0091 sin reiniciar: la puerta recordaba el «sí». El
+    catálogo, la ficha y las sugerencias siguen (sin guardados) y la puerta
+    vuelve a mirar; nunca un 500."""
+    app, motor, _ = mundo
+    jefa, moderador = await _equipo(motor)
+    categoria = (await _categoria(app, jefa))["id"]
+    ident = await _publicado(app, await _prestador(motor), jefa, moderador, categoria, title="Resiste")
+    quien = await _persona(motor)
+    assert _ids(await _lista(app, quien)) == [ident]  # la puerta ya dijo «sí»
+    await _sembrar(motor, "alter table public.saved_services rename to saved_services_apartada")
+    try:
+        assert _ids(await _lista(app, quien)) == [ident]
+        assert (await _get(app, f"{CATALOGO}/{ident}", quien)).json()["saved"] is False
+        assert (await _get(app, SUGERENCIAS, quien)).status_code == 200
+        async with _cliente(app, quien) as http:
+            r = await http.post(f"{CATALOGO}/{ident}/save")
+        assert r.status_code == 503 and r.json()["error"]["code"] == "services_not_ready"
+    finally:
+        await _sembrar(motor, "alter table public.saved_services_apartada rename to saved_services")
+        esquema.olvidar()
 
 
 async def test_sin_la_0091_guardar_contesta_503_y_el_resto_funciona(mundo, monkeypatch) -> None:

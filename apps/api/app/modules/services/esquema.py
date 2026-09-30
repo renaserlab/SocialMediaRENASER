@@ -75,6 +75,11 @@ def olvidar() -> None:
     _cache.clear()
 
 
+def olvidar_guardados() -> None:
+    """Que la próxima petición vuelva a mirar la 0091 (la tabla falló al leerse)."""
+    _cache.pop("guardados", None)
+
+
 async def hay_admision(db: AsyncSession) -> bool:
     if "admision" not in _cache:
         conexion = await db.connection()
@@ -235,7 +240,9 @@ async def exigir_catalogo(db: AsyncSession) -> None:
 # --------------------------------------------------------------------------- #
 #: LO QUE LA 0091 IMPONE Y EL CÓDIGO DA POR HECHO: la clave (perfil, servicio)
 #: que hace que guardar dos veces sea guardar una, las dos claves ajenas en
-#: cascada, sus dos índices y RLS. No el número de la migración.
+#: cascada (una a cada tabla), el tipo de cada columna, sus dos índices y RLS.
+#: No el número de la migración. (Que no tenga políticas ni permisos sueltos lo
+#: verifica la propia migración, como en la 0090.)
 _LO_QUE_NECESITAN_LOS_GUARDADOS = text(
     """
     select
@@ -251,11 +258,20 @@ _LO_QUE_NECESITAN_LOS_GUARDADOS = text(
                = array['profile_id', 'service_id']
       )
       and (
-        select count(*) from pg_catalog.pg_constraint c
+        select count(*) = 2 and count(distinct c.confrelid) = 2
+          from pg_catalog.pg_constraint c
          where c.conrelid = to_regclass('public.saved_services')
            and c.contype = 'f' and c.confdeltype = 'c'
            and c.confrelid in (to_regclass('public.profiles'), to_regclass('public.services'))
-      ) = 2
+      )
+      and (
+        select count(*) from pg_catalog.pg_attribute a
+         where a.attrelid = to_regclass('public.saved_services') and not a.attisdropped
+           and (a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)) in (
+             ('profile_id', 'uuid'), ('service_id', 'uuid'), ('title_at_save', 'text'),
+             ('created_at', 'timestamp with time zone')
+           )
+      ) = 4
       and to_regclass('public.saved_services_mios') is not null
       and to_regclass('public.saved_services_del_servicio') is not null
       and coalesce(
@@ -317,4 +333,5 @@ __all__ = [
     "hay_catalogo",
     "hay_guardados",
     "olvidar",
+    "olvidar_guardados",
 ]

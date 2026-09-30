@@ -623,7 +623,9 @@ async def desactivar_categoria(
     _disponible: None = Depends(catalogo_disponible),
     db: AsyncSession = Depends(get_db),
 ) -> CategoriaRead:
-    """No acepta servicios nuevos. Los que ya la usan siguen nombrándola."""
+    """No acepta servicios nuevos, y SUS SERVICIOS PUBLICADOS DEJAN DE VERSE en el
+    catálogo público (Incremento 3) hasta que se reactive: no se borran, y quien
+    los ofrece los ve como «no visibles»."""
     categoria = await categorias.cambiar_estado(
         db, actor_id=current_user.id, categoria_id=_categoria_id(category_id), activa=False
     )
