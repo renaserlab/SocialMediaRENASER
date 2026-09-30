@@ -716,9 +716,9 @@ reseñas. La ficha pública no tiene botón de contratar.
 
 ## Servicios · Incremento 3: descubrimiento y confianza (29/09/2026)
 
-Backend real y detrás de `FEATURE_SERVICES` (apagada). Guardar necesita la
-0091 (**sin aplicar**); sin ella, lo demás funciona y guardar dice que aún no
-está disponible. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
+Backend real y detrás de `FEATURE_SERVICES` (apagada). Guardar usa la 0091,
+**aplicada y verificada** en Supabase el 29/09/2026; en una base sin ella, lo
+demás funciona y guardar dice que aún no está disponible. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
 `serviciosDescubrimientoVistas.test.mts`.
 
 Explorar › «Servicios» (solo con la bandera) › catálogo › ficha › perfil del

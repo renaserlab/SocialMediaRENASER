@@ -2515,8 +2515,9 @@ valoraciones verificadas.
 ## Z Servicios, Incremento 3 — descubrimiento y confianza (29/09/2026)
 
 El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
-Parte III (§33 en adelante). **Implementado y probado; pendiente de aplicar y
-verificar la 0091 y de hacer el QA físico.** Nada de lo que sigue se presenta
+Parte III (§33 en adelante). **Técnicamente cerrado el 29/09/2026: la 0091
+aplicada y verificada sin divergencias; únicamente queda pendiente el QA
+físico** (§49). Nada de lo que sigue se presenta
 como política definitiva si la empresa no lo confirmó.
 
 ### Requisitos cumplidos

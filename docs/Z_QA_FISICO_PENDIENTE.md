@@ -1474,12 +1474,15 @@ navegador.
 ## Z Servicios · Incremento 3 — descubrimiento y confianza (29/09/2026)
 
 **Nada de esta sección está comprobado en un teléfono.** Las pruebas
-automáticas cubren la API contra PostgreSQL y el código de las pantallas.
+automáticas cubren la API contra PostgreSQL y el código de las pantallas, y el
+cierre técnico (§49 de la arquitectura) recorrió además la API real, reiniciada,
+en local. Falta el teléfono.
 
 Antes de empezar:
 
-- **Aplicar la 0091** en la base del entorno de pruebas y verificarla
-  (`Z_SERVICIOS_ARQUITECTURA.md` §44–§45). **Reiniciar la API** después.
+- La 0091 ya está **aplicada y verificada** en Supabase (29/09/2026,
+  `Z_SERVICIOS_ARQUITECTURA.md` §49). Si el QA usa otra base, aplicarla allí,
+  verificarla (§44–§45) y **reiniciar la API**.
 - La API de ese entorno corre el código de `Edson` y tiene
   `FEATURE_SERVICES=true` **solo allí**.
 - Tener al menos dos prestadores aprobados con servicios publicados en dos

@@ -16,8 +16,8 @@ adelante), también ese día, con el Incremento 3 implementado y probado.
 | **`FEATURE_SERVICES`** | **apagada.** Todas las rutas contestan 503 `services_disabled` sin mirar la base |
 | **Incremento 2 (catálogo)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§32) |
 | **Migración 0090** | **APLICADA** en Supabase el 29/09/2026 y verificada ese día en solo lectura: **sin divergencias** (§32). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
-| **Incremento 3 (descubrimiento y confianza)** | **implementado y probado; pendiente de aplicar y verificar la 0091 y de hacer el QA físico** (§33). Catálogo público, búsqueda, filtros, orden, perfil público del prestador, señales de confianza, guardados y sugerencias con su razón |
-| **Migración 0091** | **ESCRITA, SIN APLICAR** en Supabase. Solo crea `saved_services`. Sin ella, todo el descubrimiento funciona salvo guardar (503 controlado). Pasos: §44–§45; **reiniciar la API** después |
+| **Incremento 3 (descubrimiento y confianza)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§49). Catálogo público, búsqueda, filtros, orden, perfil público del prestador, señales de confianza, guardados y sugerencias con su razón |
+| **Migración 0091** | **APLICADA** a mano en Supabase y verificada el 29/09/2026 en solo lectura: **sin divergencias** (§49). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
 | **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
@@ -1146,15 +1146,16 @@ No se cambió nada durante esta verificación.
 
 # Parte III · Incremento 3: descubrimiento y confianza
 
-Escrito el 29/09/2026 en la rama `Edson`. **Implementado y probado; pendiente
-de aplicar y verificar la 0091 y de hacer el QA físico.** No está cerrado.
+Escrito el 29/09/2026 en la rama `Edson`. **Técnicamente cerrado ese mismo
+día (§49): la 0091 aplicada y verificada sin divergencias; únicamente queda
+pendiente el QA físico.**
 
 ## 33. Estado del Incremento 3
 
 | | |
 |---|---|
 | **Qué hace** | Cualquiera descubre servicios desde Explorar. Puede: <ul><li>buscarlos por lo que necesita;</li><li>filtrarlos y ordenarlos;</li><li>abrir su ficha y conocer al prestador, con lo que Z comprobó de él;</li><li>guardarlos para después.</li></ul>Las sugerencias llevan su razón. Termina **antes** de reservar o contratar |
-| **Migración 0091** | **Escrita y probada solo en PostgreSQL local desechable. SIN APLICAR** en Supabase. Solo crea `saved_services`. Pasos y verificación: §44–§45 |
+| **Migración 0091** | **APLICADA** a mano en Supabase y verificada el 29/09/2026 en solo lectura, **sin divergencias** (§49). Solo crea `saved_services`. Pasos y verificación: §44–§45 |
 | **Sin la 0091** | Buscar, filtrar, la ficha, el perfil y las sugerencias funcionan; **guardar, quitar y la lista de guardados** contestan 503 `services_not_ready`. Nunca un 500 |
 | **`FEATURE_SERVICES`** | **apagada.** Las 8 rutas nuevas contestan 503 `services_disabled`. El acceso «Servicios» de Explorar sigue como antes: avisa de que aún no está |
 | **Dinero, reservas, reseñas** | **ninguno.** El precio se enseña; no hay reserva, pago, agenda ni reseña que crear |
@@ -1365,12 +1366,19 @@ La ficha sigue en `GET /services/catalog/{id}`, ahora con sesión opcional
 (para `saved` y los bloqueos). Todas pasan primero por la bandera y la
 0090.
 
-La **puerta de la 0091** (`esquema.hay_guardados`) exige:
-- la tabla con las columnas del modelo y **sus tipos**;
+La **puerta de la 0091** (`esquema.hay_guardados`) exige, por
+**definición** y no por nombre (desde el cierre, §49):
+- la tabla con las columnas del modelo, **sus tipos**, `NOT NULL` y, en
+  `created_at`, `now()` (guardar no la manda: sin ese valor sería un 500);
 - la clave primaria `(profile_id, service_id)`;
-- las **dos** claves ajenas en cascada, una a `profiles` y otra a `services`;
-- sus dos índices;
-- RLS.
+- las **dos** claves ajenas en cascada y validadas, una a `profiles` y otra
+  a `services`;
+- la comprobación del título entre 1 y 300, validada;
+- sus dos índices con sus columnas y su orden: btree, no únicos, sin
+  condición, válidos y listos;
+- RLS sin políticas;
+- y ni `anon` ni `authenticated` (tampoco por PUBLIC) con permisos
+  efectivos, en la tabla o en una columna.
 
 No mira el número de la migración. Sin la 0091 completa, guardar es 503.
 Como la del catálogo, recuerda el sí y el no hasta reiniciar, y un error al
@@ -1443,6 +1451,9 @@ solo abre la app (§32, tarea abierta).
 (D1–D15).
 
 ## 44. Cómo aplicar la 0091
+
+**Hecho el 29/09/2026** (§49): se ejecutó a mano y se verificó sin
+divergencias. Los pasos quedan como referencia para otra base.
 
 1. Comprobar que el fichero es el completo:
    `supabase/migrations/0091_servicios_guardados.sql`, que empieza por
@@ -1593,10 +1604,10 @@ puertas, el cursor atado a su orden, la 0091 y el orden del historial.
 
 ## 47. Riesgos de integración
 
-- **La 0091 sin aplicar**:
-  - Si se despliega el código antes, todo el descubrimiento funciona salvo
-    guardar (503 controlado).
-  - Si se aplica después, **hay que reiniciar la API**.
+- **La 0091**: aplicada y verificada (§49). La API de producción todavía no
+  tiene este código; al desplegar `Edson` se reinicia y la puerta la ve. En
+  cualquier otra base sin ella, todo funciona salvo guardar (503
+  controlado), y al aplicarla **hay que reiniciar la API**.
 - **Categorías inactivas**: desde este incremento, desactivar una categoría
   **saca del público** sus servicios publicados. Es la regla pedida: quien lo
   ofrece lo ve como «no visible» y la confirmación de administración lo avisa,
@@ -1623,7 +1634,9 @@ puertas, el cursor atado a su orden, la 0091 y el orden del historial.
 
 **No se empezó el Incremento 4.** Antes, una persona tiene que:
 
-1. **Aplicar la 0091** y verificarla (§44–§45); reiniciar la API.
+1. ~~Aplicar la 0091 y verificarla~~ **Hecho el 29/09/2026** (§49, sin
+   divergencias). Queda desplegar `Edson` cuando se apruebe: el despliegue
+   reinicia la API y la puerta ve la 0091.
 2. Desplegar `Edson` cuando se apruebe y **hacer el QA físico** de los
    Incrementos 1, 2 y 3.
 3. Decidir al menos **C1** (categorías iniciales) y **C5** (monedas y
@@ -1638,3 +1651,149 @@ El Incremento 4 (disponibilidad y reservas) parte de:
 - y el hueco que la ficha deja para la barra de reserva.
 
 Todo lo de reservas, agenda y pago sigue sin tabla, ruta ni pantalla.
+
+## 49. Cierre técnico del Incremento 3 (29/09/2026)
+
+**La 0091 se ejecutó a mano en Supabase el 29/09/2026** y se **verificó ese
+mismo día** (23:03 hora de Lima, 04:03 UTC del 30/09) **sin divergencias**. No
+se volvió a ejecutar, no se tocó el fichero y no se escribió ningún dato en
+Supabase.
+
+### La verificación, en solo lectura
+
+El verificador de la 0090, adaptado a la 0091, abre dos sesiones sobre
+Supabase:
+- **catálogos** (psycopg): `BEGIN READ ONLY`; `transaction_read_only = on` y
+  una sonda de escritura (`create temp table`) **rechazada con 25006** antes
+  de consultar nada; al terminar, sigue en solo lectura, **sin id de
+  transacción de escritura**, y `ROLLBACK`;
+- **la de la API**: la misma `DATABASE_URL`, asyncpg y el pool de
+  `app/shared/database.py`; `SET TRANSACTION READ ONLY` como primera
+  sentencia, la misma sonda rechazada y `ROLLBACK`.
+
+La URL sale del fichero de secretos autorizado y nunca se imprime.
+Referencia: prólogo + 0001–0091 sobre PostgreSQL 17 local desechable
+(Supabase: 17.6).
+
+| Comprobación | Resultado |
+|---|---|
+| Esquema público entero frente a la referencia (1587 columnas, 1188 restricciones, 503 índices, 75 disparadores, 50 funciones, 154/154 tablas con RLS, 149 políticas) | **igual**: la 0001–0090 siguen intactas |
+| `saved_services` | tabla normal y permanente, propietaria `postgres` (también su tipo y sus índices), RLS activa, **0 políticas** |
+| Columnas | `profile_id uuid`, `service_id uuid`, `title_at_save text`, `created_at timestamptz default now()`; las cuatro `NOT NULL`, en ese orden |
+| Clave primaria | `(profile_id, service_id)`, válida |
+| Claves ajenas | a `profiles(id)` y a `services(id)`, `ON DELETE CASCADE`, validadas y no diferibles |
+| Título | `saved_services_titulo`: entre 1 y 300 caracteres sin contar espacios de los extremos, validada |
+| Índices | `saved_services_mios (profile_id, created_at desc, service_id desc)` y `saved_services_del_servicio (service_id)`: btree, no únicos, sin condición, válidos y listos |
+| Disparadores | solo los internos de las dos claves ajenas, como en la referencia |
+| Permisos de PUBLIC, `anon` y `authenticated` | **ninguno**: ni declarados (en la tabla o en una columna) ni efectivos. Con permisos, solo `postgres` y `service_role` (la clave del servidor) |
+| Datos de `saved_services` | 0 filas; 0 títulos nulos, vacíos o fuera de 1–300; 0 sin perfil o sin servicio; 0 duplicados |
+| Integridad de `public` | 334 claves ajenas: 0 filas huérfanas, 0 sin validar |
+| Lo que escribió la transacción de la 0091 | una sola transacción; en el catálogo, solo `saved_services`, sus índices, sus restricciones, su TOAST y los disparadores internos de sus claves, igual que en la referencia; **ninguna fila de datos** en las 189 tablas de public, auth y storage |
+| Modelo `SavedService` del backend | igual: columnas, tipos, nulabilidad, `now()`, claves ajenas, clave primaria, CHECK e índices |
+| §45, ejecutado tal cual | los nueve resultados esperados |
+
+El verificador se ensayó antes contra la referencia local (sin divergencias)
+y contra la referencia estropeada a propósito (un permiso a `anon`,
+`created_at` sin `now()`, un índice parcial y una política): las detectó
+todas y la puerta dijo que no.
+
+### La puerta de esquema, con la conexión y el rol de la API
+
+El rol es `postgres`: **no** superusuario, con BYPASSRLS. En un proceso nuevo
+la memoria de la puerta empieza **vacía**, y el código real dice **sí** a las
+tres (`hay_admision`, `hay_catalogo`, `hay_guardados`) y lo recuerda.
+
+**Corregido en el cierre.** La puerta de la 0091 miraba en parte nombres
+(§41): no la nulabilidad, ni el `now()` del que depende guardar, ni el
+título, ni la definición de los índices, ni las políticas, ni los permisos.
+Ahora mira definiciones y permisos. Lo que la cierra, con el mismo código y
+PostgreSQL 17 local (`test_la_puerta_de_los_guardados_mira_lo_que_hace_falta`):
+
+| Caso | Puerta |
+|---|---|
+| la 0091 completa; y también con `service_role` con permisos o tras un `CLUSTER` | sí |
+| la tabla o una columna que falta; una columna de otro tipo o nulable; `created_at` sin `now()` | no |
+| la clave primaria que falta o en otro orden; una clave ajena a la misma tabla que la otra, con otra acción o sin validar | no |
+| la comprobación del título que falta, con otro límite o sin validar | no |
+| un índice que falta, en otro orden, con otras columnas, parcial, único, de otro tipo (hash) o no válido | no |
+| RLS apagada, o con una política | no |
+| un permiso para `anon`, `authenticated` o PUBLIC, en la tabla o en una columna | no |
+| un **error al mirar** | 503 `services_not_ready` al guardar y en la lista, **nunca 500**; no se recuerda y, en cuanto deja de fallar, responde sin reiniciar (`test_un_error_al_mirar_la_0091_es_503_y_no_se_recuerda`) |
+
+**Mutaciones:** 17 nuevas (G1–G13 y G16–G19) y las tres anteriores que tocan
+la puerta (M14, R7, R8): **20 de 20 en rojo**, cada una en su caso roto y
+ninguna en el control positivo, así que ninguna prueba es tautológica. Tres
+primeras versiones sobrevivieron y resultaron **equivalentes**: una
+comprobación sin validar ya no coincide por su propia definición («NOT
+VALID»), y lo concedido a PUBLIC ya lo ve el permiso efectivo de `anon` (todo
+rol tiene lo de PUBLIC). Se quitaron esas tres condiciones redundantes y la
+G5 pasó a retirar la protección de verdad.
+
+### El recorrido local, con la API reiniciada de verdad
+
+La API real, en su propio proceso (uvicorn) y **sin `dependency_overrides`**:
+tokens HS256 de verdad firmados con un secreto de usar y tirar,
+`FEATURE_SERVICES` encendida **solo en ese proceso** y PostgreSQL 17 local
+desechable. Lo único sustituido es Supabase Storage, por el almacén en memoria
+de las pruebas. Nada tocó Supabase. **63 de 63 comprobaciones verdes:**
+
+1. Con 0001–0090, sin la 0091: la admisión real, el catálogo y la
+   publicación por el flujo real. El catálogo responde y **guardar, quitar y
+   la lista contestan 503 `services_not_ready`**.
+2. Se aplica la 0091 a esa base: **la misma API sigue en 503**. Recuerda el
+   «no», y su registro lo dice una sola vez.
+3. **Se reinicia la API** (un proceso nuevo): guardar responde 200.
+4. Con la API reiniciada:
+   - el catálogo público, sin nada privado y con las portadas firmadas;
+   - la búsqueda con y sin tildes, con mayúsculas y con espacios de más;
+   - los filtros: gratis, a consultar, rangos en soles, modalidad, zona,
+     categoría madre con su hija y credencial;
+   - el orden por precio y por recientes, y el cursor de a dos sin repetir
+     ni saltar;
+   - la ficha y el perfil con la confianza real (admisión, identidad y
+     credencial) y las reseñas en 0 con media `null`;
+   - guardar dos veces y quitar dos veces (200 y 200), y la lista;
+   - un guardado que se suspende queda «no disponible» con su título; lo
+     retirado y lo de una categoría desactivada salen del catálogo (y quien lo
+     ofrece lo ve «no visible»);
+   - los bloqueos en los dos sentidos;
+   - las sugerencias con su código de razón;
+   - y el aislamiento entre personas.
+
+Ningún 500 ni ninguna traza en los registros de las dos API.
+
+### Registrada como aplicada
+
+La huella git de la 0091 (`d867002…`) entró en `APLICADAS`
+(`test_servicios_migracion_0090.py`), igual que la 0090: añadir un solo
+espacio al fichero pone roja la prueba. Su cabecera sigue diciendo «SIN
+APLICAR» a propósito: cambiarla sería editar lo aplicado (§26).
+
+### Pruebas y validación del cierre
+
+| Comprobación | Resultado |
+|---|---|
+| Verificación de la 0091 en Supabase | **sin divergencias** |
+| Puerta real con el rol de la API | **sí**, las tres |
+| Recorrido local con la API reiniciada | **63 de 63** |
+| Servicios con PostgreSQL 17 (todos los `test_servicios_*`) | **358 pasan**, 0 fallan |
+| Servicios sin PostgreSQL | 199 pasan, 159 omitidas (las que necesitan la base), 0 fallan |
+| Backend completo **con** PostgreSQL 17 (0001–0091 desde cero) | **3983 pasan**, 0 fallan, 0 omitidas (13 min 43 s) |
+| Backend completo **sin** PostgreSQL | **2963 pasan**, 1020 omitidas (las que necesitan la base), 0 fallan (7 min 37 s) |
+| Móvil del Incremento 3 (descubrimiento, vistas, catálogo y diccionarios) | **141 de 141** (sin cambios en el móvil) |
+| `tsc --noEmit` | limpio |
+| Rutas de la API | 499, **ninguna duplicada** |
+| `git diff --check` | limpio |
+| Mutaciones de la puerta | **20 de 20** |
+| `FEATURE_SERVICES` | **apagada** |
+| Código | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
+
+### Estado
+
+- **Incremento 3 técnicamente cerrado. Únicamente queda pendiente el QA
+  físico** (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 3»).
+- `FEATURE_SERVICES` sigue **apagada**, y **no hubo despliegue**.
+- **C15** sigue pendiente, y conviene decidirla **antes de encender**
+  Servicios (D6).
+- El **push** de un aviso todavía no lleva al destino (§32).
+- **No se empezó el Incremento 4** (§48).

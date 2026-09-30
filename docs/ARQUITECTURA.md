@@ -93,13 +93,11 @@ Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
 antes de usarla, y sigue funcionando cuando no lo está. Al 29/09/2026 la
-última **escrita** es la **0091** (servicios guardados, Incremento 3 de
-Servicios), **SIN APLICAR**: sin ella todo funciona salvo guardar servicios,
-que contesta 503; tras aplicarla hay que reiniciar la API. Ver
-[`Z_SERVICIOS_ARQUITECTURA.md` §44–§45](Z_SERVICIOS_ARQUITECTURA.md). La
-última **aplicada** es la **0090** (catálogo y publicación de
-servicios), verificada ese día en solo lectura **sin divergencias**; ver
-[`Z_SERVICIOS_ARQUITECTURA.md` §32](Z_SERVICIOS_ARQUITECTURA.md). La anterior,
+última **escrita y aplicada** es la **0091** (servicios guardados, Incremento 3
+de Servicios), ejecutada a mano y verificada ese día en solo lectura **sin
+divergencias**; ver [`Z_SERVICIOS_ARQUITECTURA.md` §49](Z_SERVICIOS_ARQUITECTURA.md).
+La **0090** (catálogo y publicación de servicios) también está aplicada y
+verificada (§32 del mismo documento). La anterior,
 la **0089** (borrar una cuenta sin borrar la historia), también está aplicada y
 verificada; ver [`Z_BAJA_DE_CUENTA.md` §15](Z_BAJA_DE_CUENTA.md). Las
 aplicadas no se editan: las pruebas vigilan su huella git.
