@@ -10,5 +10,9 @@ email-validator>=2.2,<3.0
 httpx>=0.28,<1.0
 # Derivados de imagen (version ligera del feed). Ver content/media_processing.py.
 pillow>=11.0,<12.0
+# La base de zonas IANA de `zoneinfo` (la agenda de Servicios). Fijada aqui
+# para que Windows y el contenedor calculen con la MISMA, y no con la que
+# traiga (o no) el sistema.
+tzdata>=2025.1
 pytest>=8.3,<9.0
 pytest-asyncio>=0.25,<1.0
