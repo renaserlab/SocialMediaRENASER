@@ -2591,10 +2591,13 @@ El push de un aviso sigue abriendo solo la aplicación (tarea abierta).
 ## Z Servicios, Incremento 4 — disponibilidad y agenda del prestador (30/09/2026)
 
 El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
-Parte IV (§50 en adelante). **Implementado y probado en `Edson`; pendiente de
-aplicar y verificar la migración 0092 y de realizar el QA físico.** La 0092 NO
-está aplicada. Nada de lo que sigue se presenta como política definitiva si la
-empresa no lo confirmó.
+Parte IV (§50 en adelante). **Técnicamente cerrado el 30/09/2026 en `Edson`;
+únicamente queda pendiente el QA físico** (§61). La 0092 se ejecutó a mano en
+Supabase y se verificó ese día en solo lectura, **sin divergencias**, también
+con la puerta de esquema y el rol real de la API. El código sigue **sin
+desplegar** y `FEATURE_SERVICES`, **apagada**. Nada de lo que sigue se
+presenta como política definitiva si la empresa no lo confirmó: E1–E12 siguen
+siendo suyas.
 
 ### Requisitos cumplidos
 
@@ -2667,3 +2670,22 @@ condiciones, direcciones, cobros, Stripe, saldos, devoluciones, disputas,
 recordatorios, asistencia, reseñas, posventa ni calendarios externos. El
 Incremento 5 **no se empezó**. El push de un aviso sigue abriendo solo la
 aplicación (tarea abierta).
+
+### Cierre técnico (30/09/2026)
+
+- **0092 aplicada y verificada** en Supabase, en solo lectura y sin
+  divergencias: las cinco tablas definición por definición, el ORM, §57 y el
+  esquema público entero frente a una referencia 0001–0092. La transacción de
+  la 0092 no escribió ninguna fila de datos. Su huella está en `APLICADAS`:
+  ya no se edita.
+- **La puerta**, con el rol real de la API y en un proceso nuevo, dice «sí» a
+  la admisión, el catálogo, los guardados y la agenda.
+- **Una corrección técnica, no de negocio**: la puerta no exigía que los
+  índices de las claves primarias y de las exclusiones estuvieran válidos y
+  listos (una exclusión con su índice a medias no impide los cruces). Ahora
+  lo exige, con su prueba y su mutación.
+- **Sigue siendo de la empresa**: E1–E12 (arriba), **C15** antes de encender
+  Servicios (D6) y el **destino del push** de un aviso.
+- **Producción**: cuando se despliegue `Edson`, reiniciar la API (el
+  despliegue lo hace): la puerta recuerda el «no».
+- **Pendiente**: el QA físico (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 4»).

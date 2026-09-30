@@ -747,8 +747,11 @@ finanzas. La ficha no tiene botón de contratar.
 
 ## Servicios · Incremento 4: disponibilidad y agenda (30/09/2026)
 
-Backend real y detrás de `FEATURE_SERVICES` (apagada). Usa la 0092, **escrita
-y SIN APLICAR**: en una base sin ella, la entrada a la agenda no aparece
+Backend real y detrás de `FEATURE_SERVICES` (apagada). Usa la 0092,
+**aplicada en Supabase y verificada el 30/09/2026 sin divergencias**
+(`Z_SERVICIOS_ARQUITECTURA.md` §61); el código sigue sin desplegar y ninguna
+de estas vistas se probó todavía en un teléfono (QA físico pendiente). En una
+base sin la 0092, la entrada a la agenda no aparece
 (`can_manage_schedule` es falso), la ficha no enseña la sección de
 disponibilidad y las rutas contestan 503 `services_not_ready`. Ninguna vista se
 alcanza solo escribiendo la URL: lo vigila `serviciosAgendaVistas.test.mts`.

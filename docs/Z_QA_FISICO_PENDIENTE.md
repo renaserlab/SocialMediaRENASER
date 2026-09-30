@@ -1563,15 +1563,21 @@ Antes de empezar:
 
 ## Z Servicios · Incremento 4 — disponibilidad y agenda (30/09/2026)
 
-**Nada de esta sección está comprobado en un teléfono**, y la 0092 **todavía
-no está aplicada**. Las pruebas automáticas cubren el cálculo, la API contra
-PostgreSQL (con carreras reales) y el código de las pantallas. Falta el
-teléfono.
+**Nada de esta sección está comprobado en un teléfono.** La 0092 **ya está
+aplicada en Supabase** y se verificó el 30/09/2026 en solo lectura, sin
+divergencias y con la puerta de esquema diciendo «sí» con el rol real de la
+API (`Z_SERVICIOS_ARQUITECTURA.md` §61). Las pruebas automáticas cubren el
+cálculo, la API contra PostgreSQL (con carreras reales), el recorrido
+integral con la API real reiniciada (103 de 103) y el código de las
+pantallas. **Falta el teléfono**: es lo único pendiente del Incremento 4.
 
 Antes de empezar:
 
-- **Aplicar la 0092** en la base del QA, verificarla (`Z_SERVICIOS_ARQUITECTURA.md`
-  §56–§57) y **reiniciar la API**: la puerta recuerda el «no».
+- Si la base del QA no es Supabase, **aplicar la 0092** en ella y
+  verificarla (§56–§57). En cualquier caso, la API del QA tiene que correr el
+  código de `Edson` y haberse **reiniciado después** de que la 0092 existiera
+  en su base: la puerta recuerda el «no». Lo mismo vale para producción el
+  día que se despliegue `Edson`.
 - La API de ese entorno corre el código de `Edson` y tiene
   `FEATURE_SERVICES=true` **solo allí**.
 - Un prestador aprobado con un servicio publicado (virtual, 60 min) y otro en

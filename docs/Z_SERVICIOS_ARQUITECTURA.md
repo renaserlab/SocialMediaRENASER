@@ -6,7 +6,8 @@ Incremento 1 en la rama `Edson`; la **Parte II** (§18 en adelante), el mismo
 día, con el Incremento 2 implementado y probado; la **Parte III** (§33 en
 adelante), también ese día, con el Incremento 3 implementado y probado; y la
 **Parte IV** (§50 en adelante), el 30/09/2026, con el Incremento 4
-implementado y probado y la 0092 **sin aplicar**.
+implementado y probado y, ese mismo día, técnicamente cerrado con la 0092
+aplicada y verificada (§61).
 
 ## Estado
 
@@ -20,8 +21,8 @@ implementado y probado y la 0092 **sin aplicar**.
 | **Migración 0090** | **APLICADA** en Supabase el 29/09/2026 y verificada ese día en solo lectura: **sin divergencias** (§32). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
 | **Incremento 3 (descubrimiento y confianza)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§49). Catálogo público, búsqueda, filtros, orden, perfil público del prestador, señales de confianza, guardados y sugerencias con su razón |
 | **Migración 0091** | **APLICADA** a mano en Supabase y verificada el 29/09/2026 en solo lectura: **sin divergencias** (§49). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
-| **Incremento 4 (disponibilidad y agenda)** | **implementado y probado; pendiente de aplicar y verificar la migración 0092 y de realizar el QA físico** (§50). Agenda por servicio, semana, excepciones, bloqueos privados y horarios calculados por el servidor |
-| **Migración 0092** | **ESCRITA Y SIN APLICAR.** Probada solo contra PostgreSQL local (§58). Al aplicarla, reiniciar la API (§56) |
+| **Incremento 4 (disponibilidad y agenda)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§61). Agenda por servicio, semana, excepciones, bloqueos privados y horarios calculados por el servidor |
+| **Migración 0092** | **APLICADA** a mano en Supabase y verificada el 30/09/2026 en solo lectura: **sin divergencias** (§61). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita. Al desplegar `Edson`, reiniciar la API |
 | **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa: la agenda enseña horarios posibles y no aparta ninguno. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
@@ -1806,22 +1807,24 @@ APLICAR» a propósito: cambiarla sería editar lo aplicado (§26).
 
 # Parte IV · Incremento 4: disponibilidad y agenda del prestador
 
-Escrito el 30/09/2026 en la rama `Edson`. **Implementado y probado; pendiente
-de aplicar y verificar la migración 0092 y de realizar el QA físico.** No se
-usa la palabra «cerrado» hasta que la 0092 esté aplicada, verificada con el rol
-real de la API, registrada como aplicada y se repita el recorrido de cierre.
+Escrito el 30/09/2026 en la rama `Edson`, con el Incremento 4 implementado y
+probado y la 0092 sin aplicar. Ese mismo día la 0092 se aplicó a mano en
+Supabase, se verificó en solo lectura (también con el rol real de la API), se
+registró como aplicada y se repitió el recorrido de cierre: **técnicamente
+cerrado; únicamente queda pendiente el QA físico** (§61). Lo que sigue de
+§50 a §60 describe el incremento; donde decía «sin aplicar», manda §61.
 
 ## 50. Estado del Incremento 4
 
 | | |
 |---|---|
 | **Qué hace** | Un prestador activo configura, para cada servicio, cuándo lo ofrece: zona horaria, semana, excepciones de fecha, bloqueos, preparación, descanso e intervalo. Una persona consulta fechas y horarios reales, calculados por el servidor. Termina al enseñar un horario |
-| **Migración 0092** | **ESCRITA Y SIN APLICAR.** Probada solo contra PostgreSQL local (§55). Aplicarla es de una persona (§56) |
+| **Migración 0092** | **APLICADA** a mano en Supabase el 30/09/2026 y verificada ese día en solo lectura, **sin divergencias** (§61) |
 | **Sin la 0092** | Las 14 rutas nuevas contestan **503 `services_not_ready`**, sin escribir nada; la ficha no enseña la sección de disponibilidad y el servicio propio no ofrece la agenda. Los Incrementos 1–3 siguen igual |
 | **`FEATURE_SERVICES`** | **apagada.** Con ella apagada, las 14 rutas contestan 503 `services_disabled` sin mirar la base |
 | **Reservas, retenciones, dinero** | **ninguno.** Ninguna tabla, ruta ni pantalla del incremento crea una reserva, una retención, un pedido o un cobro (§54) |
-| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
-| **QA físico** | **pendiente**: `Z_QA_FISICO_PENDIENTE.md`, «Incremento 4» |
+| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge. Al desplegarlo, **reiniciar la API de producción** (la puerta recuerda el «no») |
+| **QA físico** | **pendiente**: `Z_QA_FISICO_PENDIENTE.md`, «Incremento 4». Es lo único que falta |
 | **Incremento 5** | **no se empezó** |
 
 ## 51. El modelo (5 tablas, 0092)
@@ -1975,8 +1978,9 @@ identificadores y no con nombres escritos (no depende del `search_path`):
 - cada columna con su tipo y su NOT NULL, y ninguna de más;
 - las claves primarias y las cinco ajenas en cascada, validadas;
 - las dos exclusiones **tal cual**, y las 18 CHECK validadas;
-- los cinco índices por su definición (el de la clave, único y parcial),
-  válidos y listos;
+- los cinco índices por su definición (el de la clave, único y parcial), y
+  TODOS los de las cinco tablas —también los de las claves primarias y los
+  de las exclusiones— válidos, listos y vivos (añadido en el cierre, §61);
 - los cuatro disparadores con su función y su forma;
 - la función de la zona sin SECURITY DEFINER, con su `search_path` y su
   cuerpo (su huella se calcula sin retornos de carro, por si el editor de
@@ -2024,6 +2028,10 @@ respaldo a la pantalla de la que se vino. El detalle, en
 4. Verificar (§57) en una sesión de solo lectura.
 5. Registrar su huella en `APLICADAS` (`test_servicios_migracion_0090.py`),
    como la 0090 y la 0091, y repetir el recorrido de cierre.
+
+**Hecho el 30/09/2026** (§61): pasos 2, 4 y 5 en Supabase; el 3, en la API
+local del recorrido. La de producción corre el backend anterior y se
+reiniciará al desplegar `Edson`.
 
 **Rollback**: el que dice la cabecera del fichero (borra la agenda de cada
 servicio; nada más depende de ella) y reiniciar la API.
@@ -2172,9 +2180,10 @@ Sobre el código final (`d5edbd2`), el 30/09/2026:
 
 ## 59. Riesgos
 
-- **La 0092 sin aplicar**: la agenda no existe en ninguna base gestionada.
-  Aplicarla exige `btree_gist` (la 0092 lo comprueba antes de crear nada) y
-  **reiniciar la API** después.
+- **La 0092 ya está en Supabase** (§61), pero la API de producción corre el
+  backend anterior, que no la usa. **Al desplegar `Edson`, reiniciar la
+  API**: la puerta recuerda el «no». Una base nueva necesita `btree_gist`
+  (la 0092 lo comprueba antes de crear nada).
 - **Dos bases de zonas**: el cálculo usa `tzdata` (Python) y el disparador de
   la base, la de PostgreSQL. Una zona tiene que existir en las dos. Si alguna
   vez discrepan (una zona nueva en una y no en la otra), la API la rechaza con
@@ -2196,12 +2205,227 @@ Sobre el código final (`d5edbd2`), el 30/09/2026:
 
 ## 60. Estado y punto exacto de continuación
 
-- **Incremento 4 de Z Servicios implementado y probado; pendiente de aplicar
-  y verificar la migración 0092 y de realizar el QA físico.**
+- **Incremento 4 de Z Servicios técnicamente cerrado; únicamente queda
+  pendiente el QA físico** (§61).
 - `FEATURE_SERVICES` sigue **apagada**; **no hubo despliegue**.
 - **C15** pendiente antes de encender; el **push** sin destino; las
-  decisiones E1–E11 de la empresa (`Z_REQUISITOS_Y_DECISIONES.md`).
+  decisiones E1–E12 de la empresa (`Z_REQUISITOS_Y_DECISIONES.md`).
 - **No se empezó el Incremento 5.** Parte de: un servicio público, su agenda
   activa, el horario elegido en la ruta (`horarioElegidoDesdeRuta`) y el
   guardia de los bloqueos (`_contrataciones_que_protege`), que tendrá que
   contar sus reservas.
+
+## 61. Cierre técnico del Incremento 4 (30/09/2026)
+
+**La 0092 se ejecutó a mano en Supabase el 30/09/2026** y se **verificó ese
+mismo día** (12:41 hora de Lima, 17:41 UTC, y otra vez a las 13:05, 18:05
+UTC, con el código final de la puerta) **sin divergencias**. No se volvió a
+ejecutar, no se tocó el fichero y no se escribió ningún dato en Supabase.
+
+### La verificación, en solo lectura
+
+El verificador de la 0091, adaptado a la 0092, abre dos sesiones sobre
+Supabase:
+- **catálogos** (psycopg): `BEGIN READ ONLY`; `transaction_read_only = on` y
+  una sonda de escritura (`create temp table`) **rechazada con 25006** antes
+  de consultar nada; al terminar, sigue en solo lectura, **sin id de
+  transacción de escritura**, y `ROLLBACK`;
+- **la de la API**: la misma `DATABASE_URL`, asyncpg y el pool de
+  `app/shared/database.py`; `SET TRANSACTION READ ONLY` como primera
+  sentencia, la misma sonda rechazada (25006) y `ROLLBACK`.
+
+La URL sale del fichero de secretos autorizado y nunca se imprime.
+Referencias: prólogo + 0001–0092 sobre PostgreSQL 17.11 local desechable
+(Supabase: 17.6); el ORM (`agenda_models`), creado de verdad en un esquema
+aparte; §57 tal cual; y la puerta de `esquema.py`.
+
+| Comprobación | Resultado |
+|---|---|
+| Esquema público entero frente a la referencia (1630 columnas, 1218 restricciones, 515 índices, 79 disparadores, 51 funciones, 159/159 tablas con RLS, 149 políticas) | **igual**: la 0001–0091 siguen intactas |
+| Las cinco tablas | normales y permanentes, de `postgres` (también sus tipos y sus índices), RLS activa, **0 políticas** |
+| Columnas | las 43, con su tipo, su nulabilidad, su valor por defecto y su orden |
+| Claves | 5 primarias de una columna; 5 ajenas `ON DELETE CASCADE`, validadas y no diferibles (a `services`, la agenda y el historial; a `service_schedules`, reglas, excepciones y bloqueos) |
+| CHECK | los 18, con su nombre y su definición, validados |
+| Exclusiones | `service_schedule_rules_sin_cruces` (`… WHERE (active)`) y `service_schedule_exceptions_sin_cruces`, **tal cual**; operadores `=(uuid,uuid)`, `=(smallint,smallint)` o `=(date,date)` y `&&(anyrange,anyrange)`; sus índices GiST, válidos |
+| `btree_gist` | una sola, en `extensions`, versión 1.7, creada en la misma transacción que la 0092; de `supabase_admin`, igual que `pg_trgm` (0040): es el rol con el que Supabase crea las extensiones. Lo de la 0092 es de `postgres` |
+| Índices | 12 (5 propios, 5 primarios y 2 de exclusión): definición, método, columnas, orden, clases de operadores y condición (el parcial de la `Idempotency-Key`); válidos, listos y vivos |
+| Disparadores | los 4, habilitados y antes de la fila: `service_schedules_zona_valida` (INSERT o UPDATE OF `timezone`), los dos `…_solo_en_cascada` (DELETE, con `('services', 'service_id')`) y `service_schedule_events_inmutables` (UPDATE); y los internos de las claves, como en la referencia |
+| Función de la zona | `servicios_agenda_zona_valida()`: plpgsql, devuelve `trigger`, SECURITY INVOKER, `search_path=public, pg_temp`, volátil, de `postgres`, cuerpo idéntico (`e672312f…`), sin EXECUTE para PUBLIC, `anon` ni `authenticated`. Las dos que reutiliza (0086 y 0090), idénticas a la referencia |
+| Permisos de PUBLIC, `anon` y `authenticated` | **ninguno**: ni declarados (en una tabla o una columna) ni efectivos. Con permisos, solo `postgres` y `service_role` |
+| Datos | 0 filas en las cinco tablas; **0** en los 16 recuentos de incoherencias (huérfanas, zonas que no existen, reglas activas cruzadas, excepciones incompatibles, bloqueos inválidos, claves repetidas, valores imposibles, fechas futuras) |
+| Integridad de `public` | 339 claves ajenas: 0 filas huérfanas, 0 sin validar |
+| Lo que escribió la transacción de la 0092 | una sola transacción; en el catálogo, solo sus tablas, índices, restricciones, tipos, TOAST, disparadores, la función y la extensión (271 filas de `btree_gist`, las mismas que en la referencia); **ninguna fila de datos** en las 205 tablas de todos los esquemas que no son del sistema |
+| Modelo `agenda_models` del backend | **igual**: columnas y orden, tipos, nulabilidad, valores por defecto, claves, CHECK e índices. Solo en la base, por diseño: las 2 exclusiones, los 4 disparadores y el `gen_random_uuid()` de los `id` (el ORM los genera en Python) |
+| §57, ejecutado tal cual | los seis resultados esperados (el recuento: 0 agendas y 0 eventos) |
+
+El verificador se ensayó antes contra la referencia local (sin divergencias)
+y contra la referencia estropeada a propósito (un permiso a `anon`, un valor
+por defecto quitado, un índice distinto, una política, SECURITY DEFINER, un
+disparador apagado, una exclusión y un CHECK quitados, y datos incoherentes):
+dio 48 divergencias y la puerta dijo que no.
+
+### La puerta de esquema, con la conexión y el rol de la API
+
+El rol es `postgres`: **no** superusuario, con BYPASSRLS. En un proceso nuevo
+la memoria de la puerta empieza **vacía**, y el código real dice **sí** a las
+cuatro (`hay_admision`, `hay_catalogo`, `hay_guardados`, `hay_agenda`) y lo
+recuerda. Sus dos mitades, por separado, también dicen sí.
+
+**Corregido en el cierre.** Probando la puerta ante cada alteración
+(PostgreSQL 17 local), tres la dejaban **abierta**: el índice de una
+exclusión no válido o a medias (`indisready`), y el de una clave primaria a
+medias. Una exclusión con su índice a medias **no impide los cruces**. La
+puerta ahora exige que TODOS los índices de las cinco tablas estén válidos,
+listos y vivos. La prueba se puso roja con esos tres casos antes de
+corregir. Lo que la cierra, con el mismo código
+(`test_la_puerta_de_la_agenda_mira_lo_que_hace_falta`):
+
+| Caso | Puerta |
+|---|---|
+| la 0092 completa; y con `service_role` con permisos | sí |
+| una tabla que falta (bloqueos, historial), una columna que falta o de más | no |
+| una columna de otro tipo (`timestamp`, `integer`) o con otra nulabilidad (en los dos sentidos) | no |
+| una exclusión que falta o con otra definición | no |
+| un CHECK que falta, distinto, o el **mismo sin validar** | no |
+| una clave ajena con otra acción, o la **misma sin validar** | no |
+| un índice distinto (no único), no válido o a medias; también el de una exclusión o una clave primaria | no |
+| un disparador que falta, deshabilitado, **solo en réplica**, en otro momento (AFTER) o con otra función | no |
+| la función de la zona con otro cuerpo, SECURITY DEFINER u otro `search_path` | no |
+| sin `btree_gist` | no |
+| RLS apagada, o con una política | no |
+| un permiso para `anon`, `authenticated` o PUBLIC: en una tabla, en una columna o EXECUTE en la función | no |
+| un **error al mirar** | 503 `services_not_ready`, **nunca 500**; no se recuerda |
+
+Y **por HTTP**, con cada una de esas 39 alteraciones (en una transacción que
+se deshace): la agenda del prestador, dar de alta una regla, el calendario
+público y los horarios de un día contestan **503 `services_not_ready`**, nada
+se escribe y nunca hay un 500
+(`test_con_la_0092_alterada_la_api_contesta_503_y_nunca_500`).
+
+**Mutaciones:** una nueva (M32: la puerta no mira si todos los índices están
+válidos) y las cuatro anteriores que tocan la puerta (M13, M14, M22, M31):
+**5 de 5 en rojo**. Las otras 27 del incremento no se repitieron: su código no
+cambió.
+
+### Reiniciar la API
+
+La puerta recuerda el «sí» y el «no» hasta reiniciar. En local, el recorrido
+lo demuestra (abajo). **Producción** corre el backend anterior, que no usa la
+0092: **el día que se despliegue `Edson`, la API de producción tiene que
+reiniciarse** (el despliegue lo hace). No se desplegó nada.
+
+### El recorrido integral, con la API real reiniciada
+
+La API real, en su propio proceso (uvicorn) y **sin `dependency_overrides`**:
+tokens HS256 de verdad firmados con un secreto de usar y tirar,
+`FEATURE_SERVICES` encendida **solo en ese proceso** y PostgreSQL 17 local
+desechable. Lo único sustituido es Supabase Storage, por el almacén en memoria
+de las pruebas. Nada tocó Supabase. **103 de 103 comprobaciones verdes:**
+
+1. Con 0001–0091, sin la 0092, y los servicios publicados por el flujo real:
+   la agenda, el calendario y los horarios contestan **503
+   `services_not_ready`**; la ficha sigue en 200 y el servicio propio no
+   ofrece la agenda.
+2. Se aplica la 0092 a esa base: **la misma API sigue en 503** (recuerda el
+   «no»).
+3. **Se reinicia la API**: la agenda responde y el servicio propio la ofrece.
+4. **El prestador** (Lima; 60 min de la versión publicada, 10 de preparación
+   y 15 de descanso): la agenda sin configurar («schedule_missing»); zonas
+   que no son IANA con lugar o que no existen, 422; configurar dos veces deja
+   un solo evento; lunes a viernes 09–12; un cruce, 409; tocarse, 201; horas
+   imposibles, otra modalidad u otra capacidad, 422; editar, desactivar y
+   retirar una regla (y retirarla otra vez, 404); la vista previa y lo
+   público dan **09:10 y 10:35**; cerrar un lunes entero; cerrar la franja
+   09–10 de un miércoles (queda 10:35: la rejilla no se mueve, E12); una
+   extra el sábado (15:10), que no admite cerrar el día entero (409), y
+   editarla (15:10 y 16:35); sustituir el martes (14:10 y 15:35); retirar la
+   franja cerrada; un bloqueo con motivo que solo ve el dueño (ni el
+   calendario, ni el día, ni con sesión, ni el historial lo dicen) y que quita
+   el de las 10:35; otro prestador, administración y moderación, 404; sin
+   sesión, 401; cambiar la zona sin confirmar, 409 con «de dónde a dónde»;
+   confirmada (Nueva York), el bloqueo es el mismo instante con otra hora
+   local, y de vuelta a Lima; en pausa, nada público; reanudada, vuelve.
+5. **Lo público**: fechas con zona, modalidad, duración y «próximo» con su
+   desplazamiento; horarios con hora local, instante, desplazamiento y
+   capacidad teórica; la modalidad que ofrece (200) y la que no (422); un
+   servicio presencial; 34 horarios de 5 en 5 en 4 páginas sin repetir ni
+   saltar; rangos de más de 31 días, al revés, ilegibles, antes de hoy, más
+   allá del horizonte o del año 9999, 422; 31 días exactos, 200; una fecha a
+   90 días, 422; un cursor malo, 422; más de 96 por página, 422; un domingo
+   sin reglas, vacío; **Nueva York el 01/11/2026**: la franja 00–04 dura 5
+   horas reales y da 5 horarios, la 01:00 dos veces (−04:00 y −05:00), y las
+   09:00 siguen siendo las 09:00 antes y después (13:00 y 14:00 UTC); un
+   borrador, 404 (pero su vista previa sí, con «service_not_public»);
+   suspendido por Z, 404; retirado, 404 (y ya no se escribe: 409
+   `service_retired`); el bloqueo entre personas, 404 para quien bloqueó y
+   200 para los demás.
+6. **Elegir un horario**: la app solo guarda fecha, inicio, hora y modalidad
+   en la ruta. Tras todo lo público y la selección, **las mismas filas** en
+   reservas, pedidos, retenciones, cobros, transferencias, devoluciones,
+   avisos a los prestadores y la agenda. La API no tiene con qué apartar: lo
+   público de la agenda solo se lee (GET) y ninguna de sus 14 operaciones es
+   de reserva, retención o pago.
+7. **Carreras** (peticiones simultáneas, conexiones distintas, PostgreSQL de
+   verdad):
+   - tres reglas cruzadas a la vez, tres rondas: **201, 409, 409** y una
+     sola activa cada vez;
+   - cerrar y sustituir la misma fecha a la vez, tres rondas: **201 y 409**,
+     una sola guardada;
+   - la misma `Idempotency-Key` cinco veces a la vez: un 201, cuatro 200 y
+     **un** bloqueo; con otro contenido, 409 `idempotency_key_reused`;
+   - retirar un bloqueo dos veces mientras se crea otro: 200 y 404, 201, y
+     queda solo el nuevo;
+   - 48 peticiones mezcladas (leer el calendario, los días y la vista previa
+     mientras se crean excepciones y se activa y desactiva una regla):
+     **ningún 5xx**.
+
+Ningún 500 ni ninguna traza en los registros de las dos API.
+
+### Registrada como aplicada
+
+La huella git de la 0092 (`eba1a48…`) entró en `APLICADAS`
+(`test_servicios_migracion_0090.py`), igual que la 0090 y la 0091, y la
+batería de la 0092 exige además ese registro
+(`test_esta_aplicada_y_ya_no_se_edita`): añadir un solo espacio al fichero
+pone rojas las dos. Su cabecera sigue diciendo «SIN APLICAR» a propósito:
+cambiarla sería editar lo aplicado.
+
+### Pruebas y validación del cierre
+
+| Comprobación | Resultado |
+|---|---|
+| Verificación de la 0092 en Supabase (dos veces) | **sin divergencias** |
+| Puerta real con el rol de la API | **sí**, las cuatro |
+| Recorrido integral con la API reiniciada | **103 de 103** |
+| Migración 0092 (`test_servicios_migracion_0092.py`) | **19 pasan**, 0 fallan |
+| Puerta de la agenda (en `test_servicios_agenda_api.py`) | **6 pasan** (39 alteraciones, también por HTTP) |
+| Cálculo de horarios (`test_servicios_agenda_calculo.py`) | **49 pasan** |
+| API de la agenda (`test_servicios_agenda_api.py`, con carreras) | **28 pasan**, 0 fallan |
+| Servicios con PostgreSQL 17 (todos los `test_servicios_*`) | **456 pasan** (16 ficheros), 0 fallan |
+| Servicios sin PostgreSQL | 256 pasan, 200 omitidas (las que necesitan la base), 0 fallan |
+| Backend completo **con** PostgreSQL 17 (0001–0092 desde cero) | **4082 pasan**, 0 fallan, 0 omitidas (24 min 13 s, junto a la otra batería) |
+| Backend completo **sin** PostgreSQL | **3021 pasan**, 1061 omitidas (las que necesitan la base), 0 fallan (13 min 14 s) |
+| Móvil del Incremento 4 (agenda, vistas y diccionarios) | **83 de 83** (sin cambios en el móvil) |
+| Móvil completo | **3484 de 3484** |
+| `tsc --noEmit` | limpio |
+| Rutas de la API | 513, **ninguna duplicada** |
+| `git diff --check` | limpio |
+| Secretos en el cambio | ninguno |
+| Escrituras directas desde el móvil | ninguna |
+| Mutaciones de la puerta | **5 de 5** |
+| `FEATURE_SERVICES` | **apagada** (por defecto `False`) |
+| Código | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
+
+### Estado
+
+- **Incremento 4 técnicamente cerrado. Únicamente queda pendiente el QA
+  físico** (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 4»).
+- `FEATURE_SERVICES` sigue **apagada**, y **no hubo despliegue**. Al
+  desplegar `Edson`, **reiniciar la API de producción**.
+- Las decisiones **E1–E12** siguen siendo de la empresa
+  (`Z_REQUISITOS_Y_DECISIONES.md`); la antelación de 2 horas y el horizonte de
+  60 días, provisionales.
+- **C15** sigue pendiente, y conviene decidirla **antes de encender**
+  Servicios (D6).
+- El **push** de un aviso todavía no lleva al destino (§32).
+- **No se empezó el Incremento 5** (§60).
