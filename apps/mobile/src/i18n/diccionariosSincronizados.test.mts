@@ -73,6 +73,12 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Servicios, Incremento 4: formato puro («{n} min», «{desde} → {hasta}»),
+    // «SA» (sábado / Saturday) y la raya de un día desconocido.
+    'servicios.agenda.minutos',
+    'servicios.agenda.desdeHasta',
+    'servicios.agenda.dia.6.corto',
+    'servicios.agenda.dia.desconocido.corto',
     // Servicios, Incremento 2: formato puro (un importe ya formateado, o un
     // número con «min» y «h», que son símbolos del sistema internacional).
     'servicios.catalogo.precio.fixed',
@@ -135,6 +141,18 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Servicios, Incremento 4: «Configurar agenda», «Cancelar», «Motivo»,
+    // «sábado» y «domingo» se escriben EXACTAMENTE igual en portugués; el
+    // resto es formato puro.
+    'servicios.agenda.configurar',
+    'servicios.agenda.cancelar',
+    'servicios.agenda.campo.motivo',
+    'servicios.agenda.motivoPrivado',
+    'servicios.agenda.dia.6',
+    'servicios.agenda.dia.7',
+    'servicios.agenda.minutos',
+    'servicios.agenda.desdeHasta',
+    'servicios.agenda.dia.desconocido.corto',
     // Servicios, Incremento 3: «Filtros», «título», «prestador» y «Empresa»
     // se escriben EXACTAMENTE igual en portugués.
     'servicios.descubrir.filtros.titulo',

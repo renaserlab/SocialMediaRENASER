@@ -252,6 +252,8 @@ export type ServicioPrivado = {
   can_withdraw: boolean;
   can_open_draft: boolean;
   publicly_visible: boolean;
+  /** Si puede preparar su agenda (Incremento 4). Lo decide el servidor. */
+  can_manage_schedule?: boolean;
 };
 
 export type ServicioResumen = {

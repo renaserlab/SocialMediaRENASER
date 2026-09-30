@@ -35,7 +35,8 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * Un servicio propio: dónde está, qué dijo Z y qué se puede hacer ahora.
  *
  * TODO LO QUE SE OFRECE LO DICE EL SERVIDOR (`can_edit`, `can_submit`,
- * `can_withdraw`, `can_open_draft`, `publicly_visible`):
+ * `can_withdraw`, `can_open_draft`, `publicly_visible`, `can_manage_schedule`
+ * —la entrada a «Disponibilidad y agenda»—):
  *
  *  - CON BORRADOR: completar la información, las imágenes y revisar y enviar.
  *  - EN MANOS DE Z (enviado, en revisión, aprobado): esperar, o retirarlo.
@@ -232,6 +233,15 @@ export function ServicioDelPrestadorScreen() {
       ) : null}
 
       <View style={styles.seccion}>
+        {s.can_manage_schedule ? (
+          <ListRow
+            title={f('servicios.agenda.titulo')}
+            subtitle={f('servicios.agenda.entrada')}
+            leftIcon="calendar"
+            rightIcon="chevron-right"
+            onPress={() => router.push(`${ruta}/agenda` as never)}
+          />
+        ) : null}
         <ListRow
           title={f('servicios.historial.titulo')}
           leftIcon="clock"

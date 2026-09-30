@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
 import { ContenidoDelServicio } from '@/components/ContenidoDelServicio';
+import { DisponibilidadEnLaFicha } from '@/components/DisponibilidadEnLaFicha';
 import { ResenasDelServicio, SenalesDeConfianza } from '@/components/ConfianzaEnServicios';
 import { EstadoDelCatalogo } from '@/components/EstadoDelCatalogo';
 import { StateView } from '@/components/StateView';
@@ -37,7 +38,8 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * con su razón.
  *
  * NO HAY BOTÓN DE CONTRATAR: la reserva y el pago no existen todavía. Guardar
- * no reserva nada.
+ * no reserva nada. La DISPONIBILIDAD (Incremento 4) enseña el próximo horario
+ * posible y lleva a los horarios; tampoco aparta ninguno.
  */
 export function FichaDeServicioScreen() {
   const { colors } = useAppTheme();
@@ -97,6 +99,7 @@ export function FichaDeServicioScreen() {
             categoria={nombreDeLaCategoria(ficha.category, idioma)}
             imagenes={ficha.images}
           />
+          <DisponibilidadEnLaFicha servicio={ficha.id} />
 
           <Button
             label={ficha.saved ? f('servicios.descubrir.quitarDeGuardados') : f('servicios.descubrir.guardar')}
