@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.modules.services import esquema
+from app.modules.services import reserva as reserva_dominio
 from app.shared.database import get_db
 from tests.test_baja_de_cuenta_postgres import API, SIN_POSTGRES, _borrar_cuenta, _cliente, _filas, _persona, _sembrar, _uno
 from tests.test_servicios_agenda_api import _agenda, _codigo, _configurada, _dia, _pedir, _publica
@@ -460,6 +461,42 @@ async def test_una_retencion_vencida_no_se_confirma_aunque_nadie_la_haya_barrido
     assert eventos == [("hold_created", "client"), ("hold_expired", "system")]
 
 
+async def test_no_se_confirma_una_sesion_que_ya_empezo(reservas, monkeypatch) -> None:
+    """Hallazgo de la revisión del 30/09. La ventana del horario se mide desde
+    que se RETUVO; con una antelación menor que los minutos de la retención
+    (aquí, cero), una sesión apartada 5 minutos antes de empezar se podía
+    confirmar ya empezada, con sus avisos."""
+    app, motor, _ = reservas
+    monkeypatch.setattr(get_settings(), "services_agenda_notice_minutes", 0)
+    _, servicio, jefa, _ = await _servicio(app, motor)
+    await _condiciones(app, jefa)
+    cliente = await _persona(motor)
+    inicio = (await _horarios(app, servicio, _dia(7)))[0]["starts_at"]
+    retencion = (await _retener(app, cliente, servicio, inicio)).json()["id"]
+    cuerpo = _aceptando(await _resumen(app, cliente, retencion))
+    # Retenida 5 minutos antes de empezar, y apartada hasta 5 minutos después.
+    async with motor.begin() as conexion:
+        await conexion.execute(text("set local session_replication_role = replica"))
+        await conexion.execute(
+            text("update public.service_holds set created_at = starts_at - interval '5 minutes', "
+                 "expires_at = starts_at + interval '5 minutes' where id = cast(:h as uuid)"),
+            {"h": retencion},
+        )
+    empieza = datetime.fromisoformat(inicio.replace("Z", "+00:00"))
+    monkeypatch.setattr(reserva_dominio, "_ahora", lambda: empieza + timedelta(minutes=1))
+    r = await _confirmar(app, cliente, retencion, cuerpo)
+    assert r.status_code == 409 and _codigo(r) == "service_slot_not_available", r.text
+    assert await _uno(motor, "select count(*) from public.service_bookings where hold_id = cast(:h as uuid)",
+                      h=retencion) == 0
+    # Justo al empezar, tampoco; un minuto antes, sí.
+    monkeypatch.setattr(reserva_dominio, "_ahora", lambda: empieza)
+    r = await _confirmar(app, cliente, retencion, cuerpo)
+    assert r.status_code == 409 and _codigo(r) == "service_slot_not_available", r.text
+    monkeypatch.setattr(reserva_dominio, "_ahora", lambda: empieza - timedelta(minutes=1))
+    r = await _confirmar(app, cliente, retencion, cuerpo)
+    assert r.status_code == 201, r.text
+
+
 async def test_el_barrido_vence_por_lotes_y_repetirlo_no_hace_nada(reservas) -> None:
     app, motor, _ = reservas
     _, servicio, jefa, _ = await _servicio(app, motor)
@@ -825,6 +862,13 @@ ALTERACIONES_DE_LA_0093 = (
     (f"alter table {_B} drop constraint service_bookings_client_id_fkey",
      f"alter table {_B} add constraint service_bookings_client_id_fkey foreign key (client_id) "
      "references public.profiles(id) on delete cascade"),
+    # La baja de quien presta, otra vez por DOS caminos, o sin diferir.
+    (f"alter table {_O} drop constraint service_orders_provider_id_fkey",
+     f"alter table {_O} add constraint service_orders_provider_id_fkey foreign key (provider_id) "
+     "references public.service_providers(id) on delete cascade"),
+    (f"alter table {_B} drop constraint service_bookings_provider_id_fkey",
+     f"alter table {_B} add constraint service_bookings_provider_id_fkey foreign key (provider_id) "
+     "references public.service_providers(id)"),
     ("drop index public.service_holds_una_plaza",),
     ("drop index public.service_holds_una_plaza",
      f"create index service_holds_una_plaza on {_H} (service_id, starts_at, seat) "
@@ -930,6 +974,74 @@ async def test_la_baja_de_quien_tiene_una_reserva_por_venir_espera(reservas) -> 
     assert await _uno(motor, "select count(*) from public.profiles where id = cast(:u as uuid)", u=hecho["cliente"]) == 1
 
 
+async def _ultimo_en_disparar(conexion) -> str:
+    """De las claves ajenas que borran al borrar un prestador (servicios,
+    pedidos y reservas), la tabla cuyo disparador va el ÚLTIMO: PostgreSQL los
+    dispara por el orden de su nombre, y el nombre sale de su OID."""
+    filas = (await conexion.execute(text(
+        "select c.conrelid::regclass::text from pg_catalog.pg_trigger t "
+        "join pg_catalog.pg_constraint c on c.oid = t.tgconstraint "
+        "where t.tgrelid = 'public.service_providers'::regclass and c.contype = 'f' "
+        "and c.conrelid in ('public.services'::regclass, 'public.service_orders'::regclass, "
+        "'public.service_bookings'::regclass) and t.tgtype & 8 = 8 "
+        "order by t.tgname collate \"C\""
+    ))).scalars().all()
+    return filas[-1]
+
+
+async def test_la_baja_de_quien_presta_no_depende_del_orden_de_los_disparadores(reservas) -> None:
+    """Hallazgo de la revisión del 30/09. Del prestador salían DOS caminos de
+    borrado hacia sus pedidos y reservas: por el servicio (0090) y directo por
+    `provider_id` (0093). Los disparadores de las claves ajenas se disparan por
+    el orden de su nombre (el OID): si el directo iba antes, el pedido se
+    borraba con el servicio todavía vivo y `solo_en_cascada` lo impedía; la
+    baja fallaba según los OID de cada base. Aquí se prueban LOS DOS órdenes:
+    el de una base nueva y, recreando la clave del servicio, el contrario.
+    Todo dentro de una transacción que se deshace."""
+    app, motor, _ = reservas
+    hecho = await _reservado(app, motor)
+    servicio = hecho["servicio"]
+    async with motor.connect() as conexion:
+        transaccion = await conexion.begin()
+        try:
+            # La reserva, al pasado (una por venir impide la baja, y eso ya se prueba).
+            await conexion.execute(text("set local session_replication_role = replica"))
+            for tabla in ("service_holds", "service_bookings"):
+                await conexion.execute(text(
+                    f"update public.{tabla} set starts_at = starts_at - interval '60 days', "
+                    "ends_at = ends_at - interval '60 days', occupied_from = occupied_from - interval '60 days', "
+                    "occupied_until = occupied_until - interval '60 days', "
+                    "local_date = local_date - 60 where service_id = cast(:s as uuid)"
+                ), {"s": servicio})
+            await conexion.execute(text("set local session_replication_role = origin"))
+            for orden in ("el de una base nueva", "el servicio el último"):
+                if orden == "el servicio el último":
+                    nombre, definicion = (await conexion.execute(text(
+                        "select conname, pg_get_constraintdef(oid) from pg_catalog.pg_constraint "
+                        "where conrelid = 'public.services'::regclass and contype = 'f' "
+                        "and confrelid = 'public.service_providers'::regclass"
+                    ))).one()
+                    await conexion.execute(text(f'alter table public.services drop constraint "{nombre}"'))
+                    await conexion.execute(text(f'alter table public.services add constraint "{nombre}" {definicion}'))
+                    assert await _ultimo_en_disparar(conexion) == "services", "no se logró el orden contrario"
+                punto = await conexion.begin_nested()
+                await conexion.execute(text("delete from auth.users where id = cast(:u as uuid)"), {"u": hecho["perfil"]})
+                # Lo diferido, AHORA (la transacción no llega a confirmarse).
+                await conexion.execute(text("set constraints all immediate"))
+                for tabla in ("services", "service_orders", "service_bookings", "service_holds"):
+                    columna = "id" if tabla == "services" else "service_id"
+                    quedan = (await conexion.execute(text(
+                        f"select count(*) from public.{tabla} where {columna} = cast(:s as uuid)"
+                    ), {"s": servicio})).scalar()
+                    assert quedan == 0, (orden, tabla, quedan)
+                await punto.rollback()
+        finally:
+            await transaccion.rollback()
+    # Nada de lo anterior quedó.
+    assert await _uno(motor, "select count(*) from public.service_bookings where service_id = cast(:s as uuid)",
+                      s=servicio) == 1
+
+
 # =========================================================================== #
 # 9. Carreras, con PostgreSQL de verdad
 # =========================================================================== #
@@ -1015,6 +1127,110 @@ async def test_confirmar_mientras_vence_o_se_suelta_deja_un_resultado_valido(res
         assert (confirmacion.status_code == 201) == (reservas_ == 1)
         if reservas_ == 0 and estado == "active":  # el barrido llegó antes de vencer
             await _pedir(app, "POST", f"{RETENCIONES}/{retencion}/release", cliente, None, _clave())
+
+
+async def _alguien_espera_un_cerrojo(motor, *, hasta: float = 8.0) -> None:
+    """Hasta que una conexión de la API esté esperando un cerrojo."""
+    reloj = asyncio.get_running_loop()
+    fin = reloj.time() + hasta
+    while reloj.time() < fin:
+        if await _uno(motor, "select count(*) from pg_stat_activity where datname = current_database() "
+                             "and wait_event_type = 'Lock' and pid <> pg_backend_pid()"):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("nadie llegó a esperar el cerrojo")
+
+
+@pytest.mark.parametrize("carrera", ["confirmar", "soltar", "retener"])
+async def test_el_barrido_a_medias_no_se_interbloquea_con_quien_espera_su_retencion(reservas, carrera) -> None:
+    """Hallazgo de la revisión del 30/09. El barrido bloquea una retención, la
+    vence y DESPUÉS escribe su línea del historial, cuya clave ajena mira el
+    servicio (FOR KEY SHARE). Si entretanto alguien puso en fila el servicio
+    (FOR UPDATE) y espera por esa retención, son dos esperando al otro: 40P01,
+    y la petición de la persona acababa en 500. Aquí, sin azar: la conexión
+    del «barrido» hace lo mismo que `_vencer`, y escribe su línea solo cuando
+    PostgreSQL enseña a la petición esperando."""
+    app, motor, _ = reservas
+    _, servicio, jefa, _ = await _servicio(app, motor)
+    await _condiciones(app, jefa)
+    cliente = await _persona(motor)
+    otra_persona = await _persona(motor)
+    inicio = (await _horarios(app, servicio, _dia(7)))[0]["starts_at"]
+    retencion = (await _retener(app, cliente, servicio, inicio)).json()["id"]
+    cuerpo = _aceptando(await _resumen(app, cliente, retencion))
+    await _vencer_ya(motor, retencion)
+    async with motor.connect() as barrido:
+        transaccion = await barrido.begin()
+        await barrido.execute(text("set local lock_timeout = '10s'"))
+        await barrido.execute(text("select id from public.service_holds where id = cast(:h as uuid) "
+                                   "for update skip locked"), {"h": retencion})
+        await barrido.execute(text("update public.service_holds set status = 'expired', expired_at = now(), "
+                                   "updated_at = now() where id = cast(:h as uuid)"), {"h": retencion})
+        if carrera == "confirmar":
+            peticion = _confirmar(app, cliente, retencion, cuerpo)
+        elif carrera == "soltar":
+            peticion = _pedir(app, "POST", f"{RETENCIONES}/{retencion}/release", cliente, None, _clave())
+        else:
+            peticion = _retener(app, otra_persona, servicio, inicio)
+        tarea = asyncio.create_task(peticion)
+        try:
+            await _alguien_espera_un_cerrojo(motor)
+            await barrido.execute(text(
+                "insert into public.service_booking_events (service_id, hold_id, action, from_status, to_status, "
+                "actor_role, details, created_at) values (cast(:s as uuid), cast(:h as uuid), 'hold_expired', "
+                "'active', 'expired', 'system', '{}'::jsonb, now())"), {"s": servicio, "h": retencion})
+            await transaccion.commit()
+        finally:
+            respuesta = await asyncio.wait_for(tarea, 20)
+    esperado = {"confirmar": (409, "service_hold_expired"), "soltar": (200, None), "retener": (201, None)}[carrera]
+    assert (respuesta.status_code, _codigo(respuesta) if respuesta.status_code >= 400 else None) == esperado, (
+        respuesta.text)
+    estado = await _uno(motor, "select status from public.service_holds where id = cast(:h as uuid)", h=retencion)
+    assert estado == "expired"
+    assert await _uno(motor, "select count(*) from public.service_bookings where service_id = cast(:s as uuid)",
+                      s=servicio) == 0
+
+
+@pytest.mark.parametrize("accion", ["confirm", "release"])
+async def test_la_misma_clave_a_la_vez_en_dos_retenciones_es_409_y_nunca_500(reservas, monkeypatch, accion) -> None:
+    """Hallazgo de la revisión del 30/09. La misma `Idempotency-Key`, A LA
+    VEZ, para dos retenciones de servicios distintos: no comparten ningún
+    cerrojo, las dos escribían su línea con la misma clave y la segunda
+    chocaba con el índice único (23505): un 500. Tiene que ser un 409."""
+    app, motor, _ = reservas
+    _, uno, jefa, moderador = await _servicio(app, motor)
+    _, dos, _, _ = await _servicio(app, motor, jefa=jefa, moderador=moderador)
+    await _condiciones(app, jefa)
+    cliente = await _persona(motor)
+    retenciones = []
+    for servicio in (uno, dos):
+        inicio = (await _horarios(app, servicio, _dia(7)))[0]["starts_at"]
+        r = await _retener(app, cliente, servicio, inicio)
+        assert r.status_code == 201, r.text
+        retenciones.append(r.json()["id"])
+    cuerpos = [_aceptando(await _resumen(app, cliente, h)) for h in retenciones]
+    # La primera sigue abierta un momento DESPUÉS de escribir su línea.
+    original = reserva_dominio._anotar
+
+    async def _lento(*args, **kwargs):
+        evento = await original(*args, **kwargs)
+        await asyncio.sleep(0.5)
+        return evento
+
+    monkeypatch.setattr(reserva_dominio, "_anotar", _lento)
+    clave = _clave()
+    if accion == "confirm":
+        respuestas = await asyncio.gather(*(_confirmar(app, cliente, h, c, clave=clave)
+                                            for h, c in zip(retenciones, cuerpos)))
+        bien = 201
+    else:
+        respuestas = await asyncio.gather(*(_pedir(app, "POST", f"{RETENCIONES}/{h}/release", cliente, None, clave)
+                                            for h in retenciones))
+        bien = 200
+    assert sorted(r.status_code for r in respuestas) == [bien, 409], [r.text for r in respuestas]
+    assert [_codigo(r) for r in respuestas if r.status_code == 409] == ["idempotency_key_reused"]
+    assert await _uno(motor, "select count(*) from public.service_booking_events where idempotency_key = :k",
+                      k=clave) == 1
 
 
 async def test_una_sesion_de_dos_plazas_con_seis_a_la_vez_da_dos(reservas) -> None:

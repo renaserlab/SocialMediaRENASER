@@ -101,10 +101,18 @@ describe('cada vista tiene ruta y se alcanza desde otra', () => {
     assert.match(pantalla('ServiciosScreen'), /router\.push\('\/servicios\/reservas' as never\)/);
     assert.match(pantalla('MisReservasScreen'), /router\.push\(rutaDeLaReserva\(b\.id\) as never\)/);
     const prestador = pantalla('ServiciosPrestadorScreen');
-    // SOLO para un prestador activo, como su catálogo.
+    // Para un prestador ADMITIDO, activo o SUSPENDIDO: nada cancela sus
+    // reservas por venir al suspenderlo y el servidor se las sigue sirviendo
+    // (hallazgo de la revisión del 30/09: suspendido, solo llegaba por un aviso).
     assert.match(
       prestador,
-      /solicitud\.provider\.status === 'active' \? \(\s*<ListRow\s*title=\{f\('servicios\.reserva\.delPrestador'\)\}[\s\S]*?router\.push\('\/servicios\/prestador\/reservas' as never\)/,
+      /solicitud\.provider\.status !== 'pending' \? \(\s*<ListRow\s*title=\{f\('servicios\.reserva\.delPrestador'\)\}[\s\S]*?router\.push\('\/servicios\/prestador\/reservas' as never\)/,
+    );
+    // Y el estado del prestador es uno de estos tres: si apareciera otro, esa
+    // condición hay que volver a pensarla.
+    assert.match(
+      fuente('lib/serviciosAdmision.ts'),
+      /status: 'pending' \| 'active' \| 'suspended';/,
     );
     assert.match(pantalla('ReservasDelPrestadorScreen'), /router\.push\(rutaDeLaReservaDelPrestador\(b\.id\) as never\)/);
     const admin = pantalla('AdminServiciosScreen');
@@ -290,10 +298,26 @@ describe('lo apartado vence, y lo decide el servidor', () => {
     const fresco = confirmar.indexOf('const fresco = await cargar();');
     const llamada = confirmar.indexOf('ServiceBookingRepository.confirmar(');
     assert.ok(fresco > 0 && llamada > fresco, 'se lee el resumen antes de mandar');
-    // Si cambiaron las condiciones o ya no se puede, no se manda nada.
-    assert.match(confirmar, /if \(fresco\.terms\?\.sha256 !== r\.terms\?\.sha256 \|\| !fresco\.contract\.confirmable\) \{[\s\S]*?return;/);
+    // Si cambiaron las condiciones (las de Z o las del servicio: versión o
+    // huella) o ya no se puede, no se manda nada.
+    assert.match(confirmar, /\(\['z', 'servicio'\] as const\)\.some\(\s*\(que\) => huellaDeLoAceptable\(fresco, que\) !== huellaDeLoAceptable\(r, que\),?\s*\)/);
+    assert.match(confirmar, /if \(cambiaron \|\| !fresco\.contract\.confirmable\) \{[\s\S]*?return;/);
     // Y lo que se manda se arma con lo NUEVO.
     assert.match(confirmar, /peticionDeConfirmacion\(fresco, formulario\)/);
+  });
+
+  it('la casilla «Acepto» es de la versión QUE SE VE, no un «sí» que sobrevive a otra', () => {
+    // Hallazgo de la revisión del 30/09: marcada con la v1, confirmaba la v2.
+    const resumen = pantalla('ResumenDeLaContratacionScreen');
+    assert.match(resumen, /const aceptaZ = estaAceptado\(r, formulario, 'z'\);/);
+    assert.match(resumen, /const aceptaServicio = r\.service_conditions === null \|\| estaAceptado\(r, formulario, 'servicio'\);/);
+    assert.match(resumen, /selected=\{aceptaZ\}/);
+    assert.match(resumen, /selected=\{aceptaServicio\}/);
+    assert.match(resumen, /disabled=\{ocupado \|\| !aceptaZ \|\| !aceptaServicio\}/);
+    assert.match(resumen, /alternarAceptacion\(r, formulario, que\)/);
+    // Nadie lee la casilla como booleano suelto.
+    assert.ok(!/formulario\.acepta\b|formulario\.aceptaServicio\b/.test(resumen));
+    assert.ok(!/acepta: (true|false)/.test(resumen));
   });
 
   it('tras un 409 que invalida el horario se vuelve a elegir, sin reintentar a ciegas', () => {

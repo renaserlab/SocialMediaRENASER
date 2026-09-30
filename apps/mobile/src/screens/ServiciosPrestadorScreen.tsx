@@ -163,8 +163,9 @@ export function ServiciosPrestadorScreen() {
           onPress={() => router.push('/servicios/prestador/catalogo' as never)}
         />
       ) : null}
-      {/* Y las reservas de sus servicios (Incremento 5). */}
-      {solicitud.provider.status === 'active' ? (
+      {/* Y las reservas de sus servicios (Incremento 5): también SUSPENDIDO,
+          porque suspenderlo no cancela las que tiene por venir. */}
+      {solicitud.provider.status !== 'pending' ? (
         <ListRow
           title={f('servicios.reserva.delPrestador')}
           subtitle={f('servicios.reserva.delPrestadorEntrada')}

@@ -51,7 +51,12 @@
 -- LA BAJA DE UNA CUENTA (0089): una reserva POR VENIR impide borrar la cuenta
 -- de quien contrata o de quien presta (409 `account_deletion_blocked`); las
 -- pasadas se quedan con la persona en NULL, y los datos de la atención de esa
--- persona (su nota y su dirección) se borran con ella.
+-- persona (su nota y su dirección) se borran con ella. La de QUIEN PRESTA se
+-- lleva, como en la 0090, sus servicios y con ellos sus pedidos y reservas
+-- pasadas: por UN SOLO CAMINO, el del servicio. Las claves de pedidos y
+-- reservas a `service_providers` no borran nada y se comprueban AL CONFIRMAR
+-- (diferidas): si también borraran, el orden de los disparadores (el de sus
+-- OID) decidiría si la baja funciona.
 --
 -- RLS activa, CERO políticas y CERO privilegios para `anon` y `authenticated`:
 -- solo la API.
@@ -60,7 +65,8 @@
 -- verifica lo que dejó. REEJECUTABLE: `if not exists`, `create or replace`.
 --
 -- ROLLBACK (se pierden las retenciones, reservas y pedidos de Servicios; nada
--- más depende de ellos):
+-- más depende de ellos), en una transacción:
+--   begin;
 --   drop table public.service_booking_events, public.service_booking_acceptances,
 --              public.service_booking_intakes, public.service_bookings,
 --              public.service_orders, public.service_holds;
@@ -71,10 +77,17 @@
 --                 public.servicios_reserva_coherente(),
 --                 public.servicios_pedido_inmutable(),
 --                 public.servicios_pedido_completo();
---   delete from public.service_policies where kind = 'booking_terms';
---   alter table public.service_policies drop constraint service_policies_tipo,
---     add constraint service_policies_tipo check (kind in ('provider_terms'));
--- y REINICIAR LA API.
+--   delete from public.service_policies where kind = 'booking_terms' and status = 'draft';
+--   do $$ begin
+--     if not exists (select 1 from public.service_policies where kind = 'booking_terms') then
+--       alter table public.service_policies drop constraint service_policies_tipo,
+--         add constraint service_policies_tipo check (kind in ('provider_terms'));
+--     end if;
+--   end $$;
+--   commit;
+-- Las condiciones de contratación YA PUBLICADAS no se borran: la 0086 no deja
+-- borrar una política publicada (son la evidencia de lo que se aceptó). Con
+-- alguna, el tipo se queda ampliado, y no molesta. Y REINICIAR LA API.
 
 begin;
 
@@ -232,8 +245,10 @@ create table if not exists public.service_orders (
     references public.services(id) on delete cascade,
   version_id uuid not null
     references public.service_versions(id) on delete cascade,
+  -- NO BORRA NADA y se comprueba al confirmar: la baja de quien presta llega
+  -- a sus pedidos por el servicio (ver la cabecera).
   provider_id uuid not null
-    references public.service_providers(id) on delete cascade,
+    references public.service_providers(id) deferrable initially deferred,
   client_id uuid
     references public.profiles(id) on delete set null,
   status text not null default 'confirmed'
@@ -294,8 +309,9 @@ create table if not exists public.service_bookings (
     references public.services(id) on delete cascade,
   version_id uuid not null
     references public.service_versions(id) on delete cascade,
+  -- Como en el pedido: no borra nada y se comprueba al confirmar.
   provider_id uuid not null
-    references public.service_providers(id) on delete cascade,
+    references public.service_providers(id) deferrable initially deferred,
   client_id uuid
     references public.profiles(id) on delete set null,
   status text not null default 'confirmed'
@@ -820,6 +836,13 @@ begin
            'public.service_booking_acceptances'::regclass, 'public.service_booking_events'::regclass
          ])) <> 21 then
     raise exception 'La 0093 no dejó sus claves ajenas';
+  end if;
+
+  if (select count(*) from pg_catalog.pg_constraint c
+       where c.contype = 'f' and c.confrelid = 'public.service_providers'::regclass
+         and c.conrelid = any (array['public.service_orders'::regclass, 'public.service_bookings'::regclass])
+         and c.confdeltype = 'a' and c.condeferrable and c.condeferred) <> 2 then
+    raise exception 'La 0093 no dejó diferidas las claves de pedidos y reservas al prestador';
   end if;
 end;
 $$;

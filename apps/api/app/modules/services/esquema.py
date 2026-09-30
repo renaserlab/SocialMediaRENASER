@@ -796,14 +796,14 @@ _LO_QUE_NECESITA_LA_RESERVA = text(
       ('service_bookings', 'client_id', 'profiles', 'id', 'n'),
       ('service_bookings', 'hold_id', 'service_holds', 'id', 'c'),
       ('service_bookings', 'order_id', 'service_orders', 'id', 'c'),
-      ('service_bookings', 'provider_id', 'service_providers', 'id', 'c'),
+      ('service_bookings', 'provider_id', 'service_providers', 'id', 'a'),
       ('service_bookings', 'service_id', 'services', 'id', 'c'),
       ('service_bookings', 'version_id', 'service_versions', 'id', 'c'),
       ('service_holds', 'client_id', 'profiles', 'id', 'n'),
       ('service_holds', 'service_id', 'services', 'id', 'c'),
       ('service_holds', 'version_id', 'service_versions', 'id', 'c'),
       ('service_orders', 'client_id', 'profiles', 'id', 'n'),
-      ('service_orders', 'provider_id', 'service_providers', 'id', 'c'),
+      ('service_orders', 'provider_id', 'service_providers', 'id', 'a'),
       ('service_orders', 'service_id', 'services', 'id', 'c'),
       ('service_orders', 'version_id', 'service_versions', 'id', 'c')
     ),
@@ -872,6 +872,13 @@ _LO_QUE_NECESITA_LA_RESERVA = text(
               and cardinality(c.conkey) = 1 and a.attname = e.columna and m.attname = e.columna_madre) = 21
       and (select count(*) from pg_catalog.pg_constraint c
             where c.contype = 'f' and c.conrelid in (select t from tablas)) = 21
+      -- DIFERIDAS, solo las dos que apuntan al prestador: su baja llega a
+      -- pedidos y reservas por UN camino, el del servicio.
+      and (select count(*) from pg_catalog.pg_constraint c
+            where c.contype = 'f' and c.conrelid in (select t from tablas) and c.condeferrable
+              and c.condeferred and c.confrelid = to_regclass('public.service_providers')) = 2
+      and (select count(*) from pg_catalog.pg_constraint c
+            where c.contype = 'f' and c.conrelid in (select t from tablas) and c.condeferrable) = 2
       and (select count(*) from unicas e
              join pg_catalog.pg_constraint c
                on c.conrelid = to_regclass('public.' || e.tabla) and c.conname = e.nombre

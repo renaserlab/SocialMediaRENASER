@@ -15,10 +15,13 @@ import { huellaCorta, nuevaClave } from '@/lib/serviciosAdmision';
 import { claveDelDia, diaDeLaSemana, fechaVisible } from '@/lib/serviciosAgenda';
 import { claveDeLaModalidad, duracionLegible, precioLegible } from '@/lib/serviciosCatalogo';
 import {
+  alternarAceptacion,
   borradorDe,
   claveDelBloqueo,
+  estaAceptado,
   guardarBorrador,
   hayQueVolverAElegir,
+  huellaDeLoAceptable,
   olvidarBorrador,
   peticionDeConfirmacion,
   rutaDeLaContratacion,
@@ -129,11 +132,15 @@ export function ResumenDeLaContratacionScreen() {
     );
   }
 
-  const cambiarAcepta = (campo: 'acepta' | 'aceptaServicio') => () => {
-    const nuevo = { ...formulario, [campo]: !formulario[campo] };
+  // La casilla guarda LO QUE SE VE (versión y huella): si el servidor trae
+  // otras condiciones, aparece sin marcar y hay que volver a aceptarlas.
+  const cambiarAcepta = (que: 'z' | 'servicio') => () => {
+    const nuevo = alternarAceptacion(r, formulario, que);
     setFormulario(nuevo);
     guardarBorrador(retencion, nuevo);
   };
+  const aceptaZ = estaAceptado(r, formulario, 'z');
+  const aceptaServicio = r.service_conditions === null || estaAceptado(r, formulario, 'servicio');
   const precio = precioLegible(r.service.price);
   const bloqueos = r.contract.blockers.map(claveDelBloqueo).filter((c): c is string => c !== null);
   const esDePago = r.contract.kind === 'paid';
@@ -143,7 +150,10 @@ export function ResumenDeLaContratacionScreen() {
       // ANTES DE MANDAR NADA, lo último del servidor.
       const fresco = await cargar();
       if (fresco === null) return;
-      if (fresco.terms?.sha256 !== r.terms?.sha256 || !fresco.contract.confirmable) {
+      const cambiaron = (['z', 'servicio'] as const).some(
+        (que) => huellaDeLoAceptable(fresco, que) !== huellaDeLoAceptable(r, que),
+      );
+      if (cambiaron || !fresco.contract.confirmable) {
         notify(f('servicios.noSePudo'), f('servicios.reserva.algoCambio'));
         return;
       }
@@ -248,15 +258,15 @@ export function ResumenDeLaContratacionScreen() {
           <Chip
             rol="checkbox"
             label={f('servicios.reserva.aceptoZ')}
-            selected={formulario.acepta}
-            onPress={cambiarAcepta('acepta')}
+            selected={aceptaZ}
+            onPress={cambiarAcepta('z')}
           />
           {r.service_conditions ? (
             <Chip
               rol="checkbox"
               label={f('servicios.reserva.aceptoServicio')}
-              selected={formulario.aceptaServicio}
-              onPress={cambiarAcepta('aceptaServicio')}
+              selected={aceptaServicio}
+              onPress={cambiarAcepta('servicio')}
             />
           ) : null}
         </>
@@ -276,7 +286,7 @@ export function ResumenDeLaContratacionScreen() {
           label={f('servicios.reserva.confirmar')}
           icon="check"
           loading={ocupado}
-          disabled={ocupado || !formulario.acepta || (r.service_conditions !== null && !formulario.aceptaServicio)}
+          disabled={ocupado || !aceptaZ || !aceptaServicio}
           onPress={confirmar}
         />
       ) : null}

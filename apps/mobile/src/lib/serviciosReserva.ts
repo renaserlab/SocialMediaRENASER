@@ -210,14 +210,49 @@ export type FormularioDeContratacion = {
   distrito: string;
   direccion: string;
   referencia: string;
-  /** Las condiciones de contratación de Z. */
-  acepta: boolean;
-  /** Las del servicio, si las tiene. */
-  aceptaServicio: boolean;
+  /**
+   * LO QUE SE ACEPTÓ, NO UN «SÍ»: la versión y la huella de las condiciones
+   * de contratación de Z que estaban EN PANTALLA al marcar la casilla
+   * (`huellaDeLoAceptable`). Si el servidor trae otras (la empresa publicó
+   * una versión nueva mientras tanto), la casilla aparece SIN MARCAR y no se
+   * manda nada: lo que se registra como aceptado es lo que la persona vio.
+   */
+  acepta: string | null;
+  /** Lo mismo con las condiciones del servicio, si las tiene. */
+  aceptaServicio: string | null;
 };
 
 export function formularioVacio(): FormularioDeContratacion {
-  return { nota: '', distrito: '', direccion: '', referencia: '', acepta: false, aceptaServicio: false };
+  return { nota: '', distrito: '', direccion: '', referencia: '', acepta: null, aceptaServicio: null };
+}
+
+/** Las de Z o las del servicio. */
+export type LoAceptable = 'z' | 'servicio';
+
+/** Qué se está aceptando AHORA MISMO en ese resumen; `null` si no hay nada que aceptar. */
+export function huellaDeLoAceptable(r: Pick<Resumen, 'terms' | 'service_conditions'>, que: LoAceptable): string | null {
+  if (que === 'z') return r.terms === null ? null : `${r.terms.policy_id}:${r.terms.sha256}`;
+  return r.service_conditions === null ? null : r.service_conditions.sha256;
+}
+
+/** Si la casilla está marcada para LO QUE HAY EN PANTALLA, no para algo leído antes. */
+export function estaAceptado(
+  r: Pick<Resumen, 'terms' | 'service_conditions'>,
+  f: FormularioDeContratacion,
+  que: LoAceptable,
+): boolean {
+  const huella = huellaDeLoAceptable(r, que);
+  return huella !== null && (que === 'z' ? f.acepta : f.aceptaServicio) === huella;
+}
+
+/** Marcar o desmarcar la casilla: al marcar se guarda la huella de lo que se ve. */
+export function alternarAceptacion(
+  r: Pick<Resumen, 'terms' | 'service_conditions'>,
+  f: FormularioDeContratacion,
+  que: LoAceptable,
+): FormularioDeContratacion {
+  const valor = estaAceptado(r, f, que) ? null : huellaDeLoAceptable(r, que);
+  return que === 'z' ? { ...f, acepta: valor } : { ...f, aceptaServicio: valor };
 }
 
 export type Resultado = { peticion: Record<string, unknown> | null; fallo: string | null };
@@ -231,9 +266,17 @@ export type Resultado = { peticion: Record<string, unknown> | null; fallo: strin
  */
 export function peticionDeConfirmacion(r: Resumen, f: FormularioDeContratacion): Resultado {
   if (r.terms === null) return { peticion: null, fallo: 'servicios.reserva.error.sinCondiciones' };
-  if (!f.acepta) return { peticion: null, fallo: 'servicios.reserva.error.aceptar' };
-  if (r.service_conditions !== null && !f.aceptaServicio) {
-    return { peticion: null, fallo: 'servicios.reserva.error.aceptarServicio' };
+  // Aceptó OTRA versión (o las del servicio cambiaron): se dice que algo
+  // cambió y la casilla queda sin marcar; nunca se manda como aceptado lo
+  // que la persona no vio.
+  if (!estaAceptado(r, f, 'z')) {
+    return { peticion: null, fallo: f.acepta === null ? 'servicios.reserva.error.aceptar' : 'servicios.reserva.algoCambio' };
+  }
+  if (r.service_conditions !== null && !estaAceptado(r, f, 'servicio')) {
+    return {
+      peticion: null,
+      fallo: f.aceptaServicio === null ? 'servicios.reserva.error.aceptarServicio' : 'servicios.reserva.algoCambio',
+    };
   }
   const nota = f.nota.trim();
   if (nota.length > r.limits.note_max_length) return { peticion: null, fallo: 'servicios.reserva.error.largo' };

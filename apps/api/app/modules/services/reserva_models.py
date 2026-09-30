@@ -204,8 +204,10 @@ class ServiceOrder(Base):
     version_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("service_versions.id", ondelete="CASCADE")
     )
+    #: No borra nada y se comprueba al confirmar (0093): la baja de quien
+    #: presta llega aquí por UN camino, el del servicio.
     provider_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("service_providers.id", ondelete="CASCADE")
+        Uuid(as_uuid=False), ForeignKey("service_providers.id", deferrable=True, initially="DEFERRED")
     )
     client_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
@@ -256,8 +258,10 @@ class ServiceBooking(Base):
     version_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("service_versions.id", ondelete="CASCADE")
     )
+    #: No borra nada y se comprueba al confirmar (0093): la baja de quien
+    #: presta llega aquí por UN camino, el del servicio.
     provider_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("service_providers.id", ondelete="CASCADE")
+        Uuid(as_uuid=False), ForeignKey("service_providers.id", deferrable=True, initially="DEFERRED")
     )
     client_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True

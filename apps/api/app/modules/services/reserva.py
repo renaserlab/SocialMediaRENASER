@@ -26,8 +26,9 @@ UNA SOLA AUTORIDAD PARA CADA COSA:
     contrata lo gratuito; lo que tiene precio se prepara y se detiene con
     `service_booking_payments_not_configured`, sin fingir nada.
 
-ORDEN DE LOS CERROJOS, siempre el mismo: la fila del servicio, después la
-retención; y, para el tope por persona, un cerrojo de transacción de esa
+ORDEN DE LOS CERROJOS, siempre el mismo: la fila del servicio (FOR NO KEY
+UPDATE, ver `_poner_en_fila`), después la retención; y, para el tope por
+persona y para su clave de idempotencia, un cerrojo de transacción de esa
 persona. Nunca uno global.
 
 LO PRIVADO: la nota y la dirección de quien contrata viven en
@@ -311,33 +312,56 @@ def _restriccion(error: IntegrityError) -> str | None:
     return None
 
 
+#: Un cerrojo que no llegó a tiempo y un interbloqueo que PostgreSQL deshizo.
+_ESPERAS_FALLIDAS = ("55P03", "40P01")
+
+
 def sin_esperas_largas(funcion):
-    """Un cerrojo que no llega a tiempo (55P03) es un 409 `service_booking_busy`,
-    nunca un 500."""
+    """Un cerrojo que no llega a tiempo (55P03) o un interbloqueo (40P01) es un
+    409 `service_booking_busy`, nunca un 500. El orden de los cerrojos los
+    evita; esto es la última red."""
 
     @functools.wraps(funcion)
     async def envuelta(*args, **kwargs):
         try:
             return await funcion(*args, **kwargs)
         except DBAPIError as error:
-            if _estado_sql(error) == "55P03":
+            if _estado_sql(error) in _ESPERAS_FALLIDAS:
                 raise Ocupado() from None
             raise
 
     return envuelta
 
 
-async def _poner_en_fila(db: AsyncSession, servicio_id: str):  # noqa: ANN202
+async def _poner_en_fila(db: AsyncSession, servicio_id: str) -> Service:
     """La fila del servicio, BLOQUEADA hasta el final de la transacción, sin
-    esperar más de lo razonable."""
+    esperar más de lo razonable.
+
+    FOR NO KEY UPDATE, NO FOR UPDATE. Sigue en fila con las demás
+    contrataciones del servicio y con quien lo edita o lo bloquea (FOR UPDATE),
+    pero NO choca con la comprobación de una clave ajena (FOR KEY SHARE) de
+    quien escribe una fila que apunta al servicio. El barrido bloquea una
+    retención, la vence y después escribe su línea del historial: con FOR
+    UPDATE aquí, quien tenía el servicio y esperaba esa retención y el barrido
+    se esperaban el uno al otro (40P01, hallazgo de la revisión del 30/09)."""
     if (await db.connection()).dialect.name == "postgresql":
         await db.execute(text(f"set local lock_timeout = '{int(limites.ESPERA_DEL_CERROJO_MS)}ms'"))
-    return await catalogo.bloquear(db, servicio_id)
+    servicio = await db.scalar(
+        select(Service)
+        .where(Service.id == servicio_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    if servicio is None:
+        raise catalogo.ServicioNoEncontrado()
+    return servicio
 
 
 async def _en_fila_la_persona(db: AsyncSession, cliente_id: str) -> None:
-    """Las retenciones de UNA persona, en fila (para su tope). No es global:
-    dos personas distintas nunca se esperan aquí."""
+    """Lo de UNA persona, en fila: su tope de retenciones y su clave de
+    idempotencia (la misma clave a la vez en dos retenciones de servicios
+    distintos no comparte otro cerrojo). No es global: dos personas distintas
+    nunca se esperan aquí."""
     if (await db.connection()).dialect.name == "postgresql":
         await db.execute(
             text("select pg_advisory_xact_lock(hashtextextended(:clave, 0))"),
@@ -642,6 +666,7 @@ async def liberar(
     primera = await _retencion_propia(db, cliente_id, retencion_id)
     await _poner_en_fila(db, primera.service_id)
     fila = await _retencion_propia(db, cliente_id, retencion_id, bloquear=True)
+    await _en_fila_la_persona(db, cliente_id)
     previo = await _por_clave(db, cliente_id, clave)
     if previo is not None:
         if previo.action != RETENCION_SOLTADA or previo.hold_id != fila.id:
@@ -799,6 +824,10 @@ async def confirmar(
     huella = _huella({"hold_id": primera.id, **{k: datos.get(k) for k in sorted(datos)}})
     await _poner_en_fila(db, primera.service_id)
     fila = await _retencion_propia(db, cliente_id, retencion_id, bloquear=True)
+    # La misma clave a la vez en OTRA retención (de otro servicio) no comparte
+    # ninguno de los cerrojos de arriba: sin este, las dos escribían su línea y
+    # la segunda chocaba con el índice único (un 500).
+    await _en_fila_la_persona(db, cliente_id)
 
     previo = await _por_clave(db, cliente_id, clave)
     if previo is not None:
@@ -817,6 +846,11 @@ async def confirmar(
         raise RetencionNoActiva()
     if fila.status == RETENCION_VENCIDA or _utc(fila.expires_at) <= ahora:
         raise RetencionVencida()
+    # LO QUE YA EMPEZÓ NO SE CONTRATA, aunque la retención siga viva: la
+    # ventana del horario se mide desde que se retuvo y, con una antelación
+    # menor que los minutos de la retención, seguiría dentro.
+    if _utc(fila.starts_at) <= ahora:
+        raise HorarioNoDisponible()
 
     try:
         servicio, vigente, prestador, _ = await descubrimiento.publico(db, fila.service_id, mira=cliente_id)
@@ -1172,6 +1206,7 @@ async def reservas_para_administrar(
     return await _pagina(db, true(), ambito=ambito, cursor=cursor, limite=limite, ahora=ahora or _ahora())
 
 
+@sin_esperas_largas
 async def vencer_retenciones(db: AsyncSession, *, lote: int | None = None, ahora: datetime | None = None) -> int:
     """EL BARRIDO: marca vencidas, por lotes, las activas cuyo plazo pasó.
     Idempotente (una vencida no se toca dos veces) y sin esperar a nadie (lo

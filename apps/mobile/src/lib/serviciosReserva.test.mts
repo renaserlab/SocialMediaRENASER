@@ -250,8 +250,72 @@ describe('la cuenta atrás es la del SERVIDOR', () => {
 });
 
 // =========================================================================== //
+describe('la casilla «Acepto» es de UNA versión: la que estaba en pantalla', () => {
+  // Hallazgo de la revisión del 30/09: la casilla era un «sí» sin versión. Si
+  // la empresa publicaba otra mientras tanto, el borrador seguía marcado y se
+  // mandaba como aceptada una versión que nadie había visto.
+  const v1 = resumen();
+  const v2 = resumen({ terms: { policy_id: 'p2', version: 4, title: 'Condiciones', body: 'Otro', sha256: 'c'.repeat(64) } });
+
+  it('marcar guarda la versión y la huella de lo que se ve; desmarcar, nada', () => {
+    const marcado = R.alternarAceptacion(v1, R.formularioVacio(), 'z');
+    assert.equal(marcado.acepta, `p1:${'a'.repeat(64)}`);
+    assert.equal(R.estaAceptado(v1, marcado, 'z'), true);
+    assert.equal(R.alternarAceptacion(v1, marcado, 'z').acepta, null);
+  });
+
+  it('lo aceptado con la v1 NO confirma la v2: la casilla sale sin marcar y se dice que algo cambió', () => {
+    const conV1 = R.alternarAceptacion(v1, R.formularioVacio(), 'z');
+    assert.equal(R.estaAceptado(v2, conV1, 'z'), false);
+    assert.deepEqual(R.peticionDeConfirmacion(v2, conV1), { peticion: null, fallo: 'servicios.reserva.algoCambio' });
+  });
+
+  it('tampoco el borrador que sobrevive a salir y volver (el resumen recargado ya es la v2)', () => {
+    R.guardarBorrador('h-v1', R.alternarAceptacion(v1, R.formularioVacio(), 'z'));
+    const recuperado = R.borradorDe('h-v1');
+    R.olvidarBorrador('h-v1');
+    assert.equal(R.peticionDeConfirmacion(v2, recuperado).peticion, null);
+  });
+
+  it('ni la misma huella bajo otra versión, ni otra huella bajo la misma versión', () => {
+    const conV1 = R.alternarAceptacion(v1, R.formularioVacio(), 'z');
+    const mismaHuellaOtraVersion = resumen({ terms: { ...v1.terms!, policy_id: 'p9' } });
+    const otraHuellaMismaVersion = resumen({ terms: { ...v1.terms!, sha256: 'd'.repeat(64) } });
+    assert.equal(R.peticionDeConfirmacion(mismaHuellaOtraVersion, conV1).peticion, null);
+    assert.equal(R.peticionDeConfirmacion(otraHuellaMismaVersion, conV1).peticion, null);
+  });
+
+  it('volver a marcar ya viendo la v2 sí confirma, con SU versión y SU huella', () => {
+    const conV1 = R.alternarAceptacion(v1, R.formularioVacio(), 'z');
+    const conV2 = R.alternarAceptacion(v2, conV1, 'z');
+    assert.equal(R.estaAceptado(v2, conV2, 'z'), true);
+    assert.deepEqual(R.peticionDeConfirmacion(v2, conV2).peticion, {
+      terms_policy_id: 'p2', terms_sha256: 'c'.repeat(64), note: null,
+    });
+  });
+
+  it('las condiciones del servicio, igual: lo aceptado es su huella', () => {
+    const conDelServicio = (sha: string) => resumen({ service_conditions: { text: 'x', sha256: sha } });
+    const antes = conDelServicio('e'.repeat(64));
+    const despues = conDelServicio('f'.repeat(64));
+    let f = R.alternarAceptacion(antes, R.formularioVacio(), 'z');
+    f = R.alternarAceptacion(antes, f, 'servicio');
+    assert.equal(R.peticionDeConfirmacion(antes, f).peticion?.service_conditions_sha256, 'e'.repeat(64));
+    assert.deepEqual(R.peticionDeConfirmacion(despues, f), { peticion: null, fallo: 'servicios.reserva.algoCambio' });
+    assert.equal(R.estaAceptado(despues, f, 'servicio'), false);
+  });
+
+  it('sin condiciones no hay nada que marcar', () => {
+    const sin = resumen({ terms: null });
+    assert.equal(R.huellaDeLoAceptable(sin, 'z'), null);
+    assert.equal(R.alternarAceptacion(sin, R.formularioVacio(), 'z').acepta, null);
+    assert.equal(R.estaAceptado(sin, { ...R.formularioVacio(), acepta: 'null' }, 'z'), false);
+  });
+});
+
+// =========================================================================== //
 describe('lo que se manda al confirmar: solo lo necesario', () => {
-  const lleno = { ...R.formularioVacio(), acepta: true };
+  const lleno = { ...R.formularioVacio(), acepta: `p1:${'a'.repeat(64)}` };
 
   it('sin condiciones publicadas no se confirma', () => {
     assert.deepEqual(R.peticionDeConfirmacion(resumen({ terms: null }), lleno), {
@@ -264,7 +328,7 @@ describe('lo que se manda al confirmar: solo lo necesario', () => {
     assert.equal(R.peticionDeConfirmacion(resumen(), R.formularioVacio()).fallo, 'servicios.reserva.error.aceptar');
     const conDelServicio = resumen({ service_conditions: { text: 'x', sha256: 'b'.repeat(64) } });
     assert.equal(R.peticionDeConfirmacion(conDelServicio, lleno).fallo, 'servicios.reserva.error.aceptarServicio');
-    const ok = R.peticionDeConfirmacion(conDelServicio, { ...lleno, aceptaServicio: true });
+    const ok = R.peticionDeConfirmacion(conDelServicio, { ...lleno, aceptaServicio: 'b'.repeat(64) });
     assert.equal(ok.fallo, null);
     assert.equal(ok.peticion?.service_conditions_sha256, 'b'.repeat(64));
   });

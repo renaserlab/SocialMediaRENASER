@@ -20,7 +20,11 @@ import random
 from dataclasses import replace
 from datetime import datetime, timedelta
 
+import pytest
+from sqlalchemy.exc import DBAPIError
+
 from app.modules.services import agenda_calculo as calc
+from app.modules.services import reserva
 from tests.test_servicios_agenda_calculo import ANTES, JUEVES, LIBRE, LIMA, _datos, _horas, _regla
 
 
@@ -144,3 +148,36 @@ def test_nunca_se_ofrece_un_horario_que_la_base_rechazaria() -> None:
         # Y las sesiones tomadas entre sí nunca se pisan (como exige la base).
         orden = sorted(((min(o.desde for o in v), max(o.hasta for o in v)) for v in sesiones.values()))
         assert all(a[1] <= b[0] for a, b in zip(orden, orden[1:]))
+
+
+
+# --------------------------------------------------------------------------- #
+# Una espera que no llega, o un interbloqueo, es un 409 y nunca un 500
+# --------------------------------------------------------------------------- #
+def _operacion_que_falla(estado: str):  # noqa: ANN202
+    """Una operación de la reserva a la que PostgreSQL contesta con ese código."""
+
+    class _Causa(Exception):
+        sqlstate = estado
+
+    @reserva.sin_esperas_largas
+    async def _operacion():
+        raise DBAPIError("select 1", None, _Causa())
+
+    return _operacion
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("estado", ["55P03", "40P01"])
+async def test_un_cerrojo_que_no_llega_o_un_interbloqueo_son_ocupado(estado: str) -> None:
+    """55P03 (el cerrojo no llegó a tiempo) y 40P01 (PostgreSQL deshizo un
+    interbloqueo, hallazgo de la revisión del 30/09): los dos son
+    `service_booking_busy`, un 409 que se puede reintentar."""
+    with pytest.raises(reserva.Ocupado):
+        await _operacion_que_falla(estado)()
+
+
+@pytest.mark.asyncio
+async def test_otro_error_de_la_base_no_se_disfraza_de_ocupado() -> None:
+    with pytest.raises(DBAPIError):
+        await _operacion_que_falla("23505")()

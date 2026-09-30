@@ -563,6 +563,59 @@ def test_la_baja_con_reservas_pasadas_anonimiza_y_se_lleva_lo_privado(pg) -> Non
 
 
 @SIN_POSTGRES
+def test_la_baja_de_quien_presta_no_depende_del_orden_de_los_disparadores(pg) -> None:  # noqa: F811
+    """Hallazgo de la revisión del 30/09. Del prestador salían DOS caminos de
+    borrado hacia sus pedidos y reservas: por el servicio (0090) y directo por
+    `provider_id`. PostgreSQL dispara los disparadores de las claves ajenas por
+    el orden de su nombre (su OID): con el directo antes, el pedido se borraba
+    con su servicio vivo y `solo_en_cascada` lo impedía. Aquí se fuerza ese
+    orden recreando la clave del servicio (su disparador pasa a ser el
+    último)."""
+    _montar(pg)
+    m = _mundo(pg)
+    h = _retencion(pg, m["servicio"], m["version"], m["cliente"], inicio="2021-03-03 15:00+00")
+    pedido, reserva = _contratar(pg, m["servicio"], m["version"], m["prestador"], m["cliente"], m["politica"], h)
+    nombre = _uno(pg, "select conname from pg_catalog.pg_constraint where conrelid = 'public.services'::regclass "
+                      "and contype = 'f' and confrelid = 'public.service_providers'::regclass")
+    definicion = _uno(pg, "select pg_get_constraintdef(oid) from pg_catalog.pg_constraint "
+                          "where conrelid = 'public.services'::regclass and conname = %s", nombre)
+    with pg.transaction():
+        _hacer(pg, f'alter table public.services drop constraint "{nombre}"')
+        _hacer(pg, f'alter table public.services add constraint "{nombre}" {definicion}')
+    orden = [t for (t,) in _todas(
+        pg,
+        "select c.conrelid::regclass::text from pg_catalog.pg_trigger t "
+        "join pg_catalog.pg_constraint c on c.oid = t.tgconstraint "
+        "where t.tgrelid = 'public.service_providers'::regclass and c.contype = 'f' "
+        "and c.conrelid in ('public.services'::regclass, 'public.service_orders'::regclass, "
+        "'public.service_bookings'::regclass) and t.tgtype & 8 = 8 order by t.tgname collate \"C\"",
+    )]
+    assert orden[-1] == "services", orden
+    _hacer(pg, "delete from auth.users where id = %s", m["perfil"])
+    assert _uno(pg, "select count(*) from public.services where id = %s", m["servicio"]) == 0
+    for tabla in ("service_holds", "service_orders", "service_bookings", "service_booking_events"):
+        assert _uno(pg, f"select count(*) from public.{tabla} where service_id = %s", m["servicio"]) == 0, tabla
+    assert _uno(pg, "select count(*) from public.service_booking_acceptances where order_id = %s", pedido) == 0
+    assert reserva
+
+
+@SIN_POSTGRES
+def test_las_claves_al_prestador_no_borran_y_se_comprueban_al_confirmar(pg) -> None:  # noqa: F811
+    """Un pedido o una reserva de un prestador que ya no existe no se guarda:
+    la clave se comprueba, aunque sea al confirmar la transacción."""
+    import psycopg
+
+    _montar(pg)
+    m = _mundo(pg)
+    h = _retencion(pg, m["servicio"], m["version"], m["cliente"])
+    with pytest.raises(psycopg.Error) as error:
+        _contratar(pg, m["servicio"], m["version"], str(uuid.uuid4()), m["cliente"], m["politica"], h)
+    assert "_provider_id_fkey" in str(error.value), str(error.value)
+    for tabla in ("service_orders", "service_bookings"):
+        assert _uno(pg, f"select count(*) from public.{tabla}") == 0, tabla
+
+
+@SIN_POSTGRES
 def test_las_politicas_admiten_las_condiciones_de_contratacion_y_nada_mas(pg) -> None:  # noqa: F811
     _montar(pg)
     admin = _persona(pg, "admin")
@@ -625,6 +678,54 @@ def test_un_fallo_a_mitad_no_deja_nada(pg) -> None:  # noqa: F811
         assert _uno(pg, "select to_regprocedure(%s)", f"public.{funcion}()") is None, funcion
     assert _uno(pg, "select pg_get_constraintdef(oid) from pg_constraint "
                     "where conname = 'service_policies_tipo'") == tipo_antes
+
+
+def _deshacer_segun_la_cabecera() -> str:
+    """El ROLLBACK tal como lo documenta la cabecera de la 0093."""
+    inicio = TEXTO.index("-- ROLLBACK")
+    fin = TEXTO.index("-- Las condiciones de contratación YA PUBLICADAS", inicio)
+    return "\n".join(linea[2:] for linea in TEXTO[inicio:fin].splitlines() if linea.startswith("--   "))
+
+
+@SIN_POSTGRES
+def test_el_rollback_de_la_cabecera_funciona_con_condiciones_publicadas(pg) -> None:  # noqa: F811
+    """Hallazgo de la revisión del 30/09. El procedimiento borraba las
+    condiciones de contratación, y la 0086 no deja borrar una política
+    publicada: fallaba justo cuando haría falta (publicarlas es obligatorio
+    antes de encender la reserva). Ahora deja las publicadas, borra los
+    borradores y solo estrecha el tipo si no queda ninguna."""
+    _montar(pg, hasta="0092")
+    tipo_de_la_0086 = _uno(pg, "select pg_get_constraintdef(oid) from pg_catalog.pg_constraint "
+                               "where conname = 'service_policies_tipo'")
+    deshacer = _deshacer_segun_la_cabecera()
+    assert deshacer.strip().startswith("begin;") and deshacer.strip().endswith("commit;"), deshacer
+
+    # CON condiciones publicadas, una reserva y un borrador.
+    _hacer(pg, TEXTO)
+    m = _mundo(pg)
+    h = _retencion(pg, m["servicio"], m["version"], m["cliente"], inicio="2021-03-03 15:00+00")
+    _contratar(pg, m["servicio"], m["version"], m["prestador"], m["cliente"], m["politica"], h)
+    _hacer(pg, "insert into public.service_policies (kind, country_code, version, title, body, body_sha256) values "
+               "('booking_terms', 'CL', 1, 'Borrador', repeat('x', 60), repeat('b', 64))")
+    _hacer(pg, deshacer)
+    for tabla in TABLAS:
+        assert _uno(pg, "select to_regclass(%s)", f"public.{tabla}") is None, tabla
+    for funcion in FUNCIONES:
+        assert _uno(pg, "select to_regprocedure(%s)", f"public.{funcion}()") is None, funcion
+    assert _todas(pg, "select status, count(*) from public.service_policies where kind = 'booking_terms' "
+                      "group by status") == [("published", 1)]
+    assert "booking_terms" in _uno(pg, "select pg_get_constraintdef(oid) from pg_catalog.pg_constraint "
+                                       "where conname = 'service_policies_tipo'")
+    # Y la 0093 se puede volver a aplicar encima.
+    _hacer(pg, TEXTO)
+    for tabla in TABLAS:
+        assert _uno(pg, "select to_regclass(%s)", f"public.{tabla}") is not None, tabla
+
+    # SIN condiciones de contratación, el tipo vuelve a ser el de la 0086.
+    _montar(pg)
+    _hacer(pg, deshacer)
+    assert _uno(pg, "select pg_get_constraintdef(oid) from pg_catalog.pg_constraint "
+                    "where conname = 'service_policies_tipo'") == tipo_de_la_0086
 
 
 @SIN_POSTGRES
