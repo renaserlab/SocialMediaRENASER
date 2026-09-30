@@ -93,6 +93,11 @@ async def servicios_disponibles(db: AsyncSession = Depends(get_db)) -> None:
     await esquema.exigir_servicios(db)
 
 
+async def condiciones_de_contratacion_disponibles(db: AsyncSession = Depends(get_db)) -> None:
+    """Lo anterior y, además, la 0093 (Incremento 5), o 503."""
+    await esquema.exigir_condiciones_de_contratacion(db)
+
+
 async def funcion_de_revision(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -585,7 +590,7 @@ async def crear_borrador_de_condiciones_de_contratacion(
     response: Response,
     current_user: AuthUser = Depends(get_current_user),
     _funcion: str = Depends(funcion_de_decision),
-    _disponible: None = Depends(servicios_disponibles),
+    _disponible: None = Depends(condiciones_de_contratacion_disponibles),
     db: AsyncSession = Depends(get_db),
 ) -> PoliticaRead:
     """LAS CONDICIONES DE CONTRATACIÓN (Incremento 5): las acepta quien

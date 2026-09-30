@@ -458,6 +458,42 @@ async def test_con_la_bandera_apagada_todo_contesta_503_sin_mirar_la_base(entorn
     assert "admision" not in esquema._cache
 
 
+def _de_la_reserva(ruta: str) -> str:
+    return (
+        API
+        + ruta.replace("{service_id}", str(uuid.uuid4()))
+        .replace("{hold_id}", str(uuid.uuid4()))
+        .replace("{booking_id}", str(uuid.uuid4()))
+    )
+
+
+@pytest.mark.asyncio
+async def test_la_reserva_con_una_bandera_apagada_contesta_503_sin_mirar_la_base(entorno, monkeypatch) -> None:
+    """Incremento 5: Servicios apagado → `services_disabled`; encendido pero
+    con la contratación apagada → `service_booking_disabled`. En los dos casos,
+    ANTES de mirar la base (ninguna puerta de esquema guarda respuesta). Las
+    condiciones de contratación no dependen de la bandera de la contratación
+    (la empresa puede preparar el texto antes), solo de Servicios."""
+    http, quien, _, _ = entorno
+    _como(quien, JEFA)
+    for bandera, codigo in ((None, "services_disabled"), ("feature_services", "service_booking_disabled")):
+        if bandera:
+            monkeypatch.setattr(get_settings(), bandera, True)
+        assert get_settings().feature_service_booking is False
+        esquema.olvidar()
+        for metodo, ruta in sorted(RUTAS_DE_LA_RESERVA):
+            if ruta.endswith("/booking-terms/draft"):
+                continue
+            r = await http.request(metodo, _de_la_reserva(ruta), json={}, headers={"Idempotency-Key": "k-1"})
+            assert (r.status_code, _codigo(r)) == (503, codigo), (bandera, metodo, ruta, r.text)
+        assert not {"admision", "catalogo", "agenda", "reserva"} & set(esquema._cache), (bandera, esquema._cache)
+    esquema.olvidar()
+    monkeypatch.setattr(get_settings(), "feature_services", False)
+    r = await http.post(f"{API}/admin/services/policies/booking-terms/draft", json={})
+    assert (r.status_code, _codigo(r)) == (503, "services_disabled")
+    assert "reserva" not in esquema._cache
+
+
 @pytest.mark.asyncio
 async def test_sin_permiso_de_revision_es_403_incluso_con_la_bandera_apagada(entorno) -> None:
     http, quien, _, _ = entorno

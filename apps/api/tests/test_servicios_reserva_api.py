@@ -703,6 +703,39 @@ async def test_una_reserva_anterior_no_cambia_con_la_version_nueva(reservas) -> 
     assert (ahora["starts_at"], ahora["ends_at"]) == (hecho["reserva"]["starts_at"], hecho["reserva"]["ends_at"])
 
 
+async def test_la_separacion_se_congela_al_retener_y_sigue_ocupando(reservas) -> None:
+    """La preparación y el descanso se CONGELAN en la retención (y en la
+    reserva): con inicios cada 15 minutos, la sesión de las 09:00 con 15 de
+    descanso ocupa hasta las 10:15, y lo sigue haciendo aunque el prestador
+    quite después el descanso."""
+    app, motor, _ = reservas
+    perfil, servicio, jefa, _ = await _servicio(app, motor)
+    agenda = {"timezone": "America/Lima", "buffer_after_minutes": 15, "slot_interval_minutes": 15}
+    r = await _pedir(app, "PUT", _agenda(servicio), perfil, agenda)
+    assert r.status_code in (200, 201), r.text
+    await _condiciones(app, jefa)
+    fecha = _dia(7)
+    horarios = await _horarios(app, servicio, fecha)
+    assert [h["time"] for h in horarios][:3] == ["09:00", "09:15", "09:30"]
+    cliente = await _persona(motor)
+    retencion = (await _retener(app, cliente, servicio, horarios[0]["starts_at"])).json()["id"]
+    horas = [h["time"] for h in await _horarios(app, servicio, fecha)]
+    assert "10:00" not in horas and "10:15" in horas, horas
+    separacion = ("select round(extract(epoch from starts_at - occupied_from) / 60)::int, "
+                  "round(extract(epoch from occupied_until - ends_at) / 60)::int from public.{} where {} = cast(:h as uuid)")
+    assert await _filas(motor, separacion.format("service_holds", "id"), h=retencion) == [(0, 15)]
+    # El prestador quita el descanso: lo ya apartado sigue ocupando lo que congeló.
+    r = await _pedir(app, "PUT", _agenda(servicio), perfil, {**agenda, "buffer_after_minutes": 0})
+    assert r.status_code in (200, 201), r.text
+    horas = [h["time"] for h in await _horarios(app, servicio, fecha)]
+    assert "10:00" not in horas and "10:15" in horas, horas
+    # Y la reserva guarda la separación con la que se apartó.
+    assert (await _confirmar(app, cliente, retencion)).status_code == 201
+    assert await _filas(motor, "select buffer_before_minutes, buffer_after_minutes from public.service_bookings "
+                               "where hold_id = cast(:h as uuid)", h=retencion) == [(0, 15)]
+    assert await _filas(motor, separacion.format("service_bookings", "hold_id"), h=retencion) == [(0, 15)]
+
+
 async def test_una_sesion_de_grupo_da_sus_plazas_y_ni_una_mas(reservas) -> None:
     app, motor, _ = reservas
     _, servicio, jefa, _ = await _servicio(app, motor, capacidad=2)
@@ -847,6 +880,10 @@ async def test_con_la_0093_alterada_la_api_contesta_503_y_nunca_500(reservas) ->
         ("GET", f"{RETENCIONES}/{hecho['retencion']}", hecho["cliente"], None),
         ("GET", MIS_RESERVAS, hecho["cliente"], None),
         ("GET", DEL_PRESTADOR, hecho["perfil"], None),
+        # Las condiciones de CONTRATACIÓN solo caben con la 0093 (amplía el
+        # tipo de `service_policies`): sin ella, 503, nunca un 500.
+        ("POST", f"{ADMIN_SERVICIOS}/policies/booking-terms/draft", hecho["jefa"],
+         {"country_code": "CL", "title": "Condiciones de contratación", "body": "Texto de prueba " * 10}),
     )
     normal = app.dependency_overrides[get_db]
     try:

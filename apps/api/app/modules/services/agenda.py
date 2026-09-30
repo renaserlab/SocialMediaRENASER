@@ -940,10 +940,12 @@ async def crear_bloqueo(
 
 
 async def _contrataciones_que_protege(db: AsyncSession, bloqueo: ServiceScheduleBlock) -> int:
-    """EL GUARDIA DEL INCREMENTO 5. Retirar un bloqueo no puede dejar sin
-    protección una contratación futura. En el Incremento 4 NO EXISTEN
-    contrataciones, así que ninguna depende de un bloqueo: cero. La reserva,
-    cuando exista, contará aquí las suyas."""
+    """Retirar un bloqueo no puede dejar sin protección una contratación
+    futura. Desde el Incremento 5 NINGUNA depende de un bloqueo: una reserva
+    se protege SOLA (su retención consumida ocupa el horario en la base,
+    exclusión `service_holds_sin_cruces`), así que retirar un bloqueo nunca la
+    deja al descubierto: cero, siempre. Se queda como punto único por si una
+    regla futura (la aceptación del prestador, por ejemplo) lo necesitara."""
     del db, bloqueo
     return 0
 
@@ -957,7 +959,7 @@ async def borrar_bloqueo(
     fila = await db.get(ServiceScheduleBlock, bloqueo_id, populate_existing=True) if _es_uuid(bloqueo_id) else None
     if fila is None or fila.service_id != servicio.id:
         raise ElementoNoEncontrado()
-    if await _contrataciones_que_protege(db, fila) > 0:  # pragma: no cover - Incremento 5
+    if await _contrataciones_que_protege(db, fila) > 0:  # pragma: no cover - ninguna depende de un bloqueo
         raise BloqueoEnUso()
     detalle = _bloqueo_en_detalle(fila)
     await db.execute(delete(ServiceScheduleBlock).where(ServiceScheduleBlock.id == fila.id))

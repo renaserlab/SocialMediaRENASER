@@ -1019,6 +1019,16 @@ async def exigir_reservas(db: AsyncSession) -> None:
         raise ServiciosSinMigracion()
 
 
+async def exigir_condiciones_de_contratacion(db: AsyncSession) -> None:
+    """Escribir las condiciones de CONTRATACIÓN: Servicios y la 0093 completa
+    (es la que amplía el tipo de `service_policies`; sin ella, el borrador
+    chocaría con la restricción de la 0086 y sería un 500). NO depende de la
+    bandera de la contratación: la empresa puede preparar el texto antes."""
+    await exigir_agenda(db)
+    if not await hay_reservas(db):
+        raise ServiciosSinMigracion()
+
+
 __all__ = [
     "COLUMNAS_DE_LA_0088",
     "ReservaApagada",
@@ -1030,6 +1040,7 @@ __all__ = [
     "TABLAS_DE_LA_RESERVA",
     "encendido",
     "exigir_agenda",
+    "exigir_condiciones_de_contratacion",
     "exigir_catalogo",
     "exigir_guardados",
     "exigir_reservas",
